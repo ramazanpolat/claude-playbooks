@@ -82,15 +82,31 @@ claude-playbook create experiment --alias exp
 ### Install a playbook from a repo or directory
 
 ```bash
-# From a Git repo
+# Git repo — auto-detects playbook manifest
 claude-playbook install https://github.com/danielmiessler/Personal_AI_Infrastructure --name pai
 
-# From a local directory (symlink by default)
+# Git repo with multiple playbooks — pick one
+claude-playbook install https://github.com/user/repo --playbook work
+
+# Local directory (symlink by default)
 claude-playbook install ~/dev/my-playbook
 
-# From a local directory (copy)
+# Local directory (copy)
 claude-playbook install ~/dev/my-playbook --copy
 ```
+
+If the repo contains a `.playbook` manifest file, the installer reads it for defaults (name, alias, which subdirectory to use). You can override any of these with CLI flags.
+
+A repo can contain multiple `*.playbook` files — one per configuration. Use `--playbook <name>` to pick one:
+
+```
+my-repo/
+    .playbook           # default
+    work.playbook       # selected with --playbook work
+    personal.playbook   # selected with --playbook personal
+```
+
+If no `*.playbook` file exists, the repo root (or `--subdir`) is installed directly as the playbook.
 
 ### Run a playbook
 
