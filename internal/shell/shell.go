@@ -3,6 +3,7 @@ package shell
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -99,6 +100,40 @@ func Remove(configFile, name string) (bool, error) {
 		return false, nil
 	}
 	return true, writeLines(configFile, out)
+}
+
+// ReadAllByPath scans the shell config for any alias containing CLAUDE_CONFIG_DIR=<path>
+// and returns a map of absPath → full alias line. This catches manually created aliases
+// that don't have the managed comment marker.
+func ReadAllByPath(configFile string) (map[string]string, error) {
+	lines, err := readLines(configFile)
+	if err != nil {
+		return nil, err
+	}
+	home, _ := os.UserHomeDir()
+	result := make(map[string]string)
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "alias ") {
+			continue
+		}
+		idx := strings.Index(line, "CLAUDE_CONFIG_DIR=")
+		if idx < 0 {
+			continue
+		}
+		val := line[idx+len("CLAUDE_CONFIG_DIR="):]
+		// Value ends at next space, tab, quote, or end of string.
+		if end := strings.IndexAny(val, " \t'\""); end >= 0 {
+			val = val[:end]
+		}
+		// Expand leading ~.
+		if strings.HasPrefix(val, "~/") {
+			val = filepath.Join(home, val[2:])
+		}
+		if val != "" {
+			result[val] = line
+		}
+	}
+	return result, nil
 }
 
 // ExtractAliasName extracts the alias name from a line like:

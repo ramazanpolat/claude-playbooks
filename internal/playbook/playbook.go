@@ -32,6 +32,7 @@ func Discover(playbooksDir, shellConfig string) ([]*Playbook, error) {
 	}
 
 	allAliases, _ := shell.ReadAll(shellConfig)
+	allByPath, _ := shell.ReadAllByPath(shellConfig)
 
 	var pbs []*Playbook
 	for _, e := range entries {
@@ -47,7 +48,11 @@ func Discover(playbooksDir, shellConfig string) ([]*Playbook, error) {
 		if info != nil {
 			pb.LastUsed = info.ModTime()
 		}
+		// Prefer managed (comment-marked) alias; fall back to path-based detection.
 		if aliasLine, ok := allAliases[name]; ok {
+			pb.AliasLine = aliasLine
+			pb.Alias = shell.ExtractAliasName(aliasLine)
+		} else if aliasLine, ok := allByPath[pb.Path]; ok {
 			pb.AliasLine = aliasLine
 			pb.Alias = shell.ExtractAliasName(aliasLine)
 		}
