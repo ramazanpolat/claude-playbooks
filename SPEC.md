@@ -141,6 +141,45 @@ CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude [claude-flags...]
 
 ---
 
+### `claude-playbook start <path> [claude-flags...]`
+
+Starts an ad-hoc Claude Code session at the given directory. Unlike `run`, no named playbook is required — any directory works. The directory is created if it does not exist.
+
+```bash
+# Start a session at a directory
+claude-playbook start /tmp/scratch
+
+# Pass flags to claude
+claude-playbook start /tmp/scratch --model claude-opus-4-6
+
+# Delete the directory when the session ends
+claude-playbook start /tmp/scratch --delete
+```
+
+All of the above are equivalent to:
+```bash
+CLAUDE_CONFIG_DIR=/tmp/scratch claude [claude-flags...]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--delete` | Delete the directory when the claude session ends |
+
+**`--delete` behavior:**
+- Runs cleanup after `claude` exits, regardless of exit code.
+- Best-effort: if deletion fails, prints a warning to stderr but does not change the exit code.
+
+**Edge cases:**
+
+- Path exists but is a file → error: `'/tmp/foo' is not a directory`
+- Directory cannot be created → error: `could not create '/tmp/foo': <reason>`
+- `claude` not on PATH → error: `'claude' command not found. Install Claude Code first: https://claude.ai/download`
+- Unknown flags → forwarded to `claude` as-is
+
+---
+
 ### `claude-playbook alias <name> [alias]`
 
 Shows all aliases, or shows/sets/removes the alias for a specific playbook.

@@ -157,6 +157,26 @@ claude-playbook run experiment --model claude-opus-4-6 --permission-mode auto
 
 Useful for temporary or one-off playbooks where setting up an alias is not worth it.
 
+### Start an ad-hoc session
+
+```bash
+claude-playbook start /tmp/scratch
+```
+
+Opens Claude Code at any directory without requiring a named playbook. The directory is created if it doesn't exist. Any flags after the path are forwarded directly to `claude`:
+
+```bash
+claude-playbook start /tmp/scratch --model claude-opus-4-6
+```
+
+Use `--delete` to automatically remove the directory when the session ends:
+
+```bash
+claude-playbook start /tmp/scratch --delete
+```
+
+Useful for fully throwaway experiments — no trace left behind.
+
 ### Manage aliases
 
 ```bash

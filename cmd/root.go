@@ -33,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(aliasCmd)
 	rootCmd.AddCommand(deleteCmd)
