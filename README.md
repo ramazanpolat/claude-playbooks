@@ -72,7 +72,7 @@ claude-playbook --version
 ```bash
 git clone https://github.com/ramazanpolat/claude-playbooks.git
 cd claude-playbooks
-go build -o claude-playbook .
+./build.sh
 mv claude-playbook /usr/local/bin/
 ```
 
