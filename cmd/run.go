@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,31 +13,59 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:                "run <name> [claude-flags...]",
-	Short:              "Run Claude Code with a playbook",
+	Use:   "run <name> [claude-flags...]",
+	Short: "Run Claude Code with a playbook",
+	// DisableFlagParsing passes all args raw, including parent persistent flags
+	// that weren't parsed. We handle them manually below.
 	DisableFlagParsing: true,
 	RunE:               runRun,
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
+	// With DisableFlagParsing=true, cobra skips ALL flag parsing — including
+	// root persistent flags like --playbooks-dir. Extract them manually so the
+	// alias pattern `alias x='claude-playbook --playbooks-dir ... run'` works.
+	var playbooksDir, shellConfig string
+	var rest []string
+
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--playbooks-dir" && i+1 < len(args):
+			playbooksDir = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--playbooks-dir="):
+			playbooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
+		case args[i] == "--shell-config" && i+1 < len(args):
+			shellConfig = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--shell-config="):
+			shellConfig = strings.TrimPrefix(args[i], "--shell-config=")
+		case args[i] == "--help" || args[i] == "-h":
+			fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
+			fmt.Println()
+			fmt.Println("Runs Claude Code with the named playbook.")
+			fmt.Println("Any flags after the name are forwarded directly to claude.")
+			return nil
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+
+	if playbooksDir != "" {
+		config.PlaybooksDir = playbooksDir
+	}
+	if shellConfig != "" {
+		config.ShellConfig = shellConfig
+	}
+
+	if len(rest) == 0 {
 		return fmt.Errorf("playbook name required\nUsage: claude-playbook run <name> [claude-flags...]")
 	}
 
-	name := args[0]
+	name := rest[0]
+	claudeArgs := rest[1:]
 
-	// Support --help passed to this command before the playbook name.
-	if name == "--help" || name == "-h" {
-		fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
-		fmt.Println()
-		fmt.Println("Runs Claude Code with the named playbook. Any flags after the name are forwarded to claude.")
-		fmt.Println()
-		fmt.Println("Note: global flags (--playbooks-dir, --shell-config) must be set via environment")
-		fmt.Println("variables when using 'run': CLAUDE_PLAYBOOKS_DIR, CLAUDE_SHELL_CONFIG")
-		return nil
-	}
-
-	playbooksDir := config.ResolvePlaybooksDir()
+	playbooksDir = config.ResolvePlaybooksDir()
 	pbPath := filepath.Join(playbooksDir, name)
 
 	if _, err := os.Stat(pbPath); os.IsNotExist(err) {
@@ -48,7 +77,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
-	claudeArgs := args[1:]
 	c := exec.Command(claudePath, claudeArgs...)
 	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+pbPath)
 	c.Stdin = os.Stdin
