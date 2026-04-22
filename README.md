@@ -29,7 +29,7 @@ claude
 CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
 ```
 
-That's all a playbook is under the hood. `claude-playbooks` just makes creating and managing them easy.
+That's all a playbook is under the hood. `claude-playbook` just makes creating and managing them easy.
 
 ## Installation
 
@@ -79,25 +79,48 @@ To use a different alias:
 claude-playbook create experiment --alias exp
 ```
 
-### Launch a playbook
+### Install a playbook from a repo or directory
 
 ```bash
-claude-playbook launch experiment
+# From a Git repo
+claude-playbook install https://github.com/danielmiessler/Personal_AI_Infrastructure --name pai
+
+# From a local directory (symlink by default)
+claude-playbook install ~/dev/my-playbook
+
+# From a local directory (copy)
+claude-playbook install ~/dev/my-playbook --copy
 ```
 
-Opens Claude Code using that playbook. Equivalent to running `CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude`. Useful if you skipped alias creation or want a one-off launch.
+### Run a playbook
+
+```bash
+claude-playbook run experiment
+```
+
+Opens Claude Code using that playbook without requiring an alias. Any flags after the name are forwarded directly to `claude`:
+
+```bash
+claude-playbook run experiment --model claude-opus-4-6 --permission-mode auto
+```
+
+Useful for temporary or one-off playbooks where setting up an alias is not worth it.
 
 ### Manage aliases
 
 ```bash
-# Add or update the alias for a playbook
+# Show all aliases (full alias line as it appears in shell config)
+claude-playbook alias
+
+# Show or create alias for a specific playbook
+claude-playbook alias experiment
+
+# Set a custom alias
 claude-playbook alias experiment exp
 
-# Remove the alias
+# Remove an alias
 claude-playbook alias experiment --remove
 ```
-
-Aliases are written to your shell config (`~/.zshrc` or `~/.bashrc`). After adding one, reload your shell or run `source ~/.zshrc`.
 
 Since an alias is just a shell command, you can manually edit it to include any Claude Code flags. Open your `~/.zshrc` and adjust the generated alias to your liking:
 
@@ -120,23 +143,23 @@ alias scratch='CLAUDE_CONFIG_DIR=~/.claude-playbooks/scratch claude --model clau
 
 Any flag that `claude` accepts can go in the alias. Run `claude --help` to see all available options.
 
-### Put a playbook's bin/ on PATH
-
-Some playbooks (like [Kommander](https://github.com/ramazanpolat/kommander)) ship CLI tools in a `bin/` directory. To use them from anywhere:
+### Delete a playbook
 
 ```bash
-claude-playbook path experiment
+claude-playbook delete experiment      # prompts for confirmation
+claude-playbook delete experiment -y   # skip confirmation
 ```
 
-Adds `~/.claude-playbooks/experiment/bin` to your `PATH` in your shell config.
+Deletes the playbook directory and removes its alias from the shell config.
 
-### Remove a playbook
+### Adding a playbook's bin/ to PATH
+
+Some playbooks ship CLI tools in a `bin/` directory. Add them to your PATH manually:
 
 ```bash
-claude-playbook remove experiment
+# In ~/.zshrc
+export PATH="$HOME/.claude-playbooks/experiment/bin:$PATH"
 ```
-
-Removes the alias and PATH entry. Add `--purge` to also delete the playbook directory and all its data.
 
 ## Relationship to CLAUDE.md
 
@@ -159,7 +182,7 @@ $EDITOR ~/.claude-playbooks/hook-test/settings.json
 hook-test
 
 # When you're done testing, clean up
-claude-playbook remove hook-test --purge
+claude-playbook delete hook-test
 ```
 
 Your main `claude` setup was never touched.
