@@ -55,13 +55,27 @@ No shared state. No shared settings. No shared memory.
 
 ## Installation
 
+Requires [Go](https://go.dev/dl/) 1.21 or later.
+
 ```bash
-# Coming soon: install via brew or curl
-# For now, clone and add to PATH
 git clone https://github.com/ramazanpolat/claude-playbooks.git
 cd claude-playbooks
-./install.sh
+go build -o claude-playbook .
 ```
+
+Move the binary somewhere on your PATH:
+
+```bash
+mv claude-playbook /usr/local/bin/
+```
+
+Verify:
+
+```bash
+claude-playbook --version
+```
+
+> Homebrew tap and pre-built binaries coming soon.
 
 ## Usage
 
