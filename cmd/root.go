@@ -10,10 +10,14 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "claude-playbook",
-	Short: "Manage isolated Claude Code instances",
-	RunE:  runRoot,
+	Use:     "claude-playbook",
+	Short:   "Manage isolated Claude Code instances",
+	Version: Version,
+	RunE:    runRoot,
 }
 
 func Execute() {
