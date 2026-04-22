@@ -180,13 +180,17 @@ This lets users see exactly what command runs when they type an alias, including
 
 ### `claude-playbook install <source>`
 
-Installs an existing playbook from a Git repository or a local directory.
+Installs a playbook from a Git repository or a local directory.
 
 ```bash
-# From a Git repo (clones into ~/.claude-playbooks/<repo-name>)
+# Git repo — auto-detects playbook manifest
 claude-playbook install https://github.com/danielmiessler/Personal_AI_Infrastructure --name pai
 
-# From a local directory (symlink by default)
+# Git repo with multiple playbooks — pick one by name
+claude-playbook install https://github.com/user/repo --playbook work
+claude-playbook install https://github.com/user/repo --playbook work --name my-work --alias mw
+
+# Local directory (symlink by default)
 claude-playbook install ~/dev/my-playbook
 claude-playbook install ~/dev/my-playbook --copy
 claude-playbook install ~/dev/my-playbook --name mypb --alias mp
@@ -196,38 +200,97 @@ claude-playbook install ~/dev/my-playbook --name mypb --alias mp
 
 | Source | Behaviour |
 |--------|-----------|
-| URL (`http://`, `https://`, `git@`) | Cloned into `~/.claude-playbooks/<name>` |
-| Local path | Symlinked into `~/.claude-playbooks/<name>` by default |
-| Local path + `--copy` | Copied into `~/.claude-playbooks/<name>` |
+| URL (`http://`, `https://`, `git@`) | Cloned, then manifest resolved |
+| Local path | Symlinked by default; `--copy` to copy instead |
 
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
-| `--name <name>` | Playbook name (default: derived from repo/directory name) |
+| `--playbook <name>` | Select `<name>.playbook` from the source root |
+| `--subdir <path>` | Use this subdirectory as the playbook root (when no manifest) |
+| `--name <name>` | Override playbook name |
+| `--alias <alias>` | Override alias (default: same as name) |
 | `--no-alias` | Skip alias creation |
-| `--alias <alias>` | Use a different alias name |
 | `--copy` | Copy instead of symlink (local paths only) |
 
-**Name derivation:**
+---
+
+## Playbook Manifests
+
+A `.playbook` file is a JSON file that describes how to install a playbook. Repos and directories can contain multiple `*.playbook` files, each referencing a different subdir or configuration.
+
+**File format:**
+
+```json
+{
+  "name": "pai",
+  "alias": "pai",
+  "subdir": "playbook",
+  "description": "Personal AI Infrastructure by Daniel Miessler"
+}
+```
+
+All fields are optional. Any field can be overridden by a CLI flag.
+
+| Field | Description |
+|-------|-------------|
+| `name` | Default playbook name |
+| `alias` | Default alias (falls back to `name` if omitted) |
+| `subdir` | Subdirectory within the repo/directory to use as the playbook root |
+| `description` | Human-readable description (shown in `list`) |
+
+**A repo with multiple playbooks:**
+
+```
+my-repo/
+    .playbook           # default manifest (used when no --playbook given)
+    work.playbook       # named variant
+    personal.playbook   # named variant
+    playbooks/
+        work/
+            CLAUDE.md
+        personal/
+            CLAUDE.md
+```
+
+**Manifest resolution order:**
+
+1. `--playbook <name>` given → use `<name>.playbook` from source root; error if not found
+2. `.playbook` exists (exact dotfile, no prefix) → use it as default
+3. Exactly one `*.playbook` found → use it; print which one was selected
+4. Multiple `*.playbook` found, no `.playbook` default → error and list candidates:
+   ```
+   Multiple playbooks found. Pick one with --playbook:
+     work      (work.playbook)
+     personal  (personal.playbook)
+   ```
+5. No `*.playbook` found → install the source root (or `--subdir` if given) directly as the playbook
+
+**CLI flags always override manifest fields.**
+
+---
+
+**Name derivation (when not set by manifest or `--name`):**
 - Git URL: last path segment, stripped of `.git` suffix (e.g., `Personal_AI_Infrastructure` from `.../Personal_AI_Infrastructure.git`)
-- Local path: directory name as-is (e.g., `my-playbook` from `~/dev/my-playbook`)
-- If the derived name is not valid as a directory name or shell alias, error and ask user to provide `--name`
+- Local path: directory name as-is
 
 **Edge cases:**
 
-- Name already taken → error: `Playbook 'my-playbook' already exists. Use --name to choose a different name.`
-- Git URL: `git` not on PATH → error: `'git' command not found.`
-- Git URL: clone fails → show git's error output, exit with code 1
-- Local path does not exist → error: `Directory '~/dev/my-playbook' not found.`
-- Local path is a file, not a directory → error: `'~/dev/my-playbook' is not a directory.`
-- Local path has no `CLAUDE.md` → warn: `No CLAUDE.md found in '~/dev/my-playbook'. Any directory is valid, but a CLAUDE.md is how Claude Code loads your playbook's instructions.` Then proceed.
+- `--playbook` given but `<name>.playbook` not found → error: `No 'work.playbook' found in source root.`
+- Name already taken → error: `Playbook 'pai' already exists. Use --name to choose a different name.`
 - `--copy` given with a URL → error: `--copy only applies to local paths. Git installs always clone.`
+- `--subdir` path not found inside source → error: `Subdirectory 'playbook' not found in source.`
+- Git not on PATH → error: `'git' command not found.`
+- Clone fails → show git's error output directly
+- Source path does not exist → error: `'~/dev/my-playbook' not found.`
+- Source is a file, not a directory → error: `'~/dev/my-playbook' is not a directory.`
 
-**Output on success (git example):**
+**Output on success:**
 ```
 Installed playbook 'pai'
 Source:  https://github.com/danielmiessler/Personal_AI_Infrastructure (cloned)
+Manifest: .playbook
 Path:    ~/.claude-playbooks/pai
 Alias:   pai added to ~/.zshrc
 
