@@ -31,6 +31,28 @@ CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
 
 That's all a playbook is under the hood. `claude-playbook` just makes creating and managing them easy.
 
+```
+~/.claude-playbooks/               Shell aliases:
+
+├── kommander/        ◄──────────  alias kommander='CLAUDE_CONFIG_DIR=~/.claude-playbooks/kommander claude ...'
+│   ├── CLAUDE.md                  standing instructions, rules, protocols
+│   ├── settings.json              hooks, permissions, model defaults
+│   ├── hooks/                     session start/end scripts
+│   └── data/                      tasks, session logs, memory
+│
+├── work/             ◄──────────  alias k-work='CLAUDE_CONFIG_DIR=~/.claude-playbooks/work claude ...'
+│   ├── CLAUDE.md
+│   ├── settings.json
+│   └── data/
+│
+└── experiment/       ◄──────────  alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
+    ├── CLAUDE.md
+    └── settings.json
+
+Each directory is a completely isolated Claude Code instance.
+No shared state. No shared settings. No shared memory.
+```
+
 ## Installation
 
 ```bash
