@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
@@ -24,7 +26,7 @@ var createCmd = &cobra.Command{
 }
 
 func init() {
-	createCmd.Flags().StringVar(&createAlias, "alias", "", "alias name (default: same as playbook name)")
+	createCmd.Flags().StringVar(&createAlias, "alias", "", "alias name (default: last segment of playbook name)")
 	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip alias creation")
 }
 
@@ -34,6 +36,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
+	if strings.HasPrefix(name, ".") {
+		return fmt.Errorf("playbook name cannot start with '.'")
+	}
+	if strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") {
+		return fmt.Errorf("playbook name cannot start or end with '/'")
+	}
+
 	playbooksDir := config.ResolvePlaybooksDir()
 	dest := filepath.Join(playbooksDir, name)
 
@@ -45,6 +54,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	if err := manifest.WriteMinimal(dest); err != nil {
+		return fmt.Errorf("failed to write .playbook: %w", err)
+	}
+
 	fmt.Printf("Created playbook %q at %s\n", name, dest)
 
 	if createNoAlias {
@@ -54,7 +67,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	aliasName := createAlias
 	if aliasName == "" {
-		aliasName = name
+		aliasName = lastSegment(name)
 	}
 
 	shellConfig, err := config.ResolveShellConfig()
@@ -62,11 +75,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := shell.Write(shellConfig, name, aliasName, dest); err != nil {
+	if err := shell.Write(shellConfig, aliasName, dest); err != nil {
 		return fmt.Errorf("failed to write alias: %w", err)
 	}
 
 	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)
 	fmt.Printf("\nReload your shell or run:\n  source %s\n\nThen run with:\n  %s\n", shellConfig, aliasName)
 	return nil
+}
+
+func lastSegment(name string) string {
+	i := strings.LastIndex(name, "/")
+	if i < 0 {
+		return name
+	}
+	return name[i+1:]
 }

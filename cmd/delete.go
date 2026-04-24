@@ -18,7 +18,7 @@ var deleteYes bool
 
 var deleteCmd = &cobra.Command{
 	Use:   "delete <name>",
-	Short: "Delete a playbook and its alias",
+	Short: "Delete a playbook or a container",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runDelete,
 }
@@ -35,55 +35,108 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	pb, err := playbook.Require(playbooksDir, shellConfig, name)
+	target, err := playbook.ResolveTarget(playbooksDir, name)
+	if err != nil {
+		return err
+	}
+
+	if target.IsPlaybook {
+		return deletePlaybook(playbooksDir, shellConfig, target.Name, target.Path)
+	}
+	return deleteContainer(playbooksDir, shellConfig, target.Name, target.Path)
+}
+
+func deletePlaybook(playbooksDir, shellConfig, name, path string) error {
+	pb, err := playbook.Find(playbooksDir, shellConfig, name)
 	if err != nil {
 		return err
 	}
 
 	if !deleteYes {
 		aliasInfo := "(no alias)"
-		if pb.HasAlias() {
+		if pb != nil && pb.HasAlias() {
 			aliasInfo = fmt.Sprintf("%s (will be removed from %s)", pb.Alias, shellConfig)
 		}
-		fileCount, dirCount := countContents(pb.Path)
-		fmt.Printf("Playbook: %s\n", pb.Name)
-		fmt.Printf("Location: %s\n", pb.Path)
+		fileCount, dirCount := countContents(path)
+		fmt.Printf("Playbook: %s\n", name)
+		fmt.Printf("Location: %s\n", path)
 		fmt.Printf("Alias:    %s\n", aliasInfo)
 		fmt.Printf("Contents: %d files, %d directories\n", fileCount, dirCount)
-		fmt.Print("\nPermanently delete? [y/N] ")
-
-		reader := bufio.NewReader(os.Stdin)
-		answer, _ := reader.ReadString('\n')
-		answer = strings.TrimSpace(strings.ToLower(answer))
-		if answer != "y" && answer != "yes" {
+		if !confirm("\nPermanently delete? [y/N] ") {
 			fmt.Println("Cancelled.")
 			return nil
 		}
 	}
 
-	// Remove alias from shell config.
-	if pb.HasAlias() {
-		if _, err := shell.Remove(shellConfig, name); err != nil {
-			return fmt.Errorf("failed to remove alias: %w", err)
-		}
+	if _, err := shell.RemoveByPath(shellConfig, path); err != nil {
+		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
-
-	// Delete directory (resolve symlink target too if it's a symlink).
-	linfo, err := os.Lstat(pb.Path)
-	if err == nil {
-		if linfo.Mode()&os.ModeSymlink != 0 {
-			if err := os.Remove(pb.Path); err != nil {
-				return fmt.Errorf("failed to remove symlink: %w", err)
-			}
-		} else {
-			if err := os.RemoveAll(pb.Path); err != nil {
-				return fmt.Errorf("failed to delete directory: %w", err)
-			}
-		}
+	if err := removeAny(path); err != nil {
+		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
-
 	fmt.Printf("Deleted playbook %q.\n", name)
 	return nil
+}
+
+func deleteContainer(playbooksDir, shellConfig, name, path string) error {
+	kids, _ := playbook.DiscoverUnder(playbooksDir, name)
+
+	if !deleteYes {
+		fmt.Printf("Container: %s\n", name)
+		fmt.Printf("Location:  %s\n", path)
+		if len(kids) == 0 {
+			fmt.Println("Contains no playbooks.")
+		} else {
+			fmt.Printf("Contains %d playbook%s:\n", len(kids), pluralS(len(kids)))
+			pbs, _ := playbook.Discover(playbooksDir, shellConfig)
+			for _, k := range kids {
+				aliasInfo := "no alias"
+				for _, pb := range pbs {
+					if pb.Name == k && pb.HasAlias() {
+						aliasInfo = "alias: " + pb.Alias
+					}
+				}
+				fmt.Printf("  %s  (%s)\n", k, aliasInfo)
+			}
+		}
+		fileCount, dirCount := countContents(path)
+		fmt.Printf("Total:     %d files, %d directories\n", fileCount, dirCount)
+		if !confirm("\nPermanently delete container and all playbooks inside? [y/N] ") {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	if _, err := shell.RemoveByPathPrefix(shellConfig, path); err != nil {
+		return fmt.Errorf("failed to clean up aliases: %w", err)
+	}
+	if err := removeAny(path); err != nil {
+		return fmt.Errorf("failed to delete %s: %w", path, err)
+	}
+	fmt.Printf("Deleted container %q (%d playbook%s).\n", name, len(kids), pluralS(len(kids)))
+	return nil
+}
+
+func removeAny(path string) error {
+	linfo, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if linfo.Mode()&os.ModeSymlink != 0 {
+		return os.Remove(path)
+	}
+	return os.RemoveAll(path)
+}
+
+func confirm(prompt string) bool {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	return answer == "y" || answer == "yes"
 }
 
 func countContents(dir string) (files, dirs int) {

@@ -1,67 +1,50 @@
+// Package manifest reads the .playbook TOML file inside a playbook directory.
+//
+// The presence of the file marks the directory as a playbook. All fields are
+// optional defaults and metadata.
 package manifest
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
-// Entry is one [[playbook]] block in a .playbook file.
-type Entry struct {
+const FileName = ".playbook"
+
+// Manifest holds the parsed contents of a .playbook file.
+type Manifest struct {
+	Version     string `toml:"version"`
 	Name        string `toml:"name"`
 	Alias       string `toml:"alias"`
-	Subdir      string `toml:"subdir"`
 	Description string `toml:"description"`
 }
 
-type file struct {
-	Playbooks []Entry `toml:"playbook"`
-}
-
-// Resolve parses .playbook in dir and returns the selected entry.
-// selector is the value of --playbook (empty = first entry).
-// Returns nil with no error when no .playbook file exists.
-func Resolve(dir, selector string) (*Entry, error) {
-	path := filepath.Join(dir, ".playbook")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, nil
-	}
-
+// Read parses the .playbook file inside dir. Returns (nil, nil) if the file
+// does not exist. Returns an error if the file exists but is invalid TOML.
+func Read(dir string) (*Manifest, error) {
+	path := filepath.Join(dir, FileName)
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
+	var m Manifest
+	if _, err := toml.Decode(string(data), &m); err != nil {
+		return nil, fmt.Errorf("invalid .playbook at %s: %w", path, err)
+	}
+	return &m, nil
+}
 
-	var f file
-	if _, err := toml.Decode(string(data), &f); err != nil {
-		return nil, fmt.Errorf("invalid .playbook: %w", err)
-	}
-
-	if len(f.Playbooks) == 0 {
-		return nil, fmt.Errorf(".playbook has no [[playbook]] entries")
-	}
-
-	if selector == "" {
-		return &f.Playbooks[0], nil
-	}
-
-	for i := range f.Playbooks {
-		if f.Playbooks[i].Name == selector {
-			return &f.Playbooks[i], nil
-		}
-	}
-
-	var names []string
-	for _, e := range f.Playbooks {
-		if e.Name != "" {
-			names = append(names, e.Name)
-		}
-	}
-	if len(names) > 0 {
-		return nil, fmt.Errorf("no playbook %q in .playbook. Available: %s", selector, strings.Join(names, ", "))
-	}
-	return nil, fmt.Errorf("no playbook %q found in .playbook", selector)
+// WriteMinimal creates a new .playbook with just a version field. Used by
+// `create` and `install` when no manifest is present in the source.
+func WriteMinimal(dir string) error {
+	path := filepath.Join(dir, FileName)
+	content := `version = "0.1.0"
+`
+	return os.WriteFile(path, []byte(content), 0644)
 }

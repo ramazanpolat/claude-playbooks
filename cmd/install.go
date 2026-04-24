@@ -12,37 +12,39 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 var (
 	installName     string
 	installAlias    string
+	installAliasAll bool
 	installNoAlias  bool
 	installCopy     bool
-	installPlaybook string
-	installSubdir   string
 )
 
 var installCmd = &cobra.Command{
 	Use:   "install <source>",
-	Short: "Install a playbook from a git repo or local directory",
+	Short: "Install a playbook (or a repo of playbooks) from a git URL or local directory",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runInstall,
 }
 
 func init() {
-	installCmd.Flags().StringVar(&installName, "name", "", "playbook name (default: derived from source)")
-	installCmd.Flags().StringVar(&installAlias, "alias", "", "alias name (default: same as name)")
+	installCmd.Flags().StringVar(&installName, "name", "", "target directory name under the playbooks root")
+	installCmd.Flags().StringVar(&installAlias, "alias", "", "alias name (single-playbook installs only)")
+	installCmd.Flags().BoolVar(&installAliasAll, "alias-all", false, "write one alias per discovered playbook (multi-playbook installs)")
 	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip alias creation")
 	installCmd.Flags().BoolVar(&installCopy, "copy", false, "copy instead of symlink (local paths only)")
-	installCmd.Flags().StringVar(&installPlaybook, "playbook", "", "select a playbook entry by name from .playbook")
-	installCmd.Flags().StringVar(&installSubdir, "subdir", "", "use this subdirectory as the playbook root")
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	if installNoAlias && installAlias != "" {
-		return fmt.Errorf("--no-alias and --alias cannot be used together")
+	if installNoAlias && (installAlias != "" || installAliasAll) {
+		return fmt.Errorf("--no-alias cannot be combined with --alias or --alias-all")
+	}
+	if installAlias != "" && installAliasAll {
+		return fmt.Errorf("--alias and --alias-all cannot be used together")
 	}
 
 	source := args[0]
@@ -57,147 +59,102 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var sourceDir string
-	var tempDir string
-	var installMethod string // "cloned", "symlinked", "copied"
+	// Determine target directory name.
+	targetName := installName
+	if targetName == "" {
+		targetName = deriveName(source)
+	}
+	if targetName == "" {
+		return fmt.Errorf("could not derive name from source; use --name")
+	}
+	dest := filepath.Join(playbooksDir, targetName)
+	if _, err := os.Stat(dest); err == nil {
+		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
+	}
 
+	var installMethod string
 	if isGit {
-		// For git: clone to a temp dir first to read manifest, then decide final location.
-		var err error
-		tempDir, err = os.MkdirTemp("", "claude-playbook-*")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(tempDir)
-
 		fmt.Printf("Cloning %s...\n", source)
-		gitCmd := exec.Command("git", "clone", "--depth=1", source, tempDir)
+		gitCmd := exec.Command("git", "clone", "--depth=1", source, dest)
 		gitCmd.Stdout = os.Stdout
 		gitCmd.Stderr = os.Stderr
 		if err := gitCmd.Run(); err != nil {
+			os.RemoveAll(dest)
 			return fmt.Errorf("git clone failed")
 		}
-		sourceDir = tempDir
+		installMethod = "cloned"
 	} else {
-		// Local path.
 		abs, err := filepath.Abs(source)
 		if err != nil {
 			return err
 		}
 		info, err := os.Stat(abs)
 		if os.IsNotExist(err) {
-			return fmt.Errorf("'%s' not found", source)
+			return fmt.Errorf("%q not found", source)
+		}
+		if err != nil {
+			return err
 		}
 		if !info.IsDir() {
-			return fmt.Errorf("'%s' is not a directory", source)
+			return fmt.Errorf("%q is not a directory", source)
 		}
-		sourceDir = abs
-	}
-
-	// Resolve manifest.
-	m, err := manifest.Resolve(sourceDir, installPlaybook)
-	if err != nil {
-		return err
-	}
-
-	// Determine subdir (CLI > manifest > none).
-	subdir := installSubdir
-	if subdir == "" && m != nil && m.Subdir != "" {
-		subdir = m.Subdir
-	}
-
-	// Determine playbook root within source.
-	playbookRoot := sourceDir
-	if subdir != "" {
-		playbookRoot = filepath.Join(sourceDir, subdir)
-		if _, err := os.Stat(playbookRoot); os.IsNotExist(err) {
-			return fmt.Errorf("subdirectory '%s' not found in source", subdir)
-		}
-	}
-
-	// Determine name (CLI > manifest > derived).
-	name := installName
-	if name == "" && m != nil && m.Name != "" {
-		name = m.Name
-	}
-	if name == "" {
-		name = deriveName(source)
-	}
-
-	// Check name not already taken.
-	dest := filepath.Join(playbooksDir, name)
-	if _, err := os.Stat(dest); err == nil {
-		return fmt.Errorf("playbook %q already exists. Use --name to choose a different name", name)
-	}
-
-	// Install.
-	if isGit {
-		// For git: if no subdir, clone directly to dest. If subdir, clone to hidden src dir + symlink subdir.
-		if subdir == "" {
-			srcDir := tempDir
-			// Move temp clone to dest.
-			if err := os.Rename(srcDir, dest); err != nil {
-				// Rename may fail across filesystems; fall back to copy.
-				if err := copyDir(srcDir, dest); err != nil {
-					return fmt.Errorf("failed to install: %w", err)
-				}
-			}
-			tempDir = "" // Don't clean up — it's now the dest.
-		} else {
-			// Clone to hidden source dir, symlink the subdir.
-			hiddenSrc := filepath.Join(playbooksDir, "."+name+"-src")
-			if err := os.Rename(tempDir, hiddenSrc); err != nil {
-				if err := copyDir(tempDir, hiddenSrc); err != nil {
-					return fmt.Errorf("failed to install source: %w", err)
-				}
-			}
-			tempDir = ""
-			symlinkTarget := filepath.Join(hiddenSrc, subdir)
-			if err := os.Symlink(symlinkTarget, dest); err != nil {
-				return fmt.Errorf("failed to create symlink: %w", err)
-			}
-		}
-		installMethod = "cloned"
-	} else {
-		// Local: symlink or copy.
-		target := playbookRoot
 		if installCopy {
-			if err := copyDir(target, dest); err != nil {
+			if err := copyDir(abs, dest); err != nil {
+				os.RemoveAll(dest)
 				return fmt.Errorf("failed to copy: %w", err)
 			}
 			installMethod = "copied"
 		} else {
-			if err := os.Symlink(target, dest); err != nil {
+			if err := os.Symlink(abs, dest); err != nil {
 				return fmt.Errorf("failed to create symlink: %w", err)
 			}
 			installMethod = "symlinked"
 		}
 	}
 
-	// Warn if no CLAUDE.md.
-	if _, err := os.Stat(filepath.Join(dest, "CLAUDE.md")); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Warning: no CLAUDE.md found. Any directory is valid, but CLAUDE.md is how Claude Code loads your playbook's instructions.\n")
+	// Discover playbooks in the installed tree.
+	pbs, err := playbook.DiscoverUnder(playbooksDir, targetName)
+	if err != nil {
+		return fmt.Errorf("failed to discover playbooks: %w", err)
 	}
 
-	// Determine alias (CLI > manifest > name).
-	aliasName := installAlias
-	if aliasName == "" && m != nil && m.Alias != "" {
-		aliasName = m.Alias
-	}
-	if aliasName == "" {
-		aliasName = name
+	// If none found, treat the install root as one playbook: write .playbook there.
+	if len(pbs) == 0 {
+		// For a symlink, we don't write into the user's source.
+		if installMethod == "symlinked" {
+			// Use the symlink target.
+			target, _ := os.Readlink(dest)
+			if err := manifest.WriteMinimal(target); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write .playbook to %s: %v\n", target, err)
+			}
+		} else {
+			if err := manifest.WriteMinimal(dest); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write .playbook: %v\n", err)
+			}
+		}
+		pbs = []string{targetName}
 	}
 
-	// Write alias.
-	fmt.Printf("\nInstalled playbook %q\n", name)
+	fmt.Printf("\nInstalled %q at %s\n", targetName, dest)
 	fmt.Printf("Source:   %s (%s)\n", source, installMethod)
-	if m != nil {
-		fmt.Printf("Manifest: .playbook\n")
+	fmt.Printf("Found %d playbook%s:\n", len(pbs), pluralS(len(pbs)))
+	for _, n := range pbs {
+		fmt.Printf("  %s\n", n)
 	}
-	fmt.Printf("Path:     %s\n", dest)
 
+	// Warn about missing CLAUDE.md per playbook.
+	for _, n := range pbs {
+		if _, err := os.Stat(filepath.Join(playbooksDir, n, "CLAUDE.md")); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: %s has no CLAUDE.md\n", n)
+		}
+	}
+
+	// Alias handling.
 	if installNoAlias {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
+		fmt.Printf("\nRun with:\n")
+		for _, n := range pbs {
+			fmt.Printf("  claude-playbook run %s\n", n)
+		}
 		return nil
 	}
 
@@ -205,13 +162,138 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := shell.Write(shellConfig, name, aliasName, dest); err != nil {
-		return fmt.Errorf("failed to write alias: %w", err)
+
+	switch {
+	case len(pbs) == 1:
+		name := pbs[0]
+		aliasName := installAlias
+		if aliasName == "" {
+			aliasName = defaultAliasFor(playbooksDir, name)
+		}
+		pbPath := filepath.Join(playbooksDir, name)
+		if err := shell.Write(shellConfig, aliasName, pbPath); err != nil {
+			return fmt.Errorf("failed to write alias: %w", err)
+		}
+		fmt.Printf("Alias:    %s added to %s\n", aliasName, shellConfig)
+		fmt.Printf("\nReload your shell or run:\n  source %s\n\nThen run with:\n  %s\n", shellConfig, aliasName)
+
+	case installAlias != "":
+		fmt.Fprintf(os.Stderr, "\nWarning: --alias was ignored because the install produced %d playbooks. Use --alias-all or add aliases with 'claude-playbook alias'.\n", len(pbs))
+		fmt.Println()
+		fmt.Println("Add aliases with:")
+		for _, n := range pbs {
+			fmt.Printf("  claude-playbook alias %s %s\n", n, lastSegment(n))
+		}
+
+	case installAliasAll:
+		// Resolve default aliases with collision handling.
+		assigned, skipped := assignAliases(playbooksDir, shellConfig, pbs, targetName)
+		for _, a := range assigned {
+			if err := shell.Write(shellConfig, a.alias, a.path); err != nil {
+				return fmt.Errorf("failed to write alias %q: %w", a.alias, err)
+			}
+			fmt.Printf("Alias:    %s → %s\n", a.alias, a.name)
+		}
+		for _, s := range skipped {
+			fmt.Fprintf(os.Stderr, "Warning: alias %q skipped for %s (%s)\n", s.alias, s.name, s.reason)
+		}
+		if len(assigned) > 0 {
+			fmt.Printf("\nReload your shell or run:\n  source %s\n", shellConfig)
+		}
+
+	default:
+		// Multi-playbook, no --alias-all: print next-step suggestions, write nothing.
+		fmt.Println()
+		fmt.Println("No aliases created. Add ones you want:")
+		for _, n := range pbs {
+			fmt.Printf("  claude-playbook alias %s %s\n", n, lastSegment(n))
+		}
+		fmt.Println()
+		fmt.Println("Or run without an alias:")
+		for _, n := range pbs {
+			fmt.Printf("  claude-playbook run %s\n", n)
+			break // just show one as an example
+		}
 	}
 
-	fmt.Printf("Alias:    %s added to %s\n", aliasName, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  source %s\n\nThen run with:\n  %s\n", shellConfig, aliasName)
 	return nil
+}
+
+type aliasAssignment struct {
+	name  string // playbook name
+	alias string // alias to write
+	path  string // playbook path
+}
+
+type aliasSkip struct {
+	name   string
+	alias  string
+	reason string
+}
+
+func assignAliases(playbooksDir, shellConfig string, pbs []string, containerName string) ([]aliasAssignment, []aliasSkip) {
+	existing, _ := shell.ReadAll(shellConfig)
+	takenInShell := map[string]bool{}
+	for _, e := range existing {
+		takenInShell[e.AliasName] = true
+	}
+
+	// First pass: desired alias per playbook.
+	desired := make(map[string]string, len(pbs))
+	for _, n := range pbs {
+		desired[n] = defaultAliasFor(playbooksDir, n)
+	}
+
+	// Detect internal collisions (two playbooks wanting the same alias).
+	count := map[string]int{}
+	for _, a := range desired {
+		count[a]++
+	}
+	for n, a := range desired {
+		if count[a] > 1 {
+			desired[n] = containerName + "-" + a
+		}
+	}
+
+	var assigned []aliasAssignment
+	var skipped []aliasSkip
+	for _, n := range pbs {
+		alias := desired[n]
+		if takenInShell[alias] {
+			skipped = append(skipped, aliasSkip{name: n, alias: alias, reason: "alias already in use"})
+			continue
+		}
+		assigned = append(assigned, aliasAssignment{
+			name:  n,
+			alias: alias,
+			path:  filepath.Join(playbooksDir, n),
+		})
+		takenInShell[alias] = true
+	}
+	return assigned, skipped
+}
+
+// defaultAliasFor returns the preferred alias for a playbook: manifest alias,
+// else manifest name, else last segment of the playbook name.
+func defaultAliasFor(playbooksDir, pbName string) string {
+	path := filepath.Join(playbooksDir, pbName)
+	m, _ := manifest.Read(path)
+	if m != nil {
+		if m.Alias != "" {
+			return m.Alias
+		}
+		if m.Name != "" {
+			return m.Name
+		}
+	}
+	return lastSegment(pbName)
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func isGitURL(s string) bool {
@@ -222,11 +304,8 @@ func isGitURL(s string) bool {
 }
 
 func deriveName(source string) string {
-	// Strip trailing slash.
 	source = strings.TrimRight(source, "/")
-	// Take last path segment.
 	name := filepath.Base(source)
-	// Strip .git suffix.
 	name = strings.TrimSuffix(name, ".git")
 	return name
 }
