@@ -257,54 +257,48 @@ claude-playbook install ~/dev/my-playbook --name mypb --alias mp
 
 ## Playbook Manifests
 
-A `.playbook` file is a JSON file that describes how to install a playbook. Repos and directories can contain multiple `*.playbook` files, each referencing a different subdir or configuration.
+A `.playbook` file is a TOML file at the root of a repo or directory that describes how to install a playbook. It can define one or more playbook entries using TOML array-of-tables syntax.
 
 **File format:**
 
-```json
-{
-  "name": "pai",
-  "alias": "pai",
-  "subdir": "playbook",
-  "description": "Personal AI Infrastructure by Daniel Miessler"
-}
+```toml
+[[playbook]]
+name = "pai"
+alias = "pai"
+subdir = "playbook"
+description = "Personal AI Infrastructure by Daniel Miessler"
 ```
 
 All fields are optional. Any field can be overridden by a CLI flag.
 
 | Field | Description |
 |-------|-------------|
-| `name` | Default playbook name |
-| `alias` | Default alias (falls back to `name` if omitted) |
+| `name` | Playbook name (default: derived from source) |
+| `alias` | Shell alias (default: same as name) |
 | `subdir` | Subdirectory within the repo/directory to use as the playbook root |
-| `description` | Human-readable description (shown in `list`) |
+| `description` | Human-readable description |
 
-**A repo with multiple playbooks:**
+**A repo with multiple playbook configurations:**
 
+```toml
+[[playbook]]
+name = "work"
+alias = "work"
+subdir = "configs/work"
+description = "Work configuration"
+
+[[playbook]]
+name = "personal"
+alias = "personal"
+subdir = "configs/personal"
+description = "Personal configuration"
 ```
-my-repo/
-    .playbook           # default manifest (used when no --playbook given)
-    work.playbook       # named variant
-    personal.playbook   # named variant
-    playbooks/
-        work/
-            CLAUDE.md
-        personal/
-            CLAUDE.md
-```
 
-**Manifest resolution order:**
+**Manifest resolution:**
 
-1. `--playbook <name>` given → use `<name>.playbook` from source root; error if not found
-2. `.playbook` exists (exact dotfile, no prefix) → use it as default
-3. Exactly one `*.playbook` found → use it; print which one was selected
-4. Multiple `*.playbook` found, no `.playbook` default → error and list candidates:
-   ```
-   Multiple playbooks found. Pick one with --playbook:
-     work      (work.playbook)
-     personal  (personal.playbook)
-   ```
-5. No `*.playbook` found → install the source root (or `--subdir` if given) directly as the playbook
+1. No `.playbook` file → install the source root (or `--subdir` if given) directly as the playbook.
+2. `.playbook` exists, no `--playbook` flag → use the first `[[playbook]]` entry.
+3. `.playbook` exists, `--playbook <name>` given → find the entry whose `name` field matches; error if not found, listing available names.
 
 **CLI flags always override manifest fields.**
 
@@ -316,7 +310,9 @@ my-repo/
 
 **Edge cases:**
 
-- `--playbook` given but `<name>.playbook` not found → error: `No 'work.playbook' found in source root.`
+- `--playbook <name>` given but no matching entry → error: `no playbook "work" in .playbook. Available: personal`
+- `.playbook` exists but has no `[[playbook]]` entries → error: `.playbook has no [[playbook]] entries`
+- Invalid TOML → error: `invalid .playbook: <reason>`
 - Name already taken → error: `Playbook 'pai' already exists. Use --name to choose a different name.`
 - `--copy` given with a URL → error: `--copy only applies to local paths. Git installs always clone.`
 - `--subdir` path not found inside source → error: `Subdirectory 'playbook' not found in source.`
@@ -328,10 +324,10 @@ my-repo/
 **Output on success:**
 ```
 Installed playbook 'pai'
-Source:  https://github.com/danielmiessler/Personal_AI_Infrastructure (cloned)
+Source:   https://github.com/danielmiessler/Personal_AI_Infrastructure (cloned)
 Manifest: .playbook
-Path:    ~/.claude-playbooks/pai
-Alias:   pai added to ~/.zshrc
+Path:     ~/.claude-playbooks/pai
+Alias:    pai added to ~/.zshrc
 
 Reload your shell or run:
   source ~/.zshrc

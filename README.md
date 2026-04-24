@@ -130,18 +130,21 @@ claude-playbook install ~/dev/my-playbook
 claude-playbook install ~/dev/my-playbook --copy
 ```
 
-If the repo contains a `.playbook` manifest file, the installer reads it for defaults (name, alias, which subdirectory to use). You can override any of these with CLI flags.
+If the repo contains a `.playbook` manifest file (TOML format), the installer reads it for defaults (name, alias, which subdirectory to use). You can override any of these with CLI flags.
 
-A repo can contain multiple `*.playbook` files — one per configuration. Use `--playbook <name>` to pick one:
+A `.playbook` file can define multiple configurations using TOML array-of-tables. Use `--playbook <name>` to pick one:
 
+```toml
+[[playbook]]
+name = "work"
+subdir = "configs/work"
+
+[[playbook]]
+name = "personal"
+subdir = "configs/personal"
 ```
-my-repo/
-    .playbook           # default
-    work.playbook       # selected with --playbook work
-    personal.playbook   # selected with --playbook personal
-```
 
-If no `*.playbook` file exists, the repo root (or `--subdir`) is installed directly as the playbook.
+If no `.playbook` file exists, the repo root (or `--subdir`) is installed directly as the playbook.
 
 ### Run a playbook
 
