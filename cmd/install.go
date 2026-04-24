@@ -36,7 +36,7 @@ func init() {
 	installCmd.Flags().StringVar(&installAlias, "alias", "", "alias name (default: same as name)")
 	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip alias creation")
 	installCmd.Flags().BoolVar(&installCopy, "copy", false, "copy instead of symlink (local paths only)")
-	installCmd.Flags().StringVar(&installPlaybook, "playbook", "", "select a specific .playbook manifest by name")
+	installCmd.Flags().StringVar(&installPlaybook, "playbook", "", "select a playbook entry by name from .playbook")
 	installCmd.Flags().StringVar(&installSubdir, "subdir", "", "use this subdirectory as the playbook root")
 }
 
@@ -189,17 +189,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write alias.
-	var manifestFile string
-	if m != nil && installPlaybook != "" {
-		manifestFile = installPlaybook + ".playbook"
-	} else if m != nil {
-		manifestFile = ".playbook"
-	}
-
 	fmt.Printf("\nInstalled playbook %q\n", name)
 	fmt.Printf("Source:   %s (%s)\n", source, installMethod)
-	if manifestFile != "" {
-		fmt.Printf("Manifest: %s\n", manifestFile)
+	if m != nil {
+		fmt.Printf("Manifest: .playbook\n")
 	}
 	fmt.Printf("Path:     %s\n", dest)
 
