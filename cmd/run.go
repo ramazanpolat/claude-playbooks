@@ -68,8 +68,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	playbooksDir = config.ResolvePlaybooksDir()
 	pbPath := filepath.Join(playbooksDir, name)
 
-	if _, err := os.Stat(pbPath); os.IsNotExist(err) {
+	info, err := os.Stat(pbPath)
+	if os.IsNotExist(err) || (err == nil && !info.IsDir()) {
 		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
+	}
+	if _, err := os.Stat(filepath.Join(pbPath, ".playbook")); os.IsNotExist(err) {
+		return fmt.Errorf("%q is not a playbook (no .playbook file). Use 'claude-playbook list' to see available playbooks", name)
 	}
 
 	claudePath, err := exec.LookPath("claude")

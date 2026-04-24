@@ -1,119 +1,48 @@
+// Package shell manages playbook aliases in the user's shell config file.
+//
+// Aliases are plain single-line `alias` definitions — no comment markers, no
+// metadata, no registry. Discovery works by grepping lines for either the
+// alias name or the CLAUDE_CONFIG_DIR path.
 package shell
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
-const commentPrefix = "# claude-playbook: "
-
-func commentLine(name string) string {
-	return commentPrefix + name
+// AliasEntry represents a single alias line found in the shell config.
+type AliasEntry struct {
+	AliasName string // e.g. "experiment"
+	Line      string // the full alias line as written
+	Path      string // the CLAUDE_CONFIG_DIR value (absolute, expanded)
 }
 
-func AliasLine(aliasName, playbookDir string) string {
+// aliasRegex matches: [whitespace] alias name = ... CLAUDE_CONFIG_DIR=<path> ...
+// Tolerates leading whitespace and any quote style around the command.
+var aliasRegex = regexp.MustCompile(`^\s*alias\s+([A-Za-z_][A-Za-z0-9_-]*)\s*=`)
+
+// Format returns the canonical alias line written by the tool.
+func Format(aliasName, playbookDir string) string {
 	return fmt.Sprintf("alias %s='CLAUDE_CONFIG_DIR=%s claude'", aliasName, playbookDir)
 }
 
-// ReadAlias returns the full alias line for a playbook, or "" if not set.
-func ReadAlias(configFile, name string) (string, error) {
-	lines, err := readLines(configFile)
-	if err != nil {
-		return "", err
-	}
-	target := commentLine(name)
-	for i, line := range lines {
-		if line == target && i+1 < len(lines) {
-			return lines[i+1], nil
-		}
-	}
-	return "", nil
-}
-
-// ReadAll returns a map of playbook name → full alias line for all managed aliases.
-func ReadAll(configFile string) (map[string]string, error) {
-	lines, err := readLines(configFile)
-	if err != nil {
-		return map[string]string{}, err
-	}
-	result := make(map[string]string)
-	for i, line := range lines {
-		if strings.HasPrefix(line, commentPrefix) {
-			name := strings.TrimPrefix(line, commentPrefix)
-			if i+1 < len(lines) {
-				result[name] = lines[i+1]
-			}
-		}
-	}
-	return result, nil
-}
-
-// Write adds or updates the alias block for a playbook.
-func Write(configFile, name, aliasName, playbookDir string) error {
-	comment := commentLine(name)
-	alias := AliasLine(aliasName, playbookDir)
-
-	lines, err := readLines(configFile)
-	if err != nil {
-		return err
-	}
-
-	for i, line := range lines {
-		if line == comment && i+1 < len(lines) {
-			lines[i+1] = alias
-			return writeLines(configFile, lines)
-		}
-	}
-
-	// Not found — append.
-	if len(lines) > 0 && lines[len(lines)-1] != "" {
-		lines = append(lines, "")
-	}
-	lines = append(lines, comment, alias)
-	return writeLines(configFile, lines)
-}
-
-// Remove removes the alias block for a playbook. Returns true if found.
-func Remove(configFile, name string) (bool, error) {
-	lines, err := readLines(configFile)
-	if err != nil {
-		return false, err
-	}
-	comment := commentLine(name)
-	var out []string
-	found := false
-	for i := 0; i < len(lines); i++ {
-		if lines[i] == comment {
-			found = true
-			i++ // skip the alias line too
-			// drop preceding blank line if present
-			if len(out) > 0 && out[len(out)-1] == "" {
-				out = out[:len(out)-1]
-			}
-			continue
-		}
-		out = append(out, lines[i])
-	}
-	if !found {
-		return false, nil
-	}
-	return true, writeLines(configFile, out)
-}
-
-// ReadAllByPath scans the shell config for any alias containing CLAUDE_CONFIG_DIR=<path>
-// and returns a map of absPath → full alias line. This catches manually created aliases
-// that don't have the managed comment marker.
-func ReadAllByPath(configFile string) (map[string]string, error) {
+// ReadAll scans the shell config for every alias whose definition contains
+// CLAUDE_CONFIG_DIR=<path>. Returns one entry per matching line (there may
+// be duplicates with the same path or alias name).
+func ReadAll(configFile string) ([]AliasEntry, error) {
 	lines, err := readLines(configFile)
 	if err != nil {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
-	result := make(map[string]string)
+
+	var entries []AliasEntry
 	for _, line := range lines {
-		if !strings.HasPrefix(line, "alias ") {
+		m := aliasRegex.FindStringSubmatch(line)
+		if m == nil {
 			continue
 		}
 		idx := strings.Index(line, "CLAUDE_CONFIG_DIR=")
@@ -121,30 +50,268 @@ func ReadAllByPath(configFile string) (map[string]string, error) {
 			continue
 		}
 		val := line[idx+len("CLAUDE_CONFIG_DIR="):]
-		// Value ends at next space, tab, quote, or end of string.
 		if end := strings.IndexAny(val, " \t'\""); end >= 0 {
 			val = val[:end]
 		}
-		// Expand leading ~.
+		if val == "" {
+			continue
+		}
 		if strings.HasPrefix(val, "~/") {
 			val = filepath.Join(home, val[2:])
+		} else if strings.HasPrefix(val, "$HOME/") {
+			val = filepath.Join(home, val[len("$HOME/"):])
 		}
-		if val != "" {
-			result[val] = line
-		}
+		entries = append(entries, AliasEntry{
+			AliasName: m[1],
+			Line:      line,
+			Path:      val,
+		})
 	}
-	return result, nil
+	return entries, nil
 }
 
-// ExtractAliasName extracts the alias name from a line like:
-// alias foo='CLAUDE_CONFIG_DIR=...'
-func ExtractAliasName(line string) string {
-	line = strings.TrimPrefix(line, "alias ")
-	idx := strings.IndexByte(line, '=')
+// FindByPath returns aliases whose CLAUDE_CONFIG_DIR path equals the given path.
+func FindByPath(configFile, path string) ([]AliasEntry, error) {
+	entries, err := ReadAll(configFile)
+	if err != nil {
+		return nil, err
+	}
+	want, _ := filepath.Abs(path)
+	var matches []AliasEntry
+	for _, e := range entries {
+		have, _ := filepath.Abs(e.Path)
+		if have == want {
+			matches = append(matches, e)
+		}
+	}
+	return matches, nil
+}
+
+// FindByAliasName returns the first alias entry whose alias name matches.
+func FindByAliasName(configFile, aliasName string) (*AliasEntry, error) {
+	entries, err := ReadAll(configFile)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].AliasName == aliasName {
+			return &entries[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// Write sets an alias: removes any existing lines for this alias name or this
+// playbook path, then appends a fresh line. If the alias name is already in
+// use by a different CLAUDE_CONFIG_DIR, it is silently overwritten.
+func Write(configFile, aliasName, playbookDir string) error {
+	lines, err := readLines(configFile)
+	if err != nil {
+		return err
+	}
+
+	absPlaybookDir, _ := filepath.Abs(playbookDir)
+	var kept []string
+	for _, line := range lines {
+		if shouldDrop(line, aliasName, absPlaybookDir) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+
+	// Ensure a blank line separator before appending.
+	if len(kept) > 0 && kept[len(kept)-1] != "" {
+		kept = append(kept, "")
+	}
+	kept = append(kept, Format(aliasName, playbookDir))
+	return writeLines(configFile, kept)
+}
+
+// RemoveByPath deletes every alias line whose CLAUDE_CONFIG_DIR matches the given path.
+// Returns the number of lines removed.
+func RemoveByPath(configFile, playbookDir string) (int, error) {
+	lines, err := readLines(configFile)
+	if err != nil {
+		return 0, err
+	}
+	absPlaybookDir, _ := filepath.Abs(playbookDir)
+	var kept []string
+	removed := 0
+	for _, line := range lines {
+		if matchesPath(line, absPlaybookDir) {
+			removed++
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+	return removed, writeLines(configFile, kept)
+}
+
+// RemoveByAliasName deletes every alias line whose alias name matches.
+// Returns the number of lines removed.
+func RemoveByAliasName(configFile, aliasName string) (int, error) {
+	lines, err := readLines(configFile)
+	if err != nil {
+		return 0, err
+	}
+	var kept []string
+	removed := 0
+	for _, line := range lines {
+		if matchesAliasName(line, aliasName) {
+			removed++
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+	return removed, writeLines(configFile, kept)
+}
+
+// RemoveByPathPrefix deletes every alias line whose CLAUDE_CONFIG_DIR starts
+// with the given prefix (used when deleting a container to clean up all nested
+// playbook aliases).
+func RemoveByPathPrefix(configFile, prefix string) (int, error) {
+	lines, err := readLines(configFile)
+	if err != nil {
+		return 0, err
+	}
+	absPrefix, _ := filepath.Abs(prefix)
+	// Ensure trailing slash so prefix match is directory-bounded.
+	if !strings.HasSuffix(absPrefix, string(filepath.Separator)) {
+		absPrefix += string(filepath.Separator)
+	}
+	var kept []string
+	removed := 0
+	for _, line := range lines {
+		if matchesPathPrefix(line, absPrefix) {
+			removed++
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+	return removed, writeLines(configFile, kept)
+}
+
+// RewritePathPrefix updates every alias line whose CLAUDE_CONFIG_DIR starts
+// with oldPrefix so it starts with newPrefix instead. Used by `rename`.
+func RewritePathPrefix(configFile, oldPrefix, newPrefix string) (int, error) {
+	lines, err := readLines(configFile)
+	if err != nil {
+		return 0, err
+	}
+	absOld, _ := filepath.Abs(oldPrefix)
+	absNew, _ := filepath.Abs(newPrefix)
+	changed := 0
+	for i, line := range lines {
+		rewritten, ok := rewriteLinePathPrefix(line, absOld, absNew)
+		if ok {
+			lines[i] = rewritten
+			changed++
+		}
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+	return changed, writeLines(configFile, lines)
+}
+
+// --- internals ---
+
+func shouldDrop(line, aliasName, absPlaybookDir string) bool {
+	return matchesAliasName(line, aliasName) || matchesPath(line, absPlaybookDir)
+}
+
+func matchesAliasName(line, aliasName string) bool {
+	m := aliasRegex.FindStringSubmatch(line)
+	return m != nil && m[1] == aliasName
+}
+
+func matchesPath(line, absPath string) bool {
+	if !aliasRegex.MatchString(line) {
+		return false
+	}
+	have := extractPath(line)
+	if have == "" {
+		return false
+	}
+	abs, _ := filepath.Abs(have)
+	return abs == absPath
+}
+
+func matchesPathPrefix(line, absPrefixWithSlash string) bool {
+	if !aliasRegex.MatchString(line) {
+		return false
+	}
+	have := extractPath(line)
+	if have == "" {
+		return false
+	}
+	abs, _ := filepath.Abs(have)
+	abs += string(filepath.Separator)
+	return strings.HasPrefix(abs, absPrefixWithSlash)
+}
+
+func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
+	if !aliasRegex.MatchString(line) {
+		return line, false
+	}
+	have := extractPath(line)
+	if have == "" {
+		return line, false
+	}
+	abs, _ := filepath.Abs(have)
+	oldWithSlash := absOld + string(filepath.Separator)
+	absWithSlash := abs + string(filepath.Separator)
+
+	var newPath string
+	switch {
+	case abs == absOld:
+		newPath = absNew
+	case strings.HasPrefix(absWithSlash, oldWithSlash):
+		newPath = absNew + strings.TrimPrefix(abs, absOld)
+	default:
+		return line, false
+	}
+
+	// Replace the raw value of CLAUDE_CONFIG_DIR= in the line with the new absolute path.
+	idx := strings.Index(line, "CLAUDE_CONFIG_DIR=")
+	if idx < 0 {
+		return line, false
+	}
+	prefix := line[:idx+len("CLAUDE_CONFIG_DIR=")]
+	rest := line[idx+len("CLAUDE_CONFIG_DIR="):]
+	end := strings.IndexAny(rest, " \t'\"")
+	if end < 0 {
+		end = len(rest)
+	}
+	after := rest[end:]
+	return prefix + newPath + after, true
+}
+
+func extractPath(line string) string {
+	idx := strings.Index(line, "CLAUDE_CONFIG_DIR=")
 	if idx < 0 {
 		return ""
 	}
-	return line[:idx]
+	val := line[idx+len("CLAUDE_CONFIG_DIR="):]
+	if end := strings.IndexAny(val, " \t'\""); end >= 0 {
+		val = val[:end]
+	}
+	home, _ := os.UserHomeDir()
+	if strings.HasPrefix(val, "~/") {
+		val = filepath.Join(home, val[2:])
+	} else if strings.HasPrefix(val, "$HOME/") {
+		val = filepath.Join(home, val[len("$HOME/"):])
+	}
+	return val
 }
 
 func readLines(path string) ([]string, error) {
@@ -156,9 +323,7 @@ func readLines(path string) ([]string, error) {
 		return nil, err
 	}
 	content := string(data)
-	// Split but preserve trailing newline awareness.
 	lines := strings.Split(content, "\n")
-	// Remove the last empty element that Split produces when file ends with \n.
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
