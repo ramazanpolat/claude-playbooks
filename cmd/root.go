@@ -35,8 +35,12 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(infoCmd)
+	rootCmd.AddCommand(renameCmd)
 	rootCmd.AddCommand(aliasCmd)
 	rootCmd.AddCommand(deleteCmd)
+	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(completionCmd)
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
@@ -69,13 +73,14 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			maxLen = len(pb.Name)
 		}
 	}
+	cmdColW := maxLen + len("claude-playbook run ")
 
 	for _, pb := range pbs {
 		runStr := fmt.Sprintf("claude-playbook run %s", pb.Name)
 		if pb.HasAlias() {
-			fmt.Printf("  %-*s  %-42s (or: %s)\n", maxLen, pb.Name, runStr, pb.Alias)
+			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, pb.Alias)
 		} else {
-			fmt.Printf("  %-*s  %-42s (no alias set)\n", maxLen, pb.Name, runStr)
+			fmt.Printf("  %-*s  %-*s  (no alias set)\n", maxLen, pb.Name, cmdColW, runStr)
 		}
 	}
 

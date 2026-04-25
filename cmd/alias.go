@@ -16,15 +16,15 @@ var aliasCmd = &cobra.Command{
 	Use:   "alias [name] [alias]",
 	Short: "Show or manage playbook aliases",
 	Long: `With no arguments: show full alias lines for all playbooks.
-With one argument: show the alias for that playbook, or create one using the playbook name.
-With two arguments: set the alias.
-With --remove: remove the alias.`,
+With one argument: show the alias for that playbook, or report that it has none (read-only).
+With two arguments: set the alias (creates or replaces).
+With --remove: remove any alias for the playbook.`,
 	Args: cobra.RangeArgs(0, 2),
 	RunE: runAlias,
 }
 
 func init() {
-	aliasCmd.Flags().BoolVar(&aliasRemove, "remove", false, "remove the alias from shell config")
+	aliasCmd.Flags().BoolVar(&aliasRemove, "remove", false, "remove the alias for the named playbook")
 }
 
 func runAlias(cmd *cobra.Command, args []string) error {
@@ -61,7 +61,6 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
-
 	pb, err := playbook.Require(playbooksDir, shellConfig, name)
 	if err != nil {
 		return err
@@ -73,17 +72,18 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Playbook %q has no alias set.\n", name)
 			return nil
 		}
-		if _, err := shell.Remove(shellConfig, name); err != nil {
+		removed, err := shell.RemoveByPath(shellConfig, pb.Path)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("Alias %q removed from %s\n", pb.Alias, shellConfig)
+		fmt.Printf("Removed %d alias(es) for playbook %q from %s\n", removed, name, shellConfig)
 		return nil
 	}
 
 	// Two args — set alias.
 	if len(args) == 2 {
 		newAlias := args[1]
-		if err := shell.Write(shellConfig, name, newAlias, pb.Path); err != nil {
+		if err := shell.Write(shellConfig, newAlias, pb.Path); err != nil {
 			return err
 		}
 		fmt.Printf("Alias %q set for playbook %q in %s\n", newAlias, name, shellConfig)
@@ -91,17 +91,12 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// One arg — show or create.
+	// One arg — show (read-only).
 	if pb.HasAlias() {
 		fmt.Printf("Alias for %q: %s\n", name, pb.AliasLine)
 		return nil
 	}
-
-	// No alias — create one using the playbook name.
-	if err := shell.Write(shellConfig, name, name, pb.Path); err != nil {
-		return err
-	}
-	fmt.Printf("Alias %q created for playbook %q in %s\n", name, name, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  source %s\n", shellConfig)
+	fmt.Printf("Playbook %q has no alias set.\n", name)
+	fmt.Printf("Use 'claude-playbook alias %s <alias-name>' to create one.\n", name)
 	return nil
 }
