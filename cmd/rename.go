@@ -20,7 +20,7 @@ var (
 
 var renameCmd = &cobra.Command{
 	Use:   "rename <old-name> <new-name>",
-	Short: "Rename a playbook or container",
+	Short: "Rename a top-level playbook",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runRename,
 }
@@ -37,6 +37,12 @@ func runRename(cmd *cobra.Command, args []string) error {
 	oldName := args[0]
 	newName := args[1]
 
+	if strings.Contains(oldName, "/") {
+		return fmt.Errorf("%q is a child playbook; rename children by editing the parent's .playbook", oldName)
+	}
+	if strings.Contains(newName, "/") {
+		return fmt.Errorf("playbook names may not contain '/' here")
+	}
 	if strings.HasPrefix(newName, ".") {
 		return fmt.Errorf("new name cannot start with '.'")
 	}
@@ -47,50 +53,43 @@ func runRename(cmd *cobra.Command, args []string) error {
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	target, err := playbook.ResolveTarget(playbooksDir, oldName)
+	pb, err := playbook.Require(playbooksDir, shellConfig, oldName)
 	if err != nil {
 		return err
 	}
+	if pb.IsChild {
+		return fmt.Errorf("%q is a child playbook; rename children by editing %s/.playbook", oldName, pb.Parent)
+	}
 
-	oldPath := target.Path
+	oldPath := pb.Path
 	newPath := filepath.Join(playbooksDir, newName)
 
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("%q already exists at %s", newName, newPath)
 	}
 
-	// Ensure parent of newPath exists (for nested renames).
-	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
-		return fmt.Errorf("failed to prepare destination: %w", err)
-	}
-
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return fmt.Errorf("failed to rename: %w", err)
 	}
 
-	// Rewrite aliases pointing into the old path.
 	changed, err := shell.RewritePathPrefix(shellConfig, oldPath, newPath)
 	if err != nil {
 		return fmt.Errorf("failed to update aliases: %w", err)
 	}
 
-	// Apply --alias / --no-alias (playbook-only).
-	if target.IsPlaybook {
-		pb, _ := playbook.Find(playbooksDir, shellConfig, newName)
-		switch {
-		case renameNoAlias:
-			if pb != nil && pb.HasAlias() {
-				if _, err := shell.RemoveByPath(shellConfig, pb.Path); err != nil {
-					return fmt.Errorf("failed to drop alias: %w", err)
-				}
-			}
-		case renameAlias != "":
+	switch {
+	case renameNoAlias:
+		if pb.HasAlias() {
 			if _, err := shell.RemoveByPath(shellConfig, newPath); err != nil {
-				return fmt.Errorf("failed to update alias: %w", err)
+				return fmt.Errorf("failed to drop alias: %w", err)
 			}
-			if err := shell.Write(shellConfig, renameAlias, newPath); err != nil {
-				return fmt.Errorf("failed to write alias: %w", err)
-			}
+		}
+	case renameAlias != "":
+		if _, err := shell.RemoveByPath(shellConfig, newPath); err != nil {
+			return fmt.Errorf("failed to update alias: %w", err)
+		}
+		if err := shell.Write(shellConfig, renameAlias, newPath); err != nil {
+			return fmt.Errorf("failed to write alias: %w", err)
 		}
 	}
 

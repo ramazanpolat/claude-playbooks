@@ -17,10 +17,11 @@ import (
 var deleteYes bool
 
 var deleteCmd = &cobra.Command{
-	Use:   "delete <name>",
-	Short: "Delete a playbook or a container",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDelete,
+	Use:     "delete <name>",
+	Aliases: []string{"uninstall", "unlink"},
+	Short:   "Delete a top-level playbook (and all its children)",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runDelete,
 }
 
 func init() {
@@ -35,32 +36,48 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	target, err := playbook.ResolveTarget(playbooksDir, name)
-	if err != nil {
-		return err
+	if strings.Contains(name, "/") {
+		return fmt.Errorf("%q is a child playbook; delete the parent or run 'claude-playbook dealias %s' to drop just the alias", name, name)
 	}
 
-	if target.IsPlaybook {
-		return deletePlaybook(playbooksDir, shellConfig, target.Name, target.Path)
-	}
-	return deleteContainer(playbooksDir, shellConfig, target.Name, target.Path)
-}
-
-func deletePlaybook(playbooksDir, shellConfig, name, path string) error {
 	pb, err := playbook.Find(playbooksDir, shellConfig, name)
 	if err != nil {
 		return err
 	}
+	if pb == nil {
+		// Allow cleanup of dangling state when the directory is already gone:
+		// only proceed if a directory exists at the expected path.
+		path := filepath.Join(playbooksDir, name)
+		if _, err := os.Lstat(path); os.IsNotExist(err) {
+			return fmt.Errorf("%q not found under %s", name, playbooksDir)
+		}
+		return deleteOrphan(playbooksDir, shellConfig, name, path)
+	}
+	if pb.IsChild {
+		return fmt.Errorf("%q is a child playbook; delete the parent %q or run 'claude-playbook dealias %s' to drop just the alias", name, pb.Parent, name)
+	}
+
+	children := playbook.Children(playbooksDir, shellConfig, pb)
 
 	if !deleteYes {
 		aliasInfo := "(no alias)"
-		if pb != nil && pb.HasAlias() {
+		if pb.HasAlias() {
 			aliasInfo = fmt.Sprintf("%s (will be removed from %s)", pb.Alias, shellConfig)
 		}
-		fileCount, dirCount := countContents(path)
-		fmt.Printf("Playbook: %s\n", name)
-		fmt.Printf("Location: %s\n", path)
+		fileCount, dirCount := countContents(pb.Path)
+		fmt.Printf("Playbook: %s\n", pb.Name)
+		fmt.Printf("Location: %s\n", pb.Path)
 		fmt.Printf("Alias:    %s\n", aliasInfo)
+		if len(children) > 0 {
+			fmt.Printf("Children: %d\n", len(children))
+			for _, c := range children {
+				if c.HasAlias() {
+					fmt.Printf("  %s    (alias: %s — will be removed)\n", c.Name, c.Alias)
+				} else {
+					fmt.Printf("  %s    (no alias)\n", c.Name)
+				}
+			}
+		}
 		fmt.Printf("Contents: %d files, %d directories\n", fileCount, dirCount)
 		if !confirm("\nPermanently delete? [y/N] ") {
 			fmt.Println("Cancelled.")
@@ -68,52 +85,34 @@ func deletePlaybook(playbooksDir, shellConfig, name, path string) error {
 		}
 	}
 
-	if _, err := shell.RemoveByPath(shellConfig, path); err != nil {
+	if _, err := shell.RemoveByPathPrefix(shellConfig, pb.Path); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
-	if err := removeAny(path); err != nil {
-		return fmt.Errorf("failed to delete %s: %w", path, err)
+	if err := removeAny(pb.Path); err != nil {
+		return fmt.Errorf("failed to delete %s: %w", pb.Path, err)
 	}
-	fmt.Printf("Deleted playbook %q.\n", name)
+	fmt.Printf("Deleted playbook %q.\n", pb.Name)
 	return nil
 }
 
-func deleteContainer(playbooksDir, shellConfig, name, path string) error {
-	kids, _ := playbook.DiscoverUnder(playbooksDir, name)
-
+// deleteOrphan handles a directory that exists at the expected path but is
+// not a discoverable playbook (e.g. .playbook removed). Cleans up any aliases
+// pointing into it and removes the directory.
+func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 	if !deleteYes {
-		fmt.Printf("Container: %s\n", name)
-		fmt.Printf("Location:  %s\n", path)
-		if len(kids) == 0 {
-			fmt.Println("Contains no playbooks.")
-		} else {
-			fmt.Printf("Contains %d playbook%s:\n", len(kids), pluralS(len(kids)))
-			pbs, _ := playbook.Discover(playbooksDir, shellConfig)
-			for _, k := range kids {
-				aliasInfo := "no alias"
-				for _, pb := range pbs {
-					if pb.Name == k && pb.HasAlias() {
-						aliasInfo = "alias: " + pb.Alias
-					}
-				}
-				fmt.Printf("  %s  (%s)\n", k, aliasInfo)
-			}
-		}
-		fileCount, dirCount := countContents(path)
-		fmt.Printf("Total:     %d files, %d directories\n", fileCount, dirCount)
-		if !confirm("\nPermanently delete container and all playbooks inside? [y/N] ") {
+		fmt.Printf("Directory %q exists at %s but has no .playbook.\n", name, path)
+		if !confirm("Permanently delete the directory and any aliases pointing into it? [y/N] ") {
 			fmt.Println("Cancelled.")
 			return nil
 		}
 	}
-
 	if _, err := shell.RemoveByPathPrefix(shellConfig, path); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
-	fmt.Printf("Deleted container %q (%d playbook%s).\n", name, len(kids), pluralS(len(kids)))
+	fmt.Printf("Deleted %q.\n", name)
 	return nil
 }
 
