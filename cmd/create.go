@@ -20,13 +20,13 @@ var (
 
 var createCmd = &cobra.Command{
 	Use:   "create <name>",
-	Short: "Create a new playbook",
+	Short: "Create a new top-level playbook",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runCreate,
 }
 
 func init() {
-	createCmd.Flags().StringVar(&createAlias, "alias", "", "alias name (default: last segment of playbook name)")
+	createCmd.Flags().StringVar(&createAlias, "alias", "", "alias name (default: <name>)")
 	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip alias creation")
 }
 
@@ -36,14 +36,17 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
+	if strings.Contains(name, "/") {
+		return fmt.Errorf("'create' only creates top-level playbooks. To add a child, declare it in the parent's .playbook")
+	}
 	if strings.HasPrefix(name, ".") {
 		return fmt.Errorf("playbook name cannot start with '.'")
 	}
-	if strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") {
-		return fmt.Errorf("playbook name cannot start or end with '/'")
-	}
 
 	playbooksDir := config.ResolvePlaybooksDir()
+	if err := os.MkdirAll(playbooksDir, 0755); err != nil {
+		return err
+	}
 	dest := filepath.Join(playbooksDir, name)
 
 	if _, err := os.Stat(dest); err == nil {
@@ -54,7 +57,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	if err := manifest.WriteMinimal(dest); err != nil {
+	if err := manifest.WriteMinimal(dest, name); err != nil {
 		return fmt.Errorf("failed to write .playbook: %w", err)
 	}
 
@@ -67,7 +70,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	aliasName := createAlias
 	if aliasName == "" {
-		aliasName = lastSegment(name)
+		aliasName = name
 	}
 
 	shellConfig, err := config.ResolveShellConfig()
@@ -84,6 +87,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// lastSegment returns the part after the last '/' in name.
 func lastSegment(name string) string {
 	i := strings.LastIndex(name, "/")
 	if i < 0 {

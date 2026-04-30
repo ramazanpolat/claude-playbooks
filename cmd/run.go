@@ -4,27 +4,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run <name> [claude-flags...]",
-	Short: "Run Claude Code with a playbook",
-	// DisableFlagParsing passes all args raw, including parent persistent flags
-	// that weren't parsed. We handle them manually below.
+	Use:                "run <name> [claude-flags...]",
+	Short:              "Run Claude Code with a playbook",
 	DisableFlagParsing: true,
 	RunE:               runRun,
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
-	// With DisableFlagParsing=true, cobra skips ALL flag parsing — including
-	// root persistent flags like --playbooks-dir. Extract them manually so the
-	// alias pattern `alias x='claude-playbook --playbooks-dir ... run'` works.
 	var playbooksDir, shellConfig string
 	var rest []string
 
@@ -65,15 +60,15 @@ func runRun(cmd *cobra.Command, args []string) error {
 	name := rest[0]
 	claudeArgs := rest[1:]
 
-	playbooksDir = config.ResolvePlaybooksDir()
-	pbPath := filepath.Join(playbooksDir, name)
+	playbooksDirResolved := config.ResolvePlaybooksDir()
+	shellConfigResolved, _ := config.ResolveShellConfig()
 
-	info, err := os.Stat(pbPath)
-	if os.IsNotExist(err) || (err == nil && !info.IsDir()) {
-		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
+	pb, err := playbook.Find(playbooksDirResolved, shellConfigResolved, name)
+	if err != nil {
+		return err
 	}
-	if _, err := os.Stat(filepath.Join(pbPath, ".playbook")); os.IsNotExist(err) {
-		return fmt.Errorf("%q is not a playbook (no .playbook file). Use 'claude-playbook list' to see available playbooks", name)
+	if pb == nil {
+		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
 	}
 
 	claudePath, err := exec.LookPath("claude")
@@ -82,7 +77,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	c := exec.Command(claudePath, claudeArgs...)
-	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+pbPath)
+	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+pb.Path)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

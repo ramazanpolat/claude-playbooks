@@ -35,9 +35,11 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(renameCmd)
 	rootCmd.AddCommand(aliasCmd)
+	rootCmd.AddCommand(dealiasCmd)
 	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(completionCmd)
@@ -67,10 +69,17 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	fmt.Println("Available playbooks:")
 	fmt.Println()
 
+	display := func(pb *playbook.Playbook) string {
+		if pb.IsChild {
+			return "  " + pb.Name
+		}
+		return pb.Name
+	}
+
 	maxLen := 0
 	for _, pb := range pbs {
-		if len(pb.Name) > maxLen {
-			maxLen = len(pb.Name)
+		if l := len(display(pb)); l > maxLen {
+			maxLen = l
 		}
 	}
 	cmdColW := maxLen + len("claude-playbook run ")
@@ -78,9 +87,9 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	for _, pb := range pbs {
 		runStr := fmt.Sprintf("claude-playbook run %s", pb.Name)
 		if pb.HasAlias() {
-			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, pb.Alias)
+			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, display(pb), cmdColW, runStr, pb.Alias)
 		} else {
-			fmt.Printf("  %-*s  %-*s  (no alias set)\n", maxLen, pb.Name, cmdColW, runStr)
+			fmt.Printf("  %-*s  %-*s  (no alias set)\n", maxLen, display(pb), cmdColW, runStr)
 		}
 	}
 

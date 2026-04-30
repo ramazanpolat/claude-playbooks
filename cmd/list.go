@@ -49,10 +49,17 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Dynamic widths.
+	// Display name includes a 2-space indent for children.
+	display := func(pb *playbook.Playbook) string {
+		if pb.IsChild {
+			return "  " + pb.Name
+		}
+		return pb.Name
+	}
+
 	nameW, pathW, aliasW := 4, 4, 5
 	for _, pb := range pbs {
-		if w := len(pb.Name); w > nameW {
+		if w := len(display(pb)); w > nameW {
 			nameW = w
 		}
 		if w := len(pb.Path); w > pathW {
@@ -75,7 +82,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			alias = "-"
 		}
 		fmt.Printf("%-*s  %-*s  %-*s  %s\n",
-			nameW, pb.Name,
+			nameW, display(pb),
 			pathW, pb.Path,
 			aliasW, alias,
 			formatAge(pb.LastUsed),

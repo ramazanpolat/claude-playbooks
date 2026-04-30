@@ -21,7 +21,6 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	// Strip root persistent flags that leak through DisableFlagParsing.
 	var playbooksDir, shellConfigOverride string
 	var rest []string
 	for i := 0; i < len(args); i++ {
@@ -63,11 +62,11 @@ func printUpdateHelp() {
 	fmt.Println("Usage: claude-playbook update [name] [script-args...]")
 	fmt.Println()
 	fmt.Println("Without <name>: self-update the claude-playbook binary.")
-	fmt.Println("With <name>: run <playbook-or-container>/bin/update-playbook.sh, forwarding extra args.")
+	fmt.Println("With <name>: run <playbook>/bin/update-playbook.sh, forwarding extra args.")
+	fmt.Println("Children are not updatable independently — pass the parent's name.")
 }
 
 func runSelfUpdate() error {
-	// Minimal placeholder: direct users to the install script.
 	fmt.Printf("Current version: %s\n", Version)
 	fmt.Println()
 	fmt.Println("Self-update is not yet implemented. To update, re-run:")
@@ -77,12 +76,17 @@ func runSelfUpdate() error {
 
 func runPlaybookUpdate(name string, scriptArgs []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
-	target, err := playbook.ResolveTarget(playbooksDir, name)
+	shellConfig, _ := config.ResolveShellConfig()
+
+	pb, err := playbook.Require(playbooksDir, shellConfig, name)
 	if err != nil {
 		return err
 	}
+	if pb.IsChild {
+		return fmt.Errorf("update operates on top-level playbooks; %q is a child of %q. Try: claude-playbook update %s", name, pb.Parent, pb.Parent)
+	}
 
-	script := filepath.Join(target.Path, "bin", "update-playbook.sh")
+	script := filepath.Join(pb.Path, "bin", "update-playbook.sh")
 	info, err := os.Stat(script)
 	if err != nil {
 		return fmt.Errorf("%q has no update script at bin/update-playbook.sh. This target does not support updates; see its documentation", name)
@@ -92,8 +96,8 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 	}
 
 	c := exec.Command(script, scriptArgs...)
-	c.Dir = target.Path
-	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+target.Path)
+	c.Dir = pb.Path
+	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+pb.Path)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
