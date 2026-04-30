@@ -16,6 +16,7 @@ Common use cases:
 - **Separate work and personal** configurations that don't interfere
 - **Run two Claude Code instances concurrently** on different tasks with different personalities
 - **Share a configuration** with your team by putting the playbook in a Git repo
+- **Ship a bundle of role-focused playbooks** (DBA, SRE, Frontend, ...) as one repo with named child playbooks
 
 ## How isolation works
 
@@ -29,29 +30,32 @@ claude
 CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
 ```
 
-That's all a playbook is under the hood. `claude-playbook` just makes creating and managing them easy.
+That's all a playbook is under the hood. `claude-playbook` just makes creating, sharing, and managing them easy.
 
 ```
-~/.claude-playbooks/               Shell aliases:
+~/.claude-playbooks/                Shell aliases:
 
-├── kommander/        ◄──────────  alias kommander='CLAUDE_CONFIG_DIR=~/.claude-playbooks/kommander claude ...'
-│   ├── CLAUDE.md                  standing instructions, rules, protocols
-│   ├── settings.json              hooks, permissions, model defaults
-│   ├── hooks/                     session start/end scripts
-│   └── data/                      tasks, session logs, memory
-│
-├── work/             ◄──────────  alias k-work='CLAUDE_CONFIG_DIR=~/.claude-playbooks/work claude ...'
+├── experiment/                     ◄── alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
+│   ├── .playbook                       (marker + metadata)
 │   ├── CLAUDE.md
-│   ├── settings.json
-│   └── data/
+│   └── settings.json
 │
-└── experiment/       ◄──────────  alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
-    ├── CLAUDE.md
-    └── settings.json
+├── pai/                            ◄── alias pai='CLAUDE_CONFIG_DIR=~/.claude-playbooks/pai claude'
+│   ├── .playbook
+│   └── ...
+│
+└── awesome/                        ◄── alias ap='CLAUDE_CONFIG_DIR=~/.claude-playbooks/awesome claude'
+    ├── .playbook                       (declares [[children]] for dba and sre)
+    └── playbooks/
+        ├── dba/                    ◄── alias ap-dba='CLAUDE_CONFIG_DIR=~/.claude-playbooks/awesome/playbooks/dba claude'
+        │   └── CLAUDE.md
+        └── sre/                    ◄── alias ap-sre='CLAUDE_CONFIG_DIR=~/.claude-playbooks/awesome/playbooks/sre claude'
+            └── CLAUDE.md
 
-Each directory is a completely isolated Claude Code instance.
-No shared state. No shared settings. No shared memory.
+Each playbook directory is a completely isolated Claude Code instance.
 ```
+
+A directory is a playbook if it contains a `.playbook` file. Top-level playbooks may declare child playbooks in their `.playbook` manifest; children are addressed as `<top-level>/<child-name>` (e.g. `awesome/dba`).
 
 ## Installation
 
@@ -85,10 +89,14 @@ claude-playbook list
 ```
 
 ```
-NAME          PATH                               ALIAS         LAST USED
-experiment    ~/.claude-playbooks/experiment     experiment    2 days ago
-work          ~/.claude-playbooks/work           work          1 hour ago
+NAME           PATH                                            ALIAS    LAST USED
+experiment     ~/.claude-playbooks/experiment                  exp      2 days ago
+awesome        ~/.claude-playbooks/awesome                     ap       2 hours ago
+  awesome/dba  ~/.claude-playbooks/awesome/playbooks/dba       ap-dba   2 hours ago
+  awesome/sre  ~/.claude-playbooks/awesome/playbooks/sre       -        never
 ```
+
+Children are indented under their parent. Pass a prefix to filter (`claude-playbook list awesome/`).
 
 ### Create a new playbook
 
@@ -102,83 +110,116 @@ Creates a new isolated directory at `~/.claude-playbooks/experiment` with a fres
 experiment    # launches Claude Code with the experiment playbook
 ```
 
-To skip the alias:
-
-```bash
-claude-playbook create experiment --no-alias
-```
-
-To use a different alias:
+Override or skip the alias:
 
 ```bash
 claude-playbook create experiment --alias exp
+claude-playbook create experiment --no-alias
 ```
+
+`create` only makes top-level playbooks. To add a child, edit the parent's `.playbook` and declare it under `[[children]]`.
 
 ### Install a playbook from a repo or directory
 
+There are two install modes, selected by whether you specify a subdirectory.
+
+#### Tree install (whole repo)
+
 ```bash
-# Git repo — auto-detects playbook manifest
-claude-playbook install https://github.com/danielmiessler/Personal_AI_Infrastructure --name pai
+# Install the whole repo. Uses metadata from the repo's .playbook (name, alias).
+claude-playbook install https://github.com/ramazanpolat/awesome-playbooks
 
-# Git repo with multiple playbooks — pick one
-claude-playbook install https://github.com/user/repo --playbook work
+# Override the install name and alias
+claude-playbook install https://github.com/user/awesome --name ap --alias ap
 
-# Local directory (symlink by default)
+# Also write aliases for every declared child
+claude-playbook install https://github.com/user/awesome --alias-all
+
+# Install a local directory (always copied)
 claude-playbook install ~/dev/my-playbook
 
-# Local directory (copy)
-claude-playbook install ~/dev/my-playbook --copy
+# Source has no .playbook — write a minimal one at the install destination
+claude-playbook install ~/dev/scratch --init
 ```
 
-If the repo contains a `.playbook` manifest file (TOML format), the installer reads it for defaults (name, alias, which subdirectory to use). You can override any of these with CLI flags.
+By default the root playbook gets a shell alias; declared children do not, unless you pass `--alias-all`. You can always alias one explicitly later: `claude-playbook alias awesome/dba ap-dba`.
 
-A `.playbook` file can define multiple configurations using TOML array-of-tables. Use `--playbook <name>` to pick one:
+#### Cherry-pick a subdirectory
+
+```bash
+# Pull just one playbook out of a larger repo
+claude-playbook install https://github.com/user/awesome --subdir playbooks/dba
+
+# Same thing, expressed as a GitHub browser URL (branch + subdir parsed automatically)
+claude-playbook install https://github.com/user/awesome/tree/main/playbooks/dba
+
+# Custom name and alias
+claude-playbook install https://github.com/user/awesome --subdir playbooks/dba --name dba --alias ap-dba
+```
+
+Cherry-pick installs are flat — any `[[children]]` declarations inside the cherry-picked subdir are ignored.
+
+#### `.playbook` manifest
+
+Every playbook has a `.playbook` file at its root. Top-level metadata plus optional declared children:
 
 ```toml
-[[playbook]]
-name = "work"
-subdir = "configs/work"
+version = "1.0.0"
+name = "awesome"
+alias = "ap"
+description = "A bundle of role-focused playbooks"
 
-[[playbook]]
-name = "personal"
-subdir = "configs/personal"
+[[children]]
+name = "dba"
+path = "playbooks/dba"
+alias = "ap-dba"
+description = "DBA playbook"
+
+[[children]]
+name = "sre"
+path = "playbooks/sre"
+description = "SRE playbook"
+# no alias field → no alias suggested for this child
 ```
 
-If no `.playbook` file exists, the repo root (or `--subdir`) is installed directly as the playbook.
+Children declared here become addressable as `awesome/dba` and `awesome/sre`. The child's `name` is independent of its on-disk path, so you can refactor your repo without breaking the user-facing names.
+
+### Symlink an external directory
+
+Use `link` when you're actively developing a playbook outside the playbooks root and want to edit-in-place:
+
+```bash
+claude-playbook link ~/dev/my-playbook
+```
+
+If the target has a `.playbook` already, the symlink is created and an alias is written. If it doesn't, you'll be prompted ssh-keygen-style for the metadata, and a `.playbook` will be written into the target directory.
+
+```bash
+claude-playbook link ~/dev/my-playbook --name scratch --alias sc
+claude-playbook link ~/dev/my-playbook --no-alias
+```
+
+`link` is a separate command from `install` because the lifecycle is different: deletes only remove the symlink (the source is preserved), edits are live, and `.playbook` is written into your source directory.
 
 ### Run a playbook
 
 ```bash
 claude-playbook run experiment
-```
-
-Opens Claude Code using that playbook without requiring an alias. Any flags after the name are forwarded directly to `claude`:
-
-```bash
+claude-playbook run awesome/dba          # children are addressed as parent/child
 claude-playbook run experiment --model claude-opus-4-6 --permission-mode auto
 ```
 
-Useful for temporary or one-off playbooks where setting up an alias is not worth it.
+Any flags after the name are forwarded directly to `claude`. Useful for temporary or one-off playbooks where setting up an alias isn't worth it.
 
 ### Start an ad-hoc session
 
 ```bash
 claude-playbook start /tmp/scratch
-```
-
-Opens Claude Code at any directory without requiring a named playbook. The directory is created if it doesn't exist. Any flags after the path are forwarded directly to `claude`:
-
-```bash
 claude-playbook start /tmp/scratch --model claude-opus-4-6
-```
-
-Use `--delete` to automatically remove the directory when the session ends:
-
-```bash
 claude-playbook start /tmp/scratch --delete
 ```
 
-Useful for fully throwaway experiments — no trace left behind.
+Opens Claude Code at any directory without registering a named playbook. The directory is created if it doesn't exist. `--delete` removes the directory when the session ends — useful for fully throwaway experiments.
 
 ### Manage aliases
 
@@ -186,17 +227,19 @@ Useful for fully throwaway experiments — no trace left behind.
 # Show all aliases (full alias line as it appears in shell config)
 claude-playbook alias
 
-# Show or create alias for a specific playbook
-claude-playbook alias experiment
+# Show alias for a specific playbook (read-only — does not create anything)
+claude-playbook alias awesome/dba
 
-# Set a custom alias
-claude-playbook alias experiment exp
+# Set or replace an alias
+claude-playbook alias awesome/dba ap-dba
 
 # Remove an alias
-claude-playbook alias experiment --remove
+claude-playbook alias awesome/dba --remove
+# or:
+claude-playbook dealias awesome/dba
 ```
 
-Since an alias is just a shell command, you can manually edit it to include any Claude Code flags. Open your `~/.zshrc` and adjust the generated alias to your liking:
+Since an alias is just a shell command, you can hand-edit your `~/.zshrc` to add any Claude Code flags:
 
 ```bash
 # Default generated alias
@@ -209,10 +252,7 @@ alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude --mode
 alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude --permission-mode auto'
 
 # Max effort + specific model (good for deep work)
-alias work='CLAUDE_CONFIG_DIR=~/.claude-playbooks/work claude --model claude-opus-4-6 --permission-mode auto --effort max'
-
-# Lightweight model for quick tasks or experimentation
-alias scratch='CLAUDE_CONFIG_DIR=~/.claude-playbooks/scratch claude --model claude-haiku-4-5-20251001'
+alias work='CLAUDE_CONFIG_DIR=~/.claude-playbooks/awesome/playbooks/dba claude --model claude-opus-4-6 --permission-mode auto --effort max'
 ```
 
 Any flag that `claude` accepts can go in the alias. Run `claude --help` to see all available options.
@@ -221,10 +261,38 @@ Any flag that `claude` accepts can go in the alias. Run `claude --help` to see a
 
 ```bash
 claude-playbook delete experiment      # prompts for confirmation
-claude-playbook delete experiment -y   # skip confirmation
+claude-playbook delete awesome -y      # also removes children + their aliases
 ```
 
-Deletes the playbook directory and removes its alias from the shell config.
+`uninstall` and `unlink` are accepted as command aliases — same behavior, different word that may read better depending on how the playbook arrived:
+
+```bash
+claude-playbook uninstall awesome      # reads better after 'install'
+claude-playbook unlink my-thing        # reads better after 'link'
+```
+
+For symlinked playbooks, all three remove only the symlink — the target directory is preserved.
+
+Children cannot be deleted independently — to drop a child, edit the parent's `.playbook`. To drop just a child's alias, use `dealias`.
+
+### Update a playbook
+
+`claude-playbook` does not know how to update playbook contents itself; instead, it runs `bin/update-playbook.sh` from inside the playbook directory if the playbook author has provided one:
+
+```bash
+claude-playbook update awesome    # runs awesome/bin/update-playbook.sh
+```
+
+Children don't have independent updaters — pass the parent's name.
+
+A typical updater script for a Git-backed playbook:
+
+```bash
+#!/bin/sh
+set -e
+cd "$(dirname "$0")/.."
+git pull --ff-only
+```
 
 ### Adding a playbook's bin/ to PATH
 
@@ -241,25 +309,22 @@ Every playbook can have a `CLAUDE.md` file in its root directory. Claude Code lo
 
 This is separate from project-level `CLAUDE.md` files (which live in your project directories and describe the project itself). Both are loaded simultaneously; the playbook's `CLAUDE.md` defines *how you work*, the project's `CLAUDE.md` defines *what you're working on*.
 
-## Example: a focused experiment
+## Example: a bundle of role-focused playbooks
 
-You want to test a custom `SessionStart` hook that shows your active tasks at the start of each conversation. You don't want to break your normal Claude Code workflow while iterating.
+[awesome-playbooks](https://github.com/ramazanpolat/awesome-playbooks) ships a collection of role-focused configurations (DBA, SRE, SEO, SecOps, Frontend, Backend, Data, Writer) as one repo with named child playbooks:
 
 ```bash
-# Create an isolated sandbox (alias 'hook-test' added automatically)
-claude-playbook create hook-test
+# Pull the whole bundle, root alias only
+claude-playbook install https://github.com/ramazanpolat/awesome-playbooks
 
-# Edit the new playbook's config freely
-$EDITOR ~/.claude-playbooks/hook-test/settings.json
+# Or grab everything with all the suggested aliases
+claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --alias-all
 
-# Launch it
-hook-test
-
-# When you're done testing, clean up
-claude-playbook delete hook-test
+# Or just one
+claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/dba
 ```
 
-Your main `claude` setup was never touched.
+After install with `--alias-all`, every role becomes a one-word command: `ap-dba`, `ap-sre`, `ap-fe`, ...
 
 ## License
 
