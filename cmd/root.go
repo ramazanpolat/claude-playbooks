@@ -61,7 +61,18 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	if len(pbs) == 0 {
 		fmt.Println()
-		fmt.Println("No playbooks found. Run 'claude-playbook create <name>' to get started.")
+		fmt.Println("No playbooks installed yet. Get started with one of:")
+		fmt.Println()
+		fmt.Println("  # Install the example multi-playbook tree (DBA, SRE, SecOps, frontend, ...):")
+		fmt.Println("  claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --alias-all")
+		fmt.Println()
+		fmt.Println("  # Cherry-pick a single role (e.g. DBA):")
+		fmt.Println("  claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/dba")
+		fmt.Println()
+		fmt.Println("  # Create your own from scratch:")
+		fmt.Println("  claude-playbook create <name>")
+		fmt.Println()
+		fmt.Println("Run 'claude-playbook --help' for all commands.")
 		return nil
 	}
 

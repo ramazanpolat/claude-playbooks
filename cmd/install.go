@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -113,6 +114,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if err := copyDir(work, dest); err != nil {
 		os.RemoveAll(dest)
 		return fmt.Errorf("failed to copy from staging: %w", err)
+	}
+
+	if err := auth.SyncCredentials(dest); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	// Find / require / write a .playbook at the install destination.

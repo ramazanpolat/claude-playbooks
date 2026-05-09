@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 )
 
 var startCmd = &cobra.Command{
@@ -66,6 +68,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if mkErr := os.MkdirAll(absPath, 0755); mkErr != nil {
 			return fmt.Errorf("could not create %q: %w", absPath, mkErr)
 		}
+	}
+
+	if err := auth.SyncCredentials(absPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	claudePath, err := exec.LookPath("claude")

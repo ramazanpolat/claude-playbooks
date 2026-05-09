@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -86,6 +87,10 @@ func runLink(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to write .playbook to %s: %w", abs, err)
 		}
 		fmt.Printf("Wrote %s\n", filepath.Join(abs, manifest.FileName))
+	}
+
+	if err := auth.SyncCredentials(abs); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	if err := os.Symlink(abs, dest); err != nil {
