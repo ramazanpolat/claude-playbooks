@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -69,6 +70,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	if pb == nil {
 		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
+	}
+
+	if err := auth.SyncCredentials(pb.Path); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	claudePath, err := exec.LookPath("claude")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -55,6 +56,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	if err := auth.SyncCredentials(dest); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	if err := manifest.WriteMinimal(dest, name); err != nil {
