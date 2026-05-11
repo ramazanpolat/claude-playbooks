@@ -376,10 +376,11 @@ If `INSTALL_DIR` is unset, the script installs to `/usr/local/bin` when
 writable, otherwise to `~/.local/bin`.
 
 `INSTALL_NAME` must be a command name, not a path. This supports custom command
-names such as:
+names for both piped and local installs:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | INSTALL_NAME=cpb sh
+INSTALL_NAME=cpb ./install.sh
 ```
 
 ### `uninstall.sh`
@@ -396,6 +397,13 @@ Environment:
 
 If `INSTALL_DIR` is set, only `$INSTALL_DIR/$INSTALL_NAME` is removed. If it is
 unset, the script checks `/usr/local/bin`, `~/.local/bin`, and `command -v`.
+
+Use the same `INSTALL_NAME` when uninstalling a custom command name:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | INSTALL_NAME=cpb sh
+INSTALL_NAME=cpb ./uninstall.sh
+```
 
 ## Release Workflow
 
