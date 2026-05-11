@@ -78,6 +78,21 @@ curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/
 cpb --version
 ```
 
+You can also clone the repo and run the installer locally:
+
+```bash
+git clone https://github.com/ramazanpolat/claude-playbooks.git
+cd claude-playbooks
+./install.sh
+```
+
+Local installs support the same shorter command name:
+
+```bash
+INSTALL_NAME=cpb ./install.sh
+cpb --version
+```
+
 Uninstall only the binary:
 
 ```bash
@@ -88,6 +103,13 @@ To uninstall a custom command name:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | INSTALL_NAME=cpb sh
+```
+
+Or run the local uninstaller from a clone. Use the same `INSTALL_NAME` if you installed a custom command name:
+
+```bash
+./uninstall.sh
+INSTALL_NAME=cpb ./uninstall.sh
 ```
 
 Uninstalling does not delete `~/.claude-playbooks`.
