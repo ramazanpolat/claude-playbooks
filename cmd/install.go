@@ -116,10 +116,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to copy from staging: %w", err)
 	}
 
-	if err := auth.SyncCredentials(dest); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
-	}
-
 	// Find / require / write a .playbook at the install destination.
 	m, err := manifest.Read(dest)
 	if err != nil {
@@ -149,6 +145,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("child %q path %q not found", c.Name, c.Path)
 			}
 		}
+	}
+
+	if err := syncInstalledCredentials(dest, m, cherryPick); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	if cherryPick {
@@ -245,6 +245,21 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nReload your shell or run:\n  source %s\n", shellConfig)
+	return nil
+}
+
+func syncInstalledCredentials(dest string, m *manifest.Manifest, cherryPick bool) error {
+	if err := auth.SyncCredentials(dest); err != nil {
+		return err
+	}
+	if cherryPick || m == nil {
+		return nil
+	}
+	for _, c := range m.Children {
+		if err := auth.SyncCredentials(filepath.Join(dest, c.Path)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
