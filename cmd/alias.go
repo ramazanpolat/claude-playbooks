@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -83,6 +84,9 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	// Two args — set alias.
 	if len(args) == 2 {
 		newAlias := args[1]
+		if err := auth.SyncCredentials(pb.Path); err != nil {
+			return fmt.Errorf("failed to sync credentials: %w", err)
+		}
 		if err := shell.Write(shellConfig, newAlias, pb.Path); err != nil {
 			return err
 		}
