@@ -1,442 +1,426 @@
-# claude-playbook CLI Spec
+# Claude Playbooks Specification
 
-## Overview
+This document describes the current behavior of `claude-playbook`.
 
-`claude-playbook` is a CLI tool for creating and managing Claude Code playbooks. A playbook is an isolated Claude Code instance — a directory used as `CLAUDE_CONFIG_DIR`.
+## Purpose
 
-All playbooks live under `~/.claude-playbooks/` by default.
+`claude-playbook` manages isolated Claude Code configuration directories.
+Claude Code uses `CLAUDE_CONFIG_DIR` as its config root; each playbook is one
+separate config root with its own settings, hooks, memory, history, MCP state,
+and `CLAUDE.md`.
 
----
+The tool provides commands to create, install, link, list, run, alias, rename,
+delete, and update those isolated Claude Code instances.
 
-## Naming Convention
+## Storage Model
 
-Playbook names can be any string that is valid as a directory name and a shell alias name. Recommended style: lowercase letters, numbers, and dashes (e.g. `work`, `hook-test`, `team-alpha`). Not enforced, but keeps names shell-friendly.
+The default playbooks root is:
 
----
-
-## Storage
-
+```text
+~/.claude-playbooks
 ```
+
+It can be overridden with:
+
+- `--playbooks-dir <path>`
+- `CLAUDE_PLAYBOOKS_DIR=<path>`
+
+A directory is a playbook when it contains a `.playbook` manifest.
+
+Top-level playbooks live directly under the playbooks root. Child playbooks live
+inside a top-level playbook and are declared by that top-level playbook's
+manifest. Children are addressed as:
+
+```text
+<parent>/<child>
+```
+
+Example:
+
+```text
 ~/.claude-playbooks/
-    <name>/          # one directory per playbook
+  awesome/
+    .playbook
+    CLAUDE.md
+    playbooks/
+      dba/
+        CLAUDE.md
+      sre/
+        CLAUDE.md
 ```
 
-The filesystem is the source of truth. Any directory directly under `~/.claude-playbooks/` is a playbook. There is no index file. Aliases are tracked via comment markers in the shell config (see [Alias Management](#alias-management)).
+If `awesome/.playbook` declares `dba` and `sre`, the playbooks are addressed as
+`awesome`, `awesome/dba`, and `awesome/sre`.
 
----
+## Manifest
+
+The manifest file is `.playbook` and uses TOML.
+
+```toml
+version = "1.0.0"
+name = "awesome"
+alias = "ap"
+description = "A bundle of role-focused playbooks"
+
+[[children]]
+name = "dba"
+path = "playbooks/dba"
+alias = "ap-dba"
+description = "DBA playbook"
+
+[[children]]
+name = "sre"
+path = "playbooks/sre"
+description = "SRE playbook"
+```
+
+Top-level fields:
+
+- `version`: manifest or playbook version string.
+- `name`: preferred install/display name.
+- `alias`: suggested shell alias for the root playbook.
+- `description`: optional human-readable description.
+- `children`: optional list of child playbooks.
+
+Child fields:
+
+- `name`: user-facing child name. It must be present and must not contain `/`.
+- `path`: path to the child directory relative to the top-level playbook root.
+- `alias`: optional suggested shell alias.
+- `description`: optional human-readable description.
+
+Child names must be unique inside one parent. During tree install, every child
+path declared in the manifest must exist and must be a directory.
+
+## Authentication Sync
+
+Newly created, installed, and linked playbooks are prepared to reuse the user's
+existing Claude Code authentication where possible.
+
+The tool syncs authentication in two layers:
+
+- It links the playbook's `.credentials.json` to the global Claude Code
+  credentials file when a usable global credentials file exists.
+- It copies selected non-token account/onboarding metadata into the playbook's
+  `.claude.json`, so Claude Code can recognize the config directory as already
+  authenticated.
+
+On macOS, if `~/.claude/.credentials.json` is missing, the tool attempts to
+materialize it from the Keychain item used by Claude Code.
+
+Existing valid regular credentials inside a playbook are preserved, which allows
+a playbook to use a separate login.
+
+## Shell Aliases
+
+Aliases are written to the detected shell config file, or to the path supplied
+by:
+
+- `--shell-config <path>`
+- `CLAUDE_SHELL_CONFIG=<path>`
+
+The generated alias form is:
+
+```sh
+alias example='CLAUDE_CONFIG_DIR=/path/to/playbook claude'
+```
+
+Aliases are intentionally plain shell aliases. Users may edit them manually to
+add Claude Code flags, for example:
+
+```sh
+alias example='CLAUDE_CONFIG_DIR=/path/to/playbook claude --permission-mode auto'
+```
+
+Alias discovery scans the shell config for alias lines containing
+`CLAUDE_CONFIG_DIR=`.
 
 ## Commands
 
-### `claude-playbook` (no arguments)
+### `create <name>`
 
-Prints a one-line description and lists all playbooks with how to run each one.
+Creates a new top-level playbook directory under the playbooks root and writes a
+minimal `.playbook`.
 
-```
-claude-playbook -- manage isolated Claude Code instances
+Rules:
 
-Available playbooks:
+- `create` only creates top-level playbooks.
+- Names must not contain `/`.
+- Names must not start with `.`.
+- Existing target directories are not overwritten.
+- Authentication metadata is synced into the new playbook.
 
-  experiment    claude-playbook run experiment    (or: experiment)
-  work          claude-playbook run work          (or: k-work)
-  scratch       claude-playbook run scratch       (no alias set)
+Flags:
 
-Run 'claude-playbook --help' for all commands.
-```
+- `--alias <alias>` writes a custom alias.
+- `--no-alias` skips alias creation.
 
-- If no playbooks exist: `No playbooks found. Run 'claude-playbook create <name>' to get started.`
-- Output is intentionally terse and machine-readable so agents can parse it.
+### `list [prefix]`
 
----
+Lists discovered playbooks and aliases. Children are shown under their parent.
 
-### `claude-playbook list`
+`prefix` filters the displayed names, including child names such as
+`awesome/`.
 
-Lists all playbooks in a table.
+### `run <name> [claude-flags...]`
 
-```
-NAME          PATH                               ALIAS       LAST USED
-----          ----                               -----       ---------
-experiment    ~/.claude-playbooks/experiment     experiment  2 days ago
-work          ~/.claude-playbooks/work           work        1 hour ago
-scratch       ~/.claude-playbooks/scratch        -           never
-```
+Runs Claude Code with `CLAUDE_CONFIG_DIR` set to the selected playbook.
 
-- `ALIAS` shows `-` if no alias is set.
-- `LAST USED` is derived from the directory mtime. Shows `never` if never accessed, `just now` if under a minute ago.
-- If empty or no playbooks dir: `No playbooks found. Run 'claude-playbook create <name>' to get started.`
+Any arguments after the playbook name are forwarded directly to `claude`.
 
----
+Examples:
 
-### `claude-playbook create <name>`
-
-Creates a new playbook.
-
-```bash
-claude-playbook create experiment
-claude-playbook create experiment --no-alias
-claude-playbook create experiment --alias exp
-```
-
-**Steps:**
-1. Check `~/.claude-playbooks/<name>` does not already exist.
-2. Create the directory.
-3. Unless `--no-alias`, write an alias to the shell config. Default alias name equals the playbook name.
-4. Print confirmation and next steps.
-
-**Flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--alias <alias>` | Use a different alias name |
-| `--no-alias` | Skip alias creation |
-
-**Edge cases:**
-
-- `--no-alias` and `--alias` together → error
-- Name already exists → error: `playbook "experiment" already exists at ~/.claude-playbooks/experiment`
-
-**Output on success (with alias):**
-```
-Created playbook "experiment" at ~/.claude-playbooks/experiment
-Alias "experiment" added to ~/.zshrc
-
-Reload your shell or run:
-  source ~/.zshrc
-
-Then run with:
-  experiment
-```
-
-**Output on success (--no-alias):**
-```
-Created playbook "experiment" at ~/.claude-playbooks/experiment
-
-Run with:
-  claude-playbook run experiment
-```
-
----
-
-### `claude-playbook run <name> [claude-flags...]`
-
-Runs Claude Code using the named playbook. Any flags after the name are forwarded directly to `claude`.
-
-```bash
+```sh
 claude-playbook run experiment
-claude-playbook run experiment --model claude-opus-4-6
-claude-playbook run experiment --permission-mode auto --effort max
+claude-playbook run awesome/dba --model claude-opus-4-6
 ```
 
-Equivalent to:
-```bash
-CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude [claude-flags...]
-```
+### `start <path> [claude-flags...]`
 
-Uses `DisableFlagParsing` internally to pass all flags through. Root flags (`--playbooks-dir`, `--shell-config`) are extracted manually before forwarding.
+Starts Claude Code with `CLAUDE_CONFIG_DIR` set to an arbitrary path without
+registering a named playbook.
 
-**Edge cases:**
+The directory is created if it does not exist.
 
-- Playbook not found → error: `unknown playbook "experiment". Run 'claude-playbook list' to see available playbooks`
-- `claude` not on PATH → error: `'claude' command not found. Install Claude Code first: https://claude.ai/download`
-- Unknown flags → forwarded to `claude` as-is
+Flags:
 
----
+- `--delete` removes the directory after Claude Code exits.
 
-### `claude-playbook start <path> [claude-flags...]`
+### `install <source>`
 
-Starts an ad-hoc Claude Code session at any directory. The directory is created if it does not exist. Any flags after the path are forwarded directly to `claude`.
+Installs a playbook from a Git URL or local directory. Local directory installs
+are copied; they are not symlinked.
 
-```bash
-claude-playbook start /tmp/scratch
-claude-playbook start /tmp/scratch --model claude-opus-4-6
-claude-playbook start /tmp/scratch --delete
-```
+Install has two modes.
 
-Equivalent to:
-```bash
-CLAUDE_CONFIG_DIR=/tmp/scratch claude [claude-flags...]
-```
+Tree install installs the whole source:
 
-**Flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--delete` | Delete the directory after the session ends |
-
-`--delete` runs after `claude` exits regardless of exit code. Best-effort: if deletion fails, prints a warning to stderr but does not change the exit code.
-
-**Edge cases:**
-
-- Path exists but is a file → error: `"/tmp/foo" is not a directory`
-- Directory cannot be created → error: `could not create "/tmp/foo": <reason>`
-- No path given → error: `path required`
-- `claude` not on PATH → error: same as `run`
-
----
-
-### `claude-playbook install <source>`
-
-Installs a playbook from a Git repository or local directory.
-
-```bash
-# Git repo
-claude-playbook install https://github.com/user/repo --name mypb
-
-# Git repo, select named entry from .playbook manifest
-claude-playbook install https://github.com/user/repo --playbook work
-
-# Local directory (symlink by default)
+```sh
+claude-playbook install https://github.com/user/awesome-playbooks
 claude-playbook install ~/dev/my-playbook
-claude-playbook install ~/dev/my-playbook --name mypb --alias mp
-
-# Local directory (copy)
-claude-playbook install ~/dev/my-playbook --copy
 ```
 
-**Source types:**
+Cherry-pick install installs one subdirectory as a flat top-level playbook:
 
-| Source | Behaviour |
-|--------|-----------|
-| URL (`http://`, `https://`, `git@`, `git://`) | Shallow-cloned with `git clone --depth=1` |
-| Local path | Symlinked by default; `--copy` to copy instead |
-
-**Flags:**
-
-| Flag | Description |
-|------|-------------|
-| `--name <name>` | Override playbook name |
-| `--alias <alias>` | Override alias (default: same as name) |
-| `--no-alias` | Skip alias creation |
-| `--copy` | Copy instead of symlink (local paths only) |
-| `--playbook <name>` | Select a `[[playbook]]` entry by name from `.playbook` |
-| `--subdir <path>` | Use this subdirectory as the playbook root |
-
-**Flag precedence (highest to lowest):** CLI flags → manifest fields → derived from source.
-
-**Name derivation (when not set by manifest or `--name`):**
-- Git URL: last path segment stripped of `.git` (e.g. `Personal_AI_Infrastructure`)
-- Local path: directory name as-is
-
-**Edge cases:**
-
-- `--no-alias` and `--alias` together → error
-- `--copy` with a URL → error: `--copy only applies to local paths. Git installs always clone`
-- Source not found → error: `'~/dev/my-playbook' not found`
-- Source is a file → error: `'~/dev/my-playbook' is not a directory`
-- `--subdir` not found in source → error: `subdirectory 'foo' not found in source`
-- Name already taken → error: `playbook "pai" already exists. Use --name to choose a different name`
-- `git` not on PATH → error: `'git' command not found`
-- Clone fails → git's error output shown directly
-- No `CLAUDE.md` found → warning to stderr (install still succeeds)
-
-**Output on success:**
-```
-Installed playbook "pai"
-Source:   https://github.com/user/repo (cloned)
-Manifest: .playbook
-Path:     ~/.claude-playbooks/pai
-Alias:    pai added to ~/.zshrc
-
-Reload your shell or run:
-  source ~/.zshrc
-
-Then run with:
-  pai
+```sh
+claude-playbook install https://github.com/user/awesome --subdir playbooks/dba
+claude-playbook install https://github.com/user/awesome/tree/main/playbooks/dba
 ```
 
-`Manifest: .playbook` line is omitted when no `.playbook` file was present.
+Name selection order:
 
----
+1. `--name`
+2. manifest `name`
+3. source-derived fallback
 
-### `claude-playbook alias [name] [alias]`
+Rules:
 
-Shows all aliases, or shows/sets/removes the alias for a specific playbook.
+- Git sources are cloned into temporary staging before copy/install.
+- `--branch` applies only to Git URLs.
+- GitHub `/tree/<ref>/<path>` URLs are parsed into clone URL, branch, and
+  subdirectory.
+- If the source has no `.playbook`, install fails unless `--init` is supplied.
+- `--init` writes a minimal `.playbook` at the installed destination.
+- Tree installs validate declared child directories.
+- Cherry-pick installs ignore child declarations and install as a flat playbook.
+- Authentication metadata is synced into the root playbook and, for tree
+  installs, into declared children.
 
-```bash
-claude-playbook alias                         # show all playbooks and their aliases
-claude-playbook alias experiment              # show alias, or create one using the playbook name
-claude-playbook alias experiment exp          # set alias to 'exp'
-claude-playbook alias experiment --remove     # remove alias from shell config
+Alias behavior:
+
+- Root alias is written by default unless `--no-alias` is used.
+- Root alias selection order is `--alias`, manifest `alias`, manifest `name`,
+  target name.
+- `--alias-all` also writes aliases for children that declare an alias.
+- `--alias-all` is tree-install only behavior.
+- Alias collisions are skipped with a warning. Child alias collisions try a
+  `<target>-<alias>` fallback before skipping.
+
+Flags:
+
+- `--name <name>`
+- `--subdir <path>`
+- `--branch <ref>`
+- `--alias <alias>`
+- `--alias-all`
+- `--no-alias`
+- `--init`
+
+### `link <target>`
+
+Symlinks an external directory into the playbooks root.
+
+Use `link` for edit-in-place development of a playbook stored outside
+`~/.claude-playbooks`.
+
+Rules:
+
+- The target must exist and must be a directory.
+- Link names must not contain `/`.
+- Link names must not start with `.`.
+- Existing targets under the playbooks root are not overwritten.
+- If the target has no `.playbook`, the command prompts for metadata and writes
+  `.playbook` into the target.
+- In non-interactive stdin, linking a target without `.playbook` fails.
+- Authentication metadata is synced into the linked target.
+- Later delete/uninstall/unlink operations remove only the symlink, not the
+  source directory.
+
+Flags:
+
+- `--name <name>`
+- `--alias <alias>`
+- `--no-alias`
+
+### `info <name>`
+
+Shows details for one playbook.
+
+### `rename <old-name> <new-name>`
+
+Renames a top-level playbook directory.
+
+Rules:
+
+- Only top-level playbooks can be renamed.
+- New names must not contain `/`.
+- New names must not start with `.`.
+- Existing target directories are not overwritten.
+- Alias paths that point into the old playbook are rewritten to the new path.
+
+Flags:
+
+- `--alias <alias>` sets a custom alias after rename.
+- `--no-alias` removes aliases for the renamed playbook.
+
+### `alias [name] [alias]`
+
+Manages shell aliases.
+
+Forms:
+
+```sh
+claude-playbook alias
+claude-playbook alias awesome/dba
+claude-playbook alias awesome/dba ap-dba
+claude-playbook alias awesome/dba --remove
 ```
 
-**No arguments** — shows the full alias line for every playbook:
+With no arguments, the command lists discovered alias lines. With one playbook
+name, it shows the alias for that playbook. With a playbook and alias, it writes
+or replaces the alias.
 
-```
-experiment  alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
-work        alias k-work='CLAUDE_CONFIG_DIR=~/.claude-playbooks/work claude --model claude-opus-4-6'
-scratch     (no alias)
-```
+### `dealias <name>`
 
-**One argument, alias exists** — prints it:
-```
-Alias for "experiment": alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
-```
+Removes the alias for a playbook.
 
-**One argument, no alias** — creates one using the playbook name:
-```
-Alias "experiment" created for playbook "experiment" in ~/.zshrc
-```
+### `delete <name>`
 
-**Two arguments** — sets the alias:
-```
-Alias "exp" set for playbook "experiment" in ~/.zshrc
-```
+Deletes a top-level playbook.
 
-**`--remove`** — removes the alias. No-op if no alias is set:
-```
-Playbook "experiment" has no alias set.
-```
+Command aliases:
 
-**Flags:**
+- `uninstall`
+- `unlink`
 
-| Flag | Description |
-|------|-------------|
-| `--remove` | Remove alias from shell config |
+Rules:
 
-**Edge cases:**
+- The command prompts for confirmation unless `--yes` is supplied.
+- Children cannot be deleted independently.
+- Deleting a parent removes aliases whose `CLAUDE_CONFIG_DIR` points at the
+  parent or inside the parent.
+- If the playbook root entry is a symlink, only the symlink is removed.
 
-- Playbook not found → error: `unknown playbook "experiment". Run 'claude-playbook list' to see available playbooks`
-- Shell config not found → error with instructions to use `--shell-config`
+Flags:
 
----
+- `-y`, `--yes`
 
-### `claude-playbook delete <name>`
+### `update [name]`
 
-Deletes the playbook directory and removes its alias from the shell config.
+With a playbook name, runs `bin/update-playbook.sh` from inside that playbook if
+the script exists.
 
-```bash
-claude-playbook delete experiment      # prompts for confirmation
-claude-playbook delete experiment -y   # skip confirmation
-```
+Without a playbook name, prints self-update guidance for the `claude-playbook`
+binary.
 
-**Confirmation prompt:**
-```
-Playbook: experiment
-Location: ~/.claude-playbooks/experiment
-Alias:    experiment (will be removed from ~/.zshrc)
-Contents: 12 files, 3 directories
+Children do not have independent updaters. Pass the parent name.
 
-Permanently delete? [y/N]
-```
+### `completion [shell]`
 
-If the playbook is a symlink, the symlink is removed but the target is left intact.
+Generates shell completion scripts for:
 
-**Flags:**
+- `bash`
+- `zsh`
+- `fish`
+- `powershell`
 
-| Flag | Description |
-|------|-------------|
-| `-y`, `--yes` | Skip confirmation prompt |
+## Installer Scripts
 
-**Edge cases:**
+### `install.sh`
 
-- Playbook not found → error: `unknown playbook "experiment". Run 'claude-playbook list' to see available playbooks`
-- No alias → skip alias cleanup silently, still delete the directory
-- Directory already missing → skip deletion silently, still clean up alias if present
+Downloads a release asset and installs the binary.
 
----
+Environment:
 
-## Playbook Manifests
+- `REPO`: GitHub repo, default `ramazanpolat/claude-playbooks`.
+- `ASSET_PREFIX`: release asset prefix, default `claude-playbook`.
+- `INSTALL_NAME`: installed command name, default `claude-playbook`.
+- `BINARY_NAME`: fallback for `INSTALL_NAME`.
+- `DEFAULT_INSTALL_DIR`: default system install dir, default `/usr/local/bin`.
+- `INSTALL_DIR`: explicit install directory.
+- `VERSION`: release tag to install. If empty, latest GitHub Release is used.
+- `DOWNLOAD_BASE_URL`: release download base URL.
+- `INSTALL_URL`: exact asset URL override.
 
-A `.playbook` file is a TOML file at the root of a repo or directory. It defines one or more playbook entries using TOML array-of-tables syntax.
+If `INSTALL_DIR` is unset, the script installs to `/usr/local/bin` when
+writable, otherwise to `~/.local/bin`.
 
-**Single entry:**
-```toml
-[[playbook]]
-subdir = "config"
-description = "My playbook"
+`INSTALL_NAME` must be a command name, not a path. This supports custom command
+names such as:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | INSTALL_NAME=cpb sh
 ```
 
-**Multiple entries:**
-```toml
-[[playbook]]
-name = "work"
-alias = "work"
-subdir = "configs/work"
-description = "Work configuration"
+### `uninstall.sh`
 
-[[playbook]]
-name = "personal"
-alias = "personal"
-subdir = "configs/personal"
-description = "Personal configuration"
-```
+Removes the installed binary only. It does not delete playbooks.
 
-All fields are optional.
+Environment:
 
-| Field | Description |
-|-------|-------------|
-| `name` | Playbook name (default: derived from source) |
-| `alias` | Shell alias (default: same as name) |
-| `subdir` | Subdirectory to use as the playbook root |
-| `description` | Human-readable description |
+- `INSTALL_NAME`: command name to remove, default `claude-playbook`.
+- `BINARY_NAME`: fallback for `INSTALL_NAME`.
+- `DEFAULT_INSTALL_DIR`: default system install dir, default `/usr/local/bin`.
+- `INSTALL_DIR`: explicit install directory.
+- `CLAUDE_PLAYBOOKS_DIR`: only used in the final informational message.
 
-**Manifest resolution:**
+If `INSTALL_DIR` is set, only `$INSTALL_DIR/$INSTALL_NAME` is removed. If it is
+unset, the script checks `/usr/local/bin`, `~/.local/bin`, and `command -v`.
 
-1. No `.playbook` file → install the source root (or `--subdir` if given) directly.
-2. `.playbook` exists, no `--playbook` flag → use the first `[[playbook]]` entry.
-3. `.playbook` exists, `--playbook <name>` given → find the entry with matching `name`; error if not found, listing available names.
+## Release Workflow
 
-**CLI flags always override manifest fields.**
+GitHub releases are created from `v*` tags only when the tagged commit is already
+on `main`. Tags pushed from feature branches are intentionally skipped.
 
-**Edge cases:**
+## Tests
 
-- `--playbook <name>` but no matching entry → error: `no playbook "work" in .playbook. Available: personal`
-- `.playbook` exists but has no `[[playbook]]` entries → error: `.playbook has no [[playbook]] entries`
-- Invalid TOML → error: `invalid .playbook: <reason>`
+Markdown acceptance suites live under `tests/`.
 
----
+- `tests/TEST_SUITE.md` verifies the built binary without installing it.
+- `tests/INSTALL_UNINSTALL_TEST_SUITE.md` verifies `install.sh` and
+  `uninstall.sh`, including custom command names such as `cpb`.
 
-## Alias Management
+These suites are written for Codex or Claude Code to run in real cmux panes,
+simulating visible terminal usage. They should use temporary playbooks roots,
+temporary shell config files, and temporary install directories so they do not
+modify the user's real playbooks, shell config, or installed binary.
 
-Aliases are written to and removed from the user's shell config file.
+## Non-Goals
 
-**Shell detection order:**
-1. `--shell-config <path>` flag
-2. `$CLAUDE_SHELL_CONFIG` environment variable
-3. `$SHELL` → `zsh` → `~/.zshrc`; `bash` → `~/.bashrc`
-4. If undetectable → error: `Could not find shell config. Use --shell-config <path> to specify one.`
+`claude-playbook` does not implement Claude Code itself. It does not parse or
+validate Claude Code settings beyond preparing config directories and launching
+`claude` with `CLAUDE_CONFIG_DIR`.
 
-**Format of generated alias:**
-```bash
-# claude-playbook: <name>
-alias <alias>='CLAUDE_CONFIG_DIR=~/.claude-playbooks/<name> claude'
-```
-
-The comment line `# claude-playbook: <name>` is the marker used to find and remove the alias. Do not edit or remove it manually.
-
-**Updating an alias:** finds the existing block by the comment line and replaces it in-place. Never appends a duplicate.
-
-**Detection of unmanaged aliases:** if a playbook has no comment-marked alias, the tool scans all `alias` lines in the shell config for `CLAUDE_CONFIG_DIR=<path>` where `<path>` resolves to the playbook directory. This handles aliases created by other tools or manually.
-
----
-
-## Global Flags
-
-These flags work on all commands:
-
-| Flag | Description |
-|------|-------------|
-| `--playbooks-dir <path>` | Use this directory instead of `~/.claude-playbooks` |
-| `--shell-config <path>` | Use this file instead of the auto-detected shell config |
-| `--version` | Show the version |
-| `--help` | Show help |
-
-Environment variable equivalents:
-
-| Variable | Equivalent flag |
-|----------|----------------|
-| `CLAUDE_PLAYBOOKS_DIR` | `--playbooks-dir` |
-| `CLAUDE_SHELL_CONFIG` | `--shell-config` |
-
----
-
-## Error Conventions
-
-- All errors print to stderr via cobra's default error handling.
-- Exit code `0` = success, non-zero = failure.
-- Error messages are plain English, one line, no stack traces. Always suggest a next action where possible.
-
-```
-Error: playbook "experiment" already exists at ~/.claude-playbooks/experiment
-Error: unknown playbook "typo". Run 'claude-playbook list' to see available playbooks
-Error: 'claude' command not found. Install Claude Code first: https://claude.ai/download
-```
+The tool also does not update playbook contents directly. Playbook authors may
+provide `bin/update-playbook.sh`, and `claude-playbook update <name>` delegates
+to that script.
