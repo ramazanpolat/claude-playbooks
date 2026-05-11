@@ -71,6 +71,27 @@ Verify:
 claude-playbook --version
 ```
 
+Install with a shorter command name:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | INSTALL_NAME=cpb sh
+cpb --version
+```
+
+Uninstall only the binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | sh
+```
+
+To uninstall a custom command name:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | INSTALL_NAME=cpb sh
+```
+
+Uninstalling does not delete `~/.claude-playbooks`.
+
 **Build from source** (requires [Go](https://go.dev/dl/) 1.21+):
 
 ```bash
