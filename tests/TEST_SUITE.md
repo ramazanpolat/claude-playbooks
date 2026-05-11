@@ -4,13 +4,13 @@ This suite is for Claude Code or Codex agents testing `claude-playbook` from a f
 
 This is an operator-driven cmux acceptance suite. The agent must create a real cmux terminal pane, send commands to that pane, read the terminal screen between sections, and judge pass/fail from visible output. Do not run this suite as a hidden local script through `exec_command`, and do not collapse it into a background runner that bypasses the terminal UI.
 
-Current branch under test:
+Default branch under test:
 
 ```bash
-feature/auto-auth-sync
+main
 ```
 
-For future branches, change only the `BRANCH` value in the bootstrap step.
+For feature branches, set `BRANCH` before running the bootstrap step.
 
 ## Rules
 
@@ -59,7 +59,7 @@ Send this block to the new cmux pane, wait for it to finish, then inspect the vi
 ```bash
 set -euo pipefail
 
-export BRANCH="${BRANCH:-feature/auto-auth-sync}"
+export BRANCH="${BRANCH:-main}"
 export SUITE_ROOT="${SUITE_ROOT:-$(mktemp -d -t claude-playbook-suite.XXXXXX)}"
 export REPO="$SUITE_ROOT/repo"
 export BIN_DIR="$SUITE_ROOT/bin"

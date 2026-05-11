@@ -6,11 +6,13 @@ It clones the repo, switches to the target branch, builds a temporary release as
 
 This is an operator-driven cmux acceptance suite. Codex or Claude Code must drive a real cmux terminal pane, send commands visibly to that pane, read terminal output between steps, and report pass/fail from what appeared on screen. Do not run this suite as a hidden local script through `exec_command`, and do not collapse the whole suite into a single background heredoc.
 
-Current branch under test:
+Default branch under test:
 
 ```bash
-feature/auto-auth-sync
+main
 ```
+
+For feature branches, set `BRANCH` before running the test body.
 
 ## Rules
 
@@ -52,7 +54,7 @@ Send this block to the cmux pane, wait for it to finish, then verify the visible
 ```bash
 set -euo pipefail
 
-export BRANCH="${BRANCH:-feature/auto-auth-sync}"
+export BRANCH="${BRANCH:-main}"
 export REPO_URL="${REPO_URL:-https://github.com/ramazanpolat/claude-playbooks}"
 export SUITE_ROOT="${SUITE_ROOT:-$(mktemp -d -t claude-playbook-install-suite.XXXXXX)}"
 export REPO="$SUITE_ROOT/repo"
