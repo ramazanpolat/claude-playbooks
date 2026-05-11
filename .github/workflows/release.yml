@@ -12,12 +12,27 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check tag is on main
+        id: release_gate
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ github.ref_name }} points to $GITHUB_SHA, which is not on origin/main. Skipping release."
+          fi
 
       - uses: actions/setup-go@v5
+        if: steps.release_gate.outputs.release == 'true'
         with:
           go-version: '1.21'
 
       - name: Build binaries
+        if: steps.release_gate.outputs.release == 'true'
         run: |
           mkdir dist
           GOOS=darwin  GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-darwin-arm64  .
@@ -26,6 +41,7 @@ jobs:
           GOOS=linux   GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-linux-arm64   .
 
       - name: Create GitHub Release
+        if: steps.release_gate.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*

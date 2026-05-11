@@ -80,6 +80,17 @@ cd claude-playbooks
 mv claude-playbook /usr/local/bin/
 ```
 
+## Release process
+
+GitHub releases are created from `v*` tags only when the tagged commit is already on `main`. Tags pushed from feature branches are ignored by the release workflow.
+
+```bash
+git checkout main
+git pull --ff-only
+git tag -a vX.Y.Z -m vX.Y.Z
+git push origin vX.Y.Z
+```
+
 ## Usage
 
 ### List your playbooks
