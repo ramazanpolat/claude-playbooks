@@ -139,7 +139,7 @@ source ~/.zshrc
 experiment
 ```
 
-This creates `~/.claude-playbooks/experiment`, writes a `.playbook` marker, syncs Claude auth metadata, and adds a shell alias named `experiment`.
+This creates `~/.claude-playbooks/experiment`, writes a `.playbook` marker, drops in a starter `CLAUDE.md` that introduces the playbook concept to the Claude Code session opened inside it, syncs Claude auth metadata, and adds a shell alias named `experiment`.
 
 You can also run it without using the alias:
 

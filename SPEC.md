@@ -140,7 +140,8 @@ Alias discovery scans the shell config for alias lines containing
 ### `create <name>`
 
 Creates a new top-level playbook directory under the playbooks root and writes a
-minimal `.playbook`.
+minimal `.playbook` plus a default `CLAUDE.md` that introduces the playbook
+concept so the first Claude Code session opened inside it has context.
 
 Rules:
 
@@ -149,6 +150,8 @@ Rules:
 - Names must not start with `.`.
 - Existing target directories are not overwritten.
 - Authentication metadata is synced into the new playbook.
+- A default `CLAUDE.md` is written at the playbook root. Users are expected to
+  edit or replace it with playbook-specific instructions.
 
 Flags:
 
