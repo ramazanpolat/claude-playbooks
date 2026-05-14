@@ -134,6 +134,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// Re-read so downstream resolution sees the freshly written file.
 		m, _ = manifest.Read(dest)
 	}
+	configDest := dest
+	if !cherryPick && m != nil && m.Subdir != "" {
+		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
+		info, err := os.Stat(configDest)
+		if err != nil || !info.IsDir() {
+			os.RemoveAll(dest)
+			return fmt.Errorf("subdir %q not found in source", m.Subdir)
+		}
+	}
 
 	// Validate children for tree install. Cherry-pick installs are always flat.
 	if !cherryPick && m != nil {
@@ -147,7 +156,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err := syncInstalledCredentials(dest, m, cherryPick); err != nil {
+	if err := syncInstalledCredentials(dest, configDest, m, cherryPick); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
@@ -167,7 +176,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// CLAUDE.md warnings.
-	warnIfNoClaudeMD(dest, targetName)
+	warnIfNoClaudeMD(configDest, targetName)
 	if !cherryPick && m != nil {
 		for _, c := range m.Children {
 			cp := filepath.Join(dest, c.Path)
@@ -205,7 +214,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		taken[e.AliasName] = true
 	}
 
-	if writeAlias(shellConfig, rootAlias, dest, taken) {
+	if writeAlias(shellConfig, rootAlias, configDest, taken) {
 		fmt.Printf("Alias:    %s → %s\n", rootAlias, targetName)
 	} else {
 		fmt.Fprintf(os.Stderr, "Warning: alias %q already in use; skipped. Set one manually with 'claude-playbook alias %s <alias>'\n", rootAlias, targetName)
@@ -248,8 +257,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func syncInstalledCredentials(dest string, m *manifest.Manifest, cherryPick bool) error {
-	if err := auth.SyncCredentials(dest); err != nil {
+func syncInstalledCredentials(dest, configDest string, m *manifest.Manifest, cherryPick bool) error {
+	if err := auth.SyncCredentials(configDest); err != nil {
 		return err
 	}
 	if cherryPick || m == nil {
