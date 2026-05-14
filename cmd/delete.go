@@ -64,9 +64,16 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		if pb.HasAlias() {
 			aliasInfo = fmt.Sprintf("%s (will be removed from %s)", pb.Alias, shellConfig)
 		}
-		fileCount, dirCount := countContents(pb.Path)
+		deletePath := pb.RootPath
+		if deletePath == "" {
+			deletePath = pb.Path
+		}
+		fileCount, dirCount := countContents(deletePath)
 		fmt.Printf("Playbook: %s\n", pb.Name)
-		fmt.Printf("Location: %s\n", pb.Path)
+		fmt.Printf("Location: %s\n", deletePath)
+		if deletePath != pb.Path {
+			fmt.Printf("Config:   %s\n", pb.Path)
+		}
 		fmt.Printf("Alias:    %s\n", aliasInfo)
 		if len(children) > 0 {
 			fmt.Printf("Children: %d\n", len(children))
@@ -85,11 +92,15 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if _, err := shell.RemoveByPathPrefix(shellConfig, pb.Path); err != nil {
+	deletePath := pb.RootPath
+	if deletePath == "" {
+		deletePath = pb.Path
+	}
+	if _, err := shell.RemoveByPathPrefix(shellConfig, deletePath); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
-	if err := removeAny(pb.Path); err != nil {
-		return fmt.Errorf("failed to delete %s: %w", pb.Path, err)
+	if err := removeAny(deletePath); err != nil {
+		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
 	return nil

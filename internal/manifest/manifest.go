@@ -18,6 +18,7 @@ type Manifest struct {
 	Version     string  `toml:"version"`
 	Name        string  `toml:"name"`
 	Alias       string  `toml:"alias"`
+	Subdir      string  `toml:"subdir"`
 	Description string  `toml:"description"`
 	Children    []Child `toml:"children"`
 }
@@ -61,6 +62,9 @@ func Exists(dir string) bool {
 // validate checks structural invariants. Path existence is checked by callers
 // that have access to the playbook directory.
 func (m *Manifest) validate(path string) error {
+	if err := validateRelativePath(path, "subdir", m.Subdir); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for _, c := range m.Children {
 		if c.Name == "" {
@@ -69,6 +73,9 @@ func (m *Manifest) validate(path string) error {
 		if c.Path == "" {
 			return fmt.Errorf("invalid .playbook at %s: child %q missing 'path'", path, c.Name)
 		}
+		if err := validateRelativePath(path, fmt.Sprintf("child %q path", c.Name), c.Path); err != nil {
+			return err
+		}
 		if strings.Contains(c.Name, "/") {
 			return fmt.Errorf("invalid .playbook at %s: child name %q must not contain '/'", path, c.Name)
 		}
@@ -76,6 +83,17 @@ func (m *Manifest) validate(path string) error {
 			return fmt.Errorf("invalid .playbook at %s: duplicate child name %q", path, c.Name)
 		}
 		seen[c.Name] = true
+	}
+	return nil
+}
+
+func validateRelativePath(manifestPath, field, value string) error {
+	if value == "" {
+		return nil
+	}
+	cleaned := filepath.Clean(value)
+	if filepath.IsAbs(value) || cleaned == "." || strings.HasPrefix(cleaned, "..") {
+		return fmt.Errorf("invalid .playbook at %s: %s must be a relative path below the playbook root", manifestPath, field)
 	}
 	return nil
 }
@@ -106,6 +124,9 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.Alias != "" {
 		fmt.Fprintf(&b, "alias = %q\n", m.Alias)
+	}
+	if m.Subdir != "" {
+		fmt.Fprintf(&b, "subdir = %q\n", m.Subdir)
 	}
 	if m.Description != "" {
 		fmt.Fprintf(&b, "description = %q\n", m.Description)
