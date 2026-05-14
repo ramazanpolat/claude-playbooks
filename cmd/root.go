@@ -58,9 +58,10 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("claude-playbook -- manage isolated Claude Code instances")
+	fmt.Println()
+	fmt.Printf("Playbooks directory: %s\n", playbooksDir)
 
 	if len(pbs) == 0 {
-		fmt.Println()
 		fmt.Println("No playbooks installed yet. Get started with one of:")
 		fmt.Println()
 		fmt.Println("  # Install the example multi-playbook tree (DBA, SRE, SecOps, frontend, ...):")
