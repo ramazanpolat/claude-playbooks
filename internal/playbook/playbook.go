@@ -21,7 +21,8 @@ import (
 // Playbook represents a discovered playbook.
 type Playbook struct {
 	Name        string    // top-level: "experiment". child: "awesome/dba".
-	Path        string    // absolute directory path
+	Path        string    // absolute Claude config directory path
+	RootPath    string    // absolute installed root directory path; same as Path for flat playbooks
 	Alias       string    // alias name, "" if none
 	AliasLine   string    // full alias line, "" if none
 	LastUsed    time.Time // directory mtime
@@ -147,10 +148,19 @@ func discoverTopLevel(root string) ([]*Playbook, error) {
 			// commands that load the manifest directly.
 			continue
 		}
+		configPath := path
+		configInfo := info
+		if m != nil {
+			if resolved, resolvedInfo := resolveManifestSubdir(path, m); resolved != "" {
+				configPath = resolved
+				configInfo = resolvedInfo
+			}
+		}
 		pb := &Playbook{
 			Name:     e.Name(),
-			Path:     path,
-			LastUsed: info.ModTime(),
+			Path:     configPath,
+			RootPath: path,
+			LastUsed: configInfo.ModTime(),
 			Manifest: m,
 		}
 		if m != nil {
@@ -162,7 +172,11 @@ func discoverTopLevel(root string) ([]*Playbook, error) {
 }
 
 func buildChild(parent *Playbook, c *manifest.Child) *Playbook {
-	childPath := filepath.Join(parent.Path, c.Path)
+	rootPath := parent.RootPath
+	if rootPath == "" {
+		rootPath = parent.Path
+	}
+	childPath := filepath.Join(rootPath, c.Path)
 	info, err := os.Stat(childPath)
 	if err != nil || !info.IsDir() {
 		return nil
@@ -170,6 +184,7 @@ func buildChild(parent *Playbook, c *manifest.Child) *Playbook {
 	pb := &Playbook{
 		Name:        parent.Name + "/" + c.Name,
 		Path:        childPath,
+		RootPath:    childPath,
 		LastUsed:    info.ModTime(),
 		IsChild:     true,
 		Parent:      parent.Name,
@@ -183,6 +198,18 @@ func buildChild(parent *Playbook, c *manifest.Child) *Playbook {
 		}
 	}
 	return pb
+}
+
+func resolveManifestSubdir(root string, m *manifest.Manifest) (string, os.FileInfo) {
+	if m == nil || m.Subdir == "" {
+		return "", nil
+	}
+	resolved := filepath.Join(root, filepath.FromSlash(m.Subdir))
+	info, err := os.Stat(resolved)
+	if err != nil || !info.IsDir() {
+		return "", nil
+	}
+	return resolved, info
 }
 
 func attachAlias(pb *Playbook, aliases []shell.AliasEntry) {
