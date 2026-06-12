@@ -441,7 +441,21 @@ func pluralS(n int) string {
 }
 
 // copyDir recursively copies the tree rooted at src into dst.
+//
+// Internal symlinks are dereferenced so installed playbooks are self-contained
+// regular files/directories. Symlinks that resolve outside the source tree are
+// preserved to avoid unexpectedly copying unrelated local data into an install.
 func copyDir(src, dst string) error {
+	root, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return err
+	}
+	return copyDirWithinRoot(src, dst, root, map[string]bool{root: true})
+}
+
+// visited holds resolved directories already being copied; a symlink that
+// resolves to one of them would recurse forever, so it is preserved as-is.
+func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -459,10 +473,30 @@ func copyDir(src, dst string) error {
 			if err != nil {
 				return err
 			}
+			if resolved, err := filepath.EvalSymlinks(path); err == nil {
+				if targetInfo, err := os.Stat(resolved); err == nil && pathWithin(root, resolved) {
+					if targetInfo.IsDir() {
+						if visited[resolved] {
+							return os.Symlink(link, target)
+						}
+						visited[resolved] = true
+						return copyDirWithinRoot(resolved, target, root, visited)
+					}
+					return copyFile(resolved, target, targetInfo.Mode())
+				}
+			}
 			return os.Symlink(link, target)
 		}
 		return copyFile(path, target, info.Mode())
 	})
+}
+
+func pathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
