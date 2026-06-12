@@ -114,6 +114,32 @@ INSTALL_NAME=cpb ./uninstall.sh
 
 Uninstalling does not delete `~/.claude-playbooks`.
 
+### Uninstalling claude-playbook itself
+
+To remove the tool, all its installed playbooks, their shell aliases, and the
+binary in one step:
+
+```bash
+claude-playbook self-uninstall          # prompts for confirmation
+claude-playbook self-uninstall -y       # skip prompt
+claude-playbook self-uninstall -y --keep-data     # keep ~/.claude-playbooks
+claude-playbook self-uninstall -y --keep-binary   # keep the binary
+claude-playbook self-uninstall --dry-run          # preview without removing
+```
+
+If the binary can't be removed (e.g. installed to `/usr/local/bin` and you're
+not root), the command prints a `sudo rm <path>` hint and continues cleaning up
+everything else.
+
+**Manual fallback** (if you can't run the binary):
+
+```bash
+# 1. Remove aliases from your shell config (~/.zshrc or ~/.bashrc)
+#    Delete any lines matching: alias ...='CLAUDE_CONFIG_DIR=~/.claude-playbooks/...
+# 2. rm -rf ~/.claude-playbooks
+# 3. sudo rm /usr/local/bin/claude-playbook   # or wherever the binary lives
+```
+
 **Build from source** (requires [Go](https://go.dev/dl/) 1.21+):
 
 ```bash
