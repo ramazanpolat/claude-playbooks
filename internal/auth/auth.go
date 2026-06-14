@@ -222,6 +222,7 @@ func findAccountState(targetDir string) (map[string]any, error) {
 	targetState, _ := filepath.Abs(filepath.Join(targetDir, StateFileName))
 	candidates := []string{
 		filepath.Join(home, ".claude", StateFileName),
+		filepath.Join(home, StateFileName),
 	}
 
 	playbooksDir := os.Getenv("CLAUDE_PLAYBOOKS_DIR")

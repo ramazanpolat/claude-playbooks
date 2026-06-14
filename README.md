@@ -35,21 +35,21 @@ That's all a playbook is under the hood. `claude-playbook` just makes creating, 
 ```
 ~/.claude-playbooks/                Shell aliases:
 
-├── experiment/                     ◄── alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
+├── experiment/                     ◄── alias experiment='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/experiment" claude'
 │   ├── .playbook                       (marker + metadata)
 │   ├── CLAUDE.md
 │   └── settings.json
 │
-├── pai/                            ◄── alias pai='CLAUDE_CONFIG_DIR=~/.claude-playbooks/pai claude'
+├── pai/                            ◄── alias pai='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/pai" claude'
 │   ├── .playbook
 │   └── ...
 │
-└── awesome/                        ◄── alias ap='CLAUDE_CONFIG_DIR=~/.claude-playbooks/awesome claude'
+└── awesome/                        ◄── alias ap='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/awesome" claude'
     ├── .playbook                       (declares [[children]] for dba and sre)
     └── playbooks/
-        ├── dba/                    ◄── alias ap-dba='CLAUDE_CONFIG_DIR=~/.claude-playbooks/awesome/playbooks/dba claude'
+        ├── dba/                    ◄── alias ap-dba='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/awesome/playbooks/dba" claude'
         │   └── CLAUDE.md
-        └── sre/                    ◄── alias ap-sre='CLAUDE_CONFIG_DIR=~/.claude-playbooks/awesome/playbooks/sre claude'
+        └── sre/                    ◄── alias ap-sre='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/awesome/playbooks/sre" claude'
             └── CLAUDE.md
 
 Each playbook directory is a completely isolated Claude Code instance.
@@ -135,7 +135,7 @@ everything else.
 
 ```bash
 # 1. Remove aliases from your shell config (~/.zshrc or ~/.bashrc)
-#    Delete any lines matching: alias ...='CLAUDE_CONFIG_DIR=~/.claude-playbooks/...
+#    Delete any lines matching: alias ...='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/...
 # 2. rm -rf ~/.claude-playbooks
 # 3. sudo rm /usr/local/bin/claude-playbook   # or wherever the binary lives
 ```
@@ -326,7 +326,7 @@ The child's public name is independent of its directory path, so a repo can move
 Generated aliases are plain shell aliases that set `CLAUDE_CONFIG_DIR`:
 
 ```bash
-alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
+alias experiment='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/experiment" claude'
 ```
 
 Show, set, or remove aliases:
@@ -342,7 +342,7 @@ claude-playbook dealias experiment
 Because aliases are ordinary shell lines, you can edit them to add Claude Code flags:
 
 ```bash
-alias work='CLAUDE_CONFIG_DIR=~/.claude-playbooks/work claude --model claude-opus-4-6 --permission-mode auto'
+alias work='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/work" claude --model claude-opus-4-6 --permission-mode auto'
 ```
 
 ### Temporary sessions

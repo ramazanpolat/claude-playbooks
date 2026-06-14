@@ -108,6 +108,9 @@ The tool syncs authentication in two layers:
 On macOS, if `~/.claude/.credentials.json` is missing, the tool attempts to
 materialize it from the Keychain item used by Claude Code.
 
+Account metadata is discovered from `~/.claude/.claude.json`,
+`~/.claude.json`, or an existing playbook under the playbooks root.
+
 Existing valid regular credentials inside a playbook are preserved, which allows
 a playbook to use a separate login.
 
@@ -122,14 +125,14 @@ by:
 The generated alias form is:
 
 ```sh
-alias example='CLAUDE_CONFIG_DIR=/path/to/playbook claude'
+alias example='CLAUDE_CONFIG_DIR="/path/to/playbook" claude'
 ```
 
 Aliases are intentionally plain shell aliases. Users may edit them manually to
 add Claude Code flags, for example:
 
 ```sh
-alias example='CLAUDE_CONFIG_DIR=/path/to/playbook claude --permission-mode auto'
+alias example='CLAUDE_CONFIG_DIR="/path/to/playbook" claude --permission-mode auto'
 ```
 
 Alias discovery scans the shell config for alias lines containing
@@ -146,7 +149,9 @@ concept so the first Claude Code session opened inside it has context.
 Rules:
 
 - `create` only creates top-level playbooks.
-- Names must not contain `/`.
+- Names must be a single top-level path segment, not an absolute or relative
+  path.
+- Names must not contain path separators.
 - Names must not start with `.`.
 - Existing target directories are not overwritten.
 - Authentication metadata is synced into the new playbook.
@@ -224,6 +229,8 @@ Rules:
   subdirectory.
 - If the source has no `.playbook`, install fails unless `--init` is supplied.
 - `--init` writes a minimal `.playbook` at the installed destination.
+- The selected install name must be a single top-level path segment, not an
+  absolute or relative path.
 - Tree installs validate declared child directories.
 - Cherry-pick installs ignore child declarations and install as a flat playbook.
 - Authentication metadata is synced into the root playbook and, for tree
@@ -259,7 +266,9 @@ Use `link` for edit-in-place development of a playbook stored outside
 Rules:
 
 - The target must exist and must be a directory.
-- Link names must not contain `/`.
+- Link names must be a single top-level path segment, not an absolute or
+  relative path.
+- Link names must not contain path separators.
 - Link names must not start with `.`.
 - Existing targets under the playbooks root are not overwritten.
 - If the target has no `.playbook`, the command prompts for metadata and writes
@@ -286,7 +295,9 @@ Renames a top-level playbook directory.
 Rules:
 
 - Only top-level playbooks can be renamed.
-- New names must not contain `/`.
+- New names must be a single top-level path segment, not an absolute or
+  relative path.
+- New names must not contain path separators.
 - New names must not start with `.`.
 - Existing target directories are not overwritten.
 - Alias paths that point into the old playbook are rewritten to the new path.
@@ -337,6 +348,27 @@ Rules:
 Flags:
 
 - `-y`, `--yes`
+
+### `self-uninstall`
+
+Removes `claude-playbook` itself, playbook shell aliases, and, unless retained,
+the playbooks directory.
+
+Rules:
+
+- The command prompts for confirmation unless `--yes` is supplied.
+- `--keep-data` preserves the playbooks directory and all playbook contents.
+- `--keep-binary` preserves the executable.
+- `--dry-run` prints what would be removed without removing anything.
+- Shell aliases whose `CLAUDE_CONFIG_DIR` points under the playbooks directory
+  are removed.
+
+Flags:
+
+- `-y`, `--yes`
+- `--keep-data`
+- `--keep-binary`
+- `--dry-run`
 
 ### `update [name]`
 

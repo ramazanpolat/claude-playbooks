@@ -105,6 +105,9 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if targetName == "" {
 		return fmt.Errorf("could not derive name from source; use --name")
 	}
+	if err := validateTopLevelName("install name", targetName); err != nil {
+		return err
+	}
 	dest := filepath.Join(playbooksDir, targetName)
 	if _, err := os.Lstat(dest); err == nil {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)

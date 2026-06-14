@@ -40,8 +40,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if strings.Contains(name, "/") {
 		return fmt.Errorf("'create' only creates top-level playbooks. To add a child, declare it in the parent's .playbook")
 	}
-	if strings.HasPrefix(name, ".") {
-		return fmt.Errorf("playbook name cannot start with '.'")
+	if err := validateTopLevelName("playbook name", name); err != nil {
+		return err
 	}
 
 	playbooksDir := config.ResolvePlaybooksDir()

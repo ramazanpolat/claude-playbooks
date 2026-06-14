@@ -23,10 +23,17 @@ type AliasEntry struct {
 // aliasRegex matches: [whitespace] alias name = ... CLAUDE_CONFIG_DIR=<path> ...
 // Tolerates leading whitespace and any quote style around the command.
 var aliasRegex = regexp.MustCompile(`^\s*alias\s+([A-Za-z_][A-Za-z0-9_-]*)\s*=`)
+var aliasNameRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+
+// ValidAliasName reports whether aliasName is a portable shell alias name.
+func ValidAliasName(aliasName string) bool {
+	return aliasNameRegex.MatchString(aliasName)
+}
 
 // Format returns the canonical alias line written by the tool.
 func Format(aliasName, playbookDir string) string {
-	return fmt.Sprintf("alias %s='CLAUDE_CONFIG_DIR=%s claude'", aliasName, playbookDir)
+	body := fmt.Sprintf("CLAUDE_CONFIG_DIR=%s claude", shellDoubleQuote(playbookDir))
+	return fmt.Sprintf("alias %s=%s", aliasName, shellQuote(body))
 }
 
 // ReadAll scans the shell config for every alias whose definition contains
@@ -49,10 +56,7 @@ func ReadAll(configFile string) ([]AliasEntry, error) {
 		if idx < 0 {
 			continue
 		}
-		val := line[idx+len("CLAUDE_CONFIG_DIR="):]
-		if end := strings.IndexAny(val, " \t'\""); end >= 0 {
-			val = val[:end]
-		}
+		val := scanEnvValue(line[idx+len("CLAUDE_CONFIG_DIR="):])
 		if val == "" {
 			continue
 		}
@@ -105,6 +109,9 @@ func FindByAliasName(configFile, aliasName string) (*AliasEntry, error) {
 // playbook path, then appends a fresh line. If the alias name is already in
 // use by a different CLAUDE_CONFIG_DIR, it is silently overwritten.
 func Write(configFile, aliasName, playbookDir string) error {
+	if !ValidAliasName(aliasName) {
+		return fmt.Errorf("invalid alias name %q", aliasName)
+	}
 	lines, err := readLines(configFile)
 	if err != nil {
 		return err
@@ -288,12 +295,9 @@ func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
 	}
 	prefix := line[:idx+len("CLAUDE_CONFIG_DIR=")]
 	rest := line[idx+len("CLAUDE_CONFIG_DIR="):]
-	end := strings.IndexAny(rest, " \t'\"")
-	if end < 0 {
-		end = len(rest)
-	}
+	end := envValueEnd(rest)
 	after := rest[end:]
-	return prefix + newPath + after, true
+	return prefix + shellDoubleQuote(newPath) + after, true
 }
 
 func extractPath(line string) string {
@@ -301,10 +305,7 @@ func extractPath(line string) string {
 	if idx < 0 {
 		return ""
 	}
-	val := line[idx+len("CLAUDE_CONFIG_DIR="):]
-	if end := strings.IndexAny(val, " \t'\""); end >= 0 {
-		val = val[:end]
-	}
+	val := scanEnvValue(line[idx+len("CLAUDE_CONFIG_DIR="):])
 	home, _ := os.UserHomeDir()
 	if strings.HasPrefix(val, "~/") {
 		val = filepath.Join(home, val[2:])
@@ -312,6 +313,114 @@ func extractPath(line string) string {
 		val = filepath.Join(home, val[len("$HOME/"):])
 	}
 	return val
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func shellDoubleQuote(s string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		`$`, `\$`,
+		"`", "\\`",
+	)
+	return `"` + replacer.Replace(s) + `"`
+}
+
+func scanEnvValue(s string) string {
+	if s == "" {
+		return ""
+	}
+	switch s[0] {
+	case '\'':
+		return scanSingleQuoted(s[1:])
+	case '"':
+		return scanDoubleQuoted(s[1:])
+	default:
+		if end := strings.IndexAny(s, " \t'\""); end >= 0 {
+			return s[:end]
+		}
+		return s
+	}
+}
+
+func envValueEnd(s string) int {
+	if s == "" {
+		return 0
+	}
+	switch s[0] {
+	case '\'':
+		return quotedValueEnd(s, '\'')
+	case '"':
+		return quotedValueEnd(s, '"')
+	default:
+		if end := strings.IndexAny(s, " \t'\""); end >= 0 {
+			return end
+		}
+		return len(s)
+	}
+}
+
+func quotedValueEnd(s string, quote byte) int {
+	escaped := false
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote == '"' && c == '\\' {
+			escaped = true
+			continue
+		}
+		if c == quote {
+			return i + 1
+		}
+	}
+	return len(s)
+}
+
+func scanSingleQuoted(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\'' {
+			if strings.HasPrefix(s[i:], "'\\''") {
+				b.WriteByte('\'')
+				i += 3
+				continue
+			}
+			return b.String()
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func scanDoubleQuoted(s string) string {
+	var b strings.Builder
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			b.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			return b.String()
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 func readLines(path string) ([]string, error) {

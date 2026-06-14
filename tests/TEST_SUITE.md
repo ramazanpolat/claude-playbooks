@@ -178,7 +178,7 @@ assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/created"
 echo "TEST 2: create with alias writes only to CLAUDE_SHELL_CONFIG"
 "$BIN" create created-alias --alias ca
 assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/created-alias"
-assert_contains "$CLAUDE_SHELL_CONFIG" "alias ca='CLAUDE_CONFIG_DIR=$CLAUDE_PLAYBOOKS_DIR/created-alias claude'"
+assert_contains "$CLAUDE_SHELL_CONFIG" "alias ca='CLAUDE_CONFIG_DIR=\"$CLAUDE_PLAYBOOKS_DIR/created-alias\" claude'"
 
 echo "TEST 3: install local bundle syncs root and children"
 SRC="$TEST_ROOT/source-bundle"
@@ -201,8 +201,8 @@ printf '# Child\n' > "$SRC/playbooks/child/CLAUDE.md"
 "$BIN" install "$SRC" --name installed --alias-all
 assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/installed"
 assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/installed/playbooks/child"
-assert_contains "$CLAUDE_SHELL_CONFIG" "alias bundlealias='CLAUDE_CONFIG_DIR=$CLAUDE_PLAYBOOKS_DIR/installed claude'"
-assert_contains "$CLAUDE_SHELL_CONFIG" "alias childalias='CLAUDE_CONFIG_DIR=$CLAUDE_PLAYBOOKS_DIR/installed/playbooks/child claude'"
+assert_contains "$CLAUDE_SHELL_CONFIG" "alias bundlealias='CLAUDE_CONFIG_DIR=\"$CLAUDE_PLAYBOOKS_DIR/installed\" claude'"
+assert_contains "$CLAUDE_SHELL_CONFIG" "alias childalias='CLAUDE_CONFIG_DIR=\"$CLAUDE_PLAYBOOKS_DIR/installed/playbooks/child\" claude'"
 
 echo "TEST 4: install --subdir --init syncs the cherry-picked playbook"
 "$BIN" install "$SRC" --subdir playbooks/child --name installed-child --init --no-alias

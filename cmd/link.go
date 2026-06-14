@@ -68,8 +68,8 @@ func runLink(cmd *cobra.Command, args []string) error {
 	if strings.Contains(name, "/") {
 		return fmt.Errorf("link name may not contain '/'")
 	}
-	if strings.HasPrefix(name, ".") {
-		return fmt.Errorf("link name cannot start with '.'")
+	if err := validateTopLevelName("link name", name); err != nil {
+		return err
 	}
 
 	dest := filepath.Join(playbooksDir, name)
