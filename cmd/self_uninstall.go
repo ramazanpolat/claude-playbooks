@@ -55,7 +55,9 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 
 	if !selfUninstallYes && !selfUninstallDryRun {
 		fmt.Printf("This will remove:\n")
-		fmt.Printf("  Playbooks:     %d playbook(s) under %s\n", countTopLevel(pbs), playbooksDir)
+		if !selfUninstallKeepData {
+			fmt.Printf("  Playbooks:     %d playbook(s) under %s\n", countTopLevel(pbs), playbooksDir)
+		}
 		if !selfUninstallKeepData {
 			fmt.Printf("  Directory:     %s\n", playbooksDir)
 		}
@@ -72,9 +74,15 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 
 	if selfUninstallDryRun {
 		fmt.Println("[dry-run] Would remove:")
-		for _, pb := range pbs {
-			if !pb.IsChild {
-				fmt.Printf("  playbook: %s (%s)\n", pb.Name, pb.Path)
+		if !selfUninstallKeepData {
+			for _, pb := range pbs {
+				if !pb.IsChild {
+					removePath := pb.RootPath
+					if removePath == "" {
+						removePath = pb.Path
+					}
+					fmt.Printf("  playbook: %s (%s)\n", pb.Name, removePath)
+				}
 			}
 		}
 		if !selfUninstallKeepData {
@@ -95,15 +103,21 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		if pb.IsChild {
 			continue
 		}
-		if n, err := shell.RemoveByPathPrefix(shellConfig, pb.Path); err != nil {
+		removePath := pb.RootPath
+		if removePath == "" {
+			removePath = pb.Path
+		}
+		if n, err := shell.RemoveByPathPrefix(shellConfig, removePath); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to remove aliases for %s: %v\n", pb.Name, err)
 		} else if n > 0 {
 			removed = append(removed, fmt.Sprintf("aliases for playbook %q", pb.Name))
 		}
-		if err := removeAny(pb.Path); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to remove %s: %v\n", pb.Path, err)
-		} else {
-			removed = append(removed, fmt.Sprintf("playbook %q (%s)", pb.Name, pb.Path))
+		if !selfUninstallKeepData {
+			if err := removeAny(removePath); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to remove %s: %v\n", removePath, err)
+			} else {
+				removed = append(removed, fmt.Sprintf("playbook %q (%s)", pb.Name, removePath))
+			}
 		}
 	}
 

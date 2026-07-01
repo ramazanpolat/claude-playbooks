@@ -43,8 +43,8 @@ func runRename(cmd *cobra.Command, args []string) error {
 	if strings.Contains(newName, "/") {
 		return fmt.Errorf("playbook names may not contain '/' here")
 	}
-	if strings.HasPrefix(newName, ".") {
-		return fmt.Errorf("new name cannot start with '.'")
+	if err := validateTopLevelName("new name", newName); err != nil {
+		return err
 	}
 
 	shellConfig, err := config.ResolveShellConfig()
@@ -61,18 +61,26 @@ func runRename(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%q is a child playbook; rename children by editing %s/.playbook", oldName, pb.Parent)
 	}
 
-	oldPath := pb.Path
+	oldRoot := pb.RootPath
+	if oldRoot == "" {
+		oldRoot = pb.Path
+	}
+	oldConfigPath := pb.Path
 	newPath := filepath.Join(playbooksDir, newName)
+	newConfigPath := newPath
+	if rel, err := filepath.Rel(oldRoot, oldConfigPath); err == nil && rel != "." {
+		newConfigPath = filepath.Join(newPath, rel)
+	}
 
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("%q already exists at %s", newName, newPath)
 	}
 
-	if err := os.Rename(oldPath, newPath); err != nil {
+	if err := os.Rename(oldRoot, newPath); err != nil {
 		return fmt.Errorf("failed to rename: %w", err)
 	}
 
-	changed, err := shell.RewritePathPrefix(shellConfig, oldPath, newPath)
+	changed, err := shell.RewritePathPrefix(shellConfig, oldRoot, newPath)
 	if err != nil {
 		return fmt.Errorf("failed to update aliases: %w", err)
 	}
@@ -80,15 +88,15 @@ func runRename(cmd *cobra.Command, args []string) error {
 	switch {
 	case renameNoAlias:
 		if pb.HasAlias() {
-			if _, err := shell.RemoveByPath(shellConfig, newPath); err != nil {
+			if _, err := shell.RemoveByPathPrefix(shellConfig, newPath); err != nil {
 				return fmt.Errorf("failed to drop alias: %w", err)
 			}
 		}
 	case renameAlias != "":
-		if _, err := shell.RemoveByPath(shellConfig, newPath); err != nil {
+		if _, err := shell.RemoveByPathPrefix(shellConfig, newPath); err != nil {
 			return fmt.Errorf("failed to update alias: %w", err)
 		}
-		if err := shell.Write(shellConfig, renameAlias, newPath); err != nil {
+		if err := shell.Write(shellConfig, renameAlias, newConfigPath); err != nil {
 			return fmt.Errorf("failed to write alias: %w", err)
 		}
 	}
