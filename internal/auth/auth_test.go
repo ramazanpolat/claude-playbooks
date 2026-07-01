@@ -220,6 +220,92 @@ func TestSyncCredentialsCopiesAccountMetadata(t *testing.T) {
 	}
 }
 
+func TestSyncCredentialsCopiesDefaultClaudeStateFromHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, CredentialsFileName), []byte(testCreds), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	sourceState := `{"userID":"default-user","oauthAccount":{"accountUuid":"default-account","emailAddress":"user@example.com"},"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.138","installMethod":"native"}`
+	if err := os.WriteFile(filepath.Join(home, StateFileName), []byte(sourceState), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(home, ".claude-playbooks", "new-playbook")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncCredentials(target); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(target, StateFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"userID": "default-user"`)) {
+		t.Fatalf("target state did not get default userID: %s", string(data))
+	}
+	if !bytes.Contains(data, []byte(`"accountUuid": "default-account"`)) {
+		t.Fatalf("target state did not get default account: %s", string(data))
+	}
+	if !bytes.Contains(data, []byte(`"hasCompletedOnboarding": true`)) {
+		t.Fatalf("target state did not get default onboarding metadata: %s", string(data))
+	}
+}
+
+func TestSyncCredentialsPrefersDefaultClaudeStateOverPlaybooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, CredentialsFileName), []byte(testCreds), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	defaultState := `{"userID":"default-user","oauthAccount":{"accountUuid":"default-account"},"hasCompletedOnboarding":true}`
+	if err := os.WriteFile(filepath.Join(home, StateFileName), []byte(defaultState), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	playbookStateDir := filepath.Join(home, ".claude-playbooks", "old-playbook")
+	if err := os.MkdirAll(playbookStateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	playbookState := `{"userID":"playbook-user","oauthAccount":{"accountUuid":"playbook-account"},"hasCompletedOnboarding":true}`
+	if err := os.WriteFile(filepath.Join(playbookStateDir, StateFileName), []byte(playbookState), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(home, ".claude-playbooks", "new-playbook")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncCredentials(target); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(target, StateFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"accountUuid": "default-account"`)) {
+		t.Fatalf("target state did not prefer default account: %s", string(data))
+	}
+	if bytes.Contains(data, []byte(`playbook-account`)) {
+		t.Fatalf("target state unexpectedly used playbook account: %s", string(data))
+	}
+}
+
 func TestSyncCredentialsPrefersFullyOnboardedMetadata(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
