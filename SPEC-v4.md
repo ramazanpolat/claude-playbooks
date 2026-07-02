@@ -134,9 +134,10 @@ claude-playbook create experiment --alias exp
 1. Validate the name (single segment; not empty; no `/` or `\`; must not start with `.`).
 2. Check the target directory does not exist.
 3. Create the directory.
-4. Unless `--no-alias`, write a shell alias. The alias name defaults to the playbook name. Override with `--alias`.
+4. Write a starter `CLAUDE.md` into it (a short template explaining what a playbook is and how to customize it).
+5. Unless `--no-alias`, write a shell alias. The alias name defaults to the playbook name. Override with `--alias`.
 
-No `.playbook` is written by default. Add one only when you want to set metadata.
+`create` writes **no `.playbook` manifest** — the directory is a valid playbook simply by living under the playbooks root. Add a `.playbook` yourself only when you want to set metadata (version, description, homepage, author).
 
 **Flags:**
 
@@ -213,6 +214,8 @@ CLAUDE_CONFIG_DIR=/tmp/scratch claude [claude-flags...]
 
 Installs a single playbook from a Git repository or a local directory. The result is always **one flat playbook** under the playbooks root.
 
+`install` always **copies** the source into the playbooks root — both Git URLs (via clone) and local directories (via recursive copy). The installed playbook is a self-contained, independent copy; later edits to the original source do not affect it. To keep an *external* directory in place and expose it under the playbooks root as a symlink instead of a copy, use the separate [`link`](#claude-playbook-link-target) command.
+
 ```bash
 # Git repo (derives install name from the URL)
 claude-playbook install https://github.com/user/pai
@@ -223,11 +226,8 @@ claude-playbook install https://github.com/user/repo --name myrepo
 # Install a specific branch/tag
 claude-playbook install https://github.com/user/repo --branch dev
 
-# Local directory (symlinked by default)
+# Local directory (copied into the playbooks root, becomes independent of source)
 claude-playbook install ~/dev/my-playbook
-
-# Local directory (copied, becomes independent of source)
-claude-playbook install ~/dev/my-playbook --copy
 
 # Install one playbook out of a monorepo (the primary multi-playbook-repo path)
 claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/sre --name sre --alias sre
@@ -240,9 +240,9 @@ claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --subd
 
 | Source | Behaviour |
 |--------|-----------|
-| URL (`http://`, `https://`, `git@`, `git://`) | Shallow-cloned (`git clone --depth=1`) |
+| URL (`http://`, `https://`, `git@`, `git://`) | Shallow-cloned (`git clone --depth=1`) into the install directory |
 | GitHub `/tree/<ref>/<path>` URL | Recognized and split automatically into clone URL + `--branch <ref>` + `--subdir <path>` (only fills flags you didn't set explicitly) |
-| Anything else | Treated as a local filesystem path |
+| Anything else | Treated as a local filesystem path and **copied** into the install directory |
 
 **Flags:**
 
@@ -253,15 +253,13 @@ claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --subd
 | `--branch <ref>` | Git URL only: clone this branch/tag/ref instead of the default branch |
 | `--alias <alias>` | Custom alias name for the installed playbook |
 | `--no-alias` | Skip alias creation |
-| `--copy` | Copy instead of symlink (local paths only) |
 
 **Steps (no `--subdir`):**
 1. Derive the install directory name from `--name`, or the manifest `name`, or the last path segment of the URL (stripped of `.git`), or the source directory's name.
 2. Check the target doesn't already exist under the playbooks root.
-3. Fetch the source:
+3. Fetch the source into the target (always a copy):
    - Git URL → `git clone --depth=1` (with `--branch <ref>` if given) into the target.
-   - Local path (default) → symlink target → source.
-   - Local path with `--copy` → recursive copy.
+   - Local path → recursive copy into the target.
 4. The installed directory **is** the playbook. If a `.playbook` is present it supplies metadata; if not, the directory is still a valid playbook.
 5. Write an alias per the rules below.
 6. Print a summary.
@@ -286,7 +284,6 @@ One alias is written, using the `--alias` value, or the manifest's `alias` field
 **CLAUDE.md warning:** if the installed playbook has no `CLAUDE.md`, a warning is printed. Claude Code works without one, but most playbooks benefit from having one.
 
 **Errors:**
-- `--copy` with a URL → `--copy only applies to local paths. Git installs always clone`
 - `--branch` with a local path → `--branch only applies to Git URLs`
 - `--subdir` path missing in source → `subdirectory "<path>" not found in source`
 - Source not found → `'~/dev/foo' not found`
@@ -308,6 +305,47 @@ Reload your shell or run:
 Then run with:
   sre
 ```
+
+---
+
+### `claude-playbook link <target>`
+
+Symlinks an existing **external** directory into the playbooks root, exposing it as a playbook without copying it. Unlike `install` (which always copies and leaves the source untouched), `link` keeps the directory where it lives and points a symlink at it — edits made in either place are the same files. This is the way to develop a playbook in a working tree while running it through `claude-playbook`.
+
+```bash
+claude-playbook link ~/dev/my-playbook
+claude-playbook link ~/dev/my-playbook --name mp --alias mp
+claude-playbook link ~/dev/my-playbook --no-alias
+```
+
+**Steps:**
+1. Resolve `<target>` to an absolute path; it must exist and be a directory.
+2. Pick the link name from `--name`, or the target's basename. It must be a single-segment name (no `/`).
+3. Check `<root>/<name>` does not already exist.
+4. If the target has no `.playbook`:
+   - If stdin is a TTY, prompt interactively for a playbook name, alias, and description, and **write a `.playbook` into the target directory** with those values.
+   - If stdin is not a TTY, error out — there is nothing to prompt with. Add a `.playbook` to the target first.
+5. Create the symlink `<root>/<name>` → `<target>`.
+6. Unless `--no-alias`, write an alias. The alias name comes from `--alias`, or the target manifest's `alias`, or the link name.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--name <name>` | Name under the playbooks root (default: the target's basename) |
+| `--alias <alias>` | Custom alias name (default: the link name) |
+| `--no-alias` | Skip alias creation |
+
+`--alias` and `--no-alias` cannot be combined.
+
+**Errors:**
+- Target not found → `'~/dev/foo' not found`
+- Target is a file → `'~/dev/foo' is not a directory`
+- Name contains a slash → `link name may not contain '/'`
+- Name already taken → `"mp" already exists at ~/.claude-playbooks/mp. Use --name to choose a different name`
+- No `.playbook` and stdin is not a TTY → `target has no .playbook and stdin is not a TTY; cannot prompt for metadata. Add a .playbook to the target first`
+
+Because the entry under the playbooks root is a symlink, `info` reports its `Type` as `symlink → <target>` (or `symlink → <target> (BROKEN)` if the target is gone), and `delete` removes only the link, never the target.
 
 ---
 
@@ -434,6 +472,26 @@ Use 'claude-playbook alias dba <alias-name>' to create one.
 
 ---
 
+### `claude-playbook dealias <name>`
+
+Removes every shell alias pointing at the named playbook. This is exactly equivalent to `claude-playbook alias <name> --remove`, provided as a standalone verb for convenience.
+
+```bash
+claude-playbook dealias sre
+```
+
+**Behaviour:**
+1. Resolve the named playbook (error if unknown).
+2. If it has no alias, report that and exit successfully — nothing to do.
+3. Otherwise remove all alias lines whose `CLAUDE_CONFIG_DIR` points at the playbook's directory, and report how many were removed.
+
+The playbook directory itself is untouched; only shell aliases are removed.
+
+**Errors:**
+- Playbook not found → `unknown playbook "sre". Run 'claude-playbook list' to see available playbooks`
+
+---
+
 ### `claude-playbook delete <name>`
 
 Deletes a playbook. (Aliases: `uninstall`, `unlink`.)
@@ -476,34 +534,22 @@ Updates either the `claude-playbook` tool itself, or a specific playbook — bas
 
 #### `claude-playbook update` (no arguments) — self-update
 
-Updates the `claude-playbook` binary to the latest release.
+Reports the current `claude-playbook` version and tells you how to update.
 
 ```bash
 claude-playbook update
-claude-playbook update --check
-claude-playbook update --version v1.1.0
 ```
 
-**Steps:**
-1. Query the GitHub releases API for the latest tag.
-2. Compare to the currently running version.
-3. If newer (or `--version` is given), download the right asset for the current OS/arch.
-4. Replace the running binary in place.
-5. Print old → new version.
+**Automatic in-place self-update is not yet implemented.** The command does **not** download or replace the binary. It prints the currently running version and the command to re-install the latest release:
 
-**Flags:**
+```
+Current version: v1.2.0
 
-| Flag | Description |
-|------|-------------|
-| `--check` | Report availability only; do not install |
-| `--version <tag>` | Install a specific release tag |
+Self-update is not yet implemented. To update, re-run:
+  curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
+```
 
-**Errors:**
-- Already latest (and no `--version`) → prints current version and exits successfully
-- Binary path not writable → `cannot write to <path>. Try 'sudo claude-playbook update' or re-run the install script`
-- Release not found → `release <tag> not found`
-- No asset for current OS/arch → `no binary for <os>/<arch> in release <tag>`
-- Dev build → warns and asks for confirmation before overwriting
+There are no `--check` or `--version` flags. (A future version may add real in-place binary replacement, at which point this subsection will describe it.)
 
 #### `claude-playbook update <name>` — update a playbook
 
@@ -518,7 +564,7 @@ claude-playbook update sre
 2. Check `<playbook>/bin/update-playbook.sh` exists and is executable.
 3. Run the script with:
    - Working directory: the playbook directory
-   - Environment: inherited, with `CLAUDE_PLAYBOOK_TARGET=<name>` and `CLAUDE_PLAYBOOK_PATH=<path>`
+   - Environment: inherited, with `CLAUDE_CONFIG_DIR=<path>`, `CLAUDE_PLAYBOOK_TARGET=<name>`, and `CLAUDE_PLAYBOOK_PATH=<path>`
    - Arguments: any remaining command-line arguments are forwarded to the script
 4. Forward stdout, stderr, and exit code.
 
@@ -535,6 +581,37 @@ git pull --ff-only
 - Update script missing → `"sre" has no update script at bin/update-playbook.sh. This install does not support updates; see its documentation.`
 - Script not executable → `update script is not executable: <path>`
 - Script exits non-zero → exit code forwarded; `update-playbook.sh exited with code <n>` is printed to stderr
+
+---
+
+### `claude-playbook self-uninstall`
+
+Removes `claude-playbook` and everything it created: all playbooks, their shell aliases, the playbooks root directory, and the binary itself. The complete undo for an install.
+
+```bash
+claude-playbook self-uninstall               # prompts
+claude-playbook self-uninstall -y            # skip the prompt
+claude-playbook self-uninstall --dry-run     # show what would be removed
+claude-playbook self-uninstall --keep-data   # remove the binary but keep playbooks
+```
+
+**Steps:**
+1. For each discovered playbook: remove its shell aliases, and (unless `--keep-data`) remove its directory.
+2. Unless `--keep-data`, remove the playbooks root directory.
+3. Sweep any leftover aliases whose `CLAUDE_CONFIG_DIR` points anywhere inside the playbooks root.
+4. Unless `--keep-binary`, remove the running binary. If removal is denied by permissions, print the `sudo rm <path>` command to run manually rather than failing.
+5. Print a summary of what was removed and remind the user to reload their shell.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `-y`, `--yes` | Skip the confirmation prompt |
+| `--keep-data` | Preserve the playbooks directory and its playbooks |
+| `--keep-binary` | Leave the binary in place |
+| `--dry-run` | Print what would be removed without changing anything |
+
+`--dry-run` never prompts and never modifies anything. Without `--dry-run` or `-y`, the command prints what will be removed and asks for confirmation.
 
 ---
 
