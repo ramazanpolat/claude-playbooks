@@ -15,25 +15,18 @@ const FileName = ".playbook"
 
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
-	Version     string  `toml:"version"`
-	Name        string  `toml:"name"`
-	Alias       string  `toml:"alias"`
-	Subdir      string  `toml:"subdir"`
-	Description string  `toml:"description"`
-	Children    []Child `toml:"children"`
-}
-
-// Child is one entry in the [[children]] table.
-type Child struct {
+	Version     string `toml:"version"`
 	Name        string `toml:"name"`
-	Path        string `toml:"path"`
 	Alias       string `toml:"alias"`
+	Subdir      string `toml:"subdir"`
 	Description string `toml:"description"`
+	Homepage    string `toml:"homepage"`
+	Author      string `toml:"author"`
 }
 
 // Read parses the .playbook file inside dir. Returns (nil, nil) if the file
 // does not exist. Returns an error if the file exists but is invalid TOML or
-// has structural problems (duplicate child names, etc.).
+// has structural problems.
 func Read(dir string) (*Manifest, error) {
 	path := filepath.Join(dir, FileName)
 	data, err := os.ReadFile(path)
@@ -62,29 +55,7 @@ func Exists(dir string) bool {
 // validate checks structural invariants. Path existence is checked by callers
 // that have access to the playbook directory.
 func (m *Manifest) validate(path string) error {
-	if err := validateRelativePath(path, "subdir", m.Subdir); err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, c := range m.Children {
-		if c.Name == "" {
-			return fmt.Errorf("invalid .playbook at %s: child entry missing 'name'", path)
-		}
-		if c.Path == "" {
-			return fmt.Errorf("invalid .playbook at %s: child %q missing 'path'", path, c.Name)
-		}
-		if err := validateRelativePath(path, fmt.Sprintf("child %q path", c.Name), c.Path); err != nil {
-			return err
-		}
-		if strings.Contains(c.Name, "/") {
-			return fmt.Errorf("invalid .playbook at %s: child name %q must not contain '/'", path, c.Name)
-		}
-		if seen[c.Name] {
-			return fmt.Errorf("invalid .playbook at %s: duplicate child name %q", path, c.Name)
-		}
-		seen[c.Name] = true
-	}
-	return nil
+	return validateRelativePath(path, "subdir", m.Subdir)
 }
 
 func validateRelativePath(manifestPath, field, value string) error {
@@ -131,16 +102,11 @@ func Write(dir string, m *Manifest) error {
 	if m.Description != "" {
 		fmt.Fprintf(&b, "description = %q\n", m.Description)
 	}
-	for _, c := range m.Children {
-		b.WriteString("\n[[children]]\n")
-		fmt.Fprintf(&b, "name = %q\n", c.Name)
-		fmt.Fprintf(&b, "path = %q\n", c.Path)
-		if c.Alias != "" {
-			fmt.Fprintf(&b, "alias = %q\n", c.Alias)
-		}
-		if c.Description != "" {
-			fmt.Fprintf(&b, "description = %q\n", c.Description)
-		}
+	if m.Homepage != "" {
+		fmt.Fprintf(&b, "homepage = %q\n", m.Homepage)
+	}
+	if m.Author != "" {
+		fmt.Fprintf(&b, "author = %q\n", m.Author)
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }

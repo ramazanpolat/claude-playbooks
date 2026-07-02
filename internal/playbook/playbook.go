@@ -1,9 +1,9 @@
 // Package playbook discovers and describes playbooks on disk.
 //
-// A directory is a playbook if it contains a .playbook file. Discovery looks
-// at the immediate children of the playbooks root only. A top-level playbook's
-// .playbook may declare child playbooks under a [[children]] table; those
-// children are exposed as <top-level>/<child-name>.
+// Discovery is flat: every direct child directory of the playbooks root is
+// exactly one playbook. A .playbook manifest is optional and supplies metadata
+// only; a bare directory is a perfectly valid playbook. There is no nesting and
+// no notion of child playbooks.
 package playbook
 
 import (
@@ -20,51 +20,32 @@ import (
 
 // Playbook represents a discovered playbook.
 type Playbook struct {
-	Name        string    // top-level: "experiment". child: "awesome/dba".
-	Path        string    // absolute Claude config directory path
-	RootPath    string    // absolute installed root directory path; same as Path for flat playbooks
-	Alias       string    // alias name, "" if none
-	AliasLine   string    // full alias line, "" if none
-	LastUsed    time.Time // directory mtime
-	IsChild     bool      // true if this playbook is a child of another
-	Parent      string    // top-level name; "" for top-level playbooks
-	ChildSpec   *manifest.Child
-	Manifest    *manifest.Manifest // nil for children that have no own manifest
-	Description string             // resolved from manifest (own > parent's children entry)
+	Name        string             // directory name under the playbooks root
+	Path        string             // absolute Claude config directory path
+	RootPath    string             // absolute installed root directory path; same as Path unless a manifest subdir is set
+	Alias       string             // alias name, "" if none
+	AliasLine   string             // full alias line, "" if none
+	LastUsed    time.Time          // directory mtime
+	Manifest    *manifest.Manifest // nil when the directory has no .playbook
+	Description string             // resolved from manifest, if any
 }
 
 func (p *Playbook) HasAlias() bool { return p.Alias != "" }
 
 // Discover returns all playbooks under playbooksDir, enriched with alias info.
-// Sorted: top-level playbooks alphabetically, with each top-level immediately
-// followed by its children in declaration order.
+// Playbooks are sorted alphabetically by name.
 func Discover(playbooksDir, shellConfig string) ([]*Playbook, error) {
-	tops, err := discoverTopLevel(playbooksDir)
+	pbs, err := discover(playbooksDir)
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(tops, func(i, j int) bool { return tops[i].Name < tops[j].Name })
+	sort.Slice(pbs, func(i, j int) bool { return pbs[i].Name < pbs[j].Name })
 
 	aliases, _ := shell.ReadAll(shellConfig)
-
-	var out []*Playbook
-	for _, top := range tops {
-		attachAlias(top, aliases)
-		out = append(out, top)
-		if top.Manifest == nil {
-			continue
-		}
-		for i := range top.Manifest.Children {
-			c := &top.Manifest.Children[i]
-			child := buildChild(top, c)
-			if child == nil {
-				continue
-			}
-			attachAlias(child, aliases)
-			out = append(out, child)
-		}
+	for _, pb := range pbs {
+		attachAlias(pb, aliases)
 	}
-	return out, nil
+	return pbs, nil
 }
 
 // Find resolves a playbook by name. Returns (nil, nil) when not found.
@@ -93,30 +74,9 @@ func Require(playbooksDir, shellConfig, name string) (*Playbook, error) {
 	return pb, nil
 }
 
-// Children returns the resolved child playbooks of a top-level playbook.
-// Returns nil if pb is not a top-level playbook with a manifest declaring
-// children.
-func Children(playbooksDir, shellConfig string, pb *Playbook) []*Playbook {
-	if pb == nil || pb.IsChild || pb.Manifest == nil {
-		return nil
-	}
-	aliases, _ := shell.ReadAll(shellConfig)
-	var out []*Playbook
-	for i := range pb.Manifest.Children {
-		c := &pb.Manifest.Children[i]
-		child := buildChild(pb, c)
-		if child == nil {
-			continue
-		}
-		attachAlias(child, aliases)
-		out = append(out, child)
-	}
-	return out
-}
-
 // --- internals ---
 
-func discoverTopLevel(root string) ([]*Playbook, error) {
+func discover(root string) ([]*Playbook, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -138,16 +98,10 @@ func discoverTopLevel(root string) ([]*Playbook, error) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		if !manifest.Exists(path) {
-			continue
-		}
-		m, err := manifest.Read(path)
-		if err != nil {
-			// Surface invalid manifest by skipping the entry but keep going so
-			// other playbooks remain discoverable. The error will surface via
-			// commands that load the manifest directly.
-			continue
-		}
+		// A manifest is optional; if present it supplies metadata. An invalid
+		// manifest is treated as absent so the directory stays discoverable;
+		// the error surfaces via commands that load the manifest directly.
+		m, _ := manifest.Read(path)
 		configPath := path
 		configInfo := info
 		if m != nil {
@@ -169,35 +123,6 @@ func discoverTopLevel(root string) ([]*Playbook, error) {
 		out = append(out, pb)
 	}
 	return out, nil
-}
-
-func buildChild(parent *Playbook, c *manifest.Child) *Playbook {
-	rootPath := parent.RootPath
-	if rootPath == "" {
-		rootPath = parent.Path
-	}
-	childPath := filepath.Join(rootPath, c.Path)
-	info, err := os.Stat(childPath)
-	if err != nil || !info.IsDir() {
-		return nil
-	}
-	pb := &Playbook{
-		Name:        parent.Name + "/" + c.Name,
-		Path:        childPath,
-		RootPath:    childPath,
-		LastUsed:    info.ModTime(),
-		IsChild:     true,
-		Parent:      parent.Name,
-		ChildSpec:   c,
-		Description: c.Description,
-	}
-	if own, _ := manifest.Read(childPath); own != nil {
-		pb.Manifest = own
-		if pb.Description == "" {
-			pb.Description = own.Description
-		}
-	}
-	return pb
 }
 
 func resolveManifestSubdir(root string, m *manifest.Manifest) (string, os.FileInfo) {

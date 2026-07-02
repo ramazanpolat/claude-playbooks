@@ -41,6 +41,8 @@ func detectShellConfig() (string, error) {
 		return filepath.Join(home, ".zshrc"), nil
 	case strings.Contains(shell, "bash"):
 		return filepath.Join(home, ".bashrc"), nil
+	case strings.Contains(shell, "fish"):
+		return filepath.Join(home, ".config", "fish", "config.fish"), nil
 	default:
 		return "", fmt.Errorf("unknown shell %q. Use --shell-config to specify config file", shell)
 	}
