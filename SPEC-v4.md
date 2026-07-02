@@ -6,18 +6,6 @@
 
 Playbooks solve a simple problem: Claude Code stores everything in a single config directory. If you want to try a new hook, a different model default, or a custom CLAUDE.md without risking your main setup, you need a separate environment. Under the hood, a playbook is just a directory, and Claude Code reads from wherever `CLAUDE_CONFIG_DIR` points. `claude-playbook` makes creating, running, sharing, and maintaining those directories easy.
 
-### What changed from v3
-
-v4 removes nested playbooks entirely and makes the model flat:
-
-- **There are no groups, no nested playbooks, no `playbooks`/`children` manifest field, and no discovery depth rules.** Every install is exactly one playbook.
-- **Each direct child directory of the playbooks root is one playbook.** A `.playbook` manifest is never required — a bare directory is a valid playbook. When present, the manifest provides metadata only.
-- A playbook's **name is a single directory name** (no slashes, no paths).
-- The multi-playbook-repo use case is served by **installing individual directories** out of a monorepo with `--subdir` (or a GitHub `/tree/<ref>/<path>` URL), each producing its own independent, flat playbook.
-- `install` copies the selected slice into the playbooks root and never mutates the source.
-
-The result: one install → one playbook, and "the filesystem is the source of truth" holds with no special cases to memorize.
-
 ---
 
 ## Concepts
