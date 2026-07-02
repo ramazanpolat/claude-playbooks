@@ -1,5 +1,6 @@
 // Package manifest reads and writes the .playbook TOML file inside a playbook
-// directory. The presence of the file marks the directory as a playbook.
+// directory. The file is optional and holds metadata only; a directory is a
+// valid playbook with or without it.
 package manifest
 
 import (
@@ -67,17 +68,6 @@ func validateRelativePath(manifestPath, field, value string) error {
 		return fmt.Errorf("invalid .playbook at %s: %s must be a relative path below the playbook root", manifestPath, field)
 	}
 	return nil
-}
-
-// WriteMinimal creates a new .playbook file with version and name fields.
-func WriteMinimal(dir, name string) error {
-	path := filepath.Join(dir, FileName)
-	var b strings.Builder
-	b.WriteString(`version = "0.1.0"` + "\n")
-	if name != "" {
-		fmt.Fprintf(&b, "name = %q\n", name)
-	}
-	return os.WriteFile(path, []byte(b.String()), 0644)
 }
 
 // Write serializes a manifest to the .playbook file inside dir. Used by `link`

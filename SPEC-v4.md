@@ -577,7 +577,7 @@ git pull --ff-only
 ```
 
 **Errors:**
-- Target not found → `"sre" not found under ~/.claude-playbooks`
+- Target not found → `unknown playbook "sre". Run 'claude-playbook list' to see available playbooks`
 - Update script missing → `"sre" has no update script at bin/update-playbook.sh. This install does not support updates; see its documentation.`
 - Script not executable → `update script is not executable: <path>`
 - Script exits non-zero → exit code forwarded; `update-playbook.sh exited with code <n>` is printed to stderr
