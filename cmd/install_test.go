@@ -236,9 +236,7 @@ func resetCommandTestState(t *testing.T) {
 	installSubdir = ""
 	installBranch = ""
 	installAlias = ""
-	installAliasAll = false
 	installNoAlias = false
-	installInit = false
 	renameAlias = ""
 	renameNoAlias = false
 	selfUninstallYes = false
@@ -252,9 +250,7 @@ func resetCommandTestState(t *testing.T) {
 		installSubdir = ""
 		installBranch = ""
 		installAlias = ""
-		installAliasAll = false
 		installNoAlias = false
-		installInit = false
 		renameAlias = ""
 		renameNoAlias = false
 		selfUninstallYes = false

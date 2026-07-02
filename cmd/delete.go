@@ -19,7 +19,7 @@ var deleteYes bool
 var deleteCmd = &cobra.Command{
 	Use:     "delete <name>",
 	Aliases: []string{"uninstall", "unlink"},
-	Short:   "Delete a top-level playbook (and all its children)",
+	Short:   "Delete a playbook",
 	Args:    cobra.ExactArgs(1),
 	RunE:    runDelete,
 }
@@ -37,7 +37,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	if strings.Contains(name, "/") {
-		return fmt.Errorf("%q is a child playbook; delete the parent or run 'claude-playbook dealias %s' to drop just the alias", name, name)
+		return fmt.Errorf("playbook name cannot contain '/'")
 	}
 
 	pb, err := playbook.Find(playbooksDir, shellConfig, name)
@@ -53,11 +53,6 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		}
 		return deleteOrphan(playbooksDir, shellConfig, name, path)
 	}
-	if pb.IsChild {
-		return fmt.Errorf("%q is a child playbook; delete the parent %q or run 'claude-playbook dealias %s' to drop just the alias", name, pb.Parent, name)
-	}
-
-	children := playbook.Children(playbooksDir, shellConfig, pb)
 
 	if !deleteYes {
 		aliasInfo := "(no alias)"
@@ -75,16 +70,6 @@ func runDelete(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Config:   %s\n", pb.Path)
 		}
 		fmt.Printf("Alias:    %s\n", aliasInfo)
-		if len(children) > 0 {
-			fmt.Printf("Children: %d\n", len(children))
-			for _, c := range children {
-				if c.HasAlias() {
-					fmt.Printf("  %s    (alias: %s — will be removed)\n", c.Name, c.Alias)
-				} else {
-					fmt.Printf("  %s    (no alias)\n", c.Name)
-				}
-			}
-		}
 		fmt.Printf("Contents: %d files, %d directories\n", fileCount, dirCount)
 		if !confirm("\nPermanently delete? [y/N] ") {
 			fmt.Println("Cancelled.")
@@ -107,11 +92,11 @@ func runDelete(cmd *cobra.Command, args []string) error {
 }
 
 // deleteOrphan handles a directory that exists at the expected path but is
-// not a discoverable playbook (e.g. .playbook removed). Cleans up any aliases
-// pointing into it and removes the directory.
+// not a discoverable playbook (e.g. a dotfile-named entry). Cleans up any
+// aliases pointing into it and removes the directory.
 func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 	if !deleteYes {
-		fmt.Printf("Directory %q exists at %s but has no .playbook.\n", name, path)
+		fmt.Printf("Directory %q exists at %s but is not a discoverable playbook.\n", name, path)
 		if !confirm("Permanently delete the directory and any aliases pointing into it? [y/N] ") {
 			fmt.Println("Cancelled.")
 			return nil

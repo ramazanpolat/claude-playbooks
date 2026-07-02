@@ -63,7 +63,6 @@ func printUpdateHelp() {
 	fmt.Println()
 	fmt.Println("Without <name>: self-update the claude-playbook binary.")
 	fmt.Println("With <name>: run <playbook>/bin/update-playbook.sh, forwarding extra args.")
-	fmt.Println("Children are not updatable independently — pass the parent's name.")
 }
 
 func runSelfUpdate() error {
@@ -82,9 +81,6 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 	if err != nil {
 		return err
 	}
-	if pb.IsChild {
-		return fmt.Errorf("update operates on top-level playbooks; %q is a child of %q. Try: claude-playbook update %s", name, pb.Parent, pb.Parent)
-	}
 
 	script := filepath.Join(pb.Path, "bin", "update-playbook.sh")
 	info, err := os.Stat(script)
@@ -97,7 +93,11 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 
 	c := exec.Command(script, scriptArgs...)
 	c.Dir = pb.Path
-	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+pb.Path)
+	c.Env = append(os.Environ(),
+		"CLAUDE_CONFIG_DIR="+pb.Path,
+		"CLAUDE_PLAYBOOK_TARGET="+name,
+		"CLAUDE_PLAYBOOK_PATH="+pb.Path,
+	)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

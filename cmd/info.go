@@ -50,9 +50,6 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	fileCount, dirCount := countContents(pb.Path)
 
 	fmt.Printf("Name:        %s\n", pb.Name)
-	if pb.IsChild {
-		fmt.Printf("Parent:      %s\n", pb.Parent)
-	}
 	if pb.Manifest != nil && pb.Manifest.Version != "" {
 		fmt.Printf("Version:     %s\n", pb.Manifest.Version)
 	}
@@ -64,42 +61,18 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	if pb.Description != "" {
 		fmt.Printf("Description: %s\n", pb.Description)
 	}
+	if pb.Manifest != nil && pb.Manifest.Homepage != "" {
+		fmt.Printf("Homepage:    %s\n", pb.Manifest.Homepage)
+	}
+	if pb.Manifest != nil && pb.Manifest.Author != "" {
+		fmt.Printf("Author:      %s\n", pb.Manifest.Author)
+	}
 
-	if !pb.IsChild {
-		updater := filepath.Join(pb.Path, "bin", "update-playbook.sh")
-		if s, err := os.Stat(updater); err == nil && s.Mode()&0111 != 0 {
-			fmt.Printf("Updater:     bin/update-playbook.sh\n")
-		} else {
-			fmt.Printf("Updater:     (none)\n")
-		}
-
-		children := playbook.Children(playbooksDir, shellConfig, pb)
-		if len(children) > 0 {
-			fmt.Println("Children:")
-			nameW := 0
-			pathW := 0
-			for _, c := range children {
-				if l := len(c.Name); l > nameW {
-					nameW = l
-				}
-				if c.ChildSpec != nil {
-					if l := len(c.ChildSpec.Path); l > pathW {
-						pathW = l
-					}
-				}
-			}
-			for _, c := range children {
-				ap := "no alias"
-				if c.HasAlias() {
-					ap = "alias: " + c.Alias
-				}
-				cp := ""
-				if c.ChildSpec != nil {
-					cp = c.ChildSpec.Path
-				}
-				fmt.Printf("  %-*s  %-*s  (%s)\n", nameW, c.Name, pathW, cp, ap)
-			}
-		}
+	updater := filepath.Join(pb.Path, "bin", "update-playbook.sh")
+	if s, err := os.Stat(updater); err == nil && s.Mode()&0111 != 0 {
+		fmt.Printf("Updater:     bin/update-playbook.sh\n")
+	} else {
+		fmt.Printf("Updater:     (none)\n")
 	}
 
 	return nil

@@ -38,10 +38,10 @@ func runRename(cmd *cobra.Command, args []string) error {
 	newName := args[1]
 
 	if strings.Contains(oldName, "/") {
-		return fmt.Errorf("%q is a child playbook; rename children by editing the parent's .playbook", oldName)
+		return fmt.Errorf("playbook name cannot contain '/'")
 	}
 	if strings.Contains(newName, "/") {
-		return fmt.Errorf("playbook names may not contain '/' here")
+		return fmt.Errorf("playbook name cannot contain '/'")
 	}
 	if err := validateTopLevelName("new name", newName); err != nil {
 		return err
@@ -56,9 +56,6 @@ func runRename(cmd *cobra.Command, args []string) error {
 	pb, err := playbook.Require(playbooksDir, shellConfig, oldName)
 	if err != nil {
 		return err
-	}
-	if pb.IsChild {
-		return fmt.Errorf("%q is a child playbook; rename children by editing %s/.playbook", oldName, pb.Parent)
 	}
 
 	oldRoot := pb.RootPath

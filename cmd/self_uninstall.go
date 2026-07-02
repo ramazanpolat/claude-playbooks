@@ -56,7 +56,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	if !selfUninstallYes && !selfUninstallDryRun {
 		fmt.Printf("This will remove:\n")
 		if !selfUninstallKeepData {
-			fmt.Printf("  Playbooks:     %d playbook(s) under %s\n", countTopLevel(pbs), playbooksDir)
+			fmt.Printf("  Playbooks:     %d playbook(s) under %s\n", len(pbs), playbooksDir)
 		}
 		if !selfUninstallKeepData {
 			fmt.Printf("  Directory:     %s\n", playbooksDir)
@@ -76,13 +76,11 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		fmt.Println("[dry-run] Would remove:")
 		if !selfUninstallKeepData {
 			for _, pb := range pbs {
-				if !pb.IsChild {
-					removePath := pb.RootPath
-					if removePath == "" {
-						removePath = pb.Path
-					}
-					fmt.Printf("  playbook: %s (%s)\n", pb.Name, removePath)
+				removePath := pb.RootPath
+				if removePath == "" {
+					removePath = pb.Path
 				}
+				fmt.Printf("  playbook: %s (%s)\n", pb.Name, removePath)
 			}
 		}
 		if !selfUninstallKeepData {
@@ -98,11 +96,8 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	var removed []string
 	var needsManual []string
 
-	// Step 1: remove each top-level playbook's aliases and directory.
+	// Step 1: remove each playbook's aliases and directory.
 	for _, pb := range pbs {
-		if pb.IsChild {
-			continue
-		}
 		removePath := pb.RootPath
 		if removePath == "" {
 			removePath = pb.Path
@@ -172,14 +167,4 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  source %s\n", shellConfig)
 
 	return nil
-}
-
-func countTopLevel(pbs []*playbook.Playbook) int {
-	n := 0
-	for _, pb := range pbs {
-		if !pb.IsChild {
-			n++
-		}
-	}
-	return n
 }

@@ -19,13 +19,11 @@ import (
 )
 
 var (
-	installName     string
-	installSubdir   string
-	installBranch   string
-	installAlias    string
-	installAliasAll bool
-	installNoAlias  bool
-	installInit     bool
+	installName    string
+	installSubdir  string
+	installBranch  string
+	installAlias   string
+	installNoAlias bool
 )
 
 var installCmd = &cobra.Command{
@@ -39,18 +37,13 @@ func init() {
 	installCmd.Flags().StringVar(&installName, "name", "", "directory name under the playbooks root")
 	installCmd.Flags().StringVar(&installSubdir, "subdir", "", "cherry-pick: install only this subdirectory of the source")
 	installCmd.Flags().StringVar(&installBranch, "branch", "", "Git URL only: clone this ref instead of the default branch")
-	installCmd.Flags().StringVar(&installAlias, "alias", "", "alias for the installed top-level playbook")
-	installCmd.Flags().BoolVar(&installAliasAll, "alias-all", false, "tree install only: also write aliases for declared children")
+	installCmd.Flags().StringVar(&installAlias, "alias", "", "alias for the installed playbook")
 	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip alias creation entirely")
-	installCmd.Flags().BoolVar(&installInit, "init", false, "if source has no .playbook, write a minimal one at the install destination")
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	if installNoAlias && (installAlias != "" || installAliasAll) {
-		return fmt.Errorf("--no-alias cannot be combined with --alias or --alias-all")
-	}
-	if installAlias != "" && installAliasAll {
-		return fmt.Errorf("--alias and --alias-all cannot be used together")
+	if installNoAlias && installAlias != "" {
+		return fmt.Errorf("--no-alias and --alias cannot be used together")
 	}
 
 	source := args[0]
@@ -119,23 +112,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to copy from staging: %w", err)
 	}
 
-	// Find / require / write a .playbook at the install destination.
+	// Read the optional .playbook at the install destination. A missing
+	// manifest is fine: the installed directory is a valid flat playbook.
 	m, err := manifest.Read(dest)
 	if err != nil {
 		os.RemoveAll(dest)
 		return err
-	}
-	if m == nil {
-		if !installInit {
-			os.RemoveAll(dest)
-			return fmt.Errorf("%s has no .playbook. Add one to the source, or pass --init", dest)
-		}
-		if err := manifest.WriteMinimal(dest, targetName); err != nil {
-			os.RemoveAll(dest)
-			return fmt.Errorf("failed to write minimal .playbook: %w", err)
-		}
-		// Re-read so downstream resolution sees the freshly written file.
-		m, _ = manifest.Read(dest)
 	}
 	configDest := dest
 	if !cherryPick && m != nil && m.Subdir != "" {
@@ -147,45 +129,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Validate children for tree install. Cherry-pick installs are always flat.
-	if !cherryPick && m != nil {
-		for _, c := range m.Children {
-			childPath := filepath.Join(dest, c.Path)
-			info, err := os.Stat(childPath)
-			if err != nil || !info.IsDir() {
-				os.RemoveAll(dest)
-				return fmt.Errorf("child %q path %q not found", c.Name, c.Path)
-			}
-		}
-	}
-
-	if err := syncInstalledCredentials(dest, configDest, m, cherryPick); err != nil {
+	if err := auth.SyncCredentials(configDest); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
-	if cherryPick {
-		fmt.Printf("Installed %q at %s\n", targetName, dest)
-	} else {
-		childCount := 0
-		if m != nil {
-			childCount = len(m.Children)
-		}
-		fmt.Printf("Installed %q at %s\n", targetName, dest)
-		if childCount == 0 {
-			fmt.Println("1 playbook (no children).")
-		} else {
-			fmt.Printf("1 root playbook + %d child%s:\n", childCount, childPlural(childCount))
-		}
-	}
+	fmt.Printf("Installed %q at %s\n", targetName, dest)
 
-	// CLAUDE.md warnings.
+	// CLAUDE.md warning.
 	warnIfNoClaudeMD(configDest, targetName)
-	if !cherryPick && m != nil {
-		for _, c := range m.Children {
-			cp := filepath.Join(dest, c.Path)
-			warnIfNoClaudeMD(cp, targetName+"/"+c.Name)
-		}
-	}
 
 	// Alias handling.
 	if installNoAlias {
@@ -198,16 +149,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Always write the root alias unless --no-alias.
-	rootAlias := installAlias
-	if rootAlias == "" {
+	// Write the single alias unless --no-alias.
+	aliasName := installAlias
+	if aliasName == "" {
 		switch {
 		case m != nil && m.Alias != "":
-			rootAlias = m.Alias
+			aliasName = m.Alias
 		case m != nil && m.Name != "":
-			rootAlias = m.Name
+			aliasName = m.Name
 		default:
-			rootAlias = targetName
+			aliasName = targetName
 		}
 	}
 
@@ -217,61 +168,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		taken[e.AliasName] = true
 	}
 
-	if writeAlias(shellConfig, rootAlias, configDest, taken) {
-		fmt.Printf("Alias:    %s → %s\n", rootAlias, targetName)
+	if writeAlias(shellConfig, aliasName, configDest, taken) {
+		fmt.Printf("Alias:    %s → %s\n", aliasName, targetName)
 	} else {
-		fmt.Fprintf(os.Stderr, "Warning: alias %q already in use; skipped. Set one manually with 'claude-playbook alias %s <alias>'\n", rootAlias, targetName)
-	}
-
-	// Children aliases (tree install only) when --alias-all is set.
-	if !cherryPick && installAliasAll && m != nil {
-		for _, c := range m.Children {
-			if c.Alias == "" {
-				continue
-			}
-			childPath := filepath.Join(dest, c.Path)
-			childName := targetName + "/" + c.Name
-			alias := c.Alias
-			if taken[alias] {
-				prefixed := targetName + "-" + alias
-				if taken[prefixed] {
-					fmt.Fprintf(os.Stderr, "Warning: alias %q (and fallback %q) already in use for %s; skipped\n", alias, prefixed, childName)
-					continue
-				}
-				alias = prefixed
-			}
-			if writeAlias(shellConfig, alias, childPath, taken) {
-				fmt.Printf("Alias:    %s → %s\n", alias, childName)
-			}
-		}
-	} else if !cherryPick && m != nil && len(m.Children) > 0 && !installAliasAll {
-		fmt.Println()
-		fmt.Println("Children installed without aliases. Pass --alias-all on next install, or:")
-		for _, c := range m.Children {
-			suggestion := c.Alias
-			if suggestion == "" {
-				suggestion = c.Name
-			}
-			fmt.Printf("  claude-playbook alias %s/%s %s\n", targetName, c.Name, suggestion)
-		}
+		fmt.Fprintf(os.Stderr, "Warning: alias %q already in use; skipped. Set one manually with 'claude-playbook alias %s <alias>'\n", aliasName, targetName)
 	}
 
 	fmt.Printf("\nReload your shell or run:\n  source %s\n", shellConfig)
-	return nil
-}
-
-func syncInstalledCredentials(dest, configDest string, m *manifest.Manifest, cherryPick bool) error {
-	if err := auth.SyncCredentials(configDest); err != nil {
-		return err
-	}
-	if cherryPick || m == nil {
-		return nil
-	}
-	for _, c := range m.Children {
-		if err := auth.SyncCredentials(filepath.Join(dest, c.Path)); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -427,13 +330,6 @@ func lastSegmentOfPath(p string) string {
 		return p
 	}
 	return p[i+1:]
-}
-
-func childPlural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "ren"
 }
 
 func pluralS(n int) string {

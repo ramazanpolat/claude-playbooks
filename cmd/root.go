@@ -65,10 +65,10 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if len(pbs) == 0 {
 		fmt.Println("No playbooks installed yet. Get started with one of:")
 		fmt.Println()
-		fmt.Println("  # Install the example multi-playbook tree (DBA, SRE, SecOps, frontend, ...):")
-		fmt.Println("  claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --alias-all")
+		fmt.Println("  # Install a single playbook from a Git repo:")
+		fmt.Println("  claude-playbook install https://github.com/user/pai")
 		fmt.Println()
-		fmt.Println("  # Cherry-pick a single role (e.g. DBA):")
+		fmt.Println("  # Cherry-pick one playbook out of a monorepo (e.g. DBA):")
 		fmt.Println("  claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/dba")
 		fmt.Println()
 		fmt.Println("  # Create your own from scratch:")
@@ -82,16 +82,9 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	fmt.Println("Available playbooks:")
 	fmt.Println()
 
-	display := func(pb *playbook.Playbook) string {
-		if pb.IsChild {
-			return "  " + pb.Name
-		}
-		return pb.Name
-	}
-
 	maxLen := 0
 	for _, pb := range pbs {
-		if l := len(display(pb)); l > maxLen {
+		if l := len(pb.Name); l > maxLen {
 			maxLen = l
 		}
 	}
@@ -100,9 +93,9 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	for _, pb := range pbs {
 		runStr := fmt.Sprintf("claude-playbook run %s", pb.Name)
 		if pb.HasAlias() {
-			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, display(pb), cmdColW, runStr, pb.Alias)
+			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, pb.Alias)
 		} else {
-			fmt.Printf("  %-*s  %-*s  (no alias set)\n", maxLen, display(pb), cmdColW, runStr)
+			fmt.Printf("  %-*s  %-*s  (no alias set)\n", maxLen, pb.Name, cmdColW, runStr)
 		}
 	}
 

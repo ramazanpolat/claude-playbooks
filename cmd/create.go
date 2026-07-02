@@ -10,7 +10,6 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
@@ -38,7 +37,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	name := args[0]
 	if strings.Contains(name, "/") {
-		return fmt.Errorf("'create' only creates top-level playbooks. To add a child, declare it in the parent's .playbook")
+		return fmt.Errorf("playbook name cannot contain '/'")
 	}
 	if err := validateTopLevelName("playbook name", name); err != nil {
 		return err
@@ -60,10 +59,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	if err := auth.SyncCredentials(dest); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
-	}
-
-	if err := manifest.WriteMinimal(dest, name); err != nil {
-		return fmt.Errorf("failed to write .playbook: %w", err)
 	}
 
 	if err := writeDefaultClaudeMD(dest, name); err != nil {
@@ -96,15 +91,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// lastSegment returns the part after the last '/' in name.
-func lastSegment(name string) string {
-	i := strings.LastIndex(name, "/")
-	if i < 0 {
-		return name
-	}
-	return name[i+1:]
-}
-
 // defaultClaudeMD is written into a freshly created playbook so that the
 // Claude Code session opened inside it knows what a playbook is and how this
 // directory relates to the rest of the user's setup. Users are expected to
@@ -112,7 +98,7 @@ func lastSegment(name string) string {
 const defaultClaudeMD = "# Playbook: %s\n\n" +
 	"This Claude Code session is running inside an **isolated playbook** — a self-contained Claude Code config directory managed by `claude-playbook`.\n\n" +
 	"Your `CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, custom agents, slash commands, and this `CLAUDE.md` are all scoped here. Nothing in this playbook affects the user's default `~/.claude` install or other playbooks.\n\n" +
-	"The directory is marked as a playbook by the `.playbook` TOML manifest in its root. Don't delete that file — it is the marker `claude-playbook` uses to discover this playbook.\n\n" +
+	"This directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n" +
 	"## Useful `claude-playbook` commands\n\n" +
 	"```\n" +
 	"claude-playbook list           # list playbooks and aliases\n" +
