@@ -1,8 +1,16 @@
-# claude-playbook Binary Test Suite
+# claude-playbook Binary Test Suite (herdr + sprite)
 
-This suite is for Claude Code or Codex agents testing `claude-playbook` from a freshly built binary. The binary must not be installed. Every command should call the built binary by absolute path.
+This suite is for a Claude Code (or compatible) agent testing `claude-playbook`
+from a freshly built binary. The binary must not be installed on the host.
+Every command calls the built binary by absolute path.
 
-This is an operator-driven cmux acceptance suite. The agent must create a real cmux terminal pane, send commands to that pane, read the terminal screen between sections, and judge pass/fail from visible output. Do not run this suite as a hidden local script through `exec_command`, and do not collapse it into a background runner that bypasses the terminal UI.
+This is an **operator-driven herdr acceptance suite**. The agent drives a real
+**herdr pane** that holds a **`sprite console`** into an isolated Sprite VM.
+All test commands run inside the sprite; the host's real `~/.claude-playbooks`,
+`~/.zshrc`, `~/.claude`, and installed `claude-playbook` are never touched —
+isolation comes from the VM, not from environment gymnastics. Do not run this
+suite as a hidden local script; keep the pane visible and read it between
+sections.
 
 Default branch under test:
 
@@ -12,96 +20,106 @@ main
 
 For feature branches, set `BRANCH` before running the bootstrap step.
 
+## Requirements
+
+- `herdr` on the host (the agent runs inside a herdr pane; `HERDR_ENV=1`).
+- `sprite` CLI authenticated on the host.
+- A sprite with: `go`, `git`, and — for the live/real-user sections — `claude`
+  installed plus a working long-lived token at
+  `~/.config/claude-code/oauth-token` (exported as `CLAUDE_CODE_OAUTH_TOKEN`
+  in the sprite's shell rc). GitHub auth (`gh auth status`) is required only
+  while this repo is private. The sprite `first` satisfies all of this; any
+  sprite provisioned per the `test-on-sprite` skill works.
+
 ## Rules
 
-- Run this in a new cmux terminal pane.
-- The runner must be Codex or Claude Code driving that pane with `cmux send`, `cmux send-key`, and `cmux read-screen`, simulating a user at a terminal.
-- Keep the test pane visible/inspectable and report its pane/surface refs.
-- Read the screen after every major section before continuing.
-- Clone `https://github.com/ramazanpolat/claude-playbooks` into a temporary directory.
-- Switch to the test branch before building.
-- Build the binary to a temporary path outside the repo.
-- Do not run `install.sh`.
-- Do not copy or move the binary into `/usr/local/bin`, `/opt/homebrew/bin`, or any other PATH install location.
-- Use `CLAUDE_PLAYBOOKS_DIR` for temporary playbook storage.
-- Use `CLAUDE_SHELL_CONFIG` only when testing alias writes, so the real `~/.zshrc` is not touched.
-- Do not install the built binary.
-- Do not modify the real `~/.claude-playbooks`, `~/.zshrc`, or installed `claude-playbook`.
-- The live auth smoke test uses a temporary `HOME` seeded from the user's current Claude auth metadata, so the test does not write to the real `~/.claude` directory.
+- Drive the pane with `herdr pane send-text` + `herdr pane send-keys ... Enter`,
+  and read output with `herdr pane read ... --source visible --format text`.
+  Simulate a user at a terminal; inspect the screen after every major section.
+- Never split with `--current`; always split from the agent's own explicit
+  pane id (`$HERDR_PANE_ID`).
+- **Guard every destructive in-pane command with a hostname check** — a
+  `sprite console` can silently drop back to the host shell, and unguarded
+  commands then run on the host:
+  `if [ "$(hostname)" = <sprite-name> ]; then ...; else echo GUARD_FAIL; fi`
+- Build the binary to a path outside the repo (e.g. under the suite temp
+  root). Do not run `install.sh`. Do not copy the binary into any PATH
+  location — in the sprite or on the host.
+- Use `CLAUDE_PLAYBOOKS_DIR` and `CLAUDE_SHELL_CONFIG` under a suite temp root
+  inside the sprite, so repeated runs don't require a checkpoint restore.
+- zsh gotcha: after writing an alias, `source ~/.zshrc && <alias>` fails —
+  zsh resolves aliases at parse time. Send `source` and the alias as two
+  separate commands.
 
-## cmux Pane Setup
+## herdr Pane Setup
 
-From the active Codex or Claude Code pane:
-
-```bash
-cmux identify --id-format both
-cmux tree --workspace <workspace-ref>
-cmux new-pane --type terminal --direction right --workspace <workspace-ref> --focus false
-cmux rename-tab --workspace <workspace-ref> --surface <surface-ref> claude-playbook-suite
-```
-
-Run all remaining commands inside the new terminal pane. The agent should send each command block to the pane, press Enter, wait for completion, then read output with:
+From the agent's own pane (id in `$HERDR_PANE_ID`):
 
 ```bash
-cmux read-screen --workspace <workspace-ref> --surface <surface-ref> --scrollback --lines 160
+herdr pane split "$HERDR_PANE_ID" --direction right --no-focus
+# capture the returned pane_id, e.g. w5:pX — call it $P below
+herdr pane send-text "$P" 'sprite console -s <sprite-name>'
+herdr pane send-keys "$P" Enter
+# verify the console is live before anything else:
+herdr pane send-text "$P" 'echo GUARD=$(hostname)'
+herdr pane send-keys "$P" Enter
+herdr pane read "$P" --source visible --format text   # expect GUARD=<sprite-name>
 ```
 
-Start a clean bash shell in the test pane before the first test command. This keeps shell strict mode local to the test pane and avoids modifying the agent's own shell:
+Re-run the guard check any time the pane's prompt looks unexpected.
 
-```bash
-bash --noprofile --norc
-```
+## Bootstrap And Build (in the sprite pane)
 
-## Bootstrap And Build
-
-Send this block to the new cmux pane, wait for it to finish, then inspect the visible output:
+Send this block to the pane, wait, then read the output:
 
 ```bash
 set -euo pipefail
-
 export BRANCH="${BRANCH:-main}"
-export SUITE_ROOT="${SUITE_ROOT:-$(mktemp -d -t claude-playbook-suite.XXXXXX)}"
+export SUITE_ROOT="${SUITE_ROOT:-$(mktemp -d -t cpb-suite.XXXXXX)}"
 export REPO="$SUITE_ROOT/repo"
-export BIN_DIR="$SUITE_ROOT/bin"
-export BIN="$BIN_DIR/claude-playbook"
-export REAL_HOME="${REAL_HOME:-$HOME}"
-export REAL_PATH="${REAL_PATH:-$PATH}"
-
-mkdir -p "$BIN_DIR"
+export BIN="$SUITE_ROOT/bin/claude-playbook"
+mkdir -p "$SUITE_ROOT/bin"
 
 git clone https://github.com/ramazanpolat/claude-playbooks "$REPO"
 cd "$REPO"
 git fetch origin "$BRANCH"
-git switch --track "origin/$BRANCH"
+git switch --track "origin/$BRANCH" 2>/dev/null || git switch "$BRANCH"
 git rev-parse --short HEAD
 
 go test ./...
 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=suite-test" -o "$BIN" .
 
 "$BIN" --version
-test ! -x /usr/local/bin/claude-playbook || echo "Note: installed claude-playbook exists, but this suite uses $BIN"
 echo "BIN=$BIN"
 echo "SUITE_ROOT=$SUITE_ROOT"
 ```
+
+If the in-sprite clone fails (no GitHub auth for a private repo), transfer the
+tree from the host instead: `git archive --format=tar -o /tmp/src.tar <BRANCH>`
+locally, `sprite file push -s <sprite> /tmp/src.tar /home/sprite/src.tar`
+(push to the home dir — pushing into a fresh subdirectory fails), then extract
+in the pane. Record the commit hash from the host in that case.
 
 Expected:
 
 - `go test ./...` passes.
 - `"$BIN" --version` prints `claude-playbook version suite-test`.
-- No command installs the binary.
-- The agent records the visible commit hash and binary path from the terminal output before continuing.
+- Nothing is installed. The agent records the commit hash and `BIN` path.
 
-## Isolated Binary Feature Tests
+## Isolated Binary Feature Tests (flat model)
 
-These tests use a fake `HOME`, fake global Claude auth files, a fake shell config, and a stub `claude` executable. They verify that the built binary syncs auth artifacts for newly created, installed, linked, run, and ad-hoc playbooks without launching real Claude Code.
+These run inside the sprite with a fake `HOME`, fake auth files, a fake shell
+config, and a stub `claude` executable. They verify the **v4 flat model**: one
+install = one playbook, `.playbook` optional and metadata-only, no children.
 
-Send this block to the same cmux pane after the bootstrap step. The agent must inspect the visible `TEST N` output as it runs and stop immediately on any `FAIL:` line:
+Send this block to the pane; inspect each `TEST N` line and stop on any
+`FAIL:`:
 
 ```bash
 set -euo pipefail
 : "${BIN:?BIN must point to the built claude-playbook binary}"
 
-export TEST_ROOT="${TEST_ROOT:-$(mktemp -d -t claude-playbook-isolated.XXXXXX)}"
+export TEST_ROOT="${TEST_ROOT:-$(mktemp -d -t cpb-isolated.XXXXXX)}"
 export REAL_HOME="${REAL_HOME:-$HOME}"
 export REAL_PATH="${REAL_PATH:-$PATH}"
 export HOME="$TEST_ROOT/home"
@@ -118,10 +136,7 @@ JSON
 
 cat > "$HOME/.claude/.claude.json" <<'JSON'
 {
-  "oauthAccount": {
-    "emailAddress": "suite@example.com",
-    "uuid": "suite-user"
-  },
+  "oauthAccount": { "emailAddress": "suite@example.com", "uuid": "suite-user" },
   "userID": "suite-user",
   "hasCompletedOnboarding": true,
   "lastOnboardingVersion": "suite",
@@ -141,27 +156,12 @@ SH
 chmod +x "$STUB_DIR/claude"
 export PATH="$STUB_DIR:$PATH"
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-assert_exists() {
-  test -e "$1" || fail "missing path: $1"
-}
-
-assert_file() {
-  test -f "$1" || fail "missing file: $1"
-}
-
-assert_symlink() {
-  test -L "$1" || fail "missing symlink: $1"
-}
-
-assert_contains() {
-  grep -Fq "$2" "$1" || fail "expected $1 to contain: $2"
-}
-
+fail() { echo "FAIL: $*" >&2; exit 1; }
+assert_exists()    { test -e "$1" || fail "missing path: $1"; }
+assert_not_exists(){ test ! -e "$1" || fail "unexpected path: $1"; }
+assert_file()      { test -f "$1" || fail "missing file: $1"; }
+assert_symlink()   { test -L "$1" || fail "missing symlink: $1"; }
+assert_contains()  { grep -Fq "$2" "$1" || fail "expected $1 to contain: $2"; }
 assert_auth_synced() {
   dir="$1"
   assert_file "$dir/.claude.json"
@@ -170,9 +170,10 @@ assert_auth_synced() {
   assert_contains "$dir/.claude.json" '"hasCompletedOnboarding": true'
 }
 
-echo "TEST 1: create --no-alias syncs credentials and account metadata"
+echo "TEST 1: create makes a bare playbook (no .playbook), syncs auth, writes CLAUDE.md"
 "$BIN" create created --no-alias
-assert_file "$CLAUDE_PLAYBOOKS_DIR/created/.playbook"
+assert_not_exists "$CLAUDE_PLAYBOOKS_DIR/created/.playbook"
+assert_file "$CLAUDE_PLAYBOOKS_DIR/created/CLAUDE.md"
 assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/created"
 
 echo "TEST 2: create with alias writes only to CLAUDE_SHELL_CONFIG"
@@ -180,205 +181,234 @@ echo "TEST 2: create with alias writes only to CLAUDE_SHELL_CONFIG"
 assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/created-alias"
 assert_contains "$CLAUDE_SHELL_CONFIG" "alias ca='CLAUDE_CONFIG_DIR=\"$CLAUDE_PLAYBOOKS_DIR/created-alias\" claude'"
 
-echo "TEST 3: install local bundle syncs root and children"
-SRC="$TEST_ROOT/source-bundle"
-mkdir -p "$SRC/playbooks/child"
+echo "TEST 3: install local dir with manifest is one flat playbook"
+SRC="$TEST_ROOT/source-pb"
+mkdir -p "$SRC"
 cat > "$SRC/.playbook" <<'EOF'
 version = "0.1.0"
-name = "bundle"
-alias = "bundlealias"
-description = "Suite bundle"
-
-[[children]]
-name = "child"
-path = "playbooks/child"
-alias = "childalias"
-description = "Suite child"
+name = "srcpb"
+alias = "srcalias"
+description = "Suite playbook"
+homepage = "https://example.com/suite"
+author = "Suite Author"
 EOF
-printf '# Bundle\n' > "$SRC/CLAUDE.md"
-printf '# Child\n' > "$SRC/playbooks/child/CLAUDE.md"
-
-"$BIN" install "$SRC" --name installed --alias-all
+printf '# Source PB\n' > "$SRC/CLAUDE.md"
+"$BIN" install "$SRC" --name installed
 assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/installed"
-assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/installed/playbooks/child"
-assert_contains "$CLAUDE_SHELL_CONFIG" "alias bundlealias='CLAUDE_CONFIG_DIR=\"$CLAUDE_PLAYBOOKS_DIR/installed\" claude'"
-assert_contains "$CLAUDE_SHELL_CONFIG" "alias childalias='CLAUDE_CONFIG_DIR=\"$CLAUDE_PLAYBOOKS_DIR/installed/playbooks/child\" claude'"
+assert_contains "$CLAUDE_SHELL_CONFIG" "alias srcalias='CLAUDE_CONFIG_DIR=\"$CLAUDE_PLAYBOOKS_DIR/installed\" claude'"
 
-echo "TEST 4: install --subdir --init syncs the cherry-picked playbook"
-"$BIN" install "$SRC" --subdir playbooks/child --name installed-child --init --no-alias
-assert_file "$CLAUDE_PLAYBOOKS_DIR/installed-child/.playbook"
-assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/installed-child"
+echo "TEST 4: install a BARE local dir (no .playbook) succeeds — flat model"
+BARE="$TEST_ROOT/bare-src"
+mkdir -p "$BARE"
+printf '# Bare\n' > "$BARE/CLAUDE.md"
+"$BIN" install "$BARE" --name bare-installed --no-alias
+assert_exists "$CLAUDE_PLAYBOOKS_DIR/bare-installed/CLAUDE.md"
+assert_not_exists "$CLAUDE_PLAYBOOKS_DIR/bare-installed/.playbook"
+assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/bare-installed"
 
-echo "TEST 5: link syncs credentials into the linked source directory"
+echo "TEST 5: install --subdir cherry-picks one slice of a monorepo"
+MONO="$TEST_ROOT/monorepo"
+mkdir -p "$MONO/playbooks/sre" "$MONO/playbooks/dba"
+printf '# SRE\n' > "$MONO/playbooks/sre/CLAUDE.md"
+printf '# DBA\n' > "$MONO/playbooks/dba/CLAUDE.md"
+"$BIN" install "$MONO" --subdir playbooks/sre --name sre --no-alias
+assert_file "$CLAUDE_PLAYBOOKS_DIR/sre/CLAUDE.md"
+assert_not_exists "$CLAUDE_PLAYBOOKS_DIR/sre/playbooks"
+assert_auth_synced "$CLAUDE_PLAYBOOKS_DIR/sre"
+
+echo "TEST 6: link symlinks an external dir and syncs auth into the source"
 LINK_SRC="$TEST_ROOT/link-source"
 mkdir -p "$LINK_SRC"
-cat > "$LINK_SRC/.playbook" <<'EOF'
-version = "0.1.0"
-name = "linked"
-alias = "linkedalias"
-EOF
 printf '# Linked\n' > "$LINK_SRC/CLAUDE.md"
-
 "$BIN" link "$LINK_SRC" --name linked --no-alias
 assert_symlink "$CLAUDE_PLAYBOOKS_DIR/linked"
 assert_auth_synced "$LINK_SRC"
 
-echo "TEST 6: run syncs auth before executing claude and forwards flags"
+echo "TEST 7: run syncs auth before executing claude and forwards flags"
 RUN_PB="$CLAUDE_PLAYBOOKS_DIR/run-sync"
 mkdir -p "$RUN_PB"
-cat > "$RUN_PB/.playbook" <<'EOF'
-version = "0.1.0"
-name = "run-sync"
-EOF
 RUN_OUT="$TEST_ROOT/run.out"
 "$BIN" run run-sync --probe value > "$RUN_OUT"
 assert_auth_synced "$RUN_PB"
 assert_contains "$RUN_OUT" "STUB_CLAUDE_CONFIG_DIR=$RUN_PB"
 assert_contains "$RUN_OUT" "STUB_ARGS=--probe value"
 
-echo "TEST 7: start syncs auth for ad-hoc directories"
+echo "TEST 8: start syncs auth for ad-hoc directories"
 START_DIR="$TEST_ROOT/ad-hoc"
 START_OUT="$TEST_ROOT/start.out"
 "$BIN" start "$START_DIR" --start-probe > "$START_OUT"
 assert_auth_synced "$START_DIR"
 assert_contains "$START_OUT" "STUB_CLAUDE_CONFIG_DIR=$START_DIR"
-assert_contains "$START_OUT" "STUB_ARGS=--start-probe"
 
-echo "TEST 8: list and info see the test playbooks"
-LIST_OUT="$TEST_ROOT/list.out"
-INFO_OUT="$TEST_ROOT/info.out"
+echo "TEST 9: list is flat; info shows manifest metadata and no Children"
+LIST_OUT="$TEST_ROOT/list.out"; INFO_OUT="$TEST_ROOT/info.out"
 "$BIN" list > "$LIST_OUT"
 "$BIN" info installed > "$INFO_OUT"
 assert_contains "$LIST_OUT" "created"
-assert_contains "$LIST_OUT" "installed"
-assert_contains "$INFO_OUT" "Name:"
-assert_contains "$INFO_OUT" "Children:"
+assert_contains "$LIST_OUT" "bare-installed"
+assert_contains "$INFO_OUT" "Homepage:    https://example.com/suite"
+assert_contains "$INFO_OUT" "Author:      Suite Author"
+if grep -q "Children:" "$INFO_OUT"; then fail "info still prints Children"; fi
+
+echo "TEST 10: rename updates alias; dealias and delete clean up"
+"$BIN" rename created-alias renamed --alias ra
+assert_contains "$CLAUDE_SHELL_CONFIG" "alias ra="
+"$BIN" dealias renamed
+if grep -q "alias ra=" "$CLAUDE_SHELL_CONFIG"; then fail "dealias left alias"; fi
+"$BIN" delete bare-installed -y
+assert_not_exists "$CLAUDE_PLAYBOOKS_DIR/bare-installed"
 
 echo "PASS: isolated binary feature tests completed"
 echo "TEST_ROOT=$TEST_ROOT"
-export HOME="$REAL_HOME"
-export PATH="$REAL_PATH"
-echo "HOME restored to $HOME"
-echo "PATH restored"
+export HOME="$REAL_HOME"; export PATH="$REAL_PATH"
+echo "HOME and PATH restored"
 ```
 
 Expected:
 
-- The final line is `PASS: isolated binary feature tests completed`.
-- No test uses an installed `claude-playbook`.
-- The only shell config written is `$CLAUDE_SHELL_CONFIG`.
-- The real `~/.zshrc` and real `~/.claude-playbooks` are not modified.
-- The agent captures `TEST_ROOT` from the terminal output for possible inspection.
+- Final line `PASS: isolated binary feature tests completed`.
+- No test used an installed `claude-playbook`; only `$CLAUDE_SHELL_CONFIG` was
+  written; the sprite's real `~/.zshrc` and `~/.claude-playbooks` unmodified.
 
-## Live Auth Smoke Test
+## Live Auth Smoke Test (real Claude in the sprite)
 
-This is the regression test for the bug where a new playbook showed Claude Code's login method screen. It must run in a cmux terminal pane because it launches real interactive Claude Code.
+Regression test for new playbooks showing Claude Code's login screen. Runs
+real interactive Claude Code in the pane, authenticated via the sprite's
+long-lived token — no host auth files are copied anywhere.
 
-Prerequisites:
-
-- The host has Claude Code installed as `claude`.
-- The user is already logged in to Claude Code in the normal/default environment.
-- The user's current Claude account metadata exists in one of these locations:
-  `~/.claude/.claude.json`, `~/.claude.json`, or an existing playbook under `~/.claude-playbooks`.
-
-Send this block to the same cmux pane after the isolated tests. This section intentionally launches real interactive Claude Code in the pane; the agent must inspect the screen and interact with prompts like a user:
+Send to the pane (guarded):
 
 ```bash
-set -euo pipefail
-: "${BIN:?BIN must point to the built claude-playbook binary}"
-
-export LIVE_ROOT="${LIVE_ROOT:-$(mktemp -d -t claude-playbook-live.XXXXXX)}"
-export LIVE_PLAYBOOKS_DIR="$LIVE_ROOT/playbooks"
-export LIVE_SHELL_CONFIG="$LIVE_ROOT/zshrc"
-export LIVE_HOME="$LIVE_ROOT/home"
-export REAL_HOME="${REAL_HOME:-$HOME}"
-export PATH="${REAL_PATH:-$PATH}"
-mkdir -p "$LIVE_HOME/.claude"
-chmod 700 "$LIVE_HOME" "$LIVE_HOME/.claude"
-touch "$LIVE_SHELL_CONFIG"
-
-command -v claude
-
-SOURCE_STATE=""
-for candidate in "$REAL_HOME/.claude/.claude.json" "$REAL_HOME/.claude.json"; do
-  if [ -f "$candidate" ]; then
-    SOURCE_STATE="$candidate"
-    break
-  fi
-done
-if [ -z "$SOURCE_STATE" ] && [ -d "$REAL_HOME/.claude-playbooks" ]; then
-  SOURCE_STATE="$(find "$REAL_HOME/.claude-playbooks" -maxdepth 3 -name .claude.json -print -quit)"
-fi
-test -n "$SOURCE_STATE"
-cp "$SOURCE_STATE" "$LIVE_HOME/.claude/.claude.json"
-
-if [ -f "$REAL_HOME/.claude/.credentials.json" ]; then
-  cp "$REAL_HOME/.claude/.credentials.json" "$LIVE_HOME/.claude/.credentials.json"
-fi
-
-export HOME="$LIVE_HOME"
-
-CLAUDE_PLAYBOOKS_DIR="$LIVE_PLAYBOOKS_DIR" \
-CLAUDE_SHELL_CONFIG="$LIVE_SHELL_CONFIG" \
-  "$BIN" create live-auth --no-alias
-
-test -e "$LIVE_PLAYBOOKS_DIR/live-auth/.credentials.json"
-test -f "$LIVE_PLAYBOOKS_DIR/live-auth/.claude.json"
-
-echo "Launching live Claude Code auth smoke test."
-echo "PASS condition: normal Claude Code prompt appears without login method selection."
-echo "FAIL condition: screen shows Select login method, OAuth URL, or Paste code here."
-echo "Exit Claude Code with /exit or Ctrl-C after observing the result."
-
-CLAUDE_PLAYBOOKS_DIR="$LIVE_PLAYBOOKS_DIR" \
-CLAUDE_SHELL_CONFIG="$LIVE_SHELL_CONFIG" \
-  "$BIN" run live-auth
+if [ "$(hostname)" = <sprite-name> ]; then
+  export CLAUDE_CODE_OAUTH_TOKEN=$(cat ~/.config/claude-code/oauth-token)
+  export LIVE_ROOT=$(mktemp -d -t cpb-live.XXXXXX)
+  CLAUDE_PLAYBOOKS_DIR="$LIVE_ROOT/playbooks" CLAUDE_SHELL_CONFIG="$LIVE_ROOT/zshrc" \
+    "$BIN" create live-auth --no-alias
+  CLAUDE_PLAYBOOKS_DIR="$LIVE_ROOT/playbooks" "$BIN" run live-auth
+else echo GUARD_FAIL; fi
 ```
 
-Use `cmux read-screen` to inspect the pane.
-
-If Claude Code shows a workspace trust prompt, select the trusted option only if the path is the expected repo checkout, then continue inspecting for auth prompts.
+Read the pane after ~8s.
 
 Pass:
 
-- Claude Code starts normally for the `live-auth` playbook.
-- The screen does not show `Select login method`.
-- The screen does not show `Paste code here if prompted`.
-- The screen does not show a `claude.com/cai/oauth/authorize` URL.
-- The real `~/.claude`, `~/.claude-playbooks`, and `~/.zshrc` are not modified.
+- Claude Code reaches its normal prompt (a workspace-trust prompt is fine —
+  accept it and keep inspecting).
+- No `Select login method`, no `Paste code here`, no
+  `claude.com/cai/oauth/authorize` URL.
 
-Fail:
+Fail: any login-method menu, OAuth URL, or auth-code prompt.
 
-- Any login method menu appears.
-- Any OAuth URL appears.
-- Claude asks for an auth code.
+Exit Claude with `/exit` (send it as text + Enter). If the TUI wedges, find the
+PID via a side channel (`sprite exec -s <sprite> -- pgrep -x claude`) and kill
+it — never guess and press keys blind; that can advance a login flow.
 
-After the live result is observed, exit Claude Code with `/exit` or Ctrl-C.
+## Real-User Test: drive a real playbook end to end
+
+This is the acceptance test the binary exists for: install a real playbook,
+run it via its alias, and use it — typing into Claude like a user. It uses the
+Kommander playbook because its task system gives observable state transitions
+and a statusline to check.
+
+All commands go to the sprite pane, guarded. Claude turns cost real tokens;
+keep prompts short.
+
+1. **Install the playbook** (repo root has `.playbook` with
+   `subdir = "playbook"` — exercises the manifest-subdir path):
+
+   ```bash
+   "$BIN" install https://github.com/ramazanpolat/kommander-playbook --name kmd --alias kmd
+   ```
+
+   Expected: `Installed "kmd"`, alias `kmd` written, alias target ends in
+   `/kmd/playbook` (the manifest subdir).
+
+2. **Run it via the alias** — two separate sends (zsh parse-time gotcha):
+
+   ```bash
+   source ~/.zshrc
+   ```
+   ```bash
+   kmd
+   ```
+
+   Read the pane: Claude Code starts (trust prompt → accept). PASS: no login
+   screen; the Kommander SessionStart banner/task menu appears.
+
+3. **Check the statusline**: read the pane bottom. Expected shape:
+   `[<name> <version>] //TASK: none //DIR: ... //GIT: ...`.
+
+4. **Create a task by typing** — send a short task description, e.g.:
+
+   ```
+   new task: suite-smoke -- verify kommander works in this sprite
+   ```
+
+   Wait for the turn to finish (re-read the pane every ~15s). Expected: Claude
+   creates the task folder and acquires the lock. Verify via side channel:
+
+   ```bash
+   sprite exec -s <sprite> -- bash -lc 'ls ~/.claude-playbooks/kmd/playbook/data/tasks/'
+   ```
+
+   Expected: `suite-smoke/` with `TASK.md` and `.lock.held`. The statusline
+   now shows `//TASK: suite-smoke`.
+
+5. **Complete the task by typing**:
+
+   ```
+   complete current task
+   ```
+
+   Expected: Claude updates TASK.md to Completed, releases the lock, renames
+   the folder to `DONE--suite-smoke`, and prints the next-action menu. Verify
+   via the side channel that `DONE--suite-smoke/` exists and `.lock.held` is
+   gone; statusline returns to `//TASK: none`.
+
+6. **Exit** Claude with `/exit`.
+
+Pass: every expected state transition observed both on screen and on disk.
+
+## Parallel Multi-Instance Test (herdr workspace)
+
+Tests safe concurrency of the binary across simultaneous users. Create a
+dedicated herdr workspace so the panes don't crowd the working tab: move a
+fresh pane to a new workspace (`herdr pane move <id> --new-workspace --label
+cpb-parallel`), then split it N-1 times. Each pane opens its own `sprite
+console` (same sprite is fine) and gets its own `CLAUDE_PLAYBOOKS_DIR` and
+`CLAUDE_SHELL_CONFIG` under a per-pane temp root.
+
+In all panes at once, run the isolated-feature pattern's TEST 1–5 with
+pane-unique names. Then, as a shared-state race check, point two panes at the
+SAME `CLAUDE_PLAYBOOKS_DIR`+`CLAUDE_SHELL_CONFIG` and have them `create`
+differently-named playbooks concurrently.
+
+Pass:
+
+- Every pane's suite reports PASS independently.
+- In the shared-root race, both playbooks exist and both aliases are present
+  in the shared shell config (no lost writes, no interleaved/corrupt lines).
 
 ## Cleanup
 
-Cleanup is optional after the isolated tests. After the live auth smoke test, cleanup is recommended because `$LIVE_HOME/.claude` may contain copied Claude auth artifacts.
-
-```bash
-for d in "${SUITE_ROOT:-}" "${TEST_ROOT:-}" "${LIVE_ROOT:-}"; do
-  if [ -n "$d" ] && [ "$d" != "/" ]; then
-    rm -rf "$d"
-  fi
-done
-```
+In the sprite pane: `rm -rf "$SUITE_ROOT" "$TEST_ROOT" "$LIVE_ROOT"` and
+`"$BIN" delete kmd -y` (or remove the playbooks root used). On the host: close
+the extra pane(s) (`herdr pane close <id>`) and the workspace if one was
+created. The sprite may simply be restored to its ready checkpoint instead.
 
 ## Report Template
 
-When reporting results, include:
-
 ```text
+Sprite:
+Pane(s):
 Branch:
 Commit:
 Binary path:
 go test result:
 Isolated binary suite result:
 Live auth smoke result:
-Did login method screen appear:
+Real-user kommander result (task create / statusline / complete):
+Parallel result:
 Temp roots kept for inspection:
 Notes:
 ```
