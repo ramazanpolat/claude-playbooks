@@ -220,6 +220,9 @@ echo "TEST 6: link symlinks an external dir and syncs auth into the source"
 LINK_SRC="$TEST_ROOT/link-source"
 mkdir -p "$LINK_SRC"
 printf '# Linked\n' > "$LINK_SRC/CLAUDE.md"
+# link PROMPTS interactively when the target has no .playbook and stdin is a
+# TTY (which it is, in a real pane) — seed a manifest to keep this scriptable.
+printf 'version = "0.1.0"\nname = "linked"\n' > "$LINK_SRC/.playbook"
 "$BIN" link "$LINK_SRC" --name linked --no-alias
 assert_symlink "$CLAUDE_PLAYBOOKS_DIR/linked"
 assert_auth_synced "$LINK_SRC"
