@@ -1,0 +1,20 @@
+I want you to conduct a comprehensive end-to-end (E2E) test of the `claude-playbooks` CLI. You must test every CLI command and feature with 100% coverage, simulating real user behavior.
+
+CRITICAL: You must conduct these tests in a completely isolated environment. DO NOT touch my existing playbooks, the default `~/.claude-playbooks` directory, or my real shell configuration (e.g., `~/.zshrc` or `~/.bashrc`).
+
+Follow these execution steps exactly:
+1. **Workspace Setup**: You are running in a herdr environment. Use your `herdr` skill to create a new, dedicated workspace for this testing session.
+2. **Isolation Setup**: Inside that workspace, create an isolated directory structure for the test (e.g., isolated `bin`, `playbooks`, and `test_bashrc` files).
+3. **Installation**: Install the latest version of the `claude-playbook` binary into your isolated `bin` directory using the project's installation script or by compiling it directly.
+4. **Environment Configuration**: Set up an isolated shell environment in your panes by redirecting `--playbooks-dir` and `--shell-config` (or the equivalent environment variables) to point to your isolated directories. Ensure NO test modifies the host system.
+5. **Concurrent Panes**: In the herdr workspace, split your terminal into multiple panes (e.g., 4 panes) to concurrently test features.
+6. **Feature Testing**: Execute tests across the panes covering all available commands: `create`, `info`, `list`, `rename`, `alias`, `run`, `start`, `dealias`, `link`, `delete`, and `install`.
+7. **Interactive Handling**: Handle any interactive prompts automatically using `herdr pane send-keys` or `send-text` where required (e.g., `link` and `delete` commands).
+8. **Live Auth Smoke Test**: You must test the real integration with the `claude` (Claude Code) executable without mocking it. Run a playbook via the `claude-playbook run` command in an isolated pane. Interact with the live session using `herdr pane send-keys`/`send-text`:
+   - Handle the workspace trust prompt automatically (e.g., by sending `Enter`).
+   - Verify that Claude Code successfully authenticates using the synced host tokens and **does not** ask for an OAuth login link or `/login`.
+   - Send a test query (like `hello` or `who are you?`) and verify the output.
+   - Gracefully exit the session by sending `/exit`.
+9. **Verification**: Read the output from the panes using `herdr pane read` to strictly verify that all commands succeeded, playbooks were created, and aliases were correctly written to the isolated shell config.
+10. **Concurrency Verification**: Ensure that running commands simultaneously across panes does not corrupt the shared shell config or playbook state.
+11. **Cleanup & Report**: Once tests are complete, summarize the results, confirm that the isolation successfully held, and clean up the test workspace.
