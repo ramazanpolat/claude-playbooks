@@ -88,8 +88,21 @@ func runLink(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Wrote %s\n", filepath.Join(abs, manifest.FileName))
 	}
+	m, err := manifest.Read(abs)
+	if err != nil {
+		return err
+	}
+	configTarget := abs
+	configDest := dest
+	if m != nil && m.Subdir != "" {
+		configTarget, err = manifest.ResolveSubdir(abs, "subdir", m.Subdir)
+		if err != nil {
+			return err
+		}
+		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
+	}
 
-	if err := auth.SyncCredentials(abs); err != nil {
+	if err := auth.SyncCredentials(configTarget); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
@@ -106,7 +119,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 	aliasName := linkAlias
 	if aliasName == "" {
 		// Prefer alias from manifest if present, else the link name.
-		if m, _ := manifest.Read(abs); m != nil && m.Alias != "" {
+		if m != nil && m.Alias != "" {
 			aliasName = m.Alias
 		} else {
 			aliasName = name
@@ -117,7 +130,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := shell.Write(shellConfig, aliasName, dest); err != nil {
+	if err := shell.Write(shellConfig, aliasName, configDest); err != nil {
 		return fmt.Errorf("failed to write alias: %w", err)
 	}
 	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)

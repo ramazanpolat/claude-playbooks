@@ -33,6 +33,9 @@ var findGenericPassword = func(service string) ([]byte, error) {
 
 // SyncCredentials ensures the target config directory shares the global Claude Code authentication.
 func SyncCredentials(targetDir string) error {
+	if isAuthIsolated(targetDir) {
+		return detachSharedCredentials(targetDir)
+	}
 	globalCreds, err := EnsureGlobalCredentials()
 	if err != nil {
 		return err
@@ -70,6 +73,9 @@ func EnsureGlobalCredentials() (string, error) {
 			if err := os.WriteFile(globalCreds, out, 0600); err != nil {
 				return "", err
 			}
+			if err := os.Chmod(globalCreds, 0600); err != nil {
+				return "", err
+			}
 			return globalCreds, nil
 		}
 	}
@@ -96,6 +102,9 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 	}
 	if !targetInfo.IsDir() {
 		return fmt.Errorf("%s is not a directory", targetDir)
+	}
+	if isAuthIsolated(targetDir) {
+		return detachSharedCredentials(targetDir)
 	}
 
 	sourceAbs, err := filepath.Abs(sourceCreds)
@@ -168,6 +177,21 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 	return os.Symlink(sourceAbs, targetCreds)
 }
 
+func detachSharedCredentials(targetDir string) error {
+	targetCreds := filepath.Join(targetDir, CredentialsFileName)
+	info, err := os.Lstat(targetCreds)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return os.Remove(targetCreds)
+	}
+	return nil
+}
+
 func isAuthIsolated(targetDir string) bool {
 	if os.Getenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH") == "true" {
 		return true
@@ -192,13 +216,19 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, perm)
+	if err := os.WriteFile(dst, data, perm); err != nil {
+		return err
+	}
+	return os.Chmod(dst, perm)
 }
 
 // SyncAccountMetadata copies Claude Code's non-token account metadata into the
 // target config. Interactive Claude startup uses this state to decide whether a
 // config directory is already logged in.
 func SyncAccountMetadata(targetDir string) error {
+	if isAuthIsolated(targetDir) {
+		return nil
+	}
 	sourceState, err := findAccountState(targetDir)
 	if err != nil {
 		return err
@@ -245,7 +275,10 @@ func SyncAccountMetadata(targetDir string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(targetPath, data, 0600)
+	if err := os.WriteFile(targetPath, data, 0600); err != nil {
+		return err
+	}
+	return os.Chmod(targetPath, 0600)
 }
 
 func credentialsFileUsable(path string) (bool, error) {

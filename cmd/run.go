@@ -37,7 +37,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 			i++
 		case strings.HasPrefix(args[i], "--shell-config="):
 			shellConfig = strings.TrimPrefix(args[i], "--shell-config=")
-		case args[i] == "--help" || args[i] == "-h":
+		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
 			fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
 			fmt.Println()
 			fmt.Println("Runs Claude Code with the named playbook.")
@@ -88,5 +88,5 @@ func runRun(cmd *cobra.Command, args []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
-	return c.Run()
+	return preserveExitCode(c.Run())
 }

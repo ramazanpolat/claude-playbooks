@@ -159,7 +159,7 @@ source ~/.zshrc
 experiment
 ```
 
-This creates `~/.claude-playbooks/experiment`, writes a `.playbook` marker, drops in a starter `CLAUDE.md` that introduces the playbook concept to the Claude Code session opened inside it, syncs Claude auth metadata, and adds a shell alias named `experiment`.
+This creates `~/.claude-playbooks/experiment`, drops in a starter `CLAUDE.md` that introduces the playbook concept to the Claude Code session opened inside it, syncs Claude auth metadata, and adds a shell alias named `experiment`. A `.playbook` manifest is optional and is not created by this command.
 
 You can also run it without using the alias:
 
@@ -229,6 +229,8 @@ claude-playbook install https://github.com/user/awesome --subdir playbooks/dba
 ```
 
 Cherry-picked installs are flat top-level playbooks.
+
+Branch names containing `/` are resolved against the repository's remote refs. You can also make the boundary explicit with `--branch feature/name`.
 
 Customize the name and alias:
 
@@ -314,7 +316,7 @@ claude-playbook uninstall awesome
 claude-playbook unlink my-linked-playbook
 ```
 
-Update delegates to a playbook-provided script:
+Update first delegates to a playbook-provided script:
 
 ```bash
 claude-playbook update awesome
@@ -328,6 +330,8 @@ set -e
 cd "$(dirname "$0")/.."
 git pull --ff-only
 ```
+
+Git installs also record their repository, branch, and selected subdirectory in `.playbook`. If no update script exists, a flat, non-linked install can update natively from that source. Native update stages a full backup, overlays new source files while preserving local Claude state and credentials, and atomically activates the result. Linked playbooks and legacy manifests with `subdir` require a delegated update script.
 
 ### Use temporary config locations
 

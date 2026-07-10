@@ -98,17 +98,19 @@ func discover(root string) ([]*Playbook, error) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		// A manifest is optional; if present it supplies metadata. An invalid
-		// manifest is treated as absent so the directory stays discoverable;
-		// the error surfaces via commands that load the manifest directly.
-		m, _ := manifest.Read(path)
+		m, err := manifest.Read(path)
+		if err != nil {
+			return nil, err
+		}
 		configPath := path
 		configInfo := info
 		if m != nil {
-			if resolved, resolvedInfo := resolveManifestSubdir(path, m); resolved != "" {
-				configPath = resolved
-				configInfo = resolvedInfo
+			resolved, resolvedInfo, err := resolveManifestSubdir(path, m)
+			if err != nil {
+				return nil, err
 			}
+			configPath = resolved
+			configInfo = resolvedInfo
 		}
 		pb := &Playbook{
 			Name:     e.Name(),
@@ -125,16 +127,20 @@ func discover(root string) ([]*Playbook, error) {
 	return out, nil
 }
 
-func resolveManifestSubdir(root string, m *manifest.Manifest) (string, os.FileInfo) {
+func resolveManifestSubdir(root string, m *manifest.Manifest) (string, os.FileInfo, error) {
 	if m == nil || m.Subdir == "" {
-		return "", nil
+		info, err := os.Stat(root)
+		return root, info, err
 	}
-	resolved := filepath.Join(root, filepath.FromSlash(m.Subdir))
+	resolved, err := manifest.ResolveSubdir(root, "subdir", m.Subdir)
+	if err != nil {
+		return "", nil, err
+	}
 	info, err := os.Stat(resolved)
-	if err != nil || !info.IsDir() {
-		return "", nil
+	if err != nil {
+		return "", nil, err
 	}
-	return resolved, info
+	return resolved, info, nil
 }
 
 func attachAlias(pb *Playbook, aliases []shell.AliasEntry) {

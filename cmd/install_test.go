@@ -2,11 +2,14 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
@@ -44,6 +47,29 @@ func TestCopyDirDereferencesInternalSymlinks(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dst, "bin", "helper")); err != nil {
 		t.Fatalf("copied symlinked dir contents: %v", err)
+	}
+}
+
+func TestCopyDirDereferencesRootSymlink(t *testing.T) {
+	root := t.TempDir()
+	realSource := filepath.Join(root, "real")
+	if err := os.Mkdir(realSource, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realSource, "CLAUDE.md"), []byte("# copied\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	sourceLink := filepath.Join(root, "source-link")
+	if err := os.Symlink(realSource, sourceLink); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, "dest")
+	if err := copyDir(sourceLink, dest); err != nil {
+		t.Fatal(err)
+	}
+	assertNotSymlink(t, dest)
+	if _, err := os.Stat(filepath.Join(dest, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -134,6 +160,125 @@ func TestInstallRejectsPathManifestName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "top-level playbook name") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestInstallRejectsEscapingSubdir(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	sibling := filepath.Join(root, "sibling")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sibling, 0755); err != nil {
+		t.Fatal(err)
+	}
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	installSubdir = "../sibling"
+	installNoAlias = true
+	if err := runInstall(nil, []string{source}); err == nil {
+		t.Fatal("expected escaping --subdir to be rejected")
+	}
+	entries, err := os.ReadDir(config.PlaybooksDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("install created output for escaping subdir: entries=%v err=%v", entries, err)
+	}
+}
+
+func TestDeleteRejectsParentSegment(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	config.PlaybooksDir = filepath.Join(parent, "playbooks")
+	config.ShellConfig = filepath.Join(root, "shellrc")
+	if err := os.MkdirAll(config.PlaybooksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(parent, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".."}); err == nil {
+		t.Fatal("expected parent segment to be rejected")
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("parent contents were removed: %v", err)
+	}
+}
+
+func TestSplitTreePathChoosesLongestRemoteRef(t *testing.T) {
+	ref, subdir, ok := splitTreePathByRefs("feature/foo/playbooks/dba", []string{"main", "feature", "feature/foo"})
+	if !ok || ref != "feature/foo" || subdir != "playbooks/dba" {
+		t.Fatalf("ref=%q subdir=%q ok=%v", ref, subdir, ok)
+	}
+}
+
+func TestGitInstallPreservesCustomUpdateScript(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	resetCommandTestState(t)
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestData := "name = \"custom-update\"\nisolate_auth = true\n[source]\nupdate_script = \"custom-update.sh\"\n"
+	if err := os.WriteFile(filepath.Join(repo, ".playbook"), []byte(manifestData), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "custom-update.sh"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"}} {
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	config.ShellConfig = filepath.Join(root, "shellrc")
+	installNoAlias = true
+	if err := runInstall(nil, []string{"file://" + repo}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "custom-update"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m == nil || m.Source == nil || m.Source.UpdateScript != "custom-update.sh" {
+		t.Fatalf("source metadata=%#v", m)
+	}
+}
+
+func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
+	resetCommandTestState(t)
+	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	config.ShellConfig = filepath.Join(root, "shellrc")
+	target := filepath.Join(root, "target")
+	configDir := filepath.Join(target, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	linkName = "linked"
+	linkAlias = "linkedalias"
+	if err := runLink(nil, []string{target}); err != nil {
+		t.Fatal(err)
+	}
+	pb, err := playbook.Require(config.PlaybooksDir, config.ShellConfig, "linked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.Path != filepath.Join(config.PlaybooksDir, "linked", "config") || pb.Alias != "linkedalias" {
+		t.Fatalf("linked playbook path=%q alias=%q", pb.Path, pb.Alias)
 	}
 }
 
@@ -243,6 +388,10 @@ func resetCommandTestState(t *testing.T) {
 	selfUninstallKeepData = false
 	selfUninstallKeepBinary = false
 	selfUninstallDryRun = false
+	deleteYes = false
+	linkName = ""
+	linkAlias = ""
+	linkNoAlias = false
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
 		config.ShellConfig = ""
@@ -257,6 +406,10 @@ func resetCommandTestState(t *testing.T) {
 		selfUninstallKeepData = false
 		selfUninstallKeepBinary = false
 		selfUninstallDryRun = false
+		deleteYes = false
+		linkName = ""
+		linkAlias = ""
+		linkNoAlias = false
 	})
 }
 

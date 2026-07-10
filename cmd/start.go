@@ -35,7 +35,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			// ignore
 		case args[i] == "--delete":
 			deleteAfter = true
-		case args[i] == "--help" || args[i] == "-h":
+		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
 			fmt.Println("Usage: claude-playbook start <path> [claude-flags...]")
 			fmt.Println()
 			fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
@@ -93,5 +93,5 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return runErr
+	return preserveExitCode(runErr)
 }

@@ -49,9 +49,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	source := args[0]
 
 	// Parse GitHub /tree/<ref>/<path> URLs into source + branch + subdir.
-	repoURL, parsedRef, parsedSubdir, parsed := parseGitTreeURL(source)
+	repoURL, parsedRef, parsedSubdir, parsed := parseGitTreeURLWithRef(source, installBranch)
 	if parsed {
 		source = repoURL
+		if installBranch == "" {
+			treePath := path.Join(parsedRef, parsedSubdir)
+			if resolvedRef, resolvedSubdir, ok := resolveRemoteTreeRef(repoURL, treePath); ok {
+				parsedRef = resolvedRef
+				parsedSubdir = resolvedSubdir
+			}
+		}
 		if installBranch == "" {
 			installBranch = parsedRef
 		}
@@ -60,7 +67,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	subdir := strings.TrimPrefix(strings.TrimSuffix(installSubdir, "/"), "/")
+	subdir := strings.Trim(installSubdir, "/")
 	cherryPick := subdir != ""
 
 	playbooksDir := config.ResolvePlaybooksDir()
@@ -77,12 +84,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer cleanup()
+	mPre, err := manifest.Read(work)
+	if err != nil {
+		return err
+	}
 
 	// Stage 2: pick the target name. Order: --name, manifest's name, then a
 	// fallback derived from the source.
 	targetName := installName
 	if targetName == "" {
-		if mPre, _ := manifest.Read(work); mPre != nil && mPre.Name != "" {
+		if mPre != nil && mPre.Name != "" {
 			targetName = mPre.Name
 		}
 	}
@@ -107,14 +118,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Read the optional manifest from staging to check if we need to cherry-pick a subdir.
-	mPre, _ := manifest.Read(work)
 	copySrc := work
-	hasManifestSubdir := !cherryPick && mPre != nil && mPre.Subdir != ""
+	hasManifestSubdir := mPre != nil && mPre.Subdir != ""
 	if hasManifestSubdir {
-		copySrc = filepath.Join(work, filepath.FromSlash(mPre.Subdir))
-		info, err := os.Stat(copySrc)
-		if err != nil || !info.IsDir() {
-			return fmt.Errorf("subdir %q not found in source", mPre.Subdir)
+		copySrc, err = manifest.ResolveSubdir(work, "subdir", mPre.Subdir)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -124,10 +133,30 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to copy from staging: %w", err)
 	}
 
-	// If we flatly extracted a subdirectory, write the metadata manifest flat into the target directory,
-	// removing the 'subdir' field.
+	needsManifestWrite := false
+	if mPre == nil {
+		mPre = &manifest.Manifest{}
+	}
+	sourceSubdir := subdir
 	if hasManifestSubdir {
+		sourceSubdir = path.Join(sourceSubdir, mPre.Subdir)
 		mPre.Subdir = ""
+		needsManifestWrite = true
+	}
+	if isGit {
+		updateScript := ""
+		if mPre.Source != nil {
+			updateScript = mPre.Source.UpdateScript
+		}
+		mPre.Source = &manifest.Source{
+			Repository:   source,
+			Branch:       installBranch,
+			Subdir:       sourceSubdir,
+			UpdateScript: updateScript,
+		}
+		needsManifestWrite = true
+	}
+	if needsManifestWrite {
 		if err := manifest.Write(dest, mPre); err != nil {
 			os.RemoveAll(dest)
 			return fmt.Errorf("failed to write manifest: %w", err)
@@ -142,12 +171,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	configDest := dest
-	if !cherryPick && m != nil && m.Subdir != "" {
-		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
-		info, err := os.Stat(configDest)
-		if err != nil || !info.IsDir() {
+	if m != nil && m.Subdir != "" {
+		configDest, err = manifest.ResolveSubdir(dest, "subdir", m.Subdir)
+		if err != nil {
 			os.RemoveAll(dest)
-			return fmt.Errorf("subdir %q not found in source", m.Subdir)
+			return err
 		}
 	}
 
@@ -190,7 +218,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		taken[e.AliasName] = true
 	}
 
-	if writeAlias(shellConfig, aliasName, configDest, taken) {
+	written, err := writeAlias(shellConfig, aliasName, configDest, taken)
+	if err != nil {
+		return fmt.Errorf("failed to write alias: %w", err)
+	}
+	if written {
 		fmt.Printf("Alias:    %s → %s\n", aliasName, targetName)
 	} else {
 		fmt.Fprintf(os.Stderr, "Warning: alias %q already in use; skipped. Set one manually with 'claude-playbook alias %s <alias>'\n", aliasName, targetName)
@@ -200,15 +232,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func writeAlias(shellConfig, name, path string, taken map[string]bool) bool {
+func writeAlias(shellConfig, name, path string, taken map[string]bool) (bool, error) {
 	if taken[name] {
-		return false
+		return false, nil
 	}
 	if err := shell.Write(shellConfig, name, path); err != nil {
-		return false
+		return false, err
 	}
 	taken[name] = true
-	return true
+	return true, nil
 }
 
 func warnIfNoClaudeMD(dir, name string) {
@@ -257,11 +289,10 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 
 		work := tmp
 		if subdir != "" {
-			work = filepath.Join(tmp, filepath.FromSlash(subdir))
-			info, err := os.Stat(work)
-			if err != nil || !info.IsDir() {
+			work, err = manifest.ResolveSubdir(tmp, "source.subdir", subdir)
+			if err != nil {
 				cleanup()
-				return "", func() {}, fmt.Errorf("subdir %q not found in source", subdir)
+				return "", func() {}, err
 			}
 		}
 		return work, cleanup, nil
@@ -286,10 +317,9 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 	}
 	work := abs
 	if subdir != "" {
-		work = filepath.Join(abs, filepath.FromSlash(subdir))
-		info, err := os.Stat(work)
-		if err != nil || !info.IsDir() {
-			return "", func() {}, fmt.Errorf("subdir %q not found in source", subdir)
+		work, err = manifest.ResolveSubdir(abs, "source.subdir", subdir)
+		if err != nil {
+			return "", func() {}, err
 		}
 	}
 	return work, func() {}, nil
@@ -306,6 +336,10 @@ func deriveNameFromLocal(source string) string {
 // parseGitTreeURL recognises GitHub /tree/<ref>/<path...> URLs and returns
 // (clone-url, ref, subdir, true). For other URLs returns ("","","",false).
 func parseGitTreeURL(s string) (string, string, string, bool) {
+	return parseGitTreeURLWithRef(s, "")
+}
+
+func parseGitTreeURLWithRef(s, preferredRef string) (string, string, string, bool) {
 	u, err := url.Parse(s)
 	if err != nil {
 		return "", "", "", false
@@ -322,20 +356,64 @@ func parseGitTreeURL(s string) (string, string, string, bool) {
 	}
 	owner := parts[0]
 	repo := parts[1]
-	ref := parts[3]
-	sub := ""
-	if len(parts) > 4 {
-		sub = path.Join(parts[4:]...)
+	treePath := path.Join(parts[3:]...)
+	ref, sub := splitTreePath(treePath, preferredRef)
+	if ref == "" {
+		return "", "", "", false
 	}
 	clone := fmt.Sprintf("https://%s/%s/%s", u.Host, owner, repo)
 	return clone, ref, sub, true
+}
+
+func splitTreePath(treePath, preferredRef string) (string, string) {
+	if preferredRef != "" && (treePath == preferredRef || strings.HasPrefix(treePath, preferredRef+"/")) {
+		return preferredRef, strings.TrimPrefix(strings.TrimPrefix(treePath, preferredRef), "/")
+	}
+	parts := strings.SplitN(treePath, "/", 2)
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+	return parts[0], parts[1]
+}
+
+func resolveRemoteTreeRef(repoURL, treePath string) (string, string, bool) {
+	out, err := exec.Command("git", "ls-remote", "--heads", "--tags", repoURL).Output()
+	if err != nil {
+		return "", "", false
+	}
+	var refs []string
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || strings.HasSuffix(fields[1], "^{}") {
+			continue
+		}
+		ref := strings.TrimPrefix(fields[1], "refs/heads/")
+		ref = strings.TrimPrefix(ref, "refs/tags/")
+		refs = append(refs, ref)
+	}
+	return splitTreePathByRefs(treePath, refs)
+}
+
+func splitTreePathByRefs(treePath string, refs []string) (string, string, bool) {
+	best := ""
+	for _, ref := range refs {
+		if (treePath == ref || strings.HasPrefix(treePath, ref+"/")) && len(ref) > len(best) {
+			best = ref
+		}
+	}
+	if best == "" {
+		return "", "", false
+	}
+	return best, strings.TrimPrefix(strings.TrimPrefix(treePath, best), "/"), true
 }
 
 func isGitURL(s string) bool {
 	return strings.HasPrefix(s, "http://") ||
 		strings.HasPrefix(s, "https://") ||
 		strings.HasPrefix(s, "git@") ||
-		strings.HasPrefix(s, "git://")
+		strings.HasPrefix(s, "git://") ||
+		strings.HasPrefix(s, "ssh://") ||
+		strings.HasPrefix(s, "file://")
 }
 
 func deriveNameFromURL(source string) string {
@@ -371,7 +449,7 @@ func copyDir(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return copyDirWithinRoot(src, dst, root, map[string]bool{root: true})
+	return copyDirWithinRoot(root, dst, root, map[string]bool{root: true})
 }
 
 // visited holds resolved directories already being copied; a symlink that
@@ -387,7 +465,17 @@ func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
+			if targetInfo, statErr := os.Lstat(target); statErr == nil && (!targetInfo.IsDir() || targetInfo.Mode()&os.ModeSymlink != 0) {
+				if err := removeAny(target); err != nil {
+					return err
+				}
+			} else if statErr != nil && !os.IsNotExist(statErr) {
+				return statErr
+			}
+			if err := os.MkdirAll(target, info.Mode()); err != nil {
+				return err
+			}
+			return os.Chmod(target, info.Mode().Perm())
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			link, err := os.Readlink(path)
@@ -398,6 +486,9 @@ func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
 				if targetInfo, err := os.Stat(resolved); err == nil && pathWithin(root, resolved) {
 					if targetInfo.IsDir() {
 						if visited[resolved] {
+							if err := removeAny(target); err != nil {
+								return err
+							}
 							return os.Symlink(link, target)
 						}
 						visited[resolved] = true
@@ -405,6 +496,9 @@ func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
 					}
 					return copyFile(resolved, target, targetInfo.Mode())
 				}
+			}
+			if err := removeAny(target); err != nil {
+				return err
 			}
 			return os.Symlink(link, target)
 		}
@@ -426,11 +520,20 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if info, err := os.Lstat(dst); err == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+		if err := removeAny(dst); err != nil {
+			return err
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode.Perm())
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Chmod(mode.Perm())
 }

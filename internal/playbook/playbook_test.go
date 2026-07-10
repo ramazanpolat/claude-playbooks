@@ -101,3 +101,31 @@ func TestDiscoverManifestSubdir(t *testing.T) {
 		t.Fatalf("rootPath = %q, want %q", pb.RootPath, install)
 	}
 }
+
+func TestDiscoverReturnsInvalidManifestError(t *testing.T) {
+	root := t.TempDir()
+	playbookDir := filepath.Join(root, "broken")
+	if err := os.Mkdir(playbookDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(playbookDir, ".playbook"), []byte("subdir = [broken\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Discover(root, filepath.Join(root, "shellrc")); err == nil {
+		t.Fatal("expected malformed manifest to fail discovery")
+	}
+}
+
+func TestDiscoverReturnsMissingSubdirError(t *testing.T) {
+	root := t.TempDir()
+	playbookDir := filepath.Join(root, "missing")
+	if err := os.Mkdir(playbookDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(playbookDir, ".playbook"), []byte("subdir = \"config\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Discover(root, filepath.Join(root, "shellrc")); err == nil {
+		t.Fatal("expected missing manifest subdir to fail discovery")
+	}
+}

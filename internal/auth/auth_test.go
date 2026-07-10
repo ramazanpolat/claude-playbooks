@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 const testCreds = `{"claudeAiOauth":{"accessToken":"token"}}`
@@ -115,6 +117,58 @@ func TestSyncCredentialsPreservesValidLocalCredentials(t *testing.T) {
 	}
 	if string(got) != string(localContent) {
 		t.Fatalf("local credentials changed: %q", string(got))
+	}
+}
+
+func TestSyncCredentialsIsolationDoesNotCreateCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, CredentialsFileName), []byte(testCreds), 0600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "playbook")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, manifest.FileName), []byte("isolate_auth = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncCredentials(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(target, CredentialsFileName)); !os.IsNotExist(err) {
+		t.Fatalf("isolated playbook received credentials, err=%v", err)
+	}
+}
+
+func TestSyncCredentialsIsolationDetachesExistingSymlink(t *testing.T) {
+	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	globalCreds := filepath.Join(globalDir, CredentialsFileName)
+	if err := os.WriteFile(globalCreds, []byte(testCreds), 0600); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	link := filepath.Join(target, CredentialsFileName)
+	if err := os.Symlink(globalCreds, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncCredentials(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("shared credential link still exists, err=%v", err)
 	}
 }
 

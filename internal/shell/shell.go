@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
@@ -42,7 +43,7 @@ func Format(aliasName, playbookDir string) string {
 			binName = baseBin
 		}
 	}
-	body := fmt.Sprintf("CLAUDE_CONFIG_DIR=%s %s run %s", shellDoubleQuote(playbookDir), binName, playbookName)
+	body := fmt.Sprintf("CLAUDE_CONFIG_DIR=%s %s run %s", shellDoubleQuote(playbookDir), shellQuote(binName), shellQuote(playbookName))
 	return fmt.Sprintf("alias %s=%s", aliasName, shellQuote(body))
 }
 
@@ -132,79 +133,98 @@ func Write(configFile, aliasName, playbookDir string) error {
 	if !ValidAliasName(aliasName) {
 		return fmt.Errorf("invalid alias name %q", aliasName)
 	}
-	lines, err := readLines(configFile)
-	if err != nil {
-		return err
-	}
+	configFile = resolveConfigPath(configFile)
+	return withConfigLock(configFile, func() error {
+		lines, err := readLines(configFile)
+		if err != nil {
+			return err
+		}
 
-	absPlaybookDir, _ := filepath.Abs(playbookDir)
-	kept, _ := dropMatchingLines(lines, func(line string) bool {
-		return shouldDrop(line, aliasName, absPlaybookDir)
+		absPlaybookDir, _ := filepath.Abs(playbookDir)
+		kept, _ := dropMatchingLines(lines, func(line string) bool {
+			return shouldDrop(line, aliasName, absPlaybookDir)
+		})
+
+		if len(kept) > 0 && kept[len(kept)-1] != "" {
+			kept = append(kept, "")
+		}
+		playbookName := strings.NewReplacer("\r", " ", "\n", " ").Replace(derivePlaybookName(playbookDir))
+		kept = append(kept, fmt.Sprintf("# claude-playbook: %s", playbookName))
+		kept = append(kept, Format(aliasName, playbookDir))
+		return writeLines(configFile, kept)
 	})
-
-	// Ensure a blank line separator before appending.
-	if len(kept) > 0 && kept[len(kept)-1] != "" {
-		kept = append(kept, "")
-	}
-	playbookName := derivePlaybookName(playbookDir)
-	kept = append(kept, fmt.Sprintf("# claude-playbook: %s", playbookName))
-	kept = append(kept, Format(aliasName, playbookDir))
-	return writeLines(configFile, kept)
 }
 
 // RemoveByPath deletes every alias line whose CLAUDE_CONFIG_DIR matches the given path.
 // Returns the number of lines removed.
 func RemoveByPath(configFile, playbookDir string) (int, error) {
-	lines, err := readLines(configFile)
-	if err != nil {
-		return 0, err
-	}
-	absPlaybookDir, _ := filepath.Abs(playbookDir)
-	kept, removed := dropMatchingLines(lines, func(line string) bool {
-		return matchesPath(line, absPlaybookDir)
+	configFile = resolveConfigPath(configFile)
+	removed := 0
+	err := withConfigLock(configFile, func() error {
+		lines, err := readLines(configFile)
+		if err != nil {
+			return err
+		}
+		absPlaybookDir, _ := filepath.Abs(playbookDir)
+		kept, n := dropMatchingLines(lines, func(line string) bool {
+			return matchesPath(line, absPlaybookDir)
+		})
+		removed = n
+		if removed == 0 {
+			return nil
+		}
+		return writeLines(configFile, kept)
 	})
-	if removed == 0 {
-		return 0, nil
-	}
-	return removed, writeLines(configFile, kept)
+	return removed, err
 }
 
 // RemoveByAliasName deletes every alias line whose alias name matches.
 // Returns the number of lines removed.
 func RemoveByAliasName(configFile, aliasName string) (int, error) {
-	lines, err := readLines(configFile)
-	if err != nil {
-		return 0, err
-	}
-	kept, removed := dropMatchingLines(lines, func(line string) bool {
-		return matchesAliasName(line, aliasName)
+	configFile = resolveConfigPath(configFile)
+	removed := 0
+	err := withConfigLock(configFile, func() error {
+		lines, err := readLines(configFile)
+		if err != nil {
+			return err
+		}
+		kept, n := dropMatchingLines(lines, func(line string) bool {
+			return matchesAliasName(line, aliasName)
+		})
+		removed = n
+		if removed == 0 {
+			return nil
+		}
+		return writeLines(configFile, kept)
 	})
-	if removed == 0 {
-		return 0, nil
-	}
-	return removed, writeLines(configFile, kept)
+	return removed, err
 }
 
 // RemoveByPathPrefix deletes every alias line whose CLAUDE_CONFIG_DIR starts
 // with the given prefix (used when deleting a container to clean up all nested
 // playbook aliases).
 func RemoveByPathPrefix(configFile, prefix string) (int, error) {
-	lines, err := readLines(configFile)
-	if err != nil {
-		return 0, err
-	}
-	absPrefix, _ := filepath.Abs(prefix)
-	// Ensure trailing slash so prefix match is directory-bounded.
-	if !strings.HasSuffix(absPrefix, string(filepath.Separator)) {
-		absPrefix += string(filepath.Separator)
-	}
-	kept, removed := dropMatchingLines(lines, func(line string) bool {
-		return matchesPathPrefix(line, absPrefix)
+	configFile = resolveConfigPath(configFile)
+	removed := 0
+	err := withConfigLock(configFile, func() error {
+		lines, err := readLines(configFile)
+		if err != nil {
+			return err
+		}
+		absPrefix, _ := filepath.Abs(prefix)
+		if !strings.HasSuffix(absPrefix, string(filepath.Separator)) {
+			absPrefix += string(filepath.Separator)
+		}
+		kept, n := dropMatchingLines(lines, func(line string) bool {
+			return matchesPathPrefix(line, absPrefix)
+		})
+		removed = n
+		if removed == 0 {
+			return nil
+		}
+		return writeLines(configFile, kept)
 	})
-	if removed == 0 {
-		return 0, nil
-	}
-	return removed, writeLines(configFile, kept)
+	return removed, err
 }
 
 func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string, int) {
@@ -227,24 +247,28 @@ func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string
 // RewritePathPrefix updates every alias line whose CLAUDE_CONFIG_DIR starts
 // with oldPrefix so it starts with newPrefix instead. Used by `rename`.
 func RewritePathPrefix(configFile, oldPrefix, newPrefix string) (int, error) {
-	lines, err := readLines(configFile)
-	if err != nil {
-		return 0, err
-	}
-	absOld, _ := filepath.Abs(oldPrefix)
-	absNew, _ := filepath.Abs(newPrefix)
+	configFile = resolveConfigPath(configFile)
 	changed := 0
-	for i, line := range lines {
-		rewritten, ok := rewriteLinePathPrefix(line, absOld, absNew)
-		if ok {
-			lines[i] = rewritten
-			changed++
+	err := withConfigLock(configFile, func() error {
+		lines, err := readLines(configFile)
+		if err != nil {
+			return err
 		}
-	}
-	if changed == 0 {
-		return 0, nil
-	}
-	return changed, writeLines(configFile, lines)
+		absOld, _ := filepath.Abs(oldPrefix)
+		absNew, _ := filepath.Abs(newPrefix)
+		for i, line := range lines {
+			rewritten, ok := rewriteLinePathPrefix(line, absOld, absNew)
+			if ok {
+				lines[i] = rewritten
+				changed++
+			}
+		}
+		if changed == 0 {
+			return nil
+		}
+		return writeLines(configFile, lines)
+	})
+	return changed, err
 }
 
 // --- internals ---
@@ -458,5 +482,64 @@ func readLines(path string) ([]string, error) {
 
 func writeLines(path string, lines []string) error {
 	content := strings.Join(lines, "\n") + "\n"
-	return os.WriteFile(path, []byte(content), 0644)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".claude-playbook-shell-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func withConfigLock(configFile string, fn func() error) error {
+	dir := filepath.Dir(configFile)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(configFile+".claude-playbook.lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	return fn()
+}
+
+func resolveConfigPath(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	dir := filepath.Dir(path)
+	if resolvedDir, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Join(resolvedDir, filepath.Base(path))
+	}
+	return path
 }

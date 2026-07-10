@@ -240,8 +240,8 @@ claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --subd
 
 | Source | Behaviour |
 |--------|-----------|
-| URL (`http://`, `https://`, `git@`, `git://`) | Shallow-cloned (`git clone --depth=1`) into the install directory |
-| GitHub `/tree/<ref>/<path>` URL | Recognized and split automatically into clone URL + `--branch <ref>` + `--subdir <path>` (only fills flags you didn't set explicitly) |
+| URL (`http://`, `https://`, `git@`, `git://`, `ssh://`, `file://`) | Shallow-cloned (`git clone --depth=1`) into the install directory |
+| GitHub `/tree/<ref>/<path>` URL | Recognized and split automatically into clone URL + `--branch <ref>` + `--subdir <path>`; remote refs are consulted so branch names containing `/` work |
 | Anything else | Treated as a local filesystem path and **copied** into the install directory |
 
 **Flags:**
@@ -553,20 +553,28 @@ There are no `--check` or `--version` flags. (A future version may add real in-p
 
 #### `claude-playbook update <name>` — update a playbook
 
-Delegates to `<playbook>/bin/update-playbook.sh`. Because playbooks come from many sources with many update strategies, the update logic belongs to the playbook author, not the tool.
+Uses a delegated update script when one exists. Git installs also carry source metadata, allowing safe native updates when no script is present.
 
 ```bash
 claude-playbook update sre
 ```
 
-**Behaviour:**
+**Delegated-script behaviour:**
 1. Resolve the named playbook.
-2. Check `<playbook>/bin/update-playbook.sh` exists and is executable.
+2. Resolve the script from `source.update_script`, defaulting to `bin/update-playbook.sh`, and require it to remain below the playbook root and be executable.
 3. Run the script with:
    - Working directory: the playbook directory
    - Environment: inherited, with `CLAUDE_CONFIG_DIR=<path>`, `CLAUDE_PLAYBOOK_TARGET=<name>`, and `CLAUDE_PLAYBOOK_PATH=<path>`
    - Arguments: any remaining command-line arguments are forwarded to the script
 4. Forward stdout, stderr, and exit code.
+
+**Native-update behaviour:**
+1. If no delegated script exists, require `[source].repository` metadata.
+2. Refuse linked playbooks and legacy installs whose config is selected through top-level `subdir`; those require a delegated script.
+3. Fetch `[source].repository` at the recorded branch and source subdirectory.
+4. Copy the current playbook into a same-filesystem staging directory, then overlay the fetched source. This preserves credentials, account state, history, and other local-only files while replacing source-owned files.
+5. Preserve local alias, authentication-isolation, and source metadata.
+6. Rename the old directory to a timestamped backup and atomically activate the staged directory. Restore the old directory if activation fails.
 
 **Example `bin/update-playbook.sh` for a git-backed install:**
 ```bash
@@ -578,9 +586,10 @@ git pull --ff-only
 
 **Errors:**
 - Target not found → `unknown playbook "sre". Run 'claude-playbook list' to see available playbooks`
-- Update script missing → `"sre" has no update script at bin/update-playbook.sh. This install does not support updates; see its documentation.`
+- Update script and source metadata missing → `"sre" has no update script (...) and no [source] metadata in .playbook`
 - Script not executable → `update script is not executable: <path>`
-- Script exits non-zero → exit code forwarded; `update-playbook.sh exited with code <n>` is printed to stderr
+- Script exits non-zero → exit code forwarded; `update script exited with code <n>` is printed to stderr
+- Linked or legacy-subdir native update → an error requiring a delegated script
 
 ---
 
@@ -647,6 +656,12 @@ alias = "sre"
 description = "Site Reliability Engineering assistant"
 homepage = "https://github.com/ramazanpolat/awesome-playbooks"
 author = "Ramazan Polat"
+
+[source]
+repository = "https://github.com/example/playbooks"
+branch = "main"
+subdir = "playbooks/sre"
+update_script = "bin/update-playbook.sh"
 ```
 
 **Fields:**
@@ -660,6 +675,11 @@ author = "Ramazan Polat"
 | `description` | Human-readable description, shown by `info`. |
 | `homepage` | Optional URL, shown by `info`. |
 | `author` | Optional author name or contact, shown by `info`. |
+| `isolate_auth` | When true, detach shared credentials and do not copy global credentials or account metadata into this playbook. |
+| `source.repository` | Git URL or local source used by native update. Git installs populate this automatically. |
+| `source.branch` | Optional Git branch or tag used by native update. |
+| `source.subdir` | Optional source-relative directory selected during native update. Must remain physically below the fetched source, including through symlinks. |
+| `source.update_script` | Optional delegated update script path, relative to and physically below the playbook config root. |
 
 **Forward compatibility:** unknown fields are ignored. Manifest authors may include fields for future tool versions without breaking older installs.
 
@@ -667,6 +687,7 @@ author = "Ramazan Polat"
 - Invalid TOML → `invalid .playbook at <path>: <reason>`
 - `subdir` escapes the install directory (e.g. `../foo`) → `invalid .playbook at <path>: 'subdir' must be relative and stay inside the directory`
 - `subdir` does not exist → `~/.claude-playbooks/<name>/.playbook declares subdir "<path>" but the directory is missing`
+- `source.subdir` or `source.update_script` escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`
 
 ---
 

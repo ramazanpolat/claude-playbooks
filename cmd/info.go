@@ -33,10 +33,14 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	typeStr := "directory"
-	linfo, _ := os.Lstat(pb.Path)
+	typePath := pb.RootPath
+	if typePath == "" {
+		typePath = pb.Path
+	}
+	linfo, _ := os.Lstat(typePath)
 	if linfo != nil && linfo.Mode()&os.ModeSymlink != 0 {
-		target, _ := os.Readlink(pb.Path)
-		if _, err := os.Stat(pb.Path); err != nil {
+		target, _ := os.Readlink(typePath)
+		if _, err := os.Stat(typePath); err != nil {
 			typeStr = fmt.Sprintf("symlink → %s (BROKEN)", target)
 		} else {
 			typeStr = fmt.Sprintf("symlink → %s", target)
@@ -48,13 +52,20 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		alias = "(none)"
 	}
 
-	fileCount, dirCount := countContents(pb.Path)
+	countPath := pb.Path
+	if resolved, err := filepath.EvalSymlinks(countPath); err == nil {
+		countPath = resolved
+	}
+	fileCount, dirCount := countContents(countPath)
 
 	fmt.Printf("Name:        %s\n", pb.Name)
 	if pb.Manifest != nil && pb.Manifest.Version != "" {
 		fmt.Printf("Version:     %s\n", pb.Manifest.Version)
 	}
 	fmt.Printf("Path:        %s\n", pb.Path)
+	if typePath != pb.Path {
+		fmt.Printf("Root:        %s\n", typePath)
+	}
 	fmt.Printf("Type:        %s\n", typeStr)
 	fmt.Printf("Alias:       %s\n", alias)
 	fmt.Printf("Size:        %d files, %d directories\n", fileCount, dirCount)
@@ -69,9 +80,13 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Author:      %s\n", pb.Manifest.Author)
 	}
 
-	updater := filepath.Join(pb.Path, "bin", "update-playbook.sh")
+	updaterName := "bin/update-playbook.sh"
+	if pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.UpdateScript != "" {
+		updaterName = pb.Manifest.Source.UpdateScript
+	}
+	updater := filepath.Join(pb.Path, filepath.FromSlash(updaterName))
 	if s, err := os.Stat(updater); err == nil && s.Mode()&0111 != 0 {
-		fmt.Printf("Updater:     bin/update-playbook.sh\n")
+		fmt.Printf("Updater:     %s\n", updaterName)
 	} else {
 		fmt.Printf("Updater:     (none)\n")
 	}

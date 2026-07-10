@@ -6,6 +6,7 @@ package manifest
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -14,16 +15,25 @@ import (
 
 const FileName = ".playbook"
 
+// Source holds provenance data used by native updates.
+type Source struct {
+	Repository   string `toml:"repository,omitempty"`
+	Branch       string `toml:"branch,omitempty"`
+	Subdir       string `toml:"subdir,omitempty"`
+	UpdateScript string `toml:"update_script,omitempty"`
+}
+
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
-	Version     string `toml:"version"`
-	Name        string `toml:"name"`
-	Alias       string `toml:"alias"`
-	Subdir      string `toml:"subdir"`
-	Description string `toml:"description"`
-	Homepage    string `toml:"homepage"`
-	Author      string `toml:"author"`
-	IsolateAuth bool   `toml:"isolate_auth"`
+	Version     string  `toml:"version"`
+	Name        string  `toml:"name"`
+	Alias       string  `toml:"alias"`
+	Subdir      string  `toml:"subdir"`
+	Description string  `toml:"description"`
+	Homepage    string  `toml:"homepage"`
+	Author      string  `toml:"author"`
+	IsolateAuth bool    `toml:"isolate_auth"`
+	Source      *Source `toml:"source,omitempty"`
 }
 
 // Read parses the .playbook file inside dir. Returns (nil, nil) if the file
@@ -57,24 +67,77 @@ func Exists(dir string) bool {
 // validate checks structural invariants. Path existence is checked by callers
 // that have access to the playbook directory.
 func (m *Manifest) validate(path string) error {
-	return validateRelativePath(path, "subdir", m.Subdir)
+	if err := validateRelativePath(path, "subdir", m.Subdir); err != nil {
+		return err
+	}
+	if m.Source != nil {
+		if err := validateRelativePath(path, "source.subdir", m.Source.Subdir); err != nil {
+			return err
+		}
+		if err := validateRelativePath(path, "source.update_script", m.Source.UpdateScript); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateRelativePath(manifestPath, field, value string) error {
 	if value == "" {
 		return nil
 	}
-	cleaned := filepath.Clean(value)
-	if filepath.IsAbs(value) || cleaned == "." || strings.HasPrefix(cleaned, "..") {
+	cleaned := path.Clean(filepath.ToSlash(value))
+	if filepath.IsAbs(value) || strings.HasPrefix(cleaned, "/") || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return fmt.Errorf("invalid .playbook at %s: %s must be a relative path below the playbook root", manifestPath, field)
 	}
 	return nil
+}
+
+// ResolveSubdir resolves a manifest or source subdirectory and verifies that
+// symlinks do not escape the supplied root.
+func ResolveSubdir(root, field, value string) (string, error) {
+	if value == "" {
+		return root, nil
+	}
+	candidate, err := ResolvePath(root, field, value)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(candidate)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("%s %q is not a directory below %s", field, value, root)
+	}
+	return candidate, nil
+}
+
+// ResolvePath resolves a relative path and verifies that symlinks keep it
+// physically below root. The returned path retains root's lexical form.
+func ResolvePath(root, field, value string) (string, error) {
+	if err := validateRelativePath(filepath.Join(root, FileName), field, value); err != nil {
+		return "", err
+	}
+	rootResolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	candidate := filepath.Join(root, filepath.FromSlash(value))
+	candidateResolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("%s %q not found below %s: %w", field, value, root, err)
+	}
+	rel, err := filepath.Rel(rootResolved, candidateResolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s %q resolves outside %s", field, value, root)
+	}
+	return candidate, nil
 }
 
 // Write serializes a manifest to the .playbook file inside dir. Used by `link`
 // after collecting metadata interactively.
 func Write(dir string, m *Manifest) error {
 	path := filepath.Join(dir, FileName)
+	if err := m.validate(path); err != nil {
+		return err
+	}
 	var b strings.Builder
 	if m.Version != "" {
 		fmt.Fprintf(&b, "version = %q\n", m.Version)
@@ -101,6 +164,21 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.IsolateAuth {
 		fmt.Fprintf(&b, "isolate_auth = true\n")
+	}
+	if m.Source != nil {
+		b.WriteString("\n[source]\n")
+		if m.Source.Repository != "" {
+			fmt.Fprintf(&b, "repository = %q\n", m.Source.Repository)
+		}
+		if m.Source.Branch != "" {
+			fmt.Fprintf(&b, "branch = %q\n", m.Source.Branch)
+		}
+		if m.Source.Subdir != "" {
+			fmt.Fprintf(&b, "subdir = %q\n", m.Source.Subdir)
+		}
+		if m.Source.UpdateScript != "" {
+			fmt.Fprintf(&b, "update_script = %q\n", m.Source.UpdateScript)
+		}
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }

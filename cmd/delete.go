@@ -37,8 +37,8 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	if strings.Contains(name, "/") {
-		return fmt.Errorf("playbook name cannot contain '/'")
+	if err := validateSinglePathSegment("playbook name", name); err != nil {
+		return err
 	}
 
 	pb, err := playbook.Find(playbooksDir, shellConfig, name)

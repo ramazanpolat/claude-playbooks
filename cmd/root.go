@@ -14,14 +14,20 @@ import (
 var Version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:     "claude-playbook",
-	Short:   "Manage isolated Claude Code instances",
-	Version: Version,
-	RunE:    runRoot,
+	Use:           "claude-playbook",
+	Short:         "Manage isolated Claude Code instances",
+	Version:       Version,
+	SilenceErrors: true,
+	SilenceUsage:  true,
+	RunE:          runRoot,
 }
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		if code, ok := exitCode(err); ok {
+			os.Exit(code)
+		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
