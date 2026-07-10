@@ -656,7 +656,7 @@ author = "Ramazan Polat"
 | `version` | Version of the playbook itself (free-form semver string). Shown by `info`. Not enforced by the tool. |
 | `name` | Preferred playbook name. `install` uses it as a suggestion; the actual name is always the install directory name. |
 | `alias` | Preferred alias for `install`/`create` to suggest when writing the default alias. |
-| `subdir` | Optional. Points at a subdirectory of the install that holds the actual Claude config (CLAUDE.md, settings, hooks). When set, `run`/aliases target `<install>/<subdir>` instead of the install root. Used by repos that keep tool/repo files at the top and the playbook itself one level down. This is unrelated to the `--subdir` install flag. |
+| `subdir` | Optional. Used for backward compatibility. Points at a subdirectory of the install that holds the Claude config. New installations will automatically extract the subdir flatly into the target directory and clear this field in the manifest to ensure all playbooks remain flat at the root level. |
 | `description` | Human-readable description, shown by `info`. |
 | `homepage` | Optional URL, shown by `info`. |
 | `author` | Optional author name or contact, shown by `info`. |
@@ -672,7 +672,7 @@ author = "Ramazan Polat"
 
 ## Alias Management
 
-Aliases are plain `alias` lines in the user's shell configuration file. No registry, no metadata, no comment markers — shell lines in the config are the complete truth.
+Aliases are plain `alias` lines in the user's shell configuration file, each preceded by a `# claude-playbook: <playbook-name>` comment marker. No registry or separate metadata database is used — shell lines in the config are the complete truth, and the comment markers are cleaned up automatically when aliases are removed.
 
 ### Shell config detection
 
@@ -692,10 +692,11 @@ The file to read and write is chosen in this order:
 ### Alias format
 
 ```bash
-alias <alias-name>='CLAUDE_CONFIG_DIR=<playbook-path> claude'
+# claude-playbook: <playbook-name>
+alias <alias-name>='CLAUDE_CONFIG_DIR=<playbook-path> <bin-name> run <playbook-name>'
 ```
 
-No surrounding comments, no markers. A user-authored alias and a tool-written alias are indistinguishable — which is the point.
+Aliases route their execution back through `claude-playbook run` (or its active command name link like `cpb run`) to allow credentials sharing, keychains, and symlink healing to execute transparently on every session startup.
 
 ### Lookup
 
@@ -707,15 +708,15 @@ Two lookup directions, both by plain grep:
 Because lookup works on the actual `alias` line content, hand-maintained aliases are fully supported. If a user writes:
 
 ```bash
-alias myexp="CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/experiment claude --model claude-opus-4-6"
+alias myexp="CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/experiment cpb run experiment --model claude-opus-4-6"
 ```
 
 — the tool sees it, reports it in `list` and `info`, and `alias experiment --remove` will delete it.
 
 ### Updates and removals
 
-- **Set/update:** remove any existing line matching the alias name or any existing line pointing at the playbook path, then append the new alias line.
-- **Remove:** delete any line matching the target (by alias name or by playbook path).
+- **Set/update:** remove any existing line matching the alias name or any existing line pointing at the playbook path (along with their preceding comment markers), then append the new alias line.
+- **Remove:** delete any line matching the target (by alias name or by playbook path), along with their preceding comment markers.
 
 If multiple aliases point to the same playbook, they are all reported; removal deletes all of them.
 
