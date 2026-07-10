@@ -17,6 +17,7 @@ var updateCmd = &cobra.Command{
 	Use:                "update [name]",
 	Short:              "Self-update the tool, or update a playbook via its bin/update-playbook.sh",
 	DisableFlagParsing: true,
+	ValidArgsFunction:  autocompletePlaybookNames,
 	RunE:               runUpdate,
 }
 

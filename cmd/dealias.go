@@ -11,11 +11,12 @@ import (
 )
 
 var dealiasCmd = &cobra.Command{
-	Use:   "dealias <name>",
-	Short: "Remove the shell alias for a playbook",
-	Long:  `Removes any aliases pointing at the named playbook. Equivalent to 'alias <name> --remove'.`,
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDealias,
+	Use:               "dealias <name>",
+	Short:             "Remove the shell alias for a playbook",
+	Long:              `Removes any aliases pointing at the named playbook. Equivalent to 'alias <name> --remove'.`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: autocompletePlaybookNames,
+	RunE:              runDealias,
 }
 
 func runDealias(cmd *cobra.Command, args []string) error {

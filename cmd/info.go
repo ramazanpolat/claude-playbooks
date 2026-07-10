@@ -12,10 +12,11 @@ import (
 )
 
 var infoCmd = &cobra.Command{
-	Use:   "info <name>",
-	Short: "Show detailed information about a playbook",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runInfo,
+	Use:               "info <name>",
+	Short:             "Show detailed information about a playbook",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: autocompletePlaybookNames,
+	RunE:              runInfo,
 }
 
 func runInfo(cmd *cobra.Command, args []string) error {

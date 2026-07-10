@@ -17,11 +17,12 @@ import (
 var deleteYes bool
 
 var deleteCmd = &cobra.Command{
-	Use:     "delete <name>",
-	Aliases: []string{"uninstall", "unlink"},
-	Short:   "Delete a playbook",
-	Args:    cobra.ExactArgs(1),
-	RunE:    runDelete,
+	Use:               "delete <name>",
+	Aliases:           []string{"uninstall", "unlink"},
+	Short:             "Delete a playbook",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: autocompletePlaybookNames,
+	RunE:              runDelete,
 }
 
 func init() {

@@ -20,8 +20,9 @@ var aliasCmd = &cobra.Command{
 With one argument: show the alias for that playbook, or report that it has none (read-only).
 With two arguments: set the alias (creates or replaces).
 With --remove: remove any alias for the playbook.`,
-	Args: cobra.RangeArgs(0, 2),
-	RunE: runAlias,
+	Args:              cobra.RangeArgs(0, 2),
+	ValidArgsFunction: autocompletePlaybookNames,
+	RunE:              runAlias,
 }
 
 func init() {

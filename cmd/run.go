@@ -17,6 +17,7 @@ var runCmd = &cobra.Command{
 	Use:                "run <name> [claude-flags...]",
 	Short:              "Run Claude Code with a playbook",
 	DisableFlagParsing: true,
+	ValidArgsFunction:  autocompletePlaybookNames,
 	RunE:               runRun,
 }
 
