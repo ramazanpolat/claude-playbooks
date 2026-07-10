@@ -15,6 +15,7 @@ Common use cases:
 - **Test a new hook or setting** without risking your main `~/.claude`
 - **Separate work and personal** configurations that don't interfere
 - **Run two Claude Code instances concurrently** on different tasks with different personalities
+- **Authenticate with different accounts concurrently** (e.g., keep one playbook authenticated with your corporate account and another with your personal account)
 - **Share a configuration** with your team by putting the playbook in a Git repo
 - **Consume a repository** containing one or more playbook configurations (e.g. via subdirectories)
 
@@ -145,6 +146,8 @@ mv claude-playbook /usr/local/bin/
 Most workflows start with either `create`, `install`, or `link`.
 
 `claude-playbook` tries to reuse your existing Claude Code authentication for newly created, installed, and linked playbooks. That means a new playbook should normally open Claude Code directly instead of asking you to log in again.
+
+If you want to use **different accounts concurrently**, you can enable authentication isolation for any playbook. Simply set `isolate_auth = true` in the playbook's `.playbook` manifest file, or run the playbook with the environment variable `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true`. This isolates that playbook's login session and prevents it from sharing or auto-syncing credentials with your other playbooks or global settings.
 
 ### Create and run your own playbook
 
