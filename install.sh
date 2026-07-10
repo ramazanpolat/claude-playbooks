@@ -67,6 +67,13 @@ fi
 mv "$TMP_FILE" "$INSTALL_DIR/$INSTALL_NAME"
 TMP_FILE=""
 
+# If installing as the default name, also create the cpb symlink
+if [ "$INSTALL_NAME" = "claude-playbook" ]; then
+  rm -f "$INSTALL_DIR/cpb"
+  ln -s "claude-playbook" "$INSTALL_DIR/cpb"
+  echo "Created symlink $INSTALL_DIR/cpb -> claude-playbook"
+fi
+
 echo ""
 echo "Installed to $INSTALL_DIR/$INSTALL_NAME"
 

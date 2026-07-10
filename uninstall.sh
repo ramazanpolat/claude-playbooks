@@ -33,9 +33,16 @@ REMOVED=0
 
 if [ -n "${INSTALL_DIR:-}" ]; then
   remove_target "$INSTALL_DIR/$INSTALL_NAME"
+  if [ "$INSTALL_NAME" = "claude-playbook" ]; then
+    remove_target "$INSTALL_DIR/cpb"
+  fi
 else
   remove_target "$DEFAULT_INSTALL_DIR/$INSTALL_NAME"
   remove_target "$HOME/.local/bin/$INSTALL_NAME"
+  if [ "$INSTALL_NAME" = "claude-playbook" ]; then
+    remove_target "$DEFAULT_INSTALL_DIR/cpb"
+    remove_target "$HOME/.local/bin/cpb"
+  fi
 
   FOUND=$(command -v "$INSTALL_NAME" 2>/dev/null || true)
   remove_target "$FOUND"

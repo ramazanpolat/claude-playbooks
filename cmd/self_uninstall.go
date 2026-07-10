@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -134,6 +135,15 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 
 	// Step 4: remove the binary.
 	if !selfUninstallKeepBinary && execPath != "(unknown)" {
+		dir := filepath.Dir(execPath)
+		base := filepath.Base(execPath)
+		siblingName := ""
+		if base == "claude-playbook" {
+			siblingName = "cpb"
+		} else if base == "cpb" {
+			siblingName = "claude-playbook"
+		}
+
 		if err := os.Remove(execPath); err != nil {
 			if os.IsPermission(err) {
 				fmt.Fprintf(os.Stderr, "note: cannot remove binary (permission denied). Run manually:\n  sudo rm %s\n", execPath)
@@ -143,6 +153,26 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			removed = append(removed, fmt.Sprintf("binary (%s)", execPath))
+		}
+
+		if siblingName != "" {
+			siblingPath := filepath.Join(dir, siblingName)
+			if info, err := os.Lstat(siblingPath); err == nil {
+				if err := os.Remove(siblingPath); err != nil {
+					if os.IsPermission(err) {
+						fmt.Fprintf(os.Stderr, "note: cannot remove sibling binary (permission denied). Run manually:\n  sudo rm %s\n", siblingPath)
+						needsManual = append(needsManual, fmt.Sprintf("sudo rm %s", siblingPath))
+					} else {
+						fmt.Fprintf(os.Stderr, "warning: failed to remove sibling binary %s: %v\n", siblingName, err)
+					}
+				} else {
+					typeName := "sibling binary"
+					if info.Mode()&os.ModeSymlink != 0 {
+						typeName = "sibling symlink"
+					}
+					removed = append(removed, fmt.Sprintf("%s (%s)", typeName, siblingPath))
+				}
+			}
 		}
 	}
 
