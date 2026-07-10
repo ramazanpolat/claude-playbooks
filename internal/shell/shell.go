@@ -138,18 +138,16 @@ func Write(configFile, aliasName, playbookDir string) error {
 	}
 
 	absPlaybookDir, _ := filepath.Abs(playbookDir)
-	var kept []string
-	for _, line := range lines {
-		if shouldDrop(line, aliasName, absPlaybookDir) {
-			continue
-		}
-		kept = append(kept, line)
-	}
+	kept, _ := dropMatchingLines(lines, func(line string) bool {
+		return shouldDrop(line, aliasName, absPlaybookDir)
+	})
 
 	// Ensure a blank line separator before appending.
 	if len(kept) > 0 && kept[len(kept)-1] != "" {
 		kept = append(kept, "")
 	}
+	playbookName := derivePlaybookName(playbookDir)
+	kept = append(kept, fmt.Sprintf("# claude-playbook: %s", playbookName))
 	kept = append(kept, Format(aliasName, playbookDir))
 	return writeLines(configFile, kept)
 }
@@ -162,15 +160,9 @@ func RemoveByPath(configFile, playbookDir string) (int, error) {
 		return 0, err
 	}
 	absPlaybookDir, _ := filepath.Abs(playbookDir)
-	var kept []string
-	removed := 0
-	for _, line := range lines {
-		if matchesPath(line, absPlaybookDir) {
-			removed++
-			continue
-		}
-		kept = append(kept, line)
-	}
+	kept, removed := dropMatchingLines(lines, func(line string) bool {
+		return matchesPath(line, absPlaybookDir)
+	})
 	if removed == 0 {
 		return 0, nil
 	}
@@ -184,15 +176,9 @@ func RemoveByAliasName(configFile, aliasName string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var kept []string
-	removed := 0
-	for _, line := range lines {
-		if matchesAliasName(line, aliasName) {
-			removed++
-			continue
-		}
-		kept = append(kept, line)
-	}
+	kept, removed := dropMatchingLines(lines, func(line string) bool {
+		return matchesAliasName(line, aliasName)
+	})
 	if removed == 0 {
 		return 0, nil
 	}
@@ -212,19 +198,30 @@ func RemoveByPathPrefix(configFile, prefix string) (int, error) {
 	if !strings.HasSuffix(absPrefix, string(filepath.Separator)) {
 		absPrefix += string(filepath.Separator)
 	}
-	var kept []string
-	removed := 0
-	for _, line := range lines {
-		if matchesPathPrefix(line, absPrefix) {
-			removed++
-			continue
-		}
-		kept = append(kept, line)
-	}
+	kept, removed := dropMatchingLines(lines, func(line string) bool {
+		return matchesPathPrefix(line, absPrefix)
+	})
 	if removed == 0 {
 		return 0, nil
 	}
 	return removed, writeLines(configFile, kept)
+}
+
+func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string, int) {
+	var kept []string
+	removed := 0
+	n := len(lines)
+	for i := 0; i < n; i++ {
+		if matchFn(lines[i]) {
+			removed++
+			if len(kept) > 0 && strings.HasPrefix(strings.TrimSpace(kept[len(kept)-1]), "# claude-playbook:") {
+				kept = kept[:len(kept)-1]
+			}
+			continue
+		}
+		kept = append(kept, lines[i])
+	}
+	return kept, removed
 }
 
 // RewritePathPrefix updates every alias line whose CLAUDE_CONFIG_DIR starts

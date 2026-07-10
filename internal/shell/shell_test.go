@@ -25,7 +25,7 @@ func TestWriteAndReadAliasWithSpacesInPath(t *testing.T) {
 			binName = baseBin
 		}
 	}
-	expected := "alias spacepath='CLAUDE_CONFIG_DIR=\"" + playbookDir + "\" " + binName + " run pb'\n"
+	expected := "# claude-playbook: pb\nalias spacepath='CLAUDE_CONFIG_DIR=\"" + playbookDir + "\" " + binName + " run pb'\n"
 	if got := string(data); got != expected {
 		t.Fatalf("alias line = %q, want %q", got, expected)
 	}
