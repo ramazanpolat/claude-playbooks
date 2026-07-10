@@ -84,5 +84,27 @@ case ":$PATH:" in
      && echo "  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
 
+# Install shell completions
+install_completion() {
+  local rc_file="$1"
+  local shell_type="$2"
+  if [ -f "$rc_file" ]; then
+    if ! grep -q "$INSTALL_NAME completion $shell_type" "$rc_file"; then
+      echo "source <($INSTALL_NAME completion $shell_type)" >> "$rc_file"
+      echo "Added $shell_type completion for $INSTALL_NAME to $rc_file"
+    fi
+    if [ "$INSTALL_NAME" = "claude-playbook" ] && ! grep -q "cpb completion $shell_type" "$rc_file"; then
+      echo "source <(cpb completion $shell_type)" >> "$rc_file"
+      echo "Added $shell_type completion for cpb to $rc_file"
+    fi
+  fi
+}
+
+echo ""
+echo "Setting up shell completions..."
+install_completion "$HOME/.bashrc" "bash"
+install_completion "$HOME/.zshrc" "zsh"
+
 echo ""
 echo "Done. Run: $INSTALL_NAME --help"
+echo "(You may need to restart your terminal or run 'source ~/.bashrc' or 'source ~/.zshrc' for completions to take effect)"
