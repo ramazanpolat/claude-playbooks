@@ -270,3 +270,45 @@ func assertNotSymlink(t *testing.T, path string) {
 		t.Fatalf("%s is still a symlink", path)
 	}
 }
+
+func TestInstallFlattensSubdirFromManifest(t *testing.T) {
+	resetCommandTestState(t)
+	home := t.TempDir()
+	config.PlaybooksDir = filepath.Join(home, "playbooks")
+	config.ShellConfig = filepath.Join(home, ".zshrc")
+
+	// Create source directory
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "playbook"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("version = \"0.1.0\"\nname = \"flatpb\"\nsubdir = \"playbook\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "playbook", "CLAUDE.md"), []byte("# flat CLAUDE\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runInstall(nil, []string{src}); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(config.PlaybooksDir, "flatpb")
+	// The playbook files should be flat under dest
+	if _, err := os.Stat(filepath.Join(dest, "CLAUDE.md")); err != nil {
+		t.Fatalf("expected CLAUDE.md flat under dest: %v", err)
+	}
+	// The extra "playbook" folder should NOT exist under dest
+	if _, err := os.Stat(filepath.Join(dest, "playbook")); !os.IsNotExist(err) {
+		t.Fatalf("expected extra 'playbook' directory to not exist under dest")
+	}
+
+	// Manifest should exist flat and have subdir cleared
+	data, err := os.ReadFile(filepath.Join(dest, ".playbook"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "subdir") {
+		t.Fatalf("expected subdir field to be removed from manifest, got: %s", string(data))
+	}
+}

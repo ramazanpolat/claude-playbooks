@@ -106,10 +106,32 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
 	}
 
+	// Read the optional manifest from staging to check if we need to cherry-pick a subdir.
+	mPre, _ := manifest.Read(work)
+	copySrc := work
+	hasManifestSubdir := !cherryPick && mPre != nil && mPre.Subdir != ""
+	if hasManifestSubdir {
+		copySrc = filepath.Join(work, filepath.FromSlash(mPre.Subdir))
+		info, err := os.Stat(copySrc)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("subdir %q not found in source", mPre.Subdir)
+		}
+	}
+
 	// Stage 3: move staged tree to its final destination.
-	if err := copyDir(work, dest); err != nil {
+	if err := copyDir(copySrc, dest); err != nil {
 		os.RemoveAll(dest)
 		return fmt.Errorf("failed to copy from staging: %w", err)
+	}
+
+	// If we flatly extracted a subdirectory, write the metadata manifest flat into the target directory,
+	// removing the 'subdir' field.
+	if hasManifestSubdir {
+		mPre.Subdir = ""
+		if err := manifest.Write(dest, mPre); err != nil {
+			os.RemoveAll(dest)
+			return fmt.Errorf("failed to write manifest: %w", err)
+		}
 	}
 
 	// Read the optional .playbook at the install destination. A missing
