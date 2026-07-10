@@ -23,6 +23,7 @@ type Manifest struct {
 	Description string `toml:"description"`
 	Homepage    string `toml:"homepage"`
 	Author      string `toml:"author"`
+	IsolateAuth bool   `toml:"isolate_auth"`
 }
 
 // Read parses the .playbook file inside dir. Returns (nil, nil) if the file
@@ -97,6 +98,9 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.Author != "" {
 		fmt.Fprintf(&b, "author = %q\n", m.Author)
+	}
+	if m.IsolateAuth {
+		fmt.Fprintf(&b, "isolate_auth = true\n")
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }

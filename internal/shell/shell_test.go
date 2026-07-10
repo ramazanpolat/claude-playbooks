@@ -18,8 +18,16 @@ func TestWriteAndReadAliasWithSpacesInPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(data); got != "alias spacepath='CLAUDE_CONFIG_DIR=\""+playbookDir+"\" claude'\n" {
-		t.Fatalf("alias line = %q", got)
+	binName := "claude-playbook"
+	if len(os.Args) > 0 {
+		baseBin := filepath.Base(os.Args[0])
+		if baseBin != "." && baseBin != "/" {
+			binName = baseBin
+		}
+	}
+	expected := "alias spacepath='CLAUDE_CONFIG_DIR=\"" + playbookDir + "\" " + binName + " run pb'\n"
+	if got := string(data); got != expected {
+		t.Fatalf("alias line = %q, want %q", got, expected)
 	}
 
 	entries, err := ReadAll(configFile)

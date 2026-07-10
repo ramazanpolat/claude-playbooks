@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 const testCreds = `{"claudeAiOauth":{"accessToken":"token"}}`
@@ -76,6 +77,7 @@ func TestSyncCredentialsRepairsWrongSymlink(t *testing.T) {
 }
 
 func TestSyncCredentialsPreservesValidLocalCredentials(t *testing.T) {
+	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".claude")
@@ -113,6 +115,65 @@ func TestSyncCredentialsPreservesValidLocalCredentials(t *testing.T) {
 	}
 	if string(got) != string(localContent) {
 		t.Fatalf("local credentials changed: %q", string(got))
+	}
+}
+
+func TestSyncCredentialsHealsSymlinkAndSyncsNewer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	globalCreds := filepath.Join(globalDir, CredentialsFileName)
+	if err := os.WriteFile(globalCreds, []byte(testCreds), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the global file older than the local one we're about to write.
+	oldTime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(globalCreds, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(t.TempDir(), "playbook")
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	localCreds := filepath.Join(target, CredentialsFileName)
+	localContent := []byte(`{"claudeAiOauth":{"accessToken":"newer-local"}}`)
+	if err := os.WriteFile(localCreds, localContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncCredentials(target); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Target should now be a symlink to global
+	info, err := os.Lstat(localCreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("expected target credentials to be replaced with a symlink")
+	}
+
+	gotLink, err := os.Readlink(localCreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotLink != globalCreds {
+		t.Fatalf("expected symlink to point to %q, got %q", globalCreds, gotLink)
+	}
+
+	// 2. Global file should have been updated with the newer target credentials
+	globalContent, err := os.ReadFile(globalCreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(globalContent) != string(localContent) {
+		t.Fatalf("expected global credentials to be updated to %q, got %q", string(localContent), string(globalContent))
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 const CredentialsFileName = ".credentials.json"
@@ -84,7 +86,9 @@ func EnsureGlobalCredentials() (string, error) {
 }
 
 // LinkCredentials points targetDir/.credentials.json at sourceCreds. Existing
-// valid regular credentials are left intact so a playbook can keep its own login.
+// valid regular credentials are left intact only if isAuthIsolated is true.
+// Otherwise, they are synchronized to the global credentials file (if newer) and
+// replaced with a symlink to prevent authentication desync.
 func LinkCredentials(targetDir, sourceCreds string) error {
 	targetInfo, err := os.Stat(targetDir)
 	if err != nil {
@@ -107,8 +111,11 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 	}
 
 	targetCreds := filepath.Join(targetDir, CredentialsFileName)
-	if info, err := os.Lstat(targetCreds); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
+	targetLinfo, err := os.Lstat(targetCreds)
+	exists := err == nil
+
+	if exists {
+		if targetLinfo.Mode()&os.ModeSymlink != 0 {
 			link, err := os.Readlink(targetCreds)
 			if err == nil {
 				linkAbs := link
@@ -128,18 +135,64 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 			if err != nil {
 				return fmt.Errorf("existing credentials at %s are not usable: %w", targetCreds, err)
 			}
-			if usable {
-				return nil
-			}
-			if err := os.Remove(targetCreds); err != nil {
-				return err
+			if isAuthIsolated(targetDir) {
+				if usable {
+					return nil
+				}
+				if err := os.Remove(targetCreds); err != nil {
+					return err
+				}
+			} else {
+				if usable {
+					// Share and sync: copy to global if the target (playbook's local file) is newer.
+					sourceInfo, err := os.Stat(sourceAbs)
+					if err == nil {
+						if targetLinfo.ModTime().After(sourceInfo.ModTime()) {
+							if err := copyFile(targetCreds, sourceAbs, 0600); err != nil {
+								return fmt.Errorf("failed to copy newer credentials to global: %w", err)
+							}
+						}
+					} else if os.IsNotExist(err) {
+						if err := copyFile(targetCreds, sourceAbs, 0600); err != nil {
+							return fmt.Errorf("failed to copy credentials to global: %w", err)
+						}
+					}
+				}
+				if err := os.Remove(targetCreds); err != nil {
+					return err
+				}
 			}
 		}
-	} else if !os.IsNotExist(err) {
-		return err
 	}
 
 	return os.Symlink(sourceAbs, targetCreds)
+}
+
+func isAuthIsolated(targetDir string) bool {
+	if os.Getenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH") == "true" {
+		return true
+	}
+	dir := targetDir
+	for {
+		m, err := manifest.Read(dir)
+		if err == nil && m != nil {
+			return m.IsolateAuth
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return false
+}
+
+func copyFile(src, dst string, perm os.FileMode) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, perm)
 }
 
 // SyncAccountMetadata copies Claude Code's non-token account metadata into the

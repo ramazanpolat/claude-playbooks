@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
 
 // AliasEntry represents a single alias line found in the shell config.
@@ -32,8 +34,26 @@ func ValidAliasName(aliasName string) bool {
 
 // Format returns the canonical alias line written by the tool.
 func Format(aliasName, playbookDir string) string {
-	body := fmt.Sprintf("CLAUDE_CONFIG_DIR=%s claude", shellDoubleQuote(playbookDir))
+	playbookName := derivePlaybookName(playbookDir)
+	binName := "claude-playbook"
+	if len(os.Args) > 0 {
+		baseBin := filepath.Base(os.Args[0])
+		if baseBin != "." && baseBin != "/" {
+			binName = baseBin
+		}
+	}
+	body := fmt.Sprintf("CLAUDE_CONFIG_DIR=%s %s run %s", shellDoubleQuote(playbookDir), binName, playbookName)
 	return fmt.Sprintf("alias %s=%s", aliasName, shellQuote(body))
+}
+
+func derivePlaybookName(playbookDir string) string {
+	playbooksDir := config.ResolvePlaybooksDir()
+	rel, err := filepath.Rel(playbooksDir, playbookDir)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return filepath.Base(playbookDir)
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	return parts[0]
 }
 
 // ReadAll scans the shell config for every alias whose definition contains
