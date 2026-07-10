@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -83,31 +84,79 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 		return err
 	}
 
-	script := filepath.Join(pb.Path, "bin", "update-playbook.sh")
-	info, err := os.Stat(script)
-	if err != nil {
-		return fmt.Errorf("%q has no update script at bin/update-playbook.sh. This target does not support updates; see its documentation", name)
+	// Tier 1: Delegated Script
+	scriptPath := "bin/update-playbook.sh"
+	if pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.UpdateScript != "" {
+		scriptPath = pb.Manifest.Source.UpdateScript
 	}
-	if info.Mode()&0111 == 0 {
-		return fmt.Errorf("update script is not executable: %s", script)
+	script := filepath.Join(pb.Path, scriptPath)
+	info, err := os.Stat(script)
+	
+	if err == nil {
+		// Script exists, run it
+		if info.Mode()&0111 == 0 {
+			return fmt.Errorf("update script is not executable: %s", script)
+		}
+		c := exec.Command(script, scriptArgs...)
+		c.Dir = pb.Path
+		c.Env = append(os.Environ(),
+			"CLAUDE_CONFIG_DIR="+pb.Path,
+			"CLAUDE_PLAYBOOK_TARGET="+name,
+			"CLAUDE_PLAYBOOK_PATH="+pb.Path,
+		)
+		c.Stdin = os.Stdin
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		if err := c.Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				fmt.Fprintf(os.Stderr, "update script exited with code %d\n", exitErr.ExitCode())
+				os.Exit(exitErr.ExitCode())
+			}
+			return err
+		}
+		return nil
 	}
 
-	c := exec.Command(script, scriptArgs...)
-	c.Dir = pb.Path
-	c.Env = append(os.Environ(),
-		"CLAUDE_CONFIG_DIR="+pb.Path,
-		"CLAUDE_PLAYBOOK_TARGET="+name,
-		"CLAUDE_PLAYBOOK_PATH="+pb.Path,
-	)
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			fmt.Fprintf(os.Stderr, "update-playbook.sh exited with code %d\n", exitErr.ExitCode())
-			os.Exit(exitErr.ExitCode())
-		}
-		return err
+	// Tier 2: Native Smart Overwrite
+	if pb.Manifest == nil || pb.Manifest.Source == nil || pb.Manifest.Source.Repository == "" {
+		return fmt.Errorf("%q has no update script (%s) and no [source] metadata in .playbook. Cannot update natively.", name, scriptPath)
 	}
+
+	fmt.Printf("Updating natively from %s...\n", pb.Manifest.Source.Repository)
+	
+	work, cleanup, err := stageSource(pb.Manifest.Source.Repository, isGitURL(pb.Manifest.Source.Repository), pb.Manifest.Source.Branch, pb.Manifest.Source.Subdir)
+	if err != nil {
+		return fmt.Errorf("failed to fetch latest source: %w", err)
+	}
+	defer cleanup()
+
+	// Simple Native Overwrite: Copy from staged dir into pb.Path.
+	// Since the user warned about blindly overwriting, we back up the existing directory just in case.
+	backupPath := pb.Path + ".bak." + fmt.Sprintf("%d", os.Getpid())
+	if err := os.Rename(pb.Path, backupPath); err != nil {
+		return fmt.Errorf("failed to backup existing playbook to %s: %w", backupPath, err)
+	}
+	
+	if err := copyDir(work, pb.Path); err != nil {
+		// Restore backup
+		os.RemoveAll(pb.Path)
+		os.Rename(backupPath, pb.Path)
+		return fmt.Errorf("failed to apply update: %w", err)
+	}
+	
+	// Preserve the old .playbook manifest because we might have local alias tweaks, etc.
+	// (or at least merge them) but copyDir overwrote it.
+	// We'll write the merged manifest.
+	newManifest, _ := manifest.Read(pb.Path)
+	if newManifest == nil {
+		newManifest = pb.Manifest
+	} else {
+		newManifest.Alias = pb.Manifest.Alias // preserve alias
+		newManifest.Source = pb.Manifest.Source
+	}
+	newManifest.Subdir = ""
+	manifest.Write(pb.Path, newManifest)
+	
+	fmt.Printf("Successfully updated %q natively. Backup saved to %s (feel free to delete it).\n", name, backupPath)
 	return nil
 }

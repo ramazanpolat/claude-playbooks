@@ -14,6 +14,14 @@ import (
 
 const FileName = ".playbook"
 
+// Source holds provenance data for native updates.
+type Source struct {
+	Repository   string `toml:"repository,omitempty"`
+	Branch       string `toml:"branch,omitempty"`
+	Subdir       string `toml:"subdir,omitempty"`
+	UpdateScript string `toml:"update_script,omitempty"`
+}
+
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
 	Version     string `toml:"version"`
@@ -22,8 +30,9 @@ type Manifest struct {
 	Subdir      string `toml:"subdir"`
 	Description string `toml:"description"`
 	Homepage    string `toml:"homepage"`
-	Author      string `toml:"author"`
-	IsolateAuth bool   `toml:"isolate_auth"`
+	Author      string  `toml:"author"`
+	IsolateAuth bool    `toml:"isolate_auth"`
+	Source      *Source `toml:"source,omitempty"`
 }
 
 // Read parses the .playbook file inside dir. Returns (nil, nil) if the file
@@ -101,6 +110,21 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.IsolateAuth {
 		fmt.Fprintf(&b, "isolate_auth = true\n")
+	}
+	if m.Source != nil {
+		fmt.Fprintf(&b, "\n[source]\n")
+		if m.Source.Repository != "" {
+			fmt.Fprintf(&b, "repository = %q\n", m.Source.Repository)
+		}
+		if m.Source.Branch != "" {
+			fmt.Fprintf(&b, "branch = %q\n", m.Source.Branch)
+		}
+		if m.Source.Subdir != "" {
+			fmt.Fprintf(&b, "subdir = %q\n", m.Source.Subdir)
+		}
+		if m.Source.UpdateScript != "" {
+			fmt.Fprintf(&b, "update_script = %q\n", m.Source.UpdateScript)
+		}
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }

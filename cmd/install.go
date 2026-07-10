@@ -124,10 +124,24 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to copy from staging: %w", err)
 	}
 
-	// If we flatly extracted a subdirectory, write the metadata manifest flat into the target directory,
-	// removing the 'subdir' field.
+	// Inject source provenance metadata if installed from git
+	needsManifestWrite := false
+	if mPre == nil {
+		mPre = &manifest.Manifest{}
+	}
 	if hasManifestSubdir {
 		mPre.Subdir = ""
+		needsManifestWrite = true
+	}
+	if isGit {
+		mPre.Source = &manifest.Source{
+			Repository: source,
+			Branch:     installBranch,
+			Subdir:     installSubdir,
+		}
+		needsManifestWrite = true
+	}
+	if needsManifestWrite {
 		if err := manifest.Write(dest, mPre); err != nil {
 			os.RemoveAll(dest)
 			return fmt.Errorf("failed to write manifest: %w", err)
