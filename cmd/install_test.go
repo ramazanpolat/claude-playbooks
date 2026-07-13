@@ -309,8 +309,15 @@ func TestRenameMovesRootForSubdirManifest(t *testing.T) {
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatalf("old root still exists, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(config.PlaybooksDir, "new", ".playbook")); err != nil {
-		t.Fatalf("new root missing manifest: %v", err)
+	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "new"))
+	if err != nil || m == nil {
+		t.Fatalf("new root missing manifest: m=%#v err=%v", m, err)
+	}
+	if m.Name != "new" {
+		t.Fatalf("manifest name = %q, want \"new\"", m.Name)
+	}
+	if m.Subdir != "config" {
+		t.Fatalf("manifest subdir = %q, want \"config\"", m.Subdir)
 	}
 	newConfig := filepath.Join(config.PlaybooksDir, "new", "config")
 	if _, err := os.Stat(filepath.Join(newConfig, "CLAUDE.md")); err != nil {
@@ -322,6 +329,64 @@ func TestRenameMovesRootForSubdirManifest(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Path != newConfig {
 		t.Fatalf("alias paths = %#v, want %s", entries, newConfig)
+	}
+}
+
+func TestInstallRewritesManifestNameToInstallName(t *testing.T) {
+	resetCommandTestState(t)
+	home := t.TempDir()
+	config.PlaybooksDir = filepath.Join(home, "playbooks")
+	config.ShellConfig = filepath.Join(home, ".zshrc")
+	src := testPlaybookSource(t, "kommander")
+
+	installName = "kommander-dev"
+	installNoAlias = true
+	if err := runInstall(nil, []string{src}); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "kommander-dev"))
+	if err != nil || m == nil {
+		t.Fatalf("installed manifest: m=%#v err=%v", m, err)
+	}
+	if m.Name != "kommander-dev" {
+		t.Fatalf("manifest name = %q, want \"kommander-dev\"", m.Name)
+	}
+}
+
+func TestRenameLinkedPlaybookKeepsExternalManifest(t *testing.T) {
+	resetCommandTestState(t)
+	home := t.TempDir()
+	config.PlaybooksDir = filepath.Join(home, "playbooks")
+	config.ShellConfig = filepath.Join(home, ".zshrc")
+	external := filepath.Join(home, "external")
+	if err := os.MkdirAll(external, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(external, ".playbook"), []byte("version = \"0.1.0\"\nname = \"orig\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.PlaybooksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.ShellConfig, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runRename(nil, []string{"linked", "moved"}); err != nil {
+		t.Fatal(err)
+	}
+
+	newPath := filepath.Join(config.PlaybooksDir, "moved")
+	if info, err := os.Lstat(newPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("renamed playbook is not a symlink: info=%v err=%v", info, err)
+	}
+	m, err := manifest.Read(external)
+	if err != nil || m == nil || m.Name != "orig" {
+		t.Fatalf("external manifest was modified: m=%#v err=%v", m, err)
 	}
 }
 

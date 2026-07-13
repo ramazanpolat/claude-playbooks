@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
@@ -96,6 +97,19 @@ func runRename(cmd *cobra.Command, args []string) error {
 		}
 		if err := shell.Write(shellConfig, renameAlias, newConfigPath); err != nil {
 			return fmt.Errorf("failed to write alias: %w", err)
+		}
+	}
+
+	// Keep the manifest's name in sync with the directory name. Skip linked
+	// playbooks: their manifest belongs to the external source tree.
+	if info, err := os.Lstat(newPath); err == nil && info.Mode()&os.ModeSymlink == 0 {
+		if m, err := manifest.Read(newPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not read manifest to update its name: %v\n", err)
+		} else if m != nil && m.Name != newName {
+			m.Name = newName
+			if err := manifest.Write(newPath, m); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not update manifest name: %v\n", err)
+			}
 		}
 	}
 

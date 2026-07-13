@@ -73,6 +73,46 @@ func TestNativeUpdatePreservesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestNativeUpdateRestoresInstallName(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	config.ShellConfig = filepath.Join(root, "shellrc")
+	source := filepath.Join(root, "source")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(installed, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "CLAUDE.md"), []byte("new\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// The source ships its own name; the install carries a stale one.
+	if err := manifest.Write(source, &manifest.Manifest{Name: "upstream"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(installed, &manifest.Manifest{Name: "kommander", Source: &manifest.Source{Repository: source}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runPlaybookUpdate("pb", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := manifest.Read(installed)
+	if err != nil || m == nil {
+		t.Fatalf("updated manifest: m=%#v err=%v", m, err)
+	}
+	if m.Name != "pb" {
+		t.Fatalf("manifest name = %q, want \"pb\"", m.Name)
+	}
+	if m.Source == nil || m.Source.Repository != source {
+		t.Fatalf("source metadata lost: %#v", m.Source)
+	}
+}
+
 func TestNativeUpdateRefusesLinkedPlaybook(t *testing.T) {
 	resetCommandTestState(t)
 	root := t.TempDir()

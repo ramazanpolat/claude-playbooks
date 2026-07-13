@@ -182,6 +182,9 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 		newManifest.IsolateAuth = pb.Manifest.IsolateAuth
 		newManifest.Source = pb.Manifest.Source
 	}
+	// The install's name is its directory name; never adopt the source's.
+	// This also heals installs whose manifest predates name rewriting.
+	newManifest.Name = filepath.Base(root)
 	newManifest.Subdir = ""
 	if err := manifest.Write(candidate, newManifest); err != nil {
 		return fmt.Errorf("failed to write updated manifest: %w", err)
