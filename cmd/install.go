@@ -156,6 +156,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 		needsManifestWrite = true
 	}
+	// The installed manifest's name always mirrors the top-level install
+	// directory: the source's name only seeds the default targetName above.
+	// Side-by-side installs of the same source stay distinguishable by name.
+	if mPre.Name != targetName {
+		mPre.Name = targetName
+		needsManifestWrite = true
+	}
 	if needsManifestWrite {
 		if err := manifest.Write(dest, mPre); err != nil {
 			os.RemoveAll(dest)
