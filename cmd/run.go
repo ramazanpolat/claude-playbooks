@@ -73,17 +73,18 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
 	}
 
-	if err := auth.SyncCredentials(pb.Path); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
-	}
-
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
+	launchEnv, syncErr := auth.PrepareLaunchEnv(pb.Path)
+	if syncErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", syncErr)
+	}
+
 	c := exec.Command(claudePath, claudeArgs...)
-	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+pb.Path)
+	c.Env = launchEnv
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
