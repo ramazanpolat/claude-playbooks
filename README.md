@@ -333,6 +333,16 @@ git pull --ff-only
 
 Git installs also record their repository, branch, and selected subdirectory in `.playbook`. If no update script exists, a flat, non-linked install can update natively from that source. Native update stages a full backup, overlays new source files while preserving local Claude state and credentials, and atomically activates the result. Linked playbooks and legacy manifests with `subdir` require a delegated update script.
 
+With **no** name, `update` self-updates the `claude-playbook` binary itself to the latest GitHub release:
+
+```bash
+claude-playbook update            # download + install the latest release
+claude-playbook update --check    # report the latest version without installing
+claude-playbook update --force    # reinstall even if already on the latest
+```
+
+It downloads the release asset for your OS/architecture, verifies it, and atomically replaces the running binary (resolving the `cpb` symlink so the real binary is updated). If the install directory needs elevated privileges to write, it says so.
+
 ### Use temporary config locations
 
 For tests or demos, keep playbooks and shell aliases away from your real files:

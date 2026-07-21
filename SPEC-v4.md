@@ -534,22 +534,34 @@ Updates either the `claude-playbook` tool itself, or a specific playbook — bas
 
 #### `claude-playbook update` (no arguments) — self-update
 
-Reports the current `claude-playbook` version and tells you how to update.
+Updates the running `claude-playbook` binary in place to the latest GitHub release.
 
 ```bash
-claude-playbook update
+claude-playbook update            # download + install the latest release
+claude-playbook update --check    # report the latest version without installing
+claude-playbook update --force    # reinstall even if already on the latest
 ```
 
-**Automatic in-place self-update is not yet implemented.** The command does **not** download or replace the binary. It prints the currently running version and the command to re-install the latest release:
+It resolves the latest release tag from the GitHub API, downloads the asset for
+the running OS/architecture (`claude-playbook-<goos>-<goarch>`), verifies it by
+running `--version` against the downloaded file, and then atomically replaces
+the current executable (it stages a temp file in the executable's own directory
+and `rename`s it into place, so the swap is atomic and never a partial write).
+Symlinks are resolved first, so invoking through the `cpb` symlink updates the
+real binary and leaves the link intact.
 
 ```
 Current version: v1.2.0
-
-Self-update is not yet implemented. To update, re-run:
-  curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
+Latest version:  v1.3.0
+Downloading claude-playbook-darwin-arm64 v1.3.0 (darwin/arm64)...
+Updated to v1.3.0 at /Users/you/.local/bin/claude-playbook.
 ```
 
-There are no `--check` or `--version` flags. (A future version may add real in-place binary replacement, at which point this subsection will describe it.)
+If already on the latest version, it prints `Already up to date.` and exits
+(pass `--force` to reinstall anyway). If the install directory is not writable
+(e.g. a root-owned `/usr/local/bin`), it reports that elevated privileges are
+needed. `GITHUB_TOKEN`, when set, is used for the GitHub API request to avoid
+rate limits.
 
 #### `claude-playbook update <name>` — update a playbook
 

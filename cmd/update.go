@@ -26,6 +26,7 @@ var updateCmd = &cobra.Command{
 
 func runUpdate(cmd *cobra.Command, args []string) error {
 	var playbooksDir, shellConfigOverride string
+	var force, checkOnly bool
 	var rest []string
 	for i := 0; i < len(args); i++ {
 		switch {
@@ -42,6 +43,13 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
 			printUpdateHelp()
 			return nil
+		// --force/--check are self-update flags; only honor them before a name
+		// so a playbook's delegated update script still receives its own flags
+		// (e.g. `update kommander --force` passes --force to kommander's script).
+		case (args[i] == "--force" || args[i] == "-f") && len(rest) == 0:
+			force = true
+		case args[i] == "--check" && len(rest) == 0:
+			checkOnly = true
 		default:
 			rest = append(rest, args[i])
 		}
@@ -54,7 +62,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(rest) == 0 {
-		return runSelfUpdate()
+		return runSelfUpdate(force, checkOnly)
 	}
 
 	name := rest[0]
@@ -65,16 +73,11 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 func printUpdateHelp() {
 	fmt.Println("Usage: claude-playbook update [name] [script-args...]")
 	fmt.Println()
-	fmt.Println("Without <name>: self-update the claude-playbook binary.")
-	fmt.Println("With <name>: run its delegated update script, or update natively from source metadata.")
-}
-
-func runSelfUpdate() error {
-	fmt.Printf("Current version: %s\n", Version)
+	fmt.Println("Without <name>: self-update the claude-playbook binary to the latest release.")
+	fmt.Println("  --check    report the latest version without installing it")
+	fmt.Println("  --force    reinstall even if already on the latest version")
 	fmt.Println()
-	fmt.Println("Self-update is not yet implemented. To update, re-run:")
-	fmt.Println("  curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh")
-	return nil
+	fmt.Println("With <name>: run its delegated update script, or update natively from source metadata.")
 }
 
 func runPlaybookUpdate(name string, scriptArgs []string) error {
