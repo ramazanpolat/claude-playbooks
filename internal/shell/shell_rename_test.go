@@ -155,3 +155,32 @@ func TestRewriteMarkerCommentLeavesOtherLinesAlone(t *testing.T) {
 		t.Fatalf("empty name should be a no-op: %q", got)
 	}
 }
+
+// The run-argument rewrite must be confined to the command text after the
+// CLAUDE_CONFIG_DIR value. A playbooks root whose own path contains " run
+// <name>" would otherwise match inside the path first: the directory gets
+// corrupted, the real argument is left stale, and the alias becomes
+// undiscoverable by path (every lookup parses CLAUDE_CONFIG_DIR).
+func TestRewritePathPrefixDoesNotMatchInsideThePath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "team run old")
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	oldDir := filepath.Join(root, "old")
+	newDir := filepath.Join(root, "new")
+
+	// Bare (hand-edited / legacy) form, which is what makes the collision reachable.
+	cfg := writeConfig(t, `alias x='CLAUDE_CONFIG_DIR="`+oldDir+`" cpb run old'`)
+	if _, err := RewritePathPrefix(cfg, oldDir, newDir); err != nil {
+		t.Fatal(err)
+	}
+	got := readConfig(t, cfg)
+
+	if !strings.Contains(got, `CLAUDE_CONFIG_DIR="`+newDir+`"`) {
+		t.Fatalf("config dir corrupted by the run-argument rewrite:\n got: %s\nwant path: %s", got, newDir)
+	}
+	if !strings.Contains(got, "run new") {
+		t.Fatalf("run argument not rewritten:\n%s", got)
+	}
+	if strings.Contains(got, "team run new") {
+		t.Fatalf("rewrite reached inside the path:\n%s", got)
+	}
+}

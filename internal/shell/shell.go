@@ -347,7 +347,6 @@ func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
 	rest := line[idx+len("CLAUDE_CONFIG_DIR="):]
 	end := envValueEnd(rest)
 	after := rest[end:]
-	out := prefix + shellDoubleQuote(newPath) + after
 
 	// The path is only half of the alias. Its `run <name>` argument also names the
 	// playbook, and a rename changes that name: leaving it stale yields a line that
@@ -358,8 +357,14 @@ func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
 	// documents hand-editing an alias to append Claude Code flags
 	// (`... run work --model ... --permission-mode auto`) and regeneration would
 	// silently discard them.
-	out, _ = rewriteRunArg(out, derivePlaybookName(abs), derivePlaybookName(newPath))
-	return out, true
+	//
+	// Scoped to `after` -- the command text following the CLAUDE_CONFIG_DIR value --
+	// never the whole line. A playbooks root whose own path contains " run <name>"
+	// (e.g. "/tmp/team run old/old") would otherwise match inside the path first,
+	// corrupting the directory while leaving the real argument stale and rendering
+	// the alias undiscoverable by path (every lookup parses CLAUDE_CONFIG_DIR).
+	after, _ = rewriteRunArg(after, derivePlaybookName(abs), derivePlaybookName(newPath))
+	return prefix + shellDoubleQuote(newPath) + after, true
 }
 
 // runArgQuoting lists the ways a playbook name can be quoted in an alias line,
