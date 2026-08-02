@@ -131,9 +131,10 @@ func runRename(cmd *cobra.Command, args []string) error {
 		// printed and would execute the extra text if pasted.
 		fmt.Fprintf(os.Stderr,
 			"Warning: alias %q in %s was hand-edited, so it was left unchanged and still refers to %q.\n"+
-				"         Regenerate it with: %s alias %s %s\n",
+				"         Regenerate it with: %s%s alias %s %s\n",
 			aliasName, shellConfig, oldName,
 			shell.QuoteArg(filepath.Base(os.Args[0])),
+			configOverrideArgs(),
 			shell.QuoteArg(newName),
 			shell.QuoteArg(aliasName))
 	}
@@ -151,4 +152,19 @@ func removeAliasesForBothPaths(shellConfig, oldRoot, newPath string) error {
 		}
 	}
 	return nil
+}
+
+// configOverrideArgs renders the --playbooks-dir / --shell-config overrides in
+// effect, so a suggested command reproduces this invocation's configuration.
+// Without them, a suggestion made under `--playbooks-dir ./pb` would search the
+// default directory and fail, or write the alias into the wrong rc file.
+func configOverrideArgs() string {
+	var b strings.Builder
+	if config.PlaybooksDir != "" {
+		b.WriteString(" --playbooks-dir " + shell.QuoteArg(config.PlaybooksDir))
+	}
+	if config.ShellConfig != "" {
+		b.WriteString(" --shell-config " + shell.QuoteArg(config.ShellConfig))
+	}
+	return b.String()
 }
