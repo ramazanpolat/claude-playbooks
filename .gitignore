@@ -1,3 +1,87 @@
-claude-playbook
-bin/test-cpb
-dist/
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+# build.sh emits the binary at the repo root; the release workflow cross-compiles
+# into dist/. These are anchored with a leading slash: as bare patterns they
+# would match a file or directory of that name at ANY depth, so a future
+# cmd/claude-playbook/ package would be silently dropped from the tree.
+/claude-playbook
+/cpb
+/bin/test-cpb
+/dist/
+
+# Go toolchain artifacts. *.test is the compiled test binary -- it does not
+# match *_test.go sources, which stay tracked.
+*.exe
+*.test
+*.out
+*.prof
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+# Nothing matching these has ever been committed to this repo. The patterns
+# exist so an accidental key or credential file cannot be staged in the first
+# place -- a secret removed in a later commit still ships in every clone.
+.env
+.env.*
+!.env.example
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.gpg
+.netrc
+.npmrc
+.pypirc
+credentials.json
+secrets.json
+secrets.yml
+secrets.yaml
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
+# ---------------------------------------------------------------------------
+# Claude Code runtime state
+# ---------------------------------------------------------------------------
+# This project creates and manages CLAUDE_CONFIG_DIR trees, so a stray run with
+# CLAUDE_CONFIG_DIR pointed at the repo drops live session data here. Session
+# transcripts (projects/) and edit snapshots (file-history/) record whatever a
+# session touched, including credentials typed into commands -- they are the
+# highest-value thing in the tree to keep out of git.
+#
+# Anchored to the repo root, which is where Claude Code actually writes, so
+# these can never collide with a test fixture of the same name under tests/.
+/projects/
+/file-history/
+/shell-snapshots/
+/session-env/
+/paste-cache/
+/statsig/
+/todos/
+/history.jsonl
+/.claude.json
+/.claude.json.backup
+/.credentials.json
+
+# .claude/ holds project-scoped config. Ignore its contents (runtime state)
+# while leaving room to track a shared settings.json deliberately: git cannot
+# re-include a file whose parent directory is excluded, so this excludes the
+# directory's contents rather than the directory itself.
+/.claude/*
+!/.claude/settings.json
+
+# ---------------------------------------------------------------------------
+# OS and editor noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
