@@ -258,9 +258,18 @@ func RewritePathPrefix(configFile, oldPrefix, newPrefix string) (int, error) {
 		absNew, _ := filepath.Abs(newPrefix)
 		for i, line := range lines {
 			rewritten, ok := rewriteLinePathPrefix(line, absOld, absNew)
-			if ok {
-				lines[i] = rewritten
-				changed++
+			if !ok {
+				continue
+			}
+			lines[i] = rewritten
+			changed++
+			// Write emits a `# claude-playbook: <name>` marker above each alias.
+			// It names the playbook too, so a rename leaves it stale for the same
+			// reason the run argument was. Nothing reads the name (removal matches
+			// the prefix alone), but a marker naming a playbook that no longer
+			// exists is misleading in a file the user is invited to hand-edit.
+			if i > 0 {
+				lines[i-1] = rewriteMarkerComment(lines[i-1], newPlaybookName(rewritten))
 			}
 		}
 		if changed == 0 {
@@ -338,7 +347,93 @@ func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
 	rest := line[idx+len("CLAUDE_CONFIG_DIR="):]
 	end := envValueEnd(rest)
 	after := rest[end:]
-	return prefix + shellDoubleQuote(newPath) + after, true
+	out := prefix + shellDoubleQuote(newPath) + after
+
+	// The path is only half of the alias. Its `run <name>` argument also names the
+	// playbook, and a rename changes that name: leaving it stale yields a line that
+	// points at the right directory and then asks to run a playbook that no longer
+	// exists ("Error: unknown playbook"). The alias is dead until regenerated.
+	//
+	// Targeted rewrite rather than regenerating via Format, because README
+	// documents hand-editing an alias to append Claude Code flags
+	// (`... run work --model ... --permission-mode auto`) and regeneration would
+	// silently discard them.
+	out, _ = rewriteRunArg(out, derivePlaybookName(abs), derivePlaybookName(newPath))
+	return out, true
+}
+
+// runArgQuoting lists the ways a playbook name can be quoted in an alias line,
+// most specific first. The first entry is what Format produces: the body is
+// single-quoted as a whole, so its inner single quotes are escaped as '\”.
+var runArgQuoting = []struct{ open, close string }{
+	{`'\''`, `'\''`},
+	{`'`, `'`},
+	{`"`, `"`},
+	{``, ``},
+}
+
+// rewriteRunArg replaces the `run <oldName>` argument with newName, leaving the
+// rest of the line verbatim -- including any flags appended after it.
+//
+// It rewrites only when the argument matches oldName exactly, so an unrelated
+// token is never clobbered.
+func rewriteRunArg(line, oldName, newName string) (string, bool) {
+	if oldName == "" || newName == "" || oldName == newName {
+		return line, false
+	}
+	for _, q := range runArgQuoting {
+		old := " run " + q.open + oldName + q.close
+		i := strings.Index(line, old)
+		if i < 0 {
+			continue
+		}
+		if q.open == "" {
+			// Unquoted: refuse a partial match, so `run demo` does not fire on
+			// `run demo-staging`.
+			if end := i + len(old); end < len(line) && isPlaybookNameByte(line[end]) {
+				continue
+			}
+		}
+		return line[:i] + " run " + q.open + newName + q.close + line[i+len(old):], true
+	}
+	return line, false
+}
+
+const markerPrefix = "# claude-playbook:"
+
+// newPlaybookName derives the playbook name from an already-rewritten alias line.
+func newPlaybookName(line string) string {
+	p := extractPath(line)
+	if p == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return ""
+	}
+	return derivePlaybookName(abs)
+}
+
+// rewriteMarkerComment updates a `# claude-playbook: <name>` marker in place,
+// preserving its original indentation. Any other line is returned untouched.
+func rewriteMarkerComment(line, name string) string {
+	if name == "" {
+		return line
+	}
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, markerPrefix) {
+		return line
+	}
+	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	safe := strings.NewReplacer("\r", " ", "\n", " ").Replace(name)
+	return indent + markerPrefix + " " + safe
+}
+
+func isPlaybookNameByte(b byte) bool {
+	return b == '-' || b == '_' || b == '.' ||
+		(b >= '0' && b <= '9') ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z')
 }
 
 func extractPath(line string) string {
