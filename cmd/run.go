@@ -80,7 +80,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	launchEnv, syncErr := auth.PrepareLaunchEnv(pb.Path)
 	if syncErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", syncErr)
+		// Neutral wording: PrepareLaunchEnv may have been syncing credentials,
+		// account metadata, or detaching for an isolated playbook. Naming
+		// credentials specifically sent users after credential files and symlinks
+		// for failures in paths where credential syncing was deliberately skipped.
+		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
 	c := exec.Command(claudePath, claudeArgs...)

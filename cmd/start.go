@@ -77,7 +77,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	launchEnv, syncErr := auth.PrepareLaunchEnv(absPath)
 	if syncErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", syncErr)
+		// Neutral wording -- see the matching comment in cmd/run.go.
+		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
 	c := exec.Command(claudePath, claudeArgs...)
