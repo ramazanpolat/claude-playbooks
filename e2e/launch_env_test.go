@@ -9,25 +9,30 @@
 // binary, put a stub `claude` on its PATH that records its own environment, and
 // assert on what that stub received.
 //
-// Nothing here needs a valid credential. Proving a token is NOT propagated
-// requires no working token, so these tests never touch a real OAuth grant --
-// which matters, because exercising a shared subscription grant can rotate its
-// refresh token and strand every other holder.
+// Nothing here needs a valid credential: proving a token is NOT propagated
+// requires no working token. Keeping that true takes more than not supplying
+// one. On darwin the no-token path shells out to `security find-generic-password`
+// BEFORE consulting $HOME, so redirecting HOME does not isolate the run -- the
+// stub `security` in shimDir does, and TestSecurityLookupIsIntercepted asserts
+// it was reached. This matters because exercising a shared subscription grant
+// can rotate its refresh token and strand every other holder of it.
 package e2e
 
 import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 const (
-	tokenEnv     = "CLAUDE_CODE_OAUTH_TOKEN"
-	tokenFileEnv = "CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE"
-	isolateEnv   = "CLAUDE_PLAYBOOKS_ISOLATE_AUTH"
-	dumpEnv      = "CPB_TEST_ENVDUMP"
+	tokenEnv       = "CLAUDE_CODE_OAUTH_TOKEN"
+	tokenFileEnv   = "CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE"
+	isolateEnv     = "CLAUDE_PLAYBOOKS_ISOLATE_AUTH"
+	dumpEnv        = "CPB_TEST_ENVDUMP"
+	securityLogEnv = "CPB_TEST_SECURITY_LOG"
 )
 
 // binPath builds claude-playbook once per test binary run and returns its path.
@@ -38,28 +43,52 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(dir)
 
 	binPath = filepath.Join(dir, "claude-playbook")
 	// The module root is the parent of this package.
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	build.Dir = ".."
 	if out, err := build.CombinedOutput(); err != nil {
+		os.RemoveAll(dir)
 		// Without a binary every test below is vacuous, so fail loudly rather
 		// than skipping into a green run that proves nothing.
 		panic("building claude-playbook for e2e: " + err.Error() + "\n" + string(out))
 	}
-	os.Exit(m.Run())
+
+	code := m.Run()
+	// os.Exit does not run deferred functions, so a `defer os.RemoveAll(dir)`
+	// here would silently leak a ~13MB binary per run into the system temp
+	// directory. Clean up explicitly on every exit path instead.
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
-// shimDir writes a stub `claude` that records its environment to $CPB_TEST_ENVDUMP.
+// shimDir writes the stub executables prepended to the binary's PATH.
+//
+//   - `claude`   records its environment to $CPB_TEST_ENVDUMP. This is what every
+//     assertion in this file reads.
+//   - `security` is stubbed because EnsureGlobalCredentials shells out to
+//     `security find-generic-password -s "Claude Code-credentials"` on darwin,
+//     and does so BEFORE consulting $HOME. Redirecting HOME therefore does not
+//     isolate the test: without this stub the no-token cases read the
+//     developer's real Claude Keychain item and materialize it into the
+//     temporary home. Exiting non-zero models "no such Keychain item", which
+//     makes the darwin path deterministic and identical to every other OS.
 func shimDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	shim := filepath.Join(dir, "claude")
-	script := "#!/bin/sh\nenv > \"$" + dumpEnv + "\"\nexit 0\n"
-	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+
+	stubs := map[string]string{
+		"claude": "#!/bin/sh\nenv > \"$" + dumpEnv + "\"\nexit 0\n",
+		// Records each interception so a test can prove the stub is the binary
+		// actually reached -- a stub silently bypassed by a PATH change would
+		// otherwise re-expose the real Keychain while every test still passed.
+		"security": "#!/bin/sh\necho \"$*\" >> \"$" + securityLogEnv + "\"\nexit 1\n",
+	}
+	for name, script := range stubs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return dir
 }
@@ -110,6 +139,7 @@ func childEnv(t *testing.T, playbooksDir string, l launch) map[string]string {
 		"PATH=" + shimDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"HOME=" + work,
 		dumpEnv + "=" + dump,
+		securityLogEnv + "=" + filepath.Join(work, "security.log"),
 	}, l.env...)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -242,6 +272,46 @@ func TestStartHonorsIsolation(t *testing.T) {
 	})
 	if v, present := got[tokenEnv]; present {
 		t.Fatalf("start leaked the global token to an isolated config dir: %s=%s", tokenEnv, v)
+	}
+}
+
+// The suite's own isolation is a testable property, not a comment. On darwin the
+// no-token path shells out to `security find-generic-password` BEFORE consulting
+// $HOME, so a stub that is ever bypassed -- by a PATH change, a refactor, an
+// absolute path in the callee -- would silently start reading the developer's
+// real Claude Keychain item while every other test kept passing.
+//
+// This asserts the interception actually happened rather than assuming it: the
+// stub logs each call, and on darwin at least one must be recorded.
+func TestSecurityLookupIsIntercepted(t *testing.T) {
+	root := t.TempDir()
+	playbook(t, root, "shared", false)
+
+	// The no-token path is the one that reaches EnsureGlobalCredentials.
+	got := childEnv(t, root, launch{
+		env:  []string{tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")},
+		args: []string{"run", "shared"},
+	})
+
+	logPath := got[securityLogEnv]
+	if logPath == "" {
+		t.Fatalf("%s was not propagated to the child; the stub cannot be verified", securityLogEnv)
+	}
+	data, err := os.ReadFile(logPath)
+	if runtime.GOOS != "darwin" {
+		// Only darwin consults the Keychain; elsewhere no call is the correct
+		// outcome and an empty log proves nothing is wrong.
+		if err == nil && len(data) > 0 {
+			t.Fatalf("unexpected security lookup on %s: %s", runtime.GOOS, data)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("no security lookup was recorded on darwin: the stub was bypassed "+
+			"and the real Keychain may have been read: %v", err)
+	}
+	if !strings.Contains(string(data), "find-generic-password") {
+		t.Fatalf("security stub log does not show the expected lookup: %q", data)
 	}
 }
 
