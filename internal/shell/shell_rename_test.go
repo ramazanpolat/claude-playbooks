@@ -83,8 +83,10 @@ func TestRewritePathPrefixPreservesUserFlags(t *testing.T) {
 	if !strings.Contains(got, "--model claude-opus-4-6 --permission-mode auto") {
 		t.Fatalf("user flags were discarded:\n%s", got)
 	}
-	if !strings.Contains(got, "run job ") {
-		t.Fatalf("unquoted run argument not rewritten:\n%s", got)
+	// The argument is re-encoded rather than spliced raw, so its quoting is
+	// normalised to the canonical escaped form -- still a single shell word.
+	if !strings.Contains(got, `run '\''job'\''`) {
+		t.Fatalf("run argument not rewritten:\n%s", got)
 	}
 	if strings.Contains(got, "run work") {
 		t.Fatalf("old playbook name survived:\n%s", got)
@@ -94,21 +96,23 @@ func TestRewritePathPrefixPreservesUserFlags(t *testing.T) {
 // The rewrite must not fire on a token that merely starts with the old name.
 func TestRewriteRunArgRefusesPartialMatch(t *testing.T) {
 	line := `alias a='CLAUDE_CONFIG_DIR="/x/demo" cpb run demo-staging'`
-	if out, changed := rewriteRunArg(line, "demo", "lab"); changed {
+	if out, changed := rewriteRunArg(line, "demo", "lab", '\''); changed {
 		t.Fatalf("rewrote a partial match: %s", out)
 	}
 }
 
 // Every quoting form the tool or a hand edit can produce must be handled.
 func TestRewriteRunArgQuotingForms(t *testing.T) {
+	// Every input form is recognised; the output is normalised to a single
+	// correctly quoted word for the body context (0 = unquoted body here).
 	for _, tc := range []struct{ in, want string }{
-		{`x run '\''old'\'' y`, `x run '\''new'\'' y`},
+		{`x run '\''old'\'' y`, `x run 'new' y`},
 		{`x run 'old' y`, `x run 'new' y`},
-		{`x run "old" y`, `x run "new" y`},
-		{`x run old y`, `x run new y`},
-		{`x run old`, `x run new`},
+		{`x run "old" y`, `x run 'new' y`},
+		{`x run old y`, `x run 'new' y`},
+		{`x run old`, `x run 'new'`},
 	} {
-		got, changed := rewriteRunArg(tc.in, "old", "new")
+		got, changed := rewriteRunArg(tc.in, "old", "new", 0)
 		if !changed || got != tc.want {
 			t.Errorf("rewriteRunArg(%q) = %q (changed=%v), want %q", tc.in, got, changed, tc.want)
 		}
@@ -177,10 +181,51 @@ func TestRewritePathPrefixDoesNotMatchInsideThePath(t *testing.T) {
 	if !strings.Contains(got, `CLAUDE_CONFIG_DIR="`+newDir+`"`) {
 		t.Fatalf("config dir corrupted by the run-argument rewrite:\n got: %s\nwant path: %s", got, newDir)
 	}
-	if !strings.Contains(got, "run new") {
+	if !strings.Contains(got, `run '\''new'\''`) {
 		t.Fatalf("run argument not rewritten:\n%s", got)
 	}
 	if strings.Contains(got, "team run new") {
 		t.Fatalf("rewrite reached inside the path:\n%s", got)
+	}
+}
+
+// A playbook name is not a safe shell token. validateSinglePathSegment rejects
+// only / \ CR LF, so an apostrophe is a legal name -- and splicing one raw into
+// the single-quoted alias body ends the quote, making everything after it
+// execute when the config is sourced. Names reach rename from the CLI and from
+// a .playbook manifest inside an installed repo.
+func TestRewritePathPrefixEscapesInjectingName(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	evil := `x'; touch PWNED; #`
+	oldDir := filepath.Join(root, "victim")
+	newDir := filepath.Join(root, evil)
+
+	cfg := writeConfig(t, Format("v", oldDir))
+	if _, err := RewritePathPrefix(cfg, oldDir, newDir); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(readConfig(t, cfg))
+
+	// Every apostrophe introduced by the name must be escaped, so the body's
+	// quoting is still balanced. An odd count means the body was terminated.
+	if strings.Count(got, "'")%2 != 0 {
+		t.Fatalf("unbalanced quoting -- body was terminated:\n%s", got)
+	}
+	// The payload must not appear as bare shell text outside a quoted string.
+	if strings.Contains(got, `'; touch PWNED`) && !strings.Contains(got, `'\''; touch PWNED`) {
+		t.Fatalf("name spliced unescaped:\n%s", got)
+	}
+}
+
+func TestEscapeForBody(t *testing.T) {
+	if got := escapeForBody(`a'b`, '\''); got != `a'\''b` {
+		t.Errorf("single-quote context: got %q", got)
+	}
+	if got := escapeForBody(`a"b$c`, '"'); got != `a\"b\$c` {
+		t.Errorf("double-quote context: got %q", got)
+	}
+	if got := escapeForBody(`a'b`, 0); got != `a'b` {
+		t.Errorf("unquoted context must pass through: got %q", got)
 	}
 }

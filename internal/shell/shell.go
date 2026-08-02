@@ -363,8 +363,11 @@ func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
 	// (e.g. "/tmp/team run old/old") would otherwise match inside the path first,
 	// corrupting the directory while leaving the real argument stale and rendering
 	// the alias undiscoverable by path (every lookup parses CLAUDE_CONFIG_DIR).
-	after, _ = rewriteRunArg(after, derivePlaybookName(abs), derivePlaybookName(newPath))
-	return prefix + shellDoubleQuote(newPath) + after, true
+	q := bodyQuote(line)
+	after, _ = rewriteRunArg(after, derivePlaybookName(abs), derivePlaybookName(newPath), q)
+	// The path is spliced into the alias body too, and has never been escaped for
+	// it -- the same injection, predating the run-argument rewrite.
+	return prefix + escapeForBody(shellDoubleQuote(newPath), q) + after, true
 }
 
 // runArgQuoting lists the ways a playbook name can be quoted in an alias line,
@@ -382,26 +385,71 @@ var runArgQuoting = []struct{ open, close string }{
 //
 // It rewrites only when the argument matches oldName exactly, so an unrelated
 // token is never clobbered.
-func rewriteRunArg(line, oldName, newName string) (string, bool) {
+func rewriteRunArg(line, oldName, newName string, q byte) (string, bool) {
 	if oldName == "" || newName == "" || oldName == newName {
 		return line, false
 	}
-	for _, q := range runArgQuoting {
-		old := " run " + q.open + oldName + q.close
+	replacement := " run " + encodeRunArg(newName, q)
+	for _, form := range runArgQuoting {
+		old := " run " + form.open + oldName + form.close
 		i := strings.Index(line, old)
 		if i < 0 {
 			continue
 		}
-		if q.open == "" {
+		if form.open == "" {
 			// Unquoted: refuse a partial match, so `run demo` does not fire on
 			// `run demo-staging`.
 			if end := i + len(old); end < len(line) && isPlaybookNameByte(line[end]) {
 				continue
 			}
 		}
-		return line[:i] + " run " + q.open + newName + q.close + line[i+len(old):], true
+		return line[:i] + replacement + line[i+len(old):], true
 	}
 	return line, false
+}
+
+// bodyQuote returns the quote character wrapping an alias body, or 0 when the
+// body is unquoted. `alias v='...'` -> '\”, `alias v="..."` -> '"'.
+func bodyQuote(line string) byte {
+	loc := aliasRegex.FindStringIndex(line)
+	if loc == nil {
+		return 0
+	}
+	rest := line[loc[1]:]
+	if rest == "" {
+		return 0
+	}
+	if rest[0] == '\'' || rest[0] == '"' {
+		return rest[0]
+	}
+	return 0
+}
+
+// escapeForBody re-encodes s so it can be spliced into an alias body wrapped in
+// quote q without terminating that quote or otherwise changing its meaning.
+//
+// Splicing a raw value is a command injection, not a cosmetic bug: a playbook
+// named `x'; touch PWNED; #` ends the single-quoted body and everything after it
+// executes when the shell config is sourced. Names reach here from `rename` and
+// from a `.playbook` manifest in an installed repo, and validateSinglePathSegment
+// rejects only `/ \ CR LF` -- an apostrophe is a legal playbook name.
+func escapeForBody(s string, q byte) string {
+	switch q {
+	case '\'':
+		// A literal ' cannot appear inside a single-quoted string: leave the
+		// string, emit an escaped quote, re-enter.
+		return strings.ReplaceAll(s, "'", `'\''`)
+	case '"':
+		return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`).Replace(s)
+	default:
+		return s
+	}
+}
+
+// encodeRunArg renders name as a single shell word for an alias body wrapped in
+// quote q. The result is always safe to splice, whatever the name contains.
+func encodeRunArg(name string, q byte) string {
+	return escapeForBody(shellQuote(name), q)
 }
 
 const markerPrefix = "# claude-playbook:"
