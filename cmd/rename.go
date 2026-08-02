@@ -79,7 +79,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to rename: %w", err)
 	}
 
-	changed, err := shell.RewritePathPrefix(shellConfig, oldRoot, newPath)
+	changed, skippedAliases, err := shell.RewritePathPrefix(shellConfig, oldRoot, newPath)
 	if err != nil {
 		return fmt.Errorf("failed to update aliases: %w", err)
 	}
@@ -116,6 +116,16 @@ func runRename(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Renamed %q → %q\n", oldName, newName)
 	if changed > 0 {
 		fmt.Printf("Updated %d alias line%s in %s\n", changed, pluralS(changed), shellConfig)
+	}
+	// A hand-edited alias is left exactly as written rather than guessed at:
+	// editing shell-encoded text in place is what makes silent corruption
+	// possible. Say so, and name the one command that fixes it — otherwise the
+	// alias quietly keeps pointing at the old playbook.
+	for _, aliasName := range skippedAliases {
+		fmt.Fprintf(os.Stderr,
+			"Warning: alias %q in %s was hand-edited, so it was left unchanged and still refers to %q.\n"+
+				"         Regenerate it with: %s alias %s %s\n",
+			aliasName, shellConfig, oldName, filepath.Base(os.Args[0]), newName, aliasName)
 	}
 	return nil
 }
