@@ -28,6 +28,12 @@ type AliasEntry struct {
 var aliasRegex = regexp.MustCompile(`^\s*alias\s+([A-Za-z_][A-Za-z0-9_-]*)\s*=`)
 var aliasNameRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
+// QuoteArg renders s as a single shell word. Use it for any value interpolated
+// into a command shown to the user: a playbook name may legally contain spaces
+// and shell metacharacters, and an unquoted suggestion is both wrong to paste
+// and dangerous if pasted.
+func QuoteArg(s string) string { return shellQuote(s) }
+
 // ValidAliasName reports whether aliasName is a portable shell alias name.
 func ValidAliasName(aliasName string) bool {
 	return aliasNameRegex.MatchString(aliasName)
@@ -390,9 +396,16 @@ func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool, string) {
 	if bm := canonicalBinRegex.FindStringSubmatch(line); bm != nil {
 		binName = bm[1]
 	}
-	if line != formatWith(aliasName, abs, binName) {
+	// Compare against the path exactly as written. Write records whatever it was
+	// given, so a relative --playbooks-dir produces a relative CLAUDE_CONFIG_DIR;
+	// comparing against the absolutised form classified those genuinely canonical
+	// lines as hand-edited, left them stale, and warned the user falsely.
+	if line != formatWith(aliasName, have, binName) {
 		return line, false, aliasName
 	}
+	// The regenerated line is absolute. A relative CLAUDE_CONFIG_DIR resolves
+	// against the shell's working directory at invocation time, so it only worked
+	// from one place; normalising here is a fix, not a side effect.
 	return formatWith(aliasName, newPath, binName), true, ""
 }
 

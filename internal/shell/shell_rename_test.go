@@ -173,3 +173,44 @@ func TestRewriteMarkerCommentLeavesOtherLinesAlone(t *testing.T) {
 		t.Fatalf("empty name should be a no-op: %q", got)
 	}
 }
+
+// Write records the playbook path exactly as it was given, so a relative
+// --playbooks-dir yields a relative CLAUDE_CONFIG_DIR. Comparing the canonical
+// form against an absolutised path classified those genuinely generated lines as
+// hand-edited: they were left stale AND the user was warned falsely.
+func TestRewritePathPrefixRecognisesRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(cwd) })
+
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", "pb")
+	cfg := writeConfig(t, Format("d", filepath.Join("pb", "demo")))
+
+	n, skipped, err := RewritePathPrefix(cfg, filepath.Join("pb", "demo"), filepath.Join("pb", "lab"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(skipped) != 0 {
+		t.Fatalf("changed=%d skipped=%v -- a generated alias was misread as hand-edited", n, skipped)
+	}
+	if got := readConfig(t, cfg); !strings.Contains(got, "run '\\''lab'\\''") {
+		t.Fatalf("not regenerated for the new name:\n%s", got)
+	}
+}
+
+// A playbook name may legally contain spaces and shell metacharacters, so any
+// value interpolated into a command shown to the user must be quoted.
+func TestQuoteArg(t *testing.T) {
+	if got := QuoteArg(`a b; touch PWNED`); got != `'a b; touch PWNED'` {
+		t.Fatalf("QuoteArg = %s", got)
+	}
+	if got := QuoteArg(`bob's`); got != `'bob'\''s'` {
+		t.Fatalf("QuoteArg = %s", got)
+	}
+}

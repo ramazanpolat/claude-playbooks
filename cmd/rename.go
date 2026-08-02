@@ -87,14 +87,18 @@ func runRename(cmd *cobra.Command, args []string) error {
 	switch {
 	case renameNoAlias:
 		if pb.HasAlias() {
-			if _, err := shell.RemoveByPathPrefix(shellConfig, newPath); err != nil {
+			// Skipped (hand-edited) lines still carry the OLD path, so cleaning
+			// only newPath would leave them behind despite an explicit flag.
+			if err := removeAliasesForBothPaths(shellConfig, oldRoot, newPath); err != nil {
 				return fmt.Errorf("failed to drop alias: %w", err)
 			}
+			skippedAliases = nil
 		}
 	case renameAlias != "":
-		if _, err := shell.RemoveByPathPrefix(shellConfig, newPath); err != nil {
+		if err := removeAliasesForBothPaths(shellConfig, oldRoot, newPath); err != nil {
 			return fmt.Errorf("failed to update alias: %w", err)
 		}
+		skippedAliases = nil
 		if err := shell.Write(shellConfig, renameAlias, newConfigPath); err != nil {
 			return fmt.Errorf("failed to write alias: %w", err)
 		}
@@ -122,10 +126,29 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// possible. Say so, and name the one command that fixes it — otherwise the
 	// alias quietly keeps pointing at the old playbook.
 	for _, aliasName := range skippedAliases {
+		// Every value is shell-quoted: a playbook name may legally contain spaces
+		// and shell metacharacters, so an unquoted suggestion is unrunnable as
+		// printed and would execute the extra text if pasted.
 		fmt.Fprintf(os.Stderr,
 			"Warning: alias %q in %s was hand-edited, so it was left unchanged and still refers to %q.\n"+
 				"         Regenerate it with: %s alias %s %s\n",
-			aliasName, shellConfig, oldName, filepath.Base(os.Args[0]), newName, aliasName)
+			aliasName, shellConfig, oldName,
+			shell.QuoteArg(filepath.Base(os.Args[0])),
+			shell.QuoteArg(newName),
+			shell.QuoteArg(aliasName))
+	}
+	return nil
+}
+
+// removeAliasesForBothPaths drops alias lines for a renamed playbook under
+// either its new or its old path. Lines this package regenerated moved to the
+// new path; lines it deliberately left alone (hand-edited) still name the old
+// one, and an explicit --no-alias/--alias must reach both.
+func removeAliasesForBothPaths(shellConfig, oldRoot, newPath string) error {
+	for _, p := range []string{newPath, oldRoot} {
+		if _, err := shell.RemoveByPathPrefix(shellConfig, p); err != nil {
+			return err
+		}
 	}
 	return nil
 }
