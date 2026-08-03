@@ -79,7 +79,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to rename: %w", err)
 	}
 
-	changed, err := shell.RewritePathPrefix(shellConfig, oldRoot, newPath)
+	changed, skippedAliases, err := shell.RewritePathPrefix(shellConfig, oldRoot, newPath)
 	if err != nil {
 		return fmt.Errorf("failed to update aliases: %w", err)
 	}
@@ -87,14 +87,18 @@ func runRename(cmd *cobra.Command, args []string) error {
 	switch {
 	case renameNoAlias:
 		if pb.HasAlias() {
-			if _, err := shell.RemoveByPathPrefix(shellConfig, newPath); err != nil {
+			// Skipped (hand-edited) lines still carry the OLD path, so cleaning
+			// only newPath would leave them behind despite an explicit flag.
+			if err := removeAliasesForBothPaths(shellConfig, oldRoot, newPath); err != nil {
 				return fmt.Errorf("failed to drop alias: %w", err)
 			}
+			skippedAliases = nil
 		}
 	case renameAlias != "":
-		if _, err := shell.RemoveByPathPrefix(shellConfig, newPath); err != nil {
+		if err := removeAliasesForBothPaths(shellConfig, oldRoot, newPath); err != nil {
 			return fmt.Errorf("failed to update alias: %w", err)
 		}
+		skippedAliases = nil
 		if err := shell.Write(shellConfig, renameAlias, newConfigPath); err != nil {
 			return fmt.Errorf("failed to write alias: %w", err)
 		}
@@ -117,5 +121,50 @@ func runRename(cmd *cobra.Command, args []string) error {
 	if changed > 0 {
 		fmt.Printf("Updated %d alias line%s in %s\n", changed, pluralS(changed), shellConfig)
 	}
+	// A hand-edited alias is left exactly as written rather than guessed at:
+	// editing shell-encoded text in place is what makes silent corruption
+	// possible. Say so, and name the one command that fixes it — otherwise the
+	// alias quietly keeps pointing at the old playbook.
+	for _, aliasName := range skippedAliases {
+		// Every value is shell-quoted: a playbook name may legally contain spaces
+		// and shell metacharacters, so an unquoted suggestion is unrunnable as
+		// printed and would execute the extra text if pasted.
+		fmt.Fprintf(os.Stderr,
+			"Warning: alias %q in %s was hand-edited, so it was left unchanged and still refers to %q.\n"+
+				"         Regenerate it with: %s%s alias %s %s\n",
+			aliasName, shellConfig, oldName,
+			shell.QuoteArg(filepath.Base(os.Args[0])),
+			configOverrideArgs(),
+			shell.QuoteArg(newName),
+			shell.QuoteArg(aliasName))
+	}
 	return nil
+}
+
+// removeAliasesForBothPaths drops alias lines for a renamed playbook under
+// either its new or its old path. Lines this package regenerated moved to the
+// new path; lines it deliberately left alone (hand-edited) still name the old
+// one, and an explicit --no-alias/--alias must reach both.
+func removeAliasesForBothPaths(shellConfig, oldRoot, newPath string) error {
+	for _, p := range []string{newPath, oldRoot} {
+		if _, err := shell.RemoveByPathPrefix(shellConfig, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// configOverrideArgs renders the --playbooks-dir / --shell-config overrides in
+// effect, so a suggested command reproduces this invocation's configuration.
+// Without them, a suggestion made under `--playbooks-dir ./pb` would search the
+// default directory and fail, or write the alias into the wrong rc file.
+func configOverrideArgs() string {
+	var b strings.Builder
+	if config.PlaybooksDir != "" {
+		b.WriteString(" --playbooks-dir " + shell.QuoteArg(config.PlaybooksDir))
+	}
+	if config.ShellConfig != "" {
+		b.WriteString(" --shell-config " + shell.QuoteArg(config.ShellConfig))
+	}
+	return b.String()
 }

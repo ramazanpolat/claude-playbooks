@@ -64,12 +64,12 @@ func TestRewritePathPrefixPreservesQuotedAliasPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changed, err := RewritePathPrefix(configFile, oldRoot, newRoot)
+	changed, skipped, err := RewritePathPrefix(configFile, oldRoot, newRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changed != 1 {
-		t.Fatalf("changed = %d, want 1", changed)
+	if changed != 1 || len(skipped) != 0 {
+		t.Fatalf("changed = %d, skipped = %v, want 1 and none", changed, skipped)
 	}
 
 	entries, err := ReadAll(configFile)

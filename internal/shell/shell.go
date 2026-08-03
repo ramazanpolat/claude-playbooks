@@ -28,6 +28,12 @@ type AliasEntry struct {
 var aliasRegex = regexp.MustCompile(`^\s*alias\s+([A-Za-z_][A-Za-z0-9_-]*)\s*=`)
 var aliasNameRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
+// QuoteArg renders s as a single shell word. Use it for any value interpolated
+// into a command shown to the user: a playbook name may legally contain spaces
+// and shell metacharacters, and an unquoted suggestion is both wrong to paste
+// and dangerous if pasted.
+func QuoteArg(s string) string { return shellQuote(s) }
+
 // ValidAliasName reports whether aliasName is a portable shell alias name.
 func ValidAliasName(aliasName string) bool {
 	return aliasNameRegex.MatchString(aliasName)
@@ -35,7 +41,10 @@ func ValidAliasName(aliasName string) bool {
 
 // Format returns the canonical alias line written by the tool.
 func Format(aliasName, playbookDir string) string {
-	playbookName := derivePlaybookName(playbookDir)
+	return formatWith(aliasName, playbookDir, currentBinName())
+}
+
+func currentBinName() string {
 	binName := "claude-playbook"
 	if len(os.Args) > 0 {
 		baseBin := filepath.Base(os.Args[0])
@@ -43,9 +52,23 @@ func Format(aliasName, playbookDir string) string {
 			binName = baseBin
 		}
 	}
+	return binName
+}
+
+// formatWith builds the canonical alias line for an explicit binary name. A line
+// already on disk may name a different binary than this process (installed as
+// `cpb`, later renamed via `claude-playbook`), and regenerating it must preserve
+// whichever it was.
+func formatWith(aliasName, playbookDir, binName string) string {
+	playbookName := derivePlaybookName(playbookDir)
 	body := fmt.Sprintf("CLAUDE_CONFIG_DIR=%s %s run %s", shellDoubleQuote(playbookDir), shellQuote(binName), shellQuote(playbookName))
 	return fmt.Sprintf("alias %s=%s", aliasName, shellQuote(body))
 }
+
+// canonicalBinRegex pulls the binary name out of a canonically generated line.
+// In that form the body is single-quoted as a whole, so its inner quotes appear
+// escaped as '\”.
+var canonicalBinRegex = regexp.MustCompile(`'\\''(.*?)'\\'' run `)
 
 func derivePlaybookName(playbookDir string) string {
 	playbooksDir := config.ResolvePlaybooksDir()
@@ -246,9 +269,13 @@ func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string
 
 // RewritePathPrefix updates every alias line whose CLAUDE_CONFIG_DIR starts
 // with oldPrefix so it starts with newPrefix instead. Used by `rename`.
-func RewritePathPrefix(configFile, oldPrefix, newPrefix string) (int, error) {
+// RewritePathPrefix regenerates every canonical alias line for a playbook that
+// moved. Non-canonical lines for that playbook are left untouched and returned
+// in skipped, so the caller can tell the user to regenerate them.
+func RewritePathPrefix(configFile, oldPrefix, newPrefix string) (int, []string, error) {
 	configFile = resolveConfigPath(configFile)
 	changed := 0
+	var skipped []string
 	err := withConfigLock(configFile, func() error {
 		lines, err := readLines(configFile)
 		if err != nil {
@@ -257,10 +284,22 @@ func RewritePathPrefix(configFile, oldPrefix, newPrefix string) (int, error) {
 		absOld, _ := filepath.Abs(oldPrefix)
 		absNew, _ := filepath.Abs(newPrefix)
 		for i, line := range lines {
-			rewritten, ok := rewriteLinePathPrefix(line, absOld, absNew)
-			if ok {
-				lines[i] = rewritten
-				changed++
+			rewritten, ok, skip := rewriteLinePathPrefix(line, absOld, absNew)
+			if skip != "" {
+				skipped = append(skipped, skip)
+			}
+			if !ok {
+				continue
+			}
+			lines[i] = rewritten
+			changed++
+			// Write emits a `# claude-playbook: <name>` marker above each alias.
+			// It names the playbook too, so a rename leaves it stale for the same
+			// reason the run argument was. Nothing reads the name (removal matches
+			// the prefix alone), but a marker naming a playbook that no longer
+			// exists is misleading in a file the user is invited to hand-edit.
+			if i > 0 {
+				lines[i-1] = rewriteMarkerComment(lines[i-1], newPlaybookName(rewritten))
 			}
 		}
 		if changed == 0 {
@@ -268,7 +307,7 @@ func RewritePathPrefix(configFile, oldPrefix, newPrefix string) (int, error) {
 		}
 		return writeLines(configFile, lines)
 	})
-	return changed, err
+	return changed, skipped, err
 }
 
 // --- internals ---
@@ -307,13 +346,20 @@ func matchesPathPrefix(line, absPrefixWithSlash string) bool {
 	return strings.HasPrefix(abs, absPrefixWithSlash)
 }
 
-func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
-	if !aliasRegex.MatchString(line) {
-		return line, false
+// rewriteLinePathPrefix regenerates an alias line for a moved playbook.
+//
+// Returns (line, true, "") when the line was regenerated; (line, false, "") when
+// the line is not an alias for a path under absOld; and (line, false, aliasName)
+// when it IS such an alias but is not in canonical form, so it was deliberately
+// left untouched for the caller to report.
+func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool, string) {
+	m := aliasRegex.FindStringSubmatch(line)
+	if m == nil {
+		return line, false, ""
 	}
 	have := extractPath(line)
 	if have == "" {
-		return line, false
+		return line, false, ""
 	}
 	abs, _ := filepath.Abs(have)
 	oldWithSlash := absOld + string(filepath.Separator)
@@ -326,19 +372,71 @@ func rewriteLinePathPrefix(line, absOld, absNew string) (string, bool) {
 	case strings.HasPrefix(absWithSlash, oldWithSlash):
 		newPath = absNew + strings.TrimPrefix(abs, absOld)
 	default:
-		return line, false
+		return line, false, ""
 	}
 
-	// Replace the raw value of CLAUDE_CONFIG_DIR= in the line with the new absolute path.
-	idx := strings.Index(line, "CLAUDE_CONFIG_DIR=")
-	if idx < 0 {
-		return line, false
+	// An alias line names the playbook TWICE: as CLAUDE_CONFIG_DIR and as the
+	// `run <name>` argument. Rewriting one and not the other leaves a line that
+	// resolves, launches, and dies with "unknown playbook".
+	//
+	// Both are regenerated together via formatWith, and ONLY for a line that is
+	// byte-identical to what this package generated. Editing an arbitrary line in
+	// place means splicing values into text that is already shell-encoded, and
+	// every attempt at that produced a new defect: a `run <name>` search matching
+	// inside the path, an unescaped name becoming a command injection, and
+	// escaping that the path decoder could no longer read back. Regenerating
+	// sidesteps all of it -- Format encodes correctly by construction.
+	//
+	// A line that is not in canonical form -- hand-edited to add Claude Code
+	// flags, or written by hand -- is left exactly as it is and reported to the
+	// caller, which tells the user to regenerate it with `alias`. Refusing is the
+	// point: a wrong guess here silently corrupts the user's shell config.
+	aliasName := m[1]
+	binName := currentBinName()
+	if bm := canonicalBinRegex.FindStringSubmatch(line); bm != nil {
+		binName = bm[1]
 	}
-	prefix := line[:idx+len("CLAUDE_CONFIG_DIR=")]
-	rest := line[idx+len("CLAUDE_CONFIG_DIR="):]
-	end := envValueEnd(rest)
-	after := rest[end:]
-	return prefix + shellDoubleQuote(newPath) + after, true
+	// Compare against the path exactly as written. Write records whatever it was
+	// given, so a relative --playbooks-dir produces a relative CLAUDE_CONFIG_DIR;
+	// comparing against the absolutised form classified those genuinely canonical
+	// lines as hand-edited, left them stale, and warned the user falsely.
+	if line != formatWith(aliasName, have, binName) {
+		return line, false, aliasName
+	}
+	// The regenerated line is absolute. A relative CLAUDE_CONFIG_DIR resolves
+	// against the shell's working directory at invocation time, so it only worked
+	// from one place; normalising here is a fix, not a side effect.
+	return formatWith(aliasName, newPath, binName), true, ""
+}
+
+const markerPrefix = "# claude-playbook:"
+
+// newPlaybookName derives the playbook name from an already-rewritten alias line.
+func newPlaybookName(line string) string {
+	p := extractPath(line)
+	if p == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return ""
+	}
+	return derivePlaybookName(abs)
+}
+
+// rewriteMarkerComment updates a `# claude-playbook: <name>` marker in place,
+// preserving its original indentation. Any other line is returned untouched.
+func rewriteMarkerComment(line, name string) string {
+	if name == "" {
+		return line
+	}
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, markerPrefix) {
+		return line
+	}
+	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	safe := strings.NewReplacer("\r", " ", "\n", " ").Replace(name)
+	return indent + markerPrefix + " " + safe
 }
 
 func extractPath(line string) string {
