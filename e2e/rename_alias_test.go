@@ -43,8 +43,13 @@ func TestRenamedPlaybookAliasStillLaunches(t *testing.T) {
 
 	shim := shimDir(t)
 	dump := filepath.Join(work, "envdump")
+	// The alias invokes the binary by bare name, so the directory holding the
+	// binary under test must be on PATH. Relying on an installed claude-playbook
+	// made this pass on a developer machine and fail on a clean CI runner.
 	baseEnv := []string{
-		"PATH=" + shim + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"PATH=" + shim +
+			string(os.PathListSeparator) + filepath.Dir(binPath) +
+			string(os.PathListSeparator) + os.Getenv("PATH"),
 		"HOME=" + work,
 		dumpEnv + "=" + dump,
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
