@@ -64,11 +64,17 @@ func TokenActive() (inject string, active bool) {
 // override would rely on exec taking the last duplicate — true on Unix, not a
 // guarantee worth depending on. The result never aliases environ's backing
 // array, so callers may keep using the original slice.
-func removeEnv(environ []string, key string) []string {
-	prefix := key + "="
+func removeEnv(environ []string, keys ...string) []string {
 	out := make([]string, 0, len(environ))
 	for _, kv := range environ {
-		if !strings.HasPrefix(kv, prefix) {
+		drop := false
+		for _, key := range keys {
+			if strings.HasPrefix(kv, key+"=") {
+				drop = true
+				break
+			}
+		}
+		if !drop {
 			out = append(out, kv)
 		}
 	}
@@ -86,16 +92,22 @@ func removeEnv(environ []string, key string) []string {
 // therefore takes the full SyncCredentials path (which detaches), syncs no
 // account metadata, and has any inherited token stripped from its environment:
 // a token left in place would authenticate the child as the global account,
-// defeating the documented different-accounts-concurrently workflow.
+// defeating the documented different-accounts-concurrently workflow. The plan
+// descriptors are stripped for the same reason — they describe the global
+// account, and leaking them would tell an isolated playbook's session the plan
+// of an account it is deliberately not using.
 //
 // Otherwise, when a long-lived OAuth token is active, the token supersedes
 // stored credentials, so credential-file syncing is SKIPPED — this avoids
 // recreating the shared-symlink / refresh-rotation hazards that cause repeated
 // /login prompts across config dirs. Non-secret account metadata is still
 // synced so a fresh config dir presents as logged in. The token is injected into
-// the returned environment when it is not already present.
+// the returned environment when it is not already present, alongside the plan
+// descriptors the token path drops (see subscription.go).
 //
-// Without a token, the full credential sync runs, preserving prior behavior.
+// Without a token, the full credential sync runs, preserving prior behavior —
+// including leaving the plan descriptors alone, since stored credentials carry
+// them natively and Claude Code reads them from there.
 //
 // The returned error is advisory: env is always usable, and callers should warn
 // (not abort) on a non-nil error, matching the previous SyncCredentials call
@@ -104,7 +116,8 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+configDir)
 
 	if isAuthIsolated(configDir) {
-		return removeEnv(env, OAuthTokenEnv), SyncCredentials(configDir)
+		return removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv),
+			SyncCredentials(configDir)
 	}
 
 	inject, active := TokenActive()
@@ -118,6 +131,9 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 
 	if inject != "" {
 		env = append(env, OAuthTokenEnv+"="+inject)
+	}
+	if active {
+		env = appendSubscriptionEnv(env)
 	}
 	return env, syncErr
 }
