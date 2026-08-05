@@ -211,3 +211,38 @@ func TestPrepareLaunchEnvInheritedTokenNotDuplicated(t *testing.T) {
 		t.Fatalf("exported token must win over the file, got %q", got[0])
 	}
 }
+
+// `export CLAUDE_CODE_OAUTH_TOKEN=` is present in the environment yet reads as
+// unset to os.Getenv, so TokenActive falls through to the token file while the
+// inherited empty entry stays in os.Environ(). Appending the file's token
+// without stripping first left TWO entries for the key.
+//
+// This is asserted on PrepareLaunchEnv's return value, not on a child process:
+// exec resolves duplicates before the child can observe them (last wins on
+// Unix), so a child-level assertion passes either way and proves nothing. The
+// duplicate is only visible here -- and removeEnv's own comment rejects relying
+// on that resolution order in the first place.
+//
+// The defect predates the plan-descriptor work; it is fixed alongside it
+// because the same function had to change.
+func TestPrepareLaunchEnvReplacesEmptyExportedToken(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "oauth-token")
+	if err := os.WriteFile(tokenFile, []byte("sk-ant-oat01-FROMFILE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tokenFile)
+	t.Setenv(OAuthTokenEnv, "") // exported, but empty
+	t.Setenv("HOME", t.TempDir())
+
+	env, _ := PrepareLaunchEnv(t.TempDir())
+
+	got := tokenEntries(env)
+	if len(got) != 1 {
+		t.Fatalf("env carries %d %s entries (%q), want exactly 1",
+			len(got), OAuthTokenEnv, got)
+	}
+	if got[0] != OAuthTokenEnv+"=sk-ant-oat01-FROMFILE" {
+		t.Fatalf("token entry = %q, want the file's token", got[0])
+	}
+}

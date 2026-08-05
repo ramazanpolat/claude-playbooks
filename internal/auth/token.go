@@ -130,6 +130,12 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 	}
 
 	if inject != "" {
+		// Strip first: an inherited entry can exist even though TokenActive
+		// chose the file, because `export CLAUDE_CODE_OAUTH_TOKEN=` is present
+		// in the environment yet indistinguishable from unset to os.Getenv.
+		// Appending alone would leave two entries for the key, and removeEnv's
+		// own comment rejects relying on exec preferring the last duplicate.
+		env = removeEnv(env, OAuthTokenEnv)
 		env = append(env, OAuthTokenEnv+"="+inject)
 	}
 	if active {

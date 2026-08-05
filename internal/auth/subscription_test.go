@@ -93,21 +93,6 @@ func TestGlobalSubscriptionMissingStore(t *testing.T) {
 	}
 }
 
-// Shelling out to `security` can block on a locked Keychain or raise a GUI
-// authorization prompt -- exactly what token auth exists to avoid. When the
-// file answers, the Keychain must not be consulted at all.
-func TestGlobalSubscriptionPrefersFileOverKeychain(t *testing.T) {
-	calls := stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"from_keychain"}}`), nil)
-	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"from_file"}}`)
-
-	if got := GlobalSubscription(); got.Type != "from_file" {
-		t.Fatalf("Type = %q, want the file's value", got.Type)
-	}
-	if *calls != 0 {
-		t.Fatalf("Keychain was consulted %d time(s) despite the file answering", *calls)
-	}
-}
-
 // Selection is on "has a descriptor", not "is valid JSON". A store can be
 // syntactically valid yet carry no plan descriptors -- a bare {}, or a
 // credential block holding only an access token. Choosing on validity alone
@@ -143,6 +128,85 @@ func TestGlobalSubscriptionDescriptorlessKeychainDoesNotShadowFile(t *testing.T)
 	if got := GlobalSubscription(); got.Type != "from_file" {
 		t.Fatalf("Type = %q, want the file's value; a descriptorless Keychain "+
 			"item shadowed a populated file", got.Type)
+	}
+}
+
+// The two descriptors are independent, so a source recording only one must not
+// suppress the other source that holds the rest. Returning the first source
+// that answered at all silently dropped the tier here.
+func TestGlobalSubscriptionMergesAcrossSources(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Keychain is consulted only on darwin")
+	}
+	calls := stubKeychain(t, []byte(`{"claudeAiOauth":{"rateLimitTier":"from_keychain"}}`), nil)
+	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"from_file"}}`)
+
+	got := GlobalSubscription()
+	if got.Type != "from_file" {
+		t.Fatalf("Type = %q, want the file's value", got.Type)
+	}
+	if got.RateLimitTier != "from_keychain" {
+		t.Fatalf("RateLimitTier = %q, want the Keychain's value; a partial file "+
+			"suppressed the descriptor the Keychain held", got.RateLimitTier)
+	}
+	if *calls != 1 {
+		t.Fatalf("Keychain consulted %d time(s), want exactly 1", *calls)
+	}
+}
+
+// The earlier source wins any field both record -- merging must not let a later
+// source overwrite what the file already answered.
+func TestGlobalSubscriptionEarlierSourceWinsOnConflict(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Keychain is consulted only on darwin")
+	}
+	stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"kc","rateLimitTier":"kc_tier"}}`), nil)
+	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"file"}}`)
+
+	got := GlobalSubscription()
+	if got.Type != "file" {
+		t.Fatalf("Type = %q, want the file's value to win", got.Type)
+	}
+	if got.RateLimitTier != "kc_tier" {
+		t.Fatalf("RateLimitTier = %q, want the Keychain to fill the gap", got.RateLimitTier)
+	}
+}
+
+// A complete file must still short-circuit the Keychain: merging must not have
+// reintroduced a `security` invocation on the common path.
+func TestGlobalSubscriptionCompleteFileSkipsKeychain(t *testing.T) {
+	calls := stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"kc"}}`), nil)
+	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"pro","rateLimitTier":"tier_x"}}`)
+
+	if got := GlobalSubscription(); got.Type != "pro" || got.RateLimitTier != "tier_x" {
+		t.Fatalf("GlobalSubscription() = %+v, want {pro tier_x}", got)
+	}
+	if *calls != 0 {
+		t.Fatalf("Keychain consulted %d time(s) despite the file being complete", *calls)
+	}
+}
+
+// appendSubscriptionEnv must not append into a caller's spare capacity, or a
+// caller that later appends to its own slice would overwrite what we added.
+func TestAppendSubscriptionEnvDoesNotAliasCaller(t *testing.T) {
+	stubKeychain(t, nil, errors.New("no such item"))
+	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"pro","rateLimitTier":"tier_x"}}`)
+
+	base := make([]string, 1, 8) // deliberate spare capacity
+	base[0] = "KEEP=1"
+
+	got := appendSubscriptionEnv(base)
+	if len(got) != 3 {
+		t.Fatalf("appendSubscriptionEnv() = %v, want 3 entries", got)
+	}
+
+	// The caller appends to its ORIGINAL slice; that must not disturb got.
+	_ = append(base, "CALLER=2") //nolint:gocritic // the aliasing is the point
+	for i, want := range []string{"KEEP=1", SubscriptionTypeEnv + "=pro", RateLimitTierEnv + "=tier_x"} {
+		if got[i] != want {
+			t.Fatalf("got[%d] = %q after the caller appended, want %q -- "+
+				"the result aliased the caller's backing array", i, got[i], want)
+		}
 	}
 }
 

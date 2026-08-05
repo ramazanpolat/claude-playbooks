@@ -107,33 +107,49 @@ func readCredentialKeychain() []byte {
 // playbook launch because a plan name could not be read would be worse than
 // launching without them.
 //
-// Sources are tried cheapest-first and the first one that actually YIELDS a
-// descriptor wins. Two properties fall out of that ordering, both deliberate:
+// Sources are tried cheapest-first and their descriptors are MERGED, with the
+// earlier source winning any field both record. Merging rather than taking the
+// first source that answers at all matters because the two descriptors are
+// independent: a store can record subscriptionType without rateLimitTier, and
+// returning early on it would silently drop a tier the next source does hold.
 //
-//   - The plaintext file is consulted before the Keychain, so the common case
-//     costs one file read and spawns no subprocess. Reversing this would put a
-//     `security` invocation -- and its potential GUI authorization prompt -- on
-//     every single launch under token auth, defeating the reason token auth is
-//     used at all.
-//   - Selection is on "has a descriptor", not on "is valid JSON". A store can
-//     be syntactically valid yet carry no plan descriptors at all (a bare `{}`,
-//     or a credential block holding only an access token). Choosing on validity
-//     would let such a store shadow a populated one and yield nothing.
+// A later source is read only while some field is still missing, which keeps
+// the ordering's real point intact: the plaintext file is consulted before the
+// Keychain, so a store recording both descriptors costs one file read and
+// spawns no subprocess. Reversing that would put a `security` invocation -- and
+// its potential GUI authorization prompt -- on every launch under token auth,
+// defeating the reason token auth is used at all.
 //
-// The two sources describe the same account, so preferring whichever answers is
-// safe; they disagree only in staleness, and a plan name changes far less often
-// than the tokens beside it.
+// Selection is on "has a descriptor", not on "is valid JSON": a store can be
+// syntactically valid yet carry no plan descriptors (a bare `{}`, or a
+// credential block holding only an access token), and choosing on validity
+// would let such a store shadow a populated one and yield nothing.
+//
+// On the file-vs-Keychain precedence: Claude Code's composite store writes the
+// Keychain first and DELETES the plaintext file once an item lands there, so
+// the two coexist only when Keychain writes are failing -- and then the file is
+// the live copy, not a stale leftover. Preferring the file is therefore both
+// the cheap choice and the correct one; the case where a stale file shadows a
+// current Keychain item is not one this storage model produces.
 func GlobalSubscription() Subscription {
+	var merged Subscription
 	for _, read := range []func() []byte{readCredentialFile, readCredentialKeychain} {
+		if merged.Type != "" && merged.RateLimitTier != "" {
+			break
+		}
 		data := read()
 		if data == nil {
 			continue
 		}
-		if sub := parseSubscription(data); !sub.Empty() {
-			return sub
+		sub := parseSubscription(data)
+		if merged.Type == "" {
+			merged.Type = sub.Type
+		}
+		if merged.RateLimitTier == "" {
+			merged.RateLimitTier = sub.RateLimitTier
 		}
 	}
-	return Subscription{}
+	return merged
 }
 
 // envHas reports whether env already carries an entry for key. An explicitly
@@ -158,6 +174,10 @@ func envHas(env []string, key string) bool {
 // env is scanned rather than os.Getenv consulted, because env -- not this
 // process's environment -- is what the child will actually receive, and the two
 // diverge as soon as a caller appends to it.
+//
+// The result never aliases env's backing array, matching removeEnv's contract
+// in token.go: appending in place would write past env's length into memory a
+// caller may still append to itself.
 func appendSubscriptionEnv(env []string) []string {
 	missing := make([]string, 0, 2)
 	for _, key := range [...]string{SubscriptionTypeEnv, RateLimitTierEnv} {
@@ -179,10 +199,13 @@ func appendSubscriptionEnv(env []string) []string {
 		SubscriptionTypeEnv: sub.Type,
 		RateLimitTierEnv:    sub.RateLimitTier,
 	}
+
+	out := make([]string, len(env), len(env)+len(missing))
+	copy(out, env)
 	for _, key := range missing {
 		if v := values[key]; v != "" {
-			env = append(env, key+"="+v)
+			out = append(out, key+"="+v)
 		}
 	}
-	return env
+	return out
 }
