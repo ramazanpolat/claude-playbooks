@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // SubscriptionTypeEnv and RateLimitTierEnv are the environment variables Claude
@@ -42,49 +43,10 @@ type Subscription struct {
 // definite answer the credential store never gave.
 func (s Subscription) Empty() bool { return s.Type == "" && s.RateLimitTier == "" }
 
-// globalCredentialsJSON returns the raw global credentials JSON, or nil.
-//
-// This deliberately does NOT reuse EnsureGlobalCredentials: that function
-// materializes the Keychain item into ~/.claude/.credentials.json as a side
-// effect. Under token auth PrepareLaunchEnv otherwise touches no credential
-// file, and writing a plaintext copy of the account's refresh token merely to
-// learn its plan name would be a poor trade. Read, do not persist.
-func globalCredentialsJSON() []byte {
-	if runtime.GOOS == "darwin" {
-		// The bare service name is the default config dir's item. Playbook config
-		// dirs use a sha256-suffixed service, but the account's plan is a property
-		// of the account, not of whichever playbook happens to be launching.
-		if out, err := findGenericPassword("Claude Code-credentials"); err == nil {
-			if out = bytes.TrimSpace(out); len(out) > 0 && json.Valid(out) {
-				return out
-			}
-		}
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".claude", CredentialsFileName))
-	if err != nil {
-		return nil
-	}
-	if data = bytes.TrimSpace(data); len(data) > 0 && json.Valid(data) {
-		return data
-	}
-	return nil
-}
-
-// GlobalSubscription reports the account's plan descriptors from the global
-// credential store. A missing or unreadable store yields an empty Subscription
-// rather than an error: the descriptors are an enhancement, and failing a
-// playbook launch because a plan name could not be read would be worse than
-// launching without them.
-func GlobalSubscription() Subscription {
-	data := globalCredentialsJSON()
-	if data == nil {
-		return Subscription{}
-	}
+// parseSubscription extracts the plan descriptors from a credential blob,
+// ignoring everything else it contains -- notably the live access and refresh
+// tokens, which are never copied out of the decoder.
+func parseSubscription(data []byte) Subscription {
 	var parsed struct {
 		ClaudeAiOauth struct {
 			SubscriptionType string `json:"subscriptionType"`
@@ -100,23 +62,127 @@ func GlobalSubscription() Subscription {
 	}
 }
 
+// readCredentialFile returns the global plaintext credential store, or nil.
+func readCredentialFile() []byte {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", CredentialsFileName))
+	if err != nil {
+		return nil
+	}
+	if data = bytes.TrimSpace(data); len(data) > 0 && json.Valid(data) {
+		return data
+	}
+	return nil
+}
+
+// readCredentialKeychain returns the global Keychain item, or nil off darwin.
+//
+// Shelling out to `security` can block on a locked Keychain or raise a GUI
+// authorization prompt, which is precisely what token auth exists to avoid, so
+// this is the LAST source consulted rather than the first -- see
+// GlobalSubscription.
+func readCredentialKeychain() []byte {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	// The bare service name is the default config dir's item. Playbook config
+	// dirs use a sha256-suffixed service, but the account's plan is a property
+	// of the account, not of whichever playbook happens to be launching.
+	out, err := findGenericPassword("Claude Code-credentials")
+	if err != nil {
+		return nil
+	}
+	if out = bytes.TrimSpace(out); len(out) > 0 && json.Valid(out) {
+		return out
+	}
+	return nil
+}
+
+// GlobalSubscription reports the account's plan descriptors from the global
+// credential store. A missing or unreadable store yields an empty Subscription
+// rather than an error: the descriptors are an enhancement, and failing a
+// playbook launch because a plan name could not be read would be worse than
+// launching without them.
+//
+// Sources are tried cheapest-first and the first one that actually YIELDS a
+// descriptor wins. Two properties fall out of that ordering, both deliberate:
+//
+//   - The plaintext file is consulted before the Keychain, so the common case
+//     costs one file read and spawns no subprocess. Reversing this would put a
+//     `security` invocation -- and its potential GUI authorization prompt -- on
+//     every single launch under token auth, defeating the reason token auth is
+//     used at all.
+//   - Selection is on "has a descriptor", not on "is valid JSON". A store can
+//     be syntactically valid yet carry no plan descriptors at all (a bare `{}`,
+//     or a credential block holding only an access token). Choosing on validity
+//     would let such a store shadow a populated one and yield nothing.
+//
+// The two sources describe the same account, so preferring whichever answers is
+// safe; they disagree only in staleness, and a plan name changes far less often
+// than the tokens beside it.
+func GlobalSubscription() Subscription {
+	for _, read := range []func() []byte{readCredentialFile, readCredentialKeychain} {
+		data := read()
+		if data == nil {
+			continue
+		}
+		if sub := parseSubscription(data); !sub.Empty() {
+			return sub
+		}
+	}
+	return Subscription{}
+}
+
+// envHas reports whether env already carries an entry for key. An explicitly
+// exported empty value (`FOO=`) counts as present: os.Getenv cannot tell that
+// apart from unset, but the operator who typed it meant something by it.
+func envHas(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // appendSubscriptionEnv adds the plan descriptors to env for a token-authenticated
-// child, leaving any value the caller already exported untouched -- an explicit
-// override in the user's shell is a deliberate act and outranks what this
-// process infers from disk.
+// child, leaving any value already present untouched -- an explicit export is a
+// deliberate act and outranks what this process infers from disk. A Team seat
+// needs exactly that: its real subscriptionType is not a value the picker
+// accepts, so the operator must be able to override it.
+//
+// env is scanned rather than os.Getenv consulted, because env -- not this
+// process's environment -- is what the child will actually receive, and the two
+// diverge as soon as a caller appends to it.
 func appendSubscriptionEnv(env []string) []string {
+	missing := make([]string, 0, 2)
+	for _, key := range [...]string{SubscriptionTypeEnv, RateLimitTierEnv} {
+		if !envHas(env, key) {
+			missing = append(missing, key)
+		}
+	}
+	// Nothing to fill in: skip the credential read entirely rather than paying
+	// for a store lookup whose every result would be discarded.
+	if len(missing) == 0 {
+		return env
+	}
+
 	sub := GlobalSubscription()
 	if sub.Empty() {
 		return env
 	}
-	for _, kv := range [...]struct{ key, value string }{
-		{SubscriptionTypeEnv, sub.Type},
-		{RateLimitTierEnv, sub.RateLimitTier},
-	} {
-		if kv.value == "" || os.Getenv(kv.key) != "" {
-			continue
+	values := map[string]string{
+		SubscriptionTypeEnv: sub.Type,
+		RateLimitTierEnv:    sub.RateLimitTier,
+	}
+	for _, key := range missing {
+		if v := values[key]; v != "" {
+			env = append(env, key+"="+v)
 		}
-		env = append(env, kv.key+"="+kv.value)
 	}
 	return env
 }

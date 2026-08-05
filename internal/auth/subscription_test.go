@@ -8,14 +8,25 @@ import (
 	"testing"
 )
 
-// stubKeychain replaces the Keychain lookup for the duration of a test.
-// Returning an error models "no such item", which is what makes the non-darwin
-// and darwin paths converge on the file fallback.
-func stubKeychain(t *testing.T, out []byte, err error) {
+// stubKeychain replaces the Keychain lookup and returns a pointer to a call
+// counter, so a test can assert the lookup was NOT reached -- the cheap-first
+// ordering is only meaningful if the expensive source stays untouched.
+func stubKeychain(t *testing.T, out []byte, err error) *int {
 	t.Helper()
+	calls := 0
 	prev := findGenericPassword
-	findGenericPassword = func(string) ([]byte, error) { return out, err }
+	findGenericPassword = func(string) ([]byte, error) {
+		calls++
+		return out, err
+	}
 	t.Cleanup(func() { findGenericPassword = prev })
+	return &calls
+}
+
+// homeWithoutCreds points HOME at an empty directory.
+func homeWithoutCreds(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 }
 
 // writeGlobalCreds seeds $HOME/.claude/.credentials.json with raw body.
@@ -75,63 +86,159 @@ func TestGlobalSubscriptionDegradesGracefully(t *testing.T) {
 
 func TestGlobalSubscriptionMissingStore(t *testing.T) {
 	stubKeychain(t, nil, errors.New("no such item"))
-	t.Setenv("HOME", t.TempDir()) // no .claude directory at all
+	homeWithoutCreds(t)
 
 	if got := GlobalSubscription(); !got.Empty() {
 		t.Fatalf("GlobalSubscription() = %+v, want empty", got)
 	}
 }
 
-// On darwin the Keychain is the primary store; the plaintext file is only a
-// fallback. A regression that reversed this would read a stale file while the
-// Keychain held the current account.
-func TestGlobalSubscriptionPrefersKeychainOnDarwin(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Keychain is consulted only on darwin")
-	}
-	stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"from_keychain"}}`), nil)
-	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"from_file"}}`)
-
-	if got := GlobalSubscription(); got.Type != "from_keychain" {
-		t.Fatalf("Type = %q, want the Keychain's value", got.Type)
-	}
-}
-
-// A Keychain item holding garbage must not shadow a usable file: json.Valid
-// gates the Keychain branch precisely so a corrupt item degrades to the
-// fallback instead of yielding nothing.
-func TestGlobalSubscriptionFallsBackWhenKeychainInvalid(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Keychain is consulted only on darwin")
-	}
-	stubKeychain(t, []byte(`not json at all`), nil)
+// Shelling out to `security` can block on a locked Keychain or raise a GUI
+// authorization prompt -- exactly what token auth exists to avoid. When the
+// file answers, the Keychain must not be consulted at all.
+func TestGlobalSubscriptionPrefersFileOverKeychain(t *testing.T) {
+	calls := stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"from_keychain"}}`), nil)
 	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"from_file"}}`)
 
 	if got := GlobalSubscription(); got.Type != "from_file" {
 		t.Fatalf("Type = %q, want the file's value", got.Type)
 	}
+	if *calls != 0 {
+		t.Fatalf("Keychain was consulted %d time(s) despite the file answering", *calls)
+	}
 }
 
-// appendSubscriptionEnv must never emit a bare key or an empty value, and must
-// leave an operator's explicit export untouched.
+// Selection is on "has a descriptor", not "is valid JSON". A store can be
+// syntactically valid yet carry no plan descriptors -- a bare {}, or a
+// credential block holding only an access token. Choosing on validity alone
+// would let such a store shadow a populated one and yield nothing.
+func TestGlobalSubscriptionSkipsValidButDescriptorlessSource(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Keychain is consulted only on darwin")
+	}
+	for _, body := range []string{`{}`, `{"claudeAiOauth":{"accessToken":"x"}}`} {
+		t.Run(body, func(t *testing.T) {
+			stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"from_keychain"}}`), nil)
+			writeGlobalCreds(t, body) // valid JSON, no descriptors
+
+			if got := GlobalSubscription(); got.Type != "from_keychain" {
+				t.Fatalf("Type = %q, want the Keychain's value; a descriptorless "+
+					"file shadowed a populated Keychain", got.Type)
+			}
+		})
+	}
+}
+
+// The same rule from the other side, and the actual regression this fixes: a
+// Keychain item holding valid JSON with no descriptors must not suppress a
+// populated file. Selecting on validity rather than content returned empty here
+// and ignored a perfectly good file.
+func TestGlobalSubscriptionDescriptorlessKeychainDoesNotShadowFile(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Keychain is consulted only on darwin")
+	}
+	stubKeychain(t, []byte(`{}`), nil)
+	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"from_file"}}`)
+
+	if got := GlobalSubscription(); got.Type != "from_file" {
+		t.Fatalf("Type = %q, want the file's value; a descriptorless Keychain "+
+			"item shadowed a populated file", got.Type)
+	}
+}
+
+// With no file at all the Keychain is the only source left, so it must be
+// reached -- the cheap-first ordering must not become "file-only".
+func TestGlobalSubscriptionFallsBackToKeychain(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Keychain is consulted only on darwin")
+	}
+	calls := stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"from_keychain"}}`), nil)
+	homeWithoutCreds(t)
+
+	if got := GlobalSubscription(); got.Type != "from_keychain" {
+		t.Fatalf("Type = %q, want the Keychain's value", got.Type)
+	}
+	if *calls == 0 {
+		t.Fatal("Keychain was never consulted despite being the only source")
+	}
+}
+
+// An explicit export outranks the inferred value, and must survive in the
+// returned slice -- asserting only that the inferred value is absent would pass
+// against an implementation that dropped the operator's value entirely.
 func TestAppendSubscriptionEnvRespectsExistingExport(t *testing.T) {
 	stubKeychain(t, nil, errors.New("no such item"))
 	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"pro","rateLimitTier":"tier_x"}}`)
-	t.Setenv(SubscriptionTypeEnv, "operator_choice")
 
-	got := appendSubscriptionEnv(nil)
+	got := appendSubscriptionEnv([]string{SubscriptionTypeEnv + "=operator_choice"})
+
+	var sawOperator, sawInferred, sawTier bool
+	for _, kv := range got {
+		switch kv {
+		case SubscriptionTypeEnv + "=operator_choice":
+			sawOperator = true
+		case SubscriptionTypeEnv + "=pro":
+			sawInferred = true
+		case RateLimitTierEnv + "=tier_x":
+			sawTier = true
+		}
+	}
+	if !sawOperator {
+		t.Fatalf("appendSubscriptionEnv() = %v, dropped the operator's export", got)
+	}
+	if sawInferred {
+		t.Fatalf("appendSubscriptionEnv() = %v, overrode the operator's export", got)
+	}
+	// One explicit value must not suppress the other descriptor.
+	if !sawTier {
+		t.Fatalf("appendSubscriptionEnv() = %v, want it to still add %s", got, RateLimitTierEnv)
+	}
+}
+
+// os.Getenv cannot distinguish unset from `export FOO=`, but the operator who
+// typed the latter meant something by it. Scanning the slice can tell them
+// apart, and must.
+func TestAppendSubscriptionEnvRespectsExplicitEmptyExport(t *testing.T) {
+	stubKeychain(t, nil, errors.New("no such item"))
+	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"pro","rateLimitTier":"tier_x"}}`)
+
+	got := appendSubscriptionEnv([]string{SubscriptionTypeEnv + "="})
+
 	for _, kv := range got {
 		if kv == SubscriptionTypeEnv+"=pro" {
-			t.Fatalf("overrode the operator's exported %s", SubscriptionTypeEnv)
+			t.Fatalf("appendSubscriptionEnv() = %v, overrode an explicit empty export", got)
 		}
 	}
-	found := false
-	for _, kv := range got {
-		if kv == RateLimitTierEnv+"=tier_x" {
-			found = true
-		}
+}
+
+// When both descriptors are already present there is nothing to fill in, so the
+// credential store must not be read at all -- on darwin that read can spawn a
+// subprocess and raise a Keychain prompt.
+func TestAppendSubscriptionEnvSkipsLookupWhenNothingMissing(t *testing.T) {
+	calls := stubKeychain(t, []byte(`{"claudeAiOauth":{"subscriptionType":"from_keychain"}}`), nil)
+	homeWithoutCreds(t) // force the file source to miss, so only the Keychain could answer
+
+	in := []string{SubscriptionTypeEnv + "=a", RateLimitTierEnv + "=b"}
+	got := appendSubscriptionEnv(in)
+
+	if len(got) != len(in) {
+		t.Fatalf("appendSubscriptionEnv() = %v, want it unchanged", got)
 	}
-	if !found {
-		t.Fatalf("appendSubscriptionEnv() = %v, want it to still add %s", got, RateLimitTierEnv)
+	if *calls != 0 {
+		t.Fatalf("credential store was consulted %d time(s) with nothing to fill in", *calls)
+	}
+}
+
+// A store recording only one descriptor must yield only that one, never an
+// empty companion: an empty CLAUDE_CODE_SUBSCRIPTION_TYPE reads to Claude Code
+// as a definite answer the store never gave.
+func TestAppendSubscriptionEnvOmitsEmptyValues(t *testing.T) {
+	stubKeychain(t, nil, errors.New("no such item"))
+	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"pro"}}`)
+
+	got := appendSubscriptionEnv(nil)
+
+	if len(got) != 1 || got[0] != SubscriptionTypeEnv+"=pro" {
+		t.Fatalf("appendSubscriptionEnv() = %v, want exactly [%s=pro]", got, SubscriptionTypeEnv)
 	}
 }
