@@ -118,6 +118,11 @@ type launch struct {
 	env []string
 	// args after the global flags, e.g. {"run", "shared"}.
 	args []string
+	// seedHome populates the temporary HOME before the binary runs. The plan
+	// descriptors are read from the global credential store, which lives under
+	// HOME; without a hook the redirected HOME is always empty and every
+	// injection case would be indistinguishable from "nothing found".
+	seedHome func(t *testing.T, home string)
 }
 
 // childEnv runs claude-playbook and returns the environment its child received.
@@ -125,6 +130,10 @@ func childEnv(t *testing.T, playbooksDir string, l launch) map[string]string {
 	t.Helper()
 	work := t.TempDir()
 	dump := filepath.Join(work, "envdump")
+
+	if l.seedHome != nil {
+		l.seedHome(t, work)
+	}
 
 	args := append([]string{
 		"--playbooks-dir", playbooksDir,
