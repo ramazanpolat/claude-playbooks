@@ -46,6 +46,18 @@ const oauthCredentialKey = "claudeAiOauth"
 // The returned error is advisory; callers should warn rather than abort, since
 // a playbook still launches correctly on the environment token.
 func QuarantineStoredOAuth(configDir string) error {
+	// The global store is the recovery path, not a playbook's own copy: a later
+	// launch without a token re-links config dirs to it, and on darwin it is
+	// also what the Keychain is materialised into. Stripping it would remove the
+	// grant every playbook falls back to and leave nothing to re-link. Reachable
+	// via `start ~/.claude`, which binds an arbitrary config dir.
+	global, err := globalClaudeDir()
+	if err == nil && global != "" {
+		if dir, err := filepath.Abs(configDir); err == nil && dir == global {
+			return nil
+		}
+	}
+
 	path := filepath.Join(configDir, CredentialsFileName)
 
 	// Lstat, not Stat: a symlink must be recognised before anything is written,
@@ -108,6 +120,16 @@ func QuarantineStoredOAuth(configDir string) error {
 	}
 	out = append(out, '\n')
 	return writeFilePrivate(path, out)
+}
+
+// globalClaudeDir returns the absolute path of the global Claude config
+// directory, the one EnsureGlobalCredentials treats as the shared source.
+func globalClaudeDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(filepath.Join(home, ".claude"))
 }
 
 // writeFilePrivate writes data at mode 0600 via a temporary file and a rename,

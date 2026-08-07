@@ -293,3 +293,71 @@ func TestLinkCredentialsNeverOverwritesGlobalWithGrantlessStore(t *testing.T) {
 		t.Fatal("global grant was overwritten by a grantless playbook store")
 	}
 }
+
+// The global store is what every playbook falls back to and what a later
+// no-token launch re-links to. Quarantining it would remove the grant and leave
+// nothing to recover from -- reachable in practice via `start ~/.claude`, which
+// binds an arbitrary directory as the config dir.
+func TestQuarantineRefusesGlobalStore(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := writeStore(t, global, `{`+grantJSON+`,`+mcpJSON+`}`)
+
+	if err := QuarantineStoredOAuth(global); err != nil {
+		t.Fatalf("QuarantineStoredOAuth: %v", err)
+	}
+
+	store := readStore(t, p)
+	if _, present := store[oauthCredentialKey]; !present {
+		t.Fatal("the GLOBAL grant was quarantined; nothing is left for playbooks " +
+			"to fall back to or re-link against")
+	}
+}
+
+// The guard must key on the resolved path, not the literal string, or a
+// trailing slash or relative form would walk straight past it.
+func TestQuarantineRefusesGlobalStoreByResolvedPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := writeStore(t, global, `{`+grantJSON+`}`)
+
+	for _, form := range []string{global + "/", filepath.Join(global, ".", "")} {
+		if err := QuarantineStoredOAuth(form); err != nil {
+			t.Fatalf("QuarantineStoredOAuth(%q): %v", form, err)
+		}
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("global store destroyed via path form %q", form)
+		}
+	}
+}
+
+// The guard must not over-reach: a playbook that merely lives under the home
+// directory, or is named like the global dir, is still a playbook.
+func TestQuarantineStillHandlesNonGlobalDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pb := filepath.Join(home, ".claude-playbooks", "work")
+	if err := os.MkdirAll(pb, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := writeStore(t, pb, `{`+grantJSON+`}`)
+
+	if err := QuarantineStoredOAuth(pb); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatalf("a normal playbook was skipped by the global guard (stat err = %v)", err)
+	}
+}
