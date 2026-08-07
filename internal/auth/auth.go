@@ -152,7 +152,12 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 					return err
 				}
 			} else {
-				if usable {
+				// "Usable" means parseable, which is not the same as "carries an
+				// account grant". A store can be valid JSON holding only sibling
+				// keys -- mcpOAuth, or the remainder left by QuarantineStoredOAuth
+				// -- and copying that over the global store would erase the
+				// account's credentials while looking like a routine sync.
+				if usable && storeHasOAuthGrant(targetCreds) {
 					// Share and sync: copy to global if the target (playbook's local file) is newer.
 					sourceInfo, err := os.Stat(sourceAbs)
 					if err == nil {
