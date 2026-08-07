@@ -111,7 +111,16 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 
 	var syncErr error
 	if active {
+		// Order matters: quarantine first, so a launch that fails afterwards
+		// still leaves the config dir without the stale grant that would
+		// hijack the token. Its error is reported only if metadata sync had
+		// none of its own -- both are advisory, and the sync warning is the
+		// more actionable of the two.
+		qErr := QuarantineStoredOAuth(configDir)
 		syncErr = SyncAccountMetadata(configDir)
+		if syncErr == nil {
+			syncErr = qErr
+		}
 	} else {
 		syncErr = SyncCredentials(configDir)
 	}
