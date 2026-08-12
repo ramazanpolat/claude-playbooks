@@ -214,6 +214,18 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// A custom command name must be resolvable at invocation time: record
+	// it as the manifest alias so multicall dispatch finds the playbook.
+	if installAlias != "" && (m == nil || m.Alias != installAlias) {
+		if m == nil {
+			m = &manifest.Manifest{Version: "0.1.0", Name: targetName}
+		}
+		m.Alias = installAlias
+		if err := manifest.Write(dest, m); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not record alias in manifest: %v\n", err)
+		}
+	}
+
 	installLauncher(aliasName, targetName, configDest)
 	return nil
 }

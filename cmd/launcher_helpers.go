@@ -19,13 +19,22 @@ func installLauncher(cmdName, playbookName, configDir string) {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", shell.QuoteArg(playbookName))
 	}
 
+	// The registry is the ownership authority: refuse a command name that
+	// already addresses another playbook, or the shared name would resolve
+	// to whichever playbook wins the registry scan.
+	if owner, oerr := commandNameOwner(cmdName, playbookName); oerr == nil && owner != nil {
+		fmt.Fprintf(os.Stderr, "Warning: command name %q already addresses playbook %q; no launcher written\n", cmdName, owner.Name)
+		manual()
+		return
+	}
+
 	dir, err := config.ResolveLauncherDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: no launcher written: %v\n", err)
 		manual()
 		return
 	}
-	path, err := launcher.Write(dir, cmdName, playbookName, configDir, config.ResolvePlaybooksDir())
+	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Pick another name with: claude-playbook alias %s <name>\n", shell.QuoteArg(playbookName))

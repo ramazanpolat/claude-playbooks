@@ -1,45 +1,36 @@
 package launcher
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
 
-func TestWriteAndParse(t *testing.T) {
+func TestWriteAndList(t *testing.T) {
 	dir := t.TempDir()
-	path, err := Write(dir, "demo", "demo", "/home/u/.claude-playbooks/demo", "/pb")
+	path, err := Write(dir, "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o111 == 0 {
-		t.Errorf("launcher not executable: %v", info.Mode())
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("launcher is not a symlink: %v", info.Mode())
+	}
+	bin, _ := BinPath()
+	if resolved, err := filepath.EvalSymlinks(path); err != nil || resolved != bin {
+		t.Errorf("resolves to %q (%v), want %q", resolved, err, bin)
 	}
 	entries, err := List(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
+	if len(entries) != 1 || entries[0].CmdName != "demo" {
 		t.Fatalf("entries = %#v", entries)
-	}
-	e := entries[0]
-	if e.CmdName != "demo" || e.PlaybookName != "demo" || e.ConfigDir != "/home/u/.claude-playbooks/demo" {
-		t.Errorf("parsed entry = %#v", e)
-	}
-	data, _ := os.ReadFile(path)
-	if !strings.Contains(string(data), `CLAUDE_CONFIG_DIR='/home/u/.claude-playbooks/demo' exec `) {
-		t.Errorf("script body:\n%s", data)
-	}
-	if !strings.Contains(string(data), ` run 'demo' "$@"`) {
-		t.Errorf("script body:\n%s", data)
 	}
 }
 
@@ -48,230 +39,113 @@ func TestWriteRefusesForeignFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "taken"), []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "taken", "pb", "/x", "/pb"); err == nil {
-		t.Fatal("expected ErrTaken")
+	if _, err := Write(dir, "taken"); err == nil {
+		t.Fatal("expected ErrTaken for a regular file")
+	}
+	// A symlink to something else is just as foreign.
+	if err := os.Symlink("/bin/sh", filepath.Join(dir, "shlink")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(dir, "shlink"); err == nil {
+		t.Fatal("expected ErrTaken for a foreign symlink")
 	}
 }
 
-func TestWriteRefreshesOwnPlaybookOnly(t *testing.T) {
+func TestWriteRefreshesOwnLink(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Write(dir, "demo", "demo", "/pb/demo", "/pb"); err != nil {
+	if _, err := Write(dir, "demo"); err != nil {
 		t.Fatal(err)
 	}
-	// Same playbook: refresh in place.
-	if _, err := Write(dir, "demo", "demo", "/pb/demo", "/pb"); err != nil {
-		t.Fatal(err)
-	}
-	// Another playbook wanting the same command must not silently repoint
-	// it at a different isolated configuration.
-	if _, err := Write(dir, "demo", "other", "/pb/other", "/pb"); err == nil {
-		t.Fatal("expected ErrTaken for a launcher owned by another playbook")
+	if _, err := Write(dir, "demo"); err != nil {
+		t.Fatalf("refresh of own link failed: %v", err)
 	}
 	entries, _ := List(dir)
-	if len(entries) != 1 || entries[0].ConfigDir != "/pb/demo" {
+	if len(entries) != 1 {
 		t.Fatalf("entries = %#v", entries)
 	}
 }
 
-func TestWriteAbsolutizesRelativePaths(t *testing.T) {
+func TestWriteRejectsBadAndReservedNames(t *testing.T) {
 	dir := t.TempDir()
-	work := t.TempDir()
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(work); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(orig) })
-	// filepath.Abs resolves against Getwd, which may differ from the
-	// TempDir string on symlinked temp roots (macOS /var -> /private/var).
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	path, err := Write(dir, "rel", "rel", "./pb/rel", "./pb")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(path)
-	if strings.Contains(string(data), "'./pb") {
-		t.Errorf("relative path embedded verbatim:\n%s", data)
-	}
-	if !strings.Contains(string(data), "--playbooks-dir '"+filepath.Join(wd, "pb")+"'") {
-		t.Errorf("script body:\n%s", data)
-	}
-	entries, _ := List(dir)
-	if len(entries) != 1 || entries[0].ConfigDir != filepath.Join(wd, "pb", "rel") {
-		t.Fatalf("entries = %#v", entries)
-	}
-}
-
-func TestListForPathPrefix(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := Write(dir, "in", "in", "/rootA/in", "/rootA"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Write(dir, "out", "out", "/rootB/out", "/rootB"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ListForPathPrefix(dir, "/rootA")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].CmdName != "in" {
-		t.Fatalf("got = %#v", got)
-	}
-}
-
-func TestRemoveForPathPrefix(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := Write(dir, "a", "a", "/pb/a", "/pb"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Write(dir, "a-sub", "a", "/pb/a/config", "/pb"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Write(dir, "b", "b", "/pb/b", "/pb"); err != nil {
-		t.Fatal(err)
-	}
-	// Foreign files are untouched.
-	if err := os.WriteFile(filepath.Join(dir, "other"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	removed, err := RemoveForPathPrefix(dir, "/pb/a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(removed) != 2 {
-		t.Fatalf("removed = %#v", removed)
-	}
-	entries, _ := List(dir)
-	if len(entries) != 1 || entries[0].CmdName != "b" {
-		t.Fatalf("entries = %#v", entries)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "other")); err != nil {
-		t.Errorf("foreign file was touched: %v", err)
-	}
-	// Prefix must match path components, not string prefixes: /pb/a must
-	// not remove /pb/ab.
-	if _, err := Write(dir, "ab", "ab", "/pb/ab", "/pb"); err != nil {
-		t.Fatal(err)
-	}
-	if removed, _ := RemoveForPathPrefix(dir, "/pb/a"); len(removed) != 0 {
-		t.Fatalf("component-prefix violation: %#v", removed)
-	}
-}
-
-func TestQuoteInScript(t *testing.T) {
-	dir := t.TempDir()
-	cfg := "/tmp/o'brien/pb"
-	path, err := Write(dir, "q", "o'brien pb", cfg, "/pb")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(path)
-	if !strings.Contains(string(data), `CLAUDE_CONFIG_DIR='/tmp/o'\''brien/pb' exec `) {
-		t.Errorf("script body:\n%s", data)
-	}
-	entries, _ := List(dir)
-	if len(entries) != 1 || entries[0].ConfigDir != cfg {
-		t.Fatalf("round-trip failed: %#v", entries)
-	}
-}
-
-func TestWriteRejectsBadNames(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range []string{"", ".", "..", "a/b"} {
-		if _, err := Write(dir, name, "pb", "/x", "/pb"); err == nil {
+	for _, name := range []string{"", ".", "..", "a/b", "cpb", "claude-playbook"} {
+		if _, err := Write(dir, name); err == nil {
 			t.Errorf("name %q accepted", name)
 		}
 	}
 }
 
-func TestUnderNormalizesRelativePath(t *testing.T) {
+func TestLookupAndRemove(t *testing.T) {
 	dir := t.TempDir()
-	orig, _ := os.Getwd()
-	if err := os.Chdir(t.TempDir()); err != nil {
+	if _, exists, _ := Lookup(dir, "none"); exists {
+		t.Fatal("phantom entry")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "foreign"), []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chdir(orig) })
-	wd, _ := os.Getwd()
+	if _, _, foreign := Lookup(dir, "foreign"); !foreign {
+		t.Fatal("foreign file not flagged")
+	}
+	if _, err := Write(dir, "ours"); err != nil {
+		t.Fatal(err)
+	}
+	if e, exists, foreign := Lookup(dir, "ours"); !exists || foreign || e.CmdName != "ours" {
+		t.Fatalf("e=%#v exists=%v foreign=%v", e, exists, foreign)
+	}
 
-	if _, err := Write(dir, "r", "r", "./pb/r", "./pb"); err != nil {
-		t.Fatal(err)
+	// Remove touches launchers only.
+	if removed, err := Remove(dir, "foreign"); err != nil || removed {
+		t.Fatalf("foreign removed=%v err=%v", removed, err)
 	}
-	// Callers may still hold the literal relative override.
-	got, err := ListForPathPrefix(dir, "./pb")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(dir, "foreign")); err != nil {
+		t.Fatal("foreign file was deleted")
 	}
-	if len(got) != 1 || got[0].ConfigDir != filepath.Join(wd, "pb", "r") {
-		t.Fatalf("relative prefix did not match: %#v", got)
+	if removed, err := Remove(dir, "ours"); err != nil || !removed {
+		t.Fatalf("ours removed=%v err=%v", removed, err)
 	}
-	removed, err := RemoveForPathPrefix(dir, "./pb")
-	if err != nil || len(removed) != 1 {
-		t.Fatalf("removed=%#v err=%v", removed, err)
+	if entries, _ := List(dir); len(entries) != 0 {
+		t.Fatalf("entries = %#v", entries)
 	}
 }
 
-func TestListSkipsLargeFiles(t *testing.T) {
+func TestListIgnoresForeignEntries(t *testing.T) {
 	dir := t.TempDir()
-	big := make([]byte, 1<<20)
-	copy(big, []byte("#!/bin/sh\n"))
-	if err := os.WriteFile(filepath.Join(dir, "bigbin"), big, 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "regular"), []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "small", "small", "/pb/small", "/pb"); err != nil {
+	if err := os.Symlink("/bin/sh", filepath.Join(dir, "shlink")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(dir, "mine"); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := List(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].CmdName != "small" {
+	if len(entries) != 1 || entries[0].CmdName != "mine" {
 		t.Fatalf("entries = %#v", entries)
 	}
 }
 
-func TestLookup(t *testing.T) {
-	dir := t.TempDir()
-	if _, exists, _ := Lookup(dir, "none"); exists {
-		t.Fatal("phantom entry")
-	}
-	if err := os.WriteFile(filepath.Join(dir, "foreign"), []byte("#!/bin/sh\necho\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, foreign := Lookup(dir, "foreign"); !foreign {
-		t.Fatal("foreign file not flagged")
-	}
-	if _, err := Write(dir, "ours", "pb", "/pb/x", "/pb"); err != nil {
-		t.Fatal(err)
-	}
-	if e, exists, foreign := Lookup(dir, "ours"); !exists || foreign || e.ConfigDir != "/pb/x" {
-		t.Fatalf("e=%#v exists=%v foreign=%v", e, exists, foreign)
-	}
-}
-
-func TestConcurrentWritesSameNameExactlyOneWins(t *testing.T) {
+func TestConcurrentWritesSameName(t *testing.T) {
+	// All writers produce an identical link, so concurrency must never
+	// error or corrupt: every call succeeds and exactly one link remains.
 	dir := t.TempDir()
 	const n = 16
 	var wins int32
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
-			cfg := fmt.Sprintf("/pb/p%d", i)
-			if _, err := Write(dir, "shared", fmt.Sprintf("p%d", i), cfg, "/pb"); err == nil {
+			if _, err := Write(dir, "shared"); err == nil {
 				atomic.AddInt32(&wins, 1)
 			}
-		}(i)
+		}()
 	}
 	wg.Wait()
-	if wins != 1 {
-		t.Fatalf("wins = %d, want exactly 1", wins)
+	if wins != n {
+		t.Fatalf("wins = %d, want %d", wins, n)
 	}
 	entries, _ := List(dir)
 	if len(entries) != 1 {

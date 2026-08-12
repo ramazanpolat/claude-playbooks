@@ -76,17 +76,20 @@ func runRename(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%q already exists at %s", newName, newPath)
 	}
 
-	// Preflight the --alias launcher collision BEFORE any mutation (the
-	// directory rename and the alias rewrites): failing afterwards would
-	// leave A renamed to C with its old launcher broken, and an installed
-	// alias running a different playbook than the PATH command.
-	if renameAlias != "" {
+	// Preflight command-name collisions BEFORE any mutation (the directory
+	// rename and the alias rewrites): failing afterwards would leave A
+	// renamed to C with stale launcher state. Ownership is a registry
+	// question — does another playbook already answer to this name?
+	for _, cand := range []string{renameAlias, newName} {
+		if cand == "" {
+			continue
+		}
+		if owner, oerr := commandNameOwner(cand, oldName); oerr == nil && owner != nil {
+			return fmt.Errorf("command name %q already addresses playbook %q", cand, owner.Name)
+		}
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if e, exists, foreign := launcher.Lookup(ldir, renameAlias); foreign {
-				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", renameAlias)
-			} else if exists && e.ConfigDir != newConfigPath &&
-				!launcher.Under(e.ConfigDir, oldRoot) && !launcher.Under(e.ConfigDir, newPath) {
-				return fmt.Errorf("command name %q belongs to playbook %q (%s)", renameAlias, e.PlaybookName, e.ConfigDir)
+			if _, _, foreign := launcher.Lookup(ldir, cand); foreign {
+				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", cand)
 			}
 		}
 	}
@@ -120,43 +123,58 @@ func runRename(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Keep the manifest's name in sync with the directory name. Skip linked
-	// playbooks: their manifest belongs to the external source tree.
+	// Keep the manifest's name in sync with the directory name, and record
+	// a --alias so multicall dispatch can resolve the command at runtime.
+	// Skip linked playbooks: their manifest belongs to the external tree.
 	if info, err := os.Lstat(newPath); err == nil && info.Mode()&os.ModeSymlink == 0 {
 		if m, err := manifest.Read(newPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not read manifest to update its name: %v\n", err)
-		} else if m != nil && m.Name != newName {
-			m.Name = newName
-			if err := manifest.Write(newPath, m); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not update manifest name: %v\n", err)
+		} else {
+			if m == nil {
+				m = &manifest.Manifest{Version: "0.1.0"}
+			}
+			changed := false
+			if m.Name != newName {
+				m.Name = newName
+				changed = true
+			}
+			if renameAlias != "" && m.Alias != renameAlias {
+				m.Alias = renameAlias
+				changed = true
+			}
+			if changed {
+				if err := manifest.Write(newPath, m); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not update manifest: %v\n", err)
+				}
 			}
 		}
 	}
 
-	// Launchers referencing the old path are dead either way; regenerate
-	// them against the new location (preserving custom command names) unless
-	// --no-alias drops them or --alias replaces them with a single new name.
+	// Launchers carry no state — a link named by the manifest alias keeps
+	// working untouched. Only the link named after the OLD directory name
+	// goes stale (that name no longer resolves), so retire it and register
+	// the new name; --alias sets a fresh manifest alias, --no-alias drops
+	// launcher registration.
 	if ldir, err := config.ResolveLauncherDir(); err == nil {
-		stale, lerr := launcher.RemoveForPathPrefix(ldir, oldRoot)
-		if lerr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not update launchers: %v\n", lerr)
+		if removed, rerr := launcher.Remove(ldir, oldName); rerr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", oldName, rerr)
+		} else if removed {
+			fmt.Printf("Removed command %q\n", oldName)
 		}
 		switch {
 		case renameNoAlias:
 			// dropped
 		case renameAlias != "":
-			if _, werr := launcher.Write(ldir, renameAlias, newName, newConfigPath, playbooksDir); werr != nil {
+			if _, werr := launcher.Write(ldir, renameAlias); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", renameAlias, werr)
 			} else {
-				fmt.Printf("Command %q now points at %q\n", renameAlias, newName)
+				fmt.Printf("Command %q now runs %q\n", renameAlias, newName)
 			}
 		default:
-			for _, e := range stale {
-				if _, werr := launcher.Write(ldir, e.CmdName, newName, newConfigPath, playbooksDir); werr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not update launcher %q: %v\n", e.CmdName, werr)
-				} else {
-					fmt.Printf("Command %q now points at %q\n", e.CmdName, newName)
-				}
+			if _, werr := launcher.Write(ldir, newName); werr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", newName, werr)
+			} else {
+				fmt.Printf("Command %q now runs %q\n", newName, newName)
 			}
 		}
 	}

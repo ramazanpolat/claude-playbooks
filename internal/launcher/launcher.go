@@ -1,9 +1,11 @@
-// Package launcher manages per-playbook launcher commands: small executable
-// #!/bin/sh scripts installed next to the claude-playbook binary, whose
-// directory is on PATH by construction whenever the tool itself was invoked
-// by name. Unlike shell aliases they work identically from any shell, need
-// no rc-file edit and no reload, and are visible to non-interactive callers
-// (scripts, cron, other tools).
+// Package launcher manages per-playbook launcher commands: symlinks to the
+// claude-playbook binary placed in a directory on PATH. When the binary is
+// invoked through such a link it sees the link's name in argv[0] and
+// dispatches to `run <name>` — the multicall pattern used by busybox and
+// git. The launcher itself carries no state: name resolution happens at
+// invocation time against the live playbook registry, so there is nothing
+// to go stale when playbooks are renamed, moved, or deleted, nothing to
+// quote, and no script content to observe half-written.
 package launcher
 
 import (
@@ -11,65 +13,49 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // ErrTaken is returned by Write when the target name exists in the launcher
-// directory but is not a launcher this tool generated.
+// directory but is not a symlink to this binary.
 var ErrTaken = errors.New("command name taken by a file this tool did not generate")
 
-const (
-	markerPrefix = "# claude-playbook launcher for playbook: "
-	configPrefix = "# config-dir: "
-)
-
-// Entry describes one launcher script found in the launcher directory.
-type Entry struct {
-	CmdName      string // file name = the command the user types
-	Path         string // absolute path of the script
-	PlaybookName string // from the marker line
-	ConfigDir    string // from the config-dir line
+// ReservedNames are argv[0] values that always mean the CLI itself and may
+// never name a launcher.
+var ReservedNames = map[string]bool{
+	"claude-playbook": true,
+	"cpb":             true,
 }
 
-// BinPath returns the absolute path of the running binary, for embedding in
-// generated scripts.
+// Entry describes one launcher symlink found in the launcher directory.
+type Entry struct {
+	CmdName string // link name = the command the user types
+	Path    string // absolute path of the symlink
+	Target  string // what the link points to
+}
+
+// BinPath returns the resolved absolute path of the running binary — the
+// symlink target embedded in launchers. Symlinks in argv[0] are resolved so
+// a launcher always points at the real binary, not at another launcher.
 func BinPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
 	return filepath.Abs(exe)
 }
 
-// Script renders the launcher script content. The effective playbooks root
-// is embedded as --playbooks-dir: `run` resolves the playbook by name inside
-// that root, and a launcher created under a --playbooks-dir override would
-// otherwise search the default root and die with "unknown playbook".
-func Script(playbookName, configDir, playbooksDir, binPath string) string {
-	return "#!/bin/sh\n" +
-		markerPrefix + playbookName + "\n" +
-		configPrefix + configDir + "\n" +
-		"CLAUDE_CONFIG_DIR=" + quote(configDir) + " exec " + quote(binPath) +
-		" --playbooks-dir " + quote(playbooksDir) + " run " + quote(playbookName) + " \"$@\"\n"
-}
-
-// Write installs (or refreshes) the launcher for a playbook as dir/cmdName.
-// An existing file is only overwritten when it carries this package's marker;
-// anything else returns ErrTaken.
-func Write(dir, cmdName, playbookName, configDir, playbooksDir string) (string, error) {
-	if strings.ContainsAny(cmdName, "/\x00") || cmdName == "" || cmdName == "." || cmdName == ".." {
-		return "", fmt.Errorf("invalid command name %q", cmdName)
-	}
-	// A relative --playbooks-dir (./pb) baked in verbatim would resolve
-	// against whatever directory the launcher is later run from.
-	var err error
-	if configDir, err = filepath.Abs(configDir); err != nil {
+// Write installs (or refreshes) the launcher symlink dir/cmdName -> binary.
+// Creation is atomic-exclusive (os.Symlink fails on an existing name); an
+// existing entry is replaced only when it is already a launcher, via a
+// temporary link renamed over the old one so the command never dangles.
+func Write(dir, cmdName string) (string, error) {
+	if err := validName(cmdName); err != nil {
 		return "", err
 	}
-	if playbooksDir, err = filepath.Abs(playbooksDir); err != nil {
-		return "", err
-	}
-	binPath, err := BinPath()
+	target, err := BinPath()
 	if err != nil {
 		return "", err
 	}
@@ -77,66 +63,48 @@ func Write(dir, cmdName, playbookName, configDir, playbooksDir string) (string, 
 		return "", err
 	}
 	path := filepath.Join(dir, cmdName)
-	content := []byte(Script(playbookName, configDir, playbooksDir, binPath))
 
-	// Atomic claim: O_EXCL guarantees exactly one of two concurrent
-	// creators wins; a plain stat-then-write would let the last writer
-	// silently repoint the shared command at its own playbook.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	err = os.Symlink(target, path)
 	if err == nil {
-		if _, werr := f.Write(content); werr != nil {
-			f.Close()
-			os.Remove(path)
-			return "", werr
-		}
-		if cerr := f.Close(); cerr != nil {
-			os.Remove(path)
-			return "", cerr
-		}
 		return path, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
 		return "", err
 	}
-
-	// The name exists: refresh only a launcher that already belongs to this
-	// playbook. Overwriting another playbook's launcher would silently
-	// repoint a familiar command at a different isolated configuration.
-	e, ok := parse(path)
-	if !ok {
+	if !isOurs(path, target) {
 		return "", fmt.Errorf("%w: %s", ErrTaken, path)
 	}
-	if e.ConfigDir != configDir {
-		return "", fmt.Errorf("%w: %s belongs to playbook %q (%s)", ErrTaken, path, e.PlaybookName, e.ConfigDir)
+	// Already resolves to this binary: identical content, nothing to write.
+	// This also makes concurrent creators converge without coordination.
+	if _, err := filepath.EvalSymlinks(path); err == nil {
+		return path, nil
 	}
-	// Replace via temp file + rename so readers never see a partial script.
-	tmp, err := os.CreateTemp(dir, "."+cmdName+".tmp-*")
-	if err != nil {
-		return "", err
+	// Dangling launcher (the binary moved since it was created): replace by
+	// renaming a fresh link over it (atomic on POSIX). Tmp names carry an
+	// attempt counter so concurrent replacers never collide.
+	for i := 0; i < 10; i++ {
+		tmp := filepath.Join(dir, fmt.Sprintf(".%s.tmp-%d-%d", cmdName, os.Getpid(), i))
+		if err := os.Symlink(target, tmp); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", err
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			os.Remove(tmp)
+			return "", err
+		}
+		return path, nil
 	}
-	tmpName := tmp.Name()
-	if _, werr := tmp.Write(content); werr != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return "", werr
-	}
-	if cerr := tmp.Close(); cerr != nil {
-		os.Remove(tmpName)
-		return "", cerr
-	}
-	if err := os.Chmod(tmpName, 0o755); err != nil {
-		os.Remove(tmpName)
-		return "", err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		return "", err
-	}
-	return path, nil
+	return "", fmt.Errorf("could not refresh launcher %s", path)
 }
 
-// List returns every launcher script in dir.
+// List returns every launcher symlink in dir pointing at this binary.
 func List(dir string) ([]Entry, error) {
+	target, err := BinPath()
+	if err != nil {
+		return nil, err
+	}
 	des, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -146,107 +114,67 @@ func List(dir string) ([]Entry, error) {
 	}
 	var out []Entry
 	for _, de := range des {
-		if de.IsDir() {
+		path := filepath.Join(dir, de.Name())
+		if !isOurs(path, target) {
 			continue
 		}
-		path := filepath.Join(dir, de.Name())
-		if e, ok := parse(path); ok {
-			out = append(out, e)
-		}
+		t, _ := os.Readlink(path)
+		out = append(out, Entry{CmdName: de.Name(), Path: path, Target: t})
 	}
 	return out, nil
 }
 
-// ListForPathPrefix returns every launcher in dir whose config dir is path
-// or lives under it — the same predicate RemoveForPathPrefix deletes by, so
-// previews and removals always agree.
-func ListForPathPrefix(dir, path string) ([]Entry, error) {
-	entries, err := List(dir)
-	if err != nil {
-		return nil, err
-	}
-	var out []Entry
-	for _, e := range entries {
-		if Under(e.ConfigDir, path) {
-			out = append(out, e)
-		}
-	}
-	return out, nil
-}
-
-// Lookup reports the launcher entry at dir/cmdName. exists is false when no
-// file is present; foreign is true when a file exists but is not a launcher
-// this tool generated.
+// Lookup reports the launcher at dir/cmdName. exists is false when no file
+// is present; foreign is true when a file exists but is not a launcher.
 func Lookup(dir, cmdName string) (e Entry, exists, foreign bool) {
 	path := filepath.Join(dir, cmdName)
 	if _, err := os.Lstat(path); err != nil {
 		return Entry{}, false, false
 	}
-	e, ok := parse(path)
-	return e, true, !ok
+	target, err := BinPath()
+	if err != nil || !isOurs(path, target) {
+		return Entry{}, true, true
+	}
+	t, _ := os.Readlink(path)
+	return Entry{CmdName: cmdName, Path: path, Target: t}, true, false
 }
 
-// RemoveForPathPrefix deletes every launcher in dir whose config dir is path
-// or lives under it. It returns the removed entries.
-func RemoveForPathPrefix(dir, path string) ([]Entry, error) {
-	entries, err := ListForPathPrefix(dir, path)
+// Remove deletes the launcher dir/cmdName if it is one. It reports whether
+// a launcher was removed; foreign files are left untouched.
+func Remove(dir, cmdName string) (bool, error) {
+	e, exists, foreign := Lookup(dir, cmdName)
+	if !exists || foreign {
+		return false, nil
+	}
+	if err := os.Remove(e.Path); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// isOurs reports whether path is a symlink resolving to this binary.
+func isOurs(path, binPath string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return nil, err
+		// Dangling link: judge by the literal target's basename so cleanup
+		// still recognizes launchers after the binary moved.
+		t, rerr := os.Readlink(path)
+		return rerr == nil && ReservedNames[filepath.Base(t)]
 	}
-	var removed []Entry
-	for _, e := range entries {
-		if err := os.Remove(e.Path); err != nil {
-			return removed, err
-		}
-		removed = append(removed, e)
-	}
-	return removed, nil
+	return resolved == binPath
 }
 
-// Under reports whether configDir is path or lives under it. Stored config
-// dirs are always absolute (Write absolutizes), so a relative path — e.g. a
-// caller still holding the literal `--playbooks-dir ./pb` — is absolutized
-// before comparing, or the predicate would silently never match.
-func Under(configDir, path string) bool {
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
+func validName(cmdName string) error {
+	if cmdName == "" || cmdName == "." || cmdName == ".." ||
+		filepath.Base(cmdName) != cmdName {
+		return fmt.Errorf("invalid command name %q", cmdName)
 	}
-	return configDir == path || strings.HasPrefix(configDir, path+string(filepath.Separator))
-}
-
-func isOurs(path string) bool {
-	_, ok := parse(path)
-	return ok
-}
-
-func parse(path string) (Entry, bool) {
-	// A launcher is 4 short lines; anything bigger is not ours. Stat before
-	// reading — the launcher dir is often a populated bin directory, and
-	// ReadFile on every neighboring executable would load whole binaries.
-	if info, err := os.Stat(path); err != nil || info.Size() > 4096 {
-		return Entry{}, false
+	if ReservedNames[cmdName] {
+		return fmt.Errorf("command name %q is reserved for the CLI itself", cmdName)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Entry{}, false
-	}
-	lines := strings.Split(string(data), "\n")
-	if len(lines) < 3 || lines[0] != "#!/bin/sh" ||
-		!strings.HasPrefix(lines[1], markerPrefix) || !strings.HasPrefix(lines[2], configPrefix) {
-		return Entry{}, false
-	}
-	return Entry{
-		CmdName:      filepath.Base(path),
-		Path:         path,
-		PlaybookName: strings.TrimPrefix(lines[1], markerPrefix),
-		ConfigDir:    strings.TrimPrefix(lines[2], configPrefix),
-	}, true
-}
-
-// quote renders s as a single shell word (POSIX single-quoting).
-func quote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return nil
 }

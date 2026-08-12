@@ -125,6 +125,18 @@ func runLink(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Record a --alias override in the target's manifest so multicall
+	// dispatch can resolve the command at invocation time.
+	if linkAlias != "" && (m == nil || m.Alias != linkAlias) {
+		if m == nil {
+			m = &manifest.Manifest{Version: "0.1.0", Name: name}
+		}
+		m.Alias = linkAlias
+		if err := manifest.Write(abs, m); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not record alias in manifest: %v\n", err)
+		}
+	}
+
 	installLauncher(aliasName, name, configDest)
 	return nil
 }

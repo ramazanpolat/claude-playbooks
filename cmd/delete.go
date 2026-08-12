@@ -86,7 +86,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if _, err := shell.RemoveByPathPrefix(shellConfig, deletePath); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
-	removeLaunchersFor(deletePath)
+	removeLaunchersNamed(launcherNamesFor(pb))
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
@@ -108,7 +108,7 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 	if _, err := shell.RemoveByPathPrefix(shellConfig, path); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
-	removeLaunchersFor(path)
+	removeLaunchersNamed([]string{name})
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
@@ -116,20 +116,22 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 	return nil
 }
 
-// removeLaunchersFor deletes launcher commands pointing into path.
-// Best-effort: the playbook removal must not fail on launcher-dir trouble.
-func removeLaunchersFor(path string) {
+// removeLaunchersNamed deletes the launcher symlinks for the given command
+// names. Best-effort: the playbook removal must not fail on launcher-dir
+// trouble, and foreign files are never touched.
+func removeLaunchersNamed(names []string) {
 	dir, err := config.ResolveLauncherDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not clean up launchers: %v\n", err)
 		return
 	}
-	removed, err := launcher.RemoveForPathPrefix(dir, path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not clean up launchers: %v\n", err)
-	}
-	for _, e := range removed {
-		fmt.Printf("Removed command %q (%s)\n", e.CmdName, e.Path)
+	for _, n := range names {
+		removed, err := launcher.Remove(dir, n)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", n, err)
+		} else if removed {
+			fmt.Printf("Removed command %q\n", n)
+		}
 	}
 }
 

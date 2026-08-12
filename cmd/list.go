@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,24 +31,22 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Launcher commands take display precedence over rc-file aliases.
-	launcherByPath := map[string]string{}
+	// Launcher commands take display precedence over rc-file aliases. A
+	// launcher is addressed by name: a symlink matching the playbook's
+	// name or manifest alias is its command.
+	launcherNames := map[string]bool{}
 	if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 		if les, lerr := launcher.List(ldir); lerr == nil {
 			for _, e := range les {
-				launcherByPath[e.ConfigDir] = e.CmdName
+				launcherNames[e.CmdName] = true
 			}
 		}
 	}
 	command := func(pb *playbook.Playbook) string {
-		// Launchers store absolute config dirs; discovery under a relative
-		// --playbooks-dir leaves pb.Path relative, so normalize first.
-		path := pb.Path
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
-		if c, ok := launcherByPath[path]; ok {
-			return c
+		for _, n := range launcherNamesFor(pb) {
+			if launcherNames[n] {
+				return n
+			}
 		}
 		return pb.Alias
 	}

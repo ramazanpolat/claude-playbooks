@@ -285,8 +285,12 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].CmdName != "linkedalias" || entries[0].ConfigDir != pb.Path {
+	if len(entries) != 1 || entries[0].CmdName != "linkedalias" {
 		t.Fatalf("launcher entries = %#v", entries)
+	}
+	// The alias must be resolvable at invocation time via the manifest.
+	if pb.Manifest == nil || pb.Manifest.Alias != "linkedalias" {
+		t.Fatalf("manifest alias not recorded: %#v", pb.Manifest)
 	}
 }
 
@@ -551,8 +555,12 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Launcher "x" belongs to bbb.
-	if _, err := launcher.Write(config.LauncherDir, "x", "bbb", filepath.Join(config.PlaybooksDir, "bbb"), config.PlaybooksDir); err != nil {
+	// Command name "x" belongs to bbb via its manifest alias.
+	if err := manifest.Write(filepath.Join(config.PlaybooksDir, "bbb"),
+		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Alias: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launcher.Write(config.LauncherDir, "x"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -569,8 +577,7 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 	if _, serr := os.Stat(filepath.Join(config.PlaybooksDir, "ccc")); serr == nil {
 		t.Error("ccc exists despite the error")
 	}
-	e, exists, foreign := launcher.Lookup(config.LauncherDir, "x")
-	if !exists || foreign || e.PlaybookName != "bbb" {
-		t.Errorf("launcher x mutated: %#v exists=%v foreign=%v", e, exists, foreign)
+	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "x"); !exists || foreign {
+		t.Errorf("launcher x mutated: exists=%v foreign=%v", exists, foreign)
 	}
 }

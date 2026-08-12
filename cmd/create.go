@@ -10,6 +10,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 var (
@@ -74,6 +75,15 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	aliasName := createAlias
 	if aliasName == "" {
 		aliasName = name
+	}
+
+	// A custom command name must be resolvable at invocation time: record
+	// it as the manifest alias so multicall dispatch finds the playbook.
+	if aliasName != name {
+		m := &manifest.Manifest{Version: "0.1.0", Name: name, Alias: aliasName}
+		if err := manifest.Write(dest, m); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not record alias in manifest: %v\n", err)
+		}
 	}
 
 	installLauncher(aliasName, name, dest)

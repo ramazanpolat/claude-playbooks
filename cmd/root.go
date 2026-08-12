@@ -23,6 +23,18 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
+	// Multicall dispatch: invoked through a launcher symlink, argv[0] names
+	// a playbook — behave as `run <name>` with all arguments forwarded.
+	if name, ok := multicallPlaybook(); ok {
+		if err := runRun(nil, append([]string{name}, os.Args[1:]...)); err != nil {
+			if code, ok := exitCode(err); ok {
+				os.Exit(code)
+			}
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := rootCmd.Execute(); err != nil {
 		if code, ok := exitCode(err); ok {
 			os.Exit(code)

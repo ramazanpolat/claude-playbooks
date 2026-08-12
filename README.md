@@ -257,16 +257,15 @@ Deleting a linked playbook removes only the symlink. The source directory is pre
 
 ### Launcher commands
 
-`create`, `install`, and `link` register each playbook as a **launcher command**: a small executable `#!/bin/sh` script placed next to the `claude-playbook` binary (falling back to `~/.local/bin` when that directory is not writable). Unlike shell aliases, launchers work identically from any shell, are available immediately with no rc-file edit or reload, and are visible to scripts and cron:
+`create`, `install`, and `link` register each playbook as a **launcher command**: a symlink to the `claude-playbook` binary placed next to it (falling back to `~/.local/bin` when that directory is not writable):
 
-```sh
-#!/bin/sh
-# claude-playbook launcher for playbook: experiment
-# config-dir: /home/you/.claude-playbooks/experiment
-CLAUDE_CONFIG_DIR='/home/you/.claude-playbooks/experiment' exec '/usr/local/bin/cpb' run 'experiment' "$@"
+```text
+~/.local/bin/experiment -> /usr/local/bin/claude-playbook
 ```
 
-`delete` removes a playbook's launchers; `rename` regenerates them against the new location.
+When invoked through the link, the binary sees the link's name in `argv[0]` and behaves as `claude-playbook run <name>` — the multicall pattern used by busybox and git. The name resolves against the live playbook registry (directory name first, then the `.playbook` manifest's `alias`) **at invocation time**, so the launcher carries no state that can go stale. Unlike shell aliases, launchers work identically from any shell, are available immediately with no rc-file edit or reload, and are visible to scripts and cron.
+
+`delete` removes a playbook's launcher symlinks; `rename` retires the old name and registers the new one; a launcher named by a manifest alias keeps working across renames untouched.
 
 ### Manage aliases (legacy)
 

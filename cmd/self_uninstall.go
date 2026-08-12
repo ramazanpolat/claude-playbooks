@@ -68,7 +68,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if les, lerr := launcher.ListForPathPrefix(ldir, playbooksDir); lerr == nil && len(les) > 0 {
+			if les, lerr := launcher.List(ldir); lerr == nil && len(les) > 0 {
 				fmt.Printf("  Launchers:     %d command(s) in %s\n", len(les), ldir)
 			}
 		}
@@ -98,7 +98,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  shell aliases in: %s\n", shellConfig)
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if les, lerr := launcher.ListForPathPrefix(ldir, playbooksDir); lerr == nil {
+			if les, lerr := launcher.List(ldir); lerr == nil {
 				for _, e := range les {
 					fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
 				}
@@ -139,14 +139,19 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 3: remove launcher commands pointing into the playbooks dir.
+	// Step 3: remove every launcher symlink pointing at this binary — the
+	// binary is going away, so any such link would dangle.
 	if ldir, lerr := config.ResolveLauncherDir(); lerr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not resolve launcher dir: %v\n", lerr)
-	} else if les, lerr := launcher.RemoveForPathPrefix(ldir, playbooksDir); lerr != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to remove launchers: %v\n", lerr)
+	} else if les, lerr := launcher.List(ldir); lerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to list launchers: %v\n", lerr)
 	} else {
 		for _, e := range les {
-			removed = append(removed, fmt.Sprintf("launcher %q (%s)", e.CmdName, e.Path))
+			if rerr := os.Remove(e.Path); rerr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to remove launcher %s: %v\n", e.Path, rerr)
+			} else {
+				removed = append(removed, fmt.Sprintf("launcher %q (%s)", e.CmdName, e.Path))
+			}
 		}
 	}
 
