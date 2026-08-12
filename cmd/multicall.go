@@ -127,14 +127,18 @@ func invokedViaLauncher() bool {
 	return err == nil && resolved == bin
 }
 
-// lockRegistry takes an exclusive advisory lock on the playbooks root,
-// serializing preflight-through-registration across concurrent processes:
-// without it, two creates can both pass the ownership check before either
-// playbook is visible and register duplicate owners for one command name.
-// flock releases automatically when the process dies, so a crashed holder
-// never wedges the registry.
+// lockRegistry takes an exclusive advisory lock serializing
+// preflight-through-registration across concurrent processes: without it,
+// two creates can both pass the ownership check before either playbook is
+// visible and register duplicate owners for one command name. The lock
+// always lives in the DEFAULT playbooks root, not the effective one:
+// commands under different --playbooks-dir roots can still contend for
+// shared resources (a linked target's external manifest, the launcher
+// directory), so per-root locks would not exclude each other. flock
+// releases automatically when the process dies, so a crashed holder never
+// wedges the registry.
 func lockRegistry() (unlock func(), err error) {
-	dir := config.ResolvePlaybooksDir()
+	dir := defaultPlaybooksRoot()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
