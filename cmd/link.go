@@ -83,31 +83,41 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	// Serialize from BEFORE the shared manifest is created or read: two
-	// concurrent links to the same manifestless target could otherwise both
-	// pass manifest.Exists, write different prompted manifests, and
-	// preflight against stale snapshots (see lockRegistry).
+	// Prompt for manifest metadata BEFORE taking the machine-user-global
+	// lock: holding it across human think time would block every concurrent
+	// command (same rule as delete's confirmation).
+	var prompted *manifest.Manifest
+	if !manifest.Exists(abs) {
+		aliasDefault := name
+		if linkAlias != "" {
+			aliasDefault = linkAlias
+		}
+		var perr error
+		prompted, perr = promptForManifest(abs, name, aliasDefault)
+		if perr != nil {
+			return perr
+		}
+	}
+
+	// Serialize registration (see lockRegistry), then RE-CHECK the shared
+	// manifest under the lock: a concurrent link may have initialized it
+	// while the prompt was open — its manifest wins and ours is discarded,
+	// falling through to the shared-state policy below.
 	unlock, err := lockRegistry()
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	// Ensure target has a .playbook, prompting interactively if it doesn't.
 	// A manifest created by THIS invocation is not shared state yet: alias
 	// overrides may apply to it freely, and it must not survive a failed
 	// link as litter.
 	createdManifest := false
 	if !manifest.Exists(abs) {
-		aliasDefault := name
-		if linkAlias != "" {
-			aliasDefault = linkAlias
+		if prompted == nil {
+			return fmt.Errorf("target's %s disappeared while preparing the link; re-run", manifest.FileName)
 		}
-		m, err := promptForManifest(abs, name, aliasDefault)
-		if err != nil {
-			return err
-		}
-		if err := manifest.Write(abs, m); err != nil {
+		if err := manifest.Write(abs, prompted); err != nil {
 			return fmt.Errorf("failed to write .playbook to %s: %w", abs, err)
 		}
 		createdManifest = true
@@ -117,6 +127,8 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 			}
 		}()
 		fmt.Printf("Wrote %s\n", filepath.Join(abs, manifest.FileName))
+	} else if prompted != nil {
+		fmt.Fprintf(os.Stderr, "Note: target's %s was initialized concurrently; using it and discarding the prompted metadata.\n", manifest.FileName)
 	}
 	m, err := manifest.Read(abs)
 	if err != nil {
