@@ -139,6 +139,18 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if effectiveAlias == "" && mPre != nil {
 		effectiveAlias = mPre.Alias
 	}
+	// The launcher that will actually be written uses the effective alias,
+	// falling back to the target name — an unwritable name must fail before
+	// the source is copied into the registry, not as a post-copy warning.
+	if !installNoAlias {
+		launcherName := effectiveAlias
+		if launcherName == "" {
+			launcherName = targetName
+		}
+		if err := launcher.ValidateName(launcherName); err != nil {
+			return fmt.Errorf("%w (pass --no-alias to install without a launcher)", err)
+		}
+	}
 	if err := preflightCommandNames("", targetName, effectiveAlias); err != nil {
 		return err
 	}

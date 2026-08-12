@@ -112,15 +112,18 @@ func runRename(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	if !renameNoAlias && launcherOpsAllowed() {
+	if !renameNoAlias {
 		writeName := renameAlias
 		if writeName == "" {
 			writeName = newName
 		}
-		// A default name that cannot be a launcher (e.g. renaming to a
-		// reserved CLI name) skips launcher creation later, so it needs no
-		// foreign-file check here.
-		if launcher.ValidateName(writeName) == nil {
+		// Rename promises a replacement command; an unwritable default name
+		// (reserved CLI name) must fail before mutation, with --no-alias as
+		// the opt-out.
+		if err := launcher.ValidateName(writeName); err != nil {
+			return fmt.Errorf("%w (pass --no-alias to rename without a launcher)", err)
+		}
+		if launcherOpsAllowed() {
 			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 				if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
 					return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", writeName)

@@ -159,6 +159,19 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	if effectiveAlias == "" && m != nil {
 		effectiveAlias = m.Alias
 	}
+	// The launcher that will actually be written uses the effective alias,
+	// falling back to the link name — an unwritable name (reserved link
+	// name, invalid manifest alias) must fail before dest joins the
+	// registry, not as a post-link warning.
+	if !linkNoAlias {
+		launcherName := effectiveAlias
+		if launcherName == "" {
+			launcherName = name
+		}
+		if err := launcher.ValidateName(launcherName); err != nil {
+			return fmt.Errorf("%w (pass --no-alias to link without a launcher)", err)
+		}
+	}
 	if err := preflightCommandNames("", name, effectiveAlias); err != nil {
 		return err
 	}
