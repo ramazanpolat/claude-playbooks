@@ -201,9 +201,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// The playbook is already installed at this point: alias trouble is a
+	// warning with manual instructions, not a failure of the whole command.
 	shellConfig, err := config.ResolveShellConfig()
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Warning: no alias written: %v\n", err)
+		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", targetName)
+		fmt.Printf("Set the alias later with:\n  claude-playbook --shell-config <rc-file> alias %s <alias>\n", shell.QuoteArg(targetName))
+		return nil
 	}
 
 	// Write the single alias unless --no-alias.

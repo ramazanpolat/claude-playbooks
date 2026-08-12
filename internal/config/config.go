@@ -43,7 +43,17 @@ func detectShellConfig() (string, error) {
 		return filepath.Join(home, ".bashrc"), nil
 	case strings.Contains(shell, "fish"):
 		return filepath.Join(home, ".config", "fish", "config.fish"), nil
-	default:
-		return "", fmt.Errorf("unknown shell %q. Use --shell-config to specify config file", shell)
 	}
+	// SHELL is unset or names a shell we don't recognize (/bin/sh is the
+	// useradd default on Debian; docker exec and cron leave SHELL empty).
+	// Fall back to an rc file the user already has instead of failing:
+	// .bashrc/.zshrc load in their shells, and .profile is read by sh
+	// login shells.
+	for _, name := range []string{".bashrc", ".zshrc", ".profile"} {
+		p := filepath.Join(home, name)
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("unknown shell %q and no ~/.bashrc, ~/.zshrc, or ~/.profile to fall back to. Use --shell-config to specify config file", shell)
 }
