@@ -103,14 +103,28 @@ func runRename(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("command name %q already addresses playbook %q", cand, owner.Name)
 		}
 	}
+	// An explicitly requested alias that can never name a launcher
+	// (reserved, path separators) must fail before any mutation — the late
+	// launcher.Write warning would leave a renamed playbook without its
+	// requested command.
+	if renameAlias != "" {
+		if err := launcher.ValidateName(renameAlias); err != nil {
+			return err
+		}
+	}
 	if !renameNoAlias && launcherOpsAllowed() {
 		writeName := renameAlias
 		if writeName == "" {
 			writeName = newName
 		}
-		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
-				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", writeName)
+		// A default name that cannot be a launcher (e.g. renaming to a
+		// reserved CLI name) skips launcher creation later, so it needs no
+		// foreign-file check here.
+		if launcher.ValidateName(writeName) == nil {
+			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+				if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
+					return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", writeName)
+				}
 			}
 		}
 	}

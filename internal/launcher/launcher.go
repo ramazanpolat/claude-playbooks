@@ -52,7 +52,7 @@ func BinPath() (string, error) {
 // existing entry is replaced only when it is already a launcher, via a
 // temporary link renamed over the old one so the command never dangles.
 func Write(dir, cmdName string) (string, error) {
-	if err := validName(cmdName); err != nil {
+	if err := ValidateName(cmdName); err != nil {
 		return "", err
 	}
 	target, err := BinPath()
@@ -146,7 +146,9 @@ func isOurs(path, binPath string) bool {
 	return err == nil && resolved == binPath
 }
 
-func validName(cmdName string) error {
+// ValidateName reports whether cmdName may name a launcher. Exposed so
+// callers can reject an impossible --alias before mutating anything.
+func ValidateName(cmdName string) error {
 	if cmdName == "" || cmdName == "." || cmdName == ".." ||
 		filepath.Base(cmdName) != cmdName {
 		return fmt.Errorf("invalid command name %q", cmdName)

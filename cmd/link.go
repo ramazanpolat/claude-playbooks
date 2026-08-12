@@ -11,6 +11,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -76,6 +77,22 @@ func runLink(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", name, dest)
 	}
 
+	if linkAlias != "" {
+		if err := launcher.ValidateName(linkAlias); err != nil {
+			return err
+		}
+	}
+
+	// Serialize from BEFORE the shared manifest is created or read: two
+	// concurrent links to the same manifestless target could otherwise both
+	// pass manifest.Exists, write different prompted manifests, and
+	// preflight against stale snapshots (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	// Ensure target has a .playbook, prompting interactively if it doesn't.
 	if !manifest.Exists(abs) {
 		m, err := promptForManifest(abs, name)
@@ -100,14 +117,6 @@ func runLink(cmd *cobra.Command, args []string) error {
 		}
 		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
 	}
-
-	// Serialize preflight-through-registration across concurrent commands
-	// (see lockRegistry).
-	unlock, err := lockRegistry()
-	if err != nil {
-		return err
-	}
-	defer unlock()
 
 	// Preflight command names BEFORE the symlink joins the registry (the
 	// link name registers even under --no-alias, and the target manifest's

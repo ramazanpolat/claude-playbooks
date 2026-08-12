@@ -10,6 +10,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -59,6 +60,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	aliasName := createAlias
 	if aliasName == "" {
 		aliasName = name
+	}
+	if createAlias != "" {
+		if err := launcher.ValidateName(createAlias); err != nil {
+			return err
+		}
 	}
 	// Serialize preflight-through-registration: without the registry lock,
 	// two concurrent creates can both pass the ownership check and register

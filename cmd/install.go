@@ -14,6 +14,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -115,6 +116,12 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if _, err := os.Lstat(dest); err == nil {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
 	}
+	if installAlias != "" {
+		if err := launcher.ValidateName(installAlias); err != nil {
+			return err
+		}
+	}
+
 	// Serialize preflight-through-registration across concurrent installs
 	// (see lockRegistry).
 	unlock, err := lockRegistry()
