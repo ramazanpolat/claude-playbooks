@@ -152,3 +152,20 @@ func TestConcurrentWritesSameName(t *testing.T) {
 		t.Fatalf("entries = %#v", entries)
 	}
 }
+
+func TestRemoveNeverTouchesReservedNames(t *testing.T) {
+	dir := t.TempDir()
+	// The installer's own cpb shortcut also resolves to this binary.
+	bin, _ := BinPath()
+	if err := os.Symlink(bin, filepath.Join(dir, "cpb")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"cpb", "claude-playbook", "../cpb"} {
+		if removed, err := Remove(dir, name); err != nil || removed {
+			t.Errorf("Remove(%q) = %v, %v", name, removed, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "cpb")); err != nil {
+		t.Fatal("the CLI shortcut was deleted")
+	}
+}

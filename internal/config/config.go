@@ -29,11 +29,20 @@ func ResolveLauncherDir() (string, error) {
 	if v := os.Getenv("CLAUDE_LAUNCHER_DIR"); v != "" {
 		return v, nil
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
+	// Prefer the directory of the command as INVOKED (argv[0] resolved via
+	// PATH, without following the final symlink): os.Executable resolves
+	// through symlinks, and for installs managed via a PATH symlink whose
+	// target lives elsewhere (package/version managers), the target dir is
+	// writable but not on PATH — launchers written there would be
+	// unreachable.
+	dir := invokedBinDir()
+	if dir == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Dir(exe)
 	}
-	dir := filepath.Dir(exe)
 	if dirWritable(dir) {
 		return dir, nil
 	}
@@ -174,4 +183,23 @@ func detectShellConfig() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("cannot determine shell (SHELL is unset) and no ~/.bashrc, ~/.zshrc, or ~/.profile found. Use --shell-config to specify config file")
+}
+
+// invokedBinDir returns the directory of the command as the user reached it:
+// the literal argv[0] directory, or its PATH entry — deliberately without
+// resolving the final symlink. Empty when argv[0] cannot be located.
+func invokedBinDir() string {
+	argv0 := os.Args[0]
+	var p string
+	if strings.ContainsRune(argv0, os.PathSeparator) {
+		p = argv0
+	} else if lp, err := exec.LookPath(argv0); err == nil {
+		p = lp
+	} else {
+		return ""
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return filepath.Dir(p)
 }

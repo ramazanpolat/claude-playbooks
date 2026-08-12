@@ -123,6 +123,13 @@ func Lookup(dir, cmdName string) (e Entry, exists, foreign bool) {
 // Remove deletes the launcher dir/cmdName if it is one. It reports whether
 // a launcher was removed; foreign files are left untouched.
 func Remove(dir, cmdName string) (bool, error) {
+	// Reserved or malformed names are never playbook launchers: a crafted
+	// or imported manifest alias like "cpb" must not delete the CLI's own
+	// shortcut symlink (which also resolves to this binary), and a
+	// path-carrying name must not escape the launcher directory.
+	if ValidateName(cmdName) != nil {
+		return false, nil
+	}
 	e, exists, foreign := Lookup(dir, cmdName)
 	if !exists || foreign {
 		return false, nil

@@ -49,7 +49,7 @@ func Execute() {
 			}
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook.\n", base)
+		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook. (If this symlink is your own alias for the CLI, name it %q or %q, or use a hard link.)\n", base, "claude-playbook", "cpb")
 		os.Exit(1)
 	}
 	if err := rootCmd.Execute(); err != nil {
