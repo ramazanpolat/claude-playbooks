@@ -41,11 +41,10 @@ func ResolveLauncherDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	local := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(local, 0o755); err != nil {
-		return "", fmt.Errorf("binary dir %s is not writable and %s cannot be created: %w", dir, local, err)
-	}
-	return local, nil
+	// Resolution only computes the path — creation happens on the write
+	// path (launcher.Write), so read-only callers (list, --dry-run, a
+	// cancelled uninstall prompt) never mutate the filesystem.
+	return filepath.Join(home, ".local", "bin"), nil
 }
 
 // dirWritable reports whether the current user can create files in dir.

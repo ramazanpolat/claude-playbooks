@@ -1,9 +1,12 @@
 package launcher
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -248,5 +251,30 @@ func TestLookup(t *testing.T) {
 	}
 	if e, exists, foreign := Lookup(dir, "ours"); !exists || foreign || e.ConfigDir != "/pb/x" {
 		t.Fatalf("e=%#v exists=%v foreign=%v", e, exists, foreign)
+	}
+}
+
+func TestConcurrentWritesSameNameExactlyOneWins(t *testing.T) {
+	dir := t.TempDir()
+	const n = 16
+	var wins int32
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cfg := fmt.Sprintf("/pb/p%d", i)
+			if _, err := Write(dir, "shared", fmt.Sprintf("p%d", i), cfg, "/pb"); err == nil {
+				atomic.AddInt32(&wins, 1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Fatalf("wins = %d, want exactly 1", wins)
+	}
+	entries, _ := List(dir)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %#v", entries)
 	}
 }

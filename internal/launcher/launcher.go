@@ -77,23 +77,59 @@ func Write(dir, cmdName, playbookName, configDir, playbooksDir string) (string, 
 		return "", err
 	}
 	path := filepath.Join(dir, cmdName)
-	if _, err := os.Lstat(path); err == nil {
-		// Refresh only a launcher that already belongs to this playbook.
-		// Overwriting another playbook's launcher would silently repoint a
-		// familiar command at a different isolated configuration.
-		e, ok := parse(path)
-		if !ok {
-			return "", fmt.Errorf("%w: %s", ErrTaken, path)
+	content := []byte(Script(playbookName, configDir, playbooksDir, binPath))
+
+	// Atomic claim: O_EXCL guarantees exactly one of two concurrent
+	// creators wins; a plain stat-then-write would let the last writer
+	// silently repoint the shared command at its own playbook.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	if err == nil {
+		if _, werr := f.Write(content); werr != nil {
+			f.Close()
+			os.Remove(path)
+			return "", werr
 		}
-		if e.ConfigDir != configDir {
-			return "", fmt.Errorf("%w: %s belongs to playbook %q (%s)", ErrTaken, path, e.PlaybookName, e.ConfigDir)
+		if cerr := f.Close(); cerr != nil {
+			os.Remove(path)
+			return "", cerr
 		}
+		return path, nil
 	}
-	if err := os.WriteFile(path, []byte(Script(playbookName, configDir, playbooksDir, binPath)), 0o755); err != nil {
+	if !errors.Is(err, os.ErrExist) {
 		return "", err
 	}
-	// WriteFile does not chmod an existing file.
-	if err := os.Chmod(path, 0o755); err != nil {
+
+	// The name exists: refresh only a launcher that already belongs to this
+	// playbook. Overwriting another playbook's launcher would silently
+	// repoint a familiar command at a different isolated configuration.
+	e, ok := parse(path)
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrTaken, path)
+	}
+	if e.ConfigDir != configDir {
+		return "", fmt.Errorf("%w: %s belongs to playbook %q (%s)", ErrTaken, path, e.PlaybookName, e.ConfigDir)
+	}
+	// Replace via temp file + rename so readers never see a partial script.
+	tmp, err := os.CreateTemp(dir, "."+cmdName+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	tmpName := tmp.Name()
+	if _, werr := tmp.Write(content); werr != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return "", werr
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		os.Remove(tmpName)
+		return "", cerr
+	}
+	if err := os.Chmod(tmpName, 0o755); err != nil {
+		os.Remove(tmpName)
+		return "", err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
 		return "", err
 	}
 	return path, nil
