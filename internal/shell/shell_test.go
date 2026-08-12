@@ -201,3 +201,27 @@ func TestWritePreservesShellConfigSymlink(t *testing.T) {
 		t.Fatalf("target was not updated: %s", data)
 	}
 }
+
+func TestReloadHint(t *testing.T) {
+	cases := []struct{ shell, file, want string }{
+		{"/bin/zsh", "/home/u/.zshrc", "source '/home/u/.zshrc'"},
+		{"/bin/bash", "/home/u/.bashrc", "source '/home/u/.bashrc'"},
+		{"/usr/bin/fish", "/home/u/.config/fish/config.fish", "source '/home/u/.config/fish/config.fish'"},
+		// POSIX shells have no `source` builtin — the verb follows the
+		// shell, not the filename, so custom --shell-config paths work too.
+		{"/bin/sh", "/home/u/.profile", ". '/home/u/.profile'"},
+		{"/bin/dash", "/tmp/shrc", ". '/tmp/shrc'"},
+		// POSIX `.` PATH-searches slash-less names; bare relatives get ./
+		{"/bin/dash", "myrc", ". './myrc'"},
+		{"/bin/ksh", "/tmp/kshrc", ". '/tmp/kshrc'"},
+		// Paths with whitespace or metacharacters stay one pasteable word.
+		{"/bin/sh", "/tmp/my dir/.profile", ". '/tmp/my dir/.profile'"},
+		{"/bin/bash", "/tmp/o'brien/.bashrc", `source '/tmp/o'\''brien/.bashrc'`},
+	}
+	for _, c := range cases {
+		t.Setenv("SHELL", c.shell)
+		if got := ReloadHint(c.file); got != c.want {
+			t.Errorf("SHELL=%s file=%s: got %q, want %q", c.shell, c.file, got, c.want)
+		}
+	}
+}

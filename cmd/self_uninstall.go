@@ -194,7 +194,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	fmt.Println("Reload your shell to clear any cached aliases:")
-	fmt.Printf("  source %s\n", shellConfig)
+	fmt.Printf("  %s\n", shell.ReloadHint(shellConfig))
 
 	return nil
 }

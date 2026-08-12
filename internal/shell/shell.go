@@ -39,6 +39,25 @@ func ValidAliasName(aliasName string) bool {
 	return aliasNameRegex.MatchString(aliasName)
 }
 
+// ReloadHint returns the command a user should run to load configFile into
+// their current shell. The verb follows the user's shell, not the filename:
+// bash/zsh/fish get the familiar `source`; every other shell (sh, dash, ksh,
+// unknown) gets the POSIX `.`, which they all support — a dash user pointing
+// --shell-config at a custom path has no `source` builtin. The path is quoted
+// so the hint stays pasteable when it contains whitespace or metacharacters.
+func ReloadHint(configFile string) string {
+	sh := config.UserShell()
+	if strings.Contains(sh, "bash") || strings.Contains(sh, "zsh") || strings.Contains(sh, "fish") {
+		return "source " + shellQuote(configFile)
+	}
+	// The POSIX `.` searches PATH — not the cwd — for names without a
+	// slash, so a bare relative path must carry a ./ prefix to run.
+	if !strings.Contains(configFile, "/") {
+		configFile = "./" + configFile
+	}
+	return ". " + shellQuote(configFile)
+}
+
 // Format returns the canonical alias line written by the tool.
 func Format(aliasName, playbookDir string) string {
 	return formatWith(aliasName, playbookDir, currentBinName())
