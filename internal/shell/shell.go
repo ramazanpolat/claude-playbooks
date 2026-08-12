@@ -42,11 +42,13 @@ func ValidAliasName(aliasName string) bool {
 // ReloadHint returns the command a user should run to load configFile into
 // their current shell. `source` is a bash/zsh-ism; .profile is the one target
 // a pure-POSIX shell (sh/dash) will be reading, and those shells only have `.`.
+// The path is quoted so the hint stays pasteable when it contains whitespace
+// or shell metacharacters.
 func ReloadHint(configFile string) string {
 	if filepath.Base(configFile) == ".profile" {
-		return ". " + configFile
+		return ". " + shellQuote(configFile)
 	}
-	return "source " + configFile
+	return "source " + shellQuote(configFile)
 }
 
 // Format returns the canonical alias line written by the tool.

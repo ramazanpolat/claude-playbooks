@@ -203,13 +203,20 @@ func TestWritePreservesShellConfigSymlink(t *testing.T) {
 }
 
 func TestReloadHint(t *testing.T) {
-	if got := ReloadHint("/home/u/.profile"); got != ". /home/u/.profile" {
+	if got := ReloadHint("/home/u/.profile"); got != ". '/home/u/.profile'" {
 		t.Errorf("got %q", got)
 	}
-	if got := ReloadHint("/home/u/.bashrc"); got != "source /home/u/.bashrc" {
+	if got := ReloadHint("/home/u/.bashrc"); got != "source '/home/u/.bashrc'" {
 		t.Errorf("got %q", got)
 	}
-	if got := ReloadHint("/home/u/.zshrc"); got != "source /home/u/.zshrc" {
+	if got := ReloadHint("/home/u/.zshrc"); got != "source '/home/u/.zshrc'" {
+		t.Errorf("got %q", got)
+	}
+	// Paths with whitespace or metacharacters must stay one pasteable word.
+	if got := ReloadHint("/tmp/my dir/.profile"); got != ". '/tmp/my dir/.profile'" {
+		t.Errorf("got %q", got)
+	}
+	if got := ReloadHint("/tmp/o'brien/.bashrc"); got != `source '/tmp/o'\''brien/.bashrc'` {
 		t.Errorf("got %q", got)
 	}
 }
