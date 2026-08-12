@@ -193,10 +193,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 			manifestFile := filepath.Join(oldManifestDir, manifest.FileName)
 			origBytes, rerr := os.ReadFile(manifestFile)
 			origExisted := rerr == nil
-			if werr := manifest.Write(oldManifestDir, m); werr != nil {
-				return fmt.Errorf("cannot persist alias change (nothing renamed): %w", werr)
-			}
-			restoreManifest = func() {
+			restore := func() {
 				var rerr error
 				if origExisted {
 					rerr = os.WriteFile(manifestFile, origBytes, 0o644)
@@ -204,9 +201,17 @@ func runRename(cmd *cobra.Command, args []string) error {
 					rerr = os.Remove(manifestFile)
 				}
 				if rerr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not restore manifest after failed rename: %v\n", rerr)
+					fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", rerr)
 				}
 			}
+			if werr := manifest.Write(oldManifestDir, m); werr != nil {
+				// A failing write may have truncated or partially
+				// overwritten the file in place — restore the captured
+				// bytes so the error really does leave nothing changed.
+				restore()
+				return fmt.Errorf("cannot persist alias change (nothing renamed): %w", werr)
+			}
+			restoreManifest = restore
 		}
 	}
 

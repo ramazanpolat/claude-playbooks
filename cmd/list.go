@@ -41,6 +41,12 @@ func runList(cmd *cobra.Command, args []string) error {
 	if ldir, lerr := config.ResolveLauncherDir(); lerr == nil && launcherOpsAllowed() {
 		if les, lerr := launcher.List(ldir); lerr == nil {
 			for _, e := range les {
+				// The installer's own CLI shortcut (cpb -> claude-playbook)
+				// is a symlink to this binary too; reserved names never
+				// dispatch, so never advertise them as a playbook's command.
+				if launcher.ReservedNames[e.CmdName] {
+					continue
+				}
 				launcherNames[e.CmdName] = true
 			}
 		}
