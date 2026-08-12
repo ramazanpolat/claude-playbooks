@@ -32,7 +32,14 @@ func Execute() {
 	// stale (its playbook was deleted or renamed away) and fails loudly
 	// rather than falling through to the CLI overview with exit 0.
 	if base := filepath.Base(os.Args[0]); !launcher.ReservedNames[base] && invokedViaLauncher() {
-		if name, ok := multicallPlaybook(); ok {
+		name, ok, derr := multicallPlaybook()
+		if derr != nil {
+			// The registry itself is unreadable — very different from this
+			// launcher being stale; name the real cause.
+			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+			os.Exit(1)
+		}
+		if ok {
 			if err := runRun(nil, append([]string{name}, os.Args[1:]...)); err != nil {
 				if code, ok := exitCode(err); ok {
 					os.Exit(code)

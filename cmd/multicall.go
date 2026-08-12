@@ -15,31 +15,32 @@ import (
 
 // multicallPlaybook resolves argv[0] against the live playbook registry.
 // When the binary is invoked through a launcher symlink, the link's name is
-// a playbook name or manifest alias; the CLI's own names never dispatch,
-// and an unresolvable name falls through to the normal CLI so a custom
-// binary install name keeps working.
-func multicallPlaybook() (string, bool) {
+// a playbook name or manifest alias; the CLI's own names never dispatch. A
+// discovery failure is returned distinctly from a genuine missing name:
+// one broken .playbook elsewhere in the registry must not make every
+// launcher report itself as stale.
+func multicallPlaybook() (string, bool, error) {
 	base := filepath.Base(os.Args[0])
 	if launcher.ReservedNames[base] {
-		return "", false
+		return "", false, nil
 	}
 	root := config.ResolvePlaybooksDir()
 	shellConfig, _ := config.ResolveShellConfig()
 	pbs, err := playbook.Discover(root, shellConfig)
 	if err != nil {
-		return "", false
+		return "", false, fmt.Errorf("cannot resolve %q: reading the playbook registry failed: %w", base, err)
 	}
 	for _, pb := range pbs {
 		if pb.Name == base {
-			return pb.Name, true
+			return pb.Name, true, nil
 		}
 	}
 	for _, pb := range pbs {
 		if pb.Manifest != nil && pb.Manifest.Alias == base {
-			return pb.Name, true
+			return pb.Name, true, nil
 		}
 	}
-	return "", false
+	return "", false, nil
 }
 
 // launcherNamesFor returns the command names that may address a playbook:
