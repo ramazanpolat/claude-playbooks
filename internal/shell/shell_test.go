@@ -201,3 +201,15 @@ func TestWritePreservesShellConfigSymlink(t *testing.T) {
 		t.Fatalf("target was not updated: %s", data)
 	}
 }
+
+func TestReloadHint(t *testing.T) {
+	if got := ReloadHint("/home/u/.profile"); got != ". /home/u/.profile" {
+		t.Errorf("got %q", got)
+	}
+	if got := ReloadHint("/home/u/.bashrc"); got != "source /home/u/.bashrc" {
+		t.Errorf("got %q", got)
+	}
+	if got := ReloadHint("/home/u/.zshrc"); got != "source /home/u/.zshrc" {
+		t.Errorf("got %q", got)
+	}
+}

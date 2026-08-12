@@ -134,7 +134,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write alias: %w", err)
 	}
 	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  source %s\n\nThen run with:\n  %s\n", shellConfig, aliasName)
+	fmt.Printf("\nReload your shell or run:\n  %s\n\nThen run with:\n  %s\n", shell.ReloadHint(shellConfig), aliasName)
 	return nil
 }
 

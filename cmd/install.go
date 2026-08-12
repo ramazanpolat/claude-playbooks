@@ -240,7 +240,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: alias %q already in use; skipped. Set one manually with 'claude-playbook alias %s <alias>'\n", aliasName, targetName)
 	}
 
-	fmt.Printf("\nReload your shell or run:\n  source %s\n", shellConfig)
+	fmt.Printf("\nReload your shell or run:\n  %s\n", shell.ReloadHint(shellConfig))
 	return nil
 }
 

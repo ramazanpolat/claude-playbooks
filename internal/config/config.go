@@ -44,11 +44,16 @@ func detectShellConfig() (string, error) {
 	case strings.Contains(shell, "fish"):
 		return filepath.Join(home, ".config", "fish", "config.fish"), nil
 	}
-	// SHELL is unset or names a shell we don't recognize (/bin/sh is the
-	// useradd default on Debian; docker exec and cron leave SHELL empty).
-	// Fall back to an rc file the user already has instead of failing:
-	// .bashrc/.zshrc load in their shells, and .profile is read by sh
-	// login shells.
+	// /bin/sh (the useradd default on Debian) and dash never read .bashrc;
+	// their login shells read .profile, so the alias must go there.
+	switch filepath.Base(shell) {
+	case "sh", "dash":
+		return filepath.Join(home, ".profile"), nil
+	}
+	// SHELL is unset (docker exec, cron) or names a shell we don't
+	// recognize. Fall back to an rc file the user already has instead of
+	// failing: .bashrc/.zshrc load in their shells, and .profile is read
+	// by sh login shells.
 	for _, name := range []string{".bashrc", ".zshrc", ".profile"} {
 		p := filepath.Join(home, name)
 		if _, err := os.Stat(p); err == nil {

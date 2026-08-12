@@ -47,20 +47,22 @@ func TestDetectShellConfigKnownShells(t *testing.T) {
 	}
 }
 
-func TestDetectShellConfigFallbackUnknownShell(t *testing.T) {
-	// /bin/sh is the useradd default on Debian; the alias must land in an
-	// existing rc file instead of failing.
+func TestDetectShellConfigShAndDashUseProfile(t *testing.T) {
+	// /bin/sh is the useradd default on Debian. dash never reads .bashrc,
+	// so even with a .bashrc present the alias must go to .profile.
 	home := t.TempDir()
 	touch(t, filepath.Join(home, ".bashrc"))
 	touch(t, filepath.Join(home, ".profile"))
-	withEnv(t, home, "/bin/sh")
 
-	got, err := detectShellConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(home, ".bashrc"); got != want {
-		t.Errorf("got %s, want %s", got, want)
+	for _, sh := range []string{"/bin/sh", "/bin/dash", "/usr/bin/dash"} {
+		withEnv(t, home, sh)
+		got, err := detectShellConfig()
+		if err != nil {
+			t.Fatalf("SHELL=%s: %v", sh, err)
+		}
+		if want := filepath.Join(home, ".profile"); got != want {
+			t.Errorf("SHELL=%s: got %s, want %s", sh, got, want)
+		}
 	}
 }
 
@@ -78,11 +80,13 @@ func TestDetectShellConfigFallbackEmptyShell(t *testing.T) {
 	}
 }
 
-func TestDetectShellConfigFallbackPrefersBashrcOverProfile(t *testing.T) {
+func TestDetectShellConfigFallbackPreferenceOrder(t *testing.T) {
+	// A shell we don't recognize falls back to the first existing rc file
+	// in .bashrc, .zshrc, .profile order.
 	home := t.TempDir()
 	touch(t, filepath.Join(home, ".zshrc"))
 	touch(t, filepath.Join(home, ".profile"))
-	withEnv(t, home, "/bin/dash")
+	withEnv(t, home, "/usr/bin/ksh")
 
 	got, err := detectShellConfig()
 	if err != nil {
@@ -95,7 +99,7 @@ func TestDetectShellConfigFallbackPrefersBashrcOverProfile(t *testing.T) {
 
 func TestDetectShellConfigErrorWhenNothingToFallBackTo(t *testing.T) {
 	home := t.TempDir()
-	withEnv(t, home, "/bin/sh")
+	withEnv(t, home, "/usr/bin/ksh")
 
 	if _, err := detectShellConfig(); err == nil {
 		t.Fatal("expected an error with no rc files present")

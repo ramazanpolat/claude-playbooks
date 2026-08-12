@@ -92,7 +92,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		fmt.Printf("Alias %q set for playbook %q in %s\n", newAlias, name, shellConfig)
-		fmt.Printf("\nReload your shell or run:\n  source %s\n", shellConfig)
+		fmt.Printf("\nReload your shell or run:\n  %s\n", shell.ReloadHint(shellConfig))
 		return nil
 	}
 

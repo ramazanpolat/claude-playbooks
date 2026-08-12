@@ -92,7 +92,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  source %s\n\nThen run with:\n  %s\n", shellConfig, aliasName)
+	fmt.Printf("\nReload your shell or run:\n  %s\n\nThen run with:\n  %s\n", shell.ReloadHint(shellConfig), aliasName)
 	return nil
 }
 

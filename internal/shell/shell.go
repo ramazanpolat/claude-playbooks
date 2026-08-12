@@ -39,6 +39,16 @@ func ValidAliasName(aliasName string) bool {
 	return aliasNameRegex.MatchString(aliasName)
 }
 
+// ReloadHint returns the command a user should run to load configFile into
+// their current shell. `source` is a bash/zsh-ism; .profile is the one target
+// a pure-POSIX shell (sh/dash) will be reading, and those shells only have `.`.
+func ReloadHint(configFile string) string {
+	if filepath.Base(configFile) == ".profile" {
+		return ". " + configFile
+	}
+	return "source " + configFile
+}
+
 // Format returns the canonical alias line written by the tool.
 func Format(aliasName, playbookDir string) string {
 	return formatWith(aliasName, playbookDir, currentBinName())
