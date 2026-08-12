@@ -260,6 +260,9 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
 	root := t.TempDir()
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	// Launchers are only written when the effective root matches what
+	// dispatch resolves at invocation time — simulate an env-exported root.
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", config.PlaybooksDir)
 	config.ShellConfig = filepath.Join(root, "shellrc")
 	target := filepath.Join(root, "target")
 	configDir := filepath.Join(target, "config")

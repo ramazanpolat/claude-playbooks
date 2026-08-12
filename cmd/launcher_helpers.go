@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
@@ -17,6 +18,17 @@ import (
 func installLauncher(cmdName, playbookName, configDir string) {
 	manual := func() {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", shell.QuoteArg(playbookName))
+	}
+
+	// A launcher resolves against the DEFAULT registry at invocation time
+	// (env or ~/.claude-playbooks): a symlink cannot carry a --playbooks-dir
+	// flag. Writing one for a different root would at best dangle and at
+	// worst run a same-named playbook from the default root — skip it and
+	// say how to run the playbook instead.
+	if effective, dispatch := config.ResolvePlaybooksDir(), dispatchPlaybooksRoot(); !samePath(effective, dispatch) {
+		fmt.Fprintf(os.Stderr, "Note: custom playbooks root %s is not what launchers resolve against at invocation time (%s); no launcher written.\n", effective, dispatch)
+		fmt.Printf("\nRun with:\n  claude-playbook --playbooks-dir %s run %s\n", shell.QuoteArg(effective), shell.QuoteArg(playbookName))
+		return
 	}
 
 	// The registry is the ownership authority: refuse a command name that
@@ -76,4 +88,26 @@ func warnIfShadowedOrUnreachable(cmdName, path, configDir string) {
 			}
 		}
 	}
+}
+
+// dispatchPlaybooksRoot is the playbooks root multicall dispatch will
+// resolve when a launcher is invoked: the environment override or the
+// default — never the --playbooks-dir flag, which exists only for the
+// current process.
+func dispatchPlaybooksRoot() string {
+	if v := os.Getenv("CLAUDE_PLAYBOOKS_DIR"); v != "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude-playbooks")
+}
+
+func samePath(a, b string) bool {
+	if aa, err := filepath.Abs(a); err == nil {
+		a = aa
+	}
+	if bb, err := filepath.Abs(b); err == nil {
+		b = bb
+	}
+	return a == b
 }

@@ -190,6 +190,15 @@ func runRename(cmd *cobra.Command, args []string) error {
 				}
 			}
 		case renameAlias != "":
+			// The previous alias no longer resolves through the registry
+			// once the manifest changes — retire its link too.
+			if oldManifestAlias != "" && oldManifestAlias != renameAlias {
+				if removed, rerr := launcher.Remove(ldir, oldManifestAlias); rerr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", oldManifestAlias, rerr)
+				} else if removed {
+					fmt.Printf("Removed command %q\n", oldManifestAlias)
+				}
+			}
 			if _, werr := launcher.Write(ldir, renameAlias); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", renameAlias, werr)
 			} else {

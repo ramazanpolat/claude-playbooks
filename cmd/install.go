@@ -117,11 +117,15 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 	// Preflight command names BEFORE the directory joins the registry:
 	// dispatch resolves directory names ahead of aliases, so a clash would
-	// silently re-route an existing command.
-	if !installNoAlias {
-		if err := preflightCommandNames("", targetName, installAlias); err != nil {
-			return err
-		}
+	// silently re-route an existing command. The target name joins the
+	// registry even under --no-alias, and an imported manifest's alias
+	// registers without any flag.
+	effectiveAlias := installAlias
+	if effectiveAlias == "" && mPre != nil {
+		effectiveAlias = mPre.Alias
+	}
+	if err := preflightCommandNames("", targetName, effectiveAlias); err != nil {
+		return err
 	}
 
 	// Read the optional manifest from staging to check if we need to cherry-pick a subdir.

@@ -60,7 +60,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if aliasName == "" {
 		aliasName = name
 	}
-	if err := preflightCommandNames("", name, aliasName); err != nil {
+	// The directory name joins the registry even under --no-alias.
+	preflightNames := []string{name}
+	if !createNoAlias {
+		preflightNames = append(preflightNames, aliasName)
+	}
+	if err := preflightCommandNames("", preflightNames...); err != nil {
 		return err
 	}
 
