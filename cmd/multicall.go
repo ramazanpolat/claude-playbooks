@@ -130,19 +130,27 @@ func invokedViaLauncher() bool {
 // lockRegistry takes an exclusive advisory lock serializing
 // preflight-through-registration across concurrent processes: without it,
 // two creates can both pass the ownership check before either playbook is
-// visible and register duplicate owners for one command name. The lock
-// always lives in the DEFAULT playbooks root, not the effective one:
-// commands under different --playbooks-dir roots can still contend for
-// shared resources (a linked target's external manifest, the launcher
-// directory), so per-root locks would not exclude each other. flock
-// releases automatically when the process dies, so a crashed holder never
-// wedges the registry.
+// visible and register duplicate owners for one command name. The lock is
+// machine-user-global and lives OUTSIDE every registry root (user cache
+// dir, tmp as fallback): commands under different --playbooks-dir roots
+// contend for shared resources (a linked target's external manifest, the
+// launcher directory), so per-root locks would not exclude each other —
+// and a lock inside any root would mutate registries the command was told
+// to stay away from, or fail when that root is read-only. flock releases
+// automatically when the process dies, so a crashed holder never wedges
+// the registry.
 func lockRegistry() (unlock func(), err error) {
-	dir := defaultPlaybooksRoot()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
+	var path string
+	if cache, cerr := os.UserCacheDir(); cerr == nil {
+		dir := filepath.Join(cache, "claude-playbook")
+		if merr := os.MkdirAll(dir, 0o755); merr == nil {
+			path = filepath.Join(dir, "registry.lock")
+		}
 	}
-	f, err := os.OpenFile(filepath.Join(dir, ".registry.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if path == "" {
+		path = filepath.Join(os.TempDir(), fmt.Sprintf("claude-playbook-registry-%d.lock", os.Getuid()))
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}
