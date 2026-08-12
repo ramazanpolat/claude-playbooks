@@ -112,6 +112,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// renamed with shell state changed, and a retry against the old name
 	// reporting an unknown playbook. The manifest sits at the pre-rename
 	// location (through the symlink for linked playbooks).
+	restoreManifest := func() {}
 	if renameAlias != "" || renameNoAlias {
 		oldManifestDir := oldRoot
 		if info, lerr := os.Lstat(oldRoot); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -135,13 +136,31 @@ func runRename(cmd *cobra.Command, args []string) error {
 			m = nil // nothing to persist
 		}
 		if m != nil {
+			// Capture the pre-change manifest so a failed directory rename
+			// can restore it — otherwise the alias moves while the rename
+			// reports that nothing happened.
+			manifestFile := filepath.Join(oldManifestDir, manifest.FileName)
+			origBytes, rerr := os.ReadFile(manifestFile)
+			origExisted := rerr == nil
 			if werr := manifest.Write(oldManifestDir, m); werr != nil {
 				return fmt.Errorf("cannot persist alias change (nothing renamed): %w", werr)
+			}
+			restoreManifest = func() {
+				var rerr error
+				if origExisted {
+					rerr = os.WriteFile(manifestFile, origBytes, 0o644)
+				} else {
+					rerr = os.Remove(manifestFile)
+				}
+				if rerr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not restore manifest after failed rename: %v\n", rerr)
+				}
 			}
 		}
 	}
 
 	if err := os.Rename(oldRoot, newPath); err != nil {
+		restoreManifest()
 		return fmt.Errorf("failed to rename: %w", err)
 	}
 

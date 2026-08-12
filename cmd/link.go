@@ -112,6 +112,20 @@ func runLink(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Record a --alias override in the target's manifest BEFORE the symlink
+	// joins the registry: failing afterwards would leave the playbook
+	// registered with an unresolvable advertised command, and a retry would
+	// report the link name as already existing.
+	if linkAlias != "" && (m == nil || m.Alias != linkAlias) {
+		if m == nil {
+			m = &manifest.Manifest{Version: "0.1.0", Name: name}
+		}
+		m.Alias = linkAlias
+		if err := manifest.Write(abs, m); err != nil {
+			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", linkAlias, abs, err)
+		}
+	}
+
 	if err := auth.SyncCredentials(configTarget); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
@@ -133,20 +147,6 @@ func runLink(cmd *cobra.Command, args []string) error {
 			aliasName = m.Alias
 		} else {
 			aliasName = name
-		}
-	}
-
-	// Record a --alias override in the target's manifest so multicall
-	// dispatch can resolve the command at invocation time.
-	if linkAlias != "" && (m == nil || m.Alias != linkAlias) {
-		if m == nil {
-			m = &manifest.Manifest{Version: "0.1.0", Name: name}
-		}
-		m.Alias = linkAlias
-		if err := manifest.Write(abs, m); err != nil {
-			// Without the manifest entry the alias can never resolve — a
-			// launcher by that name would fall through to the normal CLI.
-			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", linkAlias, abs, err)
 		}
 	}
 

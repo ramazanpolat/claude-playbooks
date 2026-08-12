@@ -106,12 +106,19 @@ func launcherOpsAllowed() bool {
 	return samePath(config.ResolvePlaybooksDir(), defaultPlaybooksRoot())
 }
 
+// samePath compares canonicalized paths: ~/.claude-playbooks may itself be
+// a symlink, and an override naming its physical target addresses the same
+// registry dispatch resolves.
 func samePath(a, b string) bool {
-	if aa, err := filepath.Abs(a); err == nil {
-		a = aa
+	return canonPath(a) == canonPath(b)
+}
+
+func canonPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
 	}
-	if bb, err := filepath.Abs(b); err == nil {
-		b = bb
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
 	}
-	return a == b
+	return p
 }

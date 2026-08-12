@@ -35,7 +35,10 @@ func runList(cmd *cobra.Command, args []string) error {
 	// launcher is addressed by name: a symlink matching the playbook's
 	// name or manifest alias is its command.
 	launcherNames := map[string]bool{}
-	if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+	// Launchers exist only for the default root; under a custom root a
+	// same-named global launcher would dispatch the DEFAULT playbook, so
+	// advertising it here would be wrong.
+	if ldir, lerr := config.ResolveLauncherDir(); lerr == nil && launcherOpsAllowed() {
 		if les, lerr := launcher.List(ldir); lerr == nil {
 			for _, e := range les {
 				launcherNames[e.CmdName] = true
