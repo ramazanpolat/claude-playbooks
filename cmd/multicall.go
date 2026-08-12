@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
@@ -92,4 +94,31 @@ func preflightCommandNames(exceptName string, names ...string) error {
 		}
 	}
 	return nil
+}
+
+// invokedViaLauncher reports whether this process was started through a
+// launcher symlink (argv[0] reaches a symlink resolving to this binary).
+// Needed to fail loudly on STALE launchers: a link whose playbook no longer
+// exists must not fall through to the CLI overview and exit 0 — scripts
+// would mistake that for a successful playbook run.
+func invokedViaLauncher() bool {
+	argv0 := os.Args[0]
+	var path string
+	if strings.ContainsRune(argv0, os.PathSeparator) {
+		path = argv0
+	} else if lp, err := exec.LookPath(argv0); err == nil {
+		path = lp
+	} else {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	bin, err := launcher.BinPath()
+	if err != nil {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	return err == nil && resolved == bin
 }

@@ -141,6 +141,11 @@ func runRename(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if m, err := manifest.Read(manifestDir); err != nil {
+		// An unreadable manifest blocks alias changes: dispatch resolves
+		// aliases from it, so proceeding would desynchronize launchers.
+		if renameAlias != "" || renameNoAlias {
+			return fmt.Errorf("cannot update alias: reading manifest failed: %w", err)
+		}
 		fmt.Fprintf(os.Stderr, "Warning: could not read manifest to update it: %v\n", err)
 	} else {
 		if m == nil {
@@ -161,6 +166,13 @@ func runRename(cmd *cobra.Command, args []string) error {
 		}
 		if changed {
 			if err := manifest.Write(manifestDir, m); err != nil {
+				// Alias changes MUST persist before launcher state moves:
+				// a launcher named by an alias the manifest never recorded
+				// can never resolve, and --no-alias would remove commands
+				// while the old alias stays registered.
+				if renameAlias != "" || renameNoAlias {
+					return fmt.Errorf("cannot persist alias change (launchers left untouched): %w", err)
+				}
 				fmt.Fprintf(os.Stderr, "Warning: could not update manifest: %v\n", err)
 			}
 		}

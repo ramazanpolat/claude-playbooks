@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -34,6 +35,13 @@ func Execute() {
 			os.Exit(1)
 		}
 		return
+	}
+	// A launcher whose name no longer resolves is stale (its playbook was
+	// deleted or renamed away). Fail loudly rather than falling through to
+	// the CLI overview with exit 0.
+	if invokedViaLauncher() {
+		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook.\n", filepath.Base(os.Args[0]))
+		os.Exit(1)
 	}
 	if err := rootCmd.Execute(); err != nil {
 		if code, ok := exitCode(err); ok {
