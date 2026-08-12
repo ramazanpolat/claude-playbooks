@@ -259,37 +259,25 @@ func runRename(cmd *cobra.Command, args []string) error {
 		_ = ldir
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none changed.\n")
 	} else if err == nil {
-		// A linked playbook whose shared alias IS the old name keeps
-		// registering it after the rename — its launcher stays valid and
-		// must survive.
-		if !(linkedOld && oldManifestAlias == oldName) {
-			if removed, rerr := launcher.Remove(ldir, oldName); rerr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", oldName, rerr)
-			} else if removed {
-				fmt.Printf("Removed command %q\n", oldName)
-			}
-		}
+		// Retirement is CLAIM-AWARE (same post-mutation re-resolution as
+		// delete): a name still addressed after the rename — a linked
+		// playbook whose shared alias is the old name, or another playbook
+		// whose manifest alias equals it — keeps its launcher.
+		removeUnclaimedLaunchers([]string{oldName})
 		switch {
 		case renameNoAlias:
-			// An alias-named link resolves through the manifest, which is
-			// about to be cleared — retire it too, or --no-alias leaves a
-			// working command behind.
+			// An alias-named link resolves through the manifest, which was
+			// cleared — retire it too (unless someone else claims it), or
+			// --no-alias leaves a working command behind.
 			if oldManifestAlias != "" {
-				if removed, rerr := launcher.Remove(ldir, oldManifestAlias); rerr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", oldManifestAlias, rerr)
-				} else if removed {
-					fmt.Printf("Removed command %q\n", oldManifestAlias)
-				}
+				removeUnclaimedLaunchers([]string{oldManifestAlias})
 			}
 		case renameAlias != "":
-			// The previous alias no longer resolves through the registry
-			// once the manifest changes — retire its link too.
+			// The previous alias no longer resolves through this playbook
+			// once the manifest changes — retire its link too, unless
+			// another playbook claims it.
 			if oldManifestAlias != "" && oldManifestAlias != renameAlias {
-				if removed, rerr := launcher.Remove(ldir, oldManifestAlias); rerr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", oldManifestAlias, rerr)
-				} else if removed {
-					fmt.Printf("Removed command %q\n", oldManifestAlias)
-				}
+				removeUnclaimedLaunchers([]string{oldManifestAlias})
 			}
 			if _, werr := launcher.Write(ldir, renameAlias); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", renameAlias, werr)
