@@ -80,6 +80,14 @@ func runRename(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%q already exists at %s", newName, newPath)
 	}
 
+	// Serialize preflight-through-registration across concurrent commands
+	// (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	// Preflight command-name collisions BEFORE any mutation (the directory
 	// rename and the alias rewrites): failing afterwards would leave A
 	// renamed to C with stale launcher state. Registry ownership applies to

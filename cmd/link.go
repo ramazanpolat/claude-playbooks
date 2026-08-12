@@ -101,6 +101,14 @@ func runLink(cmd *cobra.Command, args []string) error {
 		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
 	}
 
+	// Serialize preflight-through-registration across concurrent commands
+	// (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	// Preflight command names BEFORE the symlink joins the registry (the
 	// link name registers even under --no-alias, and the target manifest's
 	// alias registers without any flag).

@@ -115,6 +115,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if _, err := os.Lstat(dest); err == nil {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
 	}
+	// Serialize preflight-through-registration across concurrent installs
+	// (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	// Preflight command names BEFORE the directory joins the registry:
 	// dispatch resolves directory names ahead of aliases, so a clash would
 	// silently re-route an existing command. The target name joins the

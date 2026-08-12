@@ -60,6 +60,15 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if aliasName == "" {
 		aliasName = name
 	}
+	// Serialize preflight-through-registration: without the registry lock,
+	// two concurrent creates can both pass the ownership check and register
+	// duplicate owners for one command name.
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	// The directory name joins the registry even under --no-alias.
 	preflightNames := []string{name}
 	if !createNoAlias {

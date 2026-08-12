@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
@@ -124,4 +125,29 @@ func invokedViaLauncher() bool {
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	return err == nil && resolved == bin
+}
+
+// lockRegistry takes an exclusive advisory lock on the playbooks root,
+// serializing preflight-through-registration across concurrent processes:
+// without it, two creates can both pass the ownership check before either
+// playbook is visible and register duplicate owners for one command name.
+// flock releases automatically when the process dies, so a crashed holder
+// never wedges the registry.
+func lockRegistry() (unlock func(), err error) {
+	dir := config.ResolvePlaybooksDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, ".registry.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("cannot lock registry: %w", err)
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
 }
