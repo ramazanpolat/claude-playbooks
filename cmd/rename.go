@@ -96,6 +96,19 @@ func runRename(cmd *cobra.Command, args []string) error {
 			skippedAliases = nil
 		}
 	case renameAlias != "":
+		// Preflight the launcher collision BEFORE mutating shell aliases:
+		// installing alias x for this playbook and then failing to claim
+		// launcher x (owned by another playbook) would leave the same
+		// command running different playbooks in interactive shells vs
+		// PATH lookups.
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if e, exists, foreign := launcher.Lookup(ldir, renameAlias); foreign {
+				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", renameAlias)
+			} else if exists && e.ConfigDir != newConfigPath &&
+				!launcher.Under(e.ConfigDir, oldRoot) && !launcher.Under(e.ConfigDir, newPath) {
+				return fmt.Errorf("command name %q belongs to playbook %q (%s)", renameAlias, e.PlaybookName, e.ConfigDir)
+			}
+		}
 		if err := removeAliasesForBothPaths(shellConfig, oldRoot, newPath); err != nil {
 			return fmt.Errorf("failed to update alias: %w", err)
 		}

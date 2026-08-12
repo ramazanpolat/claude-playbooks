@@ -131,11 +131,23 @@ func ListForPathPrefix(dir, path string) ([]Entry, error) {
 	}
 	var out []Entry
 	for _, e := range entries {
-		if underPath(e.ConfigDir, path) {
+		if Under(e.ConfigDir, path) {
 			out = append(out, e)
 		}
 	}
 	return out, nil
+}
+
+// Lookup reports the launcher entry at dir/cmdName. exists is false when no
+// file is present; foreign is true when a file exists but is not a launcher
+// this tool generated.
+func Lookup(dir, cmdName string) (e Entry, exists, foreign bool) {
+	path := filepath.Join(dir, cmdName)
+	if _, err := os.Lstat(path); err != nil {
+		return Entry{}, false, false
+	}
+	e, ok := parse(path)
+	return e, true, !ok
 }
 
 // RemoveForPathPrefix deletes every launcher in dir whose config dir is path
@@ -155,7 +167,14 @@ func RemoveForPathPrefix(dir, path string) ([]Entry, error) {
 	return removed, nil
 }
 
-func underPath(configDir, path string) bool {
+// Under reports whether configDir is path or lives under it. Stored config
+// dirs are always absolute (Write absolutizes), so a relative path — e.g. a
+// caller still holding the literal `--playbooks-dir ./pb` — is absolutized
+// before comparing, or the predicate would silently never match.
+func Under(configDir, path string) bool {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	return configDir == path || strings.HasPrefix(configDir, path+string(filepath.Separator))
 }
 
@@ -165,9 +184,14 @@ func isOurs(path string) bool {
 }
 
 func parse(path string) (Entry, bool) {
-	// A launcher is 4 short lines; anything bigger is not ours.
+	// A launcher is 4 short lines; anything bigger is not ours. Stat before
+	// reading — the launcher dir is often a populated bin directory, and
+	// ReadFile on every neighboring executable would load whole binaries.
+	if info, err := os.Stat(path); err != nil || info.Size() > 4096 {
+		return Entry{}, false
+	}
 	data, err := os.ReadFile(path)
-	if err != nil || len(data) > 4096 {
+	if err != nil {
 		return Entry{}, false
 	}
 	lines := strings.Split(string(data), "\n")

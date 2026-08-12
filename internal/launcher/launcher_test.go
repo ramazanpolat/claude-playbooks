@@ -186,3 +186,67 @@ func TestWriteRejectsBadNames(t *testing.T) {
 		}
 	}
 }
+
+func TestUnderNormalizesRelativePath(t *testing.T) {
+	dir := t.TempDir()
+	orig, _ := os.Getwd()
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	wd, _ := os.Getwd()
+
+	if _, err := Write(dir, "r", "r", "./pb/r", "./pb"); err != nil {
+		t.Fatal(err)
+	}
+	// Callers may still hold the literal relative override.
+	got, err := ListForPathPrefix(dir, "./pb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ConfigDir != filepath.Join(wd, "pb", "r") {
+		t.Fatalf("relative prefix did not match: %#v", got)
+	}
+	removed, err := RemoveForPathPrefix(dir, "./pb")
+	if err != nil || len(removed) != 1 {
+		t.Fatalf("removed=%#v err=%v", removed, err)
+	}
+}
+
+func TestListSkipsLargeFiles(t *testing.T) {
+	dir := t.TempDir()
+	big := make([]byte, 1<<20)
+	copy(big, []byte("#!/bin/sh\n"))
+	if err := os.WriteFile(filepath.Join(dir, "bigbin"), big, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(dir, "small", "small", "/pb/small", "/pb"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := List(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].CmdName != "small" {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestLookup(t *testing.T) {
+	dir := t.TempDir()
+	if _, exists, _ := Lookup(dir, "none"); exists {
+		t.Fatal("phantom entry")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "foreign"), []byte("#!/bin/sh\necho\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, foreign := Lookup(dir, "foreign"); !foreign {
+		t.Fatal("foreign file not flagged")
+	}
+	if _, err := Write(dir, "ours", "pb", "/pb/x", "/pb"); err != nil {
+		t.Fatal(err)
+	}
+	if e, exists, foreign := Lookup(dir, "ours"); !exists || foreign || e.ConfigDir != "/pb/x" {
+		t.Fatalf("e=%#v exists=%v foreign=%v", e, exists, foreign)
+	}
+}
