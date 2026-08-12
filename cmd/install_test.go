@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -277,8 +278,15 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pb.Path != filepath.Join(config.PlaybooksDir, "linked", "config") || pb.Alias != "linkedalias" {
-		t.Fatalf("linked playbook path=%q alias=%q", pb.Path, pb.Alias)
+	if pb.Path != filepath.Join(config.PlaybooksDir, "linked", "config") {
+		t.Fatalf("linked playbook path=%q", pb.Path)
+	}
+	entries, err := launcher.List(config.LauncherDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].CmdName != "linkedalias" || entries[0].ConfigDir != pb.Path {
+		t.Fatalf("launcher entries = %#v", entries)
 	}
 }
 
@@ -442,6 +450,7 @@ func resetCommandTestState(t *testing.T) {
 	t.Helper()
 	config.PlaybooksDir = ""
 	config.ShellConfig = ""
+	config.LauncherDir = t.TempDir()
 	installName = ""
 	installSubdir = ""
 	installBranch = ""
@@ -460,6 +469,7 @@ func resetCommandTestState(t *testing.T) {
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
 		config.ShellConfig = ""
+		config.LauncherDir = ""
 		installName = ""
 		installSubdir = ""
 		installBranch = ""

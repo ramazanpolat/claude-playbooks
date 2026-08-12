@@ -10,30 +10,15 @@ import (
 	"testing"
 )
 
-// aliasLineFor returns the generated alias line for a playbook from a shell config.
-func aliasLineFor(t *testing.T, shellConfig, aliasName string) string {
-	t.Helper()
-	data, err := os.ReadFile(shellConfig)
-	if err != nil {
-		t.Fatalf("reading shell config: %v", err)
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "alias "+aliasName+"=") {
-			return line
-		}
-	}
-	t.Fatalf("no alias %q in shell config:\n%s", aliasName, data)
-	return ""
-}
-
-// Renaming a playbook must leave its alias usable. The alias is generated text
-// naming the playbook twice -- once as CLAUDE_CONFIG_DIR, once as the `run`
-// argument -- and rewriting only the first produces a line that resolves, runs,
-// and dies with "unknown playbook". Nothing catches that until the alias is
-// actually typed, which is how it survived to a release.
+// Renaming a playbook must leave its launch command usable. The launcher
+// script names the playbook twice -- once as CLAUDE_CONFIG_DIR, once as the
+// `run` argument -- and regenerating only one produces a command that
+// resolves, runs, and dies with "unknown playbook". Nothing catches that
+// until the command is actually typed, which is how the alias-era version of
+// this bug survived to a release.
 //
-// This executes the rewritten alias for real rather than inspecting its text.
-func TestRenamedPlaybookAliasStillLaunches(t *testing.T) {
+// This executes the regenerated launcher for real rather than inspecting it.
+func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 	root := t.TempDir()
 	work := t.TempDir()
 	shellConfig := filepath.Join(work, "shellrc")
@@ -56,9 +41,10 @@ func TestRenamedPlaybookAliasStillLaunches(t *testing.T) {
 		"CLAUDE_PLAYBOOKS_DIR=" + root,
 	}
 
+	launcherDir := filepath.Join(work, "bin")
 	cpb := func(args ...string) string {
 		t.Helper()
-		full := append([]string{"--playbooks-dir", root, "--shell-config", shellConfig}, args...)
+		full := append([]string{"--playbooks-dir", root, "--shell-config", shellConfig, "--launcher-dir", launcherDir}, args...)
 		cmd := exec.Command(binPath, full...)
 		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()
@@ -71,25 +57,23 @@ func TestRenamedPlaybookAliasStillLaunches(t *testing.T) {
 	cpb("create", "before", "--alias", "ab")
 	cpb("rename", "before", "after")
 
-	line := aliasLineFor(t, shellConfig, "ab")
-
-	// The alias body is what a shell would execute when the user types `ab`.
-	body := strings.TrimPrefix(strings.TrimSpace(line), "alias ab=")
-	script := "eval " + body
-
-	cmd := exec.Command("sh", "-c", script)
+	// Executing the launcher is what happens when the user types `ab`.
+	script := filepath.Join(launcherDir, "ab")
+	cmd := exec.Command(script)
 	cmd.Env = baseEnv
 	out, err := cmd.CombinedOutput()
 
 	if strings.Contains(string(out), "unknown playbook") {
-		t.Fatalf("renamed playbook's alias is dead -- it still names the old playbook:\n"+
-			"  alias: %s\n  output: %s", line, out)
+		body, _ := os.ReadFile(script)
+		t.Fatalf("renamed playbook's launcher is dead -- it still names the old playbook:\n"+
+			"  launcher: %s\n  output: %s", body, out)
 	}
 	if err != nil {
-		t.Fatalf("executing the alias failed: %v\n%s\nalias: %s", err, out, line)
+		body, _ := os.ReadFile(script)
+		t.Fatalf("executing the launcher failed: %v\n%s\nlauncher: %s", err, out, body)
 	}
 	if _, statErr := os.Stat(dump); statErr != nil {
-		t.Fatalf("alias ran but never reached claude (no env dump): %v\noutput: %s", statErr, out)
+		t.Fatalf("launcher ran but never reached claude (no env dump): %v\noutput: %s", statErr, out)
 	}
 
 	// It must land in the RENAMED directory, not merely succeed.
@@ -99,6 +83,6 @@ func TestRenamedPlaybookAliasStillLaunches(t *testing.T) {
 	}
 	wantDir := "CLAUDE_CONFIG_DIR=" + filepath.Join(root, "after")
 	if !strings.Contains(string(data), wantDir) {
-		t.Fatalf("alias launched the wrong config dir; wanted %s", wantDir)
+		t.Fatalf("launcher used the wrong config dir; wanted %s", wantDir)
 	}
 }

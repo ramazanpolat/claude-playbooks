@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
@@ -85,6 +86,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if _, err := shell.RemoveByPathPrefix(shellConfig, deletePath); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
+	removeLaunchersFor(deletePath)
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
@@ -106,11 +108,29 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 	if _, err := shell.RemoveByPathPrefix(shellConfig, path); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
+	removeLaunchersFor(path)
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
 	fmt.Printf("Deleted %q.\n", name)
 	return nil
+}
+
+// removeLaunchersFor deletes launcher commands pointing into path.
+// Best-effort: the playbook removal must not fail on launcher-dir trouble.
+func removeLaunchersFor(path string) {
+	dir, err := config.ResolveLauncherDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not clean up launchers: %v\n", err)
+		return
+	}
+	removed, err := launcher.RemoveForPathPrefix(dir, path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not clean up launchers: %v\n", err)
+	}
+	for _, e := range removed {
+		fmt.Printf("Removed command %q (%s)\n", e.CmdName, e.Path)
+	}
 }
 
 func removeAny(path string) error {

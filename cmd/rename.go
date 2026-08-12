@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -113,6 +114,34 @@ func runRename(cmd *cobra.Command, args []string) error {
 			m.Name = newName
 			if err := manifest.Write(newPath, m); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not update manifest name: %v\n", err)
+			}
+		}
+	}
+
+	// Launchers referencing the old path are dead either way; regenerate
+	// them against the new location (preserving custom command names) unless
+	// --no-alias drops them or --alias replaces them with a single new name.
+	if ldir, err := config.ResolveLauncherDir(); err == nil {
+		stale, lerr := launcher.RemoveForPathPrefix(ldir, oldRoot)
+		if lerr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not update launchers: %v\n", lerr)
+		}
+		switch {
+		case renameNoAlias:
+			// dropped
+		case renameAlias != "":
+			if _, werr := launcher.Write(ldir, renameAlias, newName, newConfigPath); werr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", renameAlias, werr)
+			} else {
+				fmt.Printf("Command %q now points at %q\n", renameAlias, newName)
+			}
+		default:
+			for _, e := range stale {
+				if _, werr := launcher.Write(ldir, e.CmdName, newName, newConfigPath); werr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not update launcher %q: %v\n", e.CmdName, werr)
+				} else {
+					fmt.Printf("Command %q now points at %q\n", e.CmdName, newName)
+				}
 			}
 		}
 	}

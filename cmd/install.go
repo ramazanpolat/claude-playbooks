@@ -15,7 +15,6 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 var (
@@ -201,17 +200,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// The playbook is already installed at this point: alias trouble is a
-	// warning with manual instructions, not a failure of the whole command.
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: no alias written: %v\n", err)
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", targetName)
-		fmt.Printf("Set the alias later with:\n  claude-playbook --shell-config <rc-file> alias %s <alias>\n", shell.QuoteArg(targetName))
-		return nil
-	}
-
-	// Write the single alias unless --no-alias.
+	// Pick the command name: --alias, manifest's alias, manifest's name,
+	// then the install directory name.
 	aliasName := installAlias
 	if aliasName == "" {
 		switch {
@@ -224,35 +214,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	existing, _ := shell.ReadAll(shellConfig)
-	taken := map[string]bool{}
-	for _, e := range existing {
-		taken[e.AliasName] = true
-	}
-
-	written, err := writeAlias(shellConfig, aliasName, configDest, taken)
-	if err != nil {
-		return fmt.Errorf("failed to write alias: %w", err)
-	}
-	if written {
-		fmt.Printf("Alias:    %s → %s\n", aliasName, targetName)
-	} else {
-		fmt.Fprintf(os.Stderr, "Warning: alias %q already in use; skipped. Set one manually with 'claude-playbook alias %s <alias>'\n", aliasName, targetName)
-	}
-
-	fmt.Printf("\nReload your shell or run:\n  %s\n", shell.ReloadHint(shellConfig))
+	installLauncher(aliasName, targetName, configDest)
 	return nil
-}
-
-func writeAlias(shellConfig, name, path string, taken map[string]bool) (bool, error) {
-	if taken[name] {
-		return false, nil
-	}
-	if err := shell.Write(shellConfig, name, path); err != nil {
-		return false, err
-	}
-	taken[name] = true
-	return true, nil
 }
 
 func warnIfNoClaudeMD(dir, name string) {

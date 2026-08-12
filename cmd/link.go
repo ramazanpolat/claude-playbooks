@@ -12,7 +12,6 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 var (
@@ -126,15 +125,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		return err
-	}
-	if err := shell.Write(shellConfig, aliasName, configDest); err != nil {
-		return fmt.Errorf("failed to write alias: %w", err)
-	}
-	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  %s\n\nThen run with:\n  %s\n", shell.ReloadHint(shellConfig), aliasName)
+	installLauncher(aliasName, name, configDest)
 	return nil
 }
 

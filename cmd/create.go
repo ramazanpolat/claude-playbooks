@@ -10,7 +10,6 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 var (
@@ -77,22 +76,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		aliasName = name
 	}
 
-	// The playbook already exists at this point: alias trouble is a warning
-	// with manual instructions, not a failure of the whole command.
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: no alias written: %v\n", err)
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
-		fmt.Printf("Set the alias later with:\n  claude-playbook --shell-config <rc-file> alias %s %s\n", shell.QuoteArg(name), shell.QuoteArg(aliasName))
-		return nil
-	}
-
-	if err := shell.Write(shellConfig, aliasName, dest); err != nil {
-		return fmt.Errorf("failed to write alias: %w", err)
-	}
-
-	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  %s\n\nThen run with:\n  %s\n", shell.ReloadHint(shellConfig), aliasName)
+	installLauncher(aliasName, name, dest)
 	return nil
 }
 
