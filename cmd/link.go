@@ -129,6 +129,14 @@ func runLink(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// The target's manifest is SHARED state: the same external directory
+	// may already be linked from other registry roots whose launchers
+	// resolve through its alias. Overwriting a differing alias would
+	// silently break those registrations, so refuse instead.
+	if linkAlias != "" && m != nil && m.Alias != "" && m.Alias != linkAlias {
+		return fmt.Errorf("target manifest already sets alias %q; --alias %q would rewrite the shared manifest and break other registrations of this target. Use the existing alias or edit the target's %s", m.Alias, linkAlias, manifest.FileName)
+	}
+
 	// Record a --alias override in the target's manifest BEFORE the symlink
 	// joins the registry: failing afterwards would leave the playbook
 	// registered with an unresolvable advertised command, and a retry would

@@ -249,7 +249,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 		m.Alias = installAlias
 		if err := manifest.Write(dest, m); err != nil {
-			// Without the manifest entry the alias can never resolve.
+			// Without the manifest entry the alias can never resolve; and
+			// dest already joined the registry, so leaving it would block a
+			// retry under the same name — roll it back like the other
+			// post-copy error paths.
+			os.RemoveAll(dest)
 			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", installAlias, err)
 		}
 	}

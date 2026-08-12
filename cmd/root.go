@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -24,23 +25,24 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	// Multicall dispatch: invoked through a launcher symlink, argv[0] names
-	// a playbook — behave as `run <name>` with all arguments forwarded.
-	if name, ok := multicallPlaybook(); ok {
-		if err := runRun(nil, append([]string{name}, os.Args[1:]...)); err != nil {
-			if code, ok := exitCode(err); ok {
-				os.Exit(code)
+	// Multicall dispatch happens ONLY when invoked through a launcher
+	// symlink: a regular binary installed under a name that happens to
+	// match a playbook must keep the CLI reachable. Within a launcher
+	// invocation, a resolvable name dispatches and an unresolvable one is
+	// stale (its playbook was deleted or renamed away) and fails loudly
+	// rather than falling through to the CLI overview with exit 0.
+	if base := filepath.Base(os.Args[0]); !launcher.ReservedNames[base] && invokedViaLauncher() {
+		if name, ok := multicallPlaybook(); ok {
+			if err := runRun(nil, append([]string{name}, os.Args[1:]...)); err != nil {
+				if code, ok := exitCode(err); ok {
+					os.Exit(code)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
 			}
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return
 		}
-		return
-	}
-	// A launcher whose name no longer resolves is stale (its playbook was
-	// deleted or renamed away). Fail loudly rather than falling through to
-	// the CLI overview with exit 0.
-	if invokedViaLauncher() {
-		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook.\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook.\n", base)
 		os.Exit(1)
 	}
 	if err := rootCmd.Execute(); err != nil {
