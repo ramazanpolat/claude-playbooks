@@ -75,6 +75,13 @@ func runLink(cmd *cobra.Command, args []string) error {
 	if _, err := os.Lstat(dest); err == nil {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", name, dest)
 	}
+	// Preflight command names BEFORE the symlink joins the registry (see
+	// create/install: directory names out-rank aliases in dispatch).
+	if !linkNoAlias {
+		if err := preflightCommandNames("", name, linkAlias); err != nil {
+			return err
+		}
+	}
 
 	// Ensure target has a .playbook, prompting interactively if it doesn't.
 	if !manifest.Exists(abs) {

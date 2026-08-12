@@ -74,29 +74,10 @@ func Write(dir, cmdName string) (string, error) {
 	if !isOurs(path, target) {
 		return "", fmt.Errorf("%w: %s", ErrTaken, path)
 	}
-	// Already resolves to this binary: identical content, nothing to write.
-	// This also makes concurrent creators converge without coordination.
-	if _, err := filepath.EvalSymlinks(path); err == nil {
-		return path, nil
-	}
-	// Dangling launcher (the binary moved since it was created): replace by
-	// renaming a fresh link over it (atomic on POSIX). Tmp names carry an
-	// attempt counter so concurrent replacers never collide.
-	for i := 0; i < 10; i++ {
-		tmp := filepath.Join(dir, fmt.Sprintf(".%s.tmp-%d-%d", cmdName, os.Getpid(), i))
-		if err := os.Symlink(target, tmp); err != nil {
-			if errors.Is(err, os.ErrExist) {
-				continue
-			}
-			return "", err
-		}
-		if err := os.Rename(tmp, path); err != nil {
-			os.Remove(tmp)
-			return "", err
-		}
-		return path, nil
-	}
-	return "", fmt.Errorf("could not refresh launcher %s", path)
+	// The link already resolves to this binary — identical content, nothing
+	// to write. This also makes concurrent creators converge without
+	// coordination.
+	return path, nil
 }
 
 // List returns every launcher symlink in dir pointing at this binary.
@@ -152,20 +133,17 @@ func Remove(dir, cmdName string) (bool, error) {
 	return true, nil
 }
 
-// isOurs reports whether path is a symlink resolving to this binary.
+// isOurs reports whether path is a symlink resolving to this binary. A
+// dangling link is never ours: claiming it by its target's basename would
+// let cleanup delete a user's own `foo -> /old/tool/cpb`, and the binary is
+// always alive while this code runs, so genuine launchers always resolve.
 func isOurs(path, binPath string) bool {
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
 		return false
 	}
 	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		// Dangling link: judge by the literal target's basename so cleanup
-		// still recognizes launchers after the binary moved.
-		t, rerr := os.Readlink(path)
-		return rerr == nil && ReservedNames[filepath.Base(t)]
-	}
-	return resolved == binPath
+	return err == nil && resolved == binPath
 }
 
 func validName(cmdName string) error {

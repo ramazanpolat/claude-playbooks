@@ -53,6 +53,17 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("playbook %q already exists at %s", name, dest)
 	}
 
+	// Preflight command names BEFORE the directory exists: once created it
+	// joins the registry, and dispatch resolves directory names ahead of
+	// aliases, so a clash would silently re-route an existing command.
+	aliasName := createAlias
+	if aliasName == "" {
+		aliasName = name
+	}
+	if err := preflightCommandNames("", name, aliasName); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -70,11 +81,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if createNoAlias {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
 		return nil
-	}
-
-	aliasName := createAlias
-	if aliasName == "" {
-		aliasName = name
 	}
 
 	// A custom command name must be resolvable at invocation time: record

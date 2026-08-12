@@ -115,6 +115,14 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if _, err := os.Lstat(dest); err == nil {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
 	}
+	// Preflight command names BEFORE the directory joins the registry:
+	// dispatch resolves directory names ahead of aliases, so a clash would
+	// silently re-route an existing command.
+	if !installNoAlias {
+		if err := preflightCommandNames("", targetName, installAlias); err != nil {
+			return err
+		}
+	}
 
 	// Read the optional manifest from staging to check if we need to cherry-pick a subdir.
 	copySrc := work

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -70,4 +71,25 @@ func commandNameOwner(cmdName, exceptName string) (*playbook.Playbook, error) {
 		}
 	}
 	return nil, nil
+}
+
+// preflightCommandNames errors when any candidate name already addresses
+// another playbook. Callers run this BEFORE registering a playbook: once the
+// directory exists it joins the registry, and since dispatch resolves
+// directory names ahead of aliases, a clashing registration would silently
+// re-route an existing command.
+func preflightCommandNames(exceptName string, names ...string) error {
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		owner, err := commandNameOwner(n, exceptName)
+		if err != nil {
+			continue
+		}
+		if owner != nil {
+			return fmt.Errorf("command name %q already addresses playbook %q. Pick another name or alias", n, owner.Name)
+		}
+	}
+	return nil
 }

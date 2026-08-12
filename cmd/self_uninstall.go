@@ -68,7 +68,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if les, lerr := launcher.List(ldir); lerr == nil && len(les) > 0 {
+			if les := launchersToRemove(ldir, pbs); len(les) > 0 {
 				fmt.Printf("  Launchers:     %d command(s) in %s\n", len(les), ldir)
 			}
 		}
@@ -98,10 +98,8 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  shell aliases in: %s\n", shellConfig)
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if les, lerr := launcher.List(ldir); lerr == nil {
-				for _, e := range les {
-					fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
-				}
+			for _, e := range launchersToRemove(ldir, pbs) {
+				fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
 			}
 		}
 		return nil
@@ -139,14 +137,14 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 3: remove every launcher symlink pointing at this binary — the
-	// binary is going away, so any such link would dangle.
+	// Step 3: remove launchers. When the binary is going away, every link
+	// to it would dangle — sweep them all. With --keep-binary, launchers
+	// for OTHER playbook roots sharing the directory keep working, so only
+	// the selected registry's command names are removed.
 	if ldir, lerr := config.ResolveLauncherDir(); lerr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not resolve launcher dir: %v\n", lerr)
-	} else if les, lerr := launcher.List(ldir); lerr != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to list launchers: %v\n", lerr)
 	} else {
-		for _, e := range les {
+		for _, e := range launchersToRemove(ldir, pbs) {
 			if rerr := os.Remove(e.Path); rerr != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to remove launcher %s: %v\n", e.Path, rerr)
 			} else {
@@ -226,4 +224,32 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  %s\n", shell.ReloadHint(shellConfig))
 
 	return nil
+}
+
+// launchersToRemove returns the launcher entries self-uninstall will delete
+// — previews and the removal step share this so they always agree. Without
+// --keep-binary every link to the binary is doomed to dangle; with it, only
+// the selected registry's command names are removed.
+func launchersToRemove(ldir string, pbs []*playbook.Playbook) []launcher.Entry {
+	les, err := launcher.List(ldir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to list launchers: %v\n", err)
+		return nil
+	}
+	if !selfUninstallKeepBinary {
+		return les
+	}
+	owned := map[string]bool{}
+	for _, pb := range pbs {
+		for _, n := range launcherNamesFor(pb) {
+			owned[n] = true
+		}
+	}
+	var out []launcher.Entry
+	for _, e := range les {
+		if owned[e.CmdName] {
+			out = append(out, e)
+		}
+	}
+	return out
 }
