@@ -97,6 +97,14 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 		if perr != nil {
 			return perr
 		}
+		// An interactively entered alias becomes the manifest alias and the
+		// launcher name — a reserved or path-like value would leave the
+		// link registered with its advertised command unusable.
+		if prompted.Alias != "" {
+			if verr := launcher.ValidateName(prompted.Alias); verr != nil {
+				return fmt.Errorf("prompted alias rejected: %w", verr)
+			}
+		}
 	}
 
 	// Serialize registration (see lockRegistry), then RE-CHECK the shared

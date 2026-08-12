@@ -61,9 +61,13 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if aliasName == "" {
 		aliasName = name
 	}
-	if createAlias != "" {
-		if err := launcher.ValidateName(createAlias); err != nil {
-			return err
+	// The EFFECTIVE launcher name (explicit --alias or the playbook name
+	// itself) must be writable, or creation would succeed without its
+	// advertised command. --no-alias opts out of a launcher entirely and
+	// skips this.
+	if !createNoAlias {
+		if err := launcher.ValidateName(aliasName); err != nil {
+			return fmt.Errorf("%w (pass --no-alias to create the playbook without a launcher)", err)
 		}
 	}
 	// Serialize preflight-through-registration: without the registry lock,

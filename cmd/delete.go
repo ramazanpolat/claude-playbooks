@@ -148,13 +148,13 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 	return nil
 }
 
-// removeUnclaimedLaunchers deletes the launcher symlinks for the given
-// command names — but only names that no longer resolve in the registry
-// AFTER the deletion: a stateless symlink may be serving another playbook
-// that claims the same name (and, unenumerably, another registry root — the
-// re-resolution keeps every claim we can actually see working). Best-effort:
-// the playbook removal must not fail on launcher-dir trouble, and foreign
-// files are never touched.
+// removeUnclaimedLaunchers retires the launcher symlinks for the given
+// command names after a mutation. A name still resolving in the visible
+// registry keeps its launcher outright. An unclaimed name's launcher is
+// ALSO retained — a stateless symlink may be serving a playbook in another
+// registry root selected via environment or flag, which is unenumerable
+// from here — but with a manual-removal hint: invoking it without such a
+// root fails loudly as stale, so retention is noisy, never silently wrong.
 func removeUnclaimedLaunchers(names []string) {
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none removed.\n")
@@ -162,20 +162,19 @@ func removeUnclaimedLaunchers(names []string) {
 	}
 	dir, err := config.ResolveLauncherDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not clean up launchers: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: could not inspect launchers: %v\n", err)
 		return
 	}
 	for _, n := range names {
+		e, exists, foreign := launcher.Lookup(dir, n)
+		if !exists || foreign {
+			continue
+		}
 		if owner, oerr := commandNameOwner(n, ""); oerr == nil && owner != nil {
 			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, owner.Name)
 			continue
 		}
-		removed, err := launcher.Remove(dir, n)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", n, err)
-		} else if removed {
-			fmt.Printf("Removed command %q\n", n)
-		}
+		fmt.Printf("Kept command %q — launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
 	}
 }
 
