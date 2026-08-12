@@ -203,20 +203,23 @@ func TestWritePreservesShellConfigSymlink(t *testing.T) {
 }
 
 func TestReloadHint(t *testing.T) {
-	if got := ReloadHint("/home/u/.profile"); got != ". '/home/u/.profile'" {
-		t.Errorf("got %q", got)
+	cases := []struct{ shell, file, want string }{
+		{"/bin/zsh", "/home/u/.zshrc", "source '/home/u/.zshrc'"},
+		{"/bin/bash", "/home/u/.bashrc", "source '/home/u/.bashrc'"},
+		{"/usr/bin/fish", "/home/u/.config/fish/config.fish", "source '/home/u/.config/fish/config.fish'"},
+		// POSIX shells have no `source` builtin — the verb follows the
+		// shell, not the filename, so custom --shell-config paths work too.
+		{"/bin/sh", "/home/u/.profile", ". '/home/u/.profile'"},
+		{"/bin/dash", "/tmp/shrc", ". '/tmp/shrc'"},
+		{"/bin/ksh", "/tmp/kshrc", ". '/tmp/kshrc'"},
+		// Paths with whitespace or metacharacters stay one pasteable word.
+		{"/bin/sh", "/tmp/my dir/.profile", ". '/tmp/my dir/.profile'"},
+		{"/bin/bash", "/tmp/o'brien/.bashrc", `source '/tmp/o'\''brien/.bashrc'`},
 	}
-	if got := ReloadHint("/home/u/.bashrc"); got != "source '/home/u/.bashrc'" {
-		t.Errorf("got %q", got)
-	}
-	if got := ReloadHint("/home/u/.zshrc"); got != "source '/home/u/.zshrc'" {
-		t.Errorf("got %q", got)
-	}
-	// Paths with whitespace or metacharacters must stay one pasteable word.
-	if got := ReloadHint("/tmp/my dir/.profile"); got != ". '/tmp/my dir/.profile'" {
-		t.Errorf("got %q", got)
-	}
-	if got := ReloadHint("/tmp/o'brien/.bashrc"); got != `source '/tmp/o'\''brien/.bashrc'` {
-		t.Errorf("got %q", got)
+	for _, c := range cases {
+		t.Setenv("SHELL", c.shell)
+		if got := ReloadHint(c.file); got != c.want {
+			t.Errorf("SHELL=%s file=%s: got %q, want %q", c.shell, c.file, got, c.want)
+		}
 	}
 }

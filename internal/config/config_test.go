@@ -119,13 +119,28 @@ func TestDetectShellConfigFallbackEmptyShell(t *testing.T) {
 	}
 }
 
+func TestDetectShellConfigUnrecognizedNonemptyShellErrors(t *testing.T) {
+	// A shell we can't map (ksh, ...) must error rather than write to
+	// another shell's rc file — even when candidates exist. Callers
+	// downgrade this to a warning with manual instructions.
+	home := t.TempDir()
+	touch(t, filepath.Join(home, ".bashrc"))
+	touch(t, filepath.Join(home, ".profile"))
+	withEnv(t, home, "/usr/bin/ksh")
+
+	if _, err := detectShellConfig(); err == nil {
+		t.Fatal("expected an error for an unrecognized nonempty SHELL")
+	}
+}
+
 func TestDetectShellConfigFallbackPreferenceOrder(t *testing.T) {
-	// A shell we don't recognize falls back to the first existing rc file
-	// in .bashrc, .zshrc, .profile order.
+	// SHELL unset and the user database names a shell we can't map: fall
+	// back to the first existing rc file in .bashrc, .zshrc, .profile order.
 	home := t.TempDir()
 	touch(t, filepath.Join(home, ".zshrc"))
 	touch(t, filepath.Join(home, ".profile"))
-	withEnv(t, home, "/usr/bin/ksh")
+	withEnv(t, home, "")
+	withLoginShell(t, "/usr/sbin/nologin")
 
 	got, err := detectShellConfig()
 	if err != nil {
@@ -138,7 +153,8 @@ func TestDetectShellConfigFallbackPreferenceOrder(t *testing.T) {
 
 func TestDetectShellConfigErrorWhenNothingToFallBackTo(t *testing.T) {
 	home := t.TempDir()
-	withEnv(t, home, "/usr/bin/ksh")
+	withEnv(t, home, "")
+	withLoginShell(t, "")
 
 	if _, err := detectShellConfig(); err == nil {
 		t.Fatal("expected an error with no rc files present")

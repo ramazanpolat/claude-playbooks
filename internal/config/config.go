@@ -82,20 +82,33 @@ func loginShell() string {
 	return ""
 }
 
+// UserShell returns the user's shell: $SHELL when set, otherwise the login
+// shell from the user database. Empty when neither is known.
+func UserShell() string {
+	if s := os.Getenv("SHELL"); s != "" {
+		return s
+	}
+	return loginShellFunc()
+}
+
 func detectShellConfig() (string, error) {
 	home, _ := os.UserHomeDir()
 	shell := os.Getenv("SHELL")
 	if p, ok := rcForShell(shell, home); ok {
 		return p, nil
 	}
-	// SHELL is unset (docker exec, cron) or unrecognized. Ask the user
-	// database for the login shell before guessing: a /bin/sh user with a
-	// .bashrc lying around must still get .profile, which is what their
-	// shell actually reads.
-	if shell == "" {
-		if p, ok := rcForShell(loginShellFunc(), home); ok {
-			return p, nil
-		}
+	if shell != "" {
+		// A shell we don't map (ksh, nologin, ...): writing to another
+		// shell's rc file would report success for an alias that never
+		// loads. Callers downgrade this to a warning with manual
+		// instructions once the playbook itself is in place.
+		return "", fmt.Errorf("unrecognized shell %q. Use --shell-config to specify config file", shell)
+	}
+	// SHELL is unset (docker exec, cron): ask the user database for the
+	// login shell before guessing. A /bin/sh user with a .bashrc lying
+	// around must still get .profile, which is what their shell reads.
+	if p, ok := rcForShell(loginShellFunc(), home); ok {
+		return p, nil
 	}
 	// Last resort: an rc file the user already has.
 	for _, name := range []string{".bashrc", ".zshrc", ".profile"} {
@@ -104,5 +117,5 @@ func detectShellConfig() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("unknown shell %q and no ~/.bashrc, ~/.zshrc, or ~/.profile to fall back to. Use --shell-config to specify config file", shell)
+	return "", fmt.Errorf("cannot determine shell (SHELL is unset) and no ~/.bashrc, ~/.zshrc, or ~/.profile found. Use --shell-config to specify config file")
 }
