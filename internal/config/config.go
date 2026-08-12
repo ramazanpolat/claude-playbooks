@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -60,12 +61,21 @@ func rcForShell(shell, home string) (path string, ok bool) {
 var loginShellFunc = loginShell
 
 // loginShell returns the current user's login shell from the user database,
-// or "" if it cannot be determined. getent covers Linux including NSS
-// sources; the /etc/passwd scan covers minimal images without getent.
+// or "" if it cannot be determined. On Darwin accounts live in Directory
+// Services, so dscl is authoritative there; getent covers Linux including
+// NSS sources; the /etc/passwd scan covers minimal images without getent.
 func loginShell() string {
 	u, err := user.Current()
 	if err != nil {
 		return ""
+	}
+	if runtime.GOOS == "darwin" {
+		// Output: "UserShell: /bin/zsh"
+		if out, err := exec.Command("dscl", ".", "-read", "/Users/"+u.Username, "UserShell").Output(); err == nil {
+			if f := strings.Fields(string(out)); len(f) >= 2 {
+				return f[1]
+			}
+		}
 	}
 	if out, err := exec.Command("getent", "passwd", u.Username).Output(); err == nil {
 		if f := strings.Split(strings.TrimSpace(string(out)), ":"); len(f) >= 7 {
