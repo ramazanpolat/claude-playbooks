@@ -270,11 +270,12 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\n"), 0644); err != nil {
+	// The alias lives in the target's own manifest: a pre-existing shared
+	// manifest is never alias-mutated by link.
+	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\nalias = \"linkedalias\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	linkName = "linked"
-	linkAlias = "linkedalias"
 	if err := runLink(nil, []string{target}); err != nil {
 		t.Fatal(err)
 	}

@@ -34,7 +34,7 @@ func init() {
 	linkCmd.Flags().BoolVar(&linkNoAlias, "no-alias", false, "skip alias creation")
 }
 
-func runLink(cmd *cobra.Command, args []string) error {
+func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	if linkNoAlias && linkAlias != "" {
 		return fmt.Errorf("--no-alias and --alias cannot be used together")
 	}
@@ -94,14 +94,28 @@ func runLink(cmd *cobra.Command, args []string) error {
 	defer unlock()
 
 	// Ensure target has a .playbook, prompting interactively if it doesn't.
+	// A manifest created by THIS invocation is not shared state yet: alias
+	// overrides may apply to it freely, and it must not survive a failed
+	// link as litter.
+	createdManifest := false
 	if !manifest.Exists(abs) {
-		m, err := promptForManifest(abs, name)
+		aliasDefault := name
+		if linkAlias != "" {
+			aliasDefault = linkAlias
+		}
+		m, err := promptForManifest(abs, name, aliasDefault)
 		if err != nil {
 			return err
 		}
 		if err := manifest.Write(abs, m); err != nil {
 			return fmt.Errorf("failed to write .playbook to %s: %w", abs, err)
 		}
+		createdManifest = true
+		defer func() {
+			if retErr != nil {
+				os.Remove(filepath.Join(abs, manifest.FileName))
+			}
+		}()
 		fmt.Printf("Wrote %s\n", filepath.Join(abs, manifest.FileName))
 	}
 	m, err := manifest.Read(abs)
@@ -129,19 +143,20 @@ func runLink(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// The target's manifest is SHARED state: the same external directory
-	// may already be linked from other registry roots whose launchers
-	// resolve through its alias. Overwriting a differing alias would
-	// silently break those registrations, so refuse instead.
-	if linkAlias != "" && m != nil && m.Alias != "" && m.Alias != linkAlias {
-		return fmt.Errorf("target manifest already sets alias %q; --alias %q would rewrite the shared manifest and break other registrations of this target. Use the existing alias or edit the target's %s", m.Alias, linkAlias, manifest.FileName)
+	// A PRE-EXISTING target manifest is SHARED state: the same external
+	// directory may already be linked from other registry roots whose
+	// launchers resolve through it. Any differing alias mutation — changing
+	// one, or adding one where none existed — could break or reroute those
+	// registrations, so refuse unless this invocation created the manifest.
+	if linkAlias != "" && !createdManifest && m != nil && m.Alias != linkAlias {
+		return fmt.Errorf("target's %s is shared state (alias %q); --alias %q would mutate it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Alias, linkAlias, manifest.FileName)
 	}
 
-	// Record a --alias override in the target's manifest BEFORE the symlink
-	// joins the registry: failing afterwards would leave the playbook
-	// registered with an unresolvable advertised command, and a retry would
-	// report the link name as already existing.
-	if linkAlias != "" && (m == nil || m.Alias != linkAlias) {
+	// For a manifest created by this invocation, the --alias flag wins over
+	// whatever was typed at the prompt. Persist BEFORE the symlink joins
+	// the registry: failing afterwards would leave the playbook registered
+	// with an unresolvable advertised command.
+	if linkAlias != "" && createdManifest && (m == nil || m.Alias != linkAlias) {
 		if m == nil {
 			m = &manifest.Manifest{Version: "0.1.0", Name: name}
 		}
@@ -179,7 +194,7 @@ func runLink(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func promptForManifest(targetDir, defaultName string) (*manifest.Manifest, error) {
+func promptForManifest(targetDir, defaultName, defaultAlias string) (*manifest.Manifest, error) {
 	if !isTTY(os.Stdin) {
 		return nil, fmt.Errorf("target has no .playbook and stdin is not a TTY; cannot prompt for metadata. Add a .playbook to the target first")
 	}
@@ -190,7 +205,7 @@ func promptForManifest(targetDir, defaultName string) (*manifest.Manifest, error
 
 	reader := bufio.NewReader(os.Stdin)
 	name := promptDefault(reader, "Playbook name", defaultName)
-	alias := promptDefault(reader, "Alias name", name)
+	alias := promptDefault(reader, "Alias name", defaultAlias)
 	desc := promptDefault(reader, "Description", "")
 
 	return &manifest.Manifest{

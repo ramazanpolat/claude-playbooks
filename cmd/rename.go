@@ -134,14 +134,16 @@ func runRename(cmd *cobra.Command, args []string) error {
 		linkedOld = true
 	}
 	// A linked playbook's manifest is SHARED state — other registry roots
-	// may resolve their launchers through its alias. Changing or clearing
-	// an existing alias there would silently break those registrations.
-	if linkedOld && oldManifestAlias != "" {
-		if renameNoAlias {
+	// may resolve their launchers through it. Clearing an alias, changing
+	// one, or ADDING one where none existed can break or reroute those
+	// registrations (collisions are only preflighted in the selected
+	// root), so every differing alias mutation is refused.
+	if linkedOld {
+		if renameNoAlias && oldManifestAlias != "" {
 			return fmt.Errorf("cannot clear alias %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", oldManifestAlias, manifest.FileName)
 		}
 		if renameAlias != "" && renameAlias != oldManifestAlias {
-			return fmt.Errorf("linked target's manifest already sets alias %q; --alias %q would rewrite shared state. Use the existing alias or edit the target's %s", oldManifestAlias, renameAlias, manifest.FileName)
+			return fmt.Errorf("cannot set alias %q on a linked target's shared %s (current alias %q). Edit the target's manifest directly if you really mean it", renameAlias, manifest.FileName, oldManifestAlias)
 		}
 	}
 	// A manifest alias that merely mirrors the old directory name (link's
