@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,7 +42,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 	}
 	command := func(pb *playbook.Playbook) string {
-		if c, ok := launcherByPath[pb.Path]; ok {
+		// Launchers store absolute config dirs; discovery under a relative
+		// --playbooks-dir leaves pb.Path relative, so normalize first.
+		path := pb.Path
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		if c, ok := launcherByPath[path]; ok {
 			return c
 		}
 		return pb.Alias

@@ -540,3 +540,37 @@ func TestInstallFlattensSubdirFromManifest(t *testing.T) {
 		t.Fatalf("expected subdir field to be removed from manifest, got: %s", string(data))
 	}
 }
+
+func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
+	resetCommandTestState(t)
+	home := t.TempDir()
+	config.PlaybooksDir = filepath.Join(home, "playbooks")
+	config.ShellConfig = filepath.Join(home, ".zshrc")
+	for _, name := range []string{"aaa", "bbb"} {
+		if err := os.MkdirAll(filepath.Join(config.PlaybooksDir, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Launcher "x" belongs to bbb.
+	if _, err := launcher.Write(config.LauncherDir, "x", "bbb", filepath.Join(config.PlaybooksDir, "bbb"), config.PlaybooksDir); err != nil {
+		t.Fatal(err)
+	}
+
+	renameAlias = "x"
+	err := runRename(nil, []string{"aaa", "ccc"})
+	if err == nil {
+		t.Fatal("expected collision error")
+	}
+	// The collision must abort BEFORE any mutation: aaa still present,
+	// ccc absent, launcher x untouched.
+	if _, serr := os.Stat(filepath.Join(config.PlaybooksDir, "aaa")); serr != nil {
+		t.Errorf("aaa was renamed despite the error: %v", serr)
+	}
+	if _, serr := os.Stat(filepath.Join(config.PlaybooksDir, "ccc")); serr == nil {
+		t.Error("ccc exists despite the error")
+	}
+	e, exists, foreign := launcher.Lookup(config.LauncherDir, "x")
+	if !exists || foreign || e.PlaybookName != "bbb" {
+		t.Errorf("launcher x mutated: %#v exists=%v foreign=%v", e, exists, foreign)
+	}
+}
