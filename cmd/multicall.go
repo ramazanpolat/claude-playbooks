@@ -87,7 +87,10 @@ func preflightCommandNames(exceptName string, names ...string) error {
 		}
 		owner, err := commandNameOwner(n, exceptName)
 		if err != nil {
-			continue
+			// Dispatch relies on the same discovery call: registering a
+			// name it cannot verify would advertise a command that cannot
+			// resolve.
+			return fmt.Errorf("cannot verify command name %q: %w", n, err)
 		}
 		if owner != nil {
 			return fmt.Errorf("command name %q already addresses playbook %q. Pick another name or alias", n, owner.Name)

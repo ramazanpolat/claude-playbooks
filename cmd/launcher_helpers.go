@@ -96,15 +96,13 @@ func defaultPlaybooksRoot() string {
 // on operating against the default playbooks root. A symlink carries no
 // root identity, so a launcher can only ever mean "this name in the default
 // registry": a --playbooks-dir flag exists just for the current process,
-// and an environment override cannot be distinguished from the documented
-// one-shot `CLAUDE_PLAYBOOKS_DIR=/tmp/pb claude-playbook create demo` —
-// writing or removing links for either would corrupt the default registry's
-// commands. (Dispatch still honors an exported environment root at
-// invocation time; such setups manage their links manually.)
+// and an environment override naming a NON-default root cannot be
+// distinguished from the documented one-shot assignment — mutating links
+// for either would corrupt the default registry's commands. How the default
+// root was expressed does not matter: an exported
+// CLAUDE_PLAYBOOKS_DIR=$HOME/.claude-playbooks resolves to the same
+// registry dispatch will see and is allowed.
 func launcherOpsAllowed() bool {
-	if os.Getenv("CLAUDE_PLAYBOOKS_DIR") != "" {
-		return false
-	}
 	return samePath(config.ResolvePlaybooksDir(), defaultPlaybooksRoot())
 }
 

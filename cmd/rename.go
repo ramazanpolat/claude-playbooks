@@ -82,18 +82,61 @@ func runRename(cmd *cobra.Command, args []string) error {
 
 	// Preflight command-name collisions BEFORE any mutation (the directory
 	// rename and the alias rewrites): failing afterwards would leave A
-	// renamed to C with stale launcher state. Ownership is a registry
-	// question — does another playbook already answer to this name?
+	// renamed to C with stale launcher state. Registry ownership applies to
+	// every name that will address this playbook; the foreign-file check
+	// applies only to the launcher name that will actually be written.
 	for _, cand := range []string{renameAlias, newName} {
 		if cand == "" {
 			continue
 		}
-		if owner, oerr := commandNameOwner(cand, oldName); oerr == nil && owner != nil {
+		if owner, oerr := commandNameOwner(cand, oldName); oerr != nil {
+			return fmt.Errorf("cannot verify command name %q: %w", cand, oerr)
+		} else if owner != nil {
 			return fmt.Errorf("command name %q already addresses playbook %q", cand, owner.Name)
 		}
+	}
+	if !renameNoAlias && launcherOpsAllowed() {
+		writeName := renameAlias
+		if writeName == "" {
+			writeName = newName
+		}
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if _, _, foreign := launcher.Lookup(ldir, cand); foreign {
-				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", cand)
+			if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
+				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", writeName)
+			}
+		}
+	}
+
+	// Persist a requested alias change BEFORE the directory rename and the
+	// shell-alias rewrites: failing afterwards would leave the playbook
+	// renamed with shell state changed, and a retry against the old name
+	// reporting an unknown playbook. The manifest sits at the pre-rename
+	// location (through the symlink for linked playbooks).
+	if renameAlias != "" || renameNoAlias {
+		oldManifestDir := oldRoot
+		if info, lerr := os.Lstat(oldRoot); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			if resolved, rerr := filepath.EvalSymlinks(oldRoot); rerr == nil {
+				oldManifestDir = resolved
+			}
+		}
+		m, merr := manifest.Read(oldManifestDir)
+		if merr != nil {
+			return fmt.Errorf("cannot update alias: reading manifest failed: %w", merr)
+		}
+		if m == nil {
+			m = &manifest.Manifest{Version: "0.1.0"}
+		}
+		switch {
+		case renameNoAlias && m.Alias != "":
+			m.Alias = ""
+		case renameAlias != "" && m.Alias != renameAlias:
+			m.Alias = renameAlias
+		default:
+			m = nil // nothing to persist
+		}
+		if m != nil {
+			if werr := manifest.Write(oldManifestDir, m); werr != nil {
+				return fmt.Errorf("cannot persist alias change (nothing renamed): %w", werr)
 			}
 		}
 	}
@@ -127,53 +170,17 @@ func runRename(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Keep the manifest in sync: the name follows the directory (local
-	// playbooks only — a linked playbook's name belongs to the external
-	// tree), while alias changes always persist, resolving through the
-	// symlink for linked playbooks, because multicall dispatch reads the
-	// alias from the manifest at invocation time.
-	manifestDir := newPath
-	linked := false
-	if info, err := os.Lstat(newPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		linked = true
-		if resolved, rerr := filepath.EvalSymlinks(newPath); rerr == nil {
-			manifestDir = resolved
-		}
-	}
-	if m, err := manifest.Read(manifestDir); err != nil {
-		// An unreadable manifest blocks alias changes: dispatch resolves
-		// aliases from it, so proceeding would desynchronize launchers.
-		if renameAlias != "" || renameNoAlias {
-			return fmt.Errorf("cannot update alias: reading manifest failed: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Warning: could not read manifest to update it: %v\n", err)
-	} else {
-		if m == nil {
-			m = &manifest.Manifest{Version: "0.1.0"}
-		}
-		changed := false
-		if !linked && m.Name != newName {
+	// Alias changes were persisted before the rename; here only the name is
+	// kept in sync with the directory, for local playbooks (a linked
+	// playbook's name belongs to the external tree). Failures are warnings:
+	// dispatch resolves by directory name, not the manifest name.
+	if info, err := os.Lstat(newPath); err == nil && info.Mode()&os.ModeSymlink == 0 {
+		if m, err := manifest.Read(newPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not read manifest to update its name: %v\n", err)
+		} else if m != nil && m.Name != newName {
 			m.Name = newName
-			changed = true
-		}
-		switch {
-		case renameNoAlias && m.Alias != "":
-			m.Alias = ""
-			changed = true
-		case renameAlias != "" && m.Alias != renameAlias:
-			m.Alias = renameAlias
-			changed = true
-		}
-		if changed {
-			if err := manifest.Write(manifestDir, m); err != nil {
-				// Alias changes MUST persist before launcher state moves:
-				// a launcher named by an alias the manifest never recorded
-				// can never resolve, and --no-alias would remove commands
-				// while the old alias stays registered.
-				if renameAlias != "" || renameNoAlias {
-					return fmt.Errorf("cannot persist alias change (launchers left untouched): %w", err)
-				}
-				fmt.Fprintf(os.Stderr, "Warning: could not update manifest: %v\n", err)
+			if err := manifest.Write(newPath, m); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not update manifest name: %v\n", err)
 			}
 		}
 	}
