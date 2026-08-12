@@ -9,7 +9,7 @@ import (
 
 func TestWriteAndParse(t *testing.T) {
 	dir := t.TempDir()
-	path, err := Write(dir, "demo", "demo", "/home/u/.claude-playbooks/demo")
+	path, err := Write(dir, "demo", "demo", "/home/u/.claude-playbooks/demo", "/pb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,17 +45,17 @@ func TestWriteRefusesForeignFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "taken"), []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "taken", "pb", "/x"); err == nil {
+	if _, err := Write(dir, "taken", "pb", "/x", "/pb"); err == nil {
 		t.Fatal("expected ErrTaken")
 	}
 }
 
 func TestWriteOverwritesOwnLauncher(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Write(dir, "demo", "demo", "/old"); err != nil {
+	if _, err := Write(dir, "demo", "demo", "/old", "/pb"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "demo", "demo", "/new"); err != nil {
+	if _, err := Write(dir, "demo", "demo", "/new", "/pb"); err != nil {
 		t.Fatal(err)
 	}
 	entries, _ := List(dir)
@@ -66,13 +66,13 @@ func TestWriteOverwritesOwnLauncher(t *testing.T) {
 
 func TestRemoveForPathPrefix(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Write(dir, "a", "a", "/pb/a"); err != nil {
+	if _, err := Write(dir, "a", "a", "/pb/a", "/pb"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "a-sub", "a", "/pb/a/config"); err != nil {
+	if _, err := Write(dir, "a-sub", "a", "/pb/a/config", "/pb"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "b", "b", "/pb/b"); err != nil {
+	if _, err := Write(dir, "b", "b", "/pb/b", "/pb"); err != nil {
 		t.Fatal(err)
 	}
 	// Foreign files are untouched.
@@ -96,7 +96,7 @@ func TestRemoveForPathPrefix(t *testing.T) {
 	}
 	// Prefix must match path components, not string prefixes: /pb/a must
 	// not remove /pb/ab.
-	if _, err := Write(dir, "ab", "ab", "/pb/ab"); err != nil {
+	if _, err := Write(dir, "ab", "ab", "/pb/ab", "/pb"); err != nil {
 		t.Fatal(err)
 	}
 	if removed, _ := RemoveForPathPrefix(dir, "/pb/a"); len(removed) != 0 {
@@ -107,7 +107,7 @@ func TestRemoveForPathPrefix(t *testing.T) {
 func TestQuoteInScript(t *testing.T) {
 	dir := t.TempDir()
 	cfg := "/tmp/o'brien/pb"
-	path, err := Write(dir, "q", "o'brien pb", cfg)
+	path, err := Write(dir, "q", "o'brien pb", cfg, "/pb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestQuoteInScript(t *testing.T) {
 func TestWriteRejectsBadNames(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"", ".", "..", "a/b"} {
-		if _, err := Write(dir, name, "pb", "/x"); err == nil {
+		if _, err := Write(dir, name, "pb", "/x", "/pb"); err == nil {
 			t.Errorf("name %q accepted", name)
 		}
 	}

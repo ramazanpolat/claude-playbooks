@@ -130,14 +130,14 @@ func runRename(cmd *cobra.Command, args []string) error {
 		case renameNoAlias:
 			// dropped
 		case renameAlias != "":
-			if _, werr := launcher.Write(ldir, renameAlias, newName, newConfigPath); werr != nil {
+			if _, werr := launcher.Write(ldir, renameAlias, newName, newConfigPath, playbooksDir); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", renameAlias, werr)
 			} else {
 				fmt.Printf("Command %q now points at %q\n", renameAlias, newName)
 			}
 		default:
 			for _, e := range stale {
-				if _, werr := launcher.Write(ldir, e.CmdName, newName, newConfigPath); werr != nil {
+				if _, werr := launcher.Write(ldir, e.CmdName, newName, newConfigPath, playbooksDir); werr != nil {
 					fmt.Fprintf(os.Stderr, "Warning: could not update launcher %q: %v\n", e.CmdName, werr)
 				} else {
 					fmt.Printf("Command %q now points at %q\n", e.CmdName, newName)

@@ -41,18 +41,22 @@ func BinPath() (string, error) {
 	return filepath.Abs(exe)
 }
 
-// Script renders the launcher script content.
-func Script(playbookName, configDir, binPath string) string {
+// Script renders the launcher script content. The effective playbooks root
+// is embedded as --playbooks-dir: `run` resolves the playbook by name inside
+// that root, and a launcher created under a --playbooks-dir override would
+// otherwise search the default root and die with "unknown playbook".
+func Script(playbookName, configDir, playbooksDir, binPath string) string {
 	return "#!/bin/sh\n" +
 		markerPrefix + playbookName + "\n" +
 		configPrefix + configDir + "\n" +
-		"CLAUDE_CONFIG_DIR=" + quote(configDir) + " exec " + quote(binPath) + " run " + quote(playbookName) + " \"$@\"\n"
+		"CLAUDE_CONFIG_DIR=" + quote(configDir) + " exec " + quote(binPath) +
+		" --playbooks-dir " + quote(playbooksDir) + " run " + quote(playbookName) + " \"$@\"\n"
 }
 
 // Write installs (or refreshes) the launcher for a playbook as dir/cmdName.
 // An existing file is only overwritten when it carries this package's marker;
 // anything else returns ErrTaken.
-func Write(dir, cmdName, playbookName, configDir string) (string, error) {
+func Write(dir, cmdName, playbookName, configDir, playbooksDir string) (string, error) {
 	if strings.ContainsAny(cmdName, "/\x00") || cmdName == "" || cmdName == "." || cmdName == ".." {
 		return "", fmt.Errorf("invalid command name %q", cmdName)
 	}
@@ -67,7 +71,7 @@ func Write(dir, cmdName, playbookName, configDir string) (string, error) {
 	if _, err := os.Lstat(path); err == nil && !isOurs(path) {
 		return "", fmt.Errorf("%w: %s", ErrTaken, path)
 	}
-	if err := os.WriteFile(path, []byte(Script(playbookName, configDir, binPath)), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte(Script(playbookName, configDir, playbooksDir, binPath)), 0o755); err != nil {
 		return "", err
 	}
 	// WriteFile does not chmod an existing file.

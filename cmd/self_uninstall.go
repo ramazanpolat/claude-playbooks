@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
@@ -66,6 +67,11 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Binary:        %s\n", execPath)
 		}
 		fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if les, lerr := launcher.List(ldir); lerr == nil && len(les) > 0 {
+				fmt.Printf("  Launchers:     %d command(s) in %s\n", len(les), ldir)
+			}
+		}
 		fmt.Println()
 		if !confirm("Permanently uninstall claude-playbook? [y/N] ") {
 			fmt.Println("Cancelled.")
@@ -91,6 +97,13 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  binary: %s\n", execPath)
 		}
 		fmt.Printf("  shell aliases in: %s\n", shellConfig)
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if les, lerr := launcher.List(ldir); lerr == nil {
+				for _, e := range les {
+					fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
+				}
+			}
+		}
 		return nil
 	}
 
@@ -126,7 +139,18 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 3: sweep any leftover CLAUDE_CONFIG_DIR aliases pointing into the playbooks dir.
+	// Step 3: remove launcher commands pointing into the playbooks dir.
+	if ldir, lerr := config.ResolveLauncherDir(); lerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not resolve launcher dir: %v\n", lerr)
+	} else if les, lerr := launcher.RemoveForPathPrefix(ldir, playbooksDir); lerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to remove launchers: %v\n", lerr)
+	} else {
+		for _, e := range les {
+			removed = append(removed, fmt.Sprintf("launcher %q (%s)", e.CmdName, e.Path))
+		}
+	}
+
+	// Step 4: sweep any leftover CLAUDE_CONFIG_DIR aliases pointing into the playbooks dir.
 	if n, err := shell.RemoveByPathPrefix(shellConfig, playbooksDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sweep leftover aliases: %v\n", err)
 	} else if n > 0 {
