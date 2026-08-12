@@ -32,6 +32,10 @@ func Execute() {
 	// stale (its playbook was deleted or renamed away) and fails loudly
 	// rather than falling through to the CLI overview with exit 0.
 	if base := filepath.Base(os.Args[0]); !launcher.ReservedNames[base] && invokedViaLauncher() {
+		// Registry overrides passed to the launcher must apply BEFORE name
+		// resolution, or the name resolves against the default registry and
+		// can pick a same-named playbook from the wrong root.
+		applyRegistryOverrides(os.Args[1:])
 		name, ok, derr := multicallPlaybook()
 		if derr != nil {
 			// The registry itself is unreadable — very different from this

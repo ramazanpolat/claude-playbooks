@@ -42,15 +42,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Hold the registry lock from discovery through removal: overlapping a
-	// locked rename could otherwise delete the renamed playbook's retained
-	// launchers based on a stale snapshot (see lockRegistry).
-	unlock, err := lockRegistry()
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
+	// Discovery and confirmation run on an UNLOCKED snapshot: the prompt
+	// waits on human input, and holding the machine-user-global registry
+	// lock there would block every concurrent command indefinitely.
 	pb, err := playbook.Find(playbooksDir, shellConfig, name)
 	if err != nil {
 		return err
@@ -88,17 +82,33 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Now lock and REVALIDATE: a concurrent rename may have moved the
+	// playbook while the prompt was open (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	pb, err = playbook.Find(playbooksDir, shellConfig, name)
+	if err != nil {
+		return err
+	}
+	if pb == nil {
+		return fmt.Errorf("%q disappeared while waiting for confirmation (deleted or renamed concurrently); nothing removed", name)
+	}
+
 	deletePath := pb.RootPath
 	if deletePath == "" {
 		deletePath = pb.Path
 	}
+	names := launcherNamesFor(pb)
 	if _, err := shell.RemoveByPathPrefix(shellConfig, deletePath); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
-	removeLaunchersNamed(launcherNamesFor(pb))
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
+	removeUnclaimedLaunchers(names)
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
 	return nil
 }
@@ -114,21 +124,38 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 			return nil
 		}
 	}
+	// Lock only after the prompt (see runDelete), then re-verify the
+	// directory is still present and still not a discoverable playbook.
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return fmt.Errorf("%q disappeared while waiting for confirmation; nothing removed", name)
+	}
+	if pb, _ := playbook.Find(playbooksDir, shellConfig, name); pb != nil {
+		return fmt.Errorf("%q became a discoverable playbook while waiting for confirmation; re-run delete", name)
+	}
 	if _, err := shell.RemoveByPathPrefix(shellConfig, path); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
-	removeLaunchersNamed([]string{name})
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
+	removeUnclaimedLaunchers([]string{name})
 	fmt.Printf("Deleted %q.\n", name)
 	return nil
 }
 
-// removeLaunchersNamed deletes the launcher symlinks for the given command
-// names. Best-effort: the playbook removal must not fail on launcher-dir
-// trouble, and foreign files are never touched.
-func removeLaunchersNamed(names []string) {
+// removeUnclaimedLaunchers deletes the launcher symlinks for the given
+// command names — but only names that no longer resolve in the registry
+// AFTER the deletion: a stateless symlink may be serving another playbook
+// that claims the same name (and, unenumerably, another registry root — the
+// re-resolution keeps every claim we can actually see working). Best-effort:
+// the playbook removal must not fail on launcher-dir trouble, and foreign
+// files are never touched.
+func removeUnclaimedLaunchers(names []string) {
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none removed.\n")
 		return
@@ -139,6 +166,10 @@ func removeLaunchersNamed(names []string) {
 		return
 	}
 	for _, n := range names {
+		if owner, oerr := commandNameOwner(n, ""); oerr == nil && owner != nil {
+			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, owner.Name)
+			continue
+		}
 		removed, err := launcher.Remove(dir, n)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", n, err)

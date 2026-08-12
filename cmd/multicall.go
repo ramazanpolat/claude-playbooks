@@ -164,3 +164,23 @@ func lockRegistry() (unlock func(), err error) {
 		f.Close()
 	}, nil
 }
+
+// applyRegistryOverrides pre-scans forwarded arguments for the registry
+// flags `run` supports and applies them to the process config, so multicall
+// resolution and the subsequent run agree on the registry.
+func applyRegistryOverrides(args []string) {
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--playbooks-dir" && i+1 < len(args):
+			config.PlaybooksDir = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--playbooks-dir="):
+			config.PlaybooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
+		case args[i] == "--shell-config" && i+1 < len(args):
+			config.ShellConfig = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--shell-config="):
+			config.ShellConfig = strings.TrimPrefix(args[i], "--shell-config=")
+		}
+	}
+}
