@@ -56,6 +56,16 @@ func runRename(cmd *cobra.Command, args []string) error {
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
+	// Lock BEFORE discovery: rename has no interactive prompt, so the lock
+	// spans discovery through mutation cheaply — everything derived from pb
+	// (paths, manifest alias) stays fresh against concurrent delete/create
+	// cycles of the same name (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	pb, err := playbook.Require(playbooksDir, shellConfig, oldName)
 	if err != nil {
 		return err
@@ -79,14 +89,6 @@ func runRename(cmd *cobra.Command, args []string) error {
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("%q already exists at %s", newName, newPath)
 	}
-
-	// Serialize preflight-through-registration across concurrent commands
-	// (see lockRegistry).
-	unlock, err := lockRegistry()
-	if err != nil {
-		return err
-	}
-	defer unlock()
 
 	// Preflight command-name collisions BEFORE any mutation (the directory
 	// rename and the alias rewrites): failing afterwards would leave A
