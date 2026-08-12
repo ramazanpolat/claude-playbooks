@@ -211,6 +211,8 @@ func TestReloadHint(t *testing.T) {
 		// shell, not the filename, so custom --shell-config paths work too.
 		{"/bin/sh", "/home/u/.profile", ". '/home/u/.profile'"},
 		{"/bin/dash", "/tmp/shrc", ". '/tmp/shrc'"},
+		// POSIX `.` PATH-searches slash-less names; bare relatives get ./
+		{"/bin/dash", "myrc", ". './myrc'"},
 		{"/bin/ksh", "/tmp/kshrc", ". '/tmp/kshrc'"},
 		// Paths with whitespace or metacharacters stay one pasteable word.
 		{"/bin/sh", "/tmp/my dir/.profile", ". '/tmp/my dir/.profile'"},

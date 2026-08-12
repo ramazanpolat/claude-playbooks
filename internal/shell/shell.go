@@ -50,6 +50,11 @@ func ReloadHint(configFile string) string {
 	if strings.Contains(sh, "bash") || strings.Contains(sh, "zsh") || strings.Contains(sh, "fish") {
 		return "source " + shellQuote(configFile)
 	}
+	// The POSIX `.` searches PATH — not the cwd — for names without a
+	// slash, so a bare relative path must carry a ./ prefix to run.
+	if !strings.Contains(configFile, "/") {
+		configFile = "./" + configFile
+	}
 	return ". " + shellQuote(configFile)
 }
 
