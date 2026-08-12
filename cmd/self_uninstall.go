@@ -228,28 +228,20 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 
 // launchersToRemove returns the launcher entries self-uninstall will delete
 // — previews and the removal step share this so they always agree. Without
-// --keep-binary every link to the binary is doomed to dangle; with it, only
-// the selected registry's command names are removed.
+// --keep-binary every link to the binary is doomed to dangle, so all are
+// swept. With --keep-binary none are touched: a symlink carries no root
+// identity, so a same-named command may be serving another registry
+// (selected via environment) — removed default-root playbooks then fail
+// loudly as "unknown playbook" when invoked, which is cleanable, unlike a
+// silently deleted shared command.
 func launchersToRemove(ldir string, pbs []*playbook.Playbook) []launcher.Entry {
+	if selfUninstallKeepBinary {
+		return nil
+	}
 	les, err := launcher.List(ldir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to list launchers: %v\n", err)
 		return nil
 	}
-	if !selfUninstallKeepBinary {
-		return les
-	}
-	owned := map[string]bool{}
-	for _, pb := range pbs {
-		for _, n := range launcherNamesFor(pb) {
-			owned[n] = true
-		}
-	}
-	var out []launcher.Entry
-	for _, e := range les {
-		if owned[e.CmdName] {
-			out = append(out, e)
-		}
-	}
-	return out
+	return les
 }

@@ -120,6 +120,10 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 // names. Best-effort: the playbook removal must not fail on launcher-dir
 // trouble, and foreign files are never touched.
 func removeLaunchersNamed(names []string) {
+	if !launcherOpsAllowed() {
+		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none removed.\n")
+		return
+	}
 	dir, err := config.ResolveLauncherDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not clean up launchers: %v\n", err)

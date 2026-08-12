@@ -93,7 +93,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if aliasName != name {
 		m := &manifest.Manifest{Version: "0.1.0", Name: name, Alias: aliasName}
 		if err := manifest.Write(dest, m); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not record alias in manifest: %v\n", err)
+			// Without the manifest entry the alias can never resolve.
+			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", aliasName, err)
 		}
 	}
 

@@ -234,7 +234,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 		m.Alias = installAlias
 		if err := manifest.Write(dest, m); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not record alias in manifest: %v\n", err)
+			// Without the manifest entry the alias can never resolve.
+			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", installAlias, err)
 		}
 	}
 

@@ -144,7 +144,9 @@ func runLink(cmd *cobra.Command, args []string) error {
 		}
 		m.Alias = linkAlias
 		if err := manifest.Write(abs, m); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not record alias in manifest: %v\n", err)
+			// Without the manifest entry the alias can never resolve — a
+			// launcher by that name would fall through to the normal CLI.
+			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", linkAlias, abs, err)
 		}
 	}
 

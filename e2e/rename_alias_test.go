@@ -19,8 +19,10 @@ import (
 //
 // This executes the regenerated launcher for real rather than inspecting it.
 func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
-	root := t.TempDir()
 	work := t.TempDir()
+	// Launcher mutations only apply to the default playbooks root; HOME is
+	// the sandbox, so the default root lives inside it.
+	root := filepath.Join(work, ".claude-playbooks")
 	shellConfig := filepath.Join(work, "shellrc")
 	if err := os.WriteFile(shellConfig, []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -38,13 +40,12 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 		"HOME=" + work,
 		dumpEnv + "=" + dump,
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
-		"CLAUDE_PLAYBOOKS_DIR=" + root,
 	}
 
 	launcherDir := filepath.Join(work, "bin")
 	cpb := func(args ...string) string {
 		t.Helper()
-		full := append([]string{"--playbooks-dir", root, "--shell-config", shellConfig, "--launcher-dir", launcherDir}, args...)
+		full := append([]string{"--shell-config", shellConfig, "--launcher-dir", launcherDir}, args...)
 		cmd := exec.Command(binPath, full...)
 		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()

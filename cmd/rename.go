@@ -171,7 +171,10 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// goes stale (that name no longer resolves), so retire it and register
 	// the new name; --alias sets a fresh manifest alias, --no-alias drops
 	// launcher registration.
-	if ldir, err := config.ResolveLauncherDir(); err == nil {
+	if ldir, err := config.ResolveLauncherDir(); err == nil && !launcherOpsAllowed() {
+		_ = ldir
+		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none changed.\n")
+	} else if err == nil {
 		if removed, rerr := launcher.Remove(ldir, oldName); rerr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", oldName, rerr)
 		} else if removed {
