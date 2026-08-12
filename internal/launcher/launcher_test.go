@@ -50,17 +50,74 @@ func TestWriteRefusesForeignFile(t *testing.T) {
 	}
 }
 
-func TestWriteOverwritesOwnLauncher(t *testing.T) {
+func TestWriteRefreshesOwnPlaybookOnly(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Write(dir, "demo", "demo", "/old", "/pb"); err != nil {
+	if _, err := Write(dir, "demo", "demo", "/pb/demo", "/pb"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "demo", "demo", "/new", "/pb"); err != nil {
+	// Same playbook: refresh in place.
+	if _, err := Write(dir, "demo", "demo", "/pb/demo", "/pb"); err != nil {
 		t.Fatal(err)
+	}
+	// Another playbook wanting the same command must not silently repoint
+	// it at a different isolated configuration.
+	if _, err := Write(dir, "demo", "other", "/pb/other", "/pb"); err == nil {
+		t.Fatal("expected ErrTaken for a launcher owned by another playbook")
 	}
 	entries, _ := List(dir)
-	if len(entries) != 1 || entries[0].ConfigDir != "/new" {
+	if len(entries) != 1 || entries[0].ConfigDir != "/pb/demo" {
 		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestWriteAbsolutizesRelativePaths(t *testing.T) {
+	dir := t.TempDir()
+	work := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+	// filepath.Abs resolves against Getwd, which may differ from the
+	// TempDir string on symlinked temp roots (macOS /var -> /private/var).
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := Write(dir, "rel", "rel", "./pb/rel", "./pb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "'./pb") {
+		t.Errorf("relative path embedded verbatim:\n%s", data)
+	}
+	if !strings.Contains(string(data), "--playbooks-dir '"+filepath.Join(wd, "pb")+"'") {
+		t.Errorf("script body:\n%s", data)
+	}
+	entries, _ := List(dir)
+	if len(entries) != 1 || entries[0].ConfigDir != filepath.Join(wd, "pb", "rel") {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestListForPathPrefix(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Write(dir, "in", "in", "/rootA/in", "/rootA"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(dir, "out", "out", "/rootB/out", "/rootB"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ListForPathPrefix(dir, "/rootA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].CmdName != "in" {
+		t.Fatalf("got = %#v", got)
 	}
 }
 

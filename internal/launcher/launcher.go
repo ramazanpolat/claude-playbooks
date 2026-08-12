@@ -60,6 +60,15 @@ func Write(dir, cmdName, playbookName, configDir, playbooksDir string) (string, 
 	if strings.ContainsAny(cmdName, "/\x00") || cmdName == "" || cmdName == "." || cmdName == ".." {
 		return "", fmt.Errorf("invalid command name %q", cmdName)
 	}
+	// A relative --playbooks-dir (./pb) baked in verbatim would resolve
+	// against whatever directory the launcher is later run from.
+	var err error
+	if configDir, err = filepath.Abs(configDir); err != nil {
+		return "", err
+	}
+	if playbooksDir, err = filepath.Abs(playbooksDir); err != nil {
+		return "", err
+	}
 	binPath, err := BinPath()
 	if err != nil {
 		return "", err
@@ -68,8 +77,17 @@ func Write(dir, cmdName, playbookName, configDir, playbooksDir string) (string, 
 		return "", err
 	}
 	path := filepath.Join(dir, cmdName)
-	if _, err := os.Lstat(path); err == nil && !isOurs(path) {
-		return "", fmt.Errorf("%w: %s", ErrTaken, path)
+	if _, err := os.Lstat(path); err == nil {
+		// Refresh only a launcher that already belongs to this playbook.
+		// Overwriting another playbook's launcher would silently repoint a
+		// familiar command at a different isolated configuration.
+		e, ok := parse(path)
+		if !ok {
+			return "", fmt.Errorf("%w: %s", ErrTaken, path)
+		}
+		if e.ConfigDir != configDir {
+			return "", fmt.Errorf("%w: %s belongs to playbook %q (%s)", ErrTaken, path, e.PlaybookName, e.ConfigDir)
+		}
 	}
 	if err := os.WriteFile(path, []byte(Script(playbookName, configDir, playbooksDir, binPath)), 0o755); err != nil {
 		return "", err
@@ -103,23 +121,42 @@ func List(dir string) ([]Entry, error) {
 	return out, nil
 }
 
+// ListForPathPrefix returns every launcher in dir whose config dir is path
+// or lives under it — the same predicate RemoveForPathPrefix deletes by, so
+// previews and removals always agree.
+func ListForPathPrefix(dir, path string) ([]Entry, error) {
+	entries, err := List(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []Entry
+	for _, e := range entries {
+		if underPath(e.ConfigDir, path) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 // RemoveForPathPrefix deletes every launcher in dir whose config dir is path
 // or lives under it. It returns the removed entries.
 func RemoveForPathPrefix(dir, path string) ([]Entry, error) {
-	entries, err := List(dir)
+	entries, err := ListForPathPrefix(dir, path)
 	if err != nil {
 		return nil, err
 	}
 	var removed []Entry
 	for _, e := range entries {
-		if e.ConfigDir == path || strings.HasPrefix(e.ConfigDir, path+string(filepath.Separator)) {
-			if err := os.Remove(e.Path); err != nil {
-				return removed, err
-			}
-			removed = append(removed, e)
+		if err := os.Remove(e.Path); err != nil {
+			return removed, err
 		}
+		removed = append(removed, e)
 	}
 	return removed, nil
+}
+
+func underPath(configDir, path string) bool {
+	return configDir == path || strings.HasPrefix(configDir, path+string(filepath.Separator))
 }
 
 func isOurs(path string) bool {

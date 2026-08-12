@@ -68,7 +68,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if les, lerr := launcher.List(ldir); lerr == nil && len(les) > 0 {
+			if les, lerr := launcher.ListForPathPrefix(ldir, playbooksDir); lerr == nil && len(les) > 0 {
 				fmt.Printf("  Launchers:     %d command(s) in %s\n", len(les), ldir)
 			}
 		}
@@ -98,7 +98,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  shell aliases in: %s\n", shellConfig)
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-			if les, lerr := launcher.List(ldir); lerr == nil {
+			if les, lerr := launcher.ListForPathPrefix(ldir, playbooksDir); lerr == nil {
 				for _, e := range les {
 					fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
 				}
