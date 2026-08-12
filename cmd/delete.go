@@ -42,6 +42,15 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Hold the registry lock from discovery through removal: overlapping a
+	// locked rename could otherwise delete the renamed playbook's retained
+	// launchers based on a stale snapshot (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	pb, err := playbook.Find(playbooksDir, shellConfig, name)
 	if err != nil {
 		return err

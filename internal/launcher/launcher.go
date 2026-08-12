@@ -12,7 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // ErrTaken is returned by Write when the target name exists in the launcher
@@ -33,9 +35,8 @@ type Entry struct {
 	Target  string // what the link points to
 }
 
-// BinPath returns the resolved absolute path of the running binary — the
-// symlink target embedded in launchers. Symlinks in argv[0] are resolved so
-// a launcher always points at the real binary, not at another launcher.
+// BinPath returns the fully resolved absolute path of the running binary,
+// used for OWNERSHIP checks: a launcher is ours when it resolves here.
 func BinPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -47,6 +48,28 @@ func BinPath() (string, error) {
 	return filepath.Abs(exe)
 }
 
+// TargetPath returns the path launchers point AT: the command as invoked
+// (argv[0], or its PATH entry), with the final symlink deliberately NOT
+// resolved. Package managers repoint that stable entry on upgrade — a
+// launcher targeting the resolved versioned binary would keep running the
+// old version or dangle after cleanup, and the new binary would disown it.
+func TargetPath() (string, error) {
+	argv0 := os.Args[0]
+	var p string
+	if strings.ContainsRune(argv0, os.PathSeparator) {
+		p = argv0
+	} else if lp, err := exec.LookPath(argv0); err == nil {
+		p = lp
+	} else {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", err
+		}
+		p = exe
+	}
+	return filepath.Abs(p)
+}
+
 // Write installs (or refreshes) the launcher symlink dir/cmdName -> binary.
 // Creation is atomic-exclusive (os.Symlink fails on an existing name); an
 // existing entry is replaced only when it is already a launcher, via a
@@ -55,7 +78,11 @@ func Write(dir, cmdName string) (string, error) {
 	if err := ValidateName(cmdName); err != nil {
 		return "", err
 	}
-	target, err := BinPath()
+	target, err := TargetPath()
+	if err != nil {
+		return "", err
+	}
+	bin, err := BinPath()
 	if err != nil {
 		return "", err
 	}
@@ -71,13 +98,33 @@ func Write(dir, cmdName string) (string, error) {
 	if !errors.Is(err, os.ErrExist) {
 		return "", err
 	}
-	if !isOurs(path, target) {
+	if !isOurs(path, bin) {
 		return "", fmt.Errorf("%w: %s", ErrTaken, path)
 	}
-	// The link already resolves to this binary — identical content, nothing
-	// to write. This also makes concurrent creators converge without
-	// coordination.
-	return path, nil
+	if existing, rerr := os.Readlink(path); rerr == nil && existing == target {
+		// Identical content, nothing to write. This also makes concurrent
+		// creators converge without coordination.
+		return path, nil
+	}
+	// Ours but pointing elsewhere (e.g. at a versioned physical binary from
+	// before the stable-entry policy): migrate by renaming a fresh link
+	// over it. Tmp names carry an attempt counter so concurrent migrators
+	// never collide.
+	for i := 0; i < 10; i++ {
+		tmp := filepath.Join(dir, fmt.Sprintf(".%s.tmp-%d-%d", cmdName, os.Getpid(), i))
+		if err := os.Symlink(target, tmp); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", err
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			os.Remove(tmp)
+			return "", err
+		}
+		return path, nil
+	}
+	return "", fmt.Errorf("could not refresh launcher %s", path)
 }
 
 // List returns every launcher symlink in dir pointing at this binary.
