@@ -10,7 +10,8 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 var (
@@ -53,6 +54,40 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("playbook %q already exists at %s", name, dest)
 	}
 
+	// Preflight command names BEFORE the directory exists: once created it
+	// joins the registry, and dispatch resolves directory names ahead of
+	// aliases, so a clash would silently re-route an existing command.
+	aliasName := createAlias
+	if aliasName == "" {
+		aliasName = name
+	}
+	// The EFFECTIVE launcher name (explicit --alias or the playbook name
+	// itself) must be writable, or creation would succeed without its
+	// advertised command. --no-alias opts out of a launcher entirely and
+	// skips this.
+	if !createNoAlias {
+		if err := launcher.ValidateName(aliasName); err != nil {
+			return fmt.Errorf("%w (pass --no-alias to create the playbook without a launcher)", err)
+		}
+	}
+	// Serialize preflight-through-registration: without the registry lock,
+	// two concurrent creates can both pass the ownership check and register
+	// duplicate owners for one command name.
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// The directory name joins the registry even under --no-alias.
+	preflightNames := []string{name}
+	if !createNoAlias {
+		preflightNames = append(preflightNames, aliasName)
+	}
+	if err := preflightCommandNames("", preflightNames...); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -72,27 +107,20 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	aliasName := createAlias
-	if aliasName == "" {
-		aliasName = name
+	// A custom command name must be resolvable at invocation time: record
+	// it as the manifest alias so multicall dispatch finds the playbook.
+	if aliasName != name {
+		m := &manifest.Manifest{Version: "0.1.0", Name: name, Alias: aliasName}
+		if err := manifest.Write(dest, m); err != nil {
+			// Without the manifest entry the alias can never resolve; and
+			// dest already joined the registry, so leaving it would block a
+			// retry under the same name — roll it back, as install does.
+			os.RemoveAll(dest)
+			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", aliasName, err)
+		}
 	}
 
-	// The playbook already exists at this point: alias trouble is a warning
-	// with manual instructions, not a failure of the whole command.
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: no alias written: %v\n", err)
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
-		fmt.Printf("Set the alias later with:\n  claude-playbook --shell-config <rc-file> alias %s %s\n", shell.QuoteArg(name), shell.QuoteArg(aliasName))
-		return nil
-	}
-
-	if err := shell.Write(shellConfig, aliasName, dest); err != nil {
-		return fmt.Errorf("failed to write alias: %w", err)
-	}
-
-	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  %s\n\nThen run with:\n  %s\n", shell.ReloadHint(shellConfig), aliasName)
+	installLauncher(aliasName, name, dest)
 	return nil
 }
 

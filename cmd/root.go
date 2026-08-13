@@ -3,10 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -23,6 +25,37 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
+	// Multicall dispatch happens ONLY when invoked through a launcher
+	// symlink: a regular binary installed under a name that happens to
+	// match a playbook must keep the CLI reachable. Within a launcher
+	// invocation, a resolvable name dispatches and an unresolvable one is
+	// stale (its playbook was deleted or renamed away) and fails loudly
+	// rather than falling through to the CLI overview with exit 0.
+	if base := filepath.Base(os.Args[0]); !launcher.ReservedNames[base] && invokedViaLauncher() {
+		// Registry overrides passed to the launcher must apply BEFORE name
+		// resolution, or the name resolves against the default registry and
+		// can pick a same-named playbook from the wrong root.
+		applyRegistryOverrides(os.Args[1:])
+		name, ok, derr := multicallPlaybook()
+		if derr != nil {
+			// The registry itself is unreadable — very different from this
+			// launcher being stale; name the real cause.
+			fmt.Fprintf(os.Stderr, "Error: %v\n", derr)
+			os.Exit(1)
+		}
+		if ok {
+			if err := runRun(nil, append([]string{name}, os.Args[1:]...)); err != nil {
+				if code, ok := exitCode(err); ok {
+					os.Exit(code)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook. (If this symlink is your own alias for the CLI, name it %q or %q, or use a hard link.)\n", base, "claude-playbook", "cpb")
+		os.Exit(1)
+	}
 	if err := rootCmd.Execute(); err != nil {
 		if code, ok := exitCode(err); ok {
 			os.Exit(code)
@@ -35,6 +68,7 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&config.PlaybooksDir, "playbooks-dir", "", "playbooks directory (default: ~/.claude-playbooks)")
 	rootCmd.PersistentFlags().StringVar(&config.ShellConfig, "shell-config", "", "shell config file (default: auto-detect from $SHELL)")
+	rootCmd.PersistentFlags().StringVar(&config.LauncherDir, "launcher-dir", "", "directory for launcher commands (default: directory of this binary)")
 
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(createCmd)

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
@@ -41,6 +42,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Discovery and confirmation run on an UNLOCKED snapshot: the prompt
+	// waits on human input, and holding the machine-user-global registry
+	// lock there would block every concurrent command indefinitely.
 	pb, err := playbook.Find(playbooksDir, shellConfig, name)
 	if err != nil {
 		return err
@@ -78,16 +82,33 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Now lock and REVALIDATE: a concurrent rename may have moved the
+	// playbook while the prompt was open (see lockRegistry).
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	pb, err = playbook.Find(playbooksDir, shellConfig, name)
+	if err != nil {
+		return err
+	}
+	if pb == nil {
+		return fmt.Errorf("%q disappeared while waiting for confirmation (deleted or renamed concurrently); nothing removed", name)
+	}
+
 	deletePath := pb.RootPath
 	if deletePath == "" {
 		deletePath = pb.Path
 	}
+	names := launcherNamesFor(pb)
 	if _, err := shell.RemoveByPathPrefix(shellConfig, deletePath); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
+	removeUnclaimedLaunchers(names)
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
 	return nil
 }
@@ -103,14 +124,58 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 			return nil
 		}
 	}
+	// Lock only after the prompt (see runDelete), then re-verify the
+	// directory is still present and still not a discoverable playbook.
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return fmt.Errorf("%q disappeared while waiting for confirmation; nothing removed", name)
+	}
+	if pb, _ := playbook.Find(playbooksDir, shellConfig, name); pb != nil {
+		return fmt.Errorf("%q became a discoverable playbook while waiting for confirmation; re-run delete", name)
+	}
 	if _, err := shell.RemoveByPathPrefix(shellConfig, path); err != nil {
 		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
+	removeUnclaimedLaunchers([]string{name})
 	fmt.Printf("Deleted %q.\n", name)
 	return nil
+}
+
+// removeUnclaimedLaunchers retires the launcher symlinks for the given
+// command names after a mutation. A name still resolving in the visible
+// registry keeps its launcher outright. An unclaimed name's launcher is
+// ALSO retained — a stateless symlink may be serving a playbook in another
+// registry root selected via environment or flag, which is unenumerable
+// from here — but with a manual-removal hint: invoking it without such a
+// root fails loudly as stale, so retention is noisy, never silently wrong.
+func removeUnclaimedLaunchers(names []string) {
+	if !launcherOpsAllowed() {
+		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none removed.\n")
+		return
+	}
+	dir, err := config.ResolveLauncherDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not inspect launchers: %v\n", err)
+		return
+	}
+	for _, n := range names {
+		e, exists, foreign := launcher.Lookup(dir, n)
+		if !exists || foreign {
+			continue
+		}
+		if owner, oerr := commandNameOwner(n, ""); oerr == nil && owner != nil {
+			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, owner.Name)
+			continue
+		}
+		fmt.Printf("Kept command %q — launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
+	}
 }
 
 func removeAny(path string) error {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -258,18 +259,23 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	resetCommandTestState(t)
 	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
 	root := t.TempDir()
-	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	// Launcher mutations only apply to the default playbooks root — point
+	// HOME at the sandbox so the default root lands inside it.
+	t.Setenv("HOME", root)
+	os.Unsetenv("CLAUDE_PLAYBOOKS_DIR")
+	config.PlaybooksDir = filepath.Join(root, ".claude-playbooks")
 	config.ShellConfig = filepath.Join(root, "shellrc")
 	target := filepath.Join(root, "target")
 	configDir := filepath.Join(target, "config")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\n"), 0644); err != nil {
+	// The alias lives in the target's own manifest: a pre-existing shared
+	// manifest is never alias-mutated by link.
+	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\nalias = \"linkedalias\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	linkName = "linked"
-	linkAlias = "linkedalias"
 	if err := runLink(nil, []string{target}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,8 +283,19 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pb.Path != filepath.Join(config.PlaybooksDir, "linked", "config") || pb.Alias != "linkedalias" {
-		t.Fatalf("linked playbook path=%q alias=%q", pb.Path, pb.Alias)
+	if pb.Path != filepath.Join(config.PlaybooksDir, "linked", "config") {
+		t.Fatalf("linked playbook path=%q", pb.Path)
+	}
+	entries, err := launcher.List(config.LauncherDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].CmdName != "linkedalias" {
+		t.Fatalf("launcher entries = %#v", entries)
+	}
+	// The alias must be resolvable at invocation time via the manifest.
+	if pb.Manifest == nil || pb.Manifest.Alias != "linkedalias" {
+		t.Fatalf("manifest alias not recorded: %#v", pb.Manifest)
 	}
 }
 
@@ -442,6 +459,7 @@ func resetCommandTestState(t *testing.T) {
 	t.Helper()
 	config.PlaybooksDir = ""
 	config.ShellConfig = ""
+	config.LauncherDir = t.TempDir()
 	installName = ""
 	installSubdir = ""
 	installBranch = ""
@@ -460,6 +478,7 @@ func resetCommandTestState(t *testing.T) {
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
 		config.ShellConfig = ""
+		config.LauncherDir = ""
 		installName = ""
 		installSubdir = ""
 		installBranch = ""
@@ -528,5 +547,42 @@ func TestInstallFlattensSubdirFromManifest(t *testing.T) {
 	}
 	if strings.Contains(string(data), "subdir") {
 		t.Fatalf("expected subdir field to be removed from manifest, got: %s", string(data))
+	}
+}
+
+func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
+	resetCommandTestState(t)
+	home := t.TempDir()
+	config.PlaybooksDir = filepath.Join(home, "playbooks")
+	config.ShellConfig = filepath.Join(home, ".zshrc")
+	for _, name := range []string{"aaa", "bbb"} {
+		if err := os.MkdirAll(filepath.Join(config.PlaybooksDir, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Command name "x" belongs to bbb via its manifest alias.
+	if err := manifest.Write(filepath.Join(config.PlaybooksDir, "bbb"),
+		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Alias: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launcher.Write(config.LauncherDir, "x"); err != nil {
+		t.Fatal(err)
+	}
+
+	renameAlias = "x"
+	err := runRename(nil, []string{"aaa", "ccc"})
+	if err == nil {
+		t.Fatal("expected collision error")
+	}
+	// The collision must abort BEFORE any mutation: aaa still present,
+	// ccc absent, launcher x untouched.
+	if _, serr := os.Stat(filepath.Join(config.PlaybooksDir, "aaa")); serr != nil {
+		t.Errorf("aaa was renamed despite the error: %v", serr)
+	}
+	if _, serr := os.Stat(filepath.Join(config.PlaybooksDir, "ccc")); serr == nil {
+		t.Error("ccc exists despite the error")
+	}
+	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "x"); !exists || foreign {
+		t.Errorf("launcher x mutated: exists=%v foreign=%v", exists, foreign)
 	}
 }

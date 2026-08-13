@@ -11,8 +11,8 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 var (
@@ -34,7 +34,7 @@ func init() {
 	linkCmd.Flags().BoolVar(&linkNoAlias, "no-alias", false, "skip alias creation")
 }
 
-func runLink(cmd *cobra.Command, args []string) error {
+func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	if linkNoAlias && linkAlias != "" {
 		return fmt.Errorf("--no-alias and --alias cannot be used together")
 	}
@@ -77,16 +77,66 @@ func runLink(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", name, dest)
 	}
 
-	// Ensure target has a .playbook, prompting interactively if it doesn't.
-	if !manifest.Exists(abs) {
-		m, err := promptForManifest(abs, name)
-		if err != nil {
+	if linkAlias != "" {
+		if err := launcher.ValidateName(linkAlias); err != nil {
 			return err
 		}
-		if err := manifest.Write(abs, m); err != nil {
+	}
+
+	// Prompt for manifest metadata BEFORE taking the machine-user-global
+	// lock: holding it across human think time would block every concurrent
+	// command (same rule as delete's confirmation).
+	var prompted *manifest.Manifest
+	if !manifest.Exists(abs) {
+		aliasDefault := name
+		if linkAlias != "" {
+			aliasDefault = linkAlias
+		}
+		var perr error
+		prompted, perr = promptForManifest(abs, name, aliasDefault)
+		if perr != nil {
+			return perr
+		}
+		// An interactively entered alias becomes the manifest alias and the
+		// launcher name — a reserved or path-like value would leave the
+		// link registered with its advertised command unusable.
+		if prompted.Alias != "" {
+			if verr := launcher.ValidateName(prompted.Alias); verr != nil {
+				return fmt.Errorf("prompted alias rejected: %w", verr)
+			}
+		}
+	}
+
+	// Serialize registration (see lockRegistry), then RE-CHECK the shared
+	// manifest under the lock: a concurrent link may have initialized it
+	// while the prompt was open — its manifest wins and ours is discarded,
+	// falling through to the shared-state policy below.
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// A manifest created by THIS invocation is not shared state yet: alias
+	// overrides may apply to it freely, and it must not survive a failed
+	// link as litter.
+	createdManifest := false
+	if !manifest.Exists(abs) {
+		if prompted == nil {
+			return fmt.Errorf("target's %s disappeared while preparing the link; re-run", manifest.FileName)
+		}
+		if err := manifest.Write(abs, prompted); err != nil {
 			return fmt.Errorf("failed to write .playbook to %s: %w", abs, err)
 		}
+		createdManifest = true
+		defer func() {
+			if retErr != nil {
+				os.Remove(filepath.Join(abs, manifest.FileName))
+			}
+		}()
 		fmt.Printf("Wrote %s\n", filepath.Join(abs, manifest.FileName))
+	} else if prompted != nil {
+		fmt.Fprintf(os.Stderr, "Note: target's %s was initialized concurrently; using it and discarding the prompted metadata.\n", manifest.FileName)
 	}
 	m, err := manifest.Read(abs)
 	if err != nil {
@@ -100,6 +150,53 @@ func runLink(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
+	}
+
+	// Preflight command names BEFORE the symlink joins the registry (the
+	// link name registers even under --no-alias, and the target manifest's
+	// alias registers without any flag).
+	effectiveAlias := linkAlias
+	if effectiveAlias == "" && m != nil {
+		effectiveAlias = m.Alias
+	}
+	// The launcher that will actually be written uses the effective alias,
+	// falling back to the link name — an unwritable name (reserved link
+	// name, invalid manifest alias) must fail before dest joins the
+	// registry, not as a post-link warning.
+	if !linkNoAlias {
+		launcherName := effectiveAlias
+		if launcherName == "" {
+			launcherName = name
+		}
+		if err := launcher.ValidateName(launcherName); err != nil {
+			return fmt.Errorf("%w (pass --no-alias to link without a launcher)", err)
+		}
+	}
+	if err := preflightCommandNames("", name, effectiveAlias); err != nil {
+		return err
+	}
+
+	// A PRE-EXISTING target manifest is SHARED state: the same external
+	// directory may already be linked from other registry roots whose
+	// launchers resolve through it. Any differing alias mutation — changing
+	// one, or adding one where none existed — could break or reroute those
+	// registrations, so refuse unless this invocation created the manifest.
+	if linkAlias != "" && !createdManifest && m != nil && m.Alias != linkAlias {
+		return fmt.Errorf("target's %s is shared state (alias %q); --alias %q would mutate it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Alias, linkAlias, manifest.FileName)
+	}
+
+	// For a manifest created by this invocation, the --alias flag wins over
+	// whatever was typed at the prompt. Persist BEFORE the symlink joins
+	// the registry: failing afterwards would leave the playbook registered
+	// with an unresolvable advertised command.
+	if linkAlias != "" && createdManifest && (m == nil || m.Alias != linkAlias) {
+		if m == nil {
+			m = &manifest.Manifest{Version: "0.1.0", Name: name}
+		}
+		m.Alias = linkAlias
+		if err := manifest.Write(abs, m); err != nil {
+			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", linkAlias, abs, err)
+		}
 	}
 
 	if err := auth.SyncCredentials(configTarget); err != nil {
@@ -126,19 +223,11 @@ func runLink(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		return err
-	}
-	if err := shell.Write(shellConfig, aliasName, configDest); err != nil {
-		return fmt.Errorf("failed to write alias: %w", err)
-	}
-	fmt.Printf("Alias %q added to %s\n", aliasName, shellConfig)
-	fmt.Printf("\nReload your shell or run:\n  %s\n\nThen run with:\n  %s\n", shell.ReloadHint(shellConfig), aliasName)
+	installLauncher(aliasName, name, configDest)
 	return nil
 }
 
-func promptForManifest(targetDir, defaultName string) (*manifest.Manifest, error) {
+func promptForManifest(targetDir, defaultName, defaultAlias string) (*manifest.Manifest, error) {
 	if !isTTY(os.Stdin) {
 		return nil, fmt.Errorf("target has no .playbook and stdin is not a TTY; cannot prompt for metadata. Add a .playbook to the target first")
 	}
@@ -149,7 +238,7 @@ func promptForManifest(targetDir, defaultName string) (*manifest.Manifest, error
 
 	reader := bufio.NewReader(os.Stdin)
 	name := promptDefault(reader, "Playbook name", defaultName)
-	alias := promptDefault(reader, "Alias name", name)
+	alias := promptDefault(reader, "Alias name", defaultAlias)
 	desc := promptDefault(reader, "Description", "")
 
 	return &manifest.Manifest{
