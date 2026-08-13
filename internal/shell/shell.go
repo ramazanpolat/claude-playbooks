@@ -269,6 +269,62 @@ func RemoveByPathPrefix(configFile, prefix string) (int, error) {
 	return removed, err
 }
 
+// RemoveExactLines deletes every line of configFile that exactly matches one
+// of doomed. Returns the number of lines removed. Like every editor in this
+// package it resolves a symlinked rc file to its target, takes the config
+// lock, and replaces the file atomically with its mode preserved.
+func RemoveExactLines(configFile string, doomed []string) (int, error) {
+	set := make(map[string]bool, len(doomed))
+	for _, l := range doomed {
+		set[l] = true
+	}
+	configFile = resolveConfigPath(configFile)
+	removed := 0
+	err := withConfigLock(configFile, func() error {
+		lines, err := readLines(configFile)
+		if err != nil {
+			return err
+		}
+		kept, n := dropMatchingLines(lines, func(line string) bool {
+			return set[line]
+		})
+		removed = n
+		if removed == 0 {
+			return nil
+		}
+		return writeLines(configFile, kept)
+	})
+	return removed, err
+}
+
+// CountExactLines reports how many lines of configFile exactly match one of
+// doomed, without modifying anything. Preview counterpart of
+// RemoveExactLines.
+func CountExactLines(configFile string, doomed []string) (int, error) {
+	set := make(map[string]bool, len(doomed))
+	for _, l := range doomed {
+		set[l] = true
+	}
+	lines, err := readLines(resolveConfigPath(configFile))
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, l := range lines {
+		if set[l] {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// RemoveLockFile deletes the advisory lock file the editing helpers create
+// beside configFile. Only self-uninstall calls this — while the tool is
+// installed the lock file is load-bearing.
+func RemoveLockFile(configFile string) {
+	os.Remove(resolveConfigPath(configFile) + ".claude-playbook.lock")
+}
+
 func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string, int) {
 	var kept []string
 	removed := 0

@@ -133,12 +133,16 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	// Launcher commands take display precedence over legacy rc aliases,
 	// exactly as in `list` — a launcher-only playbook has a working command
 	// and must not be shown as "(no alias set)".
+	// Gate before resolving: ResolveLauncherDir probes directory writability
+	// by creating a temp file, which a custom-root invocation must not do.
 	launcherNames := map[string]bool{}
-	if ldir, lerr := config.ResolveLauncherDir(); lerr == nil && launcherOpsAllowed() {
-		if les, lerr := launcher.List(ldir); lerr == nil {
-			for _, e := range les {
-				if !launcher.ReservedNames[e.CmdName] {
-					launcherNames[e.CmdName] = true
+	if launcherOpsAllowed() {
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if les, lerr := launcher.List(ldir); lerr == nil {
+				for _, e := range les {
+					if !launcher.ReservedNames[e.CmdName] {
+						launcherNames[e.CmdName] = true
+					}
 				}
 			}
 		}

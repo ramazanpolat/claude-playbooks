@@ -37,17 +37,21 @@ func runList(cmd *cobra.Command, args []string) error {
 	launcherNames := map[string]bool{}
 	// Launchers exist only for the default root; under a custom root a
 	// same-named global launcher would dispatch the DEFAULT playbook, so
-	// advertising it here would be wrong.
-	if ldir, lerr := config.ResolveLauncherDir(); lerr == nil && launcherOpsAllowed() {
-		if les, lerr := launcher.List(ldir); lerr == nil {
-			for _, e := range les {
-				// The installer's own CLI shortcut (cpb -> claude-playbook)
-				// is a symlink to this binary too; reserved names never
-				// dispatch, so never advertise them as a playbook's command.
-				if launcher.ReservedNames[e.CmdName] {
-					continue
+	// advertising it here would be wrong. Gate before resolving:
+	// ResolveLauncherDir probes directory writability by creating a temp
+	// file, which a read-only listing under a custom root must not do.
+	if launcherOpsAllowed() {
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if les, lerr := launcher.List(ldir); lerr == nil {
+				for _, e := range les {
+					// The installer's own CLI shortcut (cpb -> claude-playbook)
+					// is a symlink to this binary too; reserved names never
+					// dispatch, so never advertise them as a playbook's command.
+					if launcher.ReservedNames[e.CmdName] {
+						continue
+					}
+					launcherNames[e.CmdName] = true
 				}
-				launcherNames[e.CmdName] = true
 			}
 		}
 	}

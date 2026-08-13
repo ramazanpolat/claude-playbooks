@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -69,9 +68,16 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Binary:        %s\n", execPath)
 		}
 		fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
-		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+		for _, ldir := range launcherSweepDirs() {
 			if les := launchersToRemove(ldir, pbs); len(les) > 0 {
 				fmt.Printf("  Launchers:     %d command(s) in %s\n", len(les), ldir)
+			}
+		}
+		if !selfUninstallKeepBinary {
+			for _, rc := range completionRcFiles() {
+				if n, err := shell.CountExactLines(rc, completionLines()); err == nil && n > 0 {
+					fmt.Printf("  Completions:   %d line(s) in %s\n", n, rc)
+				}
 			}
 		}
 		fmt.Println()
@@ -99,9 +105,16 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  binary: %s\n", execPath)
 		}
 		fmt.Printf("  shell aliases in: %s\n", shellConfig)
-		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+		for _, ldir := range launcherSweepDirs() {
 			for _, e := range launchersToRemove(ldir, pbs) {
 				fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
+			}
+		}
+		if !selfUninstallKeepBinary {
+			for _, rc := range completionRcFiles() {
+				if n, err := shell.CountExactLines(rc, completionLines()); err == nil && n > 0 {
+					fmt.Printf("  %d completion line(s) from: %s\n", n, rc)
+				}
 			}
 		}
 		return nil
@@ -140,12 +153,14 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 3: remove launchers. When the binary is going away, every link
-	// to it would dangle — sweep them all. With --keep-binary, launchers
-	// for OTHER playbook roots sharing the directory keep working, so only
-	// the selected registry's command names are removed.
-	if ldir, lerr := config.ResolveLauncherDir(); lerr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not resolve launcher dir: %v\n", lerr)
-	} else {
+	// to it would dangle — sweep them all, in every directory launcher.Write
+	// may have used. With --keep-binary, launchers for OTHER playbook roots
+	// sharing the directory keep working, so none are removed.
+	sweepDirs := launcherSweepDirs()
+	if len(sweepDirs) == 0 {
+		fmt.Fprintf(os.Stderr, "warning: could not resolve any launcher directory; launchers not swept\n")
+	}
+	for _, ldir := range sweepDirs {
 		for _, e := range launchersToRemove(ldir, pbs) {
 			if rerr := os.Remove(e.Path); rerr != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to remove launcher %s: %v\n", e.Path, rerr)
@@ -156,10 +171,15 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 3.5: remove the completion lines install.sh appended to shell rc
-	// files — after the binary is gone they error on every new shell.
-	for _, rc := range []string{filepath.Join(os.Getenv("HOME"), ".bashrc"), filepath.Join(os.Getenv("HOME"), ".zshrc")} {
-		if n := removeCompletionLines(rc); n > 0 {
-			removed = append(removed, fmt.Sprintf("%d completion line(s) from %s", n, rc))
+	// files — after the binary is gone they error on every new shell. With
+	// --keep-binary they keep working, so they stay.
+	if !selfUninstallKeepBinary {
+		for _, rc := range completionRcFiles() {
+			if n, err := shell.RemoveExactLines(rc, completionLines()); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not update %s: %v\n", rc, err)
+			} else if n > 0 {
+				removed = append(removed, fmt.Sprintf("%d completion line(s) from %s", n, rc))
+			}
 		}
 	}
 
@@ -213,6 +233,14 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// The rc-file editors keep an advisory lock file beside each file they
+	// touch; once the tool itself is gone that litter is ours to clear.
+	if !selfUninstallKeepBinary {
+		for _, rc := range append(completionRcFiles(), shellConfig) {
+			shell.RemoveLockFile(rc)
+		}
+	}
+
 	fmt.Println("Removed:")
 	if len(removed) == 0 {
 		fmt.Println("  (nothing)")
@@ -256,45 +284,58 @@ func launchersToRemove(ldir string, pbs []*playbook.Playbook) []launcher.Entry {
 	return les
 }
 
-// removeCompletionLines strips the exact `source <(NAME completion SHELL)`
-// lines install.sh appends to a shell rc file. Returns how many were removed;
-// best-effort (0 on any error).
-func removeCompletionLines(rcFile string) int {
-	data, err := os.ReadFile(rcFile)
+// completionRcFiles returns the rc files install.sh may have appended
+// completion lines to. Empty when the home directory is unknown — better to
+// leave the lines behind than to rewrite a relative .bashrc in the current
+// working directory.
+func completionRcFiles() []string {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return 0
+		return nil
 	}
+	return []string{filepath.Join(home, ".bashrc"), filepath.Join(home, ".zshrc")}
+}
+
+// completionLines is the exact set of `source <(NAME completion SHELL)`
+// lines install.sh appends: both CLI names, plus the basename the binary is
+// actually running under in case an install predates the fixed-name scheme.
+func completionLines() []string {
 	names := map[string]bool{"claude-playbook": true, "cpb": true}
 	if exe, err := os.Executable(); err == nil {
 		names[filepath.Base(exe)] = true
 	}
-	doomed := map[string]bool{}
+	var out []string
 	for name := range names {
 		for _, sh := range []string{"bash", "zsh"} {
-			doomed[fmt.Sprintf("source <(%s completion %s)", name, sh)] = true
+			out = append(out, fmt.Sprintf("source <(%s completion %s)", name, sh))
 		}
 	}
-	lines := strings.Split(string(data), "\n")
-	var kept []string
-	n := 0
-	for _, l := range lines {
-		if doomed[l] {
-			n++
+	return out
+}
+
+// launcherSweepDirs returns every directory the launcher sweep must cover:
+// the resolved launcher dir plus the ~/.local/bin fallback launcher.Write
+// uses when the primary dir is unwritable — resolution is
+// writability-sensitive (think sudo), so the two can disagree with where
+// launchers were actually written. Deduped canonically; preview and removal
+// share this so they always agree.
+func launcherSweepDirs() []string {
+	var dirs []string
+	if ldir, err := config.ResolveLauncherDir(); err == nil {
+		dirs = append(dirs, ldir)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".local", "bin"))
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range dirs {
+		c := canonPath(d)
+		if seen[c] {
 			continue
 		}
-		kept = append(kept, l)
+		seen[c] = true
+		out = append(out, d)
 	}
-	if n == 0 {
-		return 0
-	}
-	info, err := os.Stat(rcFile)
-	mode := os.FileMode(0o644)
-	if err == nil {
-		mode = info.Mode()
-	}
-	if err := os.WriteFile(rcFile, []byte(strings.Join(kept, "\n")), mode); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not update %s: %v\n", rcFile, err)
-		return 0
-	}
-	return n
+	return out
 }

@@ -21,27 +21,56 @@ remove_target() {
   REMOVED=1
 }
 
-# Remove playbook launcher symlinks (v2.13.0+): symlinks in dir whose literal
-# target names the binary being uninstalled. Launchers point at the stable
-# PATH entry by name, so a literal-target basename match identifies them
-# without resolving chains. The CLI entries themselves (claude-playbook, cpb)
-# are handled by remove_target, not here.
+# Fully resolve a path through symlinks. Fails (printing nothing) when the
+# path cannot be resolved — a dangling link, or a system with neither
+# readlink -f nor realpath. Callers treat failure as "not ours" and leave
+# the file alone.
+resolve_path() {
+  readlink -f "$1" 2>/dev/null && return 0
+  realpath "$1" 2>/dev/null && return 0
+  return 1
+}
+
+# Remove playbook launcher symlinks (v2.13.0+): only links that RESOLVE to
+# the binary being uninstalled are ours. Matching on the target's basename
+# would delete a user's own `foo -> /elsewhere/cpb`; a dangling link is
+# never ours either, because the binary still exists while this runs. The
+# CLI entries themselves (claude-playbook, cpb) are handled by
+# remove_target, not here.
 remove_launchers_in() {
   dir="$1"
+  bin_real="$2"
   [ -d "$dir" ] || return 0
+  [ -n "$bin_real" ] || return 0
   for link in "$dir"/*; do
     [ -L "$link" ] || continue
     base=$(basename "$link")
     [ "$base" = "claude-playbook" ] && continue
     [ "$base" = "cpb" ] && continue
-    dest=$(readlink "$link" 2>/dev/null) || continue
-    destbase=$(basename "$dest")
-    if [ "$destbase" = "cpb" ] || [ "$destbase" = "claude-playbook" ]; then
+    link_real=$(resolve_path "$link") || continue
+    if [ "$link_real" = "$bin_real" ]; then
       rm -f "$link"
       echo "Removed launcher $link"
       REMOVED=1
     fi
   done
+}
+
+# Remove one installation: the launchers resolving to this binary (both in
+# its own directory and in the ~/.local/bin fallback), the cpb symlink
+# beside it, then the binary itself.
+remove_install_at() {
+  bin="$1"
+  if [ -e "$bin" ] || [ -L "$bin" ]; then
+    if bin_real=$(resolve_path "$bin"); then
+      remove_launchers_in "$(dirname "$bin")" "$bin_real"
+      remove_launchers_in "$HOME/.local/bin" "$bin_real"
+    else
+      echo "Note: cannot resolve symlinks on this system; launchers near $bin were not swept." >&2
+    fi
+  fi
+  remove_target "$(dirname "$bin")/cpb"
+  remove_target "$bin"
 }
 
 # Remove the completion lines install.sh appended to shell rc files; without
@@ -59,35 +88,30 @@ remove_completion_lines() {
     done
   done
   [ "$changed" -eq 1 ] || return 0
-  tmp=$(mktemp "${rc_file}.tmp.XXXXXX")
+  tmp=$(mktemp "${TMPDIR:-/tmp}/cpb-rc.XXXXXX")
   grep -vxF -e "source <(claude-playbook completion bash)" \
             -e "source <(claude-playbook completion zsh)" \
             -e "source <(cpb completion bash)" \
             -e "source <(cpb completion zsh)" \
             "$rc_file" > "$tmp" || true
-  mv "$tmp" "$rc_file"
+  # Write THROUGH the rc path: an mv would replace a symlinked ~/.zshrc
+  # (stow, chezmoi) with a detached plain file at mktemp's 0600 mode.
+  cat "$tmp" > "$rc_file"
+  rm -f "$tmp"
   echo "Removed completion lines from $rc_file"
 }
 
 REMOVED=0
 
 if [ -n "${INSTALL_DIR:-}" ]; then
-  remove_launchers_in "$INSTALL_DIR"
-  remove_launchers_in "$HOME/.local/bin"
-  remove_target "$INSTALL_DIR/cpb"
-  remove_target "$INSTALL_DIR/claude-playbook"
+  remove_install_at "$INSTALL_DIR/claude-playbook"
 else
-  remove_launchers_in "$DEFAULT_INSTALL_DIR"
-  remove_launchers_in "$HOME/.local/bin"
-  remove_target "$DEFAULT_INSTALL_DIR/cpb"
-  remove_target "$DEFAULT_INSTALL_DIR/claude-playbook"
-  remove_target "$HOME/.local/bin/cpb"
-  remove_target "$HOME/.local/bin/claude-playbook"
+  remove_install_at "$DEFAULT_INSTALL_DIR/claude-playbook"
+  remove_install_at "$HOME/.local/bin/claude-playbook"
 
   FOUND=$(command -v claude-playbook 2>/dev/null || true)
   if [ -n "$FOUND" ]; then
-    remove_target "$(dirname "$FOUND")/cpb"
-    remove_target "$FOUND"
+    remove_install_at "$FOUND"
   fi
 fi
 

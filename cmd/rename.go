@@ -265,10 +265,11 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// goes stale (that name no longer resolves), so retire it and register
 	// the new name; --alias sets a fresh manifest alias, --no-alias drops
 	// launcher registration.
-	if ldir, err := config.ResolveLauncherDir(); err == nil && !launcherOpsAllowed() {
-		_ = ldir
+	// Gate before resolving: ResolveLauncherDir probes directory writability
+	// by creating a temp file, which a custom-root invocation must not do.
+	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none changed.\n")
-	} else if err == nil {
+	} else if ldir, err := config.ResolveLauncherDir(); err == nil {
 		// Retirement is CLAIM-AWARE (same post-mutation re-resolution as
 		// delete): a name still addressed after the rename — a linked
 		// playbook whose shared alias is the old name, or another playbook
