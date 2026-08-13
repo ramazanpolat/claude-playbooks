@@ -71,9 +71,10 @@ cpb --version
 ```
 
 Want a different command name? Use a shell alias (`alias pb=claude-playbook`)
-or a hard link (`ln /usr/local/bin/claude-playbook ~/.local/bin/pb`). Do not
-use a symlink: a symlink to the binary under any other name is treated as a
-playbook launcher and dispatched accordingly.
+or a hard link (`ln "$(command -v claude-playbook)" ~/.local/bin/pb` — works
+for both install locations). Do not use a symlink: a symlink to the binary
+under any other name is treated as a playbook launcher and dispatched
+accordingly.
 
 The installer never edits your shell rc files. To enable completions
 (optional), add one line to your rc file yourself:

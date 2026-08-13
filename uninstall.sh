@@ -3,32 +3,15 @@ set -e
 
 DEFAULT_INSTALL_DIR="${DEFAULT_INSTALL_DIR:-/usr/local/bin}"
 
-# Locate the installed binary.
-BIN=""
-if [ -n "${INSTALL_DIR:-}" ]; then
-  [ -x "$INSTALL_DIR/claude-playbook" ] && BIN="$INSTALL_DIR/claude-playbook"
-else
-  for c in "$DEFAULT_INSTALL_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"; do
-    if [ -x "$c" ]; then
-      BIN="$c"
-      break
-    fi
-  done
-  if [ -z "$BIN" ]; then
-    BIN=$(command -v claude-playbook 2>/dev/null || true)
-  fi
-fi
-
 # The uninstall logic lives in ONE place: the binary itself. Launcher
 # ownership, the cpb sibling, and completion-line cleanup all need the same
 # judgment the CLI already implements and tests — duplicating it in shell is
-# how uninstallers grow divergent bugs.
-if [ -n "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then
-  exec "$BIN" self-uninstall --binary-only --yes
-fi
+# how uninstallers grow divergent bugs. This script only decides WHICH
+# binaries to hand the job to, and keeps a literal-artifact fallback for a
+# binary that is broken or too old to know --binary-only.
 
-# Fallback: no runnable binary. Remove only the two literal artifacts
-# install.sh writes; nothing here guesses at ownership.
+# Fallback: remove only the two literal artifacts install.sh writes;
+# nothing here guesses at ownership.
 REMOVED=0
 remove_artifacts_in() {
   dir="$1"
@@ -47,19 +30,60 @@ remove_artifacts_in() {
   fi
 }
 
+# Candidate binaries. The PATH-active one comes first — it defines what the
+# user actually runs — then the fixed install locations, so a dual install
+# (e.g. ~/.local/bin plus a later sudo install) is cleaned everywhere, as
+# the pre-delegation script did.
 if [ -n "${INSTALL_DIR:-}" ]; then
-  remove_artifacts_in "$INSTALL_DIR"
+  set -- "$INSTALL_DIR/claude-playbook"
 else
-  remove_artifacts_in "$DEFAULT_INSTALL_DIR"
-  remove_artifacts_in "$HOME/.local/bin"
+  set -- "$(command -v claude-playbook 2>/dev/null || true)" \
+         "$DEFAULT_INSTALL_DIR/claude-playbook" \
+         "$HOME/.local/bin/claude-playbook"
 fi
 
-if [ "$REMOVED" -eq 0 ]; then
+DELEGATED=0
+FELL_BACK=0
+HANDLED=0
+DONE=""
+for BIN in "$@"; do
+  [ -n "$BIN" ] || continue
+  [ -e "$BIN" ] || [ -L "$BIN" ] || continue
+  case "$DONE" in *"|$BIN|"*) continue ;; esac
+  DONE="$DONE|$BIN|"
+  HANDLED=1
+  # Delegate only to a binary that runs AND knows --binary-only; an older
+  # release passes --version yet would die on the unknown flag, so probe
+  # its help text first instead of exec-ing into a guaranteed failure.
+  if [ -x "$BIN" ] && "$BIN" --version >/dev/null 2>&1 \
+      && "$BIN" self-uninstall --help 2>/dev/null | grep -q -- "--binary-only"; then
+    "$BIN" self-uninstall --binary-only --yes
+    DELEGATED=1
+  else
+    remove_artifacts_in "$(dirname "$BIN")"
+    FELL_BACK=1
+  fi
+done
+
+if [ "$HANDLED" -eq 0 ]; then
+  if [ -n "${INSTALL_DIR:-}" ]; then
+    remove_artifacts_in "$INSTALL_DIR"
+  else
+    remove_artifacts_in "$DEFAULT_INSTALL_DIR"
+    remove_artifacts_in "$HOME/.local/bin"
+  fi
+fi
+
+if [ "$DELEGATED" -eq 0 ] && [ "$REMOVED" -eq 0 ]; then
   echo "claude-playbook was not found in the expected install locations."
-else
-  echo "Note: the binary could not be run, so launcher symlinks and any"
-  echo "completion lines in your shell rc files were not cleaned up."
+fi
+if [ "$FELL_BACK" -eq 1 ] && [ "$REMOVED" -eq 1 ]; then
+  echo "Note: that binary could not run the built-in uninstaller, so launcher"
+  echo "symlinks and any completion lines in your shell rc files were not"
+  echo "cleaned up for it."
 fi
 
-echo ""
-echo "Playbooks were not touched: ${CLAUDE_PLAYBOOKS_DIR:-$HOME/.claude-playbooks}"
+if [ "$DELEGATED" -eq 0 ]; then
+  echo ""
+  echo "Playbooks were not touched: ${CLAUDE_PLAYBOOKS_DIR:-$HOME/.claude-playbooks}"
+fi
