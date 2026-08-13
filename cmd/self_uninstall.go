@@ -71,6 +71,9 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		if !selfUninstallKeepBinary {
 			fmt.Printf("  Binary:        %s\n", execPath)
+			if s := siblingToRemove(execPath); s != "" {
+				fmt.Printf("  Sibling:       %s\n", s)
+			}
 		}
 		fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
 		for _, ldir := range launcherSweepDirs() {
@@ -111,6 +114,9 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		if !selfUninstallKeepBinary {
 			fmt.Printf("  binary: %s\n", execPath)
+			if s := siblingToRemove(execPath); s != "" {
+				fmt.Printf("  sibling: %s\n", s)
+			}
 		}
 		fmt.Printf("  shell aliases in: %s\n", shellConfig)
 		for _, ldir := range launcherSweepDirs() {
@@ -201,16 +207,11 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		removed = append(removed, fmt.Sprintf("%d leftover alias(es) from %s", n, shellConfig))
 	}
 
-	// Step 4: remove the binary.
+	// Step 4: remove the binary. The sibling must be identified BEFORE the
+	// binary goes: ownership is proven by both resolving to the same file,
+	// which is impossible to check once one of them is deleted.
 	if !selfUninstallKeepBinary && execPath != "(unknown)" {
-		dir := filepath.Dir(execPath)
-		base := filepath.Base(execPath)
-		siblingName := ""
-		if base == "claude-playbook" {
-			siblingName = "cpb"
-		} else if base == "cpb" {
-			siblingName = "claude-playbook"
-		}
+		siblingPath := siblingToRemove(execPath)
 
 		if err := os.Remove(execPath); err != nil {
 			if os.IsPermission(err) {
@@ -223,15 +224,14 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			removed = append(removed, fmt.Sprintf("binary (%s)", execPath))
 		}
 
-		if siblingName != "" {
-			siblingPath := filepath.Join(dir, siblingName)
+		if siblingPath != "" {
 			if info, err := os.Lstat(siblingPath); err == nil {
 				if err := os.Remove(siblingPath); err != nil {
 					if os.IsPermission(err) {
 						fmt.Fprintf(os.Stderr, "note: cannot remove sibling binary (permission denied). Run manually:\n  sudo rm %s\n", siblingPath)
 						needsManual = append(needsManual, fmt.Sprintf("sudo rm %s", siblingPath))
 					} else {
-						fmt.Fprintf(os.Stderr, "warning: failed to remove sibling binary %s: %v\n", siblingName, err)
+						fmt.Fprintf(os.Stderr, "warning: failed to remove sibling binary %s: %v\n", siblingPath, err)
 					}
 				} else {
 					typeName := "sibling binary"
@@ -324,6 +324,43 @@ func completionLines() []string {
 		}
 	}
 	return out
+}
+
+// siblingToRemove returns the OTHER reserved-name entry beside the binary
+// (claude-playbook <-> cpb) if and only if it resolves to the same file as
+// the binary being removed — the installer only ever creates the pair that
+// way, so an unrelated regular file or foreign link under a reserved name
+// is left alone. Shared by preview and removal. Empty when there is nothing
+// provably ours to remove.
+func siblingToRemove(execPath string) string {
+	if selfUninstallKeepBinary || execPath == "(unknown)" {
+		return ""
+	}
+	var siblingName string
+	switch filepath.Base(execPath) {
+	case "claude-playbook":
+		siblingName = "cpb"
+	case "cpb":
+		siblingName = "claude-playbook"
+	default:
+		return ""
+	}
+	p := filepath.Join(filepath.Dir(execPath), siblingName)
+	if _, err := os.Lstat(p); err != nil {
+		return ""
+	}
+	pResolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return ""
+	}
+	execResolved, err := filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return ""
+	}
+	if pResolved != execResolved {
+		return ""
+	}
+	return p
 }
 
 // lockFilesToRemove returns the advisory lock files that exist beside the

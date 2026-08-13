@@ -113,8 +113,16 @@ remove_completion_lines() {
     echo "Warning: could not filter $rc_file; left unchanged." >&2
     return 0
   fi
-  mode=$(stat -f %Lp "$target" 2>/dev/null || stat -c %a "$target" 2>/dev/null) || mode=""
-  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  # BSD and GNU stat disagree: GNU's -f means FILESYSTEM status, prints a
+  # report, and only then fails on %Lp — so each attempt must be captured
+  # separately (a failed assignment is fully overwritten by the next), and
+  # the result is trusted only if it looks like an octal mode.
+  mode=$(stat -f %Lp "$target" 2>/dev/null) || mode=$(stat -c %a "$target" 2>/dev/null) || mode=""
+  case "$mode" in
+    [0-7] | [0-7][0-7] | [0-7][0-7][0-7] | [0-7][0-7][0-7][0-7])
+      chmod "$mode" "$tmp" ;;
+    *) ;; # unknown mode: tmp keeps mktemp's 0600 — content still safe
+  esac
   mv -f "$tmp" "$target"
   echo "Removed completion lines from $rc_file"
 }

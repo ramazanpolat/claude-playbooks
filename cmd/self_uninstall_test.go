@@ -82,6 +82,77 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	}
 }
 
+func TestSiblingToRemoveRequiresSameResolution(t *testing.T) {
+	resetCommandTestState(t)
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude-playbook")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cpb := filepath.Join(dir, "cpb")
+
+	if got := siblingToRemove(bin); got != "" {
+		t.Fatalf("no sibling on disk, got %q", got)
+	}
+
+	// The installer's own pair: cpb -> claude-playbook is removed.
+	if err := os.Symlink("claude-playbook", cpb); err != nil {
+		t.Fatal(err)
+	}
+	if got := siblingToRemove(bin); got != cpb {
+		t.Fatalf("installer sibling: got %q, want %q", got, cpb)
+	}
+
+	// Invoked THROUGH the symlink: the real binary is the sibling.
+	if got := siblingToRemove(cpb); got != bin {
+		t.Fatalf("exec via symlink: got %q, want %q", got, bin)
+	}
+
+	// A foreign regular file under the reserved name survives.
+	if err := os.Remove(cpb); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cpb, []byte("someone else's cpb"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := siblingToRemove(bin); got != "" {
+		t.Fatalf("foreign regular file claimed as sibling: %q", got)
+	}
+
+	// A symlink resolving elsewhere survives.
+	other := filepath.Join(dir, "other-tool")
+	if err := os.WriteFile(other, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(cpb); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("other-tool", cpb); err != nil {
+		t.Fatal(err)
+	}
+	if got := siblingToRemove(bin); got != "" {
+		t.Fatalf("foreign symlink claimed as sibling: %q", got)
+	}
+
+	// Non-reserved basenames never have siblings.
+	if got := siblingToRemove(other); got != "" {
+		t.Fatalf("non-reserved basename produced sibling %q", got)
+	}
+
+	// --keep-binary keeps the pair intact.
+	if err := os.Remove(cpb); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("claude-playbook", cpb); err != nil {
+		t.Fatal(err)
+	}
+	selfUninstallKeepBinary = true
+	if got := siblingToRemove(bin); got != "" {
+		t.Fatalf("--keep-binary still selects sibling %q", got)
+	}
+	selfUninstallKeepBinary = false
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout
