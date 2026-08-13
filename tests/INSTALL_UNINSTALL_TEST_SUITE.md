@@ -4,8 +4,8 @@ This suite verifies `install.sh` and `uninstall.sh` without touching the
 user's real `claude-playbook` installation, shell config, or playbooks.
 
 It clones the repo, switches to the target branch, builds a temporary release
-asset, installs that asset into a temporary bin directory, verifies a custom
-command name such as `cpb`, then uninstalls it.
+asset, installs that asset into a temporary bin directory, verifies the `cpb`
+symlink the installer creates, then uninstalls it.
 
 This is an **operator-driven herdr acceptance suite**. The agent drives a real
 **herdr pane** holding a **`sprite console`** into an isolated Sprite VM, sends
@@ -132,49 +132,51 @@ INSTALL_DIR="$INSTALL_DIR" \
   sh "$REPO/install.sh"
 
 assert_exists "$INSTALL_DIR/claude-playbook"
+assert_exists "$INSTALL_DIR/cpb"
 "$INSTALL_DIR/claude-playbook" --version | tee "$SUITE_ROOT/default-version.out"
 assert_contains "$SUITE_ROOT/default-version.out" "suite-install-test"
+"$INSTALL_DIR/cpb" --version | tee "$SUITE_ROOT/cpb-version.out"
+assert_contains "$SUITE_ROOT/cpb-version.out" "suite-install-test"
 echo "TEST 1 PASS"
 ```
 
-Expected: `Installed to .../claude-playbook`, version string visible, ends
-with `TEST 1 PASS`.
+Expected: `Installed to .../claude-playbook`, `Created symlink .../cpb ->
+claude-playbook`, both names print the version string, ends with
+`TEST 1 PASS`.
 
-### Step 3: Uninstall Default Command Name
+### Step 3: Uninstall Removes Both Names
 
 ```bash
-echo "TEST 2: uninstall default command name from temp INSTALL_DIR"
+echo "TEST 2: uninstall removes claude-playbook and cpb from temp INSTALL_DIR"
 INSTALL_DIR="$INSTALL_DIR" sh "$REPO/uninstall.sh"
 assert_not_exists "$INSTALL_DIR/claude-playbook"
+assert_not_exists "$INSTALL_DIR/cpb"
 echo "TEST 2 PASS"
 ```
 
-Expected: `Removed .../claude-playbook`, playbooks untouched, `TEST 2 PASS`.
+Expected: `Removed .../claude-playbook` and `Removed .../cpb`, playbooks
+untouched, `TEST 2 PASS`.
 
-### Step 4: Install Custom Command Name `cpb`
+### Step 4: Reinstall For The User-Flow Test
 
 ```bash
-echo "TEST 3: install custom command name cpb with INSTALL_NAME"
+echo "TEST 3: reinstall into temp INSTALL_DIR"
 VERSION="$VERSION" \
 DOWNLOAD_BASE_URL="file://$RELEASE_ROOT" \
 INSTALL_DIR="$INSTALL_DIR" \
-INSTALL_NAME=cpb \
   sh "$REPO/install.sh"
 
+assert_exists "$INSTALL_DIR/claude-playbook"
 assert_exists "$INSTALL_DIR/cpb"
-assert_not_exists "$INSTALL_DIR/claude-playbook"
-"$INSTALL_DIR/cpb" --version | tee "$SUITE_ROOT/cpb-version.out"
-assert_contains "$SUITE_ROOT/cpb-version.out" "suite-install-test"
 echo "TEST 3 PASS"
 ```
 
-Expected: `Installed to .../cpb`, no `claude-playbook` binary created,
-`TEST 3 PASS`.
+Expected: same as TEST 1; ends with `TEST 3 PASS`.
 
 ### Step 5: Use `cpb` Like A User
 
 ```bash
-echo "TEST 4: custom command can run CLI features without touching real playbooks"
+echo "TEST 4: cpb symlink can run CLI features without touching real playbooks"
 HOME="$HOME_SANDBOX" "$INSTALL_DIR/cpb" create cpb-smoke --no-alias
 assert_exists "$CLAUDE_PLAYBOOKS_DIR/cpb-smoke"
 assert_exists "$CLAUDE_PLAYBOOKS_DIR/cpb-smoke/CLAUDE.md"
@@ -186,31 +188,15 @@ Expected: `Created playbook "cpb-smoke"` under the suite temp directory. Flat
 model: the playbook is a bare directory with a starter `CLAUDE.md` and **no
 `.playbook` manifest**. Ends with `TEST 4 PASS`.
 
-### Step 6: Uninstall Custom Command Name `cpb`
+### Step 6: Final Uninstall Leaves Playbooks Intact
 
 ```bash
-echo "TEST 5: uninstall custom command name cpb with INSTALL_NAME"
-INSTALL_DIR="$INSTALL_DIR" INSTALL_NAME=cpb sh "$REPO/uninstall.sh"
+echo "TEST 5: uninstall removes both names, playbooks survive"
+INSTALL_DIR="$INSTALL_DIR" sh "$REPO/uninstall.sh"
+assert_not_exists "$INSTALL_DIR/claude-playbook"
 assert_not_exists "$INSTALL_DIR/cpb"
 assert_exists "$CLAUDE_PLAYBOOKS_DIR/cpb-smoke"
 echo "TEST 5 PASS"
-```
-
-Expected: `Removed .../cpb`; the `cpb-smoke` playbook remains; `TEST 5 PASS`.
-
-### Step 7: Verify `BINARY_NAME=cpb` Compatibility
-
-```bash
-echo "TEST 6: BINARY_NAME remains a compatibility alias for INSTALL_NAME"
-VERSION="$VERSION" \
-DOWNLOAD_BASE_URL="file://$RELEASE_ROOT" \
-INSTALL_DIR="$INSTALL_DIR" \
-BINARY_NAME=cpb \
-  sh "$REPO/install.sh"
-
-assert_exists "$INSTALL_DIR/cpb"
-INSTALL_DIR="$INSTALL_DIR" BINARY_NAME=cpb sh "$REPO/uninstall.sh"
-assert_not_exists "$INSTALL_DIR/cpb"
 
 echo "PASS: install/uninstall suite completed"
 echo "BRANCH=$BRANCH"

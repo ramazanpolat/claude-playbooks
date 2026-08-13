@@ -63,12 +63,15 @@ Verify:
 claude-playbook --version
 ```
 
-Install with a shorter command name:
+The installer also creates a `cpb` symlink -- a shorter name for the same
+binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | INSTALL_NAME=cpb sh
 cpb --version
 ```
+
+Want a different command name? Point your own alias or symlink at the binary,
+e.g. `alias pb=claude-playbook` or `ln -s claude-playbook ~/.local/bin/pb`.
 
 You can also clone the repo and run the installer locally:
 
@@ -78,30 +81,16 @@ cd claude-playbooks
 ./install.sh
 ```
 
-Local installs support the same shorter command name:
-
-```bash
-INSTALL_NAME=cpb ./install.sh
-cpb --version
-```
-
 Uninstall only the binary:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | sh
 ```
 
-To uninstall a custom command name:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | INSTALL_NAME=cpb sh
-```
-
-Or run the local uninstaller from a clone. Use the same `INSTALL_NAME` if you installed a custom command name:
+Or run the local uninstaller from a clone:
 
 ```bash
 ./uninstall.sh
-INSTALL_NAME=cpb ./uninstall.sh
 ```
 
 Uninstalling does not delete `~/.claude-playbooks`.
