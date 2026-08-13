@@ -67,8 +67,11 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	if !strings.Contains(out, "completion line(s) from") {
 		t.Fatalf("dry-run does not preview the rc completion edit:\n%s", out)
 	}
-	if !strings.Contains(out, lockFile) {
-		t.Fatalf("dry-run does not preview the lock-file removal:\n%s", out)
+	// Advisory lock files survive uninstall by design (deleting a flock
+	// pathname splits concurrent lockers across inodes), so the preview
+	// must not claim them either.
+	if strings.Contains(out, lockFile) {
+		t.Fatalf("dry-run previews a lock-file removal that must not happen:\n%s", out)
 	}
 	if _, err := os.Stat(lockFile); err != nil {
 		t.Fatalf("dry-run removed the lock file: %v", err)
@@ -79,6 +82,24 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	}
 	if !strings.Contains(string(data), "source <(cpb completion zsh)") {
 		t.Fatalf("dry-run modified an rc file:\n%s", data)
+	}
+}
+
+func TestLaunchersToRemoveExcludesReservedNames(t *testing.T) {
+	resetCommandTestState(t)
+	dir := t.TempDir()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"deploy", "cpb", "claude-playbook"} {
+		if err := os.Symlink(exe, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	les := launchersToRemove(dir, nil)
+	if len(les) != 1 || les[0].CmdName != "deploy" {
+		t.Fatalf("reserved names must be left to sibling/binary cleanup, got %#v", les)
 	}
 }
 

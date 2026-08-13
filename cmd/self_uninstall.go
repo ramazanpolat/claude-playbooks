@@ -87,9 +87,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 					fmt.Printf("  Completions:   %d line(s) in %s\n", n, rc)
 				}
 			}
-			for _, lf := range lockFilesToRemove(shellConfig) {
-				fmt.Printf("  Lock file:     %s\n", lf)
-			}
 		}
 		fmt.Println()
 		if !confirm("Permanently uninstall claude-playbook? [y/N] ") {
@@ -129,9 +126,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 				if n, err := shell.CountExactLines(rc, completionLines()); err == nil && n > 0 {
 					fmt.Printf("  %d completion line(s) from: %s\n", n, rc)
 				}
-			}
-			for _, lf := range lockFilesToRemove(shellConfig) {
-				fmt.Printf("  lock file: %s\n", lf)
 			}
 		}
 		return nil
@@ -244,15 +238,12 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// The rc-file editors keep an advisory lock file beside each file they
-	// touch; once the tool itself is gone that litter is ours to clear.
-	if !selfUninstallKeepBinary {
-		for _, lf := range lockFilesToRemove(shellConfig) {
-			if err := os.Remove(lf); err == nil {
-				removed = append(removed, fmt.Sprintf("lock file (%s)", lf))
-			}
-		}
-	}
+	// The advisory rc lock files (<rc>.claude-playbook.lock) are deliberately
+	// LEFT BEHIND: unlinking a flock pathname splits any concurrent locker
+	// onto a different inode, and a claude-playbook process already running
+	// survives its binary's removal — deleting the lock could let its edit
+	// overlap a later editor's and lose rc content. Two empty files are the
+	// cheaper failure.
 
 	fmt.Println("Removed:")
 	if len(removed) == 0 {
@@ -294,7 +285,18 @@ func launchersToRemove(ldir string, pbs []*playbook.Playbook) []launcher.Entry {
 		fmt.Fprintf(os.Stderr, "warning: failed to list launchers: %v\n", err)
 		return nil
 	}
-	return les
+	// The reserved CLI names resolve to this binary too but are not
+	// playbook launchers — the sibling/binary cleanup owns them. Sweeping
+	// them here would double-report the same path (launcher AND sibling)
+	// and desync the preview from what each step actually removes.
+	var out []launcher.Entry
+	for _, e := range les {
+		if launcher.ReservedNames[e.CmdName] {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // completionRcFiles returns the rc files install.sh may have appended
@@ -361,25 +363,6 @@ func siblingToRemove(execPath string) string {
 		return ""
 	}
 	return p
-}
-
-// lockFilesToRemove returns the advisory lock files that exist beside the
-// rc files this uninstall edits. Shared by preview and removal so the
-// consent summary always matches what actually gets deleted.
-func lockFilesToRemove(shellConfig string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, rc := range append(completionRcFiles(), shellConfig) {
-		lf := shell.LockFilePath(rc)
-		if seen[lf] {
-			continue
-		}
-		seen[lf] = true
-		if _, err := os.Lstat(lf); err == nil {
-			out = append(out, lf)
-		}
-	}
-	return out
 }
 
 // launcherSweepDirs returns every directory the launcher sweep must cover:

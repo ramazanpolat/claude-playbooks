@@ -326,13 +326,6 @@ func CountExactLines(configFile string, doomed []string) (int, error) {
 	return n, nil
 }
 
-// LockFilePath returns the advisory lock file the editing helpers create
-// beside configFile. Exposed so self-uninstall can preview and remove the
-// litter — while the tool is installed the lock file is load-bearing.
-func LockFilePath(configFile string) string {
-	return resolveConfigPath(configFile) + ".claude-playbook.lock"
-}
-
 func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string, int) {
 	var kept []string
 	removed := 0
