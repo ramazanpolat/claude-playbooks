@@ -57,19 +57,32 @@ remove_launchers_in() {
 }
 
 # Remove one installation: the launchers resolving to this binary (both in
-# its own directory and in the ~/.local/bin fallback), the cpb symlink
-# beside it, then the binary itself.
+# its own directory and in the ~/.local/bin fallback), the cpb sibling
+# beside it — only when provably ours — then the binary itself.
 remove_install_at() {
   bin="$1"
+  bin_real=""
   if [ -e "$bin" ] || [ -L "$bin" ]; then
     if bin_real=$(resolve_path "$bin"); then
       remove_launchers_in "$(dirname "$bin")" "$bin_real"
       remove_launchers_in "$HOME/.local/bin" "$bin_real"
     else
+      bin_real=""
       echo "Note: cannot resolve symlinks on this system; launchers near $bin were not swept." >&2
     fi
   fi
-  remove_target "$(dirname "$bin")/cpb"
+  # The cpb sibling is ours in exactly two provable cases, mirroring the Go
+  # self-uninstall ownership check: it is the literal `cpb -> claude-playbook`
+  # link install.sh writes (ours even if currently dangling), or it resolves
+  # to the same file as the binary being removed. A foreign regular file or
+  # a link to another executable under the reserved name survives.
+  sib="$(dirname "$bin")/cpb"
+  if [ -L "$sib" ] && [ "$(readlink "$sib" 2>/dev/null)" = "claude-playbook" ]; then
+    remove_target "$sib"
+  elif { [ -e "$sib" ] || [ -L "$sib" ]; } && [ -n "$bin_real" ] \
+      && sib_real=$(resolve_path "$sib") && [ "$sib_real" = "$bin_real" ]; then
+    remove_target "$sib"
+  fi
   remove_target "$bin"
 }
 
