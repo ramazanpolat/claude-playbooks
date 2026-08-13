@@ -59,6 +59,21 @@ for BIN in "$@"; do
       && "$BIN" self-uninstall --help 2>/dev/null | grep -q -- "--binary-only"; then
     "$BIN" self-uninstall --binary-only --yes
     DELEGATED=1
+    # The candidate may be a symlink whose physical target the delegated
+    # uninstall just removed (package-manager-style indirection): reserved
+    # names are excluded from the launcher sweep, so clear the now-dangling
+    # PATH entry — and its cpb twin — here. Only dangling links are
+    # touched: if the binary survived (e.g. permission denied), both still
+    # resolve and stay.
+    if [ -L "$BIN" ] && [ ! -e "$BIN" ]; then
+      rm -f "$BIN"
+      echo "Removed $BIN"
+      twin="$(dirname "$BIN")/cpb"
+      if [ -L "$twin" ] && [ ! -e "$twin" ]; then
+        rm -f "$twin"
+        echo "Removed $twin"
+      fi
+    fi
   else
     remove_artifacts_in "$(dirname "$BIN")"
     FELL_BACK=1
