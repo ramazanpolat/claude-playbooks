@@ -52,6 +52,10 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	home := seedCompletionRc(t)
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
 	config.ShellConfig = filepath.Join(home, "shellrc")
+	lockFile := filepath.Join(home, ".zshrc.claude-playbook.lock")
+	if err := os.WriteFile(lockFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	selfUninstallDryRun = true
 
 	out := captureStdout(t, func() {
@@ -62,6 +66,12 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 
 	if !strings.Contains(out, "completion line(s) from") {
 		t.Fatalf("dry-run does not preview the rc completion edit:\n%s", out)
+	}
+	if !strings.Contains(out, lockFile) {
+		t.Fatalf("dry-run does not preview the lock-file removal:\n%s", out)
+	}
+	if _, err := os.Stat(lockFile); err != nil {
+		t.Fatalf("dry-run removed the lock file: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(home, ".zshrc"))
 	if err != nil {

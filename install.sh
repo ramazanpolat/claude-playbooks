@@ -59,8 +59,9 @@ fi
 mv "$TMP_FILE" "$INSTALL_DIR/claude-playbook"
 TMP_FILE=""
 
-# cpb is the short name for the same binary. Want another name? Create your
-# own alias or symlink.
+# cpb is the short name for the same binary. Want another name? Use a shell
+# alias or a hard link — a symlink under any other name would dispatch as a
+# playbook launcher.
 rm -f "$INSTALL_DIR/cpb"
 ln -s "claude-playbook" "$INSTALL_DIR/cpb"
 echo "Created symlink $INSTALL_DIR/cpb -> claude-playbook"

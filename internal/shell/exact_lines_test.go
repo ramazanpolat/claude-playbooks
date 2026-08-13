@@ -52,6 +52,28 @@ func TestRemoveExactLinesKeepsEverythingElse(t *testing.T) {
 	}
 }
 
+func TestRemoveExactLinesKeepsPrecedingClaudePlaybookComment(t *testing.T) {
+	// The alias editors strip a preceding "# claude-playbook:" marker line;
+	// completion lines are never written with one, so here such a comment is
+	// user-authored and must survive.
+	rc := filepath.Join(t.TempDir(), ".zshrc")
+	content := "# claude-playbook: custom setup\nsource <(cpb completion zsh)\n"
+	if err := os.WriteFile(rc, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := RemoveExactLines(rc, completionDoomed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("removed %d lines, want 1", n)
+	}
+	got, _ := os.ReadFile(rc)
+	if string(got) != "# claude-playbook: custom setup\n" {
+		t.Fatalf("user comment did not survive: %q", got)
+	}
+}
+
 func TestRemoveExactLinesWritesThroughSymlink(t *testing.T) {
 	dir := t.TempDir()
 	real := filepath.Join(dir, "dotfiles-zshrc")

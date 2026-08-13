@@ -270,9 +270,11 @@ func RemoveByPathPrefix(configFile, prefix string) (int, error) {
 }
 
 // RemoveExactLines deletes every line of configFile that exactly matches one
-// of doomed. Returns the number of lines removed. Like every editor in this
-// package it resolves a symlinked rc file to its target, takes the config
-// lock, and replaces the file atomically with its mode preserved.
+// of doomed — ONLY those lines: unlike the alias editors it never strips an
+// adjacent `# claude-playbook:` comment, which here would be user-authored.
+// Returns the number of lines removed. Like every editor in this package it
+// resolves a symlinked rc file to its target, takes the config lock, and
+// replaces the file atomically with its mode preserved.
 func RemoveExactLines(configFile string, doomed []string) (int, error) {
 	set := make(map[string]bool, len(doomed))
 	for _, l := range doomed {
@@ -285,9 +287,15 @@ func RemoveExactLines(configFile string, doomed []string) (int, error) {
 		if err != nil {
 			return err
 		}
-		kept, n := dropMatchingLines(lines, func(line string) bool {
-			return set[line]
-		})
+		var kept []string
+		n := 0
+		for _, line := range lines {
+			if set[line] {
+				n++
+				continue
+			}
+			kept = append(kept, line)
+		}
 		removed = n
 		if removed == 0 {
 			return nil
@@ -318,11 +326,11 @@ func CountExactLines(configFile string, doomed []string) (int, error) {
 	return n, nil
 }
 
-// RemoveLockFile deletes the advisory lock file the editing helpers create
-// beside configFile. Only self-uninstall calls this — while the tool is
-// installed the lock file is load-bearing.
-func RemoveLockFile(configFile string) {
-	os.Remove(resolveConfigPath(configFile) + ".claude-playbook.lock")
+// LockFilePath returns the advisory lock file the editing helpers create
+// beside configFile. Exposed so self-uninstall can preview and remove the
+// litter — while the tool is installed the lock file is load-bearing.
+func LockFilePath(configFile string) string {
+	return resolveConfigPath(configFile) + ".claude-playbook.lock"
 }
 
 func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string, int) {

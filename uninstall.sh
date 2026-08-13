@@ -88,16 +88,34 @@ remove_completion_lines() {
     done
   done
   [ "$changed" -eq 1 ] || return 0
-  tmp=$(mktemp "${TMPDIR:-/tmp}/cpb-rc.XXXXXX")
+  # Edit the SYMLINK TARGET, atomically: filter into a same-directory temp
+  # file, restore the original's mode, then rename over the target. The
+  # original survives any failure in between, and a stow/chezmoi-symlinked
+  # ~/.zshrc keeps its symlink because only the target is replaced.
+  target="$rc_file"
+  if [ -L "$rc_file" ]; then
+    target=$(resolve_path "$rc_file") || {
+      echo "Note: cannot resolve symlinked $rc_file on this system; completion lines left in place." >&2
+      return 0
+    }
+  fi
+  tmp=$(mktemp "${target}.cpb.XXXXXX") || return 0
+  st=0
   grep -vxF -e "source <(claude-playbook completion bash)" \
             -e "source <(claude-playbook completion zsh)" \
             -e "source <(cpb completion bash)" \
             -e "source <(cpb completion zsh)" \
-            "$rc_file" > "$tmp" || true
-  # Write THROUGH the rc path: an mv would replace a symlinked ~/.zshrc
-  # (stow, chezmoi) with a detached plain file at mktemp's 0600 mode.
-  cat "$tmp" > "$rc_file"
-  rm -f "$tmp"
+            "$target" > "$tmp" || st=$?
+  # grep exits 1 when every line was filtered out (valid); >1 is a real
+  # read or write error — keep the original untouched.
+  if [ "$st" -gt 1 ]; then
+    rm -f "$tmp"
+    echo "Warning: could not filter $rc_file; left unchanged." >&2
+    return 0
+  fi
+  mode=$(stat -f %Lp "$target" 2>/dev/null || stat -c %a "$target" 2>/dev/null) || mode=""
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv -f "$tmp" "$target"
   echo "Removed completion lines from $rc_file"
 }
 

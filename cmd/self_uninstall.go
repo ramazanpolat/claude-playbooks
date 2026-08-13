@@ -30,7 +30,12 @@ playbooks directory, and the claude-playbook binary itself.
 
 Use --keep-data to preserve the playbooks directory.
 Use --keep-binary to leave the binary in place.
-Use --dry-run to preview what would be removed without making any changes.`,
+Use --dry-run to preview what would be removed without making any changes.
+
+Launchers are swept from the launcher directory this invocation resolves
+plus the ~/.local/bin fallback. If you created launchers with --launcher-dir
+or CLAUDE_LAUNCHER_DIR, run self-uninstall with the same setting so that
+directory is swept too.`,
 	Args: cobra.NoArgs,
 	RunE: runSelfUninstall,
 }
@@ -79,6 +84,9 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 					fmt.Printf("  Completions:   %d line(s) in %s\n", n, rc)
 				}
 			}
+			for _, lf := range lockFilesToRemove(shellConfig) {
+				fmt.Printf("  Lock file:     %s\n", lf)
+			}
 		}
 		fmt.Println()
 		if !confirm("Permanently uninstall claude-playbook? [y/N] ") {
@@ -115,6 +123,9 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 				if n, err := shell.CountExactLines(rc, completionLines()); err == nil && n > 0 {
 					fmt.Printf("  %d completion line(s) from: %s\n", n, rc)
 				}
+			}
+			for _, lf := range lockFilesToRemove(shellConfig) {
+				fmt.Printf("  lock file: %s\n", lf)
 			}
 		}
 		return nil
@@ -236,8 +247,10 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	// The rc-file editors keep an advisory lock file beside each file they
 	// touch; once the tool itself is gone that litter is ours to clear.
 	if !selfUninstallKeepBinary {
-		for _, rc := range append(completionRcFiles(), shellConfig) {
-			shell.RemoveLockFile(rc)
+		for _, lf := range lockFilesToRemove(shellConfig) {
+			if err := os.Remove(lf); err == nil {
+				removed = append(removed, fmt.Sprintf("lock file (%s)", lf))
+			}
 		}
 	}
 
@@ -308,6 +321,25 @@ func completionLines() []string {
 	for name := range names {
 		for _, sh := range []string{"bash", "zsh"} {
 			out = append(out, fmt.Sprintf("source <(%s completion %s)", name, sh))
+		}
+	}
+	return out
+}
+
+// lockFilesToRemove returns the advisory lock files that exist beside the
+// rc files this uninstall edits. Shared by preview and removal so the
+// consent summary always matches what actually gets deleted.
+func lockFilesToRemove(shellConfig string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, rc := range append(completionRcFiles(), shellConfig) {
+		lf := shell.LockFilePath(rc)
+		if seen[lf] {
+			continue
+		}
+		seen[lf] = true
+		if _, err := os.Lstat(lf); err == nil {
+			out = append(out, lf)
 		}
 	}
 	return out

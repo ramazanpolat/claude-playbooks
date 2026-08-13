@@ -70,8 +70,10 @@ binary:
 cpb --version
 ```
 
-Want a different command name? Point your own alias or symlink at the binary,
-e.g. `alias pb=claude-playbook` or `ln -s claude-playbook ~/.local/bin/pb`.
+Want a different command name? Use a shell alias (`alias pb=claude-playbook`)
+or a hard link (`ln /usr/local/bin/claude-playbook ~/.local/bin/pb`). Do not
+use a symlink: a symlink to the binary under any other name is treated as a
+playbook launcher and dispatched accordingly.
 
 You can also clone the repo and run the installer locally:
 
