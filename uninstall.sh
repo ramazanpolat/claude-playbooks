@@ -3,162 +3,62 @@ set -e
 
 DEFAULT_INSTALL_DIR="${DEFAULT_INSTALL_DIR:-/usr/local/bin}"
 
-remove_target() {
-  target="$1"
-  if [ -z "$target" ]; then
-    return 0
-  fi
-  case "$target" in
-    /*) ;;
-    *) return 0 ;;
-  esac
-  if [ ! -e "$target" ] && [ ! -L "$target" ]; then
-    return 0
-  fi
-
-  rm -f "$target"
-  echo "Removed $target"
-  REMOVED=1
-}
-
-# Fully resolve a path through symlinks. Fails (printing nothing) when the
-# path cannot be resolved — a dangling link, or a system with neither
-# readlink -f nor realpath. Callers treat failure as "not ours" and leave
-# the file alone.
-resolve_path() {
-  readlink -f "$1" 2>/dev/null && return 0
-  realpath "$1" 2>/dev/null && return 0
-  return 1
-}
-
-# Remove playbook launcher symlinks (v2.13.0+): only links that RESOLVE to
-# the binary being uninstalled are ours. Matching on the target's basename
-# would delete a user's own `foo -> /elsewhere/cpb`; a dangling link is
-# never ours either, because the binary still exists while this runs. The
-# CLI entries themselves (claude-playbook, cpb) are handled by
-# remove_target, not here.
-remove_launchers_in() {
-  dir="$1"
-  bin_real="$2"
-  [ -d "$dir" ] || return 0
-  [ -n "$bin_real" ] || return 0
-  for link in "$dir"/*; do
-    [ -L "$link" ] || continue
-    base=$(basename "$link")
-    [ "$base" = "claude-playbook" ] && continue
-    [ "$base" = "cpb" ] && continue
-    link_real=$(resolve_path "$link") || continue
-    if [ "$link_real" = "$bin_real" ]; then
-      rm -f "$link"
-      echo "Removed launcher $link"
-      REMOVED=1
-    fi
-  done
-}
-
-# Remove one installation: the launchers resolving to this binary (both in
-# its own directory and in the ~/.local/bin fallback), the cpb sibling
-# beside it — only when provably ours — then the binary itself.
-remove_install_at() {
-  bin="$1"
-  bin_real=""
-  if [ -e "$bin" ] || [ -L "$bin" ]; then
-    if bin_real=$(resolve_path "$bin"); then
-      remove_launchers_in "$(dirname "$bin")" "$bin_real"
-      remove_launchers_in "$HOME/.local/bin" "$bin_real"
-    else
-      bin_real=""
-      echo "Note: cannot resolve symlinks on this system; launchers near $bin were not swept." >&2
-    fi
-  fi
-  # The cpb sibling is ours in exactly two provable cases, mirroring the Go
-  # self-uninstall ownership check: it is the literal `cpb -> claude-playbook`
-  # link install.sh writes (ours even if currently dangling), or it resolves
-  # to the same file as the binary being removed. A foreign regular file or
-  # a link to another executable under the reserved name survives.
-  sib="$(dirname "$bin")/cpb"
-  if [ -L "$sib" ] && [ "$(readlink "$sib" 2>/dev/null)" = "claude-playbook" ]; then
-    remove_target "$sib"
-  elif { [ -e "$sib" ] || [ -L "$sib" ]; } && [ -n "$bin_real" ] \
-      && sib_real=$(resolve_path "$sib") && [ "$sib_real" = "$bin_real" ]; then
-    remove_target "$sib"
-  fi
-  remove_target "$bin"
-}
-
-# Remove the completion lines install.sh appended to shell rc files; without
-# this every new shell errors with 'command not found' after uninstall.
-remove_completion_lines() {
-  rc_file="$1"
-  [ -f "$rc_file" ] || return 0
-  changed=0
-  for name in claude-playbook cpb; do
-    for shell_type in bash zsh; do
-      line="source <($name completion $shell_type)"
-      if grep -qxF "$line" "$rc_file"; then
-        changed=1
-      fi
-    done
-  done
-  [ "$changed" -eq 1 ] || return 0
-  # Edit the SYMLINK TARGET, atomically: filter into a same-directory temp
-  # file, restore the original's mode, then rename over the target. The
-  # original survives any failure in between, and a stow/chezmoi-symlinked
-  # ~/.zshrc keeps its symlink because only the target is replaced.
-  target="$rc_file"
-  if [ -L "$rc_file" ]; then
-    target=$(resolve_path "$rc_file") || {
-      echo "Note: cannot resolve symlinked $rc_file on this system; completion lines left in place." >&2
-      return 0
-    }
-  fi
-  tmp=$(mktemp "${target}.cpb.XXXXXX") || return 0
-  st=0
-  grep -vxF -e "source <(claude-playbook completion bash)" \
-            -e "source <(claude-playbook completion zsh)" \
-            -e "source <(cpb completion bash)" \
-            -e "source <(cpb completion zsh)" \
-            "$target" > "$tmp" || st=$?
-  # grep exits 1 when every line was filtered out (valid); >1 is a real
-  # read or write error — keep the original untouched.
-  if [ "$st" -gt 1 ]; then
-    rm -f "$tmp"
-    echo "Warning: could not filter $rc_file; left unchanged." >&2
-    return 0
-  fi
-  # BSD and GNU stat disagree: GNU's -f means FILESYSTEM status, prints a
-  # report, and only then fails on %Lp — so each attempt must be captured
-  # separately (a failed assignment is fully overwritten by the next), and
-  # the result is trusted only if it looks like an octal mode.
-  mode=$(stat -f %Lp "$target" 2>/dev/null) || mode=$(stat -c %a "$target" 2>/dev/null) || mode=""
-  case "$mode" in
-    [0-7] | [0-7][0-7] | [0-7][0-7][0-7] | [0-7][0-7][0-7][0-7])
-      chmod "$mode" "$tmp" ;;
-    *) ;; # unknown mode: tmp keeps mktemp's 0600 — content still safe
-  esac
-  mv -f "$tmp" "$target"
-  echo "Removed completion lines from $rc_file"
-}
-
-REMOVED=0
-
+# Locate the installed binary.
+BIN=""
 if [ -n "${INSTALL_DIR:-}" ]; then
-  remove_install_at "$INSTALL_DIR/claude-playbook"
+  [ -x "$INSTALL_DIR/claude-playbook" ] && BIN="$INSTALL_DIR/claude-playbook"
 else
-  remove_install_at "$DEFAULT_INSTALL_DIR/claude-playbook"
-  remove_install_at "$HOME/.local/bin/claude-playbook"
-
-  FOUND=$(command -v claude-playbook 2>/dev/null || true)
-  if [ -n "$FOUND" ]; then
-    remove_install_at "$FOUND"
+  for c in "$DEFAULT_INSTALL_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"; do
+    if [ -x "$c" ]; then
+      BIN="$c"
+      break
+    fi
+  done
+  if [ -z "$BIN" ]; then
+    BIN=$(command -v claude-playbook 2>/dev/null || true)
   fi
 fi
 
-remove_completion_lines "$HOME/.bashrc"
-remove_completion_lines "$HOME/.zshrc"
+# The uninstall logic lives in ONE place: the binary itself. Launcher
+# ownership, the cpb sibling, and completion-line cleanup all need the same
+# judgment the CLI already implements and tests — duplicating it in shell is
+# how uninstallers grow divergent bugs.
+if [ -n "$BIN" ] && "$BIN" --version >/dev/null 2>&1; then
+  exec "$BIN" self-uninstall --binary-only --yes
+fi
+
+# Fallback: no runnable binary. Remove only the two literal artifacts
+# install.sh writes; nothing here guesses at ownership.
+REMOVED=0
+remove_artifacts_in() {
+  dir="$1"
+  [ -n "$dir" ] || return 0
+  # cpb is ours only as the exact `cpb -> claude-playbook` link install.sh
+  # creates (dangling included); anything else under that name is foreign.
+  if [ -L "$dir/cpb" ] && [ "$(readlink "$dir/cpb" 2>/dev/null)" = "claude-playbook" ]; then
+    rm -f "$dir/cpb"
+    echo "Removed $dir/cpb"
+    REMOVED=1
+  fi
+  if [ -e "$dir/claude-playbook" ] || [ -L "$dir/claude-playbook" ]; then
+    rm -f "$dir/claude-playbook"
+    echo "Removed $dir/claude-playbook"
+    REMOVED=1
+  fi
+}
+
+if [ -n "${INSTALL_DIR:-}" ]; then
+  remove_artifacts_in "$INSTALL_DIR"
+else
+  remove_artifacts_in "$DEFAULT_INSTALL_DIR"
+  remove_artifacts_in "$HOME/.local/bin"
+fi
 
 if [ "$REMOVED" -eq 0 ]; then
   echo "claude-playbook was not found in the expected install locations."
+else
+  echo "Note: the binary could not be run, so launcher symlinks and any"
+  echo "completion lines in your shell rc files were not cleaned up."
 fi
 
 echo ""

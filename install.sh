@@ -76,25 +76,11 @@ case ":$PATH:" in
      && echo "  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
 
-# Install shell completions
-install_completion() {
-  local rc_file="$1"
-  local shell_type="$2"
-  if [ -f "$rc_file" ]; then
-    for name in claude-playbook cpb; do
-      if ! grep -q "$name completion $shell_type" "$rc_file"; then
-        echo "source <($name completion $shell_type)" >> "$rc_file"
-        echo "Added $shell_type completion for $name to $rc_file"
-      fi
-    done
-  fi
-}
-
+# The installer never edits shell rc files — your dotfiles are yours.
 echo ""
-echo "Setting up shell completions..."
-install_completion "$HOME/.bashrc" "bash"
-install_completion "$HOME/.zshrc" "zsh"
+echo "Optional: enable shell completions by adding ONE of these lines to your rc file:"
+echo "  echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh"
+echo "  echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash"
 
 echo ""
 echo "Done. Run: claude-playbook --help (or cpb --help)"
-echo "(You may need to restart your terminal or run 'source ~/.bashrc' or 'source ~/.zshrc' for completions to take effect)"

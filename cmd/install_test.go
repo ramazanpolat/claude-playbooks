@@ -471,6 +471,7 @@ func resetCommandTestState(t *testing.T) {
 	selfUninstallKeepData = false
 	selfUninstallKeepBinary = false
 	selfUninstallDryRun = false
+	selfUninstallBinaryOnly = false
 	deleteYes = false
 	linkName = ""
 	linkAlias = ""
@@ -490,6 +491,7 @@ func resetCommandTestState(t *testing.T) {
 		selfUninstallKeepData = false
 		selfUninstallKeepBinary = false
 		selfUninstallDryRun = false
+		selfUninstallBinaryOnly = false
 		deleteYes = false
 		linkName = ""
 		linkAlias = ""

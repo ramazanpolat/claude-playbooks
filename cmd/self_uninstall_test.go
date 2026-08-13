@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 // seedCompletionRc creates a sandbox HOME holding rc files with the exact
@@ -82,6 +83,54 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	}
 	if !strings.Contains(string(data), "source <(cpb completion zsh)") {
 		t.Fatalf("dry-run modified an rc file:\n%s", data)
+	}
+}
+
+func TestSelfUninstallBinaryOnlyLeavesDataAndAliases(t *testing.T) {
+	resetCommandTestState(t)
+	home := seedCompletionRc(t)
+	config.PlaybooksDir = filepath.Join(home, "playbooks")
+	config.ShellConfig = filepath.Join(home, "shellrc")
+	root := filepath.Join(config.PlaybooksDir, "kept")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("version = \"0.1.0\"\nname = \"kept\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := shell.Write(config.ShellConfig, "kept", root); err != nil {
+		t.Fatal(err)
+	}
+	selfUninstallYes = true
+	selfUninstallBinaryOnly = true
+	selfUninstallKeepBinary = true // test seam: keeps the running test executable alive
+
+	if err := runSelfUninstall(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, ".playbook")); err != nil {
+		t.Fatalf("binary-only removed playbook data: %v", err)
+	}
+	entries, err := shell.ReadAll(config.ShellConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("binary-only touched aliases: %#v", entries)
+	}
+}
+
+func TestSelfUninstallBinaryOnlyRejectsKeepBinaryContradiction(t *testing.T) {
+	resetCommandTestState(t)
+	selfUninstallBinaryOnly = true
+	selfUninstallKeepBinary = true
+	selfUninstallYes = true
+	// Passing the real command engages the CLI-only validation, which
+	// rejects the combination before touching anything.
+	err := runSelfUninstall(selfUninstallCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "contradict") {
+		t.Fatalf("expected contradiction error, got %v", err)
 	}
 }
 

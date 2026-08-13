@@ -18,6 +18,7 @@ var (
 	selfUninstallYes        bool
 	selfUninstallKeepData   bool
 	selfUninstallKeepBinary bool
+	selfUninstallBinaryOnly bool
 	selfUninstallDryRun     bool
 )
 
@@ -30,6 +31,9 @@ playbooks directory, and the claude-playbook binary itself.
 
 Use --keep-data to preserve the playbooks directory.
 Use --keep-binary to leave the binary in place.
+Use --binary-only to remove only the binary, its cpb sibling, launchers,
+and completion lines — playbooks and shell aliases stay (uninstall.sh
+delegates to this mode).
 Use --dry-run to preview what would be removed without making any changes.
 
 Launchers are swept from the launcher directory this invocation resolves
@@ -44,13 +48,24 @@ func init() {
 	selfUninstallCmd.Flags().BoolVarP(&selfUninstallYes, "yes", "y", false, "skip confirmation prompt")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepData, "keep-data", false, "preserve the playbooks directory")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepBinary, "keep-binary", false, "leave the binary in place")
+	selfUninstallCmd.Flags().BoolVar(&selfUninstallBinaryOnly, "binary-only", false, "remove only the binary, its cpb sibling, launchers, and completion lines — playbooks and aliases untouched (what uninstall.sh runs)")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallDryRun, "dry-run", false, "print what would be removed without doing anything")
 }
 
 func runSelfUninstall(cmd *cobra.Command, args []string) error {
+	// cmd is nil only in tests, which combine the flags directly to keep
+	// the test executable alive; through the CLI they contradict.
+	if cmd != nil && selfUninstallBinaryOnly && selfUninstallKeepBinary {
+		return fmt.Errorf("--binary-only and --keep-binary contradict each other")
+	}
+	// Binary-only mode touches no aliases, so it must not fail on an
+	// unrecognized shell — uninstall.sh delegates here unconditionally.
 	shellConfig, err := config.ResolveShellConfig()
 	if err != nil {
-		return err
+		if !selfUninstallBinaryOnly {
+			return err
+		}
+		shellConfig = ""
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
@@ -59,14 +74,15 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		execPath = "(unknown)"
 	}
 
-	pbs, _ := playbook.Discover(playbooksDir, shellConfig)
+	var pbs []*playbook.Playbook
+	if !selfUninstallBinaryOnly {
+		pbs, _ = playbook.Discover(playbooksDir, shellConfig)
+	}
 
 	if !selfUninstallYes && !selfUninstallDryRun {
 		fmt.Printf("This will remove:\n")
-		if !selfUninstallKeepData {
+		if !selfUninstallKeepData && !selfUninstallBinaryOnly {
 			fmt.Printf("  Playbooks:     %d playbook(s) under %s\n", len(pbs), playbooksDir)
-		}
-		if !selfUninstallKeepData {
 			fmt.Printf("  Directory:     %s\n", playbooksDir)
 		}
 		if !selfUninstallKeepBinary {
@@ -75,7 +91,9 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  Sibling:       %s\n", s)
 			}
 		}
-		fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
+		if !selfUninstallBinaryOnly {
+			fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
+		}
 		for _, ldir := range launcherSweepDirs() {
 			if les := launchersToRemove(ldir, pbs); len(les) > 0 {
 				fmt.Printf("  Launchers:     %d command(s) in %s\n", len(les), ldir)
@@ -97,7 +115,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 
 	if selfUninstallDryRun {
 		fmt.Println("[dry-run] Would remove:")
-		if !selfUninstallKeepData {
+		if !selfUninstallKeepData && !selfUninstallBinaryOnly {
 			for _, pb := range pbs {
 				removePath := pb.RootPath
 				if removePath == "" {
@@ -105,8 +123,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 				}
 				fmt.Printf("  playbook: %s (%s)\n", pb.Name, removePath)
 			}
-		}
-		if !selfUninstallKeepData {
 			fmt.Printf("  directory: %s\n", playbooksDir)
 		}
 		if !selfUninstallKeepBinary {
@@ -115,7 +131,9 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  sibling: %s\n", s)
 			}
 		}
-		fmt.Printf("  shell aliases in: %s\n", shellConfig)
+		if !selfUninstallBinaryOnly {
+			fmt.Printf("  shell aliases in: %s\n", shellConfig)
+		}
 		for _, ldir := range launcherSweepDirs() {
 			for _, e := range launchersToRemove(ldir, pbs) {
 				fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
@@ -134,7 +152,8 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	var removed []string
 	var needsManual []string
 
-	// Step 1: remove each playbook's aliases and directory.
+	// Step 1: remove each playbook's aliases and directory. (Binary-only
+	// mode discovered no playbooks: data and aliases stay untouched.)
 	for _, pb := range pbs {
 		removePath := pb.RootPath
 		if removePath == "" {
@@ -155,7 +174,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 2: remove the playbooks root directory.
-	if !selfUninstallKeepData {
+	if !selfUninstallKeepData && !selfUninstallBinaryOnly {
 		if err := os.RemoveAll(playbooksDir); err != nil && !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "warning: failed to remove %s: %v\n", playbooksDir, err)
 		} else {
@@ -195,10 +214,12 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 4: sweep any leftover CLAUDE_CONFIG_DIR aliases pointing into the playbooks dir.
-	if n, err := shell.RemoveByPathPrefix(shellConfig, playbooksDir); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to sweep leftover aliases: %v\n", err)
-	} else if n > 0 {
-		removed = append(removed, fmt.Sprintf("%d leftover alias(es) from %s", n, shellConfig))
+	if !selfUninstallBinaryOnly {
+		if n, err := shell.RemoveByPathPrefix(shellConfig, playbooksDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to sweep leftover aliases: %v\n", err)
+		} else if n > 0 {
+			removed = append(removed, fmt.Sprintf("%d leftover alias(es) from %s", n, shellConfig))
+		}
 	}
 
 	// Step 4: remove the binary. The sibling must be identified BEFORE the
@@ -259,6 +280,12 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		for _, m := range needsManual {
 			fmt.Printf("  %s\n", m)
 		}
+	}
+
+	if selfUninstallBinaryOnly {
+		fmt.Println()
+		fmt.Printf("Playbooks were not touched: %s\n", playbooksDir)
+		return nil
 	}
 
 	fmt.Println()

@@ -75,6 +75,14 @@ or a hard link (`ln /usr/local/bin/claude-playbook ~/.local/bin/pb`). Do not
 use a symlink: a symlink to the binary under any other name is treated as a
 playbook launcher and dispatched accordingly.
 
+The installer never edits your shell rc files. To enable completions
+(optional), add one line to your rc file yourself:
+
+```bash
+echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh
+echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash
+```
+
 You can also clone the repo and run the installer locally:
 
 ```bash
@@ -95,7 +103,10 @@ Or run the local uninstaller from a clone:
 ./uninstall.sh
 ```
 
-Uninstalling does not delete `~/.claude-playbooks`.
+The script delegates to `claude-playbook self-uninstall --binary-only`, so
+one implementation owns all cleanup: the binary, its `cpb` sibling, launcher
+symlinks, and any completion lines you added. Playbooks and shell aliases are
+untouched, and `~/.claude-playbooks` is never deleted.
 
 ### Uninstalling claude-playbook itself
 

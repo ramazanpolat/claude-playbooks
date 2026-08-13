@@ -5,7 +5,9 @@ user's real `claude-playbook` installation, shell config, or playbooks.
 
 It clones the repo, switches to the target branch, builds a temporary release
 asset, installs that asset into a temporary bin directory, verifies the `cpb`
-symlink the installer creates, then uninstalls it.
+symlink the installer creates, then uninstalls it. `uninstall.sh` delegates
+to `self-uninstall --binary-only`, so these steps exercise the CLI's own
+cleanup path end-to-end.
 
 This is an **operator-driven herdr acceptance suite**. The agent drives a real
 **herdr pane** holding a **`sprite console`** into an isolated Sprite VM, sends
@@ -148,14 +150,15 @@ claude-playbook`, both names print the version string, ends with
 
 ```bash
 echo "TEST 2: uninstall removes claude-playbook and cpb from temp INSTALL_DIR"
-INSTALL_DIR="$INSTALL_DIR" sh "$REPO/uninstall.sh"
+HOME="$HOME_SANDBOX" INSTALL_DIR="$INSTALL_DIR" sh "$REPO/uninstall.sh"
 assert_not_exists "$INSTALL_DIR/claude-playbook"
 assert_not_exists "$INSTALL_DIR/cpb"
 echo "TEST 2 PASS"
 ```
 
-Expected: `Removed .../claude-playbook` and `Removed .../cpb`, playbooks
-untouched, `TEST 2 PASS`.
+Expected: uninstall.sh delegates to `self-uninstall --binary-only`; the
+output is the CLI's `Removed:` list naming the binary and the sibling
+symlink, then `Playbooks were not touched: ...`, then `TEST 2 PASS`.
 
 ### Step 4: Reinstall For The User-Flow Test
 
@@ -192,7 +195,7 @@ model: the playbook is a bare directory with a starter `CLAUDE.md` and **no
 
 ```bash
 echo "TEST 5: uninstall removes both names, playbooks survive"
-INSTALL_DIR="$INSTALL_DIR" sh "$REPO/uninstall.sh"
+HOME="$HOME_SANDBOX" INSTALL_DIR="$INSTALL_DIR" sh "$REPO/uninstall.sh"
 assert_not_exists "$INSTALL_DIR/claude-playbook"
 assert_not_exists "$INSTALL_DIR/cpb"
 assert_exists "$CLAUDE_PLAYBOOKS_DIR/cpb-smoke"
