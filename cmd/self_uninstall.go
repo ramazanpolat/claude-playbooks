@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -23,9 +24,10 @@ var (
 
 var selfUninstallCmd = &cobra.Command{
 	Use:   "self-uninstall",
-	Short: "Remove claude-playbook, its playbooks, and its shell aliases",
-	Long: `Removes all installed playbooks, their shell aliases, the playbooks directory,
-and the claude-playbook binary itself.
+	Short: "Remove claude-playbook, its playbooks, launchers, and shell integration",
+	Long: `Removes all installed playbooks, their launcher commands, legacy shell
+aliases, the completion lines install.sh added to shell rc files, the
+playbooks directory, and the claude-playbook binary itself.
 
 Use --keep-data to preserve the playbooks directory.
 Use --keep-binary to leave the binary in place.
@@ -153,6 +155,14 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Step 3.5: remove the completion lines install.sh appended to shell rc
+	// files — after the binary is gone they error on every new shell.
+	for _, rc := range []string{filepath.Join(os.Getenv("HOME"), ".bashrc"), filepath.Join(os.Getenv("HOME"), ".zshrc")} {
+		if n := removeCompletionLines(rc); n > 0 {
+			removed = append(removed, fmt.Sprintf("%d completion line(s) from %s", n, rc))
+		}
+	}
+
 	// Step 4: sweep any leftover CLAUDE_CONFIG_DIR aliases pointing into the playbooks dir.
 	if n, err := shell.RemoveByPathPrefix(shellConfig, playbooksDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sweep leftover aliases: %v\n", err)
@@ -244,4 +254,47 @@ func launchersToRemove(ldir string, pbs []*playbook.Playbook) []launcher.Entry {
 		return nil
 	}
 	return les
+}
+
+// removeCompletionLines strips the exact `source <(NAME completion SHELL)`
+// lines install.sh appends to a shell rc file. Returns how many were removed;
+// best-effort (0 on any error).
+func removeCompletionLines(rcFile string) int {
+	data, err := os.ReadFile(rcFile)
+	if err != nil {
+		return 0
+	}
+	names := map[string]bool{"claude-playbook": true, "cpb": true}
+	if exe, err := os.Executable(); err == nil {
+		names[filepath.Base(exe)] = true
+	}
+	doomed := map[string]bool{}
+	for name := range names {
+		for _, sh := range []string{"bash", "zsh"} {
+			doomed[fmt.Sprintf("source <(%s completion %s)", name, sh)] = true
+		}
+	}
+	lines := strings.Split(string(data), "\n")
+	var kept []string
+	n := 0
+	for _, l := range lines {
+		if doomed[l] {
+			n++
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if n == 0 {
+		return 0
+	}
+	info, err := os.Stat(rcFile)
+	mode := os.FileMode(0o644)
+	if err == nil {
+		mode = info.Mode()
+	}
+	if err := os.WriteFile(rcFile, []byte(strings.Join(kept, "\n")), mode); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not update %s: %v\n", rcFile, err)
+		return 0
+	}
+	return n
 }

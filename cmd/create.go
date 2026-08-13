@@ -27,8 +27,8 @@ var createCmd = &cobra.Command{
 }
 
 func init() {
-	createCmd.Flags().StringVar(&createAlias, "alias", "", "alias name (default: <name>)")
-	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip alias creation")
+	createCmd.Flags().StringVar(&createAlias, "alias", "", "launcher command name (default: <name>)")
+	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip launcher command creation")
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
@@ -134,9 +134,9 @@ const defaultClaudeMD = "# Playbook: %s\n\n" +
 	"This directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n" +
 	"## Useful `claude-playbook` commands\n\n" +
 	"```\n" +
-	"claude-playbook list           # list playbooks and aliases\n" +
+	"claude-playbook list           # list playbooks and their commands\n" +
 	"claude-playbook info <name>    # show details for one\n" +
-	"claude-playbook alias          # manage shell aliases\n" +
+	"claude-playbook rename         # rename a playbook (and its command)\n" +
 	"claude-playbook delete <name>  # remove a playbook\n" +
 	"```\n\n" +
 	"Full command reference: https://github.com/ramazanpolat/claude-playbooks\n\n" +

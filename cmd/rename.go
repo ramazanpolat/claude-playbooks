@@ -29,8 +29,8 @@ var renameCmd = &cobra.Command{
 }
 
 func init() {
-	renameCmd.Flags().StringVar(&renameAlias, "alias", "", "custom alias for renamed playbook")
-	renameCmd.Flags().BoolVar(&renameNoAlias, "no-alias", false, "drop the alias if one existed")
+	renameCmd.Flags().StringVar(&renameAlias, "alias", "", "new launcher command name for the renamed playbook")
+	renameCmd.Flags().BoolVar(&renameNoAlias, "no-alias", false, "drop the launcher command and manifest alias")
 }
 
 func runRename(cmd *cobra.Command, args []string) error {

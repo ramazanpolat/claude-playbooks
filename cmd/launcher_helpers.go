@@ -44,7 +44,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Pick another name with: claude-playbook alias %s <name>\n", shell.QuoteArg(playbookName))
+		fmt.Fprintf(os.Stderr, "Pick another command name by renaming: claude-playbook rename %s <name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName))
 		manual()
 		return
 	}

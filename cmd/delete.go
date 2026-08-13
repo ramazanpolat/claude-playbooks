@@ -75,6 +75,15 @@ func runDelete(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Config:   %s\n", pb.Path)
 		}
 		fmt.Printf("Alias:    %s\n", aliasInfo)
+		if launcherOpsAllowed() {
+			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+				for _, n := range launcherNamesFor(pb) {
+					if _, exists, foreign := launcher.Lookup(ldir, n); exists && !foreign {
+						fmt.Printf("Command:  %s (launcher kept; removal hint printed after delete)\n", n)
+					}
+				}
+			}
+		}
 		fmt.Printf("Contents: %d files, %d directories\n", fileCount, dirCount)
 		if !confirm("\nPermanently delete? [y/N] ") {
 			fmt.Println("Cancelled.")
