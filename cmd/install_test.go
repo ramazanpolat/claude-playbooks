@@ -457,6 +457,7 @@ func quoteTOML(s string) string {
 
 func resetCommandTestState(t *testing.T) {
 	t.Helper()
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	config.PlaybooksDir = ""
 	config.ShellConfig = ""
 	config.LauncherDir = t.TempDir()
@@ -471,6 +472,7 @@ func resetCommandTestState(t *testing.T) {
 	selfUninstallKeepData = false
 	selfUninstallKeepBinary = false
 	selfUninstallDryRun = false
+	selfUninstallBinaryOnly = false
 	deleteYes = false
 	linkName = ""
 	linkAlias = ""
@@ -490,6 +492,7 @@ func resetCommandTestState(t *testing.T) {
 		selfUninstallKeepData = false
 		selfUninstallKeepBinary = false
 		selfUninstallDryRun = false
+		selfUninstallBinaryOnly = false
 		deleteYes = false
 		linkName = ""
 		linkAlias = ""

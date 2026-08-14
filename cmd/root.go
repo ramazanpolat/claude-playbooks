@@ -130,12 +130,39 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 	cmdColW := maxLen + len("claude-playbook run ")
 
+	// Launcher commands take display precedence over legacy rc aliases,
+	// exactly as in `list` — a launcher-only playbook has a working command
+	// and must not be shown as "(no alias set)".
+	// Gate before resolving: ResolveLauncherDir probes directory writability
+	// by creating a temp file, which a custom-root invocation must not do.
+	launcherNames := map[string]bool{}
+	if launcherOpsAllowed() {
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if les, lerr := launcher.List(ldir); lerr == nil {
+				for _, e := range les {
+					if !launcher.ReservedNames[e.CmdName] {
+						launcherNames[e.CmdName] = true
+					}
+				}
+			}
+		}
+	}
 	for _, pb := range pbs {
 		runStr := fmt.Sprintf("claude-playbook run %s", pb.Name)
-		if pb.HasAlias() {
-			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, pb.Alias)
+		command := ""
+		for _, n := range launcherNamesFor(pb) {
+			if launcherNames[n] {
+				command = n
+				break
+			}
+		}
+		if command == "" {
+			command = pb.Alias
+		}
+		if command != "" {
+			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, command)
 		} else {
-			fmt.Printf("  %-*s  %-*s  (no alias set)\n", maxLen, pb.Name, cmdColW, runStr)
+			fmt.Printf("  %-*s  %-*s  (no command registered)\n", maxLen, pb.Name, cmdColW, runStr)
 		}
 	}
 

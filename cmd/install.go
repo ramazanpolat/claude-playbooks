@@ -37,8 +37,8 @@ func init() {
 	installCmd.Flags().StringVar(&installName, "name", "", "directory name under the playbooks root")
 	installCmd.Flags().StringVar(&installSubdir, "subdir", "", "cherry-pick: install only this subdirectory of the source")
 	installCmd.Flags().StringVar(&installBranch, "branch", "", "Git URL only: clone this ref instead of the default branch")
-	installCmd.Flags().StringVar(&installAlias, "alias", "", "alias for the installed playbook")
-	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip alias creation entirely")
+	installCmd.Flags().StringVar(&installAlias, "alias", "", "launcher command name for the installed playbook")
+	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip launcher command creation entirely")
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {

@@ -34,14 +34,14 @@ CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
 That's all a playbook is under the hood. `claude-playbook` just makes creating, sharing, and managing them easy.
 
 ```
-~/.claude-playbooks/                Shell aliases:
+~/.claude-playbooks/                Launcher commands (on PATH):
 
-├── experiment/                     ◄── alias experiment='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/experiment" cpb run experiment'
-│   ├── CLAUDE.md
+├── experiment/                     ◄── ~/.local/bin/experiment -> claude-playbook
+│   ├── CLAUDE.md                       (typing `experiment` runs this playbook)
 │   └── settings.json
 │
-└── awesome/                        ◄── alias ap='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/awesome" cpb run awesome'
-    ├── .playbook                       (marker + metadata)
+└── awesome/                        ◄── ~/.local/bin/ap -> claude-playbook
+    ├── .playbook                       (marker + metadata; `alias = "ap"` names the command)
     └── CLAUDE.md
 
 Each playbook directory is a completely isolated Claude Code instance.
@@ -63,11 +63,25 @@ Verify:
 claude-playbook --version
 ```
 
-Install with a shorter command name:
+The installer also creates a `cpb` symlink -- a shorter name for the same
+binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | INSTALL_NAME=cpb sh
 cpb --version
+```
+
+Want a different command name? Use a shell alias (`alias pb=claude-playbook`)
+or a hard link (`ln "$(command -v claude-playbook)" ~/.local/bin/pb` — works
+for both install locations). Do not use a symlink: a symlink to the binary
+under any other name is treated as a playbook launcher and dispatched
+accordingly.
+
+The installer never edits your shell rc files. To enable completions
+(optional), add one line to your rc file yourself:
+
+```bash
+echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh
+echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash
 ```
 
 You can also clone the repo and run the installer locally:
@@ -78,38 +92,32 @@ cd claude-playbooks
 ./install.sh
 ```
 
-Local installs support the same shorter command name:
-
-```bash
-INSTALL_NAME=cpb ./install.sh
-cpb --version
-```
-
 Uninstall only the binary:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | sh
 ```
 
-To uninstall a custom command name:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | INSTALL_NAME=cpb sh
-```
-
-Or run the local uninstaller from a clone. Use the same `INSTALL_NAME` if you installed a custom command name:
+Or run the local uninstaller from a clone:
 
 ```bash
 ./uninstall.sh
-INSTALL_NAME=cpb ./uninstall.sh
 ```
 
-Uninstalling does not delete `~/.claude-playbooks`.
+The script delegates to `claude-playbook self-uninstall --binary-only`, so
+one implementation owns all cleanup: the binary, its `cpb` sibling, launcher
+symlinks, and any completion lines you added. Every launcher the tool creates
+is recorded in a registry (`~/.local/state/claude-playbook/launchers`), so
+launchers are removed wherever they were created — including custom
+`--launcher-dir` locations — while a link you renamed or repointed yourself
+is left alone. Playbooks and shell aliases are untouched, and
+`~/.claude-playbooks` is never deleted.
 
 ### Uninstalling claude-playbook itself
 
-To remove the tool, all its installed playbooks, their shell aliases, and the
-binary in one step:
+To remove the tool, all its installed playbooks, their launcher commands and
+legacy shell aliases, the completion lines in your rc files, and the binary in
+one step:
 
 ```bash
 claude-playbook self-uninstall          # prompts for confirmation
@@ -126,10 +134,12 @@ everything else.
 **Manual fallback** (if you can't run the binary):
 
 ```bash
-# 1. Remove aliases from your shell config (~/.zshrc or ~/.bashrc)
-#    Delete any lines matching: alias ...='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/...
-# 2. rm -rf ~/.claude-playbooks
-# 3. sudo rm /usr/local/bin/claude-playbook   # or wherever the binary lives
+# 1. Remove launcher symlinks pointing at the binary
+#    (in the binary's directory and ~/.local/bin: ls -l | grep claude-playbook)
+# 2. Remove legacy alias lines and `source <(claude-playbook completion ...)`
+#    lines from your shell config (~/.zshrc or ~/.bashrc)
+# 3. rm -rf ~/.claude-playbooks
+# 4. sudo rm /usr/local/bin/claude-playbook   # or wherever the binary lives
 ```
 
 **Build from source** (requires [Go](https://go.dev/dl/) 1.21+):
@@ -155,13 +165,12 @@ Use `create` when you want a fresh isolated Claude Code setup.
 
 ```bash
 claude-playbook create experiment
-source ~/.zshrc
 experiment
 ```
 
-This creates `~/.claude-playbooks/experiment`, drops in a starter `CLAUDE.md` that introduces the playbook concept to the Claude Code session opened inside it, syncs Claude auth metadata, and adds a shell alias named `experiment`. A `.playbook` manifest is optional and is not created by this command.
+This creates `~/.claude-playbooks/experiment`, drops in a starter `CLAUDE.md` that introduces the playbook concept to the Claude Code session opened inside it, syncs Claude auth metadata, and registers a launcher command named `experiment` — a symlink to the `claude-playbook` binary on your PATH. It works immediately, in every shell, with no rc-file edit and no reload. A `.playbook` manifest is only written when you pick a custom command name with `--alias`.
 
-You can also run it without using the alias:
+You can also run it without the launcher:
 
 ```bash
 claude-playbook run experiment
@@ -173,7 +182,7 @@ Pass Claude Code flags after the playbook name:
 claude-playbook run experiment --model claude-opus-4-6 --permission-mode auto
 ```
 
-Use a custom alias or skip alias creation:
+Use a custom command name, or skip launcher creation:
 
 ```bash
 claude-playbook create backend --alias be
@@ -187,7 +196,7 @@ claude-playbook list
 ```
 
 ```
-NAME           PATH                                            ALIAS    LAST USED
+NAME           PATH                                            COMMAND  LAST USED
 experiment     ~/.claude-playbooks/experiment                  exp      2 days ago
 awesome        ~/.claude-playbooks/awesome                     ap       2 hours ago
 ```
@@ -202,7 +211,7 @@ Install a repo:
 claude-playbook install https://github.com/ramazanpolat/awesome-playbooks
 ```
 
-Override the install name or alias:
+Override the install name or launcher command:
 
 ```bash
 claude-playbook install https://github.com/user/awesome --name team-tools --alias tt
@@ -265,7 +274,7 @@ Deleting a linked playbook removes only the symlink. The source directory is pre
 
 When invoked through the link, the binary sees the link's name in `argv[0]` and behaves as `claude-playbook run <name>` — the multicall pattern used by busybox and git. The name resolves against the live playbook registry (directory name first, then the `.playbook` manifest's `alias`) **at invocation time**, so the launcher carries no state that can go stale. Unlike shell aliases, launchers work identically from any shell, are available immediately with no rc-file edit or reload, and are visible to scripts and cron.
 
-`delete` removes a playbook's launcher symlinks; `rename` retires the old name and registers the new one; a launcher named by a manifest alias keeps working across renames untouched.
+`delete` and `rename` never silently remove a launcher another playbook (or another playbooks root) might still be using: a name that no longer resolves is kept with an explicit `rm <path>` hint, and invoking a stale launcher fails loudly with "unknown playbook". `rename` registers the new name; a launcher named by a manifest alias keeps working across renames untouched.
 
 ### Manage aliases (legacy)
 
@@ -359,19 +368,22 @@ It downloads the release asset for your OS/architecture, verifies it, and atomic
 
 ### Use temporary config locations
 
-For tests or demos, keep playbooks and shell aliases away from your real files:
+For tests or demos, keep playbooks away from your real files:
 
 ```bash
-CLAUDE_PLAYBOOKS_DIR=/tmp/playbooks \
-CLAUDE_SHELL_CONFIG=/tmp/zshrc \
-claude-playbook create demo
+CLAUDE_PLAYBOOKS_DIR=/tmp/playbooks claude-playbook create demo
 ```
 
-The equivalent flags are:
+The equivalent flag is:
 
 ```bash
-claude-playbook --playbooks-dir /tmp/playbooks --shell-config /tmp/zshrc create demo
+claude-playbook --playbooks-dir /tmp/playbooks create demo
 ```
+
+Launcher commands are only managed for the default playbooks root
+(`~/.claude-playbooks`), so a temporary root never touches your PATH or shell
+files — the command prints how to run the playbook with an explicit
+`--playbooks-dir` instead.
 
 ### Add a playbook's bin directory to PATH
 

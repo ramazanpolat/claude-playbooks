@@ -30,8 +30,8 @@ var linkCmd = &cobra.Command{
 
 func init() {
 	linkCmd.Flags().StringVar(&linkName, "name", "", "name under the playbooks root (default: target's basename)")
-	linkCmd.Flags().StringVar(&linkAlias, "alias", "", "alias name (default: link name)")
-	linkCmd.Flags().BoolVar(&linkNoAlias, "no-alias", false, "skip alias creation")
+	linkCmd.Flags().StringVar(&linkAlias, "alias", "", "launcher command name (default: link name)")
+	linkCmd.Flags().BoolVar(&linkNoAlias, "no-alias", false, "skip launcher command creation")
 }
 
 func runLink(cmd *cobra.Command, args []string) (retErr error) {

@@ -269,6 +269,63 @@ func RemoveByPathPrefix(configFile, prefix string) (int, error) {
 	return removed, err
 }
 
+// RemoveExactLines deletes every line of configFile that exactly matches one
+// of doomed — ONLY those lines: unlike the alias editors it never strips an
+// adjacent `# claude-playbook:` comment, which here would be user-authored.
+// Returns the number of lines removed. Like every editor in this package it
+// resolves a symlinked rc file to its target, takes the config lock, and
+// replaces the file atomically with its mode preserved.
+func RemoveExactLines(configFile string, doomed []string) (int, error) {
+	set := make(map[string]bool, len(doomed))
+	for _, l := range doomed {
+		set[l] = true
+	}
+	configFile = resolveConfigPath(configFile)
+	removed := 0
+	err := withConfigLock(configFile, func() error {
+		lines, err := readLines(configFile)
+		if err != nil {
+			return err
+		}
+		var kept []string
+		n := 0
+		for _, line := range lines {
+			if set[line] {
+				n++
+				continue
+			}
+			kept = append(kept, line)
+		}
+		removed = n
+		if removed == 0 {
+			return nil
+		}
+		return writeLines(configFile, kept)
+	})
+	return removed, err
+}
+
+// CountExactLines reports how many lines of configFile exactly match one of
+// doomed, without modifying anything. Preview counterpart of
+// RemoveExactLines.
+func CountExactLines(configFile string, doomed []string) (int, error) {
+	set := make(map[string]bool, len(doomed))
+	for _, l := range doomed {
+		set[l] = true
+	}
+	lines, err := readLines(resolveConfigPath(configFile))
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, l := range lines {
+		if set[l] {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func dropMatchingLines(lines []string, matchFn func(line string) bool) ([]string, int) {
 	var kept []string
 	removed := 0
