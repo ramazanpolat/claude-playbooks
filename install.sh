@@ -45,15 +45,18 @@ trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
 
 curl -fsSL "$URL" -o "$TMP_FILE"
 
-# Verify against the release's SHA256SUMS. A mismatch always aborts; a
-# missing sums file (older releases, custom INSTALL_URL) warns and
-# continues — the sums travel over the same channel as the binary, so
-# they guard against corruption and truncation, not a compromised host.
-if [ -z "${INSTALL_URL:-}" ]; then
+# Verify against the release's SHA256SUMS. A genuine mismatch always
+# aborts; every unverifiable case (no sums published, malformed entry, no
+# sha256 tool, INSTALL_URL override) warns and continues — the sums travel
+# over the same channel as the binary, so they guard against corruption
+# and truncation, not a compromised host.
+if [ -n "${INSTALL_URL:-}" ]; then
+  echo "Warning: INSTALL_URL override in use; skipping checksum verification"
+else
   SUMS=$(curl -fsSL "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" 2>/dev/null || true)
   if [ -n "$SUMS" ]; then
-    want=$(printf '%s
-' "$SUMS" | awk -v a="$ASSET" '$2==a {print $1}')
+    want=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a {print $1}')
+    matches=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a' | grep -c . || true)
     if command -v sha256sum >/dev/null 2>&1; then
       got=$(sha256sum "$TMP_FILE" | awk '{print $1}')
     elif command -v shasum >/dev/null 2>&1; then
@@ -63,6 +66,10 @@ if [ -z "${INSTALL_URL:-}" ]; then
     fi
     if [ -z "$want" ]; then
       echo "Warning: ${ASSET} not listed in SHA256SUMS; skipping checksum verification"
+    elif [ "$matches" != "1" ] || ! printf '%s' "$want" | grep -qiE '^[0-9a-f]{64}$'; then
+      # A truncated or duplicated entry must not fail a legitimate binary
+      # as "mismatch" — it is unverifiable, not wrong.
+      echo "Warning: malformed SHA256SUMS entry for ${ASSET}; skipping checksum verification"
     elif [ -z "$got" ]; then
       echo "Warning: no sha256 tool found; skipping checksum verification"
     elif [ "$want" != "$got" ]; then
