@@ -55,7 +55,8 @@ if [ -n "${INSTALL_URL:-}" ]; then
 else
   SUMS=$(curl -fsSL "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" 2>/dev/null || true)
   if [ -n "$SUMS" ]; then
-    want=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a {print $1}')
+    # Lowercased: sums files may carry uppercase hex, the tools emit lower.
+    want=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a {print $1}' | tr 'A-F' 'a-f')
     matches=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a' | grep -c . || true)
     if command -v sha256sum >/dev/null 2>&1; then
       got=$(sha256sum "$TMP_FILE" | awk '{print $1}')
