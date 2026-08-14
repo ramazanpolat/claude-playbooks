@@ -172,3 +172,29 @@ func TestAliasUnchangedOnLinkedPlaybookDoesNotRewriteSharedManifest(t *testing.T
 		t.Fatalf("shared manifest rewritten:\n%s", got)
 	}
 }
+
+func TestAliasForeignFilePreflightLeavesStateUntouched(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "deploy")
+
+	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	// A foreign file squats on the requested replacement name.
+	if err := os.WriteFile(filepath.Join(config.LauncherDir, "taken"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runAlias(nil, []string{"deploy", "taken"}); err == nil {
+		t.Fatal("foreign file on the new name must fail the alias change")
+	}
+	// Nothing mutated: manifest still says d, old launcher still present.
+	m, err := manifest.Read(root)
+	if err != nil || m == nil || m.Alias != "d" {
+		t.Fatalf("manifest mutated despite preflight failure: %+v err=%v", m, err)
+	}
+	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "d"); !exists || foreign {
+		t.Fatal("old launcher lost despite preflight failure")
+	}
+}

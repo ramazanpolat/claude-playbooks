@@ -165,16 +165,34 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 		}
 	}
 
+	// Staging ran unlocked (it may fetch from the network); the swap must
+	// not. Take the registry lock and RE-READ the live manifest: a
+	// concurrent `alias` (or other manifest mutation) that landed while the
+	// candidate was staging would otherwise be resurrected from the stale
+	// pre-staging snapshot, leaving launchers and manifest disagreeing.
+	unlock, lerr := lockRegistry()
+	if lerr != nil {
+		return lerr
+	}
+	defer unlock()
+	liveManifest, err := manifest.Read(root)
+	if err != nil {
+		return fmt.Errorf("cannot re-read manifest before activation: %w", err)
+	}
+	if liveManifest == nil {
+		liveManifest = pb.Manifest
+	}
+
 	newManifest, err := manifest.Read(candidate)
 	if err != nil {
 		return err
 	}
 	if newManifest == nil {
-		newManifest = pb.Manifest
+		newManifest = liveManifest
 	} else {
-		newManifest.Alias = pb.Manifest.Alias
-		newManifest.IsolateAuth = pb.Manifest.IsolateAuth
-		newManifest.Source = pb.Manifest.Source
+		newManifest.Alias = liveManifest.Alias
+		newManifest.IsolateAuth = liveManifest.IsolateAuth
+		newManifest.Source = liveManifest.Source
 	}
 	// The install's name is its directory name; never adopt the source's.
 	// This also heals installs whose manifest predates name rewriting.

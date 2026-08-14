@@ -137,6 +137,18 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		if err := preflightCommandNames(pb.Name, newAlias); err != nil {
 			return err
 		}
+		// A foreign file squatting on the name must fail BEFORE the manifest
+		// changes and the old launcher is retired — installLauncher's late
+		// warning would otherwise leave the playbook with neither its old
+		// command nor a working new one, and exit 0. Same preflight as
+		// rename.
+		if launcherOpsAllowed() {
+			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+				if _, _, foreign := launcher.Lookup(ldir, newAlias); foreign {
+					return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", newAlias)
+				}
+			}
+		}
 		m := pb.Manifest
 		if m == nil {
 			// Flat playbook: the alias needs a manifest to be registered in,
