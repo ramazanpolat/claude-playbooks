@@ -148,7 +148,12 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			// shared target manifest would drop comments and unknown fields
 			// for no reason. Just make sure the launcher exists, and FAIL
 			// when it cannot be written: "repair my command" that leaves no
-			// command must not exit 0.
+			// command must not exit 0. Ownership is rechecked first — a
+			// hand-edited manifest elsewhere may have claimed this alias,
+			// and dispatch would resolve the launcher to THAT playbook.
+			if err := preflightCommandNames(pb.Name, newAlias); err != nil {
+				return err
+			}
 			if !launcherOpsAllowed() {
 				fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; alias %q is recorded in the manifest only.\n", newAlias)
 				return nil
@@ -222,6 +227,11 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			restoreManifest()
 			return fmt.Errorf("no launcher written (alias unchanged): %w", derr)
 		}
+		// Whether a launcher already existed under the new name decides what
+		// rollback restores: launcher.Write refreshes an unclaimed link of
+		// ours in place, and deleting it on rollback would destroy a link
+		// that predates this command.
+		_, newExisted, _ := launcher.Lookup(ldir, newAlias)
 		lpath, werr := launcher.Write(ldir, newAlias)
 		if werr != nil {
 			restoreManifest()
@@ -229,11 +239,14 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		}
 		if old != "" {
 			if err := retireAliasLauncher(old, name); err != nil {
-				// Roll back everything this command created: the new
-				// launcher and the manifest change — otherwise the old
-				// launcher is left stale behind a success exit.
-				if _, derr := launcher.Remove(ldir, newAlias); derr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q during rollback: %v\n", newAlias, derr)
+				// Roll back what this command CREATED: the manifest change,
+				// and the new launcher only if it did not exist before (a
+				// pre-existing refreshed link still resolves to this binary
+				// and stays).
+				if !newExisted {
+					if _, derr := launcher.Remove(ldir, newAlias); derr != nil {
+						fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q during rollback: %v\n", newAlias, derr)
+					}
 				}
 				restoreManifest()
 				return fmt.Errorf("could not retire old launcher %q (alias unchanged): %w", old, err)

@@ -253,3 +253,24 @@ func TestAliasRepairUnchangedFailsWhenLauncherUnwritable(t *testing.T) {
 		t.Fatal("unwritable launcher dir must fail the unchanged-alias repair")
 	}
 }
+
+func TestAliasRepairRefusedWhenAnotherPlaybookClaimsIt(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "deploy")
+
+	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	// A hand-edited manifest elsewhere claims the same alias.
+	other := seedFlatPlaybook(t, "other")
+	if err := manifest.Write(other, &manifest.Manifest{Version: "0.1.0", Name: "other", Alias: "d"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Repairing deploy's alias must refuse: dispatch could resolve "d"
+	// to the other playbook.
+	if err := runAlias(nil, []string{"deploy", "d"}); err == nil {
+		t.Fatal("repair must recheck ownership and refuse a contested alias")
+	}
+}
