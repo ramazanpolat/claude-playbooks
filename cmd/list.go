@@ -20,13 +20,9 @@ var listCmd = &cobra.Command{
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		return err
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	pbs, err := playbook.Discover(playbooksDir, shellConfig)
+	pbs, err := playbook.Discover(playbooksDir)
 	if err != nil {
 		return err
 	}
@@ -55,13 +51,16 @@ func runList(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+	// Only a launcher that actually exists is a command — a manifest alias
+	// without its launcher (failed write, hand-edited manifest, custom
+	// root) must show as unregistered, per the SPEC's `-` contract.
 	command := func(pb *playbook.Playbook) string {
 		for _, n := range launcherNamesFor(pb) {
 			if launcherNames[n] {
 				return n
 			}
 		}
-		return pb.Alias
+		return ""
 	}
 
 	prefix := ""

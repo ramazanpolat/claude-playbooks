@@ -110,14 +110,13 @@ symlinks, and any completion lines you added. Every launcher the tool creates
 is recorded in a registry (`~/.local/state/claude-playbook/launchers`), so
 launchers are removed wherever they were created — including custom
 `--launcher-dir` locations — while a link you renamed or repointed yourself
-is left alone. Playbooks and shell aliases are untouched, and
-`~/.claude-playbooks` is never deleted.
+is left alone. Playbooks are untouched, and `~/.claude-playbooks` is never
+deleted.
 
 ### Uninstalling claude-playbook itself
 
-To remove the tool, all its installed playbooks, their launcher commands and
-legacy shell aliases, the completion lines in your rc files, and the binary in
-one step:
+To remove the tool, all its installed playbooks, their launcher commands,
+the completion lines in your rc files, and the binary in one step:
 
 ```bash
 claude-playbook self-uninstall          # prompts for confirmation
@@ -136,8 +135,8 @@ everything else.
 ```bash
 # 1. Remove launcher symlinks pointing at the binary
 #    (in the binary's directory and ~/.local/bin: ls -l | grep claude-playbook)
-# 2. Remove legacy alias lines and `source <(claude-playbook completion ...)`
-#    lines from your shell config (~/.zshrc or ~/.bashrc)
+# 2. Remove any `source <(claude-playbook completion ...)` lines from your
+#    shell config (~/.zshrc or ~/.bashrc)
 # 3. rm -rf ~/.claude-playbooks
 # 4. sudo rm /usr/local/bin/claude-playbook   # or wherever the binary lives
 ```
@@ -276,33 +275,19 @@ When invoked through the link, the binary sees the link's name in `argv[0]` and 
 
 `delete` and `rename` never silently remove a launcher another playbook (or another playbooks root) might still be using: a name that no longer resolves is kept with an explicit `rm <path>` hint, and invoking a stale launcher fails loudly with "unknown playbook". `rename` registers the new name; a launcher named by a manifest alias keeps working across renames untouched.
 
-### Manage aliases (legacy)
+### Manage aliases
 
-Installs made by older versions registered playbooks as shell aliases routing through `claude-playbook run` (or `cpb run`):
-
-```bash
-# claude-playbook: experiment
-alias experiment='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/experiment" cpb run experiment'
-```
-
-Existing aliases keep working and are still cleaned up by `delete`/`rename`. Note that in interactive shells an alias wins over a launcher of the same name; `create`/`install` warn when that shadows a different playbook.
-
-Show, set, or remove aliases:
+A playbook is addressed by its directory name and, optionally, one **alias** — an alternate command name recorded in its `.playbook` manifest and materialized as a launcher, so `cpb alias experiment exp` makes both `experiment` and `exp` work as commands:
 
 ```bash
-claude-playbook alias
-claude-playbook alias experiment
-claude-playbook alias experiment exp
+claude-playbook alias                    # list every playbook's alias
+claude-playbook alias experiment         # show one
+claude-playbook alias experiment exp     # set (replaces any previous alias + launcher)
 claude-playbook alias experiment --remove
-claude-playbook dealias experiment
+claude-playbook dealias experiment       # same as --remove
 ```
 
-Because aliases are ordinary shell lines, you can edit them to add Claude Code flags:
-
-```bash
-# claude-playbook: work
-alias work='CLAUDE_CONFIG_DIR="$HOME/.claude-playbooks/work" cpb run work --model claude-opus-4-6 --permission-mode auto'
-```
+Renaming with `cpb rename` keeps names, aliases, and launchers consistent automatically; a launcher named by the alias keeps working across renames untouched.
 
 ### Temporary sessions
 

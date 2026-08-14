@@ -25,7 +25,7 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	var playbooksDir, shellConfigOverride string
+	var playbooksDir string
 	var force, checkOnly bool
 	var rest []string
 	for i := 0; i < len(args); i++ {
@@ -35,11 +35,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			i++
 		case strings.HasPrefix(args[i], "--playbooks-dir="):
 			playbooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		case args[i] == "--shell-config" && i+1 < len(args):
-			shellConfigOverride = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--shell-config="):
-			shellConfigOverride = strings.TrimPrefix(args[i], "--shell-config=")
 		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
 			printUpdateHelp()
 			return nil
@@ -56,9 +51,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if playbooksDir != "" {
 		config.PlaybooksDir = playbooksDir
-	}
-	if shellConfigOverride != "" {
-		config.ShellConfig = shellConfigOverride
 	}
 
 	if len(rest) == 0 {
@@ -82,9 +74,8 @@ func printUpdateHelp() {
 
 func runPlaybookUpdate(name string, scriptArgs []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
-	shellConfig, _ := config.ResolveShellConfig()
 
-	pb, err := playbook.Require(playbooksDir, shellConfig, name)
+	pb, err := playbook.Require(playbooksDir, name)
 	if err != nil {
 		return err
 	}
@@ -174,16 +165,44 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 		}
 	}
 
+	// Staging ran unlocked (it may fetch from the network); the swap must
+	// not. Take the registry lock and RE-READ the live manifest: a
+	// concurrent `alias` (or other manifest mutation) that landed while the
+	// candidate was staging would otherwise be resurrected from the stale
+	// pre-staging snapshot, leaving launchers and manifest disagreeing.
+	unlock, lerr := lockRegistry()
+	if lerr != nil {
+		return lerr
+	}
+	defer unlock()
+	liveManifest, err := manifest.Read(root)
+	if err != nil {
+		return fmt.Errorf("cannot re-read manifest before activation: %w", err)
+	}
+	// The staged candidate belongs to the installation we snapshotted.
+	// Bind activation to that exact installation: the DIRECTORY must be
+	// the same filesystem object as before staging (a delete + reinstall
+	// from the very same repository passes any manifest comparison), and
+	// every source field must match. Anything else means the playbook was
+	// deleted, re-created, or re-sourced while staging ran — discard the
+	// candidate instead of repairing.
+	liveInfo, lierr := os.Lstat(root)
+	if lierr != nil || !os.SameFile(rootInfo, liveInfo) ||
+		liveManifest == nil || liveManifest.Source == nil ||
+		*liveManifest.Source != *pb.Manifest.Source {
+		return fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated — re-run update", name)
+	}
+
 	newManifest, err := manifest.Read(candidate)
 	if err != nil {
 		return err
 	}
 	if newManifest == nil {
-		newManifest = pb.Manifest
+		newManifest = liveManifest
 	} else {
-		newManifest.Alias = pb.Manifest.Alias
-		newManifest.IsolateAuth = pb.Manifest.IsolateAuth
-		newManifest.Source = pb.Manifest.Source
+		newManifest.Alias = liveManifest.Alias
+		newManifest.IsolateAuth = liveManifest.IsolateAuth
+		newManifest.Source = liveManifest.Source
 	}
 	// The install's name is its directory name; never adopt the source's.
 	// This also heals installs whose manifest predates name rewriting.

@@ -32,7 +32,7 @@ playbooks directory, and the claude-playbook binary itself.
 Use --keep-data to preserve the playbooks directory.
 Use --keep-binary to leave the binary in place.
 Use --binary-only to remove only the binary, its cpb sibling, launchers,
-and completion lines — playbooks and shell aliases stay (uninstall.sh
+and completion lines — playbooks stay (uninstall.sh
 delegates to this mode).
 Use --dry-run to preview what would be removed without making any changes.
 
@@ -59,15 +59,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	if cmd != nil && selfUninstallBinaryOnly && selfUninstallKeepBinary {
 		return fmt.Errorf("--binary-only and --keep-binary contradict each other")
 	}
-	// Binary-only mode touches no aliases, so it must not fail on an
-	// unrecognized shell — uninstall.sh delegates here unconditionally.
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		if !selfUninstallBinaryOnly {
-			return err
-		}
-		shellConfig = ""
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	execPath, err := os.Executable()
@@ -77,7 +68,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 
 	var pbs []*playbook.Playbook
 	if !selfUninstallBinaryOnly {
-		pbs, _ = playbook.Discover(playbooksDir, shellConfig)
+		pbs, _ = playbook.Discover(playbooksDir)
 	}
 
 	if !selfUninstallYes && !selfUninstallDryRun {
@@ -91,9 +82,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			if s := siblingToRemove(execPath); s != "" {
 				fmt.Printf("  Sibling:       %s\n", s)
 			}
-		}
-		if !selfUninstallBinaryOnly {
-			fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
 		}
 		for _, e := range launcherRemovalPlan(pbs) {
 			fmt.Printf("  Launcher:      %s (%s)\n", e.CmdName, e.Path)
@@ -135,9 +123,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  sibling: %s\n", s)
 			}
 		}
-		if !selfUninstallBinaryOnly {
-			fmt.Printf("  shell aliases in: %s\n", shellConfig)
-		}
 		for _, e := range launcherRemovalPlan(pbs) {
 			fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
 		}
@@ -159,17 +144,12 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	var removed []string
 	var needsManual []string
 
-	// Step 1: remove each playbook's aliases and directory. (Binary-only
-	// mode discovered no playbooks: data and aliases stay untouched.)
+	// Step 1: remove each playbook's directory. (Binary-only mode
+	// discovered no playbooks: data stays untouched.)
 	for _, pb := range pbs {
 		removePath := pb.RootPath
 		if removePath == "" {
 			removePath = pb.Path
-		}
-		if n, err := shell.RemoveByPathPrefix(shellConfig, removePath); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to remove aliases for %s: %v\n", pb.Name, err)
-		} else if n > 0 {
-			removed = append(removed, fmt.Sprintf("aliases for playbook %q", pb.Name))
 		}
 		if !selfUninstallKeepData {
 			if err := removeAny(removePath); err != nil {
@@ -214,22 +194,15 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	// Step 3.5: remove the completion lines install.sh appended to shell rc
 	// files — after the binary is gone they error on every new shell. With
 	// --keep-binary they keep working, so they stay.
+	completionLinesRemoved := 0
 	if !selfUninstallKeepBinary {
 		for _, rc := range completionRcFiles() {
 			if n, err := shell.RemoveExactLines(rc, completionLines()); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not update %s: %v\n", rc, err)
 			} else if n > 0 {
+				completionLinesRemoved += n
 				removed = append(removed, fmt.Sprintf("%d completion line(s) from %s", n, rc))
 			}
-		}
-	}
-
-	// Step 4: sweep any leftover CLAUDE_CONFIG_DIR aliases pointing into the playbooks dir.
-	if !selfUninstallBinaryOnly {
-		if n, err := shell.RemoveByPathPrefix(shellConfig, playbooksDir); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to sweep leftover aliases: %v\n", err)
-		} else if n > 0 {
-			removed = append(removed, fmt.Sprintf("%d leftover alias(es) from %s", n, shellConfig))
 		}
 	}
 
@@ -293,15 +266,18 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Editing the rc files does not reach shells that are already open —
+	// their loaded completion functions go stale only on reload (SPEC
+	// self-uninstall step 7).
+	if completionLinesRemoved > 0 {
+		fmt.Println()
+		fmt.Println("Completion lines were removed; open a new shell (or re-source your rc file) to drop the stale completion functions.")
+	}
+
 	if selfUninstallBinaryOnly {
 		fmt.Println()
 		fmt.Printf("Playbooks were not touched: %s\n", playbooksDir)
-		return nil
 	}
-
-	fmt.Println()
-	fmt.Println("Reload your shell to clear any cached aliases:")
-	fmt.Printf("  %s\n", shell.ReloadHint(shellConfig))
 
 	return nil
 }

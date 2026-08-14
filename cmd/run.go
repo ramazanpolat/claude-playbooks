@@ -22,7 +22,7 @@ var runCmd = &cobra.Command{
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
-	var playbooksDir, shellConfig string
+	var playbooksDir string
 	var rest []string
 
 	for i := 0; i < len(args); i++ {
@@ -32,11 +32,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 			i++
 		case strings.HasPrefix(args[i], "--playbooks-dir="):
 			playbooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		case args[i] == "--shell-config" && i+1 < len(args):
-			shellConfig = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--shell-config="):
-			shellConfig = strings.TrimPrefix(args[i], "--shell-config=")
 		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
 			fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
 			fmt.Println()
@@ -51,9 +46,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if playbooksDir != "" {
 		config.PlaybooksDir = playbooksDir
 	}
-	if shellConfig != "" {
-		config.ShellConfig = shellConfig
-	}
 
 	if len(rest) == 0 {
 		return fmt.Errorf("playbook name required\nUsage: claude-playbook run <name> [claude-flags...]")
@@ -63,9 +55,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 	claudeArgs := rest[1:]
 
 	playbooksDirResolved := config.ResolvePlaybooksDir()
-	shellConfigResolved, _ := config.ResolveShellConfig()
 
-	pb, err := playbook.Find(playbooksDirResolved, shellConfigResolved, name)
+	pb, err := playbook.Find(playbooksDirResolved, name)
 	if err != nil {
 		return err
 	}

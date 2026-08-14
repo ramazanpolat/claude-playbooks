@@ -21,7 +21,7 @@ import (
 // every one of those an encoding problem -- an apostrophe alone was a command
 // injection into the user's shell config. Rejecting the name at the front door
 // removes the whole class instead of escaping it at each site, and matches the
-// charset already required of alias names (shell.ValidAliasName).
+// charset already required of launcher command names.
 //
 // Deliberately applied to names being CREATED (create/rename/link/install), not
 // to names being looked up: delete and the discovery paths keep using
@@ -60,8 +60,7 @@ func autocompletePlaybookNames(cmd *cobra.Command, args []string, toComplete str
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
-	shellConfig, _ := config.ResolveShellConfig()
-	pbs, err := playbook.Discover(playbooksDir, shellConfig)
+	pbs, err := playbook.Discover(playbooksDir)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}

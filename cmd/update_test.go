@@ -16,7 +16,6 @@ func TestNativeUpdatePreservesRuntimeState(t *testing.T) {
 	resetCommandTestState(t)
 	root := t.TempDir()
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	config.ShellConfig = filepath.Join(root, "shellrc")
 	source := filepath.Join(root, "source")
 	installed := filepath.Join(config.PlaybooksDir, "pb")
 	if err := os.MkdirAll(source, 0755); err != nil {
@@ -67,7 +66,7 @@ func TestNativeUpdatePreservesRuntimeState(t *testing.T) {
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("backups=%v err=%v", backups, err)
 	}
-	pbs, err := playbook.Discover(config.PlaybooksDir, config.ShellConfig)
+	pbs, err := playbook.Discover(config.PlaybooksDir)
 	if err != nil || len(pbs) != 1 || pbs[0].Name != "pb" {
 		t.Fatalf("backup was discovered as a playbook: pbs=%v err=%v", pbs, err)
 	}
@@ -77,7 +76,6 @@ func TestNativeUpdateRestoresInstallName(t *testing.T) {
 	resetCommandTestState(t)
 	root := t.TempDir()
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	config.ShellConfig = filepath.Join(root, "shellrc")
 	source := filepath.Join(root, "source")
 	installed := filepath.Join(config.PlaybooksDir, "pb")
 	if err := os.MkdirAll(source, 0755); err != nil {
@@ -117,7 +115,6 @@ func TestNativeUpdateRefusesLinkedPlaybook(t *testing.T) {
 	resetCommandTestState(t)
 	root := t.TempDir()
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	config.ShellConfig = filepath.Join(root, "shellrc")
 	source := filepath.Join(root, "source")
 	external := filepath.Join(root, "external")
 	if err := os.MkdirAll(source, 0755); err != nil {
@@ -150,7 +147,6 @@ func TestUpdateRejectsEscapingScriptPath(t *testing.T) {
 	resetCommandTestState(t)
 	root := t.TempDir()
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	config.ShellConfig = filepath.Join(root, "shellrc")
 	installed := filepath.Join(config.PlaybooksDir, "pb")
 	if err := os.MkdirAll(installed, 0755); err != nil {
 		t.Fatal(err)

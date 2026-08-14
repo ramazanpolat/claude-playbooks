@@ -8,7 +8,6 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 // seedCompletionRc creates a sandbox HOME holding rc files with the exact
@@ -31,7 +30,6 @@ func TestSelfUninstallKeepBinaryPreservesCompletionLines(t *testing.T) {
 	resetCommandTestState(t)
 	home := seedCompletionRc(t)
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, "shellrc")
 	selfUninstallYes = true
 	selfUninstallKeepData = true
 	selfUninstallKeepBinary = true
@@ -53,7 +51,6 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	resetCommandTestState(t)
 	home := seedCompletionRc(t)
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, "shellrc")
 	lockFile := filepath.Join(home, ".zshrc.claude-playbook.lock")
 	if err := os.WriteFile(lockFile, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -87,19 +84,15 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	}
 }
 
-func TestSelfUninstallBinaryOnlyLeavesDataAndAliases(t *testing.T) {
+func TestSelfUninstallBinaryOnlyLeavesData(t *testing.T) {
 	resetCommandTestState(t)
 	home := seedCompletionRc(t)
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, "shellrc")
 	root := filepath.Join(config.PlaybooksDir, "kept")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("version = \"0.1.0\"\nname = \"kept\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := shell.Write(config.ShellConfig, "kept", root); err != nil {
 		t.Fatal(err)
 	}
 	selfUninstallYes = true
@@ -112,13 +105,6 @@ func TestSelfUninstallBinaryOnlyLeavesDataAndAliases(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(root, ".playbook")); err != nil {
 		t.Fatalf("binary-only removed playbook data: %v", err)
-	}
-	entries, err := shell.ReadAll(config.ShellConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("binary-only touched aliases: %#v", entries)
 	}
 }
 

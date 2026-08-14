@@ -21,13 +21,9 @@ var infoCmd = &cobra.Command{
 
 func runInfo(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		return err
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	pb, err := playbook.Require(playbooksDir, shellConfig, name)
+	pb, err := playbook.Require(playbooksDir, name)
 	if err != nil {
 		return err
 	}
@@ -47,7 +43,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	alias := pb.Alias
+	alias := pb.Alias()
 	if alias == "" {
 		alias = "(none)"
 	}
