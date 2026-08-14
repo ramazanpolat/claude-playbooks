@@ -1,0 +1,6 @@
+#!/bin/sh
+echo ""
+echo "  ▐▛███▜▌   Claude Code"
+echo "  ▝▜███▛▘   config dir: $CLAUDE_CONFIG_DIR"
+echo ""
+echo "  ❯ isolated session — own settings, memory, hooks"

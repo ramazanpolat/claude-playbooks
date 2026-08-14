@@ -102,6 +102,9 @@ esac
 ASSET="$RELEASE_ROOT/$VERSION/claude-playbook-$OS-$ARCH"
 cp "$BIN" "$ASSET"
 chmod +x "$ASSET"
+# Real releases carry SHA256SUMS; generate one so installs exercise the
+# checksum-verification path.
+( cd "$RELEASE_ROOT/$VERSION" && { sha256sum claude-playbook-* 2>/dev/null || shasum -a 256 claude-playbook-*; } > SHA256SUMS )
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 assert_exists()     { test -e "$1" || fail "missing path: $1"; }

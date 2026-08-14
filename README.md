@@ -1,5 +1,9 @@
 # Claude Playbooks
 
+[![CI](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml/badge.svg)](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml)
+
+![claude-playbook demo](docs/demo.gif)
+
 A **Claude Playbook** is an isolated instance of Claude Code.
 
 That's it. Each playbook has its own configuration, settings, hooks, memory, and task history -- completely separate from your default `~/.claude` installation and from every other playbook.
@@ -55,7 +59,7 @@ A directory is a playbook if it exists under the playbooks root. A `.playbook` m
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
 ```
 
-The script detects your OS and architecture, downloads the right binary from the latest GitHub Release, and installs it to `/usr/local/bin` (or `~/.local/bin` if that's not writable).
+The script detects your OS and architecture, downloads the right binary from the latest GitHub Release, verifies it against the release's `SHA256SUMS`, and installs it to `/usr/local/bin` (or `~/.local/bin` if that's not writable). Linux and macOS, amd64/arm64 (no native Windows — WSL works).
 
 Verify:
 
