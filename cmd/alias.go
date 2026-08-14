@@ -148,12 +148,11 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			// shared target manifest would drop comments and unknown fields
 			// for no reason. Just make sure the launcher exists, and FAIL
 			// when it cannot be written: "repair my command" that leaves no
-			// command must not exit 0. Ownership is rechecked first — a
-			// hand-edited manifest elsewhere may have claimed this alias,
-			// and dispatch would resolve the launcher to THAT playbook.
-			if err := preflightCommandNames(pb.Name, newAlias); err != nil {
-				return err
-			}
+			// command must not exit 0. No ownership recheck here: the tool
+			// refuses to CREATE colliding aliases, so a collision can only
+			// exist through hand-edited manifests — the pilot's own state,
+			// deliberately not defended against (dispatch stays
+			// deterministic: names first, then sorted-order aliases).
 			if !launcherOpsAllowed() {
 				fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; alias %q is recorded in the manifest only.\n", newAlias)
 				return nil
