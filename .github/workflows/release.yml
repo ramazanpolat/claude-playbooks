@@ -46,6 +46,13 @@ jobs:
           GOOS=linux   GOARCH=amd64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-linux-amd64   .
           GOOS=linux   GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-linux-arm64   .
 
+      - name: Generate checksums
+        if: steps.release_gate.outputs.release == 'true'
+        run: |
+          cd dist
+          sha256sum claude-playbook-* > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create GitHub Release
         if: steps.release_gate.outputs.release == 'true'
         uses: softprops/action-gh-release@v2

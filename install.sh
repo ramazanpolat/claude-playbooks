@@ -44,6 +44,48 @@ TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/claude-playbook.XXXXXX")
 trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
 
 curl -fsSL "$URL" -o "$TMP_FILE"
+
+# Verify against the release's SHA256SUMS. A genuine mismatch always
+# aborts; every unverifiable case (no sums published, malformed entry, no
+# sha256 tool, INSTALL_URL override) warns and continues — the sums travel
+# over the same channel as the binary, so they guard against corruption
+# and truncation, not a compromised host.
+if [ -n "${INSTALL_URL:-}" ]; then
+  echo "Warning: INSTALL_URL override in use; skipping checksum verification"
+else
+  SUMS=$(curl -fsSL "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" 2>/dev/null || true)
+  if [ -n "$SUMS" ]; then
+    # Lowercased: sums files may carry uppercase hex, the tools emit lower.
+    want=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a {print $1}' | tr 'A-F' 'a-f')
+    matches=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a' | grep -c . || true)
+    if command -v sha256sum >/dev/null 2>&1; then
+      got=$(sha256sum "$TMP_FILE" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+      got=$(shasum -a 256 "$TMP_FILE" | awk '{print $1}')
+    else
+      got=""
+    fi
+    if [ -z "$want" ]; then
+      echo "Warning: ${ASSET} not listed in SHA256SUMS; skipping checksum verification"
+    elif [ "$matches" != "1" ] || ! printf '%s' "$want" | grep -qiE '^[0-9a-f]{64}$'; then
+      # A truncated or duplicated entry must not fail a legitimate binary
+      # as "mismatch" — it is unverifiable, not wrong.
+      echo "Warning: malformed SHA256SUMS entry for ${ASSET}; skipping checksum verification"
+    elif [ -z "$got" ]; then
+      echo "Warning: no sha256 tool found; skipping checksum verification"
+    elif [ "$want" != "$got" ]; then
+      echo "Error: checksum mismatch for ${ASSET} ${LATEST}"
+      echo "  expected: $want"
+      echo "  got:      $got"
+      exit 1
+    else
+      echo "Checksum verified (sha256)."
+    fi
+  else
+    echo "Warning: no SHA256SUMS published for ${LATEST}; skipping checksum verification"
+  fi
+fi
+
 chmod +x "$TMP_FILE"
 
 # Install to INSTALL_DIR when set, otherwise /usr/local/bin if writable, otherwise ~/.local/bin.
