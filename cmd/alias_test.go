@@ -198,3 +198,37 @@ func TestAliasForeignFilePreflightLeavesStateUntouched(t *testing.T) {
 		t.Fatal("old launcher lost despite preflight failure")
 	}
 }
+
+func TestAliasLauncherWriteFailureRollsBackManifest(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "deploy")
+
+	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(root, manifest.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Break the launcher directory: an unwritable parent makes
+	// launcher.Write's MkdirAll fail after every preflight has passed.
+	ro := filepath.Join(t.TempDir(), "ro")
+	if err := os.MkdirAll(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	config.LauncherDir = filepath.Join(ro, "sub")
+
+	err = runAlias(nil, []string{"deploy", "d2"})
+	if err == nil {
+		t.Fatal("launcher write failure must fail the alias change")
+	}
+	after, rerr := os.ReadFile(filepath.Join(root, manifest.FileName))
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("manifest not rolled back:\n%s", after)
+	}
+}

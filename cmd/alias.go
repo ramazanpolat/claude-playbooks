@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -155,14 +156,52 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			// same bootstrap as create --alias.
 			m = &manifest.Manifest{Version: "0.1.0", Name: pb.Name}
 		}
+		// Capture the pre-change manifest so a failed launcher write can
+		// restore it byte-for-byte (or remove a manifest this command
+		// bootstrapped) — the alias operation's entire point is the
+		// command, so a launcher failure must leave NO state changed.
+		manifestFile := filepath.Join(pb.RootPath, manifest.FileName)
+		origBytes, rerr := os.ReadFile(manifestFile)
+		origExisted := rerr == nil
+		restoreManifest := func() {
+			var rerr error
+			if origExisted {
+				rerr = os.WriteFile(manifestFile, origBytes, 0o644)
+			} else {
+				rerr = os.Remove(manifestFile)
+			}
+			if rerr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", rerr)
+			}
+		}
 		m.Alias = newAlias
 		if err := manifest.Write(pb.RootPath, m); err != nil {
+			restoreManifest()
 			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", newAlias, err)
+		}
+		if !launcherOpsAllowed() {
+			fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; alias %q recorded in the manifest only.\n", newAlias)
+			return nil
+		}
+		// Prove the NEW command exists before retiring the old one: the
+		// reverse order can leave the playbook with neither command while
+		// exiting 0 (launcher dir uncreatable, permissions, a post-preflight
+		// race on the name).
+		ldir, derr := config.ResolveLauncherDir()
+		if derr != nil {
+			restoreManifest()
+			return fmt.Errorf("no launcher written (alias unchanged): %w", derr)
+		}
+		lpath, werr := launcher.Write(ldir, newAlias)
+		if werr != nil {
+			restoreManifest()
+			return fmt.Errorf("could not write launcher %q (alias unchanged): %w", newAlias, werr)
 		}
 		if old != "" {
 			retireAliasLauncher(old, name)
 		}
-		installLauncher(newAlias, pb.Name, pb.Path)
+		fmt.Printf("Command:  %s  (launcher at %s)\n", newAlias, lpath)
+		warnIfShadowedOrUnreachable(newAlias, lpath, pb.Path)
 		return nil
 	}
 
