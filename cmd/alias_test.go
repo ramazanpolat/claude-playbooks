@@ -232,3 +232,24 @@ func TestAliasLauncherWriteFailureRollsBackManifest(t *testing.T) {
 		t.Fatalf("manifest not rolled back:\n%s", after)
 	}
 }
+
+func TestAliasRepairUnchangedFailsWhenLauncherUnwritable(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "deploy")
+
+	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	ro := filepath.Join(t.TempDir(), "ro")
+	if err := os.MkdirAll(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	config.LauncherDir = filepath.Join(ro, "sub")
+
+	// Re-setting the SAME alias is a repair; an unwritable launcher dir
+	// must surface as an error, not a warning behind exit 0.
+	if err := runAlias(nil, []string{"deploy", "d"}); err == nil {
+		t.Fatal("unwritable launcher dir must fail the unchanged-alias repair")
+	}
+}

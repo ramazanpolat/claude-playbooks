@@ -106,11 +106,26 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		if linked {
 			return fmt.Errorf("cannot clear alias %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", old, manifest.FileName)
 		}
+		manifestFile := filepath.Join(pb.RootPath, manifest.FileName)
+		origBytes, rerr := os.ReadFile(manifestFile)
+		if rerr != nil {
+			return fmt.Errorf("cannot read manifest: %w", rerr)
+		}
 		pb.Manifest.Alias = ""
 		if err := manifest.Write(pb.RootPath, pb.Manifest); err != nil {
+			if werr := os.WriteFile(manifestFile, origBytes, 0o644); werr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", werr)
+			}
 			return err
 		}
-		retireAliasLauncher(old, name)
+		if err := retireAliasLauncher(old, name); err != nil {
+			// The launcher is still there; a cleared manifest would make it
+			// stale while this command reports success — restore it.
+			if werr := os.WriteFile(manifestFile, origBytes, 0o644); werr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", werr)
+			}
+			return fmt.Errorf("could not retire launcher %q (alias unchanged): %w", old, err)
+		}
 		fmt.Printf("Removed alias %q from playbook %q\n", old, name)
 		return nil
 	}
@@ -131,8 +146,23 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		if newAlias == old {
 			// Nothing to record — and for a linked playbook, rewriting the
 			// shared target manifest would drop comments and unknown fields
-			// for no reason. Just make sure the launcher exists.
-			installLauncher(newAlias, pb.Name, pb.Path)
+			// for no reason. Just make sure the launcher exists, and FAIL
+			// when it cannot be written: "repair my command" that leaves no
+			// command must not exit 0.
+			if !launcherOpsAllowed() {
+				fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; alias %q is recorded in the manifest only.\n", newAlias)
+				return nil
+			}
+			ldir, derr := config.ResolveLauncherDir()
+			if derr != nil {
+				return fmt.Errorf("no launcher written: %w", derr)
+			}
+			lpath, werr := launcher.Write(ldir, newAlias)
+			if werr != nil {
+				return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
+			}
+			fmt.Printf("Command:  %s  (launcher at %s)\n", newAlias, lpath)
+			warnIfShadowedOrUnreachable(newAlias, lpath, pb.Path)
 			return nil
 		}
 		if err := preflightCommandNames(pb.Name, newAlias); err != nil {
@@ -198,7 +228,16 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("could not write launcher %q (alias unchanged): %w", newAlias, werr)
 		}
 		if old != "" {
-			retireAliasLauncher(old, name)
+			if err := retireAliasLauncher(old, name); err != nil {
+				// Roll back everything this command created: the new
+				// launcher and the manifest change — otherwise the old
+				// launcher is left stale behind a success exit.
+				if _, derr := launcher.Remove(ldir, newAlias); derr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q during rollback: %v\n", newAlias, derr)
+				}
+				restoreManifest()
+				return fmt.Errorf("could not retire old launcher %q (alias unchanged): %w", old, err)
+			}
 		}
 		fmt.Printf("Command:  %s  (launcher at %s)\n", newAlias, lpath)
 		warnIfShadowedOrUnreachable(newAlias, lpath, pb.Path)
@@ -220,24 +259,31 @@ func runAlias(cmd *cobra.Command, args []string) error {
 // an explicit `alias --remove`/replacement means "this command goes" — but
 // still claim-aware: a name that now addresses another playbook keeps its
 // launcher, and launcher.Remove only ever deletes a symlink resolving to
-// this binary.
-func retireAliasLauncher(old, exceptName string) {
+// this binary. Failures are returned, not swallowed: the caller changed the
+// manifest and must be able to roll it back rather than exit 0 with a
+// stale launcher behind.
+func retireAliasLauncher(old, exceptName string) error {
 	if !launcherOpsAllowed() {
-		return
+		return nil
 	}
-	if owner, err := commandNameOwner(old, exceptName); err != nil || owner != nil {
-		if owner != nil {
-			fmt.Printf("Kept command %q (still addresses playbook %q)\n", old, owner.Name)
-		}
-		return
+	owner, err := commandNameOwner(old, exceptName)
+	if err != nil {
+		return fmt.Errorf("cannot verify ownership of %q: %w", old, err)
+	}
+	if owner != nil {
+		fmt.Printf("Kept command %q (still addresses playbook %q)\n", old, owner.Name)
+		return nil
 	}
 	dir, err := config.ResolveLauncherDir()
 	if err != nil {
-		return
+		return err
 	}
-	if ok, err := launcher.Remove(dir, old); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", old, err)
-	} else if ok {
+	ok, err := launcher.Remove(dir, old)
+	if err != nil {
+		return err
+	}
+	if ok {
 		fmt.Printf("Removed command %q\n", old)
 	}
+	return nil
 }

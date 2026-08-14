@@ -179,13 +179,17 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot re-read manifest before activation: %w", err)
 	}
-	// The staged candidate belongs to the installation we snapshotted. A
-	// live manifest that is missing or names a different source means the
-	// playbook was deleted, re-created, or re-sourced while staging ran —
-	// activating would silently replace the NEW installation with content
-	// built from the old one. Discard the candidate instead of repairing.
-	if liveManifest == nil || liveManifest.Source == nil ||
-		liveManifest.Source.Repository != pb.Manifest.Source.Repository {
+	// The staged candidate belongs to the installation we snapshotted.
+	// Bind activation to that exact installation: the DIRECTORY must be
+	// the same filesystem object as before staging (a delete + reinstall
+	// from the very same repository passes any manifest comparison), and
+	// every source field must match. Anything else means the playbook was
+	// deleted, re-created, or re-sourced while staging ran — discard the
+	// candidate instead of repairing.
+	liveInfo, lierr := os.Lstat(root)
+	if lierr != nil || !os.SameFile(rootInfo, liveInfo) ||
+		liveManifest == nil || liveManifest.Source == nil ||
+		*liveManifest.Source != *pb.Manifest.Source {
 		return fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated — re-run update", name)
 	}
 
