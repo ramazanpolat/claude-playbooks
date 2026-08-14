@@ -15,7 +15,7 @@ func TestDiscoverBareDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pbs, err := Discover(root, filepath.Join(root, "nonexistent-shellrc"))
+	pbs, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestDiscoverFlatNoNesting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pbs, err := Discover(root, filepath.Join(root, "nonexistent-shellrc"))
+	pbs, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestDiscoverManifestSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pb, err := Find(root, filepath.Join(root, "nonexistent-shellrc"), "sre")
+	pb, err := Find(root, "sre")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestDiscoverReturnsInvalidManifestError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(playbookDir, ".playbook"), []byte("subdir = [broken\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Discover(root, filepath.Join(root, "shellrc")); err == nil {
+	if _, err := Discover(root); err == nil {
 		t.Fatal("expected malformed manifest to fail discovery")
 	}
 }
@@ -125,7 +125,7 @@ func TestDiscoverReturnsMissingSubdirError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(playbookDir, ".playbook"), []byte("subdir = \"config\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Discover(root, filepath.Join(root, "shellrc")); err == nil {
+	if _, err := Discover(root); err == nil {
 		t.Fatal("expected missing manifest subdir to fail discovery")
 	}
 }

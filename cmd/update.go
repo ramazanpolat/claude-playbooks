@@ -25,7 +25,7 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	var playbooksDir, shellConfigOverride string
+	var playbooksDir string
 	var force, checkOnly bool
 	var rest []string
 	for i := 0; i < len(args); i++ {
@@ -35,11 +35,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			i++
 		case strings.HasPrefix(args[i], "--playbooks-dir="):
 			playbooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		case args[i] == "--shell-config" && i+1 < len(args):
-			shellConfigOverride = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--shell-config="):
-			shellConfigOverride = strings.TrimPrefix(args[i], "--shell-config=")
 		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
 			printUpdateHelp()
 			return nil
@@ -56,9 +51,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if playbooksDir != "" {
 		config.PlaybooksDir = playbooksDir
-	}
-	if shellConfigOverride != "" {
-		config.ShellConfig = shellConfigOverride
 	}
 
 	if len(rest) == 0 {
@@ -82,9 +74,8 @@ func printUpdateHelp() {
 
 func runPlaybookUpdate(name string, scriptArgs []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
-	shellConfig, _ := config.ResolveShellConfig()
 
-	pb, err := playbook.Require(playbooksDir, shellConfig, name)
+	pb, err := playbook.Require(playbooksDir, name)
 	if err != nil {
 		return err
 	}

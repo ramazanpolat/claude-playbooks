@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 // Playbook represents a discovered playbook.
@@ -23,34 +22,33 @@ type Playbook struct {
 	Name        string             // directory name under the playbooks root
 	Path        string             // absolute Claude config directory path
 	RootPath    string             // absolute installed root directory path; same as Path unless a manifest subdir is set
-	Alias       string             // alias name, "" if none
-	AliasLine   string             // full alias line, "" if none
 	LastUsed    time.Time          // directory mtime
 	Manifest    *manifest.Manifest // nil when the directory has no .playbook
 	Description string             // resolved from manifest, if any
 }
 
-func (p *Playbook) HasAlias() bool { return p.Alias != "" }
+// Alias returns the playbook's manifest alias, "" if none.
+func (p *Playbook) Alias() string {
+	if p.Manifest != nil {
+		return p.Manifest.Alias
+	}
+	return ""
+}
 
-// Discover returns all playbooks under playbooksDir, enriched with alias info.
-// Playbooks are sorted alphabetically by name.
-func Discover(playbooksDir, shellConfig string) ([]*Playbook, error) {
+// Discover returns all playbooks under playbooksDir, sorted alphabetically
+// by name.
+func Discover(playbooksDir string) ([]*Playbook, error) {
 	pbs, err := discover(playbooksDir)
 	if err != nil {
 		return nil, err
 	}
 	sort.Slice(pbs, func(i, j int) bool { return pbs[i].Name < pbs[j].Name })
-
-	aliases, _ := shell.ReadAll(shellConfig)
-	for _, pb := range pbs {
-		attachAlias(pb, aliases)
-	}
 	return pbs, nil
 }
 
 // Find resolves a playbook by name. Returns (nil, nil) when not found.
-func Find(playbooksDir, shellConfig, name string) (*Playbook, error) {
-	all, err := Discover(playbooksDir, shellConfig)
+func Find(playbooksDir, name string) (*Playbook, error) {
+	all, err := Discover(playbooksDir)
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +61,8 @@ func Find(playbooksDir, shellConfig, name string) (*Playbook, error) {
 }
 
 // Require returns a playbook or a user-facing error.
-func Require(playbooksDir, shellConfig, name string) (*Playbook, error) {
-	pb, err := Find(playbooksDir, shellConfig, name)
+func Require(playbooksDir, name string) (*Playbook, error) {
+	pb, err := Find(playbooksDir, name)
 	if err != nil {
 		return nil, err
 	}
@@ -141,16 +139,4 @@ func resolveManifestSubdir(root string, m *manifest.Manifest) (string, os.FileIn
 		return "", nil, err
 	}
 	return resolved, info, nil
-}
-
-func attachAlias(pb *Playbook, aliases []shell.AliasEntry) {
-	absPath, _ := filepath.Abs(pb.Path)
-	for _, a := range aliases {
-		aAbs, _ := filepath.Abs(a.Path)
-		if aAbs == absPath {
-			pb.Alias = a.AliasName
-			pb.AliasLine = a.Line
-			return
-		}
-	}
 }

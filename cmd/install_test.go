@@ -11,7 +11,6 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 func TestCopyDirDereferencesInternalSymlinks(t *testing.T) {
@@ -192,7 +191,6 @@ func TestDeleteRejectsParentSegment(t *testing.T) {
 	root := t.TempDir()
 	parent := filepath.Join(root, "parent")
 	config.PlaybooksDir = filepath.Join(parent, "playbooks")
-	config.ShellConfig = filepath.Join(root, "shellrc")
 	if err := os.MkdirAll(config.PlaybooksDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +239,6 @@ func TestGitInstallPreservesCustomUpdateScript(t *testing.T) {
 		}
 	}
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	config.ShellConfig = filepath.Join(root, "shellrc")
 	installNoAlias = true
 	if err := runInstall(nil, []string{"file://" + repo}); err != nil {
 		t.Fatal(err)
@@ -264,7 +261,6 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	t.Setenv("HOME", root)
 	os.Unsetenv("CLAUDE_PLAYBOOKS_DIR")
 	config.PlaybooksDir = filepath.Join(root, ".claude-playbooks")
-	config.ShellConfig = filepath.Join(root, "shellrc")
 	target := filepath.Join(root, "target")
 	configDir := filepath.Join(target, "config")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -279,7 +275,7 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	if err := runLink(nil, []string{target}); err != nil {
 		t.Fatal(err)
 	}
-	pb, err := playbook.Require(config.PlaybooksDir, config.ShellConfig, "linked")
+	pb, err := playbook.Require(config.PlaybooksDir, "linked")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +299,6 @@ func TestRenameMovesRootForSubdirManifest(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, ".zshrc")
 	root := filepath.Join(config.PlaybooksDir, "old")
 	configDir := filepath.Join(root, "config")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -315,10 +310,6 @@ func TestRenameMovesRootForSubdirManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, "CLAUDE.md"), []byte("# Config\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := shell.Write(config.ShellConfig, "oldalias", configDir); err != nil {
-		t.Fatal(err)
-	}
-
 	if err := runRename(nil, []string{"old", "new"}); err != nil {
 		t.Fatal(err)
 	}
@@ -340,20 +331,12 @@ func TestRenameMovesRootForSubdirManifest(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(newConfig, "CLAUDE.md")); err != nil {
 		t.Fatalf("new config missing contents: %v", err)
 	}
-	entries, err := shell.ReadAll(config.ShellConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].Path != newConfig {
-		t.Fatalf("alias paths = %#v, want %s", entries, newConfig)
-	}
 }
 
 func TestInstallRewritesManifestNameToInstallName(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, ".zshrc")
 	src := testPlaybookSource(t, "kommander")
 
 	installName = "kommander-dev"
@@ -375,7 +358,6 @@ func TestRenameLinkedPlaybookKeepsExternalManifest(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, ".zshrc")
 	external := filepath.Join(home, "external")
 	if err := os.MkdirAll(external, 0755); err != nil {
 		t.Fatal(err)
@@ -389,10 +371,6 @@ func TestRenameLinkedPlaybookKeepsExternalManifest(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(config.ShellConfig, nil, 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	if err := runRename(nil, []string{"linked", "moved"}); err != nil {
 		t.Fatal(err)
 	}
@@ -411,15 +389,11 @@ func TestSelfUninstallKeepDataPreservesPlaybooks(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, ".zshrc")
 	root := filepath.Join(config.PlaybooksDir, "kept")
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("version = \"0.1.0\"\nname = \"kept\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := shell.Write(config.ShellConfig, "kept", root); err != nil {
 		t.Fatal(err)
 	}
 	selfUninstallYes = true
@@ -432,13 +406,6 @@ func TestSelfUninstallKeepDataPreservesPlaybooks(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(root, ".playbook")); err != nil {
 		t.Fatalf("playbook data was not preserved: %v", err)
-	}
-	entries, err := shell.ReadAll(config.ShellConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("aliases were not removed: %#v", entries)
 	}
 }
 
@@ -459,7 +426,6 @@ func resetCommandTestState(t *testing.T) {
 	t.Helper()
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	config.PlaybooksDir = ""
-	config.ShellConfig = ""
 	config.LauncherDir = t.TempDir()
 	installName = ""
 	installSubdir = ""
@@ -479,7 +445,6 @@ func resetCommandTestState(t *testing.T) {
 	linkNoAlias = false
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
-		config.ShellConfig = ""
 		config.LauncherDir = ""
 		installName = ""
 		installSubdir = ""
@@ -515,7 +480,6 @@ func TestInstallFlattensSubdirFromManifest(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, ".zshrc")
 
 	// Create source directory
 	src := t.TempDir()
@@ -557,7 +521,6 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	config.ShellConfig = filepath.Join(home, ".zshrc")
 	for _, name := range []string{"aaa", "bbb"} {
 		if err := os.MkdirAll(filepath.Join(config.PlaybooksDir, name), 0755); err != nil {
 			t.Fatal(err)

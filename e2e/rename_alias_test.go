@@ -45,7 +45,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 	launcherDir := filepath.Join(work, "bin")
 	cpb := func(args ...string) string {
 		t.Helper()
-		full := append([]string{"--shell-config", shellConfig, "--launcher-dir", launcherDir}, args...)
+		full := append([]string{"--launcher-dir", launcherDir}, args...)
 		cmd := exec.Command(binPath, full...)
 		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()

@@ -67,7 +67,6 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&config.PlaybooksDir, "playbooks-dir", "", "playbooks directory (default: ~/.claude-playbooks)")
-	rootCmd.PersistentFlags().StringVar(&config.ShellConfig, "shell-config", "", "shell config file (default: auto-detect from $SHELL)")
 	rootCmd.PersistentFlags().StringVar(&config.LauncherDir, "launcher-dir", "", "directory for launcher commands (default: directory of this binary)")
 
 	rootCmd.AddCommand(listCmd)
@@ -87,13 +86,9 @@ func init() {
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		return err
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	pbs, err := playbook.Discover(playbooksDir, shellConfig)
+	pbs, err := playbook.Discover(playbooksDir)
 	if err != nil {
 		return err
 	}
@@ -157,7 +152,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if command == "" {
-			command = pb.Alias
+			command = pb.Alias()
 		}
 		if command != "" {
 			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, command)

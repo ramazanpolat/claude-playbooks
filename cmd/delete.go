@@ -12,7 +12,6 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 var deleteYes bool
@@ -32,10 +31,6 @@ func init() {
 
 func runDelete(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		return err
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	if err := validateSinglePathSegment("playbook name", name); err != nil {
@@ -45,7 +40,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	// Discovery and confirmation run on an UNLOCKED snapshot: the prompt
 	// waits on human input, and holding the machine-user-global registry
 	// lock there would block every concurrent command indefinitely.
-	pb, err := playbook.Find(playbooksDir, shellConfig, name)
+	pb, err := playbook.Find(playbooksDir, name)
 	if err != nil {
 		return err
 	}
@@ -56,13 +51,13 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		if _, err := os.Lstat(path); os.IsNotExist(err) {
 			return fmt.Errorf("%q not found under %s", name, playbooksDir)
 		}
-		return deleteOrphan(playbooksDir, shellConfig, name, path)
+		return deleteOrphan(playbooksDir, name, path)
 	}
 
 	if !deleteYes {
 		aliasInfo := "(no alias)"
-		if pb.HasAlias() {
-			aliasInfo = fmt.Sprintf("%s (will be removed from %s)", pb.Alias, shellConfig)
+		if a := pb.Alias(); a != "" {
+			aliasInfo = fmt.Sprintf("%s (its launcher will be removed)", a)
 		}
 		deletePath := pb.RootPath
 		if deletePath == "" {
@@ -98,7 +93,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer unlock()
-	pb, err = playbook.Find(playbooksDir, shellConfig, name)
+	pb, err = playbook.Find(playbooksDir, name)
 	if err != nil {
 		return err
 	}
@@ -111,9 +106,6 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		deletePath = pb.Path
 	}
 	names := launcherNamesFor(pb)
-	if _, err := shell.RemoveByPathPrefix(shellConfig, deletePath); err != nil {
-		return fmt.Errorf("failed to clean up aliases: %w", err)
-	}
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
@@ -125,7 +117,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 // deleteOrphan handles a directory that exists at the expected path but is
 // not a discoverable playbook (e.g. a dotfile-named entry). Cleans up any
 // aliases pointing into it and removes the directory.
-func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
+func deleteOrphan(playbooksDir, name, path string) error {
 	if !deleteYes {
 		fmt.Printf("Directory %q exists at %s but is not a discoverable playbook.\n", name, path)
 		if !confirm("Permanently delete the directory and any aliases pointing into it? [y/N] ") {
@@ -143,11 +135,8 @@ func deleteOrphan(playbooksDir, shellConfig, name, path string) error {
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		return fmt.Errorf("%q disappeared while waiting for confirmation; nothing removed", name)
 	}
-	if pb, _ := playbook.Find(playbooksDir, shellConfig, name); pb != nil {
+	if pb, _ := playbook.Find(playbooksDir, name); pb != nil {
 		return fmt.Errorf("%q became a discoverable playbook while waiting for confirmation; re-run delete", name)
-	}
-	if _, err := shell.RemoveByPathPrefix(shellConfig, path); err != nil {
-		return fmt.Errorf("failed to clean up aliases: %w", err)
 	}
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)

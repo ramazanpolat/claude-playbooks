@@ -78,18 +78,16 @@ export VERSION="v-suite"
 export INSTALL_DIR="$SUITE_ROOT/install-bin"
 export HOME_SANDBOX="$SUITE_ROOT/home"
 export CLAUDE_PLAYBOOKS_DIR="$SUITE_ROOT/playbooks"
-export CLAUDE_SHELL_CONFIG="$SUITE_ROOT/zshrc"
 
 mkdir -p "$SUITE_ROOT/build" "$RELEASE_ROOT/$VERSION" "$INSTALL_DIR" \
          "$HOME_SANDBOX" "$CLAUDE_PLAYBOOKS_DIR"
-touch "$CLAUDE_SHELL_CONFIG"
 
 git clone "$REPO_URL" "$REPO"
 cd "$REPO"
 git fetch origin "$BRANCH"
 git switch --track "origin/$BRANCH" 2>/dev/null || git switch "$BRANCH"
 
-env -u CLAUDE_PLAYBOOKS_DIR -u CLAUDE_SHELL_CONFIG go test ./...
+env -u CLAUDE_PLAYBOOKS_DIR go test ./...
 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=suite-install-test" -o "$BIN" .
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"

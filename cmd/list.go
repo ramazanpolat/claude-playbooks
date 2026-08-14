@@ -20,13 +20,9 @@ var listCmd = &cobra.Command{
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	shellConfig, err := config.ResolveShellConfig()
-	if err != nil {
-		return err
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	pbs, err := playbook.Discover(playbooksDir, shellConfig)
+	pbs, err := playbook.Discover(playbooksDir)
 	if err != nil {
 		return err
 	}
@@ -61,7 +57,7 @@ func runList(cmd *cobra.Command, args []string) error {
 				return n
 			}
 		}
-		return pb.Alias
+		return pb.Alias()
 	}
 
 	prefix := ""

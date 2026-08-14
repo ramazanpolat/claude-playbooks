@@ -26,7 +26,7 @@ CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
 
 ### The filesystem is the source of truth
 
-There is no index file, no database, no registry file. The state the tool reads from or writes to is: the playbooks root directory (including the optional `.playbook` manifests inside it, where a custom command alias is recorded), the launcher directory (symlinks to the binary that serve as per-playbook commands), a flock lock file in the user cache dir (`<cache>/claude-playbook/registry.lock`, used only to serialize concurrent mutations — it holds no data), and, for legacy alias-era installs, the user's shell configuration file. Any mutation users make with `mv`, `rm`, or a text editor is immediately consistent with what the tool sees on its next invocation.
+There is no index file, no database, no registry file. The state the tool reads from or writes to is: the playbooks root directory (including the optional `.playbook` manifests inside it, where a custom command alias is recorded), the launcher directory (symlinks to the binary that serve as per-playbook commands), a flock lock file in the user cache dir (`<cache>/claude-playbook/registry.lock`, used only to serialize concurrent mutations — it holds no data). Any mutation users make with `mv`, `rm`, or a text editor is immediately consistent with what the tool sees on its next invocation.
 
 ### The playbooks root
 
@@ -87,7 +87,7 @@ Since v2.13.0, per-playbook commands are **launchers** — symlinks to the `clau
 
 ### `claude-playbook` (no arguments)
 
-Prints a one-line description and lists all discovered playbooks with how to run each. The parenthetical shows the playbook's registered command — launcher commands take display precedence over legacy rc aliases; a playbook with neither shows `(no command registered)`.
+Prints a one-line description and lists all discovered playbooks with how to run each. The parenthetical shows the playbook's registered command (its launcher, by directory name or manifest alias); a playbook with none shows `(no command registered)`.
 
 ```
 claude-playbook -- manage isolated Claude Code instances
@@ -143,7 +143,7 @@ sre           ~/.claude-playbooks/sre               sre      1 hour ago
 dba           ~/.claude-playbooks/dba               -        never
 ```
 
-Column widths are computed from the longest NAME, PATH, and COMMAND values, with minimum widths of 4, 4, and 7. `COMMAND` shows the playbook's launcher command name (matching its directory name or manifest alias); launchers take display precedence over legacy rc aliases, which are shown only when no launcher exists. `-` means no command is registered. `LAST USED` is derived from the playbook directory's mtime.
+Column widths are computed from the longest NAME, PATH, and COMMAND values, with minimum widths of 4, 4, and 7. `COMMAND` shows the playbook's launcher command name (matching its directory name or manifest alias). `-` means no command is registered. `LAST USED` is derived from the playbook directory's mtime.
 
 ---
 
@@ -199,7 +199,7 @@ Equivalent to:
 CLAUDE_CONFIG_DIR=~/.claude-playbooks/<name> claude [claude-flags...]
 ```
 
-Flag parsing is disabled so arbitrary `claude` flags pass through. The global `--playbooks-dir` and `--shell-config` flags are extracted from the argument list before forwarding.
+Flag parsing is disabled so arbitrary `claude` flags pass through. The global `--playbooks-dir` flag is extracted from the argument list before forwarding.
 
 **Errors:**
 - Playbook not found → `unknown playbook "experiment". Run 'claude-playbook list' to see available playbooks`
@@ -330,7 +330,7 @@ Run it now:
   sre
 ```
 
-No shell reload is needed — the launcher is a symlink in a PATH directory, live the moment it is written. If the launcher directory is not on PATH, or another executable or alias-era rc alias shadows the command, a warning explains the fix.
+No shell reload is needed — the launcher is a symlink in a PATH directory, live the moment it is written. If the launcher directory is not on PATH, or another executable shadows the command, a warning explains the fix.
 
 ---
 
@@ -411,7 +411,7 @@ Updater:     bin/update-playbook.sh
 | `Version` | `version` field from the `.playbook` manifest, if set |
 | `Path` | Absolute path to the directory |
 | `Type` | `directory`, `symlink → <target>`, or `symlink → <target> (BROKEN)` |
-| `Alias` | Shell alias for this playbook, or `(none)` |
+| `Alias` | The playbook's manifest alias, or `(none)` |
 | `Size` | File and directory counts |
 | `Last used` | Human-readable time since the directory was last modified |
 | `Description` | From `.playbook` manifest, if present |
@@ -426,7 +426,7 @@ Updater:     bin/update-playbook.sh
 
 ### `claude-playbook rename <old-name> <new-name>`
 
-Renames a playbook directory and updates affected aliases.
+Renames a playbook directory and keeps its command registrations consistent.
 
 ```bash
 claude-playbook rename experiment exp-1
@@ -435,15 +435,15 @@ claude-playbook rename sre site-reliability
 
 **Steps:**
 1. Validate the old name exists and the new name doesn't. Both must be single-segment names.
-2. Rename the directory with `mv`.
-3. Update all legacy shell aliases whose `CLAUDE_CONFIG_DIR=<path>` points at the old location — rewrite them to the new location.
+2. Persist any requested manifest-alias change, then rename the directory.
+3. Retire the old name's launcher (claim-aware) and register the new command.
 
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
-| `--alias <alias>` | Use a custom alias name for the renamed playbook |
-| `--no-alias` | Drop the alias if one existed |
+| `--alias <alias>` | Set the manifest alias (and its launcher) for the renamed playbook |
+| `--no-alias` | Drop the alias and launcher registration |
 
 `--alias` and `--no-alias` cannot be combined.
 
@@ -455,68 +455,59 @@ claude-playbook rename sre site-reliability
 
 ---
 
-### `claude-playbook alias [name] [new-alias]` (legacy)
+### `claude-playbook alias [name] [new-alias]`
 
-Lists or manages **legacy rc-file shell aliases** — the alias-era registration mechanism kept working for installs that predate launcher commands (v2.13.0). New registrations use launchers; this command never touches them. **Read-only when given one argument** — no hidden side effects.
+Shows or manages a playbook's **alias**: one alternate command name, recorded in the playbook's `.playbook` manifest and materialized as a launcher command. A playbook is addressed by its directory name plus at most one alias. **Read-only with zero or one argument** — no hidden side effects.
 
 ```bash
-claude-playbook alias                    # list all playbooks and their aliases
-claude-playbook alias sre                # show alias for this playbook, or say "none"
-claude-playbook alias sre s              # set alias to 's' (creates or replaces)
-claude-playbook alias sre --remove       # remove alias
+claude-playbook alias                    # list every playbook's alias
+claude-playbook alias sre                # show the alias for this playbook, or say "none"
+claude-playbook alias sre s              # set the alias to 's' (replaces any previous one)
+claude-playbook alias sre --remove       # remove the alias and its launcher
 ```
 
-**No arguments** — lists all playbooks with the full alias lines from the shell config:
+**No arguments** — lists all playbooks and their aliases:
 
 ```
-experiment    alias experiment='CLAUDE_CONFIG_DIR="/Users/you/.claude-playbooks/experiment" claude-playbook run experiment'
-sre           alias sre='CLAUDE_CONFIG_DIR="/Users/you/.claude-playbooks/sre" claude-playbook run sre'
+experiment    exp
+sre           s
 dba           (no alias)
-```
-
-Showing the full alias line lets users see exactly what will run, including any flags they've added manually.
-
-**One argument, alias exists** — prints it.
-```
-Alias for "sre": alias sre='CLAUDE_CONFIG_DIR="/Users/you/.claude-playbooks/sre" claude-playbook run sre'
 ```
 
 **One argument, no alias** — reports only; does **not** create one.
 ```
 Playbook "dba" has no alias set.
-Use 'claude-playbook alias dba <alias-name>' to create one.
+Use 'claude-playbook alias dba <alias-name>' to set one.
 ```
 
-**Two arguments** — sets the alias (creates or replaces).
+**Two arguments** — sets the alias: validates the name (reserved names and the playbook's own name are refused), preflights registry ownership under the registration lock, records the alias in the manifest (bootstrapping one for a flat playbook), retires the previous alias's launcher (claim-aware), and writes the new launcher.
 
-**With `--remove`** — removes any aliases pointing at this playbook. No-op with a message if none exist.
+**With `--remove`** — clears the manifest alias and removes its launcher (claim-aware: a name that still addresses another playbook keeps its launcher).
+
+Linked playbooks: the manifest is the LINK TARGET's shared state, so alias mutations are refused — edit the target's manifest directly if you really mean it.
 
 **Flags:**
 
 | Flag | Description |
 |------|-------------|
-| `--remove` | Remove the alias(es) for the named playbook |
+| `--remove` | Remove the alias for the named playbook |
 
 **Errors:**
 - Playbook not found → `unknown playbook "sre"`
-- Shell config cannot be found or written → see Alias Management
+- Alias name reserved, invalid, or already addressing another playbook
+- Linked playbook → refused (shared manifest)
 
 ---
 
-### `claude-playbook dealias <name>` (legacy)
+### `claude-playbook dealias <name>`
 
-Removes every **legacy rc-file shell alias** pointing at the named playbook. This is exactly equivalent to `claude-playbook alias <name> --remove`, provided as a standalone verb for convenience. Launcher commands are untouched.
+Removes the playbook's alias and its launcher. Exactly equivalent to `claude-playbook alias <name> --remove`, provided as a standalone verb for convenience.
 
 ```bash
 claude-playbook dealias sre
 ```
 
-**Behaviour:**
-1. Resolve the named playbook (error if unknown).
-2. If it has no alias, report that and exit successfully — nothing to do.
-3. Otherwise remove all alias lines whose `CLAUDE_CONFIG_DIR` points at the playbook's directory, and report how many were removed.
-
-The playbook directory itself is untouched; only legacy shell aliases are removed.
+The playbook directory itself is untouched.
 
 **Errors:**
 - Playbook not found → `unknown playbook "sre". Run 'claude-playbook list' to see available playbooks`
@@ -543,11 +534,10 @@ Contents: 12 files, 3 directories
 Permanently delete? [y/N]
 ```
 
-The `Alias` line covers legacy rc aliases (`(no alias)` when none); a `Command` line appears for each launcher matching the playbook's name or manifest alias.
+The `Alias` line shows the manifest alias (`(none)` when unset); a `Command` line appears for each launcher matching the playbook's name or manifest alias.
 
 **Deletion scope:**
 - The target directory (for a symlink, the link is removed; the symlink target is preserved).
-- All legacy shell aliases pointing into the deleted directory.
 - Launcher symlinks are **kept**, claim-aware: a command name that still resolves to another playbook keeps its launcher outright (`Kept command "sre" (still addresses playbook "other")`); an unclaimed name's launcher is also kept — a stateless symlink may be serving a playbook in another registry root — with a manual removal hint: `Kept command "sre" — launchers may serve other registry roots; remove it manually if unused:` followed by `rm <path>`. A kept launcher whose name no longer resolves fails loudly as stale when invoked, so retention is noisy, never silently wrong.
 
 **Flags:**
@@ -617,7 +607,7 @@ claude-playbook update sre
 
 **Native-update behaviour:**
 1. If no delegated script exists, require `[source].repository` metadata.
-2. Refuse linked playbooks and legacy installs whose config is selected through top-level `subdir`; those require a delegated script.
+2. Refuse linked playbooks and installs whose config is selected through top-level `subdir`; those require a delegated script.
 3. Fetch `[source].repository` at the recorded branch and source subdirectory.
 4. Copy the current playbook into a same-filesystem staging directory, then overlay the fetched source. This preserves credentials, account state, history, and other local-only files while replacing source-owned files.
 5. Preserve local alias, authentication-isolation, and source metadata.
@@ -636,13 +626,13 @@ git pull --ff-only
 - Update script and source metadata missing → `"sre" has no update script (...) and no [source] metadata in .playbook`
 - Script not executable → `update script is not executable: <path>`
 - Script exits non-zero → exit code forwarded; `update script exited with code <n>` is printed to stderr
-- Linked or legacy-subdir native update → an error requiring a delegated script
+- Linked or subdir-selected native update → an error requiring a delegated script
 
 ---
 
 ### `claude-playbook self-uninstall`
 
-Removes `claude-playbook` and everything it created: all playbooks, their launcher commands and legacy shell aliases, the completion lines `install.sh` added to shell rc files, the playbooks root directory, and the binary itself. The complete undo for an install.
+Removes `claude-playbook` and everything it created: all playbooks, their launcher commands, any `source <(... completion ...)` lines in shell rc files, the playbooks root directory, and the binary itself. The complete undo for an install.
 
 ```bash
 claude-playbook self-uninstall               # prompts
@@ -652,11 +642,10 @@ claude-playbook self-uninstall --keep-data   # remove the binary but keep playbo
 ```
 
 **Steps:**
-1. For each discovered playbook: remove its legacy shell aliases, and (unless `--keep-data`) remove its directory.
+1. For each discovered playbook (unless `--keep-data`): remove its directory.
 2. Unless `--keep-data`, remove the playbooks root directory.
 3. Unless `--keep-binary`, sweep **all** launcher symlinks pointing at the binary — every one of them would dangle once the binary is gone, whichever registry root it served. With `--keep-binary`, no launchers are touched: a same-named command may be serving another registry root, and a removed default-root playbook's launcher fails loudly as stale rather than being silently deleted.
-4. Remove the `source <(claude-playbook completion bash|zsh)` lines `install.sh` appended to `~/.bashrc` and `~/.zshrc` — after the binary is gone they would error on every new shell.
-5. Sweep any leftover aliases whose `CLAUDE_CONFIG_DIR` points anywhere inside the playbooks root.
+4. Remove any `source <(claude-playbook|cpb completion bash|zsh)` lines from `~/.bashrc` and `~/.zshrc` — after the binary is gone they would error on every new shell.
 6. Unless `--keep-binary`, remove the running binary and its sibling `cpb`/`claude-playbook` link. If removal is denied by permissions, print the `sudo rm <path>` command to run manually rather than failing.
 7. Print a summary of what was removed and remind the user to reload their shell.
 
@@ -740,67 +729,9 @@ update_script = "bin/update-playbook.sh"
 
 ---
 
-## Alias Management (legacy)
+## Aliases
 
-**This section documents the alias-era registration mechanism, retained so installs that predate launcher commands (v2.13.0) keep working.** New registrations write launchers (see Launcher Commands); the `alias`/`dealias` commands and the machinery below manage only the old rc-file alias lines.
-
-Aliases are plain single-line `alias` definitions in the user's shell configuration file — no metadata, no registry. The alias lines in the config are the complete truth: discovery works purely by content match (the alias name, or the `CLAUDE_CONFIG_DIR` path inside the definition).
-
-### Shell config detection
-
-The file to read and write is chosen in this order:
-
-1. The `--shell-config <path>` flag, if given.
-2. The `CLAUDE_SHELL_CONFIG` environment variable, if set.
-3. Auto-detection from `$SHELL`:
-   - `zsh` → `~/.zshrc`
-   - `bash` → `~/.bashrc`
-   - `fish` → `~/.config/fish/config.fish`
-4. If undetectable, commands that need the shell config fail with:
-   ```
-   Could not find shell config. Use --shell-config <path> to specify one.
-   ```
-
-### Alias format
-
-```bash
-alias <alias-name>='CLAUDE_CONFIG_DIR="<playbook-path>" <bin-name> run <playbook-name>'
-```
-
-Aliases route their execution back through `claude-playbook run` (or its active command name link like `cpb run`) to allow credentials sharing, keychains, and symlink healing to execute transparently on every session startup.
-
-### Lookup
-
-Two lookup directions, both by plain grep:
-
-- **By alias name** (for duplicate checks, removals): match lines where the alias definition is `alias <name>=...` (tolerating leading whitespace).
-- **By playbook** (for `list`, `info`, and `alias` with no args): match lines containing `CLAUDE_CONFIG_DIR=<path>` where `<path>` (with `~` and `$HOME` expanded) resolves to the playbook's directory.
-
-Because lookup works on the actual `alias` line content, hand-maintained aliases are fully supported. If a user writes:
-
-```bash
-alias myexp="CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/experiment cpb run experiment --model claude-opus-4-6"
-```
-
-— the tool sees it, reports it in `list` and `info`, and `alias experiment --remove` will delete it.
-
-### Updates and removals
-
-- **Set/update:** remove any existing line matching the alias name or any existing line pointing at the playbook path, then append the new alias line.
-- **Remove:** delete any line matching the target (by alias name or by playbook path).
-
-If multiple aliases point to the same playbook, they are all reported; removal deletes all of them.
-
-### Manual customization
-
-Because aliases are just shell commands, users can hand-edit them freely to add `claude` flags:
-
-```bash
-alias experiment='CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude'
-alias sre='CLAUDE_CONFIG_DIR=~/.claude-playbooks/sre claude --permission-mode auto --effort max'
-```
-
-`alias` (no args) shows the full line so users can see exactly what's configured.
+A playbook's alias is one alternate command name, stored as the `alias` field of its `.playbook` manifest — no rc files, no separate registry. Dispatch resolves directory names first, then manifest aliases; the alias is materialized as a launcher command like the playbook's own name. `create --alias`, `install --alias`, `link --alias`, `rename --alias`, and `alias <name> <alias>` all write the same field.
 
 ---
 
@@ -812,7 +743,6 @@ These flags work on every command.
 |------|-------------|
 | `--playbooks-dir <path>` | Override the playbooks root directory. Default: `~/.claude-playbooks` |
 | `--launcher-dir <path>` | Override the launcher directory. Default: the directory of the binary as invoked, falling back to `~/.local/bin` when unwritable |
-| `--shell-config <path>` | Override the shell config file (only affects the legacy alias features). Default: auto-detected from `$SHELL` |
 | `--version` | Print the version of `claude-playbook` |
 | `--help`, `-h` | Show help for the command or subcommand |
 
@@ -822,7 +752,6 @@ These flags work on every command.
 |----------|----------------|
 | `CLAUDE_PLAYBOOKS_DIR` | `--playbooks-dir` |
 | `CLAUDE_LAUNCHER_DIR` | `--launcher-dir` |
-| `CLAUDE_SHELL_CONFIG` | `--shell-config` |
 
 **Resolution precedence:** CLI flag → environment variable → default.
 

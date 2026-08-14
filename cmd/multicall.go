@@ -25,8 +25,7 @@ func multicallPlaybook() (string, bool, error) {
 		return "", false, nil
 	}
 	root := config.ResolvePlaybooksDir()
-	shellConfig, _ := config.ResolveShellConfig()
-	pbs, err := playbook.Discover(root, shellConfig)
+	pbs, err := playbook.Discover(root)
 	if err != nil {
 		return "", false, fmt.Errorf("cannot resolve %q: reading the playbook registry failed: %w", base, err)
 	}
@@ -59,8 +58,7 @@ func launcherNamesFor(pb *playbook.Playbook) []string {
 // here rather than parsed out of files.
 func commandNameOwner(cmdName, exceptName string) (*playbook.Playbook, error) {
 	root := config.ResolvePlaybooksDir()
-	shellConfig, _ := config.ResolveShellConfig()
-	pbs, err := playbook.Discover(root, shellConfig)
+	pbs, err := playbook.Discover(root)
 	if err != nil {
 		return nil, err
 	}
@@ -176,11 +174,6 @@ func applyRegistryOverrides(args []string) {
 			i++
 		case strings.HasPrefix(args[i], "--playbooks-dir="):
 			config.PlaybooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		case args[i] == "--shell-config" && i+1 < len(args):
-			config.ShellConfig = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--shell-config="):
-			config.ShellConfig = strings.TrimPrefix(args[i], "--shell-config=")
 		}
 	}
 }

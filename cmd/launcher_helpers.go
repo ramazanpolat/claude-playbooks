@@ -44,7 +44,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Reach it under a different name with a shell alias: claude-playbook alias %s <name> — rename the playbook (and its command) with: claude-playbook rename %s <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
+		fmt.Fprintf(os.Stderr, "Register a different command name with: claude-playbook alias %s <name> — rename the playbook (and its command) with: claude-playbook rename %s <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
 		manual()
 		return
 	}
@@ -61,27 +61,13 @@ func installLauncher(cmdName, playbookName, configDir string) {
 
 // warnIfShadowedOrUnreachable checks that typing cmdName will actually run
 // the launcher just written: the launcher directory must be on PATH and no
-// other executable may resolve first, and no rc-file alias from an earlier
-// install may shadow it in interactive shells.
+// other executable may resolve first.
 func warnIfShadowedOrUnreachable(cmdName, path, configDir string) {
 	if resolved, err := exec.LookPath(cmdName); err != nil {
 		dir, _ := config.ResolveLauncherDir()
 		fmt.Fprintf(os.Stderr, "Warning: %s is not on your PATH. Add it with:\n  export PATH=%s:\"$PATH\"\n", dir, shell.QuoteArg(dir))
 	} else if resolved != path {
 		fmt.Fprintf(os.Stderr, "Warning: %q resolves to %s, which shadows the launcher at %s\n", cmdName, resolved, path)
-	}
-	// A same-named alias from an alias-era install wins over PATH in
-	// interactive shells. Pointing at another playbook is a trap worth
-	// naming; pointing at this one still works, so stay quiet.
-	if cfg, err := config.ResolveShellConfig(); err == nil {
-		if entries, err := shell.ReadAll(cfg); err == nil {
-			for _, e := range entries {
-				if e.AliasName == cmdName && e.Path != configDir {
-					fmt.Fprintf(os.Stderr, "Warning: alias %q in %s points at %s and shadows this command in interactive shells. Remove it with: claude-playbook dealias %s\n",
-						cmdName, cfg, e.Path, shell.QuoteArg(cmdName))
-				}
-			}
-		}
 	}
 }
 

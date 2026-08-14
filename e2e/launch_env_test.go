@@ -137,7 +137,6 @@ func childEnv(t *testing.T, playbooksDir string, l launch) map[string]string {
 
 	args := append([]string{
 		"--playbooks-dir", playbooksDir,
-		"--shell-config", filepath.Join(work, "shellrc"),
 	}, l.args...)
 
 	cmd := exec.Command(binPath, args...)
