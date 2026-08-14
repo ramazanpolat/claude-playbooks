@@ -36,10 +36,11 @@ and completion lines — playbooks and shell aliases stay (uninstall.sh
 delegates to this mode).
 Use --dry-run to preview what would be removed without making any changes.
 
-Launchers are swept from the launcher directory this invocation resolves
-plus the ~/.local/bin fallback. If you created launchers with --launcher-dir
-or CLAUDE_LAUNCHER_DIR, run self-uninstall with the same setting so that
-directory is swept too.`,
+Launchers are removed wherever they were created: every launcher this
+tool writes is recorded in a registry file, so custom --launcher-dir and
+CLAUDE_LAUNCHER_DIR locations are cleaned automatically; a resolution
+scan of the standard directories additionally covers launchers that
+predate the registry.`,
 	Args: cobra.NoArgs,
 	RunE: runSelfUninstall,
 }
@@ -94,15 +95,18 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		if !selfUninstallBinaryOnly {
 			fmt.Printf("  Shell aliases: all CLAUDE_CONFIG_DIR aliases in %s\n", shellConfig)
 		}
-		for _, ldir := range launcherSweepDirs() {
-			if les := launchersToRemove(ldir, pbs); len(les) > 0 {
-				fmt.Printf("  Launchers:     %d command(s) in %s\n", len(les), ldir)
-			}
+		for _, e := range launcherRemovalPlan(pbs) {
+			fmt.Printf("  Launcher:      %s (%s)\n", e.CmdName, e.Path)
 		}
 		if !selfUninstallKeepBinary {
 			for _, rc := range completionRcFiles() {
 				if n, err := shell.CountExactLines(rc, completionLines()); err == nil && n > 0 {
 					fmt.Printf("  Completions:   %d line(s) in %s\n", n, rc)
+				}
+			}
+			if rp := launcher.ReceiptPath(); rp != "" {
+				if _, err := os.Stat(rp); err == nil {
+					fmt.Printf("  Registry:      %s\n", rp)
 				}
 			}
 		}
@@ -134,15 +138,18 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		if !selfUninstallBinaryOnly {
 			fmt.Printf("  shell aliases in: %s\n", shellConfig)
 		}
-		for _, ldir := range launcherSweepDirs() {
-			for _, e := range launchersToRemove(ldir, pbs) {
-				fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
-			}
+		for _, e := range launcherRemovalPlan(pbs) {
+			fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
 		}
 		if !selfUninstallKeepBinary {
 			for _, rc := range completionRcFiles() {
 				if n, err := shell.CountExactLines(rc, completionLines()); err == nil && n > 0 {
 					fmt.Printf("  %d completion line(s) from: %s\n", n, rc)
+				}
+			}
+			if rp := launcher.ReceiptPath(); rp != "" {
+				if _, err := os.Stat(rp); err == nil {
+					fmt.Printf("  launcher registry: %s\n", rp)
 				}
 			}
 		}
@@ -183,19 +190,23 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 3: remove launchers. When the binary is going away, every link
-	// to it would dangle — sweep them all, in every directory launcher.Write
-	// may have used. With --keep-binary, launchers for OTHER playbook roots
-	// sharing the directory keep working, so none are removed.
-	sweepDirs := launcherSweepDirs()
-	if len(sweepDirs) == 0 {
-		fmt.Fprintf(os.Stderr, "warning: could not resolve any launcher directory; launchers not swept\n")
+	// to it would dangle — sweep the scan dirs plus every receipt entry
+	// that still verifies as ours. With --keep-binary, launchers for OTHER
+	// playbook roots sharing the directory keep working, so none are
+	// removed. Once the launchers are gone the receipt has nothing left to
+	// describe, so it goes too.
+	for _, e := range launcherRemovalPlan(pbs) {
+		if rerr := os.Remove(e.Path); rerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to remove launcher %s: %v\n", e.Path, rerr)
+		} else {
+			removed = append(removed, fmt.Sprintf("launcher %q (%s)", e.CmdName, e.Path))
+		}
 	}
-	for _, ldir := range sweepDirs {
-		for _, e := range launchersToRemove(ldir, pbs) {
-			if rerr := os.Remove(e.Path); rerr != nil {
-				fmt.Fprintf(os.Stderr, "warning: failed to remove launcher %s: %v\n", e.Path, rerr)
-			} else {
-				removed = append(removed, fmt.Sprintf("launcher %q (%s)", e.CmdName, e.Path))
+	if !selfUninstallKeepBinary {
+		if rp := launcher.ReceiptPath(); rp != "" {
+			if _, err := os.Stat(rp); err == nil {
+				launcher.RemoveReceipt()
+				removed = append(removed, fmt.Sprintf("launcher registry (%s)", rp))
 			}
 		}
 	}
@@ -390,6 +401,66 @@ func siblingToRemove(execPath string) string {
 		return ""
 	}
 	return p
+}
+
+// launcherRemovalPlan is THE list of launchers uninstall will delete —
+// previews and the removal step share it so consent always matches
+// execution. It unions two sources: a resolution scan of the standard
+// directories (covers launchers that predate the receipt), and the
+// receipt's recorded paths (covers custom --launcher-dir installs the
+// scan cannot know about). Every candidate is verified against the live
+// filesystem; deduplication is by canonical location.
+func launcherRemovalPlan(pbs []*playbook.Playbook) []launcher.Entry {
+	if selfUninstallKeepBinary {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []launcher.Entry
+	add := func(e launcher.Entry) {
+		key := canonPath(filepath.Dir(e.Path)) + "/" + e.CmdName
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, e)
+	}
+	for _, ldir := range launcherSweepDirs() {
+		for _, e := range launchersToRemove(ldir, pbs) {
+			add(e)
+		}
+	}
+	for _, e := range receiptLaunchers() {
+		add(e)
+	}
+	return out
+}
+
+// receiptLaunchers returns recorded launcher paths that still verify as
+// ours: a symlink resolving to this binary, or a dangling one (we wrote
+// it; a live command resolving elsewhere is never removed on the
+// receipt's say-so). Paths the user renamed or deleted by hand no longer
+// match anything and are skipped.
+func receiptLaunchers() []launcher.Entry {
+	bin, berr := launcher.BinPath()
+	var out []launcher.Entry
+	for _, p := range launcher.Recorded() {
+		name := filepath.Base(p)
+		if launcher.ReservedNames[name] {
+			continue
+		}
+		info, err := os.Lstat(p)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		if resolved, rerr := filepath.EvalSymlinks(p); rerr == nil {
+			if berr != nil || resolved != bin {
+				continue // resolves, but not to us (or unverifiable): live foreign command
+			}
+		}
+		target, _ := os.Readlink(p)
+		out = append(out, launcher.Entry{CmdName: name, Path: p, Target: target})
+	}
+	return out
 }
 
 // launcherSweepDirs returns every directory the launcher sweep must cover:

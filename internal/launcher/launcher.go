@@ -93,6 +93,7 @@ func Write(dir, cmdName string) (string, error) {
 
 	err = os.Symlink(target, path)
 	if err == nil {
+		receipt(path)
 		return path, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
@@ -103,7 +104,9 @@ func Write(dir, cmdName string) (string, error) {
 	}
 	if existing, rerr := os.Readlink(path); rerr == nil && existing == target {
 		// Identical content, nothing to write. This also makes concurrent
-		// creators converge without coordination.
+		// creators converge without coordination. Still recorded: the link
+		// may predate the receipt.
+		receipt(path)
 		return path, nil
 	}
 	// Ours but pointing elsewhere (e.g. at a versioned physical binary from
@@ -122,9 +125,19 @@ func Write(dir, cmdName string) (string, error) {
 			os.Remove(tmp)
 			return "", err
 		}
+		receipt(path)
 		return path, nil
 	}
 	return "", fmt.Errorf("could not refresh launcher %s", path)
+}
+
+// receipt records a written launcher path, warning instead of failing:
+// the symlink already exists, and a working command beats a complete
+// ledger.
+func receipt(path string) {
+	if err := record(path); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: launcher created but not recorded in receipt: %v\n", err)
+	}
 }
 
 // List returns every launcher symlink in dir pointing at this binary.
@@ -183,6 +196,9 @@ func Remove(dir, cmdName string) (bool, error) {
 	}
 	if err := os.Remove(e.Path); err != nil {
 		return false, err
+	}
+	if err := unrecord(e.Path); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: launcher removed but receipt not updated: %v\n", err)
 	}
 	return true, nil
 }

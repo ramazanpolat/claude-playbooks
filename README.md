@@ -106,8 +106,12 @@ Or run the local uninstaller from a clone:
 
 The script delegates to `claude-playbook self-uninstall --binary-only`, so
 one implementation owns all cleanup: the binary, its `cpb` sibling, launcher
-symlinks, and any completion lines you added. Playbooks and shell aliases are
-untouched, and `~/.claude-playbooks` is never deleted.
+symlinks, and any completion lines you added. Every launcher the tool creates
+is recorded in a registry (`~/.local/state/claude-playbook/launchers`), so
+launchers are removed wherever they were created — including custom
+`--launcher-dir` locations — while a link you renamed or repointed yourself
+is left alone. Playbooks and shell aliases are untouched, and
+`~/.claude-playbooks` is never deleted.
 
 ### Uninstalling claude-playbook itself
 

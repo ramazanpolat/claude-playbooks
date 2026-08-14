@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
@@ -149,6 +150,83 @@ func TestLaunchersToRemoveExcludesReservedNames(t *testing.T) {
 	les := launchersToRemove(dir, nil)
 	if len(les) != 1 || les[0].CmdName != "deploy" {
 		t.Fatalf("reserved names must be left to sibling/binary cleanup, got %#v", les)
+	}
+}
+
+func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
+	resetCommandTestState(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A launcher in a custom directory that no sweep would rediscover —
+	// only the receipt knows about it.
+	customDir := t.TempDir()
+	customPath, err := launcher.Write(customDir, "custom-cmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A recorded path the user has since repointed at another executable:
+	// live foreign command, must never be removed on the receipt's say-so.
+	foreign := filepath.Join(customDir, "foreign-cmd")
+	otherBin := filepath.Join(customDir, "other-tool")
+	if err := os.WriteFile(otherBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launcher.Write(customDir, "foreign-cmd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(foreign); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(otherBin, foreign); err != nil {
+		t.Fatal(err)
+	}
+
+	// A recorded path the user deleted by hand: skipped, not an error.
+	if _, err := launcher.Write(customDir, "hand-deleted"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(customDir, "hand-deleted")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A dangling recorded link (target vanished): ours, removed.
+	danglingTarget := filepath.Join(customDir, "vanishing")
+	if err := os.Link(exe, danglingTarget); err != nil {
+		t.Skipf("cannot hard-link test binary: %v", err)
+	}
+	danglingPath, err := launcher.Write(customDir, "dangler")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Write already recorded the path; repoint the link at the hard link
+	// and delete that target so the recorded launcher dangles.
+	if err := os.Remove(danglingPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(danglingTarget, danglingPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(danglingTarget); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := launcherRemovalPlan(nil)
+	byPath := map[string]bool{}
+	for _, e := range plan {
+		byPath[e.Path] = true
+	}
+	if !byPath[customPath] {
+		t.Fatalf("custom-dir launcher missing from plan: %v", plan)
+	}
+	if byPath[foreign] {
+		t.Fatalf("live foreign command in plan: %v", plan)
+	}
+	if !byPath[danglingPath] {
+		t.Fatalf("dangling recorded launcher missing from plan: %v", plan)
 	}
 }
 
