@@ -151,9 +151,6 @@ func runRoot(cmd *cobra.Command, args []string) error {
 				break
 			}
 		}
-		if command == "" {
-			command = pb.Alias()
-		}
 		if command != "" {
 			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, command)
 		} else {

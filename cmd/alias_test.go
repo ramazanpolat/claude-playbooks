@@ -144,3 +144,31 @@ func TestAliasRejectsReservedAndOwnName(t *testing.T) {
 		t.Fatal("alias equal to the playbook's own name must be refused")
 	}
 }
+
+func TestAliasUnchangedOnLinkedPlaybookDoesNotRewriteSharedManifest(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	external := t.TempDir()
+	// Comments and unknown fields prove a rewrite: manifest.Write would
+	// drop both.
+	content := "# hand-authored comment\nversion = \"0.1.0\"\nname = \"ext\"\nalias = \"x\"\ncustom_field = \"kept\"\n"
+	if err := os.WriteFile(filepath.Join(external, manifest.FileName), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(config.ResolvePlaybooksDir(), "linked")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same alias: allowed (ensures the launcher), but the shared manifest
+	// must remain byte-identical.
+	if err := runAlias(nil, []string{"linked", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(external, manifest.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Fatalf("shared manifest rewritten:\n%s", got)
+	}
+}

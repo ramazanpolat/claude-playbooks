@@ -647,7 +647,7 @@ claude-playbook self-uninstall --keep-data   # remove the binary but keep playbo
 3. Unless `--keep-binary`, sweep **all** launcher symlinks pointing at the binary — every one of them would dangle once the binary is gone, whichever registry root it served. With `--keep-binary`, no launchers are touched: a same-named command may be serving another registry root, and a removed default-root playbook's launcher fails loudly as stale rather than being silently deleted.
 4. Remove any `source <(claude-playbook|cpb completion bash|zsh)` lines from `~/.bashrc` and `~/.zshrc` — after the binary is gone they would error on every new shell.
 6. Unless `--keep-binary`, remove the running binary and its sibling `cpb`/`claude-playbook` link. If removal is denied by permissions, print the `sudo rm <path>` command to run manually rather than failing.
-7. Print a summary of what was removed and remind the user to reload their shell.
+7. Print a summary of what was removed. When completion lines were removed from rc files, remind the user that already-open shells still hold the stale completion functions until reloaded.
 
 **Flags:**
 

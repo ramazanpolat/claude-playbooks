@@ -29,10 +29,6 @@ func runStart(cmd *cobra.Command, args []string) error {
 			i++
 		case strings.HasPrefix(args[i], "--playbooks-dir="):
 			// ignore
-		case args[i] == "--shell-config" && i+1 < len(args):
-			i++
-		case strings.HasPrefix(args[i], "--shell-config="):
-			// ignore
 		case args[i] == "--delete":
 			deleteAfter = true
 		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:

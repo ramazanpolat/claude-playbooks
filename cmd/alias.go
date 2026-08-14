@@ -68,6 +68,20 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	}
 
 	name := args[0]
+
+	// Mutations (set, --remove) serialize the WHOLE read-modify-write under
+	// the registry lock: snapshotting the current alias before locking lets
+	// two overlapping replacements read the same "old" value, so the loser
+	// never retires the winner's launcher — and an unlocked removal could
+	// delete a launcher another process just legitimately claimed.
+	if aliasRemove || len(args) == 2 {
+		unlock, lerr := lockRegistry()
+		if lerr != nil {
+			return lerr
+		}
+		defer unlock()
+	}
+
 	pb, err := playbook.Require(playbooksDir, name)
 	if err != nil {
 		return err
@@ -113,11 +127,13 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		if err := launcher.ValidateName(newAlias); err != nil {
 			return err
 		}
-		unlock, err := lockRegistry()
-		if err != nil {
-			return err
+		if newAlias == old {
+			// Nothing to record — and for a linked playbook, rewriting the
+			// shared target manifest would drop comments and unknown fields
+			// for no reason. Just make sure the launcher exists.
+			installLauncher(newAlias, pb.Name, pb.Path)
+			return nil
 		}
-		defer unlock()
 		if err := preflightCommandNames(pb.Name, newAlias); err != nil {
 			return err
 		}
@@ -131,7 +147,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", newAlias, err)
 		}
-		if old != "" && old != newAlias {
+		if old != "" {
 			retireAliasLauncher(old, name)
 		}
 		installLauncher(newAlias, pb.Name, pb.Path)

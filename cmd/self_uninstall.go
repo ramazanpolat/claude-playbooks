@@ -194,11 +194,13 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	// Step 3.5: remove the completion lines install.sh appended to shell rc
 	// files — after the binary is gone they error on every new shell. With
 	// --keep-binary they keep working, so they stay.
+	completionLinesRemoved := 0
 	if !selfUninstallKeepBinary {
 		for _, rc := range completionRcFiles() {
 			if n, err := shell.RemoveExactLines(rc, completionLines()); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not update %s: %v\n", rc, err)
 			} else if n > 0 {
+				completionLinesRemoved += n
 				removed = append(removed, fmt.Sprintf("%d completion line(s) from %s", n, rc))
 			}
 		}
@@ -262,6 +264,14 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		for _, m := range needsManual {
 			fmt.Printf("  %s\n", m)
 		}
+	}
+
+	// Editing the rc files does not reach shells that are already open —
+	// their loaded completion functions go stale only on reload (SPEC
+	// self-uninstall step 7).
+	if completionLinesRemoved > 0 {
+		fmt.Println()
+		fmt.Println("Completion lines were removed; open a new shell (or re-source your rc file) to drop the stale completion functions.")
 	}
 
 	if selfUninstallBinaryOnly {
