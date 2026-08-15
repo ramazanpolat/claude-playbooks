@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -131,6 +134,10 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 		return err
 	}
 
+	if err := verifyChecksum(w, cfg, downloadBase, latest, asset, tmpPath); err != nil {
+		return fmt.Errorf("downloaded binary failed checksum verification (aborting without replacing the current one): %w", err)
+	}
+
 	if cfg.verifyExec {
 		if err := verifyBinary(tmpPath, latest); err != nil {
 			return fmt.Errorf("downloaded binary failed verification (aborting without replacing the current one): %w", err)
@@ -199,6 +206,85 @@ func downloadTo(cfg selfUpdateConfig, url string, dst io.Writer) error {
 	if _, err := io.Copy(dst, resp.Body); err != nil {
 		return err
 	}
+	return nil
+}
+
+var hexDigest = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
+// verifyChecksum fetches the release's SHA256SUMS and compares the staged
+// download's digest. Policy mirrors install.sh: a genuine mismatch aborts;
+// every unverifiable case (no sums published, entry missing, malformed or
+// duplicated) warns and continues — the sums travel over the same channel
+// as the binary, so they guard against corruption and truncation, not a
+// compromised host.
+func verifyChecksum(w io.Writer, cfg selfUpdateConfig, downloadBase, latest, asset, path string) error {
+	url := fmt.Sprintf("%s/%s/SHA256SUMS", strings.TrimRight(downloadBase, "/"), latest)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		fmt.Fprintf(w, "Warning: no SHA256SUMS for %s; skipping checksum verification\n", latest)
+		return nil
+	}
+	req.Header.Set("User-Agent", "claude-playbook-selfupdate")
+	resp, err := cfg.httpClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(w, "Warning: no SHA256SUMS for %s; skipping checksum verification\n", latest)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(w, "Warning: no SHA256SUMS published for %s; skipping checksum verification\n", latest)
+		return nil
+	}
+	const sumsLimit = 64 * 1024
+	body, err := io.ReadAll(io.LimitReader(resp.Body, sumsLimit+1))
+	if err != nil {
+		fmt.Fprintf(w, "Warning: could not read SHA256SUMS for %s; skipping checksum verification\n", latest)
+		return nil
+	}
+	if len(body) > sumsLimit {
+		// A truncated parse could miss the real entry and either skip
+		// verification or, worse, match a wrong prefix line — treat an
+		// oversized manifest as unverifiable, never as partially true.
+		fmt.Fprintf(w, "Warning: SHA256SUMS for %s exceeds %d bytes; skipping checksum verification\n", latest, sumsLimit)
+		return nil
+	}
+
+	want := ""
+	matches := 0
+	for _, line := range strings.Split(string(body), "\n") {
+		fields := strings.Fields(line)
+		// sha256sum text mode writes "hash  name"; --binary mode writes
+		// "hash *name" — both are valid manifests.
+		if len(fields) == 2 && (fields[1] == asset || fields[1] == "*"+asset) {
+			matches++
+			want = fields[0]
+		}
+	}
+	if matches == 0 {
+		fmt.Fprintf(w, "Warning: %s not listed in SHA256SUMS; skipping checksum verification\n", asset)
+		return nil
+	}
+	if matches != 1 || !hexDigest.MatchString(want) {
+		// A truncated or duplicated entry must not fail a legitimate binary
+		// as "mismatch" — it is unverifiable, not wrong.
+		fmt.Fprintf(w, "Warning: malformed SHA256SUMS entry for %s; skipping checksum verification\n", asset)
+		return nil
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(want, got) {
+		return fmt.Errorf("checksum mismatch for %s %s: expected %s, got %s", asset, latest, strings.ToLower(want), got)
+	}
+	fmt.Fprintln(w, "Checksum verified (sha256).")
 	return nil
 }
 
