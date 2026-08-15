@@ -235,9 +235,17 @@ func verifyChecksum(w io.Writer, cfg selfUpdateConfig, downloadBase, latest, ass
 		fmt.Fprintf(w, "Warning: no SHA256SUMS published for %s; skipping checksum verification\n", latest)
 		return nil
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	const sumsLimit = 64 * 1024
+	body, err := io.ReadAll(io.LimitReader(resp.Body, sumsLimit+1))
 	if err != nil {
 		fmt.Fprintf(w, "Warning: could not read SHA256SUMS for %s; skipping checksum verification\n", latest)
+		return nil
+	}
+	if len(body) > sumsLimit {
+		// A truncated parse could miss the real entry and either skip
+		// verification or, worse, match a wrong prefix line — treat an
+		// oversized manifest as unverifiable, never as partially true.
+		fmt.Fprintf(w, "Warning: SHA256SUMS for %s exceeds %d bytes; skipping checksum verification\n", latest, sumsLimit)
 		return nil
 	}
 
@@ -245,7 +253,9 @@ func verifyChecksum(w io.Writer, cfg selfUpdateConfig, downloadBase, latest, ass
 	matches := 0
 	for _, line := range strings.Split(string(body), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[1] == asset {
+		// sha256sum text mode writes "hash  name"; --binary mode writes
+		// "hash *name" — both are valid manifests.
+		if len(fields) == 2 && (fields[1] == asset || fields[1] == "*"+asset) {
 			matches++
 			want = fields[0]
 		}

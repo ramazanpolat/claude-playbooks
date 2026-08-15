@@ -262,3 +262,39 @@ func TestSelfUpdateNoSumsWarnsAndProceeds(t *testing.T) {
 		t.Fatalf("no skip warning:\n%s", out.String())
 	}
 }
+
+func TestSelfUpdateChecksumBinaryModeEntryVerifies(t *testing.T) {
+	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+		return scriptDigest(script) + " *" + asset + "\n"
+	})
+	defer srv.Close()
+	exe := newExecutable(t)
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v1.0.0"
+
+	var out strings.Builder
+	if err := selfUpdate(&out, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Checksum verified (sha256).") {
+		t.Fatalf("binary-mode entry not verified:\n%s", out.String())
+	}
+}
+
+func TestSelfUpdateOversizedSumsWarnsAndProceeds(t *testing.T) {
+	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+		return strings.Repeat("x", 70*1024)
+	})
+	defer srv.Close()
+	exe := newExecutable(t)
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v1.0.0"
+
+	var out strings.Builder
+	if err := selfUpdate(&out, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "exceeds") {
+		t.Fatalf("no oversize warning:\n%s", out.String())
+	}
+}
