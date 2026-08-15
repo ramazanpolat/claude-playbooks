@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -161,5 +163,102 @@ func TestSelfUpdateVerifyRejectsBadDownload(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(exe); string(got) != "OLD-BINARY" {
 		t.Fatalf("a failed verification still replaced the binary: %q", got)
+	}
+}
+
+// sumsReleaseServer is fakeReleaseServer plus a SHA256SUMS route whose
+// content is produced by sums(asset, script).
+func sumsReleaseServer(t *testing.T, tag, versionOutput string, sums func(asset, script string) string) *httptest.Server {
+	t.Helper()
+	asset := fmt.Sprintf("claude-playbook-%s-%s", runtime.GOOS, runtime.GOARCH)
+	script := "#!/bin/sh\necho \"" + versionOutput + "\"\n"
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			fmt.Fprintf(w, `{"tag_name":%q}`, tag)
+		case strings.HasSuffix(r.URL.Path, "/"+tag+"/"+asset):
+			_, _ = w.Write([]byte(script))
+		case strings.HasSuffix(r.URL.Path, "/"+tag+"/SHA256SUMS"):
+			_, _ = w.Write([]byte(sums(asset, script)))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func scriptDigest(script string) string {
+	h := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(h[:])
+}
+
+func TestSelfUpdateChecksumVerifies(t *testing.T) {
+	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+		return scriptDigest(script) + "  " + asset + "\n"
+	})
+	defer srv.Close()
+	exe := newExecutable(t)
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v1.0.0"
+
+	var out strings.Builder
+	if err := selfUpdate(&out, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Checksum verified (sha256).") {
+		t.Fatalf("no verification line in output:\n%s", out.String())
+	}
+}
+
+func TestSelfUpdateChecksumMismatchAborts(t *testing.T) {
+	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+		return strings.Repeat("ab", 32) + "  " + asset + "\n"
+	})
+	defer srv.Close()
+	exe := newExecutable(t)
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v1.0.0"
+
+	var out strings.Builder
+	err := selfUpdate(&out, cfg)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("expected checksum mismatch, got %v", err)
+	}
+	data, rerr := os.ReadFile(exe)
+	if rerr != nil || string(data) != "OLD-BINARY" {
+		t.Fatalf("binary replaced despite mismatch: %q %v", data, rerr)
+	}
+}
+
+func TestSelfUpdateChecksumMalformedWarnsAndProceeds(t *testing.T) {
+	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+		return "1234  " + asset + "\n"
+	})
+	defer srv.Close()
+	exe := newExecutable(t)
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v1.0.0"
+
+	var out strings.Builder
+	if err := selfUpdate(&out, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "malformed SHA256SUMS") {
+		t.Fatalf("no malformed warning:\n%s", out.String())
+	}
+}
+
+func TestSelfUpdateNoSumsWarnsAndProceeds(t *testing.T) {
+	srv := fakeReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9")
+	defer srv.Close()
+	exe := newExecutable(t)
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v1.0.0"
+
+	var out strings.Builder
+	if err := selfUpdate(&out, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "skipping checksum verification") {
+		t.Fatalf("no skip warning:\n%s", out.String())
 	}
 }
