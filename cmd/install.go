@@ -14,7 +14,6 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -42,8 +41,8 @@ func init() {
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	if installNoAlias && installAlias != "" {
-		return fmt.Errorf("--no-alias and --alias cannot be used together")
+	if err := checkAliasFlagConflict(installAlias, installNoAlias); err != nil {
+		return err
 	}
 
 	source := args[0]
@@ -116,11 +115,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if _, err := os.Lstat(dest); err == nil {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
 	}
-	if installAlias != "" {
-		if err := launcher.ValidateName(installAlias); err != nil {
-			return err
-		}
-	}
 
 	// Serialize preflight-through-registration across concurrent installs
 	// (see lockRegistry).
@@ -142,14 +136,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// The launcher that will actually be written uses the effective alias,
 	// falling back to the target name — an unwritable name must fail before
 	// the source is copied into the registry, not as a post-copy warning.
-	if !installNoAlias {
-		launcherName := effectiveAlias
-		if launcherName == "" {
-			launcherName = targetName
-		}
-		if err := launcher.ValidateName(launcherName); err != nil {
-			return fmt.Errorf("%w (pass --no-alias to install without a launcher)", err)
-		}
+	// The installed manifest normalizes its name to targetName, so this
+	// resolved name is still the command to write after the copy.
+	launcherName, err := resolveLauncherName(installNoAlias, effectiveAlias, targetName, "install")
+	if err != nil {
+		return err
 	}
 	if err := preflightCommandNames("", targetName, effectiveAlias); err != nil {
 		return err
@@ -239,28 +230,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Pick the command name: --alias, manifest's alias, manifest's name,
-	// then the install directory name.
-	aliasName := installAlias
-	if aliasName == "" {
-		switch {
-		case m != nil && m.Alias != "":
-			aliasName = m.Alias
-		case m != nil && m.Name != "":
-			aliasName = m.Name
-		default:
-			aliasName = targetName
-		}
-	}
-
 	// A custom command name must be resolvable at invocation time: record
 	// it as the manifest alias so multicall dispatch finds the playbook.
-	if installAlias != "" && (m == nil || m.Alias != installAlias) {
-		if m == nil {
-			m = &manifest.Manifest{Version: "0.1.0", Name: targetName}
-		}
-		m.Alias = installAlias
-		if err := manifest.Write(dest, m); err != nil {
+	if installAlias != "" {
+		if err := writeAliasManifest(dest, targetName, installAlias); err != nil {
 			// Without the manifest entry the alias can never resolve; and
 			// dest already joined the registry, so leaving it would block a
 			// retry under the same name — roll it back like the other
@@ -270,7 +243,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	installLauncher(aliasName, targetName, configDest)
+	installLauncher(launcherName, targetName, configDest)
 	return nil
 }
 

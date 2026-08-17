@@ -182,7 +182,7 @@ claude-playbook run experiment
 Pass Claude Code flags after the playbook name:
 
 ```bash
-claude-playbook run experiment --model claude-opus-4-6 --permission-mode auto
+claude-playbook run experiment --model claude-opus-5 --permission-mode auto
 ```
 
 Use a custom command name, or skip launcher creation:
@@ -299,7 +299,7 @@ Use `start` for a one-off Claude Code config directory without registering a pla
 
 ```bash
 claude-playbook start /tmp/scratch
-claude-playbook start /tmp/scratch --model claude-opus-4-6
+claude-playbook start /tmp/scratch --model claude-opus-5
 claude-playbook start /tmp/scratch --delete
 ```
 

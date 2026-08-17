@@ -191,7 +191,7 @@ Runs Claude Code using the named playbook. Any flags after the name are forwarde
 ```bash
 claude-playbook run experiment
 claude-playbook run sre
-claude-playbook run sre --model claude-opus-4-6
+claude-playbook run sre --model claude-opus-5
 ```
 
 Equivalent to:
@@ -213,7 +213,7 @@ Starts an ad-hoc Claude Code session at any directory. Creates the directory if 
 
 ```bash
 claude-playbook start /tmp/scratch
-claude-playbook start /tmp/scratch --model claude-opus-4-6
+claude-playbook start /tmp/scratch --model claude-opus-5
 claude-playbook start /tmp/scratch --delete
 ```
 
@@ -639,15 +639,16 @@ claude-playbook self-uninstall               # prompts
 claude-playbook self-uninstall -y            # skip the prompt
 claude-playbook self-uninstall --dry-run     # show what would be removed
 claude-playbook self-uninstall --keep-data   # remove the binary but keep playbooks
+claude-playbook self-uninstall --binary-only # remove binary/launchers/completions, keep playbooks (what uninstall.sh runs)
 ```
 
 **Steps:**
-1. For each discovered playbook (unless `--keep-data`): remove its directory.
-2. Unless `--keep-data`, remove the playbooks root directory.
-3. Unless `--keep-binary`, sweep **all** launcher symlinks pointing at the binary — every one of them would dangle once the binary is gone, whichever registry root it served. With `--keep-binary`, no launchers are touched: a same-named command may be serving another registry root, and a removed default-root playbook's launcher fails loudly as stale rather than being silently deleted.
-4. Remove any `source <(claude-playbook|cpb completion bash|zsh)` lines from `~/.bashrc` and `~/.zshrc` — after the binary is gone they would error on every new shell.
-6. Unless `--keep-binary`, remove the running binary and its sibling `cpb`/`claude-playbook` link. If removal is denied by permissions, print the `sudo rm <path>` command to run manually rather than failing.
-7. Print a summary of what was removed. When completion lines were removed from rc files, remind the user that already-open shells still hold the stale completion functions until reloaded.
+1. For each discovered playbook (unless `--keep-data` or `--binary-only`): remove its directory.
+2. Unless `--keep-data` or `--binary-only`, remove the playbooks root directory.
+3. Unless `--keep-binary`, sweep **all** launcher symlinks pointing at the binary — every one of them would dangle once the binary is gone, whichever registry root it served. The sweep unions two sources: a resolution scan of the standard launcher directories (the resolved launcher dir plus the `~/.local/bin` fallback), and the launcher receipt file (`~/.local/state/claude-playbook/launchers`) in which every launcher the tool creates is recorded — covering custom `--launcher-dir` locations the scan cannot know about. Every candidate is verified to still be a symlink resolving to this binary (or dangling); a link the user renamed or repointed resolves elsewhere and is left alone. The reserved names (`claude-playbook`, `cpb`) are owned by the binary-removal step. Once the launchers are gone, the receipt is removed too. With `--keep-binary`, no launchers are touched: a same-named command may be serving another registry root, and a removed default-root playbook's launcher fails loudly as stale rather than being silently deleted.
+4. Unless `--keep-binary`, remove any `source <(claude-playbook|cpb completion bash|zsh)` lines from `~/.bashrc` and `~/.zshrc` — after the binary is gone they would error on every new shell.
+5. Unless `--keep-binary`, remove the running binary and its sibling `cpb`/`claude-playbook` link. If removal is denied by permissions, print the `sudo rm <path>` command to run manually rather than failing.
+6. Print a summary of what was removed. When completion lines were removed from rc files, remind the user that already-open shells still hold the stale completion functions until reloaded. In `--binary-only` mode, state explicitly that the playbooks directory was not touched.
 
 **Flags:**
 
@@ -656,6 +657,7 @@ claude-playbook self-uninstall --keep-data   # remove the binary but keep playbo
 | `-y`, `--yes` | Skip the confirmation prompt |
 | `--keep-data` | Preserve the playbooks directory and its playbooks |
 | `--keep-binary` | Leave the binary in place |
+| `--binary-only` | Remove only the binary, its `cpb` sibling, launchers, and completion lines — playbooks stay untouched (the mode `uninstall.sh` delegates to) |
 | `--dry-run` | Print what would be removed without changing anything |
 
 `--dry-run` never prompts and never modifies anything. Without `--dry-run` or `-y`, the command prints what will be removed and asks for confirmation.

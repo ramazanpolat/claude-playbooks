@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,30 +19,36 @@ var startCmd = &cobra.Command{
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
+	// start addresses a path, not a registry name, so the playbooks-dir
+	// value is irrelevant — it is consumed only to keep it out of the args
+	// forwarded to claude.
+	args, _, err := scanPlaybooksDirArg(args)
+	if err != nil {
+		return err
+	}
+
 	var deleteAfter bool
 	var rest []string
-
 	for i := 0; i < len(args); i++ {
 		switch {
-		case args[i] == "--playbooks-dir" && i+1 < len(args):
-			i++
-		case strings.HasPrefix(args[i], "--playbooks-dir="):
-			// ignore
 		case args[i] == "--delete":
 			deleteAfter = true
-		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
-			fmt.Println("Usage: claude-playbook start <path> [claude-flags...]")
-			fmt.Println()
-			fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
-			fmt.Println("Creates the directory if it does not exist.")
-			fmt.Println("Any flags after the path are forwarded directly to claude.")
-			fmt.Println()
-			fmt.Println("Flags:")
-			fmt.Println("  --delete   Delete the directory when the session ends")
-			return nil
 		default:
 			rest = append(rest, args[i])
 		}
+	}
+	// --help BEFORE the path prints usage; after it, the flag is forwarded
+	// to claude.
+	if restRequestsHelp(rest) {
+		fmt.Println("Usage: claude-playbook start <path> [claude-flags...]")
+		fmt.Println()
+		fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
+		fmt.Println("Creates the directory if it does not exist.")
+		fmt.Println("Any flags after the path are forwarded directly to claude.")
+		fmt.Println()
+		fmt.Println("Flags:")
+		fmt.Println("  --delete   Delete the directory when the session ends")
+		return nil
 	}
 
 	if len(rest) == 0 {

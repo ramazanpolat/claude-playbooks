@@ -2,7 +2,8 @@
 
 ## Development
 
-Go 1.21+. No other dependencies.
+Go 1.21+ is the only toolchain you need; Go dependencies are managed in
+`go.mod` (cobra, toml).
 
 ```bash
 go test ./...     # full suite

@@ -125,7 +125,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 	cmdColW := maxLen + len("claude-playbook run ")
 
-	// Launcher commands take display precedence over legacy rc aliases,
+	// Launcher commands take display precedence over manifest aliases,
 	// exactly as in `list` — a launcher-only playbook has a working command
 	// and must not be shown as "(no alias set)".
 	// Gate before resolving: ResolveLauncherDir probes directory writability
