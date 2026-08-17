@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,15 +19,15 @@ var startCmd = &cobra.Command{
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
+	// start addresses a path, not a registry name, so the playbooks-dir
+	// value is irrelevant — it is consumed only to keep it out of the args
+	// forwarded to claude.
+	args, _ = scanPlaybooksDirArg(args)
+
 	var deleteAfter bool
 	var rest []string
-
 	for i := 0; i < len(args); i++ {
 		switch {
-		case args[i] == "--playbooks-dir" && i+1 < len(args):
-			i++
-		case strings.HasPrefix(args[i], "--playbooks-dir="):
-			// ignore
 		case args[i] == "--delete":
 			deleteAfter = true
 		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:

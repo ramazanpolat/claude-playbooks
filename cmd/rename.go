@@ -34,8 +34,8 @@ func init() {
 }
 
 func runRename(cmd *cobra.Command, args []string) error {
-	if renameNoAlias && renameAlias != "" {
-		return fmt.Errorf("--no-alias and --alias cannot be used together")
+	if err := checkAliasFlagConflict(renameAlias, renameNoAlias); err != nil {
+		return err
 	}
 	oldName := args[0]
 	newName := args[1]
@@ -181,20 +181,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 			// Capture the pre-change manifest so a failed directory rename
 			// can restore it — otherwise the alias moves while the rename
 			// reports that nothing happened.
-			manifestFile := filepath.Join(oldManifestDir, manifest.FileName)
-			origBytes, rerr := os.ReadFile(manifestFile)
-			origExisted := rerr == nil
-			restore := func() {
-				var rerr error
-				if origExisted {
-					rerr = os.WriteFile(manifestFile, origBytes, 0o644)
-				} else {
-					rerr = os.Remove(manifestFile)
-				}
-				if rerr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", rerr)
-				}
-			}
+			restore := captureManifestRestore(oldManifestDir)
 			if werr := manifest.Write(oldManifestDir, m); werr != nil {
 				// A failing write may have truncated or partially
 				// overwritten the file in place — restore the captured

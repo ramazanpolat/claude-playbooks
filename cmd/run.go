@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -22,27 +21,16 @@ var runCmd = &cobra.Command{
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
-	var playbooksDir string
-	var rest []string
-
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--playbooks-dir" && i+1 < len(args):
-			playbooksDir = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--playbooks-dir="):
-			playbooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
-			fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
-			fmt.Println()
-			fmt.Println("Runs Claude Code with the named playbook.")
-			fmt.Println("Any flags after the name are forwarded directly to claude.")
-			return nil
-		default:
-			rest = append(rest, args[i])
-		}
+	rest, playbooksDir := scanPlaybooksDirArg(args)
+	// A --help BEFORE the playbook name prints usage; after the name it
+	// belongs to claude (rest[0] is the name by then).
+	if len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h") {
+		fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
+		fmt.Println()
+		fmt.Println("Runs Claude Code with the named playbook.")
+		fmt.Println("Any flags after the name are forwarded directly to claude.")
+		return nil
 	}
-
 	if playbooksDir != "" {
 		config.PlaybooksDir = playbooksDir
 	}

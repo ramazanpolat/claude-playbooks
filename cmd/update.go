@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,32 +24,31 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	var playbooksDir string
-	var force, checkOnly bool
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--playbooks-dir" && i+1 < len(args):
-			playbooksDir = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--playbooks-dir="):
-			playbooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
-			printUpdateHelp()
-			return nil
-		// --force/--check are self-update flags; only honor them before a name
-		// so a playbook's delegated update script still receives its own flags
-		// (e.g. `update kommander --force` passes --force to kommander's script).
-		case (args[i] == "--force" || args[i] == "-f") && len(rest) == 0:
-			force = true
-		case args[i] == "--check" && len(rest) == 0:
-			checkOnly = true
-		default:
-			rest = append(rest, args[i])
-		}
-	}
+	rest, playbooksDir := scanPlaybooksDirArg(args)
 	if playbooksDir != "" {
 		config.PlaybooksDir = playbooksDir
+	}
+	// --force/--check are self-update flags; only honor them before a name
+	// so a playbook's delegated update script still receives its own flags
+	// (e.g. `update kommander --force` passes --force to kommander's script).
+	var force, checkOnly bool
+consume:
+	for len(rest) > 0 {
+		switch rest[0] {
+		case "--force", "-f":
+			force = true
+			rest = rest[1:]
+		case "--check":
+			checkOnly = true
+			rest = rest[1:]
+		default:
+			break consume
+		}
+	}
+	// --help before the name prints usage (after it, it forwards).
+	if len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h") {
+		printUpdateHelp()
+		return nil
 	}
 
 	if len(rest) == 0 {

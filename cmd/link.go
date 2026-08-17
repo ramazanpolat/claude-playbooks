@@ -35,8 +35,8 @@ func init() {
 }
 
 func runLink(cmd *cobra.Command, args []string) (retErr error) {
-	if linkNoAlias && linkAlias != "" {
-		return fmt.Errorf("--no-alias and --alias cannot be used together")
+	if err := checkAliasFlagConflict(linkAlias, linkNoAlias); err != nil {
+		return err
 	}
 
 	target := args[0]
@@ -163,14 +163,8 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	// falling back to the link name — an unwritable name (reserved link
 	// name, invalid manifest alias) must fail before dest joins the
 	// registry, not as a post-link warning.
-	if !linkNoAlias {
-		launcherName := effectiveAlias
-		if launcherName == "" {
-			launcherName = name
-		}
-		if err := launcher.ValidateName(launcherName); err != nil {
-			return fmt.Errorf("%w (pass --no-alias to link without a launcher)", err)
-		}
+	if err := validateLauncherName(linkNoAlias, effectiveAlias, name, "link"); err != nil {
+		return err
 	}
 	if err := preflightCommandNames("", name, effectiveAlias); err != nil {
 		return err
@@ -189,12 +183,8 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	// whatever was typed at the prompt. Persist BEFORE the symlink joins
 	// the registry: failing afterwards would leave the playbook registered
 	// with an unresolvable advertised command.
-	if linkAlias != "" && createdManifest && (m == nil || m.Alias != linkAlias) {
-		if m == nil {
-			m = &manifest.Manifest{Version: "0.1.0", Name: name}
-		}
-		m.Alias = linkAlias
-		if err := manifest.Write(abs, m); err != nil {
+	if linkAlias != "" && createdManifest {
+		if err := writeAliasManifest(abs, name, linkAlias); err != nil {
 			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", linkAlias, abs, err)
 		}
 	}

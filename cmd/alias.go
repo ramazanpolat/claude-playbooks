@@ -107,23 +107,19 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot clear alias %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", old, manifest.FileName)
 		}
 		manifestFile := filepath.Join(pb.RootPath, manifest.FileName)
-		origBytes, rerr := os.ReadFile(manifestFile)
-		if rerr != nil {
+		if _, rerr := os.Stat(manifestFile); rerr != nil {
 			return fmt.Errorf("cannot read manifest: %w", rerr)
 		}
+		restore := captureManifestRestore(pb.RootPath)
 		pb.Manifest.Alias = ""
 		if err := manifest.Write(pb.RootPath, pb.Manifest); err != nil {
-			if werr := os.WriteFile(manifestFile, origBytes, 0o644); werr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", werr)
-			}
+			restore()
 			return err
 		}
 		if err := retireAliasLauncher(old, name); err != nil {
 			// The launcher is still there; a cleared manifest would make it
 			// stale while this command reports success — restore it.
-			if werr := os.WriteFile(manifestFile, origBytes, 0o644); werr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", werr)
-			}
+			restore()
 			return fmt.Errorf("could not retire launcher %q (alias unchanged): %w", old, err)
 		}
 		fmt.Printf("Removed alias %q from playbook %q\n", old, name)
@@ -194,20 +190,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		// restore it byte-for-byte (or remove a manifest this command
 		// bootstrapped) — the alias operation's entire point is the
 		// command, so a launcher failure must leave NO state changed.
-		manifestFile := filepath.Join(pb.RootPath, manifest.FileName)
-		origBytes, rerr := os.ReadFile(manifestFile)
-		origExisted := rerr == nil
-		restoreManifest := func() {
-			var rerr error
-			if origExisted {
-				rerr = os.WriteFile(manifestFile, origBytes, 0o644)
-			} else {
-				rerr = os.Remove(manifestFile)
-			}
-			if rerr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", rerr)
-			}
-		}
+		restoreManifest := captureManifestRestore(pb.RootPath)
 		m.Alias = newAlias
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			restoreManifest()

@@ -42,8 +42,8 @@ func init() {
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	if installNoAlias && installAlias != "" {
-		return fmt.Errorf("--no-alias and --alias cannot be used together")
+	if err := checkAliasFlagConflict(installAlias, installNoAlias); err != nil {
+		return err
 	}
 
 	source := args[0]
@@ -142,14 +142,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// The launcher that will actually be written uses the effective alias,
 	// falling back to the target name — an unwritable name must fail before
 	// the source is copied into the registry, not as a post-copy warning.
-	if !installNoAlias {
-		launcherName := effectiveAlias
-		if launcherName == "" {
-			launcherName = targetName
-		}
-		if err := launcher.ValidateName(launcherName); err != nil {
-			return fmt.Errorf("%w (pass --no-alias to install without a launcher)", err)
-		}
+	if err := validateLauncherName(installNoAlias, effectiveAlias, targetName, "install"); err != nil {
+		return err
 	}
 	if err := preflightCommandNames("", targetName, effectiveAlias); err != nil {
 		return err
@@ -255,12 +249,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// A custom command name must be resolvable at invocation time: record
 	// it as the manifest alias so multicall dispatch finds the playbook.
-	if installAlias != "" && (m == nil || m.Alias != installAlias) {
-		if m == nil {
-			m = &manifest.Manifest{Version: "0.1.0", Name: targetName}
-		}
-		m.Alias = installAlias
-		if err := manifest.Write(dest, m); err != nil {
+	if installAlias != "" {
+		if err := writeAliasManifest(dest, targetName, installAlias); err != nil {
 			// Without the manifest entry the alias can never resolve; and
 			// dest already joined the registry, so leaving it would block a
 			// retry under the same name — roll it back like the other

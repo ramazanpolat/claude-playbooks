@@ -163,17 +163,34 @@ func lockRegistry() (unlock func(), err error) {
 	}, nil
 }
 
+// scanPlaybooksDirArg removes the registry flag --playbooks-dir (both the
+// `--playbooks-dir X` and `--playbooks-dir=X` forms) from args and returns
+// the remaining arguments plus the flag's last value ("" when absent). The
+// flag-forwarding commands (run, start, update) keep the flag out of what
+// they pass on to `claude` or a delegated script; run and update also apply
+// the value to this process's registry resolution so their lookup agrees
+// with multicall dispatch. A `--playbooks-dir` without a value at the end
+// of args is left in place, matching cobra's own flag parsing.
+func scanPlaybooksDirArg(args []string) (rest []string, dir string) {
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--playbooks-dir" && i+1 < len(args):
+			dir = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--playbooks-dir="):
+			dir = strings.TrimPrefix(args[i], "--playbooks-dir=")
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	return rest, dir
+}
+
 // applyRegistryOverrides pre-scans forwarded arguments for the registry
 // flags `run` supports and applies them to the process config, so multicall
 // resolution and the subsequent run agree on the registry.
 func applyRegistryOverrides(args []string) {
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--playbooks-dir" && i+1 < len(args):
-			config.PlaybooksDir = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--playbooks-dir="):
-			config.PlaybooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		}
+	if _, dir := scanPlaybooksDirArg(args); dir != "" {
+		config.PlaybooksDir = dir
 	}
 }
