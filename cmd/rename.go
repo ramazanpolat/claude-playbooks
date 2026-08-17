@@ -96,31 +96,18 @@ func runRename(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("command name %q already addresses playbook %q", cand, owner.Name)
 		}
 	}
-	// An explicitly requested alias that can never name a launcher
-	// (reserved, path separators) must fail before any mutation — the late
-	// launcher.Write warning would leave a renamed playbook without its
-	// requested command.
-	if renameAlias != "" {
-		if err := launcher.ValidateName(renameAlias); err != nil {
-			return err
-		}
+	// Rename promises a replacement command: the effective launcher name
+	// (explicit --alias or the new name) must be writable before any
+	// mutation — the late launcher.Write warning would leave a renamed
+	// playbook without its replacement command. --no-alias is the opt-out.
+	writeName, werr := resolveLauncherName(renameNoAlias, renameAlias, newName, "rename")
+	if werr != nil {
+		return werr
 	}
-	if !renameNoAlias {
-		writeName := renameAlias
-		if writeName == "" {
-			writeName = newName
-		}
-		// Rename promises a replacement command; an unwritable default name
-		// (reserved CLI name) must fail before mutation, with --no-alias as
-		// the opt-out.
-		if err := launcher.ValidateName(writeName); err != nil {
-			return fmt.Errorf("%w (pass --no-alias to rename without a launcher)", err)
-		}
-		if launcherOpsAllowed() {
-			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
-				if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
-					return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", writeName)
-				}
+	if writeName != "" && launcherOpsAllowed() {
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
+				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", writeName)
 			}
 		}
 	}
@@ -165,7 +152,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot update alias: reading manifest failed: %w", merr)
 		}
 		if m == nil {
-			m = &manifest.Manifest{Version: "0.1.0"}
+			m = &manifest.Manifest{}
 		}
 		switch {
 		case renameNoAlias && m.Alias != "":
@@ -181,7 +168,10 @@ func runRename(cmd *cobra.Command, args []string) error {
 			// Capture the pre-change manifest so a failed directory rename
 			// can restore it — otherwise the alias moves while the rename
 			// reports that nothing happened.
-			restore := captureManifestRestore(oldManifestDir)
+			restore, cerr := captureManifestRestore(oldManifestDir)
+			if cerr != nil {
+				return fmt.Errorf("cannot update alias: %w", cerr)
+			}
 			if werr := manifest.Write(oldManifestDir, m); werr != nil {
 				// A failing write may have truncated or partially
 				// overwritten the file in place — restore the captured

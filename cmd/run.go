@@ -21,18 +21,18 @@ var runCmd = &cobra.Command{
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
-	rest, playbooksDir := scanPlaybooksDirArg(args)
+	rest, err := takePlaybooksDirArg(args)
+	if err != nil {
+		return err
+	}
 	// A --help BEFORE the playbook name prints usage; after the name it
 	// belongs to claude (rest[0] is the name by then).
-	if len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h") {
+	if restRequestsHelp(rest) {
 		fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Runs Claude Code with the named playbook.")
 		fmt.Println("Any flags after the name are forwarded directly to claude.")
 		return nil
-	}
-	if playbooksDir != "" {
-		config.PlaybooksDir = playbooksDir
 	}
 
 	if len(rest) == 0 {

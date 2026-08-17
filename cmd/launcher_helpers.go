@@ -88,25 +88,27 @@ func checkAliasFlagConflict(alias string, noAlias bool) error {
 	return nil
 }
 
-// validateLauncherName preflights the launcher command a registration will
-// actually write: the effective alias (an explicit --alias, or one imported
-// with a manifest) falling back to the playbook's own name. An unwritable
-// name (reserved, path-like) must fail BEFORE the playbook joins the
-// registry, not as a post-registration warning — so the error carries the
-// --no-alias escape hatch. verb names the command in the message (e.g.
-// "install", "link", "create the playbook").
-func validateLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string) error {
+// resolveLauncherName resolves the launcher command a registration will
+// actually write — the effective alias (an explicit --alias, or one imported
+// with a manifest) falling back to the playbook's own name — and preflights
+// it: an unwritable name (reserved, path-like) must fail BEFORE the playbook
+// joins the registry, not as a post-registration warning, so the error
+// carries the --no-alias escape hatch. The returned name is the one callers
+// must write, so validation and registration cannot drift apart. Returns ""
+// under --no-alias. verb names the command in the message (e.g. "install",
+// "link", "create the playbook").
+func resolveLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string) (string, error) {
 	if noAlias {
-		return nil
+		return "", nil
 	}
 	name := effectiveAlias
 	if name == "" {
 		name = fallbackName
 	}
 	if err := launcher.ValidateName(name); err != nil {
-		return fmt.Errorf("%w (pass --no-alias to %s without a launcher)", err, verb)
+		return "", fmt.Errorf("%w (pass --no-alias to %s without a launcher)", err, verb)
 	}
-	return nil
+	return name, nil
 }
 
 // writeAliasManifest records alias in the playbook's manifest so multicall
@@ -120,7 +122,9 @@ func writeAliasManifest(dir, name, alias string) error {
 		return err
 	}
 	if m == nil {
-		m = &manifest.Manifest{Version: "0.1.0", Name: name}
+		// manifest.Write defaults an empty version, so the bootstrap needs
+		// only the name.
+		m = &manifest.Manifest{Name: name}
 	}
 	if m.Alias == alias {
 		return nil
@@ -133,10 +137,15 @@ func writeAliasManifest(dir, name, alias string) error {
 // restoring it byte-for-byte — or removing it when it did not exist, e.g.
 // when this command bootstrapped it. Mutating commands wrap their
 // follow-ups (directory rename, launcher writes) with it so a failure
-// leaves the manifest exactly as it started.
-func captureManifestRestore(dir string) func() {
+// leaves the manifest exactly as it started. A manifest that exists but
+// cannot be read is an error up front: treating a read failure as "did not
+// exist" would arm the restore to DELETE a file this command never read.
+func captureManifestRestore(dir string) (func(), error) {
 	manifestFile := filepath.Join(dir, manifest.FileName)
 	origBytes, rerr := os.ReadFile(manifestFile)
+	if rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+		return nil, fmt.Errorf("cannot read manifest: %w", rerr)
+	}
 	origExisted := rerr == nil
 	return func() {
 		var err error
@@ -148,7 +157,7 @@ func captureManifestRestore(dir string) func() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", err)
 		}
-	}
+	}, nil
 }
 
 // launcherOpsAllowed gates EVERY launcher mutation (create, delete, rename)

@@ -24,9 +24,9 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	rest, playbooksDir := scanPlaybooksDirArg(args)
-	if playbooksDir != "" {
-		config.PlaybooksDir = playbooksDir
+	rest, err := takePlaybooksDirArg(args)
+	if err != nil {
+		return err
 	}
 	// --force/--check are self-update flags; only honor them before a name
 	// so a playbook's delegated update script still receives its own flags
@@ -46,7 +46,7 @@ consume:
 		}
 	}
 	// --help before the name prints usage (after it, it forwards).
-	if len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h") {
+	if restRequestsHelp(rest) {
 		printUpdateHelp()
 		return nil
 	}

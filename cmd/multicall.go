@@ -168,29 +168,59 @@ func lockRegistry() (unlock func(), err error) {
 // the remaining arguments plus the flag's last value ("" when absent). The
 // flag-forwarding commands (run, start, update) keep the flag out of what
 // they pass on to `claude` or a delegated script; run and update also apply
-// the value to this process's registry resolution so their lookup agrees
-// with multicall dispatch. A `--playbooks-dir` without a value at the end
-// of args is left in place, matching cobra's own flag parsing.
-func scanPlaybooksDirArg(args []string) (rest []string, dir string) {
+// the value to this process's registry resolution (takePlaybooksDirArg) so
+// their lookup agrees with multicall dispatch. A valueless trailing
+// --playbooks-dir is an error, as it would be for cobra. A bare `--` ends
+// the scan: everything after it is forwarded verbatim, never intercepted.
+func scanPlaybooksDirArg(args []string) (rest []string, dir string, err error) {
 	for i := 0; i < len(args); i++ {
 		switch {
+		case args[i] == "--":
+			return append(rest, args[i:]...), dir, nil
 		case args[i] == "--playbooks-dir" && i+1 < len(args):
 			dir = args[i+1]
 			i++
+		case args[i] == "--playbooks-dir":
+			return nil, "", fmt.Errorf("flag needs an argument: --playbooks-dir")
 		case strings.HasPrefix(args[i], "--playbooks-dir="):
 			dir = strings.TrimPrefix(args[i], "--playbooks-dir=")
 		default:
 			rest = append(rest, args[i])
 		}
 	}
-	return rest, dir
+	return rest, dir, nil
+}
+
+// takePlaybooksDirArg scans like scanPlaybooksDirArg and applies the value
+// to this process's registry resolution (last value wins, empty ignored),
+// so run and update resolve the same registry multicall dispatch did.
+func takePlaybooksDirArg(args []string) ([]string, error) {
+	rest, dir, err := scanPlaybooksDirArg(args)
+	if err != nil {
+		return nil, err
+	}
+	if dir != "" {
+		config.PlaybooksDir = dir
+	}
+	return rest, nil
+}
+
+// restRequestsHelp reports whether the remaining args ask for the command's
+// own help: --help BEFORE the playbook name (or start's path) prints the
+// command's usage; after it, the flag belongs to claude or the playbook's
+// update script.
+func restRequestsHelp(rest []string) bool {
+	return len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h")
 }
 
 // applyRegistryOverrides pre-scans forwarded arguments for the registry
 // flags `run` supports and applies them to the process config, so multicall
 // resolution and the subsequent run agree on the registry.
 func applyRegistryOverrides(args []string) {
-	if _, dir := scanPlaybooksDirArg(args); dir != "" {
+	// The scan error is ignored here on purpose: dispatch only needs the
+	// value when present, and the command's own authoritative scan reports
+	// the malformed form.
+	if _, dir, _ := scanPlaybooksDirArg(args); dir != "" {
 		config.PlaybooksDir = dir
 	}
 }

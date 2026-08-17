@@ -77,10 +77,11 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", name, dest)
 	}
 
-	if linkAlias != "" {
-		if err := launcher.ValidateName(linkAlias); err != nil {
-			return err
-		}
+	// The launcher name (explicit --alias or the link name) must be writable
+	// BEFORE the interactive prompt: failing after it would waste the
+	// user's metadata entry on a link that can never get its command.
+	if _, verr := resolveLauncherName(linkNoAlias, linkAlias, name, "link"); verr != nil {
+		return verr
 	}
 
 	// Prompt for manifest metadata BEFORE taking the machine-user-global
@@ -163,7 +164,8 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	// falling back to the link name — an unwritable name (reserved link
 	// name, invalid manifest alias) must fail before dest joins the
 	// registry, not as a post-link warning.
-	if err := validateLauncherName(linkNoAlias, effectiveAlias, name, "link"); err != nil {
+	launcherName, err := resolveLauncherName(linkNoAlias, effectiveAlias, name, "link")
+	if err != nil {
 		return err
 	}
 	if err := preflightCommandNames("", name, effectiveAlias); err != nil {
@@ -203,17 +205,11 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 		return nil
 	}
 
-	aliasName := linkAlias
-	if aliasName == "" {
-		// Prefer alias from manifest if present, else the link name.
-		if m != nil && m.Alias != "" {
-			aliasName = m.Alias
-		} else {
-			aliasName = name
-		}
-	}
-
-	installLauncher(aliasName, name, configDest)
+	// launcherName was resolved from the same chain (--alias, then the
+	// target manifest's alias, then the link name) before the symlink went
+	// in; the lock was held for the whole registration, so m cannot have
+	// changed since.
+	installLauncher(launcherName, name, configDest)
 	return nil
 }
 

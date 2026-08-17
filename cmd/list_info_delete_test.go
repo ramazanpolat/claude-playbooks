@@ -22,25 +22,39 @@ func feedStdin(t *testing.T, in string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.WriteString(w, in); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
+	// The write runs in its own goroutine so an input larger than the pipe
+	// buffer cannot deadlock before the command under test drains it.
+	go func() {
+		_, _ = io.WriteString(w, in)
+		w.Close()
+	}()
 	old := os.Stdin
 	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = old })
+	t.Cleanup(func() {
+		os.Stdin = old
+		r.Close()
+	})
 }
 
-// sandboxDefaultRoot repoints HOME and the playbooks root at a sandbox, so
-// launcher mutations (gated on the DEFAULT root by launcherOpsAllowed) run
-// inside the test. Returns the sandboxed playbooks root.
-func sandboxDefaultRoot(t *testing.T) string {
+// sandboxRoot resets command state and repoints HOME and the playbooks root
+// at a fresh sandbox, so every test gets the same isolation contract.
+// Returns the sandboxed playbooks root.
+func sandboxRoot(t *testing.T, name string) string {
 	t.Helper()
+	resetCommandTestState(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	root := filepath.Join(home, ".claude-playbooks")
+	root := filepath.Join(home, name)
 	config.PlaybooksDir = root
 	return root
+}
+
+// sandboxDefaultRoot sandboxes the DEFAULT playbooks root, so launcher
+// mutations (gated on the default root by launcherOpsAllowed) run inside
+// the test. Returns the sandboxed playbooks root.
+func sandboxDefaultRoot(t *testing.T) string {
+	t.Helper()
+	return sandboxRoot(t, ".claude-playbooks")
 }
 
 // writePlaybook creates a playbook directory with a CLAUDE.md and, when m is
@@ -55,9 +69,6 @@ func writePlaybook(t *testing.T, root, name string, m *manifest.Manifest) {
 		t.Fatal(err)
 	}
 	if m != nil {
-		if m.Version == "" {
-			m.Version = "0.1.0"
-		}
 		if m.Name == "" {
 			m.Name = name
 		}
@@ -82,8 +93,7 @@ func listRow(t *testing.T, out, name string) string {
 // --- list ---
 
 func TestListEmptyRootPrintsHint(t *testing.T) {
-	resetCommandTestState(t)
-	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	config.PlaybooksDir = sandboxRoot(t, "playbooks")
 
 	out := captureStdout(t, func() {
 		if err := runList(nil, nil); err != nil {
@@ -96,8 +106,7 @@ func TestListEmptyRootPrintsHint(t *testing.T) {
 }
 
 func TestListPrefixFiltersByName(t *testing.T) {
-	resetCommandTestState(t)
-	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	config.PlaybooksDir = sandboxRoot(t, "playbooks")
 	for _, name := range []string{"alpha", "alphabet", "beta"} {
 		writePlaybook(t, config.PlaybooksDir, name, nil)
 	}
@@ -118,7 +127,6 @@ func TestListPrefixFiltersByName(t *testing.T) {
 }
 
 func TestListCommandColumnShowsOnlyExistingLaunchers(t *testing.T) {
-	resetCommandTestState(t)
 	root := sandboxDefaultRoot(t)
 	// withcmd advertises alias "wc"; only its launcher exists. nocmd has no
 	// launcher at all. The reserved cpb launcher must never surface as a
@@ -177,8 +185,7 @@ func TestFormatAge(t *testing.T) {
 // --- info ---
 
 func TestInfoRendersManifestFields(t *testing.T) {
-	resetCommandTestState(t)
-	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	config.PlaybooksDir = sandboxRoot(t, "playbooks")
 	writePlaybook(t, config.PlaybooksDir, "rich", &manifest.Manifest{
 		Version:     "1.2.3",
 		Alias:       "ri",
@@ -219,8 +226,7 @@ func TestInfoRendersManifestFields(t *testing.T) {
 }
 
 func TestInfoShowsExecutableUpdater(t *testing.T) {
-	resetCommandTestState(t)
-	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	config.PlaybooksDir = sandboxRoot(t, "playbooks")
 	writePlaybook(t, config.PlaybooksDir, "upd", nil)
 	bin := filepath.Join(config.PlaybooksDir, "upd", "bin")
 	if err := os.MkdirAll(bin, 0o755); err != nil {
@@ -241,10 +247,7 @@ func TestInfoShowsExecutableUpdater(t *testing.T) {
 }
 
 func TestInfoShowsSymlinkTypeForLinkedPlaybook(t *testing.T) {
-	resetCommandTestState(t)
-	sandbox := t.TempDir()
-	t.Setenv("HOME", sandbox)
-	config.PlaybooksDir = filepath.Join(sandbox, "playbooks")
+	sandbox := sandboxRoot(t, "playbooks")
 	target := filepath.Join(sandbox, "target")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
@@ -270,8 +273,7 @@ func TestInfoShowsSymlinkTypeForLinkedPlaybook(t *testing.T) {
 }
 
 func TestInfoUnknownPlaybookErrors(t *testing.T) {
-	resetCommandTestState(t)
-	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	config.PlaybooksDir = sandboxRoot(t, "playbooks")
 
 	err := runInfo(nil, []string{"ghost"})
 	if err == nil {
@@ -285,7 +287,6 @@ func TestInfoUnknownPlaybookErrors(t *testing.T) {
 // --- delete ---
 
 func TestDeleteYesRemovesPlaybookDirectory(t *testing.T) {
-	resetCommandTestState(t)
 	sandboxDefaultRoot(t)
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
 	deleteYes = true
@@ -304,7 +305,6 @@ func TestDeleteYesRemovesPlaybookDirectory(t *testing.T) {
 }
 
 func TestDeleteUnknownNameErrors(t *testing.T) {
-	resetCommandTestState(t)
 	sandboxDefaultRoot(t)
 	deleteYes = true
 
@@ -318,7 +318,6 @@ func TestDeleteUnknownNameErrors(t *testing.T) {
 }
 
 func TestDeleteDeclinedKeepsPlaybook(t *testing.T) {
-	resetCommandTestState(t)
 	sandboxDefaultRoot(t)
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
 	deleteYes = false
@@ -340,10 +339,7 @@ func TestDeleteDeclinedKeepsPlaybook(t *testing.T) {
 // A linked playbook is only a symlink in the registry: deleting it removes
 // the link, never the external source directory (README's link contract).
 func TestDeleteLinkedPlaybookRemovesSymlinkOnly(t *testing.T) {
-	resetCommandTestState(t)
-	sandbox := t.TempDir()
-	t.Setenv("HOME", sandbox)
-	config.PlaybooksDir = filepath.Join(sandbox, "playbooks")
+	sandbox := sandboxRoot(t, "playbooks")
 	target := filepath.Join(sandbox, "target")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
@@ -374,7 +370,6 @@ func TestDeleteLinkedPlaybookRemovesSymlinkOnly(t *testing.T) {
 // symlink may be serving another registry root, so removal stays the user's
 // call. Noisy, never silently wrong.
 func TestDeleteRetainsUnclaimedLauncherWithHint(t *testing.T) {
-	resetCommandTestState(t)
 	sandboxDefaultRoot(t)
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
@@ -398,7 +393,6 @@ func TestDeleteRetainsUnclaimedLauncherWithHint(t *testing.T) {
 // A launcher whose name still addresses another playbook is kept silently
 // (no rm hint): deleting victim must not take a live command with it.
 func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
-	resetCommandTestState(t)
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "victim", nil)
 	// "other" claims the command name "victim" via its manifest alias —
@@ -426,10 +420,7 @@ func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 // (dot-named, so discovery skips it) goes through the orphan path: removed
 // with an explicit message rather than reported as unknown.
 func TestDeleteOrphanRemovesNonDiscoverableDirectory(t *testing.T) {
-	resetCommandTestState(t)
-	sandbox := t.TempDir()
-	t.Setenv("HOME", sandbox)
-	config.PlaybooksDir = filepath.Join(sandbox, "playbooks")
+	sandboxRoot(t, "playbooks")
 	orphan := filepath.Join(config.PlaybooksDir, ".hidden")
 	if err := os.MkdirAll(orphan, 0o755); err != nil {
 		t.Fatal(err)
