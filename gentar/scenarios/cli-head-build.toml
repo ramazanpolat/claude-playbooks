@@ -1,0 +1,38 @@
+# claude-playbooks own-arena suite 1: build the CLI from THIS checkout
+# (uncommitted changes included — that is the point of the local loop:
+# fix, run, read the report) and prove the binary works.
+#
+# The bench has no Go toolchain; it has nested Docker (proven substrate),
+# so the build runs in a golang container against the mounted checkout.
+# Version floats from the checkout's git tags via `git describe --tags
+# --always` — same ldflags stamp build.sh uses. A shallow checkout
+# (CI default) falls back to the sha, which still floats; never
+# hardcode.
+
+[scenario]
+name = "cli-head-build"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  # Build from the checkout in nested Docker, as the invoking user so
+  # the output is owned by the bench user. GOCACHE/HOME redirected to
+  # /tmp (writable for non-root uids in the golang image).
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+]
+
+[[verify.files]]
+path = "~/.local/bin/claude-playbook"
+
+[[verify.commands]]
+# Version must match the checkout's git describe — floats, never pinned.
+command = 'V=$(git -C "$WORKSPACE_DIR" describe --tags --always --dirty 2>/dev/null || echo dev); claude-playbook --version | grep -F "$V"'
+
+[[verify.commands]]
+command = "claude-playbook list"
+
+[[verify.commands]]
+command = "claude-playbook --help >/dev/null && echo help-ok"
+contains = "help-ok"

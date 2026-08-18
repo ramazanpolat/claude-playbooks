@@ -1,0 +1,60 @@
+# claude-playbooks own arena. Runs this repo's gentar suites on every
+# push to main, every v* tag, and on demand. Conditions live HERE —
+# edit the `on:` block; the arena doesn't care.
+#
+# Runner: self-hosted with label `arena` (Docker + network reach to the
+# bench-host). One-time setup is documented in gentar/README.md.
+name: arena
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: scenario to run (empty = all suites)
+        default: ''
+      gentar_ref:
+        description: gentar ref to run the arena from
+        default: main
+
+jobs:
+  arena:
+    runs-on: [self-hosted, arena]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags: cli-head-build floats the version via git describe
+
+      - name: bring the arena
+        run: |
+          git clone -q https://github.com/agent-realm/gentar gentar/.arena
+          git -C gentar/.arena checkout -q "${{ github.event.inputs.gentar_ref || 'main' }}"
+
+      - name: stage bench access
+        run: |
+          cd gentar/.arena
+          cp .env.example .env
+          printf '%s\n' "${{ secrets.BENCH_SSH_KEY }}" > bench_key
+          chmod 600 bench_key
+          # .env defaults point at the shared bench-host; override via
+          # GENTAR_BENCH_HOST/GENTAR_BENCH_USER in .env if you host your own.
+
+      - name: run suites
+        run: |
+          SUITES="${{ github.event.inputs.scenario }}"
+          if [ -z "$SUITES" ]; then
+            SUITES=$(ls gentar/scenarios/*.toml | xargs -n1 basename | sed 's/\.toml$//' | tr '\n' ' ')
+          fi
+          gentar/run.sh $SUITES
+        env:
+          GENTAR_BENCH_KEY_FILE: ${{ github.workspace }}/gentar/.arena/bench_key
+
+      - name: upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arena-reports
+          path: gentar/reports/
+          if-no-files-found: ignore
