@@ -29,12 +29,15 @@ if [ ! -d "$ARENA" ]; then
 fi
 # Honor GENTAR_REF on EVERY run: fetch, resolve, detach. A cached
 # .arena must never pin the engine to whatever was checked out first.
-# Plain fetch covers branches/tags; a second fetch of the ref itself
-# covers bare SHAs (GitHub allows want-sha).
-git -C "$ARENA" fetch -q --tags origin
-git -C "$ARENA" fetch -q origin "$REF" 2>/dev/null || true
-sha=$(git -C "$ARENA" rev-parse -q --verify "$REF^{commit}") || {
+# Fetching the ref itself covers branches, tags, and bare SHAs (GitHub
+# allows want-sha) — but resolves via FETCH_HEAD, NOT the ref name: a
+# plain `git fetch origin main` writes FETCH_HEAD only and never moves
+# the local branch, so rev-parse main would answer with the stale tip.
+if ! git -C "$ARENA" fetch -q --tags origin "$REF"; then
   echo "GENTAR_REF $REF not found in agent-realm/gentar" >&2; exit 2
+fi
+sha=$(git -C "$ARENA" rev-parse -q --verify FETCH_HEAD^{commit}) || {
+  echo "GENTAR_REF $REF not resolvable in agent-realm/gentar" >&2; exit 2
 }
 git -C "$ARENA" checkout -q --detach "$sha"
 cd "$ARENA"
