@@ -214,7 +214,7 @@ func TestSplitTreePathChoosesLongestRemoteRef(t *testing.T) {
 	}
 }
 
-func TestGitInstallPreservesCustomUpdateScript(t *testing.T) {
+func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -224,11 +224,11 @@ func TestGitInstallPreservesCustomUpdateScript(t *testing.T) {
 	if err := os.Mkdir(repo, 0755); err != nil {
 		t.Fatal(err)
 	}
-	manifestData := "name = \"custom-update\"\nisolate_auth = true\n[source]\nupdate_script = \"custom-update.sh\"\n"
+	manifestData := "name = \"custom-update\"\nisolate_auth = true\n[update]\npreserve = [\"local.conf\"]\n"
 	if err := os.WriteFile(filepath.Join(repo, ".playbook"), []byte(manifestData), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "custom-update.sh"), []byte("#!/bin/sh\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "local.conf"), []byte("stock\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"}} {
@@ -247,7 +247,10 @@ func TestGitInstallPreservesCustomUpdateScript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m == nil || m.Source == nil || m.Source.UpdateScript != "custom-update.sh" {
+	if m == nil || m.Update == nil || len(m.Update.Preserve) != 1 || m.Update.Preserve[0] != "local.conf" {
+		t.Fatalf("update policy=%#v", m)
+	}
+	if m.Source == nil || m.Source.Repository == "" {
 		t.Fatalf("source metadata=%#v", m)
 	}
 }

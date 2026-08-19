@@ -182,15 +182,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		needsManifestWrite = true
 	}
 	if isGit {
-		updateScript := ""
-		if mPre.Source != nil {
-			updateScript = mPre.Source.UpdateScript
-		}
 		mPre.Source = &manifest.Source{
-			Repository:   source,
-			Branch:       installBranch,
-			Subdir:       sourceSubdir,
-			UpdateScript: updateScript,
+			Repository: source,
+			Branch:     installBranch,
+			Subdir:     sourceSubdir,
 		}
 		needsManifestWrite = true
 	}

@@ -328,22 +328,29 @@ claude-playbook uninstall awesome
 claude-playbook unlink my-linked-playbook
 ```
 
-Update first delegates to a playbook-provided script:
+Update pulls the playbook from the source recorded in its `.playbook`:
 
 ```bash
 claude-playbook update awesome
+claude-playbook update awesome --check    # report the available version only
 ```
 
-If `~/.claude-playbooks/awesome/bin/update-playbook.sh` exists, it is run from inside the playbook directory. A Git-backed playbook might ship:
+Git installs record their repository, branch, and selected subdirectory in `.playbook`, and a flat, non-linked install updates natively from that source. There is no delegated update script: the CLI owns the update.
 
-```bash
-#!/bin/sh
-set -e
-cd "$(dirname "$0")/.."
-git pull --ff-only
+The update replaces only the top-level entries the source itself ships, in place. Runtime state the source knows nothing about — `data/`, `projects/`, `sessions/`, `history.jsonl` — is never read, moved, or copied, so a session writing to it during the update cannot lose work. Replaced entries are moved to a timestamped `.<name>.bak.<stamp>` beside the install first, and rolled back if the overlay fails.
+
+Local configuration survives even when the source ships its own copy. `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json` are always restored over the incoming files; a playbook names anything further in its manifest:
+
+```toml
+[update]
+preserve = ["settings.json", "config/local.toml"]
 ```
 
-Git installs also record their repository, branch, and selected subdirectory in `.playbook`. If no update script exists, a flat, non-linked install can update natively from that source. Native update stages a full backup, overlays new source files while preserving local Claude state and credentials, and atomically activates the result. Linked playbooks and legacy manifests with `subdir` require a delegated update script.
+New stock settings still arrive alongside (playbooks conventionally ship `settings.json.template`) for you to merge by hand.
+
+Afterwards, if the playbook ships an executable `migrations/apply.sh`, it runs as `migrations/apply.sh <from-version> <to-version> <install-dir>` with the versions taken from the old and new `.playbook`. Runners are expected to be idempotent.
+
+Linked playbooks and manifests that select their config through a top-level `subdir` cannot be updated this way.
 
 With **no** name, `update` self-updates the `claude-playbook` binary itself to the latest GitHub release:
 

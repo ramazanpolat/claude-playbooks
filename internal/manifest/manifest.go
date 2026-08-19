@@ -17,10 +17,17 @@ const FileName = ".playbook"
 
 // Source holds provenance data used by native updates.
 type Source struct {
-	Repository   string `toml:"repository,omitempty"`
-	Branch       string `toml:"branch,omitempty"`
-	Subdir       string `toml:"subdir,omitempty"`
-	UpdateScript string `toml:"update_script,omitempty"`
+	Repository string `toml:"repository,omitempty"`
+	Branch     string `toml:"branch,omitempty"`
+	Subdir     string `toml:"subdir,omitempty"`
+}
+
+// Update holds per-playbook update policy. Preserve names install-local files
+// that must survive an update even though the source ships its own copy; the
+// CLI already preserves settings.json and the Claude Code state files, so this
+// is for anything beyond that. Paths are relative to the playbook root.
+type Update struct {
+	Preserve []string `toml:"preserve,omitempty"`
 }
 
 // Manifest holds the parsed contents of a .playbook file.
@@ -34,6 +41,7 @@ type Manifest struct {
 	Author      string  `toml:"author"`
 	IsolateAuth bool    `toml:"isolate_auth"`
 	Source      *Source `toml:"source,omitempty"`
+	Update      *Update `toml:"update,omitempty"`
 }
 
 // Read parses the .playbook file inside dir. Returns (nil, nil) if the file
@@ -74,11 +82,21 @@ func (m *Manifest) validate(path string) error {
 		if err := validateRelativePath(path, "source.subdir", m.Source.Subdir); err != nil {
 			return err
 		}
-		if err := validateRelativePath(path, "source.update_script", m.Source.UpdateScript); err != nil {
-			return err
+	}
+	if m.Update != nil {
+		for _, rel := range m.Update.Preserve {
+			if err := validateRelativePath(path, "update.preserve", rel); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// ValidateRelativePath reports whether value is a relative path that stays
+// below a playbook root. manifestPath appears in the error text only.
+func ValidateRelativePath(manifestPath, field, value string) error {
+	return validateRelativePath(manifestPath, field, value)
 }
 
 func validateRelativePath(manifestPath, field, value string) error {
@@ -176,9 +194,16 @@ func Write(dir string, m *Manifest) error {
 		if m.Source.Subdir != "" {
 			fmt.Fprintf(&b, "subdir = %q\n", m.Source.Subdir)
 		}
-		if m.Source.UpdateScript != "" {
-			fmt.Fprintf(&b, "update_script = %q\n", m.Source.UpdateScript)
+	}
+	if m.Update != nil && len(m.Update.Preserve) > 0 {
+		b.WriteString("\n[update]\npreserve = [")
+		for i, rel := range m.Update.Preserve {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", rel)
 		}
+		b.WriteString("]\n")
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }

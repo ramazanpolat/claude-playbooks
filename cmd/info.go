@@ -76,15 +76,14 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Author:      %s\n", pb.Manifest.Author)
 	}
 
-	updaterName := "bin/update-playbook.sh"
-	if pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.UpdateScript != "" {
-		updaterName = pb.Manifest.Source.UpdateScript
-	}
-	updater := filepath.Join(pb.Path, filepath.FromSlash(updaterName))
-	if s, err := os.Stat(updater); err == nil && s.Mode()&0111 != 0 {
-		fmt.Printf("Updater:     %s\n", updaterName)
+	if pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.Repository != "" {
+		fmt.Printf("Update from: %s\n", pb.Manifest.Source.Repository)
 	} else {
-		fmt.Printf("Updater:     (none)\n")
+		fmt.Printf("Update from: (no [source] metadata; cannot update)\n")
+	}
+	migrations := filepath.Join(pb.Path, "migrations", "apply.sh")
+	if s, err := os.Stat(migrations); err == nil && !s.IsDir() && s.Mode()&0111 != 0 {
+		fmt.Printf("Migrations:  migrations/apply.sh\n")
 	}
 
 	return nil
