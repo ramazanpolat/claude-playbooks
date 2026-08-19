@@ -41,32 +41,29 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	var playbooksDir string
+	rest, err := takePlaybooksDirArg(args)
+	if err != nil {
+		return err
+	}
+	// --force is self-update only. --check means the same thing on both paths
+	// (report, do not install), so it is also accepted after a playbook name.
 	var force, checkOnly bool
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--playbooks-dir" && i+1 < len(args):
-			playbooksDir = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--playbooks-dir="):
-			playbooksDir = strings.TrimPrefix(args[i], "--playbooks-dir=")
-		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
-			printUpdateHelp()
-			return nil
-		// --force is self-update only; --check means the same thing on both
-		// paths (report, do not install), so it is honored before or after a
-		// playbook name.
-		case (args[i] == "--force" || args[i] == "-f") && len(rest) == 0:
+consume:
+	for len(rest) > 0 {
+		switch rest[0] {
+		case "--force", "-f":
 			force = true
-		case args[i] == "--check":
+			rest = rest[1:]
+		case "--check":
 			checkOnly = true
+			rest = rest[1:]
 		default:
-			rest = append(rest, args[i])
+			break consume
 		}
 	}
-	if playbooksDir != "" {
-		config.PlaybooksDir = playbooksDir
+	if restRequestsHelp(rest) {
+		printUpdateHelp()
+		return nil
 	}
 
 	if len(rest) == 0 {
@@ -74,8 +71,16 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	name := rest[0]
-	if len(rest) > 1 {
-		return fmt.Errorf("unexpected argument %q; `update <name>` accepts only --check", rest[1])
+	for _, arg := range rest[1:] {
+		switch arg {
+		case "--check":
+			checkOnly = true
+		case "--help", "-h":
+			printUpdateHelp()
+			return nil
+		default:
+			return fmt.Errorf("unexpected argument %q; `update <name>` accepts only --check", arg)
+		}
 	}
 	return runPlaybookUpdate(name, checkOnly)
 }

@@ -25,9 +25,9 @@ var (
 var selfUninstallCmd = &cobra.Command{
 	Use:   "self-uninstall",
 	Short: "Remove claude-playbook, its playbooks, launchers, and shell integration",
-	Long: `Removes all installed playbooks, their launcher commands, legacy shell
-aliases, the completion lines install.sh added to shell rc files, the
-playbooks directory, and the claude-playbook binary itself.
+	Long: `Removes all installed playbooks, their launcher commands, the
+completion lines install.sh added to shell rc files, the playbooks
+directory, and the claude-playbook binary itself.
 
 Use --keep-data to preserve the playbooks directory.
 Use --keep-binary to leave the binary in place.
@@ -49,7 +49,7 @@ func init() {
 	selfUninstallCmd.Flags().BoolVarP(&selfUninstallYes, "yes", "y", false, "skip confirmation prompt")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepData, "keep-data", false, "preserve the playbooks directory")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepBinary, "keep-binary", false, "leave the binary in place")
-	selfUninstallCmd.Flags().BoolVar(&selfUninstallBinaryOnly, "binary-only", false, "remove only the binary, its cpb sibling, launchers, and completion lines — playbooks and aliases untouched (what uninstall.sh runs)")
+	selfUninstallCmd.Flags().BoolVar(&selfUninstallBinaryOnly, "binary-only", false, "remove only the binary, its cpb sibling, launchers, and completion lines — playbooks untouched (what uninstall.sh runs)")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallDryRun, "dry-run", false, "print what would be removed without doing anything")
 }
 

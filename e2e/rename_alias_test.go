@@ -10,12 +10,13 @@ import (
 	"testing"
 )
 
-// Renaming a playbook must leave its launch command usable. The launcher
-// script names the playbook twice -- once as CLAUDE_CONFIG_DIR, once as the
-// `run` argument -- and regenerating only one produces a command that
-// resolves, runs, and dies with "unknown playbook". Nothing catches that
-// until the command is actually typed, which is how the alias-era version of
-// this bug survived to a release.
+// Renaming a playbook must leave its launch command usable. A launcher is a
+// stateless symlink to the binary: invocation resolves its name against the
+// live registry (directory name first, then the manifest alias) at run time.
+// A rename that breaks that resolution produces a command that resolves,
+// runs, and dies with "unknown playbook". Nothing catches that until the
+// command is actually typed, which is how the alias-era version of this bug
+// survived to a release.
 //
 // This executes the regenerated launcher for real rather than inspecting it.
 func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {

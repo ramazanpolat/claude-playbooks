@@ -2,7 +2,10 @@
 
 ## Development
 
-Go 1.21+. No other dependencies.
+Go 1.21+ is the only toolchain you need on Linux; on macOS use a current
+Go — 1.21's linker emits binaries that recent macOS versions refuse to load
+(missing LC_UUID load command). Go dependencies are managed in `go.mod`
+(cobra, toml).
 
 ```bash
 go test ./...     # full suite

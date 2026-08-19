@@ -7,13 +7,26 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu keeps the documented Go floor (go.mod: go 1.21).
+          - os: ubuntu-latest
+            go-version: '1.21'
+          # macOS needs a current Go: 1.21's linker emits binaries without
+          # LC_UUID, which macOS 26's dyld refuses to load — the suite
+          # execs a freshly built binary and dies with "missing LC_UUID
+          # load command" / abort trap.
+          - os: macos-latest
+            go-version: '1.26'
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: ${{ matrix.go-version }}
 
       - name: gofmt
         run: |
