@@ -8,7 +8,7 @@ import (
 )
 
 func TestReadRejectsEscapingSourcePaths(t *testing.T) {
-	for _, field := range []string{"subdir", "update_script"} {
+	for _, field := range []string{"subdir"} {
 		t.Run(field, func(t *testing.T) {
 			dir := t.TempDir()
 			content := "version = \"0.1.0\"\n[source]\n" + field + " = \"../outside\"\n"
@@ -45,8 +45,33 @@ func TestResolveSubdirRejectsSymlinkEscape(t *testing.T) {
 }
 
 func TestWriteValidatesSourcePaths(t *testing.T) {
-	err := Write(t.TempDir(), &Manifest{Source: &Source{UpdateScript: "/tmp/outside"}})
+	err := Write(t.TempDir(), &Manifest{Source: &Source{Subdir: "/tmp/outside"}})
 	if err == nil {
-		t.Fatal("expected Write to validate source.update_script")
+		t.Fatal("expected Write to validate source.subdir")
+	}
+}
+
+func TestReadRejectsEscapingPreservePath(t *testing.T) {
+	dir := t.TempDir()
+	content := "version = \"0.1.0\"\n[update]\npreserve = [\"../outside\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(dir); err == nil {
+		t.Fatal("expected update.preserve traversal to be rejected")
+	}
+}
+
+func TestPreserveRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(dir, &Manifest{Update: &Update{Preserve: []string{"settings.json", "local/notes.md"}}}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Read(dir)
+	if err != nil || m == nil || m.Update == nil {
+		t.Fatalf("m=%#v err=%v", m, err)
+	}
+	if len(m.Update.Preserve) != 2 || m.Update.Preserve[0] != "settings.json" || m.Update.Preserve[1] != "local/notes.md" {
+		t.Fatalf("preserve=%#v", m.Update.Preserve)
 	}
 }

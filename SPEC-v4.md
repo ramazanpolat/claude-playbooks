@@ -400,7 +400,8 @@ Last used:   2 hours ago
 Description: Site Reliability Engineering assistant
 Homepage:    https://github.com/ramazanpolat/awesome-playbooks
 Author:      Ramazan Polat
-Updater:     bin/update-playbook.sh
+Update from: https://github.com/ramazanpolat/awesome-playbooks
+Migrations:  migrations/apply.sh
 ```
 
 **Fields:**
@@ -417,7 +418,8 @@ Updater:     bin/update-playbook.sh
 | `Description` | From `.playbook` manifest, if present |
 | `Homepage` | From `.playbook` manifest, if present |
 | `Author` | From `.playbook` manifest, if present |
-| `Updater` | `bin/update-playbook.sh` if it exists and is executable, else `(none)` |
+| `Update from` | `[source].repository` from the manifest, else `(no [source] metadata; cannot update)` |
+| `Migrations` | `migrations/apply.sh` when it exists and is executable; omitted otherwise |
 
 **Errors:**
 - Target not found → `unknown playbook "experiment"`
@@ -590,43 +592,33 @@ rate limits.
 
 #### `claude-playbook update <name>` — update a playbook
 
-Uses a delegated update script when one exists. Git installs also carry source metadata, allowing safe native updates when no script is present.
+Updates the playbook from the `[source]` metadata recorded in its `.playbook`. The CLI owns the update end to end; there is no delegated update script.
 
 ```bash
 claude-playbook update sre
+claude-playbook update sre --check
 ```
 
-**Delegated-script behaviour:**
-1. Resolve the named playbook.
-2. Resolve the script from `source.update_script`, defaulting to `bin/update-playbook.sh`, and require it to remain below the playbook root and be executable.
-3. Run the script with:
-   - Working directory: the playbook directory
-   - Environment: inherited, with `CLAUDE_CONFIG_DIR=<path>`, `CLAUDE_PLAYBOOK_TARGET=<name>`, and `CLAUDE_PLAYBOOK_PATH=<path>`
-   - Arguments: any remaining command-line arguments are forwarded to the script
-4. Forward stdout, stderr, and exit code.
-
-**Native-update behaviour:**
-1. If no delegated script exists, require `[source].repository` metadata.
-2. Refuse linked playbooks and installs whose config is selected through top-level `subdir`; those require a delegated script.
-3. Fetch `[source].repository` at the recorded branch and source subdirectory.
-4. Copy the current playbook into a same-filesystem staging directory, then overlay the fetched source. This preserves credentials, account state, history, and other local-only files while replacing source-owned files.
-5. Preserve local alias, authentication-isolation, and source metadata.
-6. Rename the old directory to a timestamped backup and atomically activate the staged directory. Restore the old directory if activation fails.
-
-**Example `bin/update-playbook.sh` for a git-backed install:**
-```bash
-#!/bin/sh
-set -e
-cd "$(dirname "$0")/.."
-git pull --ff-only
-```
+**Behaviour:**
+1. Resolve the named playbook and require `[source].repository` metadata.
+2. Refuse linked playbooks and installs whose config is selected through a top-level `subdir`.
+3. Validate `[update].preserve` before touching anything, so an escaping path fails before the overlay starts.
+4. Fetch `[source].repository` at the recorded branch and source subdirectory into a staging directory.
+5. With `--check`, report the installed version (`version` from the live `.playbook`) against the available one (`version` from the staged `.playbook`, falling back to the staged `VERSION` file), and stop.
+6. Take the registry lock and re-read the live manifest. If the install directory is no longer the same filesystem object, or any `[source]` field changed while staging ran, activate nothing.
+7. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. A failure at any point rolls the moved entries back.
+8. Restore the preserved files over the incoming copies: `settings.json`, `settings.local.json`, `.credentials.json`, `.claude.json`, plus every path in `[update].preserve`. A preserved file the source ships but the install did not have is removed rather than adopted. Preserved paths under an entry the overlay never touched are left alone.
+9. Preserve local alias, authentication-isolation, and source metadata in the rewritten manifest; the install's `name` is always reset to its directory name.
+10. If `migrations/apply.sh` exists in the updated install and is executable, run it as `migrations/apply.sh <from-version> <to-version> <install-dir>` with working directory the install and `CLAUDE_CONFIG_DIR`, `CLAUDE_PLAYBOOK_TARGET`, `CLAUDE_PLAYBOOK_PATH` in the environment. Runners are expected to be idempotent; the CLI does not track which migrations have run. Migrations are skipped with a warning when either side has no `version`.
 
 **Errors:**
 - Target not found → `unknown playbook "sre". Run 'claude-playbook list' to see available playbooks`
-- Update script and source metadata missing → `"sre" has no update script (...) and no [source] metadata in .playbook`
-- Script not executable → `update script is not executable: <path>`
-- Script exits non-zero → exit code forwarded; `update script exited with code <n>` is printed to stderr
-- Linked or subdir-selected native update → an error requiring a delegated script
+- Source metadata missing → `"sre" has no [source] metadata in .playbook; nothing to update from`
+- Linked install → `"sre" is linked; native update is disabled to avoid replacing its external source`
+- Subdir-selected install → `"sre" uses manifest subdir "...": native update requires a flat playbook`
+- Extra arguments → `unexpected argument "..."; `update <name>` accepts only --check`
+- Install changed while staging → `playbook "sre" changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update`
+- Migration runner exits non-zero → `"sre" is at code version <v> but migrations failed: <err>`
 
 ---
 
@@ -699,7 +691,9 @@ author = "Ramazan Polat"
 repository = "https://github.com/example/playbooks"
 branch = "main"
 subdir = "playbooks/sre"
-update_script = "bin/update-playbook.sh"
+
+[update]
+preserve = ["settings.json"]
 ```
 
 **Fields:**
@@ -717,7 +711,7 @@ update_script = "bin/update-playbook.sh"
 | `source.repository` | Git URL or local source used by native update. Git installs populate this automatically. |
 | `source.branch` | Optional Git branch or tag used by native update. |
 | `source.subdir` | Optional source-relative directory selected during native update. Must remain physically below the fetched source, including through symlinks. |
-| `source.update_script` | Optional delegated update script path, relative to and physically below the playbook config root. |
+| `update.preserve` | Optional list of install-local paths that survive an update even when the source ships its own copy. Each must be relative to and physically below the playbook root. `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json` are always preserved and need not be listed. |
 
 **Forward compatibility:** unknown fields are ignored. Manifest authors may include fields for future tool versions without breaking older installs.
 
@@ -725,7 +719,7 @@ update_script = "bin/update-playbook.sh"
 - Invalid TOML → `invalid .playbook at <path>: <reason>`
 - `subdir` escapes the install directory (e.g. `../foo`) → `invalid .playbook at <path>: 'subdir' must be relative and stay inside the directory`
 - `subdir` does not exist → `~/.claude-playbooks/<name>/.playbook declares subdir "<path>" but the directory is missing`
-- `source.subdir` or `source.update_script` escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`
+- `source.subdir` or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`
 
 ---
 
@@ -769,6 +763,6 @@ Error: "myrepo" already exists at ~/.claude-playbooks/myrepo. Use --name to choo
 Error: unknown playbook "typo". Run 'claude-playbook list' to see available playbooks
 Error: 'claude' command not found. Install Claude Code first: https://claude.ai/download
 Error: subdirectory "playbooks/sre" not found in source
-Error: "sre" has no update script at bin/update-playbook.sh. This install does not support updates; see its documentation.
+Error: "sre" has no [source] metadata in .playbook; nothing to update from
 Error: invalid .playbook at ~/.claude-playbooks/foo/.playbook: toml: line 3: expected '=', got ':'
 ```

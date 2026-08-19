@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,9 +16,25 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
+// defaultPreserved are the per-install files that must survive an update even
+// when the source ships its own copy.
+//
+// settings.json is the important one: playbooks track it deliberately, so a
+// generic installer lands a fully wired install (hooks, statusLine). But the
+// live file is the install's own configuration -- API routing, model pins,
+// permissions -- and overwriting it silently destroys the pilot's setup. New
+// stock settings ship alongside it in settings.json.template to be merged by
+// hand. Playbooks name additional files via [update] preserve in .playbook.
+var defaultPreserved = []string{
+	"settings.json",
+	"settings.local.json",
+	".credentials.json",
+	".claude.json",
+}
+
 var updateCmd = &cobra.Command{
 	Use:                "update [name]",
-	Short:              "Self-update the tool, or update a playbook from its script or source",
+	Short:              "Self-update the tool, or update a playbook from its source",
 	DisableFlagParsing: true,
 	ValidArgsFunction:  autocompletePlaybookNames,
 	RunE:               runUpdate,
@@ -38,12 +54,12 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		case (args[i] == "--help" || args[i] == "-h") && len(rest) == 0:
 			printUpdateHelp()
 			return nil
-		// --force/--check are self-update flags; only honor them before a name
-		// so a playbook's delegated update script still receives its own flags
-		// (e.g. `update kommander --force` passes --force to kommander's script).
+		// --force is self-update only; --check means the same thing on both
+		// paths (report, do not install), so it is honored before or after a
+		// playbook name.
 		case (args[i] == "--force" || args[i] == "-f") && len(rest) == 0:
 			force = true
-		case args[i] == "--check" && len(rest) == 0:
+		case args[i] == "--check":
 			checkOnly = true
 		default:
 			rest = append(rest, args[i])
@@ -58,69 +74,34 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	name := rest[0]
-	scriptArgs := rest[1:]
-	return runPlaybookUpdate(name, scriptArgs)
+	if len(rest) > 1 {
+		return fmt.Errorf("unexpected argument %q; `update <name>` accepts only --check", rest[1])
+	}
+	return runPlaybookUpdate(name, checkOnly)
 }
 
 func printUpdateHelp() {
-	fmt.Println("Usage: claude-playbook update [name] [script-args...]")
+	fmt.Println("Usage: claude-playbook update [name]")
 	fmt.Println()
 	fmt.Println("Without <name>: self-update the claude-playbook binary to the latest release.")
 	fmt.Println("  --check    report the latest version without installing it")
 	fmt.Println("  --force    reinstall even if already on the latest version")
 	fmt.Println()
-	fmt.Println("With <name>: run its delegated update script, or update natively from source metadata.")
+	fmt.Println("With <name>: update that playbook from its [source] metadata. Local files")
+	fmt.Println("(settings.json and anything under [update] preserve) survive, and the")
+	fmt.Println("playbook's migrations/apply.sh runs afterward.")
+	fmt.Println("  --check    report the available version without installing it")
 }
 
-func runPlaybookUpdate(name string, scriptArgs []string) error {
+func runPlaybookUpdate(name string, checkOnly bool) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	pb, err := playbook.Require(playbooksDir, name)
 	if err != nil {
 		return err
 	}
-
-	scriptPath := "bin/update-playbook.sh"
-	if pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.UpdateScript != "" {
-		scriptPath = pb.Manifest.Source.UpdateScript
-	}
-	script, scriptErr := manifest.ResolvePath(pb.Path, "source.update_script", scriptPath)
-	if scriptErr == nil {
-		info, err := os.Stat(script)
-		if err != nil {
-			return err
-		}
-		if info.IsDir() || info.Mode()&0111 == 0 {
-			return fmt.Errorf("update script is not executable: %s", script)
-		}
-
-		c := exec.Command(script, scriptArgs...)
-		c.Dir = pb.Path
-		c.Env = append(os.Environ(),
-			"CLAUDE_CONFIG_DIR="+pb.Path,
-			"CLAUDE_PLAYBOOK_TARGET="+name,
-			"CLAUDE_PLAYBOOK_PATH="+pb.Path,
-		)
-		c.Stdin = os.Stdin
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-		if err := c.Run(); err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				fmt.Fprintf(os.Stderr, "update script exited with code %d\n", exitErr.ExitCode())
-			}
-			return preserveExitCode(err)
-		}
-		return nil
-	}
-	if !errors.Is(scriptErr, os.ErrNotExist) {
-		return scriptErr
-	}
-
 	if pb.Manifest == nil || pb.Manifest.Source == nil || pb.Manifest.Source.Repository == "" {
-		return fmt.Errorf("%q has no update script (%s) and no [source] metadata in .playbook", name, scriptPath)
-	}
-	if len(scriptArgs) > 0 {
-		return fmt.Errorf("native update does not accept script arguments")
+		return fmt.Errorf("%q has no [source] metadata in .playbook; nothing to update from", name)
 	}
 
 	root := pb.RootPath
@@ -132,44 +113,55 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 		return err
 	}
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%q is linked; native update is disabled to avoid replacing its external source. Add an update script instead", name)
+		return fmt.Errorf("%q is linked; native update is disabled to avoid replacing its external source", name)
 	}
 	rootAbs, _ := filepath.Abs(root)
 	pathAbs, _ := filepath.Abs(pb.Path)
 	if rootAbs != pathAbs {
-		return fmt.Errorf("%q uses manifest subdir %q; native update requires a flat playbook or a delegated update script", name, pb.Manifest.Subdir)
+		return fmt.Errorf("%q uses manifest subdir %q; native update requires a flat playbook", name, pb.Manifest.Subdir)
 	}
 
-	fmt.Printf("Updating natively from %s...\n", pb.Manifest.Source.Repository)
+	// Validate the preserve list before touching anything: a manifest that
+	// names an escaping path must fail loudly, not halfway through the swap.
+	preserve, err := preservePaths(root, pb.Manifest)
+	if err != nil {
+		return err
+	}
+
 	work, cleanup, err := stageSource(pb.Manifest.Source.Repository, isGitURL(pb.Manifest.Source.Repository), pb.Manifest.Source.Branch, pb.Manifest.Source.Subdir)
 	if err != nil {
 		return fmt.Errorf("failed to fetch latest source: %w", err)
 	}
 	defer cleanup()
 
-	parent := filepath.Dir(root)
-	candidate, err := os.MkdirTemp(parent, "."+filepath.Base(root)+".update-")
+	stagedManifest, err := manifest.Read(work)
 	if err != nil {
-		return err
+		return fmt.Errorf("staged source has an invalid manifest: %w", err)
 	}
-	defer os.RemoveAll(candidate)
-	if err := copyDir(root, candidate); err != nil {
-		return fmt.Errorf("failed to stage current playbook: %w", err)
+	fromVersion := pb.Manifest.Version
+	toVersion := ""
+	if stagedManifest != nil {
+		toVersion = stagedManifest.Version
 	}
-	if err := copyDir(work, candidate); err != nil {
-		return fmt.Errorf("failed to stage update: %w", err)
-	}
-	for _, localName := range []string{".credentials.json", ".claude.json"} {
-		if err := restoreLocalEntry(root, candidate, localName); err != nil {
-			return fmt.Errorf("failed to preserve %s: %w", localName, err)
-		}
+	if toVersion == "" {
+		toVersion = readVersionFile(work)
 	}
 
-	// Staging ran unlocked (it may fetch from the network); the swap must
-	// not. Take the registry lock and RE-READ the live manifest: a
-	// concurrent `alias` (or other manifest mutation) that landed while the
-	// candidate was staging would otherwise be resurrected from the stale
-	// pre-staging snapshot, leaving launchers and manifest disagreeing.
+	if checkOnly {
+		fmt.Printf("%s\n", name)
+		fmt.Printf("  installed: %s\n", displayVersion(fromVersion))
+		fmt.Printf("  available: %s\n", displayVersion(toVersion))
+		if fromVersion != "" && fromVersion == toVersion {
+			fmt.Println("  up to date")
+		}
+		return nil
+	}
+
+	// Staging ran unlocked (it may fetch from the network); the overlay must
+	// not. Take the registry lock and RE-READ the live manifest: a concurrent
+	// `alias` (or other manifest mutation) that landed while the source was
+	// staging would otherwise be resurrected from the stale pre-staging
+	// snapshot, leaving launchers and manifest disagreeing.
 	unlock, lerr := lockRegistry()
 	if lerr != nil {
 		return lerr
@@ -179,57 +171,208 @@ func runPlaybookUpdate(name string, scriptArgs []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot re-read manifest before activation: %w", err)
 	}
-	// The staged candidate belongs to the installation we snapshotted.
-	// Bind activation to that exact installation: the DIRECTORY must be
-	// the same filesystem object as before staging (a delete + reinstall
-	// from the very same repository passes any manifest comparison), and
-	// every source field must match. Anything else means the playbook was
-	// deleted, re-created, or re-sourced while staging ran — discard the
-	// candidate instead of repairing.
+	// Bind activation to the exact installation we inspected: the DIRECTORY
+	// must be the same filesystem object as before staging (a delete +
+	// reinstall from the very same repository passes any manifest comparison),
+	// and every source field must match. Anything else means the playbook was
+	// deleted, re-created, or re-sourced while staging ran.
 	liveInfo, lierr := os.Lstat(root)
 	if lierr != nil || !os.SameFile(rootInfo, liveInfo) ||
 		liveManifest == nil || liveManifest.Source == nil ||
 		*liveManifest.Source != *pb.Manifest.Source {
-		return fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated — re-run update", name)
+		return fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update", name)
 	}
 
-	newManifest, err := manifest.Read(candidate)
+	fmt.Printf("Updating %s from %s...\n", name, pb.Manifest.Source.Repository)
+	backupPath, err := overlaySource(work, root, preserve)
 	if err != nil {
 		return err
 	}
-	if newManifest == nil {
-		newManifest = liveManifest
+
+	updated, err := manifest.Read(root)
+	if err != nil {
+		return err
+	}
+	if updated == nil {
+		updated = liveManifest
 	} else {
-		newManifest.Alias = liveManifest.Alias
-		newManifest.IsolateAuth = liveManifest.IsolateAuth
-		newManifest.Source = liveManifest.Source
+		updated.Alias = liveManifest.Alias
+		updated.IsolateAuth = liveManifest.IsolateAuth
+		updated.Source = liveManifest.Source
 	}
 	// The install's name is its directory name; never adopt the source's.
 	// This also heals installs whose manifest predates name rewriting.
-	newManifest.Name = filepath.Base(root)
-	newManifest.Subdir = ""
-	if err := manifest.Write(candidate, newManifest); err != nil {
+	updated.Name = filepath.Base(root)
+	updated.Subdir = ""
+	if err := manifest.Write(root, updated); err != nil {
 		return fmt.Errorf("failed to write updated manifest: %w", err)
 	}
 
-	backupPath := filepath.Join(parent, fmt.Sprintf(".%s.bak.%s", filepath.Base(root), time.Now().UTC().Format("20060102T150405.000000000")))
-	if err := os.Rename(root, backupPath); err != nil {
-		return fmt.Errorf("failed to backup existing playbook to %s: %w", backupPath, err)
-	}
-	if err := os.Rename(candidate, root); err != nil {
-		if restoreErr := os.Rename(backupPath, root); restoreErr != nil {
-			return fmt.Errorf("failed to activate update: %v; restore also failed: %v", err, restoreErr)
-		}
-		return fmt.Errorf("failed to activate update: %w", err)
-	}
+	fmt.Printf("Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
 
-	fmt.Printf("Successfully updated %q natively. Backup saved to %s.\n", name, backupPath)
+	if err := runMigrations(name, root, fromVersion, toVersion); err != nil {
+		return fmt.Errorf("%q is at code version %s but migrations failed: %w", name, displayVersion(toVersion), err)
+	}
 	return nil
 }
 
-func restoreLocalEntry(root, candidate, name string) error {
-	src := filepath.Join(root, name)
-	dst := filepath.Join(candidate, name)
+// overlaySource replaces root's copy of every top-level entry the staged
+// source provides, then restores the preserved local files over the top.
+//
+// The overlay is applied IN PLACE rather than staged into a candidate
+// directory and swapped: an install is a live CLAUDE_CONFIG_DIR whose runtime
+// state (data/, projects/, sessions/, history.jsonl) is written continuously
+// by any running session. Copying the whole install aside and renaming it back
+// silently discards every such write that lands while the copy is in flight.
+// Overlaying in place never reads or writes those paths at all -- only entries
+// the source itself ships are touched, and those are moved into the backup
+// first so a failure mid-overlay can be rolled back.
+func overlaySource(work, root string, preserve []string) (string, error) {
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return "", err
+	}
+
+	parent := filepath.Dir(root)
+	backupPath := filepath.Join(parent, fmt.Sprintf(".%s.bak.%s", filepath.Base(root), time.Now().UTC().Format("20060102T150405.000000000")))
+	if err := os.MkdirAll(backupPath, 0700); err != nil {
+		return "", err
+	}
+
+	moved := map[string]bool{}
+	rollback := func() {
+		for name := range moved {
+			_ = removeAny(filepath.Join(root, name))
+			_ = os.Rename(filepath.Join(backupPath, name), filepath.Join(root, name))
+		}
+		_ = os.RemoveAll(backupPath)
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		live := filepath.Join(root, name)
+		if _, err := os.Lstat(live); err != nil {
+			if os.IsNotExist(err) {
+				continue // source-only entry: nothing to back up
+			}
+			rollback()
+			return "", err
+		}
+		if err := os.Rename(live, filepath.Join(backupPath, name)); err != nil {
+			rollback()
+			return "", fmt.Errorf("failed to back up %s: %w", name, err)
+		}
+		moved[name] = true
+	}
+
+	if err := copyDir(work, root); err != nil {
+		rollback()
+		return "", fmt.Errorf("failed to apply update: %w", err)
+	}
+
+	for _, rel := range preserve {
+		if err := restoreLocalEntry(backupPath, root, rel, moved); err != nil {
+			rollback()
+			return "", fmt.Errorf("failed to preserve %s: %w", rel, err)
+		}
+	}
+	return backupPath, nil
+}
+
+// preservePaths returns the local files that must survive the overlay: the
+// built-in set plus whatever the playbook declares under [update] preserve.
+func preservePaths(root string, m *manifest.Manifest) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	add := func(rel string) {
+		clean := path.Clean(filepath.ToSlash(rel))
+		if seen[clean] {
+			return
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	for _, name := range defaultPreserved {
+		add(name)
+	}
+	if m != nil && m.Update != nil {
+		for _, rel := range m.Update.Preserve {
+			if err := manifest.ValidateRelativePath(filepath.Join(root, manifest.FileName), "update.preserve", rel); err != nil {
+				return nil, err
+			}
+			add(rel)
+		}
+	}
+	return out, nil
+}
+
+// runMigrations hands off to the playbook's own migration runner. Migrations
+// are data transforms the CLI cannot know the shape of; the convention is
+// migrations/apply.sh <from-version> <to-version> <install-dir>, invoked after
+// the new code is in place. Runners are expected to be idempotent -- the CLI
+// re-invokes on every update and does not track which ones have run.
+func runMigrations(name, root, from, to string) error {
+	script := filepath.Join(root, "migrations", "apply.sh")
+	info, err := os.Stat(script)
+	if err != nil {
+		return nil // no runner: this playbook has no migrations
+	}
+	if info.IsDir() {
+		return nil
+	}
+	if info.Mode()&0111 == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: %s is not executable; skipping migrations\n", script)
+		return nil
+	}
+	if from == "" || to == "" {
+		fmt.Fprintln(os.Stderr, "Warning: .playbook carries no version on one side of the update; skipping migrations")
+		return nil
+	}
+
+	fmt.Printf("Running migrations %s -> %s...\n", from, to)
+	c := exec.Command(script, from, to, root)
+	c.Dir = root
+	c.Env = append(os.Environ(),
+		"CLAUDE_CONFIG_DIR="+root,
+		"CLAUDE_PLAYBOOK_TARGET="+name,
+		"CLAUDE_PLAYBOOK_PATH="+root,
+	)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+func readVersionFile(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "VERSION"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func displayVersion(v string) string {
+	if v == "" {
+		return "unknown"
+	}
+	return v
+}
+
+// restoreLocalEntry copies rel back from the backup over the freshly overlaid
+// copy. Entries whose top-level component the overlay never touched are left
+// alone; an entry the source ships but the install did not have is removed, so
+// upstream never injects a credentials or state file the pilot did not own.
+func restoreLocalEntry(backup, root, rel string, moved map[string]bool) error {
+	top := rel
+	if i := strings.IndexByte(rel, '/'); i >= 0 {
+		top = rel[:i]
+	}
+	if !moved[top] {
+		return nil
+	}
+
+	src := filepath.Join(backup, filepath.FromSlash(rel))
+	dst := filepath.Join(root, filepath.FromSlash(rel))
 	info, err := os.Lstat(src)
 	if os.IsNotExist(err) {
 		return removeAny(dst)
@@ -238,6 +381,9 @@ func restoreLocalEntry(root, candidate, name string) error {
 		return err
 	}
 	if err := removeAny(dst); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
