@@ -26,7 +26,9 @@ refusal.
 
 A failing run writes `gentar/reports/report-<run_id>.md` stating: what
 ran (every step, with output), what was asserted and what it actually
-saw, and the reproduce command. Feed it to an agent:
+saw, and a reproduce command (`gentar/run.sh <suite>` — the runner
+rewrites the engine's central-arena default on copy). Feed it to an
+agent:
 
 > Read gentar/reports/report-<id>.md, fix the repo, rerun
 > `gentar/run.sh cli-head-build`, iterate until pass.
@@ -55,8 +57,15 @@ Triggers (edit to taste — this is your workflow, conditions are yours):
 
 Runs on a self-hosted runner labeled `arena` (needs Docker + reach to
 the bench-host; GitHub-hosted runners cannot reach an internal
-bench-host). One-time setup, ~5 min on any always-on machine with
-Docker (the pilot's Mac qualifies):
+bench-host). All suites run, the job fails if any failed, and reports
+upload as an artifact either way. The bench key lives in the runner's
+per-job temp dir — nothing secret persists in the workspace. Dispatch
+inputs reach the shell through `env`, never through `${{ }}`
+interpolation. The engine itself comes from `GENTAR_REF` (default
+gentar's `main`) and runs with bench-key reach — pin the ref to an
+audited SHA if that trust boundary matters to you. One-time setup,
+~5 min on any always-on machine with Docker (the pilot's Mac
+qualifies):
 
 > GitHub → this repo → Settings → Actions → Runners → New self-hosted
 > runner → follow the commands → when configuring, labels: `arena`.

@@ -18,8 +18,11 @@ agent = "shell"
 steps = [
   # Build from the checkout in nested Docker, as the invoking user so
   # the output is owned by the bench user. GOCACHE/HOME redirected to
-  # /tmp (writable for non-root uids in the golang image).
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o claude-playbook .' ''',
+  # /tmp (writable for non-root uids in the golang image). Version
+  # comes from .gentar-version — the runner freezes `git describe`
+  # host-side because a worktree's .git pointer is dead on the bench —
+  # falling back to the checkout's own git when present.
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
 ]
 
@@ -27,8 +30,10 @@ steps = [
 path = "~/.local/bin/claude-playbook"
 
 [[verify.commands]]
-# Version must match the checkout's git describe — floats, never pinned.
-command = 'V=$(git -C "$WORKSPACE_DIR" describe --tags --always --dirty 2>/dev/null || echo dev); claude-playbook --version | grep -F "$V"'
+# Version must match the checkout's git describe — floats, never
+# pinned. "dev" means detection failed on BOTH sides (no frozen file,
+# no working git); that must fail, not pass vacuously as dev==dev.
+command = 'V=$(cat "$WORKSPACE_DIR/.gentar-version" 2>/dev/null || git -C "$WORKSPACE_DIR" describe --tags --always --dirty 2>/dev/null || echo dev); [ "$V" != dev ] || { echo "version detection failed"; exit 1; }; claude-playbook --version | grep -F "$V"'
 
 [[verify.commands]]
 command = "claude-playbook list"
