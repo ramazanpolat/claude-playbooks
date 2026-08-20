@@ -24,8 +24,20 @@ case "$REF" in
   ''|*[!A-Za-z0-9._/-]*) echo "bad GENTAR_REF: $REF" >&2; exit 2 ;;
 esac
 
+# agent-realm/gentar is private. Anonymous https works from a dev
+# machine with a credential helper; a CI runner needs explicit auth.
+# GENTAR_CLONE_SSH_KEY (path to a read-only deploy key) switches clone
+# and fetch to ssh for the arena git ops. Unset = plain https, as on
+# a laptop.
+if [ -n "${GENTAR_CLONE_SSH_KEY:-}" ]; then
+  CLONE_URL=git@github.com:agent-realm/gentar.git
+  export GIT_SSH_COMMAND="ssh -i $GENTAR_CLONE_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+else
+  CLONE_URL=https://github.com/agent-realm/gentar
+fi
+
 if [ ! -d "$ARENA" ]; then
-  git clone -q https://github.com/agent-realm/gentar "$ARENA"
+  git clone -q "$CLONE_URL" "$ARENA"
 fi
 # Honor GENTAR_REF on EVERY run: fetch, resolve, detach. A cached
 # .arena must never pin the engine to whatever was checked out first.
