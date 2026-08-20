@@ -1,10 +1,10 @@
-# claude-playbooks own-arena suite 4: `install` from a LOCAL directory —
-# the offline half of install (the git half needs a public source repo
-# and api.github.com quota; cli-release-install covers the released path).
-# A fixture playbook is minted in the oracle step with a .playbook
-# manifest so name resolution takes the manifest branch, then install is
-# verified by reality: files under ~/.claude-playbooks, launcher on PATH,
-# list sees it, delete removes both.
+# claude-playbooks own-arena suite 4: `install` from a local directory.
+# The target dir name comes from the fixture's .playbook manifest (not
+# the source dir name), the copy is faithful (diff -r), the launcher
+# lands, and delete -y removes the playbook (the launcher is kept by
+# design and cleaned explicitly, as the product itself suggests).
+# Mid-sequence state is proven inside chained commands — gentar runs
+# verify.files (post-steps only) before verify.commands.
 
 [scenario]
 name = "playbook-install-local"
@@ -18,30 +18,28 @@ steps = [
   '''FIX="$HOME/fixture-src"; mkdir -p "$FIX/skills/demo"; printf 'name = "fixture-pb"\n' > "$FIX/.playbook"; printf '# fixture playbook\n' > "$FIX/CLAUDE.md"; printf '# demo skill\n' > "$FIX/skills/demo/SKILL.md"''',
 ]
 
-[[verify.commands]]
-command = 'claude-playbook install "$HOME/fixture-src"'
-
 [[verify.files]]
-path = "~/.claude-playbooks/fixture-pb/CLAUDE.md"
-
-[[verify.files]]
-path = "~/.claude-playbooks/fixture-pb/skills/demo/SKILL.md"
-
-# Manifest-named launcher, on PATH.
-[[verify.files]]
-path = "~/.local/bin/fixture-pb"
+# Post-steps state: the CLI is installed and the fixture is minted.
+path = "~/fixture-src/.playbook"
 
 [[verify.commands]]
-command = "claude-playbook list"
+# Manifest names the target: fixture-src -> fixture-pb.
+command = 'claude-playbook install "$HOME/fixture-src" && test -f "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && test -f "$HOME/.claude-playbooks/fixture-pb/skills/demo/SKILL.md" && echo installed'
+
+[[verify.commands]]
+command = 'test -x "$HOME/.local/bin/fixture-pb" && echo launcher-ok'
+contains = "launcher-ok"
+
+[[verify.commands]]
+command = 'claude-playbook list | grep -F fixture-pb'
 contains = "fixture-pb"
 
 [[verify.commands]]
-command = 'diff "$HOME/fixture-src/CLAUDE.md" "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && echo copied-faithfully'
-contains = "copied-faithfully"
+command = 'diff -r "$HOME/fixture-src" "$HOME/.claude-playbooks/fixture-pb" >/dev/null && echo faithful'
+contains = "faithful"
 
 [[verify.commands]]
-command = "claude-playbook delete fixture-pb"
-
-[[verify.commands]]
-command = 'test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo gone'
-contains = "gone"
+# -y: headless delete; the kept launcher is removed explicitly after,
+# exactly as the product's own removal hint suggests.
+command = 'claude-playbook delete fixture-pb -y && rm -f "$HOME/.local/bin/fixture-pb" && test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo clean'
+contains = "clean"

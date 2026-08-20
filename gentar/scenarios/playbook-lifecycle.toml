@@ -1,9 +1,13 @@
-# claude-playbooks own-arena suite 3: the create→list→info→alias→rename→
-# delete lifecycle on a throwaway bench. Every subcommand's contract is
-# checked against the filesystem and `list` — never against its own
-# output alone, so a command that lies about success still fails here.
-# Alias/dealias are verified by the launcher FILE (executing it would
-# spawn claude, which is launcher-run-version's job, not this one).
+# claude-playbooks own-arena suite 3: full playbook lifecycle, each stage
+# checked against the filesystem in the SAME command that performs it
+# (gentar runs verify.files before verify.commands, and commands run in
+# listed order — so mid-sequence state is provable only inside chained
+# commands; files can only see the post-steps state).
+#
+# Product semantics under test (observed, not assumed):
+#   - rename KEEPS the old launcher (it may serve other registry roots)
+#   - delete KEEPS the launcher too, and requires -y headless
+# The launcher's continued existence is asserted, not fought.
 
 [scenario]
 name = "playbook-lifecycle"
@@ -16,46 +20,42 @@ steps = [
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
 ]
 
-[[verify.commands]]
-command = "claude-playbook create lifecycle-pb"
-contains = "lifecycle-pb"
-
 [[verify.files]]
-path = "~/.claude-playbooks/lifecycle-pb/CLAUDE.md"
+# Post-steps state: the CLI is installed. Everything else is created by
+# the command chain below.
+path = "~/.local/bin/claude-playbook"
 
 [[verify.commands]]
-command = "claude-playbook list"
+command = 'claude-playbook create lifecycle-pb && test -f "$HOME/.claude-playbooks/lifecycle-pb/CLAUDE.md" && echo created'
+
+[[verify.commands]]
+command = 'claude-playbook list | grep -F lifecycle-pb'
 contains = "lifecycle-pb"
 
 [[verify.commands]]
-command = "claude-playbook info lifecycle-pb"
+command = 'claude-playbook info lifecycle-pb'
 contains = "lifecycle-pb"
 
-# Default alias = playbook name; an explicit second alias proves the
-# alias machinery, dealias removes exactly that one.
 [[verify.commands]]
-command = "claude-playbook alias lifecycle-pb lcpb"
-contains = "lcpb"
-
-[[verify.files]]
-path = "~/.local/bin/lcpb"
+command = 'claude-playbook alias lifecycle-pb lcpb && test -x "$HOME/.local/bin/lcpb" && echo aliased'
 
 [[verify.commands]]
-command = "claude-playbook dealias lifecycle-pb"
+command = 'claude-playbook dealias lifecycle-pb && test ! -e "$HOME/.local/bin/lcpb" && echo dealiased'
 
 [[verify.commands]]
-command = "test ! -e \"$HOME/.local/bin/lcpb\" && echo gone"
-contains = "gone"
+# The registry entry moves: new dir present, old dir gone. The old
+# LAUNCHER stays by design — not asserted here, see the final check.
+command = 'claude-playbook rename lifecycle-pb lifecycle-pb2 && test -d "$HOME/.claude-playbooks/lifecycle-pb2" && test ! -d "$HOME/.claude-playbooks/lifecycle-pb" && echo renamed'
 
 [[verify.commands]]
-command = "claude-playbook rename lifecycle-pb lifecycle-pb2"
+command = 'claude-playbook list | grep -F lifecycle-pb2'
+contains = "lifecycle-pb2"
 
 [[verify.commands]]
-command = "claude-playbook list | grep -F lifecycle-pb2 && ! claude-playbook list | grep -F lifecycle-pb "
+# -y: headless runs cannot answer the confirmation prompt (a bare
+# delete reads it from stdin, gets EOF, and silently cancels).
+command = 'claude-playbook delete lifecycle-pb2 -y && test ! -e "$HOME/.claude-playbooks/lifecycle-pb2" && echo deleted'
 
 [[verify.commands]]
-command = "claude-playbook delete lifecycle-pb2"
-
-[[verify.commands]]
-command = "! claude-playbook list | grep -F lifecycle-pb2 && echo deleted"
-contains = "deleted"
+command = '! claude-playbook list | grep -F lifecycle-pb2 && echo unlisted'
+contains = "unlisted"

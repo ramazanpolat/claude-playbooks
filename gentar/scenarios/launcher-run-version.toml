@@ -9,6 +9,9 @@
 name = "launcher-run-version"
 subject = "claude-playbooks"
 agent = "shell"
+# Spawns the real `claude` binary — needs the bench template with
+# agent CLIs pre-installed (the base shell sandbox has none).
+template = "gentar-bench-v1"
 
 [oracle]
 steps = [
