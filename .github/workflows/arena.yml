@@ -13,7 +13,7 @@ name: arena
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v*', 'arena', 'arena-*']   # v* = release proof · arena-* = keyword tags
   workflow_dispatch:
     inputs:
       scenario:
@@ -22,6 +22,14 @@ on:
       gentar_ref:
         description: gentar ref to run the arena from
         default: main
+
+# Keyword tags — run the arena on ANY commit by pushing a tag at it:
+#   arena                    → every suite in gentar/scenarios/
+#   arena-<scenario>         → that one suite (e.g. arena-playbook-lifecycle)
+# The tag names the SUBJECT commit (this checkout); GENTAR_REF still
+# picks the engine. Tag a branch tip, a main commit, or a dirty
+# experiment — same path. Delete the tag to re-run.
+# v* tags run the full suite too (release proof), unchanged.
 
 jobs:
   arena:
@@ -49,12 +57,23 @@ jobs:
 
       - name: run suites
         run: |
-          if [ -n "$SCENARIO_INPUT" ]; then
-            for s in $SCENARIO_INPUT; do
+          # Keyword tag → scenario: `arena` runs everything, `arena-<name>`
+          # runs one. Dispatch input wins when both are set (explicit ask).
+          INPUT="$SCENARIO_INPUT"
+          if [ -z "$INPUT" ] && [ "$GITHUB_EVENT_NAME" = push ] \
+             && [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            tag=${GITHUB_REF#refs/tags/}
+            case "$tag" in
+              arena)    INPUT='' ;;
+              arena-*)  INPUT=${tag#arena-} ;;
+            esac
+          fi
+          if [ -n "$INPUT" ]; then
+            for s in $INPUT; do
               [ -f "gentar/scenarios/$s.toml" ] \
                 || { echo "unknown scenario: $s" >&2; exit 2; }
             done
-            exec gentar/run.sh $SCENARIO_INPUT
+            exec gentar/run.sh $INPUT
           fi
           suites=""
           for f in gentar/scenarios/*.toml; do

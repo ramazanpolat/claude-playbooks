@@ -42,6 +42,10 @@ fix and rerun, no commit needed to test.
 |---|---|
 | `cli-head-build` | CLI builds from this checkout (nested-Docker golang) and works: version floats from `git describe`, `list`, `--help` |
 | `cli-release-install` | the README's install path verbatim, pinned release |
+| `playbook-lifecycle` | create → list → info → alias → rename → delete, each checked against the filesystem, not the command's own output |
+| `playbook-install-local` | `install` from a local directory: manifest-named target, faithful copy, launcher, delete cleans both |
+| `launcher-run-version` | `run` (and the launcher alias) actually spawns claude with the playbook wired — keyless, via `--version` |
+| `docs-honesty` | README's documented commands answer `--help` in the built binary; referenced files exist and stay executable |
 
 Add a suite = add a TOML here. Schema and vocabulary:
 [gentar scenario schema](https://github.com/agent-realm/gentar/blob/main/coordinator/gentar/toml_scenario.py)
@@ -51,8 +55,13 @@ Add a suite = add a TOML here. Schema and vocabulary:
 
 Triggers (edit to taste — this is your workflow, conditions are yours):
 
-- `push` to `main` — both suites
-- `push` of tags `v*` — both suites against the tagged commit
+- `push` to `main` — every suite
+- `push` of tags `v*` — every suite against the tagged commit (release proof)
+- **keyword tags** — run the arena on ANY commit, no merge needed:
+  - `git tag arena && git push origin arena` → every suite, at that commit
+  - `git tag arena-<scenario> && git push origin arena-<scenario>` → one suite
+    (e.g. `arena-playbook-lifecycle`); unknown name fails fast with exit 2
+  - re-run by deleting and re-pushing the tag
 - `workflow_dispatch` — pick a scenario manually
 
 Runs on a self-hosted runner labeled `arena` (needs Docker + reach to
