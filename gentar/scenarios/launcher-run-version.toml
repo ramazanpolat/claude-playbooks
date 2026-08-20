@@ -1,0 +1,30 @@
+# claude-playbooks own-arena suite 5: `run` actually launches claude
+# with the playbook wired — proven keylessly via `--version`, which
+# claude answers without credentials. This is the only suite that
+# exercises the product's core promise (CLAUDE_CONFIG_DIR → playbook,
+# claude spawned inside it); everything else proves bookkeeping around
+# it. The launcher alias runs the same path as `run`.
+
+[scenario]
+name = "launcher-run-version"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  'claude-playbook create run-version-pb',
+]
+
+[[verify.commands]]
+# claude --version answers keyless; wrapping proves BOTH exit 0 and
+# captured output in one check. Flags after the name are forwarded —
+# that forwarding is under test as much as the spawn.
+command = 'out=$(claude-playbook run run-version-pb --version 2>&1) && printf "runok:%s" "$out"'
+contains = "runok:"
+
+[[verify.commands]]
+# Same spawn through the launcher alias, not just the subcommand.
+command = 'out=$("$HOME/.local/bin/run-version-pb" --version 2>&1) && printf "launchok:%s" "$out"'
+contains = "launchok:"

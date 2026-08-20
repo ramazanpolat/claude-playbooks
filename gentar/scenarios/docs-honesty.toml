@@ -1,0 +1,33 @@
+# claude-playbooks own-arena suite 6: docs-honesty — the README's
+# documented surface must exist in the shipped binary and checkout.
+# Drift caught here is the class where docs promise a command/file the
+# tree no longer ships. Checks are against the staged checkout
+# ($WORKSPACE_DIR) and the BUILT binary, so a README edit claiming an
+# unimplemented command fails before release, not in a user's shell.
+
+[scenario]
+name = "docs-honesty"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+]
+
+# Every subcommand the README documents must answer --help in the
+# built binary. Extend the list when README gains commands — the
+# failure mode this suite exists for is docs drifting AHEAD of code.
+[[verify.commands]]
+command = 'for c in install list run create delete update info alias rename link start; do claude-playbook "$c" --help >/dev/null 2>&1 || { echo "missing: $c"; exit 1; }; done; echo cmds-ok'
+contains = "cmds-ok"
+
+[[verify.commands]]
+command = 'for f in README.md install.sh uninstall.sh build.sh SPEC-v4.md CONTRIBUTING.md LICENSE; do test -f "$WORKSPACE_DIR/$f" || { echo "missing file: $f"; exit 1; }; done; echo files-ok'
+contains = "files-ok"
+
+[[verify.commands]]
+# The two install entrypoints README points at must stay executable.
+command = 'test -x "$WORKSPACE_DIR/install.sh" && test -x "$WORKSPACE_DIR/uninstall.sh" && echo exec-ok'
+contains = "exec-ok"

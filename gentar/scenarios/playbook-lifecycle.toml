@@ -1,0 +1,61 @@
+# claude-playbooks own-arena suite 3: the create→list→info→alias→rename→
+# delete lifecycle on a throwaway bench. Every subcommand's contract is
+# checked against the filesystem and `list` — never against its own
+# output alone, so a command that lies about success still fails here.
+# Alias/dealias are verified by the launcher FILE (executing it would
+# spawn claude, which is launcher-run-version's job, not this one).
+
+[scenario]
+name = "playbook-lifecycle"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+]
+
+[[verify.commands]]
+command = "claude-playbook create lifecycle-pb"
+contains = "lifecycle-pb"
+
+[[verify.files]]
+path = "~/.claude-playbooks/lifecycle-pb/CLAUDE.md"
+
+[[verify.commands]]
+command = "claude-playbook list"
+contains = "lifecycle-pb"
+
+[[verify.commands]]
+command = "claude-playbook info lifecycle-pb"
+contains = "lifecycle-pb"
+
+# Default alias = playbook name; an explicit second alias proves the
+# alias machinery, dealias removes exactly that one.
+[[verify.commands]]
+command = "claude-playbook alias lifecycle-pb lcpb"
+contains = "lcpb"
+
+[[verify.files]]
+path = "~/.local/bin/lcpb"
+
+[[verify.commands]]
+command = "claude-playbook dealias lifecycle-pb"
+
+[[verify.commands]]
+command = "test ! -e \"$HOME/.local/bin/lcpb\" && echo gone"
+contains = "gone"
+
+[[verify.commands]]
+command = "claude-playbook rename lifecycle-pb lifecycle-pb2"
+
+[[verify.commands]]
+command = "claude-playbook list | grep -F lifecycle-pb2 && ! claude-playbook list | grep -F lifecycle-pb "
+
+[[verify.commands]]
+command = "claude-playbook delete lifecycle-pb2"
+
+[[verify.commands]]
+command = "! claude-playbook list | grep -F lifecycle-pb2 && echo deleted"
+contains = "deleted"
