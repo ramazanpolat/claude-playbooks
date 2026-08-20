@@ -66,6 +66,10 @@ jobs:
           GENTAR_REF: ${{ github.event.inputs.gentar_ref || 'main' }}
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
           GENTAR_CLONE_SSH_KEY: ${{ runner.temp }}/gentar_clone_key
+          # This runner also hosts gentar's own CI gate, whose stack owns
+          # host port 8123. The arena's debug binding moves to 8126
+          # (needs agent-realm/gentar#17; harmless no-op before it).
+          GENTAR_CLICKHOUSE_HOST_PORT: "8126"
 
       - name: upload reports
         if: always()
@@ -74,3 +78,9 @@ jobs:
           name: arena-reports
           path: gentar/reports/
           if-no-files-found: error
+
+      - name: teardown
+        # Free the port and volumes for anything else on this host —
+        # the fix-loop artifact is already uploaded above.
+        if: always()
+        run: docker compose -p arena-claude-playbooks down -v --remove-orphans || true
