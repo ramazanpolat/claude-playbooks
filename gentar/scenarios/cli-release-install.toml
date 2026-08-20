@@ -1,0 +1,29 @@
+# claude-playbooks own-arena suite 2: docs-honesty — the README's
+# documented install path. Script and VERSION are pinned to the same
+# immutable tag (same policy as gentar's claude-playbooks-install
+# suite): unpinned installs hit api.github.com rate limits from the
+# shared bench egress IP, and a script pulled from mutable main could
+# drift under a pinned binary. This proves the RELEASED path — local
+# edits to install.sh are cli-head-build territory (it builds from the
+# staged tree). Bump the pin deliberately when a release should be
+# proven; cli-head-build covers the moving tip.
+
+[scenario]
+name = "cli-release-install"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  "curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v3.2.0/install.sh | VERSION=v3.2.0 sh",
+]
+
+[[verify.files]]
+path = "~/.local/bin/claude-playbook"
+
+[[verify.files]]
+path = "~/.local/bin/cpb"
+
+[[verify.commands]]
+command = "claude-playbook --version"
+contains = "v3.2.0"

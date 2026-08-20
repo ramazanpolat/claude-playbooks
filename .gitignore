@@ -86,3 +86,11 @@ Thumbs.db
 .idea/
 .vscode/
 docs/demo/cpb-linux
+
+# ---------------------------------------------------------------------------
+# gentar own-arena (see gentar/README.md)
+# ---------------------------------------------------------------------------
+# .arena holds the cloned arena (its .env, its bench key); reports/ is
+# per-run output meant to be fed to an agent, not committed.
+gentar/.arena/
+gentar/reports/

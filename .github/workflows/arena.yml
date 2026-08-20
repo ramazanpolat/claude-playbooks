@@ -1,0 +1,70 @@
+# claude-playbooks own arena. Runs this repo's gentar suites on every
+# push to main, every v* tag, and on demand. Conditions live HERE —
+# edit the `on:` block; the arena doesn't care.
+#
+# Runner: self-hosted with label `arena` (Docker + network reach to the
+# bench-host). One-time setup is documented in gentar/README.md.
+#
+# Trust note: the arena engine (agent-realm/gentar) runs with reach to
+# the bench SSH key. The default ref is gentar's main; if that matters
+# to you, dispatch with gentar_ref pinned to an audited SHA.
+name: arena
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: scenario to run (empty = all suites)
+        default: ''
+      gentar_ref:
+        description: gentar ref to run the arena from
+        default: main
+
+jobs:
+  arena:
+    runs-on: [self-hosted, arena]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags: cli-head-build floats the version via git describe
+
+      # Dispatch inputs go through env, never into shell source — a
+      # quoted value can't become a command. The bench key lands in
+      # RUNNER_TEMP, which the runner wipes after the job; nothing
+      # secret persists in the workspace.
+      - name: stage bench access
+        run: |
+          printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
+          chmod 600 "$RUNNER_TEMP/bench_key"
+        env:
+          BENCH_KEY: ${{ secrets.BENCH_SSH_KEY }}
+
+      - name: run suites
+        run: |
+          if [ -n "$SCENARIO_INPUT" ]; then
+            for s in $SCENARIO_INPUT; do
+              [ -f "gentar/scenarios/$s.toml" ] \
+                || { echo "unknown scenario: $s" >&2; exit 2; }
+            done
+            exec gentar/run.sh $SCENARIO_INPUT
+          fi
+          suites=""
+          for f in gentar/scenarios/*.toml; do
+            suites="$suites $(basename "$f" .toml)"
+          done
+          exec gentar/run.sh $suites
+        env:
+          SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
+          GENTAR_REF: ${{ github.event.inputs.gentar_ref || 'main' }}
+          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+
+      - name: upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arena-reports
+          path: gentar/reports/
+          if-no-files-found: error
