@@ -39,8 +39,13 @@ jobs:
         run: |
           printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
           chmod 600 "$RUNNER_TEMP/bench_key"
+          printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key"
+          chmod 600 "$RUNNER_TEMP/gentar_clone_key"
         env:
           BENCH_KEY: ${{ secrets.BENCH_SSH_KEY }}
+          # Read-only deploy key on agent-realm/gentar — the arena
+          # engine repo is private; the runner needs it to clone.
+          CLONE_KEY: ${{ secrets.GENTAR_CLONE_KEY }}
 
       - name: run suites
         run: |
@@ -60,6 +65,7 @@ jobs:
           SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
           GENTAR_REF: ${{ github.event.inputs.gentar_ref || 'main' }}
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          GENTAR_CLONE_SSH_KEY: ${{ runner.temp }}/gentar_clone_key
 
       - name: upload reports
         if: always()
