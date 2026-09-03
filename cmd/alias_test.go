@@ -216,6 +216,42 @@ func TestAliasNameRepairRespectsOwnership(t *testing.T) {
 	}
 }
 
+// A foreign file squatting the launcher path must refuse the repair; a
+// linked registration must be able to repair its local name launcher (the
+// shared manifest is never touched).
+func TestAliasNameRepairForeignFileAndLinked(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "deploy")
+	ldir := config.LauncherDir
+	if err := os.MkdirAll(ldir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ldir, "deploy"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAlias(nil, []string{"deploy", "deploy"}); err == nil || !strings.Contains(err.Error(), "did not generate") {
+		t.Fatalf("expected foreign-file refusal, got: %v", err)
+	}
+	if err := os.Remove(filepath.Join(ldir, "deploy")); err != nil {
+		t.Fatal(err)
+	}
+
+	external := t.TempDir()
+	if err := os.WriteFile(filepath.Join(external, manifest.FileName), []byte("version = \"0.1.0\"\nname = \"ext\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(config.ResolvePlaybooksDir(), "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAlias(nil, []string{"linked", "linked"}); err != nil {
+		t.Fatalf("linked registration must repair its own name launcher: %v", err)
+	}
+	if e, exists, foreign := launcher.Lookup(ldir, "linked"); !exists || foreign {
+		t.Fatalf("linked name launcher not written: %+v exists=%v foreign=%v", e, exists, foreign)
+	}
+}
+
 func TestAliasUnchangedOnLinkedPlaybookDoesNotRewriteSharedManifest(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
