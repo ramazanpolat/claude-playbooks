@@ -126,6 +126,16 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("could not retire launcher %q (alias unchanged): %w", old, err)
 		}
 		fmt.Printf("Removed alias %q from playbook %q\n", old, name)
+		if !launcherOpsAllowed() {
+			return nil
+		}
+		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
+			if _, _, foreign := launcher.Lookup(ldir, name); !foreign {
+				if _, err := os.Lstat(filepath.Join(ldir, name)); err != nil {
+					fmt.Printf("Playbook %q now has no command. Restore one with: claude-playbook alias %s %s\n", name, name, name)
+				}
+			}
+		}
 		return nil
 	}
 
@@ -137,7 +147,37 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot set alias %q on a linked target's shared %s (current alias %q). Edit the target's manifest directly if you really mean it", newAlias, manifest.FileName, old)
 		}
 		if newAlias == pb.Name {
-			return fmt.Errorf("alias %q is already the playbook's name; nothing to add", newAlias)
+			// "alias <name> <name>" is the repair spelling for the name
+			// launcher: nothing to record in the manifest (the name is not
+			// an alias), just make sure the command exists. Without this,
+			// a playbook whose alias was removed — or that never had a
+			// name launcher because its alias won at install time — has no
+			// command and no way to get one back. Unlike the equal-alias
+			// branch below, ownership IS rechecked: the name is compared
+			// against every other playbook's aliases too, so a pilot who
+			// re-homed the name as another playbook's alias gets a
+			// refusal, not a launcher that dispatches to the wrong install.
+			if owner, oerr := commandNameOwner(newAlias, pb.Name); oerr == nil && owner != nil {
+				return fmt.Errorf("command name %q already addresses playbook %q", newAlias, owner.Name)
+			}
+			if !launcherOpsAllowed() {
+				fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; run manually with:\n  claude-playbook run %s\n", newAlias)
+				return nil
+			}
+			ldir, derr := config.ResolveLauncherDir()
+			if derr != nil {
+				return fmt.Errorf("no launcher written: %w", derr)
+			}
+			if _, _, foreign := launcher.Lookup(ldir, newAlias); foreign {
+				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", newAlias)
+			}
+			lpath, werr := launcher.Write(ldir, newAlias)
+			if werr != nil {
+				return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
+			}
+			fmt.Printf("Command:  %s  (launcher at %s)\n", newAlias, lpath)
+			warnIfShadowedOrUnreachable(newAlias, lpath, pb.Path)
+			return nil
 		}
 		if err := launcher.ValidateName(newAlias); err != nil {
 			return err

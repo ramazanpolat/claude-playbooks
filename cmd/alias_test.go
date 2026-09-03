@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -140,8 +141,78 @@ func TestAliasRejectsReservedAndOwnName(t *testing.T) {
 	if err := runAlias(nil, []string{"deploy", "cpb"}); err == nil {
 		t.Fatal("reserved name must be refused")
 	}
-	if err := runAlias(nil, []string{"deploy", "deploy"}); err == nil {
-		t.Fatal("alias equal to the playbook's own name must be refused")
+	// The own-name case is no longer an error: it repairs the name launcher.
+	if err := runAlias(nil, []string{"deploy", "deploy"}); err != nil {
+		t.Fatalf("own-name repair must not fail: %v", err)
+	}
+}
+
+// The dead end from the kommander-dev handoff: create --alias, drop the
+// alias, and the playbook has no command — with no way to get one back,
+// because "alias <name> <name>" used to refuse.
+func TestAliasNameRepairsNameLauncher(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "deploy")
+
+	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+		t.Fatal(err)
+	}
+	aliasRemove = true
+	err := runAlias(nil, []string{"deploy"})
+	aliasRemove = false
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "deploy"); exists {
+		t.Fatal("name launcher unexpectedly present after alias removal")
+	}
+
+	// The repair spelling: name-as-alias ensures the name launcher exists.
+	if err := runAlias(nil, []string{"deploy", "deploy"}); err != nil {
+		t.Fatalf("name repair failed: %v", err)
+	}
+	if e, exists, foreign := launcher.Lookup(config.LauncherDir, "deploy"); !exists || foreign {
+		t.Fatalf("name launcher not repaired: %+v exists=%v foreign=%v", e, exists, foreign)
+	}
+
+	// Idempotent, and the manifest stays untouched (name is not an alias).
+	before, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "deploy", manifest.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runAlias(nil, []string{"deploy", "deploy"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "deploy", manifest.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("manifest changed during name repair:\n%s\n%s", before, after)
+	}
+	m, err := manifest.Read(filepath.Join(config.ResolvePlaybooksDir(), "deploy"))
+	if err != nil || m == nil || m.Alias != "" {
+		t.Fatalf("name repair must not record an alias: %+v err=%v", m, err)
+	}
+}
+
+// The repair must not hand the playbook a name that another playbook now
+// owns as an alias, and must refuse a foreign file squatting the path.
+func TestAliasNameRepairRespectsOwnership(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "deploy")
+	seedFlatPlaybook(t, "other")
+
+	// The tool refuses to CREATE this collision, so reach it the only way it
+	// exists: a hand-edited manifest giving `other` the alias `deploy`.
+	if err := manifest.Write(filepath.Join(config.ResolvePlaybooksDir(), "other"), &manifest.Manifest{Name: "other", Alias: "deploy"}); err != nil {
+		t.Fatal(err)
+	}
+	err := runAlias(nil, []string{"deploy", "deploy"})
+	if err == nil || !strings.Contains(err.Error(), "other") {
+		t.Fatalf("expected ownership refusal naming the other playbook, got: %v", err)
 	}
 }
 
