@@ -35,7 +35,9 @@ func ParseEnvFile(path string) (*Env, error) {
 		line = strings.TrimPrefix(line, "export ")
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
-			return nil, fmt.Errorf("%s:%d: expected KEY=VALUE, got %q", path, lineNo, line)
+			// The line is not echoed: a bare token on its own line is as
+			// likely a pasted secret as a typo, and stderr is often logged.
+			return nil, fmt.Errorf("%s:%d: expected KEY=VALUE", path, lineNo)
 		}
 		key = strings.TrimSpace(key)
 		if err := ValidateEnvKey(key); err != nil {

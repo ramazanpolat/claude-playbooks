@@ -232,7 +232,7 @@ Flag parsing is disabled so arbitrary `claude` flags pass through. The global `-
 - Launch flag without a value → `flag needs an argument: --env`
 - `--env` without `=` → `--env expects KEY=VALUE, got "X"`; `--unset` with `=` → `--unset expects a variable name, got "K=V"`
 - Invalid key, reserved key, or bad value → the manifest's `[env]` errors (`invalid environment variable name "x"`, `CLAUDE_CONFIG_DIR is managed by claude-playbook and cannot be overridden`, ...)
-- `--env-file` problems → `--env-file: <path>:<line>: expected KEY=VALUE, got "..."` and the same key/value errors prefixed with `<path>:<line>`
+- `--env-file` problems → `--env-file: <path>:<line>: expected KEY=VALUE` (the offending line is not echoed; it may be a secret) and the same key/value errors prefixed with `<path>:<line>`
 - `--env-profile` missing or broken → the launch refusal from `env` (`env profile "x" not found in <dir> ...`)
 - `claude` not on PATH → `'claude' command not found. Install Claude Code first: https://claude.ai/download`
 

@@ -64,3 +64,16 @@ func TestParseEnvFileRejects(t *testing.T) {
 		t.Fatal("missing file accepted")
 	}
 }
+
+// A malformed line is reported by position only: the content may be a
+// pasted secret, and stderr is often logged.
+func TestParseEnvFileDoesNotEchoLine(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.env")
+	if err := os.WriteFile(p, []byte("sk-ant-oat01-SECRETVALUE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ParseEnvFile(p)
+	if err == nil || strings.Contains(err.Error(), "SECRETVALUE") {
+		t.Fatalf("error echoes the line: %v", err)
+	}
+}
