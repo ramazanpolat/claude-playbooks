@@ -415,17 +415,45 @@ func Write(dir string, m *Manifest) error {
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
 	// carrying any is written private, like an env profile. Existing files
-	// are only ever tightened, never loosened: os.WriteFile keeps the mode
-	// of a file that already exists.
+	// are only ever tightened, never loosened.
 	perm := os.FileMode(0644)
 	if m.Env != nil && len(m.Env.Set) > 0 {
 		perm = 0600
 	}
-	if err := os.WriteFile(path, []byte(b.String()), perm); err != nil {
+	if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 == 0 {
+		perm = 0600
+	}
+	return WritePrivate(path, []byte(b.String()), perm)
+}
+
+// WritePrivate replaces path with data through a temporary file created
+// 0600 in the same directory and renamed into place. The content is never
+// readable at a looser mode than perm, not even for the duration of the
+// write: truncating an existing 0644 file in place and chmodding afterwards
+// would expose a freshly written secret to any local reader in between.
+func WritePrivate(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	if perm == 0600 {
-		return os.Chmod(path, perm)
+	tmpPath := tmp.Name()
+	cleanup := func() { tmp.Close(); os.Remove(tmpPath) }
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
 	}
 	return nil
 }

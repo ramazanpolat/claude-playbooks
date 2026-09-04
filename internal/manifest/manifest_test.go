@@ -204,3 +204,32 @@ func TestNearestWalksPastBrokenManifest(t *testing.T) {
 		t.Fatal("the broken manifest went unreported")
 	}
 }
+
+// A secret must never be readable at a looser mode than its final one, not
+// even mid-write: the file is replaced by rename, so an existing 0644 file
+// is never truncated and rewritten in place, and no temp file lingers.
+func TestWritePrivateNeverExposesContent(t *testing.T) {
+	dir := t.TempDir()
+	at := filepath.Join(dir, FileName)
+	if err := os.WriteFile(at, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.Stat(at)
+	if err := WritePrivate(at, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.Stat(at)
+	if os.SameFile(before, after) {
+		t.Fatal("the existing public file was rewritten in place instead of replaced")
+	}
+	if after.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %v, want 0600", after.Mode().Perm())
+	}
+	if got, _ := os.ReadFile(at); string(got) != "secret\n" {
+		t.Fatalf("content = %q", got)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("temp file left behind: %v", entries)
+	}
+}
