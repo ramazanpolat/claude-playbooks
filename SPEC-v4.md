@@ -532,7 +532,7 @@ Effective at launch:
 
 **Mutations** parse and validate every argument before taking the registry lock and rewriting the manifest (bootstrapping one for a flat playbook). `set` removes the key from `unset`; `unset` removes it from `set`; `clear` removes it from both; `use` appends profile names (moving an already-listed one to the end) after checking each exists; `unuse` removes them. An emptied block is dropped from the file. A manifest that cannot be parsed is reported as an advisory launch warning and treated as declaring nothing.
 
-**Install-local.** `update` carries the live block forward and ignores the source's, assembling the final manifest in the staged tree *before* the overlay so a source-shipped block is never live, even transiently; `install` drops a source-shipped block with a note, assembling the install in a dot-prefixed staging directory (invisible to discovery) and renaming it into the registry only once its manifest is sanitized. A local source directory is always staged into a private copy first, so neither command ever writes into the pilot's source. A published manifest must not be able to redirect an install's API endpoint or strip its authentication.
+**Install-local.** `update` carries the live block forward and ignores the source's, assembling the final manifest in the staged tree *before* the overlay so a source-shipped block is never live, even transiently; `install` drops a source-shipped block with a note, assembling the install in a dot-prefixed staging directory (invisible to discovery) and renaming it into the registry only once its manifest is sanitized. A local source directory is always staged into a private copy first (in the system temp dir, or the user cache dir when that lies inside the source), so neither command ever writes into the pilot's source. A published manifest must not be able to redirect an install's API endpoint or strip its authentication.
 
 Linked playbooks: the manifest is the LINK TARGET's shared state, so mutations are refused — edit the target's manifest directly if you really mean it.
 
@@ -807,6 +807,7 @@ preserve = ["settings.json"]
 - An `env` key is not a valid variable name → `invalid .playbook at <path>: env.set: invalid environment variable name "<key>"`
 - An `env` key is `CLAUDE_CONFIG_DIR` → `invalid .playbook at <path>: env.set: CLAUDE_CONFIG_DIR is managed by claude-playbook and cannot be overridden`
 - A key appears in both `env.set` and `env.unset` → `invalid .playbook at <path>: env: <key> is both set and unset`
+- An `env.set` value is not valid UTF-8 → `invalid .playbook at <path>: env.set: value of <key> is not valid UTF-8 and cannot be stored in a manifest`. Any other value round-trips: control characters are written as TOML `\uXXXX` escapes.
 - An `env.profiles` entry is not a valid profile name → `invalid .playbook at <path>: env.profiles: invalid profile name "<name>": use letters, digits, dots, dashes, underscores`
 
 ---

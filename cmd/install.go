@@ -354,7 +354,7 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 	// [env]) before it goes live, and doing that in the pilot's own source
 	// directory would mutate it and leak one install's configuration into
 	// every later install from it.
-	tmp, err := os.MkdirTemp("", "claude-playbook-stage-")
+	tmp, err := stageTempDir(work)
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -364,6 +364,38 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 		return "", func() {}, fmt.Errorf("failed to stage %s: %w", source, err)
 	}
 	return tmp, cleanup, nil
+}
+
+// stageTempDir creates the private staging directory for a local source,
+// guaranteed to sit OUTSIDE the source tree: with TMPDIR inside the source
+// (workspaces that keep temp files local), copyDir would walk into the
+// directory it is filling and recurse until the path length ran out. The
+// system temp dir is tried first, then the user cache dir.
+func stageTempDir(work string) (string, error) {
+	workReal, err := filepath.EvalSymlinks(work)
+	if err != nil {
+		workReal = work
+	}
+	candidates := []string{os.TempDir()}
+	if cache, err := os.UserCacheDir(); err == nil {
+		candidates = append(candidates, filepath.Join(cache, "claude-playbook"))
+	}
+	for _, base := range candidates {
+		if err := os.MkdirAll(base, 0o755); err != nil {
+			continue
+		}
+		baseReal, err := filepath.EvalSymlinks(base)
+		if err != nil {
+			continue
+		}
+		if rel, err := filepath.Rel(workReal, baseReal); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue // inside the source tree
+		}
+		if tmp, err := os.MkdirTemp(base, "claude-playbook-stage-"); err == nil {
+			return tmp, nil
+		}
+	}
+	return "", fmt.Errorf("cannot stage %s: every temporary directory is inside it or unwritable (set TMPDIR outside the source)", work)
 }
 
 func deriveNameFromLocal(source string) string {

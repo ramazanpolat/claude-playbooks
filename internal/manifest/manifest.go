@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 )
@@ -114,6 +115,52 @@ func dropKey(list []string, key string) []string {
 		}
 	}
 	return out
+}
+
+// QuoteTOML renders s as a TOML basic string. Go's %q emits escapes TOML
+// does not define (\a, \v, \x..), which turn a manifest holding such a value
+// unreadable -- and an unreadable manifest aborts registry discovery for
+// every command. Control characters go out as \uXXXX; s must be valid
+// UTF-8, which validate enforces for env values before anything is written.
+func QuoteTOML(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\r':
+			b.WriteString(`\r`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, `\u%04X`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// ValidateEnvValue reports whether value can be stored: TOML strings must be
+// valid UTF-8, and a value that cannot be written faithfully must be refused
+// up front rather than corrupt the manifest.
+func ValidateEnvValue(key, value string) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("value of %s is not valid UTF-8 and cannot be stored in a manifest", key)
+	}
+	return nil
 }
 
 // ReservedEnvKeys cannot be set or unset through the manifest: the tool
@@ -246,8 +293,11 @@ func (m *Manifest) validate(path string) error {
 				return fmt.Errorf("invalid .playbook at %s: env.profiles: %w", path, err)
 			}
 		}
-		for key := range m.Env.Set {
+		for key, value := range m.Env.Set {
 			if err := ValidateEnvKey(key); err != nil {
+				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
+			}
+			if err := ValidateEnvValue(key, value); err != nil {
 				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
 			}
 		}
@@ -328,27 +378,27 @@ func Write(dir string, m *Manifest) error {
 	}
 	var b strings.Builder
 	if m.Version != "" {
-		fmt.Fprintf(&b, "version = %q\n", m.Version)
+		fmt.Fprintf(&b, "version = %s\n", QuoteTOML(m.Version))
 	} else {
 		b.WriteString(`version = "0.1.0"` + "\n")
 	}
 	if m.Name != "" {
-		fmt.Fprintf(&b, "name = %q\n", m.Name)
+		fmt.Fprintf(&b, "name = %s\n", QuoteTOML(m.Name))
 	}
 	if m.Alias != "" {
-		fmt.Fprintf(&b, "alias = %q\n", m.Alias)
+		fmt.Fprintf(&b, "alias = %s\n", QuoteTOML(m.Alias))
 	}
 	if m.Subdir != "" {
-		fmt.Fprintf(&b, "subdir = %q\n", m.Subdir)
+		fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(m.Subdir))
 	}
 	if m.Description != "" {
-		fmt.Fprintf(&b, "description = %q\n", m.Description)
+		fmt.Fprintf(&b, "description = %s\n", QuoteTOML(m.Description))
 	}
 	if m.Homepage != "" {
-		fmt.Fprintf(&b, "homepage = %q\n", m.Homepage)
+		fmt.Fprintf(&b, "homepage = %s\n", QuoteTOML(m.Homepage))
 	}
 	if m.Author != "" {
-		fmt.Fprintf(&b, "author = %q\n", m.Author)
+		fmt.Fprintf(&b, "author = %s\n", QuoteTOML(m.Author))
 	}
 	if m.IsolateAuth {
 		fmt.Fprintf(&b, "isolate_auth = true\n")
@@ -356,13 +406,13 @@ func Write(dir string, m *Manifest) error {
 	if m.Source != nil {
 		b.WriteString("\n[source]\n")
 		if m.Source.Repository != "" {
-			fmt.Fprintf(&b, "repository = %q\n", m.Source.Repository)
+			fmt.Fprintf(&b, "repository = %s\n", QuoteTOML(m.Source.Repository))
 		}
 		if m.Source.Branch != "" {
-			fmt.Fprintf(&b, "branch = %q\n", m.Source.Branch)
+			fmt.Fprintf(&b, "branch = %s\n", QuoteTOML(m.Source.Branch))
 		}
 		if m.Source.Subdir != "" {
-			fmt.Fprintf(&b, "subdir = %q\n", m.Source.Subdir)
+			fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(m.Source.Subdir))
 		}
 	}
 	if m.Update != nil && len(m.Update.Preserve) > 0 {
@@ -371,7 +421,7 @@ func Write(dir string, m *Manifest) error {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			fmt.Fprintf(&b, "%q", rel)
+			b.WriteString(QuoteTOML(rel))
 		}
 		b.WriteString("]\n")
 	}
@@ -385,7 +435,7 @@ func Write(dir string, m *Manifest) error {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				fmt.Fprintf(&b, "%q", name)
+				b.WriteString(QuoteTOML(name))
 			}
 			b.WriteString("]\n")
 		}
@@ -397,7 +447,7 @@ func Write(dir string, m *Manifest) error {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				fmt.Fprintf(&b, "%q", key)
+				b.WriteString(QuoteTOML(key))
 			}
 			b.WriteString("]\n")
 		}
@@ -409,7 +459,7 @@ func Write(dir string, m *Manifest) error {
 			sort.Strings(keys)
 			b.WriteString("\n[env.set]\n")
 			for _, key := range keys {
-				fmt.Fprintf(&b, "%s = %q\n", key, m.Env.Set[key])
+				fmt.Fprintf(&b, "%s = %s\n", key, QuoteTOML(m.Env.Set[key]))
 			}
 		}
 	}

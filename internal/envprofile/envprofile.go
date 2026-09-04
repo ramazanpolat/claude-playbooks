@@ -110,8 +110,11 @@ func Read(dir, name string) (*Profile, error) {
 }
 
 func validate(p *Profile, at string) error {
-	for key := range p.Set {
+	for key, value := range p.Set {
 		if err := manifest.ValidateEnvKey(key); err != nil {
+			return fmt.Errorf("invalid env profile at %s: set: %w", at, err)
+		}
+		if err := manifest.ValidateEnvValue(key, value); err != nil {
 			return fmt.Errorf("invalid env profile at %s: set: %w", at, err)
 		}
 	}
@@ -141,7 +144,7 @@ func Write(dir string, p *Profile) error {
 	}
 	var b strings.Builder
 	if p.Description != "" {
-		fmt.Fprintf(&b, "description = %q\n", p.Description)
+		fmt.Fprintf(&b, "description = %s\n", manifest.QuoteTOML(p.Description))
 	}
 	if len(p.Unset) > 0 {
 		unset := append([]string(nil), p.Unset...)
@@ -151,7 +154,7 @@ func Write(dir string, p *Profile) error {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			fmt.Fprintf(&b, "%q", key)
+			b.WriteString(manifest.QuoteTOML(key))
 		}
 		b.WriteString("]\n")
 	}
@@ -166,7 +169,7 @@ func Write(dir string, p *Profile) error {
 		}
 		b.WriteString("[set]\n")
 		for _, key := range keys {
-			fmt.Fprintf(&b, "%s = %q\n", key, p.Set[key])
+			fmt.Fprintf(&b, "%s = %s\n", key, manifest.QuoteTOML(p.Set[key]))
 		}
 	}
 	// Through a 0600 temp file and a rename: a profile created 0644 by an
