@@ -75,7 +75,7 @@ func TestStagingRefusalCreatesNothingInsideSource(t *testing.T) {
 	if err := manifest.Write(source, &manifest.Manifest{Name: "pb"}); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TMPDIR", filepath.Join(source, "tmp"))          // does not exist
+	t.Setenv("TMPDIR", filepath.Join(source, "tmp"))           // does not exist
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(source, "cache")) // does not exist
 	t.Setenv("HOME", filepath.Join(source, "home"))            // darwin cache dir; does not exist
 	before, _ := os.ReadDir(source)
