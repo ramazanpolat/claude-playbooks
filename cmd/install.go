@@ -166,6 +166,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if mPre == nil {
 		mPre = &manifest.Manifest{}
 	}
+	if !mPre.Env.Empty() {
+		// [env] is install-local state: a published manifest must not be
+		// able to redirect an install's API endpoint or strip its auth.
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [env] block shipped in the source's %s; environment overrides are install-local. Set them with: claude-playbook env %s set KEY=VALUE\n", manifest.FileName, targetName)
+		mPre.Env = nil
+		needsManifestWrite = true
+	}
 	sourceSubdir := subdir
 	if hasManifestSubdir {
 		sourceSubdir = path.Join(sourceSubdir, mPre.Subdir)

@@ -162,6 +162,8 @@ Most workflows start with either `create`, `install`, or `link`.
 
 If you want to use **different accounts concurrently**, you can enable authentication isolation for any playbook. Simply set `isolate_auth = true` in the playbook's `.playbook` manifest file, or run the playbook with the environment variable `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true`. This isolates that playbook's login session and prevents it from sharing or auto-syncing credentials with your other playbooks or global settings.
 
+If you use a long-lived token (`claude setup-token`, stored at `~/.config/claude-code/oauth-token`), every playbook launch injects it as `CLAUDE_CODE_OAUTH_TOKEN`. To keep one playbook on its own `/login` instead, without isolating it from the shared credentials, unset the token for that playbook: `claude-playbook env <name> unset CLAUDE_CODE_OAUTH_TOKEN`. See [Environment overrides](#environment-overrides).
+
 ### Create and run your own playbook
 
 Use `create` when you want a fresh isolated Claude Code setup.
@@ -292,6 +294,34 @@ claude-playbook dealias experiment       # same as --remove
 ```
 
 Renaming with `cpb rename` keeps names, aliases, and launchers consistent automatically; a launcher named by the alias keeps working across renames untouched.
+
+### Environment overrides
+
+A playbook can declare environment variables in the `[env]` block of its `.playbook` manifest. Every launch of that playbook (its launcher command, `run`, or `start` at its directory) applies them to the child `claude` process: `set` entries override whatever the shell exported, `unset` entries are removed even when the shell exports them. This is how a playbook pins itself to a proxy, a model, or an authentication mode that the rest of your shell does not use.
+
+```bash
+claude-playbook env                                          # list every playbook that declares overrides
+claude-playbook env router                                   # show one
+claude-playbook env router set ANTHROPIC_BASE_URL=http://proxy:1/v1
+claude-playbook env router unset CLAUDE_CODE_OAUTH_TOKEN     # this playbook uses its own /login
+claude-playbook env router clear ANTHROPIC_BASE_URL          # forget the entry; the shell's value applies again
+```
+
+The resulting manifest:
+
+```toml
+[env]
+unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
+
+[env.set]
+ANTHROPIC_BASE_URL = "http://proxy:1/v1"
+```
+
+Unsetting `CLAUDE_CODE_OAUTH_TOKEN` does more than drop the variable: the long-lived token is treated as inactive for that playbook, so the launch takes the stored-credentials path (no token injected, and the playbook's own login is left alone rather than quarantined). `/login` sticks there while every other playbook keeps using the token. Setting it instead supplies a per-playbook token that wins over the machine-global file.
+
+Precedence, lowest to highest: the shell's environment, manifest `set`, manifest `unset`, then `CLAUDE_CONFIG_DIR`, which the tool always binds itself and which cannot be overridden. Claude Code's own `env` block in `settings.json` is applied later, inside the `claude` process, and wins over all of these; it can set variables but cannot unset one the shell exported, which is what the manifest block is for.
+
+The block is **install-local**, like `alias`: `update` keeps your block and ignores one the source ships, and `install` drops a source-shipped block with a note. A shared playbook repository cannot redirect your API endpoint or strip your authentication by publishing a manifest.
 
 ### Temporary sessions
 

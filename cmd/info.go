@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -74,6 +75,24 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	}
 	if pb.Manifest != nil && pb.Manifest.Author != "" {
 		fmt.Printf("Author:      %s\n", pb.Manifest.Author)
+	}
+	if pb.Manifest != nil && !pb.Manifest.Env.Empty() {
+		label := "Env:         "
+		keys := make([]string, 0, len(pb.Manifest.Env.Set))
+		for key := range pb.Manifest.Env.Set {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fmt.Printf("%sset %s=%s\n", label, key, pb.Manifest.Env.Set[key])
+			label = "             "
+		}
+		unset := append([]string(nil), pb.Manifest.Env.Unset...)
+		sort.Strings(unset)
+		for _, key := range unset {
+			fmt.Printf("%sunset %s\n", label, key)
+			label = "             "
+		}
 	}
 
 	if pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.Repository != "" {

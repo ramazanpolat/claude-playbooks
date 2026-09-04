@@ -204,6 +204,10 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 		updated.Alias = liveManifest.Alias
 		updated.IsolateAuth = liveManifest.IsolateAuth
 		updated.Source = liveManifest.Source
+		// [env] is install-local: the live block survives, and one the
+		// source ships is never adopted (it could redirect the install's
+		// API endpoint).
+		updated.Env = liveManifest.Env
 	}
 	// The install's name is its directory name; never adopt the source's.
 	// This also heals installs whose manifest predates name rewriting.

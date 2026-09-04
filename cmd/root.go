@@ -79,6 +79,7 @@ func init() {
 	rootCmd.AddCommand(renameCmd)
 	rootCmd.AddCommand(aliasCmd)
 	rootCmd.AddCommand(dealiasCmd)
+	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(selfUninstallCmd)
 	rootCmd.AddCommand(updateCmd)

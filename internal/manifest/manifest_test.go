@@ -75,3 +75,84 @@ func TestPreserveRoundTrips(t *testing.T) {
 		t.Fatalf("preserve=%#v", m.Update.Preserve)
 	}
 }
+
+func TestEnvRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	in := &Manifest{
+		Name: "pb",
+		Env: &Env{
+			Set:   map[string]string{"ANTHROPIC_BASE_URL": "http://proxy:1/v1", "A_FLAG": "x=y"},
+			Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"},
+		},
+	}
+	if err := Write(dir, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Read(dir)
+	if err != nil || out == nil || out.Env == nil {
+		t.Fatalf("read back: m=%#v err=%v", out, err)
+	}
+	if out.Env.Set["ANTHROPIC_BASE_URL"] != "http://proxy:1/v1" || out.Env.Set["A_FLAG"] != "x=y" {
+		t.Fatalf("set did not round-trip: %#v", out.Env.Set)
+	}
+	if !out.Env.Unsets("CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatalf("unset did not round-trip: %#v", out.Env.Unset)
+	}
+	// Serialization order is deterministic: [env] header, unset, then the
+	// [env.set] table with sorted keys.
+	data, _ := os.ReadFile(filepath.Join(dir, FileName))
+	want := "[env]\nunset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy:1/v1\"\nA_FLAG = \"x=y\"\n"
+	if !strings.HasSuffix(string(data), want) {
+		t.Fatalf("serialized manifest:\n%s\nwant suffix:\n%s", data, want)
+	}
+}
+
+func TestEnvEmptyBlockIsNotWritten(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{}}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, FileName))
+	if strings.Contains(string(data), "[env]") {
+		t.Fatalf("empty env block was serialized:\n%s", data)
+	}
+}
+
+func TestReadRejectsInvalidEnv(t *testing.T) {
+	cases := map[string]string{
+		"reserved set":   "[env.set]\nCLAUDE_CONFIG_DIR = \"/x\"\n",
+		"reserved unset": "[env]\nunset = [\"CLAUDE_CONFIG_DIR\"]\n",
+		"bad name":       "[env]\nunset = [\"NOT-A-NAME\"]\n",
+		"bad set name":   "[env.set]\n\"1BAD\" = \"v\"\n",
+		"set and unset":  "[env]\nunset = [\"FOO\"]\n[env.set]\nFOO = \"v\"\n",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, FileName), []byte("name = \"pb\"\n"+body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Read(dir); err == nil {
+				t.Fatalf("manifest accepted:\n%s", body)
+			}
+		})
+	}
+}
+
+func TestNearestWalksToInstallRoot(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "playbook")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nsubdir = \"playbook\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Nearest(sub)
+	if err != nil || m == nil || m.Name != "pb" {
+		t.Fatalf("Nearest(sub) = %#v, %v", m, err)
+	}
+	if m, err := Nearest(t.TempDir()); err != nil || m != nil {
+		t.Fatalf("Nearest(no manifest) = %#v, %v; want nil, nil", m, err)
+	}
+}

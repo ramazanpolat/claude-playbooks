@@ -8,6 +8,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -30,6 +32,62 @@ type Update struct {
 	Preserve []string `toml:"preserve,omitempty"`
 }
 
+// Env holds per-install environment overrides applied by `run`, `start`, and
+// launcher dispatch to the child claude process, after the process's own
+// environment and before CLAUDE_CONFIG_DIR is bound. Set entries override
+// inherited values; Unset entries are removed from the child's environment
+// even when the shell exports them.
+//
+// The block is INSTALL-LOCAL state, like `alias`: `update` carries the live
+// block forward and ignores the source's, and `install` drops a block the
+// source ships. A playbook repository must not be able to point an install's
+// ANTHROPIC_BASE_URL somewhere else by publishing a manifest.
+//
+// Unsetting CLAUDE_CODE_OAUTH_TOKEN has a documented side effect: the
+// long-lived token is treated as inactive for that install, so the launch
+// takes the stored-credentials path (no quarantine, no injection). Setting
+// it supplies a per-install token that wins over the machine-global file.
+type Env struct {
+	Set   map[string]string `toml:"set,omitempty"`
+	Unset []string          `toml:"unset,omitempty"`
+}
+
+// ReservedEnvKeys cannot be set or unset through the manifest: the tool
+// owns them and binds them after every override is applied.
+var ReservedEnvKeys = map[string]bool{"CLAUDE_CONFIG_DIR": true}
+
+var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// ValidateEnvKey reports whether key is a well-formed, non-reserved
+// environment variable name.
+func ValidateEnvKey(key string) error {
+	if !envKeyPattern.MatchString(key) {
+		return fmt.Errorf("invalid environment variable name %q", key)
+	}
+	if ReservedEnvKeys[key] {
+		return fmt.Errorf("%s is managed by claude-playbook and cannot be overridden", key)
+	}
+	return nil
+}
+
+// Empty reports whether the block declares nothing.
+func (e *Env) Empty() bool {
+	return e == nil || (len(e.Set) == 0 && len(e.Unset) == 0)
+}
+
+// Unsets reports whether key is listed for removal.
+func (e *Env) Unsets(key string) bool {
+	if e == nil {
+		return false
+	}
+	for _, k := range e.Unset {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
 	Version     string  `toml:"version"`
@@ -42,6 +100,7 @@ type Manifest struct {
 	IsolateAuth bool    `toml:"isolate_auth"`
 	Source      *Source `toml:"source,omitempty"`
 	Update      *Update `toml:"update,omitempty"`
+	Env         *Env    `toml:"env,omitempty"`
 }
 
 // Read parses the .playbook file inside dir. Returns (nil, nil) if the file
@@ -66,6 +125,27 @@ func Read(dir string) (*Manifest, error) {
 	return &m, nil
 }
 
+// Nearest returns the manifest governing dir: the one in dir itself, or the
+// closest ancestor's. A config directory that is a manifest `subdir` has no
+// manifest of its own; its install root's applies. Returns (nil, nil) when no
+// ancestor has one.
+func Nearest(dir string) (*Manifest, error) {
+	for {
+		m, err := Read(dir)
+		if err != nil {
+			return nil, err
+		}
+		if m != nil {
+			return m, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, nil
+		}
+		dir = parent
+	}
+}
+
 // Exists reports whether dir contains a .playbook file.
 func Exists(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, FileName))
@@ -87,6 +167,21 @@ func (m *Manifest) validate(path string) error {
 		for _, rel := range m.Update.Preserve {
 			if err := validateRelativePath(path, "update.preserve", rel); err != nil {
 				return err
+			}
+		}
+	}
+	if m.Env != nil {
+		for key := range m.Env.Set {
+			if err := ValidateEnvKey(key); err != nil {
+				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
+			}
+		}
+		for _, key := range m.Env.Unset {
+			if err := ValidateEnvKey(key); err != nil {
+				return fmt.Errorf("invalid .playbook at %s: env.unset: %w", path, err)
+			}
+			if _, both := m.Env.Set[key]; both {
+				return fmt.Errorf("invalid .playbook at %s: env: %s is both set and unset", path, key)
 			}
 		}
 	}
@@ -204,6 +299,34 @@ func Write(dir string, m *Manifest) error {
 			fmt.Fprintf(&b, "%q", rel)
 		}
 		b.WriteString("]\n")
+	}
+	if !m.Env.Empty() {
+		// [env] must precede [env.set] in TOML; both are emitted in sorted
+		// order so a rewrite never reorders a hand-edited file arbitrarily.
+		b.WriteString("\n[env]\n")
+		if len(m.Env.Unset) > 0 {
+			unset := append([]string(nil), m.Env.Unset...)
+			sort.Strings(unset)
+			b.WriteString("unset = [")
+			for i, key := range unset {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				fmt.Fprintf(&b, "%q", key)
+			}
+			b.WriteString("]\n")
+		}
+		if len(m.Env.Set) > 0 {
+			keys := make([]string, 0, len(m.Env.Set))
+			for key := range m.Env.Set {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			b.WriteString("\n[env.set]\n")
+			for _, key := range keys {
+				fmt.Fprintf(&b, "%s = %q\n", key, m.Env.Set[key])
+			}
+		}
 	}
 	return os.WriteFile(path, []byte(b.String()), 0644)
 }

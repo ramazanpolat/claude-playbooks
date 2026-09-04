@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // OAuthTokenEnv is the environment variable Claude Code reads for a long-lived
@@ -55,6 +57,63 @@ func TokenActive() (inject string, active bool) {
 		return "", false
 	}
 	return tok, true
+}
+
+// resolveToken is TokenActive with the install's manifest [env] block applied
+// on top. The manifest is the per-install authority over the machine-global
+// token file:
+//
+//   - env.unset lists CLAUDE_CODE_OAUTH_TOKEN: the token is inactive here, no
+//     matter what the file or the shell says. The launch then takes the
+//     stored-credentials path. Stripping the variable alone would be the
+//     worst of both worlds -- the quarantine would still wipe the stored
+//     grant and nothing would authenticate the child.
+//   - env.set supplies CLAUDE_CODE_OAUTH_TOKEN: that value is the token for
+//     this install, injected in place of the file's. An empty value counts as
+//     inactive, matching the file rule.
+//   - otherwise TokenActive decides.
+func resolveToken(menv *manifest.Env) (inject string, active bool) {
+	if menv.Unsets(OAuthTokenEnv) {
+		return "", false
+	}
+	if menv != nil {
+		if tok, ok := menv.Set[OAuthTokenEnv]; ok {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				return "", false
+			}
+			return tok, true
+		}
+	}
+	return TokenActive()
+}
+
+// applyManifestEnv overlays the manifest [env] block on environ: set entries
+// replace any inherited value, unset entries are dropped. The token variable
+// is excluded from BOTH directions here because resolveToken has already
+// folded it into the token decision and PrepareLaunchEnv places it itself.
+func applyManifestEnv(environ []string, menv *manifest.Env) []string {
+	if menv.Empty() {
+		return environ
+	}
+	keys := make([]string, 0, len(menv.Set)+len(menv.Unset))
+	for key := range menv.Set {
+		if key != OAuthTokenEnv {
+			keys = append(keys, key)
+		}
+	}
+	for _, key := range menv.Unset {
+		if key != OAuthTokenEnv {
+			keys = append(keys, key)
+		}
+	}
+	out := removeEnv(environ, keys...)
+	for _, key := range keys {
+		if value, ok := menv.Set[key]; ok {
+			out = append(out, key+"="+value)
+		}
+	}
+	return out
 }
 
 // removeEnv returns a copy of environ with every entry for key dropped.
@@ -109,18 +168,36 @@ func removeEnv(environ []string, keys ...string) []string {
 // including leaving the plan descriptors alone, since stored credentials carry
 // them natively and Claude Code reads them from there.
 //
+// The manifest's [env] block is the per-install override layer. Whether the
+// token is active is decided with it applied (see resolveToken), and its
+// set/unset entries are overlaid last, after the auth branches, so a
+// declared value is what the child sees regardless of what the shell
+// exported. CLAUDE_CONFIG_DIR is bound after that: manifest validation
+// refuses it, and the binding here is what makes the refusal unnecessary
+// to trust. A manifest that cannot be read is reported through the advisory
+// error and treated as having no [env] block; the launch still proceeds.
+//
 // The returned error is advisory: env is always usable, and callers should warn
 // (not abort) on a non-nil error, matching the previous SyncCredentials call
 // sites.
 func PrepareLaunchEnv(configDir string) ([]string, error) {
-	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+configDir)
+	env := os.Environ()
 
-	if isAuthIsolated(configDir) {
-		return removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv),
-			SyncCredentials(configDir)
+	var menv *manifest.Env
+	m, merr := manifest.Nearest(configDir)
+	if m != nil {
+		menv = m.Env
 	}
 
-	inject, active := TokenActive()
+	if isAuthIsolated(configDir) {
+		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
+		env = applyManifestEnv(env, menv)
+		env = removeEnv(env, "CLAUDE_CONFIG_DIR")
+		env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
+		return env, firstErr(merr, SyncCredentials(configDir))
+	}
+
+	inject, active := resolveToken(menv)
 
 	var syncErr error
 	if active {
@@ -146,9 +223,27 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 		// own comment rejects relying on exec preferring the last duplicate.
 		env = removeEnv(env, OAuthTokenEnv)
 		env = append(env, OAuthTokenEnv+"="+inject)
+	} else if !active {
+		// Inactive by manifest decision (unset, or set to empty): an inherited
+		// token would otherwise still reach the child and re-arm the very
+		// adoption hazard the stored-credentials path exists to avoid.
+		env = removeEnv(env, OAuthTokenEnv)
 	}
 	if active {
 		env = appendSubscriptionEnv(env)
 	}
-	return env, syncErr
+	env = applyManifestEnv(env, menv)
+	env = removeEnv(env, "CLAUDE_CONFIG_DIR")
+	env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
+	return env, firstErr(merr, syncErr)
+}
+
+// firstErr returns the first non-nil error.
+func firstErr(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
