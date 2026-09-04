@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 )
 
 var startCmd = &cobra.Command{
@@ -77,6 +79,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	launchEnv, syncErr := auth.PrepareLaunchEnv(absPath)
+	var missing *envprofile.MissingError
+	if errors.As(syncErr, &missing) {
+		// Launching with a silently dropped layer could send traffic to the
+		// wrong endpoint with the wrong credentials -- refuse, do not warn.
+		return syncErr
+	}
 	if syncErr != nil {
 		// Neutral wording -- see the matching comment in cmd/run.go.
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)

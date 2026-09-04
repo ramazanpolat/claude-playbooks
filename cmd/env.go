@@ -10,12 +10,13 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 var envCmd = &cobra.Command{
-	Use:   "env [name] [set KEY=VALUE... | unset KEY... | clear KEY...]",
+	Use:   "env [name] [set KEY=VALUE... | unset KEY... | clear KEY... | use PROFILE... | unuse PROFILE...]",
 	Short: "Show or manage a playbook's environment overrides",
 	Long: `A playbook can declare environment variables in the [env] block of its
 .playbook manifest. Every launch of that playbook (its launcher command,
@@ -28,6 +29,11 @@ With a name: show that playbook's overrides.
   set KEY=VALUE...   record values (replacing any previous ones)
   unset KEY...       remove the variables from every launch
   clear KEY...       forget the entries; the shell's values apply again
+  use PROFILE...     layer shared env profiles under this playbook's entries
+  unuse PROFILE...   detach profiles
+
+Profiles ('claude-playbook profile') apply in the order listed, later ones
+overriding earlier; the playbook's own set/unset entries apply last.
 
 Unsetting CLAUDE_CODE_OAUTH_TOKEN switches the playbook to stored
 credentials: the machine-global long-lived token is neither injected nor
@@ -78,19 +84,31 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Environment overrides for %q:\n", name)
 		printEnvBlock("  ", pb.Manifest.Env)
+		if len(pb.Manifest.Env.Profiles) > 0 {
+			effective, err := envprofile.Expand(envprofile.Dir(playbooksDir), pb.Manifest.Env)
+			if err != nil {
+				fmt.Printf("Effective at launch: launch refused -- %v\n", err)
+				return nil
+			}
+			fmt.Println("Effective at launch:")
+			printEnvBlock("  ", effective)
+		}
 		return nil
 	}
 
 	verb := args[1]
 	keys := args[2:]
 	switch verb {
-	case "set", "unset", "clear":
+	case "set", "unset", "clear", "use", "unuse":
 	default:
-		return fmt.Errorf("unknown action %q: expected set, unset, or clear\nUsage: claude-playbook env <name> [set KEY=VALUE... | unset KEY... | clear KEY...]", verb)
+		return fmt.Errorf("unknown action %q: expected set, unset, clear, use, or unuse\nUsage: claude-playbook env <name> [set KEY=VALUE... | unset KEY... | clear KEY... | use PROFILE... | unuse PROFILE...]", verb)
 	}
 	if len(keys) == 0 {
-		if verb == "set" {
-			return fmt.Errorf("%s requires at least one KEY=VALUE", verb)
+		switch verb {
+		case "set":
+			return fmt.Errorf("set requires at least one KEY=VALUE")
+		case "use", "unuse":
+			return fmt.Errorf("%s requires at least one profile name", verb)
 		}
 		return fmt.Errorf("%s requires at least one KEY", verb)
 	}
@@ -99,6 +117,27 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	// a bad third argument must not leave the first two applied.
 	set := map[string]string{}
 	var names []string
+	profileDir := envprofile.Dir(playbooksDir)
+	if verb == "use" || verb == "unuse" {
+		for _, arg := range keys {
+			if err := manifest.ValidateProfileName(arg); err != nil {
+				return err
+			}
+			if verb == "use" {
+				// A profile must exist to be attached: launch refuses a
+				// missing one, and recording it now would only arm that.
+				p, err := envprofile.Read(profileDir, arg)
+				if err != nil {
+					return err
+				}
+				if p == nil {
+					return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook profile %s set KEY=VALUE'", arg, arg)
+				}
+			}
+			names = append(names, arg)
+		}
+		keys = nil
+	}
 	for _, arg := range keys {
 		key, value := arg, ""
 		if verb == "set" {
@@ -146,13 +185,21 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		m.Env.Set = map[string]string{}
 	}
 	for _, key := range names {
-		m.Env.Unset = dropString(m.Env.Unset, key)
-		delete(m.Env.Set, key)
 		switch verb {
-		case "set":
-			m.Env.Set[key] = set[key]
-		case "unset":
-			m.Env.Unset = append(m.Env.Unset, key)
+		case "use":
+			m.Env.Profiles = dropString(m.Env.Profiles, key)
+			m.Env.Profiles = append(m.Env.Profiles, key)
+		case "unuse":
+			m.Env.Profiles = dropString(m.Env.Profiles, key)
+		default:
+			m.Env.Unset = dropString(m.Env.Unset, key)
+			delete(m.Env.Set, key)
+			switch verb {
+			case "set":
+				m.Env.Set[key] = set[key]
+			case "unset":
+				m.Env.Unset = append(m.Env.Unset, key)
+			}
 		}
 	}
 	if m.Env.Empty() {
@@ -175,6 +222,12 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		for _, key := range names {
 			fmt.Printf("Cleared %s for playbook %q (the shell's value applies again)\n", key, name)
 		}
+	case "use":
+		fmt.Printf("Playbook %q now uses env profiles: %s\n", name, strings.Join(m.Env.Profiles, ", "))
+	case "unuse":
+		for _, key := range names {
+			fmt.Printf("Detached env profile %q from playbook %q\n", key, name)
+		}
 	}
 	for _, key := range names {
 		if key == auth.OAuthTokenEnv && verb == "unset" {
@@ -185,6 +238,9 @@ func runEnv(cmd *cobra.Command, args []string) error {
 }
 
 func printEnvBlock(indent string, e *manifest.Env) {
+	if len(e.Profiles) > 0 {
+		fmt.Printf("%sprofiles  %s\n", indent, strings.Join(e.Profiles, ", "))
+	}
 	keys := make([]string, 0, len(e.Set))
 	for key := range e.Set {
 		keys = append(keys, key)

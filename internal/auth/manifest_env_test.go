@@ -1,11 +1,15 @@
 package auth
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 )
 
 // envValue returns the value of key in env and whether it appears, failing
@@ -157,5 +161,73 @@ func TestUnreadableManifestIsAdvisory(t *testing.T) {
 	}
 	if got, _ := envValue(t, env, "CLAUDE_CONFIG_DIR"); got != configDir {
 		t.Fatalf("launch env unusable after manifest error: %v", env)
+	}
+}
+
+// Profiles are resolved from the playbooks root at launch and flattened
+// under the playbook's own entries; the token decision sees the result.
+func TestManifestProfilesApplyAtLaunch(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenPath, []byte("sk-ant-oat01-FROMFILE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tokenPath)
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv("HOME", t.TempDir())
+
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
+		Name:  "account",
+		Set:   map[string]string{"ANTHROPIC_BASE_URL": "http://profile/v1", "MODEL": "profile"},
+		Unset: []string{OAuthTokenEnv},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := filepath.Join(root, "pb")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, configDir, "[env]\nprofiles = [\"account\"]\n\n[env.set]\nMODEL = \"own\"\n")
+	store := writeStore(t, configDir, `{`+grantJSON+`}`)
+
+	env, err := PrepareLaunchEnv(configDir)
+	if err != nil {
+		t.Fatalf("advisory error: %v", err)
+	}
+	if _, present := envValue(t, env, OAuthTokenEnv); present {
+		t.Fatalf("profile's token unset was not honored: %v", env)
+	}
+	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
+		t.Fatal("grant quarantined although the profile makes the token inactive")
+	}
+	if got, _ := envValue(t, env, "ANTHROPIC_BASE_URL"); got != "http://profile/v1" {
+		t.Fatalf("ANTHROPIC_BASE_URL = %q", got)
+	}
+	if got, _ := envValue(t, env, "MODEL"); got != "own" {
+		t.Fatalf("playbook's own entry did not win over the profile: MODEL = %q", got)
+	}
+}
+
+func TestMissingProfileIsReportedTyped(t *testing.T) {
+	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+
+	configDir := filepath.Join(root, "pb")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, configDir, "[env]\nprofiles = [\"ghost\"]\n")
+
+	_, err := PrepareLaunchEnv(configDir)
+	var missing *envprofile.MissingError
+	if !errors.As(err, &missing) || missing.Name != "ghost" {
+		t.Fatalf("err = %v, want *envprofile.MissingError", err)
 	}
 }

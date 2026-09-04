@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -58,6 +60,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	launchEnv, syncErr := auth.PrepareLaunchEnv(pb.Path)
+	var missing *envprofile.MissingError
+	if errors.As(syncErr, &missing) {
+		// Launching with a silently dropped layer could send traffic to the
+		// wrong endpoint with the wrong credentials -- refuse, do not warn.
+		return syncErr
+	}
 	if syncErr != nil {
 		// Neutral wording: PrepareLaunchEnv may have been syncing credentials,
 		// account metadata, or detaching for an isolated playbook. Naming

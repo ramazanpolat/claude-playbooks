@@ -47,9 +47,73 @@ type Update struct {
 // long-lived token is treated as inactive for that install, so the launch
 // takes the stored-credentials path (no quarantine, no injection). Setting
 // it supplies a per-install token that wins over the machine-global file.
+//
+// Profiles names shared env profiles (files under the playbooks root's
+// .env-profiles/ directory) layered UNDER this block: profiles apply in
+// list order, later ones overriding earlier, and the block's own Set/Unset
+// apply last. Resolution happens at launch; the manifest records names only.
 type Env struct {
-	Set   map[string]string `toml:"set,omitempty"`
-	Unset []string          `toml:"unset,omitempty"`
+	Profiles []string          `toml:"profiles,omitempty"`
+	Set      map[string]string `toml:"set,omitempty"`
+	Unset    []string          `toml:"unset,omitempty"`
+}
+
+var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// ValidateProfileName reports whether name can name an env profile file.
+func ValidateProfileName(name string) error {
+	if !profileNamePattern.MatchString(name) {
+		return fmt.Errorf("invalid profile name %q: use letters, digits, dots, dashes, underscores", name)
+	}
+	return nil
+}
+
+// Uses reports whether profile is listed.
+func (e *Env) Uses(profile string) bool {
+	if e == nil {
+		return false
+	}
+	for _, p := range e.Profiles {
+		if p == profile {
+			return true
+		}
+	}
+	return false
+}
+
+// MergeEnv flattens layers into one block: each layer's Set entries override
+// earlier values and cancel an earlier Unset of the same key; each layer's
+// Unset entries drop earlier Set values. Profiles are not carried into the
+// result -- callers resolve them into layers first. The result never lists a
+// key in both Set and Unset, and Unset keeps first-seen order.
+func MergeEnv(layers ...*Env) *Env {
+	out := &Env{Set: map[string]string{}}
+	for _, layer := range layers {
+		if layer == nil {
+			continue
+		}
+		for key, value := range layer.Set {
+			out.Unset = dropKey(out.Unset, key)
+			out.Set[key] = value
+		}
+		for _, key := range layer.Unset {
+			delete(out.Set, key)
+			if !out.Unsets(key) {
+				out.Unset = append(out.Unset, key)
+			}
+		}
+	}
+	return out
+}
+
+func dropKey(list []string, key string) []string {
+	out := list[:0:0]
+	for _, k := range list {
+		if k != key {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // ReservedEnvKeys cannot be set or unset through the manifest: the tool
@@ -72,7 +136,7 @@ func ValidateEnvKey(key string) error {
 
 // Empty reports whether the block declares nothing.
 func (e *Env) Empty() bool {
-	return e == nil || (len(e.Set) == 0 && len(e.Unset) == 0)
+	return e == nil || (len(e.Profiles) == 0 && len(e.Set) == 0 && len(e.Unset) == 0)
 }
 
 // Unsets reports whether key is listed for removal.
@@ -171,6 +235,11 @@ func (m *Manifest) validate(path string) error {
 		}
 	}
 	if m.Env != nil {
+		for _, name := range m.Env.Profiles {
+			if err := ValidateProfileName(name); err != nil {
+				return fmt.Errorf("invalid .playbook at %s: env.profiles: %w", path, err)
+			}
+		}
 		for key := range m.Env.Set {
 			if err := ValidateEnvKey(key); err != nil {
 				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
@@ -304,6 +373,16 @@ func Write(dir string, m *Manifest) error {
 		// [env] must precede [env.set] in TOML; both are emitted in sorted
 		// order so a rewrite never reorders a hand-edited file arbitrarily.
 		b.WriteString("\n[env]\n")
+		if len(m.Env.Profiles) > 0 {
+			b.WriteString("profiles = [")
+			for i, name := range m.Env.Profiles {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				fmt.Fprintf(&b, "%q", name)
+			}
+			b.WriteString("]\n")
+		}
 		if len(m.Env.Unset) > 0 {
 			unset := append([]string(nil), m.Env.Unset...)
 			sort.Strings(unset)

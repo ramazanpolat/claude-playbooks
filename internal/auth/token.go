@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -175,7 +177,8 @@ func removeEnv(environ []string, keys ...string) []string {
 // exported. CLAUDE_CONFIG_DIR is bound after that: manifest validation
 // refuses it, and the binding here is what makes the refusal unnecessary
 // to trust. A manifest that cannot be read is reported through the advisory
-// error and treated as having no [env] block; the launch still proceeds.
+// error and treated as having no [env] block; the launch still proceeds --
+// except for a missing profile, which callers refuse to launch over.
 //
 // The returned error is advisory: env is always usable, and callers should warn
 // (not abort) on a non-nil error, matching the previous SyncCredentials call
@@ -183,10 +186,16 @@ func removeEnv(environ []string, keys ...string) []string {
 func PrepareLaunchEnv(configDir string) ([]string, error) {
 	env := os.Environ()
 
+	// The block is resolved with its profiles flattened in. A missing
+	// profile surfaces as *envprofile.MissingError; callers that launch
+	// treat it as fatal (see cmd/run.go), everything else stays advisory.
 	var menv *manifest.Env
 	m, merr := manifest.Nearest(configDir)
-	if m != nil {
-		menv = m.Env
+	if m != nil && merr == nil {
+		menv, merr = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
+		if merr != nil {
+			menv = nil
+		}
 	}
 
 	if isAuthIsolated(configDir) {

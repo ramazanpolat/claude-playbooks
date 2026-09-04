@@ -7,7 +7,9 @@ package e2e
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +99,69 @@ func TestStartHonorsManifestEnv(t *testing.T) {
 	})
 	if got["FROM_MANIFEST"] != "yes" {
 		t.Fatalf("start ignored the manifest env: %v", got)
+	}
+}
+
+// launchFails runs claude-playbook expecting a non-zero exit and returns its
+// combined output; the stub claude must never have been reached.
+func launchFails(t *testing.T, playbooksDir string, l launch) string {
+	t.Helper()
+	work := t.TempDir()
+	dump := filepath.Join(work, "envdump")
+	args := append([]string{"--playbooks-dir", playbooksDir}, l.args...)
+	cmd := exec.Command(binPath, args...)
+	cmd.Env = append([]string{
+		"PATH=" + shimDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + work,
+		dumpEnv + "=" + dump,
+		securityLogEnv + "=" + filepath.Join(work, "security.log"),
+	}, l.env...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("claude-playbook %v exited 0:\n%s", args, out)
+	}
+	if _, serr := os.Stat(dump); serr == nil {
+		t.Fatalf("stub claude was launched despite the refusal:\n%s", out)
+	}
+	return string(out)
+}
+
+// A profile stored under the playbooks root reaches the child, layered under
+// the playbook's own entries.
+func TestProfileReachesChild(t *testing.T) {
+	root := t.TempDir()
+	profiles := filepath.Join(root, ".env-profiles")
+	if err := os.MkdirAll(profiles, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profiles, "glm.toml"),
+		[]byte("unset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nANTHROPIC_BASE_URL = \"http://profile/v1\"\nMODEL = \"profile\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	playbookWithEnv(t, root, "router", "[env]\nprofiles = [\"glm\"]\n\n[env.set]\nMODEL = \"own\"\n")
+
+	got := childEnv(t, root, launch{
+		env:  []string{tokenFile(t, "sk-ant-oat01-FROMFILE")},
+		args: []string{"run", "router"},
+	})
+	if got["ANTHROPIC_BASE_URL"] != "http://profile/v1" || got["MODEL"] != "own" {
+		t.Fatalf("ANTHROPIC_BASE_URL=%q MODEL=%q", got["ANTHROPIC_BASE_URL"], got["MODEL"])
+	}
+	if v, present := got[tokenEnv]; present {
+		t.Fatalf("token reached the child despite the profile's unset: %q", v)
+	}
+}
+
+// A referenced profile that does not exist refuses the launch outright.
+func TestMissingProfileRefusesLaunch(t *testing.T) {
+	root := t.TempDir()
+	playbookWithEnv(t, root, "router", "[env]\nprofiles = [\"ghost\"]\n")
+
+	out := launchFails(t, root, launch{
+		env:  []string{tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")},
+		args: []string{"run", "router"},
+	})
+	if !strings.Contains(out, `env profile "ghost" not found`) {
+		t.Fatalf("refusal did not name the profile:\n%s", out)
 	}
 }

@@ -80,6 +80,7 @@ func init() {
 	rootCmd.AddCommand(aliasCmd)
 	rootCmd.AddCommand(dealiasCmd)
 	rootCmd.AddCommand(envCmd)
+	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(selfUninstallCmd)
 	rootCmd.AddCommand(updateCmd)

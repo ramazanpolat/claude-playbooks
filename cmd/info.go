@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -78,6 +79,10 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	}
 	if pb.Manifest != nil && !pb.Manifest.Env.Empty() {
 		label := "Env:         "
+		if len(pb.Manifest.Env.Profiles) > 0 {
+			fmt.Printf("%sprofiles %s\n", label, strings.Join(pb.Manifest.Env.Profiles, ", "))
+			label = "             "
+		}
 		keys := make([]string, 0, len(pb.Manifest.Env.Set))
 		for key := range pb.Manifest.Env.Set {
 			keys = append(keys, key)
