@@ -78,17 +78,15 @@ func TestParseEnvFileDoesNotEchoLine(t *testing.T) {
 	}
 	// A secret containing "=" splits into a bogus key: the key must not be
 	// echoed by the name validation either.
-	if err := os.WriteFile(p, []byte("c2VjcmV0LXRva2Vu=
-"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("c2Vj+cmV0/LXRva2Vu==\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err = ParseEnvFile(p)
-	if err == nil || strings.Contains(err.Error(), "c2VjcmV0") {
+	if err == nil || strings.Contains(err.Error(), "c2Vj") {
 		t.Fatalf("error echoes the bogus key: %v", err)
 	}
 	// The reserved-key refusal may name the key: it is a known constant.
-	if err := os.WriteFile(p, []byte("CLAUDE_CONFIG_DIR=/x
-"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("CLAUDE_CONFIG_DIR=/x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = ParseEnvFile(p); err == nil || !strings.Contains(err.Error(), "CLAUDE_CONFIG_DIR") {
