@@ -76,6 +76,8 @@ binary:
 cpb --version
 ```
 
+The rest of this README uses `cpb`; `claude-playbook` works everywhere `cpb` appears.
+
 Want a different command name? Use a shell alias (`alias pb=claude-playbook`)
 or a hard link (`ln "$(command -v claude-playbook)" ~/.local/bin/pb` — works
 for both install locations). Do not use a symlink: a symlink to the binary
@@ -110,7 +112,7 @@ Or run the local uninstaller from a clone:
 ./uninstall.sh
 ```
 
-The script delegates to `claude-playbook self-uninstall --binary-only`, so
+The script delegates to `cpb self-uninstall --binary-only`, so
 one implementation owns all cleanup: the binary, its `cpb` sibling, launcher
 symlinks, and any completion lines you added. Every launcher the tool creates
 is recorded in a registry (`~/.local/state/claude-playbook/launchers`), so
@@ -125,11 +127,11 @@ To remove the tool, all its installed playbooks, their launcher commands,
 the completion lines in your rc files, and the binary in one step:
 
 ```bash
-claude-playbook self-uninstall          # prompts for confirmation
-claude-playbook self-uninstall -y       # skip prompt
-claude-playbook self-uninstall -y --keep-data     # keep ~/.claude-playbooks
-claude-playbook self-uninstall -y --keep-binary   # keep the binary
-claude-playbook self-uninstall --dry-run          # preview without removing
+cpb self-uninstall          # prompts for confirmation
+cpb self-uninstall -y       # skip prompt
+cpb self-uninstall -y --keep-data     # keep ~/.claude-playbooks
+cpb self-uninstall -y --keep-binary   # keep the binary
+cpb self-uninstall --dry-run          # preview without removing
 ```
 
 If the binary can't be removed (e.g. installed to `/usr/local/bin` and you're
@@ -191,8 +193,8 @@ The modes this gives you, per playbook:
 |---|---|---|
 | Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; `/login` anywhere logs in everywhere |
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
-| One playbook keeps its own `/login` while the others use the token | `claude-playbook env <name> unset CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
-| One playbook uses its own token | `claude-playbook env <name> set CLAUDE_CODE_OAUTH_TOKEN=...` | that token wins over the file; its own login removed |
+| One playbook keeps its own `/login` while the others use the token | `cpb env <name> unset CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
+| One playbook uses its own token | `cpb env <name> set CLAUDE_CODE_OAUTH_TOKEN=...` | that token wins over the file; its own login removed |
 | One playbook is a different account, sharing nothing | `isolate_auth = true` in its `.playbook`, or `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` | detached; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token |
 
 The unset and set forms can come from an [env profile](#env-profiles-define-once-attach-to-many) shared by several playbooks.
@@ -204,7 +206,7 @@ Two things to know about the shared-login mode. Claude Code namespaces its macOS
 Use `create` when you want a fresh isolated Claude Code setup.
 
 ```bash
-claude-playbook create experiment
+cpb create experiment
 experiment
 ```
 
@@ -213,26 +215,26 @@ This creates `~/.claude-playbooks/experiment`, drops in a starter `CLAUDE.md` th
 You can also run it without the launcher:
 
 ```bash
-claude-playbook run experiment
+cpb run experiment
 ```
 
 Pass Claude Code flags after the playbook name:
 
 ```bash
-claude-playbook run experiment --model claude-opus-5 --permission-mode auto
+cpb run experiment --model claude-opus-5 --permission-mode auto
 ```
 
 Use a custom command name, or skip launcher creation:
 
 ```bash
-claude-playbook create backend --alias be
-claude-playbook create scratch --no-alias
+cpb create backend --alias be
+cpb create scratch --no-alias
 ```
 
 ### See what is installed
 
 ```bash
-claude-playbook list
+cpb list
 ```
 
 ```
@@ -248,19 +250,19 @@ Use `install` when the playbook is in a Git repo or local directory and you want
 Install a repo:
 
 ```bash
-claude-playbook install https://github.com/ramazanpolat/awesome-playbooks
+cpb install https://github.com/ramazanpolat/awesome-playbooks
 ```
 
 Override the install name or launcher command:
 
 ```bash
-claude-playbook install https://github.com/user/awesome --name team-tools --alias tt
+cpb install https://github.com/user/awesome --name team-tools --alias tt
 ```
 
 Install a local directory by copying it:
 
 ```bash
-claude-playbook install ~/dev/my-playbook
+cpb install ~/dev/my-playbook
 ```
 
 ### Install one playbook from a larger repo
@@ -268,13 +270,13 @@ claude-playbook install ~/dev/my-playbook
 Use a GitHub tree URL when you want only one subdirectory:
 
 ```bash
-claude-playbook install https://github.com/user/awesome/tree/main/playbooks/dba
+cpb install https://github.com/user/awesome/tree/main/playbooks/dba
 ```
 
 Or pass the subdirectory explicitly:
 
 ```bash
-claude-playbook install https://github.com/user/awesome --subdir playbooks/dba
+cpb install https://github.com/user/awesome --subdir playbooks/dba
 ```
 
 Cherry-picked installs are flat top-level playbooks.
@@ -284,7 +286,7 @@ Branch names containing `/` are resolved against the repository's remote refs. Y
 Customize the name and alias:
 
 ```bash
-claude-playbook install https://github.com/user/awesome --subdir playbooks/dba --name dba --alias ap-dba
+cpb install https://github.com/user/awesome --subdir playbooks/dba --name dba --alias ap-dba
 ```
 
 ### Develop a playbook in place
@@ -292,14 +294,14 @@ claude-playbook install https://github.com/user/awesome --subdir playbooks/dba -
 Use `link` when you are actively editing a playbook outside `~/.claude-playbooks` and want live changes.
 
 ```bash
-claude-playbook link ~/dev/my-playbook
+cpb link ~/dev/my-playbook
 ```
 
 `link` creates a symlink under the playbooks root.
 
 ```bash
-claude-playbook link ~/dev/my-playbook --name scratch --alias sc
-claude-playbook link ~/dev/my-playbook --no-alias
+cpb link ~/dev/my-playbook --name scratch --alias sc
+cpb link ~/dev/my-playbook --no-alias
 ```
 
 Deleting a linked playbook removes only the symlink. The source directory is preserved.
@@ -312,7 +314,7 @@ Deleting a linked playbook removes only the symlink. The source directory is pre
 ~/.local/bin/experiment -> /usr/local/bin/claude-playbook
 ```
 
-When invoked through the link, the binary sees the link's name in `argv[0]` and behaves as `claude-playbook run <name>` — the multicall pattern used by busybox and git. The name resolves against the live playbook registry (directory name first, then the `.playbook` manifest's `alias`) **at invocation time**, so the launcher carries no state that can go stale. Unlike shell aliases, launchers work identically from any shell, are available immediately with no rc-file edit or reload, and are visible to scripts and cron.
+When invoked through the link, the binary sees the link's name in `argv[0]` and behaves as `cpb run <name>` — the multicall pattern used by busybox and git. The name resolves against the live playbook registry (directory name first, then the `.playbook` manifest's `alias`) **at invocation time**, so the launcher carries no state that can go stale. Unlike shell aliases, launchers work identically from any shell, are available immediately with no rc-file edit or reload, and are visible to scripts and cron.
 
 `delete` and `rename` never silently remove a launcher another playbook (or another playbooks root) might still be using: a name that no longer resolves is kept with an explicit `rm <path>` hint, and invoking a stale launcher fails loudly with "unknown playbook". `rename` registers the new name; a launcher named by a manifest alias keeps working across renames untouched.
 
@@ -321,11 +323,11 @@ When invoked through the link, the binary sees the link's name in `argv[0]` and 
 A playbook is addressed by its directory name and, optionally, one **alias** — an alternate command name recorded in its `.playbook` manifest and materialized as a launcher, so `cpb alias experiment exp` makes both `experiment` and `exp` work as commands:
 
 ```bash
-claude-playbook alias                    # list every playbook's alias
-claude-playbook alias experiment         # show one
-claude-playbook alias experiment exp     # set (replaces any previous alias + launcher)
-claude-playbook alias experiment --remove
-claude-playbook dealias experiment       # same as --remove
+cpb alias                    # list every playbook's alias
+cpb alias experiment         # show one
+cpb alias experiment exp     # set (replaces any previous alias + launcher)
+cpb alias experiment --remove
+cpb dealias experiment       # same as --remove
 ```
 
 Renaming with `cpb rename` keeps names, aliases, and launchers consistent automatically; a launcher named by the alias keeps working across renames untouched.
@@ -363,8 +365,8 @@ your shell's environment
 #### One playbook, its own overrides
 
 ```bash
-claude-playbook env kommander set ANTHROPIC_MODEL=claude-opus-5
-claude-playbook env kommander unset CLAUDE_CODE_OAUTH_TOKEN
+cpb env kommander set ANTHROPIC_MODEL=claude-opus-5
+cpb env kommander unset CLAUDE_CODE_OAUTH_TOKEN
 ```
 
 The manifest above now ends with:
@@ -380,10 +382,10 @@ ANTHROPIC_MODEL = "claude-opus-5"
 Inspect and undo:
 
 ```bash
-claude-playbook env kommander                        # show this playbook's block
-claude-playbook env                                  # every playbook that declares overrides
-claude-playbook env kommander clear ANTHROPIC_MODEL  # forget the entry; the shell's value applies again
-claude-playbook info kommander                       # "Env:" lines appear when a block exists
+cpb env kommander                        # show this playbook's block
+cpb env                                  # every playbook that declares overrides
+cpb env kommander clear ANTHROPIC_MODEL  # forget the entry; the shell's value applies again
+cpb info kommander                       # "Env:" lines appear when a block exists
 ```
 
 ```text
@@ -397,9 +399,9 @@ Environment overrides for "kommander":
 When several playbooks want the same overrides, put them in a **profile**: a named file under `~/.claude-playbooks/.env-profiles/`, managed with `env-profile`, attached to playbooks by name with `env <playbook> use`.
 
 ```bash
-claude-playbook env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.3
-claude-playbook env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
-claude-playbook env-profile glm describe "GLM 5.3 through the local router, own /login"
+cpb env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.3
+cpb env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
+cpb env-profile glm describe "GLM 5.3 through the local router, own /login"
 ```
 
 That wrote `~/.claude-playbooks/.env-profiles/glm.toml` (mode `0600`, values may be secrets):
@@ -416,9 +418,9 @@ ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 Attach it. The playbook's manifest records only the name:
 
 ```bash
-claude-playbook env router use glm
-claude-playbook env router set ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # local entry on top of the profile
-claude-playbook env router
+cpb env router use glm
+cpb env router set ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # local entry on top of the profile
+cpb env router
 ```
 
 ```text
@@ -442,10 +444,10 @@ ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.4"
 Profiles apply in the order listed, later ones overriding earlier, and the playbook's own entries apply last. Manage them:
 
 ```bash
-claude-playbook env-profile                 # list profiles, descriptions, which playbooks use each
-claude-playbook env-profile glm             # show one
-claude-playbook env router unuse glm        # detach
-claude-playbook env-profile glm delete      # refused while any playbook still uses it
+cpb env-profile                 # list profiles, descriptions, which playbooks use each
+cpb env-profile glm             # show one
+cpb env router unuse glm        # detach
+cpb env-profile glm delete      # refused while any playbook still uses it
 ```
 
 A profile that a playbook names but that is missing, unreadable, or invalid **refuses the launch** rather than silently running without it: a dropped layer could send traffic to the wrong endpoint with the wrong credentials.
@@ -465,9 +467,9 @@ The block and the profiles are **install-local**, like `alias`. `update` keeps y
 Use `start` for a one-off Claude Code config directory without registering a playbook:
 
 ```bash
-claude-playbook start /tmp/scratch
-claude-playbook start /tmp/scratch --model claude-opus-5
-claude-playbook start /tmp/scratch --delete
+cpb start /tmp/scratch
+cpb start /tmp/scratch --model claude-opus-5
+cpb start /tmp/scratch --delete
 ```
 
 `--delete` removes the directory when the session ends, which is useful for disposable experiments.
@@ -477,29 +479,29 @@ claude-playbook start /tmp/scratch --delete
 Rename a playbook:
 
 ```bash
-claude-playbook rename experiment lab
-claude-playbook rename lab experiment --alias exp
+cpb rename experiment lab
+cpb rename lab experiment --alias exp
 ```
 
 Delete a playbook:
 
 ```bash
-claude-playbook delete experiment      # prompts for confirmation
-claude-playbook delete awesome -y      # skip confirmation
+cpb delete experiment      # prompts for confirmation
+cpb delete awesome -y      # skip confirmation
 ```
 
 `uninstall` and `unlink` are command aliases for `delete`:
 
 ```bash
-claude-playbook uninstall awesome
-claude-playbook unlink my-linked-playbook
+cpb uninstall awesome
+cpb unlink my-linked-playbook
 ```
 
 Update pulls the playbook from the source recorded in its `.playbook`:
 
 ```bash
-claude-playbook update awesome
-claude-playbook update awesome --check    # report the available version only
+cpb update awesome
+cpb update awesome --check    # report the available version only
 ```
 
 Git installs record their repository, branch, and selected subdirectory in `.playbook`, and a flat, non-linked install updates natively from that source. There is no delegated update script: the CLI owns the update.
@@ -522,9 +524,9 @@ Linked playbooks and manifests that select their config through a top-level `sub
 With **no** name, `update` self-updates the `claude-playbook` binary itself to the latest GitHub release:
 
 ```bash
-claude-playbook update            # download + install the latest release
-claude-playbook update --check    # report the latest version without installing
-claude-playbook update --force    # reinstall even if already on the latest
+cpb update            # download + install the latest release
+cpb update --check    # report the latest version without installing
+cpb update --force    # reinstall even if already on the latest
 ```
 
 It downloads the release asset for your OS/architecture, verifies it, and atomically replaces the running binary (resolving the `cpb` symlink so the real binary is updated). If the install directory needs elevated privileges to write, it says so.
@@ -534,13 +536,13 @@ It downloads the release asset for your OS/architecture, verifies it, and atomic
 For tests or demos, keep playbooks away from your real files:
 
 ```bash
-CLAUDE_PLAYBOOKS_DIR=/tmp/playbooks claude-playbook create demo
+CLAUDE_PLAYBOOKS_DIR=/tmp/playbooks cpb create demo
 ```
 
 The equivalent flag is:
 
 ```bash
-claude-playbook --playbooks-dir /tmp/playbooks create demo
+cpb --playbooks-dir /tmp/playbooks create demo
 ```
 
 Launcher commands are only managed for the default playbooks root
@@ -569,10 +571,10 @@ To install a specific role configuration from a repository containing multiple p
 
 ```bash
 # Install the DBA playbook flat under your playbooks root:
-claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --subdir playbooks/dba --name dba --alias ap-dba
+cpb install https://github.com/ramazanpolat/awesome-playbooks --subdir playbooks/dba --name dba --alias ap-dba
 
 # Or install the SRE playbook:
-claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --subdir playbooks/sre --name sre --alias ap-sre
+cpb install https://github.com/ramazanpolat/awesome-playbooks --subdir playbooks/sre --name sre --alias ap-sre
 ```
 
 ## Release process

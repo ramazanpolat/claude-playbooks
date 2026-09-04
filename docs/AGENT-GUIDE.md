@@ -2,7 +2,7 @@
 
 How an AI agent (Claude Code, Codex, OpenCode, a cron job, a CI step) drives `claude-playbook` without a human at the keyboard. Everything here is the same CLI a person uses; the difference is which forms are safe unattended and what to read instead of guess.
 
-The binary is `claude-playbook`, also on PATH as `cpb`. `SPEC-v4.md` is the contract; when this guide and the spec disagree, the spec wins.
+The binary is `claude-playbook`, also on PATH as `cpb`; examples below use `cpb`, the two are the same program. `SPEC-v4.md` is the contract; when this guide and the spec disagree, the spec wins.
 
 ## What a playbook is, in one sentence
 
@@ -13,9 +13,9 @@ A directory under `~/.claude-playbooks/` that Claude Code treats as its whole co
 Never assume a playbook exists or a name is free. The registry is the filesystem, read fresh on every call.
 
 ```bash
-claude-playbook list                 # NAME  PATH  COMMAND  LAST USED
-claude-playbook list kom             # prefix filter
-claude-playbook info <name>          # path, alias, env block, update source, exit 1 if unknown
+cpb list                 # NAME  PATH  COMMAND  LAST USED
+cpb list kom             # prefix filter
+cpb info <name>          # path, alias, env block, update source, exit 1 if unknown
 cat ~/.claude-playbooks/<name>/.playbook   # the manifest, TOML; absent for a flat playbook
 ```
 
@@ -26,9 +26,9 @@ cat ~/.claude-playbooks/<name>/.playbook   # the manifest, TOML; absent for a fl
 `run` forwards every argument after the name straight to `claude`, so Claude Code's own headless flags apply:
 
 ```bash
-claude-playbook run <name> -p "summarize the open tasks"            # one prompt, print, exit
-claude-playbook run <name> -p "..." --output-format json
-claude-playbook run <name> --version                                 # cheapest liveness check
+cpb run <name> -p "summarize the open tasks"            # one prompt, print, exit
+cpb run <name> -p "..." --output-format json
+cpb run <name> --version                                 # cheapest liveness check
 <name> -p "..."                                                      # the launcher form is identical
 ```
 
@@ -37,7 +37,7 @@ The exit code is `claude`'s exit code. Put the playbook name **before** any flag
 For a throwaway config directory that is not a registered playbook:
 
 ```bash
-claude-playbook start /tmp/scratch-$$ -p "..." --delete    # directory created, then removed on exit
+cpb start /tmp/scratch-$$ -p "..." --delete    # directory created, then removed on exit
 ```
 
 ## Create, install, link, delete without prompts
@@ -45,14 +45,14 @@ claude-playbook start /tmp/scratch-$$ -p "..." --delete    # directory created, 
 Every mutating command has a non-interactive form. Use it.
 
 ```bash
-claude-playbook create <name> --no-alias                    # no launcher; run via `run <name>`
-claude-playbook create <name> --alias <cmd>                 # launcher named <cmd>
-claude-playbook install <git-url-or-dir> --name <name> --no-alias
-claude-playbook install <git-url> --branch <ref> --subdir <path> --name <name> --alias <cmd>
-claude-playbook link <dir> --name <name> --no-alias         # symlink an external dir; its manifest is shared state
-claude-playbook delete <name> -y                            # no confirmation; launcher kept if it still resolves elsewhere
-claude-playbook update <name>                               # from [source]; settings.json, data/, [env] survive
-claude-playbook update <name> --check                       # versions only, touches nothing
+cpb create <name> --no-alias                    # no launcher; run via `run <name>`
+cpb create <name> --alias <cmd>                 # launcher named <cmd>
+cpb install <git-url-or-dir> --name <name> --no-alias
+cpb install <git-url> --branch <ref> --subdir <path> --name <name> --alias <cmd>
+cpb link <dir> --name <name> --no-alias         # symlink an external dir; its manifest is shared state
+cpb delete <name> -y                            # no confirmation; launcher kept if it still resolves elsewhere
+cpb update <name>                               # from [source]; settings.json, data/, [env] survive
+cpb update <name> --check                       # versions only, touches nothing
 ```
 
 `link` prompts for metadata when the target has no manifest; without a TTY it refuses instead (`target has no .playbook and stdin is not a TTY; cannot prompt for metadata. Add a .playbook to the target first`). Write a minimal `.playbook` with at least `name = "..."` into the target before linking from a script.
@@ -65,8 +65,8 @@ Point the whole registry at a scratch root to test without touching the user's i
 
 ```bash
 export CLAUDE_PLAYBOOKS_DIR=/tmp/pb-$$        # or --playbooks-dir on every call
-claude-playbook create demo --no-alias
-claude-playbook run demo --version
+cpb create demo --no-alias
+cpb run demo --version
 rm -rf /tmp/pb-$$
 ```
 
@@ -77,16 +77,16 @@ rm -rf /tmp/pb-$$
 Prefer the CLI over editing `.playbook` by hand: the CLI validates names, refuses `CLAUDE_CONFIG_DIR`, refuses values TOML or `os/exec` cannot carry, takes the registry lock, and writes secret-bearing files `0600`.
 
 ```bash
-claude-playbook env <name> set KEY=VALUE [KEY=VALUE...]
-claude-playbook env <name> unset KEY [KEY...]
-claude-playbook env <name> clear KEY [KEY...]
-claude-playbook env <name>                                   # shows the block and, with profiles, "Effective at launch"
-claude-playbook env-profile <profile> set KEY=VALUE ...      # creates the profile on first use
-claude-playbook env-profile <profile> unset KEY ...
-claude-playbook env <name> use <profile> [...]               # profile must exist; launch refuses a missing one
-claude-playbook env <name> unuse <profile>
-claude-playbook env-profile                                  # list: description, counts, users
-claude-playbook env-profile <profile> delete                 # refused while any playbook uses it
+cpb env <name> set KEY=VALUE [KEY=VALUE...]
+cpb env <name> unset KEY [KEY...]
+cpb env <name> clear KEY [KEY...]
+cpb env <name>                                   # shows the block and, with profiles, "Effective at launch"
+cpb env-profile <profile> set KEY=VALUE ...      # creates the profile on first use
+cpb env-profile <profile> unset KEY ...
+cpb env <name> use <profile> [...]               # profile must exist; launch refuses a missing one
+cpb env <name> unuse <profile>
+cpb env-profile                                  # list: description, counts, users
+cpb env-profile <profile> delete                 # refused while any playbook uses it
 ```
 
 Layering at launch, later wins: shell environment, each profile in list order, the playbook's own `set`, the playbook's own `unset`, then `CLAUDE_CONFIG_DIR`. Claude Code's `settings.json` `env` is applied later inside the process and wins over all of these but cannot unset.
@@ -97,8 +97,8 @@ Layering at launch, later wins: shell environment, each profile in list order, t
 
 | Goal | Command |
 |---|---|
-| this playbook keeps its own `/login` while others use the token | `claude-playbook env <name> unset CLAUDE_CODE_OAUTH_TOKEN` |
-| this playbook uses a specific token | `claude-playbook env <name> set CLAUDE_CODE_OAUTH_TOKEN=<token>` |
+| this playbook keeps its own `/login` while others use the token | `cpb env <name> unset CLAUDE_CODE_OAUTH_TOKEN` |
+| this playbook uses a specific token | `cpb env <name> set CLAUDE_CODE_OAUTH_TOKEN=<token>` |
 | this playbook is a different account entirely | `isolate_auth = true` in its `.playbook` (this one has no CLI verb) |
 | this playbook talks to a proxy | `env-profile <p> set ANTHROPIC_BASE_URL=... ` then `env <name> use <p>` |
 
@@ -111,7 +111,7 @@ An agent cannot complete an interactive `/login`. If a headless run exits with a
 - Do not put secrets into a playbook you intend to publish. `[env]` blocks and profiles are install-local by design: `update` ignores a source-shipped block and `install` drops it with a note.
 - A raw `claude` launch bypasses authentication preparation and environment overrides. If you need the playbook's semantics, launch through `run`, `start`, or the launcher.
 - Concurrency is safe for registry mutations (a flock serializes `create`, `install`, `link`, `alias`, `env`, `env-profile`, `update`); launches take no lock and read the manifest at launch time.
-- The self-update is `claude-playbook update` with no name; `--check` reports without installing.
+- The self-update is `cpb update` with no name; `--check` reports without installing.
 
 ## Reading errors
 
