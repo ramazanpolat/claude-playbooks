@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -57,5 +58,35 @@ func TestLocalSourceStagesOutsideItselfWhenTmpdirIsInside(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(filepath.Join(source, "tmp")); len(entries) != 0 {
 		t.Fatalf("update staging landed inside the source: %v", entries)
+	}
+}
+
+// When every staging candidate lies inside the source and does not exist
+// yet, the refusal must not create it there: containment is decided from
+// the nearest existing ancestor before anything is made.
+func TestStagingRefusalCreatesNothingInsideSource(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "source")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(source, &manifest.Manifest{Name: "pb"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", filepath.Join(source, "tmp"))          // does not exist
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(source, "cache")) // does not exist
+	t.Setenv("HOME", filepath.Join(source, "home"))            // darwin cache dir; does not exist
+	before, _ := os.ReadDir(source)
+
+	installNoAlias = true
+	err := runInstall(nil, []string{source})
+	if err == nil || !strings.Contains(err.Error(), "cannot stage") {
+		t.Fatalf("install with every candidate inside the source: err = %v", err)
+	}
+	after, _ := os.ReadDir(source)
+	if len(after) != len(before) {
+		t.Fatalf("refusal created entries in the source: before=%d after=%v", len(before), after)
 	}
 }

@@ -381,21 +381,39 @@ func stageTempDir(work string) (string, error) {
 		candidates = append(candidates, filepath.Join(cache, "claude-playbook"))
 	}
 	for _, base := range candidates {
+		// Containment is decided from the nearest EXISTING ancestor, before
+		// anything is created: a cache dir that does not exist yet but
+		// would land inside the source must not be made just to be
+		// rejected -- that would modify the very tree staging promises to
+		// leave alone.
+		if insideTree(base, workReal) {
+			continue
+		}
 		if err := os.MkdirAll(base, 0o755); err != nil {
 			continue
-		}
-		baseReal, err := filepath.EvalSymlinks(base)
-		if err != nil {
-			continue
-		}
-		if rel, err := filepath.Rel(workReal, baseReal); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue // inside the source tree
 		}
 		if tmp, err := os.MkdirTemp(base, "claude-playbook-stage-"); err == nil {
 			return tmp, nil
 		}
 	}
 	return "", fmt.Errorf("cannot stage %s: every temporary directory is inside it or unwritable (set TMPDIR outside the source)", work)
+}
+
+// insideTree reports whether path -- or, when it does not exist, its nearest
+// existing ancestor -- resolves to root or below it, symlinks evaluated.
+func insideTree(path, rootReal string) bool {
+	probe := path
+	for {
+		if real, err := filepath.EvalSymlinks(probe); err == nil {
+			rel, err := filepath.Rel(rootReal, real)
+			return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return false
+		}
+		probe = parent
+	}
 }
 
 func deriveNameFromLocal(source string) string {
