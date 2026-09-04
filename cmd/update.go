@@ -188,29 +188,49 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 		return fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update", name)
 	}
 
+	// The manifest that goes live is assembled in the STAGED tree before the
+	// overlay, never corrected in place afterwards: the overlay copies the
+	// staged .playbook over the live one, launches do not take the registry
+	// lock, and a source-shipped [env] block that was live even briefly --
+	// or permanently, had a later rewrite failed -- could redirect the
+	// install's endpoint or strip its authentication. Install-local fields
+	// (alias, isolation, source, [env]) come from the live manifest; the
+	// install's name is its directory name (this also heals installs whose
+	// manifest predates name rewriting).
+	updated := stagedManifest
+	if updated == nil {
+		updated = &manifest.Manifest{}
+		*updated = *liveManifest
+	} else {
+		copied := *updated
+		updated = &copied
+		updated.Alias = liveManifest.Alias
+		updated.IsolateAuth = liveManifest.IsolateAuth
+		updated.Source = liveManifest.Source
+		updated.Env = liveManifest.Env
+	}
+	updated.Name = filepath.Base(root)
+	updated.Subdir = ""
+	if err := manifest.Write(work, updated); err != nil {
+		return fmt.Errorf("failed to prepare updated manifest: %w", err)
+	}
+	// Manifest.Write's never-loosen rule looked at the STAGED file's mode;
+	// the overlay is about to replace the live file with it, so the staged
+	// copy takes the live file's mode masked by its own -- never looser
+	// than either, whatever the pilot had chosen.
+	if live, err := os.Stat(filepath.Join(root, manifest.FileName)); err == nil {
+		staged := filepath.Join(work, manifest.FileName)
+		if info, err := os.Stat(staged); err == nil {
+			if err := os.Chmod(staged, live.Mode().Perm()&info.Mode().Perm()); err != nil {
+				return fmt.Errorf("failed to prepare updated manifest: %w", err)
+			}
+		}
+	}
+
 	fmt.Printf("Updating %s from %s...\n", name, pb.Manifest.Source.Repository)
 	backupPath, err := overlaySource(work, root, preserve)
 	if err != nil {
 		return err
-	}
-
-	updated, err := manifest.Read(root)
-	if err != nil {
-		return err
-	}
-	if updated == nil {
-		updated = liveManifest
-	} else {
-		updated.Alias = liveManifest.Alias
-		updated.IsolateAuth = liveManifest.IsolateAuth
-		updated.Source = liveManifest.Source
-	}
-	// The install's name is its directory name; never adopt the source's.
-	// This also heals installs whose manifest predates name rewriting.
-	updated.Name = filepath.Base(root)
-	updated.Subdir = ""
-	if err := manifest.Write(root, updated); err != nil {
-		return fmt.Errorf("failed to write updated manifest: %w", err)
 	}
 
 	fmt.Printf("Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)

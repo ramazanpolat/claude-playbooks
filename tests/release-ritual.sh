@@ -10,9 +10,10 @@
 #   p3  shellcheck  this script + install/uninstall when shellcheck exists
 #   p4  cli-scratch real-binary exercise in a sandboxed HOME + playbooks root:
 #                     create/alias (incl. the name-repair spelling),
-#                     install from a local git fixture, update with settings
-#                     + data preservation and a migration receipt,
-#                     list/info output, delete cleanup
+#                     install from a local git fixture, env overrides and
+#                     env profiles through a stub claude, update with
+#                     settings + data + [env] preservation and a migration
+#                     receipt, list/info output, delete cleanup
 #   p5  herdr       kommander repo's two cpb-facing e2e suites against the
 #                     candidate binary (CLAUDE_PLAYBOOK_BIN). Runs inside a
 #                     dedicated herdr workspace — never squeezes the caller's
@@ -114,7 +115,7 @@ if phase_enabled p4; then
   [ -f "$PB/demo/CLAUDE.md" ] || rc=1
   p4 alias demo --remove >/dev/null 2>&1 || rc=1
   p4 alias demo demo >/dev/null 2>&1 || rc=1
-  "$BIN" --playbooks-dir "$PB" list 2>/dev/null | grep -q '^demo' || rc=1
+  "$BIN" --playbooks-dir "$PB" list 2>/dev/null | grep '^demo' >/dev/null || rc=1
   report "p4 create/alias/repair" $rc
 
   # install from a local git fixture, then update it with a migration
@@ -130,12 +131,41 @@ if phase_enabled p4; then
   git -C "$FIX" add -A >/dev/null && git -C "$FIX" -c user.name=t -c user.email=t@e.invalid commit -qm v1
   p4 install "file://$FIX" --name fx --no-alias >/dev/null 2>&1 || rc=1
   [ -f "$PB/fx/CLAUDE.md" ] || rc=1
+  report "p4 install" $rc
+
+  # env overrides + env profiles: manifest state, launch effect through a
+  # stub claude, delete-while-attached refusal. The stub security makes the
+  # no-token path deterministic on darwin (see e2e/launch_env_test.go).
+  rc=0
+  STUB="$SB/bin"; mkdir -p "$STUB"
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\nenv > "$CPB_RITUAL_ENVDUMP"\n' > "$STUB/claude"
+  printf '#!/bin/sh\nexit 1\n' > "$STUB/security"
+  chmod +x "$STUB/claude" "$STUB/security"
+  p4 env-profile glm set ANTHROPIC_BASE_URL=http://ritual/v1 >/dev/null 2>&1 || rc=1
+  p4 env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN >/dev/null 2>&1 || rc=1
+  p4 env fx use glm >/dev/null 2>&1 || rc=1
+  p4 env fx set RITUAL_OWN=yes >/dev/null 2>&1 || rc=1
+  grep -q 'profiles = \["glm"\]' "$PB/fx/.playbook" || rc=1
+  p4 env-profile glm delete >/dev/null 2>&1 && rc=1   # refused while attached
+  p4 env fx use ghost >/dev/null 2>&1 && rc=1         # refused: no such profile
+  DUMP="$SB/envdump"
+  CPB_RITUAL_ENVDUMP="$DUMP" PATH="$STUB:$PATH" CLAUDE_CODE_OAUTH_TOKEN=shell-token \
+    CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE=/dev/null p4 run fx >/dev/null 2>&1 || rc=1
+  grep -q '^ANTHROPIC_BASE_URL=http://ritual/v1$' "$DUMP" 2>/dev/null || rc=1
+  grep -q '^RITUAL_OWN=yes$' "$DUMP" 2>/dev/null || rc=1
+  grep -q '^CLAUDE_CONFIG_DIR=' "$DUMP" 2>/dev/null || rc=1
+  grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$DUMP" 2>/dev/null && rc=1   # unset by profile
+  report "p4 env/env-profile launch" $rc
+
+  rc=0
   # pilot state that must survive the update
   printf '{"env":{"X":"kept"},"hooks":{}}\n' > "$PB/fx/settings.json"
   mkdir -p "$PB/fx/data/tasks/live"
   echo live > "$PB/fx/data/tasks/live/TASK.md"
   # advance the fixture to v2 with a migration
-  printf 'version = "2.0.0"\nname = "fx"\n' > "$FIX/.playbook"
+  # v2 also ships an [env] block, which must never be adopted
+  printf 'version = "2.0.0"\nname = "fx"\n\n[env.set]\nATTACK = "1"\n' > "$FIX/.playbook"
   printf '# fx2\n' > "$FIX/CLAUDE.md"
   git -C "$FIX" add -A >/dev/null && git -C "$FIX" -c user.name=t -c user.email=t@e.invalid commit -qm v2
   p4 update fx >/dev/null 2>&1 || rc=1
@@ -143,11 +173,16 @@ if phase_enabled p4; then
   grep -q '"X": *"kept"' "$PB/fx/settings.json" || rc=1
   grep -q live "$PB/fx/data/tasks/live/TASK.md" || rc=1
   [ -f "$PB/fx/data/migration-receipt" ] || rc=1  # migration ran against the install
+  grep -q 'profiles = \["glm"\]' "$PB/fx/.playbook" || rc=1   # install-local [env] kept
+  grep -q 'RITUAL_OWN' "$PB/fx/.playbook" || rc=1
+  grep -q 'ATTACK' "$PB/fx/.playbook" && rc=1                   # source [env] ignored
   report "p4 install/update preservation" $rc
 
   rc=0
-  p4 info fx 2>/dev/null | grep -q 'Update from:' || rc=1
-  p4 update fx --check 2>/dev/null | grep -q 'up to date' || rc=1
+  # Not grep -q: under pipefail an early grep exit sends the producer
+  # SIGPIPE on its next line and the pipeline fails on timing alone.
+  p4 info fx 2>/dev/null | grep 'Update from:' >/dev/null || rc=1
+  p4 update fx --check 2>/dev/null | grep 'up to date' >/dev/null || rc=1
   p4 delete fx -y >/dev/null 2>&1 || rc=1
   [ ! -d "$PB/fx" ] || rc=1
   report "p4 info/check/delete" $rc

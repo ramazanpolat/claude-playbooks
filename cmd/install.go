@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -156,15 +157,32 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Stage 3: move staged tree to its final destination.
-	if err := copyDir(copySrc, dest); err != nil {
-		os.RemoveAll(dest)
+	// Stage 3: assemble the install in a dot-prefixed directory beside its
+	// destination -- discovery skips dot entries, so nothing can launch it
+	// while its manifest still carries the source's name, [env] block, or
+	// missing [source] -- then rename it into the registry in one step.
+	// Launches take no lock; a discoverable half-sanitized install would be
+	// live for the duration of the copy, and permanently after a crash.
+	if err := os.MkdirAll(playbooksDir, 0o755); err != nil {
+		return err
+	}
+	stage := filepath.Join(playbooksDir, "."+targetName+".install-"+strconv.Itoa(os.Getpid()))
+	os.RemoveAll(stage)
+	if err := copyDir(copySrc, stage); err != nil {
+		os.RemoveAll(stage)
 		return fmt.Errorf("failed to copy from staging: %w", err)
 	}
 
 	needsManifestWrite := false
 	if mPre == nil {
 		mPre = &manifest.Manifest{}
+	}
+	if !mPre.Env.Empty() {
+		// [env] is install-local state: a published manifest must not be
+		// able to redirect an install's API endpoint or strip its auth.
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [env] block shipped in the source's %s; environment overrides are install-local. Set them with: claude-playbook env %s set KEY=VALUE\n", manifest.FileName, targetName)
+		mPre.Env = nil
+		needsManifestWrite = true
 	}
 	sourceSubdir := subdir
 	if hasManifestSubdir {
@@ -188,18 +206,28 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		needsManifestWrite = true
 	}
 	if needsManifestWrite {
-		if err := manifest.Write(dest, mPre); err != nil {
-			os.RemoveAll(dest)
+		if err := manifest.Write(stage, mPre); err != nil {
+			os.RemoveAll(stage)
 			return fmt.Errorf("failed to write manifest: %w", err)
 		}
 	}
 
-	// Read the optional .playbook at the install destination. A missing
+	// Read the optional .playbook of the assembled install. A missing
 	// manifest is fine: the installed directory is a valid flat playbook.
-	m, err := manifest.Read(dest)
+	m, err := manifest.Read(stage)
 	if err != nil {
-		os.RemoveAll(dest)
+		os.RemoveAll(stage)
 		return err
+	}
+	if m != nil && m.Subdir != "" {
+		if _, err := manifest.ResolveSubdir(stage, "subdir", m.Subdir); err != nil {
+			os.RemoveAll(stage)
+			return err
+		}
+	}
+	if err := os.Rename(stage, dest); err != nil {
+		os.RemoveAll(stage)
+		return fmt.Errorf("failed to activate %s: %w", dest, err)
 	}
 	configDest := dest
 	if m != nil && m.Subdir != "" {
@@ -249,8 +277,8 @@ func warnIfNoClaudeMD(dir, name string) {
 }
 
 // stageSource fetches the source into a working directory and returns its
-// path. For Git URLs it clones into a temp dir; for local paths it returns
-// the resolved source directory directly. The cleanup func removes any temp
+// path. For Git URLs it clones into a temp dir; for local paths it copies
+// the resolved source directory into one. The cleanup func removes any temp
 // state created.
 func stageSource(source string, isGit bool, ref, subdir string) (string, func(), error) {
 	if isGit {
@@ -321,7 +349,82 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 			return "", func() {}, err
 		}
 	}
-	return work, func() {}, nil
+	// A local source is staged into a private copy, never used in place:
+	// callers rewrite the staged manifest (install-local name, source,
+	// [env]) before it goes live, and doing that in the pilot's own source
+	// directory would mutate it and leak one install's configuration into
+	// every later install from it.
+	// Containment is judged against the ORIGINAL source root, not the
+	// selected subdirectory: a temp dir at <source>/tmp is outside
+	// <source>/playbook yet still the pilot's tree.
+	tmp, err := stageTempDir(abs)
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { os.RemoveAll(tmp) }
+	if err := copyDir(work, tmp); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to stage %s: %w", source, err)
+	}
+	return tmp, cleanup, nil
+}
+
+// stageTempDir creates the private staging directory for a local source,
+// guaranteed to sit OUTSIDE the source tree: with TMPDIR inside the source
+// (workspaces that keep temp files local), copyDir would walk into the
+// directory it is filling and recurse until the path length ran out. The
+// system temp dir is tried first, then the user cache dir.
+func stageTempDir(work string) (string, error) {
+	workReal, err := filepath.EvalSymlinks(work)
+	if err != nil {
+		workReal = work
+	}
+	candidates := []string{os.TempDir()}
+	if cache, err := os.UserCacheDir(); err == nil {
+		candidates = append(candidates, filepath.Join(cache, "claude-playbook"))
+	}
+	for _, base := range candidates {
+		// A relative TMPDIR (".tmp" while running inside the source) must
+		// be anchored first: filepath.Rel cannot compare a relative path
+		// with an absolute root and would otherwise answer "outside".
+		if abs, err := filepath.Abs(base); err == nil {
+			base = abs
+		} else {
+			continue
+		}
+		// Containment is decided from the nearest EXISTING ancestor, before
+		// anything is created: a cache dir that does not exist yet but
+		// would land inside the source must not be made just to be
+		// rejected -- that would modify the very tree staging promises to
+		// leave alone.
+		if insideTree(base, workReal) {
+			continue
+		}
+		if err := os.MkdirAll(base, 0o755); err != nil {
+			continue
+		}
+		if tmp, err := os.MkdirTemp(base, "claude-playbook-stage-"); err == nil {
+			return tmp, nil
+		}
+	}
+	return "", fmt.Errorf("cannot stage %s: every temporary directory is inside it or unwritable (set TMPDIR outside the source)", work)
+}
+
+// insideTree reports whether path -- or, when it does not exist, its nearest
+// existing ancestor -- resolves to root or below it, symlinks evaluated.
+func insideTree(path, rootReal string) bool {
+	probe := path
+	for {
+		if real, err := filepath.EvalSymlinks(probe); err == nil {
+			rel, err := filepath.Rel(rootReal, real)
+			return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return false
+		}
+		probe = parent
+	}
 }
 
 func deriveNameFromLocal(source string) string {

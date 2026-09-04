@@ -201,19 +201,13 @@ func isAuthIsolated(targetDir string) bool {
 	if os.Getenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH") == "true" {
 		return true
 	}
-	dir := targetDir
-	for {
-		m, err := manifest.Read(dir)
-		if err == nil && m != nil {
-			return m.IsolateAuth
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	// A read error on the way up is not a reason to drop isolation: the
+	// nearest valid manifest still decides, and only its absence means no.
+	m, _ := manifest.Nearest(targetDir)
+	if m == nil {
+		return false
 	}
-	return false
+	return m.IsolateAuth
 }
 
 func copyFile(src, dst string, perm os.FileMode) error {

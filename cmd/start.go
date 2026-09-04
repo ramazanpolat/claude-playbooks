@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 )
 
 var startCmd = &cobra.Command{
@@ -19,10 +21,11 @@ var startCmd = &cobra.Command{
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
-	// start addresses a path, not a registry name, so the playbooks-dir
-	// value is irrelevant — it is consumed only to keep it out of the args
-	// forwarded to claude.
-	args, _, err := scanPlaybooksDirArg(args)
+	// start addresses a path, not a registry name, but the playbooks-dir
+	// value still names the root whose .env-profiles/ the path's manifest
+	// may reference, so it is applied to this process exactly as run does
+	// (and kept out of the args forwarded to claude).
+	args, err := takePlaybooksDirArg(args)
 	if err != nil {
 		return err
 	}
@@ -77,6 +80,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	launchEnv, syncErr := auth.PrepareLaunchEnv(absPath)
+	if errors.Is(syncErr, envprofile.ErrProfile) {
+		// Missing, unreadable, or invalid profile: launching with a silently
+		// dropped layer could send traffic to the wrong endpoint with the
+		// wrong credentials -- refuse, do not warn.
+		return syncErr
+	}
 	if syncErr != nil {
 		// Neutral wording -- see the matching comment in cmd/run.go.
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
