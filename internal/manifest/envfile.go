@@ -40,8 +40,13 @@ func ParseEnvFile(path string) (*Env, error) {
 			return nil, fmt.Errorf("%s:%d: expected KEY=VALUE", path, lineNo)
 		}
 		key = strings.TrimSpace(key)
+		if ReservedEnvKeys[key] {
+			return nil, fmt.Errorf("%s:%d: %s is managed by claude-playbook and cannot be overridden", path, lineNo, key)
+		}
 		if err := ValidateEnvKey(key); err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", path, lineNo, err)
+			// The rejected "key" is not echoed either: a secret containing
+			// "=" (padded base64, say) splits into a bogus key and value.
+			return nil, fmt.Errorf("%s:%d: invalid environment variable name (not shown; the line may hold a secret)", path, lineNo)
 		}
 		value = strings.TrimSpace(value)
 		if n := len(value); n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n-1] == value[0] {
