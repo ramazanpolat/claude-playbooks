@@ -24,6 +24,17 @@ CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
 
 `claude-playbook` is a thin convenience layer over this pattern.
 
+### Authentication preparation
+
+Every launch (`run`, `start`, launcher dispatch) prepares the config directory's authentication before exec, in `auth.PrepareLaunchEnv`. The decision, in order:
+
+1. **Isolation wins.** If the nearest valid manifest walking up from the config directory has `isolate_auth = true`, or `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` is set: detach a symlinked `.credentials.json` (the target file survives), sync no account metadata, strip `CLAUDE_CODE_OAUTH_TOKEN` and the plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) from the child environment. A `CLAUDE_CODE_OAUTH_TOKEN` the playbook's own flattened `[env]` sets is honoured as its own token: injected, with the stored `claudeAiOauth` grant quarantined as on the token path.
+2. **Token active?** True when the flattened `[env]` sets `CLAUDE_CODE_OAUTH_TOKEN` to a non-empty value, else when the process environment carries it, else when `~/.config/claude-code/oauth-token` (overridable via `CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE`) is non-empty; false when the flattened `[env]` unsets it, regardless of the rest.
+3. **Token path.** Quarantine the playbook's stored `claudeAiOauth` grant (other keys such as `mcpOAuth` survive; a symlinked store is detached, never written through; the global store is never quarantined), sync non-secret account metadata into `.claude.json` so an interactive start presents as logged in, inject the token (replacing any inherited entry), and append the plan descriptors read from the account's own store. Rationale: under token auth Claude Code never refreshes a stored grant, and its 401-recovery path adopts a differing stored `accessToken` over the environment token; an expired stored grant would replace a working token with a dead one.
+4. **No-token path.** `SyncCredentials`: the playbook's `.credentials.json` becomes a symlink to the global `~/.claude/.credentials.json` (an existing regular file with a valid grant is left alone; a grantless store never overwrites the global one), so `/login` in any playbook is visible to all. Nothing is removed. Claude Code refreshes the shared grant itself.
+
+Every preparation failure is advisory (a warning, then launch) except a profile that cannot be resolved, which refuses the launch before step 1. Raw `claude` invocations bypass this entirely.
+
 ### The filesystem is the source of truth
 
 There is no index file, no database, no registry file. The state the tool reads from or writes to is: the playbooks root directory (including the optional `.playbook` manifests inside it, where a custom command alias is recorded, and the dot-prefixed `.env-profiles/` directory holding shared env profiles), the launcher directory (symlinks to the binary that serve as per-playbook commands), a flock lock file in the user cache dir (`<cache>/claude-playbook/registry.lock`, used only to serialize concurrent mutations — it holds no data). Any mutation users make with `mv`, `rm`, or a text editor is immediately consistent with what the tool sees on its next invocation.
