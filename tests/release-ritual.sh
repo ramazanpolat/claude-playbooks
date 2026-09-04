@@ -19,9 +19,12 @@
 #                     dedicated herdr workspace — never squeezes the caller's
 #                     pane. Skipped (warn) outside herdr or without the repo.
 #   p6  matrix      external update-preservation matrix if KP_MATRIX_SCRIPT
-#                     points at one (the 10-case herdr suite from the
-#                     claude-playbook-finetune task is the reference
-#                     implementation). Skipped (warn) when unset.
+#                     points at one (the 10-case herdr suite kept as an
+#                     artifact of the kommander-dev task
+#                     claude-playbook-auth-token-coexistence, refreshed
+#                     2026-09-04, is the reference implementation; it
+#                     builds "old" from the latest cpb tag and "new" from
+#                     this tree). Skipped (warn) when unset.
 #   p7  arena       gentar own-arena suites via gentar/run.sh. Skipped (warn)
 #                     when docker or the bench prerequisites are missing.
 #   p8  gates       release gates for --version: clean tree, on main,
