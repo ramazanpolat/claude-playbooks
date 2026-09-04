@@ -160,11 +160,44 @@ mv claude-playbook /usr/local/bin/
 
 Most workflows start with either `create`, `install`, or `link`.
 
-`claude-playbook` tries to reuse your existing Claude Code authentication for newly created, installed, and linked playbooks. That means a new playbook should normally open Claude Code directly instead of asking you to log in again.
+`claude-playbook` reuses your existing Claude Code authentication for newly created, installed, and linked playbooks, so a new playbook normally opens Claude Code directly instead of asking you to log in again. How it does that depends on whether you use a long-lived token; see [Authentication](#authentication) for the decision and the per-playbook choices.
 
-If you want to use **different accounts concurrently**, you can enable authentication isolation for any playbook. Simply set `isolate_auth = true` in the playbook's `.playbook` manifest file, or run the playbook with the environment variable `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true`. This isolates that playbook's login session and prevents it from sharing or auto-syncing credentials with your other playbooks or global settings.
+Driving `claude-playbook` from an agent rather than a shell? Read [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
 
-If you use a long-lived token (`claude setup-token`, stored at `~/.config/claude-code/oauth-token`), every playbook launch injects it as `CLAUDE_CODE_OAUTH_TOKEN`. To keep one playbook on its own `/login` instead, without isolating it from the shared credentials, unset the token for that playbook: `claude-playbook env <name> unset CLAUDE_CODE_OAUTH_TOKEN`. See [Environment overrides](#environment-overrides).
+### Authentication
+
+At every launch `claude-playbook` first decides whether a **long-lived token** is active for that playbook, then prepares the config directory accordingly. Nothing else in the tool touches credentials.
+
+```text
+token active for this playbook?
+  = the playbook's [env] (or a profile it uses) sets CLAUDE_CODE_OAUTH_TOKEN
+    or the shell exports CLAUDE_CODE_OAUTH_TOKEN
+    or ~/.config/claude-code/oauth-token is non-empty
+  and the playbook's [env] does not unset it
+
+yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth only,
+         MCP logins survive); sync non-secret account metadata so the dir presents as logged in
+no   ->  link the playbook's .credentials.json to ~/.claude/.credentials.json; remove nothing;
+         Claude Code refreshes the shared login itself
+isolate_auth = true  ->  neither: detach from the shared store, strip the global token,
+         keep only what this playbook logs in itself
+```
+
+The removal on the token path exists for one reason: under token auth Claude Code never refreshes a stored login, and its 401-recovery path adopts a stored login over the token. A stale stored login would therefore replace a working year-long token with a dead one on the first transient 401. Removing it leaves nothing to adopt. It is never done on the no-token path, where that stored login *is* the session.
+
+The modes this gives you, per playbook:
+
+| You want | Do | At launch |
+|---|---|---|
+| Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; `/login` anywhere logs in everywhere |
+| Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
+| One playbook keeps its own `/login` while the others use the token | `claude-playbook env <name> unset CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
+| One playbook uses its own token | `claude-playbook env <name> set CLAUDE_CODE_OAUTH_TOKEN=...` | that token wins over the file; its own login removed |
+| One playbook is a different account, sharing nothing | `isolate_auth = true` in its `.playbook`, or `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` | detached; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token |
+
+The unset and set forms can come from an [env profile](#env-profiles-define-once-attach-to-many) shared by several playbooks.
+
+Two things to know about the shared-login mode. Claude Code namespaces its macOS Keychain entry per config directory and refreshes the OAuth grant from whichever directory hits expiry first; with many playbooks sharing one symlinked file, two concurrent refreshes can race and the loser's `invalid_grant` empties the shared file, logging every playbook out at once. That race is why the long-lived token path exists. And raw `claude` launches bypass all of the above: only launchers, `run`, and `start` prepare authentication.
 
 ### Create and run your own playbook
 
@@ -421,7 +454,7 @@ A profile that a playbook names but that is missing, unreadable, or invalid **re
 
 If you use a long-lived token (`claude setup-token`, stored at `~/.config/claude-code/oauth-token`), every playbook launch injects it as `CLAUDE_CODE_OAUTH_TOKEN` and removes the playbook's own stored login so a transient 401 cannot swap the working token for a dead one. That is right for most playbooks and wrong for one that must use a different account or a proxy that does not want the token.
 
-Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a profile, does more than drop the variable: the token is treated as inactive for that playbook, so the launch takes the stored-credentials path. No token is injected, the playbook's own login is left alone, and the shared credentials are synced. `/login` once there and it sticks, while every other playbook keeps using the token. Setting the variable instead supplies a per-playbook token that wins over the machine-global file. This is a middle ground between the default (every playbook shares the token) and `isolate_auth` (the playbook shares nothing).
+Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a profile, does more than drop the variable: the token is treated as inactive for that playbook, so the launch takes the stored-credentials path. No token is injected, the playbook's own login is left alone, and the shared credentials are synced. `/login` once there and it sticks, while every other playbook keeps using the token. Setting the variable instead supplies a per-playbook token that wins over the machine-global file. This is a middle ground between sharing the token and `isolate_auth` (the playbook shares nothing). The full decision and every mode are in [Authentication](#authentication).
 
 #### What stays yours
 
