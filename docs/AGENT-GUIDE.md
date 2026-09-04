@@ -32,7 +32,19 @@ cpb run <name> --version                                 # cheapest liveness che
 <name> -p "..."                                                      # the launcher form is identical
 ```
 
-The exit code is `claude`'s exit code. Put the playbook name **before** any flag; `--help` before the name is the tool's help, after it belongs to `claude`.
+The exit code is `claude`'s exit code. Put the playbook name **before** any `claude` flag; `--help` before the name is the tool's help, after it belongs to `claude`.
+
+One-off environment for a single launch, nothing written to disk. Launch flags are recognised only as a leading run, before the name or immediately after it; the first other argument ends the scan:
+
+```bash
+cpb run --env-profile work <name> -p "..."               # existing profile, this launch only
+cpb run <name> --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
+cpb run --unset CLAUDE_CODE_OAUTH_TOKEN <name> -p "..."  # use the stored login for this run
+cpb run --env-file ./job.env <name> -p "..."             # KEY=VALUE lines; validated like a manifest
+<name> --env-profile work -p "..."                       # launcher form, flags first
+```
+
+A missing or broken `--env-profile` refuses the launch. `--env` after a `claude` argument is forwarded to `claude`, not applied.
 
 For a throwaway config directory that is not a registered playbook:
 

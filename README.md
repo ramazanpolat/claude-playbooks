@@ -222,6 +222,7 @@ Pass Claude Code flags after the playbook name:
 
 ```bash
 cpb run experiment --model claude-opus-5 --permission-mode auto
+cpb run --env-profile work experiment      # one launch with an env profile; see Environment overrides
 ```
 
 Use a custom command name, or skip launcher creation:
@@ -451,6 +452,21 @@ cpb env-profile glm delete      # refused while any playbook still uses it
 ```
 
 A profile that a playbook names but that is missing, unreadable, or invalid **refuses the launch** rather than silently running without it: a dropped layer could send traffic to the wrong endpoint with the wrong credentials.
+
+#### One launch only
+
+The same layers can be added for a single launch without touching any file. Launch flags go before the playbook name, or right after it, and stop at the first argument that is not one of them; everything after that is `claude`'s:
+
+```bash
+cpb run --env-profile work kommander                     # an existing profile, this launch only
+cpb run kommander --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
+cpb run --unset CLAUDE_CODE_OAUTH_TOKEN kommander        # this launch uses the stored login
+cpb run --env-file ./work-account.env kommander          # KEY=VALUE lines, dotenv style
+cpb start --env-profile glm /tmp/scratch
+kommander --env-profile work -p "..."                    # launchers take them too, at the start
+```
+
+They apply on top of the playbook's own block, in command-line order, and obey the same rules: `CLAUDE_CONFIG_DIR` refused, a missing profile refuses the launch, an unset of the token switches this launch to the stored login. `cpb run --help` lists them.
 
 #### The authentication case
 
