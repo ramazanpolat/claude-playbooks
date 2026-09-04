@@ -321,7 +321,7 @@ Unsetting `CLAUDE_CODE_OAUTH_TOKEN` does more than drop the variable: the long-l
 
 Precedence, lowest to highest: the shell's environment, manifest `set`, manifest `unset`, then `CLAUDE_CONFIG_DIR`, which the tool always binds itself and which cannot be overridden. Claude Code's own `env` block in `settings.json` is applied later, inside the `claude` process, and wins over all of these; it can set variables but cannot unset one the shell exported, which is what the manifest block is for.
 
-The block is **install-local**, like `alias`: `update` keeps your block and ignores one the source ships, and `install` drops a source-shipped block with a note. A shared playbook repository cannot redirect your API endpoint or strip your authentication by publishing a manifest.
+The block is **install-local**, like `alias`: `update` keeps your block and ignores one the source ships (the source's block is never live, not even during the update), and `install` drops a source-shipped block with a note. A manifest holding `set` values is written with mode `0600`, since values may be tokens. A shared playbook repository cannot redirect your API endpoint or strip your authentication by publishing a manifest.
 
 #### Env profiles
 
@@ -337,7 +337,7 @@ claude-playbook env-profile                      # list profiles and who uses th
 claude-playbook env-profile glm delete           # refused while a playbook still uses it
 ```
 
-At launch the playbook's profiles apply in the order listed, later ones overriding earlier, and the playbook's own `set`/`unset` entries apply last. A referenced profile that does not exist refuses the launch rather than silently running without it. Profiles are yours, not the playbook source's: nothing ships them, and `update` never touches the directory.
+At launch the playbook's profiles apply in the order listed, later ones overriding earlier, and the playbook's own `set`/`unset` entries apply last. A referenced profile that is missing, unreadable, or invalid refuses the launch rather than silently running without it. Profiles are yours, not the playbook source's: nothing ships them, and `update` never touches the directory.
 
 ### Temporary sessions
 

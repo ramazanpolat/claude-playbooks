@@ -53,9 +53,14 @@ func (p *Profile) Empty() bool {
 	return p == nil || (len(p.Set) == 0 && len(p.Unset) == 0)
 }
 
+// ErrProfile is matched (errors.Is) by every error Expand returns, whether
+// the profile is missing, unreadable, malformed, or invalid. Launch paths
+// treat all of them as fatal: running with a silently dropped layer could
+// send traffic to the wrong endpoint with the wrong credentials, and a
+// broken profile is no safer than an absent one.
+var ErrProfile = errors.New("env profile cannot be resolved")
+
 // MissingError reports a manifest referencing a profile that does not exist.
-// Launch paths treat it as fatal: running with a silently dropped layer
-// could send traffic to the wrong endpoint with the wrong credentials.
 type MissingError struct {
 	Name string
 	Dir  string
@@ -64,6 +69,18 @@ type MissingError struct {
 func (e *MissingError) Error() string {
 	return fmt.Sprintf("env profile %q not found in %s (create it with: claude-playbook env-profile %s set KEY=VALUE)", e.Name, e.Dir, e.Name)
 }
+
+func (e *MissingError) Is(target error) bool { return target == ErrProfile }
+
+// ResolveError wraps a read or validation failure of a referenced profile.
+type ResolveError struct {
+	Name string
+	Err  error
+}
+
+func (e *ResolveError) Error() string        { return fmt.Sprintf("env profile %q: %v", e.Name, e.Err) }
+func (e *ResolveError) Unwrap() error        { return e.Err }
+func (e *ResolveError) Is(target error) bool { return target == ErrProfile }
 
 func path(dir, name string) string {
 	return filepath.Join(dir, name+".toml")
@@ -199,7 +216,9 @@ func List(dir string) ([]*Profile, error) {
 
 // Expand resolves e's profiles from dir and flattens everything into one
 // block: profiles in list order, then e's own set/unset on top. A nil or
-// profile-less e is returned as is. A missing profile is a *MissingError.
+// profile-less e is returned as is. Every error satisfies errors.Is(err,
+// ErrProfile): a missing profile is a *MissingError, anything else a
+// *ResolveError.
 func Expand(dir string, e *manifest.Env) (*manifest.Env, error) {
 	if e == nil || len(e.Profiles) == 0 {
 		return e, nil
@@ -208,7 +227,7 @@ func Expand(dir string, e *manifest.Env) (*manifest.Env, error) {
 	for _, name := range e.Profiles {
 		p, err := Read(dir, name)
 		if err != nil {
-			return nil, err
+			return nil, &ResolveError{Name: name, Err: err}
 		}
 		if p == nil {
 			return nil, &MissingError{Name: name, Dir: dir}

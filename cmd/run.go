@@ -60,10 +60,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	launchEnv, syncErr := auth.PrepareLaunchEnv(pb.Path)
-	var missing *envprofile.MissingError
-	if errors.As(syncErr, &missing) {
-		// Launching with a silently dropped layer could send traffic to the
-		// wrong endpoint with the wrong credentials -- refuse, do not warn.
+	if errors.Is(syncErr, envprofile.ErrProfile) {
+		// Missing, unreadable, or invalid profile: launching with a silently
+		// dropped layer could send traffic to the wrong endpoint with the
+		// wrong credentials -- refuse, do not warn.
 		return syncErr
 	}
 	if syncErr != nil {

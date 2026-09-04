@@ -156,3 +156,28 @@ func TestNearestWalksToInstallRoot(t *testing.T) {
 		t.Fatalf("Nearest(no manifest) = %#v, %v; want nil, nil", m, err)
 	}
 }
+
+// Values under [env.set] may be tokens: a manifest carrying any is private.
+func TestWriteKeepsEnvValuesPrivate(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(dir, &Manifest{Name: "pb"}); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(filepath.Join(dir, FileName)); info.Mode().Perm() != 0o644 {
+		t.Fatalf("plain manifest mode = %v, want 0644", info.Mode().Perm())
+	}
+	// Adding a value to an existing 0644 file tightens it.
+	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Set: map[string]string{"K": "secret"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(filepath.Join(dir, FileName)); info.Mode().Perm() != 0o600 {
+		t.Fatalf("manifest with env values mode = %v, want 0600", info.Mode().Perm())
+	}
+	// Clearing the values never loosens a file the pilot may have made private.
+	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Unset: []string{"K"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(filepath.Join(dir, FileName)); info.Mode().Perm() != 0o600 {
+		t.Fatalf("rewrite loosened the manifest to %v", info.Mode().Perm())
+	}
+}

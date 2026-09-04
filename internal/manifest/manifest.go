@@ -407,5 +407,19 @@ func Write(dir string, m *Manifest) error {
 			}
 		}
 	}
-	return os.WriteFile(path, []byte(b.String()), 0644)
+	// Values under [env.set] can be bearer tokens or API keys, so a manifest
+	// carrying any is written private, like an env profile. Existing files
+	// are only ever tightened, never loosened: os.WriteFile keeps the mode
+	// of a file that already exists.
+	perm := os.FileMode(0644)
+	if m.Env != nil && len(m.Env.Set) > 0 {
+		perm = 0600
+	}
+	if err := os.WriteFile(path, []byte(b.String()), perm); err != nil {
+		return err
+	}
+	if perm == 0600 {
+		return os.Chmod(path, perm)
+	}
+	return nil
 }

@@ -124,3 +124,29 @@ func TestExpandMissingProfileIsTyped(t *testing.T) {
 		t.Fatalf("err = %v, want *MissingError for nope", err)
 	}
 }
+
+// Every failure to resolve a referenced profile -- not only absence -- must
+// be recognisable to launch paths, which refuse rather than drop the layer.
+func TestExpandErrorsAllMatchErrProfile(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.toml"), []byte("= [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "invalid.toml"), []byte("[set]\nCLAUDE_CONFIG_DIR = \"/x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"absent", "broken", "invalid"} {
+		_, err := Expand(dir, &manifest.Env{Profiles: []string{name}})
+		if !errors.Is(err, ErrProfile) {
+			t.Errorf("%s: err = %v, want errors.Is ErrProfile", name, err)
+		}
+	}
+	var resolve *ResolveError
+	_, err := Expand(dir, &manifest.Env{Profiles: []string{"broken"}})
+	if !errors.As(err, &resolve) || resolve.Name != "broken" {
+		t.Fatalf("broken profile err = %v, want *ResolveError naming it", err)
+	}
+}

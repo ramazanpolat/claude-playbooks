@@ -165,3 +165,57 @@ func TestMissingProfileRefusesLaunch(t *testing.T) {
 		t.Fatalf("refusal did not name the profile:\n%s", out)
 	}
 }
+
+// A profile that exists but cannot be parsed is no safer than a missing one:
+// both run and start refuse rather than launch with the layer dropped.
+func TestBrokenProfileRefusesLaunch(t *testing.T) {
+	root := t.TempDir()
+	profiles := filepath.Join(root, ".env-profiles")
+	if err := os.MkdirAll(profiles, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profiles, "broken.toml"), []byte("= [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := playbookWithEnv(t, root, "router", "[env]\nprofiles = [\"broken\"]\n")
+	noToken := tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")
+
+	out := launchFails(t, root, launch{env: []string{noToken}, args: []string{"run", "router"}})
+	if !strings.Contains(out, `env profile "broken"`) {
+		t.Fatalf("run refusal did not name the profile:\n%s", out)
+	}
+	out = launchFails(t, root, launch{env: []string{noToken}, args: []string{"start", cfg}})
+	if !strings.Contains(out, `env profile "broken"`) {
+		t.Fatalf("start refusal did not name the profile:\n%s", out)
+	}
+}
+
+// `start --playbooks-dir <root> <path>` resolves profiles from THAT root,
+// not the default one: childEnv always passes --playbooks-dir first, so the
+// profile here is only found if start honours it.
+func TestStartResolvesProfilesFromGivenRoot(t *testing.T) {
+	root := t.TempDir()
+	profiles := filepath.Join(root, ".env-profiles")
+	if err := os.MkdirAll(profiles, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profiles, "glm.toml"), []byte("[set]\nFROM_PROFILE = \"yes\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(t.TempDir(), "startcfg")
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg, ".playbook"),
+		[]byte("name = \"startcfg\"\n\n[env]\nprofiles = [\"glm\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := childEnv(t, root, launch{
+		env:  []string{tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")},
+		args: []string{"start", cfg},
+	})
+	if got["FROM_PROFILE"] != "yes" {
+		t.Fatalf("start resolved profiles from the wrong root: %v", got)
+	}
+}
