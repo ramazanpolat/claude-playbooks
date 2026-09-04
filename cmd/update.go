@@ -214,6 +214,15 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 	if err := manifest.Write(work, updated); err != nil {
 		return fmt.Errorf("failed to prepare updated manifest: %w", err)
 	}
+	// Manifest.Write's never-loosen rule looked at the STAGED file's mode;
+	// the overlay is about to replace the live file with it, so carry the
+	// live file's private mode over or the update would silently publish a
+	// manifest the pilot had kept 0600.
+	if info, err := os.Stat(filepath.Join(root, manifest.FileName)); err == nil && info.Mode().Perm()&0o077 == 0 {
+		if err := os.Chmod(filepath.Join(work, manifest.FileName), 0o600); err != nil {
+			return fmt.Errorf("failed to prepare updated manifest: %w", err)
+		}
+	}
 
 	fmt.Printf("Updating %s from %s...\n", name, pb.Manifest.Source.Repository)
 	backupPath, err := overlaySource(work, root, preserve)

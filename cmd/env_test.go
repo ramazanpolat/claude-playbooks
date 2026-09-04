@@ -299,3 +299,42 @@ func TestLocalSourceIsNeverMutated(t *testing.T) {
 		t.Fatalf("install-local env after update: %#v", e)
 	}
 }
+
+// A live manifest the pilot keeps private stays private across an update,
+// even when the merged manifest has no [env.set] value to force 0600.
+func TestNativeUpdateKeepsPrivateManifestPrivate(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "source")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	for _, d := range []string{source, installed} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manifest.Write(source, &manifest.Manifest{Name: "pb", Version: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(installed, &manifest.Manifest{
+		Name:   "pb",
+		Source: &manifest.Source{Repository: source},
+		Env:    &manifest.Env{Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	live := filepath.Join(installed, manifest.FileName)
+	if err := os.Chmod(live, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runPlaybookUpdate("pb", false); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(live); info.Mode().Perm() != 0o600 {
+		t.Fatalf("update loosened the manifest to %v", info.Mode().Perm())
+	}
+	if m, _ := manifest.Read(installed); m.Version != "2" || !m.Env.Unsets("CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatalf("update result: %+v env=%+v", m, m.Env)
+	}
+}
