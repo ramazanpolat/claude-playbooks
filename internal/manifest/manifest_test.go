@@ -181,3 +181,26 @@ func TestWriteKeepsEnvValuesPrivate(t *testing.T) {
 		t.Fatalf("rewrite loosened the manifest to %v", info.Mode().Perm())
 	}
 }
+
+// A broken manifest in a subdir must not hide the install root's: the
+// nearest VALID one governs, and the error is still reported.
+func TestNearestWalksPastBrokenManifest(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "playbook")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nisolate_auth = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, FileName), []byte("= [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Nearest(sub)
+	if m == nil || !m.IsolateAuth {
+		t.Fatalf("Nearest stopped at the broken manifest: m=%#v", m)
+	}
+	if err == nil {
+		t.Fatal("the broken manifest went unreported")
+	}
+}

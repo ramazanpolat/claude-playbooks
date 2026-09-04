@@ -201,8 +201,10 @@ func isAuthIsolated(targetDir string) bool {
 	if os.Getenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH") == "true" {
 		return true
 	}
-	m, err := manifest.Nearest(targetDir)
-	if err != nil || m == nil {
+	// A read error on the way up is not a reason to drop isolation: the
+	// nearest valid manifest still decides, and only its absence means no.
+	m, _ := manifest.Nearest(targetDir)
+	if m == nil {
 		return false
 	}
 	return m.IsolateAuth

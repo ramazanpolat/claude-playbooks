@@ -123,17 +123,6 @@ func runEnv(cmd *cobra.Command, args []string) error {
 			if err := manifest.ValidateProfileName(arg); err != nil {
 				return err
 			}
-			if verb == "use" {
-				// A profile must exist to be attached: launch refuses a
-				// missing one, and recording it now would only arm that.
-				p, err := envprofile.Read(profileDir, arg)
-				if err != nil {
-					return err
-				}
-				if p == nil {
-					return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", arg, arg)
-				}
-			}
 			names = append(names, arg)
 		}
 		keys = nil
@@ -167,6 +156,21 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	pb, err := playbook.Require(playbooksDir, name)
 	if err != nil {
 		return err
+	}
+	if verb == "use" {
+		// A profile must exist to be attached: launch refuses a missing one,
+		// and recording it would only arm that. Checked under the lock, so
+		// a concurrent `env-profile delete` (which verifies no user under
+		// the same lock) cannot slip between the check and the write.
+		for _, arg := range names {
+			p, err := envprofile.Read(profileDir, arg)
+			if err != nil {
+				return err
+			}
+			if p == nil {
+				return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", arg, arg)
+			}
+		}
 	}
 	// A linked playbook's manifest is shared with every registration of the
 	// target directory -- same refusal as alias and rename.

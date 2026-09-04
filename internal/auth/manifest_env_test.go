@@ -231,3 +231,65 @@ func TestMissingProfileIsReportedTyped(t *testing.T) {
 		t.Fatalf("err = %v, want *envprofile.MissingError", err)
 	}
 }
+
+// An isolated playbook ignores the machine-global token, but a token its own
+// manifest sets is that playbook's choice: injected, with the stored grant
+// quarantined exactly as on the shared token path.
+func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenPath, []byte("sk-ant-oat01-GLOBAL\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tokenPath)
+	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-INHERITED")
+	t.Setenv(SubscriptionTypeEnv, "max")
+	t.Setenv("HOME", t.TempDir())
+
+	configDir := t.TempDir()
+	writeManifest(t, configDir, "isolate_auth = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	store := writeStore(t, configDir, `{`+grantJSON+`,`+mcpJSON+`}`)
+
+	env, _ := PrepareLaunchEnv(configDir)
+
+	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-OWN" {
+		t.Fatalf("token = %q, want the manifest's own", got)
+	}
+	if _, present := envValue(t, env, SubscriptionTypeEnv); present {
+		t.Fatalf("global plan descriptor leaked into an isolated playbook: %v", env)
+	}
+	keys := readStore(t, store)
+	if _, present := keys["claudeAiOauth"]; present {
+		t.Fatal("stored grant survived a token-auth launch of an isolated playbook")
+	}
+	if _, present := keys["mcpOAuth"]; !present {
+		t.Fatal("MCP logins destroyed alongside the grant")
+	}
+}
+
+// A broken manifest in a subdir does not switch the install root's
+// isolation off: the token must still be stripped.
+func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
+	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
+	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-INHERITED")
+	t.Setenv("HOME", t.TempDir())
+
+	root := t.TempDir()
+	sub := filepath.Join(root, "playbook")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("name = \"pb\"\nisolate_auth = true\nsubdir = \"playbook\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, ".playbook"), []byte("= [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := PrepareLaunchEnv(sub)
+	if _, present := envValue(t, env, OAuthTokenEnv); present {
+		t.Fatalf("broken subdir manifest switched isolation off: %v", env)
+	}
+	if err == nil {
+		t.Fatal("the broken manifest went unreported")
+	}
+}

@@ -79,15 +79,21 @@ func resolveToken(menv *manifest.Env) (inject string, active bool) {
 		return "", false
 	}
 	if menv != nil {
-		if tok, ok := menv.Set[OAuthTokenEnv]; ok {
-			tok = strings.TrimSpace(tok)
-			if tok == "" {
-				return "", false
-			}
-			return tok, true
+		if _, ok := menv.Set[OAuthTokenEnv]; ok {
+			tok := manifestToken(menv)
+			return tok, tok != ""
 		}
 	}
 	return TokenActive()
+}
+
+// manifestToken returns the token the flattened block sets, "" when it sets
+// none or an empty value.
+func manifestToken(menv *manifest.Env) string {
+	if menv == nil {
+		return ""
+	}
+	return strings.TrimSpace(menv.Set[OAuthTokenEnv])
 }
 
 // applyManifestEnv overlays the manifest [env] block on environ: set entries
@@ -145,7 +151,9 @@ func removeEnv(environ []string, keys ...string) []string {
 // PrepareLaunchEnv builds the environment for a child claude process bound to
 // configDir and returns it along with a non-fatal sync warning (nil on success).
 //
-// Authentication isolation is checked FIRST and wins over everything below.
+// Authentication isolation is checked FIRST and wins over everything below,
+// with one install-local exception: a CLAUDE_CODE_OAUTH_TOKEN the manifest
+// itself sets is that playbook's own token and is honoured (see the branch).
 // isAuthIsolated is consulted only inside SyncCredentials, so any branch that
 // skips that call also silently skips the isolate_auth contract — which
 // SPEC-v4.md defines as "detach shared credentials and do not copy global
@@ -193,19 +201,34 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 	// else stays advisory.
 	var menv *manifest.Env
 	m, merr := manifest.Nearest(configDir)
-	if m != nil && merr == nil {
-		menv, merr = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
-		if merr != nil {
-			menv = nil
+	if m != nil {
+		var perr error
+		menv, perr = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
+		if perr != nil {
+			// Reported ahead of a manifest read error: it is the one the
+			// launch refuses on.
+			menv, merr = nil, perr
 		}
 	}
 
 	if isAuthIsolated(configDir) {
+		// The machine-global token and the plan descriptors describe the
+		// global account and never apply here. A token the MANIFEST sets is
+		// this install's own choice, not the global one, and is honoured:
+		// injected, with the stored grant quarantined exactly as on the
+		// non-isolated token path (the adoption hazard is the same).
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
+		syncErr := SyncCredentials(configDir)
+		if own := manifestToken(menv); own != "" {
+			if qErr := QuarantineStoredOAuth(configDir); syncErr == nil {
+				syncErr = qErr
+			}
+			env = append(env, OAuthTokenEnv+"="+own)
+		}
 		env = applyManifestEnv(env, menv)
 		env = removeEnv(env, "CLAUDE_CONFIG_DIR")
 		env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
-		return env, firstErr(merr, SyncCredentials(configDir))
+		return env, firstErr(merr, syncErr)
 	}
 
 	inject, active := resolveToken(menv)

@@ -191,20 +191,26 @@ func Read(dir string) (*Manifest, error) {
 
 // Nearest returns the manifest governing dir: the one in dir itself, or the
 // closest ancestor's. A config directory that is a manifest `subdir` has no
-// manifest of its own; its install root's applies. Returns (nil, nil) when no
-// ancestor has one.
+// manifest of its own; its install root's applies.
+//
+// An unreadable or invalid manifest on the way up does not stop the walk --
+// the closest VALID manifest still governs, so a stray broken file in a
+// subdir cannot silently switch off an install root's isolate_auth. The
+// first such error is returned alongside whatever was found, so callers can
+// report it. Returns (nil, nil) when no ancestor has a manifest.
 func Nearest(dir string) (*Manifest, error) {
+	var firstErr error
 	for {
 		m, err := Read(dir)
-		if err != nil {
-			return nil, err
+		if err != nil && firstErr == nil {
+			firstErr = err
 		}
 		if m != nil {
-			return m, nil
+			return m, firstErr
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, nil
+			return nil, firstErr
 		}
 		dir = parent
 	}
