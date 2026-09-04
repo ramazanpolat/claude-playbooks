@@ -528,6 +528,17 @@ Effective at launch:
   unset  CLAUDE_CODE_OAUTH_TOKEN
 ```
 
+**Layering.** Later layers win:
+
+```text
+process environment
+  + each profile in env.profiles, in list order
+  + the block's own env.set
+  - the block's own env.unset
+  + CLAUDE_CONFIG_DIR (bound by the tool; reserved)
+  = the child claude process's environment
+```
+
 **Semantics at launch.** The block is first flattened: each profile in `env.profiles`, in order, then the block's own `set`/`unset` on top, where a later `set` cancels an earlier `unset` of the same key and vice versa. `PrepareLaunchEnv` then builds the child's environment as: the process environment; the authentication branch (isolation, long-lived token, or stored credentials); flattened `set` entries overriding any inherited value; flattened `unset` entries removed; finally `CLAUDE_CONFIG_DIR` bound to the playbook. A profile named by the manifest that does not exist under `<playbooks root>/.env-profiles/` refuses the launch: `env profile "x" not found in <dir> (create it with: claude-playbook env-profile x set KEY=VALUE)`; one that exists but cannot be read or parsed refuses it too: `env profile "x": invalid env profile at <path>: <reason>`. Neither is downgraded to the advisory warning other preparation failures get, and the refusal happens before any credential sync or quarantine touches the config directory. `start` resolves profiles from the root named by its `--playbooks-dir` (or `CLAUDE_PLAYBOOKS_DIR`), the same root `run` uses. Whether the long-lived token is active is decided **with the block applied**: `unset` of `CLAUDE_CODE_OAUTH_TOKEN` means inactive (the stored-credentials path runs, the playbook's own grant is not quarantined, an inherited token is stripped); `set` of it supplies a per-playbook token that replaces the machine-global file's. The manifest governing a config directory is the nearest one walking up from it, so a manifest `subdir` layout is covered by the install root's block.
 
 **Mutations** parse and validate every argument before taking the registry lock and rewriting the manifest (bootstrapping one for a flat playbook). `set` removes the key from `unset`; `unset` removes it from `set`; `clear` removes it from both; `use` appends profile names (moving an already-listed one to the end) after checking each exists; `unuse` removes them. An emptied block is dropped from the file. A manifest that cannot be parsed is reported as an advisory launch warning and treated as declaring nothing.

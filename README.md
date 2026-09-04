@@ -37,6 +37,8 @@ CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
 
 That's all a playbook is under the hood. `claude-playbook` just makes creating, sharing, and managing them easy.
 
+Since v3.5.0 a playbook can also isolate its **environment**: variables to set or unset for every launch of that playbook and no other, so one playbook talks to a proxy or keeps its own login while the rest of your shell does not. See [Environment overrides](#environment-overrides).
+
 ```
 ~/.claude-playbooks/                Launcher commands (on PATH):
 
@@ -297,47 +299,133 @@ Renaming with `cpb rename` keeps names, aliases, and launchers consistent automa
 
 ### Environment overrides
 
-A playbook can declare environment variables in the `[env]` block of its `.playbook` manifest. Every launch of that playbook (its launcher command, `run`, or `start` at its directory) applies them to the child `claude` process: `set` entries override whatever the shell exported, `unset` entries are removed even when the shell exports them. This is how a playbook pins itself to a proxy, a model, or an authentication mode that the rest of your shell does not use.
+A fresh install has none. This manifest is complete and normal:
 
-```bash
-claude-playbook env                                          # list every playbook that declares overrides
-claude-playbook env router                                   # show one
-claude-playbook env router set ANTHROPIC_BASE_URL=http://proxy:1/v1
-claude-playbook env router unset CLAUDE_CODE_OAUTH_TOKEN     # this playbook uses its own /login
-claude-playbook env router clear ANTHROPIC_BASE_URL          # forget the entry; the shell's value applies again
+```toml
+version = "3.11.4"
+name = "kommander"
+alias = "k"
+
+[source]
+repository = "https://github.com/ramazanpolat/kommander-playbook"
 ```
 
-The resulting manifest:
+Launching `k` runs `claude` with your shell's environment plus `CLAUDE_CONFIG_DIR`, exactly as before. Nothing changes until you add an override.
+
+#### What happens at launch
+
+Every launch of a playbook (its launcher command, `run`, or `start` at its directory) builds the child `claude` process's environment in layers, later layers winning:
+
+```text
+your shell's environment
+  + each env profile the playbook uses, in the order listed     (~/.claude-playbooks/.env-profiles/<name>.toml)
+  + the playbook's own [env.set]                                 (in its .playbook)
+  - the playbook's own [env] unset
+  + CLAUDE_CONFIG_DIR, bound by the tool, cannot be overridden
+  = what claude sees
+```
+
+`set` overrides whatever the shell exported; `unset` removes a variable even when the shell exports it. Raw `claude` launches bypass all of this. Claude Code's own `env` block in `settings.json` is applied later, inside the `claude` process, and wins over these layers; it can set variables but cannot unset one the shell exported, which is what the manifest block is for.
+
+#### One playbook, its own overrides
+
+```bash
+claude-playbook env kommander set ANTHROPIC_MODEL=claude-opus-5
+claude-playbook env kommander unset CLAUDE_CODE_OAUTH_TOKEN
+```
+
+The manifest above now ends with:
 
 ```toml
 [env]
 unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
 
 [env.set]
-ANTHROPIC_BASE_URL = "http://proxy:1/v1"
+ANTHROPIC_MODEL = "claude-opus-5"
 ```
 
-Unsetting `CLAUDE_CODE_OAUTH_TOKEN` does more than drop the variable: the long-lived token is treated as inactive for that playbook, so the launch takes the stored-credentials path (no token injected, and the playbook's own login is left alone rather than quarantined). `/login` sticks there while every other playbook keeps using the token. Setting it instead supplies a per-playbook token that wins over the machine-global file.
-
-Precedence, lowest to highest: the shell's environment, manifest `set`, manifest `unset`, then `CLAUDE_CONFIG_DIR`, which the tool always binds itself and which cannot be overridden. Claude Code's own `env` block in `settings.json` is applied later, inside the `claude` process, and wins over all of these; it can set variables but cannot unset one the shell exported, which is what the manifest block is for.
-
-The block is **install-local**, like `alias`: `update` keeps your block and ignores one the source ships (the source's block is never live, not even during the update), and `install` drops a source-shipped block with a note. A manifest holding `set` values is written with mode `0600`, since values may be tokens. A shared playbook repository cannot redirect your API endpoint or strip your authentication by publishing a manifest.
-
-#### Env profiles
-
-When several playbooks share the same overrides, define them once as a **profile** and attach it by name. Profiles live under `~/.claude-playbooks/.env-profiles/<name>.toml` and have the same shape as an `[env]` block:
+Inspect and undo:
 
 ```bash
-claude-playbook env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_MODEL=glm-5.3
-claude-playbook env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
-claude-playbook env-profile glm describe "GLM 5.3 through the local router"
-claude-playbook env router use glm           # attach; the manifest records only the name
-claude-playbook env router                   # shows the block and the effective result
-claude-playbook env-profile                      # list profiles and who uses them
-claude-playbook env-profile glm delete           # refused while a playbook still uses it
+claude-playbook env kommander                        # show this playbook's block
+claude-playbook env                                  # every playbook that declares overrides
+claude-playbook env kommander clear ANTHROPIC_MODEL  # forget the entry; the shell's value applies again
+claude-playbook info kommander                       # "Env:" lines appear when a block exists
 ```
 
-At launch the playbook's profiles apply in the order listed, later ones overriding earlier, and the playbook's own `set`/`unset` entries apply last. A referenced profile that is missing, unreadable, or invalid refuses the launch rather than silently running without it. Profiles are yours, not the playbook source's: nothing ships them, and `update` never touches the directory.
+```text
+Environment overrides for "kommander":
+  set    ANTHROPIC_MODEL=claude-opus-5
+  unset  CLAUDE_CODE_OAUTH_TOKEN
+```
+
+#### Env profiles: define once, attach to many
+
+When several playbooks want the same overrides, put them in a **profile**: a named file under `~/.claude-playbooks/.env-profiles/`, managed with `env-profile`, attached to playbooks by name with `env <playbook> use`.
+
+```bash
+claude-playbook env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.3
+claude-playbook env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
+claude-playbook env-profile glm describe "GLM 5.3 through the local router, own /login"
+```
+
+That wrote `~/.claude-playbooks/.env-profiles/glm.toml` (mode `0600`, values may be secrets):
+
+```toml
+description = "GLM 5.3 through the local router, own /login"
+unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
+
+[set]
+ANTHROPIC_BASE_URL = "http://proxy:1/v1"
+ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
+```
+
+Attach it. The playbook's manifest records only the name:
+
+```bash
+claude-playbook env router use glm
+claude-playbook env router set ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # local entry on top of the profile
+claude-playbook env router
+```
+
+```text
+Environment overrides for "router":
+  profiles  glm
+  set    ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4
+Effective at launch:
+  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
+  set    ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4
+  unset  CLAUDE_CODE_OAUTH_TOKEN
+```
+
+```toml
+[env]
+profiles = ["glm"]
+
+[env.set]
+ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.4"
+```
+
+Profiles apply in the order listed, later ones overriding earlier, and the playbook's own entries apply last. Manage them:
+
+```bash
+claude-playbook env-profile                 # list profiles, descriptions, which playbooks use each
+claude-playbook env-profile glm             # show one
+claude-playbook env router unuse glm        # detach
+claude-playbook env-profile glm delete      # refused while any playbook still uses it
+```
+
+A profile that a playbook names but that is missing, unreadable, or invalid **refuses the launch** rather than silently running without it: a dropped layer could send traffic to the wrong endpoint with the wrong credentials.
+
+#### The authentication case
+
+If you use a long-lived token (`claude setup-token`, stored at `~/.config/claude-code/oauth-token`), every playbook launch injects it as `CLAUDE_CODE_OAUTH_TOKEN` and removes the playbook's own stored login so a transient 401 cannot swap the working token for a dead one. That is right for most playbooks and wrong for one that must use a different account or a proxy that does not want the token.
+
+Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a profile, does more than drop the variable: the token is treated as inactive for that playbook, so the launch takes the stored-credentials path. No token is injected, the playbook's own login is left alone, and the shared credentials are synced. `/login` once there and it sticks, while every other playbook keeps using the token. Setting the variable instead supplies a per-playbook token that wins over the machine-global file. This is a middle ground between the default (every playbook shares the token) and `isolate_auth` (the playbook shares nothing).
+
+#### What stays yours
+
+The block and the profiles are **install-local**, like `alias`. `update` keeps your block and ignores one the source ships, and the source's block is never live, not even during the update; `install` drops a source-shipped block with a note; nothing ships profiles and `update` never touches their directory. A shared playbook repository cannot redirect your API endpoint or strip your authentication by publishing a manifest. Manifests holding `set` values are written `0600`; a file's mode is never loosened by a rewrite.
 
 ### Temporary sessions
 
