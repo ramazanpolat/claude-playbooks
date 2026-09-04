@@ -13,9 +13,10 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-var profileCmd = &cobra.Command{
-	Use:   "profile [name] [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]",
-	Short: "Show or manage shared env profiles",
+var envProfileCmd = &cobra.Command{
+	Use:     "env-profile [name] [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]",
+	Short:   "Show or manage shared env profiles",
+	Aliases: []string{"envprofile"},
 	Long: `An env profile is a named, reusable set of environment overrides stored
 under <playbooks root>/.env-profiles/<name>.toml. Playbooks opt in with
 'claude-playbook env <playbook> use <profile>'; at launch the profiles apply
@@ -29,10 +30,10 @@ With a name: show that profile and which playbooks use it.
   describe TEXT      set the one-line description
   delete             remove the profile; refused while a playbook uses it`,
 	Args: cobra.ArbitraryArgs,
-	RunE: runProfile,
+	RunE: runEnvProfile,
 }
 
-func runProfile(cmd *cobra.Command, args []string) error {
+func runEnvProfile(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
 
@@ -43,7 +44,7 @@ func runProfile(cmd *cobra.Command, args []string) error {
 		}
 		if len(profiles) == 0 {
 			fmt.Println("No env profiles defined.")
-			fmt.Println("Create one with 'claude-playbook profile <name> set KEY=VALUE', then 'claude-playbook env <playbook> use <name>'.")
+			fmt.Println("Create one with 'claude-playbook env-profile <name> set KEY=VALUE', then 'claude-playbook env <playbook> use <name>'.")
 			return nil
 		}
 		users, err := profileUsers(playbooksDir)
@@ -80,7 +81,7 @@ func runProfile(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if p == nil {
-			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook profile %s set KEY=VALUE'", name, name)
+			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", name, name)
 		}
 		fmt.Printf("Env profile %q", name)
 		if p.Description != "" {
@@ -140,7 +141,7 @@ func runProfile(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("delete takes no further arguments")
 		}
 	default:
-		return fmt.Errorf("unknown action %q: expected set, unset, clear, describe, or delete\nUsage: claude-playbook profile <name> [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]", verb)
+		return fmt.Errorf("unknown action %q: expected set, unset, clear, describe, or delete\nUsage: claude-playbook env-profile <name> [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]", verb)
 	}
 
 	unlock, lerr := lockRegistry()
@@ -174,7 +175,7 @@ func runProfile(cmd *cobra.Command, args []string) error {
 
 	if p == nil {
 		if verb != "set" {
-			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook profile %s set KEY=VALUE'", name, name)
+			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", name, name)
 		}
 		p = &envprofile.Profile{Name: name}
 	}

@@ -32,7 +32,7 @@ With a name: show that playbook's overrides.
   use PROFILE...     layer shared env profiles under this playbook's entries
   unuse PROFILE...   detach profiles
 
-Profiles ('claude-playbook profile') apply in the order listed, later ones
+Profiles ('claude-playbook env-profile') apply in the order listed, later ones
 overriding earlier; the playbook's own set/unset entries apply last.
 
 Unsetting CLAUDE_CODE_OAUTH_TOKEN switches the playbook to stored
@@ -131,7 +131,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 					return err
 				}
 				if p == nil {
-					return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook profile %s set KEY=VALUE'", arg, arg)
+					return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", arg, arg)
 				}
 			}
 			names = append(names, arg)

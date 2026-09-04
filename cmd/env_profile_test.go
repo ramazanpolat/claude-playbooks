@@ -16,16 +16,16 @@ func TestProfileLifecycleAndAttachment(t *testing.T) {
 	dir := envprofile.Dir(config.ResolvePlaybooksDir())
 
 	// set creates the profile; describe/unset/clear edit it.
-	if err := runProfile(nil, []string{"glm", "set", "ANTHROPIC_BASE_URL=http://proxy/v1", "MODEL=glm"}); err != nil {
+	if err := runEnvProfile(nil, []string{"glm", "set", "ANTHROPIC_BASE_URL=http://proxy/v1", "MODEL=glm"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runProfile(nil, []string{"glm", "describe", "GLM via", "router"}); err != nil {
+	if err := runEnvProfile(nil, []string{"glm", "describe", "GLM via", "router"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runProfile(nil, []string{"glm", "unset", "CLAUDE_CODE_OAUTH_TOKEN", "MODEL"}); err != nil {
+	if err := runEnvProfile(nil, []string{"glm", "unset", "CLAUDE_CODE_OAUTH_TOKEN", "MODEL"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runProfile(nil, []string{"glm", "clear", "MODEL"}); err != nil {
+	if err := runEnvProfile(nil, []string{"glm", "clear", "MODEL"}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := envprofile.Read(dir, "glm")
@@ -69,14 +69,14 @@ func TestProfileLifecycleAndAttachment(t *testing.T) {
 		}
 	}
 	list := captureStdout(t, func() {
-		if err := runProfile(nil, nil); err != nil {
+		if err := runEnvProfile(nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
 	if !strings.Contains(list, "glm  GLM via router (1 set, 1 unset; used by router)") {
 		t.Fatalf("profile list:\n%s", list)
 	}
-	if err := runProfile(nil, []string{"glm", "delete"}); err == nil || !strings.Contains(err.Error(), "used by router") {
+	if err := runEnvProfile(nil, []string{"glm", "delete"}); err == nil || !strings.Contains(err.Error(), "used by router") {
 		t.Fatalf("delete of an attached profile: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestProfileLifecycleAndAttachment(t *testing.T) {
 	if err := runEnv(nil, []string{"router", "unuse", "glm"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runProfile(nil, []string{"glm", "delete"}); err != nil {
+	if err := runEnvProfile(nil, []string{"glm", "delete"}); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := envprofile.Read(dir, "glm"); p != nil {
@@ -111,7 +111,7 @@ func TestProfileRejectsBadInput(t *testing.T) {
 		{"p", "describe"},
 		{"absent"},
 	} {
-		if err := runProfile(nil, args); err == nil {
+		if err := runEnvProfile(nil, args); err == nil {
 			t.Errorf("profile %v succeeded", args)
 		}
 	}

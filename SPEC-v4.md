@@ -62,7 +62,7 @@ A playbook's **name** is simply its directory name under the playbooks root:
 - `sre`
 - `dba`
 
-Names are used wherever a playbook is referenced: `run`, `delete`, `info`, `rename`, `alias`, `env`, `update`. Env profile names are a separate namespace (`profile`).
+Names are used wherever a playbook is referenced: `run`, `delete`, `info`, `rename`, `alias`, `env`, `update`. Env profile names are a separate namespace (`env-profile`).
 
 The charset is enforced for names being **created** (`create`, `install`, `link`, `rename`): a name must match `^[A-Za-z0-9_][A-Za-z0-9_-]*$` — letters, digits, underscores and dashes, starting with an alphanumeric or underscore. A playbook name is interpolated into a launcher command name, a `run <name>` argument, and commands printed for the user to paste, so shell metacharacters are rejected at the front door rather than escaped at each site. Names must not start with `.` (to avoid hidden directories) and must not contain `/` or `\` (names are single directory segments, never paths). Lookup paths (`delete`, discovery) only require a single path segment, so an existing playbook with an odd name can still be listed, run and removed.
 
@@ -528,7 +528,7 @@ Effective at launch:
   unset  CLAUDE_CODE_OAUTH_TOKEN
 ```
 
-**Semantics at launch.** The block is first flattened: each profile in `env.profiles`, in order, then the block's own `set`/`unset` on top, where a later `set` cancels an earlier `unset` of the same key and vice versa. `PrepareLaunchEnv` then builds the child's environment as: the process environment; the authentication branch (isolation, long-lived token, or stored credentials); flattened `set` entries overriding any inherited value; flattened `unset` entries removed; finally `CLAUDE_CONFIG_DIR` bound to the playbook. A profile named by the manifest that does not exist under `<playbooks root>/.env-profiles/` refuses the launch: `env profile "x" not found in <dir> (create it with: claude-playbook profile x set KEY=VALUE)`. Whether the long-lived token is active is decided **with the block applied**: `unset` of `CLAUDE_CODE_OAUTH_TOKEN` means inactive (the stored-credentials path runs, the playbook's own grant is not quarantined, an inherited token is stripped); `set` of it supplies a per-playbook token that replaces the machine-global file's. The manifest governing a config directory is the nearest one walking up from it, so a manifest `subdir` layout is covered by the install root's block.
+**Semantics at launch.** The block is first flattened: each profile in `env.profiles`, in order, then the block's own `set`/`unset` on top, where a later `set` cancels an earlier `unset` of the same key and vice versa. `PrepareLaunchEnv` then builds the child's environment as: the process environment; the authentication branch (isolation, long-lived token, or stored credentials); flattened `set` entries overriding any inherited value; flattened `unset` entries removed; finally `CLAUDE_CONFIG_DIR` bound to the playbook. A profile named by the manifest that does not exist under `<playbooks root>/.env-profiles/` refuses the launch: `env profile "x" not found in <dir> (create it with: claude-playbook env-profile x set KEY=VALUE)`. Whether the long-lived token is active is decided **with the block applied**: `unset` of `CLAUDE_CODE_OAUTH_TOKEN` means inactive (the stored-credentials path runs, the playbook's own grant is not quarantined, an inherited token is stripped); `set` of it supplies a per-playbook token that replaces the machine-global file's. The manifest governing a config directory is the nearest one walking up from it, so a manifest `subdir` layout is covered by the install root's block.
 
 **Mutations** parse and validate every argument before taking the registry lock and rewriting the manifest (bootstrapping one for a flat playbook). `set` removes the key from `unset`; `unset` removes it from `set`; `clear` removes it from both; `use` appends profile names (moving an already-listed one to the end) after checking each exists; `unuse` removes them. An emptied block is dropped from the file. A manifest that cannot be parsed is reported as an advisory launch warning and treated as declaring nothing.
 
@@ -542,23 +542,23 @@ Linked playbooks: the manifest is the LINK TARGET's shared state, so mutations a
 - Invalid variable name → `invalid environment variable name "bad-name"`
 - `CLAUDE_CONFIG_DIR` → `CLAUDE_CONFIG_DIR is managed by claude-playbook and cannot be overridden`
 - Unknown action → `unknown action "frob": expected set, unset, clear, use, or unuse`
-- `use` of a profile that does not exist → `unknown env profile "x". Create it with 'claude-playbook profile x set KEY=VALUE'`
+- `use` of a profile that does not exist → `unknown env profile "x". Create it with 'claude-playbook env-profile x set KEY=VALUE'`
 - Linked playbook → refused (shared manifest)
 
 ---
 
-### `claude-playbook profile [name] [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]`
+### `claude-playbook env-profile [name] [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]`
 
 Shows or manages **env profiles**: named, reusable `set`/`unset` blocks stored as `<playbooks root>/.env-profiles/<name>.toml` (mode `0600`; values may be secrets) and attached to playbooks with `env <playbook> use <name>`. **Read-only with zero or one argument.**
 
 ```bash
-claude-playbook profile                                # list profiles, with descriptions and users
-claude-playbook profile glm                            # show one, and which playbooks use it
-claude-playbook profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1   # creates the profile on first use
-claude-playbook profile glm unset CLAUDE_CODE_OAUTH_TOKEN
-claude-playbook profile glm clear ANTHROPIC_BASE_URL
-claude-playbook profile glm describe "GLM 5.3 through the local router"
-claude-playbook profile glm delete                     # refused while any playbook uses it
+claude-playbook env-profile                                # list profiles, with descriptions and users
+claude-playbook env-profile glm                            # show one, and which playbooks use it
+claude-playbook env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1   # creates the profile on first use
+claude-playbook env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
+claude-playbook env-profile glm clear ANTHROPIC_BASE_URL
+claude-playbook env-profile glm describe "GLM 5.3 through the local router"
+claude-playbook env-profile glm delete                     # refused while any playbook uses it
 ```
 
 **File format** — the manifest `[env]` shape hoisted to top level:
@@ -574,7 +574,7 @@ ANTHROPIC_BASE_URL = "http://proxy:1/v1"
 Profile names match `[A-Za-z0-9][A-Za-z0-9._-]*`. Keys follow the `[env]` rules (valid variable names, `CLAUDE_CONFIG_DIR` reserved, no key in both lists). Only `set` creates a profile; every other action on an unknown name is an error. Mutations validate every argument before taking the registry lock. `delete` scans the registry and refuses while a playbook references the profile, naming the users. The directory is never touched by `install` or `update`.
 
 **Errors:**
-- Unknown profile → `unknown env profile "glm". Create it with 'claude-playbook profile glm set KEY=VALUE'`
+- Unknown profile → `unknown env profile "glm". Create it with 'claude-playbook env-profile glm set KEY=VALUE'`
 - Delete while attached → `env profile "glm" is used by router, sre; detach it first with 'claude-playbook env <playbook> unuse glm'`
 - Invalid file on disk → `invalid env profile at <path>: <reason>` (listing and launch both fail loudly rather than skip it)
 

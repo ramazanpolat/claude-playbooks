@@ -328,13 +328,13 @@ The block is **install-local**, like `alias`: `update` keeps your block and igno
 When several playbooks share the same overrides, define them once as a **profile** and attach it by name. Profiles live under `~/.claude-playbooks/.env-profiles/<name>.toml` and have the same shape as an `[env]` block:
 
 ```bash
-claude-playbook profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_MODEL=glm-5.3
-claude-playbook profile glm unset CLAUDE_CODE_OAUTH_TOKEN
-claude-playbook profile glm describe "GLM 5.3 through the local router"
+claude-playbook env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_MODEL=glm-5.3
+claude-playbook env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
+claude-playbook env-profile glm describe "GLM 5.3 through the local router"
 claude-playbook env router use glm           # attach; the manifest records only the name
 claude-playbook env router                   # shows the block and the effective result
-claude-playbook profile                      # list profiles and who uses them
-claude-playbook profile glm delete           # refused while a playbook still uses it
+claude-playbook env-profile                      # list profiles and who uses them
+claude-playbook env-profile glm delete           # refused while a playbook still uses it
 ```
 
 At launch the playbook's profiles apply in the order listed, later ones overriding earlier, and the playbook's own `set`/`unset` entries apply last. A referenced profile that does not exist refuses the launch rather than silently running without it. Profiles are yours, not the playbook source's: nothing ships them, and `update` never touches the directory.
