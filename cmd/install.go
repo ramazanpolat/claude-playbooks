@@ -354,7 +354,10 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 	// [env]) before it goes live, and doing that in the pilot's own source
 	// directory would mutate it and leak one install's configuration into
 	// every later install from it.
-	tmp, err := stageTempDir(work)
+	// Containment is judged against the ORIGINAL source root, not the
+	// selected subdirectory: a temp dir at <source>/tmp is outside
+	// <source>/playbook yet still the pilot's tree.
+	tmp, err := stageTempDir(abs)
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -381,6 +384,14 @@ func stageTempDir(work string) (string, error) {
 		candidates = append(candidates, filepath.Join(cache, "claude-playbook"))
 	}
 	for _, base := range candidates {
+		// A relative TMPDIR (".tmp" while running inside the source) must
+		// be anchored first: filepath.Rel cannot compare a relative path
+		// with an absolute root and would otherwise answer "outside".
+		if abs, err := filepath.Abs(base); err == nil {
+			base = abs
+		} else {
+			continue
+		}
 		// Containment is decided from the nearest EXISTING ancestor, before
 		// anything is created: a cache dir that does not exist yet but
 		// would land inside the source must not be made just to be

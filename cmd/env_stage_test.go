@@ -90,3 +90,60 @@ func TestStagingRefusalCreatesNothingInsideSource(t *testing.T) {
 		t.Fatalf("refusal created entries in the source: before=%d after=%v", len(before), after)
 	}
 }
+
+// A relative TMPDIR while running inside the source must be anchored before
+// the containment check, or it silently passes and staging recurses.
+func TestRelativeTmpdirInsideSourceIsRejected(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "source")
+	if err := os.MkdirAll(filepath.Join(source, ".tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(source, &manifest.Manifest{Name: "pb"}); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	if err := os.Chdir(source); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(wd) })
+	t.Setenv("TMPDIR", ".tmp")
+
+	installNoAlias = true
+	if err := runInstall(nil, []string{source}); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(source, ".tmp")); len(entries) != 0 {
+		t.Fatalf("relative TMPDIR staged inside the source: %v", entries)
+	}
+}
+
+// With --subdir, containment is judged against the original source root: a
+// temp dir beside the selected subdirectory is still the pilot's tree.
+func TestSubdirInstallNeverStagesInsideSourceRoot(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(source, "playbook"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(filepath.Join(source, "playbook"), &manifest.Manifest{Name: "pb"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", filepath.Join(source, "tmp")) // sibling of the subdir, does not exist
+
+	installNoAlias = true
+	installSubdir = "playbook"
+	if err := runInstall(nil, []string{source}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(source, "tmp")); err == nil {
+		t.Fatal("staging created <source>/tmp beside the selected subdir")
+	}
+	if _, err := os.Stat(filepath.Join(config.PlaybooksDir, "pb", manifest.FileName)); err != nil {
+		t.Fatalf("install did not land: %v", err)
+	}
+}

@@ -233,3 +233,25 @@ func TestWritePrivateNeverExposesContent(t *testing.T) {
 		t.Fatalf("temp file left behind: %v", entries)
 	}
 }
+
+// A deliberately restrictive mode that is not fully private (0640) is kept
+// exactly by a rewrite without values, as an in-place write would have.
+func TestWritePreservesPartialModes(t *testing.T) {
+	dir := t.TempDir()
+	at := filepath.Join(dir, FileName)
+	if err := os.WriteFile(at, []byte("name = \"pb\"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(dir, &Manifest{Name: "pb", Alias: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(at); info.Mode().Perm() != 0o640 {
+		t.Fatalf("rewrite changed 0640 to %v", info.Mode().Perm())
+	}
+	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Set: map[string]string{"K": "v"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(at); info.Mode().Perm() != 0o600 {
+		t.Fatalf("values did not tighten 0640 to 0600: %v", info.Mode().Perm())
+	}
+}
