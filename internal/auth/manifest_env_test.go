@@ -10,6 +10,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // envValue returns the value of key in env and whether it appears, failing
@@ -331,5 +332,66 @@ func TestProfileErrorStopsBeforeAuthMutation(t *testing.T) {
 	}
 	if got, _ := envValue(t, env, "CLAUDE_CONFIG_DIR"); got != configDir {
 		t.Fatalf("returned env not well-formed: %v", env)
+	}
+}
+
+// One-off layers sit on top of the playbook's block, in command-line order,
+// and drive the token decision like the manifest would -- without writing
+// anything.
+func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenPath, []byte("sk-ant-oat01-FROMFILE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tokenPath)
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
+		Name: "work", Set: map[string]string{"MODEL": "profile", "FROM_PROFILE": "yes"}, Unset: []string{OAuthTokenEnv},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	configDir := filepath.Join(root, "pb")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, configDir, "[env.set]\nMODEL = \"manifest\"\nKEEP = \"manifest\"\n")
+	store := writeStore(t, configDir, `{`+grantJSON+`}`)
+	before, _ := os.ReadFile(filepath.Join(configDir, ".playbook"))
+
+	layers := []*manifest.Env{
+		{Profiles: []string{"work"}},
+		{Set: map[string]string{"MODEL": "flag"}},
+	}
+	env, err := PrepareLaunchEnvWith(configDir, layers)
+	if err != nil {
+		t.Fatalf("advisory error: %v", err)
+	}
+	if got, _ := envValue(t, env, "MODEL"); got != "flag" {
+		t.Fatalf("MODEL = %q, want the last layer's", got)
+	}
+	if got, _ := envValue(t, env, "FROM_PROFILE"); got != "yes" {
+		t.Fatalf("one-off profile not applied: %v", env)
+	}
+	if got, _ := envValue(t, env, "KEEP"); got != "manifest" {
+		t.Fatalf("manifest entry lost: KEEP=%q", got)
+	}
+	if _, present := envValue(t, env, OAuthTokenEnv); present {
+		t.Fatal("one-off profile's token unset was not honoured")
+	}
+	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
+		t.Fatal("grant quarantined although the one-off layer made the token inactive")
+	}
+	if after, _ := os.ReadFile(filepath.Join(configDir, ".playbook")); string(after) != string(before) {
+		t.Fatal("a one-off layer was written into the manifest")
+	}
+
+	// A one-off profile that does not exist refuses, before any mutation.
+	_, err = PrepareLaunchEnvWith(configDir, []*manifest.Env{{Profiles: []string{"ghost"}}})
+	if !errors.Is(err, envprofile.ErrProfile) {
+		t.Fatalf("missing one-off profile: err = %v", err)
 	}
 }

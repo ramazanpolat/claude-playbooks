@@ -159,6 +159,13 @@ if phase_enabled p4; then
   grep -q '^RITUAL_OWN=yes$' "$DUMP" 2>/dev/null || rc=1
   grep -q '^CLAUDE_CONFIG_DIR=' "$DUMP" 2>/dev/null || rc=1
   grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$DUMP" 2>/dev/null && rc=1   # unset by profile
+  # one-off launch flags: before the name and after it, nothing written
+  DUMP2="$SB/envdump2"; MAN_BEFORE="$(cat "$PB/fx/.playbook")"
+  CPB_RITUAL_ENVDUMP="$DUMP2" PATH="$STUB:$PATH" CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE=/dev/null \
+    p4 run --env RITUAL_ONEOFF=yes fx --unset RITUAL_OWN >/dev/null 2>&1 || rc=1
+  grep -q '^RITUAL_ONEOFF=yes$' "$DUMP2" 2>/dev/null || rc=1
+  grep -q '^RITUAL_OWN=' "$DUMP2" 2>/dev/null && rc=1                # one-off unset beats manifest set
+  [ "$(cat "$PB/fx/.playbook")" = "$MAN_BEFORE" ] || rc=1           # manifest untouched
   report "p4 env/env-profile launch" $rc
 
   rc=0

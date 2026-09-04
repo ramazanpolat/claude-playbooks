@@ -27,22 +27,37 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// A --help BEFORE the playbook name prints usage; after the name it
-	// belongs to claude (rest[0] is the name by then).
+	// Launch flags may precede the name (`run --env K=V name`) or follow it
+	// directly (`name --env K=V ...`, which is what a launcher passes).
+	rest, layers, err := takeLaunchFlags(rest)
+	if err != nil {
+		return err
+	}
+	// A --help at the NAME position prints usage, whether or not launch
+	// flags preceded it; after the name it belongs to claude.
 	if restRequestsHelp(rest) {
-		fmt.Println("Usage: claude-playbook run <name> [claude-flags...]")
+		fmt.Println("Usage: claude-playbook run " + launchFlagsUsage + " <name> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Runs Claude Code with the named playbook.")
-		fmt.Println("Any flags after the name are forwarded directly to claude.")
+		fmt.Println("Launch flags add one-off environment layers on top of the playbook's [env]")
+		fmt.Println("block, in order, for this launch only; they go before the name or right after it.")
+		fmt.Println("  --env-profile NAME   layer an existing env profile")
+		fmt.Println("  --env KEY=VALUE      set one variable")
+		fmt.Println("  --unset KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")
+		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
+		fmt.Println("Everything else after the name is forwarded directly to claude.")
 		return nil
 	}
 
 	if len(rest) == 0 {
-		return fmt.Errorf("playbook name required\nUsage: claude-playbook run <name> [claude-flags...]")
+		return fmt.Errorf("playbook name required\nUsage: claude-playbook run " + launchFlagsUsage + " <name> [claude-flags...]")
 	}
-
 	name := rest[0]
-	claudeArgs := rest[1:]
+	claudeArgs, more, err := takeLaunchFlags(rest[1:])
+	if err != nil {
+		return err
+	}
+	layers = append(layers, more...)
 
 	playbooksDirResolved := config.ResolvePlaybooksDir()
 
@@ -59,7 +74,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
-	launchEnv, syncErr := auth.PrepareLaunchEnv(pb.Path)
+	launchEnv, syncErr := auth.PrepareLaunchEnvWith(pb.Path, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the

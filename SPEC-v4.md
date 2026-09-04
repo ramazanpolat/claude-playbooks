@@ -195,30 +195,50 @@ claude-playbook create experiment --alias exp
 
 ---
 
-### `claude-playbook run <name> [claude-flags...]`
+### `claude-playbook run [launch-flags] <name> [launch-flags] [claude-flags...]`
 
-Runs Claude Code using the named playbook. Any flags after the name are forwarded to `claude` unchanged.
+Runs Claude Code using the named playbook. Any flags after the name are forwarded to `claude` unchanged, except a leading run of **launch flags**, which add one-off environment layers for this launch only.
 
 ```bash
 claude-playbook run experiment
 claude-playbook run sre
 claude-playbook run sre --model claude-opus-5
+claude-playbook run --env-profile work sre                       # one launch with an env profile
+claude-playbook run sre --env ANTHROPIC_MODEL=claude-opus-5      # flags may also follow the name
+claude-playbook run --unset CLAUDE_CODE_OAUTH_TOKEN sre          # this launch uses the stored login
+claude-playbook run --env-file ./work.env sre -p "..."
 ```
+
+**Launch flags** (each repeatable; value as the next argument or after `=`):
+
+| Flag | Layer |
+|------|-------|
+| `--env-profile NAME` | an existing env profile (`<playbooks root>/.env-profiles/NAME.toml`); a missing or invalid one refuses the launch |
+| `--env KEY=VALUE` | set one variable |
+| `--unset KEY` | remove one variable |
+| `--env-file PATH` | a dotenv-style file: `KEY=VALUE` per line, blank and `#` lines skipped, a leading `export ` tolerated, one pair of matching surrounding quotes stripped, later lines win; every line validated like a manifest entry |
+
+Scanning: launch flags are recognised only as a **leading run**, before the name and again immediately after it; the first argument that is not a launch flag ends the scan and everything from there on is `claude`'s. Through a launcher (`sre --env K=V -p hi`) the same rule applies to the arguments after the command name. Keys and values follow the manifest rules (`CLAUDE_CONFIG_DIR` reserved, valid UTF-8, no NUL). The layers apply on top of the playbook's flattened `[env]` block in command-line order, are resolved against the same profiles root, drive the token decision exactly as the block would (a one-off `--unset CLAUDE_CODE_OAUTH_TOKEN` takes the stored-credentials path for this launch), and are never written to disk.
 
 Equivalent to:
 ```bash
 CLAUDE_CONFIG_DIR=~/.claude-playbooks/<name> claude [claude-flags...]
 ```
 
-Flag parsing is disabled so arbitrary `claude` flags pass through. The global `--playbooks-dir` flag is extracted from the argument list before forwarding.
+Flag parsing is disabled so arbitrary `claude` flags pass through. The global `--playbooks-dir` flag is extracted from the argument list before forwarding; launch flags are extracted from the leading positions described above.
 
 **Errors:**
 - Playbook not found → `unknown playbook "experiment". Run 'claude-playbook list' to see available playbooks`
+- Launch flag without a value → `flag needs an argument: --env`
+- `--env` without `=` → `--env expects KEY=VALUE, got "X"`; `--unset` with `=` → `--unset expects a variable name, got "K=V"`
+- Invalid key, reserved key, or bad value → the manifest's `[env]` errors (`invalid environment variable name "x"`, `CLAUDE_CONFIG_DIR is managed by claude-playbook and cannot be overridden`, ...)
+- `--env-file` problems → `--env-file: <path>:<line>: expected KEY=VALUE` or `<path>:<line>: invalid environment variable name (not shown; the line may hold a secret)`: neither the line nor a rejected key is echoed, since a secret containing `=` splits into a bogus key; the reserved-key and value errors are the manifest's, prefixed with `<path>:<line>`
+- `--env-profile` missing or broken → the launch refusal from `env` (`env profile "x" not found in <dir> ...`)
 - `claude` not on PATH → `'claude' command not found. Install Claude Code first: https://claude.ai/download`
 
 ---
 
-### `claude-playbook start <path> [claude-flags...]`
+### `claude-playbook start [launch-flags] <path> [claude-flags...]`
 
 Starts an ad-hoc Claude Code session at any directory. Creates the directory if it doesn't exist. No playbook registration, no `.playbook` file, no discovery — just set `CLAUDE_CONFIG_DIR` and run. The throwaway-experiment command.
 
@@ -226,7 +246,10 @@ Starts an ad-hoc Claude Code session at any directory. Creates the directory if 
 claude-playbook start /tmp/scratch
 claude-playbook start /tmp/scratch --model claude-opus-5
 claude-playbook start /tmp/scratch --delete
+claude-playbook start --env-profile glm /tmp/scratch             # launch flags go before the path
 ```
+
+The launch flags of `run` (`--env-profile`, `--env`, `--unset`, `--env-file`) are accepted before the path, with the same semantics; profiles resolve from the root named by `--playbooks-dir` or `CLAUDE_PLAYBOOKS_DIR`.
 
 Equivalent to:
 ```bash
@@ -238,6 +261,7 @@ CLAUDE_CONFIG_DIR=/tmp/scratch claude [claude-flags...]
 | Flag | Description |
 |------|-------------|
 | `--delete` | Delete the directory when the session ends |
+| `--env-profile`, `--env`, `--unset`, `--env-file` | One-off environment layers, before the path; see `run` |
 
 `--delete` runs after `claude` exits regardless of exit code. If deletion fails, a warning is printed to stderr but the tool preserves `claude`'s exit code.
 

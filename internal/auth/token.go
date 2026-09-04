@@ -193,26 +193,53 @@ func removeEnv(environ []string, keys ...string) []string {
 // (not abort) on a non-nil error, matching the previous SyncCredentials call
 // sites.
 func PrepareLaunchEnv(configDir string) ([]string, error) {
+	return PrepareLaunchEnvWith(configDir, nil)
+}
+
+// PrepareLaunchEnvWith is PrepareLaunchEnv with one-off layers applied on top
+// of the playbook's own block, in order: the launch flags (--env-profile,
+// --env, --unset, --env-file). Each layer may name profiles, which are
+// resolved from the same root as the manifest's. The flattened result drives
+// the token decision exactly as the manifest block alone would, so a one-off
+// unset of CLAUDE_CODE_OAUTH_TOKEN takes the stored-credentials path for
+// this launch only. Nothing is written to disk.
+func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, error) {
 	env := os.Environ()
+	refuse := func(err error) ([]string, error) {
+		// The launch will be refused on this error (see cmd/run.go), so
+		// stop HERE, before credential sync or quarantine touches the
+		// config dir: a broken profile meant to unset the token must not
+		// cost the playbook its stored grant on a launch that never
+		// happens. The returned env is still well-formed.
+		env = removeEnv(env, "CLAUDE_CONFIG_DIR")
+		return append(env, "CLAUDE_CONFIG_DIR="+configDir), err
+	}
 
 	// The block is resolved with its profiles flattened in. Any profile
 	// resolution failure satisfies errors.Is(err, envprofile.ErrProfile);
 	// callers that launch treat it as fatal (see cmd/run.go), everything
 	// else stays advisory.
+	profilesDir := envprofile.Dir(config.ResolvePlaybooksDir())
 	var menv *manifest.Env
 	m, merr := manifest.Nearest(configDir)
 	if m != nil {
 		var perr error
-		menv, perr = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
+		menv, perr = envprofile.Expand(profilesDir, m.Env)
 		if perr != nil {
-			// The launch will be refused on this error (see cmd/run.go), so
-			// stop HERE, before credential sync or quarantine touches the
-			// config dir: a broken profile meant to unset the token must not
-			// cost the playbook its stored grant on a launch that never
-			// happens. The returned env is still well-formed.
-			env = removeEnv(env, "CLAUDE_CONFIG_DIR")
-			return append(env, "CLAUDE_CONFIG_DIR="+configDir), perr
+			return refuse(perr)
 		}
+	}
+	if len(layers) > 0 {
+		flat := make([]*manifest.Env, 0, len(layers)+1)
+		flat = append(flat, menv)
+		for _, layer := range layers {
+			expanded, perr := envprofile.Expand(profilesDir, layer)
+			if perr != nil {
+				return refuse(perr)
+			}
+			flat = append(flat, expanded)
+		}
+		menv = manifest.MergeEnv(flat...)
 	}
 
 	if isAuthIsolated(configDir) {

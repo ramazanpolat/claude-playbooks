@@ -40,13 +40,19 @@ func runStart(cmd *cobra.Command, args []string) error {
 			rest = append(rest, args[i])
 		}
 	}
-	// --help BEFORE the path prints usage; after it, the flag is forwarded
-	// to claude.
+	rest, layers, err := takeLaunchFlags(rest)
+	if err != nil {
+		return err
+	}
+	// A --help at the PATH position prints usage, whether or not launch
+	// flags preceded it; after the path, the flag is forwarded to claude.
 	if restRequestsHelp(rest) {
-		fmt.Println("Usage: claude-playbook start <path> [claude-flags...]")
+		fmt.Println("Usage: claude-playbook start " + launchFlagsUsage + " <path> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
 		fmt.Println("Creates the directory if it does not exist.")
+		fmt.Println("Launch flags (before the path) add one-off environment layers for this")
+		fmt.Println("launch only: --env-profile NAME, --env KEY=VALUE, --unset KEY, --env-file PATH.")
 		fmt.Println("Any flags after the path are forwarded directly to claude.")
 		fmt.Println()
 		fmt.Println("Flags:")
@@ -55,7 +61,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(rest) == 0 {
-		return fmt.Errorf("path required\nUsage: claude-playbook start <path> [claude-flags...]")
+		return fmt.Errorf("path required\nUsage: claude-playbook start " + launchFlagsUsage + " <path> [claude-flags...]")
 	}
 
 	path := rest[0]
@@ -79,7 +85,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
-	launchEnv, syncErr := auth.PrepareLaunchEnv(absPath)
+	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
