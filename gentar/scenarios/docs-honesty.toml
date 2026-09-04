@@ -20,7 +20,7 @@ steps = [
 # built binary. Extend the list when README gains commands — the
 # failure mode this suite exists for is docs drifting AHEAD of code.
 [[verify.commands]]
-command = 'for c in install list run create delete update info alias rename link start; do claude-playbook "$c" --help >/dev/null 2>&1 || { echo "missing: $c"; exit 1; }; done; echo cmds-ok'
+command = 'for c in install list run create delete update info alias rename link start env env-profile; do claude-playbook "$c" --help >/dev/null 2>&1 || { echo "missing: $c"; exit 1; }; done; echo cmds-ok'
 contains = "cmds-ok"
 
 [[verify.commands]]
