@@ -150,3 +150,21 @@ func TestExpandErrorsAllMatchErrProfile(t *testing.T) {
 		t.Fatalf("broken profile err = %v, want *ResolveError naming it", err)
 	}
 }
+
+// A profile file created 0644 by hand is tightened by the next write.
+func TestWriteTightensExistingProfile(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	at := filepath.Join(dir, "p.toml")
+	if err := os.WriteFile(at, []byte("[set]\nA = \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(dir, &Profile{Name: "p", Set: map[string]string{"API_KEY": "secret"}}); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(at); info.Mode().Perm() != 0o600 {
+		t.Fatalf("profile mode after write = %v, want 0600", info.Mode().Perm())
+	}
+}

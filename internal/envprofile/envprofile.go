@@ -169,7 +169,13 @@ func Write(dir string, p *Profile) error {
 			fmt.Fprintf(&b, "%s = %q\n", key, p.Set[key])
 		}
 	}
-	return os.WriteFile(at, []byte(b.String()), 0o600)
+	// os.WriteFile keeps the mode of a file that already exists, so one
+	// created 0644 by an editor or shell redirection would keep publishing
+	// every value written into it; chmod after the write, unconditionally.
+	if err := os.WriteFile(at, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(at, 0o600)
 }
 
 // Delete removes a profile file. Removing one that does not exist is not an

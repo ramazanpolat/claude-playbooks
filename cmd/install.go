@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -156,9 +157,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Stage 3: move staged tree to its final destination.
-	if err := copyDir(copySrc, dest); err != nil {
-		os.RemoveAll(dest)
+	// Stage 3: assemble the install in a dot-prefixed directory beside its
+	// destination -- discovery skips dot entries, so nothing can launch it
+	// while its manifest still carries the source's name, [env] block, or
+	// missing [source] -- then rename it into the registry in one step.
+	// Launches take no lock; a discoverable half-sanitized install would be
+	// live for the duration of the copy, and permanently after a crash.
+	if err := os.MkdirAll(playbooksDir, 0o755); err != nil {
+		return err
+	}
+	stage := filepath.Join(playbooksDir, "."+targetName+".install-"+strconv.Itoa(os.Getpid()))
+	os.RemoveAll(stage)
+	if err := copyDir(copySrc, stage); err != nil {
+		os.RemoveAll(stage)
 		return fmt.Errorf("failed to copy from staging: %w", err)
 	}
 
@@ -195,18 +206,28 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		needsManifestWrite = true
 	}
 	if needsManifestWrite {
-		if err := manifest.Write(dest, mPre); err != nil {
-			os.RemoveAll(dest)
+		if err := manifest.Write(stage, mPre); err != nil {
+			os.RemoveAll(stage)
 			return fmt.Errorf("failed to write manifest: %w", err)
 		}
 	}
 
-	// Read the optional .playbook at the install destination. A missing
+	// Read the optional .playbook of the assembled install. A missing
 	// manifest is fine: the installed directory is a valid flat playbook.
-	m, err := manifest.Read(dest)
+	m, err := manifest.Read(stage)
 	if err != nil {
-		os.RemoveAll(dest)
+		os.RemoveAll(stage)
 		return err
+	}
+	if m != nil && m.Subdir != "" {
+		if _, err := manifest.ResolveSubdir(stage, "subdir", m.Subdir); err != nil {
+			os.RemoveAll(stage)
+			return err
+		}
+	}
+	if err := os.Rename(stage, dest); err != nil {
+		os.RemoveAll(stage)
+		return fmt.Errorf("failed to activate %s: %w", dest, err)
 	}
 	configDest := dest
 	if m != nil && m.Subdir != "" {
@@ -256,8 +277,8 @@ func warnIfNoClaudeMD(dir, name string) {
 }
 
 // stageSource fetches the source into a working directory and returns its
-// path. For Git URLs it clones into a temp dir; for local paths it returns
-// the resolved source directory directly. The cleanup func removes any temp
+// path. For Git URLs it clones into a temp dir; for local paths it copies
+// the resolved source directory into one. The cleanup func removes any temp
 // state created.
 func stageSource(source string, isGit bool, ref, subdir string) (string, func(), error) {
 	if isGit {
@@ -328,7 +349,21 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 			return "", func() {}, err
 		}
 	}
-	return work, func() {}, nil
+	// A local source is staged into a private copy, never used in place:
+	// callers rewrite the staged manifest (install-local name, source,
+	// [env]) before it goes live, and doing that in the pilot's own source
+	// directory would mutate it and leak one install's configuration into
+	// every later install from it.
+	tmp, err := os.MkdirTemp("", "claude-playbook-stage-")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { os.RemoveAll(tmp) }
+	if err := copyDir(work, tmp); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to stage %s: %w", source, err)
+	}
+	return tmp, cleanup, nil
 }
 
 func deriveNameFromLocal(source string) string {

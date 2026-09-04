@@ -205,9 +205,13 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 		var perr error
 		menv, perr = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
 		if perr != nil {
-			// Reported ahead of a manifest read error: it is the one the
-			// launch refuses on.
-			menv, merr = nil, perr
+			// The launch will be refused on this error (see cmd/run.go), so
+			// stop HERE, before credential sync or quarantine touches the
+			// config dir: a broken profile meant to unset the token must not
+			// cost the playbook its stored grant on a launch that never
+			// happens. The returned env is still well-formed.
+			env = removeEnv(env, "CLAUDE_CONFIG_DIR")
+			return append(env, "CLAUDE_CONFIG_DIR="+configDir), perr
 		}
 	}
 

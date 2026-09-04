@@ -293,3 +293,43 @@ func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
 		t.Fatal("the broken manifest went unreported")
 	}
 }
+
+// A profile error refuses the launch; the refusal must come BEFORE any
+// credential mutation, or a broken profile meant to unset the token costs
+// the playbook its stored grant on a launch that never happens.
+func TestProfileErrorStopsBeforeAuthMutation(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenPath, []byte("sk-ant-oat01-FROMFILE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tokenPath)
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	if err := os.MkdirAll(envprofile.Dir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(envprofile.Dir(root), "broken.toml"), []byte("= [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := filepath.Join(root, "pb")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, configDir, "[env]\nprofiles = [\"broken\"]\n")
+	store := writeStore(t, configDir, `{`+grantJSON+`}`)
+
+	env, err := PrepareLaunchEnv(configDir)
+	if !errors.Is(err, envprofile.ErrProfile) {
+		t.Fatalf("err = %v, want ErrProfile", err)
+	}
+	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
+		t.Fatal("stored grant quarantined although the launch is refused")
+	}
+	if got, _ := envValue(t, env, "CLAUDE_CONFIG_DIR"); got != configDir {
+		t.Fatalf("returned env not well-formed: %v", env)
+	}
+}
