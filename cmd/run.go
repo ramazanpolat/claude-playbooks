@@ -27,8 +27,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// A --help BEFORE the playbook name prints usage; after the name it
-	// belongs to claude (rest[0] is the name by then).
+	// Launch flags may precede the name (`run --env K=V name`) or follow it
+	// directly (`name --env K=V ...`, which is what a launcher passes).
+	rest, layers, err := takeLaunchFlags(rest)
+	if err != nil {
+		return err
+	}
+	// A --help at the NAME position prints usage, whether or not launch
+	// flags preceded it; after the name it belongs to claude.
 	if restRequestsHelp(rest) {
 		fmt.Println("Usage: claude-playbook run " + launchFlagsUsage + " <name> [claude-flags...]")
 		fmt.Println()
@@ -43,12 +49,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Launch flags may precede the name (`run --env K=V name`) or follow it
-	// directly (`name --env K=V ...`, which is what a launcher passes).
-	rest, layers, err := takeLaunchFlags(rest)
-	if err != nil {
-		return err
-	}
 	if len(rest) == 0 {
 		return fmt.Errorf("playbook name required\nUsage: claude-playbook run " + launchFlagsUsage + " <name> [claude-flags...]")
 	}

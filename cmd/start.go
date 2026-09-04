@@ -40,8 +40,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 			rest = append(rest, args[i])
 		}
 	}
-	// --help BEFORE the path prints usage; after it, the flag is forwarded
-	// to claude.
+	rest, layers, err := takeLaunchFlags(rest)
+	if err != nil {
+		return err
+	}
+	// A --help at the PATH position prints usage, whether or not launch
+	// flags preceded it; after the path, the flag is forwarded to claude.
 	if restRequestsHelp(rest) {
 		fmt.Println("Usage: claude-playbook start " + launchFlagsUsage + " <path> [claude-flags...]")
 		fmt.Println()
@@ -54,10 +58,6 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println("Flags:")
 		fmt.Println("  --delete   Delete the directory when the session ends")
 		return nil
-	}
-	rest, layers, err := takeLaunchFlags(rest)
-	if err != nil {
-		return err
 	}
 
 	if len(rest) == 0 {
