@@ -1,6 +1,8 @@
 package manifest
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -31,5 +33,16 @@ func TestEnvValuesRoundTripThroughTOML(t *testing.T) {
 	}
 	if got := QuoteTOML("\x1b[0m"); got != `"\u001B[0m"` {
 		t.Fatalf("QuoteTOML(escape) = %s", got)
+	}
+	// NUL is valid TOML (\u0000) but os/exec refuses it in an environment:
+	// rejected on write, and on read of a hand-edited manifest.
+	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Set: map[string]string{"NUL": "a\x00b"}}}); err == nil {
+		t.Fatal("NUL value accepted on write")
+	}
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("name = \"pb\"\n[env.set]\nNUL = \"a\\u0000b\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(dir); err == nil {
+		t.Fatal("NUL value accepted on read")
 	}
 }

@@ -807,7 +807,8 @@ preserve = ["settings.json"]
 - An `env` key is not a valid variable name → `invalid .playbook at <path>: env.set: invalid environment variable name "<key>"`
 - An `env` key is `CLAUDE_CONFIG_DIR` → `invalid .playbook at <path>: env.set: CLAUDE_CONFIG_DIR is managed by claude-playbook and cannot be overridden`
 - A key appears in both `env.set` and `env.unset` → `invalid .playbook at <path>: env: <key> is both set and unset`
-- An `env.set` value is not valid UTF-8 → `invalid .playbook at <path>: env.set: value of <key> is not valid UTF-8 and cannot be stored in a manifest`. Any other value round-trips: control characters are written as TOML `\uXXXX` escapes.
+- An `env.set` value is not valid UTF-8 → `invalid .playbook at <path>: env.set: value of <key> is not valid UTF-8 and cannot be stored in a manifest`.
+- An `env.set` value contains a NUL byte → `invalid .playbook at <path>: env.set: value of <key> contains a NUL byte, which cannot be passed in an environment` (refused on write and on read; a NUL in an environment fails every launch). Any other value round-trips: control characters are written as TOML `\uXXXX` escapes.
 - An `env.profiles` entry is not a valid profile name → `invalid .playbook at <path>: env.profiles: invalid profile name "<name>": use letters, digits, dots, dashes, underscores`
 
 ---

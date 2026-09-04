@@ -153,12 +153,17 @@ func QuoteTOML(s string) string {
 	return b.String()
 }
 
-// ValidateEnvValue reports whether value can be stored: TOML strings must be
-// valid UTF-8, and a value that cannot be written faithfully must be refused
-// up front rather than corrupt the manifest.
+// ValidateEnvValue reports whether value can be stored AND passed on: TOML
+// strings must be valid UTF-8, so a value that cannot be written faithfully
+// is refused rather than corrupt the manifest; and a NUL byte, which TOML
+// can carry as \u0000, would make os/exec reject the child's environment
+// and fail every launch, so it is refused on read as well as on write.
 func ValidateEnvValue(key, value string) error {
 	if !utf8.ValidString(value) {
 		return fmt.Errorf("value of %s is not valid UTF-8 and cannot be stored in a manifest", key)
+	}
+	if strings.ContainsRune(value, 0) {
+		return fmt.Errorf("value of %s contains a NUL byte, which cannot be passed in an environment", key)
 	}
 	return nil
 }
