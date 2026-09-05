@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"syscall"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -332,6 +334,14 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 	return backupPath, nil
 }
 
+// absentPath reports whether a stat error means "nothing at this path":
+// plain not-found, or a regular file where the path expects a directory
+// (ENOTDIR -- the install had a FILE named config and the source introduced
+// a config/ directory, so backup/config/private.json cannot exist).
+func absentPath(err error) bool {
+	return os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR)
+}
+
 // physicallyWithin reports whether the DIRECTORY holding p -- its parent, or
 // when that does not exist yet, the nearest existing ancestor -- resolves to
 // tree or below it with symlinks evaluated. tree is the top-level entry the
@@ -359,7 +369,7 @@ func physicallyWithin(tree, p string) (bool, error) {
 	for {
 		if real, err := filepath.EvalSymlinks(probe); err == nil {
 			return pathWithin(treeReal, real), nil
-		} else if !os.IsNotExist(err) {
+		} else if !absentPath(err) {
 			return false, err
 		}
 		parent := filepath.Dir(probe)
@@ -515,7 +525,7 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 	src := filepath.Join(backup, filepath.FromSlash(rel))
 	dst := filepath.Join(root, filepath.FromSlash(rel))
 	info, err := os.Lstat(src)
-	if os.IsNotExist(err) {
+	if absentPath(err) {
 		// Restore the previous ABSENCE. If the top-level entry is already
 		// gone (an earlier preserved path removed it) there is nothing left
 		// to check or remove.

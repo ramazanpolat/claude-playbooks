@@ -365,3 +365,27 @@ func TestOverlayPreserveAncestorAndDescendant(t *testing.T) {
 		t.Fatalf("descendant after its removed ancestor failed the update: %v", err)
 	}
 }
+
+// The install had a FILE named config; the source introduces a config/
+// directory and config/private.json is preserved. The backup path for the
+// preserved file fails with ENOTDIR, which must read as "absent", not as an
+// error that fails the update.
+func TestOverlayPreserveThroughFormerFileIsAbsence(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(live, "config"), "i was a file")
+	writeFile(t, filepath.Join(work, "config", "private.json"), `{"upstream":true}`)
+	writeFile(t, filepath.Join(work, "config", "public.json"), `{"ok":true}`)
+
+	if _, err := overlaySource(work, live, []string{"config/private.json"}); err != nil {
+		t.Fatalf("ENOTDIR on the backup path failed the update: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(live, "config", "private.json")); err == nil {
+		t.Fatal("preserved path's previous absence was not restored")
+	}
+	if _, err := os.Stat(filepath.Join(live, "config", "public.json")); err != nil {
+		t.Fatalf("unpreserved sibling from the source missing: %v", err)
+	}
+}
