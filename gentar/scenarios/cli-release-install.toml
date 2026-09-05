@@ -15,7 +15,7 @@ agent = "shell"
 
 [oracle]
 steps = [
-  "curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v3.6.0/install.sh | VERSION=v3.6.0 sh",
+  "curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v3.7.0/install.sh | VERSION=v3.7.0 sh",
 ]
 
 [[verify.files]]
@@ -26,4 +26,4 @@ path = "~/.local/bin/cpb"
 
 [[verify.commands]]
 command = "claude-playbook --version"
-contains = "v3.6.0"
+contains = "v3.7.0"
