@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 func mkdirs(t *testing.T, dirs ...string) {
@@ -315,5 +316,52 @@ func TestStartRejectsDelimiterAsPath(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(scratch, "--", "keep.txt")); err != nil {
 		t.Fatal("a directory named -- was deleted")
+	}
+}
+
+// A preserve list naming both an entry and a descendant of it, with the source
+// introducing that entry into an install that lacked it: the first restore
+// removes the introduced tree, and the descendant must not fail the update by
+// finding its ancestor gone. Both orderings are covered by the collapse.
+func TestOverlayPreserveAncestorAndDescendant(t *testing.T) {
+	for _, list := range [][]string{
+		{"config", "config/private.json"},
+		{"config/private.json", "config"},
+	} {
+		root := t.TempDir()
+		live := filepath.Join(root, "live")
+		work := filepath.Join(root, "work")
+		mkdirs(t, live, work)
+		writeFile(t, filepath.Join(work, "config", "private.json"), `{"upstream":true}`)
+		writeFile(t, filepath.Join(work, "CLAUDE.md"), "new")
+
+		got, err := preservePaths(live, &manifest.Manifest{Update: &manifest.Update{Preserve: list}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rel := range got {
+			if rel == "config/private.json" {
+				t.Fatalf("descendant not collapsed into its preserved ancestor: %v", got)
+			}
+		}
+		if _, err := overlaySource(work, live, got); err != nil {
+			t.Fatalf("%v: %v", list, err)
+		}
+		if _, err := os.Lstat(filepath.Join(live, "config")); err == nil {
+			t.Fatalf("%v: introduced config/ was adopted", list)
+		}
+		if body, _ := os.ReadFile(filepath.Join(live, "CLAUDE.md")); string(body) != "new" {
+			t.Fatalf("%v: update content missing", list)
+		}
+	}
+	// And the raw case without the collapse: an already-absent ancestor is
+	// treated as restored, not as an escape.
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(work, "config", "private.json"), `{"upstream":true}`)
+	if _, err := overlaySource(work, live, []string{"config", "config/private.json"}); err != nil {
+		t.Fatalf("descendant after its removed ancestor failed the update: %v", err)
 	}
 }

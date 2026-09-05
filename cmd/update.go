@@ -422,7 +422,23 @@ func preservePaths(root string, m *manifest.Manifest) ([]string, error) {
 			add(rel)
 		}
 	}
-	return out, nil
+	// A descendant of a preserved ancestor is covered by it: restoring the
+	// ancestor restores (or removes) the descendant too, and a second pass
+	// would find the ancestor already gone. Drop such entries.
+	var collapsed []string
+	for _, rel := range out {
+		covered := false
+		for _, other := range out {
+			if other != rel && strings.HasPrefix(rel, other+"/") {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			collapsed = append(collapsed, rel)
+		}
+	}
+	return collapsed, nil
 }
 
 // runMigrations hands off to the playbook's own migration runner. Migrations
@@ -498,21 +514,39 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 
 	src := filepath.Join(backup, filepath.FromSlash(rel))
 	dst := filepath.Join(root, filepath.FromSlash(rel))
-	if top != rel {
-		// A nested path: every ancestor between the entry and the file must
-		// stay inside that entry, in the live tree and in the backup.
-		if within, err := physicallyWithin(filepath.Join(root, top), dst); err != nil {
-			return err
-		} else if !within {
-			return fmt.Errorf("%s resolves outside %s/ after the update (a symlinked ancestor); refusing to restore through it", rel, top)
-		}
-	}
 	info, err := os.Lstat(src)
 	if os.IsNotExist(err) {
-		return removeAny(dst) // restore the previous ABSENCE
+		// Restore the previous ABSENCE. If the top-level entry is already
+		// gone (an earlier preserved path removed it) there is nothing left
+		// to check or remove.
+		if _, terr := os.Lstat(filepath.Join(root, top)); os.IsNotExist(terr) {
+			return nil
+		}
+		if top != rel {
+			if within, err := physicallyWithin(filepath.Join(root, top), dst); err != nil {
+				return err
+			} else if !within {
+				return fmt.Errorf("%s resolves outside %s/ after the update (a symlinked ancestor); refusing to restore through it", rel, top)
+			}
+		}
+		return removeAny(dst)
 	}
 	if err != nil {
 		return err
+	}
+	if top != rel {
+		// A nested path: every ancestor between the entry and the file must
+		// stay inside that entry, in the live tree and in the backup. A
+		// top-level entry that no longer exists is fine: MkdirAll below
+		// recreates plain directories, and nothing can be aliased through
+		// a tree that is not there.
+		if _, terr := os.Lstat(filepath.Join(root, top)); terr == nil {
+			if within, err := physicallyWithin(filepath.Join(root, top), dst); err != nil {
+				return err
+			} else if !within {
+				return fmt.Errorf("%s resolves outside %s/ after the update (a symlinked ancestor); refusing to restore through it", rel, top)
+			}
+		}
 	}
 	if top != rel {
 		if within, err := physicallyWithin(filepath.Join(backup, top), src); err != nil {
