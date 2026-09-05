@@ -188,9 +188,12 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			// Judged only against a grant that exists: with no grant the
 			// row already says "no login", and a leftover marker from some
 			// earlier grant would otherwise read as fresh.
-			if d.Status == "auth_required" && r.usesStoredLogin() && r.HasGrant {
+			// Freshness needs BOTH instants: a grant with no expiry or a
+			// marker with no since cannot be ordered, and an unprovable
+			// marker is reported as stale rather than as a live failure.
+			if d.Status == "auth_required" && r.usesStoredLogin() && r.HasGrant && !r.ExpiresAt.IsZero() && !r.DaemonSince.IsZero() {
 				refreshAt := r.ExpiresAt.Add(-daemonRefreshLead)
-				r.ReauthRequired = r.ExpiresAt.IsZero() || !r.DaemonSince.Before(refreshAt)
+				r.ReauthRequired = !r.DaemonSince.Before(refreshAt)
 			}
 		}
 	}

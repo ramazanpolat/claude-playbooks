@@ -255,3 +255,25 @@ func TestInspectNoGrantIgnoresDaemonMarker(t *testing.T) {
 		t.Fatalf("%+v note=%q", r, r.NeedsAttention())
 	}
 }
+
+// A marker that cannot be ordered against the grant (no expiresAt, or no
+// since) is stale, never a live failure.
+func TestInspectUnorderableDaemonMarkerIsStale(t *testing.T) {
+	now := time.Now()
+	for name, fixture := range map[string]struct{ store, marker string }{
+		"grant without expiry": {`{"claudeAiOauth":{"accessToken":"x"}}`, `{"status":"auth_required","since":` + itoa(now.UnixMilli()) + `}`},
+		"marker without since": {`{"claudeAiOauth":{"accessToken":"x","expiresAt":` + itoa(now.Add(time.Hour).UnixMilli()) + `}}`, `{"status":"auth_required"}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, dir := inspectFixture(t)
+			writeStore(t, dir, fixture.store)
+			if err := os.WriteFile(filepath.Join(dir, "daemon-auth-status.json"), []byte(fixture.marker), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			r := Inspect("pb", dir, now)
+			if r.ReauthRequired || r.DaemonStatus != "auth_required" {
+				t.Fatalf("%+v", r)
+			}
+		})
+	}
+}
