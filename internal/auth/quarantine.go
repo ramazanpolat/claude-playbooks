@@ -69,13 +69,18 @@ func QuarantineStoredOAuth(configDir string) error {
 	}
 	isLink := info.Mode()&os.ModeSymlink != 0
 
-	// The reverse alias: ~/.claude/.credentials.json may itself be a symlink
-	// INTO this config dir (a shared store kept elsewhere), in which case
-	// this dir's REGULAR file is the global store's target and stripping it
-	// strips the global grant. Only a regular file can be that target: the
-	// ordinary outgoing playbook link (.credentials.json -> ~/.claude/...)
-	// resolves to the same file too, and must still be detached below.
+	// The reverse alias: ~/.claude/.credentials.json may itself resolve INTO
+	// this config dir (a shared store kept elsewhere). Then this dir's entry
+	// is part of the global store -- its regular-file target, or a symlink
+	// the global path passes through on the way there -- and removing or
+	// rewriting it strips or dangles the global grant. The ordinary OUTGOING
+	// playbook link (.credentials.json -> ~/.claude/...) resolves to the
+	// same file too but is not on the global path's own chain, and must
+	// still be detached below.
 	if !isLink && isGlobalCredentialsFile(path) {
+		return nil
+	}
+	if isLink && inGlobalCredentialsChain(path) {
 		return nil
 	}
 
@@ -168,6 +173,44 @@ func isGlobalCredentialsFile(p string) bool {
 		return false
 	}
 	return os.SameFile(gi, pi)
+}
+
+// inGlobalCredentialsChain reports whether p is one of the symlinks the global
+// credentials path passes through while resolving (~/.claude/.credentials.json
+// -> p -> ... -> store). Detaching such a link would leave the global path
+// dangling. The global entry itself and every intermediate hop are compared by
+// identity (Lstat, so a link is compared as the link it is).
+func inGlobalCredentialsChain(p string) bool {
+	global, err := globalClaudeDir()
+	if err != nil || global == "" {
+		return false
+	}
+	pi, err := os.Lstat(p)
+	if err != nil {
+		return false
+	}
+	cur := filepath.Join(global, CredentialsFileName)
+	for hops := 0; hops < 40; hops++ {
+		ci, err := os.Lstat(cur)
+		if err != nil {
+			return false
+		}
+		if os.SameFile(pi, ci) {
+			return true
+		}
+		if ci.Mode()&os.ModeSymlink == 0 {
+			return false // reached the regular file without meeting p
+		}
+		next, err := os.Readlink(cur)
+		if err != nil {
+			return false
+		}
+		if !filepath.IsAbs(next) {
+			next = filepath.Join(filepath.Dir(cur), next)
+		}
+		cur = next
+	}
+	return false
 }
 
 // sameDir reports whether a and b resolve to the same directory. Symlinks are

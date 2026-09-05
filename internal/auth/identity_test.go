@@ -172,3 +172,66 @@ func TestLinkCredentialsDoesNotCloseSymlinkCycle(t *testing.T) {
 		t.Fatalf("global store unreadable after linking: %v %q", err, body)
 	}
 }
+
+// Quarantine of the MIDDLE directory in a chain the global store passes
+// through (~/.claude/.credentials.json -> shared/.credentials.json -> real
+// store) must leave that link alone, for a grant-only store and for one with
+// sibling keys; the ordinary outgoing playbook link is still detached.
+func TestQuarantineLeavesGlobalChainLinksAlone(t *testing.T) {
+	for name, body := range map[string]string{
+		"grant only":   `{` + grantJSON + `}`,
+		"sibling keys": `{` + grantJSON + `,` + mcpJSON + `}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			real := filepath.Join(home, "real-store.json")
+			if err := os.WriteFile(real, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			shared := filepath.Join(home, "shared")
+			global := filepath.Join(home, ".claude")
+			if err := os.MkdirAll(shared, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(global, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			sharedLink := filepath.Join(shared, CredentialsFileName)
+			if err := os.Symlink(real, sharedLink); err != nil {
+				t.Fatal(err)
+			}
+			globalLink := filepath.Join(global, CredentialsFileName)
+			if err := os.Symlink(sharedLink, globalLink); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := QuarantineStoredOAuth(shared); err != nil {
+				t.Fatalf("quarantine: %v", err)
+			}
+			if got, err := os.Readlink(sharedLink); err != nil || got != real {
+				t.Fatalf("middle link of the global chain was touched: %q %v", got, err)
+			}
+			if _, present := readStore(t, globalLink)["claudeAiOauth"]; !present {
+				t.Fatal("the global grant is gone or unreadable through the chain")
+			}
+
+			// An ordinary playbook linking to the global path is NOT on the
+			// chain: it must still be detached.
+			pb := filepath.Join(home, "playbook")
+			if err := os.MkdirAll(pb, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			pbLink := filepath.Join(pb, CredentialsFileName)
+			if err := os.Symlink(globalLink, pbLink); err != nil {
+				t.Fatal(err)
+			}
+			if err := QuarantineStoredOAuth(pb); err != nil {
+				t.Fatalf("quarantine playbook: %v", err)
+			}
+			if _, err := os.Lstat(pbLink); !os.IsNotExist(err) {
+				t.Fatal("the ordinary outgoing link was not detached")
+			}
+		})
+	}
+}
