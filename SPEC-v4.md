@@ -652,7 +652,7 @@ claude-playbook auth status --claude        # add 'claude auth status --json' pe
 
 When a long-lived token file exists, a trailing line names it and notes that its own expiry is not recorded anywhere.
 
-`--json` emits one object per row with the raw fields (`mode`, `store`, `store_target`, `has_grant`, `expires_at`, `expired`, `daemon_status`, `daemon_since`, `reauth_required`, `token_file`, and `claude` when requested).
+`--json` emits one object per row with the raw fields (`name`, `dir`, `mode`, `mode_error`, `isolated`, `store`, `store_target`, `has_grant`, `expires_at`, `expired`, `daemon_status`, `daemon_since`, `reauth_required`, `token_file`, and `claude` when requested). `reauth_required` is only ever true for a stored-login mode with a grant present.
 
 **Errors:**
 - Named playbook not found → `unknown playbook "x". Run 'claude-playbook list' to see available playbooks`

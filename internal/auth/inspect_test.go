@@ -241,3 +241,17 @@ func TestInspectIsolatedWithOwnTokenIsOwnToken(t *testing.T) {
 		t.Fatalf("%+v note=%q", r, r.NeedsAttention())
 	}
 }
+
+// With no grant at all, a leftover daemon marker is not a live re-auth
+// signal: the row already says "no login".
+func TestInspectNoGrantIgnoresDaemonMarker(t *testing.T) {
+	_, dir := inspectFixture(t)
+	now := time.Now()
+	if err := os.WriteFile(filepath.Join(dir, "daemon-auth-status.json"), []byte(`{"status":"auth_required","since":`+itoa(now.UnixMilli())+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := Inspect("pb", dir, now)
+	if r.Mode != ModeSharedLogin || r.HasGrant || r.ReauthRequired || r.NeedsAttention() != "no login" {
+		t.Fatalf("%+v note=%q", r, r.NeedsAttention())
+	}
+}

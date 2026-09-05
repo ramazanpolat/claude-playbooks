@@ -185,7 +185,10 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			// The marker concerns the STORED login. Under a token mode the
 			// launch quarantines that login and never uses it, so the
 			// marker cannot mean "this playbook will fail to authenticate".
-			if d.Status == "auth_required" && r.usesStoredLogin() {
+			// Judged only against a grant that exists: with no grant the
+			// row already says "no login", and a leftover marker from some
+			// earlier grant would otherwise read as fresh.
+			if d.Status == "auth_required" && r.usesStoredLogin() && r.HasGrant {
 				refreshAt := r.ExpiresAt.Add(-daemonRefreshLead)
 				r.ReauthRequired = r.ExpiresAt.IsZero() || !r.DaemonSince.Before(refreshAt)
 			}
