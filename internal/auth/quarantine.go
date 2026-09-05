@@ -56,13 +56,6 @@ func QuarantineStoredOAuth(configDir string) error {
 	}
 
 	path := filepath.Join(configDir, CredentialsFileName)
-	// The reverse alias: ~/.claude/.credentials.json may itself be a symlink
-	// INTO this config dir (a shared store kept elsewhere), in which case
-	// this dir's regular file is the global store's target and stripping it
-	// strips the global grant. Identity of the file, not only of the dir.
-	if isGlobalCredentialsFile(path) {
-		return nil
-	}
 
 	// Lstat, not Stat: a symlink must be recognised before anything is written,
 	// or the rewrite below would follow it and strip the GLOBAL credentials --
@@ -75,6 +68,16 @@ func QuarantineStoredOAuth(configDir string) error {
 		return err
 	}
 	isLink := info.Mode()&os.ModeSymlink != 0
+
+	// The reverse alias: ~/.claude/.credentials.json may itself be a symlink
+	// INTO this config dir (a shared store kept elsewhere), in which case
+	// this dir's REGULAR file is the global store's target and stripping it
+	// strips the global grant. Only a regular file can be that target: the
+	// ordinary outgoing playbook link (.credentials.json -> ~/.claude/...)
+	// resolves to the same file too, and must still be detached below.
+	if !isLink && isGlobalCredentialsFile(path) {
+		return nil
+	}
 
 	data, err := os.ReadFile(path) // follows the link deliberately: we need its content
 	if err != nil {

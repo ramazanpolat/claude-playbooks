@@ -102,3 +102,73 @@ func TestQuarantineRefusesGlobalStoreTargetInAnotherDir(t *testing.T) {
 		t.Fatal("the global store's target was stripped through the directory that holds it")
 	}
 }
+
+// The ordinary playbook layout under a token launch: .credentials.json is an
+// OUTGOING symlink to the real global store under $HOME/.claude. It resolves
+// to the global file, and must still be detached -- the fixture puts the
+// global store where it really lives, which earlier symlink tests did not.
+func TestQuarantineStillDetachesOutgoingLinkToRealGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := writeStore(t, global, `{`+grantJSON+`}`)
+	pb := filepath.Join(home, "playbook")
+	if err := os.MkdirAll(pb, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(pb, CredentialsFileName)
+	if err := os.Symlink(store, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := QuarantineStoredOAuth(pb); err != nil {
+		t.Fatalf("quarantine: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatal("the outgoing link to the global store was not detached; the stale grant stays adoptable")
+	}
+	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
+		t.Fatal("the global store was stripped through the link")
+	}
+}
+
+// A symlink chain the global store passes through: ~/.claude/.credentials.json
+// -> shared/.credentials.json -> real store. Linking `shared` to the global
+// path would close a cycle; it must recognise the same file and do nothing.
+func TestLinkCredentialsDoesNotCloseSymlinkCycle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	real := filepath.Join(home, "real-store.json")
+	if err := os.WriteFile(real, []byte(testCreds), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(home, "shared")
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sharedLink := filepath.Join(shared, CredentialsFileName)
+	if err := os.Symlink(real, sharedLink); err != nil {
+		t.Fatal(err)
+	}
+	globalLink := filepath.Join(global, CredentialsFileName)
+	if err := os.Symlink(sharedLink, globalLink); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LinkCredentials(shared, globalLink); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if got, _ := os.Readlink(sharedLink); got != real {
+		t.Fatalf("shared link rewritten to %q; a cycle through the global path", got)
+	}
+	if body, err := os.ReadFile(globalLink); err != nil || string(body) != testCreds {
+		t.Fatalf("global store unreadable after linking: %v %q", err, body)
+	}
+}

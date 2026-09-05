@@ -121,9 +121,13 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 	targetCreds := filepath.Join(targetDir, CredentialsFileName)
 	targetLinfo, err := os.Lstat(targetCreds)
 	exists := err == nil
-	if exists && targetLinfo.Mode()&os.ModeSymlink == 0 {
-		// A regular file that IS the global store (reached through some
-		// other alias) must never be removed or copied over itself.
+	if exists {
+		// Whatever the target's store is spelled as -- a regular file that
+		// IS the global store reached through an alias, or a symlink chain
+		// the global store itself passes through (~/.claude/.credentials.json
+		// -> here -> real store) -- if it already resolves to the same file
+		// as the source there is nothing to link, and replacing it would
+		// either destroy the store or close a symlink cycle.
 		if ti, err := os.Stat(targetCreds); err == nil {
 			if si, err := os.Stat(sourceAbs); err == nil && os.SameFile(ti, si) {
 				return nil
