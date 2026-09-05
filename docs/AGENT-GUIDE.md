@@ -21,6 +21,15 @@ cat ~/.claude-playbooks/<name>/.playbook   # the manifest, TOML; absent for a fl
 
 `info` prints `Update from: (no [source] metadata; cannot update)` when a playbook cannot be updated. `Env:` lines appear only when the playbook declares overrides.
 
+Before a headless run that must not hit a login wall, check authentication state without launching:
+
+```bash
+cpb auth status --json           # per playbook: mode, store, expires_at, reauth_required
+cpb auth status <name>           # one row, human-readable
+```
+
+A row with `"mode":"error"` or `"reauth_required":true`, or an `own-login`/`shared-login` row with `"expired":true`, will not authenticate headlessly; report it instead of retrying.
+
 ## Launch a session headlessly
 
 `run` forwards every argument after the name straight to `claude`, so Claude Code's own headless flags apply:
