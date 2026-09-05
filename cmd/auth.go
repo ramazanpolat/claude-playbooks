@@ -166,7 +166,7 @@ func printAuthTable(rows []authRow, now time.Time) {
 		}
 		note := r.NeedsAttention()
 		if r.Mode == auth.ModeError {
-			note = r.ModeError
+			note = "launch refused: " + r.ModeError
 		}
 		mode := string(r.Mode)
 		if r.Isolated && r.Mode != auth.ModeIsolated {

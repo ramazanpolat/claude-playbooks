@@ -277,3 +277,14 @@ func TestInspectUnorderableDaemonMarkerIsStale(t *testing.T) {
 		})
 	}
 }
+
+// Isolation is reported even when the launch would be refused for a profile
+// error: it is a manifest property, not an outcome of profile resolution.
+func TestInspectReportsIsolationDespiteProfileError(t *testing.T) {
+	_, dir := inspectFixture(t)
+	writeManifest(t, dir, "isolate_auth = true\n\n[env]\nprofiles = [\"ghost\"]\n")
+	r := Inspect("pb", dir, time.Now())
+	if r.Mode != ModeError || !r.Isolated {
+		t.Fatalf("%+v", r)
+	}
+}

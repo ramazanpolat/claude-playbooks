@@ -101,7 +101,9 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		}
 	} else {
 		// Mode: the same decision PrepareLaunchEnv makes, minus its side
-		// effects.
+		// effects. Isolation is a manifest property and is reported even
+		// when profile resolution fails.
+		r.Isolated = isAuthIsolated(configDir)
 		var menv *manifest.Env
 		if m, _ := manifest.Nearest(configDir); m != nil {
 			var err error
@@ -115,7 +117,6 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			if menv != nil {
 				_, setsToken = menv.Set[OAuthTokenEnv]
 			}
-			r.Isolated = isAuthIsolated(configDir)
 			switch {
 			case setsToken && manifestToken(menv) != "":
 				// Honoured on the isolated path too: PrepareLaunchEnv injects

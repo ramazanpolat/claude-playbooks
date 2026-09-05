@@ -51,6 +51,19 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 	if strings.Contains(out, "x\"") || strings.Contains(out, "accessToken") {
 		t.Fatal("table leaked store content")
 	}
+	// An error row carries the documented note prefix.
+	broken := seedFlatPlaybook(t, "broken")
+	if err := manifest.Write(broken, &manifest.Manifest{Name: "broken", Env: &manifest.Env{Profiles: []string{"ghost"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errOut := captureStdout(t, func() {
+		if err := runAuthStatus(nil, []string{"broken"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(errOut, "launch refused: env profile \"ghost\" not found") {
+		t.Fatalf("error row note:\n%s", errOut)
+	}
 
 	authStatusJSON = true
 	t.Cleanup(func() { authStatusJSON = false })
