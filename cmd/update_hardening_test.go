@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
 
 func mkdirs(t *testing.T, dirs ...string) {
@@ -188,5 +190,29 @@ func TestStartDeleteIsNotTakenFromClaudeArgs(t *testing.T) {
 		if _, err := os.Stat(cfg); err == nil {
 			t.Fatalf("%v: directory survived an intentional --delete", args)
 		}
+	}
+}
+
+// A fresh install takes the SOURCE root's mode even though staging goes
+// through a 0700 MkdirTemp directory: only the live-update overlay keeps an
+// existing root's mode.
+func TestLocalInstallTakesSourceRootMode(t *testing.T) {
+	resetCommandTestState(t)
+	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	source := filepath.Join(t.TempDir(), "src")
+	writeFile(t, filepath.Join(source, "CLAUDE.md"), "x")
+	if err := os.Chmod(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installNoAlias = true
+	if err := runInstall(nil, []string{source}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(config.PlaybooksDir, "src"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("installed root mode = %v, want the source's 0755 (staging's 0700 leaked)", info.Mode().Perm())
 	}
 }

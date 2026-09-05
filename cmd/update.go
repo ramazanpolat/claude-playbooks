@@ -320,7 +320,7 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 		moved[name] = true
 	}
 
-	if err := copyDir(work, root); err != nil {
+	if err := overlayDir(work, root); err != nil {
 		return fail(fmt.Errorf("failed to apply update: %w", err))
 	}
 
