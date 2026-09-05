@@ -199,6 +199,22 @@ The modes this gives you, per playbook:
 
 The unset and set forms can come from an [env profile](#env-profiles-define-once-attach-to-many) shared by several playbooks.
 
+See where every playbook stands, without launching anything:
+
+```bash
+cpb auth status
+```
+
+```text
+NAME               MODE          STORE                                   EXPIRES   DAEMON  NOTE
+~/.claude          shared-login  file                                    in 6h12m  -
+kommander          token         absent                                  -         -
+kommander-9router  own-login     symlink -> ~/.claude/.credentials.json  in 6h12m  -
+personal           isolated      file                                    in 22m    -
+```
+
+`MODE` is the decision `run` would make. `EXPIRES` is the stored grant's expiry. `DAEMON` reads Claude Code's own `daemon-auth-status.json`, shown as `auth_required` only when the marker is newer than the current grant. `--json` for scripts, `--claude` to add `claude auth status` per directory.
+
 Two things to know about the shared-login mode. Claude Code namespaces its macOS Keychain entry per config directory and refreshes the OAuth grant from whichever directory hits expiry first; with many playbooks sharing one symlinked file, two concurrent refreshes can race and the loser's `invalid_grant` empties the shared file, logging every playbook out at once. That race is why the long-lived token path exists. And raw `claude` launches bypass all of the above: only launchers, `run`, and `start` prepare authentication.
 
 ### Create and run your own playbook

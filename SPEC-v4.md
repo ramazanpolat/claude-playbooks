@@ -73,7 +73,7 @@ A playbook's **name** is simply its directory name under the playbooks root:
 - `sre`
 - `dba`
 
-Names are used wherever a playbook is referenced: `run`, `delete`, `info`, `rename`, `alias`, `env`, `update`. Env profile names are a separate namespace (`env-profile`).
+Names are used wherever a playbook is referenced: `run`, `delete`, `info`, `rename`, `alias`, `env`, `auth status`, `update`. Env profile names are a separate namespace (`env-profile`).
 
 The charset is enforced for names being **created** (`create`, `install`, `link`, `rename`): a name must match `^[A-Za-z0-9_][A-Za-z0-9_-]*$` — letters, digits, underscores and dashes, starting with an alphanumeric or underscore. A playbook name is interpolated into a launcher command name, a `run <name>` argument, and commands printed for the user to paste, so shell metacharacters are rejected at the front door rather than escaped at each site. Names must not start with `.` (to avoid hidden directories) and must not contain `/` or `\` (names are single directory segments, never paths). Lookup paths (`delete`, discovery) only require a single path segment, so an existing playbook with an odd name can still be listed, run and removed.
 
@@ -624,7 +624,38 @@ Profile files are written mode `0600` and an existing file is tightened to it on
 **Errors:**
 - Unknown profile → `unknown env profile "glm". Create it with 'claude-playbook env-profile glm set KEY=VALUE'`
 - Delete while attached → `env profile "glm" is used by router, sre; detach it first with 'claude-playbook env <playbook> unuse glm'`
-- Invalid file on disk → `invalid env profile at <path>: <reason>` (listing and launch both fail loudly rather than skip it)
+- Invalid file on disk → `invalid env profile at <path>: TOML syntax error at line <n> (content not shown)` (listing and launch both fail loudly rather than skip it; the parser's message, which quotes file content, is never echoed)
+
+---
+
+### `claude-playbook auth status [name...]`
+
+Read-only view of how each playbook authenticates and what its stored login looks like. Nothing is written, no credential value is read into the output, no network call is made, no process is spawned unless `--claude` is given.
+
+```bash
+claude-playbook auth status                 # every playbook, ~/.claude first
+claude-playbook auth status sre router      # named ones
+claude-playbook auth status --json
+claude-playbook auth status --claude        # add 'claude auth status --json' per directory
+```
+
+**Columns:**
+
+| Column | Meaning |
+|--------|---------|
+| `MODE` | How a launch would authenticate, decided exactly as `run` decides it: `token` (machine-global long-lived token injected), `own-token` (a token the manifest or a profile sets), `own-login` (token unset for this playbook; stored login), `shared-login` (no token anywhere; stored login), `isolated` (`isolate_auth`), `error` (the launch would be refused, reason in `NOTE`). An isolated playbook whose manifest or profile sets a non-empty token is `own-token (isolated)`, matching the launch, which injects that token and quarantines the stored grant. For `~/.claude`, which claude-playbook does not launch, only an exported `CLAUDE_CODE_OAUTH_TOKEN` counts as `token`. |
+| `STORE` | What sits at `.credentials.json`: `symlink -> <target>`, `file`, `file (no grant)`, or `absent`. |
+| `EXPIRES` | The stored grant's `expiresAt` as `in 6h12m`, `expired`, `unknown`, or `-` when there is no grant. |
+| `DAEMON` | Claude Code's `daemon-auth-status.json`: `auth_required` when its `since` is at or after the current grant's refresh instant (`expiresAt` minus 4 minutes, the daemon's proactive-refresh lead) and the row is a stored-login mode, `<status> (stale)` otherwise (the file is never cleared on recovery, and under a token mode the stored login is quarantined and unused), `-` when absent. |
+| `NOTE` | `launch refused` (with a sanitized reason: no file content is ever echoed), `re-auth required`, `no login`, `grant expired (refreshes at launch if the refresh token is still valid)`, or empty. Token modes have no stored login to judge and show nothing. An explicitly empty token set by the manifest or a profile is `own-login`, matching the launch decision. |
+| `CLAUDE` | With `--claude`: `logged in, <subscription>`, `not logged in`, or `error: <reason>`. |
+
+When a long-lived token file exists, a trailing line names it and notes that its own expiry is not recorded anywhere.
+
+`--json` emits one object per row with the raw fields (`name`, `dir`, `mode`, `mode_error`, `isolated`, `store`, `store_target`, `has_grant`, `expires_at`, `expired`, `daemon_status`, `daemon_since`, `reauth_required`, `token_file`, and `claude` when requested). `reauth_required` is only ever true for a stored-login mode with a grant present whose `expiresAt` is known and a marker whose `since` is known; a marker that cannot be ordered against the grant is reported as stale.
+
+**Errors:**
+- Named playbook not found → `unknown playbook "x". Run 'claude-playbook list' to see available playbooks`
 
 ---
 
@@ -848,7 +879,7 @@ preserve = ["settings.json"]
 **Forward compatibility:** unknown fields are ignored. Manifest authors may include fields for future tool versions without breaking older installs.
 
 **Errors:**
-- Invalid TOML → `invalid .playbook at <path>: <reason>`
+- Invalid TOML → `invalid .playbook at <path>: TOML syntax error at line <n> (content not shown)`. The parser's own message is never echoed: since v3.5.0 a manifest may hold credential values under `[env.set]`, and this error reaches the terminal from every command that discovers playbooks.
 - `subdir` escapes the install directory (e.g. `../foo`) → `invalid .playbook at <path>: 'subdir' must be relative and stay inside the directory`
 - `subdir` does not exist → `~/.claude-playbooks/<name>/.playbook declares subdir "<path>" but the directory is missing`
 - `source.subdir` or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`

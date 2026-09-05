@@ -255,3 +255,23 @@ func TestWritePreservesPartialModes(t *testing.T) {
 		t.Fatalf("values did not tighten 0640 to 0600: %v", info.Mode().Perm())
 	}
 }
+
+// A broken manifest's error must not echo file content: since [env.set] may
+// hold credentials, and this error reaches the terminal from every command
+// that discovers playbooks, only the line number is reported.
+func TestReadDoesNotEchoBrokenManifestContent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("name = \"pb\"\n[env.set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Read(dir)
+	if err == nil {
+		t.Fatal("broken manifest accepted")
+	}
+	if strings.Contains(err.Error(), "SECRETVALUE") {
+		t.Fatalf("error echoes manifest content: %v", err)
+	}
+	if !strings.Contains(err.Error(), "line 3") {
+		t.Fatalf("error lacks the line number: %v", err)
+	}
+}

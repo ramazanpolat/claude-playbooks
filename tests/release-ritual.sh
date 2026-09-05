@@ -189,6 +189,15 @@ if phase_enabled p4; then
   report "p4 install/update preservation" $rc
 
   rc=0
+  # auth status is read-only: it must list the fixture install and never
+  # touch anything (the manifest is compared before and after).
+  MAN_BEFORE="$(cat "$PB/fx/.playbook")"
+  p4 auth status 2>/dev/null | grep '^fx ' >/dev/null || rc=1
+  p4 auth status --json fx 2>/dev/null | grep '"name": "fx"' >/dev/null || rc=1
+  [ "$(cat "$PB/fx/.playbook")" = "$MAN_BEFORE" ] || rc=1
+  report "p4 auth status" $rc
+
+  rc=0
   # Not grep -q: under pipefail an early grep exit sends the producer
   # SIGPIPE on its next line and the pipeline fails on timing alone.
   p4 info fx 2>/dev/null | grep 'Update from:' >/dev/null || rc=1

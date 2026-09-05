@@ -117,6 +117,19 @@ func dropKey(list []string, key string) []string {
 	return out
 }
 
+var tomlLinePattern = regexp.MustCompile(`line (\d+)`)
+
+// SanitizeTOMLError reduces a TOML decode error to its line number. The
+// parser quotes the offending text in its messages, and since [env.set] and
+// profile values may be credentials, that text must never reach a terminal
+// or a log through any command that reads the file.
+func SanitizeTOMLError(err error) string {
+	if m := tomlLinePattern.FindStringSubmatch(err.Error()); m != nil {
+		return "TOML syntax error at line " + m[1] + " (content not shown)"
+	}
+	return "TOML syntax error (content not shown)"
+}
+
 // QuoteTOML renders s as a TOML basic string. Go's %q emits escapes TOML
 // does not define (\a, \v, \x..), which turn a manifest holding such a value
 // unreadable -- and an unreadable manifest aborts registry discovery for
@@ -233,7 +246,7 @@ func Read(dir string) (*Manifest, error) {
 	}
 	var m Manifest
 	if _, err := toml.Decode(string(data), &m); err != nil {
-		return nil, fmt.Errorf("invalid .playbook at %s: %w", path, err)
+		return nil, fmt.Errorf("invalid .playbook at %s: %s", path, SanitizeTOMLError(err))
 	}
 	if err := m.validate(path); err != nil {
 		return nil, err
