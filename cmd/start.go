@@ -59,7 +59,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if len(rest) == 0 {
+	if len(rest) == 0 || rest[0] == "--" {
+		// "--" is never a path: taking it as one would resume wrapper
+		// parsing right after it, and `start -- --delete` would remove a
+		// directory literally named "--".
 		return fmt.Errorf("path required\nUsage: claude-playbook start " + launchFlagsUsage + " <path> [claude-flags...]")
 	}
 

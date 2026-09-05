@@ -76,3 +76,29 @@ func TestSameDirSeesThroughSymlinkedGlobal(t *testing.T) {
 		t.Fatal("a non-existent path was taken for the global dir")
 	}
 }
+
+// The reverse alias: ~/.claude/.credentials.json is a symlink INTO the config
+// dir being quarantined. Its regular file is the global store's target.
+func TestQuarantineRefusesGlobalStoreTargetInAnotherDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	shared := filepath.Join(home, "configs", "shared")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := writeStore(t, shared, `{`+grantJSON+`}`)
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(store, filepath.Join(global, CredentialsFileName)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := QuarantineStoredOAuth(shared); err != nil {
+		t.Fatalf("quarantine: %v", err)
+	}
+	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
+		t.Fatal("the global store's target was stripped through the directory that holds it")
+	}
+}

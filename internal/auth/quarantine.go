@@ -56,6 +56,13 @@ func QuarantineStoredOAuth(configDir string) error {
 	}
 
 	path := filepath.Join(configDir, CredentialsFileName)
+	// The reverse alias: ~/.claude/.credentials.json may itself be a symlink
+	// INTO this config dir (a shared store kept elsewhere), in which case
+	// this dir's regular file is the global store's target and stripping it
+	// strips the global grant. Identity of the file, not only of the dir.
+	if isGlobalCredentialsFile(path) {
+		return nil
+	}
 
 	// Lstat, not Stat: a symlink must be recognised before anything is written,
 	// or the rewrite below would follow it and strip the GLOBAL credentials --
@@ -140,6 +147,24 @@ func isGlobalConfigDir(dir string) bool {
 		return false
 	}
 	return sameDir(dir, global)
+}
+
+// isGlobalCredentialsFile reports whether p and the global credentials file
+// are the same file once every symlink on either side is resolved.
+func isGlobalCredentialsFile(p string) bool {
+	global, err := globalClaudeDir()
+	if err != nil || global == "" {
+		return false
+	}
+	gi, err := os.Stat(filepath.Join(global, CredentialsFileName))
+	if err != nil {
+		return false
+	}
+	pi, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(gi, pi)
 }
 
 // sameDir reports whether a and b resolve to the same directory. Symlinks are

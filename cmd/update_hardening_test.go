@@ -245,3 +245,75 @@ func TestOverlayPreservesExternalSymlinkEntry(t *testing.T) {
 		t.Fatalf("global store touched: %s", body)
 	}
 }
+
+// A symlinked ancestor that points INSIDE the install, at a sibling entry the
+// overlay never touched (config -> data), is as bad as one pointing outside:
+// data/ was never backed up, so an overwrite there is unrecoverable.
+func TestOverlayRefusesPreserveIntoUntouchedSibling(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(live, "config", "private.txt"), "install-local")
+	writeFile(t, filepath.Join(live, "data", "private.txt"), "runtime-data")
+	if err := os.Symlink("data", filepath.Join(work, "config")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := overlaySource(work, live, []string{"config/private.txt"}); err == nil {
+		t.Fatal("overlay restored a preserved path into an untouched sibling entry")
+	}
+	if got, _ := os.ReadFile(filepath.Join(live, "data", "private.txt")); string(got) != "runtime-data" {
+		t.Fatalf("untouched runtime data was overwritten: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(live, "config", "private.txt")); string(got) != "install-local" {
+		t.Fatalf("live file after rollback: %q", got)
+	}
+}
+
+// On a case-insensitive filesystem the source's SETTINGS.JSON and the preserved
+// settings.json are one file; preservation must match by identity, not name.
+func TestOverlayPreservesCaseVariantEntries(t *testing.T) {
+	root := t.TempDir()
+	probe := filepath.Join(root, "Probe")
+	writeFile(t, probe, "x")
+	if _, err := os.Stat(filepath.Join(root, "probe")); err != nil {
+		t.Skip("case-sensitive filesystem; the finding does not apply here")
+	}
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(live, "settings.json"), `{"local":true}`)
+	writeFile(t, filepath.Join(work, "SETTINGS.JSON"), `{"upstream":true}`)
+	writeFile(t, filepath.Join(work, ".CREDENTIALS.JSON"), `{"claudeAiOauth":{"accessToken":"UPSTREAM"}}`)
+
+	if _, err := overlaySource(work, live, defaultPreserved); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(live, "settings.json")); string(got) != `{"local":true}` {
+		t.Fatalf("local settings.json replaced by the upstream case variant: %s", got)
+	}
+	if _, err := os.Lstat(filepath.Join(live, ".credentials.json")); err == nil {
+		t.Fatal("upstream .CREDENTIALS.JSON was adopted as the install's credentials")
+	}
+}
+
+// "--" is never a path: `start -- --delete` must not resume wrapper parsing
+// after it and delete a directory named "--".
+func TestStartRejectsDelimiterAsPath(t *testing.T) {
+	resetCommandTestState(t)
+	wd, _ := os.Getwd()
+	scratch := t.TempDir()
+	if err := os.Chdir(scratch); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(wd) })
+	writeFile(t, filepath.Join(scratch, "--", "keep.txt"), "keep")
+
+	if err := runStart(nil, []string{"--", "--delete"}); err == nil {
+		t.Fatal("start accepted -- as the path")
+	}
+	if _, err := os.Stat(filepath.Join(scratch, "--", "keep.txt")); err != nil {
+		t.Fatal("a directory named -- was deleted")
+	}
+}

@@ -334,24 +334,31 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 
 // physicallyWithin reports whether the DIRECTORY holding p -- its parent, or
 // when that does not exist yet, the nearest existing ancestor -- resolves to
-// root or below it with symlinks evaluated. Lexical validation of a preserved
-// path is not enough: an incoming source can replace a directory on that path
-// with a symlink to anywhere, and a restore written "below root" would then
-// land outside it.
+// tree or below it with symlinks evaluated. tree is the top-level entry the
+// preserved path belongs to (root/<top>), not the whole install: a symlinked
+// ancestor may point outside the install, or -- just as bad -- into a sibling
+// entry the overlay never touched and never backed up (`config -> data`), so
+// "somewhere under root" is not good enough.
 //
 // The final component is deliberately NOT followed: a preserved entry that is
 // itself a symlink (the ordinary `.credentials.json -> ~/.claude/...`) points
 // outside by design and is recreated with Readlink, never read through. Only
 // a symlinked ancestor can make a write land elsewhere.
-func physicallyWithin(root, p string) (bool, error) {
-	rootReal, err := filepath.EvalSymlinks(root)
+func physicallyWithin(tree, p string) (bool, error) {
+	// tree itself may be the symlink (top-level `config -> data`): resolve
+	// its PARENT and require the resolved tree to be exactly parent/<top>.
+	treeParentReal, err := filepath.EvalSymlinks(filepath.Dir(tree))
 	if err != nil {
 		return false, err
+	}
+	treeReal := filepath.Join(treeParentReal, filepath.Base(tree))
+	if info, err := os.Lstat(tree); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return false, nil // the entry itself is an alias; nothing below it is ours
 	}
 	probe := filepath.Dir(p)
 	for {
 		if real, err := filepath.EvalSymlinks(probe); err == nil {
-			return pathWithin(rootReal, real), nil
+			return pathWithin(treeReal, real), nil
 		} else if !os.IsNotExist(err) {
 			return false, err
 		}
@@ -361,6 +368,34 @@ func physicallyWithin(root, p string) (bool, error) {
 		}
 		probe = parent
 	}
+}
+
+// touchedEntry reports whether the top-level entry holding a preserved path
+// was moved or introduced by the overlay, by filesystem identity rather than
+// by name: on a case-insensitive filesystem the source's SETTINGS.JSON and
+// the preserved settings.json are one file, and a map lookup on the spelling
+// would let the upstream copy stay active.
+func touchedEntry(root, top string, sets ...map[string]bool) bool {
+	for _, set := range sets {
+		if set[top] {
+			return true
+		}
+	}
+	ti, err := os.Lstat(filepath.Join(root, top))
+	if err != nil {
+		return false
+	}
+	for _, set := range sets {
+		for name := range set {
+			if name == top {
+				continue
+			}
+			if ni, err := os.Lstat(filepath.Join(root, name)); err == nil && os.SameFile(ti, ni) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // preservePaths returns the local files that must survive the overlay: the
@@ -457,16 +492,20 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 	if i := strings.IndexByte(rel, '/'); i >= 0 {
 		top = rel[:i]
 	}
-	if !moved[top] && !introduced[top] {
+	if !touchedEntry(root, top, moved, introduced) {
 		return nil // the overlay never touched this entry
 	}
 
 	src := filepath.Join(backup, filepath.FromSlash(rel))
 	dst := filepath.Join(root, filepath.FromSlash(rel))
-	if within, err := physicallyWithin(root, dst); err != nil {
-		return err
-	} else if !within {
-		return fmt.Errorf("%s resolves outside the install after the update (a symlinked ancestor); refusing to restore through it", rel)
+	if top != rel {
+		// A nested path: every ancestor between the entry and the file must
+		// stay inside that entry, in the live tree and in the backup.
+		if within, err := physicallyWithin(filepath.Join(root, top), dst); err != nil {
+			return err
+		} else if !within {
+			return fmt.Errorf("%s resolves outside %s/ after the update (a symlinked ancestor); refusing to restore through it", rel, top)
+		}
 	}
 	info, err := os.Lstat(src)
 	if os.IsNotExist(err) {
@@ -475,10 +514,12 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 	if err != nil {
 		return err
 	}
-	if within, err := physicallyWithin(backup, src); err != nil {
-		return err
-	} else if !within {
-		return fmt.Errorf("%s resolves outside the backup; refusing to restore from it", rel)
+	if top != rel {
+		if within, err := physicallyWithin(filepath.Join(backup, top), src); err != nil {
+			return err
+		} else if !within {
+			return fmt.Errorf("%s resolves outside the backup's %s/; refusing to restore from it", rel, top)
+		}
 	}
 	if err := removeAny(dst); err != nil {
 		return err
