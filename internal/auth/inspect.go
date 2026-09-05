@@ -57,18 +57,40 @@ type Report struct {
 	Isolated bool `json:"isolated"`
 	// HasGrant reports whether the store (through a link) holds claudeAiOauth.
 	HasGrant bool `json:"has_grant"`
-	// ExpiresAt is the grant's expiry, zero when unknown.
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	// ExpiresAt is the grant's expiry, zero when unknown. Marshalled by
+	// MarshalJSON so an unknown value is omitted rather than 0001-01-01.
+	ExpiresAt time.Time `json:"-"`
 	// Expired is true when a grant exists and its expiry has passed.
 	Expired bool `json:"expired"`
 	// DaemonStatus is the raw status from daemon-auth-status.json, "" when absent.
 	DaemonStatus string    `json:"daemon_status,omitempty"`
-	DaemonSince  time.Time `json:"daemon_since,omitempty"`
+	DaemonSince  time.Time `json:"-"`
 	// ReauthRequired is DaemonStatus == auth_required AND the marker is newer
 	// than the current grant's refresh instant (see daemonRefreshLead).
 	ReauthRequired bool `json:"reauth_required"`
 	// TokenFile is the machine-global token file when it exists and is non-empty.
 	TokenFile string `json:"token_file,omitempty"`
+}
+
+// MarshalJSON emits the report with expires_at and daemon_since present only
+// when known: encoding/json's omitempty does not apply to time.Time, and a
+// script would otherwise read 0001-01-01 as a real instant.
+func (r Report) MarshalJSON() ([]byte, error) {
+	type plain Report
+	out := struct {
+		plain
+		ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+		DaemonSince *time.Time `json:"daemon_since,omitempty"`
+	}{plain: plain(r)}
+	if !r.ExpiresAt.IsZero() {
+		t := r.ExpiresAt
+		out.ExpiresAt = &t
+	}
+	if !r.DaemonSince.IsZero() {
+		t := r.DaemonSince
+		out.DaemonSince = &t
+	}
+	return json.Marshal(out)
 }
 
 // Inspect reports the authentication state of configDir as a claude-playbook

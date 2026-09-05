@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -122,7 +123,14 @@ func askClaude(dir string) *claudeAuth {
 	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+dir)
 	out, err := c.Output()
 	if err != nil {
-		return &claudeAuth{Error: strings.TrimSpace(err.Error())}
+		msg := err.Error()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			// claude's own message is the useful part, not "exit status 1".
+			first := strings.SplitN(strings.TrimSpace(string(exitErr.Stderr)), "\n", 2)[0]
+			msg = strings.TrimSpace(first)
+		}
+		return &claudeAuth{Error: msg}
 	}
 	var got claudeAuth
 	if err := json.Unmarshal(out, &got); err != nil {

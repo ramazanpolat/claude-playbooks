@@ -82,3 +82,20 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 }
 
 func jsonInt(n int64) string { return strconv.FormatInt(n, 10) }
+
+// Unknown instants are omitted from JSON, never emitted as 0001-01-01.
+func TestAuthStatusJSONOmitsUnknownInstants(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "plain")
+	authStatusJSON = true
+	t.Cleanup(func() { authStatusJSON = false })
+	raw := captureStdout(t, func() {
+		if err := runAuthStatus(nil, []string{"plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(raw, "0001-01-01") || strings.Contains(raw, "expires_at") || strings.Contains(raw, "daemon_since") {
+		t.Fatalf("unknown instants leaked into JSON:\n%s", raw)
+	}
+}
