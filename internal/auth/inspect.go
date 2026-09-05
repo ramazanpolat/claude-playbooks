@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -85,32 +86,48 @@ func InspectGlobal(configDir string, now time.Time) Report {
 func inspect(name, configDir string, now time.Time, raw bool) Report {
 	r := Report{Name: name, Dir: configDir}
 
-	// Mode: the same decision PrepareLaunchEnv makes, minus its side effects.
-	var menv *manifest.Env
-	if m, _ := manifest.Nearest(configDir); m != nil {
-		var err error
-		menv, err = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
-		if err != nil {
-			r.Mode, r.ModeError = ModeError, err.Error()
+	if raw {
+		// ~/.claude is not a playbook: no manifest, no profiles, no
+		// isolation apply. Its mode is decided by the exported variable
+		// alone (the token FILE is a claude-playbook convention).
+		if os.Getenv(OAuthTokenEnv) != "" {
+			r.Mode = ModeToken
+		} else {
+			r.Mode = ModeSharedLogin
 		}
-	}
-	if r.Mode == "" {
-		switch {
-		case isAuthIsolated(configDir):
-			r.Mode = ModeIsolated
-		case menv.Unsets(OAuthTokenEnv):
-			r.Mode = ModeOwnLogin
-		case manifestToken(menv) != "":
-			r.Mode = ModeOwnToken
-		default:
-			active := os.Getenv(OAuthTokenEnv) != ""
-			if !raw {
-				_, active = TokenActive()
+	} else {
+		// Mode: the same decision PrepareLaunchEnv makes, minus its side
+		// effects.
+		var menv *manifest.Env
+		if m, _ := manifest.Nearest(configDir); m != nil {
+			var err error
+			menv, err = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
+			if err != nil {
+				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
 			}
-			if active {
-				r.Mode = ModeToken
-			} else {
-				r.Mode = ModeSharedLogin
+		}
+		if r.Mode == "" {
+			_, setsToken := (map[string]string)(nil), false
+			if menv != nil {
+				_, setsToken = menv.Set[OAuthTokenEnv]
+			}
+			switch {
+			case isAuthIsolated(configDir):
+				r.Mode = ModeIsolated
+			case menv.Unsets(OAuthTokenEnv):
+				r.Mode = ModeOwnLogin
+			case setsToken && manifestToken(menv) != "":
+				r.Mode = ModeOwnToken
+			case setsToken:
+				// Set to an empty value: resolveToken treats that as
+				// inactive, so the launch takes the stored-login path.
+				r.Mode = ModeOwnLogin
+			default:
+				if _, active := TokenActive(); active {
+					r.Mode = ModeToken
+				} else {
+					r.Mode = ModeSharedLogin
+				}
 			}
 		}
 	}
@@ -158,7 +175,10 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			if d.Since > 0 {
 				r.DaemonSince = time.UnixMilli(d.Since)
 			}
-			if d.Status == "auth_required" {
+			// The marker concerns the STORED login. Under a token mode the
+			// launch quarantines that login and never uses it, so the
+			// marker cannot mean "this playbook will fail to authenticate".
+			if d.Status == "auth_required" && r.usesStoredLogin() {
 				refreshAt := r.ExpiresAt.Add(-daemonRefreshLead)
 				r.ReauthRequired = r.ExpiresAt.IsZero() || !r.DaemonSince.Before(refreshAt)
 			}
@@ -167,21 +187,45 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	return r
 }
 
-// NeedsAttention summarises the report as one word, "" when all is well.
+// usesStoredLogin reports whether the launch authenticates from the stored
+// grant (as opposed to an injected token).
+func (r Report) usesStoredLogin() bool {
+	return r.Mode == ModeOwnLogin || r.Mode == ModeSharedLogin || r.Mode == ModeIsolated
+}
+
+// NeedsAttention summarises the report as one phrase, "" when all is well.
+// Token modes have no stored login to judge and always report "". An
+// expired grant is advisory: Claude Code refreshes it at launch while the
+// refresh token is valid, so it is a warning, not a refusal.
 func (r Report) NeedsAttention() string {
 	switch {
 	case r.Mode == ModeError:
 		return "launch refused"
+	case !r.usesStoredLogin():
+		return ""
 	case r.ReauthRequired:
 		return "re-auth required"
-	case r.Mode == ModeToken || r.Mode == ModeOwnToken:
-		return ""
 	case !r.HasGrant:
 		return "no login"
 	case r.Expired:
-		return "grant expired"
+		return "grant expired (refreshes at launch if the refresh token is still valid)"
 	}
 	return ""
+}
+
+// sanitizeProfileError renders a profile resolution error without echoing
+// any file content: the TOML parser quotes the offending text, which in a
+// profile may be a credential value.
+func sanitizeProfileError(err error) string {
+	var missing *envprofile.MissingError
+	if errors.As(err, &missing) {
+		return missing.Error() // names the profile and the directory only
+	}
+	var resolve *envprofile.ResolveError
+	if errors.As(err, &resolve) {
+		return "env profile " + strconv.Quote(resolve.Name) + " cannot be read or is invalid (content not shown; run: claude-playbook env-profile " + resolve.Name + ")"
+	}
+	return "env profile cannot be resolved (details withheld; see claude-playbook env-profile)"
 }
 
 func trimSpace(b []byte) []byte {

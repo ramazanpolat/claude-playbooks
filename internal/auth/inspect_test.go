@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,9 +144,84 @@ func TestInspectStoreAndDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(dir, "daemon-auth-status.json"))
-	if r := Inspect("pb", dir, now); !r.Expired || r.NeedsAttention() != "grant expired" {
+	if r := Inspect("pb", dir, now); !r.Expired || !strings.HasPrefix(r.NeedsAttention(), "grant expired") {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// A profile that fails to parse must not echo its content into the report:
+// the offending text may be a credential.
+func TestInspectSanitizesProfileErrors(t *testing.T) {
+	root, dir := inspectFixture(t)
+	if err := os.MkdirAll(envprofile.Dir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(envprofile.Dir(root), "bad.toml"), []byte("[set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, dir, "[env]\nprofiles = [\"bad\"]\n")
+	r := Inspect("pb", dir, time.Now())
+	if r.Mode != ModeError {
+		t.Fatalf("%+v", r)
+	}
+	if strings.Contains(r.ModeError, "SECRETVALUE") || strings.Contains(r.ModeError, "toml:") {
+		t.Fatalf("mode error echoes profile content: %q", r.ModeError)
+	}
+	if !strings.Contains(r.ModeError, `"bad"`) {
+		t.Fatalf("mode error does not name the profile: %q", r.ModeError)
+	}
+}
+
+// An explicitly empty token set by the manifest is inactive for the launch
+// (resolveToken), so the mode is own-login even with a global token file.
+func TestInspectEmptyManifestTokenIsOwnLogin(t *testing.T) {
+	_, dir := inspectFixture(t)
+	tf := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tf, []byte("sk-ant-oat01-X\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tf)
+	writeManifest(t, dir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"\"\n")
+	if r := Inspect("pb", dir, time.Now()); r.Mode != ModeOwnLogin {
+		t.Fatalf("mode = %s, want own-login", r.Mode)
+	}
+}
+
+// The global row ignores playbook configuration entirely: the isolation
+// override variable must not make ~/.claude "isolated".
+func TestInspectGlobalIgnoresIsolationOverride(t *testing.T) {
+	inspectFixture(t)
+	home, _ := os.UserHomeDir()
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	if g := InspectGlobal(global, time.Now()); g.Mode != ModeSharedLogin {
+		t.Fatalf("global mode = %s, want shared-login", g.Mode)
+	}
+}
+
+// A live daemon marker on a TOKEN-mode playbook is informational: the launch
+// quarantines the stored login, so nothing needs attention.
+func TestInspectTokenModeIgnoresDaemonMarker(t *testing.T) {
+	_, dir := inspectFixture(t)
+	tf := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tf, []byte("sk-ant-oat01-X\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tf)
+	now := time.Now()
+	if err := os.WriteFile(filepath.Join(dir, "daemon-auth-status.json"), []byte(`{"status":"auth_required","since":`+itoa(now.UnixMilli())+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := Inspect("pb", dir, now)
+	if r.Mode != ModeToken || r.ReauthRequired || r.NeedsAttention() != "" {
+		t.Fatalf("%+v note=%q", r, r.NeedsAttention())
+	}
+	if r.DaemonStatus != "auth_required" {
+		t.Fatalf("marker not surfaced informationally: %+v", r)
+	}
+}
