@@ -229,8 +229,17 @@ func TestQuarantineLeavesGlobalChainLinksAlone(t *testing.T) {
 			if err := QuarantineStoredOAuth(pb); err != nil {
 				t.Fatalf("quarantine playbook: %v", err)
 			}
-			if _, err := os.Lstat(pbLink); !os.IsNotExist(err) {
+			// Detached: gone for a grant-only store, or re-materialised as
+			// this dir's own regular file holding only the sibling keys.
+			if info, err := os.Lstat(pbLink); err == nil && info.Mode()&os.ModeSymlink != 0 {
 				t.Fatal("the ordinary outgoing link was not detached")
+			} else if err == nil {
+				if _, present := readStore(t, pbLink)["claudeAiOauth"]; present {
+					t.Fatal("re-materialised playbook store still holds the grant")
+				}
+			}
+			if _, present := readStore(t, globalLink)["claudeAiOauth"]; !present {
+				t.Fatal("detaching the outgoing link damaged the global chain")
 			}
 		})
 	}
