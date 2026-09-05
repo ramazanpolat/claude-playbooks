@@ -111,17 +111,25 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 	if err != nil {
 		return err
 	}
-	targetDirAbs, err := filepath.Abs(targetDir)
-	if err != nil {
-		return err
-	}
-	if targetDirAbs == filepath.Dir(sourceAbs) {
+	// The target must not BE the global directory, whatever it is called: a
+	// symlink to ~/.claude passed the old string comparison, and linking then
+	// replaced the global store with a symlink to itself.
+	if sameDir(targetDir, filepath.Dir(sourceAbs)) {
 		return nil
 	}
 
 	targetCreds := filepath.Join(targetDir, CredentialsFileName)
 	targetLinfo, err := os.Lstat(targetCreds)
 	exists := err == nil
+	if exists && targetLinfo.Mode()&os.ModeSymlink == 0 {
+		// A regular file that IS the global store (reached through some
+		// other alias) must never be removed or copied over itself.
+		if ti, err := os.Stat(targetCreds); err == nil {
+			if si, err := os.Stat(sourceAbs); err == nil && os.SameFile(ti, si) {
+				return nil
+			}
+		}
+	}
 
 	if exists {
 		if targetLinfo.Mode()&os.ModeSymlink != 0 {

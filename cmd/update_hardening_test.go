@@ -1,0 +1,192 @@
+package cmd
+
+import (
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func mkdirs(t *testing.T, dirs ...string) {
+	t.Helper()
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func writeFile(t *testing.T, p, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A preserved nested path whose directory the incoming source turned into an
+// external symlink must not be restored THROUGH that symlink.
+func TestOverlayRefusesPreserveThroughExternalSymlink(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	external := t.TempDir()
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(live, "config", "private.txt"), "install-local")
+	writeFile(t, filepath.Join(external, "private.txt"), "unrelated-external-file")
+	if err := os.Symlink(external, filepath.Join(work, "config")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := overlaySource(work, live, []string{"config/private.txt"})
+	if err == nil {
+		t.Fatal("overlay restored a preserved path through an external symlink")
+	}
+	if got, _ := os.ReadFile(filepath.Join(external, "private.txt")); string(got) != "unrelated-external-file" {
+		t.Fatalf("external file was overwritten: %q", got)
+	}
+	// Rolled back: the live tree is as it was.
+	if got, _ := os.ReadFile(filepath.Join(live, "config", "private.txt")); string(got) != "install-local" {
+		t.Fatalf("live file after rollback: %q", got)
+	}
+	if info, err := os.Lstat(filepath.Join(live, "config")); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("live config dir not restored as a directory: %v %v", info, err)
+	}
+}
+
+// A preserved file the install did not have must not be adopted from the
+// source: its previous absence is restored.
+func TestOverlayDoesNotAdoptSourceOnlyPreservedFiles(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(work, "CLAUDE.md"), "new")
+	writeFile(t, filepath.Join(work, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"UPSTREAM"}}`)
+	writeFile(t, filepath.Join(work, "settings.json"), `{"env":{"X":"upstream"}}`)
+
+	if _, err := overlaySource(work, live, defaultPreserved); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{".credentials.json", "settings.json"} {
+		if _, err := os.Lstat(filepath.Join(live, f)); err == nil {
+			t.Fatalf("source-only %s was adopted into the install", f)
+		}
+	}
+	if got, _ := os.ReadFile(filepath.Join(live, "CLAUDE.md")); string(got) != "new" {
+		t.Fatalf("update content missing: %q", got)
+	}
+}
+
+// The live root's own mode is the pilot's; the overlay must not apply the
+// source root's mode to it.
+func TestOverlayKeepsLiveRootMode(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	if err := os.Chmod(live, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(work, "CLAUDE.md"), "x")
+	if _, err := overlaySource(work, live, nil); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(live); info.Mode().Perm() != 0o700 {
+		t.Fatalf("live root mode changed to %v", info.Mode().Perm())
+	}
+}
+
+// A failed overlay must remove what it introduced, not only restore what it
+// moved. A Unix socket in the source is a deterministic way to make the copy
+// fail partway; disk-full or I/O errors reach the same branch.
+func TestOverlayRollbackRemovesIntroducedEntries(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(live, "existing"), "old")
+	writeFile(t, filepath.Join(work, "a-new-hook"), "new")
+	writeFile(t, filepath.Join(work, "existing"), "updated")
+	sock := filepath.Join(work, "zz-socket")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skipf("cannot create a unix socket here: %v", err)
+	}
+	defer l.Close()
+
+	if _, err := overlaySource(work, live, nil); err == nil {
+		t.Fatal("overlay succeeded despite an uncopyable source entry")
+	}
+	if got, _ := os.ReadFile(filepath.Join(live, "existing")); string(got) != "old" {
+		t.Fatalf("moved entry not restored: %q", got)
+	}
+	if _, err := os.Lstat(filepath.Join(live, "a-new-hook")); err == nil {
+		t.Fatal("introduced entry survived the rollback")
+	}
+	if _, err := os.Lstat(filepath.Join(live, "zz-socket")); err == nil {
+		t.Fatal("partially copied entry survived the rollback")
+	}
+	backups, _ := filepath.Glob(filepath.Join(root, ".live.bak.*"))
+	if len(backups) != 0 {
+		t.Fatalf("backup left behind after a complete rollback: %v", backups)
+	}
+}
+
+// `--delete` is the wrapper's only in the leading positions; anywhere else it
+// is claude's argument and must never remove the directory.
+func TestStartDeleteIsNotTakenFromClaudeArgs(t *testing.T) {
+	resetCommandTestState(t)
+	home := os.Getenv("HOME")
+	stub := filepath.Join(home, "stub-bin")
+	argsFile := filepath.Join(home, "claude-args")
+	if err := os.WriteFile(filepath.Join(stub, "claude"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CPB_TEST_ARGS\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CPB_TEST_ARGS", argsFile)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"after --", []string{"--", "--delete"}},
+		{"as a -p value", []string{"-p", "--delete"}},
+		{"after a claude flag", []string{"--version", "--delete"}},
+	} {
+		cfg := filepath.Join(home, "cfg-"+strings.ReplaceAll(tc.name, " ", "-"))
+		writeFile(t, filepath.Join(cfg, "keep.txt"), "keep")
+		if err := runStart(nil, append([]string{cfg}, tc.args...)); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if _, err := os.Stat(filepath.Join(cfg, "keep.txt")); err != nil {
+			t.Fatalf("%s: the config directory was deleted", tc.name)
+		}
+		got, _ := os.ReadFile(argsFile)
+		if !strings.Contains(string(got), "--delete") {
+			t.Fatalf("%s: --delete was not forwarded to claude: %q", tc.name, got)
+		}
+	}
+
+	// The documented spellings still delete: before the path and right after it.
+	for _, args := range [][]string{{"--delete", "PATH"}, {"PATH", "--delete"}} {
+		cfg := filepath.Join(home, "cfg-del-"+strings.Join(args, "_"))
+		writeFile(t, filepath.Join(cfg, "keep.txt"), "keep")
+		for i := range args {
+			if args[i] == "PATH" {
+				args[i] = cfg
+			}
+		}
+		if err := runStart(nil, args); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(cfg); err == nil {
+			t.Fatalf("%v: directory survived an intentional --delete", args)
+		}
+	}
+}

@@ -4,8 +4,15 @@
 
 Go 1.21+ is the only toolchain you need on Linux; on macOS use a current
 Go — 1.21's linker emits binaries that recent macOS versions refuse to load
-(missing LC_UUID load command). Go dependencies are managed in `go.mod`
-(cobra, toml).
+(missing LC_UUID load command). Release artifacts are built with the same
+current Go the macOS CI leg uses, so the downloadable binaries never come
+from the one build path CI does not exercise. Go dependencies are managed
+in `go.mod` (cobra, toml).
+
+Tests never touch your real Claude credentials: the `cmd` tests run under a
+scratch HOME with a stub `security` on PATH (`resetCommandTestState`), the
+`internal/auth` package stubs the Keychain lookup in `TestMain`, and the e2e
+suite stubs both binaries. Keep new tests inside those helpers.
 
 ```bash
 go test ./...     # full suite

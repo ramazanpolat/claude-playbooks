@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -264,13 +265,43 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 		return "", err
 	}
 
+	// moved: top-level entries that existed live and went into the backup.
+	// introduced: top-level entries the source ships that the install did
+	// NOT have. Both matter: rollback must remove what was introduced as
+	// well as restore what was moved, and preservation must restore the
+	// previous ABSENCE of a protected file the source ships (a source must
+	// never inject credentials or settings the install did not own).
 	moved := map[string]bool{}
-	rollback := func() {
-		for name := range moved {
-			_ = removeAny(filepath.Join(root, name))
-			_ = os.Rename(filepath.Join(backupPath, name), filepath.Join(root, name))
+	introduced := map[string]bool{}
+	rollback := func() error {
+		var failed []string
+		for name := range introduced {
+			if err := removeAny(filepath.Join(root, name)); err != nil {
+				failed = append(failed, name)
+			}
 		}
-		_ = os.RemoveAll(backupPath)
+		for name := range moved {
+			if err := removeAny(filepath.Join(root, name)); err != nil {
+				failed = append(failed, name)
+				continue
+			}
+			if err := os.Rename(filepath.Join(backupPath, name), filepath.Join(root, name)); err != nil {
+				failed = append(failed, name)
+			}
+		}
+		if len(failed) > 0 {
+			// Keep the backup: it is the only copy of what could not be
+			// put back, and a silent RemoveAll here would destroy it.
+			sort.Strings(failed)
+			return fmt.Errorf("rollback incomplete for %s; backup kept at %s", strings.Join(failed, ", "), backupPath)
+		}
+		return os.RemoveAll(backupPath)
+	}
+	fail := func(err error) (string, error) {
+		if rerr := rollback(); rerr != nil {
+			return "", fmt.Errorf("%w (and %v)", err, rerr)
+		}
+		return "", err
 	}
 
 	for _, e := range entries {
@@ -278,30 +309,52 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 		live := filepath.Join(root, name)
 		if _, err := os.Lstat(live); err != nil {
 			if os.IsNotExist(err) {
-				continue // source-only entry: nothing to back up
+				introduced[name] = true
+				continue
 			}
-			rollback()
-			return "", err
+			return fail(err)
 		}
 		if err := os.Rename(live, filepath.Join(backupPath, name)); err != nil {
-			rollback()
-			return "", fmt.Errorf("failed to back up %s: %w", name, err)
+			return fail(fmt.Errorf("failed to back up %s: %w", name, err))
 		}
 		moved[name] = true
 	}
 
 	if err := copyDir(work, root); err != nil {
-		rollback()
-		return "", fmt.Errorf("failed to apply update: %w", err)
+		return fail(fmt.Errorf("failed to apply update: %w", err))
 	}
 
 	for _, rel := range preserve {
-		if err := restoreLocalEntry(backupPath, root, rel, moved); err != nil {
-			rollback()
-			return "", fmt.Errorf("failed to preserve %s: %w", rel, err)
+		if err := restoreLocalEntry(backupPath, root, rel, moved, introduced); err != nil {
+			return fail(fmt.Errorf("failed to preserve %s: %w", rel, err))
 		}
 	}
 	return backupPath, nil
+}
+
+// physicallyWithin reports whether p -- or, when it does not exist yet, its
+// nearest existing ancestor -- resolves to root or below it with symlinks
+// evaluated. Lexical validation of a preserved path is not enough: an
+// incoming source can replace a directory on that path with a symlink to
+// anywhere, and a restore written "below root" would then land outside it.
+func physicallyWithin(root, p string) (bool, error) {
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false, err
+	}
+	probe := p
+	for {
+		if real, err := filepath.EvalSymlinks(probe); err == nil {
+			return pathWithin(rootReal, real), nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return false, nil
+		}
+		probe = parent
+	}
 }
 
 // preservePaths returns the local files that must survive the overlay: the
@@ -385,25 +438,41 @@ func displayVersion(v string) string {
 
 // restoreLocalEntry copies rel back from the backup over the freshly overlaid
 // copy. Entries whose top-level component the overlay never touched are left
-// alone; an entry the source ships but the install did not have is removed, so
+// alone; an entry the source ships but the install did not have -- whether
+// under a moved top-level entry or a newly introduced one -- is removed, so
 // upstream never injects a credentials or state file the pilot did not own.
-func restoreLocalEntry(backup, root, rel string, moved map[string]bool) error {
+//
+// Both the backup source and the live destination are checked for PHYSICAL
+// containment before anything is removed or written: the incoming tree may
+// have turned a directory on the preserved path into a symlink pointing
+// outside the install, and the copy deliberately preserves such symlinks.
+func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bool) error {
 	top := rel
 	if i := strings.IndexByte(rel, '/'); i >= 0 {
 		top = rel[:i]
 	}
-	if !moved[top] {
-		return nil
+	if !moved[top] && !introduced[top] {
+		return nil // the overlay never touched this entry
 	}
 
 	src := filepath.Join(backup, filepath.FromSlash(rel))
 	dst := filepath.Join(root, filepath.FromSlash(rel))
+	if within, err := physicallyWithin(root, dst); err != nil {
+		return err
+	} else if !within {
+		return fmt.Errorf("%s resolves outside the install after the update (a symlinked ancestor); refusing to restore through it", rel)
+	}
 	info, err := os.Lstat(src)
 	if os.IsNotExist(err) {
-		return removeAny(dst)
+		return removeAny(dst) // restore the previous ABSENCE
 	}
 	if err != nil {
 		return err
+	}
+	if within, err := physicallyWithin(backup, src); err != nil {
+		return err
+	} else if !within {
+		return fmt.Errorf("%s resolves outside the backup; refusing to restore from it", rel)
 	}
 	if err := removeAny(dst); err != nil {
 		return err

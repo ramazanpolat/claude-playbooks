@@ -26,10 +26,13 @@ jobs:
             echo "Tag ${{ github.ref_name }} points to $GITHUB_SHA, which is not on origin/main. Skipping release."
           fi
 
+      # Build with the same current Go the macOS CI leg uses. go.mod keeps
+      # the 1.21 language floor (the ubuntu CI leg proves it); the release
+      # artifacts should not be the one build path CI never exercises.
       - uses: actions/setup-go@v5
         if: steps.release_gate.outputs.release == 'true'
         with:
-          go-version: '1.21'
+          go-version: '1.26'
 
       - name: Test and vet
         if: steps.release_gate.outputs.release == 'true'

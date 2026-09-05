@@ -30,17 +30,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Wrapper flags (--delete and the launch flags) are recognised only as
+	// a leading run before the path and again immediately after it. A
+	// --delete anywhere else -- after another claude argument, as a claude
+	// flag's value (`-p --delete`), or after "--" -- is claude's, never a
+	// licence to remove the directory. The previous scan took ANY literal
+	// --delete in the argument list.
 	var deleteAfter bool
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--delete":
-			deleteAfter = true
-		default:
-			rest = append(rest, args[i])
-		}
-	}
-	rest, layers, err := takeLaunchFlags(rest)
+	wrapper := map[string]*bool{"--delete": &deleteAfter}
+	rest, layers, err := takeLaunchFlagsWith(args, wrapper)
 	if err != nil {
 		return err
 	}
@@ -51,12 +49,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
 		fmt.Println("Creates the directory if it does not exist.")
-		fmt.Println("Launch flags (before the path) add one-off environment layers for this")
-		fmt.Println("launch only: --env-profile NAME, --env KEY=VALUE, --unset KEY, --env-file PATH.")
-		fmt.Println("Any flags after the path are forwarded directly to claude.")
-		fmt.Println()
-		fmt.Println("Flags:")
-		fmt.Println("  --delete   Delete the directory when the session ends")
+		fmt.Println("Wrapper flags go before the path or immediately after it; the first other")
+		fmt.Println("argument (or --) ends them and everything from there on is claude's.")
+		fmt.Println("  --delete             delete the directory when the session ends")
+		fmt.Println("  --env-profile NAME   layer an existing env profile, this launch only")
+		fmt.Println("  --env KEY=VALUE      set one variable")
+		fmt.Println("  --unset KEY          remove one variable")
+		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
 		return nil
 	}
 
@@ -65,7 +64,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	path := rest[0]
-	claudeArgs := rest[1:]
+	claudeArgs, more, err := takeLaunchFlagsWith(rest[1:], wrapper)
+	if err != nil {
+		return err
+	}
+	layers = append(layers, more...)
 
 	absPath, err := filepath.Abs(path)
 	if err != nil {

@@ -567,6 +567,17 @@ func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
+			if rel == "." {
+				// The destination root is a LIVE install during an update,
+				// holding runtime files the source knows nothing about. Its
+				// mode is the pilot's (a private 0700 must stay private);
+				// only a root this copy creates takes the source's mode.
+				if _, statErr := os.Lstat(target); statErr == nil {
+					return nil
+				} else if !os.IsNotExist(statErr) {
+					return statErr
+				}
+			}
 			if targetInfo, statErr := os.Lstat(target); statErr == nil && (!targetInfo.IsDir() || targetInfo.Mode()&os.ModeSymlink != 0) {
 				if err := removeAny(target); err != nil {
 					return err

@@ -51,11 +51,8 @@ func QuarantineStoredOAuth(configDir string) error {
 	// also what the Keychain is materialised into. Stripping it would remove the
 	// grant every playbook falls back to and leave nothing to re-link. Reachable
 	// via `start ~/.claude`, which binds an arbitrary config dir.
-	global, err := globalClaudeDir()
-	if err == nil && global != "" {
-		if dir, err := filepath.Abs(configDir); err == nil && dir == global {
-			return nil
-		}
+	if isGlobalConfigDir(configDir) {
+		return nil
 	}
 
 	path := filepath.Join(configDir, CredentialsFileName)
@@ -130,6 +127,46 @@ func globalClaudeDir() (string, error) {
 		return "", err
 	}
 	return filepath.Abs(filepath.Join(home, ".claude"))
+}
+
+// isGlobalConfigDir reports whether dir IS the global Claude config directory,
+// by filesystem identity rather than by spelling: a symlink to ~/.claude (or a
+// symlinked ancestor, or a symlinked ~/.claude itself) names the same
+// directory, and a credential mutation through it lands on the global store.
+// String comparison of absolute paths missed every one of those.
+func isGlobalConfigDir(dir string) bool {
+	global, err := globalClaudeDir()
+	if err != nil || global == "" {
+		return false
+	}
+	return sameDir(dir, global)
+}
+
+// sameDir reports whether a and b resolve to the same directory. Symlinks are
+// evaluated on both sides and os.SameFile decides, so no path spelling can
+// disguise identity. A path that does not exist is never the same as one that
+// does.
+func sameDir(a, b string) bool {
+	ra, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		return false
+	}
+	rb, err := filepath.EvalSymlinks(b)
+	if err != nil {
+		return false
+	}
+	if ra == rb {
+		return true
+	}
+	ia, err := os.Stat(ra)
+	if err != nil {
+		return false
+	}
+	ib, err := os.Stat(rb)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ia, ib)
 }
 
 // writeFilePrivate writes data at mode 0600 via a temporary file and a rename,
