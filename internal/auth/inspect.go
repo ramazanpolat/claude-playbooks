@@ -51,6 +51,10 @@ type Report struct {
 	Store     StoreKind `json:"store"`
 	// StoreTarget is the symlink target when Store is StoreSymlink.
 	StoreTarget string `json:"store_target,omitempty"`
+	// Isolated is true under isolate_auth, whatever the mode: an isolated
+	// playbook may still authenticate by an own token (own-token) or by its
+	// own stored login (isolated).
+	Isolated bool `json:"isolated"`
 	// HasGrant reports whether the store (through a link) holds claudeAiOauth.
 	HasGrant bool `json:"has_grant"`
 	// ExpiresAt is the grant's expiry, zero when unknown.
@@ -111,13 +115,16 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			if menv != nil {
 				_, setsToken = menv.Set[OAuthTokenEnv]
 			}
+			r.Isolated = isAuthIsolated(configDir)
 			switch {
-			case isAuthIsolated(configDir):
+			case setsToken && manifestToken(menv) != "":
+				// Honoured on the isolated path too: PrepareLaunchEnv injects
+				// it and quarantines the stored grant exactly as elsewhere.
+				r.Mode = ModeOwnToken
+			case r.Isolated:
 				r.Mode = ModeIsolated
 			case menv.Unsets(OAuthTokenEnv):
 				r.Mode = ModeOwnLogin
-			case setsToken && manifestToken(menv) != "":
-				r.Mode = ModeOwnToken
 			case setsToken:
 				// Set to an empty value: resolveToken treats that as
 				// inactive, so the launch takes the stored-login path.

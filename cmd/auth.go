@@ -168,7 +168,11 @@ func printAuthTable(rows []authRow, now time.Time) {
 		if r.Mode == auth.ModeError {
 			note = r.ModeError
 		}
-		row := []string{r.Name, string(r.Mode), store, exp, daemon, note}
+		mode := string(r.Mode)
+		if r.Isolated && r.Mode != auth.ModeIsolated {
+			mode += " (isolated)"
+		}
+		row := []string{r.Name, mode, store, exp, daemon, note}
 		if r.Claude != nil {
 			c := "-"
 			switch {

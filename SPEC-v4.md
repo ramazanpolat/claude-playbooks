@@ -624,7 +624,7 @@ Profile files are written mode `0600` and an existing file is tightened to it on
 **Errors:**
 - Unknown profile → `unknown env profile "glm". Create it with 'claude-playbook env-profile glm set KEY=VALUE'`
 - Delete while attached → `env profile "glm" is used by router, sre; detach it first with 'claude-playbook env <playbook> unuse glm'`
-- Invalid file on disk → `invalid env profile at <path>: <reason>` (listing and launch both fail loudly rather than skip it)
+- Invalid file on disk → `invalid env profile at <path>: TOML syntax error at line <n> (content not shown)` (listing and launch both fail loudly rather than skip it; the parser's message, which quotes file content, is never echoed)
 
 ---
 
@@ -643,7 +643,7 @@ claude-playbook auth status --claude        # add 'claude auth status --json' pe
 
 | Column | Meaning |
 |--------|---------|
-| `MODE` | How a launch would authenticate, decided exactly as `run` decides it: `token` (machine-global long-lived token injected), `own-token` (a token the manifest or a profile sets), `own-login` (token unset for this playbook; stored login), `shared-login` (no token anywhere; stored login), `isolated` (`isolate_auth`), `error` (the launch would be refused, reason in `NOTE`). For `~/.claude`, which claude-playbook does not launch, only an exported `CLAUDE_CODE_OAUTH_TOKEN` counts as `token`. |
+| `MODE` | How a launch would authenticate, decided exactly as `run` decides it: `token` (machine-global long-lived token injected), `own-token` (a token the manifest or a profile sets), `own-login` (token unset for this playbook; stored login), `shared-login` (no token anywhere; stored login), `isolated` (`isolate_auth`), `error` (the launch would be refused, reason in `NOTE`). An isolated playbook whose manifest or profile sets a non-empty token is `own-token (isolated)`, matching the launch, which injects that token and quarantines the stored grant. For `~/.claude`, which claude-playbook does not launch, only an exported `CLAUDE_CODE_OAUTH_TOKEN` counts as `token`. |
 | `STORE` | What sits at `.credentials.json`: `symlink -> <target>`, `file`, `file (no grant)`, or `absent`. |
 | `EXPIRES` | The stored grant's `expiresAt` as `in 6h12m`, `expired`, `unknown`, or `-` when there is no grant. |
 | `DAEMON` | Claude Code's `daemon-auth-status.json`: `auth_required` when its `since` is at or after the current grant's refresh instant (`expiresAt` minus 4 minutes, the daemon's proactive-refresh lead) and the row is a stored-login mode, `<status> (stale)` otherwise (the file is never cleared on recovery, and under a token mode the stored login is quarantined and unused), `-` when absent. |
@@ -879,7 +879,7 @@ preserve = ["settings.json"]
 **Forward compatibility:** unknown fields are ignored. Manifest authors may include fields for future tool versions without breaking older installs.
 
 **Errors:**
-- Invalid TOML → `invalid .playbook at <path>: <reason>`
+- Invalid TOML → `invalid .playbook at <path>: TOML syntax error at line <n> (content not shown)`. The parser's own message is never echoed: since v3.5.0 a manifest may hold credential values under `[env.set]`, and this error reaches the terminal from every command that discovers playbooks.
 - `subdir` escapes the install directory (e.g. `../foo`) → `invalid .playbook at <path>: 'subdir' must be relative and stay inside the directory`
 - `subdir` does not exist → `~/.claude-playbooks/<name>/.playbook declares subdir "<path>" but the directory is missing`
 - `source.subdir` or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`

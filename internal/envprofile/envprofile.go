@@ -100,7 +100,7 @@ func Read(dir, name string) (*Profile, error) {
 	}
 	var p Profile
 	if _, err := toml.Decode(string(data), &p); err != nil {
-		return nil, fmt.Errorf("invalid env profile at %s: %w", path(dir, name), err)
+		return nil, fmt.Errorf("invalid env profile at %s: %s", path(dir, name), manifest.SanitizeTOMLError(err))
 	}
 	p.Name = name
 	if err := validate(&p, path(dir, name)); err != nil {

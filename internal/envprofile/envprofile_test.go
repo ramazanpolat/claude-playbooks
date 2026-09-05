@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -166,5 +167,19 @@ func TestWriteTightensExistingProfile(t *testing.T) {
 	}
 	if info, _ := os.Stat(at); info.Mode().Perm() != 0o600 {
 		t.Fatalf("profile mode after write = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestReadDoesNotEchoBrokenProfileContent(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.toml"), []byte("[set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Read(dir, "p")
+	if err == nil || strings.Contains(err.Error(), "SECRETVALUE") {
+		t.Fatalf("error echoes profile content: %v", err)
 	}
 }

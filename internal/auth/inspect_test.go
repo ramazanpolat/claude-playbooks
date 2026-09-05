@@ -225,3 +225,19 @@ func TestInspectTokenModeIgnoresDaemonMarker(t *testing.T) {
 		t.Fatalf("marker not surfaced informationally: %+v", r)
 	}
 }
+
+// An isolated playbook whose manifest sets a token launches by that token
+// (injected, grant quarantined): own-token, isolated, and no stored-login
+// judgement even with a live daemon marker.
+func TestInspectIsolatedWithOwnTokenIsOwnToken(t *testing.T) {
+	_, dir := inspectFixture(t)
+	writeManifest(t, dir, "isolate_auth = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	now := time.Now()
+	if err := os.WriteFile(filepath.Join(dir, "daemon-auth-status.json"), []byte(`{"status":"auth_required","since":`+itoa(now.UnixMilli())+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := Inspect("pb", dir, now)
+	if r.Mode != ModeOwnToken || !r.Isolated || r.ReauthRequired || r.NeedsAttention() != "" {
+		t.Fatalf("%+v note=%q", r, r.NeedsAttention())
+	}
+}
