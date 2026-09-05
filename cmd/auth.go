@@ -61,6 +61,29 @@ type authRow struct {
 	Claude *claudeAuth `json:"claude,omitempty"`
 }
 
+// MarshalJSON keeps the claude field: the embedded Report's own MarshalJSON
+// is promoted to authRow and would otherwise be the whole encoding, silently
+// dropping everything --claude gathered.
+func (a authRow) MarshalJSON() ([]byte, error) {
+	base, err := json.Marshal(a.Report)
+	if err != nil {
+		return nil, err
+	}
+	if a.Claude == nil {
+		return base, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(base, &fields); err != nil {
+		return nil, err
+	}
+	c, err := json.Marshal(a.Claude)
+	if err != nil {
+		return nil, err
+	}
+	fields["claude"] = c
+	return json.Marshal(fields)
+}
+
 type claudeAuth struct {
 	LoggedIn         bool   `json:"loggedIn"`
 	SubscriptionType string `json:"subscriptionType,omitempty"`

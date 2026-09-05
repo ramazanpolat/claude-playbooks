@@ -99,3 +99,31 @@ func TestAuthStatusJSONOmitsUnknownInstants(t *testing.T) {
 		t.Fatalf("unknown instants leaked into JSON:\n%s", raw)
 	}
 }
+
+// --claude output survives JSON encoding: the embedded Report's MarshalJSON
+// must not swallow the claude field. With no claude binary on PATH the field
+// carries the per-row error rather than aborting the command.
+func TestAuthStatusJSONKeepsClaudeField(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "plain")
+	t.Setenv("PATH", filepath.Join(os.Getenv("HOME"), "stub-bin"))
+	authStatusJSON, authStatusClaude = true, true
+	t.Cleanup(func() { authStatusJSON, authStatusClaude = false, false })
+	raw := captureStdout(t, func() {
+		if err := runAuthStatus(nil, []string{"plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		t.Fatalf("json: %v\n%s", err, raw)
+	}
+	c, ok := rows[0]["claude"].(map[string]any)
+	if !ok {
+		t.Fatalf("claude field missing from JSON:\n%s", raw)
+	}
+	if c["error"] != "claude not on PATH" || rows[0]["mode"] != "shared-login" {
+		t.Fatalf("row: %v", rows[0])
+	}
+}
