@@ -72,6 +72,9 @@ jobs:
   smoke-darwin:
     needs: build
     if: needs.build.outputs.release == 'true'
+    # macos-latest is Apple silicon at the time of writing; the step below
+    # picks the matching asset either way, so a label change cannot break
+    # the gate.
     runs-on: macos-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -79,17 +82,24 @@ jobs:
           name: dist
           path: dist
 
-      - name: Execute the darwin-arm64 asset
+      - name: Execute the Darwin asset for this runner's architecture
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          uname -m
-          chmod +x dist/claude-playbook-darwin-arm64
-          out="$(dist/claude-playbook-darwin-arm64 --version)"
+          # macos-latest has moved between Intel and Apple silicon over the
+          # years; pick the asset that matches the host instead of assuming.
+          case "$(uname -m)" in
+            arm64)  bin=dist/claude-playbook-darwin-arm64 ;;
+            x86_64) bin=dist/claude-playbook-darwin-amd64 ;;
+            *) echo "unexpected runner architecture: $(uname -m)"; exit 1 ;;
+          esac
+          echo "runner: $(uname -m), asset: $bin"
+          chmod +x "$bin"
+          out="$("$bin" --version)"
           echo "$out"
           case "$out" in *"$TAG"*) ;; *) echo "binary does not report the tag"; exit 1;; esac
           # A registry command against an empty scratch root, not just --version.
-          dist/claude-playbook-darwin-arm64 --playbooks-dir "$RUNNER_TEMP/pb" list
+          "$bin" --playbooks-dir "$RUNNER_TEMP/pb" list
 
   release:
     needs: [build, smoke-darwin]

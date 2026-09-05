@@ -216,3 +216,32 @@ func TestLocalInstallTakesSourceRootMode(t *testing.T) {
 		t.Fatalf("installed root mode = %v, want the source's 0755 (staging's 0700 leaked)", info.Mode().Perm())
 	}
 }
+
+// The ordinary shared-credentials layout: the preserved entry IS a symlink
+// pointing outside the install. Containment must judge the ancestors, not the
+// link's target, or every such install would refuse to update whenever the
+// source also ships that file.
+func TestOverlayPreservesExternalSymlinkEntry(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	global := filepath.Join(t.TempDir(), "global-credentials.json")
+	writeFile(t, global, `{"claudeAiOauth":{"accessToken":"GLOBAL"}}`)
+	if err := os.Symlink(global, filepath.Join(live, ".credentials.json")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(work, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"UPSTREAM"}}`)
+	writeFile(t, filepath.Join(work, "CLAUDE.md"), "new")
+
+	if _, err := overlaySource(work, live, defaultPreserved); err != nil {
+		t.Fatalf("update refused for a symlinked credentials entry: %v", err)
+	}
+	got, err := os.Readlink(filepath.Join(live, ".credentials.json"))
+	if err != nil || got != global {
+		t.Fatalf("credentials link after update = %q, %v; want %q", got, err, global)
+	}
+	if body, _ := os.ReadFile(global); string(body) != `{"claudeAiOauth":{"accessToken":"GLOBAL"}}` {
+		t.Fatalf("global store touched: %s", body)
+	}
+}

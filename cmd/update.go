@@ -332,17 +332,23 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 	return backupPath, nil
 }
 
-// physicallyWithin reports whether p -- or, when it does not exist yet, its
-// nearest existing ancestor -- resolves to root or below it with symlinks
-// evaluated. Lexical validation of a preserved path is not enough: an
-// incoming source can replace a directory on that path with a symlink to
-// anywhere, and a restore written "below root" would then land outside it.
+// physicallyWithin reports whether the DIRECTORY holding p -- its parent, or
+// when that does not exist yet, the nearest existing ancestor -- resolves to
+// root or below it with symlinks evaluated. Lexical validation of a preserved
+// path is not enough: an incoming source can replace a directory on that path
+// with a symlink to anywhere, and a restore written "below root" would then
+// land outside it.
+//
+// The final component is deliberately NOT followed: a preserved entry that is
+// itself a symlink (the ordinary `.credentials.json -> ~/.claude/...`) points
+// outside by design and is recreated with Readlink, never read through. Only
+// a symlinked ancestor can make a write land elsewhere.
 func physicallyWithin(root, p string) (bool, error) {
 	rootReal, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return false, err
 	}
-	probe := p
+	probe := filepath.Dir(p)
 	for {
 		if real, err := filepath.EvalSymlinks(probe); err == nil {
 			return pathWithin(rootReal, real), nil
