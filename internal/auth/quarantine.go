@@ -189,7 +189,15 @@ func inGlobalCredentialsChain(p string) bool {
 	if err != nil {
 		return false
 	}
-	cur := filepath.Join(global, CredentialsFileName)
+	// Every hop is anchored at its PHYSICAL parent directory: a relative
+	// target such as "../shared/x" is relative to where the link really
+	// lives, and filepath.Join would clean the ".." against the lexical
+	// parent (a symlinked ~/.claude, say) and walk the wrong tree.
+	globalReal, err := filepath.EvalSymlinks(global)
+	if err != nil {
+		return false
+	}
+	cur := filepath.Join(globalReal, CredentialsFileName)
 	for hops := 0; hops < 40; hops++ {
 		ci, err := os.Lstat(cur)
 		if err != nil {
@@ -206,7 +214,11 @@ func inGlobalCredentialsChain(p string) bool {
 			return false
 		}
 		if !filepath.IsAbs(next) {
-			next = filepath.Join(filepath.Dir(cur), next)
+			parentReal, err := filepath.EvalSymlinks(filepath.Dir(cur))
+			if err != nil {
+				return false
+			}
+			next = filepath.Join(parentReal, next)
 		}
 		cur = next
 	}

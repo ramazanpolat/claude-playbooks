@@ -244,3 +244,43 @@ func TestQuarantineLeavesGlobalChainLinksAlone(t *testing.T) {
 		})
 	}
 }
+
+// A symlinked global directory plus RELATIVE chain links: ~/.claude ->
+// vault/config, vault/config/.credentials.json -> ../shared/.credentials.json,
+// vault/shared/.credentials.json -> vault/store.json. Lexical joining of ".."
+// against the symlinked parent would look for ~/shared instead and miss the
+// hop, so quarantine of vault/shared would detach a link on the global chain.
+func TestQuarantineChainWalkResolvesRelativeHopsPhysically(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := filepath.Join(home, "vault")
+	for _, d := range []string{filepath.Join(vault, "config"), filepath.Join(vault, "shared")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := filepath.Join(vault, "store.json")
+	if err := os.WriteFile(store, []byte(`{`+grantJSON+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sharedLink := filepath.Join(vault, "shared", CredentialsFileName)
+	if err := os.Symlink(store, sharedLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "shared", CredentialsFileName), filepath.Join(vault, "config", CredentialsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(vault, "config"), filepath.Join(home, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := QuarantineStoredOAuth(filepath.Join(vault, "shared")); err != nil {
+		t.Fatalf("quarantine: %v", err)
+	}
+	if got, err := os.Readlink(sharedLink); err != nil || got != store {
+		t.Fatalf("chain link detached: %q %v", got, err)
+	}
+	if _, present := readStore(t, filepath.Join(home, ".claude", CredentialsFileName))["claudeAiOauth"]; !present {
+		t.Fatal("global grant unreachable through the chain")
+	}
+}
