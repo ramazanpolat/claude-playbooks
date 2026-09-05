@@ -17,3 +17,13 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(m.Run())
 }
+
+// Sentinel: the real credential provider is unreachable from this package's
+// tests. If a future change drops the TestMain stub, this fails before any
+// other test can touch a developer's Keychain.
+func TestKeychainIsStubbed(t *testing.T) {
+	out, err := findGenericPassword("Claude Code-credentials")
+	if err == nil || out != nil {
+		t.Fatalf("findGenericPassword reached a real provider: out=%q err=%v", out, err)
+	}
+}
