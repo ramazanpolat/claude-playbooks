@@ -389,3 +389,21 @@ func TestOverlayPreserveThroughFormerFileIsAbsence(t *testing.T) {
 		t.Fatalf("unpreserved sibling from the source missing: %v", err)
 	}
 }
+
+// The mirror of the backup-side ENOTDIR: the SOURCE introduces a regular file
+// named config while config/private.json is preserved and locally absent. The
+// absence restore hits ENOTDIR at the destination and must read as done.
+func TestOverlayPreserveUnderIntroducedFileIsAbsence(t *testing.T) {
+	root := t.TempDir()
+	live := filepath.Join(root, "live")
+	work := filepath.Join(root, "work")
+	mkdirs(t, live, work)
+	writeFile(t, filepath.Join(work, "config"), "now a file")
+
+	if _, err := overlaySource(work, live, []string{"config/private.json"}); err != nil {
+		t.Fatalf("ENOTDIR at the destination failed the update: %v", err)
+	}
+	if body, _ := os.ReadFile(filepath.Join(live, "config")); string(body) != "now a file" {
+		t.Fatalf("introduced file missing or changed: %q", body)
+	}
+}

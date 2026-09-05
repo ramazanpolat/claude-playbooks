@@ -539,7 +539,12 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 				return fmt.Errorf("%s resolves outside %s/ after the update (a symlinked ancestor); refusing to restore through it", rel, top)
 			}
 		}
-		return removeAny(dst)
+		// ENOTDIR here means the source introduced a regular FILE where the
+		// preserved path expects a directory: nothing at dst, already absent.
+		if err := removeAny(dst); err != nil && !absentPath(err) {
+			return err
+		}
+		return nil
 	}
 	if err != nil {
 		return err

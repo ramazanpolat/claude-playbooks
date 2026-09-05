@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // oauthCredentialKey is the object inside .credentials.json that holds the
@@ -213,16 +214,52 @@ func inGlobalCredentialsChain(p string) bool {
 		if err != nil {
 			return false
 		}
-		if !filepath.IsAbs(next) {
-			parentReal, err := filepath.EvalSymlinks(filepath.Dir(cur))
-			if err != nil {
-				return false
-			}
-			next = filepath.Join(parentReal, next)
+		cur, err = resolveLinkTarget(cur, next)
+		if err != nil {
+			return false
 		}
-		cur = next
 	}
 	return false
+}
+
+// resolveLinkTarget turns the target of the symlink at link into a path whose
+// every directory component is physical, resolving component by component. A
+// lexical Join would collapse "jump/.." before jump (a symlink) is followed
+// and land in the wrong tree; here ".." backs out of the directory actually
+// reached. The final component is left as spelled, so the caller can Lstat it
+// as the link it may be.
+func resolveLinkTarget(link, target string) (string, error) {
+	var cur string
+	if filepath.IsAbs(target) {
+		cur = string(filepath.Separator)
+	} else {
+		parentReal, err := filepath.EvalSymlinks(filepath.Dir(link))
+		if err != nil {
+			return "", err
+		}
+		cur = parentReal
+	}
+	// The target is split UNCLEANED: filepath.Clean would collapse "a/.."
+	// pairs lexically, which is exactly the hazard when a is a symlink.
+	parts := strings.Split(filepath.ToSlash(target), "/")
+	for i, part := range parts {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			cur = filepath.Dir(cur)
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		if i < len(parts)-1 {
+			real, err := filepath.EvalSymlinks(cur)
+			if err != nil {
+				return "", err
+			}
+			cur = real
+		}
+	}
+	return cur, nil
 }
 
 // sameDir reports whether a and b resolve to the same directory. Symlinks are

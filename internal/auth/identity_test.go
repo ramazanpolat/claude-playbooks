@@ -284,3 +284,45 @@ func TestQuarantineChainWalkResolvesRelativeHopsPhysically(t *testing.T) {
 		t.Fatal("global grant unreachable through the chain")
 	}
 }
+
+// A relative chain target that passes THROUGH a symlink and back out:
+// ~/.claude/.credentials.json -> ../jump/../shared/.credentials.json with
+// ~/jump -> ~/vault/inner. Lexical cleaning collapses "jump/.." to nothing and
+// looks in ~/shared; physical resolution follows jump first and backs out to
+// ~/vault, reaching ~/vault/shared.
+func TestQuarantineChainWalkFollowsSymlinkThenDotDot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vault := filepath.Join(home, "vault")
+	for _, d := range []string{filepath.Join(vault, "inner"), filepath.Join(vault, "shared"), filepath.Join(home, ".claude")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(vault, "inner"), filepath.Join(home, "jump")); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(vault, "store.json")
+	if err := os.WriteFile(store, []byte(`{`+grantJSON+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sharedLink := filepath.Join(vault, "shared", CredentialsFileName)
+	if err := os.Symlink(store, sharedLink); err != nil {
+		t.Fatal(err)
+	}
+	// Built as a string on purpose: filepath.Join would clean "jump/.." away.
+	if err := os.Symlink("../jump/../shared/"+CredentialsFileName, filepath.Join(home, ".claude", CredentialsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: the OS resolves the chain to the store.
+	if _, present := readStore(t, filepath.Join(home, ".claude", CredentialsFileName))["claudeAiOauth"]; !present {
+		t.Fatal("fixture: global path does not resolve to the store")
+	}
+
+	if err := QuarantineStoredOAuth(filepath.Join(vault, "shared")); err != nil {
+		t.Fatalf("quarantine: %v", err)
+	}
+	if got, err := os.Readlink(sharedLink); err != nil || got != store {
+		t.Fatalf("chain link detached: %q %v", got, err)
+	}
+}
