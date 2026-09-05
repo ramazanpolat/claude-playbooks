@@ -31,8 +31,26 @@ var launchFlagNames = map[string]bool{"--env-profile": true, "--env": true, "--u
 // complete before anything else happens: a bad value must fail before the
 // registry is consulted or credentials are touched.
 func takeLaunchFlags(args []string) (rest []string, layers []*manifest.Env, err error) {
+	return takeLaunchFlagsWith(args, nil)
+}
+
+// takeLaunchFlagsWith is takeLaunchFlags that also recognises the boolean
+// wrapper flags in bools (name -> destination) within the same leading run.
+// `start --delete` is the one user: recognised only here, it can no longer be
+// mistaken for a claude argument, a claude flag's value, or anything after
+// "--". The scan stops at "--" without consuming it, so what follows is
+// claude's verbatim.
+func takeLaunchFlagsWith(args []string, bools map[string]*bool) (rest []string, layers []*manifest.Env, err error) {
 	i := 0
 	for i < len(args) {
+		if args[i] == "--" {
+			break
+		}
+		if dst, ok := bools[args[i]]; ok {
+			*dst = true
+			i++
+			continue
+		}
 		flag, value, inline := strings.Cut(args[i], "=")
 		if !launchFlagNames[flag] {
 			break

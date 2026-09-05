@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // oauthCredentialKey is the object inside .credentials.json that holds the
@@ -51,11 +52,8 @@ func QuarantineStoredOAuth(configDir string) error {
 	// also what the Keychain is materialised into. Stripping it would remove the
 	// grant every playbook falls back to and leave nothing to re-link. Reachable
 	// via `start ~/.claude`, which binds an arbitrary config dir.
-	global, err := globalClaudeDir()
-	if err == nil && global != "" {
-		if dir, err := filepath.Abs(configDir); err == nil && dir == global {
-			return nil
-		}
+	if isGlobalConfigDir(configDir) {
+		return nil
 	}
 
 	path := filepath.Join(configDir, CredentialsFileName)
@@ -71,6 +69,21 @@ func QuarantineStoredOAuth(configDir string) error {
 		return err
 	}
 	isLink := info.Mode()&os.ModeSymlink != 0
+
+	// The reverse alias: ~/.claude/.credentials.json may itself resolve INTO
+	// this config dir (a shared store kept elsewhere). Then this dir's entry
+	// is part of the global store -- its regular-file target, or a symlink
+	// the global path passes through on the way there -- and removing or
+	// rewriting it strips or dangles the global grant. The ordinary OUTGOING
+	// playbook link (.credentials.json -> ~/.claude/...) resolves to the
+	// same file too but is not on the global path's own chain, and must
+	// still be detached below.
+	if !isLink && isGlobalCredentialsFile(path) {
+		return nil
+	}
+	if isLink && inGlobalCredentialsChain(path) {
+		return nil
+	}
 
 	data, err := os.ReadFile(path) // follows the link deliberately: we need its content
 	if err != nil {
@@ -130,6 +143,150 @@ func globalClaudeDir() (string, error) {
 		return "", err
 	}
 	return filepath.Abs(filepath.Join(home, ".claude"))
+}
+
+// isGlobalConfigDir reports whether dir IS the global Claude config directory,
+// by filesystem identity rather than by spelling: a symlink to ~/.claude (or a
+// symlinked ancestor, or a symlinked ~/.claude itself) names the same
+// directory, and a credential mutation through it lands on the global store.
+// String comparison of absolute paths missed every one of those.
+func isGlobalConfigDir(dir string) bool {
+	global, err := globalClaudeDir()
+	if err != nil || global == "" {
+		return false
+	}
+	return sameDir(dir, global)
+}
+
+// isGlobalCredentialsFile reports whether p and the global credentials file
+// are the same file once every symlink on either side is resolved.
+func isGlobalCredentialsFile(p string) bool {
+	global, err := globalClaudeDir()
+	if err != nil || global == "" {
+		return false
+	}
+	gi, err := os.Stat(filepath.Join(global, CredentialsFileName))
+	if err != nil {
+		return false
+	}
+	pi, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(gi, pi)
+}
+
+// inGlobalCredentialsChain reports whether p is one of the symlinks the global
+// credentials path passes through while resolving (~/.claude/.credentials.json
+// -> p -> ... -> store). Detaching such a link would leave the global path
+// dangling. The global entry itself and every intermediate hop are compared by
+// identity (Lstat, so a link is compared as the link it is).
+func inGlobalCredentialsChain(p string) bool {
+	global, err := globalClaudeDir()
+	if err != nil || global == "" {
+		return false
+	}
+	pi, err := os.Lstat(p)
+	if err != nil {
+		return false
+	}
+	// Every hop is anchored at its PHYSICAL parent directory: a relative
+	// target such as "../shared/x" is relative to where the link really
+	// lives, and filepath.Join would clean the ".." against the lexical
+	// parent (a symlinked ~/.claude, say) and walk the wrong tree.
+	globalReal, err := filepath.EvalSymlinks(global)
+	if err != nil {
+		return false
+	}
+	cur := filepath.Join(globalReal, CredentialsFileName)
+	for hops := 0; hops < 40; hops++ {
+		ci, err := os.Lstat(cur)
+		if err != nil {
+			return false
+		}
+		if os.SameFile(pi, ci) {
+			return true
+		}
+		if ci.Mode()&os.ModeSymlink == 0 {
+			return false // reached the regular file without meeting p
+		}
+		next, err := os.Readlink(cur)
+		if err != nil {
+			return false
+		}
+		cur, err = resolveLinkTarget(cur, next)
+		if err != nil {
+			return false
+		}
+	}
+	return false
+}
+
+// resolveLinkTarget turns the target of the symlink at link into a path whose
+// every directory component is physical, resolving component by component. A
+// lexical Join would collapse "jump/.." before jump (a symlink) is followed
+// and land in the wrong tree; here ".." backs out of the directory actually
+// reached. The final component is left as spelled, so the caller can Lstat it
+// as the link it may be.
+func resolveLinkTarget(link, target string) (string, error) {
+	var cur string
+	if filepath.IsAbs(target) {
+		cur = string(filepath.Separator)
+	} else {
+		parentReal, err := filepath.EvalSymlinks(filepath.Dir(link))
+		if err != nil {
+			return "", err
+		}
+		cur = parentReal
+	}
+	// The target is split UNCLEANED: filepath.Clean would collapse "a/.."
+	// pairs lexically, which is exactly the hazard when a is a symlink.
+	parts := strings.Split(filepath.ToSlash(target), "/")
+	for i, part := range parts {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			cur = filepath.Dir(cur)
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		if i < len(parts)-1 {
+			real, err := filepath.EvalSymlinks(cur)
+			if err != nil {
+				return "", err
+			}
+			cur = real
+		}
+	}
+	return cur, nil
+}
+
+// sameDir reports whether a and b resolve to the same directory. Symlinks are
+// evaluated on both sides and os.SameFile decides, so no path spelling can
+// disguise identity. A path that does not exist is never the same as one that
+// does.
+func sameDir(a, b string) bool {
+	ra, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		return false
+	}
+	rb, err := filepath.EvalSymlinks(b)
+	if err != nil {
+		return false
+	}
+	if ra == rb {
+		return true
+	}
+	ia, err := os.Stat(ra)
+	if err != nil {
+		return false
+	}
+	ib, err := os.Stat(rb)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ia, ib)
 }
 
 // writeFilePrivate writes data at mode 0600 via a temporary file and a rename,

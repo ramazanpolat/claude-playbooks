@@ -5,11 +5,16 @@ on:
     tags:
       - 'v*'
 
+# Three jobs, so a Darwin artifact is executed on macOS BEFORE anything is
+# published: build (ubuntu) produces every binary, smoke-darwin (macOS,
+# arm64) runs the darwin-arm64 asset and checks it reports the tag, and
+# release publishes only when both succeeded. CI covers the source; this is
+# the only place the downloadable binaries themselves are exercised.
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      release: ${{ steps.release_gate.outputs.release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,10 +31,13 @@ jobs:
             echo "Tag ${{ github.ref_name }} points to $GITHUB_SHA, which is not on origin/main. Skipping release."
           fi
 
+      # Build with the same current Go the macOS CI leg uses. go.mod keeps
+      # the 1.21 language floor (the ubuntu CI leg proves it); the release
+      # artifacts should not be the one build path CI never exercises.
       - uses: actions/setup-go@v5
         if: steps.release_gate.outputs.release == 'true'
         with:
-          go-version: '1.21'
+          go-version: '1.26'
 
       - name: Test and vet
         if: steps.release_gate.outputs.release == 'true'
@@ -53,8 +61,59 @@ jobs:
           sha256sum claude-playbook-* > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Create GitHub Release
+      - uses: actions/upload-artifact@v4
         if: steps.release_gate.outputs.release == 'true'
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  smoke-darwin:
+    needs: build
+    if: needs.build.outputs.release == 'true'
+    # macos-latest is Apple silicon at the time of writing; the step below
+    # picks the matching asset either way, so a label change cannot break
+    # the gate.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Execute the Darwin asset for this runner's architecture
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # macos-latest has moved between Intel and Apple silicon over the
+          # years; pick the asset that matches the host instead of assuming.
+          case "$(uname -m)" in
+            arm64)  bin=dist/claude-playbook-darwin-arm64 ;;
+            x86_64) bin=dist/claude-playbook-darwin-amd64 ;;
+            *) echo "unexpected runner architecture: $(uname -m)"; exit 1 ;;
+          esac
+          echo "runner: $(uname -m), asset: $bin"
+          chmod +x "$bin"
+          out="$("$bin" --version)"
+          echo "$out"
+          case "$out" in *"$TAG"*) ;; *) echo "binary does not report the tag"; exit 1;; esac
+          # A registry command against an empty scratch root, not just --version.
+          "$bin" --playbooks-dir "$RUNNER_TEMP/pb" list
+
+  release:
+    needs: [build, smoke-darwin]
+    if: needs.build.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*

@@ -488,7 +488,7 @@ cpb start /tmp/scratch --model claude-opus-5
 cpb start /tmp/scratch --delete
 ```
 
-`--delete` removes the directory when the session ends, which is useful for disposable experiments.
+`--delete` removes the directory when the session ends, which is useful for disposable experiments. Like the launch flags, it counts only before the path or right after it; a `--delete` later in the line, after `--` or as a value for one of `claude`'s own flags, goes to `claude` untouched.
 
 ### Rename, delete, and update
 

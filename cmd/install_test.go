@@ -427,6 +427,7 @@ func quoteTOML(s string) string {
 
 func resetCommandTestState(t *testing.T) {
 	t.Helper()
+	isolateCredentials(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	config.PlaybooksDir = ""
 	config.LauncherDir = t.TempDir()
@@ -554,4 +555,27 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "x"); !exists || foreign {
 		t.Errorf("launcher x mutated: exists=%v foreign=%v", exists, foreign)
 	}
+}
+
+// isolateCredentials keeps every command test away from the developer's real
+// authentication state. Commands that install, create, or link call
+// SyncCredentials, which on darwin asks the Keychain (`security
+// find-generic-password`) BEFORE looking under HOME and materialises a hit
+// into ~/.claude/.credentials.json -- so a temporary HOME alone is not
+// isolation. A stub `security` that exits non-zero models "no such item",
+// the token file points at nothing, and HOME is a scratch directory.
+func isolateCredentials(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	stub := filepath.Join(home, "stub-bin")
+	if err := os.MkdirAll(stub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stub, "security"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
+	os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN")
 }

@@ -546,17 +546,31 @@ func pluralS(n int) string {
 // Internal symlinks are dereferenced so installed playbooks are self-contained
 // regular files/directories. Symlinks that resolve outside the source tree are
 // preserved to avoid unexpectedly copying unrelated local data into an install.
+// overlayDir is copyDir for a LIVE destination root: the root keeps its own
+// mode (a private 0700 install must stay private) and only entries below it
+// take the source's. copyDir itself always applies the source root's mode,
+// which fresh installs and staging rely on -- a staging directory made by
+// MkdirTemp is 0700, and must take the source's mode or every local install
+// would end up 0700.
+func overlayDir(src, dst string) error {
+	root, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return err
+	}
+	return copyDirWithinRoot(root, dst, root, map[string]bool{root: true}, true)
+}
+
 func copyDir(src, dst string) error {
 	root, err := filepath.EvalSymlinks(src)
 	if err != nil {
 		return err
 	}
-	return copyDirWithinRoot(root, dst, root, map[string]bool{root: true})
+	return copyDirWithinRoot(root, dst, root, map[string]bool{root: true}, false)
 }
 
 // visited holds resolved directories already being copied; a symlink that
 // resolves to one of them would recurse forever, so it is preserved as-is.
-func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
+func copyDirWithinRoot(src, dst, root string, visited map[string]bool, keepRootMode bool) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -567,6 +581,17 @@ func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
+			if rel == "." && keepRootMode {
+				// The destination root is a LIVE install during an update,
+				// holding runtime files the source knows nothing about. Its
+				// mode is the pilot's (a private 0700 must stay private);
+				// only a root this copy creates takes the source's mode.
+				if _, statErr := os.Lstat(target); statErr == nil {
+					return nil
+				} else if !os.IsNotExist(statErr) {
+					return statErr
+				}
+			}
 			if targetInfo, statErr := os.Lstat(target); statErr == nil && (!targetInfo.IsDir() || targetInfo.Mode()&os.ModeSymlink != 0) {
 				if err := removeAny(target); err != nil {
 					return err
@@ -594,7 +619,7 @@ func copyDirWithinRoot(src, dst, root string, visited map[string]bool) error {
 							return os.Symlink(link, target)
 						}
 						visited[resolved] = true
-						return copyDirWithinRoot(resolved, target, root, visited)
+						return copyDirWithinRoot(resolved, target, root, visited, false)
 					}
 					return copyFile(resolved, target, targetInfo.Mode())
 				}
