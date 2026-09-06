@@ -55,6 +55,12 @@ command = 'printf "FROM_FILE=yes\n" > "$HOME/w.env"; rm -f "$HOME/claude-env"; c
 contains = "file-and-launcher-ok"
 
 [[verify.commands]]
+# The registry default profile is the bottom layer of every launch; the
+# playbook's own entry wins over it; delete is refused while it is default.
+command = 'claude-playbook env-profile base set FROM_DEFAULT=yes FROM_MANIFEST=default >/dev/null && claude-playbook env-profile base default >/dev/null && rm -f "$HOME/claude-env" && claude-playbook run env-pb && grep -x FROM_DEFAULT=yes "$HOME/claude-env" >/dev/null && grep -x FROM_MANIFEST=yes "$HOME/claude-env" >/dev/null && if claude-playbook env-profile base delete >/dev/null 2>&1; then echo default-delete-not-refused; else claude-playbook env-profile base undefault >/dev/null && claude-playbook env-profile base delete >/dev/null && echo default-ok; fi'
+contains = "default-ok"
+
+[[verify.commands]]
 # `--delete` after `--` belongs to claude, never to the wrapper.
 command = 'mkdir -p "$HOME/keepme"; claude-playbook start "$HOME/keepme" -- --delete && test -d "$HOME/keepme" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/keepme$" "$HOME/claude-env" && echo delete-boundary-ok'
 contains = "delete-boundary-ok"

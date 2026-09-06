@@ -159,6 +159,17 @@ if phase_enabled p4; then
   grep -q '^RITUAL_OWN=yes$' "$DUMP" 2>/dev/null || rc=1
   grep -q '^CLAUDE_CONFIG_DIR=' "$DUMP" 2>/dev/null || rc=1
   grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$DUMP" 2>/dev/null && rc=1   # unset by profile
+  # registry default profile: bottom layer of every launch; the playbook's
+  # own entry wins over it; delete refused while default
+  p4 env-profile base set FROM_DEFAULT=yes RITUAL_OWN=default >/dev/null 2>&1 || rc=1
+  p4 env-profile base default >/dev/null 2>&1 || rc=1
+  DUMP3="$SB/envdump3"
+  CPB_RITUAL_ENVDUMP="$DUMP3" PATH="$STUB:$PATH" CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE=/dev/null p4 run fx >/dev/null 2>&1 || rc=1
+  grep -q '^FROM_DEFAULT=yes$' "$DUMP3" 2>/dev/null || rc=1
+  grep -q '^RITUAL_OWN=yes$' "$DUMP3" 2>/dev/null || rc=1         # playbook entry beats the default
+  p4 env-profile base delete >/dev/null 2>&1 && rc=1               # refused while default
+  p4 env-profile base undefault >/dev/null 2>&1 || rc=1
+  p4 env-profile base delete >/dev/null 2>&1 || rc=1
   # one-off launch flags: before the name and after it, nothing written
   DUMP2="$SB/envdump2"; MAN_BEFORE="$(cat "$PB/fx/.playbook")"
   CPB_RITUAL_ENVDUMP="$DUMP2" PATH="$STUB:$PATH" CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE=/dev/null \

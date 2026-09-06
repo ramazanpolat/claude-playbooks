@@ -110,7 +110,7 @@ cpb env-profile                                  # list: description, counts, us
 cpb env-profile <profile> delete                 # refused while any playbook uses it
 ```
 
-Layering at launch, later wins: shell environment, each profile in list order, the playbook's own `set`, the playbook's own `unset`, then `CLAUDE_CONFIG_DIR`. Claude Code's `settings.json` `env` is applied later inside the process and wins over all of these but cannot unset.
+Layering at launch, later wins: shell environment, the registry default profile if one is set (`cpb env-profile <p> default`), each profile in list order, the playbook's own `set`, the playbook's own `unset`, one-off launch flags, then `CLAUDE_CONFIG_DIR`. Claude Code's `settings.json` `env` is applied later inside the process and wins over all of these but cannot unset.
 
 ## Choose an authentication mode per playbook
 
