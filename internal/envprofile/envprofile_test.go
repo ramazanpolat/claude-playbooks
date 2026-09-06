@@ -183,3 +183,61 @@ func TestReadDoesNotEchoBrokenProfileContent(t *testing.T) {
 		t.Fatalf("error echoes profile content: %v", err)
 	}
 }
+
+func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if name, err := Default(dir); name != "" || err != nil {
+		t.Fatalf("Default(no marker) = %q, %v", name, err)
+	}
+	if err := SetDefault(dir, "ghost"); !errors.Is(err, ErrProfile) {
+		t.Fatalf("SetDefault of a missing profile: %v", err)
+	}
+	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"A": "default", "B": "default"}, Unset: []string{"TOKEN"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(dir, &Profile{Name: "pb", Set: map[string]string{"B": "profile"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetDefault(dir, "base"); err != nil {
+		t.Fatal(err)
+	}
+	if name, _ := Default(dir); name != "base" {
+		t.Fatalf("Default = %q", name)
+	}
+	info, _ := os.Stat(filepath.Join(dir, DefaultMarker))
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("marker mode %v", info.Mode().Perm())
+	}
+
+	// no manifest block at all: the default still applies
+	got, err := ExpandWithDefault(dir, nil)
+	if err != nil || got.Set["A"] != "default" || !got.Unsets("TOKEN") {
+		t.Fatalf("nil block: %#v %v", got, err)
+	}
+	// a block with its own profile and set: default < profile < own
+	got, err = ExpandWithDefault(dir, &manifest.Env{Profiles: []string{"pb"}, Set: map[string]string{"TOKEN": "own"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Set["A"] != "default" || got.Set["B"] != "profile" || got.Set["TOKEN"] != "own" || got.Unsets("TOKEN") {
+		t.Fatalf("layering: %#v", got)
+	}
+
+	if err := ClearDefault(dir); err != nil {
+		t.Fatal(err)
+	}
+	if name, _ := Default(dir); name != "" {
+		t.Fatalf("Default after clear = %q", name)
+	}
+	if err := ClearDefault(dir); err != nil {
+		t.Fatalf("clearing an absent default: %v", err)
+	}
+
+	// a default that names a missing profile refuses like any other
+	if err := os.WriteFile(filepath.Join(dir, DefaultMarker), []byte("gone\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExpandWithDefault(dir, nil); !errors.Is(err, ErrProfile) {
+		t.Fatalf("missing default: %v", err)
+	}
+}

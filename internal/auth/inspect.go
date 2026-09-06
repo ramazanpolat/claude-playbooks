@@ -129,7 +129,14 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		var menv *manifest.Env
 		if m, _ := manifest.Nearest(configDir); m != nil {
 			var err error
-			menv, err = envprofile.Expand(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
+			menv, err = envprofile.ExpandWithDefault(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
+			if err != nil {
+				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
+			}
+		} else {
+			// No manifest: the registry default still applies.
+			var err error
+			menv, err = envprofile.ExpandWithDefault(envprofile.Dir(config.ResolvePlaybooksDir()), nil)
 			if err != nil {
 				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
 			}

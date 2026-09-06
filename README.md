@@ -370,12 +370,16 @@ Every launch of a playbook (its launcher command, `run`, or `start` at its direc
 
 ```text
 your shell's environment
+  + the registry default env profile, if one is set             (cpb env-profile <name> default)
   + each env profile the playbook uses, in the order listed     (~/.claude-playbooks/.env-profiles/<name>.toml)
   + the playbook's own [env.set]                                 (in its .playbook)
   - the playbook's own [env] unset
+  + one-off launch flags (--env-profile, --env, --unset, --env-file)
   + CLAUDE_CONFIG_DIR, bound by the tool, cannot be overridden
   = what claude sees
 ```
+
+A playbook with no `[env]` block still gets the registry default, when one is set; without one it inherits only your shell's environment.
 
 `set` overrides whatever the shell exported; `unset` removes a variable even when the shell exports it. Raw `claude` launches bypass all of this. Claude Code's own `env` block in `settings.json` is applied later, inside the `claude` process, and wins over these layers; it can set variables but cannot unset one the shell exported, which is what the manifest block is for.
 
@@ -458,7 +462,18 @@ profiles = ["glm"]
 ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.4"
 ```
 
-Profiles apply in the order listed, later ones overriding earlier, and the playbook's own entries apply last. Manage them:
+Profiles apply in the order listed, later ones overriding earlier, and the playbook's own entries apply last.
+
+One profile can be the **registry default**, applied under every playbook's own block, manifest or not, `start` included:
+
+```bash
+cpb env-profile personal default      # every launch starts from this layer
+cpb env-profile personal undefault    # back to no default
+```
+
+An empty `[env]` block and a missing one are the same thing: the identity layer. So a launch is a stack, shell environment, registry default, the playbook's profiles, the playbook's own entries, one-off flags, and every layer that says nothing changes nothing.
+
+Manage them:
 
 ```bash
 cpb env-profile                 # list profiles, descriptions, which playbooks use each
@@ -488,7 +503,7 @@ They apply on top of the playbook's own block, in command-line order, and obey t
 
 If you use a long-lived token (`claude setup-token`, stored at `~/.config/claude-code/oauth-token`), every playbook launch injects it as `CLAUDE_CODE_OAUTH_TOKEN` and removes the playbook's own stored login so a transient 401 cannot swap the working token for a dead one. That is right for most playbooks and wrong for one that must use a different account or a proxy that does not want the token.
 
-Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a profile, does more than drop the variable: the token is treated as inactive for that playbook, so the launch takes the stored-credentials path. No token is injected, the playbook's own login is left alone, and the shared credentials are synced. `/login` once there and it sticks, while every other playbook keeps using the token. Setting the variable instead supplies a per-playbook token that wins over the machine-global file. This is a middle ground between sharing the token and `isolate_auth` (the playbook shares nothing). The full decision and every mode are in [Authentication](#authentication).
+Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a profile, does more than drop the variable: the token is treated as inactive for that playbook, so the launch takes the stored-credentials path. No token is injected, the playbook's own login is left alone, and the shared credentials are synced. `/login` once there and it sticks, while every other playbook keeps using the token. Setting the variable instead supplies a per-playbook token that wins over the machine-global file; such a launch counts as another account, so the plan descriptors read from your global login are not injected into it (the profile may set its own). The same holds for a token you export in the shell yourself: only the token read from the token file gets the global descriptors. This is a middle ground between sharing the token and `isolate_auth` (the playbook shares nothing). The full decision and every mode are in [Authentication](#authentication).
 
 #### What stays yours
 

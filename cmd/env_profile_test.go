@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -117,5 +119,239 @@ func TestProfileRejectsBadInput(t *testing.T) {
 	}
 	if got, _ := envprofile.List(envprofile.Dir(config.ResolvePlaybooksDir())); len(got) != 0 {
 		t.Fatalf("a rejected command created a profile: %v", got)
+	}
+}
+
+func TestProfileDefaultLifecycle(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "router")
+	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+
+	if err := runEnvProfile(nil, []string{"base", "default"}); err == nil {
+		t.Fatal("made a missing profile the default")
+	}
+	if err := runEnvProfile(nil, []string{"base", "set", "FROM_DEFAULT=yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := envprofile.Default(dir); d != "base" {
+		t.Fatalf("default = %q", d)
+	}
+	list := captureStdout(t, func() {
+		if err := runEnvProfile(nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(list, "registry default") {
+		t.Fatalf("list does not mark the default:\n%s", list)
+	}
+	// env show mentions the default even for a playbook with no block, and
+	// the effective view includes it when a block exists.
+	show := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(show, `Registry default profile "base" applies`) {
+		t.Fatalf("show without block:\n%s", show)
+	}
+	if err := runEnv(nil, []string{"router", "set", "OWN=1"}); err != nil {
+		t.Fatal(err)
+	}
+	show = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(show, "  default   base\n") || !strings.Contains(show, "Effective at launch:\n  set    FROM_DEFAULT=yes\n  set    OWN=1\n") {
+		t.Fatalf("show with block:\n%s", show)
+	}
+	// Delete is refused while it is the default; undefault clears it.
+	if err := runEnvProfile(nil, []string{"base", "delete"}); err == nil || !strings.Contains(err.Error(), "registry default") {
+		t.Fatalf("delete of the default: %v", err)
+	}
+	if err := runEnvProfile(nil, []string{"other", "undefault"}); err == nil {
+		t.Fatal("undefault of a non-default profile succeeded")
+	}
+	if err := runEnvProfile(nil, []string{"base", "undefault"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := envprofile.Default(dir); d != "" {
+		t.Fatalf("default after undefault = %q", d)
+	}
+	if err := runEnvProfile(nil, []string{"base", "delete"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = root
+}
+
+// undefault must work when the default profile itself is unreadable (that is
+// when every launch is refused), the delete guard must refuse when the marker
+// cannot be read, and must match the default by file identity.
+func TestProfileDefaultGuardsUnderBrokenState(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	if err := runEnvProfile(nil, []string{"base", "set", "A=1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	// Break the profile file: undefault still clears the marker.
+	if err := os.WriteFile(filepath.Join(dir, "base.toml"), []byte("= [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "undefault"}); err != nil {
+		t.Fatalf("undefault with a broken profile: %v", err)
+	}
+	if d, _ := envprofile.Default(dir); d != "" {
+		t.Fatalf("marker not cleared: %q", d)
+	}
+	// Repair, set default again, then make the MARKER unreadable: delete refuses.
+	if err := envprofile.Write(dir, &envprofile.Profile{Name: "base", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("not a valid name!\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "delete"}); err == nil || !strings.Contains(err.Error(), "cannot determine the registry default") {
+		t.Fatalf("delete with an unreadable marker: %v", err)
+	}
+	// Restore a valid marker and probe case-insensitive identity.
+	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "BASE.toml")); err == nil {
+		if err := runEnvProfile(nil, []string{"BASE", "delete"}); err == nil || !strings.Contains(err.Error(), "registry default") {
+			t.Fatalf("case variant of the default was deletable: %v", err)
+		}
+	}
+}
+
+// A playbook with no block still reports what the default does to it, or
+// that the launch is refused when the default is broken.
+func TestEnvShowWithoutBlockReportsDefaultEffect(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	seedFlatPlaybook(t, "plain")
+	if err := runEnvProfile(nil, []string{"base", "set", "FROM_DEFAULT=yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "Effective at launch:\n  set    FROM_DEFAULT=yes\n") {
+		t.Fatalf("show without block lacks the default's effect:\n%s", out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("ghost\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "launch is refused") {
+		t.Fatalf("show without block hides the refusal:\n%s", out)
+	}
+}
+
+// A legacy `subdir` playbook whose subdirectory carries its own manifest is
+// governed by that manifest at launch (manifest.Nearest). `env <pb>` shows
+// that block under the registry default, names the governing manifest, and
+// does not present the root block the launch ignores.
+func TestEnvShowFollowsNearestManifestForSubdir(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "legacy")
+	if err := os.MkdirAll(filepath.Join(root, "cfg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, manifest.FileName), []byte("name = \"legacy\"\nsubdir = \"cfg\"\n\n[env.set]\nROOT = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cfg", manifest.FileName), []byte("name = \"legacy\"\n\n[env.set]\nNESTED = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "set", "FROM_DEFAULT=yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"legacy"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "governs the launch") || !strings.Contains(out, filepath.Join("cfg", manifest.FileName)) {
+		t.Fatalf("show does not name the nested manifest:\n%s", out)
+	}
+	if !strings.Contains(out, "Effective at launch:\n  set    FROM_DEFAULT=yes\n  set    NESTED=1\n") {
+		t.Fatalf("effective view does not follow the nested manifest:\n%s", out)
+	}
+	if strings.Contains(out, "ROOT=1") {
+		t.Fatalf("root block the launch ignores was presented:\n%s", out)
+	}
+	// A flat playbook is unaffected: no note, root block governs.
+	if err := os.Remove(filepath.Join(root, "cfg", manifest.FileName)); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"legacy"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "governs the launch") || !strings.Contains(out, "Effective at launch:\n  set    FROM_DEFAULT=yes\n  set    ROOT=1\n") {
+		t.Fatalf("subdir without a nested manifest:\n%s", out)
+	}
+}
+
+// A manifest-free playbook is governed at launch by the nearest ancestor
+// manifest, when one exists (manifest.Nearest walks up). `env <pb>` must show
+// that block and name the file, exactly as the launch resolves it.
+func TestEnvShowFollowsAncestorManifestForManifestFreePlaybook(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "bare")
+	root := config.ResolvePlaybooksDir()
+	if err := os.WriteFile(filepath.Join(root, manifest.FileName), []byte("name = \"root\"\n\n[env.set]\nANCESTOR = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"bare"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "governs the launch") || !strings.Contains(out, "would create a root manifest") {
+		t.Fatalf("ancestor manifest not reported:\n%s", out)
+	}
+	if !strings.Contains(out, "set    ANCESTOR=1\n") {
+		t.Fatalf("ancestor block not shown:\n%s", out)
+	}
+	// Once the playbook has its own manifest, that one governs and no note is printed.
+	if err := runEnv(nil, []string{"bare", "set", "OWN=1"}); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"bare"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "governs the launch") || strings.Contains(out, "ANCESTOR") || !strings.Contains(out, "set    OWN=1\n") {
+		t.Fatalf("own manifest should govern:\n%s", out)
 	}
 }

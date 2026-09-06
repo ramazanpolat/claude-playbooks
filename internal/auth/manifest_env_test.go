@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
@@ -393,5 +394,140 @@ func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
 	_, err = PrepareLaunchEnvWith(configDir, []*manifest.Env{{Profiles: []string{"ghost"}}})
 	if !errors.Is(err, envprofile.ErrProfile) {
 		t.Fatalf("missing one-off profile: err = %v", err)
+	}
+}
+
+// An OWN token (manifest or profile) means another account: the plan
+// descriptors read from the global store must not be injected, and inherited
+// ones are stripped; the block may set its own.
+func TestOwnTokenDropsGlobalPlanDescriptors(t *testing.T) {
+	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv(SubscriptionTypeEnv, "max")
+	t.Setenv(RateLimitTierEnv, "default_claude_max_20x")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeStore(t, global, `{"claudeAiOauth":{"accessToken":"g","subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}`)
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+
+	configDir := filepath.Join(root, "pb")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-METU\"\n")
+	env, _ := PrepareLaunchEnv(configDir)
+	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-METU" {
+		t.Fatalf("token = %q", got)
+	}
+	for _, key := range []string{SubscriptionTypeEnv, RateLimitTierEnv} {
+		if v, present := envValue(t, env, key); present {
+			t.Fatalf("%s=%q leaked into an own-token launch", key, v)
+		}
+	}
+
+	// The block may supply the other account's descriptor itself.
+	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-METU\"\nCLAUDE_CODE_SUBSCRIPTION_TYPE = \"pro\"\n")
+	env, _ = PrepareLaunchEnv(configDir)
+	if got, _ := envValue(t, env, SubscriptionTypeEnv); got != "pro" {
+		t.Fatalf("block-set descriptor lost: %q", got)
+	}
+
+	// The machine-global token still gets the global descriptors.
+	writeManifest(t, configDir, "name = \"pb\"\n")
+	tf := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tf, []byte("sk-ant-oat01-GLOBAL\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tf)
+	os.Unsetenv(SubscriptionTypeEnv)
+	os.Unsetenv(RateLimitTierEnv)
+	env, _ = PrepareLaunchEnv(configDir)
+	if got, _ := envValue(t, env, SubscriptionTypeEnv); got != "max" {
+		t.Fatalf("global token lost its descriptors: %q", got)
+	}
+
+	// A token inherited from the shell is not known to be the global
+	// account's: the global descriptors are not appended, an inherited
+	// descriptor is kept as it is.
+	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-SHELL")
+	env, _ = PrepareLaunchEnv(configDir)
+	for _, key := range []string{SubscriptionTypeEnv, RateLimitTierEnv} {
+		if v, present := envValue(t, env, key); present {
+			t.Fatalf("%s=%q appended from the global store to an inherited token", key, v)
+		}
+	}
+	t.Setenv(RateLimitTierEnv, "default_claude_pro")
+	env, _ = PrepareLaunchEnv(configDir)
+	if got, _ := envValue(t, env, RateLimitTierEnv); got != "default_claude_pro" {
+		t.Fatalf("inherited descriptor lost: %q", got)
+	}
+	if v, present := envValue(t, env, SubscriptionTypeEnv); present {
+		t.Fatalf("missing descriptor filled from the global store beside an inherited token: %q", v)
+	}
+}
+
+// The registry default profile is the bottom layer of every launch, with or
+// without a manifest, and drives the token decision like any other layer.
+func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenPath, []byte("sk-ant-oat01-FROMFILE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(oauthTokenFileEnv, tokenPath)
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{Name: "base", Set: map[string]string{"FROM_DEFAULT": "yes", "MODEL": "default"}, Unset: []string{OAuthTokenEnv}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := envprofile.SetDefault(envprofile.Dir(root), "base"); err != nil {
+		t.Fatal(err)
+	}
+
+	// No manifest at all.
+	plain := filepath.Join(root, "plain")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := writeStore(t, plain, `{`+grantJSON+`}`)
+	env, err := PrepareLaunchEnv(plain)
+	if err != nil {
+		t.Fatalf("advisory: %v", err)
+	}
+	if got, _ := envValue(t, env, "FROM_DEFAULT"); got != "yes" {
+		t.Fatalf("default not applied without a manifest: %v", env)
+	}
+	if _, present := envValue(t, env, OAuthTokenEnv); present {
+		t.Fatal("default's token unset ignored")
+	}
+	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
+		t.Fatal("grant quarantined although the default made the token inactive")
+	}
+
+	// A manifest with its own entry wins over the default.
+	own := filepath.Join(root, "own")
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, own, "[env.set]\nMODEL = \"own\"\n")
+	env, _ = PrepareLaunchEnv(own)
+	if got, _ := envValue(t, env, "MODEL"); got != "own" {
+		t.Fatalf("MODEL = %q, want the playbook's", got)
+	}
+	if got, _ := envValue(t, env, "FROM_DEFAULT"); got != "yes" {
+		t.Fatal("default layer lost under a manifest")
+	}
+
+	// Inspect sees the default too.
+	if r := Inspect("plain", plain, time.Now()); r.Mode != ModeOwnLogin {
+		t.Fatalf("inspect mode = %s, want own-login from the default's unset", r.Mode)
 	}
 }

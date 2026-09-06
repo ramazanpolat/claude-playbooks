@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -49,6 +50,7 @@ overridden.`,
 
 func runEnv(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
+	profileDir := envprofile.Dir(playbooksDir)
 
 	if len(args) == 0 {
 		pbs, err := playbook.Discover(playbooksDir)
@@ -77,15 +79,47 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if pb.Manifest == nil || pb.Manifest.Env.Empty() {
+		defaultName, derr := envprofile.Default(profileDir)
+		if derr != nil {
+			// Shown, not returned: the pilot came here to see the launch's
+			// environment, and "refused" is the true answer.
+			fmt.Printf("Registry default marker is invalid (%v): every launch is refused until 'claude-playbook env-profile <name> undefault' clears it.\n", derr)
+		}
+		governing, governingDir := governingManifest(pb)
+		if governingDir != "" {
+			if manifest.Exists(pb.RootPath) {
+				fmt.Printf("Note: %s governs the launch of %q (nearest manifest to its config directory); the root manifest that 'claude-playbook env %s set' edits is not applied.\n", filepath.Join(governingDir, manifest.FileName), name, name)
+			} else {
+				fmt.Printf("Note: %s governs the launch of %q (nearest manifest to its config directory, which has none of its own); 'claude-playbook env %s set' would create a root manifest, which would then govern instead.\n", filepath.Join(governingDir, manifest.FileName), name, name)
+			}
+		}
+		var block *manifest.Env
+		if governing != nil {
+			block = governing.Env
+		}
+		if block.Empty() {
 			fmt.Printf("Playbook %q declares no environment overrides.\n", name)
+			if defaultName != "" {
+				// The default still decides this playbook's launch: show
+				// what it contributes, or that it would refuse.
+				effective, err := envprofile.ExpandWithDefault(profileDir, nil)
+				if err != nil {
+					fmt.Printf("Registry default profile %q applies to it, and the launch is refused: %v\n", defaultName, err)
+				} else {
+					fmt.Printf("Registry default profile %q applies to it. Effective at launch:\n", defaultName)
+					printEnvBlock("  ", effective)
+				}
+			}
 			fmt.Printf("Use 'claude-playbook env %s set KEY=VALUE' or 'claude-playbook env %s unset KEY' to add some.\n", name, name)
 			return nil
 		}
 		fmt.Printf("Environment overrides for %q:\n", name)
-		printEnvBlock("  ", pb.Manifest.Env)
-		if len(pb.Manifest.Env.Profiles) > 0 {
-			effective, err := envprofile.Expand(envprofile.Dir(playbooksDir), pb.Manifest.Env)
+		if defaultName != "" {
+			fmt.Printf("  default   %s\n", defaultName)
+		}
+		printEnvBlock("  ", block)
+		if len(block.Profiles) > 0 || defaultName != "" {
+			effective, err := envprofile.ExpandWithDefault(profileDir, block)
 			if err != nil {
 				fmt.Printf("Effective at launch: launch refused -- %v\n", err)
 				return nil
@@ -117,7 +151,6 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	// a bad third argument must not leave the first two applied.
 	set := map[string]string{}
 	var names []string
-	profileDir := envprofile.Dir(playbooksDir)
 	if verb == "use" || verb == "unuse" {
 		for _, arg := range keys {
 			if err := manifest.ValidateProfileName(arg); err != nil {
@@ -268,4 +301,20 @@ func dropString(list []string, s string) []string {
 		}
 	}
 	return out
+}
+
+// governingManifest returns the manifest a launch of pb consults, resolved
+// exactly as the launch resolves it: the nearest valid manifest walking up
+// from the config directory (manifest.NearestPath, the lookup behind
+// PrepareLaunchEnv and auth status). Usually that is the playbook's own root
+// manifest, and the returned directory is "". It is the directory of the
+// governing manifest when that is some other file: a legacy `subdir` layout
+// whose subdirectory carries a manifest of its own, or a manifest-free
+// playbook under an ancestor directory that has one.
+func governingManifest(pb *playbook.Playbook) (*manifest.Manifest, string) {
+	m, dir, _ := manifest.NearestPath(pb.Path)
+	if m == nil || dir == pb.RootPath {
+		return m, ""
+	}
+	return m, dir
 }

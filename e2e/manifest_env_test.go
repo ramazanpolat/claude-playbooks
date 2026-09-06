@@ -219,3 +219,33 @@ func TestStartResolvesProfilesFromGivenRoot(t *testing.T) {
 		t.Fatalf("start resolved profiles from the wrong root: %v", got)
 	}
 }
+
+// The registry default profile reaches the child of a playbook with no manifest
+// at all, and of `start`; a missing default refuses the launch.
+func TestRegistryDefaultProfileReachesChild(t *testing.T) {
+	root := t.TempDir()
+	seedProfile(t, root, "base", "[set]\nFROM_DEFAULT = \"yes\"\n")
+	if err := os.WriteFile(filepath.Join(root, ".env-profiles", ".default"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	playbook(t, root, "plain", false)
+	noToken := tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")
+
+	got := childEnv(t, root, launch{env: []string{noToken}, args: []string{"run", "plain"}})
+	if got["FROM_DEFAULT"] != "yes" {
+		t.Fatalf("default not applied to run: %v", got)
+	}
+	cfg := filepath.Join(t.TempDir(), "startcfg")
+	got = childEnv(t, root, launch{env: []string{noToken}, args: []string{"start", cfg}})
+	if got["FROM_DEFAULT"] != "yes" {
+		t.Fatalf("default not applied to start: %v", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, ".env-profiles", ".default"), []byte("ghost\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := launchFails(t, root, launch{env: []string{noToken}, args: []string{"run", "plain"}})
+	if !strings.Contains(out, `env profile "ghost" not found`) {
+		t.Fatalf("missing default did not refuse:\n%s", out)
+	}
+}

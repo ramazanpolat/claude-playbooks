@@ -219,15 +219,18 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	// resolution failure satisfies errors.Is(err, envprofile.ErrProfile);
 	// callers that launch treat it as fatal (see cmd/run.go), everything
 	// else stays advisory.
+	// The registry default profile is the bottom layer of every playbook,
+	// manifest or not.
 	profilesDir := envprofile.Dir(config.ResolvePlaybooksDir())
 	var menv *manifest.Env
 	m, merr := manifest.Nearest(configDir)
+	var block *manifest.Env
 	if m != nil {
-		var perr error
-		menv, perr = envprofile.Expand(profilesDir, m.Env)
-		if perr != nil {
-			return refuse(perr)
-		}
+		block = m.Env
+	}
+	menv, perr := envprofile.ExpandWithDefault(profilesDir, block)
+	if perr != nil {
+		return refuse(perr)
 	}
 	if len(layers) > 0 {
 		flat := make([]*manifest.Env, 0, len(layers)+1)
@@ -295,7 +298,26 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		env = removeEnv(env, OAuthTokenEnv)
 	}
 	if active {
-		env = appendSubscriptionEnv(env)
+		switch {
+		case manifestToken(menv) != "":
+			// An OWN token (manifest or profile) is another account as far
+			// as this launch is concerned: the plan descriptors read from
+			// the global store describe the wrong account, and an inherited
+			// pair does too. The block may set its own via [env.set].
+			env = removeEnv(env, SubscriptionTypeEnv, RateLimitTierEnv)
+		case inject != "":
+			// The machine-global token file: the descriptors in the global
+			// store describe the account that minted it. Only the MISSING
+			// ones are filled in: a descriptor the shell exported is the
+			// operator's deliberate override (a Team seat needs exactly
+			// that) and outranks what is inferred from disk, see
+			// appendSubscriptionEnv.
+			env = appendSubscriptionEnv(env)
+		default:
+			// A token inherited from the shell is of unknown provenance:
+			// the global store's descriptors may describe another account.
+			// Whatever descriptors the shell exported alongside it stay.
+		}
 	}
 	env = applyManifestEnv(env, menv)
 	env = removeEnv(env, "CLAUDE_CONFIG_DIR")
