@@ -268,3 +268,54 @@ func TestEnvShowWithoutBlockReportsDefaultEffect(t *testing.T) {
 		t.Fatalf("show without block hides the refusal:\n%s", out)
 	}
 }
+
+// A legacy `subdir` playbook whose subdirectory carries its own manifest is
+// governed by that manifest at launch (manifest.Nearest). `env <pb>` shows
+// that block under the registry default, names the governing manifest, and
+// does not present the root block the launch ignores.
+func TestEnvShowFollowsNearestManifestForSubdir(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "legacy")
+	if err := os.MkdirAll(filepath.Join(root, "cfg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, manifest.FileName), []byte("name = \"legacy\"\nsubdir = \"cfg\"\n\n[env.set]\nROOT = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cfg", manifest.FileName), []byte("name = \"legacy\"\n\n[env.set]\nNESTED = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "set", "FROM_DEFAULT=yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"legacy"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "governs the launch") || !strings.Contains(out, filepath.Join("cfg", manifest.FileName)) {
+		t.Fatalf("show does not name the nested manifest:\n%s", out)
+	}
+	if !strings.Contains(out, "Effective at launch:\n  set    FROM_DEFAULT=yes\n  set    NESTED=1\n") {
+		t.Fatalf("effective view does not follow the nested manifest:\n%s", out)
+	}
+	if strings.Contains(out, "ROOT=1") {
+		t.Fatalf("root block the launch ignores was presented:\n%s", out)
+	}
+	// A flat playbook is unaffected: no note, root block governs.
+	if err := os.Remove(filepath.Join(root, "cfg", manifest.FileName)); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"legacy"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "governs the launch") || !strings.Contains(out, "Effective at launch:\n  set    FROM_DEFAULT=yes\n  set    ROOT=1\n") {
+		t.Fatalf("subdir without a nested manifest:\n%s", out)
+	}
+}

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -80,11 +81,17 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		}
 		defaultName, derr := envprofile.Default(profileDir)
 		if derr != nil {
-			return derr
+			// Shown, not returned: the pilot came here to see the launch's
+			// environment, and "refused" is the true answer.
+			fmt.Printf("Registry default marker is invalid (%v): every launch is refused until 'claude-playbook env-profile <name> undefault' clears it.\n", derr)
+		}
+		governing, nestedDir := governingManifest(pb)
+		if nestedDir != "" {
+			fmt.Printf("Note: %s governs the launch of %q (nearest manifest to its config directory); the root manifest that 'claude-playbook env %s set' edits is not applied.\n", filepath.Join(nestedDir, manifest.FileName), name, name)
 		}
 		var block *manifest.Env
-		if pb.Manifest != nil {
-			block = pb.Manifest.Env
+		if governing != nil {
+			block = governing.Env
 		}
 		if block.Empty() {
 			fmt.Printf("Playbook %q declares no environment overrides.\n", name)
@@ -290,4 +297,23 @@ func dropString(list []string, s string) []string {
 		}
 	}
 	return out
+}
+
+// governingManifest returns the manifest a launch of pb consults: the nearest
+// valid one walking up from its config directory, as manifest.Nearest and the
+// auth code resolve it. For a flat playbook that is the root manifest. For a
+// legacy `subdir` layout whose subdirectory (or a directory between it and
+// the root) carries a manifest of its own, that nested manifest governs, and
+// its directory is returned so the caller can say so; an invalid nested
+// manifest is skipped, as Nearest skips it.
+func governingManifest(pb *playbook.Playbook) (*manifest.Manifest, string) {
+	if pb.Path == pb.RootPath {
+		return pb.Manifest, ""
+	}
+	for dir := pb.Path; dir != pb.RootPath && strings.HasPrefix(dir, pb.RootPath); dir = filepath.Dir(dir) {
+		if m, err := manifest.Read(dir); err == nil && m != nil {
+			return m, dir
+		}
+	}
+	return pb.Manifest, ""
 }
