@@ -119,3 +119,69 @@ func TestProfileRejectsBadInput(t *testing.T) {
 		t.Fatalf("a rejected command created a profile: %v", got)
 	}
 }
+
+func TestProfileDefaultLifecycle(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "router")
+	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+
+	if err := runEnvProfile(nil, []string{"base", "default"}); err == nil {
+		t.Fatal("made a missing profile the default")
+	}
+	if err := runEnvProfile(nil, []string{"base", "set", "FROM_DEFAULT=yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := envprofile.Default(dir); d != "base" {
+		t.Fatalf("default = %q", d)
+	}
+	list := captureStdout(t, func() {
+		if err := runEnvProfile(nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(list, "registry default") {
+		t.Fatalf("list does not mark the default:\n%s", list)
+	}
+	// env show mentions the default even for a playbook with no block, and
+	// the effective view includes it when a block exists.
+	show := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(show, `Registry default profile "base" applies`) {
+		t.Fatalf("show without block:\n%s", show)
+	}
+	if err := runEnv(nil, []string{"router", "set", "OWN=1"}); err != nil {
+		t.Fatal(err)
+	}
+	show = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(show, "  default   base\n") || !strings.Contains(show, "Effective at launch:\n  set    FROM_DEFAULT=yes\n  set    OWN=1\n") {
+		t.Fatalf("show with block:\n%s", show)
+	}
+	// Delete is refused while it is the default; undefault clears it.
+	if err := runEnvProfile(nil, []string{"base", "delete"}); err == nil || !strings.Contains(err.Error(), "registry default") {
+		t.Fatalf("delete of the default: %v", err)
+	}
+	if err := runEnvProfile(nil, []string{"other", "undefault"}); err == nil {
+		t.Fatal("undefault of a non-default profile succeeded")
+	}
+	if err := runEnvProfile(nil, []string{"base", "undefault"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := envprofile.Default(dir); d != "" {
+		t.Fatalf("default after undefault = %q", d)
+	}
+	if err := runEnvProfile(nil, []string{"base", "delete"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = root
+}

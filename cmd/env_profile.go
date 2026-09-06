@@ -14,7 +14,7 @@ import (
 )
 
 var envProfileCmd = &cobra.Command{
-	Use:     "env-profile [name] [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]",
+	Use:     "env-profile [name] [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | default | undefault | delete]",
 	Short:   "Show or manage shared env profiles",
 	Aliases: []string{"envprofile"},
 	Long: `An env profile is a named, reusable set of environment overrides stored
@@ -28,7 +28,11 @@ With a name: show that profile and which playbooks use it.
   unset KEY...       remove the variables from every launch using the profile
   clear KEY...       forget the entries
   describe TEXT      set the one-line description
-  delete             remove the profile; refused while a playbook uses it`,
+  default            make this the registry default: applied under every
+                     playbook's own block, the bottom layer above the shell
+  undefault          clear the registry default (only if it is this profile)
+  delete             remove the profile; refused while a playbook uses it
+                     or while it is the registry default`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runEnvProfile,
 }
@@ -51,6 +55,10 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		defaultName, err := envprofile.Default(dir)
+		if err != nil {
+			return err
+		}
 		maxLen := 0
 		for _, p := range profiles {
 			if len(p.Name) > maxLen {
@@ -59,6 +67,9 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		}
 		for _, p := range profiles {
 			summary := fmt.Sprintf("%d set, %d unset", len(p.Set), len(p.Unset))
+			if p.Name == defaultName {
+				summary += "; registry default"
+			}
 			if u := users[p.Name]; len(u) > 0 {
 				summary += "; used by " + strings.Join(u, ", ")
 			}
@@ -88,6 +99,9 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 			fmt.Printf(": %s", p.Description)
 		}
 		fmt.Println()
+		if d, err := envprofile.Default(dir); err == nil && d == name {
+			fmt.Println("Registry default: applied under every playbook's own block.")
+		}
 		printEnvBlock("  ", p.Env())
 		users, err := profileUsers(playbooksDir)
 		if err != nil {
@@ -136,12 +150,12 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("describe requires the description text")
 		}
 		description = strings.Join(rest, " ")
-	case "delete":
+	case "delete", "default", "undefault":
 		if len(rest) != 0 {
-			return fmt.Errorf("delete takes no further arguments")
+			return fmt.Errorf("%s takes no further arguments", verb)
 		}
 	default:
-		return fmt.Errorf("unknown action %q: expected set, unset, clear, describe, or delete\nUsage: claude-playbook env-profile <name> [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | delete]", verb)
+		return fmt.Errorf("unknown action %q: expected set, unset, clear, describe, default, undefault, or delete\nUsage: claude-playbook env-profile <name> [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | default | undefault | delete]", verb)
 	}
 
 	unlock, lerr := lockRegistry()
@@ -155,7 +169,33 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if verb == "delete" {
+	switch verb {
+	case "default":
+		if p == nil {
+			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", name, name)
+		}
+		if err := envprofile.SetDefault(dir, name); err != nil {
+			return err
+		}
+		fmt.Printf("Env profile %q is now the registry default: every playbook launch layers it under its own block.\n", name)
+		return nil
+	case "undefault":
+		current, err := envprofile.Default(dir)
+		if err != nil {
+			return err
+		}
+		if current != name {
+			if current == "" {
+				return fmt.Errorf("no registry default is set")
+			}
+			return fmt.Errorf("the registry default is %q, not %q", current, name)
+		}
+		if err := envprofile.ClearDefault(dir); err != nil {
+			return err
+		}
+		fmt.Printf("Env profile %q is no longer the registry default.\n", name)
+		return nil
+	case "delete":
 		if p == nil {
 			return fmt.Errorf("unknown env profile %q", name)
 		}
@@ -165,6 +205,9 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		}
 		if u := users[name]; len(u) > 0 {
 			return fmt.Errorf("env profile %q is used by %s; detach it first with 'claude-playbook env <playbook> unuse %s'", name, strings.Join(u, ", "), name)
+		}
+		if d, err := envprofile.Default(dir); err == nil && d == name {
+			return fmt.Errorf("env profile %q is the registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, name)
 		}
 		if err := envprofile.Delete(dir, name); err != nil {
 			return err

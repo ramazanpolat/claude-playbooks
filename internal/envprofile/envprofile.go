@@ -220,6 +220,77 @@ func List(dir string) ([]*Profile, error) {
 	return out, nil
 }
 
+// DefaultMarker is the file under the profiles directory naming the registry
+// default profile: applied under every playbook's own block, the bottom layer
+// above the shell environment. Absent means no default.
+const DefaultMarker = ".default"
+
+// Default returns the registry default profile's name, "" when none is set.
+func Default(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, DefaultMarker))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	name := strings.TrimSpace(string(data))
+	if name == "" {
+		return "", nil
+	}
+	if err := manifest.ValidateProfileName(name); err != nil {
+		return "", fmt.Errorf("%s: %w", filepath.Join(dir, DefaultMarker), err)
+	}
+	return name, nil
+}
+
+// SetDefault records name as the registry default; the profile must exist.
+func SetDefault(dir, name string) error {
+	p, err := Read(dir, name)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		return &MissingError{Name: name, Dir: dir}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return manifest.WritePrivate(filepath.Join(dir, DefaultMarker), []byte(name+"\n"), 0o600)
+}
+
+// ClearDefault removes the registry default; clearing an absent one is fine.
+func ClearDefault(dir string) error {
+	err := os.Remove(filepath.Join(dir, DefaultMarker))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// ExpandWithDefault is Expand with the registry default profile, when one is
+// set, layered UNDER e: default first, then e's profiles in order, then e's
+// own set/unset. A default that is named but missing or broken refuses the
+// launch like any other profile (errors.Is(err, ErrProfile)).
+func ExpandWithDefault(dir string, e *manifest.Env) (*manifest.Env, error) {
+	name, err := Default(dir)
+	if err != nil {
+		return nil, &ResolveError{Name: DefaultMarker, Err: err}
+	}
+	if name == "" {
+		return Expand(dir, e)
+	}
+	base, err := Expand(dir, &manifest.Env{Profiles: []string{name}})
+	if err != nil {
+		return nil, err
+	}
+	own, err := Expand(dir, e)
+	if err != nil {
+		return nil, err
+	}
+	return manifest.MergeEnv(base, own), nil
+}
+
 // Expand resolves e's profiles from dir and flattens everything into one
 // block: profiles in list order, then e's own set/unset on top. A nil or
 // profile-less e is returned as is. Every error satisfies errors.Is(err,

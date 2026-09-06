@@ -49,6 +49,7 @@ overridden.`,
 
 func runEnv(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
+	profileDir := envprofile.Dir(playbooksDir)
 
 	if len(args) == 0 {
 		pbs, err := playbook.Discover(playbooksDir)
@@ -77,15 +78,29 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if pb.Manifest == nil || pb.Manifest.Env.Empty() {
+		defaultName, derr := envprofile.Default(profileDir)
+		if derr != nil {
+			return derr
+		}
+		var block *manifest.Env
+		if pb.Manifest != nil {
+			block = pb.Manifest.Env
+		}
+		if block.Empty() {
 			fmt.Printf("Playbook %q declares no environment overrides.\n", name)
+			if defaultName != "" {
+				fmt.Printf("Registry default profile %q applies to it.\n", defaultName)
+			}
 			fmt.Printf("Use 'claude-playbook env %s set KEY=VALUE' or 'claude-playbook env %s unset KEY' to add some.\n", name, name)
 			return nil
 		}
 		fmt.Printf("Environment overrides for %q:\n", name)
-		printEnvBlock("  ", pb.Manifest.Env)
-		if len(pb.Manifest.Env.Profiles) > 0 {
-			effective, err := envprofile.Expand(envprofile.Dir(playbooksDir), pb.Manifest.Env)
+		if defaultName != "" {
+			fmt.Printf("  default   %s\n", defaultName)
+		}
+		printEnvBlock("  ", block)
+		if len(block.Profiles) > 0 || defaultName != "" {
+			effective, err := envprofile.ExpandWithDefault(profileDir, block)
 			if err != nil {
 				fmt.Printf("Effective at launch: launch refused -- %v\n", err)
 				return nil
@@ -117,7 +132,6 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	// a bad third argument must not leave the first two applied.
 	set := map[string]string{}
 	var names []string
-	profileDir := envprofile.Dir(playbooksDir)
 	if verb == "use" || verb == "unuse" {
 		for _, arg := range keys {
 			if err := manifest.ValidateProfileName(arg); err != nil {
