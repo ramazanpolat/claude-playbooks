@@ -226,20 +226,28 @@ func List(dir string) ([]*Profile, error) {
 const DefaultMarker = ".default"
 
 // Default returns the registry default profile's name, "" when none is set.
+// Only an ABSENT marker means none: an empty one, one holding an invalid
+// name, or a dangling symlink is an error, because silently treating it as
+// "no default" would let a launch proceed without the layer every playbook
+// depends on (and with the machine-global token the default may unset).
 func Default(dir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(dir, DefaultMarker))
+	marker := filepath.Join(dir, DefaultMarker)
+	data, err := os.ReadFile(marker)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
+			if _, lerr := os.Lstat(marker); lerr == nil {
+				return "", fmt.Errorf("%s: dangling symlink", marker)
+			}
 			return "", nil
 		}
 		return "", err
 	}
 	name := strings.TrimSpace(string(data))
 	if name == "" {
-		return "", nil
+		return "", fmt.Errorf("%s: empty registry default marker", marker)
 	}
 	if err := manifest.ValidateProfileName(name); err != nil {
-		return "", fmt.Errorf("%s: %w", filepath.Join(dir, DefaultMarker), err)
+		return "", fmt.Errorf("%s: %w", marker, err)
 	}
 	return name, nil
 }

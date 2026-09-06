@@ -578,7 +578,7 @@ process environment
   = the child claude process's environment
 ```
 
-The registry default applies to every launch of every playbook, manifest or not, and to `start`. It is recorded in `<playbooks root>/.env-profiles/.default` (mode `0600`, the profile's name). A default that names a missing or invalid profile refuses the launch like any other profile.
+The registry default applies to every launch of every playbook, manifest or not, and to `start`. It is recorded in `<playbooks root>/.env-profiles/.default` (mode `0600`, the profile's name). A default that names a missing or invalid profile refuses the launch like any other profile. Only an absent marker means "no default": an empty marker, one holding an invalid name, or a dangling symlink refuses the launch too, rather than silently dropping the layer (and the token decision it may carry); `env-profile <name> undefault` clears such a marker and says why.
 
 **Semantics at launch.** The block is first flattened: each profile in `env.profiles`, in order, then the block's own `set`/`unset` on top, where a later `set` cancels an earlier `unset` of the same key and vice versa. `PrepareLaunchEnv` then builds the child's environment as: the process environment; the authentication branch (isolation, long-lived token, or stored credentials); flattened `set` entries overriding any inherited value; flattened `unset` entries removed; finally `CLAUDE_CONFIG_DIR` bound to the playbook. A profile named by the manifest that does not exist under `<playbooks root>/.env-profiles/` refuses the launch: `env profile "x" not found in <dir> (create it with: claude-playbook env-profile x set KEY=VALUE)`; one that exists but cannot be read or parsed refuses it too: `env profile "x": invalid env profile at <path>: <reason>`. Neither is downgraded to the advisory warning other preparation failures get, and the refusal happens before any credential sync or quarantine touches the config directory. `start` resolves profiles from the root named by its `--playbooks-dir` (or `CLAUDE_PLAYBOOKS_DIR`), the same root `run` uses. Whether the long-lived token is active is decided **with the block applied**: `unset` of `CLAUDE_CODE_OAUTH_TOKEN` means inactive (the stored-credentials path runs, the playbook's own grant is not quarantined, an inherited token is stripped); `set` of it supplies a per-playbook token that replaces the machine-global file's. The manifest governing a config directory is the nearest one walking up from it, so a manifest `subdir` layout is covered by the install root's block.
 
@@ -627,13 +627,13 @@ ANTHROPIC_BASE_URL = "http://proxy:1/v1"
 
 Profile files are written mode `0600` and an existing file is tightened to it on every write. Profile names match `[A-Za-z0-9][A-Za-z0-9._-]*`. Keys follow the `[env]` rules (valid variable names, `CLAUDE_CONFIG_DIR` reserved, no key in both lists). Only `set` creates a profile; every other action on an unknown name is an error. Mutations validate every argument before taking the registry lock. `delete` scans the registry and refuses while a playbook references the profile, naming the users. The directory is never touched by `install` or `update`.
 
-The listing marks the default with `registry default`; `env <playbook>` shows a `default   <name>` line and includes it in "Effective at launch"; a playbook without a block is told the default applies to it.
+The listing marks the default with `registry default` (matched by file identity, so a case variant of the name on a case-insensitive filesystem counts) and ends with a warning when the marker is unreadable or names a profile that does not exist, since every launch is refused in that state; `env <playbook>` shows a `default   <name>` line and includes it in "Effective at launch"; a playbook without a block is shown what the default contributes at launch, or the refusal it would hit.
 
 **Errors:**
 - Unknown profile → `unknown env profile "glm". Create it with 'claude-playbook env-profile glm set KEY=VALUE'`
 - Delete while attached → `env profile "glm" is used by router, sre; detach it first with 'claude-playbook env <playbook> unuse glm'`
 - Delete while default → `env profile "glm" is the registry default; clear it first with 'claude-playbook env-profile glm undefault'`
-- `undefault` of a profile that is not the default → `the registry default is "x", not "glm"` or `no registry default is set`
+- `undefault` of a profile that is not the default → `the registry default is "x", not "glm"` or `no registry default is set`; `undefault` with an unreadable marker clears it and reports `Registry default marker was invalid (<reason>); cleared.`
 - Invalid file on disk → `invalid env profile at <path>: TOML syntax error at line <n> (content not shown)` (listing and launch both fail loudly rather than skip it; the parser's message, which quotes file content, is never echoed)
 
 ---
