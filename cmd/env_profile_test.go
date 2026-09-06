@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -184,4 +186,85 @@ func TestProfileDefaultLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = root
+}
+
+// undefault must work when the default profile itself is unreadable (that is
+// when every launch is refused), the delete guard must refuse when the marker
+// cannot be read, and must match the default by file identity.
+func TestProfileDefaultGuardsUnderBrokenState(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	if err := runEnvProfile(nil, []string{"base", "set", "A=1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	// Break the profile file: undefault still clears the marker.
+	if err := os.WriteFile(filepath.Join(dir, "base.toml"), []byte("= [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "undefault"}); err != nil {
+		t.Fatalf("undefault with a broken profile: %v", err)
+	}
+	if d, _ := envprofile.Default(dir); d != "" {
+		t.Fatalf("marker not cleared: %q", d)
+	}
+	// Repair, set default again, then make the MARKER unreadable: delete refuses.
+	if err := envprofile.Write(dir, &envprofile.Profile{Name: "base", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("not a valid name!\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "delete"}); err == nil || !strings.Contains(err.Error(), "cannot determine the registry default") {
+		t.Fatalf("delete with an unreadable marker: %v", err)
+	}
+	// Restore a valid marker and probe case-insensitive identity.
+	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "BASE.toml")); err == nil {
+		if err := runEnvProfile(nil, []string{"BASE", "delete"}); err == nil || !strings.Contains(err.Error(), "registry default") {
+			t.Fatalf("case variant of the default was deletable: %v", err)
+		}
+	}
+}
+
+// A playbook with no block still reports what the default does to it, or
+// that the launch is refused when the default is broken.
+func TestEnvShowWithoutBlockReportsDefaultEffect(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	seedFlatPlaybook(t, "plain")
+	if err := runEnvProfile(nil, []string{"base", "set", "FROM_DEFAULT=yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "Effective at launch:\n  set    FROM_DEFAULT=yes\n") {
+		t.Fatalf("show without block lacks the default's effect:\n%s", out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("ghost\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "launch is refused") {
+		t.Fatalf("show without block hides the refusal:\n%s", out)
+	}
 }

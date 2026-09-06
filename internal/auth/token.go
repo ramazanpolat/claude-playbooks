@@ -298,14 +298,21 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		env = removeEnv(env, OAuthTokenEnv)
 	}
 	if active {
-		if manifestToken(menv) != "" {
+		switch {
+		case manifestToken(menv) != "":
 			// An OWN token (manifest or profile) is another account as far
 			// as this launch is concerned: the plan descriptors read from
 			// the global store describe the wrong account, and an inherited
 			// pair does too. The block may set its own via [env.set].
 			env = removeEnv(env, SubscriptionTypeEnv, RateLimitTierEnv)
-		} else {
+		case inject != "":
+			// The machine-global token file: the descriptors in the global
+			// store describe the account that minted it.
 			env = appendSubscriptionEnv(env)
+		default:
+			// A token inherited from the shell is of unknown provenance:
+			// the global store's descriptors may describe another account.
+			// Whatever descriptors the shell exported alongside it stay.
 		}
 	}
 	env = applyManifestEnv(env, menv)

@@ -268,6 +268,20 @@ func ClearDefault(dir string) error {
 	return nil
 }
 
+// SameProfile reports whether two profile names address the same file, which
+// on a case-insensitive filesystem they can while spelled differently.
+func SameProfile(dir, a, b string) bool {
+	ia, err := os.Stat(path(dir, a))
+	if err != nil {
+		return false
+	}
+	ib, err := os.Stat(path(dir, b))
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ia, ib)
+}
+
 // ExpandWithDefault is Expand with the registry default profile, when one is
 // set, layered UNDER e: default first, then e's profiles in order, then e's
 // own set/unset. A default that is named but missing or broken refuses the

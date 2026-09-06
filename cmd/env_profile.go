@@ -164,22 +164,10 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 	}
 	defer unlock()
 
-	p, err := envprofile.Read(dir, name)
-	if err != nil {
-		return err
-	}
-
-	switch verb {
-	case "default":
-		if p == nil {
-			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", name, name)
-		}
-		if err := envprofile.SetDefault(dir, name); err != nil {
-			return err
-		}
-		fmt.Printf("Env profile %q is now the registry default: every playbook launch layers it under its own block.\n", name)
-		return nil
-	case "undefault":
+	// undefault must work even when the profile file is unreadable: that is
+	// exactly the situation in which every launch is refused and the pilot
+	// needs to clear the marker. Only the marker is consulted.
+	if verb == "undefault" {
 		current, err := envprofile.Default(dir)
 		if err != nil {
 			return err
@@ -195,6 +183,23 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Env profile %q is no longer the registry default.\n", name)
 		return nil
+	}
+
+	p, err := envprofile.Read(dir, name)
+	if err != nil {
+		return err
+	}
+
+	switch verb {
+	case "default":
+		if p == nil {
+			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", name, name)
+		}
+		if err := envprofile.SetDefault(dir, name); err != nil {
+			return err
+		}
+		fmt.Printf("Env profile %q is now the registry default: every playbook launch layers it under its own block.\n", name)
+		return nil
 	case "delete":
 		if p == nil {
 			return fmt.Errorf("unknown env profile %q", name)
@@ -206,8 +211,16 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		if u := users[name]; len(u) > 0 {
 			return fmt.Errorf("env profile %q is used by %s; detach it first with 'claude-playbook env <playbook> unuse %s'", name, strings.Join(u, ", "), name)
 		}
-		if d, err := envprofile.Default(dir); err == nil && d == name {
-			return fmt.Errorf("env profile %q is the registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, name)
+		// The default is compared by FILE identity, not spelling: on a
+		// case-insensitive filesystem "BASE" and "base" are one profile. An
+		// unreadable marker refuses the delete: the profile may still be the
+		// one every launch depends on.
+		d, err := envprofile.Default(dir)
+		if err != nil {
+			return fmt.Errorf("cannot determine the registry default: %w", err)
+		}
+		if d != "" && (d == name || envprofile.SameProfile(dir, d, name)) {
+			return fmt.Errorf("env profile %q is the registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, d)
 		}
 		if err := envprofile.Delete(dir, name); err != nil {
 			return err

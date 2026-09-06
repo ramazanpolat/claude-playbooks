@@ -89,7 +89,15 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		if block.Empty() {
 			fmt.Printf("Playbook %q declares no environment overrides.\n", name)
 			if defaultName != "" {
-				fmt.Printf("Registry default profile %q applies to it.\n", defaultName)
+				// The default still decides this playbook's launch: show
+				// what it contributes, or that it would refuse.
+				effective, err := envprofile.ExpandWithDefault(profileDir, nil)
+				if err != nil {
+					fmt.Printf("Registry default profile %q applies to it, and the launch is refused: %v\n", defaultName, err)
+				} else {
+					fmt.Printf("Registry default profile %q applies to it. Effective at launch:\n", defaultName)
+					printEnvBlock("  ", effective)
+				}
 			}
 			fmt.Printf("Use 'claude-playbook env %s set KEY=VALUE' or 'claude-playbook env %s unset KEY' to add some.\n", name, name)
 			return nil
