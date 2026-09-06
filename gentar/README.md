@@ -46,6 +46,8 @@ fix and rerun, no commit needed to test.
 | `playbook-install-local` | `install` from a local directory: manifest-named target, faithful copy, launcher, delete cleans both |
 | `launcher-run-version` | `run` (and the launcher alias) actually spawns claude with the playbook wired — keyless, via `--version` |
 | `docs-honesty` | README's documented commands answer `--help` in the built binary; referenced files exist and stay executable |
+| `env-overrides` | manifest `[env]`, an attached env profile, one-off launch flags (before/after the name, via the launcher), an env file, and the `start -- --delete` boundary, all proven against the environment a stub `claude` actually received |
+| `auth-status` | `auth status` table and JSON for a fresh playbook (shared-login, no grant), read-only against a timestamp marker, unknown-name refusal |
 
 Add a suite = add a TOML here. Schema and vocabulary:
 [gentar scenario schema](https://github.com/agent-realm/gentar/blob/main/coordinator/gentar/toml_scenario.py)

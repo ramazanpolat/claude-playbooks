@@ -1,0 +1,60 @@
+# claude-playbooks own-arena suite 7: environment overrides reach the
+# child. A stub `claude` on PATH dumps the environment it received, so
+# the manifest [env] block, an attached env profile, the one-off launch
+# flags (before and after the name, through the launcher too), an env
+# file, and the `start -- --delete` boundary are all proven keylessly
+# on the REAL launch path — nothing is inferred from the tool's own
+# output. The stub shadows any real claude the template might carry.
+
+[scenario]
+name = "env-overrides"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
+  'claude-playbook create env-pb',
+  'claude-playbook env env-pb set FROM_MANIFEST=yes && claude-playbook env env-pb unset NOISY',
+  'claude-playbook env-profile glm set FROM_PROFILE=yes && claude-playbook env env-pb use glm',
+]
+
+[[verify.files]]
+# Post-steps state: the block is recorded in the playbook's manifest.
+path = "~/.claude-playbooks/env-pb/.playbook"
+
+[[verify.files]]
+path = "~/.claude-playbooks/.env-profiles/glm.toml"
+
+[[verify.commands]]
+command = 'grep -F "profiles = [\"glm\"]" "$HOME/.claude-playbooks/env-pb/.playbook" && grep -F "FROM_MANIFEST = \"yes\"" "$HOME/.claude-playbooks/env-pb/.playbook" && grep -F "unset = [\"NOISY\"]" "$HOME/.claude-playbooks/env-pb/.playbook" && echo manifest-ok'
+contains = "manifest-ok"
+
+[[verify.commands]]
+# The launch: manifest set and profile set reach the child, the manifest
+# unset removes an exported variable, CLAUDE_CONFIG_DIR is bound.
+command = 'rm -f "$HOME/claude-env"; NOISY=1 claude-playbook run env-pb && grep -x FROM_MANIFEST=yes "$HOME/claude-env" >/dev/null && grep -x FROM_PROFILE=yes "$HOME/claude-env" >/dev/null && ! grep -q "^NOISY=" "$HOME/claude-env" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/env-pb$" "$HOME/claude-env" && echo env-ok'
+contains = "env-ok"
+
+[[verify.commands]]
+# A profile in use cannot be deleted; detached, it can.
+command = 'if claude-playbook env-profile glm delete >/dev/null 2>&1; then echo not-refused; else claude-playbook env env-pb unuse glm >/dev/null && claude-playbook env-profile glm delete >/dev/null && test ! -e "$HOME/.claude-playbooks/.env-profiles/glm.toml" && echo delete-guarded; fi'
+contains = "delete-guarded"
+
+[[verify.commands]]
+# One-off launch flags before and after the name, layered over the
+# manifest, and nothing written back to it.
+command = 'rm -f "$HOME/claude-env"; cp "$HOME/.claude-playbooks/env-pb/.playbook" "$HOME/manifest-before"; claude-playbook run --env ONE_OFF=yes env-pb --unset FROM_MANIFEST && grep -x ONE_OFF=yes "$HOME/claude-env" >/dev/null && ! grep -q "^FROM_MANIFEST=" "$HOME/claude-env" && cmp -s "$HOME/manifest-before" "$HOME/.claude-playbooks/env-pb/.playbook" && echo flags-ok'
+contains = "flags-ok"
+
+[[verify.commands]]
+# An env file layer, and the launcher form with flags at the start.
+command = 'printf "FROM_FILE=yes\n" > "$HOME/w.env"; rm -f "$HOME/claude-env"; claude-playbook run --env-file "$HOME/w.env" env-pb && grep -x FROM_FILE=yes "$HOME/claude-env" >/dev/null && rm -f "$HOME/claude-env" && "$HOME/.local/bin/env-pb" --env VIA_LAUNCHER=yes && grep -x VIA_LAUNCHER=yes "$HOME/claude-env" >/dev/null && echo file-and-launcher-ok'
+contains = "file-and-launcher-ok"
+
+[[verify.commands]]
+# `--delete` after `--` belongs to claude, never to the wrapper.
+command = 'mkdir -p "$HOME/keepme"; claude-playbook start "$HOME/keepme" -- --delete && test -d "$HOME/keepme" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/keepme$" "$HOME/claude-env" && echo delete-boundary-ok'
+contains = "delete-boundary-ok"

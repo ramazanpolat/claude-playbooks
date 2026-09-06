@@ -1,0 +1,38 @@
+# claude-playbooks own-arena suite 8: `auth status` reports without
+# touching anything. In a fresh sandbox there is no token file and no
+# stored login, so a created playbook is shared-login with no grant; the
+# command must say so, in the table and in JSON, and must leave the
+# registry byte-for-byte alone (proven with a timestamp marker, not by
+# trusting the command).
+
+[scenario]
+name = "auth-status"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  'claude-playbook create auth-pb --no-alias',
+  'sleep 1 && touch "$HOME/before-status"',
+]
+
+[[verify.commands]]
+command = 'claude-playbook auth status | grep -E "^auth-pb +shared-login +absent +- +- +no login" && echo table-ok'
+contains = "table-ok"
+
+[[verify.commands]]
+command = 'out=$(claude-playbook auth status --json auth-pb) && printf "%s" "$out" | grep -F "\"mode\": \"shared-login\"" >/dev/null && printf "%s" "$out" | grep -F "\"store\": \"absent\"" >/dev/null && printf "%s" "$out" | grep -F "\"has_grant\": false" >/dev/null && printf "%s" "$out" | grep -F "\"reauth_required\": false" >/dev/null && echo json-ok'
+contains = "json-ok"
+
+[[verify.commands]]
+# Read-only: nothing under the playbooks root is newer than the marker
+# after two invocations.
+command = 'claude-playbook auth status >/dev/null && claude-playbook auth status --json >/dev/null && [ -z "$(find "$HOME/.claude-playbooks" -newer "$HOME/before-status" -type f)" ] && echo read-only'
+contains = "read-only"
+
+[[verify.commands]]
+# Unknown names are refused with the registry's own message.
+command = 'claude-playbook auth status nope 2>&1 | grep -F "unknown playbook \"nope\"" && echo unknown-ok'
+contains = "unknown-ok"
