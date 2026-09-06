@@ -319,3 +319,39 @@ func TestEnvShowFollowsNearestManifestForSubdir(t *testing.T) {
 		t.Fatalf("subdir without a nested manifest:\n%s", out)
 	}
 }
+
+// A manifest-free playbook is governed at launch by the nearest ancestor
+// manifest, when one exists (manifest.Nearest walks up). `env <pb>` must show
+// that block and name the file, exactly as the launch resolves it.
+func TestEnvShowFollowsAncestorManifestForManifestFreePlaybook(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "bare")
+	root := config.ResolvePlaybooksDir()
+	if err := os.WriteFile(filepath.Join(root, manifest.FileName), []byte("name = \"root\"\n\n[env.set]\nANCESTOR = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"bare"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "governs the launch") || !strings.Contains(out, "would create a root manifest") {
+		t.Fatalf("ancestor manifest not reported:\n%s", out)
+	}
+	if !strings.Contains(out, "set    ANCESTOR=1\n") {
+		t.Fatalf("ancestor block not shown:\n%s", out)
+	}
+	// Once the playbook has its own manifest, that one governs and no note is printed.
+	if err := runEnv(nil, []string{"bare", "set", "OWN=1"}); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := runEnv(nil, []string{"bare"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "governs the launch") || strings.Contains(out, "ANCESTOR") || !strings.Contains(out, "set    OWN=1\n") {
+		t.Fatalf("own manifest should govern:\n%s", out)
+	}
+}

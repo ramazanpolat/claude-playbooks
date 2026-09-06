@@ -370,12 +370,16 @@ Every launch of a playbook (its launcher command, `run`, or `start` at its direc
 
 ```text
 your shell's environment
+  + the registry default env profile, if one is set             (cpb env-profile <name> default)
   + each env profile the playbook uses, in the order listed     (~/.claude-playbooks/.env-profiles/<name>.toml)
   + the playbook's own [env.set]                                 (in its .playbook)
   - the playbook's own [env] unset
+  + one-off launch flags (--env-profile, --env, --unset, --env-file)
   + CLAUDE_CONFIG_DIR, bound by the tool, cannot be overridden
   = what claude sees
 ```
+
+A playbook with no `[env]` block still gets the registry default, when one is set; without one it inherits only your shell's environment.
 
 `set` overrides whatever the shell exported; `unset` removes a variable even when the shell exports it. Raw `claude` launches bypass all of this. Claude Code's own `env` block in `settings.json` is applied later, inside the `claude` process, and wins over these layers; it can set variables but cannot unset one the shell exported, which is what the manifest block is for.
 

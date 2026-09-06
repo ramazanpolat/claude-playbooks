@@ -85,9 +85,13 @@ func runEnv(cmd *cobra.Command, args []string) error {
 			// environment, and "refused" is the true answer.
 			fmt.Printf("Registry default marker is invalid (%v): every launch is refused until 'claude-playbook env-profile <name> undefault' clears it.\n", derr)
 		}
-		governing, nestedDir := governingManifest(pb)
-		if nestedDir != "" {
-			fmt.Printf("Note: %s governs the launch of %q (nearest manifest to its config directory); the root manifest that 'claude-playbook env %s set' edits is not applied.\n", filepath.Join(nestedDir, manifest.FileName), name, name)
+		governing, governingDir := governingManifest(pb)
+		if governingDir != "" {
+			if manifest.Exists(pb.RootPath) {
+				fmt.Printf("Note: %s governs the launch of %q (nearest manifest to its config directory); the root manifest that 'claude-playbook env %s set' edits is not applied.\n", filepath.Join(governingDir, manifest.FileName), name, name)
+			} else {
+				fmt.Printf("Note: %s governs the launch of %q (nearest manifest to its config directory, which has none of its own); 'claude-playbook env %s set' would create a root manifest, which would then govern instead.\n", filepath.Join(governingDir, manifest.FileName), name, name)
+			}
 		}
 		var block *manifest.Env
 		if governing != nil {
@@ -299,21 +303,18 @@ func dropString(list []string, s string) []string {
 	return out
 }
 
-// governingManifest returns the manifest a launch of pb consults: the nearest
-// valid one walking up from its config directory, as manifest.Nearest and the
-// auth code resolve it. For a flat playbook that is the root manifest. For a
-// legacy `subdir` layout whose subdirectory (or a directory between it and
-// the root) carries a manifest of its own, that nested manifest governs, and
-// its directory is returned so the caller can say so; an invalid nested
-// manifest is skipped, as Nearest skips it.
+// governingManifest returns the manifest a launch of pb consults, resolved
+// exactly as the launch resolves it: the nearest valid manifest walking up
+// from the config directory (manifest.NearestPath, the lookup behind
+// PrepareLaunchEnv and auth status). Usually that is the playbook's own root
+// manifest, and the returned directory is "". It is the directory of the
+// governing manifest when that is some other file: a legacy `subdir` layout
+// whose subdirectory carries a manifest of its own, or a manifest-free
+// playbook under an ancestor directory that has one.
 func governingManifest(pb *playbook.Playbook) (*manifest.Manifest, string) {
-	if pb.Path == pb.RootPath {
-		return pb.Manifest, ""
+	m, dir, _ := manifest.NearestPath(pb.Path)
+	if m == nil || dir == pb.RootPath {
+		return m, ""
 	}
-	for dir := pb.Path; dir != pb.RootPath && strings.HasPrefix(dir, pb.RootPath); dir = filepath.Dir(dir) {
-		if m, err := manifest.Read(dir); err == nil && m != nil {
-			return m, dir
-		}
-	}
-	return pb.Manifest, ""
+	return m, dir
 }

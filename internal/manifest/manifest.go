@@ -264,6 +264,14 @@ func Read(dir string) (*Manifest, error) {
 // first such error is returned alongside whatever was found, so callers can
 // report it. Returns (nil, nil) when no ancestor has a manifest.
 func Nearest(dir string) (*Manifest, error) {
+	m, _, err := NearestPath(dir)
+	return m, err
+}
+
+// NearestPath is Nearest, also returning the directory whose manifest governs
+// ("" when none does), for callers that must say WHICH manifest a launch
+// consults rather than only what it says.
+func NearestPath(dir string) (*Manifest, string, error) {
 	var firstErr error
 	for {
 		m, err := Read(dir)
@@ -271,11 +279,11 @@ func Nearest(dir string) (*Manifest, error) {
 			firstErr = err
 		}
 		if m != nil {
-			return m, firstErr
+			return m, dir, firstErr
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, firstErr
+			return nil, "", firstErr
 		}
 		dir = parent
 	}
