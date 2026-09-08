@@ -757,3 +757,47 @@ func TestDeleteStoreGuardDefersToTheKernel(t *testing.T) {
 		t.Fatal("directory removed despite an unverifiable store")
 	}
 }
+
+// A relative playbooks root resolves from the PHYSICAL working directory:
+// with `cd /x/a/link` (`link -> /x/b/sub`) and `--playbooks-dir ..`, the
+// store is /x/b/.env-profiles, not the /x/a/.env-profiles a lexical
+// filepath.Abs of the logical $PWD would name.
+func TestDeleteStoreGuardRelativeRootFromPhysicalCwd(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	x := t.TempDir()
+	b := filepath.Join(x, "b")
+	sub := filepath.Join(b, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(x, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(x, "a", "link")
+	if err := os.Symlink(sub, link); err != nil {
+		t.Fatal(err)
+	}
+	// The real store lives in /x/b, symlinked into a leftover there.
+	if err := envprofile.Write(filepath.Join(b, "foo", "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(b, "foo", "profiles"), envprofile.Dir(b)); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PWD", link) // the logical cwd a shell would export
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if got, _ := os.Getwd(); got != link {
+		t.Skipf("Getwd does not honour $PWD here (%s); the logical/physical split cannot be exercised", got)
+	}
+	err = refuseRegistryOwned("..", "foo", filepath.Join("..", "foo"))
+	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("relative root under a symlinked cwd: %v", err)
+	}
+}

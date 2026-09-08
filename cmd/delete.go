@@ -340,17 +340,27 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 // not converge within 255 hops (a loop) or a component cannot be inspected
 // (a dangling link).
 func storeResolution(store string) (physical string, links, traversed []string, err error) {
-	abs, err := filepath.Abs(store)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	root := filepath.VolumeName(abs) + string(filepath.Separator)
 	split := func(p string) []string {
 		p = strings.TrimPrefix(p, filepath.VolumeName(p))
 		return strings.Split(strings.Trim(p, string(filepath.Separator)), string(filepath.Separator))
 	}
-	cur := root
-	rest := split(abs)
+	var cur string
+	if filepath.IsAbs(store) {
+		cur = filepath.VolumeName(store) + string(filepath.Separator)
+	} else {
+		// A relative store resolves from the PHYSICAL working directory,
+		// as the kernel resolves it. filepath.Abs would use the logical
+		// $PWD and collapse `..` lexically: after `cd /a/link` with
+		// `/a/link -> /b/sub`, `..` means /b to the kernel and /a to Abs.
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", nil, nil, err
+		}
+		if cur, err = filepath.EvalSymlinks(wd); err != nil {
+			return "", nil, nil, err
+		}
+	}
+	rest := split(store)
 	hops := 0
 	for len(rest) > 0 {
 		comp := rest[0]
