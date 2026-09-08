@@ -281,13 +281,19 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	if os.SameFile(entry, a) {
 		return refuse()
 	}
+	// The kernel's verdict first: a chain it refuses (ELOOP on a long but
+	// acyclic chain, a file used as a directory in `file/../dir`) is not
+	// one the component walk below may accept on its own.
+	physicalInfo, err := os.Stat(store)
+	if err != nil {
+		return cannotVerify(err)
+	}
 	physical, links, traversed, err := storeResolution(store)
 	if err != nil {
 		return cannotVerify(err) // a dangling or looping chain: unverifiable, so refused
 	}
-	physicalInfo, err := os.Stat(physical)
-	if err != nil {
-		return cannotVerify(err)
+	if pi, err := os.Stat(physical); err != nil || !os.SameFile(pi, physicalInfo) {
+		return cannotVerify(fmt.Errorf("component resolution disagrees with the kernel"))
 	}
 	if os.SameFile(a, physicalInfo) {
 		return refuse() // the store's physical directory under another name
@@ -362,6 +368,9 @@ func storeResolution(store string) (physical string, links, traversed []string, 
 			return "", nil, nil, err
 		}
 		if fi.Mode()&os.ModeSymlink == 0 {
+			if !fi.IsDir() && len(rest) > 0 {
+				return "", nil, nil, fmt.Errorf("%s: not a directory", next)
+			}
 			traversed = append(traversed, next)
 			cur = next
 			continue

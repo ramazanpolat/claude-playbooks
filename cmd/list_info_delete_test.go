@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -717,5 +718,42 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	}
 	if _, err := os.Lstat(store); err != nil {
 		t.Fatal("dangling store link removed")
+	}
+}
+
+// A chain the kernel refuses (ELOOP on a long acyclic chain) makes every
+// delete unverifiable, even though a component walk alone would accept it.
+func TestDeleteStoreGuardDefersToTheKernel(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	final := filepath.Join(root, ".final")
+	if err := envprofile.Write(final, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	prev := final
+	for i := 0; i < 64; i++ {
+		link := filepath.Join(root, fmt.Sprintf(".hop%02d", i))
+		if err := os.Symlink(prev, link); err != nil {
+			t.Fatal(err)
+		}
+		prev = link
+	}
+	if err := os.Symlink(prev, store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store); err == nil {
+		t.Skip("this kernel resolves 65 symlink hops; nothing to defer to")
+	}
+	other := filepath.Join(root, ".other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("chain the kernel refuses: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatal("directory removed despite an unverifiable store")
 	}
 }
