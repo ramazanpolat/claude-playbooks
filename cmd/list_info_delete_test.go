@@ -550,8 +550,8 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 
 	// The store's registry SYMLINK addressed by a case variant: refused, link intact.
 	if caseInsensitive {
-		if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), "env profile store") {
-			t.Fatalf("case variant of the store link: %v", err)
+		if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+			t.Fatalf("case variant of the store link must get the store message, not the intermediate-link one: %v", err)
 		}
 		if _, err := os.Lstat(store); err != nil {
 			t.Fatal("store link removed")
@@ -603,7 +603,7 @@ func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	deleteYes = true
-	if err := runDelete(nil, []string{".holder"}); err == nil || !strings.Contains(err.Error(), "or a link it resolves through") {
+	if err := runDelete(nil, []string{".holder"}); err == nil || !strings.Contains(err.Error(), "or a path it resolves through") {
 		t.Fatalf("directory holding an intermediate link: %v", err)
 	}
 	if err := refuseRegistryOwned(root, "bridge", bridge); err == nil || !strings.Contains(err.Error(), "resolves through") {
@@ -669,5 +669,53 @@ func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Fatal("directory removed despite an unverifiable store")
+	}
+}
+
+// A directory entered and left again through `..` is still required by the
+// kernel; a dangling store entry is protected by identity and makes every
+// other delete unverifiable.
+func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	if err := os.MkdirAll(filepath.Join(root, ".leftover"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := envprofile.Write(filepath.Join(root, ".profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Built by hand: filepath.Join would clean the ".." away.
+	if err := os.Symlink(".leftover"+string(filepath.Separator)+".."+string(filepath.Separator)+".profiles", store); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "is a directory the registry's env profile store resolves through") {
+		t.Fatalf("traversed directory: %v", err)
+	}
+	if err := runDelete(nil, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+		t.Fatalf("physical directory under another name: %v", err)
+	}
+
+	// Dangling entry: the link itself stays protected, everything else waits.
+	if err := os.Remove(store); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, ".gone"), store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".ENV-PROFILES")); err == nil || os.IsNotExist(err) {
+		// case-insensitive: Lstat of the variant is the link itself
+		if fi, err := os.Lstat(filepath.Join(root, ".ENV-PROFILES")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+				t.Fatalf("dangling store link by case variant: %v", err)
+			}
+		}
+	}
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("delete with a dangling store: %v", err)
+	}
+	if _, err := os.Lstat(store); err != nil {
+		t.Fatal("dangling store link removed")
 	}
 }

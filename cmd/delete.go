@@ -257,6 +257,9 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	refuse := func() error {
 		return fmt.Errorf("%q is the registry's env profile store, not a playbook; remove a profile with 'claude-playbook env-profile <name> delete'", envprofile.DirName)
 	}
+	cannotVerify := func(err error) error {
+		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env profile store intact (%s: %v); nothing removed", name, store, err)
+	}
 	if name == envprofile.DirName {
 		return refuse()
 	}
@@ -264,36 +267,57 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	if err != nil {
 		return nil // nothing at the path: nothing the removal could take
 	}
-	if _, err := os.Stat(store); err != nil {
-		if os.IsNotExist(err) {
-			return nil // no store (a dangling link is not one either)
-		}
-		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env profile store intact (%s: %v); nothing removed", name, store, err)
-	}
-	physical, links, err := storeResolution(store)
+	// The registry entry itself, by Lstat identity: a directory, or the
+	// symlink the registry keeps when the store lives elsewhere, dangling or
+	// not. Catches a case variant of the name on a case-insensitive
+	// filesystem. Only an ABSENT entry means there is nothing to protect.
+	entry, err := os.Lstat(store)
 	if err != nil {
-		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env profile store intact (%s: %v); nothing removed", name, store, err)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return cannotVerify(err)
 	}
-	elements := append(links, physical)
-	for _, elem := range elements {
-		if ei, err := os.Lstat(elem); err == nil && os.SameFile(ei, a) {
-			if elem == physical || (len(links) > 0 && elem == links[0]) {
-				return refuse()
-			}
-			return fmt.Errorf("%q is a link the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, elem, store)
+	if os.SameFile(entry, a) {
+		return refuse()
+	}
+	physical, links, traversed, err := storeResolution(store)
+	if err != nil {
+		return cannotVerify(err) // a dangling or looping chain: unverifiable, so refused
+	}
+	physicalInfo, err := os.Stat(physical)
+	if err != nil {
+		return cannotVerify(err)
+	}
+	if os.SameFile(a, physicalInfo) {
+		return refuse() // the store's physical directory under another name
+	}
+	for _, link := range links {
+		if li, err := os.Lstat(link); err == nil && os.SameFile(li, a) {
+			return fmt.Errorf("%q is a link the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, link, store)
 		}
 	}
 	if !a.IsDir() {
 		return nil // a symlink or a file: removal never descends
 	}
+	// A real directory: refuse when it contains any element (its ancestors
+	// are walked from the parent up), or when it is a traversed directory
+	// itself (entered and left through `..`; not an ancestor of the store,
+	// yet required by the kernel to resolve it).
+	elements := append(append([]string{}, links...), traversed...)
 	for _, elem := range elements {
-		for dir := elem; ; dir = filepath.Dir(dir) {
+		for dir := filepath.Dir(elem); ; dir = filepath.Dir(dir) {
 			if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
-				return fmt.Errorf("%q contains the registry's env profile store or a link it resolves through (%s -> %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, elem)
+				return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, elem)
 			}
 			if filepath.Dir(dir) == dir {
 				break
 			}
+		}
+	}
+	for _, dir := range traversed {
+		if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
+			return fmt.Errorf("%q is a directory the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, dir, store)
 		}
 	}
 	return nil
@@ -301,15 +325,18 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 
 // storeResolution resolves store the way the kernel does, one path
 // component at a time, and records every symlink met on the way, in any
-// component. Relative link targets are resolved against the directory the
-// link lives in (already physical at that point, so `..` behaves as the
-// kernel's does). Returns the physical path and the links, or an error when
-// resolution does not converge within 255 hops (a loop) or a component
-// cannot be inspected.
-func storeResolution(store string) (physical string, links []string, err error) {
+// component, plus every real directory traversed (a directory entered and
+// then left through `..` is still required for the kernel to resolve the
+// path). Relative link targets are resolved against the directory the link
+// lives in (already physical at that point, so `..` behaves as the
+// kernel's does). Returns the physical path, the links, the traversed
+// directories (the physical path last), or an error when resolution does
+// not converge within 255 hops (a loop) or a component cannot be inspected
+// (a dangling link).
+func storeResolution(store string) (physical string, links, traversed []string, err error) {
 	abs, err := filepath.Abs(store)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	root := filepath.VolumeName(abs) + string(filepath.Separator)
 	split := func(p string) []string {
@@ -332,25 +359,29 @@ func storeResolution(store string) (physical string, links []string, err error) 
 		next := filepath.Join(cur, comp)
 		fi, err := os.Lstat(next)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		if fi.Mode()&os.ModeSymlink == 0 {
+			traversed = append(traversed, next)
 			cur = next
 			continue
 		}
 		hops++
 		if hops > 255 {
-			return "", nil, fmt.Errorf("too many levels of symbolic links")
+			return "", nil, nil, fmt.Errorf("too many levels of symbolic links")
 		}
 		links = append(links, next)
 		target, err := os.Readlink(next)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		if filepath.IsAbs(target) {
 			cur = filepath.VolumeName(target) + string(filepath.Separator)
 		}
 		rest = append(split(target), rest...)
 	}
-	return cur, links, nil
+	if len(traversed) == 0 || traversed[len(traversed)-1] != cur {
+		traversed = append(traversed, cur)
+	}
+	return cur, links, traversed, nil
 }
