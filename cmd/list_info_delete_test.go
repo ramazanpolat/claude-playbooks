@@ -823,8 +823,8 @@ func TestSubtreeHoldsFindsProtectedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	hit, err := subtreeHolds(dir, []os.FileInfo{pi})
-	if err != nil || hit != inner {
-		t.Fatalf("hit=%q err=%v, want %q", hit, err, inner)
+	if err != nil || hit != 0 {
+		t.Fatalf("hit=%d err=%v, want 0 (%s)", hit, err, inner)
 	}
 	other := t.TempDir()
 	oi, _ := os.Lstat(other)
@@ -832,8 +832,8 @@ func TestSubtreeHoldsFindsProtectedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	hit, err = subtreeHolds(dir, []os.FileInfo{oi})
-	if err != nil || hit != "" {
-		t.Fatalf("a symlink to a protected directory is not a hit: hit=%q err=%v", hit, err)
+	if err != nil || hit != -1 {
+		t.Fatalf("a symlink to a protected directory is not a hit: hit=%d err=%v", hit, err)
 	}
 }
 
@@ -862,5 +862,38 @@ func TestDeleteStoreGuardBindMount(t *testing.T) {
 	deleteYes = true
 	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
 		t.Fatalf("bind-mounted store inside the target: %v", err)
+	}
+}
+
+// With the store resolving to the playbooks root itself, a profile file and
+// the default marker are root entries; the orphan path must not remove
+// them, while a playbook directory beside them stays deletable.
+func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	if err := envprofile.Write(root, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := envprofile.SetDefault(root, "glm"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	for _, name := range []string{"glm.toml", envprofile.DefaultMarker} {
+		if err := runDelete(nil, []string{name}); err == nil || !strings.Contains(err.Error(), "is an entry of the registry's env profile store") {
+			t.Fatalf("delete %q: %v", name, err)
+		}
+	}
+	if p, err := envprofile.Read(root, "glm"); err != nil || p == nil {
+		t.Fatalf("profile damaged: %v %v", p, err)
+	}
+	if d, err := envprofile.Default(root); err != nil || d != "glm" {
+		t.Fatalf("default damaged: %q %v", d, err)
+	}
+	seedFlatPlaybook(t, "beside")
+	if err := runDelete(nil, []string{"beside"}); err != nil {
+		t.Fatalf("a playbook beside the store entries must stay deletable: %v", err)
 	}
 }

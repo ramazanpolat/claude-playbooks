@@ -304,7 +304,15 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 		}
 	}
 	if !a.IsDir() {
-		return nil // a symlink or a file: removal never descends
+		// A symlink or a file: removal never descends, but the entry may be
+		// the store's own (a profile file or the default marker) when the
+		// store resolves to the directory holding it (`.env-profiles -> .`).
+		// Those are `env-profile <name> delete`'s business, with its
+		// reference and default checks.
+		if parent, err := os.Stat(filepath.Dir(path)); err == nil && os.SameFile(parent, physicalInfo) {
+			return fmt.Errorf("%q is an entry of the registry's env profile store (%s resolves to the directory holding it); remove a profile with 'claude-playbook env-profile <name> delete'", name, store)
+		}
+		return nil
 	}
 	// A real directory: refuse when it contains any element (its ancestors
 	// are walked from the parent up), or when it is a traversed directory
@@ -332,27 +340,29 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	// and RemoveAll would walk straight into it. Descend the way RemoveAll
 	// does, without following symlinks, and compare identities.
 	protected := make([]os.FileInfo, 0, len(elements))
+	protectedPath := make([]string, 0, len(elements))
 	for _, elem := range elements {
 		if fi, err := os.Lstat(elem); err == nil {
 			protected = append(protected, fi)
+			protectedPath = append(protectedPath, elem)
 		}
 	}
 	hit, err := subtreeHolds(path, protected)
 	if err != nil {
 		return cannotVerify(err)
 	}
-	if hit != "" {
-		return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s is %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, hit, store)
+	if hit >= 0 {
+		return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, protectedPath[hit])
 	}
 	return nil
 }
 
 // subtreeHolds walks dir the way os.RemoveAll would, without following
-// symlinks, and reports the first entry whose file identity matches one of
-// the protected infos ("" when none). An unreadable entry is an error: the
-// walk cannot vouch for what it could not see.
-func subtreeHolds(dir string, protected []os.FileInfo) (string, error) {
-	var hit string
+// symlinks, and reports the index of the first protected info whose file
+// identity an entry matches (-1 when none). An unreadable entry is an
+// error: the walk cannot vouch for what it could not see.
+func subtreeHolds(dir string, protected []os.FileInfo) (int, error) {
+	hit := -1
 	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -364,9 +374,9 @@ func subtreeHolds(dir string, protected []os.FileInfo) (string, error) {
 		if err != nil {
 			return err
 		}
-		for _, pi := range protected {
+		for i, pi := range protected {
 			if os.SameFile(fi, pi) {
-				hit = p
+				hit = i
 				return filepath.SkipAll
 			}
 		}
