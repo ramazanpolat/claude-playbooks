@@ -230,15 +230,23 @@ func countContents(dir string) (files, dirs int) {
 // entries, so the store's name would otherwise fall through to the orphan
 // path and remove every profile and the default marker in one confirmation.
 //
-// Three shapes are refused: the name itself; a path that IS the store by
-// file identity (a case variant on a case-insensitive filesystem), judged
-// with Lstat so a leftover symlink pointing at the store is still deletable
-// (only the link goes, see removeAny); and a real directory whose physical
-// subtree contains the store's resolved location (the store symlinked into a
-// leftover, `.env-profiles -> .leftover/profiles`), which RemoveAll would
-// otherwise descend into. Callers run it before the prompt and again under
-// the registry lock against the path actually removed, since the store may
-// appear, move, or be linked while the prompt is open.
+// The store is protected along its whole resolution: the registry entry,
+// every intermediate symlink (`.env-profiles -> .bridge -> /x/profiles`),
+// and the final physical directory. Two shapes are refused, both judged by
+// file identity (os.SameFile), never by spelling, so a case variant on a
+// case-insensitive filesystem, a relative playbooks root, or a symlink on
+// either side changes nothing:
+//
+//   - the path IS one of those elements (Lstat identity, so a leftover
+//     symlink that merely points at the store is still deletable: only the
+//     link goes, see removeAny). A separate hard link to the entry shares
+//     that identity and is refused on the safe side.
+//   - the path is a real directory whose subtree contains one of those
+//     elements, which RemoveAll would descend into.
+//
+// Callers run it before the prompt and again under the registry lock
+// against the path actually removed, since the store may appear, move, or
+// be linked while the prompt is open.
 func refuseRegistryOwned(playbooksDir, name, path string) error {
 	store := envprofile.Dir(playbooksDir)
 	refuse := func() error {
@@ -251,40 +259,59 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	if err != nil {
 		return nil // nothing at the path: nothing the removal could take
 	}
-	// The store's own registry entry, by identity: a directory, or the
-	// symlink the registry keeps when the store lives elsewhere. Catches a
-	// case variant of the name on a case-insensitive filesystem.
-	if entry, err := os.Lstat(store); err == nil && os.SameFile(a, entry) {
-		return refuse()
-	}
-	target, err := os.Stat(store)
-	if err != nil {
+	if _, err := os.Stat(store); err != nil {
 		return nil // no store behind the entry (a dangling link is not one)
 	}
-	if os.SameFile(a, target) {
-		return refuse() // the store's physical directory under another name
+	chain := storeChain(store)
+	for i, elem := range chain {
+		if ei, err := os.Lstat(elem); err == nil && os.SameFile(ei, a) {
+			if i == 0 || i == len(chain)-1 {
+				return refuse()
+			}
+			return fmt.Errorf("%q is a link the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, elem, store)
+		}
 	}
 	if !a.IsDir() {
 		return nil // a symlink or a file: removal never descends
 	}
-	// Containment, by identity rather than by string: RemoveAll(path) must
-	// not descend into the store's physical location. Each ancestor of the
-	// resolved store is compared to the directory about to be removed with
-	// SameFile, which is immune to spelling (case-insensitive filesystems),
-	// to relative playbooks roots, and to symlinks along either path.
-	physStore, err := filepath.EvalSymlinks(store)
-	if err != nil {
-		return nil
-	}
-	if physStore, err = filepath.Abs(physStore); err != nil {
-		return nil
-	}
-	for dir := physStore; ; dir = filepath.Dir(dir) {
-		if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
-			return fmt.Errorf("%q contains the registry's env profile store (%s resolves to %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, physStore)
+	for _, elem := range chain {
+		abs, err := filepath.Abs(elem)
+		if err != nil {
+			continue
 		}
-		if filepath.Dir(dir) == dir {
-			return nil
+		for dir := abs; ; dir = filepath.Dir(dir) {
+			if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
+				return fmt.Errorf("%q contains the registry's env profile store or a link it resolves through (%s -> %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, elem)
+			}
+			if filepath.Dir(dir) == dir {
+				break
+			}
 		}
 	}
+	return nil
+}
+
+// storeChain lists every path the store resolves through: the registry
+// entry, each intermediate symlink target (relative targets resolved
+// against the link's directory), and the final non-link path. Bounded, so
+// a link loop ends the walk instead of the process.
+func storeChain(store string) []string {
+	chain := make([]string, 0, 4)
+	cur := store
+	for hop := 0; hop < 40; hop++ {
+		chain = append(chain, cur)
+		fi, err := os.Lstat(cur)
+		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			break
+		}
+		target, err := os.Readlink(cur)
+		if err != nil {
+			break
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(cur), target)
+		}
+		cur = target
+	}
+	return chain
 }

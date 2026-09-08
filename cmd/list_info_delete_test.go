@@ -580,3 +580,43 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 		t.Fatalf("store damaged: %v %v", p, err)
 	}
 }
+
+// The store is protected along its whole symlink chain: an intermediate link
+// and the directory holding it are refused; an unrelated link is not.
+func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	holder := filepath.Join(root, ".holder")
+	final := filepath.Join(t.TempDir(), "profiles")
+	if err := envprofile.Write(final, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(holder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bridge := filepath.Join(holder, "bridge")
+	if err := os.Symlink(final, bridge); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(".holder", "bridge"), store); err != nil { // relative target
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".holder"}); err == nil || !strings.Contains(err.Error(), "or a link it resolves through") {
+		t.Fatalf("directory holding an intermediate link: %v", err)
+	}
+	if err := refuseRegistryOwned(root, "bridge", bridge); err == nil || !strings.Contains(err.Error(), "resolves through") {
+		t.Fatalf("intermediate link itself: %v", err)
+	}
+	unrelated := filepath.Join(root, ".unrelated")
+	if err := os.Symlink(final, unrelated); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDelete(nil, []string{".unrelated"}); err != nil {
+		t.Fatalf("unrelated link to the same target must be deletable: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+}
