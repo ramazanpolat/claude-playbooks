@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -799,5 +801,66 @@ func TestDeleteStoreGuardRelativeRootFromPhysicalCwd(t *testing.T) {
 	err = refuseRegistryOwned("..", "foo", filepath.Join("..", "foo"))
 	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
 		t.Fatalf("relative root under a symlinked cwd: %v", err)
+	}
+}
+
+// The subtree walk finds a protected identity that is not a path
+// descendant of the store's resolution (a bind mount, on Linux). Without a
+// mount the mechanism is exercised directly: an inner directory's identity
+// is declared protected and the walk must report it; a symlink to a
+// protected directory is not a hit (RemoveAll unlinks it, never descends).
+func TestSubtreeHoldsFindsProtectedIdentity(t *testing.T) {
+	dir := t.TempDir()
+	inner := filepath.Join(dir, "a", "b", "mounted")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inner, filepath.Join(dir, "link-to-inner")); err != nil {
+		t.Fatal(err)
+	}
+	pi, err := os.Lstat(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hit, err := subtreeHolds(dir, []os.FileInfo{pi})
+	if err != nil || hit != inner {
+		t.Fatalf("hit=%q err=%v, want %q", hit, err, inner)
+	}
+	other := t.TempDir()
+	oi, _ := os.Lstat(other)
+	if err := os.Symlink(other, filepath.Join(dir, "a", "link-to-other")); err != nil {
+		t.Fatal(err)
+	}
+	hit, err = subtreeHolds(dir, []os.FileInfo{oi})
+	if err != nil || hit != "" {
+		t.Fatalf("a symlink to a protected directory is not a hit: hit=%q err=%v", hit, err)
+	}
+}
+
+// Linux with CAP_SYS_ADMIN only: the real bind-mount shape. Skipped elsewhere.
+func TestDeleteStoreGuardBindMount(t *testing.T) {
+	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
+		t.Skip("needs Linux and root for mount --bind")
+	}
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	data := t.TempDir()
+	if err := envprofile.Write(filepath.Join(data, "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	mounted := filepath.Join(root, ".leftover", "mounted")
+	if err := os.MkdirAll(mounted, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("mount", "--bind", data, mounted).CombinedOutput(); err != nil {
+		t.Skipf("mount --bind: %v %s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("umount", mounted).Run() })
+	if err := os.Symlink(filepath.Join(data, "profiles"), envprofile.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("bind-mounted store inside the target: %v", err)
 	}
 }

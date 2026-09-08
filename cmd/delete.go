@@ -326,7 +326,53 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 			return fmt.Errorf("%q is a directory the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, dir, store)
 		}
 	}
+	// Finally the subtree itself: a protected element can sit INSIDE the
+	// directory without being a path descendant of it (a bind mount on
+	// Linux: `/data` mounted at <dir>/mounted with the store under /data),
+	// and RemoveAll would walk straight into it. Descend the way RemoveAll
+	// does, without following symlinks, and compare identities.
+	protected := make([]os.FileInfo, 0, len(elements))
+	for _, elem := range elements {
+		if fi, err := os.Lstat(elem); err == nil {
+			protected = append(protected, fi)
+		}
+	}
+	hit, err := subtreeHolds(path, protected)
+	if err != nil {
+		return cannotVerify(err)
+	}
+	if hit != "" {
+		return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s is %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, hit, store)
+	}
 	return nil
+}
+
+// subtreeHolds walks dir the way os.RemoveAll would, without following
+// symlinks, and reports the first entry whose file identity matches one of
+// the protected infos ("" when none). An unreadable entry is an error: the
+// walk cannot vouch for what it could not see.
+func subtreeHolds(dir string, protected []os.FileInfo) (string, error) {
+	var hit string
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if p == dir {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		for _, pi := range protected {
+			if os.SameFile(fi, pi) {
+				hit = p
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return hit, err
 }
 
 // storeResolution resolves store the way the kernel does, one path
