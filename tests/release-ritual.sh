@@ -213,6 +213,14 @@ if phase_enabled p4; then
   # SIGPIPE on its next line and the pipeline fails on timing alone.
   p4 info fx 2>/dev/null | grep 'Update from:' >/dev/null || rc=1
   p4 update fx --check 2>/dev/null | grep 'up to date' >/dev/null || rc=1
+  # the env profile store is never a delete target: refused by name and by
+  # case variant (same directory on a case-insensitive filesystem, "not
+  # found" on a case-sensitive one; both non-zero), profiles intact after
+  p4 env-profile keep set K=1 >/dev/null 2>&1 || rc=1
+  p4 delete .env-profiles -y >/dev/null 2>&1 && rc=1
+  p4 delete .ENV-PROFILES -y >/dev/null 2>&1 && rc=1
+  [ -f "$PB/.env-profiles/keep.toml" ] || rc=1
+  p4 env-profile keep delete >/dev/null 2>&1 || rc=1
   p4 delete fx -y >/dev/null 2>&1 || rc=1
   [ ! -d "$PB/fx" ] || rc=1
   report "p4 info/check/delete" $rc
