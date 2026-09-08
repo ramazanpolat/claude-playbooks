@@ -1,14 +1,18 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -445,5 +449,487 @@ func TestDeleteOrphanRemovesNonDiscoverableDirectory(t *testing.T) {
 	}
 	if !strings.Contains(out, `Deleted ".hidden".`) {
 		t.Fatalf("orphan deletion not confirmed in output, got:\n%s", out)
+	}
+}
+
+// The env profile store is dot-named, so discovery skips it and a delete by
+// name would fall through to the orphan path; it must be refused by name and
+// by file identity (a case variant on a case-insensitive filesystem).
+func TestDeleteRefusesEnvProfileStore(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	store := envprofile.Dir(config.PlaybooksDir)
+	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	for _, name := range []string{envprofile.DirName, strings.ToUpper(envprofile.DirName)} {
+		if name != envprofile.DirName {
+			if _, err := os.Stat(filepath.Join(config.PlaybooksDir, name)); err != nil {
+				continue // case-sensitive filesystem: the variant is simply not found
+			}
+		}
+		err := runDelete(nil, []string{name})
+		if err == nil || !strings.Contains(err.Error(), "env profile store") {
+			t.Fatalf("delete %q: %v", name, err)
+		}
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("profile store damaged: %v %v", p, err)
+	}
+}
+
+// A leftover symlink pointing AT the store is deletable (only the link goes);
+// a leftover directory the store is symlinked INTO is refused, because
+// RemoveAll would descend into the store's physical location.
+func TestDeleteStoreSymlinkShapes(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+
+	// 1. link -> store: the link is removed, the store survives.
+	link := filepath.Join(root, ".oldlink")
+	if err := os.Symlink(store, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDelete(nil, []string{".oldlink"}); err != nil {
+		t.Fatalf("deleting a symlink to the store: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatal("link not removed")
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged by deleting a link to it: %v %v", p, err)
+	}
+
+	// 2. store -> inside a leftover directory: deleting the leftover is refused.
+	if err := os.RemoveAll(store); err != nil {
+		t.Fatal(err)
+	}
+	leftover := filepath.Join(root, ".leftover")
+	inner := filepath.Join(leftover, "profiles")
+	if err := envprofile.Write(inner, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inner, store); err != nil {
+		t.Fatal(err)
+	}
+	err := runDelete(nil, []string{".leftover"})
+	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("deleting the directory the store lives in: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+	// The message names the canonical store, whatever spelling was typed.
+	if err := runDelete(nil, []string{envprofile.DirName}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+		t.Fatalf("message: %v", err)
+	}
+}
+
+// Identity, not spelling: the store's registry entry can be a symlink, the
+// typed name a case variant, the playbooks root relative. None of these may
+// reach the store.
+func TestDeleteStoreGuardByIdentity(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	leftover := filepath.Join(root, ".leftover")
+	inner := filepath.Join(leftover, "profiles")
+	if err := envprofile.Write(inner, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inner, store); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	caseInsensitive := false
+	if _, err := os.Stat(filepath.Join(root, ".LEFTOVER")); err == nil {
+		caseInsensitive = true
+	}
+
+	// The store's registry SYMLINK addressed by a case variant: refused, link intact.
+	if caseInsensitive {
+		if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+			t.Fatalf("case variant of the store link must get the store message, not the intermediate-link one: %v", err)
+		}
+		if _, err := os.Lstat(store); err != nil {
+			t.Fatal("store link removed")
+		}
+		// The directory the store resolves into, addressed by a case variant.
+		if err := runDelete(nil, []string{".LEFTOVER"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+			t.Fatalf("case variant of the containing directory: %v", err)
+		}
+	}
+
+	// A relative playbooks root: the containment check must not compare a
+	// relative path against the store's absolute target.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	rel := filepath.Base(root)
+	if err := refuseRegistryOwned(rel, ".leftover", filepath.Join(rel, ".leftover")); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("relative playbooks root: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+}
+
+// The store is protected along its whole symlink chain: an intermediate link
+// and the directory holding it are refused; an unrelated link is not.
+func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	holder := filepath.Join(root, ".holder")
+	final := filepath.Join(t.TempDir(), "profiles")
+	if err := envprofile.Write(final, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(holder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bridge := filepath.Join(holder, "bridge")
+	if err := os.Symlink(final, bridge); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(".holder", "bridge"), store); err != nil { // relative target
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".holder"}); err == nil || !strings.Contains(err.Error(), "or a path it resolves through") {
+		t.Fatalf("directory holding an intermediate link: %v", err)
+	}
+	if err := refuseRegistryOwned(root, "bridge", bridge); err == nil || !strings.Contains(err.Error(), "resolves through") {
+		t.Fatalf("intermediate link itself: %v", err)
+	}
+	unrelated := filepath.Join(root, ".unrelated")
+	if err := os.Symlink(final, unrelated); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDelete(nil, []string{".unrelated"}); err != nil {
+		t.Fatalf("unrelated link to the same target must be deletable: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+}
+
+// A symlink in a PARENT component of the store's target is part of the
+// resolution too, and a resolution that cannot be established refuses.
+func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	leftover := filepath.Join(root, ".leftover")
+	if err := envprofile.Write(filepath.Join(leftover, "sub", "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	bridge := filepath.Join(root, ".bridge")
+	if err := os.Symlink(filepath.Join(".leftover", "sub"), bridge); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(".bridge", "profiles"), store); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".bridge"}); err == nil || !strings.Contains(err.Error(), "resolves through") {
+		t.Fatalf("parent-component link: %v", err)
+	}
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("directory holding the parent-component target: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+
+	// A looped store cannot be verified: the delete of anything else is refused.
+	if err := os.Remove(store); err != nil {
+		t.Fatal(err)
+	}
+	loop := filepath.Join(root, ".loop")
+	if err := os.Symlink(store, loop); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(loop, store); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(root, ".other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDelete(nil, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("looped store: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatal("directory removed despite an unverifiable store")
+	}
+}
+
+// A directory entered and left again through `..` is still required by the
+// kernel; a dangling store entry is protected by identity and makes every
+// other delete unverifiable.
+func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	if err := os.MkdirAll(filepath.Join(root, ".leftover"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := envprofile.Write(filepath.Join(root, ".profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Built by hand: filepath.Join would clean the ".." away.
+	if err := os.Symlink(".leftover"+string(filepath.Separator)+".."+string(filepath.Separator)+".profiles", store); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "is a directory the registry's env profile store resolves through") {
+		t.Fatalf("traversed directory: %v", err)
+	}
+	if err := runDelete(nil, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+		t.Fatalf("physical directory under another name: %v", err)
+	}
+
+	// Dangling entry: the link itself stays protected, everything else waits.
+	if err := os.Remove(store); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, ".gone"), store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".ENV-PROFILES")); err == nil || os.IsNotExist(err) {
+		// case-insensitive: Lstat of the variant is the link itself
+		if fi, err := os.Lstat(filepath.Join(root, ".ENV-PROFILES")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+				t.Fatalf("dangling store link by case variant: %v", err)
+			}
+		}
+	}
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("delete with a dangling store: %v", err)
+	}
+	if _, err := os.Lstat(store); err != nil {
+		t.Fatal("dangling store link removed")
+	}
+}
+
+// A chain the kernel refuses (ELOOP on a long acyclic chain) makes every
+// delete unverifiable, even though a component walk alone would accept it.
+func TestDeleteStoreGuardDefersToTheKernel(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	final := filepath.Join(root, ".final")
+	if err := envprofile.Write(final, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	prev := final
+	for i := 0; i < 64; i++ {
+		link := filepath.Join(root, fmt.Sprintf(".hop%02d", i))
+		if err := os.Symlink(prev, link); err != nil {
+			t.Fatal(err)
+		}
+		prev = link
+	}
+	if err := os.Symlink(prev, store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store); err == nil {
+		t.Skip("this kernel resolves 65 symlink hops; nothing to defer to")
+	}
+	other := filepath.Join(root, ".other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("chain the kernel refuses: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatal("directory removed despite an unverifiable store")
+	}
+}
+
+// A relative playbooks root resolves from the PHYSICAL working directory:
+// with `cd /x/a/link` (`link -> /x/b/sub`) and `--playbooks-dir ..`, the
+// store is /x/b/.env-profiles, not the /x/a/.env-profiles a lexical
+// filepath.Abs of the logical $PWD would name.
+func TestDeleteStoreGuardRelativeRootFromPhysicalCwd(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	x := t.TempDir()
+	b := filepath.Join(x, "b")
+	sub := filepath.Join(b, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(x, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(x, "a", "link")
+	if err := os.Symlink(sub, link); err != nil {
+		t.Fatal(err)
+	}
+	// The real store lives in /x/b, symlinked into a leftover there.
+	if err := envprofile.Write(filepath.Join(b, "foo", "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(b, "foo", "profiles"), envprofile.Dir(b)); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PWD", link) // the logical cwd a shell would export
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if got, _ := os.Getwd(); got != link {
+		t.Skipf("Getwd does not honour $PWD here (%s); the logical/physical split cannot be exercised", got)
+	}
+	err = refuseRegistryOwned("..", "foo", filepath.Join("..", "foo"))
+	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("relative root under a symlinked cwd: %v", err)
+	}
+}
+
+// The subtree walk finds a protected identity that is not a path
+// descendant of the store's resolution (a bind mount, on Linux). Without a
+// mount the mechanism is exercised directly: an inner directory's identity
+// is declared protected and the walk must report it; a symlink to a
+// protected directory is not a hit (RemoveAll unlinks it, never descends).
+func TestSubtreeHoldsFindsProtectedIdentity(t *testing.T) {
+	dir := t.TempDir()
+	inner := filepath.Join(dir, "a", "b", "mounted")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inner, filepath.Join(dir, "link-to-inner")); err != nil {
+		t.Fatal(err)
+	}
+	pi, err := os.Lstat(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hit, err := subtreeHolds(dir, []os.FileInfo{pi})
+	if err != nil || hit != 0 {
+		t.Fatalf("hit=%d err=%v, want 0 (%s)", hit, err, inner)
+	}
+	other := t.TempDir()
+	oi, _ := os.Lstat(other)
+	if err := os.Symlink(other, filepath.Join(dir, "a", "link-to-other")); err != nil {
+		t.Fatal(err)
+	}
+	hit, err = subtreeHolds(dir, []os.FileInfo{oi})
+	if err != nil || hit != -1 {
+		t.Fatalf("a symlink to a protected directory is not a hit: hit=%d err=%v", hit, err)
+	}
+}
+
+// Linux with CAP_SYS_ADMIN only: the real bind-mount shape. Skipped elsewhere.
+func TestDeleteStoreGuardBindMount(t *testing.T) {
+	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
+		t.Skip("needs Linux and root for mount --bind")
+	}
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	data := t.TempDir()
+	if err := envprofile.Write(filepath.Join(data, "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	mounted := filepath.Join(root, ".leftover", "mounted")
+	if err := os.MkdirAll(mounted, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("mount", "--bind", data, mounted).CombinedOutput(); err != nil {
+		t.Skipf("mount --bind: %v %s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("umount", mounted).Run() })
+	if err := os.Symlink(filepath.Join(data, "profiles"), envprofile.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("bind-mounted store inside the target: %v", err)
+	}
+}
+
+// With the store resolving to the playbooks root itself, a profile file and
+// the default marker are root entries; the orphan path must not remove
+// them, while a playbook directory beside them stays deletable.
+func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	if err := envprofile.Write(root, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := envprofile.SetDefault(root, "glm"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	for _, name := range []string{"glm.toml", envprofile.DefaultMarker} {
+		if err := runDelete(nil, []string{name}); err == nil || !strings.Contains(err.Error(), "is an entry of the registry's env profile store") {
+			t.Fatalf("delete %q: %v", name, err)
+		}
+	}
+	if p, err := envprofile.Read(root, "glm"); err != nil || p == nil {
+		t.Fatalf("profile damaged: %v %v", p, err)
+	}
+	if d, err := envprofile.Default(root); err != nil || d != "glm" {
+		t.Fatalf("default damaged: %q %v", d, err)
+	}
+	seedFlatPlaybook(t, "beside")
+	if err := runDelete(nil, []string{"beside"}); err != nil {
+		t.Fatalf("a playbook beside the store entries must stay deletable: %v", err)
+	}
+}
+
+// With the store resolving to the root, only the store's own entries are
+// refused: a linked playbook and a stray file beside them stay deletable.
+func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	if err := envprofile.Write(root, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".stray"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{"linked"}); err != nil {
+		t.Fatalf("unlinking a linked playbook beside the store entries: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "linked")); !os.IsNotExist(err) {
+		t.Fatal("link not removed")
+	}
+	if _, err := os.Stat(external); err != nil {
+		t.Fatal("link target removed")
+	}
+	if err := runDelete(nil, []string{".stray"}); err != nil {
+		t.Fatalf("a stray file beside the store entries: %v", err)
+	}
+	if err := runDelete(nil, []string{"glm.toml"}); err == nil {
+		t.Fatal("a profile file was deletable")
 	}
 }

@@ -30,6 +30,9 @@ import (
 // DirName is the profiles directory under the playbooks root.
 const DirName = ".env-profiles"
 
+// FileExt is the extension of a profile file under DirName.
+const FileExt = ".toml"
+
 // Dir returns the profiles directory for a playbooks root.
 func Dir(playbooksDir string) string {
 	return filepath.Join(playbooksDir, DirName)
@@ -83,7 +86,7 @@ func (e *ResolveError) Unwrap() error        { return e.Err }
 func (e *ResolveError) Is(target error) bool { return target == ErrProfile }
 
 func path(dir, name string) string {
-	return filepath.Join(dir, name+".toml")
+	return filepath.Join(dir, name+FileExt)
 }
 
 // Read parses one profile. Returns (nil, nil) when it does not exist.
@@ -204,7 +207,7 @@ func List(dir string) ([]*Profile, error) {
 	}
 	var out []*Profile
 	for _, e := range entries {
-		name, ok := strings.CutSuffix(e.Name(), ".toml")
+		name, ok := strings.CutSuffix(e.Name(), FileExt)
 		if !ok || e.IsDir() {
 			continue
 		}
