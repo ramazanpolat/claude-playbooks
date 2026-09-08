@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -445,5 +446,31 @@ func TestDeleteOrphanRemovesNonDiscoverableDirectory(t *testing.T) {
 	}
 	if !strings.Contains(out, `Deleted ".hidden".`) {
 		t.Fatalf("orphan deletion not confirmed in output, got:\n%s", out)
+	}
+}
+
+// The env profile store is dot-named, so discovery skips it and a delete by
+// name would fall through to the orphan path; it must be refused by name and
+// by file identity (a case variant on a case-insensitive filesystem).
+func TestDeleteRefusesEnvProfileStore(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	store := envprofile.Dir(config.PlaybooksDir)
+	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	for _, name := range []string{envprofile.DirName, strings.ToUpper(envprofile.DirName)} {
+		if name != envprofile.DirName {
+			if _, err := os.Stat(filepath.Join(config.PlaybooksDir, name)); err != nil {
+				continue // case-sensitive filesystem: the variant is simply not found
+			}
+		}
+		err := runDelete(nil, []string{name})
+		if err == nil || !strings.Contains(err.Error(), "env profile store") {
+			t.Fatalf("delete %q: %v", name, err)
+		}
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("profile store damaged: %v %v", p, err)
 	}
 }

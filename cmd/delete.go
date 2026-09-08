@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -34,6 +35,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	if err := validateSinglePathSegment("playbook name", name); err != nil {
+		return err
+	}
+	if err := refuseRegistryOwned(playbooksDir, name); err != nil {
 		return err
 	}
 
@@ -211,4 +215,25 @@ func countContents(dir string) (files, dirs int) {
 		return nil
 	})
 	return
+}
+
+// refuseRegistryOwned rejects a delete that addresses the registry's own
+// env profile store. Discovery skips dot-prefixed entries, so the name would
+// otherwise fall through to the orphan path and remove every profile and the
+// default marker in one confirmation. The check is by name AND by file
+// identity, so a case variant on a case-insensitive filesystem is refused too.
+func refuseRegistryOwned(playbooksDir, name string) error {
+	store := envprofile.Dir(playbooksDir)
+	owned := name == envprofile.DirName
+	if !owned {
+		if a, err := os.Stat(filepath.Join(playbooksDir, name)); err == nil {
+			if b, err := os.Stat(store); err == nil && os.SameFile(a, b) {
+				owned = true
+			}
+		}
+	}
+	if owned {
+		return fmt.Errorf("%q is the registry's env profile store, not a playbook; remove a profile with 'claude-playbook env-profile <name> delete'", name)
+	}
+	return nil
 }

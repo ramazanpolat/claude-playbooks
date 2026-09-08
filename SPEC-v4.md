@@ -625,7 +625,7 @@ unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
 ANTHROPIC_BASE_URL = "http://proxy:1/v1"
 ```
 
-Profile files are written mode `0600` and an existing file is tightened to it on every write. Profile names match `[A-Za-z0-9][A-Za-z0-9._-]*`. Keys follow the `[env]` rules (valid variable names, `CLAUDE_CONFIG_DIR` reserved, no key in both lists). Only `set` creates a profile; every other action on an unknown name is an error. Mutations validate every argument before taking the registry lock. `delete` scans the registry and refuses while a playbook references the profile, naming the users. The directory is never touched by `install` or `update`.
+Profile files are written mode `0600` and an existing file is tightened to it on every write. Profile names match `[A-Za-z0-9][A-Za-z0-9._-]*`. Keys follow the `[env]` rules (valid variable names, `CLAUDE_CONFIG_DIR` reserved, no key in both lists). Only `set` creates a profile; every other action on an unknown name is an error. Mutations validate every argument before taking the registry lock. `delete` scans the registry and refuses while a playbook references the profile, naming the users. The directory is never touched by `install` or `update`, and `delete` refuses to address it (see [`claude-playbook delete <name>`](#claude-playbook-delete-name)).
 
 The listing marks the default with `registry default` (matched by file identity, so a case variant of the name on a case-insensitive filesystem counts) and ends with a warning when the marker is unreadable or names a profile that does not exist, since every launch is refused in that state; `env <playbook>` shows a `default   <name>` line and includes it in "Effective at launch"; a playbook without a block is shown what the default contributes at launch, or the refusal it would hit.
 
@@ -718,8 +718,9 @@ The `Alias` line shows the manifest alias (`(none)` when unset); a `Command` lin
 
 **Errors:**
 - Name not found → `"experiment" not found under ~/.claude-playbooks`
+- Name is the profile store → `".env-profiles" is the registry's env profile store, not a playbook; remove a profile with 'claude-playbook env-profile <name> delete'`. Discovery skips dot-prefixed entries, so without this guard the name would reach the orphan path below and remove every profile and the default marker in one confirmation. Matched by name and by file identity, so a case variant on a case-insensitive filesystem is refused too.
 
-**Graceful cases:** if the directory is already gone, the command still cleans up any dangling aliases and reports success.
+**Graceful cases:** if the directory is already gone, the command still cleans up any dangling aliases and reports success. A dot-named directory that exists under the root but is not a discoverable playbook (a leftover, never the profile store) is removed through the orphan path after an explicit confirmation naming it as such.
 
 ---
 
