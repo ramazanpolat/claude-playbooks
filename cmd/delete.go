@@ -304,13 +304,17 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 		}
 	}
 	if !a.IsDir() {
-		// A symlink or a file: removal never descends, but the entry may be
-		// the store's own (a profile file or the default marker) when the
-		// store resolves to the directory holding it (`.env-profiles -> .`).
-		// Those are `env-profile <name> delete`'s business, with its
-		// reference and default checks.
-		if parent, err := os.Stat(filepath.Dir(path)); err == nil && os.SameFile(parent, physicalInfo) {
-			return fmt.Errorf("%q is an entry of the registry's env profile store (%s resolves to the directory holding it); remove a profile with 'claude-playbook env-profile <name> delete'", name, store)
+		// A symlink or a file: removal never descends. The entry may still
+		// be the store's own, a profile file or the default marker, when
+		// the store resolves to the directory holding it (`.env-profiles
+		// -> .`); those are `env-profile <name> delete`'s business, with
+		// its reference and default checks. Only entries the store itself
+		// would read count: a linked playbook or a stray file beside them
+		// is not the store's, and stays deletable.
+		if name == envprofile.DefaultMarker || strings.HasSuffix(name, envprofile.FileExt) {
+			if parent, err := os.Stat(filepath.Dir(path)); err == nil && os.SameFile(parent, physicalInfo) {
+				return fmt.Errorf("%q is an entry of the registry's env profile store (%s resolves to the directory holding it); remove a profile with 'claude-playbook env-profile <name> delete'", name, store)
+			}
 		}
 		return nil
 	}

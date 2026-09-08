@@ -897,3 +897,39 @@ func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
 		t.Fatalf("a playbook beside the store entries must stay deletable: %v", err)
 	}
 }
+
+// With the store resolving to the root, only the store's own entries are
+// refused: a linked playbook and a stray file beside them stay deletable.
+func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	if err := envprofile.Write(root, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".stray"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{"linked"}); err != nil {
+		t.Fatalf("unlinking a linked playbook beside the store entries: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "linked")); !os.IsNotExist(err) {
+		t.Fatal("link not removed")
+	}
+	if _, err := os.Stat(external); err != nil {
+		t.Fatal("link target removed")
+	}
+	if err := runDelete(nil, []string{".stray"}); err != nil {
+		t.Fatalf("a stray file beside the store entries: %v", err)
+	}
+	if err := runDelete(nil, []string{"glm.toml"}); err == nil {
+		t.Fatal("a profile file was deletable")
+	}
+}
