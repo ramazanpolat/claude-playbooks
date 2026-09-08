@@ -526,3 +526,57 @@ func TestDeleteStoreSymlinkShapes(t *testing.T) {
 		t.Fatalf("message: %v", err)
 	}
 }
+
+// Identity, not spelling: the store's registry entry can be a symlink, the
+// typed name a case variant, the playbooks root relative. None of these may
+// reach the store.
+func TestDeleteStoreGuardByIdentity(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	leftover := filepath.Join(root, ".leftover")
+	inner := filepath.Join(leftover, "profiles")
+	if err := envprofile.Write(inner, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inner, store); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	caseInsensitive := false
+	if _, err := os.Stat(filepath.Join(root, ".LEFTOVER")); err == nil {
+		caseInsensitive = true
+	}
+
+	// The store's registry SYMLINK addressed by a case variant: refused, link intact.
+	if caseInsensitive {
+		if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), "env profile store") {
+			t.Fatalf("case variant of the store link: %v", err)
+		}
+		if _, err := os.Lstat(store); err != nil {
+			t.Fatal("store link removed")
+		}
+		// The directory the store resolves into, addressed by a case variant.
+		if err := runDelete(nil, []string{".LEFTOVER"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+			t.Fatalf("case variant of the containing directory: %v", err)
+		}
+	}
+
+	// A relative playbooks root: the containment check must not compare a
+	// relative path against the store's absolute target.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	rel := filepath.Base(root)
+	if err := refuseRegistryOwned(rel, ".leftover", filepath.Join(rel, ".leftover")); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("relative playbooks root: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+}
