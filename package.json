@@ -1,0 +1,28 @@
+{
+  "name": "claude-playbook",
+  "version": "3.9.1",
+  "description": "Run claude-playbook (cpb) without installing it — fetches the release binary to ~/.claude-playbooks/bin and executes it from there.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ramazanpolat/claude-playbooks.git"
+  },
+  "license": "MIT",
+  "files": [
+    "bin/npx-shim.sh"
+  ],
+  "bin": {
+    "claude-playbook": "bin/npx-shim.sh",
+    "cpb": "bin/npx-shim.sh"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=14"
+  }
+}
