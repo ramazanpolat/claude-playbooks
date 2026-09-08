@@ -37,7 +37,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if err := validateSinglePathSegment("playbook name", name); err != nil {
 		return err
 	}
-	if err := refuseRegistryOwned(playbooksDir, name); err != nil {
+	if err := refuseRegistryOwned(playbooksDir, name, filepath.Join(playbooksDir, name)); err != nil {
 		return err
 	}
 
@@ -109,6 +109,11 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if deletePath == "" {
 		deletePath = pb.Path
 	}
+	// Re-checked under the lock, against the path actually removed: the
+	// store may have been created, moved, or linked while the prompt was open.
+	if err := refuseRegistryOwned(playbooksDir, name, deletePath); err != nil {
+		return err
+	}
 	names := launcherNamesFor(pb)
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
@@ -141,6 +146,9 @@ func deleteOrphan(playbooksDir, name, path string) error {
 	}
 	if pb, _ := playbook.Find(playbooksDir, name); pb != nil {
 		return fmt.Errorf("%q became a discoverable playbook while waiting for confirmation; re-run delete", name)
+	}
+	if err := refuseRegistryOwned(playbooksDir, name, path); err != nil {
+		return err
 	}
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
@@ -217,23 +225,52 @@ func countContents(dir string) (files, dirs int) {
 	return
 }
 
-// refuseRegistryOwned rejects a delete that addresses the registry's own
-// env profile store. Discovery skips dot-prefixed entries, so the name would
-// otherwise fall through to the orphan path and remove every profile and the
-// default marker in one confirmation. The check is by name AND by file
-// identity, so a case variant on a case-insensitive filesystem is refused too.
-func refuseRegistryOwned(playbooksDir, name string) error {
+// refuseRegistryOwned rejects a delete whose removal would take the
+// registry's own env profile store with it. Discovery skips dot-prefixed
+// entries, so the store's name would otherwise fall through to the orphan
+// path and remove every profile and the default marker in one confirmation.
+//
+// Three shapes are refused: the name itself; a path that IS the store by
+// file identity (a case variant on a case-insensitive filesystem), judged
+// with Lstat so a leftover symlink pointing at the store is still deletable
+// (only the link goes, see removeAny); and a real directory whose physical
+// subtree contains the store's resolved location (the store symlinked into a
+// leftover, `.env-profiles -> .leftover/profiles`), which RemoveAll would
+// otherwise descend into. Callers run it before the prompt and again under
+// the registry lock against the path actually removed, since the store may
+// appear, move, or be linked while the prompt is open.
+func refuseRegistryOwned(playbooksDir, name, path string) error {
 	store := envprofile.Dir(playbooksDir)
-	owned := name == envprofile.DirName
-	if !owned {
-		if a, err := os.Stat(filepath.Join(playbooksDir, name)); err == nil {
-			if b, err := os.Stat(store); err == nil && os.SameFile(a, b) {
-				owned = true
-			}
-		}
+	refuse := func() error {
+		return fmt.Errorf("%q is the registry's env profile store, not a playbook; remove a profile with 'claude-playbook env-profile <name> delete'", envprofile.DirName)
 	}
-	if owned {
-		return fmt.Errorf("%q is the registry's env profile store, not a playbook; remove a profile with 'claude-playbook env-profile <name> delete'", name)
+	if name == envprofile.DirName {
+		return refuse()
+	}
+	a, err := os.Lstat(path)
+	if err != nil {
+		return nil // nothing at the path: nothing the removal could take
+	}
+	b, err := os.Stat(store)
+	if err != nil {
+		return nil // no store exists (a dangling link is not one either)
+	}
+	if os.SameFile(a, b) {
+		return refuse()
+	}
+	if !a.IsDir() {
+		return nil // a symlink or file: removal never descends
+	}
+	physPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil
+	}
+	physStore, err := filepath.EvalSymlinks(store)
+	if err != nil {
+		return nil
+	}
+	if physStore == physPath || strings.HasPrefix(physStore, physPath+string(filepath.Separator)) {
+		return fmt.Errorf("%q contains the registry's env profile store (%s resolves to %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, physStore)
 	}
 	return nil
 }

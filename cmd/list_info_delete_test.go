@@ -474,3 +474,55 @@ func TestDeleteRefusesEnvProfileStore(t *testing.T) {
 		t.Fatalf("profile store damaged: %v %v", p, err)
 	}
 }
+
+// A leftover symlink pointing AT the store is deletable (only the link goes);
+// a leftover directory the store is symlinked INTO is refused, because
+// RemoveAll would descend into the store's physical location.
+func TestDeleteStoreSymlinkShapes(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+
+	// 1. link -> store: the link is removed, the store survives.
+	link := filepath.Join(root, ".oldlink")
+	if err := os.Symlink(store, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDelete(nil, []string{".oldlink"}); err != nil {
+		t.Fatalf("deleting a symlink to the store: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatal("link not removed")
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged by deleting a link to it: %v %v", p, err)
+	}
+
+	// 2. store -> inside a leftover directory: deleting the leftover is refused.
+	if err := os.RemoveAll(store); err != nil {
+		t.Fatal(err)
+	}
+	leftover := filepath.Join(root, ".leftover")
+	inner := filepath.Join(leftover, "profiles")
+	if err := envprofile.Write(inner, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inner, store); err != nil {
+		t.Fatal(err)
+	}
+	err := runDelete(nil, []string{".leftover"})
+	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("deleting the directory the store lives in: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+	// The message names the canonical store, whatever spelling was typed.
+	if err := runDelete(nil, []string{envprofile.DirName}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+		t.Fatalf("message: %v", err)
+	}
+}
