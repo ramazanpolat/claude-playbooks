@@ -620,3 +620,54 @@ func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
 		t.Fatalf("store damaged: %v %v", p, err)
 	}
 }
+
+// A symlink in a PARENT component of the store's target is part of the
+// resolution too, and a resolution that cannot be established refuses.
+func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
+	sandboxRoot(t, "playbooks")
+	root := config.PlaybooksDir
+	store := envprofile.Dir(root)
+	leftover := filepath.Join(root, ".leftover")
+	if err := envprofile.Write(filepath.Join(leftover, "sub", "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	bridge := filepath.Join(root, ".bridge")
+	if err := os.Symlink(filepath.Join(".leftover", "sub"), bridge); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(".bridge", "profiles"), store); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	if err := runDelete(nil, []string{".bridge"}); err == nil || !strings.Contains(err.Error(), "resolves through") {
+		t.Fatalf("parent-component link: %v", err)
+	}
+	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		t.Fatalf("directory holding the parent-component target: %v", err)
+	}
+	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+		t.Fatalf("store damaged: %v %v", p, err)
+	}
+
+	// A looped store cannot be verified: the delete of anything else is refused.
+	if err := os.Remove(store); err != nil {
+		t.Fatal(err)
+	}
+	loop := filepath.Join(root, ".loop")
+	if err := os.Symlink(store, loop); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(loop, store); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(root, ".other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDelete(nil, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+		t.Fatalf("looped store: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatal("directory removed despite an unverifiable store")
+	}
+}

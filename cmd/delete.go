@@ -230,10 +230,12 @@ func countContents(dir string) (files, dirs int) {
 // entries, so the store's name would otherwise fall through to the orphan
 // path and remove every profile and the default marker in one confirmation.
 //
-// The store is protected along its whole resolution: the registry entry,
-// every intermediate symlink (`.env-profiles -> .bridge -> /x/profiles`),
-// and the final physical directory. Two shapes are refused, both judged by
-// file identity (os.SameFile), never by spelling, so a case variant on a
+// The store is protected along its whole resolution, exactly as the kernel
+// resolves it, one component at a time: the registry entry, every symlink
+// met on the way (in the final component or in any parent component,
+// `.env-profiles -> .bridge/profiles` with `.bridge -> .leftover/sub`), and
+// the final physical directory. Two shapes are refused, both judged by file
+// identity (os.SameFile), never by spelling, so a case variant on a
 // case-insensitive filesystem, a relative playbooks root, or a symlink on
 // either side changes nothing:
 //
@@ -244,9 +246,12 @@ func countContents(dir string) (files, dirs int) {
 //   - the path is a real directory whose subtree contains one of those
 //     elements, which RemoveAll would descend into.
 //
-// Callers run it before the prompt and again under the registry lock
-// against the path actually removed, since the store may appear, move, or
-// be linked while the prompt is open.
+// A store whose resolution cannot be established (a link loop, a chain the
+// kernel refuses, an unreadable component) refuses the delete outright
+// rather than trusting a partial picture. Callers run the check before the
+// prompt and again under the registry lock against the path actually
+// removed, since the store may appear, move, or be linked while the prompt
+// is open.
 func refuseRegistryOwned(playbooksDir, name, path string) error {
 	store := envprofile.Dir(playbooksDir)
 	refuse := func() error {
@@ -260,12 +265,19 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 		return nil // nothing at the path: nothing the removal could take
 	}
 	if _, err := os.Stat(store); err != nil {
-		return nil // no store behind the entry (a dangling link is not one)
+		if os.IsNotExist(err) {
+			return nil // no store (a dangling link is not one either)
+		}
+		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env profile store intact (%s: %v); nothing removed", name, store, err)
 	}
-	chain := storeChain(store)
-	for i, elem := range chain {
+	physical, links, err := storeResolution(store)
+	if err != nil {
+		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env profile store intact (%s: %v); nothing removed", name, store, err)
+	}
+	elements := append(links, physical)
+	for _, elem := range elements {
 		if ei, err := os.Lstat(elem); err == nil && os.SameFile(ei, a) {
-			if i == 0 || i == len(chain)-1 {
+			if elem == physical || (len(links) > 0 && elem == links[0]) {
 				return refuse()
 			}
 			return fmt.Errorf("%q is a link the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, elem, store)
@@ -274,12 +286,8 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	if !a.IsDir() {
 		return nil // a symlink or a file: removal never descends
 	}
-	for _, elem := range chain {
-		abs, err := filepath.Abs(elem)
-		if err != nil {
-			continue
-		}
-		for dir := abs; ; dir = filepath.Dir(dir) {
+	for _, elem := range elements {
+		for dir := elem; ; dir = filepath.Dir(dir) {
 			if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
 				return fmt.Errorf("%q contains the registry's env profile store or a link it resolves through (%s -> %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, elem)
 			}
@@ -291,27 +299,58 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	return nil
 }
 
-// storeChain lists every path the store resolves through: the registry
-// entry, each intermediate symlink target (relative targets resolved
-// against the link's directory), and the final non-link path. Bounded, so
-// a link loop ends the walk instead of the process.
-func storeChain(store string) []string {
-	chain := make([]string, 0, 4)
-	cur := store
-	for hop := 0; hop < 40; hop++ {
-		chain = append(chain, cur)
-		fi, err := os.Lstat(cur)
-		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
-			break
-		}
-		target, err := os.Readlink(cur)
-		if err != nil {
-			break
-		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(cur), target)
-		}
-		cur = target
+// storeResolution resolves store the way the kernel does, one path
+// component at a time, and records every symlink met on the way, in any
+// component. Relative link targets are resolved against the directory the
+// link lives in (already physical at that point, so `..` behaves as the
+// kernel's does). Returns the physical path and the links, or an error when
+// resolution does not converge within 255 hops (a loop) or a component
+// cannot be inspected.
+func storeResolution(store string) (physical string, links []string, err error) {
+	abs, err := filepath.Abs(store)
+	if err != nil {
+		return "", nil, err
 	}
-	return chain
+	root := filepath.VolumeName(abs) + string(filepath.Separator)
+	split := func(p string) []string {
+		p = strings.TrimPrefix(p, filepath.VolumeName(p))
+		return strings.Split(strings.Trim(p, string(filepath.Separator)), string(filepath.Separator))
+	}
+	cur := root
+	rest := split(abs)
+	hops := 0
+	for len(rest) > 0 {
+		comp := rest[0]
+		rest = rest[1:]
+		switch comp {
+		case "", ".":
+			continue
+		case "..":
+			cur = filepath.Dir(cur)
+			continue
+		}
+		next := filepath.Join(cur, comp)
+		fi, err := os.Lstat(next)
+		if err != nil {
+			return "", nil, err
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			cur = next
+			continue
+		}
+		hops++
+		if hops > 255 {
+			return "", nil, fmt.Errorf("too many levels of symbolic links")
+		}
+		links = append(links, next)
+		target, err := os.Readlink(next)
+		if err != nil {
+			return "", nil, err
+		}
+		if filepath.IsAbs(target) {
+			cur = filepath.VolumeName(target) + string(filepath.Separator)
+		}
+		rest = append(split(target), rest...)
+	}
+	return cur, links, nil
 }
