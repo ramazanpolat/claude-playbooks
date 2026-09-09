@@ -120,7 +120,7 @@ Layering at launch, later wins: shell environment, the registry default profile 
 |---|---|
 | this playbook keeps its own `/login` while others use the token | `cpb env <name> unset CLAUDE_CODE_OAUTH_TOKEN` |
 | this playbook uses a specific token | `cpb env <name> set CLAUDE_CODE_OAUTH_TOKEN=<token>` |
-| this playbook is a different account entirely | `isolate_auth = true` in its `.playbook` (this one has no CLI verb) |
+| this playbook is a different account entirely, or routes `ANTHROPIC_BASE_URL` to another backend | `isolate_auth = true` in its `.playbook` (this one has no CLI verb); leftover account state and cached feature flags are removed at launch while it has no login of its own |
 | this playbook talks to a proxy | `env-profile <p> set ANTHROPIC_BASE_URL=... ` then `env <name> use <p>` |
 
 An agent cannot complete an interactive `/login`. If a headless run exits with an authentication error, report it and stop; do not retry in a loop, and do not edit `.credentials.json`.

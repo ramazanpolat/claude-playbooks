@@ -179,6 +179,21 @@ if phase_enabled p4; then
   [ "$(cat "$PB/fx/.playbook")" = "$MAN_BEFORE" ] || rc=1           # manifest untouched
   report "p4 env/env-profile launch" $rc
 
+  # isolation removes Anthropic account state left from a non-isolated past
+  # (the account record and cached feature flags that switch claude.ai-hosted
+  # tools on) while the playbook has no login of its own; other keys survive
+  rc=0
+  p4 create iso --no-alias >/dev/null 2>&1 || rc=1
+  printf 'name = "iso"\nisolate_auth = true\n' > "$PB/iso/.playbook"
+  printf '{"numStartups": 3, "oauthAccount": {"emailAddress": "x@y"}, "cachedGrowthBookFeatures": {"tengu_x": true}}\n' > "$PB/iso/.claude.json"
+  p4 auth status iso 2>/dev/null | grep 'stale account state' >/dev/null || rc=1
+  CPB_RITUAL_ENVDUMP="$DUMP" PATH="$STUB:$PATH" p4 run iso >/dev/null 2>&1 || rc=1
+  grep -q 'cachedGrowthBookFeatures\|oauthAccount' "$PB/iso/.claude.json" && rc=1
+  grep -q '"numStartups": 3' "$PB/iso/.claude.json" || rc=1
+  p4 auth status iso 2>/dev/null | grep 'stale account state' >/dev/null && rc=1
+  p4 delete iso -y >/dev/null 2>&1 || rc=1
+  report "p4 isolation identity purge" $rc
+
   rc=0
   # pilot state that must survive the update
   printf '{"env":{"X":"kept"},"hooks":{}}\n' > "$PB/fx/settings.json"

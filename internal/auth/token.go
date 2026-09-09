@@ -258,6 +258,18 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 				syncErr = qErr
 			}
 			env = append(env, OAuthTokenEnv+"="+own)
+		} else if absent, aErr := storeGrantAbsent(filepath.Join(configDir, CredentialsFileName)); aErr != nil {
+			// Cannot tell whether this playbook is logged in: leave its
+			// state alone and say so. An unreadable store may hold a login.
+			if syncErr == nil {
+				syncErr = aErr
+			}
+		} else if absent {
+			// Isolated and logged in nowhere: nothing may keep presenting
+			// this directory as the global account. See QuarantineAccountState.
+			if _, qErr := QuarantineAccountState(configDir); qErr != nil && syncErr == nil {
+				syncErr = qErr
+			}
 		}
 		env = applyManifestEnv(env, menv)
 		env = removeEnv(env, "CLAUDE_CONFIG_DIR")
