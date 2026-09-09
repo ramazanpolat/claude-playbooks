@@ -143,6 +143,18 @@ func TestReceiptRefusesSeparators(t *testing.T) {
 	if err := record("/l/tab\tpath", "/root", "pb"); err == nil {
 		t.Fatal("path with a tab recorded")
 	}
+	// a separator smuggled in through the working directory is caught too
+	tabbed := filepath.Join(t.TempDir(), "tab\tdir")
+	if err := os.MkdirAll(tabbed, 0o755); err == nil {
+		wd, _ := os.Getwd()
+		if err := os.Chdir(tabbed); err == nil {
+			t.Cleanup(func() { _ = os.Chdir(wd) })
+			if err := record("rel", "/root", "pb"); err == nil {
+				t.Fatal("relative path under a tabbed working directory recorded")
+			}
+			_ = os.Chdir(wd)
+		}
+	}
 	if got := Recorded(); len(got) != 0 {
 		t.Fatalf("something recorded: %v", got)
 	}
