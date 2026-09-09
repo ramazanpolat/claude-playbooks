@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,5 +266,49 @@ func TestIdentityQuarantineSafeSides(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dir, CredentialsFileName)); !os.IsNotExist(err) {
 		t.Fatal("shared link not detached")
+	}
+}
+
+// Status must promise exactly what the launch does: nothing pending behind a
+// store it cannot read, and a pending removal for a detached shared store
+// even when a fresh auth_required marker concerns that shared login.
+func TestInspectPendingRemovalMatchesLaunch(t *testing.T) {
+	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
+	os.Unsetenv(OAuthTokenEnv)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// unparsable regular store: no promise
+	dir := t.TempDir()
+	writeManifest(t, dir, "isolate_auth = true\n")
+	writeState(t, dir, identityFixture)
+	writeStore(t, dir, "{not json")
+	r := Inspect("iso", dir, time.Now())
+	if len(r.StaleIdentity) != 0 || strings.Contains(r.NeedsAttention(), "stale") {
+		t.Fatalf("unparsable store promised a purge: %v %q", r.StaleIdentity, r.NeedsAttention())
+	}
+
+	// symlinked shared store with a fresh auth_required marker
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	writeStore(t, global, fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"g","expiresAt":%d}}`, now.Add(time.Minute).UnixMilli()))
+	dir = t.TempDir()
+	writeManifest(t, dir, "isolate_auth = true\n")
+	writeState(t, dir, identityFixture)
+	if err := os.Symlink(filepath.Join(global, CredentialsFileName), filepath.Join(dir, CredentialsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "daemon-auth-status.json"), []byte(fmt.Sprintf(`{"status":"auth_required","since":%d}`, now.UnixMilli())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r = Inspect("iso", dir, now)
+	if r.ReauthRequired {
+		t.Fatal("marker about the shared login counted against an isolated playbook that detaches it")
+	}
+	if len(r.StaleIdentity) == 0 || !strings.Contains(r.NeedsAttention(), "stale account state") {
+		t.Fatalf("pending removal hidden: %v %q", r.StaleIdentity, r.NeedsAttention())
 	}
 }

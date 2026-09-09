@@ -206,11 +206,21 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		r.Store = StoreAbsent
 	}
 
-	// The pending removal is judged the way the launch will see it: the
-	// isolated launch detaches a symlinked (shared) store first, so a grant
-	// reached only through that link does not count as this playbook's own.
-	if r.Isolated && r.Mode == ModeIsolated && (!r.HasGrant || r.Store == StoreSymlink) {
-		r.StaleIdentity = StaleIdentityState(configDir)
+	// The pending removal is judged exactly as the launch will judge it:
+	// a symlinked (shared) store is detached first, so a grant reached only
+	// through that link does not count; a regular store must be KNOWN to
+	// hold no grant, since the launch leaves state alone when it cannot
+	// tell (an unreadable or malformed store may hold a login).
+	if r.Isolated && r.Mode == ModeIsolated {
+		pending := r.Store == StoreSymlink
+		if !pending {
+			if absent, err := storeGrantAbsent(store); err == nil && absent {
+				pending = true
+			}
+		}
+		if pending {
+			r.StaleIdentity = StaleIdentityState(configDir)
+		}
 	}
 	// Daemon hint.
 	if data, err := os.ReadFile(filepath.Join(configDir, "daemon-auth-status.json")); err == nil {
@@ -232,7 +242,11 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			// Freshness needs BOTH instants: a grant with no expiry or a
 			// marker with no since cannot be ordered, and an unprovable
 			// marker is reported as stale rather than as a live failure.
-			if d.Status == "auth_required" && r.usesStoredLogin() && r.HasGrant && !r.ExpiresAt.IsZero() && !r.DaemonSince.IsZero() {
+			// An isolated playbook's symlinked store is the SHARED login,
+			// detached at launch: a marker about it is not this playbook's
+			// failure to authenticate.
+			sharedDetached := r.Isolated && r.Store == StoreSymlink
+			if d.Status == "auth_required" && r.usesStoredLogin() && r.HasGrant && !sharedDetached && !r.ExpiresAt.IsZero() && !r.DaemonSince.IsZero() {
 				refreshAt := r.ExpiresAt.Add(-daemonRefreshLead)
 				r.ReauthRequired = !r.DaemonSince.Before(refreshAt)
 			}
