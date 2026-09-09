@@ -1,5 +1,5 @@
 {
-  "name": "claude-playbooks",
+  "name": "cpb-cli",
   "version": "3.9.1",
   "description": "Bootstrap claude-playbook (cpb) via npx: first run installs the release binary to ~/.local/bin, later runs delegate to it. CPB_NPX_BOOTSTRAP=0 for ephemeral mode.",
   "repository": {

@@ -92,6 +92,35 @@ echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh
 echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash
 ```
 
+### Run it with npx (no install needed)
+
+On a machine with Node, straight from the repo:
+
+```bash
+npx github:ramazanpolat/claude-playbooks --version
+```
+
+The first run bootstraps a normal install: it downloads the release
+binary, verifies it against the release's `SHA256SUMS` (same policy as
+`install.sh`), installs to `~/.local/bin` only (never `/usr/local/bin`,
+no sudo), creates the `cpb` link, and says what it did. After that the
+tool is a plain install — `cpb`, `claude-playbook`, and every playbook
+launcher work directly, and later npx invocations simply run the
+installed binary. Uninstall is the usual `cpb self-uninstall`.
+
+Knobs, for the cases where you do not want that:
+
+| Variable | Effect |
+|---|---|
+| `CPB_NPX_BOOTSTRAP=0` | Ephemeral mode: install nothing, delegate to nothing — download to `~/.claude-playbooks/bin/<tag>/` and run from there |
+| `CPB_VERSION=v3.9.1` | Fetch a specific release. With `CPB_NPX_BOOTSTRAP=0` it tests a pinned version beside an installed one |
+| `CPB_NPX_CACHE=<dir>` | Override the ephemeral-mode cache dir |
+| `CPB_NPX_INSTALL_DIR=<dir>` | Override the bootstrap install dir |
+
+By default the shim fetches the release matching the package's own
+version, falling back to the latest GitHub release. Native Windows is
+not supported (use WSL); the npm package refuses to install there.
+
 You can also clone the repo and run the installer locally:
 
 ```bash
