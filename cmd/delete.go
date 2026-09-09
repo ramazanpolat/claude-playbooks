@@ -78,7 +78,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 				for _, n := range launcherNamesFor(pb) {
 					if _, exists, foreign := launcher.Lookup(ldir, n); exists && !foreign {
-						fmt.Printf("Command:  %s (launcher kept; removal hint printed after delete)\n", n)
+						fmt.Printf("Command:  %s (%s)\n", n, launcherFate(ldir, n, pb.Name).prompt)
 					}
 				}
 			}
@@ -183,26 +183,62 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not inspect launchers: %v\n", err)
 		return
 	}
-	root := attributedRoot()
 	for _, n := range names {
 		e, exists, foreign := launcher.Lookup(dir, n)
 		if !exists || foreign {
 			continue
 		}
-		if owner, oerr := commandNameOwner(n, ""); oerr == nil && owner != nil {
-			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, owner.Name)
-			continue
-		}
-		if r, p, ok := launcher.Attribution(e.Path); ok && r == root && p == playbookName {
+		fate := launcherFate(dir, n, playbookName)
+		switch fate.action {
+		case fateClaimed:
+			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, fate.owner)
+		case fateUnknown:
+			fmt.Fprintf(os.Stderr, "Warning: kept command %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
+		case fateRemove:
 			if _, rerr := launcher.Remove(dir, n); rerr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", n, rerr)
 				continue
 			}
 			fmt.Printf("Removed command %q\n", n)
-			continue
+		default:
+			fmt.Printf("Kept command %q — not recorded as this playbook's own launcher, and launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
 		}
-		fmt.Printf("Kept command %q — not recorded as this playbook's own launcher, and launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
 	}
+}
+
+type launcherAction int
+
+const (
+	fateKeepHint launcherAction = iota // unattributed, or attributed elsewhere: kept, hint printed
+	fateClaimed                        // another playbook still claims the name: kept silently
+	fateRemove                         // this tool wrote it for this playbook in this root: removed
+	fateUnknown                        // ownership could not be verified: kept, warning
+)
+
+type launcherPlan struct {
+	action launcherAction
+	owner  string // the claiming playbook, for fateClaimed
+	err    error  // the discovery failure, for fateUnknown
+	prompt string // the confirmation-prompt phrasing
+}
+
+// launcherFate decides what delete (or rename, for a name left behind) does
+// with the launcher dir/n once playbookName is gone, so the confirmation
+// prompt and the action itself cannot disagree. Discovery failing is not
+// "unclaimed": the launcher is kept. The receipt's root is compared
+// canonically, like every root comparison in this package.
+func launcherFate(dir, n, playbookName string) launcherPlan {
+	owner, oerr := commandNameOwner(n, playbookName)
+	if oerr != nil {
+		return launcherPlan{action: fateUnknown, err: oerr, prompt: "launcher kept; ownership could not be verified"}
+	}
+	if owner != nil {
+		return launcherPlan{action: fateClaimed, owner: owner.Name, prompt: fmt.Sprintf("launcher kept; still addresses playbook %q", owner.Name)}
+	}
+	if r, p, ok := launcher.Attribution(filepath.Join(dir, n)); ok && p == playbookName && samePath(r, attributedRoot()) {
+		return launcherPlan{action: fateRemove, prompt: "launcher will be removed"}
+	}
+	return launcherPlan{action: fateKeepHint, prompt: "launcher kept; removal hint printed after delete"}
 }
 
 func removeAny(path string) error {

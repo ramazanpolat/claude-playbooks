@@ -102,10 +102,12 @@ func entryPath(line string) string {
 }
 
 // entryLine renders a receipt line. Attribution is recorded only when
-// both parts are known; a launcher written without them stays a path-only
-// line, which claims nothing.
+// both parts are known and neither carries a field or line separator; a
+// launcher written without them stays a path-only line, which claims
+// nothing. (Command names are validated against those characters; a
+// registry root containing one is merely left unattributed.)
 func entryLine(path, root, playbook string) string {
-	if root == "" || playbook == "" {
+	if root == "" || playbook == "" || strings.ContainsAny(root+playbook, "\t\n\r") {
 		return path
 	}
 	return path + "\t" + root + "\t" + playbook
@@ -130,6 +132,11 @@ func RemoveReceipt() {
 // best-effort bookkeeping: they return an error for the caller to warn
 // about, but the launcher operation itself has already succeeded.
 func record(path, root, playbook string) error {
+	if strings.ContainsAny(path, "\t\n\r") {
+		// The line format cannot carry it, and a truncated path would
+		// later match nothing or the wrong thing.
+		return fmt.Errorf("launcher path %q contains a tab or line break; not recorded", path)
+	}
 	line := entryLine(path, root, playbook)
 	return editReceipt(func(lines []string) []string {
 		var kept []string

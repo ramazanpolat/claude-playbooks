@@ -131,3 +131,28 @@ func TestReceiptAttribution(t *testing.T) {
 		t.Fatalf("unrecord by path: %v", got)
 	}
 }
+
+// Field and line separators never enter the receipt: a name with a tab is
+// not a valid launcher name, a root with one leaves the line unattributed,
+// a path with one is refused outright.
+func TestReceiptRefusesSeparators(t *testing.T) {
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	if err := ValidateName("a\tb"); err == nil {
+		t.Fatal("tab accepted in a command name")
+	}
+	if err := record("/l/tab\tpath", "/root", "pb"); err == nil {
+		t.Fatal("path with a tab recorded")
+	}
+	if got := Recorded(); len(got) != 0 {
+		t.Fatalf("something recorded: %v", got)
+	}
+	if err := record("/l/ok", "/ro\tot", "pb"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := Attribution("/l/ok"); ok {
+		t.Fatal("root with a tab attributed")
+	}
+	if got := Recorded(); len(got) != 1 || got[0] != "/l/ok" {
+		t.Fatalf("Recorded = %v", got)
+	}
+}
