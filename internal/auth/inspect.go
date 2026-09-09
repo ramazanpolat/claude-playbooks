@@ -207,7 +207,10 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	}
 
 	// Daemon hint.
-	if r.Isolated && r.Mode == ModeIsolated && !r.HasGrant {
+	// The pending removal is judged the way the launch will see it: the
+	// isolated launch detaches a symlinked (shared) store first, so a grant
+	// reached only through that link does not count as this playbook's own.
+	if r.Isolated && r.Mode == ModeIsolated && (!r.HasGrant || r.Store == StoreSymlink) {
 		r.StaleIdentity = StaleIdentityState(configDir)
 	}
 	if data, err := os.ReadFile(filepath.Join(configDir, "daemon-auth-status.json")); err == nil {
@@ -256,8 +259,10 @@ func (r Report) NeedsAttention() string {
 		return ""
 	case r.ReauthRequired:
 		return "re-auth required"
-	case !r.HasGrant && len(r.StaleIdentity) > 0:
+	case len(r.StaleIdentity) > 0 && !r.HasGrant:
 		return "no login; stale account state, purged at launch"
+	case len(r.StaleIdentity) > 0:
+		return "stale account state, purged at launch (the shared login is detached at launch)"
 	case !r.HasGrant:
 		return "no login"
 	case r.Expired:

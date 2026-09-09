@@ -8,6 +8,39 @@ import (
 	"path/filepath"
 )
 
+// storeGrantAbsent reports whether the credential store at path holds no
+// usable claudeAiOauth grant, distinguishing "known absent" (no file, or a
+// file that parses and has no grant) from "cannot tell" (unreadable or
+// unparsable), which is an error. Purging account state is only safe on a
+// known absence: an unreadable store may well hold a valid login.
+func storeGrantAbsent(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return true, nil
+	}
+	var store map[string]json.RawMessage
+	if err := json.Unmarshal(bytes.TrimSpace(data), &store); err != nil {
+		return false, fmt.Errorf("invalid %s at %s: %w", CredentialsFileName, path, err)
+	}
+	raw, present := store[oauthCredentialKey]
+	if !present {
+		return true, nil
+	}
+	var grant struct {
+		AccessToken string `json:"accessToken"`
+	}
+	if err := json.Unmarshal(raw, &grant); err != nil {
+		return false, fmt.Errorf("invalid %s at %s: %w", CredentialsFileName, path, err)
+	}
+	return grant.AccessToken == "", nil
+}
+
 // identityStateKeys are the parts of .claude.json that describe an Anthropic
 // ACCOUNT rather than the installation: who is logged in, and the feature
 // flags and eligibility Claude Code fetched for that account. Claude Code
@@ -62,13 +95,19 @@ func StaleIdentityState(configDir string) []string {
 //
 // An absent or empty file is nothing to do. Invalid JSON is an error, left to
 // the caller to treat as advisory: the launch still works, the leftovers stay.
+// The rewrite keeps the file's owner permissions masked to 0600, so a
+// read-only 0400 state file stays read-only and nothing is ever widened.
 func QuarantineAccountState(configDir string) ([]string, error) {
 	path := filepath.Join(configDir, StateFileName)
-	data, err := os.ReadFile(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil, err
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
@@ -93,8 +132,32 @@ func QuarantineAccountState(configDir string) ([]string, error) {
 		return nil, err
 	}
 	out = append(out, '\n')
-	if err := writeFilePrivate(path, out); err != nil {
+	if err := writeFileWithMode(path, out, info.Mode().Perm()&0o600); err != nil {
 		return nil, err
 	}
 	return removed, nil
+}
+
+// writeFileWithMode writes data via a temporary file and a rename, at the
+// given mode (already masked by the caller), so a concurrent reader never
+// sees a half-written file and an existing stricter mode is not widened.
+func writeFileWithMode(path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".claude.json-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
