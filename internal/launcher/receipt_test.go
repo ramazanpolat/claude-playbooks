@@ -156,3 +156,38 @@ func TestReceiptRefusesSeparators(t *testing.T) {
 		t.Fatalf("Recorded = %v", got)
 	}
 }
+
+// Launcher paths are matched in a normalized form (absolute, directory
+// resolved), and attributed fields read back verbatim, trailing space
+// included.
+func TestReceiptNormalizesPathsAndKeepsFieldsVerbatim(t *testing.T) {
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	real := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "bin-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := record(filepath.Join(link, "cmd"), "/root", "pb "); err != nil {
+		t.Fatal(err)
+	}
+	if r, p, ok := Attribution(filepath.Join(real, "cmd")); !ok || r != "/root" || p != "pb " {
+		t.Fatalf("attribution through the resolved dir = %q %q %v", r, p, ok)
+	}
+	wd, _ := os.Getwd()
+	if err := os.Chdir(real); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if _, _, ok := Attribution("cmd"); !ok {
+		t.Fatal("relative launcher path not matched")
+	}
+	if err := unrecord("./cmd"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 0 {
+		t.Fatalf("unrecord by relative path missed: %v", got)
+	}
+}

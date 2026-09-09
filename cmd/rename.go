@@ -244,12 +244,19 @@ func runRename(cmd *cobra.Command, args []string) error {
 			} else {
 				fmt.Printf("Command %q now runs %q\n", newName, newName)
 			}
-			// A retained manifest-alias launcher keeps working untouched,
-			// but the receipt must now attribute it to the NEW name, or a
-			// later delete of the renamed playbook would keep it.
-			if oldManifestAlias != "" && oldManifestAlias != oldName {
-				if _, werr := launcher.Write(ldir, oldManifestAlias, attributedRoot(), newName); werr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not re-record launcher %q for %q: %v\n", oldManifestAlias, newName, werr)
+		}
+		// Whatever launcher still addresses the renamed playbook, a retained
+		// manifest alias included (a linked playbook's, or one equal to the
+		// old name), keeps working untouched but must now be attributed to
+		// the NEW name, or a later delete of the renamed playbook would keep
+		// it. Write on an identical existing link only re-records.
+		if renamed, rerr := playbook.Find(config.ResolvePlaybooksDir(), newName); rerr == nil && renamed != nil {
+			for _, n := range launcherNamesFor(renamed) {
+				if _, exists, foreign := launcher.Lookup(ldir, n); !exists || foreign {
+					continue
+				}
+				if _, werr := launcher.Write(ldir, n, attributedRoot(), newName); werr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not re-record launcher %q for %q: %v\n", n, newName, werr)
 				}
 			}
 		}

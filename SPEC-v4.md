@@ -697,14 +697,14 @@ claude-playbook delete sre -y            # skip the prompt
 ```
 Playbook: sre
 Location: ~/.claude-playbooks/sre
-Alias:    sre (will be removed from ~/.zshrc)
+Alias:    sre
 Command:  sre (launcher will be removed)
 Contents: 12 files, 3 directories
 
 Permanently delete? [y/N]
 ```
 
-The `Alias` line shows the manifest alias (`(none)` when unset); a `Command` line appears for each launcher matching the playbook's name or manifest alias, stating what the delete will do with it: `launcher will be removed` (recorded as this playbook's own, see below), `launcher kept; still addresses playbook "x"`, `launcher kept; removal hint printed after delete`, or `launcher kept; ownership could not be verified` when the registry cannot be scanned.
+The `Alias` line shows the manifest alias (`(none)` when unset) and promises nothing about its launcher; a `Command` line appears for each launcher matching the playbook's name or manifest alias, stating what the delete will do with it: `launcher will be removed` (recorded as this playbook's own, see below), `launcher kept; still addresses playbook "x"`, `launcher kept; removal hint printed after delete`, or `launcher kept; ownership could not be verified` when the registry cannot be scanned.
 
 **Deletion scope:**
 - The target directory (for a symlink, the link is removed; the symlink target is preserved).

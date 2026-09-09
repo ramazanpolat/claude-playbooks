@@ -59,9 +59,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if !deleteYes {
-		aliasInfo := "(no alias)"
+		aliasInfo := "(none)"
 		if a := pb.Alias(); a != "" {
-			aliasInfo = fmt.Sprintf("%s (its launcher will be removed)", a)
+			aliasInfo = a // the alias's launcher, if any, gets its own Command line
 		}
 		deletePath := pb.RootPath
 		if deletePath == "" {

@@ -15,6 +15,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // feedStdin points os.Stdin at a pipe preloaded with in, so interactive
@@ -1074,5 +1075,43 @@ func TestRenameReattributesRetainedAliasLauncher(t *testing.T) {
 	})
 	if !strings.Contains(out, `Removed command "oa"`) {
 		t.Fatalf("renamed playbook's alias launcher kept:\n%s", out)
+	}
+}
+
+// A rename whose manifest alias equals the old name (a link's default) keeps
+// that launcher and must re-attribute it; the prompt's Alias line promises
+// nothing about launchers.
+func TestRenameReattributesAliasEqualToOldName(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "old", &manifest.Manifest{Alias: "old"})
+	if _, err := launcher.Write(config.LauncherDir, "old", attributedRoot(), "old"); err != nil {
+		t.Fatal(err)
+	}
+	renameAlias, renameNoAlias = "", false
+	if err := runRename(nil, []string{"old", "new"}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	renamed, err := playbook.Find(root, "new")
+	if err != nil || renamed == nil {
+		t.Fatalf("renamed playbook: %v %v", renamed, err)
+	}
+	for _, n := range launcherNamesFor(renamed) {
+		if _, exists, _ := launcher.Lookup(config.LauncherDir, n); !exists {
+			continue
+		}
+		if _, p, ok := launcher.Attribution(filepath.Join(config.LauncherDir, n)); !ok || p != "new" {
+			t.Fatalf("launcher %q attributed to %q (ok=%v), want new", n, p, ok)
+		}
+	}
+	deleteYes = false
+	feedStdin(t, "n\n")
+	out := captureStdout(t, func() {
+		if err := runDelete(nil, []string{"new"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "its launcher will be removed") {
+		t.Fatalf("Alias line still promises removal:\n%s", out)
 	}
 }

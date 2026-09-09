@@ -40,6 +40,24 @@ func ReceiptPath() string {
 	return filepath.Join(base, "claude-playbook", "launchers")
 }
 
+// normalizeLauncherPath is the form launcher paths are COMPARED in:
+// absolute, with the launcher DIRECTORY resolved through symlinks and the
+// launcher itself left alone (it is a symlink; resolving it would name the
+// binary). Recording with `--launcher-dir ./bin` and matching later with
+// the absolute directory then agree. Lines are stored as given, so
+// Recorded() and uninstall see the paths they always saw. A path that
+// cannot be resolved compares as given, made absolute where possible.
+func normalizeLauncherPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	dir, base := filepath.Dir(path), filepath.Base(path)
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	return filepath.Join(dir, base)
+}
+
 // Recorded returns the deduplicated launcher paths in the receipt, in
 // file order. A missing or unreadable receipt is an empty list.
 func Recorded() []string {
@@ -61,7 +79,7 @@ func Recorded() []string {
 // not know, or knows without attribution (a pre-v3.10.1 line).
 func Attribution(launcherPath string) (root, playbook string, ok bool) {
 	for _, line := range receiptLines() {
-		if entryPath(line) != launcherPath {
+		if !sameLauncher(entryPath(line), launcherPath) {
 			continue
 		}
 		fields := strings.Split(line, "\t")
@@ -73,7 +91,8 @@ func Attribution(launcherPath string) (root, playbook string, ok bool) {
 	return "", "", false
 }
 
-// receiptLines returns the non-empty lines of the receipt, "" file aside.
+// receiptLines returns the non-empty lines of the receipt, "" file aside,
+// each passed through cleanLine.
 func receiptLines() []string {
 	path := ReceiptPath()
 	if path == "" {
@@ -85,11 +104,29 @@ func receiptLines() []string {
 	}
 	var out []string
 	for _, line := range strings.Split(string(data), "\n") {
-		if line = strings.Trim(line, " \r"); line != "" {
+		if line = cleanLine(line); line != "" {
 			out = append(out, line)
 		}
 	}
 	return out
+}
+
+// cleanLine trims a receipt line the way each format allows: a path-only
+// line is trimmed of surrounding whitespace, as it always was; an
+// attributed line keeps its fields verbatim (a playbook name may carry
+// trailing whitespace and must read back unchanged), losing only the
+// carriage return of a CRLF file.
+func cleanLine(line string) string {
+	line = strings.TrimRight(line, "\r")
+	if strings.IndexByte(line, '\t') < 0 {
+		return strings.TrimSpace(line)
+	}
+	return strings.TrimLeft(line, " ")
+}
+
+// sameLauncher reports whether two launcher paths name the same link.
+func sameLauncher(a, b string) bool {
+	return normalizeLauncherPath(a) == normalizeLauncherPath(b)
 }
 
 // entryPath is the launcher path of a receipt line: everything before the
@@ -142,7 +179,7 @@ func record(path, root, playbook string) error {
 		var kept []string
 		replaced := false
 		for _, l := range lines {
-			if entryPath(l) != path {
+			if !sameLauncher(entryPath(l), path) {
 				kept = append(kept, l)
 				continue
 			}
@@ -162,7 +199,7 @@ func unrecord(path string) error {
 	return editReceipt(func(lines []string) []string {
 		var kept []string
 		for _, l := range lines {
-			if entryPath(l) != path {
+			if !sameLauncher(entryPath(l), path) {
 				kept = append(kept, l)
 			}
 		}
@@ -191,7 +228,7 @@ func editReceipt(edit func([]string) []string) error {
 	var lines []string
 	if data, err := os.ReadFile(path); err == nil {
 		for _, l := range strings.Split(string(data), "\n") {
-			if l = strings.Trim(l, " \r"); l != "" {
+			if l = cleanLine(l); l != "" {
 				lines = append(lines, l)
 			}
 		}
