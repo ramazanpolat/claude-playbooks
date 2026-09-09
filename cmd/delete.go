@@ -158,13 +158,6 @@ func deleteOrphan(playbooksDir, name, path string) error {
 	return nil
 }
 
-// removeUnclaimedLaunchers retires the launcher symlinks for the given
-// command names after a mutation. A name still resolving in the visible
-// registry keeps its launcher outright. An unclaimed name's launcher is
-// ALSO retained — a stateless symlink may be serving a playbook in another
-// registry root selected via environment or flag, which is unenumerable
-// from here — but with a manual-removal hint: invoking it without such a
-// root fails loudly as stale, so retention is noisy, never silently wrong.
 // removeUnclaimedLaunchers retires the launchers named for a playbook that
 // is going away. A name another playbook still claims is kept outright. A
 // launcher the receipt attributes to THIS root and THIS playbook was
