@@ -94,11 +94,25 @@ echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash
 
 ### Run it with npx (no install needed)
 
-On a machine with Node, straight from the repo:
+On a machine with Node:
 
 ```bash
+npx cpb-cli --version
+```
+
+(requires the package to be published to npm — see below if it is not).
+
+Straight from the repo, no publish needed — but npm 12+ refuses git
+packages by default (`EALLOWGIT`), so allow GitHub explicitly once:
+
+```bash
+npm config set allow-git github.com
 npx github:ramazanpolat/claude-playbooks --version
 ```
+
+One-off without touching config: prefix with
+`npm_config_allow_git=github.com`. Remote-tarball URLs are blocked the
+same way, so there is no URL form that works without this opt-in.
 
 The first run bootstraps a normal install: it downloads the release
 binary, verifies it against the release's `SHA256SUMS` (same policy as
