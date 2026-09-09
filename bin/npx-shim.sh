@@ -1,28 +1,36 @@
 #!/bin/sh
 # npx entry point for claude-playbook.
 #
-# Runs the release binary without a global install:
 #   npx github:ramazanpolat/claude-playbooks <args...>
 #   npx cpb <args...>                        (when published to npm)
 #
-# First invocation downloads the platform binary from GitHub Releases into
-# ~/.claude-playbooks/bin/<version>/ and verifies it against the release's
-# SHA256SUMS; later invocations exec the cached copy. The cache is persistent
-# (outside any npx cache), so playbook launchers created by `cpb install`
-# keep pointing at a stable binary path even when invoked through npx.
+# Behavior:
+#   1. claude-playbook/cpb already on PATH -> exec it. The installed binary
+#      is the source of truth; npx just routes to it. No download, no
+#      version games: update the installed one with `cpb self-update`.
+#   2. Not installed (first run) -> bootstrap: download the release binary,
+#      verify against the release's SHA256SUMS, install to ~/.local/bin
+#      (user-owned only -- never /usr/local/bin, never sudo), create the
+#      cpb link, announce it, exec it.
+#   3. CPB_NPX_BOOTSTRAP=0 -> no install, no delegation: fetch (or reuse
+#      cache) under ~/.claude-playbooks/bin/<tag>/ and exec from there.
+#      Ephemeral mode; also the way to test a pinned version alongside an
+#      installed one:
+#        CPB_NPX_BOOTSTRAP=0 CPB_VERSION=v3.8.0 npx cpb --version
 #
-# Version resolution, first match wins:
-#   1. CPB_VERSION env (e.g. "v3.9.1") — escape hatch / testing
-#   2. this package's version (npm_package_version under npx) — so
-#      `npx github:...#v3.9.1` runs that binary, not latest. Bump
+# Version resolution for downloads, first match wins:
+#   1. CPB_VERSION env (e.g. "v3.9.1") -- escape hatch / testing
+#   2. this package's version (npm_package_version under npx) -- so
+#      `npx github:...#v3.9.1` runs that release, not latest. Bump
 #      package.json "version" together with the release tag.
-#   3. latest release from the GitHub API — same as install.sh
+#   3. latest release from the GitHub API -- same as install.sh
 set -e
 
 REPO="${REPO:-ramazanpolat/claude-playbooks}"
 ASSET_PREFIX="${ASSET_PREFIX:-claude-playbook}"
 DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL:-https://github.com/${REPO}/releases/download}"
 CACHE_ROOT="${CPB_NPX_CACHE:-$HOME/.claude-playbooks/bin}"
+INSTALL_DIR="${CPB_NPX_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS.
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -41,6 +49,17 @@ esac
 
 ASSET="${ASSET_PREFIX}-${OS}-${ARCH}"
 
+# Delegate to an installed claude-playbook. Skipped in ephemeral mode so a
+# pinned CPB_VERSION can run beside the install.
+if [ "${CPB_NPX_BOOTSTRAP:-}" != "0" ]; then
+  if command -v cpb >/dev/null 2>&1; then
+    exec "$(command -v cpb)" "$@"
+  fi
+  if command -v claude-playbook >/dev/null 2>&1; then
+    exec "$(command -v claude-playbook)" "$@"
+  fi
+fi
+
 # Resolve which release tag to fetch.
 TAG=""
 if [ -n "${CPB_VERSION:-}" ]; then
@@ -57,7 +76,13 @@ if [ -z "$TAG" ]; then
   exit 1
 fi
 
-BIN_DIR="${CACHE_ROOT}/${TAG}"
+if [ "${CPB_NPX_BOOTSTRAP:-}" = "0" ]; then
+  MODE="ephemeral"
+  BIN_DIR="${CACHE_ROOT}/${TAG}"
+else
+  MODE="bootstrap"
+  BIN_DIR="$INSTALL_DIR"
+fi
 BIN="${BIN_DIR}/claude-playbook"
 
 if [ ! -x "$BIN" ]; then
@@ -110,6 +135,26 @@ if [ ! -x "$BIN" ]; then
   chmod +x "$TMP_FILE"
   mv "$TMP_FILE" "$BIN"
   TMP_FILE=""
+  FETCHED=1
+fi
+
+if [ "$MODE" = "bootstrap" ]; then
+  # cpb is the short name for the same binary. Relative link, exactly like
+  # install.sh: a symlink to the binary under any other name is treated as
+  # a playbook launcher and dispatched accordingly.
+  rm -f "${BIN_DIR}/cpb"
+  ln -s claude-playbook "${BIN_DIR}/cpb"
+
+  if [ -n "${FETCHED:-}" ]; then
+    echo "" >&2
+    echo "Installed claude-playbook ${TAG} to ${BIN_DIR}" >&2
+    echo "  Uninstall anytime: cpb self-uninstall --keep-data" >&2
+  fi
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *) echo "Warning: $BIN_DIR is not on your PATH. Add this to your shell config:" >&2 \
+       && echo "  export PATH=\"$BIN_DIR:\$PATH\"" >&2 ;;
+  esac
 fi
 
 # Exec with argv[0] = the binary's own path: the multicall dispatch in the

@@ -1,7 +1,7 @@
 {
   "name": "claude-playbook",
   "version": "3.9.1",
-  "description": "Run claude-playbook (cpb) without installing it — fetches the release binary to ~/.claude-playbooks/bin and executes it from there.",
+  "description": "Bootstrap claude-playbook (cpb) via npx: first run installs the release binary to ~/.local/bin, later runs delegate to it. CPB_NPX_BOOTSTRAP=0 for ephemeral mode.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ramazanpolat/claude-playbooks.git"
