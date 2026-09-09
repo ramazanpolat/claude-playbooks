@@ -51,12 +51,49 @@ ASSET="${ASSET_PREFIX}-${OS}-${ARCH}"
 
 # Delegate to an installed claude-playbook. Skipped in ephemeral mode so a
 # pinned CPB_VERSION can run beside the install.
+#
+# Under npx, this package's own bin dir sits first on PATH, so a naive
+# `command -v cpb` finds THIS SHIM (bin/cpb -> npx-shim.sh) and exec'ing it
+# loops forever. Resolve symlinks on both sides and only delegate to a
+# candidate that is a different file than this script.
+resolve_symlinks() {
+  _p="$1"
+  while [ -L "$_p" ]; do
+    _l=$(readlink "$_p")
+    case "$_l" in
+      /*) _p="$_l" ;;
+      *)  _p="$(dirname "$_p")/$_l" ;;
+    esac
+  done
+  printf '%s' "$_p"
+}
+SELF=$(resolve_symlinks "$0")
+
+# Print the first <name> on PATH that is not this script itself.
+find_other() {
+  _name="$1"
+  _saveIFS=$IFS; IFS=:
+  for _dir in $PATH; do
+    [ -n "$_dir" ] || _dir=.
+    [ -x "$_dir/$_name" ] || continue
+    if [ "$(resolve_symlinks "$_dir/$_name")" != "$SELF" ]; then
+      IFS=$_saveIFS
+      printf '%s' "$_dir/$_name"
+      return 0
+    fi
+  done
+  IFS=$_saveIFS
+  return 1
+}
+
 if [ "${CPB_NPX_BOOTSTRAP:-}" != "0" ]; then
-  if command -v cpb >/dev/null 2>&1; then
-    exec "$(command -v cpb)" "$@"
+  FOUND=$(find_other cpb) || FOUND=""
+  if [ -n "$FOUND" ]; then
+    exec "$FOUND" "$@"
   fi
-  if command -v claude-playbook >/dev/null 2>&1; then
-    exec "$(command -v claude-playbook)" "$@"
+  FOUND=$(find_other claude-playbook) || FOUND=""
+  if [ -n "$FOUND" ]; then
+    exec "$FOUND" "$@"
   fi
 fi
 
