@@ -23,6 +23,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # version-drift check reads the latest tag
 
       - uses: actions/setup-go@v5
         with:
@@ -45,3 +47,24 @@ jobs:
         run: |
           sh -n install.sh
           sh -n uninstall.sh
+          sh -n bin/npx-shim.sh
+
+      # package.json "version" must equal the latest release tag: the npx
+      # shim uses it to pick the release it fetches, so a stale value makes
+      # `npx github:ramazanpolat/claude-playbooks` serve an old binary.
+      # Run only on main — a PR can legitimately be ahead of the tag.
+      - name: npx package version matches latest tag
+        if: github.event_name == 'push'
+        run: |
+          latest=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$latest" ]; then
+            echo "no tags yet; skipping"
+            exit 0
+          fi
+          pkg=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)
+          if [ "v$pkg" != "$latest" ]; then
+            echo "package.json version ($pkg) != latest tag ($latest)." \
+              && echo "Bump package.json in the same commit as the release tag." \
+              && exit 1
+          fi
+          echo "package.json version ($pkg) matches latest tag ($latest)"
