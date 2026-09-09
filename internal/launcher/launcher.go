@@ -74,7 +74,10 @@ func TargetPath() (string, error) {
 // Creation is atomic-exclusive (os.Symlink fails on an existing name); an
 // existing entry is replaced only when it is already a launcher, via a
 // temporary link renamed over the old one so the command never dangles.
-func Write(dir, cmdName string) (string, error) {
+// root and playbook attribute the launcher in the receipt to the registry
+// root and playbook it serves; delete uses that attribution to remove the
+// launchers it created itself. Pass both empty for an unattributed link.
+func Write(dir, cmdName, root, playbook string) (string, error) {
 	if err := ValidateName(cmdName); err != nil {
 		return "", err
 	}
@@ -93,7 +96,7 @@ func Write(dir, cmdName string) (string, error) {
 
 	err = os.Symlink(target, path)
 	if err == nil {
-		receipt(path)
+		receipt(path, root, playbook)
 		return path, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
@@ -106,7 +109,7 @@ func Write(dir, cmdName string) (string, error) {
 		// Identical content, nothing to write. This also makes concurrent
 		// creators converge without coordination. Still recorded: the link
 		// may predate the receipt.
-		receipt(path)
+		receipt(path, root, playbook)
 		return path, nil
 	}
 	// Ours but pointing elsewhere (e.g. at a versioned physical binary from
@@ -125,17 +128,18 @@ func Write(dir, cmdName string) (string, error) {
 			os.Remove(tmp)
 			return "", err
 		}
-		receipt(path)
+		receipt(path, root, playbook)
 		return path, nil
 	}
 	return "", fmt.Errorf("could not refresh launcher %s", path)
 }
 
-// receipt records a written launcher path, warning instead of failing:
+// receipt records a written launcher path and the root and playbook it was
+// written for (either empty: no attribution), warning instead of failing:
 // the symlink already exists, and a working command beats a complete
 // ledger.
-func receipt(path string) {
-	if err := record(path); err != nil {
+func receipt(path, root, playbook string) {
+	if err := record(path, root, playbook); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: launcher created but not recorded in receipt: %v\n", err)
 	}
 }

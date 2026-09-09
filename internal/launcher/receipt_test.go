@@ -24,7 +24,7 @@ func TestWriteRecordsAndRemoveUnrecords(t *testing.T) {
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir := t.TempDir()
 
-	path, err := Write(dir, "recorded")
+	path, err := Write(dir, "recorded", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestWriteRecordsAndRemoveUnrecords(t *testing.T) {
 	}
 
 	// Re-writing the identical link must not duplicate the entry.
-	if _, err := Write(dir, "recorded"); err != nil {
+	if _, err := Write(dir, "recorded", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := Recorded(); len(got) != 1 {
@@ -70,7 +70,7 @@ func TestRemoveReceiptCleansStateDir(t *testing.T) {
 	dir := t.TempDir()
 	rp := filepath.Join(dir, "state", "launchers")
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", rp)
-	if err := record("/x/y"); err != nil {
+	if err := record("/x/y", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	RemoveReceipt()
@@ -79,5 +79,55 @@ func TestRemoveReceiptCleansStateDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(rp)); !os.IsNotExist(err) {
 		t.Fatal("empty state dir survives RemoveReceipt")
+	}
+}
+
+// Attribution round-trips, is replaced on re-record, and is absent for a
+// path-only (pre-v3.10.1 or unattributed) line, which Recorded still lists.
+func TestReceiptAttribution(t *testing.T) {
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	if err := record("/l/a", "/root", "pb"); err != nil {
+		t.Fatal(err)
+	}
+	if err := record("/l/b", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if r, p, ok := Attribution("/l/a"); !ok || r != "/root" || p != "pb" {
+		t.Fatalf("attribution of /l/a = %q %q %v", r, p, ok)
+	}
+	if _, _, ok := Attribution("/l/b"); ok {
+		t.Fatal("unattributed line claimed an owner")
+	}
+	if _, _, ok := Attribution("/l/none"); ok {
+		t.Fatal("unknown path claimed an owner")
+	}
+	if got := Recorded(); len(got) != 2 || got[0] != "/l/a" || got[1] != "/l/b" {
+		t.Fatalf("Recorded = %v", got)
+	}
+	// re-record replaces the attribution in place, once
+	if err := record("/l/a", "/root2", "pb2"); err != nil {
+		t.Fatal(err)
+	}
+	if r, p, _ := Attribution("/l/a"); r != "/root2" || p != "pb2" {
+		t.Fatalf("attribution not replaced: %q %q", r, p)
+	}
+	if got := Recorded(); len(got) != 2 {
+		t.Fatalf("duplicate line after re-record: %v", got)
+	}
+	// a hand-edited old-format file is tolerated
+	if err := os.WriteFile(ReceiptPath(), []byte("/old/one\n/l/a\t/root\tpb\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 2 || got[0] != "/old/one" {
+		t.Fatalf("old format: %v", got)
+	}
+	if _, _, ok := Attribution("/old/one"); ok {
+		t.Fatal("old-format line claimed an owner")
+	}
+	if err := unrecord("/l/a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 1 {
+		t.Fatalf("unrecord by path: %v", got)
 	}
 }

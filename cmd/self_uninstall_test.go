@@ -149,7 +149,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 	// A launcher in a custom directory that no sweep would rediscover —
 	// only the receipt knows about it.
 	customDir := t.TempDir()
-	customPath, err := launcher.Write(customDir, "custom-cmd")
+	customPath, err := launcher.Write(customDir, "custom-cmd", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 	if err := os.WriteFile(otherBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := launcher.Write(customDir, "foreign-cmd"); err != nil {
+	if _, err := launcher.Write(customDir, "foreign-cmd", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(foreign); err != nil {
@@ -172,7 +172,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 	}
 
 	// A recorded path the user deleted by hand: skipped, not an error.
-	if _, err := launcher.Write(customDir, "hand-deleted"); err != nil {
+	if _, err := launcher.Write(customDir, "hand-deleted", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(customDir, "hand-deleted")); err != nil {
@@ -184,7 +184,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 	if err := os.Link(exe, danglingTarget); err != nil {
 		t.Skipf("cannot hard-link test binary: %v", err)
 	}
-	danglingPath, err := launcher.Write(customDir, "dangler")
+	danglingPath, err := launcher.Write(customDir, "dangler", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -138,7 +138,7 @@ func TestListCommandColumnShowsOnlyExistingLaunchers(t *testing.T) {
 	// (rightly) refuses reserved names.
 	writePlaybook(t, root, "withcmd", &manifest.Manifest{Alias: "wc"})
 	writePlaybook(t, root, "nocmd", nil)
-	if _, err := launcher.Write(config.LauncherDir, "wc"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "wc", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	exe, err := os.Executable()
@@ -381,7 +381,7 @@ func TestDeleteLinkedPlaybookRemovesSymlinkOnly(t *testing.T) {
 func TestDeleteRetainsUnclaimedLauncherWithHint(t *testing.T) {
 	sandboxDefaultRoot(t)
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
-	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "victim", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	deleteYes = true
@@ -407,7 +407,7 @@ func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 	// "other" claims the command name "victim" via its manifest alias —
 	// the registry, not the symlink, owns command-name ownership.
 	writePlaybook(t, root, "other", &manifest.Manifest{Alias: "victim"})
-	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "victim", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	deleteYes = true
@@ -931,5 +931,54 @@ func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
 	}
 	if err := runDelete(nil, []string{"glm.toml"}); err == nil {
 		t.Fatal("a profile file was deletable")
+	}
+}
+
+// A launcher the receipt attributes to this root and this playbook was
+// written by this tool for it: delete removes it and its receipt line. One
+// attributed to another root, or to nobody, is kept with the hint.
+func TestDeleteRemovesTheLauncherItCreated(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "mine", &manifest.Manifest{Alias: "minecmd"})
+	if _, err := launcher.Write(config.LauncherDir, "minecmd", attributedRoot(), "mine"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launcher.Write(config.LauncherDir, "mine", attributedRoot(), "mine"); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	out := captureStdout(t, func() {
+		if err := runDelete(nil, []string{"mine"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, n := range []string{"minecmd", "mine"} {
+		if _, exists, _ := launcher.Lookup(config.LauncherDir, n); exists {
+			t.Fatalf("launcher %q survived the delete of its playbook", n)
+		}
+		if !strings.Contains(out, `Removed command "`+n+`"`) {
+			t.Fatalf("removal not reported for %q:\n%s", n, out)
+		}
+		if _, _, ok := launcher.Attribution(filepath.Join(config.LauncherDir, n)); ok {
+			t.Fatalf("receipt still attributes %q", n)
+		}
+	}
+
+	// attributed to another root: kept with the hint
+	writePlaybook(t, root, "theirs", nil)
+	if _, err := launcher.Write(config.LauncherDir, "theirs", "/some/other/root", "theirs"); err != nil {
+		t.Fatal(err)
+	}
+	out = captureStdout(t, func() {
+		if err := runDelete(nil, []string{"theirs"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "theirs"); !exists {
+		t.Fatal("launcher of another root removed")
+	}
+	if !strings.Contains(out, "not recorded as this playbook's own launcher") {
+		t.Fatalf("hint missing:\n%s", out)
 	}
 }

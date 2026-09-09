@@ -382,7 +382,7 @@ Deleting a linked playbook removes only the symlink. The source directory is pre
 
 When invoked through the link, the binary sees the link's name in `argv[0]` and behaves as `cpb run <name>` — the multicall pattern used by busybox and git. The name resolves against the live playbook registry (directory name first, then the `.playbook` manifest's `alias`) **at invocation time**, so the launcher carries no state that can go stale. Unlike shell aliases, launchers work identically from any shell, are available immediately with no rc-file edit or reload, and are visible to scripts and cron.
 
-`delete` and `rename` never silently remove a launcher another playbook (or another playbooks root) might still be using: a name that no longer resolves is kept with an explicit `rm <path>` hint, and invoking a stale launcher fails loudly with "unknown playbook". `rename` registers the new name; a launcher named by a manifest alias keeps working across renames untouched.
+`delete` removes the launchers it created for the playbook it is deleting (the receipt under `~/.local/state/claude-playbook/launchers` records which root and playbook each launcher was written for) and prints `Removed command <name>`. It never silently removes a launcher another playbook still claims, nor one it cannot attribute: a hand-made link, one recorded before v3.10.1, or one written for another playbooks root is kept with an explicit `rm <path>` hint, and invoking a stale launcher fails loudly rather than running the wrong thing. Re-registering the command once (`cpb alias <playbook> <name>`) attributes an older launcher.
 
 ### Manage aliases
 

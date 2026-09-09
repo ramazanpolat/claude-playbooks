@@ -118,7 +118,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
-	removeUnclaimedLaunchers(names)
+	removeUnclaimedLaunchers(names, pb.Name)
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
 	return nil
 }
@@ -153,7 +153,7 @@ func deleteOrphan(playbooksDir, name, path string) error {
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
-	removeUnclaimedLaunchers([]string{name})
+	removeUnclaimedLaunchers([]string{name}, name)
 	fmt.Printf("Deleted %q.\n", name)
 	return nil
 }
@@ -165,7 +165,15 @@ func deleteOrphan(playbooksDir, name, path string) error {
 // registry root selected via environment or flag, which is unenumerable
 // from here — but with a manual-removal hint: invoking it without such a
 // root fails loudly as stale, so retention is noisy, never silently wrong.
-func removeUnclaimedLaunchers(names []string) {
+// removeUnclaimedLaunchers retires the launchers named for a playbook that
+// is going away. A name another playbook still claims is kept outright. A
+// launcher the receipt attributes to THIS root and THIS playbook was
+// written by this tool for exactly the thing being removed, so it goes,
+// receipt line included. Anything else (hand-made, written before the
+// receipt carried attribution, or attributed to another root or playbook)
+// is kept with a manual hint: a stateless symlink may be serving something
+// this process cannot see.
+func removeUnclaimedLaunchers(names []string, playbookName string) {
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none removed.\n")
 		return
@@ -175,6 +183,7 @@ func removeUnclaimedLaunchers(names []string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not inspect launchers: %v\n", err)
 		return
 	}
+	root := attributedRoot()
 	for _, n := range names {
 		e, exists, foreign := launcher.Lookup(dir, n)
 		if !exists || foreign {
@@ -184,7 +193,15 @@ func removeUnclaimedLaunchers(names []string) {
 			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, owner.Name)
 			continue
 		}
-		fmt.Printf("Kept command %q — launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
+		if r, p, ok := launcher.Attribution(e.Path); ok && r == root && p == playbookName {
+			if _, rerr := launcher.Remove(dir, n); rerr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", n, rerr)
+				continue
+			}
+			fmt.Printf("Removed command %q\n", n)
+			continue
+		}
+		fmt.Printf("Kept command %q — not recorded as this playbook's own launcher, and launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
 	}
 }
 

@@ -42,7 +42,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 		manual()
 		return
 	}
-	path, err := launcher.Write(dir, cmdName)
+	path, err := launcher.Write(dir, cmdName, attributedRoot(), playbookName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Register a different command name with: claude-playbook alias %s <name> — rename the playbook (and its command) with: claude-playbook rename %s <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
@@ -158,6 +158,15 @@ func captureManifestRestore(dir string) (func(), error) {
 			fmt.Fprintf(os.Stderr, "Warning: could not restore manifest: %v\n", err)
 		}
 	}, nil
+}
+
+// attributedRoot is the registry root recorded in the launcher receipt for
+// launchers written now: the canonical form of the root in effect, which
+// launcherOpsAllowed guarantees is the default one. delete compares the
+// same canonical form, so a root spelled through a symlink one day and
+// physically the next still matches.
+func attributedRoot() string {
+	return canonPath(config.ResolvePlaybooksDir())
 }
 
 // launcherOpsAllowed gates EVERY launcher mutation (create, delete, rename)
