@@ -174,6 +174,14 @@ func record(path, root, playbook string) error {
 		// later match nothing or the wrong thing.
 		return fmt.Errorf("launcher path %q contains a tab or line break; not recorded", path)
 	}
+	// Persisted absolute: a relative `--launcher-dir ./bin` means something
+	// only in the working directory it was given in, and a later reader
+	// runs elsewhere. Symlinks are left as they are (see
+	// normalizeLauncherPath), so Recorded() keeps naming the link the pilot
+	// sees.
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	line := entryLine(path, root, playbook)
 	return editReceipt(func(lines []string) []string {
 		var kept []string

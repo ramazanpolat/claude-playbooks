@@ -190,4 +190,18 @@ func TestReceiptNormalizesPathsAndKeepsFieldsVerbatim(t *testing.T) {
 	if got := Recorded(); len(got) != 0 {
 		t.Fatalf("unrecord by relative path missed: %v", got)
 	}
+	// A relative path is persisted absolute, so a reader in another
+	// working directory still finds it.
+	if err := record("./rel", "/root", "pb"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 1 || !filepath.IsAbs(got[0]) || filepath.Base(got[0]) != "rel" {
+		t.Fatalf("relative path persisted as %v", got)
+	}
+	if err := os.Chdir(wd); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := Attribution(filepath.Join(real, "rel")); !ok {
+		t.Fatal("absolute lookup from another cwd missed the relative record")
+	}
 }
