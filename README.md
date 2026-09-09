@@ -182,7 +182,8 @@ yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth
 no   ->  link the playbook's .credentials.json to ~/.claude/.credentials.json; remove nothing;
          Claude Code refreshes the shared login itself
 isolate_auth = true  ->  neither: detach from the shared store, strip the global token,
-         keep only what this playbook logs in itself
+         keep only what this playbook logs in itself; while it has no login of its own,
+         drop the account record and cached feature flags left from a non-isolated past
 ```
 
 The removal on the token path exists for one reason: under token auth Claude Code never refreshes a stored login, and its 401-recovery path adopts a stored login over the token. A stale stored login would therefore replace a working year-long token with a dead one on the first transient 401. Removing it leaves nothing to adopt. It is never done on the no-token path, where that stored login *is* the session.
@@ -198,6 +199,8 @@ The modes this gives you, per playbook:
 | One playbook is a different account, sharing nothing | `isolate_auth = true` in its `.playbook`, or `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` | detached; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token |
 
 The unset and set forms can come from an [env profile](#env-profiles-define-once-attach-to-many) shared by several playbooks.
+
+**Routing a playbook to another backend.** A playbook whose `settings.json` or env block points `ANTHROPIC_BASE_URL` at a third-party Anthropic-compatible endpoint (a GLM plan through a router, say) should carry `isolate_auth = true`. Claude Code decides which claude.ai-hosted tools to send from the feature flags it cached while an Anthropic account was logged in, not from where requests go; a playbook that ran as your global account before being rerouted keeps sending them, and since Claude Code 2.1.265 at least one backend (GLM) rejects the Artifact tool's schema with `400` on every interactive turn. Isolation removes that leftover state at launch while the playbook has no login of its own, and `cpb auth status` shows `stale account state, purged at launch` until it has.
 
 See where every playbook stands, without launching anything:
 

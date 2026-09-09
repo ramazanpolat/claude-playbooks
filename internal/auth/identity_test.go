@@ -1,328 +1,184 @@
 package auth
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
-// A symlink to the global config directory names the same directory; string
-// comparison of absolute paths let both mutations through to the global store.
-func TestQuarantineRefusesGlobalStoreThroughSymlinkedDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	global := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(global, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	store := writeStore(t, global, `{`+grantJSON+`}`)
-	alias := filepath.Join(home, "linked-global")
-	if err := os.Symlink(global, alias); err != nil {
-		t.Fatal(err)
-	}
+const identityFixture = `{
+  "numStartups": 3,
+  "projects": {"/w": {"allowedTools": ["Bash"]}},
+  "oauthAccount": {"emailAddress": "x@y", "organizationUuid": "o"},
+  "cachedGrowthBookFeatures": {"tengu_x": true},
+  "cachedGrowthBookFeaturesAt": 1,
+  "cachedExperimentFeatures": {},
+  "cachedExperimentData": {},
+  "passesEligibilityCache": {"a": true},
+  "cachedExtraUsageDisabledReason": "none"
+}
+`
 
-	if err := QuarantineStoredOAuth(alias); err != nil {
-		t.Fatalf("quarantine through the alias: %v", err)
+func writeState(t *testing.T, dir, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, StateFileName)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
-		t.Fatal("the GLOBAL grant was quarantined through a symlinked directory")
-	}
+	return p
 }
 
-func TestLinkCredentialsRefusesGlobalStoreThroughSymlinkedDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	global := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(global, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	store := writeStore(t, global, testCreds)
-	alias := filepath.Join(home, "linked-global")
-	if err := os.Symlink(global, alias); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := LinkCredentials(alias, store); err != nil {
-		t.Fatalf("link through the alias: %v", err)
-	}
-	info, err := os.Lstat(store)
+func TestQuarantineAccountStateRemovesIdentityKeysOnly(t *testing.T) {
+	dir := t.TempDir()
+	p := writeState(t, dir, identityFixture)
+	removed, err := QuarantineAccountState(dir)
 	if err != nil {
-		t.Fatalf("global store gone: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		t.Fatal("the global store was replaced by a symlink to itself")
-	}
-	if got, _ := os.ReadFile(store); string(got) != testCreds {
-		t.Fatalf("global store content changed: %q", got)
-	}
-}
-
-// The same protection when ~/.claude itself is the symlink and the playbook
-// path is the resolved target: identity, not spelling.
-func TestSameDirSeesThroughSymlinkedGlobal(t *testing.T) {
-	home := t.TempDir()
-	real := filepath.Join(home, "real-claude")
-	if err := os.MkdirAll(real, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(real, filepath.Join(home, ".claude")); err != nil {
+	if len(removed) != len(identityStateKeys) {
+		t.Fatalf("removed %v, want all of %v", removed, identityStateKeys)
+	}
+	var after map[string]any
+	if err := json.Unmarshal(readFile(t, p), &after); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	if !isGlobalConfigDir(real) {
-		t.Fatal("the resolved target of a symlinked ~/.claude was not recognised as the global dir")
-	}
-	if isGlobalConfigDir(filepath.Join(home, "elsewhere")) {
-		t.Fatal("a non-existent path was taken for the global dir")
-	}
-}
-
-// The reverse alias: ~/.claude/.credentials.json is a symlink INTO the config
-// dir being quarantined. Its regular file is the global store's target.
-func TestQuarantineRefusesGlobalStoreTargetInAnotherDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	shared := filepath.Join(home, "configs", "shared")
-	if err := os.MkdirAll(shared, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	store := writeStore(t, shared, `{`+grantJSON+`}`)
-	global := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(global, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(store, filepath.Join(global, CredentialsFileName)); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := QuarantineStoredOAuth(shared); err != nil {
-		t.Fatalf("quarantine: %v", err)
-	}
-	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
-		t.Fatal("the global store's target was stripped through the directory that holds it")
-	}
-}
-
-// The ordinary playbook layout under a token launch: .credentials.json is an
-// OUTGOING symlink to the real global store under $HOME/.claude. It resolves
-// to the global file, and must still be detached -- the fixture puts the
-// global store where it really lives, which earlier symlink tests did not.
-func TestQuarantineStillDetachesOutgoingLinkToRealGlobal(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	global := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(global, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	store := writeStore(t, global, `{`+grantJSON+`}`)
-	pb := filepath.Join(home, "playbook")
-	if err := os.MkdirAll(pb, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(pb, CredentialsFileName)
-	if err := os.Symlink(store, link); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := QuarantineStoredOAuth(pb); err != nil {
-		t.Fatalf("quarantine: %v", err)
-	}
-	if _, err := os.Lstat(link); !os.IsNotExist(err) {
-		t.Fatal("the outgoing link to the global store was not detached; the stale grant stays adoptable")
-	}
-	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
-		t.Fatal("the global store was stripped through the link")
-	}
-}
-
-// A symlink chain the global store passes through: ~/.claude/.credentials.json
-// -> shared/.credentials.json -> real store. Linking `shared` to the global
-// path would close a cycle; it must recognise the same file and do nothing.
-func TestLinkCredentialsDoesNotCloseSymlinkCycle(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	real := filepath.Join(home, "real-store.json")
-	if err := os.WriteFile(real, []byte(testCreds), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	shared := filepath.Join(home, "shared")
-	global := filepath.Join(home, ".claude")
-	if err := os.MkdirAll(shared, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(global, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sharedLink := filepath.Join(shared, CredentialsFileName)
-	if err := os.Symlink(real, sharedLink); err != nil {
-		t.Fatal(err)
-	}
-	globalLink := filepath.Join(global, CredentialsFileName)
-	if err := os.Symlink(sharedLink, globalLink); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := LinkCredentials(shared, globalLink); err != nil {
-		t.Fatalf("link: %v", err)
-	}
-	if got, _ := os.Readlink(sharedLink); got != real {
-		t.Fatalf("shared link rewritten to %q; a cycle through the global path", got)
-	}
-	if body, err := os.ReadFile(globalLink); err != nil || string(body) != testCreds {
-		t.Fatalf("global store unreadable after linking: %v %q", err, body)
-	}
-}
-
-// Quarantine of the MIDDLE directory in a chain the global store passes
-// through (~/.claude/.credentials.json -> shared/.credentials.json -> real
-// store) must leave that link alone, for a grant-only store and for one with
-// sibling keys; the ordinary outgoing playbook link is still detached.
-func TestQuarantineLeavesGlobalChainLinksAlone(t *testing.T) {
-	for name, body := range map[string]string{
-		"grant only":   `{` + grantJSON + `}`,
-		"sibling keys": `{` + grantJSON + `,` + mcpJSON + `}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
-			real := filepath.Join(home, "real-store.json")
-			if err := os.WriteFile(real, []byte(body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			shared := filepath.Join(home, "shared")
-			global := filepath.Join(home, ".claude")
-			if err := os.MkdirAll(shared, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(global, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			sharedLink := filepath.Join(shared, CredentialsFileName)
-			if err := os.Symlink(real, sharedLink); err != nil {
-				t.Fatal(err)
-			}
-			globalLink := filepath.Join(global, CredentialsFileName)
-			if err := os.Symlink(sharedLink, globalLink); err != nil {
-				t.Fatal(err)
-			}
-
-			if err := QuarantineStoredOAuth(shared); err != nil {
-				t.Fatalf("quarantine: %v", err)
-			}
-			if got, err := os.Readlink(sharedLink); err != nil || got != real {
-				t.Fatalf("middle link of the global chain was touched: %q %v", got, err)
-			}
-			if _, present := readStore(t, globalLink)["claudeAiOauth"]; !present {
-				t.Fatal("the global grant is gone or unreadable through the chain")
-			}
-
-			// An ordinary playbook linking to the global path is NOT on the
-			// chain: it must still be detached.
-			pb := filepath.Join(home, "playbook")
-			if err := os.MkdirAll(pb, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			pbLink := filepath.Join(pb, CredentialsFileName)
-			if err := os.Symlink(globalLink, pbLink); err != nil {
-				t.Fatal(err)
-			}
-			if err := QuarantineStoredOAuth(pb); err != nil {
-				t.Fatalf("quarantine playbook: %v", err)
-			}
-			// Detached: gone for a grant-only store, or re-materialised as
-			// this dir's own regular file holding only the sibling keys.
-			if info, err := os.Lstat(pbLink); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				t.Fatal("the ordinary outgoing link was not detached")
-			} else if err == nil {
-				if _, present := readStore(t, pbLink)["claudeAiOauth"]; present {
-					t.Fatal("re-materialised playbook store still holds the grant")
-				}
-			}
-			if _, present := readStore(t, globalLink)["claudeAiOauth"]; !present {
-				t.Fatal("detaching the outgoing link damaged the global chain")
-			}
-		})
-	}
-}
-
-// A symlinked global directory plus RELATIVE chain links: ~/.claude ->
-// vault/config, vault/config/.credentials.json -> ../shared/.credentials.json,
-// vault/shared/.credentials.json -> vault/store.json. Lexical joining of ".."
-// against the symlinked parent would look for ~/shared instead and miss the
-// hop, so quarantine of vault/shared would detach a link on the global chain.
-func TestQuarantineChainWalkResolvesRelativeHopsPhysically(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	vault := filepath.Join(home, "vault")
-	for _, d := range []string{filepath.Join(vault, "config"), filepath.Join(vault, "shared")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
+	for _, key := range identityStateKeys {
+		if _, ok := after[key]; ok {
+			t.Fatalf("%s survived", key)
 		}
 	}
-	store := filepath.Join(vault, "store.json")
-	if err := os.WriteFile(store, []byte(`{`+grantJSON+`}`), 0o600); err != nil {
-		t.Fatal(err)
+	if after["numStartups"] != float64(3) {
+		t.Fatalf("numStartups changed: %v", after["numStartups"])
 	}
-	sharedLink := filepath.Join(vault, "shared", CredentialsFileName)
-	if err := os.Symlink(store, sharedLink); err != nil {
-		t.Fatal(err)
+	if tools := after["projects"].(map[string]any)["/w"].(map[string]any)["allowedTools"].([]any); len(tools) != 1 || tools[0] != "Bash" {
+		t.Fatalf("nested project state changed: %v", after["projects"])
 	}
-	if err := os.Symlink(filepath.Join("..", "shared", CredentialsFileName), filepath.Join(vault, "config", CredentialsFileName)); err != nil {
-		t.Fatal(err)
+	if info, _ := os.Stat(p); info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode().Perm())
 	}
-	if err := os.Symlink(filepath.Join(vault, "config"), filepath.Join(home, ".claude")); err != nil {
-		t.Fatal(err)
+	// Idempotent, and quiet about it.
+	if removed, err := QuarantineAccountState(dir); err != nil || removed != nil {
+		t.Fatalf("second run: %v %v", removed, err)
 	}
-
-	if err := QuarantineStoredOAuth(filepath.Join(vault, "shared")); err != nil {
-		t.Fatalf("quarantine: %v", err)
-	}
-	if got, err := os.Readlink(sharedLink); err != nil || got != store {
-		t.Fatalf("chain link detached: %q %v", got, err)
-	}
-	if _, present := readStore(t, filepath.Join(home, ".claude", CredentialsFileName))["claudeAiOauth"]; !present {
-		t.Fatal("global grant unreachable through the chain")
+	if got := StaleIdentityState(dir); got != nil {
+		t.Fatalf("StaleIdentityState after purge = %v", got)
 	}
 }
 
-// A relative chain target that passes THROUGH a symlink and back out:
-// ~/.claude/.credentials.json -> ../jump/../shared/.credentials.json with
-// ~/jump -> ~/vault/inner. Lexical cleaning collapses "jump/.." to nothing and
-// looks in ~/shared; physical resolution follows jump first and backs out to
-// ~/vault, reaching ~/vault/shared.
-func TestQuarantineChainWalkFollowsSymlinkThenDotDot(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	vault := filepath.Join(home, "vault")
-	for _, d := range []string{filepath.Join(vault, "inner"), filepath.Join(vault, "shared"), filepath.Join(home, ".claude")} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
+func TestQuarantineAccountStateEdgeFiles(t *testing.T) {
+	dir := t.TempDir()
+	if removed, err := QuarantineAccountState(dir); err != nil || removed != nil {
+		t.Fatalf("absent file: %v %v", removed, err)
 	}
-	if err := os.Symlink(filepath.Join(vault, "inner"), filepath.Join(home, "jump")); err != nil {
-		t.Fatal(err)
+	writeState(t, dir, "\n")
+	if removed, err := QuarantineAccountState(dir); err != nil || removed != nil {
+		t.Fatalf("empty file: %v %v", removed, err)
 	}
-	store := filepath.Join(vault, "store.json")
-	if err := os.WriteFile(store, []byte(`{`+grantJSON+`}`), 0o600); err != nil {
-		t.Fatal(err)
+	writeState(t, dir, "{not json")
+	if _, err := QuarantineAccountState(dir); err == nil || !strings.Contains(err.Error(), "invalid "+StateFileName) {
+		t.Fatalf("invalid JSON must be reported: %v", err)
 	}
-	sharedLink := filepath.Join(vault, "shared", CredentialsFileName)
-	if err := os.Symlink(store, sharedLink); err != nil {
-		t.Fatal(err)
+	if got := StaleIdentityState(dir); got != nil {
+		t.Fatalf("unreadable state reports keys: %v", got)
 	}
-	// Built as a string on purpose: filepath.Join would clean "jump/.." away.
-	if err := os.Symlink("../jump/../shared/"+CredentialsFileName, filepath.Join(home, ".claude", CredentialsFileName)); err != nil {
-		t.Fatal(err)
+}
+
+// The launch path purges only the isolated, login-less, token-less playbook.
+func TestIsolatedLaunchPurgesStaleIdentity(t *testing.T) {
+	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv("HOME", t.TempDir())
+
+	// 1. isolated, no store, no own token: purged
+	dir := t.TempDir()
+	writeManifest(t, dir, "isolate_auth = true\n")
+	writeState(t, dir, identityFixture)
+	if _, err := PrepareLaunchEnv(dir); err != nil {
+		t.Fatalf("launch: %v", err)
 	}
-	// Sanity: the OS resolves the chain to the store.
-	if _, present := readStore(t, filepath.Join(home, ".claude", CredentialsFileName))["claudeAiOauth"]; !present {
-		t.Fatal("fixture: global path does not resolve to the store")
+	if got := StaleIdentityState(dir); got != nil {
+		t.Fatalf("isolated login-less playbook kept %v", got)
 	}
 
-	if err := QuarantineStoredOAuth(filepath.Join(vault, "shared")); err != nil {
-		t.Fatalf("quarantine: %v", err)
+	// 2. isolated with its own stored login: kept
+	dir = t.TempDir()
+	writeManifest(t, dir, "isolate_auth = true\n")
+	writeState(t, dir, identityFixture)
+	writeStore(t, dir, `{"claudeAiOauth":{"accessToken":"own","expiresAt":9999999999999}}`)
+	PrepareLaunchEnv(dir)
+	if got := StaleIdentityState(dir); len(got) != len(identityStateKeys) {
+		t.Fatalf("logged-in isolated playbook lost state: %v", got)
 	}
-	if got, err := os.Readlink(sharedLink); err != nil || got != store {
-		t.Fatalf("chain link detached: %q %v", got, err)
+
+	// 3. isolated with an own token from the block: kept
+	dir = t.TempDir()
+	writeManifest(t, dir, "isolate_auth = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	writeState(t, dir, identityFixture)
+	PrepareLaunchEnv(dir)
+	if got := StaleIdentityState(dir); len(got) != len(identityStateKeys) {
+		t.Fatalf("own-token isolated playbook lost state: %v", got)
 	}
+
+	// 4. not isolated: untouched by this path
+	dir = t.TempDir()
+	writeManifest(t, dir, "name = \"pb\"\n")
+	writeState(t, dir, identityFixture)
+	PrepareLaunchEnv(dir)
+	if got := StaleIdentityState(dir); len(got) != len(identityStateKeys) {
+		t.Fatalf("non-isolated playbook lost state: %v", got)
+	}
+
+	// 5. isolated, unreadable state: launch proceeds, error advisory, file intact
+	dir = t.TempDir()
+	writeManifest(t, dir, "isolate_auth = true\n")
+	p := writeState(t, dir, "{not json")
+	env, err := PrepareLaunchEnv(dir)
+	if len(env) == 0 || err == nil || !strings.Contains(err.Error(), "invalid "+StateFileName) {
+		t.Fatalf("unreadable state: env=%d err=%v", len(env), err)
+	}
+	if string(readFile(t, p)) != "{not json" {
+		t.Fatal("unreadable state was rewritten")
+	}
+}
+
+func TestInspectReportsStaleIdentity(t *testing.T) {
+	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
+	os.Unsetenv(OAuthTokenEnv)
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	writeManifest(t, dir, "isolate_auth = true\n")
+	writeState(t, dir, identityFixture)
+	r := Inspect("iso", dir, time.Now())
+	if r.Mode != ModeIsolated || len(r.StaleIdentity) != len(identityStateKeys) {
+		t.Fatalf("mode=%s stale=%v", r.Mode, r.StaleIdentity)
+	}
+	if note := r.NeedsAttention(); note != "no login; stale account state, purged at launch" {
+		t.Fatalf("note = %q", note)
+	}
+	out, _ := json.Marshal(r)
+	if !strings.Contains(string(out), `"stale_identity":["oauthAccount"`) {
+		t.Fatalf("json lacks stale_identity: %s", out)
+	}
+	// Once logged in, the note and the list go away even with the keys present.
+	writeStore(t, dir, `{"claudeAiOauth":{"accessToken":"own","expiresAt":9999999999999}}`)
+	r = Inspect("iso", dir, time.Now())
+	if len(r.StaleIdentity) != 0 || strings.Contains(r.NeedsAttention(), "stale") {
+		t.Fatalf("logged-in isolated playbook flagged: %v %q", r.StaleIdentity, r.NeedsAttention())
+	}
+	// Inspect is read-only: the keys are still there.
+	if got := StaleIdentityState(dir); len(got) != len(identityStateKeys) {
+		t.Fatalf("Inspect mutated state: %v", got)
+	}
+}
+
+func readFile(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

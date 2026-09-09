@@ -258,6 +258,12 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 				syncErr = qErr
 			}
 			env = append(env, OAuthTokenEnv+"="+own)
+		} else if !storeHasOAuthGrant(filepath.Join(configDir, CredentialsFileName)) {
+			// Isolated and logged in nowhere: nothing may keep presenting
+			// this directory as the global account. See QuarantineAccountState.
+			if _, qErr := QuarantineAccountState(configDir); qErr != nil && syncErr == nil {
+				syncErr = qErr
+			}
 		}
 		env = applyManifestEnv(env, menv)
 		env = removeEnv(env, "CLAUDE_CONFIG_DIR")

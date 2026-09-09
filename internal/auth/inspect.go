@@ -55,6 +55,11 @@ type Report struct {
 	// playbook may still authenticate by an own token (own-token) or by its
 	// own stored login (isolated).
 	Isolated bool `json:"isolated"`
+	// StaleIdentity lists the Anthropic account state (oauthAccount, cached
+	// feature flags) an isolated playbook with no login of its own still
+	// carries from a non-isolated past; the next launch removes it. Empty
+	// otherwise.
+	StaleIdentity []string `json:"stale_identity,omitempty"`
 	// HasGrant reports whether the store (through a link) holds claudeAiOauth.
 	HasGrant bool `json:"has_grant"`
 	// ExpiresAt is the grant's expiry, zero when unknown. Marshalled by
@@ -202,6 +207,9 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	}
 
 	// Daemon hint.
+	if r.Isolated && r.Mode == ModeIsolated && !r.HasGrant {
+		r.StaleIdentity = StaleIdentityState(configDir)
+	}
 	if data, err := os.ReadFile(filepath.Join(configDir, "daemon-auth-status.json")); err == nil {
 		var d struct {
 			Status string `json:"status"`
@@ -248,6 +256,8 @@ func (r Report) NeedsAttention() string {
 		return ""
 	case r.ReauthRequired:
 		return "re-auth required"
+	case !r.HasGrant && len(r.StaleIdentity) > 0:
+		return "no login; stale account state, purged at launch"
 	case !r.HasGrant:
 		return "no login"
 	case r.Expired:
