@@ -103,15 +103,18 @@ npx cpb-cli --version
 (requires the package to be published to npm — see below if it is not).
 
 Straight from the repo, no publish needed — but npm 12+ refuses git
-packages by default (`EALLOWGIT`), so allow GitHub explicitly once:
+packages by default (`EALLOWGIT`). Opt in once — the value is an enum
+(`all` / `none` / `root`), and `root` is enough: it allows git only for
+packages you name directly, never transitive dependencies:
 
 ```bash
-npm config set allow-git github.com
+npm config set allow-git root
 npx github:ramazanpolat/claude-playbooks --version
 ```
 
 One-off without touching config: prefix with
-`npm_config_allow_git=github.com`. Remote-tarball URLs are blocked the
+`npm_config_allow_git=root`. Revert with `npm config delete allow-git`.
+Remote-tarball URLs are blocked the
 same way, so there is no URL form that works without this opt-in.
 
 The first run bootstraps a normal install: it downloads the release
