@@ -217,3 +217,43 @@ func TestReceiptNormalizesPathsAndKeepsFieldsVerbatim(t *testing.T) {
 		t.Fatal("absolute lookup from another cwd missed the relative record")
 	}
 }
+
+// A launcher directory spelled with different case on a case-insensitive
+// filesystem is the same directory: attribution and unrecord must agree.
+func TestReceiptMatchesCaseVariantDirectory(t *testing.T) {
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	base := t.TempDir()
+	lower := filepath.Join(base, "bin")
+	upper := filepath.Join(base, "BIN")
+	if err := os.MkdirAll(lower, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(upper); err != nil {
+		t.Skip("case-sensitive filesystem: nothing to reconcile")
+	}
+	link := filepath.Join(lower, "cmd")
+	if err := os.Symlink("/nonexistent/target", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := record(link, "/root", "pb"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := Attribution(filepath.Join(upper, "cmd")); !ok {
+		t.Fatal("case variant of the launcher directory not matched while the link exists")
+	}
+	if err := record(filepath.Join(upper, "cmd"), "/root", "pb"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 1 {
+		t.Fatalf("re-record through a case variant duplicated the line: %v", got)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := unrecord(filepath.Join(upper, "cmd")); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 0 {
+		t.Fatalf("unrecord through a case variant after removal missed: %v", got)
+	}
+}

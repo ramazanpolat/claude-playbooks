@@ -124,9 +124,34 @@ func cleanLine(line string) string {
 	return strings.TrimLeft(line, " ")
 }
 
-// sameLauncher reports whether two launcher paths name the same link.
+// sameLauncher reports whether two launcher paths name the same directory
+// entry: by normalized spelling first; else, when both links exist, by
+// their own file identity (a case-insensitive filesystem spells one entry
+// several ways); else by the identity of their directories with the same
+// link name, for a link already removed. Two names differing only in case
+// are never equated on the strength of spelling alone.
 func sameLauncher(a, b string) bool {
-	return normalizeLauncherPath(a) == normalizeLauncherPath(b)
+	na, nb := normalizeLauncherPath(a), normalizeLauncherPath(b)
+	if na == nb {
+		return true
+	}
+	if ia, err := os.Lstat(na); err == nil {
+		if ib, err := os.Lstat(nb); err == nil {
+			return os.SameFile(ia, ib)
+		}
+	}
+	if filepath.Base(na) != filepath.Base(nb) {
+		return false
+	}
+	da, err := os.Stat(filepath.Dir(na))
+	if err != nil {
+		return false
+	}
+	db, err := os.Stat(filepath.Dir(nb))
+	if err != nil {
+		return false
+	}
+	return os.SameFile(da, db)
 }
 
 // entryPath is the launcher path of a receipt line: everything before the
