@@ -206,13 +206,13 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		r.Store = StoreAbsent
 	}
 
-	// Daemon hint.
 	// The pending removal is judged the way the launch will see it: the
 	// isolated launch detaches a symlinked (shared) store first, so a grant
 	// reached only through that link does not count as this playbook's own.
 	if r.Isolated && r.Mode == ModeIsolated && (!r.HasGrant || r.Store == StoreSymlink) {
 		r.StaleIdentity = StaleIdentityState(configDir)
 	}
+	// Daemon hint.
 	if data, err := os.ReadFile(filepath.Join(configDir, "daemon-auth-status.json")); err == nil {
 		var d struct {
 			Status string `json:"status"`
