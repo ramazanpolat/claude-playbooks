@@ -1115,3 +1115,34 @@ func TestRenameReattributesAliasEqualToOldName(t *testing.T) {
 		t.Fatalf("Alias line still promises removal:\n%s", out)
 	}
 }
+
+// On a case-insensitive filesystem two playbooks can address one directory
+// entry under differently-cased names; deleting one must not take the
+// other's command with it.
+func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "one", &manifest.Manifest{Alias: "Foo"})
+	writePlaybook(t, root, "two", &manifest.Manifest{Alias: "foo"})
+	if _, err := launcher.Write(config.LauncherDir, "Foo", attributedRoot(), "one"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(config.LauncherDir, "foo")); err != nil {
+		t.Skip("case-sensitive filesystem: the names are distinct entries")
+	}
+	if _, err := launcher.Write(config.LauncherDir, "foo", attributedRoot(), "two"); err != nil {
+		t.Fatal(err)
+	}
+	deleteYes = true
+	out := captureStdout(t, func() {
+		if err := runDelete(nil, []string{"two"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "Foo"); !exists {
+		t.Fatal("deleting two removed the entry one addresses as Foo")
+	}
+	if !strings.Contains(out, `still addresses playbook "one"`) {
+		t.Fatalf("claim by case-folded name not reported:\n%s", out)
+	}
+}

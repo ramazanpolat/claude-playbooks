@@ -199,6 +199,35 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 	}
 }
 
+// launcherClaimedByIdentity reports the name of another playbook whose own
+// command name resolves to the same directory entry as dir/n, "" when
+// none. Same-spelled names are the registry's business (commandNameOwner);
+// this catches the spellings a case-insensitive filesystem folds together.
+func launcherClaimedByIdentity(dir, n, exceptName string) (string, error) {
+	mine, err := os.Lstat(filepath.Join(dir, n))
+	if err != nil {
+		return "", nil // no link to protect
+	}
+	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+	if err != nil {
+		return "", err
+	}
+	for _, pb := range pbs {
+		if pb.Name == exceptName {
+			continue
+		}
+		for _, name := range launcherNamesFor(pb) {
+			if name == n {
+				continue
+			}
+			if theirs, err := os.Lstat(filepath.Join(dir, name)); err == nil && os.SameFile(mine, theirs) {
+				return pb.Name, nil
+			}
+		}
+	}
+	return "", nil
+}
+
 type launcherAction int
 
 const (
@@ -227,6 +256,15 @@ func launcherFate(dir, n, playbookName string) launcherPlan {
 	}
 	if owner != nil {
 		return launcherPlan{action: fateClaimed, owner: owner.Name, prompt: fmt.Sprintf("launcher kept; still addresses playbook %q", owner.Name)}
+	}
+	// The registry compares names literally, but a case-insensitive
+	// filesystem makes "Foo" and "foo" one directory entry: a launcher
+	// another playbook addresses under a differently-cased name is that
+	// playbook's link too, and must not go with this one.
+	if other, oerr := launcherClaimedByIdentity(dir, n, playbookName); oerr != nil {
+		return launcherPlan{action: fateUnknown, err: oerr, prompt: "launcher kept; ownership could not be verified"}
+	} else if other != "" {
+		return launcherPlan{action: fateClaimed, owner: other, prompt: fmt.Sprintf("launcher kept; still addresses playbook %q", other)}
 	}
 	if r, p, ok := launcher.Attribution(filepath.Join(dir, n)); ok && p == playbookName && samePath(r, attributedRoot()) {
 		return launcherPlan{action: fateRemove, prompt: "launcher will be removed"}
