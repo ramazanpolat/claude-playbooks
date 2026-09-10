@@ -535,7 +535,7 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Alias: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := launcher.Write(config.LauncherDir, "x"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "x", "", ""); err != nil {
 		t.Fatal(err)
 	}
 

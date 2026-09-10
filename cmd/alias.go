@@ -177,7 +177,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			if _, _, foreign := launcher.Lookup(ldir, newAlias); foreign {
 				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", newAlias)
 			}
-			lpath, werr := launcher.Write(ldir, newAlias)
+			lpath, werr := launcher.Write(ldir, newAlias, attributedRoot(), pb.Name)
 			if werr != nil {
 				return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
 			}
@@ -209,7 +209,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			if derr != nil {
 				return fmt.Errorf("no launcher written: %w", derr)
 			}
-			lpath, werr := launcher.Write(ldir, newAlias)
+			lpath, werr := launcher.Write(ldir, newAlias, attributedRoot(), pb.Name)
 			if werr != nil {
 				return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
 			}
@@ -264,7 +264,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		// ours in place, and deleting it on rollback would destroy a link
 		// that predates this command.
 		_, newExisted, _ := launcher.Lookup(ldir, newAlias)
-		lpath, werr := launcher.Write(ldir, newAlias)
+		lpath, werr := launcher.Write(ldir, newAlias, attributedRoot(), pb.Name)
 		if werr != nil {
 			restoreManifest()
 			return fmt.Errorf("could not write launcher %q (alias unchanged): %w", newAlias, werr)

@@ -239,6 +239,25 @@ if phase_enabled p4; then
   p4 delete fx -y >/dev/null 2>&1 || rc=1
   [ ! -d "$PB/fx" ] || rc=1
   report "p4 info/check/delete" $rc
+
+  # launchers: delete removes the launcher it created for that playbook in
+  # the default root (receipt attribution) and keeps a hand-made one with a
+  # hint. Launcher mutations only run against the default root, so this
+  # block addresses $H/.claude-playbooks directly.
+  rc=0
+  LD="$SB/launchers"; mkdir -p "$LD"
+  pd() { CLAUDE_LAUNCHER_DIR="$LD" CLAUDE_LAUNCHER_RECEIPT="$SB/receipt" "$BIN" --playbooks-dir "$H/.claude-playbooks" "$@"; }
+  pd create lp --alias lpcmd >/dev/null 2>&1 || rc=1
+  [ -L "$LD/lpcmd" ] || rc=1
+  grep -q "lpcmd" "$SB/receipt" 2>/dev/null || rc=1
+  pd delete lp -y 2>/dev/null | grep -q 'Removed command "lpcmd"' || rc=1
+  [ ! -e "$LD/lpcmd" ] || rc=1
+  grep -q "lpcmd" "$SB/receipt" 2>/dev/null && rc=1
+  pd create hm --no-alias >/dev/null 2>&1 || rc=1
+  ln -s "$BIN" "$LD/hm"
+  pd delete hm -y 2>/dev/null | grep -q 'Kept command "hm"' || rc=1
+  [ -L "$LD/hm" ] || rc=1
+  report "p4 launcher receipt on delete" $rc
   if [ -n "$SCRIPT_HOME" ]; then HOME="$SCRIPT_HOME"; export HOME; fi
 fi
 

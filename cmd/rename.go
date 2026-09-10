@@ -217,32 +217,47 @@ func runRename(cmd *cobra.Command, args []string) error {
 		// delete): a name still addressed after the rename — a linked
 		// playbook whose shared alias is the old name, or another playbook
 		// whose manifest alias equals it — keeps its launcher.
-		removeUnclaimedLaunchers([]string{oldName})
+		removeUnclaimedLaunchers([]string{oldName}, oldName)
 		switch {
 		case renameNoAlias:
 			// An alias-named link resolves through the manifest, which was
 			// cleared — retire it too (unless someone else claims it), or
 			// --no-alias leaves a working command behind.
 			if oldManifestAlias != "" {
-				removeUnclaimedLaunchers([]string{oldManifestAlias})
+				removeUnclaimedLaunchers([]string{oldManifestAlias}, oldName)
 			}
 		case renameAlias != "":
 			// The previous alias no longer resolves through this playbook
 			// once the manifest changes — retire its link too, unless
 			// another playbook claims it.
 			if oldManifestAlias != "" && oldManifestAlias != renameAlias {
-				removeUnclaimedLaunchers([]string{oldManifestAlias})
+				removeUnclaimedLaunchers([]string{oldManifestAlias}, oldName)
 			}
-			if _, werr := launcher.Write(ldir, renameAlias); werr != nil {
+			if _, werr := launcher.Write(ldir, renameAlias, attributedRoot(), newName); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", renameAlias, werr)
 			} else {
 				fmt.Printf("Command %q now runs %q\n", renameAlias, newName)
 			}
 		default:
-			if _, werr := launcher.Write(ldir, newName); werr != nil {
+			if _, werr := launcher.Write(ldir, newName, attributedRoot(), newName); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", newName, werr)
 			} else {
 				fmt.Printf("Command %q now runs %q\n", newName, newName)
+			}
+		}
+		// Whatever launcher still addresses the renamed playbook, a retained
+		// manifest alias included (a linked playbook's, or one equal to the
+		// old name), keeps working untouched but must now be attributed to
+		// the NEW name, or a later delete of the renamed playbook would keep
+		// it. Write on an identical existing link only re-records.
+		if renamed, rerr := playbook.Find(config.ResolvePlaybooksDir(), newName); rerr == nil && renamed != nil {
+			for _, n := range launcherNamesFor(renamed) {
+				if _, exists, foreign := launcher.Lookup(ldir, n); !exists || foreign {
+					continue
+				}
+				if _, werr := launcher.Write(ldir, n, attributedRoot(), newName); werr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not re-record launcher %q for %q: %v\n", n, newName, werr)
+				}
 			}
 		}
 	}

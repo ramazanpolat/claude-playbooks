@@ -59,9 +59,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if !deleteYes {
-		aliasInfo := "(no alias)"
+		aliasInfo := "(none)"
 		if a := pb.Alias(); a != "" {
-			aliasInfo = fmt.Sprintf("%s (its launcher will be removed)", a)
+			aliasInfo = a // the alias's launcher, if any, gets its own Command line
 		}
 		deletePath := pb.RootPath
 		if deletePath == "" {
@@ -78,7 +78,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 				for _, n := range launcherNamesFor(pb) {
 					if _, exists, foreign := launcher.Lookup(ldir, n); exists && !foreign {
-						fmt.Printf("Command:  %s (launcher kept; removal hint printed after delete)\n", n)
+						fmt.Printf("Command:  %s (%s)\n", n, launcherFate(ldir, n, pb.Name).prompt)
 					}
 				}
 			}
@@ -118,7 +118,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
-	removeUnclaimedLaunchers(names)
+	removeUnclaimedLaunchers(names, pb.Name)
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
 	return nil
 }
@@ -153,19 +153,20 @@ func deleteOrphan(playbooksDir, name, path string) error {
 	if err := removeAny(path); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", path, err)
 	}
-	removeUnclaimedLaunchers([]string{name})
+	removeUnclaimedLaunchers([]string{name}, name)
 	fmt.Printf("Deleted %q.\n", name)
 	return nil
 }
 
-// removeUnclaimedLaunchers retires the launcher symlinks for the given
-// command names after a mutation. A name still resolving in the visible
-// registry keeps its launcher outright. An unclaimed name's launcher is
-// ALSO retained — a stateless symlink may be serving a playbook in another
-// registry root selected via environment or flag, which is unenumerable
-// from here — but with a manual-removal hint: invoking it without such a
-// root fails loudly as stale, so retention is noisy, never silently wrong.
-func removeUnclaimedLaunchers(names []string) {
+// removeUnclaimedLaunchers retires the launchers named for a playbook that
+// is going away. A name another playbook still claims is kept outright. A
+// launcher the receipt attributes to THIS root and THIS playbook was
+// written by this tool for exactly the thing being removed, so it goes,
+// receipt line included. Anything else (hand-made, written before the
+// receipt carried attribution, or attributed to another root or playbook)
+// is kept with a manual hint: a stateless symlink may be serving something
+// this process cannot see.
+func removeUnclaimedLaunchers(names []string, playbookName string) {
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none removed.\n")
 		return
@@ -180,12 +181,95 @@ func removeUnclaimedLaunchers(names []string) {
 		if !exists || foreign {
 			continue
 		}
-		if owner, oerr := commandNameOwner(n, ""); oerr == nil && owner != nil {
-			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, owner.Name)
+		fate := launcherFate(dir, n, playbookName)
+		switch fate.action {
+		case fateClaimed:
+			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, fate.owner)
+		case fateUnknown:
+			fmt.Fprintf(os.Stderr, "Warning: kept command %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
+		case fateRemove:
+			if _, rerr := launcher.Remove(dir, n); rerr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", n, rerr)
+				continue
+			}
+			fmt.Printf("Removed command %q\n", n)
+		default:
+			fmt.Printf("Kept command %q — not recorded as this playbook's own launcher, and launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
+		}
+	}
+}
+
+// launcherClaimedByIdentity reports the name of another playbook whose own
+// command name resolves to the same directory entry as dir/n, "" when
+// none. Same-spelled names are the registry's business (commandNameOwner);
+// this catches the spellings a case-insensitive filesystem folds together.
+func launcherClaimedByIdentity(dir, n, exceptName string) (string, error) {
+	mine, err := os.Lstat(filepath.Join(dir, n))
+	if err != nil {
+		return "", nil // no link to protect
+	}
+	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+	if err != nil {
+		return "", err
+	}
+	for _, pb := range pbs {
+		if pb.Name == exceptName {
 			continue
 		}
-		fmt.Printf("Kept command %q — launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
+		for _, name := range launcherNamesFor(pb) {
+			if name == n {
+				continue
+			}
+			if theirs, err := os.Lstat(filepath.Join(dir, name)); err == nil && os.SameFile(mine, theirs) {
+				return pb.Name, nil
+			}
+		}
 	}
+	return "", nil
+}
+
+type launcherAction int
+
+const (
+	fateKeepHint launcherAction = iota // unattributed, or attributed elsewhere: kept, hint printed
+	fateClaimed                        // another playbook still claims the name: kept silently
+	fateRemove                         // this tool wrote it for this playbook in this root: removed
+	fateUnknown                        // ownership could not be verified: kept, warning
+)
+
+type launcherPlan struct {
+	action launcherAction
+	owner  string // the claiming playbook, for fateClaimed
+	err    error  // the discovery failure, for fateUnknown
+	prompt string // the confirmation-prompt phrasing
+}
+
+// launcherFate decides what delete (or rename, for a name left behind) does
+// with the launcher dir/n once playbookName is gone, so the confirmation
+// prompt and the action itself cannot disagree. Discovery failing is not
+// "unclaimed": the launcher is kept. The receipt's root is compared
+// canonically, like every root comparison in this package.
+func launcherFate(dir, n, playbookName string) launcherPlan {
+	owner, oerr := commandNameOwner(n, playbookName)
+	if oerr != nil {
+		return launcherPlan{action: fateUnknown, err: oerr, prompt: "launcher kept; ownership could not be verified"}
+	}
+	if owner != nil {
+		return launcherPlan{action: fateClaimed, owner: owner.Name, prompt: fmt.Sprintf("launcher kept; still addresses playbook %q", owner.Name)}
+	}
+	// The registry compares names literally, but a case-insensitive
+	// filesystem makes "Foo" and "foo" one directory entry: a launcher
+	// another playbook addresses under a differently-cased name is that
+	// playbook's link too, and must not go with this one.
+	if other, oerr := launcherClaimedByIdentity(dir, n, playbookName); oerr != nil {
+		return launcherPlan{action: fateUnknown, err: oerr, prompt: "launcher kept; ownership could not be verified"}
+	} else if other != "" {
+		return launcherPlan{action: fateClaimed, owner: other, prompt: fmt.Sprintf("launcher kept; still addresses playbook %q", other)}
+	}
+	if r, p, ok := launcher.Attribution(filepath.Join(dir, n)); ok && p == playbookName && samePath(r, attributedRoot()) {
+		return launcherPlan{action: fateRemove, prompt: "launcher will be removed"}
+	}
+	return launcherPlan{action: fateKeepHint, prompt: "launcher kept; removal hint printed after delete"}
 }
 
 func removeAny(path string) error {
