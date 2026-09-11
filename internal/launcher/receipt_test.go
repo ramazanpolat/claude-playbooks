@@ -3,6 +3,7 @@ package launcher
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +25,7 @@ func TestWriteRecordsAndRemoveUnrecords(t *testing.T) {
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir := t.TempDir()
 
-	path, err := Write(dir, "recorded", "", "")
+	path, err := Write(dir, "recorded")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func TestWriteRecordsAndRemoveUnrecords(t *testing.T) {
 	}
 
 	// Re-writing the identical link must not duplicate the entry.
-	if _, err := Write(dir, "recorded", "", ""); err != nil {
+	if _, err := Write(dir, "recorded"); err != nil {
 		t.Fatal(err)
 	}
 	if got := Recorded(); len(got) != 1 {
@@ -70,7 +71,7 @@ func TestRemoveReceiptCleansStateDir(t *testing.T) {
 	dir := t.TempDir()
 	rp := filepath.Join(dir, "state", "launchers")
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", rp)
-	if err := record("/x/y", "", ""); err != nil {
+	if err := record("/x/y"); err != nil {
 		t.Fatal(err)
 	}
 	RemoveReceipt()
@@ -82,97 +83,37 @@ func TestRemoveReceiptCleansStateDir(t *testing.T) {
 	}
 }
 
-// Attribution round-trips, is replaced on re-record, and is absent for a
-// path-only (pre-v3.10.1 or unattributed) line, which Recorded still lists.
-func TestReceiptAttribution(t *testing.T) {
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	if err := record("/l/a", "/root", "pb"); err != nil {
-		t.Fatal(err)
-	}
-	if err := record("/l/b", "", ""); err != nil {
-		t.Fatal(err)
-	}
-	if r, p, ok := Attribution("/l/a"); !ok || r != "/root" || p != "pb" {
-		t.Fatalf("attribution of /l/a = %q %q %v", r, p, ok)
-	}
-	if _, _, ok := Attribution("/l/b"); ok {
-		t.Fatal("unattributed line claimed an owner")
-	}
-	if _, _, ok := Attribution("/l/none"); ok {
-		t.Fatal("unknown path claimed an owner")
-	}
-	if got := Recorded(); len(got) != 2 || got[0] != "/l/a" || got[1] != "/l/b" {
-		t.Fatalf("Recorded = %v", got)
-	}
-	// re-record replaces the attribution in place, once
-	if err := record("/l/a", "/root2", "pb2"); err != nil {
-		t.Fatal(err)
-	}
-	if r, p, _ := Attribution("/l/a"); r != "/root2" || p != "pb2" {
-		t.Fatalf("attribution not replaced: %q %q", r, p)
-	}
-	if got := Recorded(); len(got) != 2 {
-		t.Fatalf("duplicate line after re-record: %v", got)
-	}
-	// a hand-edited old-format file is tolerated
-	if err := os.WriteFile(ReceiptPath(), []byte("/old/one\n/l/a\t/root\tpb\n\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := Recorded(); len(got) != 2 || got[0] != "/old/one" {
-		t.Fatalf("old format: %v", got)
-	}
-	if _, _, ok := Attribution("/old/one"); ok {
-		t.Fatal("old-format line claimed an owner")
-	}
-	if err := unrecord("/l/a"); err != nil {
-		t.Fatal(err)
-	}
-	if got := Recorded(); len(got) != 1 {
-		t.Fatalf("unrecord by path: %v", got)
-	}
-}
-
-// Field and line separators never enter the receipt: a name with a tab is
-// not a valid launcher name, a root with one leaves the line unattributed,
-// a path with one is refused outright.
+// Line separators never enter the receipt: a name with a tab is not a
+// valid launcher name, a path with one is refused outright, even when the
+// tab arrives through the working directory.
 func TestReceiptRefusesSeparators(t *testing.T) {
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	if err := ValidateName("a\tb"); err == nil {
 		t.Fatal("tab accepted in a command name")
 	}
-	if err := record("/l/tab\tpath", "/root", "pb"); err == nil {
+	if err := record("/l/tab\tpath"); err == nil {
 		t.Fatal("path with a tab recorded")
 	}
-	// a separator smuggled in through the working directory is caught too
+	if got := Recorded(); len(got) != 0 {
+		t.Fatalf("something recorded: %v", got)
+	}
 	tabbed := filepath.Join(t.TempDir(), "tab\tdir")
 	if err := os.MkdirAll(tabbed, 0o755); err == nil {
 		wd, _ := os.Getwd()
 		if err := os.Chdir(tabbed); err == nil {
 			t.Cleanup(func() { _ = os.Chdir(wd) })
-			if err := record("rel", "/root", "pb"); err == nil {
+			if err := record("rel"); err == nil {
 				t.Fatal("relative path under a tabbed working directory recorded")
 			}
 			_ = os.Chdir(wd)
 		}
 	}
-	if got := Recorded(); len(got) != 0 {
-		t.Fatalf("something recorded: %v", got)
-	}
-	if err := record("/l/ok", "/ro\tot", "pb"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok := Attribution("/l/ok"); ok {
-		t.Fatal("root with a tab attributed")
-	}
-	if got := Recorded(); len(got) != 1 || got[0] != "/l/ok" {
-		t.Fatalf("Recorded = %v", got)
-	}
 }
 
 // Launcher paths are matched in a normalized form (absolute, directory
-// resolved), and attributed fields read back verbatim, trailing space
-// included.
-func TestReceiptNormalizesPathsAndKeepsFieldsVerbatim(t *testing.T) {
+// resolved), persisted absolute, and a legacy attributed line (v3.10.1) is
+// still read by its path.
+func TestReceiptNormalizesPathsAndReadsLegacyLines(t *testing.T) {
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	real := filepath.Join(t.TempDir(), "bin")
 	if err := os.MkdirAll(real, 0o755); err != nil {
@@ -182,44 +123,50 @@ func TestReceiptNormalizesPathsAndKeepsFieldsVerbatim(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := record(filepath.Join(link, "cmd"), "/root", "pb "); err != nil {
+	if err := record(filepath.Join(link, "cmd")); err != nil {
 		t.Fatal(err)
 	}
-	if r, p, ok := Attribution(filepath.Join(real, "cmd")); !ok || r != "/root" || p != "pb " {
-		t.Fatalf("attribution through the resolved dir = %q %q %v", r, p, ok)
+	if err := record(filepath.Join(real, "cmd")); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 1 {
+		t.Fatalf("the same launcher through two spellings recorded twice: %v", got)
 	}
 	wd, _ := os.Getwd()
 	if err := os.Chdir(real); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
-	if _, _, ok := Attribution("cmd"); !ok {
-		t.Fatal("relative launcher path not matched")
-	}
 	if err := unrecord("./cmd"); err != nil {
 		t.Fatal(err)
 	}
 	if got := Recorded(); len(got) != 0 {
 		t.Fatalf("unrecord by relative path missed: %v", got)
 	}
-	// A relative path is persisted absolute, so a reader in another
-	// working directory still finds it.
-	if err := record("./rel", "/root", "pb"); err != nil {
+	if err := record("./rel"); err != nil {
 		t.Fatal(err)
 	}
 	if got := Recorded(); len(got) != 1 || !filepath.IsAbs(got[0]) || filepath.Base(got[0]) != "rel" {
 		t.Fatalf("relative path persisted as %v", got)
 	}
-	if err := os.Chdir(wd); err != nil {
+	// a v3.10.1 line with attribution fields is read by its path and rewritten path-only
+	if err := os.WriteFile(ReceiptPath(), []byte("/old/one\t/root\tpb\n/old/two\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok := Attribution(filepath.Join(real, "rel")); !ok {
-		t.Fatal("absolute lookup from another cwd missed the relative record")
+	if got := Recorded(); len(got) != 2 || got[0] != "/old/one" || got[1] != "/old/two" {
+		t.Fatalf("legacy lines: %v", got)
+	}
+	if err := record("/old/one"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(ReceiptPath())
+	if strings.Contains(string(data), "\t") {
+		t.Fatalf("legacy attribution survived a re-record:\n%s", data)
 	}
 }
 
 // A launcher directory spelled with different case on a case-insensitive
-// filesystem is the same directory: attribution and unrecord must agree.
+// filesystem is the same directory: record and unrecord must agree.
 func TestReceiptMatchesCaseVariantDirectory(t *testing.T) {
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	base := t.TempDir()
@@ -235,13 +182,10 @@ func TestReceiptMatchesCaseVariantDirectory(t *testing.T) {
 	if err := os.Symlink("/nonexistent/target", link); err != nil {
 		t.Fatal(err)
 	}
-	if err := record(link, "/root", "pb"); err != nil {
+	if err := record(link); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok := Attribution(filepath.Join(upper, "cmd")); !ok {
-		t.Fatal("case variant of the launcher directory not matched while the link exists")
-	}
-	if err := record(filepath.Join(upper, "cmd"), "/root", "pb"); err != nil {
+	if err := record(filepath.Join(upper, "cmd")); err != nil {
 		t.Fatal(err)
 	}
 	if got := Recorded(); len(got) != 1 {

@@ -10,7 +10,7 @@ import (
 
 func TestWriteAndList(t *testing.T) {
 	dir := t.TempDir()
-	path, err := Write(dir, "demo", "", "")
+	path, err := Write(dir, "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,24 +39,24 @@ func TestWriteRefusesForeignFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "taken"), []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "taken", "", ""); err == nil {
+	if _, err := Write(dir, "taken"); err == nil {
 		t.Fatal("expected ErrTaken for a regular file")
 	}
 	// A symlink to something else is just as foreign.
 	if err := os.Symlink("/bin/sh", filepath.Join(dir, "shlink")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "shlink", "", ""); err == nil {
+	if _, err := Write(dir, "shlink"); err == nil {
 		t.Fatal("expected ErrTaken for a foreign symlink")
 	}
 }
 
 func TestWriteRefreshesOwnLink(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Write(dir, "demo", "", ""); err != nil {
+	if _, err := Write(dir, "demo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "demo", "", ""); err != nil {
+	if _, err := Write(dir, "demo"); err != nil {
 		t.Fatalf("refresh of own link failed: %v", err)
 	}
 	entries, _ := List(dir)
@@ -68,7 +68,7 @@ func TestWriteRefreshesOwnLink(t *testing.T) {
 func TestWriteRejectsBadAndReservedNames(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"", ".", "..", "a/b", "cpb", "claude-playbook"} {
-		if _, err := Write(dir, name, "", ""); err == nil {
+		if _, err := Write(dir, name); err == nil {
 			t.Errorf("name %q accepted", name)
 		}
 	}
@@ -85,7 +85,7 @@ func TestLookupAndRemove(t *testing.T) {
 	if _, _, foreign := Lookup(dir, "foreign"); !foreign {
 		t.Fatal("foreign file not flagged")
 	}
-	if _, err := Write(dir, "ours", "", ""); err != nil {
+	if _, err := Write(dir, "ours"); err != nil {
 		t.Fatal(err)
 	}
 	if e, exists, foreign := Lookup(dir, "ours"); !exists || foreign || e.CmdName != "ours" {
@@ -115,7 +115,7 @@ func TestListIgnoresForeignEntries(t *testing.T) {
 	if err := os.Symlink("/bin/sh", filepath.Join(dir, "shlink")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Write(dir, "mine", "", ""); err != nil {
+	if _, err := Write(dir, "mine"); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := List(dir)
@@ -138,7 +138,7 @@ func TestConcurrentWritesSameName(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := Write(dir, "shared", "", ""); err == nil {
+			if _, err := Write(dir, "shared"); err == nil {
 				atomic.AddInt32(&wins, 1)
 			}
 		}()

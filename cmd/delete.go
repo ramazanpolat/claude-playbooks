@@ -159,13 +159,10 @@ func deleteOrphan(playbooksDir, name, path string) error {
 }
 
 // removeUnclaimedLaunchers retires the launchers named for a playbook that
-// is going away. A name another playbook still claims is kept outright. A
-// launcher the receipt attributes to THIS root and THIS playbook was
-// written by this tool for exactly the thing being removed, so it goes,
-// receipt line included. Anything else (hand-made, written before the
-// receipt carried attribution, or attributed to another root or playbook)
-// is kept with a manual hint: a stateless symlink may be serving something
-// this process cannot see.
+// is going away: a name another playbook still claims (by spelling, or by
+// directory-entry identity on a case-insensitive filesystem) is kept, one
+// whose ownership cannot be verified is kept with a warning, and every
+// other launcher is removed, receipt line included. See launcherFate.
 func removeUnclaimedLaunchers(names []string, playbookName string) {
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; none removed.\n")
@@ -187,14 +184,12 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, fate.owner)
 		case fateUnknown:
 			fmt.Fprintf(os.Stderr, "Warning: kept command %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
-		case fateRemove:
+		default:
 			if _, rerr := launcher.Remove(dir, n); rerr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q: %v\n", n, rerr)
+				fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q (%s): %v\n", n, e.Path, rerr)
 				continue
 			}
 			fmt.Printf("Removed command %q\n", n)
-		default:
-			fmt.Printf("Kept command %q — not recorded as this playbook's own launcher, and launchers may serve other registry roots; remove it manually if unused:\n  rm %s\n", n, e.Path)
 		}
 	}
 }
@@ -231,10 +226,9 @@ func launcherClaimedByIdentity(dir, n, exceptName string) (string, error) {
 type launcherAction int
 
 const (
-	fateKeepHint launcherAction = iota // unattributed, or attributed elsewhere: kept, hint printed
-	fateClaimed                        // another playbook still claims the name: kept silently
-	fateRemove                         // this tool wrote it for this playbook in this root: removed
-	fateUnknown                        // ownership could not be verified: kept, warning
+	fateRemove  launcherAction = iota // nobody else claims the name: removed
+	fateClaimed                       // another playbook still claims the name: kept silently
+	fateUnknown                       // ownership could not be verified: kept, warning
 )
 
 type launcherPlan struct {
@@ -246,9 +240,11 @@ type launcherPlan struct {
 
 // launcherFate decides what delete (or rename, for a name left behind) does
 // with the launcher dir/n once playbookName is gone, so the confirmation
-// prompt and the action itself cannot disagree. Discovery failing is not
-// "unclaimed": the launcher is kept. The receipt's root is compared
-// canonically, like every root comparison in this package.
+// prompt and the action itself cannot disagree. A launcher is a stateless
+// symlink and this tool only ever writes launchers for the default
+// registry root (launcherOpsAllowed), so a launcher named for a playbook
+// leaving that root is that playbook's, unless another playbook claims the
+// name. Discovery failing is not "unclaimed": the launcher is kept.
 func launcherFate(dir, n, playbookName string) launcherPlan {
 	owner, oerr := commandNameOwner(n, playbookName)
 	if oerr != nil {
@@ -266,10 +262,7 @@ func launcherFate(dir, n, playbookName string) launcherPlan {
 	} else if other != "" {
 		return launcherPlan{action: fateClaimed, owner: other, prompt: fmt.Sprintf("launcher kept; still addresses playbook %q", other)}
 	}
-	if r, p, ok := launcher.Attribution(filepath.Join(dir, n)); ok && p == playbookName && samePath(r, attributedRoot()) {
-		return launcherPlan{action: fateRemove, prompt: "launcher will be removed"}
-	}
-	return launcherPlan{action: fateKeepHint, prompt: "launcher kept; removal hint printed after delete"}
+	return launcherPlan{action: fateRemove, prompt: "launcher will be removed"}
 }
 
 func removeAny(path string) error {
