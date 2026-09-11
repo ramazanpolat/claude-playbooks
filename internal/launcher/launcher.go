@@ -209,18 +209,32 @@ func Remove(dir, cmdName string) (bool, error) {
 }
 
 // IsReservedEntry reports whether dir/cmdName is not a playbook launcher
-// candidate at all: a malformed or reserved name, or a directory entry
+// candidate at all: a path-carrying or reserved name, or a directory entry
 // that IS one of the CLI's reserved symlinks under another spelling (a
-// case-insensitive filesystem folds "CPB" and "cpb" into one entry).
+// case-insensitive filesystem folds "CPB" and "cpb" into one entry). The
+// identity test applies only when the directory really lists the
+// reserved spelling: on such a filesystem a lookup of "cpb" would
+// otherwise reach a launcher merely NAMED "CPB" and mistake it for the
+// CLI's own. Names are judged by the removal-side rule, so launchers
+// created under older, looser naming stay removable.
 func IsReservedEntry(dir, cmdName string) bool {
-	if ValidateName(cmdName) != nil {
+	if !singleSegment(cmdName) || ReservedNames[cmdName] {
 		return true
 	}
 	mine, err := os.Lstat(filepath.Join(dir, cmdName))
 	if err != nil {
 		return false
 	}
+	listed := map[string]bool{}
+	if des, err := os.ReadDir(dir); err == nil {
+		for _, de := range des {
+			listed[de.Name()] = true
+		}
+	}
 	for reserved := range ReservedNames {
+		if !listed[reserved] {
+			continue
+		}
 		if theirs, err := os.Lstat(filepath.Join(dir, reserved)); err == nil && os.SameFile(mine, theirs) {
 			return true
 		}
@@ -244,12 +258,23 @@ func isOurs(path, binPath string) bool {
 // ValidateName reports whether cmdName may name a launcher. Exposed so
 // callers can reject an impossible --alias before mutating anything.
 func ValidateName(cmdName string) error {
-	if cmdName == "" || cmdName == "." || cmdName == ".." ||
-		filepath.Base(cmdName) != cmdName || strings.ContainsAny(cmdName, " \t\n\r") {
+	if !singleSegment(cmdName) || strings.ContainsAny(cmdName, " \t\n\r") {
 		return fmt.Errorf("invalid command name %q", cmdName)
 	}
-	if ReservedNames[cmdName] {
-		return fmt.Errorf("command name %q is reserved for the CLI itself", cmdName)
+	// Reserved under any spelling: a case-insensitive filesystem would fold
+	// "CPB" onto the CLI's own cpb symlink.
+	for reserved := range ReservedNames {
+		if strings.EqualFold(cmdName, reserved) {
+			return fmt.Errorf("command name %q is reserved for the CLI itself", cmdName)
+		}
 	}
 	return nil
+}
+
+// singleSegment reports whether cmdName is one directory entry name: not
+// empty, not "." or "..", and carrying no path separator. This is the
+// REMOVAL-side check: what may be created is stricter (ValidateName), and
+// a launcher created under older, looser rules must still be removable.
+func singleSegment(cmdName string) bool {
+	return cmdName != "" && cmdName != "." && cmdName != ".." && filepath.Base(cmdName) == cmdName
 }

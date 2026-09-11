@@ -261,3 +261,41 @@ func TestRemoveClearsCaseVariantLinesAndSparesReserved(t *testing.T) {
 		t.Fatal("reserved symlink gone")
 	}
 }
+
+// Removal judges names by the removal-side rule: a launcher created under
+// older, looser naming (a space in the name) is still removable, "CPB" is
+// no longer creatable, and an entry merely named CPB in a directory with
+// no cpb symlink is not mistaken for the reserved one.
+func TestRemovalSideNamingAndReservedListing(t *testing.T) {
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	dir := t.TempDir()
+	bin, err := BinPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(dir, "two words")
+	if err := os.Symlink(bin, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := record(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := Remove(dir, "two words"); err != nil || !ok {
+		t.Fatalf("legacy launcher not removable: %v %v", ok, err)
+	}
+	if got := Recorded(); len(got) != 0 {
+		t.Fatalf("receipt kept the legacy line: %v", got)
+	}
+	if err := ValidateName("CPB"); err == nil {
+		t.Fatal("a case variant of a reserved name was accepted")
+	}
+	if err := os.Symlink(bin, filepath.Join(dir, "CPB")); err != nil {
+		t.Fatal(err)
+	}
+	if IsReservedEntry(dir, "CPB") {
+		t.Fatal("an entry named CPB with no cpb symlink present was taken for the reserved one")
+	}
+	if ok, err := Remove(dir, "CPB"); err != nil || !ok {
+		t.Fatalf("legacy CPB launcher not removable: %v %v", ok, err)
+	}
+}
