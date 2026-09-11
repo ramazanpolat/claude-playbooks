@@ -77,6 +77,9 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		if launcherOpsAllowed() {
 			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 				for _, n := range launcherNamesFor(pb) {
+					if launcher.ValidateName(n) != nil {
+						continue // the CLI's own reserved symlink is not this playbook's launcher
+					}
 					if _, exists, foreign := launcher.Lookup(ldir, n); exists && !foreign {
 						fmt.Printf("Command:  %s (%s)\n", n, launcherFate(ldir, n, pb.Name).prompt)
 					}
@@ -174,6 +177,9 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 		return
 	}
 	for _, n := range names {
+		if launcher.ValidateName(n) != nil {
+			continue // a reserved or malformed name is never a playbook launcher
+		}
 		e, exists, foreign := launcher.Lookup(dir, n)
 		if !exists || foreign {
 			continue
@@ -185,11 +191,14 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 		case fateUnknown:
 			fmt.Fprintf(os.Stderr, "Warning: kept command %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
 		default:
-			if _, rerr := launcher.Remove(dir, n); rerr != nil {
+			removed, rerr := launcher.Remove(dir, n)
+			if rerr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not remove launcher %q (%s): %v\n", n, e.Path, rerr)
 				continue
 			}
-			fmt.Printf("Removed command %q\n", n)
+			if removed {
+				fmt.Printf("Removed command %q\n", n)
+			}
 		}
 	}
 }

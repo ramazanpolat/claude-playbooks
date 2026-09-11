@@ -220,7 +220,7 @@ func isOurs(path, binPath string) bool {
 // callers can reject an impossible --alias before mutating anything.
 func ValidateName(cmdName string) error {
 	if cmdName == "" || cmdName == "." || cmdName == ".." ||
-		filepath.Base(cmdName) != cmdName || strings.ContainsAny(cmdName, "\t\n\r") {
+		filepath.Base(cmdName) != cmdName || strings.ContainsAny(cmdName, " \t\n\r") {
 		return fmt.Errorf("invalid command name %q", cmdName)
 	}
 	if ReservedNames[cmdName] {

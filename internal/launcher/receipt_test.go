@@ -201,3 +201,20 @@ func TestReceiptMatchesCaseVariantDirectory(t *testing.T) {
 		t.Fatalf("unrecord through a case variant after removal missed: %v", got)
 	}
 }
+
+// Whitespace never enters a command name, and a receipt line keeps a path
+// exactly (leading indentation aside).
+func TestNamesRejectWhitespaceAndLinesKeepPaths(t *testing.T) {
+	for _, bad := range []string{"demo ", " demo", "de mo"} {
+		if err := ValidateName(bad); err == nil {
+			t.Fatalf("whitespace accepted in command name %q", bad)
+		}
+	}
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	if err := os.WriteFile(ReceiptPath(), []byte("  /a/b \n/c/d\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 2 || got[0] != "/a/b " || got[1] != "/c/d" {
+		t.Fatalf("Recorded = %q", got)
+	}
+}

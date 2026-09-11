@@ -1107,3 +1107,41 @@ func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
 		t.Fatalf("claim by case-folded name not reported:\n%s", out)
 	}
 }
+
+// A playbook named like the CLI's reserved command must not have the CLI's
+// own symlink reported, or removed, as its launcher.
+func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	exe, err := launcher.BinPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := filepath.Join(config.LauncherDir, "cpb")
+	if err := os.Symlink(exe, cli); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "cpb", nil)
+	deleteYes = false
+	feedStdin(t, "n\n")
+	out := captureStdout(t, func() {
+		if err := runDelete(nil, []string{"cpb"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "Command:  cpb") {
+		t.Fatalf("reserved symlink presented as the playbook's launcher:\n%s", out)
+	}
+	deleteYes = true
+	out = captureStdout(t, func() {
+		if err := runDelete(nil, []string{"cpb"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, `Removed command "cpb"`) {
+		t.Fatalf("removal of the reserved symlink reported:\n%s", out)
+	}
+	if _, err := os.Lstat(cli); err != nil {
+		t.Fatal("the CLI's own symlink was removed")
+	}
+}

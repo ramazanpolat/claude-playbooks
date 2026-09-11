@@ -92,16 +92,11 @@ func receiptLines() []string {
 	return out
 }
 
-// cleanLine trims a receipt line the way each format allows: a path-only
-// line is trimmed of surrounding whitespace, as it always was; a legacy
-// attributed line (v3.10.1) keeps its fields verbatim, losing only the
-// carriage return of a CRLF file.
+// cleanLine trims a receipt line of leading whitespace and a trailing
+// carriage return (a CRLF file), and nothing else: an absolute path never
+// starts with whitespace, and whatever it ends with is part of it.
 func cleanLine(line string) string {
-	line = strings.TrimRight(line, "\r")
-	if strings.IndexByte(line, '\t') < 0 {
-		return strings.TrimSpace(line)
-	}
-	return strings.TrimLeft(line, " ")
+	return strings.TrimLeft(strings.TrimRight(line, "\r"), " \t")
 }
 
 // sameLauncher reports whether two launcher paths name the same directory
