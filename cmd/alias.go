@@ -300,9 +300,8 @@ func runAlias(cmd *cobra.Command, args []string) error {
 }
 
 // retireAliasLauncher removes the launcher for an alias the user explicitly
-// unregistered. Unlike rename's implicit retirement (retention with a hint),
-// an explicit `alias --remove`/replacement means "this command goes" — but
-// still claim-aware: a name that now addresses another playbook keeps its
+// unregistered, under the same retirement rule delete and rename apply:
+// claim-aware, so a name that now addresses another playbook keeps its
 // launcher, and launcher.Remove only ever deletes a symlink resolving to
 // this binary. Failures are returned, not swallowed: the caller changed the
 // manifest and must be able to roll it back rather than exit 0 with a
