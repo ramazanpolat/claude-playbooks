@@ -9,17 +9,15 @@ import (
 )
 
 // The receipt records the absolute path of every launcher this tool
-// creates, one per line, followed since v3.10.1 by two tab-separated
-// fields: the canonical playbooks root and the playbook name the launcher
-// was written for. Its job is coverage, not authority: it lets uninstall
-// find launchers in directories no heuristic would rediscover (custom
-// --launcher-dir installs) and lets delete recognise the launchers it
-// created for the playbook being deleted, but every entry is verified
-// against the live filesystem before anything is removed, and launchers
-// created before the receipt existed are still found by the resolution
-// scan. An entry whose path the user renamed or deleted by hand simply no
-// longer matches anything and is skipped. A path-only line (pre-v3.10.1,
-// or written with no attribution) carries no ownership claim.
+// creates, one per line. Its job is coverage, not authority: it lets
+// uninstall find launchers in directories no heuristic would rediscover
+// (custom --launcher-dir installs), but every entry is verified against
+// the live filesystem before anything is removed, and launchers created
+// before the receipt existed are still found by the resolution scan. An
+// entry whose path the user renamed or deleted by hand simply no longer
+// matches anything and is skipped. v3.10.1 appended two tab-separated
+// fields (registry root and playbook) to each line; those lines are still
+// read, by their path, and rewritten path-only when touched.
 
 // ReceiptPath returns the receipt file location: $CLAUDE_LAUNCHER_RECEIPT
 // (test seam), else $XDG_STATE_HOME/claude-playbook/launchers, else
@@ -74,23 +72,6 @@ func Recorded() []string {
 	return out
 }
 
-// Attribution reports which playbooks root and playbook the receipt says
-// launcherPath was written for. ok is false for a path the receipt does
-// not know, or knows without attribution (a pre-v3.10.1 line).
-func Attribution(launcherPath string) (root, playbook string, ok bool) {
-	for _, line := range receiptLines() {
-		if !sameLauncher(entryPath(line), launcherPath) {
-			continue
-		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 3 || fields[1] == "" || fields[2] == "" {
-			return "", "", false
-		}
-		return fields[1], fields[2], true
-	}
-	return "", "", false
-}
-
 // receiptLines returns the non-empty lines of the receipt, "" file aside,
 // each passed through cleanLine.
 func receiptLines() []string {
@@ -111,17 +92,11 @@ func receiptLines() []string {
 	return out
 }
 
-// cleanLine trims a receipt line the way each format allows: a path-only
-// line is trimmed of surrounding whitespace, as it always was; an
-// attributed line keeps its fields verbatim (a playbook name may carry
-// trailing whitespace and must read back unchanged), losing only the
-// carriage return of a CRLF file.
+// cleanLine trims a receipt line of leading whitespace and a trailing
+// carriage return (a CRLF file), and nothing else: an absolute path never
+// starts with whitespace, and whatever it ends with is part of it.
 func cleanLine(line string) string {
-	line = strings.TrimRight(line, "\r")
-	if strings.IndexByte(line, '\t') < 0 {
-		return strings.TrimSpace(line)
-	}
-	return strings.TrimLeft(line, " ")
+	return strings.TrimLeft(strings.TrimRight(line, "\r"), " \t")
 }
 
 // sameLauncher reports whether two launcher paths name the same directory
@@ -163,18 +138,6 @@ func entryPath(line string) string {
 	return line
 }
 
-// entryLine renders a receipt line. Attribution is recorded only when
-// both parts are known and neither carries a field or line separator; a
-// launcher written without them stays a path-only line, which claims
-// nothing. (Command names are validated against those characters; a
-// registry root containing one is merely left unattributed.)
-func entryLine(path, root, playbook string) string {
-	if root == "" || playbook == "" || strings.ContainsAny(root+playbook, "\t\n\r") {
-		return path
-	}
-	return path + "\t" + root + "\t" + playbook
-}
-
 // RemoveReceipt deletes the receipt file (and its lock, and the state
 // directory if that leaves it empty). Called by uninstall once the
 // launchers themselves are gone.
@@ -188,27 +151,26 @@ func RemoveReceipt() {
 	os.Remove(filepath.Dir(path)) // fails unless empty — exactly the intent
 }
 
-// record adds path to the receipt with its attribution, replacing an
-// earlier line for the same path so a re-registered launcher carries the
-// current owner; unrecord removes every line for the path. Both are
-// best-effort bookkeeping: they return an error for the caller to warn
-// about, but the launcher operation itself has already succeeded.
-func record(path, root, playbook string) error {
+// record adds path to the receipt, replacing an earlier line for the same
+// launcher (a legacy attributed line included) so no launcher is listed
+// twice; unrecord removes every line for the path. Both are best-effort
+// bookkeeping: they return an error for the caller to warn about, but the
+// launcher operation itself has already succeeded.
+func record(path string) error {
 	// Persisted absolute: a relative `--launcher-dir ./bin` means something
 	// only in the working directory it was given in, and a later reader
 	// runs elsewhere. Symlinks are left as they are (see
 	// normalizeLauncherPath), so Recorded() keeps naming the link the pilot
 	// sees. The separator check runs on the persisted form: the working
-	// directory joined in may carry one too.
+	// directory joined in may carry one too, and a line break or tab would
+	// corrupt the file.
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
 	if strings.ContainsAny(path, "\t\n\r") {
-		// The line format cannot carry it, and a truncated path would
-		// later match nothing or the wrong thing.
 		return fmt.Errorf("launcher path %q contains a tab or line break; not recorded", path)
 	}
-	line := entryLine(path, root, playbook)
+	line := path
 	return editReceipt(func(lines []string) []string {
 		var kept []string
 		replaced := false
@@ -234,6 +196,39 @@ func unrecord(path string) error {
 		var kept []string
 		for _, l := range lines {
 			if !sameLauncher(entryPath(l), path) {
+				kept = append(kept, l)
+			}
+		}
+		return kept
+	})
+}
+
+// recordedMatching returns the stored paths of every receipt line naming
+// the same launcher as path, as they are written in the file.
+func recordedMatching(path string) []string {
+	var out []string
+	for _, l := range receiptLines() {
+		if p := entryPath(l); sameLauncher(p, path) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// unrecordExact removes the lines whose stored path is one of stored,
+// compared as written: the launchers they named may already be gone.
+func unrecordExact(stored []string) error {
+	if len(stored) == 0 {
+		return nil
+	}
+	drop := map[string]bool{}
+	for _, p := range stored {
+		drop[p] = true
+	}
+	return editReceipt(func(lines []string) []string {
+		var kept []string
+		for _, l := range lines {
+			if !drop[entryPath(l)] {
 				kept = append(kept, l)
 			}
 		}

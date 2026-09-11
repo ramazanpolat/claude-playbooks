@@ -74,10 +74,7 @@ func TargetPath() (string, error) {
 // Creation is atomic-exclusive (os.Symlink fails on an existing name); an
 // existing entry is replaced only when it is already a launcher, via a
 // temporary link renamed over the old one so the command never dangles.
-// root and playbook attribute the launcher in the receipt to the registry
-// root and playbook it serves; delete uses that attribution to remove the
-// launchers it created itself. Pass both empty for an unattributed link.
-func Write(dir, cmdName, root, playbook string) (string, error) {
+func Write(dir, cmdName string) (string, error) {
 	if err := ValidateName(cmdName); err != nil {
 		return "", err
 	}
@@ -96,7 +93,7 @@ func Write(dir, cmdName, root, playbook string) (string, error) {
 
 	err = os.Symlink(target, path)
 	if err == nil {
-		receipt(path, root, playbook)
+		receipt(path)
 		return path, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
@@ -109,7 +106,7 @@ func Write(dir, cmdName, root, playbook string) (string, error) {
 		// Identical content, nothing to write. This also makes concurrent
 		// creators converge without coordination. Still recorded: the link
 		// may predate the receipt.
-		receipt(path, root, playbook)
+		receipt(path)
 		return path, nil
 	}
 	// Ours but pointing elsewhere (e.g. at a versioned physical binary from
@@ -128,18 +125,17 @@ func Write(dir, cmdName, root, playbook string) (string, error) {
 			os.Remove(tmp)
 			return "", err
 		}
-		receipt(path, root, playbook)
+		receipt(path)
 		return path, nil
 	}
 	return "", fmt.Errorf("could not refresh launcher %s", path)
 }
 
-// receipt records a written launcher path and the root and playbook it was
-// written for (either empty: no attribution), warning instead of failing:
+// receipt records a written launcher path, warning instead of failing:
 // the symlink already exists, and a working command beats a complete
 // ledger.
-func receipt(path, root, playbook string) {
-	if err := record(path, root, playbook); err != nil {
+func receipt(path string) {
+	if err := record(path); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: launcher created but not recorded in receipt: %v\n", err)
 	}
 }
@@ -185,26 +181,65 @@ func Lookup(dir, cmdName string) (e Entry, exists, foreign bool) {
 }
 
 // Remove deletes the launcher dir/cmdName if it is one. It reports whether
-// a launcher was removed; foreign files are left untouched.
+// a launcher was removed; foreign files and the CLI's own reserved
+// symlinks are left untouched.
 func Remove(dir, cmdName string) (bool, error) {
 	// Reserved or malformed names are never playbook launchers: a crafted
 	// or imported manifest alias like "cpb" must not delete the CLI's own
 	// shortcut symlink (which also resolves to this binary), and a
 	// path-carrying name must not escape the launcher directory.
-	if ValidateName(cmdName) != nil {
+	if IsReservedEntry(dir, cmdName) {
 		return false, nil
 	}
 	e, exists, foreign := Lookup(dir, cmdName)
 	if !exists || foreign {
 		return false, nil
 	}
+	// The receipt lines for this link are found while it still exists:
+	// once unlinked, a line spelled through another case of the name (one
+	// entry on a case-insensitive filesystem) could no longer be matched.
+	stale := recordedMatching(e.Path)
 	if err := os.Remove(e.Path); err != nil {
 		return false, err
 	}
-	if err := unrecord(e.Path); err != nil {
+	if err := unrecordExact(stale); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: launcher removed but receipt not updated: %v\n", err)
 	}
 	return true, nil
+}
+
+// IsReservedEntry reports whether dir/cmdName is not a playbook launcher
+// candidate at all: a path-carrying or reserved name, or a directory entry
+// that IS one of the CLI's reserved symlinks under another spelling (a
+// case-insensitive filesystem folds "CPB" and "cpb" into one entry). The
+// identity test applies only when the directory really lists the
+// reserved spelling: on such a filesystem a lookup of "cpb" would
+// otherwise reach a launcher merely NAMED "CPB" and mistake it for the
+// CLI's own. Names are judged by the removal-side rule, so launchers
+// created under older, looser naming stay removable.
+func IsReservedEntry(dir, cmdName string) bool {
+	if !singleSegment(cmdName) || ReservedNames[cmdName] {
+		return true
+	}
+	mine, err := os.Lstat(filepath.Join(dir, cmdName))
+	if err != nil {
+		return false
+	}
+	listed := map[string]bool{}
+	if des, err := os.ReadDir(dir); err == nil {
+		for _, de := range des {
+			listed[de.Name()] = true
+		}
+	}
+	for reserved := range ReservedNames {
+		if !listed[reserved] {
+			continue
+		}
+		if theirs, err := os.Lstat(filepath.Join(dir, reserved)); err == nil && os.SameFile(mine, theirs) {
+			return true
+		}
+	}
+	return false
 }
 
 // isOurs reports whether path is a symlink resolving to this binary. A
@@ -223,12 +258,23 @@ func isOurs(path, binPath string) bool {
 // ValidateName reports whether cmdName may name a launcher. Exposed so
 // callers can reject an impossible --alias before mutating anything.
 func ValidateName(cmdName string) error {
-	if cmdName == "" || cmdName == "." || cmdName == ".." ||
-		filepath.Base(cmdName) != cmdName || strings.ContainsAny(cmdName, "\t\n\r") {
+	if !singleSegment(cmdName) || strings.ContainsAny(cmdName, " \t\n\r") {
 		return fmt.Errorf("invalid command name %q", cmdName)
 	}
-	if ReservedNames[cmdName] {
-		return fmt.Errorf("command name %q is reserved for the CLI itself", cmdName)
+	// Reserved under any spelling: a case-insensitive filesystem would fold
+	// "CPB" onto the CLI's own cpb symlink.
+	for reserved := range ReservedNames {
+		if strings.EqualFold(cmdName, reserved) {
+			return fmt.Errorf("command name %q is reserved for the CLI itself", cmdName)
+		}
 	}
 	return nil
+}
+
+// singleSegment reports whether cmdName is one directory entry name: not
+// empty, not "." or "..", and carrying no path separator. This is the
+// REMOVAL-side check: what may be created is stricter (ValidateName), and
+// a launcher created under older, looser rules must still be removable.
+func singleSegment(cmdName string) bool {
+	return cmdName != "" && cmdName != "." && cmdName != ".." && filepath.Base(cmdName) == cmdName
 }

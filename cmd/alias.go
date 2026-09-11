@@ -177,7 +177,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			if _, _, foreign := launcher.Lookup(ldir, newAlias); foreign {
 				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", newAlias)
 			}
-			lpath, werr := launcher.Write(ldir, newAlias, attributedRoot(), pb.Name)
+			lpath, werr := launcher.Write(ldir, newAlias)
 			if werr != nil {
 				return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
 			}
@@ -209,7 +209,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 			if derr != nil {
 				return fmt.Errorf("no launcher written: %w", derr)
 			}
-			lpath, werr := launcher.Write(ldir, newAlias, attributedRoot(), pb.Name)
+			lpath, werr := launcher.Write(ldir, newAlias)
 			if werr != nil {
 				return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
 			}
@@ -264,7 +264,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 		// ours in place, and deleting it on rollback would destroy a link
 		// that predates this command.
 		_, newExisted, _ := launcher.Lookup(ldir, newAlias)
-		lpath, werr := launcher.Write(ldir, newAlias, attributedRoot(), pb.Name)
+		lpath, werr := launcher.Write(ldir, newAlias)
 		if werr != nil {
 			restoreManifest()
 			return fmt.Errorf("could not write launcher %q (alias unchanged): %w", newAlias, werr)
@@ -300,9 +300,8 @@ func runAlias(cmd *cobra.Command, args []string) error {
 }
 
 // retireAliasLauncher removes the launcher for an alias the user explicitly
-// unregistered. Unlike rename's implicit retirement (retention with a hint),
-// an explicit `alias --remove`/replacement means "this command goes" — but
-// still claim-aware: a name that now addresses another playbook keeps its
+// unregistered, under the same retirement rule delete and rename apply:
+// claim-aware, so a name that now addresses another playbook keeps its
 // launcher, and launcher.Remove only ever deletes a symlink resolving to
 // this binary. Failures are returned, not swallowed: the caller changed the
 // manifest and must be able to roll it back rather than exit 0 with a

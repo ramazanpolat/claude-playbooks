@@ -15,7 +15,6 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
-	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // feedStdin points os.Stdin at a pipe preloaded with in, so interactive
@@ -139,7 +138,7 @@ func TestListCommandColumnShowsOnlyExistingLaunchers(t *testing.T) {
 	// (rightly) refuses reserved names.
 	writePlaybook(t, root, "withcmd", &manifest.Manifest{Alias: "wc"})
 	writePlaybook(t, root, "nocmd", nil)
-	if _, err := launcher.Write(config.LauncherDir, "wc", "", ""); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "wc"); err != nil {
 		t.Fatal(err)
 	}
 	exe, err := os.Executable()
@@ -376,13 +375,14 @@ func TestDeleteLinkedPlaybookRemovesSymlinkOnly(t *testing.T) {
 	}
 }
 
-// An unclaimed launcher is RETAINED with a manual-removal hint: a stateless
-// symlink may be serving another registry root, so removal stays the user's
-// call. Noisy, never silently wrong.
-func TestDeleteRetainsUnclaimedLauncherWithHint(t *testing.T) {
+// An unclaimed launcher named for the deleted playbook is REMOVED: this tool
+// only writes launchers for the default root, so nothing else can be
+// served by a name nobody in the registry claims.
+func TestDeleteRemovesUnclaimedLauncher(t *testing.T) {
 	sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
-	if _, err := launcher.Write(config.LauncherDir, "victim", "", ""); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
 	}
 	deleteYes = true
@@ -392,11 +392,14 @@ func TestDeleteRetainsUnclaimedLauncherWithHint(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "victim"); !exists || foreign {
-		t.Fatalf("unclaimed launcher should be retained, exists=%v foreign=%v", exists, foreign)
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "victim"); exists {
+		t.Fatal("unclaimed launcher survived the delete of its playbook")
 	}
-	if !strings.Contains(out, "remove it manually") {
-		t.Fatalf("retained launcher should print a manual-removal hint, got:\n%s", out)
+	if !strings.Contains(out, `Removed command "victim"`) {
+		t.Fatalf("removal not reported:\n%s", out)
+	}
+	if got := launcher.Recorded(); len(got) != 0 {
+		t.Fatalf("receipt still lists the removed launcher: %v", got)
 	}
 }
 
@@ -408,7 +411,7 @@ func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 	// "other" claims the command name "victim" via its manifest alias —
 	// the registry, not the symlink, owns command-name ownership.
 	writePlaybook(t, root, "other", &manifest.Manifest{Alias: "victim"})
-	if _, err := launcher.Write(config.LauncherDir, "victim", "", ""); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
 	}
 	deleteYes = true
@@ -935,17 +938,22 @@ func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
 	}
 }
 
-// A launcher the receipt attributes to this root and this playbook was
-// written by this tool for it: delete removes it and its receipt line. One
-// attributed to another root, or to nobody, is kept with the hint.
-func TestDeleteRemovesTheLauncherItCreated(t *testing.T) {
+// Both the name launcher and the alias launcher of the deleted playbook go;
+// a hand-made link named for it goes too (it would only fail loudly as
+// stale afterwards).
+func TestDeleteRemovesNameAliasAndHandMadeLaunchers(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "mine", &manifest.Manifest{Alias: "minecmd"})
-	if _, err := launcher.Write(config.LauncherDir, "minecmd", attributedRoot(), "mine"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "minecmd"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := launcher.Write(config.LauncherDir, "mine", attributedRoot(), "mine"); err != nil {
+	// hand-made: a symlink to the binary, never recorded
+	exe, err := launcher.BinPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(exe, filepath.Join(config.LauncherDir, "mine")); err != nil {
 		t.Fatal(err)
 	}
 	deleteYes = true
@@ -961,40 +969,17 @@ func TestDeleteRemovesTheLauncherItCreated(t *testing.T) {
 		if !strings.Contains(out, `Removed command "`+n+`"`) {
 			t.Fatalf("removal not reported for %q:\n%s", n, out)
 		}
-		if _, _, ok := launcher.Attribution(filepath.Join(config.LauncherDir, n)); ok {
-			t.Fatalf("receipt still attributes %q", n)
-		}
-	}
-
-	// attributed to another root: kept with the hint
-	writePlaybook(t, root, "theirs", nil)
-	if _, err := launcher.Write(config.LauncherDir, "theirs", "/some/other/root", "theirs"); err != nil {
-		t.Fatal(err)
-	}
-	out = captureStdout(t, func() {
-		if err := runDelete(nil, []string{"theirs"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if _, exists, _ := launcher.Lookup(config.LauncherDir, "theirs"); !exists {
-		t.Fatal("launcher of another root removed")
-	}
-	if !strings.Contains(out, "not recorded as this playbook's own launcher") {
-		t.Fatalf("hint missing:\n%s", out)
 	}
 }
 
 // The confirmation prompt states the launcher's fate, the fate is decided
-// once for prompt and action, a discovery failure keeps the launcher, the
-// recorded root is compared canonically, and rename carries a retained
-// alias launcher's attribution to the new name.
+// once for prompt and action, and a discovery failure keeps the launcher.
 func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 
-	// prompt predicts removal for an own launcher; declined delete keeps it
 	writePlaybook(t, root, "own", nil)
-	if _, err := launcher.Write(config.LauncherDir, "own", attributedRoot(), "own"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "own"); err != nil {
 		t.Fatal(err)
 	}
 	deleteYes = false
@@ -1011,27 +996,9 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 		t.Fatal("declined delete removed the launcher")
 	}
 
-	// recorded root spelled through a symlink still matches canonically
-	alias := filepath.Join(t.TempDir(), "root-alias")
-	if err := os.Symlink(root, alias); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := launcher.Write(config.LauncherDir, "own", alias, "own"); err != nil {
-		t.Fatal(err)
-	}
-	deleteYes = true
-	out = captureStdout(t, func() {
-		if err := runDelete(nil, []string{"own"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, `Removed command "own"`) {
-		t.Fatalf("canonically equal root not recognised:\n%s", out)
-	}
-
 	// discovery failure: the launcher is kept with a warning, not removed
 	writePlaybook(t, root, "victim", nil)
-	if _, err := launcher.Write(config.LauncherDir, "victim", attributedRoot(), "victim"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
 	}
 	broken := filepath.Join(root, "broken")
@@ -1041,10 +1008,8 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(broken, manifest.FileName), []byte("name = [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runDelete(nil, []string{"victim"}); err == nil {
-		// delete itself may refuse on a broken sibling; either way the launcher must survive
-		_ = err
-	}
+	deleteYes = true
+	_ = runDelete(nil, []string{"victim"}) // may refuse on the broken sibling; the launcher must survive either way
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "victim"); !exists {
 		t.Fatal("launcher removed although ownership could not be verified")
 	}
@@ -1053,19 +1018,21 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 	}
 }
 
-func TestRenameReattributesRetainedAliasLauncher(t *testing.T) {
+// A retained alias launcher keeps working across a rename, and a later
+// delete of the renamed playbook removes it.
+func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{Alias: "oa"})
-	if _, err := launcher.Write(config.LauncherDir, "oa", attributedRoot(), "old"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "oa"); err != nil {
 		t.Fatal(err)
 	}
 	renameAlias, renameNoAlias = "", false
 	if err := runRename(nil, []string{"old", "new"}); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
-	if _, p, ok := launcher.Attribution(filepath.Join(config.LauncherDir, "oa")); !ok || p != "new" {
-		t.Fatalf("alias launcher attributed to %q (ok=%v), want new", p, ok)
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "oa"); !exists {
+		t.Fatal("alias launcher lost across the rename")
 	}
 	deleteYes = true
 	out := captureStdout(t, func() {
@@ -1078,31 +1045,25 @@ func TestRenameReattributesRetainedAliasLauncher(t *testing.T) {
 	}
 }
 
-// A rename whose manifest alias equals the old name (a link's default) keeps
-// that launcher and must re-attribute it; the prompt's Alias line promises
-// nothing about launchers.
-func TestRenameReattributesAliasEqualToOldName(t *testing.T) {
+// A rename whose manifest alias equals the old name (a link's default)
+// leaves a working command for the new name and none for the old; the
+// prompt's Alias line promises nothing about launchers.
+func TestRenameAliasEqualToOldNameAndPrompt(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{Alias: "old"})
-	if _, err := launcher.Write(config.LauncherDir, "old", attributedRoot(), "old"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "old"); err != nil {
 		t.Fatal(err)
 	}
 	renameAlias, renameNoAlias = "", false
 	if err := runRename(nil, []string{"old", "new"}); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
-	renamed, err := playbook.Find(root, "new")
-	if err != nil || renamed == nil {
-		t.Fatalf("renamed playbook: %v %v", renamed, err)
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "old"); exists {
+		t.Fatal("stale launcher for the old name kept")
 	}
-	for _, n := range launcherNamesFor(renamed) {
-		if _, exists, _ := launcher.Lookup(config.LauncherDir, n); !exists {
-			continue
-		}
-		if _, p, ok := launcher.Attribution(filepath.Join(config.LauncherDir, n)); !ok || p != "new" {
-			t.Fatalf("launcher %q attributed to %q (ok=%v), want new", n, p, ok)
-		}
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "new"); !exists {
+		t.Fatal("no launcher for the new name")
 	}
 	deleteYes = false
 	feedStdin(t, "n\n")
@@ -1124,13 +1085,13 @@ func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "one", &manifest.Manifest{Alias: "Foo"})
 	writePlaybook(t, root, "two", &manifest.Manifest{Alias: "foo"})
-	if _, err := launcher.Write(config.LauncherDir, "Foo", attributedRoot(), "one"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "Foo"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(config.LauncherDir, "foo")); err != nil {
 		t.Skip("case-sensitive filesystem: the names are distinct entries")
 	}
-	if _, err := launcher.Write(config.LauncherDir, "foo", attributedRoot(), "two"); err != nil {
+	if _, err := launcher.Write(config.LauncherDir, "foo"); err != nil {
 		t.Fatal(err)
 	}
 	deleteYes = true
@@ -1144,5 +1105,74 @@ func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
 	}
 	if !strings.Contains(out, `still addresses playbook "one"`) {
 		t.Fatalf("claim by case-folded name not reported:\n%s", out)
+	}
+}
+
+// A playbook named like the CLI's reserved command must not have the CLI's
+// own symlink reported, or removed, as its launcher.
+func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	exe, err := launcher.BinPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := filepath.Join(config.LauncherDir, "cpb")
+	if err := os.Symlink(exe, cli); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "cpb", nil)
+	deleteYes = false
+	feedStdin(t, "n\n")
+	out := captureStdout(t, func() {
+		if err := runDelete(nil, []string{"cpb"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "Command:  cpb") {
+		t.Fatalf("reserved symlink presented as the playbook's launcher:\n%s", out)
+	}
+	deleteYes = true
+	out = captureStdout(t, func() {
+		if err := runDelete(nil, []string{"cpb"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, `Removed command "cpb"`) {
+		t.Fatalf("removal of the reserved symlink reported:\n%s", out)
+	}
+	if _, err := os.Lstat(cli); err != nil {
+		t.Fatal("the CLI's own symlink was removed")
+	}
+}
+
+// A playbook named like the reserved command under another spelling must
+// not take the CLI's own symlink with it on a case-insensitive filesystem.
+func TestDeleteSparesReservedLauncherUnderCaseVariant(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	exe, err := launcher.BinPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := filepath.Join(config.LauncherDir, "cpb")
+	if err := os.Symlink(exe, cli); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(config.LauncherDir, "CPB")); err != nil {
+		t.Skip("case-sensitive filesystem: CPB is a distinct entry")
+	}
+	writePlaybook(t, root, "CPB", nil)
+	deleteYes = true
+	out := captureStdout(t, func() {
+		if err := runDelete(nil, []string{"CPB"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "Removed command") {
+		t.Fatalf("reserved symlink reported removed:\n%s", out)
+	}
+	if _, err := os.Lstat(cli); err != nil {
+		t.Fatal("the CLI's own symlink was removed through a case variant")
 	}
 }

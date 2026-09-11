@@ -240,10 +240,10 @@ if phase_enabled p4; then
   [ ! -d "$PB/fx" ] || rc=1
   report "p4 info/check/delete" $rc
 
-  # launchers: delete removes the launcher it created for that playbook in
-  # the default root (receipt attribution) and keeps a hand-made one with a
-  # hint. Launcher mutations only run against the default root, so this
-  # block addresses $H/.claude-playbooks directly.
+  # launchers: delete removes the launchers named for the playbook (its own
+  # and a hand-made one alike) and keeps a name another playbook claims.
+  # Launcher mutations only run against the default root, so this block
+  # addresses $H/.claude-playbooks directly.
   rc=0
   LD="$SB/launchers"; mkdir -p "$LD"
   pd() { CLAUDE_LAUNCHER_DIR="$LD" CLAUDE_LAUNCHER_RECEIPT="$SB/receipt" "$BIN" --playbooks-dir "$H/.claude-playbooks" "$@"; }
@@ -255,9 +255,15 @@ if phase_enabled p4; then
   grep -q "lpcmd" "$SB/receipt" 2>/dev/null && rc=1
   pd create hm --no-alias >/dev/null 2>&1 || rc=1
   ln -s "$BIN" "$LD/hm"
-  pd delete hm -y 2>/dev/null | grep -q 'Kept command "hm"' || rc=1
-  [ -L "$LD/hm" ] || rc=1
-  report "p4 launcher receipt on delete" $rc
+  pd delete hm -y 2>/dev/null | grep -q 'Removed command "hm"' || rc=1
+  [ ! -e "$LD/hm" ] || rc=1
+  pd create keep --alias shared >/dev/null 2>&1 || rc=1
+  pd create goner --no-alias >/dev/null 2>&1 || rc=1
+  printf 'name = "goner"\nalias = "shared"\n' > "$H/.claude-playbooks/goner/.playbook"
+  pd delete goner -y 2>/dev/null | grep -q 'Kept command "shared" (still addresses playbook "keep")' || rc=1
+  [ -L "$LD/shared" ] || rc=1
+  pd delete keep -y >/dev/null 2>&1 || rc=1
+  report "p4 launcher retirement on delete" $rc
   if [ -n "$SCRIPT_HOME" ]; then HOME="$SCRIPT_HOME"; export HOME; fi
 fi
 
