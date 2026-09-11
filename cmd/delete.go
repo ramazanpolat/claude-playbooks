@@ -77,7 +77,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		if launcherOpsAllowed() {
 			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 				for _, n := range launcherNamesFor(pb) {
-					if launcher.ValidateName(n) != nil {
+					if launcher.IsReservedEntry(ldir, n) {
 						continue // the CLI's own reserved symlink is not this playbook's launcher
 					}
 					if _, exists, foreign := launcher.Lookup(ldir, n); exists && !foreign {
@@ -177,8 +177,8 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 		return
 	}
 	for _, n := range names {
-		if launcher.ValidateName(n) != nil {
-			continue // a reserved or malformed name is never a playbook launcher
+		if launcher.IsReservedEntry(dir, n) {
+			continue // a reserved name, or the CLI's own symlink under another spelling
 		}
 		e, exists, foreign := launcher.Lookup(dir, n)
 		if !exists || foreign {

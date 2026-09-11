@@ -218,3 +218,46 @@ func TestNamesRejectWhitespaceAndLinesKeepPaths(t *testing.T) {
 		t.Fatalf("Recorded = %q", got)
 	}
 }
+
+// Removing one spelling of a case-folded launcher clears every receipt
+// line for that entry, and the CLI's reserved symlink is never a
+// candidate under any spelling.
+func TestRemoveClearsCaseVariantLinesAndSparesReserved(t *testing.T) {
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	dir := t.TempDir()
+	if _, err := Write(dir, "Foo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "foo")); err != nil {
+		t.Skip("case-sensitive filesystem: nothing folds")
+	}
+	if _, err := Write(dir, "foo"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Recorded(); len(got) != 1 {
+		t.Fatalf("one entry recorded twice: %v", got)
+	}
+	if ok, err := Remove(dir, "Foo"); err != nil || !ok {
+		t.Fatalf("remove Foo: %v %v", ok, err)
+	}
+	if got := Recorded(); len(got) != 0 {
+		t.Fatalf("receipt kept a line for the removed entry: %v", got)
+	}
+	// reserved under another spelling
+	if _, err := Write(dir, "helper"); err != nil {
+		t.Fatal(err)
+	}
+	bin, _ := BinPath()
+	if err := os.Symlink(bin, filepath.Join(dir, "cpb")); err != nil {
+		t.Fatal(err)
+	}
+	if !IsReservedEntry(dir, "CPB") {
+		t.Fatal("CPB not recognised as the reserved cpb entry")
+	}
+	if ok, _ := Remove(dir, "CPB"); ok {
+		t.Fatal("removed the reserved symlink through a case variant")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "cpb")); err != nil {
+		t.Fatal("reserved symlink gone")
+	}
+}

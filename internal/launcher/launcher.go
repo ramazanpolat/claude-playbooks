@@ -181,26 +181,51 @@ func Lookup(dir, cmdName string) (e Entry, exists, foreign bool) {
 }
 
 // Remove deletes the launcher dir/cmdName if it is one. It reports whether
-// a launcher was removed; foreign files are left untouched.
+// a launcher was removed; foreign files and the CLI's own reserved
+// symlinks are left untouched.
 func Remove(dir, cmdName string) (bool, error) {
 	// Reserved or malformed names are never playbook launchers: a crafted
 	// or imported manifest alias like "cpb" must not delete the CLI's own
 	// shortcut symlink (which also resolves to this binary), and a
 	// path-carrying name must not escape the launcher directory.
-	if ValidateName(cmdName) != nil {
+	if IsReservedEntry(dir, cmdName) {
 		return false, nil
 	}
 	e, exists, foreign := Lookup(dir, cmdName)
 	if !exists || foreign {
 		return false, nil
 	}
+	// The receipt lines for this link are found while it still exists:
+	// once unlinked, a line spelled through another case of the name (one
+	// entry on a case-insensitive filesystem) could no longer be matched.
+	stale := recordedMatching(e.Path)
 	if err := os.Remove(e.Path); err != nil {
 		return false, err
 	}
-	if err := unrecord(e.Path); err != nil {
+	if err := unrecordExact(stale); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: launcher removed but receipt not updated: %v\n", err)
 	}
 	return true, nil
+}
+
+// IsReservedEntry reports whether dir/cmdName is not a playbook launcher
+// candidate at all: a malformed or reserved name, or a directory entry
+// that IS one of the CLI's reserved symlinks under another spelling (a
+// case-insensitive filesystem folds "CPB" and "cpb" into one entry).
+func IsReservedEntry(dir, cmdName string) bool {
+	if ValidateName(cmdName) != nil {
+		return true
+	}
+	mine, err := os.Lstat(filepath.Join(dir, cmdName))
+	if err != nil {
+		return false
+	}
+	for reserved := range ReservedNames {
+		if theirs, err := os.Lstat(filepath.Join(dir, reserved)); err == nil && os.SameFile(mine, theirs) {
+			return true
+		}
+	}
+	return false
 }
 
 // isOurs reports whether path is a symlink resolving to this binary. A

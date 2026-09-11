@@ -203,6 +203,39 @@ func unrecord(path string) error {
 	})
 }
 
+// recordedMatching returns the stored paths of every receipt line naming
+// the same launcher as path, as they are written in the file.
+func recordedMatching(path string) []string {
+	var out []string
+	for _, l := range receiptLines() {
+		if p := entryPath(l); sameLauncher(p, path) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// unrecordExact removes the lines whose stored path is one of stored,
+// compared as written: the launchers they named may already be gone.
+func unrecordExact(stored []string) error {
+	if len(stored) == 0 {
+		return nil
+	}
+	drop := map[string]bool{}
+	for _, p := range stored {
+		drop[p] = true
+	}
+	return editReceipt(func(lines []string) []string {
+		var kept []string
+		for _, l := range lines {
+			if !drop[entryPath(l)] {
+				kept = append(kept, l)
+			}
+		}
+		return kept
+	})
+}
+
 func editReceipt(edit func([]string) []string) error {
 	path := ReceiptPath()
 	if path == "" {
