@@ -570,6 +570,33 @@ cpb start /tmp/scratch --delete
 
 `--delete` removes the directory when the session ends, which is useful for disposable experiments. Like the launch flags, it counts only before the path or right after it; a `--delete` later in the line, after `--` or as a value for one of `claude`'s own flags, goes to `claude` untouched.
 
+### Sandboxed sessions
+
+`cpb` isolates a playbook's config directory and its environment. `--sandbox` adds the third boundary: the process itself. The playbook's Claude Code runs inside a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/), a microVM with its own kernel, filesystem and network stack, and sees only two host directories: the directory you are working on and the playbook's own directory. Your `~/.claude`, the rest of your home, your shell environment and your other playbooks are not there.
+
+```bash
+brew trust docker/tap && brew install docker/tap/sbx && sbx login   # once, macOS
+cpb run --sandbox sre                                     # current directory is the workdir
+cpb run --sandbox --workdir ~/proj sre -p "run the tests"
+cpb run --sandbox --clone --workdir ~/untrusted-repo sre  # agent works on a private clone; host tree untouched
+cpb run --sandbox --mount ~/shared-libs:ro sre            # one more directory, read-only
+cpb run --sandbox --sandbox-fresh sre                     # throw the sandbox away and start over
+```
+
+The sandbox is named `cpb-<playbook>` and reused across launches, so tools the agent installs and its own state persist until `--sandbox-fresh` or `sbx rm`. The environment is the same one an ordinary launch computes (default profile, profiles, the playbook's block, one-off flags, the authentication decision), reduced to the variables those layers set plus the token and `CLAUDE_CONFIG_DIR`; nothing else of your shell reaches the sandbox. Network egress follows your `sbx` policy (balanced by default: model APIs, package managers, code hosts), widened per sandbox by the manifest and by the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
+
+A playbook can describe its sandbox in the manifest:
+
+```toml
+[sandbox]
+workdir = "~/proj"                  # default --workdir
+mounts = ["~/shared-libs:ro"]       # extra host paths, :ro for read-only
+allow_net = ["internal.corp"]       # hosts allowed beyond the policy
+claude_version = "2.1.263"          # pin the Claude Code installed inside
+```
+
+`claude_version` matters for a playbook routed to a third-party backend that rejects a newer Claude Code's tool schemas: the sandbox keeps running the last version that works while the host moves on.
+
 ### Rename, delete, and update
 
 Rename a playbook:

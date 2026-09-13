@@ -93,6 +93,19 @@ rm -rf /tmp/pb-$$
 
 `run`, `start`, and `update` accept `--playbooks-dir` before the name as well. Env profiles are resolved from the same root (`<root>/.env-profiles/`).
 
+## Run inside a Docker Sandbox
+
+`cpb run --sandbox <name>` runs the playbook's Claude Code in a microVM (the `sbx` CLI must be installed and logged in; `cpb` refuses with an install hint otherwise). Only the working directory and the playbook's own directory are mounted, at their host paths; the environment is reduced to what the playbook's layers set plus the authentication variables.
+
+```bash
+cpb run --sandbox --workdir "$REPO" demo -p "run the tests"      # sandbox cpb-demo, created on first use
+cpb run --sandbox --clone --workdir "$REPO" demo -p "..."        # private clone; the host tree is never modified
+cpb run --sandbox --mount /data:ro demo                          # extra read-only mount
+cpb run --sandbox --sandbox-fresh demo                           # recreate the sandbox
+```
+
+`--clone` counts at creation only; to switch modes, add `--sandbox-fresh`. Network egress is the `sbx` policy's plus the manifest's `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL`; check `sbx policy log` before blaming a tool that cannot reach a service. A manifest `[sandbox]` block (`workdir`, `mounts`, `allow_net`, `claude_version`) supplies defaults; edit it through the manifest rules in `SPEC-v4.md`.
+
 ## Environment overrides and profiles
 
 Prefer the CLI over editing `.playbook` by hand: the CLI validates names, refuses `CLAUDE_CONFIG_DIR`, refuses values TOML or `os/exec` cannot carry, takes the registry lock, and writes secret-bearing files `0600`.

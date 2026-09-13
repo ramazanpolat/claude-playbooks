@@ -219,17 +219,37 @@ func (e *Env) Unsets(key string) bool {
 
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
-	Version     string  `toml:"version"`
-	Name        string  `toml:"name"`
-	Alias       string  `toml:"alias"`
-	Subdir      string  `toml:"subdir"`
-	Description string  `toml:"description"`
-	Homepage    string  `toml:"homepage"`
-	Author      string  `toml:"author"`
-	IsolateAuth bool    `toml:"isolate_auth"`
-	Source      *Source `toml:"source,omitempty"`
-	Update      *Update `toml:"update,omitempty"`
-	Env         *Env    `toml:"env,omitempty"`
+	Version     string   `toml:"version"`
+	Name        string   `toml:"name"`
+	Alias       string   `toml:"alias"`
+	Subdir      string   `toml:"subdir"`
+	Description string   `toml:"description"`
+	Homepage    string   `toml:"homepage"`
+	Author      string   `toml:"author"`
+	IsolateAuth bool     `toml:"isolate_auth"`
+	Source      *Source  `toml:"source,omitempty"`
+	Update      *Update  `toml:"update,omitempty"`
+	Env         *Env     `toml:"env,omitempty"`
+	Sandbox     *Sandbox `toml:"sandbox,omitempty"`
+}
+
+// Sandbox describes how `run --sandbox` boxes this playbook: what of the
+// host it may see beyond its own directory and the working directory, what
+// it may reach on the network beyond the sandbox policy, and which Claude
+// Code to run inside.
+type Sandbox struct {
+	// Mounts are extra host paths bind-mounted into the sandbox at the
+	// same absolute path, "~"-prefixed or absolute, ":ro" for read-only.
+	Mounts []string `toml:"mounts,omitempty"`
+	// AllowNet lists hosts (domains, wildcards, CIDRs) allowed for this
+	// sandbox on top of the active sandbox policy.
+	AllowNet []string `toml:"allow_net,omitempty"`
+	// ClaudeVersion pins the Claude Code version installed inside the
+	// sandbox at creation ("2.1.263"); empty runs the sandbox image's own.
+	ClaudeVersion string `toml:"claude_version,omitempty"`
+	// Workdir is the default working directory mounted and entered,
+	// "~"-prefixed or absolute; the invocation directory when empty.
+	Workdir string `toml:"workdir,omitempty"`
 }
 
 // Read parses the .playbook file inside dir. Returns (nil, nil) if the file
@@ -298,6 +318,11 @@ func Exists(dir string) bool {
 // validate checks structural invariants. Path existence is checked by callers
 // that have access to the playbook directory.
 func (m *Manifest) validate(path string) error {
+	if m.Sandbox != nil {
+		if err := m.Sandbox.validate(); err != nil {
+			return fmt.Errorf("invalid %s at %s: %w", FileName, path, err)
+		}
+	}
 	if err := validateRelativePath(path, "subdir", m.Subdir); err != nil {
 		return err
 	}
@@ -489,6 +514,17 @@ func Write(dir string, m *Manifest) error {
 			}
 		}
 	}
+	if m.Sandbox != nil && (len(m.Sandbox.Mounts) > 0 || len(m.Sandbox.AllowNet) > 0 || m.Sandbox.ClaudeVersion != "" || m.Sandbox.Workdir != "") {
+		b.WriteString("\n[sandbox]\n")
+		if m.Sandbox.Workdir != "" {
+			fmt.Fprintf(&b, "workdir = %s\n", QuoteTOML(m.Sandbox.Workdir))
+		}
+		writeTOMLList(&b, "mounts", m.Sandbox.Mounts)
+		writeTOMLList(&b, "allow_net", m.Sandbox.AllowNet)
+		if m.Sandbox.ClaudeVersion != "" {
+			fmt.Fprintf(&b, "claude_version = %s\n", QuoteTOML(m.Sandbox.ClaudeVersion))
+		}
+	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
 	// carrying any is written private, like an env profile. Existing files
 	// are only ever tightened, never loosened.
@@ -503,6 +539,21 @@ func Write(dir string, m *Manifest) error {
 		perm &= 0o600
 	}
 	return WritePrivate(path, []byte(b.String()), perm)
+}
+
+// writeTOMLList emits `key = ["a", "b"]` when items is non-empty.
+func writeTOMLList(b *strings.Builder, key string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString(key + " = [")
+	for i, it := range items {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(QuoteTOML(it))
+	}
+	b.WriteString("]\n")
 }
 
 // WritePrivate replaces path with data through a temporary file created
@@ -533,6 +584,33 @@ func WritePrivate(path string, data []byte, perm os.FileMode) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return err
+	}
+	return nil
+}
+
+var claudeVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// validate checks the [sandbox] block: paths are absolute or "~"-prefixed
+// (a relative mount would mean a different directory on every invocation),
+// an optional ":ro" suffix is the only mount option, network entries and
+// the version pin have the shapes sbx and the installer accept.
+func (s *Sandbox) validate() error {
+	for _, m := range s.Mounts {
+		p := strings.TrimSuffix(m, ":ro")
+		if p == "" || !(strings.HasPrefix(p, "/") || p == "~" || strings.HasPrefix(p, "~/")) || strings.ContainsAny(p, ":\t\n\r") {
+			return fmt.Errorf("sandbox.mounts entry %q must be an absolute or ~-prefixed path, optionally suffixed :ro", m)
+		}
+	}
+	for _, h := range s.AllowNet {
+		if h == "" || strings.ContainsAny(h, " \t\n\r") {
+			return fmt.Errorf("sandbox.allow_net entry %q must be a host, wildcard or CIDR without whitespace", h)
+		}
+	}
+	if s.ClaudeVersion != "" && !claudeVersionPattern.MatchString(s.ClaudeVersion) {
+		return fmt.Errorf("sandbox.claude_version %q must look like 2.1.263", s.ClaudeVersion)
+	}
+	if w := s.Workdir; w != "" && !(strings.HasPrefix(w, "/") || w == "~" || strings.HasPrefix(w, "~/")) {
+		return fmt.Errorf("sandbox.workdir %q must be an absolute or ~-prefixed path", w)
 	}
 	return nil
 }

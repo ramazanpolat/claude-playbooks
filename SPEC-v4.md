@@ -227,6 +227,30 @@ CLAUDE_CONFIG_DIR=~/.claude-playbooks/<name> claude [claude-flags...]
 
 Flag parsing is disabled so arbitrary `claude` flags pass through. The global `--playbooks-dir` flag is extracted from the argument list before forwarding; launch flags are extracted from the leading positions described above.
 
+**Sandboxed launch (v3.11.0).** With `--sandbox`, the playbook's Claude Code runs inside a Docker Sandbox: a microVM with its own kernel, filesystem, Docker daemon and network stack, driven through the `sbx` CLI (v0.38.0 or newer, installed and logged in by the pilot; `run` refuses with an install hint when it is not on PATH, and surfaces `sbx`'s own "not authenticated" failure). Only what is mounted crosses the boundary: the working directory, the playbook's own root directory (its `CLAUDE_CONFIG_DIR`, so the sandboxed Claude Code reads and writes the same playbook state), the manifest's `[sandbox].mounts`, and `--mount` entries, all at their host absolute paths. The host's `~/.claude`, the rest of the home directory, the shell environment and every other playbook stay outside.
+
+```bash
+claude-playbook run --sandbox sre                                  # cwd is the workdir
+claude-playbook run --sandbox --workdir ~/proj sre -p "..."
+claude-playbook run --sandbox --clone --workdir ~/untrusted-repo sre   # private in-sandbox clone; host tree untouched
+claude-playbook run --sandbox --mount ~/shared-libs:ro sre
+claude-playbook run --sandbox --sandbox-fresh sre                  # recreate the sandbox first
+```
+
+| Flag | Effect |
+|------|--------|
+| `--sandbox` | launch inside the playbook's sandbox `cpb-<name>` (characters `sbx` does not accept folded to `-`), created on first use and reused afterwards, so tools installed inside and the sandbox's own state persist between launches |
+| `--sandbox-fresh` | remove the existing sandbox and create it again before launching |
+| `--clone` | at creation, mount the working directory read-only and let the agent work on a private git clone inside the sandbox (`sbx --clone`; its commits are reachable from the host through the `sandbox-cpb-<name>` remote). Creation-time only, as in `sbx` |
+| `--workdir PATH` | the directory mounted and entered; default `[sandbox].workdir`, else the invocation directory. Must exist |
+| `--mount PATH[:ro]` | one more host path to mount (repeatable), on top of `[sandbox].mounts` |
+
+The flags belong to the same leading runs as the launch flags, in any order among them; `--sandbox-fresh`, `--clone`, `--workdir` and `--mount` without `--sandbox` refuse the launch. `--workdir` and `--mount` values may be `~`-prefixed.
+
+Procedure: resolve the environment exactly as an unsandboxed launch would (registry default profile, profiles, block, launch flags, the authentication decision including quarantine and identity purge of the playbook's own store, which the sandbox then reads through the mount), then reduce it to the variables the sandbox receives: the keys the effective block and launch flags **set**, plus `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER` and `CLAUDE_CONFIG_DIR` when the launch decided them. Nothing else of the host environment enters the sandbox. `sbx ls -q` decides whether `cpb-<name>` exists; `--sandbox-fresh` removes it (`sbx rm -f`); a missing sandbox is created with `sbx create --name cpb-<name> [--clone] claude <workdir> <playbook root> <extra mounts...>`. After creation, and only then, every host in `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL` (when the effective environment sets one) is allowed for that sandbox (`sbx policy allow network --sandbox cpb-<name> <host>`; a failure is a warning, the launch continues), and a `[sandbox].claude_version` pin installs that Claude Code inside the sandbox through the official installer (a failure is a warning; the image's own version runs). The launch then attaches with `sbx exec -it -e KEY=VALUE... cpb-<name> bash -lc 'cd <workdir> && exec claude <args>'`; the environment and the arguments travel as exec arguments (each argument single-quoted), never through a file inside the sandbox. `claude`'s exit status is preserved. The sandbox's network policy (deny-by-default with the pilot's preset) applies to everything not allowed explicitly; a sandboxed playbook that cannot reach a service is a policy question first (`sbx policy log`).
+
+Not sandboxed: `start`, and launcher dispatch (`sre --sandbox` reaches `run` and IS sandboxed, since a launcher forwards to `run`).
+
 **Errors:**
 - Playbook not found → `unknown playbook "experiment". Run 'claude-playbook list' to see available playbooks`
 - Launch flag without a value → `flag needs an argument: --env`
@@ -235,6 +259,12 @@ Flag parsing is disabled so arbitrary `claude` flags pass through. The global `-
 - `--env-file` problems → `--env-file: <path>:<line>: expected KEY=VALUE` or `<path>:<line>: invalid environment variable name (not shown; the line may hold a secret)`: neither the line nor a rejected key is echoed, since a secret containing `=` splits into a bogus key; the reserved-key and value errors are the manifest's, prefixed with `<path>:<line>`
 - `--env-profile` missing or broken → the launch refusal from `env` (`env profile "x" not found in <dir> ...`)
 - `claude` not on PATH → `'claude' command not found. Install Claude Code first: https://claude.ai/download`
+- Sandbox flag without `--sandbox` → `--sandbox-fresh, --clone, --workdir and --mount apply to a sandboxed launch: add --sandbox`
+- `--workdir`/`--mount` without a value → `flag needs an argument: --workdir`; empty → `flag needs a non-empty argument: --mount`
+- `sbx` not on PATH → `'sbx' (Docker Sandboxes) not found; install it (macOS: brew trust docker/tap && brew install docker/tap/sbx) and run 'sbx login' once, or launch without --sandbox`
+- `sbx ls` fails (not logged in, daemon down) → `sbx is not ready (run 'sbx login' if it reports not authenticated): <sbx error>`
+- Working directory missing → `sandbox working directory <path> is not a directory`
+- Sandbox creation or removal fails → `could not create sandbox cpb-<name>: <sbx error>` / `could not remove sandbox cpb-<name>: <sbx error>`
 
 ---
 
@@ -888,6 +918,10 @@ preserve = ["settings.json"]
 | `source.branch` | Optional Git branch or tag used by native update. |
 | `source.subdir` | Optional source-relative directory selected during native update. Must remain physically below the fetched source, including through symlinks. |
 | `update.preserve` | Optional list of install-local paths that survive an update even when the source ships its own copy. Each must be relative to and physically below the playbook root. `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json` are always preserved and need not be listed. |
+| `sandbox.workdir` | Optional default working directory for `run --sandbox`, absolute or `~`-prefixed; `--workdir` overrides it, the invocation directory is used when neither is given. |
+| `sandbox.mounts` | Optional list of extra host paths mounted into the sandbox at the same absolute path, each absolute or `~`-prefixed, with `:ro` as the only accepted option (read-only). Nothing else of the host is visible inside. |
+| `sandbox.allow_net` | Optional list of hosts (domains, wildcards, CIDR ranges, no whitespace) allowed for this playbook's sandbox on top of the active sandbox policy, applied once when the sandbox is created. The host of an `ANTHROPIC_BASE_URL` the effective environment sets is allowed automatically. |
+| `sandbox.claude_version` | Optional Claude Code version (`2.1.263`) installed inside the sandbox at creation; empty runs the sandbox image's own. A playbook routed to a backend that rejects a newer Claude Code's tool schemas pins the last version that works. |
 
 **Forward compatibility:** unknown fields are ignored. Manifest authors may include fields for future tool versions without breaking older installs.
 
@@ -900,6 +934,10 @@ preserve = ["settings.json"]
 - An `env` key is `CLAUDE_CONFIG_DIR` → `invalid .playbook at <path>: env.set: CLAUDE_CONFIG_DIR is managed by claude-playbook and cannot be overridden`
 - A key appears in both `env.set` and `env.unset` → `invalid .playbook at <path>: env: <key> is both set and unset`
 - An `env.set` value is not valid UTF-8 → `invalid .playbook at <path>: env.set: value of <key> is not valid UTF-8 and cannot be stored in a manifest`.
+- A `sandbox.mounts` entry is relative, carries another option than `:ro`, or contains a colon or line break → `invalid .playbook at <path>: sandbox.mounts entry "<entry>" must be an absolute or ~-prefixed path, optionally suffixed :ro`
+- A `sandbox.allow_net` entry is empty or contains whitespace → `invalid .playbook at <path>: sandbox.allow_net entry "<entry>" must be a host, wildcard or CIDR without whitespace`
+- `sandbox.claude_version` is not `MAJOR.MINOR.PATCH` → `invalid .playbook at <path>: sandbox.claude_version "<value>" must look like 2.1.263`
+- `sandbox.workdir` is relative → `invalid .playbook at <path>: sandbox.workdir "<value>" must be an absolute or ~-prefixed path`
 - An `env.set` value contains a NUL byte → `invalid .playbook at <path>: env.set: value of <key> contains a NUL byte, which cannot be passed in an environment` (refused on write and on read; a NUL in an environment fails every launch). Any other value round-trips: control characters are written as TOML `\uXXXX` escapes.
 - An `env.profiles` entry is not a valid profile name → `invalid .playbook at <path>: env.profiles: invalid profile name "<name>": use letters, digits, dots, dashes, underscores`
 
