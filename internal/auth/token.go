@@ -219,30 +219,9 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	// resolution failure satisfies errors.Is(err, envprofile.ErrProfile);
 	// callers that launch treat it as fatal (see cmd/run.go), everything
 	// else stays advisory.
-	// The registry default profile is the bottom layer of every playbook,
-	// manifest or not.
-	profilesDir := envprofile.Dir(config.ResolvePlaybooksDir())
-	var menv *manifest.Env
-	m, merr := manifest.Nearest(configDir)
-	var block *manifest.Env
-	if m != nil {
-		block = m.Env
-	}
-	menv, perr := envprofile.ExpandWithDefault(profilesDir, block)
+	menv, merr, perr := effectiveBlock(configDir, layers)
 	if perr != nil {
 		return refuse(perr)
-	}
-	if len(layers) > 0 {
-		flat := make([]*manifest.Env, 0, len(layers)+1)
-		flat = append(flat, menv)
-		for _, layer := range layers {
-			expanded, perr := envprofile.Expand(profilesDir, layer)
-			if perr != nil {
-				return refuse(perr)
-			}
-			flat = append(flat, expanded)
-		}
-		menv = manifest.MergeEnv(flat...)
 	}
 
 	if isAuthIsolated(configDir) {
@@ -335,6 +314,47 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	env = removeEnv(env, "CLAUDE_CONFIG_DIR")
 	env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
 	return env, firstErr(merr, syncErr)
+}
+
+// EffectiveBlock is the flattened [env] block a launch of configDir applies:
+// the registry default profile, the governing manifest's block with its
+// profiles expanded, then the one-off layers in order. The error satisfies
+// errors.Is(err, envprofile.ErrProfile) when a profile cannot be resolved,
+// the same condition on which a launch is refused. A manifest that cannot
+// be read is not an error here: the launch treats it as declaring nothing.
+func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, error) {
+	menv, _, perr := effectiveBlock(configDir, layers)
+	return menv, perr
+}
+
+// effectiveBlock builds EffectiveBlock and also returns the manifest read
+// error, which PrepareLaunchEnv reports as advisory.
+func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.Env, merr, perr error) {
+	// The registry default profile is the bottom layer of every playbook,
+	// manifest or not.
+	profilesDir := envprofile.Dir(config.ResolvePlaybooksDir())
+	m, merr := manifest.Nearest(configDir)
+	var block *manifest.Env
+	if m != nil {
+		block = m.Env
+	}
+	menv, perr = envprofile.ExpandWithDefault(profilesDir, block)
+	if perr != nil {
+		return nil, merr, perr
+	}
+	if len(layers) > 0 {
+		flat := make([]*manifest.Env, 0, len(layers)+1)
+		flat = append(flat, menv)
+		for _, layer := range layers {
+			expanded, perr := envprofile.Expand(profilesDir, layer)
+			if perr != nil {
+				return nil, merr, perr
+			}
+			flat = append(flat, expanded)
+		}
+		menv = manifest.MergeEnv(flat...)
+	}
+	return menv, merr, nil
 }
 
 // firstErr returns the first non-nil error.

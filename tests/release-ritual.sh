@@ -194,6 +194,28 @@ if phase_enabled p4; then
   p4 delete iso -y >/dev/null 2>&1 || rc=1
   report "p4 isolation identity purge" $rc
 
+  # sandboxed launch through a stub sbx: the sandbox is created with the
+  # workdir and the playbook root mounted, the routed host is allowed, the
+  # attach carries the playbook's env and nothing of the host's; the stub
+  # claude is never run. The sandbox flags without --sandbox refuse.
+  rc=0
+  SBXLOG="$SB/sbx.log"
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$SBX_STUB_LOG"\nexit 0\n' > "$STUB/sbx"
+  chmod +x "$STUB/sbx"
+  DUMP4="$SB/envdump-sandbox"; WD="$SB/work"; mkdir -p "$WD"
+  CPB_RITUAL_ENVDUMP="$DUMP4" SBX_STUB_LOG="$SBXLOG" PATH="$STUB:$PATH" CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE=/dev/null \
+    p4 run --sandbox --workdir "$WD" fx >/dev/null 2>&1 || rc=1
+  [ -e "$DUMP4" ] && rc=1                                             # host claude not run
+  # the binary passes cleaned absolute paths; compare against the same shape
+  WDC="$(cd "$WD" && pwd -P)"; FXC="$(cd "$PB/fx" && pwd -P)"
+  grep -q "^create --name cpb-fx claude $WDC $FXC\$" "$SBXLOG" 2>/dev/null || rc=1
+  grep -q '^policy allow network --sandbox cpb-fx ritual$' "$SBXLOG" 2>/dev/null || rc=1
+  grep -q "^exec -i .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
+  grep -q -- '-e HOME=' "$SBXLOG" 2>/dev/null && rc=1
+  p4 run --workdir "$WD" fx >/dev/null 2>&1 && rc=1
+  report "p4 sandboxed launch (stub sbx)" $rc
+
   rc=0
   # pilot state that must survive the update
   printf '{"env":{"X":"kept"},"hooks":{}}\n' > "$PB/fx/settings.json"

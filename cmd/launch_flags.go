@@ -24,6 +24,9 @@ import (
 // takes its value as the next argument or after "=".
 const launchFlagsUsage = "[--env-profile NAME] [--env KEY=VALUE] [--unset KEY] [--env-file PATH]"
 
+// runFlagsUsage adds the sandbox family, which only run accepts.
+const runFlagsUsage = launchFlagsUsage + " [--sandbox [--sandbox-fresh] [--clone] [--workdir PATH] [--mount PATH[:ro]]]"
+
 var launchFlagNames = map[string]bool{"--env-profile": true, "--env": true, "--unset": true, "--env-file": true}
 
 // takeLaunchFlags consumes leading launch flags from args and returns the

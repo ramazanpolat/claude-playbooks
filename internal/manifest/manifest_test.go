@@ -275,3 +275,41 @@ func TestReadDoesNotEchoBrokenManifestContent(t *testing.T) {
 		t.Fatalf("error lacks the line number: %v", err)
 	}
 }
+
+func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manifest{Name: "box", Sandbox: &Sandbox{
+		Workdir: "~/proj", Mounts: []string{"/data:ro", "~/shared"}, AllowNet: []string{"api.example.com", "10.0.0.0/8"}, ClaudeVersion: "2.1.263",
+	}}
+	if err := Write(dir, m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(dir)
+	if err != nil || got.Sandbox == nil {
+		t.Fatalf("read back: %#v %v", got, err)
+	}
+	if got.Sandbox.Workdir != "~/proj" || strings.Join(got.Sandbox.Mounts, ",") != "/data:ro,~/shared" ||
+		strings.Join(got.Sandbox.AllowNet, ",") != "api.example.com,10.0.0.0/8" || got.Sandbox.ClaudeVersion != "2.1.263" {
+		t.Fatalf("round trip: %#v", got.Sandbox)
+	}
+	// An empty block writes nothing.
+	if err := Write(dir, &Manifest{Name: "box", Sandbox: &Sandbox{}}); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, FileName)); strings.Contains(string(data), "[sandbox]") {
+		t.Fatalf("empty sandbox block written: %s", data)
+	}
+	for name, sb := range map[string]*Sandbox{
+		"relative mount":   {Mounts: []string{"data"}},
+		"mount option":     {Mounts: []string{"/data:rw"}},
+		"relative workdir": {Workdir: "proj"},
+		"net whitespace":   {AllowNet: []string{"a b"}},
+		"empty net":        {AllowNet: []string{""}},
+		"version tag":      {ClaudeVersion: "v2.1.263"},
+		"version latest":   {ClaudeVersion: "latest"},
+	} {
+		if err := Write(t.TempDir(), &Manifest{Name: "x", Sandbox: sb}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
