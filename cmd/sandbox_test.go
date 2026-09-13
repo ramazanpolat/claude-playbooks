@@ -201,6 +201,21 @@ func TestRunSandboxRefusesSharedLogin(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "box"}); err != nil {
 		t.Fatal(err)
 	}
+	// A token launch whose store is a leftover link to a grantless store:
+	// the token path leaves such a link alone, and the launch proceeds.
+	if err := os.WriteFile(filepath.Join(home, ".claude", ".credentials.json"), []byte(`{"mcpOAuth":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "leftover", nil)
+	if err := os.Symlink(filepath.Join(home, ".claude", ".credentials.json"), filepath.Join(root, "leftover", ".credentials.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "leftover"}); err != nil {
+		t.Fatalf("token launch with a grantless leftover link: %v", err)
+	}
+	if info, err := os.Lstat(filepath.Join(root, "leftover", ".credentials.json")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the leftover link was expected to survive (the fixture would not exercise the refusal otherwise)")
+	}
 }
 
 func TestRunSandboxResolvesLinkedAndRelativePaths(t *testing.T) {

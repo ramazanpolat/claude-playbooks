@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -126,6 +128,16 @@ func withinDir(p, dir string) bool {
 	return p == dir || strings.HasPrefix(p, dir+string(filepath.Separator))
 }
 
+// envHas reports whether env sets key to a non-empty value.
+func envHas(env []string, key string) bool {
+	for _, kv := range env {
+		if k, v, _ := strings.Cut(kv, "="); k == key && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // setEnv replaces key in env, appending it when absent.
 func setEnv(env []string, key, value string) []string {
 	for i, kv := range env {
@@ -228,16 +240,18 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
-	// A store that is a symlink after preparation is the shared machine
-	// login (every other path detaches or replaces the link). Its target,
-	// ~/.claude, is not mounted and sbx mounts directories only, so inside
-	// the sandbox the link dangles and Claude Code is logged out; refuse
-	// rather than launch a playbook that cannot authenticate.
-	if info, err := os.Lstat(filepath.Join(configPath, auth.CredentialsFileName)); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("playbook %q shares the machine login (auth status: shared-login): its credentials store links to ~/.claude, which a sandbox does not see. Give it a login of its own (isolate_auth = true in its .playbook, then /login inside the sandbox) or a token (an env profile setting CLAUDE_CODE_OAUTH_TOKEN), or launch without --sandbox", pb.Name)
-	}
 	block, _ := auth.EffectiveBlock(configPath, layers)
 	env := sandboxEnv(launchEnv, block)
+	// A store that is a symlink after preparation is the shared machine
+	// login. Its target, ~/.claude, is not mounted and sbx mounts
+	// directories only, so inside the sandbox the link dangles and Claude
+	// Code is logged out; refuse rather than launch a playbook that cannot
+	// authenticate. A launch carrying a token authenticates with it and a
+	// dangling link holds no grant to adopt, so a leftover link (the token
+	// path detaches only a link to a store with a grant) does not refuse.
+	if info, err := os.Lstat(filepath.Join(configPath, auth.CredentialsFileName)); err == nil && info.Mode()&os.ModeSymlink != 0 && !envHas(env, auth.OAuthTokenEnv) {
+		return fmt.Errorf("playbook %q shares the machine login (auth status: shared-login): its credentials store links to ~/.claude, which a sandbox does not see. Give it a login of its own (isolate_auth = true in its .playbook, then /login inside the sandbox) or a token (an env profile setting CLAUDE_CODE_OAUTH_TOKEN), or launch without --sandbox", pb.Name)
+	}
 
 	var sb manifest.Sandbox
 	if pb.Manifest != nil && pb.Manifest.Sandbox != nil {
@@ -367,10 +381,10 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 	return preserveExitCode(sbx.run(execArgs...))
 }
 
-// isTerminal reports whether f is a character device (a terminal).
+// isTerminal reports whether f is a terminal (/dev/null is a character
+// device too, so a mode check is not enough).
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 func describeExtras(extraMounts, hosts []string, version string) string {

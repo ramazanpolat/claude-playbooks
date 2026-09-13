@@ -99,7 +99,7 @@ rm -rf /tmp/pb-$$
 
 ```bash
 cpb run --sandbox --workdir "$REPO" demo -p "run the tests"      # sandbox cpb-demo, created on first use
-cpb run --sandbox --clone --workdir "$REPO" demo -p "..."        # private clone; the host tree is never modified
+cpb run --sandbox --sandbox-fresh --clone --workdir "$REPO" demo -p "..."   # new sandbox on a private clone; host tree never modified
 cpb run --sandbox --mount /data:ro demo                          # extra read-only mount
 cpb run --sandbox --sandbox-fresh demo                           # recreate the sandbox
 ```
