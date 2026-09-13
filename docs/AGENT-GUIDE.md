@@ -104,7 +104,7 @@ cpb run --sandbox --mount /data:ro demo                          # extra read-on
 cpb run --sandbox --sandbox-fresh demo                           # recreate the sandbox
 ```
 
-`--clone` counts at creation only; to switch modes, add `--sandbox-fresh`. Network egress is the `sbx` policy's plus the manifest's `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL`; check `sbx policy log` before blaming a tool that cannot reach a service. A manifest `[sandbox]` block (`workdir`, `mounts`, `allow_net`, `claude_version`) supplies defaults; edit it through the manifest rules in `SPEC-v4.md`.
+The playbook must authenticate on its own: `isolate_auth = true` with a `/login` inside the sandbox, or a token from an env profile. A shared-login playbook (`cpb auth status`) is refused. `--clone` counts at creation only; to switch modes, add `--sandbox-fresh`. Network egress is the `sbx` policy's plus the manifest's `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL`; check `sbx policy log` before blaming a tool that cannot reach a service. A manifest `[sandbox]` block (`workdir`, `mounts`, `allow_net`, `claude_version`) supplies defaults; edit it through the manifest rules in `SPEC-v4.md`.
 
 ## Environment overrides and profiles
 

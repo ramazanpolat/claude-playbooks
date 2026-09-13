@@ -208,10 +208,10 @@ if phase_enabled p4; then
     p4 run --sandbox --workdir "$WD" fx >/dev/null 2>&1 || rc=1
   [ -e "$DUMP4" ] && rc=1                                             # host claude not run
   # the binary passes cleaned absolute paths; compare against the same shape
-  WDC="$(cd "$WD" && pwd)"; FXC="$(cd "$PB/fx" && pwd)"
+  WDC="$(cd "$WD" && pwd -P)"; FXC="$(cd "$PB/fx" && pwd -P)"
   grep -q "^create --name cpb-fx claude $WDC $FXC\$" "$SBXLOG" 2>/dev/null || rc=1
   grep -q '^policy allow network --sandbox cpb-fx ritual$' "$SBXLOG" 2>/dev/null || rc=1
-  grep -q "^exec -it .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
+  grep -q "^exec -i .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
   grep -q -- '-e HOME=' "$SBXLOG" 2>/dev/null && rc=1
   p4 run --workdir "$WD" fx >/dev/null 2>&1 && rc=1
   report "p4 sandboxed launch (stub sbx)" $rc

@@ -583,6 +583,8 @@ cpb run --sandbox --mount ~/shared-libs:ro sre            # one more directory, 
 cpb run --sandbox --sandbox-fresh sre                     # throw the sandbox away and start over
 ```
 
+The sandbox needs a login it can carry: the playbook's own (`isolate_auth = true` in its `.playbook`, then `/login` once inside the sandbox; the grant lands in the playbook directory, on the mount) or a token from an env profile. A playbook that shares the machine login is refused, because `~/.claude` is exactly what stays outside.
+
 The sandbox is named `cpb-<playbook>` and reused across launches, so tools the agent installs and its own state persist until `--sandbox-fresh` or `sbx rm`. The environment is the same one an ordinary launch computes (default profile, profiles, the playbook's block, one-off flags, the authentication decision), reduced to the variables those layers set plus the token and `CLAUDE_CONFIG_DIR`; nothing else of your shell reaches the sandbox. Network egress follows your `sbx` policy (balanced by default: model APIs, package managers, code hosts), widened per sandbox by the manifest and by the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
 
 A playbook can describe its sandbox in the manifest:

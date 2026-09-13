@@ -27,6 +27,17 @@ func stubSbx(t *testing.T, existing ...string) string {
 	return log
 }
 
+// canon is the symlink-resolved absolute path, the form the sandbox mounts
+// (t.TempDir lives under a symlink on macOS).
+func canon(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
 func sbxCalls(t *testing.T, log string) []string {
 	t.Helper()
 	data, err := os.ReadFile(log)
@@ -94,13 +105,14 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	pbDir := filepath.Join(root, "box")
+	pbDir := canon(t, filepath.Join(root, "box"))
+	work, extra = canon(t, work), canon(t, extra)
 	want := []string{
 		"ls -q",
 		"create --name cpb-box claude " + work + " " + pbDir + " " + extra + ":ro",
 		"policy allow network --sandbox cpb-box api.example.com",
 		"policy allow network --sandbox cpb-box router.local",
-		"exec cpb-box bash -lc curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
+		"exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
 	}
 	for i, w := range want {
 		if i >= len(calls) || calls[i] != w {
@@ -108,7 +120,8 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 		}
 	}
 	attach := calls[len(calls)-1]
-	for _, frag := range []string{"exec -it ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
+	// Tests run without a terminal, so no pty is requested.
+	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
 		if !strings.Contains(attach, frag) {
 			t.Errorf("attach lacks %q: %q", frag, attach)
 		}
@@ -127,7 +140,7 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if len(calls) != 2 || calls[0] != "ls -q" || !strings.HasPrefix(calls[1], "exec -it ") {
+	if len(calls) != 2 || calls[0] != "ls -q" || !strings.HasPrefix(calls[1], "exec -i ") {
 		t.Fatalf("reuse should only list and attach: %q", calls)
 	}
 	os.Remove(log)
@@ -135,7 +148,7 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 4 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone claude "+work+" "+filepath.Join(root, "box") {
+	if len(calls) != 4 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone claude "+canon(t, work)+" "+canon(t, filepath.Join(root, "box")) {
 		t.Fatalf("fresh should remove and recreate: %q", calls)
 	}
 }
@@ -156,5 +169,77 @@ func TestRunSandboxRefusals(t *testing.T) {
 	err = runRun(nil, []string{"--sandbox", "--workdir", filepath.Join(t.TempDir(), "missing"), "box"})
 	if err == nil || !strings.Contains(err.Error(), "is not a directory") {
 		t.Fatalf("missing workdir: %v", err)
+	}
+}
+
+func TestRunSandboxRefusesSharedLogin(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "box", nil)
+	// A global login and no token: the launch links the playbook's store to
+	// ~/.claude, which the sandbox cannot see.
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude", ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	log := stubSbx(t)
+	err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"})
+	if err == nil || !strings.Contains(err.Error(), "shares the machine login") {
+		t.Fatalf("shared login: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called for a launch that cannot authenticate")
+	}
+	// An isolated playbook holds its own store: launched.
+	writePlaybook(t, root, "iso", &manifest.Manifest{IsolateAuth: true})
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "iso"}); err != nil {
+		t.Fatal(err)
+	}
+	// So is one the layers give a token.
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "box"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunSandboxResolvesLinkedAndRelativePaths(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	// A linked playbook: the registry entry is a symlink to a directory
+	// elsewhere. The target is mounted and named inside the sandbox.
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, filepath.Dir(target), "elsewhere", nil)
+	if err := os.Symlink(target, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	log := stubSbx(t)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "linked"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := sbxCalls(t, log)
+	if calls[1] != "create --name cpb-linked claude "+canon(t, work)+" "+canon(t, target) {
+		t.Fatalf("linked playbook mounts: %q", calls)
+	}
+	if !strings.Contains(calls[len(calls)-1], "-e CLAUDE_CONFIG_DIR="+canon(t, target)+" ") {
+		t.Fatalf("linked playbook config dir inside: %q", calls[len(calls)-1])
+	}
+	// A relative --playbooks-dir still yields an absolute config directory.
+	os.Remove(log)
+	writePlaybook(t, root, "rel", nil)
+	wd, _ := os.Getwd()
+	if err := os.Chdir(filepath.Dir(root)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(wd) })
+	if err := runRun(nil, []string{"--playbooks-dir", filepath.Base(root), "--sandbox", "--workdir", work, "rel"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	if !strings.Contains(calls[len(calls)-1], "-e CLAUDE_CONFIG_DIR="+canon(t, filepath.Join(root, "rel"))+" ") {
+		t.Fatalf("relative registry: %q", calls[len(calls)-1])
 	}
 }

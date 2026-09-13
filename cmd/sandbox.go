@@ -109,6 +109,34 @@ func takeRunFlags(args []string, opts *sandboxOpts) (rest []string, layers []*ma
 	}
 }
 
+// resolvedPath is the absolute, symlink-free form of a "~"-prefixed or
+// plain path. The sandbox mounts host paths at their own absolute paths and
+// a symlink's target is what actually exists there, so every path that
+// crosses into the sandbox is resolved first; the path must exist.
+func resolvedPath(p string) (string, error) {
+	abs, err := filepath.Abs(expandHome(p))
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+// withinDir reports whether p is dir or below it (both resolved).
+func withinDir(p, dir string) bool {
+	return p == dir || strings.HasPrefix(p, dir+string(filepath.Separator))
+}
+
+// setEnv replaces key in env, appending it when absent.
+func setEnv(env []string, key, value string) []string {
+	for i, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); k == key {
+			env[i] = key + "=" + value
+			return env
+		}
+	}
+	return append(env, key+"="+value)
+}
+
 // expandHome resolves a leading "~" against the home directory.
 func expandHome(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
@@ -185,14 +213,30 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 	}
 	sbx := sbxRunner{bin: bin}
 
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(pb.Path, layers)
+	// The host-side authentication decision runs against the registry's
+	// spelling of the config directory, made absolute so a relative
+	// --playbooks-dir cannot leak a relative CLAUDE_CONFIG_DIR into a sandbox
+	// whose working directory is elsewhere.
+	configPath, err := filepath.Abs(pb.Path)
+	if err != nil {
+		return err
+	}
+	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		return syncErr
 	}
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
-	block, _ := auth.EffectiveBlock(pb.Path, layers)
+	// A store that is a symlink after preparation is the shared machine
+	// login (every other path detaches or replaces the link). Its target,
+	// ~/.claude, is not mounted and sbx mounts directories only, so inside
+	// the sandbox the link dangles and Claude Code is logged out; refuse
+	// rather than launch a playbook that cannot authenticate.
+	if info, err := os.Lstat(filepath.Join(configPath, auth.CredentialsFileName)); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("playbook %q shares the machine login (auth status: shared-login): its credentials store links to ~/.claude, which a sandbox does not see. Give it a login of its own (isolate_auth = true in its .playbook, then /login inside the sandbox) or a token (an env profile setting CLAUDE_CODE_OAUTH_TOKEN), or launch without --sandbox", pb.Name)
+	}
+	block, _ := auth.EffectiveBlock(configPath, layers)
 	env := sandboxEnv(launchEnv, block)
 
 	var sb manifest.Sandbox
@@ -208,30 +252,41 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 			return err
 		}
 	}
-	workdir = expandHome(workdir)
-	if workdir, err = filepath.Abs(workdir); err != nil {
+	if info, err := os.Stat(expandHome(workdir)); err != nil || !info.IsDir() {
+		return fmt.Errorf("sandbox working directory %s is not a directory", expandHome(workdir))
+	}
+	if workdir, err = resolvedPath(workdir); err != nil {
 		return err
 	}
-	if info, err := os.Stat(workdir); err != nil || !info.IsDir() {
-		return fmt.Errorf("sandbox working directory %s is not a directory", workdir)
+	// Mount the playbook root (the config directory, or the install root
+	// it sits in) and address the config directory inside the sandbox by
+	// its resolved path: a linked registry entry is a symlink the sandbox
+	// does not have, its target is what gets mounted.
+	rootPath := pb.RootPath
+	if rootPath == "" {
+		rootPath = pb.Path
 	}
-	configDir := pb.RootPath
-	if configDir == "" {
-		configDir = pb.Path
-	}
-	if configDir, err = filepath.Abs(configDir); err != nil {
+	rootDir, err := resolvedPath(rootPath)
+	if err != nil {
 		return err
 	}
+	configDir, err := resolvedPath(configPath)
+	if err != nil {
+		return err
+	}
+	env = setEnv(env, "CLAUDE_CONFIG_DIR", configDir)
 	mounts := []string{workdir}
-	if !samePath(configDir, workdir) {
+	if !withinDir(rootDir, workdir) {
+		mounts = append(mounts, rootDir)
+	}
+	if !withinDir(configDir, rootDir) && !withinDir(configDir, workdir) {
 		mounts = append(mounts, configDir)
 	}
 	var extras []string
 	for _, m := range append(append([]string{}, sb.Mounts...), opts.mounts...) {
 		p, ro := strings.CutSuffix(m, ":ro")
-		p = expandHome(p)
-		if p, err = filepath.Abs(p); err != nil {
-			return err
+		if p, err = resolvedPath(p); err != nil {
+			return fmt.Errorf("sandbox mount %s: %w", m, err)
 		}
 		if ro {
 			p += ":ro"
@@ -278,19 +333,25 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 			}
 		}
 		if sb.ClaudeVersion != "" {
-			install := "curl -fsSL https://claude.ai/install.sh | bash -s " + shell.QuoteArg(sb.ClaudeVersion)
+			install := "set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s " + shell.QuoteArg(sb.ClaudeVersion)
 			if err := sbx.run("exec", name, "bash", "-lc", install); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not pin Claude Code %s inside sandbox %s: %v (the image's own version runs)\n", sb.ClaudeVersion, name, err)
 			}
 		}
-		fmt.Fprintf(os.Stderr, "Sandbox %s created: workdir %s, playbook %s%s\n", name, workdir, configDir, describeExtras(extras, hosts, sb.ClaudeVersion))
+		fmt.Fprintf(os.Stderr, "Sandbox %s created: workdir %s, playbook %s%s\n", name, workdir, rootDir, describeExtras(extras, hosts, sb.ClaudeVersion))
 	} else {
 		fmt.Fprintf(os.Stderr, "Sandbox %s reused (--sandbox-fresh recreates it): workdir %s\n", name, workdir)
 	}
 
 	// Attach: the playbook's environment and claude's arguments travel as
-	// exec arguments, never through a file inside the sandbox.
-	execArgs := []string{"exec", "-it"}
+	// exec arguments, never through a file inside the sandbox. A pty is
+	// requested only when this process has a terminal on both ends: sbx
+	// exec -t without one produces no output and exits 0, so a piped or
+	// scripted launch (-p) would silently do nothing.
+	execArgs := []string{"exec", "-i"}
+	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+		execArgs = append(execArgs, "-t")
+	}
 	for _, kv := range env {
 		execArgs = append(execArgs, "-e", kv)
 	}
@@ -304,6 +365,12 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 	}
 	execArgs = append(execArgs, name, "bash", "-lc", command)
 	return preserveExitCode(sbx.run(execArgs...))
+}
+
+// isTerminal reports whether f is a character device (a terminal).
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func describeExtras(extraMounts, hosts []string, version string) string {
