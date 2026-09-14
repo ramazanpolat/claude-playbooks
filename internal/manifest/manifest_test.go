@@ -279,7 +279,7 @@ func TestReadDoesNotEchoBrokenManifestContent(t *testing.T) {
 func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
 	dir := t.TempDir()
 	m := &Manifest{Name: "box", Sandbox: &Sandbox{
-		Workdir: "~/proj", Mounts: []string{"/data:ro", "~/shared"}, AllowNet: []string{"api.example.com", "10.0.0.0/8"}, ClaudeVersion: "2.1.263",
+		Always: true, Backend: "sbx", Workdir: "~/proj", Mounts: []string{"/data:ro", "~/shared"}, AllowNet: []string{"api.example.com", "10.0.0.0/8"}, ClaudeVersion: "2.1.263",
 	}}
 	if err := Write(dir, m); err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
 	if err != nil || got.Sandbox == nil {
 		t.Fatalf("read back: %#v %v", got, err)
 	}
-	if got.Sandbox.Workdir != "~/proj" || strings.Join(got.Sandbox.Mounts, ",") != "/data:ro,~/shared" ||
+	if !got.Sandbox.Always || got.Sandbox.Backend != "sbx" || got.Sandbox.Workdir != "~/proj" || strings.Join(got.Sandbox.Mounts, ",") != "/data:ro,~/shared" ||
 		strings.Join(got.Sandbox.AllowNet, ",") != "api.example.com,10.0.0.0/8" || got.Sandbox.ClaudeVersion != "2.1.263" {
 		t.Fatalf("round trip: %#v", got.Sandbox)
 	}
@@ -307,6 +307,7 @@ func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
 		"empty net":        {AllowNet: []string{""}},
 		"version tag":      {ClaudeVersion: "v2.1.263"},
 		"version latest":   {ClaudeVersion: "latest"},
+		"unknown backend":  {Backend: "tart"},
 	} {
 		if err := Write(t.TempDir(), &Manifest{Name: "x", Sandbox: sb}); err == nil {
 			t.Errorf("%s accepted", name)

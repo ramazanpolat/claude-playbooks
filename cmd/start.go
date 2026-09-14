@@ -11,6 +11,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 var startCmd = &cobra.Command{
@@ -37,15 +38,16 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// licence to remove the directory. The previous scan took ANY literal
 	// --delete in the argument list.
 	var deleteAfter bool
+	var sopts sandboxOpts
 	wrapper := map[string]*bool{"--delete": &deleteAfter}
-	rest, layers, err := takeLaunchFlagsWith(args, wrapper)
+	rest, layers, err := takeRunFlags(args, &sopts, wrapper)
 	if err != nil {
 		return err
 	}
 	// A --help at the PATH position prints usage, whether or not launch
 	// flags preceded it; after the path, the flag is forwarded to claude.
 	if restRequestsHelp(rest) {
-		fmt.Println("Usage: claude-playbook start " + launchFlagsUsage + " <path> [claude-flags...]")
+		fmt.Println("Usage: claude-playbook start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
 		fmt.Println("Creates the directory if it does not exist.")
@@ -56,6 +58,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println("  --env KEY=VALUE      set one variable")
 		fmt.Println("  --unset KEY          remove one variable")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
+		fmt.Println("Sandbox flags run the session inside a sandbox (backend sbx, Docker Sandboxes):")
+		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpb-start-<dir> (created on first use); --sbx is a synonym")
+		fmt.Println("  --no-sandbox         launch on the host although the directory's manifest says [sandbox] always = true")
+		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
+		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
+		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
+		fmt.Println("  --mount PATH[:ro]    extra host path to mount (repeatable)")
+		fmt.Println("With --sandbox, --delete also removes the sandbox when the session ends.")
 		return nil
 	}
 
@@ -63,11 +73,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 		// "--" is never a path: taking it as one would resume wrapper
 		// parsing right after it, and `start -- --delete` would remove a
 		// directory literally named "--".
-		return fmt.Errorf("path required\nUsage: claude-playbook start " + launchFlagsUsage + " <path> [claude-flags...]")
+		return fmt.Errorf("path required\nUsage: claude-playbook start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
 	}
 
 	path := rest[0]
-	claudeArgs, more, err := takeLaunchFlagsWith(rest[1:], wrapper)
+	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts, wrapper)
 	if err != nil {
 		return err
 	}
@@ -84,6 +94,31 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if mkErr := os.MkdirAll(absPath, 0755); mkErr != nil {
 			return fmt.Errorf("could not create %q: %w", absPath, mkErr)
 		}
+	}
+
+	// The directory's own manifest supplies [sandbox] (always and the
+	// defaults); an unreadable one is reported by the launch preparation.
+	var sbm *manifest.Sandbox
+	if m, err := manifest.Read(absPath); err == nil && m != nil {
+		sbm = m.Sandbox
+	}
+	sandboxed, backend, err := resolveSandbox(sbm, &sopts, "directory "+absPath)
+	if err != nil {
+		return err
+	}
+	if sandboxed {
+		name := startSandboxName(absPath)
+		runErr := runSandboxed(sandboxTarget{
+			label: "directory " + absPath, name: name,
+			configPath: absPath, rootPath: absPath, manifest: sbm, backend: backend,
+		}, layers, claudeArgs, sopts)
+		if deleteAfter {
+			removeSandbox(backend, name)
+			if rmErr := os.RemoveAll(absPath); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not delete %s: %v\n", absPath, rmErr)
+			}
+		}
+		return runErr
 	}
 
 	claudePath, err := exec.LookPath("claude")

@@ -10,11 +10,13 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 var (
 	createAlias   string
 	createNoAlias bool
+	createSandbox bool
 )
 
 var createCmd = &cobra.Command{
@@ -27,6 +29,7 @@ var createCmd = &cobra.Command{
 func init() {
 	createCmd.Flags().StringVar(&createAlias, "alias", "", "launcher command name (default: <name>)")
 	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip launcher command creation")
+	createCmd.Flags().BoolVar(&createSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
@@ -86,6 +89,16 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// An always-sandboxed playbook authenticates on its own: the machine
+	// login cannot follow it into the sandbox. Written before the
+	// credential sync so the sync already sees the isolation.
+	if createSandbox {
+		if err := manifest.Write(dest, &manifest.Manifest{Name: name, IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}}); err != nil {
+			os.RemoveAll(dest)
+			return fmt.Errorf("cannot record the sandbox setting in the manifest: %w", err)
+		}
+	}
+
 	if err := auth.SyncCredentials(dest); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
@@ -95,6 +108,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Created playbook %q at %s\n", name, dest)
+	if createSandbox {
+		fmt.Printf("Always sandboxed (%s); authentication isolated: run /login once inside the sandbox.\n", defaultSandboxBackend)
+	}
 
 	if createNoAlias {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)

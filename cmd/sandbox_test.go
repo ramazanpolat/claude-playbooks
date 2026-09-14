@@ -49,7 +49,7 @@ func sbxCalls(t *testing.T, log string) []string {
 
 func TestTakeRunFlagsMixesLaunchAndSandboxFlags(t *testing.T) {
 	var o sandboxOpts
-	rest, layers, err := takeRunFlags([]string{"--sandbox", "--env", "K=V", "--workdir", "/w", "--mount=/m:ro", "--clone", "pb", "--sandbox-fresh", "-p", "hi"}, &o)
+	rest, layers, err := takeRunFlags([]string{"--sandbox", "--env", "K=V", "--workdir", "/w", "--mount=/m:ro", "--clone", "pb", "--sandbox-fresh", "-p", "hi"}, &o, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,12 +62,12 @@ func TestTakeRunFlagsMixesLaunchAndSandboxFlags(t *testing.T) {
 	if len(rest) != 4 || rest[0] != "pb" {
 		t.Fatalf("rest: %q", rest)
 	}
-	rest, _, err = takeRunFlags(rest[1:], &o)
+	rest, _, err = takeRunFlags(rest[1:], &o, nil)
 	if err != nil || !o.fresh || len(rest) != 2 || rest[0] != "-p" {
 		t.Fatalf("after the name: fresh=%v rest=%q err=%v", o.fresh, rest, err)
 	}
 	for _, bad := range [][]string{{"--workdir"}, {"--mount="}, {"--workdir", ""}} {
-		if _, _, err := takeRunFlags(bad, &sandboxOpts{}); err == nil {
+		if _, _, err := takeRunFlags(bad, &sandboxOpts{}, nil); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
 	}
@@ -172,7 +172,7 @@ func TestRunSandboxRefusals(t *testing.T) {
 	}
 }
 
-func TestRunSandboxRefusesSharedLogin(t *testing.T) {
+func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
 	writePlaybook(t, root, "box", nil)
 	// A global login and no token: the launch links the playbook's store to
@@ -185,13 +185,22 @@ func TestRunSandboxRefusesSharedLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := stubSbx(t)
-	err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"})
-	if err == nil || !strings.Contains(err.Error(), "shares the machine login") {
+	// An unsandboxed preparation links the store; the sandboxed launch
+	// detaches it for this launch and runs as own-login inside.
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"}); err != nil {
 		t.Fatalf("shared login: %v", err)
 	}
-	if _, statErr := os.Stat(log); statErr == nil {
-		t.Fatal("sbx was called for a launch that cannot authenticate")
+	store := filepath.Join(root, "box", ".credentials.json")
+	if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("the shared-login link survived into a sandboxed launch")
 	}
+	if calls := sbxCalls(t, log); !strings.HasPrefix(calls[len(calls)-1], "exec -i ") || strings.Contains(calls[len(calls)-1], "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatalf("attach after detach: %q", calls)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", ".credentials.json")); err != nil {
+		t.Fatal("the machine login was touched")
+	}
+	os.Remove(log)
 	// An isolated playbook holds its own store: launched.
 	writePlaybook(t, root, "iso", &manifest.Manifest{IsolateAuth: true})
 	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "iso"}); err != nil {
@@ -256,5 +265,186 @@ func TestRunSandboxResolvesLinkedAndRelativePaths(t *testing.T) {
 	calls = sbxCalls(t, log)
 	if !strings.Contains(calls[len(calls)-1], "-e CLAUDE_CONFIG_DIR="+canon(t, filepath.Join(root, "rel"))+" ") {
 		t.Fatalf("relative registry: %q", calls[len(calls)-1])
+	}
+}
+
+// stubClaude puts a fake `claude` first on PATH that records its argv and
+// environment in the given file, so a host launch is provable.
+func stubClaude(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "claude.log")
+	script := "#!/bin/sh\nprintf 'ARGS %s\\n' \"$*\" > \"$CLAUDE_STUB_LOG\"\nenv >> \"$CLAUDE_STUB_LOG\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_STUB_LOG", log)
+	return log
+}
+
+func TestRunSandboxAlwaysAndOverride(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "locked", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}})
+	writePlaybook(t, root, "plain", &manifest.Manifest{IsolateAuth: true})
+	work := t.TempDir()
+	sbxLog := stubSbx(t)
+	claudeLog := stubClaude(t)
+	// always: no flag needed.
+	if err := runRun(nil, []string{"--workdir", work, "locked", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := sbxCalls(t, sbxLog)
+	if !strings.HasPrefix(calls[1], "create --name cpb-locked ") || !strings.HasSuffix(calls[len(calls)-1], "exec claude '--version'") {
+		t.Fatalf("always-sandboxed launch: %q", calls)
+	}
+	if _, err := os.Stat(claudeLog); err == nil {
+		t.Fatal("host claude ran for an always-sandboxed playbook")
+	}
+	// --no-sandbox overrides for one launch, on the host, with a note.
+	os.Remove(sbxLog)
+	err := runRun(nil, []string{"--no-sandbox", "locked", "--version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(claudeLog); err != nil || !strings.HasPrefix(string(data), "ARGS --version\n") {
+		t.Fatalf("host launch under --no-sandbox: %v %q", err, data)
+	}
+	if _, err := os.Stat(sbxLog); err == nil {
+		t.Fatal("sbx was called under --no-sandbox")
+	}
+	// A plain playbook is unaffected by --no-sandbox; a launcher-style
+	// position after the name works too.
+	os.Remove(claudeLog)
+	if err := runRun(nil, []string{"plain", "--no-sandbox", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(claudeLog); err != nil {
+		t.Fatal("plain playbook did not launch on the host")
+	}
+	// Contradictions and unknown backends refuse before anything runs.
+	for _, args := range [][]string{
+		{"--sandbox", "--no-sandbox", "plain"},
+		{"--sandbox=tart", "plain"},
+		{"--sandbox=", "plain"},
+		{"--no-sandbox", "--workdir", work, "plain"},
+	} {
+		os.Remove(sbxLog)
+		os.Remove(claudeLog)
+		if err := runRun(nil, args); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+		if _, err := os.Stat(sbxLog); err == nil {
+			t.Errorf("%q reached sbx", args)
+		}
+	}
+	// --sbx and --sandbox=sbx are the same switch.
+	for _, flag := range []string{"--sbx", "--sandbox=sbx"} {
+		os.Remove(sbxLog)
+		if err := runRun(nil, []string{flag, "--workdir", work, "plain"}); err != nil {
+			t.Fatalf("%s: %v", flag, err)
+		}
+		if calls := sbxCalls(t, sbxLog); !strings.HasPrefix(calls[len(calls)-1], "exec -i ") {
+			t.Fatalf("%s: %q", flag, calls)
+		}
+	}
+}
+
+func TestStartSandbox(t *testing.T) {
+	sandboxRoot(t, "pbs")
+	dir := filepath.Join(t.TempDir(), "scratch dir")
+	work := t.TempDir()
+	log := stubSbx(t)
+	claudeLog := stubClaude(t)
+	if err := runStart(nil, []string{"--sandbox", "--workdir", work, dir, "-p", "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := sbxCalls(t, log)
+	if calls[1] != "create --name cpb-start-scratch-dir claude "+canon(t, work)+" "+canon(t, dir) {
+		t.Fatalf("start create: %q", calls)
+	}
+	last := calls[len(calls)-1]
+	if !strings.Contains(last, "-e CLAUDE_CONFIG_DIR="+canon(t, dir)+" ") || !strings.HasSuffix(last, "exec claude '-p' 'hi'") {
+		t.Fatalf("start attach: %q", last)
+	}
+	if _, err := os.Stat(claudeLog); err == nil {
+		t.Fatal("host claude ran for a sandboxed start")
+	}
+	// The directory's manifest can say always; --delete removes the
+	// sandbox after the session, then the directory.
+	if err := manifest.Write(dir, &manifest.Manifest{Name: "scratch", IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}}); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(log)
+	t.Setenv("SBX_STUB_LS", "cpb-start-scratch-dir")
+	if err := runStart(nil, []string{"--delete", "--workdir", work, dir}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	if len(calls) != 3 || !strings.HasPrefix(calls[1], "exec -i ") || calls[2] != "rm -f cpb-start-scratch-dir" {
+		t.Fatalf("start --delete under always: %q", calls)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("--delete left the directory")
+	}
+	// Sandbox-only flags without a sandbox refuse, as in run.
+	if err := runStart(nil, []string{"--workdir", work, dir}); err == nil || !strings.Contains(err.Error(), "add --sandbox") {
+		t.Fatalf("start with --workdir alone: %v", err)
+	}
+}
+
+func TestCreateAndInstallSandboxFlag(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	createSandbox = true
+	createNoAlias = true
+	out := captureStdout(t, func() {
+		if err := runCreate(nil, []string{"boxed"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "Always sandboxed (sbx); authentication isolated") {
+		t.Fatalf("create output: %q", out)
+	}
+	m, err := manifest.Read(filepath.Join(root, "boxed"))
+	if err != nil || m == nil || !m.IsolateAuth || m.Sandbox == nil || !m.Sandbox.Always {
+		t.Fatalf("created manifest: %#v %v", m, err)
+	}
+	if info, err := os.Lstat(filepath.Join(root, "boxed", ".credentials.json")); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("an always-sandboxed playbook was linked to the machine login")
+	}
+	// info renders the block.
+	info := captureStdout(t, func() {
+		if err := runInfo(nil, []string{"boxed"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(info, "Sandbox:     always") {
+		t.Fatalf("info: %q", info)
+	}
+
+	// install --sandbox: the flag sets the block; a source-shipped
+	// [sandbox] is install-local and dropped with a note.
+	src := testPlaybookSource(t, "shipped")
+	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("version = \"1.0.0\"\nname = \"shipped\"\n\n[sandbox]\nmounts = [\"/etc\"]\nallow_net = [\"evil.example\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	installNoAlias = true
+	installSandbox = true
+	if err := runInstall(nil, []string{src}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = manifest.Read(filepath.Join(root, "shipped"))
+	if err != nil || m == nil || !m.IsolateAuth || m.Sandbox == nil || !m.Sandbox.Always || len(m.Sandbox.Mounts) != 0 || len(m.Sandbox.AllowNet) != 0 {
+		t.Fatalf("installed manifest: %#v %v", m.Sandbox, err)
+	}
+	// Without the flag the shipped block is dropped entirely.
+	installSandbox = false
+	installName = "shipped2"
+	if err := runInstall(nil, []string{src}); err != nil {
+		t.Fatal(err)
+	}
+	m, _ = manifest.Read(filepath.Join(root, "shipped2"))
+	if m == nil || !m.Sandbox.Empty() || m.IsolateAuth {
+		t.Fatalf("install without --sandbox adopted the source block: %#v", m)
 	}
 }

@@ -238,6 +238,13 @@ type Manifest struct {
 // it may reach on the network beyond the sandbox policy, and which Claude
 // Code to run inside.
 type Sandbox struct {
+	// Always sandboxes every launch of this playbook (run and launcher
+	// dispatch; start for a directory carrying the manifest). A launch
+	// passes --no-sandbox to override it, loudly.
+	Always bool `toml:"always,omitempty"`
+	// Backend names the sandbox implementation ("sbx"); empty means the
+	// default.
+	Backend string `toml:"backend,omitempty"`
 	// Mounts are extra host paths bind-mounted into the sandbox at the
 	// same absolute path, "~"-prefixed or absolute, ":ro" for read-only.
 	Mounts []string `toml:"mounts,omitempty"`
@@ -514,8 +521,14 @@ func Write(dir string, m *Manifest) error {
 			}
 		}
 	}
-	if m.Sandbox != nil && (len(m.Sandbox.Mounts) > 0 || len(m.Sandbox.AllowNet) > 0 || m.Sandbox.ClaudeVersion != "" || m.Sandbox.Workdir != "") {
+	if !m.Sandbox.Empty() {
 		b.WriteString("\n[sandbox]\n")
+		if m.Sandbox.Always {
+			b.WriteString("always = true\n")
+		}
+		if m.Sandbox.Backend != "" {
+			fmt.Fprintf(&b, "backend = %s\n", QuoteTOML(m.Sandbox.Backend))
+		}
 		if m.Sandbox.Workdir != "" {
 			fmt.Fprintf(&b, "workdir = %s\n", QuoteTOML(m.Sandbox.Workdir))
 		}
@@ -590,11 +603,32 @@ func WritePrivate(path string, data []byte, perm os.FileMode) error {
 
 var claudeVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
+// SandboxBackends lists the sandbox implementations claude-playbook drives.
+var SandboxBackends = []string{"sbx"}
+
+// KnownSandboxBackend reports whether name is one of SandboxBackends.
+func KnownSandboxBackend(name string) bool {
+	for _, b := range SandboxBackends {
+		if b == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Empty reports whether the block carries nothing.
+func (s *Sandbox) Empty() bool {
+	return s == nil || (!s.Always && s.Backend == "" && len(s.Mounts) == 0 && len(s.AllowNet) == 0 && s.ClaudeVersion == "" && s.Workdir == "")
+}
+
 // validate checks the [sandbox] block: paths are absolute or "~"-prefixed
 // (a relative mount would mean a different directory on every invocation),
 // an optional ":ro" suffix is the only mount option, network entries and
 // the version pin have the shapes sbx and the installer accept.
 func (s *Sandbox) validate() error {
+	if s.Backend != "" && !KnownSandboxBackend(s.Backend) {
+		return fmt.Errorf("sandbox.backend %q is not a known backend (%s)", s.Backend, strings.Join(SandboxBackends, ", "))
+	}
 	for _, m := range s.Mounts {
 		p := strings.TrimSuffix(m, ":ro")
 		if p == "" || !(strings.HasPrefix(p, "/") || p == "~" || strings.HasPrefix(p, "~/")) || strings.ContainsAny(p, ":\t\n\r") {

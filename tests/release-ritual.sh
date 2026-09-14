@@ -216,6 +216,22 @@ if phase_enabled p4; then
   p4 run --workdir "$WD" fx >/dev/null 2>&1 && rc=1
   report "p4 sandboxed launch (stub sbx)" $rc
 
+  # always-sandboxed playbook: create --sandbox writes the manifest, a bare
+  # run goes through sbx, --no-sandbox runs on the host and says so.
+  rc=0
+  p4 create boxed --no-alias --sandbox 2>/dev/null | grep -q 'Always sandboxed' || rc=1
+  grep -q '^always = true$' "$PB/boxed/.playbook" 2>/dev/null || rc=1
+  grep -q '^isolate_auth = true$' "$PB/boxed/.playbook" 2>/dev/null || rc=1
+  p4 info boxed 2>/dev/null | grep -q '^Sandbox:     always' || rc=1
+  SBXLOG2="$SB/sbx2.log"; DUMP5="$SB/envdump-always"
+  CPB_RITUAL_ENVDUMP="$DUMP5" SBX_STUB_LOG="$SBXLOG2" PATH="$STUB:$PATH" p4 run --workdir "$WD" boxed >/dev/null 2>&1 || rc=1
+  grep -q '^create --name cpb-boxed claude ' "$SBXLOG2" 2>/dev/null || rc=1
+  [ -e "$DUMP5" ] && rc=1
+  CPB_RITUAL_ENVDUMP="$DUMP5" SBX_STUB_LOG="$SBXLOG2" PATH="$STUB:$PATH" p4 run --no-sandbox boxed 2>&1 >/dev/null | grep -q 'Sandbox off for this launch' || rc=1
+  [ -e "$DUMP5" ] || rc=1
+  p4 delete boxed -y >/dev/null 2>&1 || rc=1
+  report "p4 always-sandboxed playbook" $rc
+
   rc=0
   # pilot state that must survive the update
   printf '{"env":{"X":"kept"},"hooks":{}}\n' > "$PB/fx/settings.json"

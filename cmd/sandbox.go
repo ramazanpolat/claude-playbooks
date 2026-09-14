@@ -17,14 +17,14 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
-	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
-// Sandboxed launch: `run --sandbox <name>` runs the playbook's Claude Code
-// inside a Docker Sandbox (the `sbx` CLI: a microVM with its own kernel,
-// filesystem and network stack). Only what is mounted crosses the boundary:
-// the playbook's own directory and the working directory, plus whatever the
+// Sandboxed launch: `run --sandbox <name>` (or `start --sandbox <path>`)
+// runs Claude Code inside a sandbox: a microVM with its own kernel,
+// filesystem and network stack, driven through a backend CLI (today only
+// `sbx`, Docker Sandboxes). Only what is mounted crosses the boundary: the
+// config directory's root and the working directory, plus whatever the
 // manifest's [sandbox] block or --mount adds. The environment is the same
 // stack every launch gets (registry default, profiles, the block, one-off
 // flags), reduced to what those layers SET plus the authentication
@@ -32,37 +32,77 @@ import (
 // the sandbox policy's, widened per sandbox by [sandbox].allow_net and the
 // host of ANTHROPIC_BASE_URL when the env points elsewhere.
 //
-// One sandbox per playbook, named cpb-<playbook>, reused across launches so
-// installed tools and the agent's state persist; --sandbox-fresh recreates
-// it. The sandbox runs the image's own Claude Code unless
-// [sandbox].claude_version pins one, installed once at creation.
+// One sandbox per playbook, named cpb-<playbook> (cpb-start-<dir> for
+// start), reused across launches so installed tools and the agent's state
+// persist; --sandbox-fresh recreates it. The sandbox runs the image's own
+// Claude Code unless [sandbox].claude_version pins one, installed once at
+// creation. A manifest with [sandbox].always = true sandboxes every launch;
+// --no-sandbox overrides that for one launch, loudly.
 
-// sandboxOpts are the --sandbox family of run flags.
+// defaultSandboxBackend is the backend used when neither the flag nor the
+// manifest names one.
+const defaultSandboxBackend = "sbx"
+
+// sandboxOpts are the --sandbox family of run/start flags.
 type sandboxOpts struct {
-	enabled bool
-	fresh   bool
-	clone   bool
-	workdir string
-	mounts  []string
+	enabled  bool   // --sandbox, --sbx, --sandbox=BACKEND
+	disabled bool   // --no-sandbox
+	backend  string // --sandbox=BACKEND
+	fresh    bool
+	clone    bool
+	workdir  string
+	mounts   []string
+}
+
+// sandboxTarget is what a sandboxed launch runs: a registered playbook or
+// a start directory.
+type sandboxTarget struct {
+	label      string            // for messages: `playbook "x"` or `directory /p`
+	name       string            // sandbox name
+	configPath string            // absolute config directory, registry spelling
+	rootPath   string            // absolute root to mount (contains configPath)
+	manifest   *manifest.Sandbox // [sandbox] defaults, may be nil
+	backend    string            // resolved backend name
 }
 
 var sandboxNameClean = regexp.MustCompile(`[^A-Za-z0-9.+-]+`)
 
-// sandboxName is the sbx sandbox name for a playbook: the characters sbx
+func cleanSandboxName(s string) string {
+	return strings.Trim(sandboxNameClean.ReplaceAllString(s, "-"), "-")
+}
+
+// sandboxName is the sandbox name for a playbook: the characters sbx
 // accepts (letters, digits, hyphens, periods, plus and minus), anything
 // else folded to a hyphen.
 func sandboxName(playbookName string) string {
-	return "cpb-" + strings.Trim(sandboxNameClean.ReplaceAllString(playbookName, "-"), "-")
+	return "cpb-" + cleanSandboxName(playbookName)
 }
 
-// takeSandboxValueFlags consumes the leading --workdir PATH and --mount
-// PATH[:ro] flags (also in =form). It returns the rest and whether anything
-// was consumed, so the caller can alternate with the launch-flag scanner
-// until neither makes progress.
+// startSandboxName names the sandbox of a start directory; the extra
+// segment keeps it apart from a registered playbook of the same name.
+func startSandboxName(dir string) string {
+	return "cpb-start-" + cleanSandboxName(filepath.Base(dir))
+}
+
+// takeSandboxValueFlags consumes the leading --workdir PATH, --mount
+// PATH[:ro] and --sandbox=BACKEND flags (the first two also as separate
+// tokens). It returns the rest and whether anything was consumed, so the
+// caller can alternate with the launch-flag scanner until neither makes
+// progress.
 func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, consumed bool, err error) {
 	i := 0
 	for i < len(args) && args[i] != "--" {
 		flag, value, inline := strings.Cut(args[i], "=")
+		if flag == "--sandbox" && inline {
+			if value == "" {
+				return nil, false, fmt.Errorf("flag needs a non-empty argument: --sandbox=BACKEND")
+			}
+			opts.enabled = true
+			opts.backend = value
+			i++
+			consumed = true
+			continue
+		}
 		if flag != "--workdir" && flag != "--mount" {
 			break
 		}
@@ -89,9 +129,15 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 }
 
 // takeRunFlags scans one leading run of launch flags and sandbox flags in
-// any order.
-func takeRunFlags(args []string, opts *sandboxOpts) (rest []string, layers []*manifest.Env, err error) {
-	bools := map[string]*bool{"--sandbox": &opts.enabled, "--sandbox-fresh": &opts.fresh, "--clone": &opts.clone}
+// any order. extra adds command-specific boolean flags (start's --delete).
+func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (rest []string, layers []*manifest.Env, err error) {
+	bools := map[string]*bool{
+		"--sandbox": &opts.enabled, "--sbx": &opts.enabled, "--no-sandbox": &opts.disabled,
+		"--sandbox-fresh": &opts.fresh, "--clone": &opts.clone,
+	}
+	for k, v := range extra {
+		bools[k] = v
+	}
 	rest = args
 	for {
 		var more []*manifest.Env
@@ -109,6 +155,39 @@ func takeRunFlags(args []string, opts *sandboxOpts) (rest []string, layers []*ma
 			return rest, layers, nil
 		}
 	}
+}
+
+// resolveSandbox decides whether this launch is sandboxed and with which
+// backend: the flags first, then the manifest's `always`, which
+// --no-sandbox overrides for one launch with a line on stderr so the
+// override never passes silently. The sandbox-only flags without a
+// sandbox are an error, as is an unknown backend.
+func resolveSandbox(sb *manifest.Sandbox, opts *sandboxOpts, label string) (on bool, backend string, err error) {
+	if opts.enabled && opts.disabled {
+		return false, "", fmt.Errorf("--sandbox and --no-sandbox together: pick one")
+	}
+	always := sb != nil && sb.Always
+	on = opts.enabled || (always && !opts.disabled)
+	if always && opts.disabled {
+		fmt.Fprintf(os.Stderr, "Sandbox off for this launch: %s is always sandboxed by its manifest\n", label)
+	}
+	if !on {
+		if opts.fresh || opts.clone || opts.workdir != "" || len(opts.mounts) > 0 {
+			return false, "", fmt.Errorf("--sandbox-fresh, --clone, --workdir and --mount apply to a sandboxed launch: add --sandbox")
+		}
+		return false, "", nil
+	}
+	backend = opts.backend
+	if backend == "" && sb != nil {
+		backend = sb.Backend
+	}
+	if backend == "" {
+		backend = defaultSandboxBackend
+	}
+	if !manifest.KnownSandboxBackend(backend) {
+		return false, "", fmt.Errorf("unknown sandbox backend %q (available: %s)", backend, strings.Join(manifest.SandboxBackends, ", "))
+	}
+	return true, backend, nil
 }
 
 // resolvedPath is the absolute, symlink-free form of a "~"-prefixed or
@@ -197,65 +276,176 @@ func baseURLHost(env []string) string {
 	return ""
 }
 
-// sbxRunner runs sbx commands; tests substitute the binary through PATH.
-type sbxRunner struct {
+// sandboxBackend is the seam every sandbox implementation fills: the six
+// operations a launch needs. Only sbx exists today; the seam keeps the
+// launch logic independent of its CLI.
+type sandboxBackend interface {
+	// names lists the existing sandboxes.
+	names() ([]string, error)
+	// create makes the sandbox with the given host paths mounted at their
+	// own absolute paths (a ":ro" suffix marks a read-only mount).
+	create(name string, clone bool, mounts []string) error
+	// allowNetwork widens the sandbox's egress policy by one host.
+	allowNetwork(name, host string) error
+	// shell runs a login-shell command inside, non-interactively.
+	shell(name, command string) error
+	// attach runs a login-shell command inside with env set, wired to this
+	// process's stdio; tty asks for a pty.
+	attach(name string, env []string, tty bool, command string) error
+	// remove deletes the sandbox and everything in it.
+	remove(name string) error
+}
+
+// newSandboxBackend returns the backend for kind, or an error naming what
+// to install when its CLI is missing.
+func newSandboxBackend(kind string) (sandboxBackend, error) {
+	switch kind {
+	case "sbx":
+		bin, err := exec.LookPath("sbx")
+		if err != nil {
+			return nil, fmt.Errorf("'sbx' (Docker Sandboxes) not found; install it (macOS: brew trust docker/tap && brew install docker/tap/sbx) and run 'sbx login' once, or launch without --sandbox")
+		}
+		return sbxBackend{bin: bin}, nil
+	}
+	return nil, fmt.Errorf("unknown sandbox backend %q (available: %s)", kind, strings.Join(manifest.SandboxBackends, ", "))
+}
+
+// sbxBackend drives Docker Sandboxes through the sbx CLI (v0.38.0).
+type sbxBackend struct {
 	bin string
 }
 
-func (r sbxRunner) output(args ...string) ([]byte, error) {
-	c := exec.Command(r.bin, args...)
-	c.Stderr = os.Stderr
-	return c.Output()
-}
-
-func (r sbxRunner) run(args ...string) error {
-	c := exec.Command(r.bin, args...)
+func (b sbxBackend) run(args ...string) error {
+	c := exec.Command(b.bin, args...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	return c.Run()
 }
 
-// runSandboxed launches pb inside its sandbox. claudeArgs are forwarded to
-// claude verbatim.
-func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []string, opts sandboxOpts) error {
-	bin, err := exec.LookPath("sbx")
+func (b sbxBackend) names() ([]string, error) {
+	c := exec.Command(b.bin, "ls", "-q")
+	c.Stderr = os.Stderr
+	out, err := c.Output()
 	if err != nil {
-		return fmt.Errorf("'sbx' (Docker Sandboxes) not found; install it (macOS: brew trust docker/tap && brew install docker/tap/sbx) and run 'sbx login' once, or launch without --sandbox")
+		return nil, fmt.Errorf("sbx is not ready (run 'sbx login' if it reports not authenticated): %w", err)
 	}
-	sbx := sbxRunner{bin: bin}
+	var names []string
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		if n := strings.TrimSpace(sc.Text()); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names, nil
+}
 
-	// The host-side authentication decision runs against the registry's
-	// spelling of the config directory, made absolute so a relative
-	// --playbooks-dir cannot leak a relative CLAUDE_CONFIG_DIR into a sandbox
-	// whose working directory is elsewhere.
-	configPath, err := filepath.Abs(pb.Path)
-	if err != nil {
-		return err
+func (b sbxBackend) create(name string, clone bool, mounts []string) error {
+	args := []string{"create", "--name", name}
+	if clone {
+		args = append(args, "--clone")
 	}
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configPath, layers)
+	args = append(args, "claude")
+	args = append(args, mounts...)
+	return b.run(args...)
+}
+
+func (b sbxBackend) allowNetwork(name, host string) error {
+	return b.run("policy", "allow", "network", "--sandbox", name, host)
+}
+
+func (b sbxBackend) shell(name, command string) error {
+	return b.run("exec", name, "bash", "-lc", command)
+}
+
+func (b sbxBackend) attach(name string, env []string, tty bool, command string) error {
+	// A pty is requested only when this process has a terminal on both
+	// ends: sbx exec -t without one produces no output and exits 0, so a
+	// piped or scripted launch (-p) would silently do nothing.
+	args := []string{"exec", "-i"}
+	if tty {
+		args = append(args, "-t")
+	}
+	for _, kv := range env {
+		args = append(args, "-e", kv)
+	}
+	args = append(args, name, "bash", "-lc", command)
+	return b.run(args...)
+}
+
+func (b sbxBackend) remove(name string) error {
+	return b.run("rm", "-f", name)
+}
+
+// removeSandbox deletes a target's sandbox (start --delete): best effort,
+// reported as a warning.
+func removeSandbox(kind, name string) {
+	b, err := newSandboxBackend(kind)
+	if err == nil {
+		err = b.remove(name)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not remove sandbox %s: %v\n", name, err)
+	}
+}
+
+// isTerminal reports whether f is a terminal (/dev/null is a character
+// device too, so a mode check is not enough).
+func isTerminal(f *os.File) bool {
+	return term.IsTerminal(int(f.Fd()))
+}
+
+// prepareSandboxEnv runs the host-side authentication decision for a
+// sandboxed launch and returns the environment the sandbox receives. A
+// store that is still a symlink afterwards, with no token in play, is the
+// shared machine login: its target (~/.claude) is not mounted and the
+// backend mounts directories only, so inside the sandbox the link would
+// dangle and Claude Code would be logged out. The launch then re-prepares
+// as isolated: the link is detached (it holds no data; the host relinks on
+// the next unsandboxed launch), stale account state is purged, and /login
+// inside the sandbox writes the target's own store on the mount.
+func prepareSandboxEnv(t sandboxTarget, layers []*manifest.Env) ([]string, error) {
+	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
-		return syncErr
+		return nil, syncErr
 	}
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
-	block, _ := auth.EffectiveBlock(configPath, layers)
-	env := sandboxEnv(launchEnv, block)
-	// A store that is a symlink after preparation is the shared machine
-	// login. Its target, ~/.claude, is not mounted and sbx mounts
-	// directories only, so inside the sandbox the link dangles and Claude
-	// Code is logged out; refuse rather than launch a playbook that cannot
-	// authenticate. A launch carrying a token authenticates with it and a
-	// dangling link holds no grant to adopt, so a leftover link (the token
-	// path detaches only a link to a store with a grant) does not refuse.
-	if info, err := os.Lstat(filepath.Join(configPath, auth.CredentialsFileName)); err == nil && info.Mode()&os.ModeSymlink != 0 && !envHas(env, auth.OAuthTokenEnv) {
-		return fmt.Errorf("playbook %q shares the machine login (auth status: shared-login): its credentials store links to ~/.claude, which a sandbox does not see. Give it a login of its own (isolate_auth = true in its .playbook, then /login inside the sandbox) or a token (an env profile setting CLAUDE_CODE_OAUTH_TOKEN), or launch without --sandbox", pb.Name)
+	store := filepath.Join(t.configPath, auth.CredentialsFileName)
+	if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink != 0 && !envHas(launchEnv, auth.OAuthTokenEnv) {
+		fmt.Fprintf(os.Stderr, "Shared login stays on the host: %s authenticates on its own inside the sandbox (run /login once there)\n", t.label)
+		prev, had := os.LookupEnv(auth.IsolateAuthEnv)
+		os.Setenv(auth.IsolateAuthEnv, "true")
+		launchEnv, syncErr = auth.PrepareLaunchEnvWith(t.configPath, layers)
+		if had {
+			os.Setenv(auth.IsolateAuthEnv, prev)
+		} else {
+			os.Unsetenv(auth.IsolateAuthEnv)
+		}
+		if syncErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
+		}
+	}
+	block, _ := auth.EffectiveBlock(t.configPath, layers)
+	return sandboxEnv(launchEnv, block), nil
+}
+
+// runSandboxed launches t inside its sandbox. claudeArgs are forwarded to
+// claude verbatim.
+func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, opts sandboxOpts) error {
+	backend, err := newSandboxBackend(t.backend)
+	if err != nil {
+		return err
+	}
+	env, err := prepareSandboxEnv(t, layers)
+	if err != nil {
+		return err
 	}
 
 	var sb manifest.Sandbox
-	if pb.Manifest != nil && pb.Manifest.Sandbox != nil {
-		sb = *pb.Manifest.Sandbox
+	if t.manifest != nil {
+		sb = *t.manifest
 	}
 	workdir := opts.workdir
 	if workdir == "" {
@@ -272,19 +462,15 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 	if workdir, err = resolvedPath(workdir); err != nil {
 		return err
 	}
-	// Mount the playbook root (the config directory, or the install root
-	// it sits in) and address the config directory inside the sandbox by
-	// its resolved path: a linked registry entry is a symlink the sandbox
-	// does not have, its target is what gets mounted.
-	rootPath := pb.RootPath
-	if rootPath == "" {
-		rootPath = pb.Path
-	}
-	rootDir, err := resolvedPath(rootPath)
+	// Mount the root (the config directory, or the install root it sits
+	// in) and address the config directory inside the sandbox by its
+	// resolved path: a linked registry entry is a symlink the sandbox does
+	// not have, its target is what gets mounted.
+	rootDir, err := resolvedPath(t.rootPath)
 	if err != nil {
 		return err
 	}
-	configDir, err := resolvedPath(configPath)
+	configDir, err := resolvedPath(t.configPath)
 	if err != nil {
 		return err
 	}
@@ -309,32 +495,25 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 	}
 	mounts = append(mounts, extras...)
 
-	name := sandboxName(pb.Name)
-	names, err := sbx.output("ls", "-q")
+	name := t.name
+	names, err := backend.names()
 	if err != nil {
-		return fmt.Errorf("sbx is not ready (run 'sbx login' if it reports not authenticated): %w", err)
+		return err
 	}
 	exists := false
-	sc := bufio.NewScanner(bytes.NewReader(names))
-	for sc.Scan() {
-		if strings.TrimSpace(sc.Text()) == name {
+	for _, n := range names {
+		if n == name {
 			exists = true
 		}
 	}
 	if exists && opts.fresh {
-		if err := sbx.run("rm", "-f", name); err != nil {
+		if err := backend.remove(name); err != nil {
 			return fmt.Errorf("could not remove sandbox %s: %w", name, err)
 		}
 		exists = false
 	}
 	if !exists {
-		createArgs := []string{"create", "--name", name}
-		if opts.clone {
-			createArgs = append(createArgs, "--clone")
-		}
-		createArgs = append(createArgs, "claude")
-		createArgs = append(createArgs, mounts...)
-		if err := sbx.run(createArgs...); err != nil {
+		if err := backend.create(name, opts.clone, mounts); err != nil {
 			return fmt.Errorf("could not create sandbox %s: %w", name, err)
 		}
 		hosts := append([]string{}, sb.AllowNet...)
@@ -342,33 +521,23 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 			hosts = append(hosts, h)
 		}
 		for _, h := range hosts {
-			if err := sbx.run("policy", "allow", "network", "--sandbox", name, h); err != nil {
+			if err := backend.allowNetwork(name, h); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not allow network %q for sandbox %s: %v\n", h, name, err)
 			}
 		}
 		if sb.ClaudeVersion != "" {
 			install := "set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s " + shell.QuoteArg(sb.ClaudeVersion)
-			if err := sbx.run("exec", name, "bash", "-lc", install); err != nil {
+			if err := backend.shell(name, install); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not pin Claude Code %s inside sandbox %s: %v (the image's own version runs)\n", sb.ClaudeVersion, name, err)
 			}
 		}
-		fmt.Fprintf(os.Stderr, "Sandbox %s created: workdir %s, playbook %s%s\n", name, workdir, rootDir, describeExtras(extras, hosts, sb.ClaudeVersion))
+		fmt.Fprintf(os.Stderr, "Sandbox %s created (%s): workdir %s, config %s%s\n", name, t.backend, workdir, rootDir, describeExtras(extras, hosts, sb.ClaudeVersion))
 	} else {
 		fmt.Fprintf(os.Stderr, "Sandbox %s reused (--sandbox-fresh recreates it): workdir %s\n", name, workdir)
 	}
 
-	// Attach: the playbook's environment and claude's arguments travel as
-	// exec arguments, never through a file inside the sandbox. A pty is
-	// requested only when this process has a terminal on both ends: sbx
-	// exec -t without one produces no output and exits 0, so a piped or
-	// scripted launch (-p) would silently do nothing.
-	execArgs := []string{"exec", "-i"}
-	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
-		execArgs = append(execArgs, "-t")
-	}
-	for _, kv := range env {
-		execArgs = append(execArgs, "-e", kv)
-	}
+	// Attach: the environment and claude's arguments travel as exec
+	// arguments, never through a file inside the sandbox.
 	quoted := make([]string, 0, len(claudeArgs))
 	for _, a := range claudeArgs {
 		quoted = append(quoted, shell.QuoteArg(a))
@@ -377,14 +546,8 @@ func runSandboxed(pb *playbook.Playbook, layers []*manifest.Env, claudeArgs []st
 	if len(quoted) > 0 {
 		command += " " + strings.Join(quoted, " ")
 	}
-	execArgs = append(execArgs, name, "bash", "-lc", command)
-	return preserveExitCode(sbx.run(execArgs...))
-}
-
-// isTerminal reports whether f is a terminal (/dev/null is a character
-// device too, so a mode check is not enough).
-func isTerminal(f *os.File) bool {
-	return term.IsTerminal(int(f.Fd()))
+	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	return preserveExitCode(backend.attach(name, env, tty, command))
 }
 
 func describeExtras(extraMounts, hosts []string, version string) string {

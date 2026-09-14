@@ -100,6 +100,30 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if pb.Manifest != nil && !pb.Manifest.Sandbox.Empty() {
+		sb := pb.Manifest.Sandbox
+		var parts []string
+		if sb.Always {
+			parts = append(parts, "always")
+		}
+		if sb.Backend != "" {
+			parts = append(parts, "backend "+sb.Backend)
+		}
+		if sb.Workdir != "" {
+			parts = append(parts, "workdir "+sb.Workdir)
+		}
+		if len(sb.Mounts) > 0 {
+			parts = append(parts, "mounts "+strings.Join(sb.Mounts, " "))
+		}
+		if len(sb.AllowNet) > 0 {
+			parts = append(parts, "allow_net "+strings.Join(sb.AllowNet, ","))
+		}
+		if sb.ClaudeVersion != "" {
+			parts = append(parts, "claude "+sb.ClaudeVersion)
+		}
+		fmt.Printf("Sandbox:     %s\n", strings.Join(parts, ", "))
+	}
+
 	if pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.Repository != "" {
 		fmt.Printf("Update from: %s\n", pb.Manifest.Source.Repository)
 	} else {

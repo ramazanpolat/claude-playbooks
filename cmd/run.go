@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -31,7 +33,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// directly (`name --env K=V ...`, which is what a launcher passes). The
 	// --sandbox family is scanned in the same leading runs.
 	var sopts sandboxOpts
-	rest, layers, err := takeRunFlags(rest, &sopts)
+	rest, layers, err := takeRunFlags(rest, &sopts, nil)
 	if err != nil {
 		return err
 	}
@@ -47,8 +49,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("  --env KEY=VALUE      set one variable")
 		fmt.Println("  --unset KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
-		fmt.Println("Sandbox flags run the playbook inside a Docker Sandbox (needs the sbx CLI):")
-		fmt.Println("  --sandbox            launch in the playbook's sandbox cpb-<name> (created on first use)")
+		fmt.Println("Sandbox flags run the playbook inside a sandbox (backend sbx, Docker Sandboxes):")
+		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use); --sbx is a synonym")
+		fmt.Println("  --no-sandbox         launch on the host although the manifest says [sandbox] always = true")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
 		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
@@ -61,7 +64,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("playbook name required\nUsage: claude-playbook run " + runFlagsUsage + " <name> [claude-flags...]")
 	}
 	name := rest[0]
-	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts)
+	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts, nil)
 	if err != nil {
 		return err
 	}
@@ -77,11 +80,34 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
 	}
 
-	if sopts.enabled {
-		return runSandboxed(pb, layers, claudeArgs, sopts)
+	var sbm *manifest.Sandbox
+	if pb.Manifest != nil {
+		sbm = pb.Manifest.Sandbox
 	}
-	if sopts.fresh || sopts.clone || sopts.workdir != "" || len(sopts.mounts) > 0 {
-		return fmt.Errorf("--sandbox-fresh, --clone, --workdir and --mount apply to a sandboxed launch: add --sandbox")
+	sandboxed, backend, err := resolveSandbox(sbm, &sopts, fmt.Sprintf("playbook %q", pb.Name))
+	if err != nil {
+		return err
+	}
+	if sandboxed {
+		// The registry's spelling of the config directory, made absolute
+		// so a relative --playbooks-dir cannot leak a relative
+		// CLAUDE_CONFIG_DIR into a sandbox whose working directory is
+		// elsewhere.
+		configPath, err := filepath.Abs(pb.Path)
+		if err != nil {
+			return err
+		}
+		rootPath := pb.RootPath
+		if rootPath == "" {
+			rootPath = pb.Path
+		}
+		if rootPath, err = filepath.Abs(rootPath); err != nil {
+			return err
+		}
+		return runSandboxed(sandboxTarget{
+			label: fmt.Sprintf("playbook %q", pb.Name), name: sandboxName(pb.Name),
+			configPath: configPath, rootPath: rootPath, manifest: sbm, backend: backend,
+		}, layers, claudeArgs, sopts)
 	}
 
 	claudePath, err := exec.LookPath("claude")
