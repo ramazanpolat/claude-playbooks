@@ -78,10 +78,13 @@ func sandboxName(playbookName string) string {
 	return "cpb-" + cleanSandboxName(playbookName)
 }
 
-// startSandboxName names the sandbox of a start directory; the extra
-// segment keeps it apart from a registered playbook of the same name.
+// startSandboxName names the sandbox of a start directory. The prefix
+// differs from a registered playbook's before the first hyphen, so no
+// playbook name (letters, digits, dashes, underscores; underscores fold
+// to dashes) can produce it: "start-x" and "start_x" both give
+// cpb-start-x, never cpbstart-x.
 func startSandboxName(dir string) string {
-	return "cpb-start-" + cleanSandboxName(filepath.Base(dir))
+	return "cpbstart-" + cleanSandboxName(filepath.Base(dir))
 }
 
 // takeSandboxValueFlags consumes the leading --workdir PATH, --mount
@@ -294,6 +297,10 @@ type sandboxBackend interface {
 	attach(name string, env []string, tty bool, command string) error
 	// remove deletes the sandbox and everything in it.
 	remove(name string) error
+	// homeDir is the sandbox user's home inside, a path that exists only
+	// there; sandbox-local state (a login the host does not share) lives
+	// below it.
+	homeDir() string
 }
 
 // newSandboxBackend returns the backend for kind, or an error naming what
@@ -377,6 +384,8 @@ func (b sbxBackend) remove(name string) error {
 	return b.run("rm", "-f", name)
 }
 
+func (b sbxBackend) homeDir() string { return "/home/agent" }
+
 // removeSandbox deletes a target's sandbox (start --delete): best effort,
 // reported as a warning.
 func removeSandbox(kind, name string) {
@@ -395,40 +404,57 @@ func isTerminal(f *os.File) bool {
 	return term.IsTerminal(int(f.Fd()))
 }
 
+// sandboxLoginPath is where a sandboxed launch keeps a login the host does
+// not share: a file below the sandbox user's home, which exists only inside
+// the sandbox and persists with it.
+func sandboxLoginPath(backend sandboxBackend, name string) string {
+	return backend.homeDir() + "/.claude-playbook-logins/" + name + "/" + auth.CredentialsFileName
+}
+
 // prepareSandboxEnv runs the host-side authentication decision for a
-// sandboxed launch and returns the environment the sandbox receives. A
-// store that is still a symlink afterwards, with no token in play, is the
+// sandboxed launch and returns the environment the sandbox receives, plus
+// the sandbox-local path the store now points at ("" when the store is the
+// target's own).
+//
+// A store that is still a symlink afterwards, with no token in play, is the
 // shared machine login: its target (~/.claude) is not mounted and the
 // backend mounts directories only, so inside the sandbox the link would
-// dangle and Claude Code would be logged out. The launch then re-prepares
-// as isolated: the link is detached (it holds no data; the host relinks on
-// the next unsandboxed launch), stale account state is purged, and /login
-// inside the sandbox writes the target's own store on the mount.
-func prepareSandboxEnv(t sandboxTarget, layers []*manifest.Env) ([]string, error) {
+// dangle and Claude Code would be logged out. The link is re-pointed at a
+// sandbox-local file instead: /login inside writes through it into the
+// sandbox, where the grant persists with the sandbox and never touches the
+// host. On the host the link dangles until the next unsandboxed launch,
+// whose credential sync replaces any link that is not the shared one with
+// the shared one and copies nothing (only a regular grant-bearing store is
+// ever promoted to the machine store, which is why the login must not land
+// as a regular file on the mount). The account state the host sync copied
+// in is purged, as for an isolated playbook: inside, nothing authenticates
+// as that account until /login.
+func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
-		return nil, syncErr
+		return nil, "", syncErr
 	}
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 	store := filepath.Join(t.configPath, auth.CredentialsFileName)
 	if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink != 0 && !envHas(launchEnv, auth.OAuthTokenEnv) {
-		fmt.Fprintf(os.Stderr, "Shared login stays on the host: %s authenticates on its own inside the sandbox (run /login once there)\n", t.label)
-		prev, had := os.LookupEnv(auth.IsolateAuthEnv)
-		os.Setenv(auth.IsolateAuthEnv, "true")
-		launchEnv, syncErr = auth.PrepareLaunchEnvWith(t.configPath, layers)
-		if had {
-			os.Setenv(auth.IsolateAuthEnv, prev)
-		} else {
-			os.Unsetenv(auth.IsolateAuthEnv)
+		loginPath = sandboxLoginPath(backend, t.name)
+		if target, err := os.Readlink(store); err != nil || target != loginPath {
+			if err := os.Remove(store); err != nil {
+				return nil, "", fmt.Errorf("could not detach the shared login for the sandbox: %w", err)
+			}
+			if err := os.Symlink(loginPath, store); err != nil {
+				return nil, "", fmt.Errorf("could not point the store at the sandbox login: %w", err)
+			}
 		}
-		if syncErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
+		if _, qErr := auth.QuarantineAccountState(t.configPath); qErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", qErr)
 		}
+		fmt.Fprintf(os.Stderr, "Shared login stays on the host: %s authenticates on its own inside the sandbox (run /login once there; the login lives in the sandbox)\n", t.label)
 	}
 	block, _ := auth.EffectiveBlock(t.configPath, layers)
-	return sandboxEnv(launchEnv, block), nil
+	return sandboxEnv(launchEnv, block), loginPath, nil
 }
 
 // runSandboxed launches t inside its sandbox. claudeArgs are forwarded to
@@ -438,7 +464,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	if err != nil {
 		return err
 	}
-	env, err := prepareSandboxEnv(t, layers)
+	env, loginPath, err := prepareSandboxEnv(t, backend, layers)
 	if err != nil {
 		return err
 	}
@@ -543,6 +569,11 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
 	command := "cd " + shell.QuoteArg(workdir) + " && exec claude"
+	if loginPath != "" {
+		// The sandbox-local login directory must exist for /login to write
+		// through the store link; created as the sandbox user, inside.
+		command = "mkdir -p " + shell.QuoteArg(filepath.Dir(loginPath)) + " && " + command
+	}
 	if len(quoted) > 0 {
 		command += " " + strings.Join(quoted, " ")
 	}

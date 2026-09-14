@@ -104,7 +104,7 @@ cpb run --sandbox --mount /data:ro demo                          # extra read-on
 cpb run --sandbox --sandbox-fresh demo                           # recreate the sandbox
 ```
 
-The machine login never enters the sandbox: a shared-login playbook is detached for the launch and authenticates on its own inside (`/login` once there); a token from an env profile works unchanged. `--clone` counts at creation only; to switch modes, add `--sandbox-fresh`.
+The machine login never enters the sandbox: a shared-login playbook authenticates on its own inside (`/login` once there; the grant lives in the sandbox, not on the host); a token from an env profile works unchanged. `--clone` counts at creation only; to switch modes, add `--sandbox-fresh`.
 
 ```bash
 cpb create demo --sandbox --no-alias        # [sandbox] always = true + isolate_auth = true

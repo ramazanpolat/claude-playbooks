@@ -184,21 +184,50 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".claude", ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	globalStore := filepath.Join(home, ".claude", ".credentials.json")
+	globalBefore, _ := os.ReadFile(globalStore)
+	if err := os.WriteFile(filepath.Join(root, "box", ".claude.json"), []byte(`{"numStartups":1,"oauthAccount":{"emailAddress":"x@y"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	log := stubSbx(t)
-	// An unsandboxed preparation links the store; the sandboxed launch
-	// detaches it for this launch and runs as own-login inside.
+	// The host sync links the store to the machine login; the sandboxed
+	// launch re-points the link at a sandbox-local file and purges the
+	// synced account state, so /login inside lands in the sandbox.
 	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"}); err != nil {
 		t.Fatalf("shared login: %v", err)
 	}
 	store := filepath.Join(root, "box", ".credentials.json")
-	if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		t.Fatal("the shared-login link survived into a sandboxed launch")
+	want := "/home/agent/.claude-playbook-logins/cpb-box/.credentials.json"
+	if target, err := os.Readlink(store); err != nil || target != want {
+		t.Fatalf("store after the sandboxed launch: %q %v", target, err)
 	}
-	if calls := sbxCalls(t, log); !strings.HasPrefix(calls[len(calls)-1], "exec -i ") || strings.Contains(calls[len(calls)-1], "CLAUDE_CODE_OAUTH_TOKEN") {
-		t.Fatalf("attach after detach: %q", calls)
+	calls := sbxCalls(t, log)
+	last := calls[len(calls)-1]
+	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-box' && cd ") {
+		t.Fatalf("attach: %q", calls)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".claude", ".credentials.json")); err != nil {
-		t.Fatal("the machine login was touched")
+	if state, _ := os.ReadFile(filepath.Join(root, "box", ".claude.json")); strings.Contains(string(state), "oauthAccount") || !strings.Contains(string(state), "numStartups") {
+		t.Fatalf("account state after the sandboxed launch: %s", state)
+	}
+	// A second sandboxed launch keeps the sandbox login link as it is.
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"}); err != nil {
+		t.Fatal(err)
+	}
+	if target, _ := os.Readlink(store); target != want {
+		t.Fatalf("store after the second sandboxed launch: %q", target)
+	}
+	// The next host launch restores the shared link and promotes nothing:
+	// the machine login is byte-for-byte what it was.
+	stubClaude(t)
+	if err := runRun(nil, []string{"box", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(store); err != nil || target != globalStore {
+		t.Fatalf("store after the host launch: %q %v", target, err)
+	}
+	if globalAfter, _ := os.ReadFile(globalStore); string(globalAfter) != string(globalBefore) {
+		t.Fatal("the machine login was changed")
 	}
 	os.Remove(log)
 	// An isolated playbook holds its own store: launched.
@@ -350,6 +379,14 @@ func TestRunSandboxAlwaysAndOverride(t *testing.T) {
 	}
 }
 
+func TestStartSandboxNameNeverCollides(t *testing.T) {
+	for _, name := range []string{"start-x", "start_x", "cpbstart-x", "start"} {
+		if sandboxName(name) == startSandboxName("/tmp/x") || sandboxName(name) == startSandboxName("/tmp/start-x") {
+			t.Errorf("playbook %q shares a sandbox with a start directory", name)
+		}
+	}
+}
+
 func TestStartSandbox(t *testing.T) {
 	sandboxRoot(t, "pbs")
 	dir := filepath.Join(t.TempDir(), "scratch dir")
@@ -360,7 +397,7 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if calls[1] != "create --name cpb-start-scratch-dir claude "+canon(t, work)+" "+canon(t, dir) {
+	if calls[1] != "create --name cpbstart-scratch-dir claude "+canon(t, work)+" "+canon(t, dir) {
 		t.Fatalf("start create: %q", calls)
 	}
 	last := calls[len(calls)-1]
@@ -376,12 +413,12 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Remove(log)
-	t.Setenv("SBX_STUB_LS", "cpb-start-scratch-dir")
+	t.Setenv("SBX_STUB_LS", "cpbstart-scratch-dir")
 	if err := runStart(nil, []string{"--delete", "--workdir", work, dir}); err != nil {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 3 || !strings.HasPrefix(calls[1], "exec -i ") || calls[2] != "rm -f cpb-start-scratch-dir" {
+	if len(calls) != 3 || !strings.HasPrefix(calls[1], "exec -i ") || calls[2] != "rm -f cpbstart-scratch-dir" {
 		t.Fatalf("start --delete under always: %q", calls)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
