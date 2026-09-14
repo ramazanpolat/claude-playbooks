@@ -211,7 +211,8 @@ if phase_enabled p4; then
   WDC="$(cd "$WD" && pwd -P)"; FXC="$(cd "$PB/fx" && pwd -P)"
   grep -q "^create --name cpb-fx claude $WDC $FXC\$" "$SBXLOG" 2>/dev/null || rc=1
   grep -q '^policy allow network --sandbox cpb-fx ritual$' "$SBXLOG" 2>/dev/null || rc=1
-  grep -q "^exec -i .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
+  grep -q "^exec -i .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-fx' && cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
+  [ "$(readlink "$PB/fx/.credentials.json")" = /home/agent/.claude-playbook-logins/cpb-fx/.credentials.json ] || rc=1   # no machine login: sandbox login link stays
   grep -q -- '-e HOME=' "$SBXLOG" 2>/dev/null && rc=1
   p4 run --workdir "$WD" fx >/dev/null 2>&1 && rc=1
   report "p4 sandboxed launch (stub sbx)" $rc

@@ -583,7 +583,7 @@ cpb run --sandbox --mount ~/shared-libs:ro sre            # one more directory, 
 cpb run --sandbox --sandbox-fresh sre                     # throw the sandbox away and start over
 ```
 
-Your machine login never enters the sandbox, because `~/.claude` is exactly what stays outside. A playbook that shares it runs with a login of its own inside: `cpb` says so on the first sandboxed launch, and one `/login` there gives the sandbox its own grant, kept inside the sandbox (gone with `--sandbox-fresh`, never written to your machine). A token from an env profile works as it does on the host.
+Your machine login never enters the sandbox, because `~/.claude` is exactly what stays outside: a working directory or mount that contains it (your home directory, say) is refused. A playbook that shares it runs with a login of its own inside: `cpb` says so on the first sandboxed launch, and one `/login` there gives the sandbox its own grant, kept inside the sandbox (gone with `--sandbox-fresh`, never written to your machine). A token from an env profile works as it does on the host.
 
 To make a playbook sandboxed every time, say so once:
 

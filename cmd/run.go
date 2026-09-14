@@ -104,10 +104,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if rootPath, err = filepath.Abs(rootPath); err != nil {
 			return err
 		}
-		return runSandboxed(sandboxTarget{
+		_, err = runSandboxed(sandboxTarget{
 			label: fmt.Sprintf("playbook %q", pb.Name), name: sandboxName(pb.Name),
 			configPath: configPath, rootPath: rootPath, manifest: sbm, backend: backend,
 		}, layers, claudeArgs, sopts)
+		return err
 	}
 
 	claudePath, err := exec.LookPath("claude")

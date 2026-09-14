@@ -438,13 +438,6 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // in is purged, as for an isolated playbook: inside, nothing authenticates
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
-	// The machine's own config directory holds the machine login as a
-	// regular store: mounting it would hand that login to the sandbox and
-	// let /login inside overwrite it. Nothing in this tool launches
-	// ~/.claude anyway; a sandboxed start on it is refused outright.
-	if auth.IsGlobalConfigDir(t.configPath) {
-		return nil, "", fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", t.configPath)
-	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		return nil, "", syncErr
@@ -463,11 +456,20 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 			return nil, "", fmt.Errorf("could not detach the sandbox login for a token launch: %w", err)
 		}
 	}
-	if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink != 0 && !envHas(launchEnv, auth.OAuthTokenEnv) {
+	// A missing store on a non-isolated target is the shared-login shape
+	// too, with no machine login to link to yet: without the sandbox link,
+	// /login inside would land as a regular grant on the mount, and a
+	// machine login established later would let the host sync promote it.
+	info, lerr := os.Lstat(store)
+	linked := lerr == nil && info.Mode()&os.ModeSymlink != 0
+	missing := os.IsNotExist(lerr) && !auth.IsAuthIsolated(t.configPath)
+	if (linked || missing) && !envHas(launchEnv, auth.OAuthTokenEnv) {
 		loginPath = sandboxLoginPath(backend, t.name)
 		if target, err := os.Readlink(store); err != nil || target != loginPath {
-			if err := os.Remove(store); err != nil {
-				return nil, "", fmt.Errorf("could not detach the shared login for the sandbox: %w", err)
+			if linked {
+				if err := os.Remove(store); err != nil {
+					return nil, "", fmt.Errorf("could not detach the shared login for the sandbox: %w", err)
+				}
 			}
 			if err := os.Symlink(loginPath, store); err != nil {
 				return nil, "", fmt.Errorf("could not point the store at the sandbox login: %w", err)
@@ -482,16 +484,43 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 	return sandboxEnv(launchEnv, block), loginPath, nil
 }
 
+// machineLoginInside reports which machine credential a mount would carry
+// into the sandbox: the machine config directory (~/.claude, holding the
+// machine login as a regular store) or the long-lived token file, when
+// either exists below the mount. "" when the mount is clean.
+func machineLoginInside(mount string) string {
+	if dir, err := auth.GlobalConfigDir(); err == nil {
+		if _, err := os.Stat(dir); err == nil && withinDir(dir, mount) {
+			return "the machine's Claude config directory " + dir
+		}
+	}
+	if tf := auth.OAuthTokenFile(); tf != "" {
+		if _, err := os.Stat(tf); err == nil {
+			if resolved, err := filepath.EvalSymlinks(tf); err == nil && withinDir(resolved, mount) {
+				return "the machine's long-lived token file " + resolved
+			}
+		}
+	}
+	return ""
+}
+
 // runSandboxed launches t inside its sandbox. claudeArgs are forwarded to
-// claude verbatim.
-func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, opts sandboxOpts) error {
+// claude verbatim. started reports whether a session was attached (as
+// opposed to a refusal before anything ran), so a caller's post-session
+// cleanup never follows a refusal.
+func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, opts sandboxOpts) (started bool, err error) {
 	backend, err := newSandboxBackend(t.backend)
 	if err != nil {
-		return err
+		return false, err
+	}
+	// The machine config directory is never a sandbox root; checked before
+	// any preparation touches it.
+	if auth.IsGlobalConfigDir(t.configPath) {
+		return false, fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", t.configPath)
 	}
 	env, loginPath, err := prepareSandboxEnv(t, backend, layers)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	var sb manifest.Sandbox
@@ -504,14 +533,14 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	}
 	if workdir == "" {
 		if workdir, err = os.Getwd(); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if info, err := os.Stat(expandHome(workdir)); err != nil || !info.IsDir() {
-		return fmt.Errorf("sandbox working directory %s is not a directory", expandHome(workdir))
+		return false, fmt.Errorf("sandbox working directory %s is not a directory", expandHome(workdir))
 	}
 	if workdir, err = resolvedPath(workdir); err != nil {
-		return err
+		return false, err
 	}
 	// Mount the root (the config directory, or the install root it sits
 	// in) and address the config directory inside the sandbox by its
@@ -519,11 +548,11 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	// not have, its target is what gets mounted.
 	rootDir, err := resolvedPath(t.rootPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	configDir, err := resolvedPath(t.configPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	env = setEnv(env, "CLAUDE_CONFIG_DIR", configDir)
 	mounts := []string{workdir}
@@ -537,7 +566,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	for _, m := range append(append([]string{}, sb.Mounts...), opts.mounts...) {
 		p, ro := strings.CutSuffix(m, ":ro")
 		if p, err = resolvedPath(p); err != nil {
-			return fmt.Errorf("sandbox mount %s: %w", m, err)
+			return false, fmt.Errorf("sandbox mount %s: %w", m, err)
 		}
 		if ro {
 			p += ":ro"
@@ -545,11 +574,20 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		extras = append(extras, p)
 	}
 	mounts = append(mounts, extras...)
+	// No mount may carry the machine login in: the home directory, or any
+	// directory above ~/.claude or the token file, is refused, read-only
+	// or not.
+	for _, m := range mounts {
+		p, _ := strings.CutSuffix(m, ":ro")
+		if what := machineLoginInside(p); what != "" {
+			return false, fmt.Errorf("sandbox mount %s contains %s: the machine login would enter the sandbox. Mount a narrower directory", p, what)
+		}
+	}
 
 	name := t.name
 	names, err := backend.names()
 	if err != nil {
-		return err
+		return false, err
 	}
 	exists := false
 	for _, n := range names {
@@ -559,13 +597,13 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	}
 	if exists && opts.fresh {
 		if err := backend.remove(name); err != nil {
-			return fmt.Errorf("could not remove sandbox %s: %w", name, err)
+			return false, fmt.Errorf("could not remove sandbox %s: %w", name, err)
 		}
 		exists = false
 	}
 	if !exists {
 		if err := backend.create(name, opts.clone, mounts); err != nil {
-			return fmt.Errorf("could not create sandbox %s: %w", name, err)
+			return false, fmt.Errorf("could not create sandbox %s: %w", name, err)
 		}
 		hosts := append([]string{}, sb.AllowNet...)
 		if h := baseURLHost(env); h != "" {
@@ -603,7 +641,20 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		command += " " + strings.Join(quoted, " ")
 	}
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
-	return preserveExitCode(backend.attach(name, env, tty, command))
+	runErr := backend.attach(name, env, tty, command)
+	if loginPath != "" {
+		// The session is over: give the host its shared link back, so the
+		// store dangles only while a sandboxed session is live. The sync
+		// replaces a link that is not the shared one and copies nothing;
+		// the sandbox login stays inside the sandbox for the next launch.
+		// A launch that never returns here (crash, kill) leaves the link
+		// dangling, which every host command tolerates and the next host
+		// launch repairs.
+		if err := auth.SyncCredentials(t.configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not restore the shared login link after the sandbox session: %v\n", err)
+		}
+	}
+	return true, preserveExitCode(runErr)
 }
 
 func describeExtras(extraMounts, hosts []string, version string) string {

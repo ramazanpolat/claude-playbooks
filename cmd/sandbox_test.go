@@ -17,7 +17,8 @@ func stubSbx(t *testing.T, existing ...string) string {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "sbx.log")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SBX_STUB_LOG\"\n" +
-		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\nexit 0\n"
+		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
+		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "sbx"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	}
 	attach := calls[len(calls)-1]
 	// Tests run without a terminal, so no pty is requested.
-	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
+	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-box' && cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
 		if !strings.Contains(attach, frag) {
 			t.Errorf("attach lacks %q: %q", frag, attach)
 		}
@@ -186,6 +187,7 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	}
 	globalStore := filepath.Join(home, ".claude", ".credentials.json")
 	globalBefore, _ := os.ReadFile(globalStore)
+	t.Setenv("SBX_STUB_STORE", filepath.Join(root, "box", ".credentials.json"))
 	if err := os.WriteFile(filepath.Join(root, "box", ".claude.json"), []byte(`{"numStartups":1,"oauthAccount":{"emailAddress":"x@y"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -198,29 +200,41 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	}
 	store := filepath.Join(root, "box", ".credentials.json")
 	want := "/home/agent/.claude-playbook-logins/cpb-box/.credentials.json"
-	if target, err := os.Readlink(store); err != nil || target != want {
-		t.Fatalf("store after the sandboxed launch: %q %v", target, err)
-	}
+	// The stub's attach ran with the store pointing into the sandbox (the
+	// stub records the link target it saw); once the session returned,
+	// the shared link is back.
 	calls := sbxCalls(t, log)
 	last := calls[len(calls)-1]
 	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-box' && cd ") {
 		t.Fatalf("attach: %q", calls)
 	}
+	if seen, _ := os.ReadFile(filepath.Join(filepath.Dir(log), "store-during-attach")); strings.TrimSpace(string(seen)) != want {
+		t.Fatalf("store during the session: %q", seen)
+	}
+	if target, err := os.Readlink(store); err != nil || target != globalStore {
+		t.Fatalf("store after the session: %q %v", target, err)
+	}
 	if state, _ := os.ReadFile(filepath.Join(root, "box", ".claude.json")); strings.Contains(string(state), "oauthAccount") || !strings.Contains(string(state), "numStartups") {
 		t.Fatalf("account state after the sandboxed launch: %s", state)
 	}
-	// A second sandboxed launch keeps the sandbox login link as it is.
+	// A second sandboxed launch re-points the link the same way.
 	os.Remove(log)
+	os.Remove(filepath.Join(filepath.Dir(log), "store-during-attach"))
 	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"}); err != nil {
 		t.Fatal(err)
 	}
-	if target, _ := os.Readlink(store); target != want {
-		t.Fatalf("store after the second sandboxed launch: %q", target)
+	if seen, _ := os.ReadFile(filepath.Join(filepath.Dir(log), "store-during-attach")); strings.TrimSpace(string(seen)) != want {
+		t.Fatalf("store during the second session: %q", seen)
 	}
 	// A token launch after the sandbox login detaches the sandbox-local
 	// link: inside, the earlier grant must not be reachable beside the
-	// token. The token path then leaves no store link at all.
+	// token. The token path then leaves no store link at all. (A launch
+	// that never returned would have left the sandbox link: simulate it.)
 	os.Remove(log)
+	os.Remove(store)
+	if err := os.Symlink(want, store); err != nil {
+		t.Fatal(err)
+	}
 	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "box"}); err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +470,7 @@ func TestStartSandbox(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(global, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"a"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := runStart(nil, []string{"--sandbox", "--workdir", work, global})
+	err := runStart(nil, []string{"--sandbox", "--delete", "--workdir", work, global})
 	if err == nil || !strings.Contains(err.Error(), "machine's Claude config directory") {
 		t.Fatalf("start --sandbox ~/.claude: %v", err)
 	}
@@ -464,7 +478,57 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal("sbx was called for the machine config directory")
 	}
 	if data, _ := os.ReadFile(filepath.Join(global, ".credentials.json")); string(data) != `{"claudeAiOauth":{"accessToken":"a"}}` {
-		t.Fatal("the machine store was touched")
+		t.Fatal("the machine store was touched, or --delete removed it after the refusal")
+	}
+	// No mount may carry the machine login in: the home directory (above
+	// ~/.claude), a directory above the token file, read-only or not. A
+	// refused launch with --delete leaves the directory alone.
+	home := os.Getenv("HOME")
+	tokenDir := filepath.Join(t.TempDir(), "tokens")
+	if err := os.MkdirAll(tokenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tokenDir, "oauth-token"), []byte("sk-ant-oat01-x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(t.TempDir(), "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(tokenDir, "oauth-token"))
+	for _, args := range [][]string{
+		{"--sandbox", "--delete", "--workdir", home, other},
+		{"--sandbox", "--delete", "--workdir", work, "--mount", home + ":ro", other},
+		{"--sandbox", "--delete", "--workdir", work, "--mount", filepath.Dir(tokenDir), other},
+		{"--sandbox", "--delete", "--workdir", work, home},
+	} {
+		os.Remove(log)
+		err := runStart(nil, args)
+		if err == nil || !strings.Contains(err.Error(), "the machine login would enter the sandbox") {
+			t.Fatalf("%q: %v", args, err)
+		}
+		if _, statErr := os.Stat(log); statErr == nil {
+			t.Fatalf("%q reached sbx", args)
+		}
+		if _, err := os.Stat(other); err != nil {
+			t.Fatalf("%q: --delete removed the directory after a refusal", args)
+		}
+	}
+	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
+	// A fresh non-isolated directory with no machine login still gets the
+	// sandbox-local link (a /login inside must not land on the mount), and
+	// with no machine login to relink to, the link stays afterwards.
+	fresh := filepath.Join(t.TempDir(), "fresh")
+	os.Remove(log)
+	os.RemoveAll(filepath.Join(home, ".claude"))
+	if err := runStart(nil, []string{"--sandbox", "--workdir", work, fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if target, err := os.Readlink(filepath.Join(fresh, ".credentials.json")); err != nil || target != "/home/agent/.claude-playbook-logins/cpbstart-fresh/.credentials.json" {
+		t.Fatalf("fresh directory store: %q %v", target, err)
+	}
+	if calls := sbxCalls(t, log); !strings.Contains(calls[len(calls)-1], "mkdir -p '/home/agent/.claude-playbook-logins/cpbstart-fresh' && cd ") {
+		t.Fatalf("fresh directory attach: %q", calls)
 	}
 }
 

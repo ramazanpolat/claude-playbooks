@@ -107,12 +107,20 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if sandboxed {
+		// Refused here, before anything else: with --delete, a refusal
+		// must never be followed by the cleanup below.
+		if auth.IsGlobalConfigDir(absPath) {
+			return fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", absPath)
+		}
 		name := startSandboxName(absPath)
-		runErr := runSandboxed(sandboxTarget{
+		started, runErr := runSandboxed(sandboxTarget{
 			label: "directory " + absPath, name: name,
 			configPath: absPath, rootPath: absPath, manifest: sbm, backend: backend,
 		}, layers, claudeArgs, sopts)
-		if deleteAfter {
+		// Cleanup only after a session actually ran: a launch refused
+		// before attaching (a bad mount, sbx missing) leaves the directory
+		// and any sandbox exactly as they were.
+		if deleteAfter && started {
 			removeSandbox(backend, name)
 			if rmErr := os.RemoveAll(absPath); rmErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not delete %s: %v\n", absPath, rmErr)
