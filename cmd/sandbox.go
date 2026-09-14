@@ -484,21 +484,44 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 	return sandboxEnv(launchEnv, block), loginPath, nil
 }
 
+// mountCovers reports whether p is the mount or below it, by filesystem
+// identity: p's ancestors are compared with the mount through os.SameFile,
+// so "/" (whose string prefix would never match), a differently cased
+// spelling on a case-insensitive filesystem, and any other alias of the
+// same directory all count.
+func mountCovers(mount, p string) bool {
+	mi, err := os.Stat(mount)
+	if err != nil {
+		return false
+	}
+	for cur := p; ; cur = filepath.Dir(cur) {
+		if ci, err := os.Stat(cur); err == nil && os.SameFile(mi, ci) {
+			return true
+		}
+		if filepath.Dir(cur) == cur {
+			return false
+		}
+	}
+}
+
 // machineLoginInside reports which machine credential a mount would carry
-// into the sandbox: the machine config directory (~/.claude, holding the
-// machine login as a regular store) or the long-lived token file, when
-// either exists below the mount. "" when the mount is clean.
+// into the sandbox: the machine config directory (~/.claude), the machine
+// credentials store at its resolved location (the store may be a symlink
+// into another directory, a supported layout), or the long-lived token
+// file, when any of them exists below the mount. "" when the mount is
+// clean.
 func machineLoginInside(mount string) string {
 	if dir, err := auth.GlobalConfigDir(); err == nil {
-		if _, err := os.Stat(dir); err == nil && withinDir(dir, mount) {
+		if _, err := os.Stat(dir); err == nil && mountCovers(mount, dir) {
 			return "the machine's Claude config directory " + dir
+		}
+		if store, err := filepath.EvalSymlinks(filepath.Join(dir, auth.CredentialsFileName)); err == nil && mountCovers(mount, store) {
+			return "the machine's credentials store " + store
 		}
 	}
 	if tf := auth.OAuthTokenFile(); tf != "" {
-		if _, err := os.Stat(tf); err == nil {
-			if resolved, err := filepath.EvalSymlinks(tf); err == nil && withinDir(resolved, mount) {
-				return "the machine's long-lived token file " + resolved
-			}
+		if resolved, err := filepath.EvalSymlinks(tf); err == nil && mountCovers(mount, resolved) {
+			return "the machine's long-lived token file " + resolved
 		}
 	}
 	return ""

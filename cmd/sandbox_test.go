@@ -496,11 +496,26 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(tokenDir, "oauth-token"))
+	// The machine store may itself be a symlink into another directory:
+	// that directory carries the machine grant too.
+	vault := filepath.Join(t.TempDir(), "vault")
+	if err := os.MkdirAll(vault, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(global, ".credentials.json"), filepath.Join(vault, ".credentials.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(vault, ".credentials.json"), filepath.Join(global, ".credentials.json")); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{
 		{"--sandbox", "--delete", "--workdir", home, other},
 		{"--sandbox", "--delete", "--workdir", work, "--mount", home + ":ro", other},
 		{"--sandbox", "--delete", "--workdir", work, "--mount", filepath.Dir(tokenDir), other},
 		{"--sandbox", "--delete", "--workdir", work, home},
+		{"--sandbox", "--delete", "--workdir", work, "--mount", "/:ro", other},
+		{"--sandbox", "--delete", "--workdir", work, "--mount", vault, other},
+		{"--sandbox", "--delete", "--workdir", work, vault},
 	} {
 		os.Remove(log)
 		err := runStart(nil, args)
@@ -515,6 +530,7 @@ func TestStartSandbox(t *testing.T) {
 		}
 	}
 	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
+	os.RemoveAll(vault)
 	// A fresh non-isolated directory with no machine login still gets the
 	// sandbox-local link (a /login inside must not land on the mount), and
 	// with no machine login to relink to, the link stays afterwards.
