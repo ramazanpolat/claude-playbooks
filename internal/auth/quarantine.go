@@ -145,6 +145,10 @@ func globalClaudeDir() (string, error) {
 	return filepath.Abs(filepath.Join(home, ".claude"))
 }
 
+// IsGlobalConfigDir reports whether dir IS the machine's Claude config
+// directory (~/.claude), by identity, symlinks resolved.
+func IsGlobalConfigDir(dir string) bool { return isGlobalConfigDir(dir) }
+
 // isGlobalConfigDir reports whether dir IS the global Claude config directory,
 // by filesystem identity rather than by spelling: a symlink to ~/.claude (or a
 // symlinked ancestor, or a symlinked ~/.claude itself) names the same

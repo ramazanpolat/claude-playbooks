@@ -217,6 +217,23 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	if target, _ := os.Readlink(store); target != want {
 		t.Fatalf("store after the second sandboxed launch: %q", target)
 	}
+	// A token launch after the sandbox login detaches the sandbox-local
+	// link: inside, the earlier grant must not be reachable beside the
+	// token. The token path then leaves no store link at all.
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "box"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(store); !os.IsNotExist(err) {
+		t.Fatalf("store after a token launch: %v", err)
+	}
+	if calls := sbxCalls(t, log); !strings.Contains(calls[len(calls)-1], "-e CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x") || strings.Contains(calls[len(calls)-1], "mkdir -p") {
+		t.Fatalf("token attach: %q", calls)
+	}
+	// Restore the shared link for the host-launch check below.
+	if err := os.Symlink(want, store); err != nil {
+		t.Fatal(err)
+	}
 	// The next host launch restores the shared link and promotes nothing:
 	// the machine login is byte-for-byte what it was.
 	stubClaude(t)
@@ -427,6 +444,27 @@ func TestStartSandbox(t *testing.T) {
 	// Sandbox-only flags without a sandbox refuse, as in run.
 	if err := runStart(nil, []string{"--workdir", work, dir}); err == nil || !strings.Contains(err.Error(), "add --sandbox") {
 		t.Fatalf("start with --workdir alone: %v", err)
+	}
+	// The machine's config directory is never sandboxed: it would mount
+	// the machine login. Refused before any sbx call and before the
+	// credential sync could touch it.
+	os.Remove(log)
+	global := filepath.Join(os.Getenv("HOME"), ".claude")
+	if err := os.MkdirAll(global, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(global, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"a"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := runStart(nil, []string{"--sandbox", "--workdir", work, global})
+	if err == nil || !strings.Contains(err.Error(), "machine's Claude config directory") {
+		t.Fatalf("start --sandbox ~/.claude: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called for the machine config directory")
+	}
+	if data, _ := os.ReadFile(filepath.Join(global, ".credentials.json")); string(data) != `{"claudeAiOauth":{"accessToken":"a"}}` {
+		t.Fatal("the machine store was touched")
 	}
 }
 

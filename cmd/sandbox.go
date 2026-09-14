@@ -32,7 +32,7 @@ import (
 // the sandbox policy's, widened per sandbox by [sandbox].allow_net and the
 // host of ANTHROPIC_BASE_URL when the env points elsewhere.
 //
-// One sandbox per playbook, named cpb-<playbook> (cpb-start-<dir> for
+// One sandbox per playbook, named cpb-<playbook> (cpbstart-<dir> for
 // start), reused across launches so installed tools and the agent's state
 // persist; --sandbox-fresh recreates it. The sandbox runs the image's own
 // Claude Code unless [sandbox].claude_version pins one, installed once at
@@ -411,6 +411,14 @@ func sandboxLoginPath(backend sandboxBackend, name string) string {
 	return backend.homeDir() + "/.claude-playbook-logins/" + name + "/" + auth.CredentialsFileName
 }
 
+// isSandboxLoginLink reports whether the store at configPath is a link to
+// a sandbox-local login (any sandbox's), which a host launch never
+// resolves.
+func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
+	target, err := os.Readlink(filepath.Join(configPath, auth.CredentialsFileName))
+	return err == nil && strings.HasPrefix(target, backend.homeDir()+"/.claude-playbook-logins/")
+}
+
 // prepareSandboxEnv runs the host-side authentication decision for a
 // sandboxed launch and returns the environment the sandbox receives, plus
 // the sandbox-local path the store now points at ("" when the store is the
@@ -430,6 +438,13 @@ func sandboxLoginPath(backend sandboxBackend, name string) string {
 // in is purged, as for an isolated playbook: inside, nothing authenticates
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
+	// The machine's own config directory holds the machine login as a
+	// regular store: mounting it would hand that login to the sandbox and
+	// let /login inside overwrite it. Nothing in this tool launches
+	// ~/.claude anyway; a sandboxed start on it is refused outright.
+	if auth.IsGlobalConfigDir(t.configPath) {
+		return nil, "", fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", t.configPath)
+	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		return nil, "", syncErr
@@ -438,6 +453,16 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 	store := filepath.Join(t.configPath, auth.CredentialsFileName)
+	if envHas(launchEnv, auth.OAuthTokenEnv) && isSandboxLoginLink(t.configPath, backend) {
+		// Token launch after a sandbox login: on the host the link dangles,
+		// so the quarantine above found no grant to detach, but inside the
+		// sandbox it resolves to the earlier login, which Claude Code's
+		// 401 recovery would adopt over the token. Detach it, as the
+		// quarantine does for a shared link with a grant.
+		if err := os.Remove(store); err != nil {
+			return nil, "", fmt.Errorf("could not detach the sandbox login for a token launch: %w", err)
+		}
+	}
 	if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink != 0 && !envHas(launchEnv, auth.OAuthTokenEnv) {
 		loginPath = sandboxLoginPath(backend, t.name)
 		if target, err := os.Readlink(store); err != nil || target != loginPath {

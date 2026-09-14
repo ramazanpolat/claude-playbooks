@@ -59,7 +59,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println("  --unset KEY          remove one variable")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
 		fmt.Println("Sandbox flags run the session inside a sandbox (backend sbx, Docker Sandboxes):")
-		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpb-start-<dir> (created on first use); --sbx is a synonym")
+		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpbstart-<dir> (created on first use); --sbx is a synonym")
 		fmt.Println("  --no-sandbox         launch on the host although the directory's manifest says [sandbox] always = true")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
