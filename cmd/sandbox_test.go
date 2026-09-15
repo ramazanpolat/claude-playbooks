@@ -20,6 +20,8 @@ func stubSbx(t *testing.T, existing ...string) string {
 		"if [ \"$1\" = ls ] && [ \"$2\" = --json ]; then printf '%s' \"${SBX_STUB_LSJSON:-[]}\"; exit 0; fi\n" +
 		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
 		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
+		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.claude-playbook-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
+		"if [ \"$1\" = secret ] && [ \"$2\" = ls ]; then printf 'CUSTOM SECRETS\\nSCOPE TARGETS ENV PLACEHOLDER SECRET\\n%s\\n' \"$SBX_STUB_SECRETS\"; exit 0; fi\n" +
 		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo 'stub failure' >&2; exit 1; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "sbx"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -113,6 +115,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	want := []string{
 		"ls -q",
 		"create --name cpb-box --no-share-skills claude " + work + " " + pbDir + " " + extra + ":ro",
+		"exec cpb-box bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox",
 		"policy allow network --sandbox cpb-box api.example.com",
 		"policy allow network --sandbox cpb-box router.local",
 		"exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
@@ -144,9 +147,24 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if len(calls) != 3 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.HasPrefix(calls[2], "exec -i ") {
-		t.Fatalf("reuse should only list and attach: %q", calls)
+	if len(calls) != 5 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpb-box" || !strings.HasPrefix(calls[4], "exec -i ") {
+		t.Fatalf("reuse should list, read the marker, list secrets and attach: %q", calls)
 	}
+	// A sandbox without the marker (created by an earlier release, with
+	// the shared skills store mounted) or with other creation settings is
+	// refused until recreated.
+	for _, marker := range []string{"none", "skills=shared"} {
+		os.Remove(log)
+		t.Setenv("SBX_STUB_MARKER", marker)
+		err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"})
+		if err == nil || !strings.Contains(err.Error(), "--sandbox-fresh") {
+			t.Fatalf("marker %q: %v", marker, err)
+		}
+		if strings.Contains(strings.Join(sbxCalls(t, log), "\n"), "exec -i") {
+			t.Fatalf("marker %q: attached", marker)
+		}
+	}
+	t.Setenv("SBX_STUB_MARKER", "skills=private")
 	// A reused sandbox covers a working directory below one of its mounts.
 	os.Remove(log)
 	sub := filepath.Join(work, "sub")
@@ -183,7 +201,7 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 4 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone --no-share-skills claude "+canon(t, work)+" "+canon(t, filepath.Join(root, "box")) {
+	if len(calls) != 6 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone --no-share-skills claude "+canon(t, work)+" "+canon(t, filepath.Join(root, "box")) || !strings.Contains(calls[3], "skills=private") || calls[4] != "secret ls --sandbox cpb-box" {
 		t.Fatalf("fresh should remove and recreate: %q", calls)
 	}
 }
@@ -484,7 +502,7 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 4 || calls[1] != "ls --json" || !strings.HasPrefix(calls[2], "exec -i ") || calls[3] != "rm -f cpbstart-scratch-dir" {
+	if len(calls) != 6 || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpbstart-scratch-dir" || !strings.HasPrefix(calls[4], "exec -i ") || calls[5] != "rm -f cpbstart-scratch-dir" {
 		t.Fatalf("start --delete under always: %q", calls)
 	}
 	t.Setenv("SBX_STUB_LSJSON", "")
@@ -611,6 +629,15 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	})
 	if !strings.Contains(info, "Sandbox:     always") {
 		t.Fatalf("info: %q", info)
+	}
+	writePlaybook(t, root, "modes", &manifest.Manifest{Sandbox: &manifest.Sandbox{ShareSkills: true, Secrets: "env"}})
+	info = captureStdout(t, func() {
+		if err := runInfo(nil, []string{"modes"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(info, "Sandbox:     share_skills, secrets env") {
+		t.Fatalf("info with the mode keys only: %q", info)
 	}
 
 	// install --sandbox: the flag sets the block; a source-shipped
@@ -820,6 +847,27 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	if strings.Contains(joined, "secret set-custom") || strings.Contains(joined, "--no-share-skills") || !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY=plain-key ") {
 		t.Fatalf("secrets=env / share_skills: %q", calls)
 	}
+	// A key registered by an earlier launch and no longer in the
+	// environment is revoked: its placeholder is re-registered as its own
+	// value, for the current endpoint host.
+	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
+	t.Setenv("SBX_STUB_LS", "cpb-revoke")
+	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]`)
+	t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "revoke"}); err != nil {
+		t.Fatal(err)
+	}
+	joined = strings.Join(sbxCalls(t, log), "\n")
+	if !strings.Contains(joined, "secret set-custom --host router.local --env ANTHROPIC_AUTH_TOKEN --value cpb-revoke-ANTHROPIC_AUTH_TOKEN --placeholder cpb-revoke-ANTHROPIC_AUTH_TOKEN --sandbox cpb-revoke") {
+		t.Fatalf("revocation: %q", joined)
+	}
+	if strings.Contains(joined, "--env OTHER") || strings.Contains(joined, "--env ANTHROPIC_API_KEY") {
+		t.Fatalf("revocation touched a mapping that is not ours or was never registered: %q", joined)
+	}
+	t.Setenv("SBX_STUB_LS", "")
+	t.Setenv("SBX_STUB_LSJSON", "")
+	t.Setenv("SBX_STUB_SECRETS", "")
 	// A failed registration falls back to the plain value, loudly.
 	t.Setenv("SBX_STUB_FAIL", "secret")
 	os.Remove(log)

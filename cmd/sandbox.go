@@ -303,6 +303,11 @@ type sandboxBackend interface {
 	allowNetwork(name, host string) error
 	// shell runs a login-shell command inside, non-interactively.
 	shell(name, command string) error
+	// shellOutput runs a login-shell command inside and returns its stdout.
+	shellOutput(name, command string) (string, error)
+	// secrets lists the custom secrets registered for the sandbox, env
+	// variable to placeholder.
+	secrets(name string) (map[string]string, error)
 	// attach runs a login-shell command inside with env set, wired to this
 	// process's stdio; tty asks for a pty.
 	attach(name string, env []string, tty bool, command string) error
@@ -421,6 +426,50 @@ func (b sbxBackend) allowNetwork(name, host string) error {
 
 func (b sbxBackend) shell(name, command string) error {
 	return b.run("exec", name, "bash", "-lc", command)
+}
+
+func (b sbxBackend) shellOutput(name, command string) (string, error) {
+	c := exec.Command(b.bin, "exec", name, "bash", "-lc", command)
+	c.Stderr = os.Stderr
+	out, err := c.Output()
+	return string(out), err
+}
+
+// secrets parses `sbx secret ls --sandbox NAME` (no JSON form in 0.38.0):
+// under the CUSTOM SECRETS table, rows are SCOPE TARGETS ENV PLACEHOLDER
+// SECRET; only rows scoped to the sandbox count.
+func (b sbxBackend) secrets(name string) (map[string]string, error) {
+	c := exec.Command(b.bin, "secret", "ls", "--sandbox", name)
+	c.Stderr = os.Stderr
+	out, err := c.Output()
+	if err != nil {
+		return nil, fmt.Errorf("sbx secret ls: %w", err)
+	}
+	found := map[string]string{}
+	custom := false
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		switch {
+		case line == "":
+			continue
+		case strings.HasPrefix(line, "CUSTOM SECRETS"):
+			custom = true
+			continue
+		case strings.HasSuffix(line, "SECRETS"):
+			custom = false
+			continue
+		}
+		if !custom {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 4 || f[0] != name || f[0] == "SCOPE" {
+			continue
+		}
+		found[f[2]] = f[3]
+	}
+	return found, nil
 }
 
 func (b sbxBackend) attach(name string, env []string, tty bool, command string) error {
@@ -807,9 +856,24 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 			}
 		}
 	}
+	if exists {
+		// Creation-time choices this launch cannot see from outside: the
+		// marker cpb wrote inside at creation says what they were. A
+		// sandbox without one predates the marker (v3.12.0 and earlier,
+		// created with sbx's shared skills store mounted) and must be
+		// recreated; one whose choices differ from the manifest too.
+		marker, err := backend.shellOutput(name, "cat ~/"+sandboxMarkerFile+" 2>/dev/null")
+		want := sandboxMarker(sb.ShareSkills)
+		if err != nil || strings.TrimSpace(marker) != want {
+			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): an earlier claude-playbook, or a changed share_skills. Recreate it with --sandbox-fresh", name, strings.TrimSpace(marker), want)
+		}
+	}
 	if !exists {
 		if err := backend.create(name, opts.clone, sb.ShareSkills, mounts); err != nil {
 			return false, fmt.Errorf("could not create sandbox %s: %w", name, err)
+		}
+		if err := backend.shell(name, "printf %s "+shell.QuoteArg(sandboxMarker(sb.ShareSkills))+" > ~/"+sandboxMarkerFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not record the sandbox's creation settings inside %s: %v (the next reuse will ask for --sandbox-fresh)\n", name, err)
 		}
 		hosts := append([]string{}, sb.AllowNet...)
 		if h := baseURLHost(env); h != "" {
@@ -898,6 +962,17 @@ func rewriteHostEndpoint(env []string, backend sandboxBackend) []string {
 	return env
 }
 
+// sandboxMarkerFile, below the sandbox user's home, records the
+// creation-time settings a launch cannot read back from the backend.
+const sandboxMarkerFile = ".claude-playbook-sandbox"
+
+func sandboxMarker(shareSkills bool) string {
+	if shareSkills {
+		return "skills=shared"
+	}
+	return "skills=private"
+}
+
 // secretEnvVars are the backend API keys Claude Code sends as request
 // headers to its API endpoint: injectable at the proxy. The subscription
 // token is not among them: Claude Code checks its shape locally, and a
@@ -926,6 +1001,14 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 		host = "api.anthropic.com"
 	}
 	host = backend.policyHost(host)
+	// Mappings registered by an earlier launch for a key the environment
+	// no longer carries would still inject that key for anyone inside who
+	// sends the (predictable) placeholder: sbx cannot delete them, so they
+	// are neutralized by re-registering the placeholder as its own value.
+	registered, err := backend.secrets(sandbox)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not list the sandbox's secrets (%v); a key registered by an earlier launch may still be mapped\n", err)
+	}
 	for _, key := range secretEnvVars {
 		value := ""
 		for _, kv := range env {
@@ -934,6 +1017,14 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 			}
 		}
 		if value == "" {
+			placeholder := secretPlaceholder(sandbox, key)
+			if registered[key] == placeholder {
+				if err := backend.secret(sandbox, host, key, placeholder, placeholder); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "Secret %s revoked at the proxy: it is no longer in the environment\n", key)
+				}
+			}
 			continue
 		}
 		placeholder := secretPlaceholder(sandbox, key)
