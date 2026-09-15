@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -569,6 +570,11 @@ func machineLoginInside(mount string) string {
 			return "the machine's long-lived token file " + resolved
 		}
 	}
+	// The registry's env profiles are its secret store (proxy injection
+	// keeps their keys out of the sandbox only while the files stay out).
+	if profiles, err := filepath.EvalSymlinks(envprofile.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
+		return "the registry's env profiles " + profiles
+	}
 	return ""
 }
 
@@ -653,16 +659,24 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 
-	// A key set in the target's own manifest sits in a file the sandbox
-	// mounts: the placeholder in the environment would hide nothing. Env
+	// A key set in a manifest under the mounted root sits in a file the
+	// sandbox mounts: the placeholder in the environment would hide
+	// nothing. The launch reads the nearest manifest walking up from the
+	// config directory, so every manifest from there up to the root is
+	// checked (a subdir install keeps its [env] in the root's). Env
 	// profiles live in the registry root, outside every mount, so that is
 	// where a secret belongs; refused before the sandbox exists.
 	if sb.Secrets != "env" {
-		if m, err := manifest.Read(t.configPath); err == nil && m != nil && m.Env != nil {
-			for _, key := range secretEnvVars {
-				if m.Env.Set[key] != "" {
-					return false, fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(t.configPath, manifest.FileName), key, key)
+		for dir := t.configPath; ; dir = filepath.Dir(dir) {
+			if m, err := manifest.Read(dir); err == nil && m != nil && m.Env != nil {
+				for _, key := range secretEnvVars {
+					if m.Env.Set[key] != "" {
+						return false, fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
+					}
 				}
+			}
+			if samePath(dir, t.rootPath) || filepath.Dir(dir) == dir {
+				break
 			}
 		}
 	}
