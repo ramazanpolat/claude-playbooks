@@ -700,6 +700,20 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	if err := runStart(nil, []string{"--sandbox", "--workdir", work, filepath.Join(project, "config")}); err != nil {
 		t.Fatalf("ancestor manifest outside the mounts: %v", err)
 	}
+	// A reused sandbox created with the wider mount keeps it: the ancestor
+	// manifest is on disk inside although this launch asks for less.
+	os.Remove(log)
+	t.Setenv("SBX_STUB_LS", "cpbstart-config")
+	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpbstart-config","workspaces":["`+canon(t, project)+`"]}]`)
+	err = runStart(nil, []string{"--sandbox", "--workdir", filepath.Join(project, "config"), filepath.Join(project, "config")})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(project, ".playbook")) {
+		t.Fatalf("reused wider mount with an ancestor key: %v", err)
+	}
+	if calls := strings.Join(sbxCalls(t, log), "\n"); strings.Contains(calls, "exec -i") {
+		t.Fatalf("attached to a reused sandbox with an ancestor key on its mount: %q", calls)
+	}
+	t.Setenv("SBX_STUB_LS", "")
+	t.Setenv("SBX_STUB_LSJSON", "")
 	// A manifest that cannot be parsed might hold a key: refused, not
 	// skipped. run refuses an invalid manifest at lookup already; start
 	// reads the directory's manifest leniently, so the guard is what

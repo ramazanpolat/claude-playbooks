@@ -799,6 +799,13 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		if err := checkReusedMounts(name, have, mounts); err != nil {
 			return false, err
 		}
+		// The existing mounts may be wider than this launch's: a manifest
+		// under them is on disk inside just the same.
+		if sb.Secrets != "env" {
+			if err := checkMountedManifests(t.configPath, have); err != nil {
+				return false, err
+			}
+		}
 	}
 	if !exists {
 		if err := backend.create(name, opts.clone, sb.ShareSkills, mounts); err != nil {
