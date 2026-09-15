@@ -147,6 +147,15 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 	if len(calls) != 3 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.HasPrefix(calls[2], "exec -i ") {
 		t.Fatalf("reuse should only list and attach: %q", calls)
 	}
+	// A reused sandbox covers a working directory below one of its mounts.
+	os.Remove(log)
+	sub := filepath.Join(work, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRun(nil, []string{"--sandbox", "--workdir", sub, "box"}); err != nil {
+		t.Fatalf("reuse with a workdir below a mount: %v", err)
+	}
 	// A reused sandbox that does not mount this launch's working directory
 	// is refused (mounts are creation-time), and so is one whose original
 	// mounts carry the machine login or the registry's profiles.
@@ -668,6 +677,28 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	if _, statErr := os.Stat(log); statErr == nil {
 		t.Fatal("sbx was called with a key on the mount (subdir)")
+	}
+	// A start directory under the working directory inherits the manifest
+	// above it, which the working-directory mount carries: refused.
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(filepath.Join(project, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(project, &manifest.Manifest{Name: "project", Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_AUTH_TOKEN": "above"}}}); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(log)
+	err = runStart(nil, []string{"--sandbox", "--workdir", project, filepath.Join(project, "config")})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(project, ".playbook")) {
+		t.Fatalf("ancestor manifest under the workdir mount: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with an ancestor key on the mount")
+	}
+	// The same manifest outside every mount is not on disk inside: allowed.
+	os.Remove(log)
+	if err := runStart(nil, []string{"--sandbox", "--workdir", work, filepath.Join(project, "config")}); err != nil {
+		t.Fatalf("ancestor manifest outside the mounts: %v", err)
 	}
 	// A manifest that cannot be parsed might hold a key: refused, not
 	// skipped. run refuses an invalid manifest at lookup already; start

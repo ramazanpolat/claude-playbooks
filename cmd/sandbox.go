@@ -576,14 +576,52 @@ func mountCovers(mount, p string) bool {
 	}
 }
 
+// checkMountedManifests walks up from configPath and refuses when a
+// manifest whose directory lies under one of the mounts sets a backend
+// API key, or cannot be read (it may hold one).
+func checkMountedManifests(configPath string, mounts []string) error {
+	underMount := func(dir string) bool {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			return false
+		}
+		for _, m := range mounts {
+			p, _ := strings.CutSuffix(m, ":ro")
+			if mountCovers(p, resolved) {
+				return true
+			}
+		}
+		return false
+	}
+	for dir := configPath; ; dir = filepath.Dir(dir) {
+		if underMount(dir) {
+			m, err := manifest.Read(dir)
+			if err != nil {
+				// An unreadable manifest may hold a key: not a guard to skip.
+				return fmt.Errorf("cannot check %s for keys the sandbox would mount: %w (fix the manifest, or set [sandbox] secrets = \"env\" to accept the exposure)", filepath.Join(dir, manifest.FileName), err)
+			}
+			if m != nil && m.Env != nil {
+				for _, key := range secretEnvVars {
+					if m.Env.Set[key] != "" {
+						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
+					}
+				}
+			}
+		}
+		if filepath.Dir(dir) == dir {
+			return nil
+		}
+	}
+}
+
 // checkReusedMounts refuses a reused sandbox whose mounts do not cover
 // what this launch needs, or carry a machine or registry secret; the
 // remedy is --sandbox-fresh.
 func checkReusedMounts(name string, have, need []string) error {
-	haveSet := map[string]bool{}
+	var havePaths []string
 	for _, m := range have {
 		p, _ := strings.CutSuffix(m, ":ro")
-		haveSet[p] = true
+		havePaths = append(havePaths, p)
 		if what := machineLoginInside(p); what != "" {
 			return fmt.Errorf("sandbox %s mounts %s, which contains %s: the machine login would be inside. Recreate it with --sandbox-fresh", name, p, what)
 		}
@@ -591,7 +629,14 @@ func checkReusedMounts(name string, have, need []string) error {
 	var missing []string
 	for _, m := range need {
 		p, _ := strings.CutSuffix(m, ":ro")
-		if !haveSet[p] {
+		covered := false
+		for _, h := range havePaths {
+			if h == p || mountCovers(h, p) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
 			missing = append(missing, p)
 		}
 	}
@@ -710,30 +755,18 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 
-	// A key set in a manifest under the mounted root sits in a file the
-	// sandbox mounts: the placeholder in the environment would hide
-	// nothing. The launch reads the nearest manifest walking up from the
-	// config directory, so every manifest from there up to the root is
-	// checked (a subdir install keeps its [env] in the root's). Env
-	// profiles live in the registry root, outside every mount, so that is
-	// where a secret belongs; refused before the sandbox exists.
+	// A key set in a manifest the sandbox mounts: the placeholder in the
+	// environment would hide nothing. The launch reads the nearest
+	// manifest walking up from the config directory, so every manifest
+	// on the way up is checked while its directory lies under one of this
+	// launch's mounts (a subdir install keeps its [env] in the root's; a
+	// start directory under the working directory inherits from above
+	// it). Env profiles live in the registry root, outside every mount,
+	// so that is where a secret belongs; refused before the sandbox
+	// exists.
 	if sb.Secrets != "env" {
-		for dir := t.configPath; ; dir = filepath.Dir(dir) {
-			m, err := manifest.Read(dir)
-			if err != nil {
-				// An unreadable manifest may hold a key: not a guard to skip.
-				return false, fmt.Errorf("cannot check %s for keys the sandbox would mount: %w (fix the manifest, or set [sandbox] secrets = \"env\" to accept the exposure)", filepath.Join(dir, manifest.FileName), err)
-			}
-			if m != nil && m.Env != nil {
-				for _, key := range secretEnvVars {
-					if m.Env.Set[key] != "" {
-						return false, fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
-					}
-				}
-			}
-			if samePath(dir, t.rootPath) || filepath.Dir(dir) == dir {
-				break
-			}
+		if err := checkMountedManifests(t.configPath, mounts); err != nil {
+			return false, err
 		}
 	}
 
