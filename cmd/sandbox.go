@@ -377,12 +377,22 @@ func (b sbxBackend) mounts(name string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sbx ls --json: %w", err)
 	}
-	var list []struct {
+	// sbx 0.38.0 wraps the list: {"sandboxes": [{name, workspaces, ...}]}
+	// (a bare array is accepted too).
+	type sandbox struct {
 		Name       string   `json:"name"`
 		Workspaces []string `json:"workspaces"`
 	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return nil, fmt.Errorf("sbx ls --json: %w", err)
+	var wrapped struct {
+		Sandboxes []sandbox `json:"sandboxes"`
+	}
+	list := wrapped.Sandboxes
+	if err := json.Unmarshal(out, &wrapped); err != nil {
+		if err2 := json.Unmarshal(out, &list); err2 != nil {
+			return nil, fmt.Errorf("sbx ls --json: %w", err)
+		}
+	} else {
+		list = wrapped.Sandboxes
 	}
 	for _, s := range list {
 		if s.Name == name {

@@ -17,7 +17,7 @@ func stubSbx(t *testing.T, existing ...string) string {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "sbx.log")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SBX_STUB_LOG\"\n" +
-		"if [ \"$1\" = ls ] && [ \"$2\" = --json ]; then printf '%s' \"${SBX_STUB_LSJSON:-[]}\"; exit 0; fi\n" +
+		"if [ \"$1\" = ls ] && [ \"$2\" = --json ]; then J=\"$SBX_STUB_LSJSON\"; [ -n \"$J\" ] || J='{\"sandboxes\":[]}'; printf '%s' \"$J\"; exit 0; fi\n" +
 		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
 		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
 		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.claude-playbook-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
@@ -142,7 +142,7 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 	writePlaybook(t, root, "box", nil)
 	work := t.TempDir()
 	log := stubSbx(t, "other", "cpb-box")
-	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpb-box","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]`)
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-box","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]}`)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"}); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpb-box","workspaces":["`+canon(t, home)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]`)
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-box","workspaces":["`+canon(t, home)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]}`)
 	err = runRun(nil, []string{"--sandbox", "--workdir", work, "box"})
 	if err == nil || !strings.Contains(err.Error(), "the machine login would be inside") {
 		t.Fatalf("reuse with a wide original mount: %v", err)
@@ -497,7 +497,7 @@ func TestStartSandbox(t *testing.T) {
 	}
 	os.Remove(log)
 	t.Setenv("SBX_STUB_LS", "cpbstart-scratch-dir")
-	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpbstart-scratch-dir","workspaces":["`+canon(t, work)+`","`+canon(t, dir)+`"]}]`)
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpbstart-scratch-dir","workspaces":["`+canon(t, work)+`","`+canon(t, dir)+`"]}]}`)
 	if err := runStart(nil, []string{"--delete", "--workdir", work, dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +731,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// manifest is on disk inside although this launch asks for less.
 	os.Remove(log)
 	t.Setenv("SBX_STUB_LS", "cpbstart-config")
-	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpbstart-config","workspaces":["`+canon(t, project)+`"]}]`)
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpbstart-config","workspaces":["`+canon(t, project)+`"]}]}`)
 	err = runStart(nil, []string{"--sandbox", "--workdir", filepath.Join(project, "config"), filepath.Join(project, "config")})
 	if err == nil || !strings.Contains(err.Error(), filepath.Join(project, ".playbook")) {
 		t.Fatalf("reused wider mount with an ancestor key: %v", err)
@@ -852,7 +852,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// value, for the current endpoint host.
 	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
 	t.Setenv("SBX_STUB_LS", "cpb-revoke")
-	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]`)
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]}`)
 	t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "revoke"}); err != nil {
