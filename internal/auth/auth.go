@@ -209,8 +209,15 @@ func detachSharedCredentials(targetDir string) error {
 	return nil
 }
 
+// IsolateAuthEnv forces the isolation path for a launch when set to "true".
+const IsolateAuthEnv = "CLAUDE_PLAYBOOKS_ISOLATE_AUTH"
+
+// IsAuthIsolated reports whether launches of targetDir run with isolated
+// authentication (manifest isolate_auth, or the override variable).
+func IsAuthIsolated(targetDir string) bool { return isAuthIsolated(targetDir) }
+
 func isAuthIsolated(targetDir string) bool {
-	if os.Getenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH") == "true" {
+	if os.Getenv(IsolateAuthEnv) == "true" {
 		return true
 	}
 	// A read error on the way up is not a reason to drop isolation: the

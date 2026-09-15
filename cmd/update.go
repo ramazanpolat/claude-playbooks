@@ -211,6 +211,7 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 		updated.IsolateAuth = liveManifest.IsolateAuth
 		updated.Source = liveManifest.Source
 		updated.Env = liveManifest.Env
+		updated.Sandbox = liveManifest.Sandbox
 	}
 	updated.Name = filepath.Base(root)
 	updated.Subdir = ""

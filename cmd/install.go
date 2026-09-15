@@ -24,6 +24,7 @@ var (
 	installBranch  string
 	installAlias   string
 	installNoAlias bool
+	installSandbox bool
 )
 
 var installCmd = &cobra.Command{
@@ -39,6 +40,7 @@ func init() {
 	installCmd.Flags().StringVar(&installBranch, "branch", "", "Git URL only: clone this ref instead of the default branch")
 	installCmd.Flags().StringVar(&installAlias, "alias", "", "launcher command name for the installed playbook")
 	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip launcher command creation entirely")
+	installCmd.Flags().BoolVar(&installSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
@@ -182,6 +184,18 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		// able to redirect an install's API endpoint or strip its auth.
 		fmt.Fprintf(os.Stderr, "Note: ignoring the [env] block shipped in the source's %s; environment overrides are install-local. Set them with: claude-playbook env %s set KEY=VALUE\n", manifest.FileName, targetName)
 		mPre.Env = nil
+		needsManifestWrite = true
+	}
+	if !mPre.Sandbox.Empty() {
+		// [sandbox] is install-local too: a published manifest must not be
+		// able to mount host paths or widen the sandbox's network.
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: claude-playbook install --sandbox, or edit the installed manifest\n", manifest.FileName)
+		mPre.Sandbox = nil
+		needsManifestWrite = true
+	}
+	if installSandbox {
+		mPre.IsolateAuth = true
+		mPre.Sandbox = &manifest.Sandbox{Always: true}
 		needsManifestWrite = true
 	}
 	sourceSubdir := subdir

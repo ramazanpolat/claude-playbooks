@@ -436,6 +436,8 @@ func resetCommandTestState(t *testing.T) {
 	installBranch = ""
 	installAlias = ""
 	installNoAlias = false
+	installSandbox = false
+	createSandbox = false
 	renameAlias = ""
 	renameNoAlias = false
 	selfUninstallYes = false
@@ -455,6 +457,8 @@ func resetCommandTestState(t *testing.T) {
 		installBranch = ""
 		installAlias = ""
 		installNoAlias = false
+		installSandbox = false
+		createSandbox = false
 		renameAlias = ""
 		renameNoAlias = false
 		selfUninstallYes = false

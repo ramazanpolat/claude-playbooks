@@ -211,10 +211,27 @@ if phase_enabled p4; then
   WDC="$(cd "$WD" && pwd -P)"; FXC="$(cd "$PB/fx" && pwd -P)"
   grep -q "^create --name cpb-fx claude $WDC $FXC\$" "$SBXLOG" 2>/dev/null || rc=1
   grep -q '^policy allow network --sandbox cpb-fx ritual$' "$SBXLOG" 2>/dev/null || rc=1
-  grep -q "^exec -i .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
+  grep -q "^exec -i .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-fx' && cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
+  [ "$(readlink "$PB/fx/.credentials.json")" = /home/agent/.claude-playbook-logins/cpb-fx/.credentials.json ] || rc=1   # no machine login: sandbox login link stays
   grep -q -- '-e HOME=' "$SBXLOG" 2>/dev/null && rc=1
   p4 run --workdir "$WD" fx >/dev/null 2>&1 && rc=1
   report "p4 sandboxed launch (stub sbx)" $rc
+
+  # always-sandboxed playbook: create --sandbox writes the manifest, a bare
+  # run goes through sbx, --no-sandbox runs on the host and says so.
+  rc=0
+  p4 create boxed --no-alias --sandbox 2>/dev/null | grep -q 'Always sandboxed' || rc=1
+  grep -q '^always = true$' "$PB/boxed/.playbook" 2>/dev/null || rc=1
+  grep -q '^isolate_auth = true$' "$PB/boxed/.playbook" 2>/dev/null || rc=1
+  p4 info boxed 2>/dev/null | grep -q '^Sandbox:     always' || rc=1
+  SBXLOG2="$SB/sbx2.log"; DUMP5="$SB/envdump-always"
+  CPB_RITUAL_ENVDUMP="$DUMP5" SBX_STUB_LOG="$SBXLOG2" PATH="$STUB:$PATH" p4 run --workdir "$WD" boxed >/dev/null 2>&1 || rc=1
+  grep -q '^create --name cpb-boxed claude ' "$SBXLOG2" 2>/dev/null || rc=1
+  [ -e "$DUMP5" ] && rc=1
+  CPB_RITUAL_ENVDUMP="$DUMP5" SBX_STUB_LOG="$SBXLOG2" PATH="$STUB:$PATH" p4 run --no-sandbox boxed 2>&1 >/dev/null | grep -q 'Sandbox off for this launch' || rc=1
+  [ -e "$DUMP5" ] || rc=1
+  p4 delete boxed -y >/dev/null 2>&1 || rc=1
+  report "p4 always-sandboxed playbook" $rc
 
   rc=0
   # pilot state that must survive the update
