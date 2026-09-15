@@ -113,7 +113,7 @@ cpb run --no-sandbox demo -p "..."           # host launch; a stderr line says t
 cpb start --sandbox --delete "$DIR" -p "..." # throwaway directory and sandbox
 ```
 
-`--sbx` equals `--sandbox`; `--sandbox=sbx` names the backend (the only one). `info` shows the block on a `Sandbox:` line. Network egress is the `sbx` policy's plus the manifest's `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL`; check `sbx policy log` before blaming a tool that cannot reach a service. A manifest `[sandbox]` block (`workdir`, `mounts`, `allow_net`, `claude_version`) supplies defaults; edit it through the manifest rules in `SPEC-v4.md`.
+`--sbx` equals `--sandbox`; `--sandbox=sbx` names the backend (the only one). `info` shows the block on a `Sandbox:` line. `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` from the layers are proxy-injected (the sandbox sees a placeholder) unless `[sandbox] secrets = "env"`; the shared skills store is not mounted unless `share_skills = true`. Network egress is the `sbx` policy's plus the manifest's `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL`; check `sbx policy log` before blaming a tool that cannot reach a service. A manifest `[sandbox]` block (`workdir`, `mounts`, `allow_net`, `claude_version`) supplies defaults; edit it through the manifest rules in `SPEC-v4.md`.
 
 ## Environment overrides and profiles
 

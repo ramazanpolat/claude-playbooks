@@ -18,7 +18,8 @@ func stubSbx(t *testing.T, existing ...string) string {
 	log := filepath.Join(dir, "sbx.log")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SBX_STUB_LOG\"\n" +
 		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
-		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\nexit 0\n"
+		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
+		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo 'stub failure' >&2; exit 1; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "sbx"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	work, extra = canon(t, work), canon(t, extra)
 	want := []string{
 		"ls -q",
-		"create --name cpb-box claude " + work + " " + pbDir + " " + extra + ":ro",
+		"create --name cpb-box --no-share-skills claude " + work + " " + pbDir + " " + extra + ":ro",
 		"policy allow network --sandbox cpb-box api.example.com",
 		"policy allow network --sandbox cpb-box router.local",
 		"exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
@@ -149,7 +150,7 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 4 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone claude "+canon(t, work)+" "+canon(t, filepath.Join(root, "box")) {
+	if len(calls) != 4 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone --no-share-skills claude "+canon(t, work)+" "+canon(t, filepath.Join(root, "box")) {
 		t.Fatalf("fresh should remove and recreate: %q", calls)
 	}
 }
@@ -305,7 +306,7 @@ func TestRunSandboxResolvesLinkedAndRelativePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if calls[1] != "create --name cpb-linked claude "+canon(t, work)+" "+canon(t, target) {
+	if calls[1] != "create --name cpb-linked --no-share-skills claude "+canon(t, work)+" "+canon(t, target) {
 		t.Fatalf("linked playbook mounts: %q", calls)
 	}
 	if !strings.Contains(calls[len(calls)-1], "-e CLAUDE_CONFIG_DIR="+canon(t, target)+" ") {
@@ -428,7 +429,7 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if calls[1] != "create --name cpbstart-scratch-dir claude "+canon(t, work)+" "+canon(t, dir) {
+	if calls[1] != "create --name cpbstart-scratch-dir --no-share-skills claude "+canon(t, work)+" "+canon(t, dir) {
 		t.Fatalf("start create: %q", calls)
 	}
 	last := calls[len(calls)-1]
@@ -601,5 +602,71 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	m, _ = manifest.Read(filepath.Join(root, "shipped2"))
 	if m == nil || !m.Sandbox.Empty() || m.IsolateAuth {
 		t.Fatalf("install without --sandbox adopted the source block: %#v", m)
+	}
+}
+
+func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{
+		"ANTHROPIC_BASE_URL": "http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN": "real-token", "ANTHROPIC_API_KEY": "real-key", "MODEL": "glm",
+	}}})
+	work := t.TempDir()
+	log := stubSbx(t)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := sbxCalls(t, log)
+	joined := strings.Join(calls, "\n")
+	for _, want := range []string{
+		"secret set-custom --host router.local --env ANTHROPIC_AUTH_TOKEN --value real-token --placeholder cpb-box-ANTHROPIC_AUTH_TOKEN --sandbox cpb-box",
+		"secret set-custom --host router.local --env ANTHROPIC_API_KEY --value real-key --placeholder cpb-box-ANTHROPIC_API_KEY --sandbox cpb-box",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in %q", want, calls)
+		}
+	}
+	attach := calls[len(calls)-1]
+	if !strings.Contains(attach, "-e ANTHROPIC_AUTH_TOKEN=cpb-box-ANTHROPIC_AUTH_TOKEN ") || !strings.Contains(attach, "-e ANTHROPIC_API_KEY=cpb-box-ANTHROPIC_API_KEY ") || !strings.Contains(attach, "-e MODEL=glm") {
+		t.Fatalf("attach env: %q", attach)
+	}
+	if strings.Contains(attach, "real-token") || strings.Contains(attach, "real-key") {
+		t.Fatalf("a real key entered the sandbox: %q", attach)
+	}
+	// The secret step runs after creation and before the attach, on every
+	// launch (a rotated value is registered again under the same
+	// placeholder).
+	if idx := strings.Index(joined, "secret set-custom"); idx < strings.Index(joined, "create --name") || idx > strings.Index(joined, "exec -i") {
+		t.Fatalf("secret step out of order: %q", calls)
+	}
+	// No endpoint: the key goes to Anthropic's host.
+	writePlaybook(t, root, "direct", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "k"}}})
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls := strings.Join(sbxCalls(t, log), "\n"); !strings.Contains(calls, "secret set-custom --host api.anthropic.com --env ANTHROPIC_API_KEY --value k --placeholder cpb-direct-ANTHROPIC_API_KEY --sandbox cpb-direct") {
+		t.Fatalf("direct: %q", calls)
+	}
+	// secrets = "env" passes plain values and registers nothing;
+	// share_skills = true drops the --no-share-skills flag.
+	writePlaybook(t, root, "plain", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "plain-key"}}, Sandbox: &manifest.Sandbox{Secrets: "env", ShareSkills: true}})
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	joined = strings.Join(calls, "\n")
+	if strings.Contains(joined, "secret set-custom") || strings.Contains(joined, "--no-share-skills") || !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY=plain-key ") {
+		t.Fatalf("secrets=env / share_skills: %q", calls)
+	}
+	// A failed registration falls back to the plain value, loudly.
+	t.Setenv("SBX_STUB_FAIL", "secret")
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY=k ") {
+		t.Fatalf("fallback after a failed registration: %q", calls)
 	}
 }

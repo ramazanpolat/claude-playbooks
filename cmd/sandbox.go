@@ -286,8 +286,14 @@ type sandboxBackend interface {
 	// names lists the existing sandboxes.
 	names() ([]string, error)
 	// create makes the sandbox with the given host paths mounted at their
-	// own absolute paths (a ":ro" suffix marks a read-only mount).
-	create(name string, clone bool, mounts []string) error
+	// own absolute paths (a ":ro" suffix marks a read-only mount);
+	// shareSkills mounts the backend's shared skills store as well.
+	create(name string, clone, shareSkills bool, mounts []string) error
+	// secret registers value as a proxy-injected secret for requests from
+	// the sandbox to host: inside, env holds placeholder; the proxy swaps
+	// the real value into request headers on the way out. Registering the
+	// same placeholder again updates the value.
+	secret(name, host, env, value, placeholder string) error
 	// allowNetwork widens the sandbox's egress policy by one host.
 	allowNetwork(name, host string) error
 	// shell runs a login-shell command inside, non-interactively.
@@ -347,14 +353,32 @@ func (b sbxBackend) names() ([]string, error) {
 	return names, nil
 }
 
-func (b sbxBackend) create(name string, clone bool, mounts []string) error {
+func (b sbxBackend) create(name string, clone, shareSkills bool, mounts []string) error {
 	args := []string{"create", "--name", name}
 	if clone {
 		args = append(args, "--clone")
 	}
+	if !shareSkills {
+		// Accepted by sbx 0.38.0 though absent from its --help: without it
+		// the shared skills store is mounted read-write into every sandbox.
+		args = append(args, "--no-share-skills")
+	}
 	args = append(args, "claude")
 	args = append(args, mounts...)
 	return b.run(args...)
+}
+
+func (b sbxBackend) secret(name, host, env, value, placeholder string) error {
+	// The value travels on sbx's argument list (sbx 0.38.0 has no stdin
+	// form), visible to a local process listing for the moment of the
+	// call; it already sits in a 0600 profile file. Output is discarded:
+	// sbx echoes the masked value and the placeholder.
+	c := exec.Command(b.bin, "secret", "set-custom", "--host", host, "--env", env, "--value", value, "--placeholder", placeholder, "--sandbox", name)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (b sbxBackend) allowNetwork(name, host string) error {
@@ -625,7 +649,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		exists = false
 	}
 	if !exists {
-		if err := backend.create(name, opts.clone, mounts); err != nil {
+		if err := backend.create(name, opts.clone, sb.ShareSkills, mounts); err != nil {
 			return false, fmt.Errorf("could not create sandbox %s: %w", name, err)
 		}
 		hosts := append([]string{}, sb.AllowNet...)
@@ -647,6 +671,8 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	} else {
 		fmt.Fprintf(os.Stderr, "Sandbox %s reused (--sandbox-fresh recreates it): workdir %s\n", name, workdir)
 	}
+
+	env = injectSecrets(backend, name, env, sb.Secrets)
 
 	// Attach: the environment and claude's arguments travel as exec
 	// arguments, never through a file inside the sandbox.
@@ -678,6 +704,54 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 	return true, preserveExitCode(runErr)
+}
+
+// secretEnvVars are the backend API keys Claude Code sends as request
+// headers to its API endpoint: injectable at the proxy. The subscription
+// token is not among them: Claude Code checks its shape locally, and a
+// placeholder would not pass.
+var secretEnvVars = []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+
+// secretPlaceholder is the value the sandbox sees for env: stable per
+// sandbox and variable, so re-registering it updates the secret in place
+// (rotation) and nothing has to be parsed from the backend.
+func secretPlaceholder(sandbox, env string) string {
+	return sandbox + "-" + env
+}
+
+// injectSecrets registers each API key the environment carries as a
+// proxy-injected secret for the endpoint host and replaces its value with
+// the placeholder, so the key never enters the sandbox. mode "env" passes
+// the values as they are. A registration that fails falls back to the
+// plain value with a warning naming the variable: a silent fallback would
+// leave the pilot believing the key stayed outside.
+func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode string) []string {
+	if mode == "env" {
+		return env
+	}
+	host := baseURLHost(env)
+	if host == "" {
+		host = "api.anthropic.com"
+	}
+	for _, key := range secretEnvVars {
+		value := ""
+		for _, kv := range env {
+			if k, v, _ := strings.Cut(kv, "="); k == key {
+				value = v
+			}
+		}
+		if value == "" {
+			continue
+		}
+		placeholder := secretPlaceholder(sandbox, key)
+		if err := backend.secret(sandbox, host, key, value, placeholder); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %s could not be injected at the proxy (%v); it enters the sandbox as a plain value. [sandbox] secrets = \"env\" silences this\n", key, err)
+			continue
+		}
+		env = setEnv(env, key, placeholder)
+		fmt.Fprintf(os.Stderr, "Secret %s stays on the host: injected at the proxy for %s, the sandbox sees a placeholder\n", key, host)
+	}
+	return env
 }
 
 func describeExtras(extraMounts, hosts []string, version string) string {
