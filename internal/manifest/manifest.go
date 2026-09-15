@@ -245,6 +245,14 @@ type Sandbox struct {
 	// Backend names the sandbox implementation ("sbx"); empty means the
 	// default.
 	Backend string `toml:"backend,omitempty"`
+	// ShareSkills mounts the backend's shared skills store into the
+	// sandbox (sbx does so by default; claude-playbook does not, since a
+	// sandbox could then plant a skill a later sandbox runs).
+	ShareSkills bool `toml:"share_skills,omitempty"`
+	// Secrets says how backend API keys reach the sandbox: "proxy" (the
+	// default) registers them as proxy-injected secrets and hands the
+	// sandbox a placeholder; "env" passes the values as plain variables.
+	Secrets string `toml:"secrets,omitempty"`
 	// Mounts are extra host paths bind-mounted into the sandbox at the
 	// same absolute path, "~"-prefixed or absolute, ":ro" for read-only.
 	Mounts []string `toml:"mounts,omitempty"`
@@ -529,6 +537,12 @@ func Write(dir string, m *Manifest) error {
 		if m.Sandbox.Backend != "" {
 			fmt.Fprintf(&b, "backend = %s\n", QuoteTOML(m.Sandbox.Backend))
 		}
+		if m.Sandbox.ShareSkills {
+			b.WriteString("share_skills = true\n")
+		}
+		if m.Sandbox.Secrets != "" {
+			fmt.Fprintf(&b, "secrets = %s\n", QuoteTOML(m.Sandbox.Secrets))
+		}
 		if m.Sandbox.Workdir != "" {
 			fmt.Fprintf(&b, "workdir = %s\n", QuoteTOML(m.Sandbox.Workdir))
 		}
@@ -618,7 +632,7 @@ func KnownSandboxBackend(name string) bool {
 
 // Empty reports whether the block carries nothing.
 func (s *Sandbox) Empty() bool {
-	return s == nil || (!s.Always && s.Backend == "" && len(s.Mounts) == 0 && len(s.AllowNet) == 0 && s.ClaudeVersion == "" && s.Workdir == "")
+	return s == nil || (!s.Always && s.Backend == "" && !s.ShareSkills && s.Secrets == "" && len(s.Mounts) == 0 && len(s.AllowNet) == 0 && s.ClaudeVersion == "" && s.Workdir == "")
 }
 
 // validate checks the [sandbox] block: paths are absolute or "~"-prefixed
@@ -628,6 +642,9 @@ func (s *Sandbox) Empty() bool {
 func (s *Sandbox) validate() error {
 	if s.Backend != "" && !KnownSandboxBackend(s.Backend) {
 		return fmt.Errorf("sandbox.backend %q is not a known backend (%s)", s.Backend, strings.Join(SandboxBackends, ", "))
+	}
+	if s.Secrets != "" && s.Secrets != "proxy" && s.Secrets != "env" {
+		return fmt.Errorf("sandbox.secrets %q must be \"proxy\" or \"env\"", s.Secrets)
 	}
 	for _, m := range s.Mounts {
 		p := strings.TrimSuffix(m, ":ro")

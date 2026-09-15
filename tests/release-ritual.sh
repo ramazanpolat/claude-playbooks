@@ -147,6 +147,7 @@ if phase_enabled p4; then
   chmod +x "$STUB/claude" "$STUB/security"
   p4 env-profile glm set ANTHROPIC_BASE_URL=http://ritual/v1 >/dev/null 2>&1 || rc=1
   p4 env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN >/dev/null 2>&1 || rc=1
+  p4 env-profile glm set ANTHROPIC_AUTH_TOKEN=ritual-secret-value >/dev/null 2>&1 || rc=1
   p4 env fx use glm >/dev/null 2>&1 || rc=1
   p4 env fx set RITUAL_OWN=yes >/dev/null 2>&1 || rc=1
   grep -q 'profiles = \["glm"\]' "$PB/fx/.playbook" || rc=1
@@ -209,7 +210,11 @@ if phase_enabled p4; then
   [ -e "$DUMP4" ] && rc=1                                             # host claude not run
   # the binary passes cleaned absolute paths; compare against the same shape
   WDC="$(cd "$WD" && pwd -P)"; FXC="$(cd "$PB/fx" && pwd -P)"
-  grep -q "^create --name cpb-fx claude $WDC $FXC\$" "$SBXLOG" 2>/dev/null || rc=1
+  grep -q "^create --name cpb-fx --no-share-skills claude $WDC $FXC\$" "$SBXLOG" 2>/dev/null || rc=1
+  # the backend key is registered at the proxy and never enters the sandbox
+  grep -q '^secret set-custom --host ritual --env ANTHROPIC_AUTH_TOKEN --value ritual-secret-value --placeholder cpb-fx-ANTHROPIC_AUTH_TOKEN --sandbox cpb-fx$' "$SBXLOG" 2>/dev/null || rc=1
+  grep '^exec -i ' "$SBXLOG" 2>/dev/null | grep -q 'ritual-secret-value' && rc=1
+  grep -q '^exec -i .*-e ANTHROPIC_AUTH_TOKEN=cpb-fx-ANTHROPIC_AUTH_TOKEN ' "$SBXLOG" 2>/dev/null || rc=1
   grep -q '^policy allow network --sandbox cpb-fx ritual$' "$SBXLOG" 2>/dev/null || rc=1
   grep -q "^exec -i .*-e RITUAL_OWN=yes .*-e CLAUDE_CONFIG_DIR=$FXC cpb-fx bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-fx' && cd '$WDC' && exec claude\$" "$SBXLOG" 2>/dev/null || rc=1
   [ "$(readlink "$PB/fx/.credentials.json")" = /home/agent/.claude-playbook-logins/cpb-fx/.credentials.json ] || rc=1   # no machine login: sandbox login link stays
@@ -226,7 +231,7 @@ if phase_enabled p4; then
   p4 info boxed 2>/dev/null | grep -q '^Sandbox:     always' || rc=1
   SBXLOG2="$SB/sbx2.log"; DUMP5="$SB/envdump-always"
   CPB_RITUAL_ENVDUMP="$DUMP5" SBX_STUB_LOG="$SBXLOG2" PATH="$STUB:$PATH" p4 run --workdir "$WD" boxed >/dev/null 2>&1 || rc=1
-  grep -q '^create --name cpb-boxed claude ' "$SBXLOG2" 2>/dev/null || rc=1
+  grep -q '^create --name cpb-boxed --no-share-skills claude ' "$SBXLOG2" 2>/dev/null || rc=1
   [ -e "$DUMP5" ] && rc=1
   CPB_RITUAL_ENVDUMP="$DUMP5" SBX_STUB_LOG="$SBXLOG2" PATH="$STUB:$PATH" p4 run --no-sandbox boxed 2>&1 >/dev/null | grep -q 'Sandbox off for this launch' || rc=1
   [ -e "$DUMP5" ] || rc=1

@@ -109,6 +109,12 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		if sb.Backend != "" {
 			parts = append(parts, "backend "+sb.Backend)
 		}
+		if sb.ShareSkills {
+			parts = append(parts, "share_skills")
+		}
+		if sb.Secrets != "" {
+			parts = append(parts, "secrets "+sb.Secrets)
+		}
 		if sb.Workdir != "" {
 			parts = append(parts, "workdir "+sb.Workdir)
 		}

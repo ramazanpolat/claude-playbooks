@@ -17,8 +17,12 @@ func stubSbx(t *testing.T, existing ...string) string {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "sbx.log")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SBX_STUB_LOG\"\n" +
+		"if [ \"$1\" = ls ] && [ \"$2\" = --json ]; then J=\"$SBX_STUB_LSJSON\"; [ -n \"$J\" ] || J='{\"sandboxes\":[]}'; printf '%s' \"$J\"; exit 0; fi\n" +
 		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
-		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\nexit 0\n"
+		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
+		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.claude-playbook-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
+		"if [ \"$1\" = secret ] && [ \"$2\" = ls ]; then printf 'CUSTOM SECRETS\\nSCOPE TARGETS ENV PLACEHOLDER SECRET\\n%s\\n' \"$SBX_STUB_SECRETS\"; exit 0; fi\n" +
+		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo 'stub failure' >&2; exit 1; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "sbx"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +114,8 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	work, extra = canon(t, work), canon(t, extra)
 	want := []string{
 		"ls -q",
-		"create --name cpb-box claude " + work + " " + pbDir + " " + extra + ":ro",
+		"create --name cpb-box --no-share-skills claude " + work + " " + pbDir + " " + extra + ":ro",
+		"exec cpb-box bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox",
 		"policy allow network --sandbox cpb-box api.example.com",
 		"policy allow network --sandbox cpb-box router.local",
 		"exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
@@ -137,19 +142,66 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 	writePlaybook(t, root, "box", nil)
 	work := t.TempDir()
 	log := stubSbx(t, "other", "cpb-box")
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-box","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]}`)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"}); err != nil {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if len(calls) != 2 || calls[0] != "ls -q" || !strings.HasPrefix(calls[1], "exec -i ") {
-		t.Fatalf("reuse should only list and attach: %q", calls)
+	if len(calls) != 5 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpb-box" || !strings.HasPrefix(calls[4], "exec -i ") {
+		t.Fatalf("reuse should list, read the marker, list secrets and attach: %q", calls)
 	}
+	// A sandbox without the marker (created by an earlier release, with
+	// the shared skills store mounted) or with other creation settings is
+	// refused until recreated.
+	for _, marker := range []string{"none", "skills=shared"} {
+		os.Remove(log)
+		t.Setenv("SBX_STUB_MARKER", marker)
+		err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"})
+		if err == nil || !strings.Contains(err.Error(), "--sandbox-fresh") {
+			t.Fatalf("marker %q: %v", marker, err)
+		}
+		if strings.Contains(strings.Join(sbxCalls(t, log), "\n"), "exec -i") {
+			t.Fatalf("marker %q: attached", marker)
+		}
+	}
+	t.Setenv("SBX_STUB_MARKER", "skills=private")
+	// A reused sandbox covers a working directory below one of its mounts.
+	os.Remove(log)
+	sub := filepath.Join(work, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRun(nil, []string{"--sandbox", "--workdir", sub, "box"}); err != nil {
+		t.Fatalf("reuse with a workdir below a mount: %v", err)
+	}
+	// A reused sandbox that does not mount this launch's working directory
+	// is refused (mounts are creation-time), and so is one whose original
+	// mounts carry the machine login or the registry's profiles.
+	os.Remove(log)
+	other := t.TempDir()
+	err := runRun(nil, []string{"--sandbox", "--workdir", other, "box"})
+	if err == nil || !strings.Contains(err.Error(), "which a reused sandbox cannot add") || !strings.Contains(err.Error(), "--sandbox-fresh") {
+		t.Fatalf("reuse with another workdir: %v", err)
+	}
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-box","workspaces":["`+canon(t, home)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]}`)
+	err = runRun(nil, []string{"--sandbox", "--workdir", work, "box"})
+	if err == nil || !strings.Contains(err.Error(), "the machine login would be inside") {
+		t.Fatalf("reuse with a wide original mount: %v", err)
+	}
+	if calls := sbxCalls(t, log); strings.Contains(strings.Join(calls, "\n"), "exec -i") {
+		t.Fatalf("attached to an unsafe reused sandbox: %q", calls)
+	}
+	t.Setenv("SBX_STUB_LSJSON", "")
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--sandbox-fresh", "--clone", "--workdir", work, "box"}); err != nil {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 4 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone claude "+canon(t, work)+" "+canon(t, filepath.Join(root, "box")) {
+	if len(calls) != 6 || calls[1] != "rm -f cpb-box" || calls[2] != "create --name cpb-box --clone --no-share-skills claude "+canon(t, work)+" "+canon(t, filepath.Join(root, "box")) || !strings.Contains(calls[3], "skills=private") || calls[4] != "secret ls --sandbox cpb-box" {
 		t.Fatalf("fresh should remove and recreate: %q", calls)
 	}
 }
@@ -305,7 +357,7 @@ func TestRunSandboxResolvesLinkedAndRelativePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if calls[1] != "create --name cpb-linked claude "+canon(t, work)+" "+canon(t, target) {
+	if calls[1] != "create --name cpb-linked --no-share-skills claude "+canon(t, work)+" "+canon(t, target) {
 		t.Fatalf("linked playbook mounts: %q", calls)
 	}
 	if !strings.Contains(calls[len(calls)-1], "-e CLAUDE_CONFIG_DIR="+canon(t, target)+" ") {
@@ -428,7 +480,7 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if calls[1] != "create --name cpbstart-scratch-dir claude "+canon(t, work)+" "+canon(t, dir) {
+	if calls[1] != "create --name cpbstart-scratch-dir --no-share-skills claude "+canon(t, work)+" "+canon(t, dir) {
 		t.Fatalf("start create: %q", calls)
 	}
 	last := calls[len(calls)-1]
@@ -445,13 +497,15 @@ func TestStartSandbox(t *testing.T) {
 	}
 	os.Remove(log)
 	t.Setenv("SBX_STUB_LS", "cpbstart-scratch-dir")
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpbstart-scratch-dir","workspaces":["`+canon(t, work)+`","`+canon(t, dir)+`"]}]}`)
 	if err := runStart(nil, []string{"--delete", "--workdir", work, dir}); err != nil {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 3 || !strings.HasPrefix(calls[1], "exec -i ") || calls[2] != "rm -f cpbstart-scratch-dir" {
+	if len(calls) != 6 || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpbstart-scratch-dir" || !strings.HasPrefix(calls[4], "exec -i ") || calls[5] != "rm -f cpbstart-scratch-dir" {
 		t.Fatalf("start --delete under always: %q", calls)
 	}
+	t.Setenv("SBX_STUB_LSJSON", "")
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatal("--delete left the directory")
 	}
@@ -576,6 +630,15 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	if !strings.Contains(info, "Sandbox:     always") {
 		t.Fatalf("info: %q", info)
 	}
+	writePlaybook(t, root, "modes", &manifest.Manifest{Sandbox: &manifest.Sandbox{ShareSkills: true, Secrets: "env"}})
+	info = captureStdout(t, func() {
+		if err := runInfo(nil, []string{"modes"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(info, "Sandbox:     share_skills, secrets env") {
+		t.Fatalf("info with the mode keys only: %q", info)
+	}
 
 	// install --sandbox: the flag sets the block; a source-shipped
 	// [sandbox] is install-local and dropped with a note.
@@ -601,5 +664,218 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	m, _ = manifest.Read(filepath.Join(root, "shipped2"))
 	if m == nil || !m.Sandbox.Empty() || m.IsolateAuth {
 		t.Fatalf("install without --sandbox adopted the source block: %#v", m)
+	}
+}
+
+func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	// Keys come from an env profile: profiles live in the registry root,
+	// outside every mount.
+	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=real-token", "ANTHROPIC_API_KEY=real-key", "MODEL=glm"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
+	work := t.TempDir()
+	log := stubSbx(t)
+	// A key in the playbook's own manifest is on the mount: refused before
+	// any sbx call, unless secrets = "env" accepts the exposure.
+	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}})
+	err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"})
+	if err == nil || !strings.Contains(err.Error(), "which the sandbox mounts") || !strings.Contains(err.Error(), "cpb env-profile <profile> set ANTHROPIC_API_KEY=") {
+		t.Fatalf("key on the mount: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with a key on the mount")
+	}
+	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"}); err != nil {
+		t.Fatalf("key on the mount with secrets = env: %v", err)
+	}
+	// A subdir install keeps its [env] in the root's manifest, above the
+	// config directory: still on the mount, still refused.
+	writePlaybook(t, root, "subpb", &manifest.Manifest{IsolateAuth: true, Subdir: "config", Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_AUTH_TOKEN": "root-disk"}}})
+	if err := os.MkdirAll(filepath.Join(root, "subpb", "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(log)
+	err = runRun(nil, []string{"--sandbox", "--workdir", work, "subpb"})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(root, "subpb", ".playbook")) {
+		t.Fatalf("key in the root manifest of a subdir install: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with a key on the mount (subdir)")
+	}
+	// A start directory under the working directory inherits the manifest
+	// above it, which the working-directory mount carries: refused.
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(filepath.Join(project, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(project, &manifest.Manifest{Name: "project", Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_AUTH_TOKEN": "above"}}}); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(log)
+	err = runStart(nil, []string{"--sandbox", "--workdir", project, filepath.Join(project, "config")})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(project, ".playbook")) {
+		t.Fatalf("ancestor manifest under the workdir mount: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with an ancestor key on the mount")
+	}
+	// The same manifest outside every mount is not on disk inside: allowed.
+	os.Remove(log)
+	if err := runStart(nil, []string{"--sandbox", "--workdir", work, filepath.Join(project, "config")}); err != nil {
+		t.Fatalf("ancestor manifest outside the mounts: %v", err)
+	}
+	// A reused sandbox created with the wider mount keeps it: the ancestor
+	// manifest is on disk inside although this launch asks for less.
+	os.Remove(log)
+	t.Setenv("SBX_STUB_LS", "cpbstart-config")
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpbstart-config","workspaces":["`+canon(t, project)+`"]}]}`)
+	err = runStart(nil, []string{"--sandbox", "--workdir", filepath.Join(project, "config"), filepath.Join(project, "config")})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(project, ".playbook")) {
+		t.Fatalf("reused wider mount with an ancestor key: %v", err)
+	}
+	if calls := strings.Join(sbxCalls(t, log), "\n"); strings.Contains(calls, "exec -i") {
+		t.Fatalf("attached to a reused sandbox with an ancestor key on its mount: %q", calls)
+	}
+	t.Setenv("SBX_STUB_LS", "")
+	t.Setenv("SBX_STUB_LSJSON", "")
+	// A manifest that cannot be parsed might hold a key: refused, not
+	// skipped. run refuses an invalid manifest at lookup already; start
+	// reads the directory's manifest leniently, so the guard is what
+	// stands between the key and the mount there.
+	broken := filepath.Join(t.TempDir(), "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, ".playbook"), []byte("name = \"broken\"\n\n[sandbox]\nclaude_version = \"latest\"\n\n[env.set]\nANTHROPIC_API_KEY = \"hidden\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(log)
+	err = runStart(nil, []string{"--sandbox", "--workdir", work, broken})
+	if err == nil || !strings.Contains(err.Error(), "cannot check") {
+		t.Fatalf("unreadable manifest: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with an uncheckable manifest")
+	}
+	// The registry's env profiles are never mounted: a working directory
+	// at the registry root (or above) is refused.
+	os.Remove(log)
+	err = runRun(nil, []string{"--sandbox", "--workdir", root, "box"})
+	if err == nil || !strings.Contains(err.Error(), "the registry's env profiles") {
+		t.Fatalf("workdir at the registry root: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with the profiles on a mount")
+	}
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := sbxCalls(t, log)
+	joined := strings.Join(calls, "\n")
+	for _, want := range []string{
+		"secret set-custom --host router.local --env ANTHROPIC_AUTH_TOKEN --value real-token --placeholder cpb-box-ANTHROPIC_AUTH_TOKEN --sandbox cpb-box",
+		"secret set-custom --host router.local --env ANTHROPIC_API_KEY --value real-key --placeholder cpb-box-ANTHROPIC_API_KEY --sandbox cpb-box",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in %q", want, calls)
+		}
+	}
+	attach := calls[len(calls)-1]
+	if !strings.Contains(attach, "-e ANTHROPIC_AUTH_TOKEN=cpb-box-ANTHROPIC_AUTH_TOKEN ") || !strings.Contains(attach, "-e ANTHROPIC_API_KEY=cpb-box-ANTHROPIC_API_KEY ") || !strings.Contains(attach, "-e MODEL=glm") {
+		t.Fatalf("attach env: %q", attach)
+	}
+	if strings.Contains(attach, "real-token") || strings.Contains(attach, "real-key") {
+		t.Fatalf("a real key entered the sandbox: %q", attach)
+	}
+	// The secret step runs after creation and before the attach, on every
+	// launch (a rotated value is registered again under the same
+	// placeholder).
+	if idx := strings.Index(joined, "secret set-custom"); idx < strings.Index(joined, "create --name") || idx > strings.Index(joined, "exec -i") {
+		t.Fatalf("secret step out of order: %q", calls)
+	}
+	// A service on this machine: the sandbox reaches it as
+	// host.docker.internal, while the policy and the secret name it
+	// localhost (what the sbx proxy matches).
+	if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:20128/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onhost"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	joined = strings.Join(calls, "\n")
+	for _, want := range []string{
+		"policy allow network --sandbox cpb-onhost localhost\n",
+		"policy allow network --sandbox cpb-onhost other.example\n",
+		"secret set-custom --host localhost --env ANTHROPIC_AUTH_TOKEN --value lt --placeholder cpb-onhost-ANTHROPIC_AUTH_TOKEN --sandbox cpb-onhost",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("host service: missing %q in %q", want, calls)
+		}
+	}
+	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
+		t.Fatalf("host service attach: %q", calls)
+	}
+	// No endpoint: the key goes to Anthropic's host.
+	if err := runEnvProfile(nil, []string{"direct", "set", "ANTHROPIC_API_KEY=k"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "direct", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"direct"}}})
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls := strings.Join(sbxCalls(t, log), "\n"); !strings.Contains(calls, "secret set-custom --host api.anthropic.com --env ANTHROPIC_API_KEY --value k --placeholder cpb-direct-ANTHROPIC_API_KEY --sandbox cpb-direct") {
+		t.Fatalf("direct: %q", calls)
+	}
+	// secrets = "env" passes plain values and registers nothing;
+	// share_skills = true drops the --no-share-skills flag.
+	writePlaybook(t, root, "plain", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "plain-key"}}, Sandbox: &manifest.Sandbox{Secrets: "env", ShareSkills: true}})
+	// (a plain-mode key may sit in the manifest: the exposure is accepted)
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	joined = strings.Join(calls, "\n")
+	if strings.Contains(joined, "secret set-custom") || strings.Contains(joined, "--no-share-skills") || !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY=plain-key ") {
+		t.Fatalf("secrets=env / share_skills: %q", calls)
+	}
+	// A key registered by an earlier launch and no longer in the
+	// environment is revoked: its placeholder is re-registered as its own
+	// value, for the current endpoint host.
+	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
+	t.Setenv("SBX_STUB_LS", "cpb-revoke")
+	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]}`)
+	t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "revoke"}); err != nil {
+		t.Fatal(err)
+	}
+	joined = strings.Join(sbxCalls(t, log), "\n")
+	if !strings.Contains(joined, "secret set-custom --host router.local --env ANTHROPIC_AUTH_TOKEN --value cpb-revoke-ANTHROPIC_AUTH_TOKEN --placeholder cpb-revoke-ANTHROPIC_AUTH_TOKEN --sandbox cpb-revoke") {
+		t.Fatalf("revocation: %q", joined)
+	}
+	if strings.Contains(joined, "--env OTHER") || strings.Contains(joined, "--env ANTHROPIC_API_KEY") {
+		t.Fatalf("revocation touched a mapping that is not ours or was never registered: %q", joined)
+	}
+	t.Setenv("SBX_STUB_LS", "")
+	t.Setenv("SBX_STUB_LSJSON", "")
+	t.Setenv("SBX_STUB_SECRETS", "")
+	// A failed registration falls back to the plain value, loudly.
+	t.Setenv("SBX_STUB_FAIL", "secret")
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY=k ") {
+		t.Fatalf("fallback after a failed registration: %q", calls)
 	}
 }

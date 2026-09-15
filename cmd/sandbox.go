@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -285,13 +287,27 @@ func baseURLHost(env []string) string {
 type sandboxBackend interface {
 	// names lists the existing sandboxes.
 	names() ([]string, error)
+	// mounts lists the host paths an existing sandbox was created with
+	// (":ro" suffix kept), which it keeps for its lifetime.
+	mounts(name string) ([]string, error)
 	// create makes the sandbox with the given host paths mounted at their
-	// own absolute paths (a ":ro" suffix marks a read-only mount).
-	create(name string, clone bool, mounts []string) error
+	// own absolute paths (a ":ro" suffix marks a read-only mount);
+	// shareSkills mounts the backend's shared skills store as well.
+	create(name string, clone, shareSkills bool, mounts []string) error
+	// secret registers value as a proxy-injected secret for requests from
+	// the sandbox to host: inside, env holds placeholder; the proxy swaps
+	// the real value into request headers on the way out. Registering the
+	// same placeholder again updates the value.
+	secret(name, host, env, value, placeholder string) error
 	// allowNetwork widens the sandbox's egress policy by one host.
 	allowNetwork(name, host string) error
 	// shell runs a login-shell command inside, non-interactively.
 	shell(name, command string) error
+	// shellOutput runs a login-shell command inside and returns its stdout.
+	shellOutput(name, command string) (string, error)
+	// secrets lists the custom secrets registered for the sandbox, env
+	// variable to placeholder.
+	secrets(name string) (map[string]string, error)
 	// attach runs a login-shell command inside with env set, wired to this
 	// process's stdio; tty asks for a pty.
 	attach(name string, env []string, tty bool, command string) error
@@ -301,6 +317,13 @@ type sandboxBackend interface {
 	// there; sandbox-local state (a login the host does not share) lives
 	// below it.
 	homeDir() string
+	// hostAlias is the name by which the sandbox reaches the host machine
+	// (inside, "localhost" is the sandbox itself).
+	hostAlias() string
+	// policyHost is the spelling the backend's policy and secret store use
+	// for host: a service on the host machine is one resource there
+	// whatever name the sandbox used for it.
+	policyHost(host string) string
 }
 
 // newSandboxBackend returns the backend for kind, or an error naming what
@@ -347,14 +370,64 @@ func (b sbxBackend) names() ([]string, error) {
 	return names, nil
 }
 
-func (b sbxBackend) create(name string, clone bool, mounts []string) error {
+func (b sbxBackend) mounts(name string) ([]string, error) {
+	c := exec.Command(b.bin, "ls", "--json")
+	c.Stderr = os.Stderr
+	out, err := c.Output()
+	if err != nil {
+		return nil, fmt.Errorf("sbx ls --json: %w", err)
+	}
+	// sbx 0.38.0 wraps the list: {"sandboxes": [{name, workspaces, ...}]}
+	// (a bare array is accepted too).
+	type sandbox struct {
+		Name       string   `json:"name"`
+		Workspaces []string `json:"workspaces"`
+	}
+	var wrapped struct {
+		Sandboxes []sandbox `json:"sandboxes"`
+	}
+	list := wrapped.Sandboxes
+	if err := json.Unmarshal(out, &wrapped); err != nil {
+		if err2 := json.Unmarshal(out, &list); err2 != nil {
+			return nil, fmt.Errorf("sbx ls --json: %w", err)
+		}
+	} else {
+		list = wrapped.Sandboxes
+	}
+	for _, s := range list {
+		if s.Name == name {
+			return s.Workspaces, nil
+		}
+	}
+	return nil, fmt.Errorf("sandbox %s not listed", name)
+}
+
+func (b sbxBackend) create(name string, clone, shareSkills bool, mounts []string) error {
 	args := []string{"create", "--name", name}
 	if clone {
 		args = append(args, "--clone")
 	}
+	if !shareSkills {
+		// Accepted by sbx 0.38.0 though absent from its --help: without it
+		// the shared skills store is mounted read-write into every sandbox.
+		args = append(args, "--no-share-skills")
+	}
 	args = append(args, "claude")
 	args = append(args, mounts...)
 	return b.run(args...)
+}
+
+func (b sbxBackend) secret(name, host, env, value, placeholder string) error {
+	// The value travels on sbx's argument list (sbx 0.38.0 has no stdin
+	// form), visible to a local process listing for the moment of the
+	// call; it already sits in a 0600 profile file. Output is discarded:
+	// sbx echoes the masked value and the placeholder.
+	c := exec.Command(b.bin, "secret", "set-custom", "--host", host, "--env", env, "--value", value, "--placeholder", placeholder, "--sandbox", name)
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (b sbxBackend) allowNetwork(name, host string) error {
@@ -363,6 +436,50 @@ func (b sbxBackend) allowNetwork(name, host string) error {
 
 func (b sbxBackend) shell(name, command string) error {
 	return b.run("exec", name, "bash", "-lc", command)
+}
+
+func (b sbxBackend) shellOutput(name, command string) (string, error) {
+	c := exec.Command(b.bin, "exec", name, "bash", "-lc", command)
+	c.Stderr = os.Stderr
+	out, err := c.Output()
+	return string(out), err
+}
+
+// secrets parses `sbx secret ls --sandbox NAME` (no JSON form in 0.38.0):
+// under the CUSTOM SECRETS table, rows are SCOPE TARGETS ENV PLACEHOLDER
+// SECRET; only rows scoped to the sandbox count.
+func (b sbxBackend) secrets(name string) (map[string]string, error) {
+	c := exec.Command(b.bin, "secret", "ls", "--sandbox", name)
+	c.Stderr = os.Stderr
+	out, err := c.Output()
+	if err != nil {
+		return nil, fmt.Errorf("sbx secret ls: %w", err)
+	}
+	found := map[string]string{}
+	custom := false
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		switch {
+		case line == "":
+			continue
+		case strings.HasPrefix(line, "CUSTOM SECRETS"):
+			custom = true
+			continue
+		case strings.HasSuffix(line, "SECRETS"):
+			custom = false
+			continue
+		}
+		if !custom {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 4 || f[0] != name || f[0] == "SCOPE" {
+			continue
+		}
+		found[f[2]] = f[3]
+	}
+	return found, nil
 }
 
 func (b sbxBackend) attach(name string, env []string, tty bool, command string) error {
@@ -385,6 +502,20 @@ func (b sbxBackend) remove(name string) error {
 }
 
 func (b sbxBackend) homeDir() string { return "/home/agent" }
+
+func (b sbxBackend) hostAlias() string { return "host.docker.internal" }
+
+// policyHost: the sbx proxy resolves host.docker.internal to the host and
+// names it "localhost" in policy and secret matching (verified on 0.38.0:
+// an allow rule or a custom secret for host.docker.internal never matches,
+// one for localhost does).
+func (b sbxBackend) policyHost(host string) string {
+	switch host {
+	case b.hostAlias(), "localhost", "127.0.0.1", "::1":
+		return "localhost"
+	}
+	return host
+}
 
 // removeSandbox deletes a target's sandbox (start --delete): best effort,
 // reported as a warning.
@@ -504,6 +635,76 @@ func mountCovers(mount, p string) bool {
 	}
 }
 
+// checkMountedManifests walks up from configPath and refuses when a
+// manifest whose directory lies under one of the mounts sets a backend
+// API key, or cannot be read (it may hold one).
+func checkMountedManifests(configPath string, mounts []string) error {
+	underMount := func(dir string) bool {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			return false
+		}
+		for _, m := range mounts {
+			p, _ := strings.CutSuffix(m, ":ro")
+			if mountCovers(p, resolved) {
+				return true
+			}
+		}
+		return false
+	}
+	for dir := configPath; ; dir = filepath.Dir(dir) {
+		if underMount(dir) {
+			m, err := manifest.Read(dir)
+			if err != nil {
+				// An unreadable manifest may hold a key: not a guard to skip.
+				return fmt.Errorf("cannot check %s for keys the sandbox would mount: %w (fix the manifest, or set [sandbox] secrets = \"env\" to accept the exposure)", filepath.Join(dir, manifest.FileName), err)
+			}
+			if m != nil && m.Env != nil {
+				for _, key := range secretEnvVars {
+					if m.Env.Set[key] != "" {
+						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
+					}
+				}
+			}
+		}
+		if filepath.Dir(dir) == dir {
+			return nil
+		}
+	}
+}
+
+// checkReusedMounts refuses a reused sandbox whose mounts do not cover
+// what this launch needs, or carry a machine or registry secret; the
+// remedy is --sandbox-fresh.
+func checkReusedMounts(name string, have, need []string) error {
+	var havePaths []string
+	for _, m := range have {
+		p, _ := strings.CutSuffix(m, ":ro")
+		havePaths = append(havePaths, p)
+		if what := machineLoginInside(p); what != "" {
+			return fmt.Errorf("sandbox %s mounts %s, which contains %s: the machine login would be inside. Recreate it with --sandbox-fresh", name, p, what)
+		}
+	}
+	var missing []string
+	for _, m := range need {
+		p, _ := strings.CutSuffix(m, ":ro")
+		covered := false
+		for _, h := range havePaths {
+			if h == p || mountCovers(h, p) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("sandbox %s was created with mounts %s; this launch also needs %s, which a reused sandbox cannot add. Recreate it with --sandbox-fresh", name, strings.Join(have, " "), strings.Join(missing, " "))
+	}
+	return nil
+}
+
 // machineLoginInside reports which machine credential a mount would carry
 // into the sandbox: the machine config directory (~/.claude), the machine
 // credentials store at its resolved location (the store may be a symlink
@@ -523,6 +724,11 @@ func machineLoginInside(mount string) string {
 		if resolved, err := filepath.EvalSymlinks(tf); err == nil && mountCovers(mount, resolved) {
 			return "the machine's long-lived token file " + resolved
 		}
+	}
+	// The registry's env profiles are its secret store (proxy injection
+	// keeps their keys out of the sandbox only while the files stay out).
+	if profiles, err := filepath.EvalSymlinks(envprofile.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
+		return "the registry's env profiles " + profiles
 	}
 	return ""
 }
@@ -545,6 +751,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	if err != nil {
 		return false, err
 	}
+	env = rewriteHostEndpoint(env, backend)
 
 	var sb manifest.Sandbox
 	if t.manifest != nil {
@@ -607,6 +814,21 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 
+	// A key set in a manifest the sandbox mounts: the placeholder in the
+	// environment would hide nothing. The launch reads the nearest
+	// manifest walking up from the config directory, so every manifest
+	// on the way up is checked while its directory lies under one of this
+	// launch's mounts (a subdir install keeps its [env] in the root's; a
+	// start directory under the working directory inherits from above
+	// it). Env profiles live in the registry root, outside every mount,
+	// so that is where a secret belongs; refused before the sandbox
+	// exists.
+	if sb.Secrets != "env" {
+		if err := checkMountedManifests(t.configPath, mounts); err != nil {
+			return false, err
+		}
+	}
+
 	name := t.name
 	names, err := backend.names()
 	if err != nil {
@@ -624,13 +846,51 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 		exists = false
 	}
+	if exists {
+		// Mounts are creation-time: a reused sandbox keeps the ones it was
+		// created with. They must cover this launch (a different working
+		// directory would not exist inside) and pass the same guard as new
+		// mounts (a registry root mounted before its profiles existed).
+		have, err := backend.mounts(name)
+		if err != nil {
+			return false, err
+		}
+		if err := checkReusedMounts(name, have, mounts); err != nil {
+			return false, err
+		}
+		// The existing mounts may be wider than this launch's: a manifest
+		// under them is on disk inside just the same.
+		if sb.Secrets != "env" {
+			if err := checkMountedManifests(t.configPath, have); err != nil {
+				return false, err
+			}
+		}
+	}
+	if exists {
+		// Creation-time choices this launch cannot see from outside: the
+		// marker cpb wrote inside at creation says what they were. A
+		// sandbox without one predates the marker (v3.12.0 and earlier,
+		// created with sbx's shared skills store mounted) and must be
+		// recreated; one whose choices differ from the manifest too.
+		marker, err := backend.shellOutput(name, "cat ~/"+sandboxMarkerFile+" 2>/dev/null")
+		want := sandboxMarker(sb.ShareSkills)
+		if err != nil || strings.TrimSpace(marker) != want {
+			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): an earlier claude-playbook, or a changed share_skills. Recreate it with --sandbox-fresh", name, strings.TrimSpace(marker), want)
+		}
+	}
 	if !exists {
-		if err := backend.create(name, opts.clone, mounts); err != nil {
+		if err := backend.create(name, opts.clone, sb.ShareSkills, mounts); err != nil {
 			return false, fmt.Errorf("could not create sandbox %s: %w", name, err)
+		}
+		if err := backend.shell(name, "printf %s "+shell.QuoteArg(sandboxMarker(sb.ShareSkills))+" > ~/"+sandboxMarkerFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not record the sandbox's creation settings inside %s: %v (the next reuse will ask for --sandbox-fresh)\n", name, err)
 		}
 		hosts := append([]string{}, sb.AllowNet...)
 		if h := baseURLHost(env); h != "" {
 			hosts = append(hosts, h)
+		}
+		for i, h := range hosts {
+			hosts[i] = backend.policyHost(h)
 		}
 		for _, h := range hosts {
 			if err := backend.allowNetwork(name, h); err != nil {
@@ -647,6 +907,8 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	} else {
 		fmt.Fprintf(os.Stderr, "Sandbox %s reused (--sandbox-fresh recreates it): workdir %s\n", name, workdir)
 	}
+
+	env = injectSecrets(backend, name, env, sb.Secrets)
 
 	// Attach: the environment and claude's arguments travel as exec
 	// arguments, never through a file inside the sandbox.
@@ -678,6 +940,112 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 	return true, preserveExitCode(runErr)
+}
+
+// rewriteHostEndpoint points an ANTHROPIC_BASE_URL at localhost (the
+// pilot's spelling for a service on this machine, a router say) at the
+// backend's host alias: inside the sandbox, localhost is the sandbox. The
+// scheme, port and path are kept. Said on stderr, since the sandbox then
+// talks to a different name than the profile wrote.
+func rewriteHostEndpoint(env []string, backend sandboxBackend) []string {
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		if k != "ANTHROPIC_BASE_URL" {
+			continue
+		}
+		u, err := url.Parse(v)
+		if err != nil || u.Hostname() == "" {
+			return env
+		}
+		switch u.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+			host := backend.hostAlias()
+			if p := u.Port(); p != "" {
+				host += ":" + p
+			}
+			u.Host = host
+			fmt.Fprintf(os.Stderr, "ANTHROPIC_BASE_URL names this machine: inside the sandbox it is %s\n", u.String())
+			return setEnv(env, k, u.String())
+		}
+		return env
+	}
+	return env
+}
+
+// sandboxMarkerFile, below the sandbox user's home, records the
+// creation-time settings a launch cannot read back from the backend.
+const sandboxMarkerFile = ".claude-playbook-sandbox"
+
+func sandboxMarker(shareSkills bool) string {
+	if shareSkills {
+		return "skills=shared"
+	}
+	return "skills=private"
+}
+
+// secretEnvVars are the backend API keys Claude Code sends as request
+// headers to its API endpoint: injectable at the proxy. The subscription
+// token is not among them: Claude Code checks its shape locally, and a
+// placeholder would not pass.
+var secretEnvVars = []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+
+// secretPlaceholder is the value the sandbox sees for env: stable per
+// sandbox and variable, so re-registering it updates the secret in place
+// (rotation) and nothing has to be parsed from the backend.
+func secretPlaceholder(sandbox, env string) string {
+	return sandbox + "-" + env
+}
+
+// injectSecrets registers each API key the environment carries as a
+// proxy-injected secret for the endpoint host and replaces its value with
+// the placeholder, so the key never enters the sandbox. mode "env" passes
+// the values as they are. A registration that fails falls back to the
+// plain value with a warning naming the variable: a silent fallback would
+// leave the pilot believing the key stayed outside.
+func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode string) []string {
+	if mode == "env" {
+		return env
+	}
+	host := baseURLHost(env)
+	if host == "" {
+		host = "api.anthropic.com"
+	}
+	host = backend.policyHost(host)
+	// Mappings registered by an earlier launch for a key the environment
+	// no longer carries would still inject that key for anyone inside who
+	// sends the (predictable) placeholder: sbx cannot delete them, so they
+	// are neutralized by re-registering the placeholder as its own value.
+	registered, err := backend.secrets(sandbox)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not list the sandbox's secrets (%v); a key registered by an earlier launch may still be mapped\n", err)
+	}
+	for _, key := range secretEnvVars {
+		value := ""
+		for _, kv := range env {
+			if k, v, _ := strings.Cut(kv, "="); k == key {
+				value = v
+			}
+		}
+		if value == "" {
+			placeholder := secretPlaceholder(sandbox, key)
+			if registered[key] == placeholder {
+				if err := backend.secret(sandbox, host, key, placeholder, placeholder); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "Secret %s revoked at the proxy: it is no longer in the environment\n", key)
+				}
+			}
+			continue
+		}
+		placeholder := secretPlaceholder(sandbox, key)
+		if err := backend.secret(sandbox, host, key, value, placeholder); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %s could not be injected at the proxy (%v); it enters the sandbox as a plain value. [sandbox] secrets = \"env\" silences this\n", key, err)
+			continue
+		}
+		env = setEnv(env, key, placeholder)
+		fmt.Fprintf(os.Stderr, "Secret %s stays on the host: injected at the proxy for %s, the sandbox sees a placeholder\n", key, host)
+	}
+	return env
 }
 
 func describeExtras(extraMounts, hosts []string, version string) string {
