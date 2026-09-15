@@ -607,11 +607,29 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 
 func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{
-		"ANTHROPIC_BASE_URL": "http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN": "real-token", "ANTHROPIC_API_KEY": "real-key", "MODEL": "glm",
-	}}})
+	// Keys come from an env profile: profiles live in the registry root,
+	// outside every mount.
+	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=real-token", "ANTHROPIC_API_KEY=real-key", "MODEL=glm"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
 	work := t.TempDir()
 	log := stubSbx(t)
+	// A key in the playbook's own manifest is on the mount: refused before
+	// any sbx call, unless secrets = "env" accepts the exposure.
+	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}})
+	err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"})
+	if err == nil || !strings.Contains(err.Error(), "which the sandbox mounts") || !strings.Contains(err.Error(), "cpb env-profile <profile> set ANTHROPIC_API_KEY=") {
+		t.Fatalf("key on the mount: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with a key on the mount")
+	}
+	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"}); err != nil {
+		t.Fatalf("key on the mount with secrets = env: %v", err)
+	}
+	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"}); err != nil {
 		t.Fatal(err)
 	}
@@ -638,8 +656,36 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	if idx := strings.Index(joined, "secret set-custom"); idx < strings.Index(joined, "create --name") || idx > strings.Index(joined, "exec -i") {
 		t.Fatalf("secret step out of order: %q", calls)
 	}
+	// A service on this machine: the sandbox reaches it as
+	// host.docker.internal, while the policy and the secret name it
+	// localhost (what the sbx proxy matches).
+	if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:20128/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onhost"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = sbxCalls(t, log)
+	joined = strings.Join(calls, "\n")
+	for _, want := range []string{
+		"policy allow network --sandbox cpb-onhost localhost\n",
+		"policy allow network --sandbox cpb-onhost other.example\n",
+		"secret set-custom --host localhost --env ANTHROPIC_AUTH_TOKEN --value lt --placeholder cpb-onhost-ANTHROPIC_AUTH_TOKEN --sandbox cpb-onhost",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("host service: missing %q in %q", want, calls)
+		}
+	}
+	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
+		t.Fatalf("host service attach: %q", calls)
+	}
 	// No endpoint: the key goes to Anthropic's host.
-	writePlaybook(t, root, "direct", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "k"}}})
+	if err := runEnvProfile(nil, []string{"direct", "set", "ANTHROPIC_API_KEY=k"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "direct", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"direct"}}})
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
 		t.Fatal(err)
@@ -650,6 +696,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// secrets = "env" passes plain values and registers nothing;
 	// share_skills = true drops the --no-share-skills flag.
 	writePlaybook(t, root, "plain", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "plain-key"}}, Sandbox: &manifest.Sandbox{Secrets: "env", ShareSkills: true}})
+	// (a plain-mode key may sit in the manifest: the exposure is accepted)
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "plain"}); err != nil {
 		t.Fatal(err)

@@ -307,6 +307,13 @@ type sandboxBackend interface {
 	// there; sandbox-local state (a login the host does not share) lives
 	// below it.
 	homeDir() string
+	// hostAlias is the name by which the sandbox reaches the host machine
+	// (inside, "localhost" is the sandbox itself).
+	hostAlias() string
+	// policyHost is the spelling the backend's policy and secret store use
+	// for host: a service on the host machine is one resource there
+	// whatever name the sandbox used for it.
+	policyHost(host string) string
 }
 
 // newSandboxBackend returns the backend for kind, or an error naming what
@@ -409,6 +416,20 @@ func (b sbxBackend) remove(name string) error {
 }
 
 func (b sbxBackend) homeDir() string { return "/home/agent" }
+
+func (b sbxBackend) hostAlias() string { return "host.docker.internal" }
+
+// policyHost: the sbx proxy resolves host.docker.internal to the host and
+// names it "localhost" in policy and secret matching (verified on 0.38.0:
+// an allow rule or a custom secret for host.docker.internal never matches,
+// one for localhost does).
+func (b sbxBackend) policyHost(host string) string {
+	switch host {
+	case b.hostAlias(), "localhost", "127.0.0.1", "::1":
+		return "localhost"
+	}
+	return host
+}
 
 // removeSandbox deletes a target's sandbox (start --delete): best effort,
 // reported as a warning.
@@ -569,6 +590,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	if err != nil {
 		return false, err
 	}
+	env = rewriteHostEndpoint(env, backend)
 
 	var sb manifest.Sandbox
 	if t.manifest != nil {
@@ -631,6 +653,20 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 
+	// A key set in the target's own manifest sits in a file the sandbox
+	// mounts: the placeholder in the environment would hide nothing. Env
+	// profiles live in the registry root, outside every mount, so that is
+	// where a secret belongs; refused before the sandbox exists.
+	if sb.Secrets != "env" {
+		if m, err := manifest.Read(t.configPath); err == nil && m != nil && m.Env != nil {
+			for _, key := range secretEnvVars {
+				if m.Env.Set[key] != "" {
+					return false, fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(t.configPath, manifest.FileName), key, key)
+				}
+			}
+		}
+	}
+
 	name := t.name
 	names, err := backend.names()
 	if err != nil {
@@ -655,6 +691,9 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		hosts := append([]string{}, sb.AllowNet...)
 		if h := baseURLHost(env); h != "" {
 			hosts = append(hosts, h)
+		}
+		for i, h := range hosts {
+			hosts[i] = backend.policyHost(h)
 		}
 		for _, h := range hosts {
 			if err := backend.allowNetwork(name, h); err != nil {
@@ -706,6 +745,36 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	return true, preserveExitCode(runErr)
 }
 
+// rewriteHostEndpoint points an ANTHROPIC_BASE_URL at localhost (the
+// pilot's spelling for a service on this machine, a router say) at the
+// backend's host alias: inside the sandbox, localhost is the sandbox. The
+// scheme, port and path are kept. Said on stderr, since the sandbox then
+// talks to a different name than the profile wrote.
+func rewriteHostEndpoint(env []string, backend sandboxBackend) []string {
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		if k != "ANTHROPIC_BASE_URL" {
+			continue
+		}
+		u, err := url.Parse(v)
+		if err != nil || u.Hostname() == "" {
+			return env
+		}
+		switch u.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+			host := backend.hostAlias()
+			if p := u.Port(); p != "" {
+				host += ":" + p
+			}
+			u.Host = host
+			fmt.Fprintf(os.Stderr, "ANTHROPIC_BASE_URL names this machine: inside the sandbox it is %s\n", u.String())
+			return setEnv(env, k, u.String())
+		}
+		return env
+	}
+	return env
+}
+
 // secretEnvVars are the backend API keys Claude Code sends as request
 // headers to its API endpoint: injectable at the proxy. The subscription
 // token is not among them: Claude Code checks its shape locally, and a
@@ -733,6 +802,7 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 	if host == "" {
 		host = "api.anthropic.com"
 	}
+	host = backend.policyHost(host)
 	for _, key := range secretEnvVars {
 		value := ""
 		for _, kv := range env {
