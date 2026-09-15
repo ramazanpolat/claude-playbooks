@@ -17,6 +17,7 @@ func stubSbx(t *testing.T, existing ...string) string {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "sbx.log")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SBX_STUB_LOG\"\n" +
+		"if [ \"$1\" = ls ] && [ \"$2\" = --json ]; then printf '%s' \"${SBX_STUB_LSJSON:-[]}\"; exit 0; fi\n" +
 		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
 		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
 		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo 'stub failure' >&2; exit 1; fi\nexit 0\n"
@@ -138,13 +139,36 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 	writePlaybook(t, root, "box", nil)
 	work := t.TempDir()
 	log := stubSbx(t, "other", "cpb-box")
+	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpb-box","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]`)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"}); err != nil {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if len(calls) != 2 || calls[0] != "ls -q" || !strings.HasPrefix(calls[1], "exec -i ") {
+	if len(calls) != 3 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.HasPrefix(calls[2], "exec -i ") {
 		t.Fatalf("reuse should only list and attach: %q", calls)
 	}
+	// A reused sandbox that does not mount this launch's working directory
+	// is refused (mounts are creation-time), and so is one whose original
+	// mounts carry the machine login or the registry's profiles.
+	os.Remove(log)
+	other := t.TempDir()
+	err := runRun(nil, []string{"--sandbox", "--workdir", other, "box"})
+	if err == nil || !strings.Contains(err.Error(), "which a reused sandbox cannot add") || !strings.Contains(err.Error(), "--sandbox-fresh") {
+		t.Fatalf("reuse with another workdir: %v", err)
+	}
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpb-box","workspaces":["`+canon(t, home)+`","`+canon(t, filepath.Join(root, "box"))+`"]}]`)
+	err = runRun(nil, []string{"--sandbox", "--workdir", work, "box"})
+	if err == nil || !strings.Contains(err.Error(), "the machine login would be inside") {
+		t.Fatalf("reuse with a wide original mount: %v", err)
+	}
+	if calls := sbxCalls(t, log); strings.Contains(strings.Join(calls, "\n"), "exec -i") {
+		t.Fatalf("attached to an unsafe reused sandbox: %q", calls)
+	}
+	t.Setenv("SBX_STUB_LSJSON", "")
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--sandbox-fresh", "--clone", "--workdir", work, "box"}); err != nil {
 		t.Fatal(err)
@@ -446,13 +470,15 @@ func TestStartSandbox(t *testing.T) {
 	}
 	os.Remove(log)
 	t.Setenv("SBX_STUB_LS", "cpbstart-scratch-dir")
+	t.Setenv("SBX_STUB_LSJSON", `[{"name":"cpbstart-scratch-dir","workspaces":["`+canon(t, work)+`","`+canon(t, dir)+`"]}]`)
 	if err := runStart(nil, []string{"--delete", "--workdir", work, dir}); err != nil {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 3 || !strings.HasPrefix(calls[1], "exec -i ") || calls[2] != "rm -f cpbstart-scratch-dir" {
+	if len(calls) != 4 || calls[1] != "ls --json" || !strings.HasPrefix(calls[2], "exec -i ") || calls[3] != "rm -f cpbstart-scratch-dir" {
 		t.Fatalf("start --delete under always: %q", calls)
 	}
+	t.Setenv("SBX_STUB_LSJSON", "")
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatal("--delete left the directory")
 	}
@@ -642,6 +668,25 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	if _, statErr := os.Stat(log); statErr == nil {
 		t.Fatal("sbx was called with a key on the mount (subdir)")
+	}
+	// A manifest that cannot be parsed might hold a key: refused, not
+	// skipped. run refuses an invalid manifest at lookup already; start
+	// reads the directory's manifest leniently, so the guard is what
+	// stands between the key and the mount there.
+	broken := filepath.Join(t.TempDir(), "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, ".playbook"), []byte("name = \"broken\"\n\n[sandbox]\nclaude_version = \"latest\"\n\n[env.set]\nANTHROPIC_API_KEY = \"hidden\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(log)
+	err = runStart(nil, []string{"--sandbox", "--workdir", work, broken})
+	if err == nil || !strings.Contains(err.Error(), "cannot check") {
+		t.Fatalf("unreadable manifest: %v", err)
+	}
+	if _, statErr := os.Stat(log); statErr == nil {
+		t.Fatal("sbx was called with an uncheckable manifest")
 	}
 	// The registry's env profiles are never mounted: a working directory
 	// at the registry root (or above) is refused.

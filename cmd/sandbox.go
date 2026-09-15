@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -286,6 +287,9 @@ func baseURLHost(env []string) string {
 type sandboxBackend interface {
 	// names lists the existing sandboxes.
 	names() ([]string, error)
+	// mounts lists the host paths an existing sandbox was created with
+	// (":ro" suffix kept), which it keeps for its lifetime.
+	mounts(name string) ([]string, error)
 	// create makes the sandbox with the given host paths mounted at their
 	// own absolute paths (a ":ro" suffix marks a read-only mount);
 	// shareSkills mounts the backend's shared skills store as well.
@@ -359,6 +363,28 @@ func (b sbxBackend) names() ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+func (b sbxBackend) mounts(name string) ([]string, error) {
+	c := exec.Command(b.bin, "ls", "--json")
+	c.Stderr = os.Stderr
+	out, err := c.Output()
+	if err != nil {
+		return nil, fmt.Errorf("sbx ls --json: %w", err)
+	}
+	var list []struct {
+		Name       string   `json:"name"`
+		Workspaces []string `json:"workspaces"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, fmt.Errorf("sbx ls --json: %w", err)
+	}
+	for _, s := range list {
+		if s.Name == name {
+			return s.Workspaces, nil
+		}
+	}
+	return nil, fmt.Errorf("sandbox %s not listed", name)
 }
 
 func (b sbxBackend) create(name string, clone, shareSkills bool, mounts []string) error {
@@ -550,6 +576,31 @@ func mountCovers(mount, p string) bool {
 	}
 }
 
+// checkReusedMounts refuses a reused sandbox whose mounts do not cover
+// what this launch needs, or carry a machine or registry secret; the
+// remedy is --sandbox-fresh.
+func checkReusedMounts(name string, have, need []string) error {
+	haveSet := map[string]bool{}
+	for _, m := range have {
+		p, _ := strings.CutSuffix(m, ":ro")
+		haveSet[p] = true
+		if what := machineLoginInside(p); what != "" {
+			return fmt.Errorf("sandbox %s mounts %s, which contains %s: the machine login would be inside. Recreate it with --sandbox-fresh", name, p, what)
+		}
+	}
+	var missing []string
+	for _, m := range need {
+		p, _ := strings.CutSuffix(m, ":ro")
+		if !haveSet[p] {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("sandbox %s was created with mounts %s; this launch also needs %s, which a reused sandbox cannot add. Recreate it with --sandbox-fresh", name, strings.Join(have, " "), strings.Join(missing, " "))
+	}
+	return nil
+}
+
 // machineLoginInside reports which machine credential a mount would carry
 // into the sandbox: the machine config directory (~/.claude), the machine
 // credentials store at its resolved location (the store may be a symlink
@@ -668,7 +719,12 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	// where a secret belongs; refused before the sandbox exists.
 	if sb.Secrets != "env" {
 		for dir := t.configPath; ; dir = filepath.Dir(dir) {
-			if m, err := manifest.Read(dir); err == nil && m != nil && m.Env != nil {
+			m, err := manifest.Read(dir)
+			if err != nil {
+				// An unreadable manifest may hold a key: not a guard to skip.
+				return false, fmt.Errorf("cannot check %s for keys the sandbox would mount: %w (fix the manifest, or set [sandbox] secrets = \"env\" to accept the exposure)", filepath.Join(dir, manifest.FileName), err)
+			}
+			if m != nil && m.Env != nil {
 				for _, key := range secretEnvVars {
 					if m.Env.Set[key] != "" {
 						return false, fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
@@ -697,6 +753,19 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 			return false, fmt.Errorf("could not remove sandbox %s: %w", name, err)
 		}
 		exists = false
+	}
+	if exists {
+		// Mounts are creation-time: a reused sandbox keeps the ones it was
+		// created with. They must cover this launch (a different working
+		// directory would not exist inside) and pass the same guard as new
+		// mounts (a registry root mounted before its profiles existed).
+		have, err := backend.mounts(name)
+		if err != nil {
+			return false, err
+		}
+		if err := checkReusedMounts(name, have, mounts); err != nil {
+			return false, err
+		}
 	}
 	if !exists {
 		if err := backend.create(name, opts.clone, sb.ShareSkills, mounts); err != nil {
