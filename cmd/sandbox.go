@@ -340,6 +340,11 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
 	command := strings.Join(quoted, " ")
+	// ssh runs the command in a non-interactive shell, whose PATH is not
+	// the pilot's (no ~/.local/bin, so no claude-playbook); the command
+	// runs through the remote user's login shell instead, which reads the
+	// profile. $SHELL is expanded by the remote shell.
+	remote := `exec "$SHELL" -lc ` + shell.QuoteArg(command)
 	sshBin, err := exec.LookPath("ssh")
 	if err != nil {
 		return fmt.Errorf("'ssh' not found; a sandbox on %s is reached over ssh", host)
@@ -348,7 +353,7 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
 		sshArgs = append(sshArgs, "-t")
 	}
-	sshArgs = append(sshArgs, "--", host, command)
+	sshArgs = append(sshArgs, "--", host, remote)
 	fmt.Fprintf(os.Stderr, "Sandbox on %s: %s\n", host, command)
 	c := exec.Command(sshBin, sshArgs...)
 	c.Stdin = os.Stdin

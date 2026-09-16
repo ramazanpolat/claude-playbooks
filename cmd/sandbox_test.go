@@ -8,6 +8,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 // stubSbx puts a fake `sbx` first on PATH. Every invocation appends its
@@ -909,6 +910,11 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 		os.Remove(sshLog)
 		return string(data)
 	}
+	// What ssh receives: options ended by --, the destination, and the
+	// command run through the remote login shell.
+	remote := func(cmd string) string {
+		return "-- polat@cockpit0 exec \"$SHELL\" -lc " + shell.QuoteArg(cmd) + "\n"
+	}
 	// The flag forwards the whole launch, rebuilt from what the parser
 	// consumed; the playbook need not exist here; ssh's options end before
 	// the destination; claude's arguments travel verbatim, even ones that
@@ -916,7 +922,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	want := "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'\n"
+	want := remote("claude-playbook run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'")
 	if got := read(); got != want {
 		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
 	}
@@ -928,7 +934,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-fresh", "--clone", "--sandbox-host=polat@cockpit0", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'\n" {
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {
 		t.Fatalf("after the name: %q", got)
 	}
 	// The manifest names the host: a bare launch of an always-sandboxed
@@ -937,7 +943,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"remote", "--version"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' 'remote' '--version'\n" {
+	if got := read(); got != remote("claude-playbook run '--sandbox' 'remote' '--version'") {
 		t.Fatalf("manifest host: %q", got)
 	}
 	claudeLog := stubClaude(t)
@@ -963,14 +969,14 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox", "opt", "--version"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' 'opt' '--version'\n" {
+	if got := read(); got != remote("claude-playbook run '--sandbox' 'opt' '--version'") {
 		t.Fatalf("manifest host with --sandbox: %q", got)
 	}
 	// --playbooks-dir travels as given: a path on that host.
 	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "polat@cockpit0", "ghost"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'\n" {
+	if got := read(); got != remote("claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'") {
 		t.Fatalf("--playbooks-dir forwarding: %q", got)
 	}
 	config.PlaybooksDir = root // the flag set the process-wide registry; back to the test's
@@ -979,7 +985,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'\n" {
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'") {
 		t.Fatalf("flag-like values: %q", got)
 	}
 	// A value that is exactly "--" keeps the registry-scan boundary the
@@ -988,7 +994,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'\n" {
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
 		t.Fatalf("bare -- value: %q", got)
 	}
 	// An overridden --workdir is forwarded too, in order, so a boundary it
@@ -996,7 +1002,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'\n" {
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
 		t.Fatalf("overridden workdir: %q", got)
 	}
 	// A manifest host forwards without evaluating any launch flag: an env
@@ -1050,7 +1056,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runStart(nil, []string{"--sandbox-host", "polat@cockpit0", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'\n" {
+	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'") {
 		t.Fatalf("start forwarding: %q", got)
 	}
 	dir := filepath.Join(t.TempDir(), "remote-dir")
@@ -1063,7 +1069,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runStart(nil, []string{"--sandbox", "--delete", dir}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook start '--sandbox' '--delete' '"+dir+"'\n" {
+	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '"+dir+"'") {
 		t.Fatalf("start with a manifest host: %q", got)
 	}
 	if _, err := os.Stat(dir); err != nil {
