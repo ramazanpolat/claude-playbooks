@@ -246,9 +246,8 @@ if phase_enabled p4; then
   SSHLOG="$SB/ssh.log"; SBXLOG3="$SB/sbx3.log"
   SSH_STUB_LOG="$SSHLOG" SBX_STUB_LOG="$SBXLOG3" PATH="$STUB:$PATH" p4 run --sandbox-host polat@cockpit0 --workdir /home/polat/proj fx -p hi >/dev/null 2>&1 || rc=1
   CMD="claude-playbook run '--playbooks-dir=$PB' '--sandbox' '--workdir=/home/polat/proj' 'fx' '-p' 'hi'"
-  # the command runs through the remote login shell: quoted once more for -lc
-  QCMD="$(printf '%s' "$CMD" | sed "s/'/'\\\\''/g")"
-  [ "$(cat "$SSHLOG" 2>/dev/null)" = "-- polat@cockpit0 exec \"\$SHELL\" -lc '$QCMD'" ] || rc=1
+  # shellcheck disable=SC2016
+  [ "$(cat "$SSHLOG" 2>/dev/null)" = "-- polat@cockpit0 env PATH=\"\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\" $CMD" ] || rc=1
   [ -e "$SBXLOG3" ] && rc=1
   report "p4 remote sandbox host (stub ssh)" $rc
 

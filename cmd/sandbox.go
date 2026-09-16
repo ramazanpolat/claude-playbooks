@@ -260,6 +260,12 @@ func resolveSandbox(sb *manifest.Sandbox, opts *sandboxOpts, label string) (on b
 	return true, backend, nil
 }
 
+// remotePathPrefix puts the installer's default (~/.local/bin) and the
+// package managers' directories ahead of the PATH an ssh session gets;
+// $HOME and $PATH are expanded by the remote shell, sh and csh families
+// alike.
+const remotePathPrefix = `env PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" `
+
 // sandboxHost is the remote host for a sandboxed launch: the flag, else
 // the manifest, else "" (here).
 func sandboxHost(sb *manifest.Sandbox, opts *sandboxOpts) string {
@@ -341,10 +347,11 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	}
 	command := strings.Join(quoted, " ")
 	// ssh runs the command in a non-interactive shell, whose PATH is not
-	// the pilot's (no ~/.local/bin, so no claude-playbook); the command
-	// runs through the remote user's login shell instead, which reads the
-	// profile. $SHELL is expanded by the remote shell.
-	remote := `exec "$SHELL" -lc ` + shell.QuoteArg(command)
+	// the pilot's (no ~/.local/bin, so no claude-playbook). Rather than a
+	// login shell (whose flags differ by shell family: tcsh has no -lc),
+	// the PATH is widened in a way every shell expands alike, with the
+	// places the installer and the package managers put the binary.
+	remote := remotePathPrefix + command
 	sshBin, err := exec.LookPath("ssh")
 	if err != nil {
 		return fmt.Errorf("'ssh' not found; a sandbox on %s is reached over ssh", host)

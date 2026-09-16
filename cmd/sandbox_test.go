@@ -8,7 +8,6 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 // stubSbx puts a fake `sbx` first on PATH. Every invocation appends its
@@ -911,9 +910,9 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 		return string(data)
 	}
 	// What ssh receives: options ended by --, the destination, and the
-	// command run through the remote login shell.
+	// command behind the PATH prefix every remote shell expands alike.
 	remote := func(cmd string) string {
-		return "-- polat@cockpit0 exec \"$SHELL\" -lc " + shell.QuoteArg(cmd) + "\n"
+		return "-- polat@cockpit0 env PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" " + cmd + "\n"
 	}
 	// The flag forwards the whole launch, rebuilt from what the parser
 	// consumed; the playbook need not exist here; ssh's options end before
