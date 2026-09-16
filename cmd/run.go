@@ -78,7 +78,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if sopts.disabled {
 			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
 		}
-		return forwardToSandboxHost(sopts.host, "run", original)
+		return forwardToSandboxHost(sopts.host, "run", original, &sopts, layers, nil, name, claudeArgs)
 	}
 
 	playbooksDirResolved := config.ResolvePlaybooksDir()
@@ -101,7 +101,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	if sandboxed {
 		if host := sandboxHost(sbm, &sopts); host != "" {
-			return forwardToSandboxHost(host, "run", original)
+			return forwardToSandboxHost(host, "run", original, &sopts, layers, nil, name, claudeArgs)
 		}
 		// The registry's spelling of the config directory, made absolute
 		// so a relative --playbooks-dir cannot leak a relative

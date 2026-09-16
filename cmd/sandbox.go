@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"golang.org/x/term"
@@ -54,7 +55,8 @@ type sandboxOpts struct {
 	clone    bool
 	workdir  string
 	mounts   []string
-	host     string // --sandbox-host user@host: run the launch there
+	host     string   // --sandbox-host user@host: run the launch there
+	envFiles []string // --env-file paths seen (local files: refused remotely)
 }
 
 // sandboxTarget is what a sandboxed launch runs: a registered playbook or
@@ -148,6 +150,7 @@ func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (res
 	}
 	rest = args
 	for {
+		opts.envFiles = append(opts.envFiles, leadingEnvFiles(rest, bools)...)
 		var more []*manifest.Env
 		rest, more, err = takeLaunchFlagsWith(rest, bools)
 		if err != nil {
@@ -163,6 +166,33 @@ func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (res
 			return rest, layers, nil
 		}
 	}
+}
+
+// leadingEnvFiles lists the --env-file values in the leading run of launch
+// flags that takeLaunchFlagsWith is about to consume, without reading
+// them: a remote launch refuses them by name.
+func leadingEnvFiles(args []string, bools map[string]*bool) []string {
+	var files []string
+	for i := 0; i < len(args) && args[i] != "--"; i++ {
+		if _, ok := bools[args[i]]; ok {
+			continue
+		}
+		flag, value, inline := strings.Cut(args[i], "=")
+		if !launchFlagNames[flag] {
+			break
+		}
+		if !inline {
+			if i+1 >= len(args) {
+				break
+			}
+			value = args[i+1]
+			i++
+		}
+		if flag == "--env-file" {
+			files = append(files, value)
+		}
+	}
+	return files
 }
 
 // resolveSandbox decides whether this launch is sandboxed and with which
@@ -218,43 +248,66 @@ func sandboxHost(sb *manifest.Sandbox, opts *sandboxOpts) string {
 }
 
 // forwardToSandboxHost runs this launch on host instead: the same
-// subcommand with the same arguments, over ssh, where claude-playbook and
-// the target are installed. The arguments travel as one quoted command
-// string (ssh hands the remote shell a string). --sandbox-host itself is
-// dropped and --sandbox added, so the remote launch is sandboxed there
-// whatever its manifest says; a --playbooks-dir travels as given (a path
-// on that host); --env-file names a local file the remote cannot read, so
-// it refuses. A pty is requested only when this process has a terminal on
+// subcommand, rebuilt from what the launch parser consumed (never from
+// the raw text, so claude's own arguments are carried verbatim and
+// nothing in them is mistaken for a flag), over ssh, where claude-playbook
+// and the target are installed. The arguments travel as one quoted
+// command string (ssh hands the remote shell a string). ssh's own options
+// end with "--" before the destination, so a host is never read as an
+// option, and the host is validated like the manifest key. --sandbox is
+// always present, so the remote launch is sandboxed there whatever its
+// manifest says; a --playbooks-dir travels as given (a path on that
+// host); --env-file names a local file the remote cannot read, so it
+// refuses. A pty is requested only when this process has a terminal on
 // both ends, as for the local attach.
-func forwardToSandboxHost(host, subcommand string, args []string) error {
-	var forwarded []string
-	sandboxed := false
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		flag, _, inline := strings.Cut(a, "=")
-		switch {
-		case a == "--":
-			forwarded = append(forwarded, args[i:]...)
-			i = len(args)
-			continue
-		case flag == "--sandbox-host":
-			if !inline {
-				i++
-			}
-			continue
-		case flag == "--env-file":
-			return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env profile on that host, or --env KEY=VALUE", host)
-		case a == "--sandbox" || a == "--sbx" || flag == "--sandbox":
-			sandboxed = true
+func forwardToSandboxHost(host, subcommand string, original []string, opts *sandboxOpts, layers []*manifest.Env, wrapper []string, target string, claudeArgs []string) error {
+	if !manifest.ValidSandboxHost(host) {
+		return fmt.Errorf("--sandbox-host %q must be an ssh destination such as user@host", host)
+	}
+	if len(opts.envFiles) > 0 {
+		return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env profile on that host, or --env KEY=VALUE", host)
+	}
+	var f []string
+	if _, dir, err := scanPlaybooksDirArg(original); err == nil && dir != "" {
+		f = append(f, "--playbooks-dir", dir)
+	}
+	f = append(f, "--sandbox")
+	if opts.backend != "" {
+		f[len(f)-1] = "--sandbox=" + opts.backend
+	}
+	if opts.fresh {
+		f = append(f, "--sandbox-fresh")
+	}
+	if opts.clone {
+		f = append(f, "--clone")
+	}
+	if opts.workdir != "" {
+		f = append(f, "--workdir", opts.workdir)
+	}
+	for _, m := range opts.mounts {
+		f = append(f, "--mount", m)
+	}
+	for _, l := range layers {
+		for _, p := range l.Profiles {
+			f = append(f, "--env-profile", p)
 		}
-		forwarded = append(forwarded, a)
+		keys := make([]string, 0, len(l.Set))
+		for k := range l.Set {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			f = append(f, "--env", k+"="+l.Set[k])
+		}
+		for _, k := range l.Unset {
+			f = append(f, "--unset", k)
+		}
 	}
-	if !sandboxed {
-		forwarded = append([]string{"--sandbox"}, forwarded...)
-	}
-	quoted := make([]string, 0, len(forwarded)+2)
-	quoted = append(quoted, "claude-playbook", subcommand)
-	for _, a := range forwarded {
+	f = append(f, wrapper...)
+	f = append(f, target)
+	f = append(f, claudeArgs...)
+	quoted := []string{"claude-playbook", subcommand}
+	for _, a := range f {
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
 	command := strings.Join(quoted, " ")
@@ -262,11 +315,11 @@ func forwardToSandboxHost(host, subcommand string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("'ssh' not found; a sandbox on %s is reached over ssh", host)
 	}
-	sshArgs := []string{}
+	var sshArgs []string
 	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
 		sshArgs = append(sshArgs, "-t")
 	}
-	sshArgs = append(sshArgs, host, "--", command)
+	sshArgs = append(sshArgs, "--", host, command)
 	fmt.Fprintf(os.Stderr, "Sandbox on %s: %s\n", host, command)
 	c := exec.Command(sshBin, sshArgs...)
 	c.Stdin = os.Stdin

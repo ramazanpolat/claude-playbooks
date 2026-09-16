@@ -91,7 +91,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if sopts.disabled {
 			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
 		}
-		return forwardToSandboxHost(sopts.host, "start", original)
+		var wrapper []string
+		if deleteAfter {
+			wrapper = []string{"--delete"}
+		}
+		return forwardToSandboxHost(sopts.host, "start", original, &sopts, layers, wrapper, path, claudeArgs)
 	}
 
 	absPath, err := filepath.Abs(path)
@@ -118,6 +122,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if sandboxed {
+		// The directory's manifest may name the host: the whole start runs
+		// there, the path being a path there, and nothing local follows.
+		if host := sandboxHost(sbm, &sopts); host != "" {
+			var wrapper []string
+			if deleteAfter {
+				wrapper = []string{"--delete"}
+			}
+			return forwardToSandboxHost(host, "start", original, &sopts, layers, wrapper, path, claudeArgs)
+		}
 		// Refused here, before anything else: with --delete, a refusal
 		// must never be followed by the cleanup below.
 		if auth.IsGlobalConfigDir(absPath) {

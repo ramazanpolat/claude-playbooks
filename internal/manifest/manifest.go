@@ -637,6 +637,12 @@ func KnownSandboxBackend(name string) bool {
 	return false
 }
 
+// ValidSandboxHost reports whether host is a plain ssh destination: no
+// whitespace, no slash, and no leading dash (an option to ssh).
+func ValidSandboxHost(host string) bool {
+	return host != "" && !strings.ContainsAny(host, " \t\n\r/") && !strings.HasPrefix(host, "-")
+}
+
 // Empty reports whether the block carries nothing.
 func (s *Sandbox) Empty() bool {
 	return s == nil || (!s.Always && s.Backend == "" && s.Host == "" && !s.ShareSkills && s.Secrets == "" && len(s.Mounts) == 0 && len(s.AllowNet) == 0 && s.ClaudeVersion == "" && s.Workdir == "")
@@ -650,7 +656,7 @@ func (s *Sandbox) validate() error {
 	if s.Backend != "" && !KnownSandboxBackend(s.Backend) {
 		return fmt.Errorf("sandbox.backend %q is not a known backend (%s)", s.Backend, strings.Join(SandboxBackends, ", "))
 	}
-	if s.Host != "" && (strings.ContainsAny(s.Host, " \t\n\r/") || strings.HasPrefix(s.Host, "-")) {
+	if s.Host != "" && !ValidSandboxHost(s.Host) {
 		return fmt.Errorf("sandbox.host %q must be an ssh destination such as user@host", s.Host)
 	}
 	if s.Secrets != "" && s.Secrets != "proxy" && s.Secrets != "env" {
