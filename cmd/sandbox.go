@@ -53,6 +53,7 @@ type sandboxOpts struct {
 	fresh    bool
 	clone    bool
 	workdir  string
+	workdirs []string // every --workdir as typed, in order (the last wins)
 	mounts   []string
 	host     string // --sandbox-host user@host: run the launch there
 }
@@ -178,6 +179,7 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 		switch flag {
 		case "--workdir":
 			opts.workdir = value
+			opts.workdirs = append(opts.workdirs, value)
 		case "--mount":
 			opts.mounts = append(opts.mounts, value)
 		case "--sandbox-host":
@@ -319,8 +321,10 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 		}
 		return []string{flag + "=" + value}
 	}
-	if opts.workdir != "" {
-		f = append(f, pair("--workdir", opts.workdir)...)
+	for _, w := range opts.workdirs {
+		// Every occurrence, in order: the last wins on the remote side as
+		// here, and an overridden bare "--" keeps the boundary it set.
+		f = append(f, pair("--workdir", w)...)
 	}
 	for _, m := range opts.mounts {
 		f = append(f, pair("--mount", m)...)

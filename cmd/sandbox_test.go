@@ -991,6 +991,14 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'\n" {
 		t.Fatalf("bare -- value: %q", got)
 	}
+	// An overridden --workdir is forwarded too, in order, so a boundary it
+	// set survives and the last value still wins.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'\n" {
+		t.Fatalf("overridden workdir: %q", got)
+	}
 	// A manifest host forwards without evaluating any launch flag: an env
 	// file that does not exist is refused by name, not opened.
 	writePlaybook(t, root, "mh", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
