@@ -249,6 +249,10 @@ type Sandbox struct {
 	// sandbox (sbx does so by default; claude-playbook does not, since a
 	// sandbox could then plant a skill a later sandbox runs).
 	ShareSkills bool `toml:"share_skills,omitempty"`
+	// Host names the machine the sandbox runs on ("user@host", reached
+	// over ssh), where claude-playbook and this playbook are installed;
+	// empty runs the sandbox here.
+	Host string `toml:"host,omitempty"`
 	// Secrets says how backend API keys reach the sandbox: "proxy" (the
 	// default) registers them as proxy-injected secrets and hands the
 	// sandbox a placeholder; "env" passes the values as plain variables.
@@ -537,6 +541,9 @@ func Write(dir string, m *Manifest) error {
 		if m.Sandbox.Backend != "" {
 			fmt.Fprintf(&b, "backend = %s\n", QuoteTOML(m.Sandbox.Backend))
 		}
+		if m.Sandbox.Host != "" {
+			fmt.Fprintf(&b, "host = %s\n", QuoteTOML(m.Sandbox.Host))
+		}
 		if m.Sandbox.ShareSkills {
 			b.WriteString("share_skills = true\n")
 		}
@@ -632,7 +639,7 @@ func KnownSandboxBackend(name string) bool {
 
 // Empty reports whether the block carries nothing.
 func (s *Sandbox) Empty() bool {
-	return s == nil || (!s.Always && s.Backend == "" && !s.ShareSkills && s.Secrets == "" && len(s.Mounts) == 0 && len(s.AllowNet) == 0 && s.ClaudeVersion == "" && s.Workdir == "")
+	return s == nil || (!s.Always && s.Backend == "" && s.Host == "" && !s.ShareSkills && s.Secrets == "" && len(s.Mounts) == 0 && len(s.AllowNet) == 0 && s.ClaudeVersion == "" && s.Workdir == "")
 }
 
 // validate checks the [sandbox] block: paths are absolute or "~"-prefixed
@@ -642,6 +649,9 @@ func (s *Sandbox) Empty() bool {
 func (s *Sandbox) validate() error {
 	if s.Backend != "" && !KnownSandboxBackend(s.Backend) {
 		return fmt.Errorf("sandbox.backend %q is not a known backend (%s)", s.Backend, strings.Join(SandboxBackends, ", "))
+	}
+	if s.Host != "" && (strings.ContainsAny(s.Host, " \t\n\r/") || strings.HasPrefix(s.Host, "-")) {
+		return fmt.Errorf("sandbox.host %q must be an ssh destination such as user@host", s.Host)
 	}
 	if s.Secrets != "" && s.Secrets != "proxy" && s.Secrets != "env" {
 		return fmt.Errorf("sandbox.secrets %q must be \"proxy\" or \"env\"", s.Secrets)

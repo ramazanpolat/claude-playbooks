@@ -238,6 +238,17 @@ if phase_enabled p4; then
   p4 delete boxed -y >/dev/null 2>&1 || rc=1
   report "p4 always-sandboxed playbook" $rc
 
+  # remote sandbox host: the launch is forwarded over ssh as one quoted
+  # command; nothing runs here (stub ssh records, stub sbx must stay idle)
+  rc=0
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$SSH_STUB_LOG"\nexit 0\n' > "$STUB/ssh"; chmod +x "$STUB/ssh"
+  SSHLOG="$SB/ssh.log"; SBXLOG3="$SB/sbx3.log"
+  SSH_STUB_LOG="$SSHLOG" SBX_STUB_LOG="$SBXLOG3" PATH="$STUB:$PATH" p4 run --sandbox-host polat@cockpit0 --workdir /home/polat/proj fx -p hi >/dev/null 2>&1 || rc=1
+  [ "$(cat "$SSHLOG" 2>/dev/null)" = "polat@cockpit0 -- claude-playbook run '--sandbox' '--playbooks-dir' '$PB' '--workdir' '/home/polat/proj' 'fx' '-p' 'hi'" ] || rc=1
+  [ -e "$SBXLOG3" ] && rc=1
+  report "p4 remote sandbox host (stub ssh)" $rc
+
   rc=0
   # pilot state that must survive the update
   printf '{"env":{"X":"kept"},"hooks":{}}\n' > "$PB/fx/settings.json"

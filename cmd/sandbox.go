@@ -54,6 +54,7 @@ type sandboxOpts struct {
 	clone    bool
 	workdir  string
 	mounts   []string
+	host     string // --sandbox-host user@host: run the launch there
 }
 
 // sandboxTarget is what a sandboxed launch runs: a registered playbook or
@@ -108,7 +109,7 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 			consumed = true
 			continue
 		}
-		if flag != "--workdir" && flag != "--mount" {
+		if flag != "--workdir" && flag != "--mount" && flag != "--sandbox-host" {
 			break
 		}
 		if !inline {
@@ -127,6 +128,8 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 			opts.workdir = value
 		case "--mount":
 			opts.mounts = append(opts.mounts, value)
+		case "--sandbox-host":
+			opts.host = value
 		}
 		consumed = true
 	}
@@ -171,6 +174,13 @@ func resolveSandbox(sb *manifest.Sandbox, opts *sandboxOpts, label string) (on b
 	if opts.enabled && opts.disabled {
 		return false, "", fmt.Errorf("--sandbox and --no-sandbox together: pick one")
 	}
+	if opts.host != "" && opts.disabled {
+		return false, "", fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+	}
+	// A host names where the sandbox runs; it implies one.
+	if opts.host != "" {
+		opts.enabled = true
+	}
 	always := sb != nil && sb.Always
 	on = opts.enabled || (always && !opts.disabled)
 	if always && opts.disabled {
@@ -193,6 +203,76 @@ func resolveSandbox(sb *manifest.Sandbox, opts *sandboxOpts, label string) (on b
 		return false, "", fmt.Errorf("unknown sandbox backend %q (available: %s)", backend, strings.Join(manifest.SandboxBackends, ", "))
 	}
 	return true, backend, nil
+}
+
+// sandboxHost is the remote host for a sandboxed launch: the flag, else
+// the manifest, else "" (here).
+func sandboxHost(sb *manifest.Sandbox, opts *sandboxOpts) string {
+	if opts.host != "" {
+		return opts.host
+	}
+	if sb != nil {
+		return sb.Host
+	}
+	return ""
+}
+
+// forwardToSandboxHost runs this launch on host instead: the same
+// subcommand with the same arguments, over ssh, where claude-playbook and
+// the target are installed. The arguments travel as one quoted command
+// string (ssh hands the remote shell a string). --sandbox-host itself is
+// dropped and --sandbox added, so the remote launch is sandboxed there
+// whatever its manifest says; a --playbooks-dir travels as given (a path
+// on that host); --env-file names a local file the remote cannot read, so
+// it refuses. A pty is requested only when this process has a terminal on
+// both ends, as for the local attach.
+func forwardToSandboxHost(host, subcommand string, args []string) error {
+	var forwarded []string
+	sandboxed := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		flag, _, inline := strings.Cut(a, "=")
+		switch {
+		case a == "--":
+			forwarded = append(forwarded, args[i:]...)
+			i = len(args)
+			continue
+		case flag == "--sandbox-host":
+			if !inline {
+				i++
+			}
+			continue
+		case flag == "--env-file":
+			return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env profile on that host, or --env KEY=VALUE", host)
+		case a == "--sandbox" || a == "--sbx" || flag == "--sandbox":
+			sandboxed = true
+		}
+		forwarded = append(forwarded, a)
+	}
+	if !sandboxed {
+		forwarded = append([]string{"--sandbox"}, forwarded...)
+	}
+	quoted := make([]string, 0, len(forwarded)+2)
+	quoted = append(quoted, "claude-playbook", subcommand)
+	for _, a := range forwarded {
+		quoted = append(quoted, shell.QuoteArg(a))
+	}
+	command := strings.Join(quoted, " ")
+	sshBin, err := exec.LookPath("ssh")
+	if err != nil {
+		return fmt.Errorf("'ssh' not found; a sandbox on %s is reached over ssh", host)
+	}
+	sshArgs := []string{}
+	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+		sshArgs = append(sshArgs, "-t")
+	}
+	sshArgs = append(sshArgs, host, "--", command)
+	fmt.Fprintf(os.Stderr, "Sandbox on %s: %s\n", host, command)
+	c := exec.Command(sshBin, sshArgs...)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return preserveExitCode(c.Run())
 }
 
 // resolvedPath is the absolute, symlink-free form of a "~"-prefixed or

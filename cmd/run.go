@@ -25,6 +25,7 @@ var runCmd = &cobra.Command{
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
+	original := args
 	rest, err := takePlaybooksDirArg(args)
 	if err != nil {
 		return err
@@ -52,6 +53,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("Sandbox flags run the playbook inside a sandbox (backend sbx, Docker Sandboxes):")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use); --sbx is a synonym")
 		fmt.Println("  --no-sandbox         launch on the host although the manifest says [sandbox] always = true")
+		fmt.Println("  --sandbox-host U@H   run the sandboxed launch on that machine over ssh (claude-playbook and the playbook installed there)")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
 		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
@@ -69,6 +71,15 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	layers = append(layers, more...)
+
+	// An explicit --sandbox-host (before or after the name) runs the whole
+	// launch on that host: the playbook need not be registered here.
+	if sopts.host != "" {
+		if sopts.disabled {
+			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+		}
+		return forwardToSandboxHost(sopts.host, "run", original)
+	}
 
 	playbooksDirResolved := config.ResolvePlaybooksDir()
 
@@ -89,6 +100,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if sandboxed {
+		if host := sandboxHost(sbm, &sopts); host != "" {
+			return forwardToSandboxHost(host, "run", original)
+		}
 		// The registry's spelling of the config directory, made absolute
 		// so a relative --playbooks-dir cannot leak a relative
 		// CLAUDE_CONFIG_DIR into a sandbox whose working directory is

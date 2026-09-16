@@ -26,6 +26,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// value still names the root whose .env-profiles/ the path's manifest
 	// may reference, so it is applied to this process exactly as run does
 	// (and kept out of the args forwarded to claude).
+	original := args
 	args, err := takePlaybooksDirArg(args)
 	if err != nil {
 		return err
@@ -61,6 +62,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println("Sandbox flags run the session inside a sandbox (backend sbx, Docker Sandboxes):")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpbstart-<dir> (created on first use); --sbx is a synonym")
 		fmt.Println("  --no-sandbox         launch on the host although the directory's manifest says [sandbox] always = true")
+		fmt.Println("  --sandbox-host U@H   run the sandboxed start on that machine over ssh (the path is a path there)")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
 		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
@@ -82,6 +84,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	layers = append(layers, more...)
+
+	// An explicit --sandbox-host (before or after the path) runs the whole
+	// start on that host; the path is a path there.
+	if sopts.host != "" {
+		if sopts.disabled {
+			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+		}
+		return forwardToSandboxHost(sopts.host, "start", original)
+	}
 
 	absPath, err := filepath.Abs(path)
 	if err != nil {

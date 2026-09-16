@@ -879,3 +879,118 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 		t.Fatalf("fallback after a failed registration: %q", calls)
 	}
 }
+
+// stubSSH puts a fake `ssh` first on PATH that records its arguments,
+// one invocation per line, in the returned log file.
+func stubSSH(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "ssh.log")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SSH_STUB_LOG\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SSH_STUB_LOG", log)
+	return log
+}
+
+func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	sshLog := stubSSH(t)
+	sbxLog := stubSbx(t)
+	// The flag forwards the whole launch; the playbook need not exist here.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "/home/polat/proj", "ghost", "-p", "it's"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(sshLog)
+	if err != nil {
+		t.Fatal("ssh was not called")
+	}
+	want := "polat@cockpit0 -- claude-playbook run '--sandbox' '--workdir' '/home/polat/proj' 'ghost' '-p' 'it'\\''s'\n"
+	if string(data) != want {
+		t.Fatalf("ssh args:\n got %q\nwant %q", data, want)
+	}
+	if _, err := os.Stat(sbxLog); err == nil {
+		t.Fatal("sbx was called locally for a remote launch")
+	}
+	// Flags after the name, --sandbox already present (not doubled), the
+	// = form, and --sbx all forward faithfully; -- ends the scan.
+	os.Remove(sshLog)
+	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-host=polat@cockpit0", "--", "--sandbox-host", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(sshLog)
+	if string(data) != "polat@cockpit0 -- claude-playbook run 'ghost' '--sbx' '--' '--sandbox-host' 'x'\n" {
+		t.Fatalf("ssh args (after the name): %q", data)
+	}
+	// The manifest names the host: a bare launch of an always-sandboxed
+	// playbook goes there; --no-sandbox keeps it here, on the host.
+	writePlaybook(t, root, "remote", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	os.Remove(sshLog)
+	if err := runRun(nil, []string{"remote", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(sshLog)
+	if string(data) != "polat@cockpit0 -- claude-playbook run '--sandbox' 'remote' '--version'\n" {
+		t.Fatalf("manifest host: %q", data)
+	}
+	os.Remove(sshLog)
+	claudeLog := stubClaude(t)
+	if err := runRun(nil, []string{"--no-sandbox", "remote", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sshLog); err == nil {
+		t.Fatal("--no-sandbox still went to the remote host")
+	}
+	if _, err := os.Stat(claudeLog); err != nil {
+		t.Fatal("--no-sandbox did not launch on the host")
+	}
+	// A manifest host without always is used only when the launch is
+	// sandboxed.
+	writePlaybook(t, root, "opt", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "polat@cockpit0"}})
+	os.Remove(sshLog)
+	os.Remove(claudeLog)
+	if err := runRun(nil, []string{"opt", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sshLog); err == nil {
+		t.Fatal("an unsandboxed launch went to the remote host")
+	}
+	if err := runRun(nil, []string{"--sandbox", "opt", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(sshLog); !strings.Contains(string(data), "claude-playbook run '--sandbox' 'opt'") {
+		t.Fatalf("manifest host with --sandbox: %q", data)
+	}
+	// --playbooks-dir travels as given: a path on that host.
+	os.Remove(sshLog)
+	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "polat@cockpit0", "ghost"}); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(sshLog); string(data) != "polat@cockpit0 -- claude-playbook run '--sandbox' '--playbooks-dir' '/srv/pbs' 'ghost'\n" {
+		t.Fatalf("--playbooks-dir forwarding: %q", data)
+	}
+	// Refusals: a local file, and contradictions.
+	for _, args := range [][]string{
+		{"--sandbox-host", "polat@cockpit0", "--env-file", "/tmp/x.env", "ghost"},
+		{"--sandbox-host", "polat@cockpit0", "--no-sandbox", "ghost"},
+	} {
+		os.Remove(sshLog)
+		if err := runRun(nil, args); err == nil {
+			t.Errorf("%q accepted", args)
+		}
+		if _, err := os.Stat(sshLog); err == nil {
+			t.Errorf("%q reached ssh", args)
+		}
+	}
+	// start forwards too, --delete included, the path being remote.
+	os.Remove(sshLog)
+	if err := runStart(nil, []string{"--sandbox-host", "polat@cockpit0", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(sshLog)
+	if string(data) != "polat@cockpit0 -- claude-playbook start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'\n" {
+		t.Fatalf("start forwarding: %q", data)
+	}
+}
