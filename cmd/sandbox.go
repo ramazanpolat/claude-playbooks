@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -261,10 +262,15 @@ func resolveSandbox(sb *manifest.Sandbox, opts *sandboxOpts, label string) (on b
 }
 
 // remotePathPrefix puts the installer's default (~/.local/bin) and the
-// package managers' directories ahead of the PATH an ssh session gets;
-// $HOME and $PATH are expanded by the remote shell, sh and csh families
-// alike.
-const remotePathPrefix = `env PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" `
+// package managers' directories ahead of the PATH an ssh session gets.
+const remotePathPrefix = `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" `
+
+// remoteTransport wraps a POSIX sh command so that any remote login shell
+// delivers it to sh unchanged: base64 in an environment variable, decoded
+// and evaluated by sh. base64 --decode is GNU and BSD alike.
+func remoteTransport(command string) string {
+	return "env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(command)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'`
+}
 
 // sandboxHost is the remote host for a sandboxed launch: the flag, else
 // the manifest, else "" (here).
@@ -346,12 +352,17 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
 	command := strings.Join(quoted, " ")
-	// ssh runs the command in a non-interactive shell, whose PATH is not
-	// the pilot's (no ~/.local/bin, so no claude-playbook). Rather than a
-	// login shell (whose flags differ by shell family: tcsh has no -lc),
-	// the PATH is widened in a way every shell expands alike, with the
-	// places the installer and the package managers put the binary.
-	remote := remotePathPrefix + command
+	// ssh hands the command text to the remote user's login shell, whose
+	// family is unknown (tcsh breaks POSIX single quotes on a newline and
+	// expands "!"), and whose non-interactive PATH lacks ~/.local/bin. So
+	// the command is not parsed by that shell at all: it travels base64
+	// in an environment variable, and an explicit POSIX sh decodes and
+	// evaluates it. The outer text is plain words every shell family
+	// passes through untouched; the inner text is parsed by sh only,
+	// with sh's stdin (the ssh channel) and exit status intact. The PATH
+	// is widened inside with the places the installer and the package
+	// managers put the binary; $HOME and $PATH expand in sh.
+	remote := remoteTransport(remotePathPrefix + "exec " + command)
 	sshBin, err := exec.LookPath("ssh")
 	if err != nil {
 		return fmt.Errorf("'ssh' not found; a sandbox on %s is reached over ssh", host)

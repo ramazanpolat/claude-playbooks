@@ -246,8 +246,11 @@ if phase_enabled p4; then
   SSHLOG="$SB/ssh.log"; SBXLOG3="$SB/sbx3.log"
   SSH_STUB_LOG="$SSHLOG" SBX_STUB_LOG="$SBXLOG3" PATH="$STUB:$PATH" p4 run --sandbox-host polat@cockpit0 --workdir /home/polat/proj fx -p hi >/dev/null 2>&1 || rc=1
   CMD="claude-playbook run '--playbooks-dir=$PB' '--sandbox' '--workdir=/home/polat/proj' 'fx' '-p' 'hi'"
+  # the command travels base64 in CPB_CMD and an explicit sh evaluates it
   # shellcheck disable=SC2016
-  [ "$(cat "$SSHLOG" 2>/dev/null)" = "-- polat@cockpit0 env PATH=\"\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\" $CMD" ] || rc=1
+  B64="$(printf '%s' "PATH=\"\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\" exec $CMD" | base64 | tr -d '\n')"
+  # shellcheck disable=SC2016
+  [ "$(cat "$SSHLOG" 2>/dev/null)" = "-- polat@cockpit0 env CPB_CMD=$B64 sh -c 'eval \"\$(printf %s \"\$CPB_CMD\" | base64 --decode)\"'" ] || rc=1
   [ -e "$SBXLOG3" ] && rc=1
   report "p4 remote sandbox host (stub ssh)" $rc
 

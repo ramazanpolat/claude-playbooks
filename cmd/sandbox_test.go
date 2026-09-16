@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -910,9 +911,11 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 		return string(data)
 	}
 	// What ssh receives: options ended by --, the destination, and the
-	// command behind the PATH prefix every remote shell expands alike.
+	// command in its transport: base64 in CPB_CMD, decoded and evaluated by
+	// an explicit sh, the PATH widened and claude-playbook exec'd inside.
 	remote := func(cmd string) string {
-		return "-- polat@cockpit0 env PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\" " + cmd + "\n"
+		inner := `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec ` + cmd
+		return "-- polat@cockpit0 env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(inner)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'` + "\n"
 	}
 	// The flag forwards the whole launch, rebuilt from what the parser
 	// consumed; the playbook need not exist here; ssh's options end before
