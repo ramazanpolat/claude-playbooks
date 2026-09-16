@@ -34,7 +34,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// directly (`name --env K=V ...`, which is what a launcher passes). The
 	// --sandbox family is scanned in the same leading runs.
 	var sopts sandboxOpts
-	rest, layers, err := takeRunFlags(rest, &sopts, nil)
+	rest, tokens, err := takeRunFlags(rest, &sopts, nil)
 	if err != nil {
 		return err
 	}
@@ -70,15 +70,20 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	layers = append(layers, more...)
+	tokens = append(tokens, more...)
 
 	// An explicit --sandbox-host (before or after the name) runs the whole
-	// launch on that host: the playbook need not be registered here.
+	// launch on that host: the playbook need not be registered here, and
+	// no launch flag is evaluated here (env files stay unread).
 	if sopts.host != "" {
 		if sopts.disabled {
 			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
 		}
-		return forwardToSandboxHost(sopts.host, "run", original, &sopts, layers, nil, name, claudeArgs)
+		return forwardToSandboxHost(sopts.host, "run", original, &sopts, tokens, nil, name, claudeArgs)
+	}
+	layers, err := launchLayers(tokens)
+	if err != nil {
+		return err
 	}
 
 	playbooksDirResolved := config.ResolvePlaybooksDir()
@@ -101,7 +106,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	if sandboxed {
 		if host := sandboxHost(sbm, &sopts); host != "" {
-			return forwardToSandboxHost(host, "run", original, &sopts, layers, nil, name, claudeArgs)
+			return forwardToSandboxHost(host, "run", original, &sopts, tokens, nil, name, claudeArgs)
 		}
 		// The registry's spelling of the config directory, made absolute
 		// so a relative --playbooks-dir cannot leak a relative

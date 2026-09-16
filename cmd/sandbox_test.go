@@ -54,15 +54,19 @@ func sbxCalls(t *testing.T, log string) []string {
 
 func TestTakeRunFlagsMixesLaunchAndSandboxFlags(t *testing.T) {
 	var o sandboxOpts
-	rest, layers, err := takeRunFlags([]string{"--sandbox", "--env", "K=V", "--workdir", "/w", "--mount=/m:ro", "--clone", "pb", "--sandbox-fresh", "-p", "hi"}, &o, nil)
+	rest, tokens, err := takeRunFlags([]string{"--sandbox", "--env", "K=V", "--workdir", "/w", "--mount=/m:ro", "--clone", "pb", "--sandbox-fresh", "-p", "hi"}, &o, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !o.enabled || !o.clone || o.fresh || o.workdir != "/w" || len(o.mounts) != 1 || o.mounts[0] != "/m:ro" {
 		t.Fatalf("opts before the name: %+v", o)
 	}
-	if len(layers) != 1 || layers[0].Set["K"] != "V" {
-		t.Fatalf("layers: %#v", layers)
+	if len(tokens) != 1 || tokens[0] != (launchToken{flag: "--env", value: "K=V"}) {
+		t.Fatalf("tokens: %#v", tokens)
+	}
+	layers, err := launchLayers(tokens)
+	if err != nil || len(layers) != 1 || layers[0].Set["K"] != "V" {
+		t.Fatalf("layers: %#v %v", layers, err)
 	}
 	if len(rest) != 4 || rest[0] != "pb" {
 		t.Fatalf("rest: %q", rest)
@@ -911,7 +915,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	want := "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir' '/home/polat/proj' '--env' 'K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'\n"
+	want := "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'\n"
 	if got := read(); got != want {
 		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
 	}
@@ -923,7 +927,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-fresh", "--clone", "--sandbox-host=polat@cockpit0", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount' '/data:ro' 'ghost' '--' '--sandbox-host' 'x'\n" {
+	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'\n" {
 		t.Fatalf("after the name: %q", got)
 	}
 	// The manifest names the host: a bare launch of an always-sandboxed
@@ -965,21 +969,28 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "polat@cockpit0", "ghost"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--playbooks-dir' '/srv/pbs' '--sandbox' 'ghost'\n" {
+	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'\n" {
 		t.Fatalf("--playbooks-dir forwarding: %q", got)
 	}
-	// Refusals: a local env file (existing, so the refusal is the reason),
-	// a host that would be an ssh option, contradictions.
-	envFile := filepath.Join(t.TempDir(), "x.env")
-	if err := os.WriteFile(envFile, []byte("A=1\n"), 0o600); err != nil {
+	// A value that looks like a flag stays a value on the remote side too:
+	// value flags travel inline.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
+	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'\n" {
+		t.Fatalf("flag-like values: %q", got)
+	}
+	// Refusals: a local env file (refused by name, never read: the path
+	// need not even exist), a host that would be an ssh option,
+	// contradictions.
+	envFile := filepath.Join(t.TempDir(), "never-read.env")
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
 		{[]string{"--sandbox-host", "polat@cockpit0", "--env-file", envFile, "ghost"}, "names a local file"},
 		{[]string{"ghost", "--sandbox-host", "polat@cockpit0", "--env-file=" + envFile}, "names a local file"},
+		{[]string{"--env-file", envFile, "ghost", "--sandbox-host", "polat@cockpit0"}, "names a local file"},
 		{[]string{"--sandbox-host", "polat@cockpit0", "--no-sandbox", "ghost"}, "pick one"},
 		{[]string{"--sandbox-host=-V", "ghost"}, "must be an ssh destination"},
 		{[]string{"--sandbox-host", "polat@cockpit0 -oProxyCommand=x", "ghost"}, "must be an ssh destination"},

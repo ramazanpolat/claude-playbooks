@@ -41,7 +41,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	var deleteAfter bool
 	var sopts sandboxOpts
 	wrapper := map[string]*bool{"--delete": &deleteAfter}
-	rest, layers, err := takeRunFlags(args, &sopts, wrapper)
+	rest, tokens, err := takeRunFlags(args, &sopts, wrapper)
 	if err != nil {
 		return err
 	}
@@ -83,10 +83,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	layers = append(layers, more...)
+	tokens = append(tokens, more...)
 
 	// An explicit --sandbox-host (before or after the path) runs the whole
-	// start on that host; the path is a path there.
+	// start on that host; the path is a path there, and no launch flag is
+	// evaluated here.
 	if sopts.host != "" {
 		if sopts.disabled {
 			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
@@ -95,7 +96,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if deleteAfter {
 			wrapper = []string{"--delete"}
 		}
-		return forwardToSandboxHost(sopts.host, "start", original, &sopts, layers, wrapper, path, claudeArgs)
+		return forwardToSandboxHost(sopts.host, "start", original, &sopts, tokens, wrapper, path, claudeArgs)
+	}
+	layers, err := launchLayers(tokens)
+	if err != nil {
+		return err
 	}
 
 	absPath, err := filepath.Abs(path)
@@ -129,7 +134,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			if deleteAfter {
 				wrapper = []string{"--delete"}
 			}
-			return forwardToSandboxHost(host, "start", original, &sopts, layers, wrapper, path, claudeArgs)
+			return forwardToSandboxHost(host, "start", original, &sopts, tokens, wrapper, path, claudeArgs)
 		}
 		// Refused here, before anything else: with --delete, a refusal
 		// must never be followed by the cleanup below.
