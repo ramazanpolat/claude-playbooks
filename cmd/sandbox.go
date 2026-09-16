@@ -310,14 +310,23 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	if opts.clone {
 		f = append(f, "--clone")
 	}
+	// A value that is exactly "--" is the one value the inline form would
+	// change: the remote registry scan stops at a standalone "--" as the
+	// local one did, so such a value travels as two words.
+	pair := func(flag, value string) []string {
+		if value == "--" {
+			return []string{flag, value}
+		}
+		return []string{flag + "=" + value}
+	}
 	if opts.workdir != "" {
-		f = append(f, "--workdir="+opts.workdir)
+		f = append(f, pair("--workdir", opts.workdir)...)
 	}
 	for _, m := range opts.mounts {
-		f = append(f, "--mount="+m)
+		f = append(f, pair("--mount", m)...)
 	}
 	for _, t := range tokens {
-		f = append(f, t.flag+"="+t.value)
+		f = append(f, pair(t.flag, t.value)...)
 	}
 	f = append(f, wrapper...)
 	f = append(f, target)

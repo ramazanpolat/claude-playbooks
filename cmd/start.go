@@ -98,11 +98,6 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		return forwardToSandboxHost(sopts.host, "start", original, &sopts, tokens, wrapper, path, claudeArgs)
 	}
-	layers, err := launchLayers(tokens)
-	if err != nil {
-		return err
-	}
-
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("invalid path %q: %w", path, err)
@@ -141,6 +136,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if auth.IsGlobalConfigDir(absPath) {
 			return fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", absPath)
 		}
+		// Only now is the start known to be local: evaluate the launch
+		// flags (env files are read here and nowhere earlier).
+		layers, err := launchLayers(tokens)
+		if err != nil {
+			return err
+		}
 		name := startSandboxName(absPath)
 		started, runErr := runSandboxed(sandboxTarget{
 			label: "directory " + absPath, name: name,
@@ -163,6 +164,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
+	layers, err := launchLayers(tokens)
+	if err != nil {
+		return err
+	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		// Missing, unreadable, or invalid profile: launching with a silently

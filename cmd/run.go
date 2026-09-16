@@ -81,11 +81,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 		return forwardToSandboxHost(sopts.host, "run", original, &sopts, tokens, nil, name, claudeArgs)
 	}
-	layers, err := launchLayers(tokens)
-	if err != nil {
-		return err
-	}
-
 	playbooksDirResolved := config.ResolvePlaybooksDir()
 
 	pb, err := playbook.Find(playbooksDirResolved, name)
@@ -107,6 +102,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if sandboxed {
 		if host := sandboxHost(sbm, &sopts); host != "" {
 			return forwardToSandboxHost(host, "run", original, &sopts, tokens, nil, name, claudeArgs)
+		}
+		// Only now is the launch known to be local: evaluate the launch
+		// flags (env files are read here and nowhere earlier).
+		layers, err := launchLayers(tokens)
+		if err != nil {
+			return err
 		}
 		// The registry's spelling of the config directory, made absolute
 		// so a relative --playbooks-dir cannot leak a relative
@@ -135,6 +136,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
+	layers, err := launchLayers(tokens)
+	if err != nil {
+		return err
+	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(pb.Path, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		// Missing, unreadable, or invalid profile: launching with a silently

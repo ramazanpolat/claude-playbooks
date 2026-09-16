@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -972,6 +973,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'\n" {
 		t.Fatalf("--playbooks-dir forwarding: %q", got)
 	}
+	config.PlaybooksDir = root // the flag set the process-wide registry; back to the test's
 	// A value that looks like a flag stays a value on the remote side too:
 	// value flags travel inline.
 	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
@@ -979,6 +981,37 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'\n" {
 		t.Fatalf("flag-like values: %q", got)
+	}
+	// A value that is exactly "--" keeps the registry-scan boundary the
+	// local launch had: two words, so a --playbooks-dir among claude's
+	// arguments stays claude's on the remote side too.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != "-- polat@cockpit0 claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'\n" {
+		t.Fatalf("bare -- value: %q", got)
+	}
+	// A manifest host forwards without evaluating any launch flag: an env
+	// file that does not exist is refused by name, not opened.
+	writePlaybook(t, root, "mh", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	err := runRun(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), "mh"})
+	if err == nil || !strings.Contains(err.Error(), "names a local file") {
+		t.Fatalf("manifest host with an env file: %v", err)
+	}
+	if got := read(); got != "" {
+		t.Fatalf("reached ssh with an env file: %q", got)
+	}
+	// The same through start with a directory manifest naming the host.
+	mdir := filepath.Join(t.TempDir(), "mh-dir")
+	if err := os.MkdirAll(mdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(mdir, &manifest.Manifest{Name: "mh", IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}}); err != nil {
+		t.Fatal(err)
+	}
+	err = runStart(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), mdir})
+	if err == nil || !strings.Contains(err.Error(), "names a local file") {
+		t.Fatalf("start with a manifest host and an env file: %v", err)
 	}
 	// Refusals: a local env file (refused by name, never read: the path
 	// need not even exist), a host that would be an ssh option,
