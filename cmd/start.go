@@ -26,6 +26,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// value still names the root whose .env-profiles/ the path's manifest
 	// may reference, so it is applied to this process exactly as run does
 	// (and kept out of the args forwarded to claude).
+	original := args
 	args, err := takePlaybooksDirArg(args)
 	if err != nil {
 		return err
@@ -40,7 +41,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	var deleteAfter bool
 	var sopts sandboxOpts
 	wrapper := map[string]*bool{"--delete": &deleteAfter}
-	rest, layers, err := takeRunFlags(args, &sopts, wrapper)
+	rest, tokens, err := takeRunFlags(args, &sopts, wrapper)
 	if err != nil {
 		return err
 	}
@@ -61,6 +62,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println("Sandbox flags run the session inside a sandbox (backend sbx, Docker Sandboxes):")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpbstart-<dir> (created on first use); --sbx is a synonym")
 		fmt.Println("  --no-sandbox         launch on the host although the directory's manifest says [sandbox] always = true")
+		fmt.Println("  --sandbox-host U@H   run the sandboxed start on that machine over ssh (the path is a path there)")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
 		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
@@ -81,8 +83,21 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	layers = append(layers, more...)
+	tokens = append(tokens, more...)
 
+	// An explicit --sandbox-host (before or after the path) runs the whole
+	// start on that host; the path is a path there, and no launch flag is
+	// evaluated here.
+	if sopts.host != "" {
+		if sopts.disabled {
+			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+		}
+		var wrapper []string
+		if deleteAfter {
+			wrapper = []string{"--delete"}
+		}
+		return forwardToSandboxHost(sopts.host, "start", original, &sopts, tokens, wrapper, path, claudeArgs)
+	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("invalid path %q: %w", path, err)
@@ -107,10 +122,25 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if sandboxed {
+		// The directory's manifest may name the host: the whole start runs
+		// there, the path being a path there, and nothing local follows.
+		if host := sandboxHost(sbm, &sopts); host != "" {
+			var wrapper []string
+			if deleteAfter {
+				wrapper = []string{"--delete"}
+			}
+			return forwardToSandboxHost(host, "start", original, &sopts, tokens, wrapper, path, claudeArgs)
+		}
 		// Refused here, before anything else: with --delete, a refusal
 		// must never be followed by the cleanup below.
 		if auth.IsGlobalConfigDir(absPath) {
 			return fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", absPath)
+		}
+		// Only now is the start known to be local: evaluate the launch
+		// flags (env files are read here and nowhere earlier).
+		layers, err := launchLayers(tokens)
+		if err != nil {
+			return err
 		}
 		name := startSandboxName(absPath)
 		started, runErr := runSandboxed(sandboxTarget{
@@ -134,6 +164,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
+	layers, err := launchLayers(tokens)
+	if err != nil {
+		return err
+	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		// Missing, unreadable, or invalid profile: launching with a silently

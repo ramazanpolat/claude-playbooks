@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -54,15 +56,19 @@ func sbxCalls(t *testing.T, log string) []string {
 
 func TestTakeRunFlagsMixesLaunchAndSandboxFlags(t *testing.T) {
 	var o sandboxOpts
-	rest, layers, err := takeRunFlags([]string{"--sandbox", "--env", "K=V", "--workdir", "/w", "--mount=/m:ro", "--clone", "pb", "--sandbox-fresh", "-p", "hi"}, &o, nil)
+	rest, tokens, err := takeRunFlags([]string{"--sandbox", "--env", "K=V", "--workdir", "/w", "--mount=/m:ro", "--clone", "pb", "--sandbox-fresh", "-p", "hi"}, &o, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !o.enabled || !o.clone || o.fresh || o.workdir != "/w" || len(o.mounts) != 1 || o.mounts[0] != "/m:ro" {
 		t.Fatalf("opts before the name: %+v", o)
 	}
-	if len(layers) != 1 || layers[0].Set["K"] != "V" {
-		t.Fatalf("layers: %#v", layers)
+	if len(tokens) != 1 || tokens[0] != (launchToken{flag: "--env", value: "K=V"}) {
+		t.Fatalf("tokens: %#v", tokens)
+	}
+	layers, err := launchLayers(tokens)
+	if err != nil || len(layers) != 1 || layers[0].Set["K"] != "V" {
+		t.Fatalf("layers: %#v %v", layers, err)
 	}
 	if len(rest) != 4 || rest[0] != "pb" {
 		t.Fatalf("rest: %q", rest)
@@ -877,5 +883,201 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	calls = sbxCalls(t, log)
 	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY=k ") {
 		t.Fatalf("fallback after a failed registration: %q", calls)
+	}
+}
+
+// stubSSH puts a fake `ssh` first on PATH that records its arguments,
+// one invocation per line, in the returned log file.
+func stubSSH(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "ssh.log")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SSH_STUB_LOG\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SSH_STUB_LOG", log)
+	return log
+}
+
+func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	sshLog := stubSSH(t)
+	sbxLog := stubSbx(t)
+	read := func() string {
+		data, _ := os.ReadFile(sshLog)
+		os.Remove(sshLog)
+		return string(data)
+	}
+	// What ssh receives: options ended by --, the destination, and the
+	// command in its transport: base64 in CPB_CMD, decoded and evaluated by
+	// an explicit sh, the PATH widened and claude-playbook exec'd inside.
+	remote := func(cmd string) string {
+		inner := `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec ` + cmd
+		return "-- polat@cockpit0 env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(inner)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'` + "\n"
+	}
+	// The flag forwards the whole launch, rebuilt from what the parser
+	// consumed; the playbook need not exist here; ssh's options end before
+	// the destination; claude's arguments travel verbatim, even ones that
+	// look like wrapper flags.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	want := remote("claude-playbook run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'")
+	if got := read(); got != want {
+		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
+	}
+	if _, err := os.Stat(sbxLog); err == nil {
+		t.Fatal("sbx was called locally for a remote launch")
+	}
+	// Flags after the name, the = form, --sbx, a backend, fresh and clone
+	// all forward in canonical order; -- ends the wrapper scan.
+	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-fresh", "--clone", "--sandbox-host=polat@cockpit0", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {
+		t.Fatalf("after the name: %q", got)
+	}
+	// The manifest names the host: a bare launch of an always-sandboxed
+	// playbook goes there; --no-sandbox keeps it here, on the host.
+	writePlaybook(t, root, "remote", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	if err := runRun(nil, []string{"remote", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook run '--sandbox' 'remote' '--version'") {
+		t.Fatalf("manifest host: %q", got)
+	}
+	claudeLog := stubClaude(t)
+	if err := runRun(nil, []string{"--no-sandbox", "remote", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != "" {
+		t.Fatalf("--no-sandbox still went to the remote host: %q", got)
+	}
+	if _, err := os.Stat(claudeLog); err != nil {
+		t.Fatal("--no-sandbox did not launch on the host")
+	}
+	// A manifest host without always is used only when the launch is
+	// sandboxed.
+	writePlaybook(t, root, "opt", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "polat@cockpit0"}})
+	os.Remove(claudeLog)
+	if err := runRun(nil, []string{"opt", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != "" {
+		t.Fatalf("an unsandboxed launch went to the remote host: %q", got)
+	}
+	if err := runRun(nil, []string{"--sandbox", "opt", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook run '--sandbox' 'opt' '--version'") {
+		t.Fatalf("manifest host with --sandbox: %q", got)
+	}
+	// --playbooks-dir travels as given: a path on that host.
+	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "polat@cockpit0", "ghost"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'") {
+		t.Fatalf("--playbooks-dir forwarding: %q", got)
+	}
+	config.PlaybooksDir = root // the flag set the process-wide registry; back to the test's
+	// A value that looks like a flag stays a value on the remote side too:
+	// value flags travel inline.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'") {
+		t.Fatalf("flag-like values: %q", got)
+	}
+	// A value that is exactly "--" keeps the registry-scan boundary the
+	// local launch had: two words, so a --playbooks-dir among claude's
+	// arguments stays claude's on the remote side too.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
+		t.Fatalf("bare -- value: %q", got)
+	}
+	// An overridden --workdir is forwarded too, in order, so a boundary it
+	// set survives and the last value still wins.
+	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
+		t.Fatalf("overridden workdir: %q", got)
+	}
+	// A manifest host forwards without evaluating any launch flag: an env
+	// file that does not exist is refused by name, not opened.
+	writePlaybook(t, root, "mh", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	err := runRun(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), "mh"})
+	if err == nil || !strings.Contains(err.Error(), "names a local file") {
+		t.Fatalf("manifest host with an env file: %v", err)
+	}
+	if got := read(); got != "" {
+		t.Fatalf("reached ssh with an env file: %q", got)
+	}
+	// The same through start with a directory manifest naming the host.
+	mdir := filepath.Join(t.TempDir(), "mh-dir")
+	if err := os.MkdirAll(mdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(mdir, &manifest.Manifest{Name: "mh", IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}}); err != nil {
+		t.Fatal(err)
+	}
+	err = runStart(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), mdir})
+	if err == nil || !strings.Contains(err.Error(), "names a local file") {
+		t.Fatalf("start with a manifest host and an env file: %v", err)
+	}
+	// Refusals: a local env file (refused by name, never read: the path
+	// need not even exist), a host that would be an ssh option,
+	// contradictions.
+	envFile := filepath.Join(t.TempDir(), "never-read.env")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--sandbox-host", "polat@cockpit0", "--env-file", envFile, "ghost"}, "names a local file"},
+		{[]string{"ghost", "--sandbox-host", "polat@cockpit0", "--env-file=" + envFile}, "names a local file"},
+		{[]string{"--env-file", envFile, "ghost", "--sandbox-host", "polat@cockpit0"}, "names a local file"},
+		{[]string{"--sandbox-host", "polat@cockpit0", "--no-sandbox", "ghost"}, "pick one"},
+		{[]string{"--sandbox-host=-V", "ghost"}, "must be an ssh destination"},
+		{[]string{"--sandbox-host", "polat@cockpit0 -oProxyCommand=x", "ghost"}, "must be an ssh destination"},
+	} {
+		err := runRun(nil, c.args)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: %v", c.args, err)
+		}
+		if got := read(); got != "" {
+			t.Errorf("%q reached ssh: %q", c.args, got)
+		}
+	}
+	// start forwards too, --delete included, the path being remote; a
+	// directory manifest naming the host forwards a sandboxed start as
+	// well, and nothing local runs or is deleted.
+	if err := runStart(nil, []string{"--sandbox-host", "polat@cockpit0", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'") {
+		t.Fatalf("start forwarding: %q", got)
+	}
+	dir := filepath.Join(t.TempDir(), "remote-dir")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(dir, &manifest.Manifest{Name: "rd", IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "polat@cockpit0"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runStart(nil, []string{"--sandbox", "--delete", dir}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '"+dir+"'") {
+		t.Fatalf("start with a manifest host: %q", got)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal("start --delete removed the local directory although the start ran remotely")
+	}
+	if _, err := os.Stat(sbxLog); err == nil {
+		t.Fatal("sbx was called locally for a remote start")
 	}
 }

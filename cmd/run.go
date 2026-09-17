@@ -25,6 +25,7 @@ var runCmd = &cobra.Command{
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
+	original := args
 	rest, err := takePlaybooksDirArg(args)
 	if err != nil {
 		return err
@@ -33,7 +34,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// directly (`name --env K=V ...`, which is what a launcher passes). The
 	// --sandbox family is scanned in the same leading runs.
 	var sopts sandboxOpts
-	rest, layers, err := takeRunFlags(rest, &sopts, nil)
+	rest, tokens, err := takeRunFlags(rest, &sopts, nil)
 	if err != nil {
 		return err
 	}
@@ -52,6 +53,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("Sandbox flags run the playbook inside a sandbox (backend sbx, Docker Sandboxes):")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use); --sbx is a synonym")
 		fmt.Println("  --no-sandbox         launch on the host although the manifest says [sandbox] always = true")
+		fmt.Println("  --sandbox-host U@H   run the sandboxed launch on that machine over ssh (claude-playbook and the playbook installed there)")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
 		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
@@ -68,8 +70,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	layers = append(layers, more...)
+	tokens = append(tokens, more...)
 
+	// An explicit --sandbox-host (before or after the name) runs the whole
+	// launch on that host: the playbook need not be registered here, and
+	// no launch flag is evaluated here (env files stay unread).
+	if sopts.host != "" {
+		if sopts.disabled {
+			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+		}
+		return forwardToSandboxHost(sopts.host, "run", original, &sopts, tokens, nil, name, claudeArgs)
+	}
 	playbooksDirResolved := config.ResolvePlaybooksDir()
 
 	pb, err := playbook.Find(playbooksDirResolved, name)
@@ -89,6 +100,15 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if sandboxed {
+		if host := sandboxHost(sbm, &sopts); host != "" {
+			return forwardToSandboxHost(host, "run", original, &sopts, tokens, nil, name, claudeArgs)
+		}
+		// Only now is the launch known to be local: evaluate the launch
+		// flags (env files are read here and nowhere earlier).
+		layers, err := launchLayers(tokens)
+		if err != nil {
+			return err
+		}
 		// The registry's spelling of the config directory, made absolute
 		// so a relative --playbooks-dir cannot leak a relative
 		// CLAUDE_CONFIG_DIR into a sandbox whose working directory is
@@ -116,6 +136,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 
+	layers, err := launchLayers(tokens)
+	if err != nil {
+		return err
+	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(pb.Path, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		// Missing, unreadable, or invalid profile: launching with a silently

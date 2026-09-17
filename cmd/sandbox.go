@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,7 +54,61 @@ type sandboxOpts struct {
 	fresh    bool
 	clone    bool
 	workdir  string
+	workdirs []string // every --workdir as typed, in order (the last wins)
 	mounts   []string
+	host     string // --sandbox-host user@host: run the launch there
+}
+
+// launchToken is one launch flag as typed, not yet evaluated: a remote
+// launch forwards it verbatim, a local one reads it (env files included)
+// only once it is known to be local.
+type launchToken struct {
+	flag  string
+	value string
+}
+
+// scanLaunchFlagsWith is takeLaunchFlagsWith without the evaluation: it
+// consumes the same leading run and records the flags as tokens.
+func scanLaunchFlagsWith(args []string, bools map[string]*bool) (rest []string, tokens []launchToken, err error) {
+	i := 0
+	for i < len(args) {
+		if args[i] == "--" {
+			break
+		}
+		if dst, ok := bools[args[i]]; ok {
+			*dst = true
+			i++
+			continue
+		}
+		flag, value, inline := strings.Cut(args[i], "=")
+		if !launchFlagNames[flag] {
+			break
+		}
+		if !inline {
+			if i+1 >= len(args) {
+				return nil, nil, fmt.Errorf("flag needs an argument: %s", flag)
+			}
+			value = args[i+1]
+			i++
+		}
+		i++
+		tokens = append(tokens, launchToken{flag: flag, value: value})
+	}
+	return args[i:], tokens, nil
+}
+
+// launchLayers evaluates tokens into env layers, in order, exactly as
+// takeLaunchFlagsWith would have.
+func launchLayers(tokens []launchToken) ([]*manifest.Env, error) {
+	var layers []*manifest.Env
+	for _, t := range tokens {
+		layer, err := launchLayer(t.flag, t.value)
+		if err != nil {
+			return nil, err
+		}
+		layers = append(layers, layer)
+	}
+	return layers, nil
 }
 
 // sandboxTarget is what a sandboxed launch runs: a registered playbook or
@@ -108,7 +163,7 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 			consumed = true
 			continue
 		}
-		if flag != "--workdir" && flag != "--mount" {
+		if flag != "--workdir" && flag != "--mount" && flag != "--sandbox-host" {
 			break
 		}
 		if !inline {
@@ -125,8 +180,11 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 		switch flag {
 		case "--workdir":
 			opts.workdir = value
+			opts.workdirs = append(opts.workdirs, value)
 		case "--mount":
 			opts.mounts = append(opts.mounts, value)
+		case "--sandbox-host":
+			opts.host = value
 		}
 		consumed = true
 	}
@@ -134,8 +192,9 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 }
 
 // takeRunFlags scans one leading run of launch flags and sandbox flags in
-// any order. extra adds command-specific boolean flags (start's --delete).
-func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (rest []string, layers []*manifest.Env, err error) {
+// any order, recording the launch flags as tokens (unevaluated). extra
+// adds command-specific boolean flags (start's --delete).
+func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (rest []string, tokens []launchToken, err error) {
 	bools := map[string]*bool{
 		"--sandbox": &opts.enabled, "--sbx": &opts.enabled, "--no-sandbox": &opts.disabled,
 		"--sandbox-fresh": &opts.fresh, "--clone": &opts.clone,
@@ -145,19 +204,19 @@ func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (res
 	}
 	rest = args
 	for {
-		var more []*manifest.Env
-		rest, more, err = takeLaunchFlagsWith(rest, bools)
+		var more []launchToken
+		rest, more, err = scanLaunchFlagsWith(rest, bools)
 		if err != nil {
 			return nil, nil, err
 		}
-		layers = append(layers, more...)
+		tokens = append(tokens, more...)
 		var consumed bool
 		rest, consumed, err = takeSandboxValueFlags(rest, opts)
 		if err != nil {
 			return nil, nil, err
 		}
 		if !consumed {
-			return rest, layers, nil
+			return rest, tokens, nil
 		}
 	}
 }
@@ -170,6 +229,13 @@ func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (res
 func resolveSandbox(sb *manifest.Sandbox, opts *sandboxOpts, label string) (on bool, backend string, err error) {
 	if opts.enabled && opts.disabled {
 		return false, "", fmt.Errorf("--sandbox and --no-sandbox together: pick one")
+	}
+	if opts.host != "" && opts.disabled {
+		return false, "", fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+	}
+	// A host names where the sandbox runs; it implies one.
+	if opts.host != "" {
+		opts.enabled = true
 	}
 	always := sb != nil && sb.Always
 	on = opts.enabled || (always && !opts.disabled)
@@ -193,6 +259,125 @@ func resolveSandbox(sb *manifest.Sandbox, opts *sandboxOpts, label string) (on b
 		return false, "", fmt.Errorf("unknown sandbox backend %q (available: %s)", backend, strings.Join(manifest.SandboxBackends, ", "))
 	}
 	return true, backend, nil
+}
+
+// remotePathPrefix puts the installer's default (~/.local/bin) and the
+// package managers' directories ahead of the PATH an ssh session gets.
+const remotePathPrefix = `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" `
+
+// remoteTransport wraps a POSIX sh command so that any remote login shell
+// delivers it to sh unchanged: base64 in an environment variable, decoded
+// and evaluated by sh. base64 --decode is GNU and BSD alike.
+func remoteTransport(command string) string {
+	return "env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(command)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'`
+}
+
+// sandboxHost is the remote host for a sandboxed launch: the flag, else
+// the manifest, else "" (here).
+func sandboxHost(sb *manifest.Sandbox, opts *sandboxOpts) string {
+	if opts.host != "" {
+		return opts.host
+	}
+	if sb != nil {
+		return sb.Host
+	}
+	return ""
+}
+
+// forwardToSandboxHost runs this launch on host instead: the same
+// subcommand, rebuilt from what the launch parser consumed (never from
+// the raw text, so claude's own arguments are carried verbatim and
+// nothing in them is mistaken for a flag), over ssh, where claude-playbook
+// and the target are installed. Every value flag is forwarded in its
+// inline form (--flag=value), so a value that looks like a flag stays a
+// value on the remote side too. Launch flags travel as typed, unevaluated:
+// no env file is read here, and --env-file refuses (a local file the
+// remote cannot read). The arguments travel as one quoted command string
+// (ssh hands the remote shell a string). ssh's own options end with "--"
+// before the destination, so a host is never read as an option, and the
+// host is validated like the manifest key. --sandbox is always present,
+// so the remote launch is sandboxed there whatever its manifest says; a
+// --playbooks-dir travels as given (a path on that host). A pty is
+// requested only when this process has a terminal on both ends, as for
+// the local attach.
+func forwardToSandboxHost(host, subcommand string, original []string, opts *sandboxOpts, tokens []launchToken, wrapper []string, target string, claudeArgs []string) error {
+	if !manifest.ValidSandboxHost(host) {
+		return fmt.Errorf("--sandbox-host %q must be an ssh destination such as user@host", host)
+	}
+	for _, t := range tokens {
+		if t.flag == "--env-file" {
+			return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env profile on that host, or --env KEY=VALUE", host)
+		}
+	}
+	var f []string
+	if _, dir, err := scanPlaybooksDirArg(original); err == nil && dir != "" {
+		f = append(f, "--playbooks-dir="+dir)
+	}
+	sandbox := "--sandbox"
+	if opts.backend != "" {
+		sandbox += "=" + opts.backend
+	}
+	f = append(f, sandbox)
+	if opts.fresh {
+		f = append(f, "--sandbox-fresh")
+	}
+	if opts.clone {
+		f = append(f, "--clone")
+	}
+	// A value that is exactly "--" is the one value the inline form would
+	// change: the remote registry scan stops at a standalone "--" as the
+	// local one did, so such a value travels as two words.
+	pair := func(flag, value string) []string {
+		if value == "--" {
+			return []string{flag, value}
+		}
+		return []string{flag + "=" + value}
+	}
+	for _, w := range opts.workdirs {
+		// Every occurrence, in order: the last wins on the remote side as
+		// here, and an overridden bare "--" keeps the boundary it set.
+		f = append(f, pair("--workdir", w)...)
+	}
+	for _, m := range opts.mounts {
+		f = append(f, pair("--mount", m)...)
+	}
+	for _, t := range tokens {
+		f = append(f, pair(t.flag, t.value)...)
+	}
+	f = append(f, wrapper...)
+	f = append(f, target)
+	f = append(f, claudeArgs...)
+	quoted := []string{"claude-playbook", subcommand}
+	for _, a := range f {
+		quoted = append(quoted, shell.QuoteArg(a))
+	}
+	command := strings.Join(quoted, " ")
+	// ssh hands the command text to the remote user's login shell, whose
+	// family is unknown (tcsh breaks POSIX single quotes on a newline and
+	// expands "!"), and whose non-interactive PATH lacks ~/.local/bin. So
+	// the command is not parsed by that shell at all: it travels base64
+	// in an environment variable, and an explicit POSIX sh decodes and
+	// evaluates it. The outer text is plain words every shell family
+	// passes through untouched; the inner text is parsed by sh only,
+	// with sh's stdin (the ssh channel) and exit status intact. The PATH
+	// is widened inside with the places the installer and the package
+	// managers put the binary; $HOME and $PATH expand in sh.
+	remote := remoteTransport(remotePathPrefix + "exec " + command)
+	sshBin, err := exec.LookPath("ssh")
+	if err != nil {
+		return fmt.Errorf("'ssh' not found; a sandbox on %s is reached over ssh", host)
+	}
+	var sshArgs []string
+	if isTerminal(os.Stdin) && isTerminal(os.Stdout) {
+		sshArgs = append(sshArgs, "-t")
+	}
+	sshArgs = append(sshArgs, "--", host, remote)
+	fmt.Fprintf(os.Stderr, "Sandbox on %s: %s\n", host, command)
+	c := exec.Command(sshBin, sshArgs...)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return preserveExitCode(c.Run())
 }
 
 // resolvedPath is the absolute, symlink-free form of a "~"-prefixed or
