@@ -51,3 +51,16 @@ CI runs exactly these on every PR. A PR with red CI is not reviewed.
 
 Use the bug template. The output of `claude-playbook --version`, your OS,
 and an exact command sequence beat any amount of description.
+
+## Release process
+
+GitHub releases are created from `v*` tags only when the tagged commit is
+already on `main`. Tags pushed from feature branches are ignored by the
+release workflow.
+
+```bash
+git checkout main
+git pull --ff-only
+git tag -a vX.Y.Z -m vX.Y.Z
+git push origin vX.Y.Z
+```

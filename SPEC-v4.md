@@ -37,7 +37,7 @@ Every preparation failure is advisory (a warning, then launch) except a profile 
 
 ### The filesystem is the source of truth
 
-There is no index file, no database, no registry file. The state the tool reads from or writes to is: the playbooks root directory (including the optional `.playbook` manifests inside it, where a custom command alias is recorded, and the dot-prefixed `.env-profiles/` directory holding shared env profiles), the launcher directory (symlinks to the binary that serve as per-playbook commands), a flock lock file in the user cache dir (`<cache>/claude-playbook/registry.lock`, used only to serialize concurrent mutations — it holds no data). Any mutation users make with `mv`, `rm`, or a text editor is immediately consistent with what the tool sees on its next invocation.
+There is no index file, no database, no registry file. The state the tool reads from or writes to is: the playbooks root directory (including the optional `.playbook` manifests inside it, where a custom command alias is recorded, and the dot-prefixed `.env-profiles/` directory holding shared env profiles), the launcher directory (symlinks to the binary that serve as per-playbook commands), a flock lock file in the user cache dir (`<cache>/claude-playbook/registry.lock`, falling back to `<tmp>/claude-playbook-registry-<uid>.lock` when no cache directory can be resolved or created; used only to serialize concurrent mutations — it holds no data). Any mutation users make with `mv`, `rm`, or a text editor is immediately consistent with what the tool sees on its next invocation.
 
 ### The playbooks root
 
@@ -91,6 +91,131 @@ Since v2.13.0, per-playbook commands are **launchers** — symlinks to the `clau
 - **Retirement rule.** `delete` and `rename` remove a launcher named for the playbook going away (its name, its manifest alias, or a name a rename leaves behind), receipt line included, printing `Removed command "x"`, unless another playbook still claims the name: by spelling in the registry, or by directory-entry identity on a case-insensitive filesystem (`cpb create one --alias Foo` and `cpb create two --alias foo` share one entry). A claimed launcher is kept outright (`Kept command "x" (still addresses playbook "y")`); when the registry cannot be scanned the launcher is kept with a warning, since ownership could not be verified. The rule rests on the launcher gate: the tool only ever writes launchers for the default registry root, so a name nobody in that registry claims serves nothing the tool made. A hand-made link named for the playbook goes with it; it would only fail loudly as stale afterwards.
 - **Stale launchers fail loudly.** Invoking a launcher whose name no longer resolves errors with `unknown playbook "<name>" — this launcher no longer matches any playbook` and exit code 1, never a silent fall-through to the CLI overview.
 - **Foreign files are never touched.** A file occupying a launcher name that is not a symlink to this binary is left alone; attempting to write over it degrades to a warning with manual instructions.
+
+---
+
+## Distribution
+
+The binary reaches a machine by one of three routes. All of them land the same
+artifact: a `claude-playbook` executable and a relative `cpb` symlink beside it,
+in one directory on `PATH`.
+
+| Route | Entry point | Install directory |
+|---|---|---|
+| Install script | `install.sh`, piped from the raw repository URL or run from a clone | `$INSTALL_DIR`, else `/usr/local/bin` when writable, else `~/.local/bin` |
+| npm / npx | the `cpb-cli` package, whose `bin` entries both point at `bin/npx-shim.sh` | `~/.local/bin` only |
+| Source | `build.sh`, then a manual `mv` | wherever the operator puts it |
+
+Neither script edits a shell rc file. Completion lines are printed for the
+operator to add, never appended. `cpb` is created as a **relative** symlink to
+`claude-playbook`: a symlink to the binary under any other name is dispatched as
+a playbook launcher (see *Launcher Commands*), so the short name is the one
+exception the binary recognises as itself, together with `claude-playbook`.
+
+### Release asset naming
+
+Both downloading routes resolve the same asset name, `<prefix>-<os>-<arch>`,
+with `os` from `uname -s` lowercased (`darwin` or `linux`; anything else is
+refused, native Windows explicitly so in the shim, which names WSL) and `arch`
+from `uname -m` mapped `x86_64`→`amd64`, `aarch64`/`arm64`→`arm64`. The asset is
+fetched from `<download base>/<tag>/<asset>`.
+
+### Checksum policy
+
+Shared verbatim by `install.sh` and the npx shim. After downloading the asset to
+a temporary file, the release's `SHA256SUMS` is fetched from the same base URL
+and the asset's line located by name (`hash  name` and `hash *name` both parsed,
+comparison lowercased since sums files may carry uppercase hex).
+
+- **A hash that is present, well-formed, and different aborts the install**, printing
+  the expected and actual digests. The temporary file is removed by the trap.
+- **Every unverifiable case warns and continues**: no `SHA256SUMS` published for
+  the tag, the asset not listed in it, a malformed or duplicated entry, no
+  `sha256sum` or `shasum` on the machine, and — for `install.sh` — an
+  `INSTALL_URL` override in use.
+
+The asymmetry is deliberate and is the policy's whole content: the sums travel
+over the same channel as the binary, so they establish that what arrived is what
+was published, not that the publisher is honest. They guard against corruption
+and truncation, not a compromised host. A malformed entry is therefore treated as
+*unverifiable*, never as a mismatch, so a truncated sums file cannot fail a
+legitimate binary.
+
+The download is written to a `mktemp` file inside the destination directory (the
+shim) or under `$TMPDIR` (`install.sh`), made executable, and moved into place
+only after verification, so an aborted install never leaves a partial binary
+where the previous one stood.
+
+### `install.sh`
+
+Resolves the release tag from `$VERSION` when set, else the `tag_name` of the
+latest release from the GitHub API. Chooses the install directory as in the table
+above — the `/usr/local/bin` probe is a writability test, so an unprivileged run
+falls back to `~/.local/bin` rather than failing or escalating; the script never
+invokes `sudo`. It then reports the install path, warns when that directory is
+not on `PATH` (printing the `export` line to add), and prints the optional
+completion lines.
+
+### npx shim
+
+`bin/npx-shim.sh` is the `bin` entry for both `claude-playbook` and `cpb` in the
+`cpb-cli` package. It has three modes.
+
+1. **Delegate.** An installed `cpb` or `claude-playbook` found on `PATH` is
+   `exec`'d with the original arguments. Nothing is downloaded and no version is
+   negotiated: the installed binary is the source of truth, updated with `update`.
+   The search resolves symlinks on both sides and skips any candidate that is
+   this script, because under npx the package's own `bin` directory sits first on
+   `PATH` and a naive lookup would find the shim and loop forever.
+2. **Bootstrap** (the default when nothing is installed). Downloads and verifies
+   as above, installs to `~/.local/bin` — never `/usr/local/bin`, never `sudo` —
+   creates the `cpb` link, announces the install and the `self-uninstall
+   --keep-data` command that reverses it, warns when the directory is not on
+   `PATH`, and `exec`s the binary. Afterwards the machine holds an ordinary
+   install and later npx invocations take route 1.
+3. **Ephemeral** (`CPB_NPX_BOOTSTRAP=0`). Neither delegates nor installs:
+   downloads to `~/.claude-playbooks/bin/<tag>/` (reusing an existing copy) and
+   runs from there, which is also how a pinned version is exercised beside an
+   installed one.
+
+Tag resolution, first match wins: `$CPB_VERSION`; else the package's own version
+as `v<npm_package_version>` (so `npx github:<repo>#v3.9.1` runs that release, and
+`package.json`'s `version` is bumped with the release tag); else the latest
+release from the GitHub API. A tag that resolves to nothing is an error naming
+`CPB_VERSION` as the escape hatch.
+
+The binary is `exec`'d with `argv[0]` set to its own path, so multicall dispatch
+behaves exactly as a direct invocation and `cpb` is only a short spelling of the
+same root command.
+
+The package declares `os` `darwin`/`linux` and `cpu` `x64`/`arm64`, so npm
+refuses to install it on native Windows.
+
+### `uninstall.sh`
+
+Delegates to `claude-playbook self-uninstall --binary-only`, so one
+implementation owns all removal (see that command). Playbooks are never touched
+by it.
+
+### Environment knobs
+
+Read by the two shell scripts only; the Go binary reads none of them.
+
+| Variable | Scripts | Effect |
+|---|---|---|
+| `VERSION` | `install.sh` | Release tag to install, skipping the latest-release lookup |
+| `CPB_VERSION` | shim | Same, for the shim; highest-priority tag source |
+| `CPB_NPX_BOOTSTRAP=0` | shim | Ephemeral mode: no delegation, no install |
+| `CPB_NPX_CACHE` | shim | Ephemeral-mode cache root. Default `~/.claude-playbooks/bin` |
+| `CPB_NPX_INSTALL_DIR` | shim | Bootstrap install directory. Default `~/.local/bin` |
+| `INSTALL_DIR` | `install.sh` | Install directory, overriding the writability probe |
+| `DEFAULT_INSTALL_DIR` | `install.sh` | The directory that probe tests. Default `/usr/local/bin` |
+| `INSTALL_URL` | `install.sh` | Exact asset URL; suppresses checksum verification with a warning |
+| `REPO`, `ASSET_PREFIX`, `DOWNLOAD_BASE_URL` | both | Redirect at another repository, asset name, or asset host |
+
+`REPO`, `ASSET_PREFIX`, `DOWNLOAD_BASE_URL`, `INSTALL_URL` and
+`DEFAULT_INSTALL_DIR` exist so the install suites can run against a local fixture
+server; they carry no compatibility promise.
 
 ---
 
@@ -402,7 +527,7 @@ One launcher is registered, named by the `--alias` value, or the manifest's `ali
 
 **Errors:**
 - `--branch` with a local path → `--branch only applies to Git URLs`
-- `--subdir` path missing in source → `subdirectory "<path>" not found in source`
+- `--subdir` path missing in source → `source.subdir "<path>" not found below <source root>: <stat error>` (the flag is resolved as a source-relative path, so it reports under that field name)
 - Source not found → `'~/dev/foo' not found`
 - Source is a file → `'~/dev/foo' is not a directory`
 - Install name already taken → `"myrepo" already exists at ~/.claude-playbooks/myrepo. Use --name to choose a different name`
@@ -956,9 +1081,8 @@ preserve = ["settings.json"]
 
 **Errors:**
 - Invalid TOML → `invalid .playbook at <path>: TOML syntax error at line <n> (content not shown)`. The parser's own message is never echoed: since v3.5.0 a manifest may hold credential values under `[env.set]`, and this error reaches the terminal from every command that discovers playbooks.
-- `subdir` escapes the install directory (e.g. `../foo`) → `invalid .playbook at <path>: 'subdir' must be relative and stay inside the directory`
-- `subdir` does not exist → `~/.claude-playbooks/<name>/.playbook declares subdir "<path>" but the directory is missing`
-- `source.subdir` or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`
+- `subdir`, `source.subdir`, or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`. One helper validates all three, so the field name is the only difference between them.
+- `subdir` or `source.subdir` names a path that does not exist, or is not a directory → `<field> "<value>" not found below <root>: <stat error>` / `<field> "<value>" is not a directory below <root>`. Raised when the path is resolved, so it carries the root it was resolved against rather than the manifest path.
 - An `env` key is not a valid variable name → `invalid .playbook at <path>: env.set: invalid environment variable name "<key>"`
 - An `env` key is `CLAUDE_CONFIG_DIR` → `invalid .playbook at <path>: env.set: CLAUDE_CONFIG_DIR is managed by claude-playbook and cannot be overridden`
 - A key appears in both `env.set` and `env.unset` → `invalid .playbook at <path>: env: <key> is both set and unset`
@@ -1001,6 +1125,19 @@ These flags work on every command.
 
 **Resolution precedence:** CLI flag → environment variable → default.
 
+These have no flag equivalent:
+
+| Variable | Effect |
+|----------|--------|
+| `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` | Forces the isolation branch of the authentication decision for this launch, as `isolate_auth = true` in the manifest does. |
+| `CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE` | Overrides the long-lived token file read in step 2 of the authentication decision. Default `~/.config/claude-code/oauth-token`. |
+| `XDG_STATE_HOME` | Parent of the launcher receipt directory (`<XDG_STATE_HOME>/claude-playbook/launchers`). Default `~/.local/state`. |
+| `CLAUDE_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam; not part of the supported surface. |
+| `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `update` (no name) makes, raising the anonymous rate limit. |
+| `CLAUDE_PLAYBOOK_UPDATE_REPO`, `CLAUDE_PLAYBOOK_UPDATE_API_BASE`, `CLAUDE_PLAYBOOK_UPDATE_DOWNLOAD_BASE` | Redirect self-update at another repository, API, or asset host. Test seams; not part of the supported surface. |
+
+A variable marked *test seam* is honoured by the binary but carries no compatibility promise: it exists so the suites can run without network or a real release, and may change or disappear in any version.
+
 ---
 
 ## Exit Codes and Error Conventions
@@ -1014,7 +1151,7 @@ These flags work on every command.
 Error: "myrepo" already exists at ~/.claude-playbooks/myrepo. Use --name to choose a different name
 Error: unknown playbook "typo". Run 'claude-playbook list' to see available playbooks
 Error: 'claude' command not found. Install Claude Code first: https://claude.ai/download
-Error: subdirectory "playbooks/sre" not found in source
+Error: source.subdir "playbooks/sre" not found below /tmp/stage: lstat /tmp/stage/playbooks: no such file or directory
 Error: "sre" has no [source] metadata in .playbook; nothing to update from
 Error: invalid .playbook at ~/.claude-playbooks/foo/.playbook: toml: line 3: expected '=', got ':'
 ```

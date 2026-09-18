@@ -2,42 +2,82 @@
 
 [![CI](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml/badge.svg)](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml)
 
+**Run many isolated Claude Codes on one machine.** Separate settings, hooks,
+memory, environment, and logins — each behind its own command.
+
 ![claude-playbook demo](docs/demo.gif)
 
-A **Claude Playbook** is an isolated instance of Claude Code.
-
-That's it. Each playbook has its own configuration, settings, hooks, memory, and task history -- completely separate from your default `~/.claude` installation and from every other playbook.
-
-## Why would I need this?
-
-Claude Code stores everything in `~/.claude/`: your settings, conversation history, permissions, hooks, MCP servers. If you want to try something -- a different model, a custom hook, a new CLAUDE.md behavior -- you have to touch your main setup. One wrong change and your daily workflow breaks.
-
-Playbooks solve this by giving each experiment (or workflow) its own isolated directory.
-
-Common use cases:
-
-- **Test a new hook or setting** without risking your main `~/.claude`
-- **Separate work and personal** configurations that don't interfere
-- **Run two Claude Code instances concurrently** on different tasks with different personalities
-- **Authenticate with different accounts concurrently** (e.g., keep one playbook authenticated with your corporate account and another with your personal account)
-- **Share a configuration** with your team by putting the playbook in a Git repo
-- **Consume a repository** containing one or more playbook configurations (e.g. via subdirectories)
-
-## How isolation works
-
-Claude Code reads its configuration from the directory set in `CLAUDE_CONFIG_DIR` (defaults to `~/.claude`). Change that variable, and you get a completely fresh, independent instance:
+## Install
 
 ```bash
-# Your normal Claude Code (uses ~/.claude)
-claude
-
-# An isolated playbook (uses ~/.claude-playbooks/experiment)
-CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
 ```
 
-That's all a playbook is under the hood. `claude-playbook` just makes creating, sharing, and managing them easy.
+Linux and macOS, amd64/arm64. Installs `claude-playbook` and the shorter `cpb`.
+[Other ways to install →](docs/installation.md)
 
-Since v3.5.0 a playbook can also isolate its **environment**: variables to set or unset for every launch of that playbook and no other, so one playbook talks to a proxy or keeps its own login while the rest of your shell does not. See [Environment overrides](#environment-overrides).
+## 60-second start
+
+```bash
+cpb create experiment     # a fresh, isolated Claude Code setup
+experiment                # a real command on your PATH — launches it
+```
+
+That's the whole loop. `experiment` is now a directory under
+`~/.claude-playbooks/` holding its own `CLAUDE.md`, `settings.json`, hooks,
+history, and MCP servers — and a launcher command that opens Claude Code bound to
+it. Your `~/.claude` never moved.
+
+Three more you'll want on day one:
+
+```bash
+cpb list                                      # what you have, and its command
+cpb install https://github.com/user/awesome   # someone else's playbook
+cpb delete experiment                         # gone, launcher and all
+```
+
+## Why
+
+Claude Code keeps everything in `~/.claude/`: settings, conversation history,
+permissions, hooks, MCP servers. Trying a different model, a custom hook, or a
+new `CLAUDE.md` behavior means touching your daily setup, and one wrong change
+breaks it.
+
+A playbook gives each experiment — or each role, client, or account — its own
+directory.
+
+- **Test a hook or setting** without risking your main `~/.claude`
+- **Keep work and personal** configurations apart
+- **Run two Claude Codes concurrently** with different personalities
+- **Stay logged into two accounts at once** — corporate in one, personal in another
+- **Share a setup with your team** by putting the playbook in a Git repo
+- **Install one role** out of a repo that ships several
+
+## Four boundaries
+
+A playbook can isolate more than its config directory. Each layer is opt-in, and
+they compose.
+
+| | What it separates | Turn it on |
+|---|---|---|
+| **Config** | settings, hooks, memory, history, MCP servers | always — every playbook is its own `CLAUDE_CONFIG_DIR` |
+| **[Identity](docs/authentication.md)** | which account or token the session runs as | a shared login, a long-lived token, a per-playbook `/login`, or `isolate_auth` |
+| **[Environment](docs/environment.md)** | variables, API endpoints, proxies | `cpb env <name> set …`, or a profile shared by several playbooks |
+| **[Process](docs/sandbox.md)** | kernel, filesystem, network | `--sandbox` — the session runs in a microVM that cannot see your home |
+
+### How the first one works
+
+Claude Code reads its configuration from `CLAUDE_CONFIG_DIR` (default
+`~/.claude`). Change that variable and you get a completely fresh, independent
+instance:
+
+```bash
+claude                                                      # your normal setup
+CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude      # an isolated playbook
+```
+
+That's all a playbook is under the hood. `cpb` makes creating, launching,
+sharing, and managing them easy.
 
 ```
 ~/.claude-playbooks/                Launcher commands (on PATH):
@@ -49,691 +89,42 @@ Since v3.5.0 a playbook can also isolate its **environment**: variables to set o
 └── awesome/                        ◄── ~/.local/bin/ap -> claude-playbook
     ├── .playbook                       (marker + metadata; `alias = "ap"` names the command)
     └── CLAUDE.md
-
-Each playbook directory is a completely isolated Claude Code instance.
 ```
 
-A directory is a playbook if it exists under the playbooks root. A `.playbook` manifest file is optional and used for storing metadata (like version, author, description).
+A directory is a playbook if it exists under the playbooks root. The `.playbook`
+manifest is optional — it holds metadata like version, alias, source, env
+overrides, and sandbox settings.
 
-## Installation
+## Commands
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
-```
-
-The script detects your OS and architecture, downloads the right binary from the latest GitHub Release, verifies it against the release's `SHA256SUMS`, and installs it to `/usr/local/bin` (or `~/.local/bin` if that's not writable). Linux and macOS, amd64/arm64 (no native Windows — WSL works).
-
-Verify:
-
-```bash
-claude-playbook --version
-```
-
-The installer also creates a `cpb` symlink -- a shorter name for the same
-binary:
-
-```bash
-cpb --version
-```
-
-The rest of this README uses `cpb`; `claude-playbook` works everywhere `cpb` appears.
-
-Want a different command name? Use a shell alias (`alias pb=claude-playbook`)
-or a hard link (`ln "$(command -v claude-playbook)" ~/.local/bin/pb` — works
-for both install locations). Do not use a symlink: a symlink to the binary
-under any other name is treated as a playbook launcher and dispatched
-accordingly.
-
-The installer never edits your shell rc files. To enable completions
-(optional), add one line to your rc file yourself:
-
-```bash
-echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh
-echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash
-```
-
-### Run it with npx (no install needed)
-
-On a machine with Node:
-
-```bash
-npx cpb-cli --version
-```
-
-(requires the package to be published to npm — see below if it is not).
-
-Straight from the repo, no publish needed — but npm 12+ refuses git
-packages by default (`EALLOWGIT`). Opt in once — the value is an enum
-(`all` / `none` / `root`), and `root` is enough: it allows git only for
-packages you name directly, never transitive dependencies:
-
-```bash
-npm config set allow-git root
-npx github:ramazanpolat/claude-playbooks --version
-```
-
-One-off without touching config: prefix with
-`npm_config_allow_git=root`. Revert with `npm config delete allow-git`.
-Remote-tarball URLs are blocked the
-same way, so there is no URL form that works without this opt-in.
-
-The first run bootstraps a normal install: it downloads the release
-binary, verifies it against the release's `SHA256SUMS` (same policy as
-`install.sh`), installs to `~/.local/bin` only (never `/usr/local/bin`,
-no sudo), creates the `cpb` link, and says what it did. After that the
-tool is a plain install — `cpb`, `claude-playbook`, and every playbook
-launcher work directly, and later npx invocations simply run the
-installed binary. Uninstall is the usual `cpb self-uninstall`.
-
-Knobs, for the cases where you do not want that:
-
-| Variable | Effect |
+| | |
 |---|---|
-| `CPB_NPX_BOOTSTRAP=0` | Ephemeral mode: install nothing, delegate to nothing — download to `~/.claude-playbooks/bin/<tag>/` and run from there |
-| `CPB_VERSION=v3.9.1` | Fetch a specific release. With `CPB_NPX_BOOTSTRAP=0` it tests a pinned version beside an installed one |
-| `CPB_NPX_CACHE=<dir>` | Override the ephemeral-mode cache dir |
-| `CPB_NPX_INSTALL_DIR=<dir>` | Override the bootstrap install dir |
-
-By default the shim fetches the release matching the package's own
-version, falling back to the latest GitHub release. Native Windows is
-not supported (use WSL); the npm package refuses to install there.
-
-You can also clone the repo and run the installer locally:
-
-```bash
-git clone https://github.com/ramazanpolat/claude-playbooks.git
-cd claude-playbooks
-./install.sh
-```
-
-Uninstall only the binary:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/uninstall.sh | sh
-```
-
-Or run the local uninstaller from a clone:
-
-```bash
-./uninstall.sh
-```
-
-The script delegates to `cpb self-uninstall --binary-only`, so
-one implementation owns all cleanup: the binary, its `cpb` sibling, launcher
-symlinks, and any completion lines you added. Every launcher the tool creates
-is recorded in a registry (`~/.local/state/claude-playbook/launchers`), so
-launchers are removed wherever they were created — including custom
-`--launcher-dir` locations — while a link you renamed or repointed yourself
-is left alone. Playbooks are untouched, and `~/.claude-playbooks` is never
-deleted.
-
-### Uninstalling claude-playbook itself
-
-To remove the tool, all its installed playbooks, their launcher commands,
-the completion lines in your rc files, and the binary in one step:
-
-```bash
-cpb self-uninstall          # prompts for confirmation
-cpb self-uninstall -y       # skip prompt
-cpb self-uninstall -y --keep-data     # keep ~/.claude-playbooks
-cpb self-uninstall -y --keep-binary   # keep the binary
-cpb self-uninstall --dry-run          # preview without removing
-```
-
-If the binary can't be removed (e.g. installed to `/usr/local/bin` and you're
-not root), the command prints a `sudo rm <path>` hint and continues cleaning up
-everything else.
-
-**Manual fallback** (if you can't run the binary):
-
-```bash
-# 1. Remove launcher symlinks pointing at the binary
-#    (in the binary's directory and ~/.local/bin: ls -l | grep claude-playbook)
-# 2. Remove any `source <(claude-playbook completion ...)` lines from your
-#    shell config (~/.zshrc or ~/.bashrc)
-# 3. rm -rf ~/.claude-playbooks
-# 4. sudo rm /usr/local/bin/claude-playbook   # or wherever the binary lives
-```
-
-**Build from source** (requires [Go](https://go.dev/dl/) 1.21+):
-
-```bash
-git clone https://github.com/ramazanpolat/claude-playbooks.git
-cd claude-playbooks
-./build.sh
-mv claude-playbook /usr/local/bin/
-```
-
-## Usage
-
-Most workflows start with either `create`, `install`, or `link`.
-
-`claude-playbook` reuses your existing Claude Code authentication for newly created, installed, and linked playbooks, so a new playbook normally opens Claude Code directly instead of asking you to log in again. How it does that depends on whether you use a long-lived token; see [Authentication](#authentication) for the decision and the per-playbook choices.
-
-Driving `claude-playbook` from an agent rather than a shell? Read [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
-
-### Authentication
-
-At every launch `claude-playbook` first decides whether a **long-lived token** is active for that playbook, then prepares the config directory accordingly. Nothing else in the tool touches credentials.
-
-```text
-token active for this playbook?
-  = the playbook's [env] (or a profile it uses) sets CLAUDE_CODE_OAUTH_TOKEN
-    or the shell exports CLAUDE_CODE_OAUTH_TOKEN
-    or ~/.config/claude-code/oauth-token is non-empty
-  and the playbook's [env] does not unset it
-
-yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth only,
-         MCP logins survive); sync non-secret account metadata so the dir presents as logged in
-no   ->  link the playbook's .credentials.json to ~/.claude/.credentials.json; remove nothing;
-         Claude Code refreshes the shared login itself
-isolate_auth = true  ->  neither: detach from the shared store, strip the global token,
-         keep only what this playbook logs in itself; while it has no login of its own,
-         drop the account record and cached feature flags left from a non-isolated past
-```
-
-The removal on the token path exists for one reason: under token auth Claude Code never refreshes a stored login, and its 401-recovery path adopts a stored login over the token. A stale stored login would therefore replace a working year-long token with a dead one on the first transient 401. Removing it leaves nothing to adopt. It is never done on the no-token path, where that stored login *is* the session.
-
-The modes this gives you, per playbook:
-
-| You want | Do | At launch |
-|---|---|---|
-| Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; `/login` anywhere logs in everywhere |
-| Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
-| One playbook keeps its own `/login` while the others use the token | `cpb env <name> unset CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
-| One playbook uses its own token | `cpb env <name> set CLAUDE_CODE_OAUTH_TOKEN=...` | that token wins over the file; its own login removed |
-| One playbook is a different account, sharing nothing | `isolate_auth = true` in its `.playbook`, or `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` | detached; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token |
-
-The unset and set forms can come from an [env profile](#env-profiles-define-once-attach-to-many) shared by several playbooks.
-
-**Routing a playbook to another backend.** A playbook whose `settings.json` or env block points `ANTHROPIC_BASE_URL` at a third-party Anthropic-compatible endpoint (a GLM plan through a router, say) should carry `isolate_auth = true`. Claude Code decides which claude.ai-hosted tools to send from the feature flags it cached while an Anthropic account was logged in, not from where requests go; a playbook that ran as your global account before being rerouted keeps sending them, and since Claude Code 2.1.265 at least one backend (GLM) rejects the Artifact tool's schema with `400` on every interactive turn. Isolation removes that leftover state at launch while the playbook has no login of its own, and `cpb auth status` shows `no login; stale account state, purged at launch` until it has.
-
-See where every playbook stands, without launching anything:
-
-```bash
-cpb auth status
-```
-
-```text
-NAME               MODE          STORE                                   EXPIRES   DAEMON  NOTE
-~/.claude          shared-login  file                                    in 6h12m  -
-kommander          token         absent                                  -         -
-kommander-9router  own-login     symlink -> ~/.claude/.credentials.json  in 6h12m  -
-personal           isolated      file                                    in 22m    -
-```
-
-`MODE` is the decision `run` would make. `EXPIRES` is the stored grant's expiry. `DAEMON` reads Claude Code's own `daemon-auth-status.json`, shown as `auth_required` only when the marker is newer than the current grant. `--json` for scripts, `--claude` to add `claude auth status` per directory.
-
-Two things to know about the shared-login mode. Claude Code namespaces its macOS Keychain entry per config directory and refreshes the OAuth grant from whichever directory hits expiry first; with many playbooks sharing one symlinked file, two concurrent refreshes can race and the loser's `invalid_grant` empties the shared file, logging every playbook out at once. That race is why the long-lived token path exists. And raw `claude` launches bypass all of the above: only launchers, `run`, and `start` prepare authentication.
-
-### Create and run your own playbook
-
-Use `create` when you want a fresh isolated Claude Code setup.
-
-```bash
-cpb create experiment
-experiment
-```
-
-This creates `~/.claude-playbooks/experiment`, drops in a starter `CLAUDE.md` that introduces the playbook concept to the Claude Code session opened inside it, syncs Claude auth metadata, and registers a launcher command named `experiment` — a symlink to the `claude-playbook` binary on your PATH. It works immediately, in every shell, with no rc-file edit and no reload. A `.playbook` manifest is only written when you pick a custom command name with `--alias`.
-
-You can also run it without the launcher:
-
-```bash
-cpb run experiment
-```
-
-Pass Claude Code flags after the playbook name:
-
-```bash
-cpb run experiment --model claude-opus-5 --permission-mode auto
-cpb run --env-profile work experiment      # one launch with an env profile; see Environment overrides
-```
-
-Use a custom command name, or skip launcher creation:
-
-```bash
-cpb create backend --alias be
-cpb create scratch --no-alias
-```
-
-### See what is installed
-
-```bash
-cpb list
-```
-
-```
-NAME           PATH                                            COMMAND  LAST USED
-experiment     ~/.claude-playbooks/experiment                  exp      2 days ago
-awesome        ~/.claude-playbooks/awesome                     ap       2 hours ago
-```
-
-### Install a shared playbook repo
-
-Use `install` when the playbook is in a Git repo or local directory and you want a copied install under `~/.claude-playbooks`.
-
-Install a repo:
-
-```bash
-cpb install https://github.com/ramazanpolat/awesome-playbooks
-```
-
-Override the install name or launcher command:
-
-```bash
-cpb install https://github.com/user/awesome --name team-tools --alias tt
-```
-
-Install a local directory by copying it:
-
-```bash
-cpb install ~/dev/my-playbook
-```
-
-### Install one playbook from a larger repo
-
-Use a GitHub tree URL when you want only one subdirectory:
-
-```bash
-cpb install https://github.com/user/awesome/tree/main/playbooks/dba
-```
-
-Or pass the subdirectory explicitly:
-
-```bash
-cpb install https://github.com/user/awesome --subdir playbooks/dba
-```
-
-Cherry-picked installs are flat top-level playbooks.
-
-Branch names containing `/` are resolved against the repository's remote refs. You can also make the boundary explicit with `--branch feature/name`.
-
-Customize the name and alias:
-
-```bash
-cpb install https://github.com/user/awesome --subdir playbooks/dba --name dba --alias ap-dba
-```
-
-### Develop a playbook in place
-
-Use `link` when you are actively editing a playbook outside `~/.claude-playbooks` and want live changes.
-
-```bash
-cpb link ~/dev/my-playbook
-```
-
-`link` creates a symlink under the playbooks root.
-
-```bash
-cpb link ~/dev/my-playbook --name scratch --alias sc
-cpb link ~/dev/my-playbook --no-alias
-```
-
-Deleting a linked playbook removes only the symlink. The source directory is preserved.
-
-### Launcher commands
-
-`create`, `install`, and `link` register each playbook as a **launcher command**: a symlink to the `claude-playbook` binary placed next to it (falling back to `~/.local/bin` when that directory is not writable):
-
-```text
-~/.local/bin/experiment -> /usr/local/bin/claude-playbook
-```
-
-When invoked through the link, the binary sees the link's name in `argv[0]` and behaves as `cpb run <name>` — the multicall pattern used by busybox and git. The name resolves against the live playbook registry (directory name first, then the `.playbook` manifest's `alias`) **at invocation time**, so the launcher carries no state that can go stale. Unlike shell aliases, launchers work identically from any shell, are available immediately with no rc-file edit or reload, and are visible to scripts and cron.
-
-`delete` removes the launchers named for the playbook it is deleting and prints `Removed command <name>`. It never removes a launcher another playbook still claims, by spelling or, on a case-insensitive filesystem, by being the same directory entry under another spelling; that one is kept and named. When the registry cannot be scanned, the launcher is kept with a warning rather than guessed about. Launchers are only ever written for the default playbooks root, so a name nobody there claims serves nothing `cpb` made.
-
-### Manage aliases
-
-A playbook is addressed by its directory name and, optionally, one **alias** — an alternate command name recorded in its `.playbook` manifest and materialized as a launcher, so `cpb alias experiment exp` makes both `experiment` and `exp` work as commands:
-
-```bash
-cpb alias                    # list every playbook's alias
-cpb alias experiment         # show one
-cpb alias experiment exp     # set (replaces any previous alias + launcher)
-cpb alias experiment --remove
-cpb dealias experiment       # same as --remove
-```
-
-Renaming with `cpb rename` keeps names, aliases, and launchers consistent automatically; a launcher named by the alias keeps working across renames untouched.
-
-### Environment overrides
-
-A fresh install has none. This manifest is complete and normal:
-
-```toml
-version = "3.11.4"
-name = "kommander"
-alias = "k"
-
-[source]
-repository = "https://github.com/ramazanpolat/kommander-playbook"
-```
-
-Launching `k` runs `claude` with your shell's environment plus `CLAUDE_CONFIG_DIR`, exactly as before. Nothing changes until you add an override.
-
-#### What happens at launch
-
-Every launch of a playbook (its launcher command, `run`, or `start` at its directory) builds the child `claude` process's environment in layers, later layers winning:
-
-```text
-your shell's environment
-  + the registry default env profile, if one is set             (cpb env-profile <name> default)
-  + each env profile the playbook uses, in the order listed     (~/.claude-playbooks/.env-profiles/<name>.toml)
-  + the playbook's own [env.set]                                 (in its .playbook)
-  - the playbook's own [env] unset
-  + one-off launch flags (--env-profile, --env, --unset, --env-file)
-  + CLAUDE_CONFIG_DIR, bound by the tool, cannot be overridden
-  = what claude sees
-```
-
-A playbook with no `[env]` block still gets the registry default, when one is set; without one it inherits only your shell's environment.
-
-`set` overrides whatever the shell exported; `unset` removes a variable even when the shell exports it. Raw `claude` launches bypass all of this. Claude Code's own `env` block in `settings.json` is applied later, inside the `claude` process, and wins over these layers; it can set variables but cannot unset one the shell exported, which is what the manifest block is for.
-
-#### One playbook, its own overrides
-
-```bash
-cpb env kommander set ANTHROPIC_MODEL=claude-opus-5
-cpb env kommander unset CLAUDE_CODE_OAUTH_TOKEN
-```
-
-The manifest above now ends with:
-
-```toml
-[env]
-unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
-
-[env.set]
-ANTHROPIC_MODEL = "claude-opus-5"
-```
-
-Inspect and undo:
-
-```bash
-cpb env kommander                        # show this playbook's block
-cpb env                                  # every playbook that declares overrides
-cpb env kommander clear ANTHROPIC_MODEL  # forget the entry; the shell's value applies again
-cpb info kommander                       # "Env:" lines appear when a block exists
-```
-
-```text
-Environment overrides for "kommander":
-  set    ANTHROPIC_MODEL=claude-opus-5
-  unset  CLAUDE_CODE_OAUTH_TOKEN
-```
-
-#### Env profiles: define once, attach to many
-
-When several playbooks want the same overrides, put them in a **profile**: a named file under `~/.claude-playbooks/.env-profiles/`, managed with `env-profile`, attached to playbooks by name with `env <playbook> use`.
-
-```bash
-cpb env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.3
-cpb env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
-cpb env-profile glm describe "GLM 5.3 through the local router, own /login"
-```
-
-That wrote `~/.claude-playbooks/.env-profiles/glm.toml` (mode `0600`, values may be secrets):
-
-```toml
-description = "GLM 5.3 through the local router, own /login"
-unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
-
-[set]
-ANTHROPIC_BASE_URL = "http://proxy:1/v1"
-ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
-```
-
-Attach it. The playbook's manifest records only the name:
-
-```bash
-cpb env router use glm
-cpb env router set ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # local entry on top of the profile
-cpb env router
-```
-
-```text
-Environment overrides for "router":
-  profiles  glm
-  set    ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4
-Effective at launch:
-  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
-  set    ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4
-  unset  CLAUDE_CODE_OAUTH_TOKEN
-```
-
-```toml
-[env]
-profiles = ["glm"]
-
-[env.set]
-ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.4"
-```
-
-Profiles apply in the order listed, later ones overriding earlier, and the playbook's own entries apply last.
-
-One profile can be the **registry default**, applied under every playbook's own block, manifest or not, `start` included:
-
-```bash
-cpb env-profile personal default      # every launch starts from this layer
-cpb env-profile personal undefault    # back to no default
-```
-
-An empty `[env]` block and a missing one are the same thing: the identity layer. So a launch is a stack, shell environment, registry default, the playbook's profiles, the playbook's own entries, one-off flags, and every layer that says nothing changes nothing.
-
-Manage them:
-
-```bash
-cpb env-profile                 # list profiles, descriptions, which playbooks use each
-cpb env-profile glm             # show one
-cpb env router unuse glm        # detach
-cpb env-profile glm delete      # refused while any playbook still uses it
-```
-
-A profile that a playbook names but that is missing, unreadable, or invalid **refuses the launch** rather than silently running without it: a dropped layer could send traffic to the wrong endpoint with the wrong credentials.
-
-#### One launch only
-
-The same layers can be added for a single launch without touching any file. Launch flags go before the playbook name, or right after it, and stop at the first argument that is not one of them; everything after that is `claude`'s:
-
-```bash
-cpb run --env-profile work kommander                     # an existing profile, this launch only
-cpb run kommander --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
-cpb run --unset CLAUDE_CODE_OAUTH_TOKEN kommander        # this launch uses the stored login
-cpb run --env-file ./work-account.env kommander          # KEY=VALUE lines, dotenv style
-cpb start --env-profile glm /tmp/scratch
-kommander --env-profile work -p "..."                    # launchers take them too, at the start
-```
-
-They apply on top of the playbook's own block, in command-line order, and obey the same rules: `CLAUDE_CONFIG_DIR` refused, a missing profile refuses the launch, an unset of the token switches this launch to the stored login. `cpb run --help` lists them.
-
-#### The authentication case
-
-If you use a long-lived token (`claude setup-token`, stored at `~/.config/claude-code/oauth-token`), every playbook launch injects it as `CLAUDE_CODE_OAUTH_TOKEN` and removes the playbook's own stored login so a transient 401 cannot swap the working token for a dead one. That is right for most playbooks and wrong for one that must use a different account or a proxy that does not want the token.
-
-Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a profile, does more than drop the variable: the token is treated as inactive for that playbook, so the launch takes the stored-credentials path. No token is injected, the playbook's own login is left alone, and the shared credentials are synced. `/login` once there and it sticks, while every other playbook keeps using the token. Setting the variable instead supplies a per-playbook token that wins over the machine-global file; such a launch counts as another account, so the plan descriptors read from your global login are not injected into it (the profile may set its own). The same holds for a token you export in the shell yourself: only the token read from the token file gets the global descriptors. This is a middle ground between sharing the token and `isolate_auth` (the playbook shares nothing). The full decision and every mode are in [Authentication](#authentication).
-
-#### What stays yours
-
-The block and the profiles are **install-local**, like `alias`. `update` keeps your block and ignores one the source ships, and the source's block is never live, not even during the update; `install` drops a source-shipped block with a note; nothing ships profiles and `update` never touches their directory. A shared playbook repository cannot redirect your API endpoint or strip your authentication by publishing a manifest. Manifests holding `set` values are written `0600`; a file's mode is never loosened by a rewrite.
-
-### Temporary sessions
-
-Use `start` for a one-off Claude Code config directory without registering a playbook:
-
-```bash
-cpb start /tmp/scratch
-cpb start /tmp/scratch --model claude-opus-5
-cpb start /tmp/scratch --delete
-```
-
-`--delete` removes the directory when the session ends, which is useful for disposable experiments. Like the launch flags, it counts only before the path or right after it; a `--delete` later in the line, after `--` or as a value for one of `claude`'s own flags, goes to `claude` untouched.
-
-### Sandboxed sessions
-
-`cpb` isolates a playbook's config directory and its environment. `--sandbox` adds the third boundary: the process itself. The playbook's Claude Code runs inside a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/), a microVM with its own kernel, filesystem and network stack, and sees only two host directories: the directory you are working on and the playbook's own directory. Your `~/.claude`, the rest of your home, your shell environment and your other playbooks are not there.
-
-```bash
-brew trust docker/tap && brew install docker/tap/sbx && sbx login   # once, macOS
-cpb run --sandbox sre                                     # current directory is the workdir
-cpb run --sandbox --workdir ~/proj sre -p "run the tests"
-cpb run --sandbox --sandbox-fresh --clone --workdir ~/untrusted-repo sre  # new sandbox on a private clone; host tree untouched
-cpb run --sandbox --mount ~/shared-libs:ro sre            # one more directory, read-only
-cpb run --sandbox --sandbox-fresh sre                     # throw the sandbox away and start over
-```
-
-Your machine login never enters the sandbox, because `~/.claude` is exactly what stays outside: a working directory or mount that contains it (your home directory, say) is refused. A playbook that shares it runs with a login of its own inside: `cpb` says so on the first sandboxed launch, and one `/login` there gives the sandbox its own grant, kept inside the sandbox (gone with `--sandbox-fresh`, never written to your machine). A token from an env profile works as it does on the host.
-
-To make a playbook sandboxed every time, say so once:
-
-```bash
-cpb create sre --sandbox              # [sandbox] always = true, isolate_auth = true
-cpb install <source> --sandbox        # same, for an installed playbook
-sre -p "run the tests"                # sandboxed, no flag needed
-sre --no-sandbox                      # this launch on the host; cpb says so on stderr
-cpb start --sandbox --delete /tmp/x   # a throwaway session in a throwaway sandbox
-```
-
-`--no-sandbox` is the only override, and it is never silent.
-
-The sandbox can live on another machine. `cpb run --sandbox-host polat@cockpit0 sre` runs the same launch there over ssh, where `cpb` and the playbook are installed and `sbx` is logged in (a Linux host with a headless keyring; a Mac keeps the sbx login in its Keychain, which an ssh session cannot open); `[sandbox] host = "polat@cockpit0"` in the manifest makes it the playbook's home for sandboxed launches. Everything about the sandbox, its login and its keys then lives on that host.
-
-API keys from your env profiles never enter the sandbox either (profiles are the place for them: a key set directly on the playbook lives in its `.playbook`, which is on the mount, and a sandboxed launch refuses that). `cpb` registers them with `sbx` as proxy-injected secrets for the endpoint host and hands the sandbox a placeholder; the host-side proxy swaps the real key into the request headers on the way out, and only for that host. Rotate the key in the profile and the next launch updates it; remove it and the next launch revokes the mapping. A router on this machine works too: a base URL at `localhost` is rewritten to the sandbox's name for the host, and the policy and secret are registered the way the proxy matches them. The shared `sbx` skills store stays out as well. `--sbx` is a synonym for `--sandbox`; `--sandbox=BACKEND` picks the backend, of which there is one today, `sbx`.
-
-The sandbox is named `cpb-<playbook>` and reused across launches, so tools the agent installs and its own state persist until `--sandbox-fresh` or `sbx rm`. `--clone` counts only when the sandbox is created: to move an existing sandbox to clone mode, recreate it with `--sandbox-fresh`. The environment is the same one an ordinary launch computes (default profile, profiles, the playbook's block, one-off flags, the authentication decision), reduced to the variables those layers set plus the token and `CLAUDE_CONFIG_DIR`; nothing else of your shell reaches the sandbox. Network egress follows your `sbx` policy (balanced by default: model APIs, package managers, code hosts), widened per sandbox by the manifest and by the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
-
-A playbook can describe its sandbox in the manifest:
-
-```toml
-[sandbox]
-workdir = "~/proj"                  # default --workdir
-mounts = ["~/shared-libs:ro"]       # extra host paths, :ro for read-only
-allow_net = ["internal.corp"]       # hosts allowed beyond the policy
-claude_version = "2.1.263"          # pin the Claude Code installed inside
-always = true                       # every launch sandboxed; --no-sandbox overrides one
-host = "polat@cockpit0"             # sandboxed launches run on that machine over ssh
-secrets = "env"                     # pass API keys as plain variables instead of proxy injection
-share_skills = true                 # mount sbx's shared skills store after all
-```
-
-The block is install-local: `cpb install` never adopts one shipped by a source, and `cpb update` keeps yours.
-
-`claude_version` matters for a playbook routed to a third-party backend that rejects a newer Claude Code's tool schemas: the sandbox keeps running the last version that works while the host moves on.
-
-### Rename, delete, and update
-
-Rename a playbook:
-
-```bash
-cpb rename experiment lab
-cpb rename lab experiment --alias exp
-```
-
-Delete a playbook:
-
-```bash
-cpb delete experiment      # prompts for confirmation
-cpb delete awesome -y      # skip confirmation
-```
-
-`uninstall` and `unlink` are command aliases for `delete`:
-
-```bash
-cpb uninstall awesome
-cpb unlink my-linked-playbook
-```
-
-Update pulls the playbook from the source recorded in its `.playbook`:
-
-```bash
-cpb update awesome
-cpb update awesome --check    # report the available version only
-```
-
-Git installs record their repository, branch, and selected subdirectory in `.playbook`, and a flat, non-linked install updates natively from that source. There is no delegated update script: the CLI owns the update.
-
-The update replaces only the top-level entries the source itself ships, in place. Runtime state the source knows nothing about — `data/`, `projects/`, `sessions/`, `history.jsonl` — is never read, moved, or copied, so a session writing to it during the update cannot lose work. Replaced entries are moved to a timestamped `.<name>.bak.<stamp>` beside the install first, and rolled back if the overlay fails.
-
-Local configuration survives even when the source ships its own copy. `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json` are always restored over the incoming files; a playbook names anything further in its manifest:
-
-```toml
-[update]
-preserve = ["settings.json", "config/local.toml"]
-```
-
-New stock settings still arrive alongside (playbooks conventionally ship `settings.json.template`) for you to merge by hand.
-
-Afterwards, if the playbook ships an executable `migrations/apply.sh`, it runs as `migrations/apply.sh <from-version> <to-version> <install-dir>` with the versions taken from the old and new `.playbook`. Runners are expected to be idempotent.
-
-Linked playbooks and manifests that select their config through a top-level `subdir` cannot be updated this way.
-
-With **no** name, `update` self-updates the `claude-playbook` binary itself to the latest GitHub release:
-
-```bash
-cpb update            # download + install the latest release
-cpb update --check    # report the latest version without installing
-cpb update --force    # reinstall even if already on the latest
-```
-
-It downloads the release asset for your OS/architecture, verifies it, and atomically replaces the running binary (resolving the `cpb` symlink so the real binary is updated). If the install directory needs elevated privileges to write, it says so.
-
-### Use temporary config locations
-
-For tests or demos, keep playbooks away from your real files:
-
-```bash
-CLAUDE_PLAYBOOKS_DIR=/tmp/playbooks cpb create demo
-```
-
-The equivalent flag is:
-
-```bash
-cpb --playbooks-dir /tmp/playbooks create demo
-```
-
-Launcher commands are only managed for the default playbooks root
-(`~/.claude-playbooks`), so a temporary root never touches your PATH or shell
-files — the command prints how to run the playbook with an explicit
-`--playbooks-dir` instead.
-
-### Add a playbook's bin directory to PATH
-
-Some playbooks ship CLI tools in a `bin/` directory. Add them to your PATH manually:
-
-```bash
-# In ~/.zshrc
-export PATH="$HOME/.claude-playbooks/experiment/bin:$PATH"
-```
-
-## Relationship to CLAUDE.md
-
-Every playbook can have a `CLAUDE.md` file in its root directory. Claude Code loads this file as standing instructions at the start of every session -- your rules, protocols, and context that apply to every conversation in that playbook.
-
-This is separate from project-level `CLAUDE.md` files (which live in your project directories and describe the project itself). Both are loaded simultaneously; the playbook's `CLAUDE.md` defines *how you work*, the project's `CLAUDE.md` defines *what you're working on*.
-
-## Example: role-focused playbooks
-
-To install a specific role configuration from a repository containing multiple playbooks (like [awesome-playbooks](https://github.com/ramazanpolat/awesome-playbooks)):
-
-```bash
-# Install the DBA playbook flat under your playbooks root:
-cpb install https://github.com/ramazanpolat/awesome-playbooks --subdir playbooks/dba --name dba --alias ap-dba
-
-# Or install the SRE playbook:
-cpb install https://github.com/ramazanpolat/awesome-playbooks --subdir playbooks/sre --name sre --alias ap-sre
-```
-
-## Release process
-
-GitHub releases are created from `v*` tags only when the tagged commit is already on `main`. Tags pushed from feature branches are ignored by the release workflow.
-
-```bash
-git checkout main
-git pull --ff-only
-git tag -a vX.Y.Z -m vX.Y.Z
-git push origin vX.Y.Z
-```
+| `cpb create <name>` | a new playbook, plus its launcher command |
+| `cpb install <url\|dir>` | copy a playbook in from a Git repo or directory |
+| `cpb link <dir>` | symlink an external directory you're editing live |
+| `cpb list` / `cpb info <name>` | what exists; one playbook in detail |
+| `cpb run <name> [claude flags…]` | launch without the launcher command |
+| `cpb start <dir>` | a throwaway session at any directory |
+| `cpb alias` / `cpb rename` / `cpb delete` | manage names and remove playbooks |
+| `cpb env` / `cpb env-profile` | per-playbook and shared environment overrides |
+| `cpb auth status` | which login or token each playbook would use |
+| `cpb update [name]` | update a playbook, or the tool itself |
+| `cpb self-uninstall` | remove everything `cpb` installed |
+
+Add `--sandbox` to any launch to run it in a microVM.
+
+## Documentation
+
+| | |
+|---|---|
+| [Installation](docs/installation.md) | install script, npx, source builds, uninstalling |
+| [Managing playbooks](docs/playbooks.md) | create, install, link, launch, rename, update, delete |
+| [Authentication](docs/authentication.md) | shared logins, long-lived tokens, isolated accounts |
+| [Environment overrides](docs/environment.md) | per-playbook variables and shared env profiles |
+| [Sandboxed sessions](docs/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
+| [Agent guide](docs/AGENT-GUIDE.md) | driving `cpb` unattended from an agent or CI |
+| [SPEC-v4.md](SPEC-v4.md) | the behavioral contract |
+| [Contributing](CONTRIBUTING.md) | development, tests, pull requests |
 
 ## License
 
