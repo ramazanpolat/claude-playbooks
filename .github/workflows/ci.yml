@@ -53,10 +53,17 @@ jobs:
       # shim uses it to pick the release it fetches, so a stale value makes
       # `npx github:ramazanpolat/claude-playbooks` serve an old binary.
       # Run only on main — a PR can legitimately be ahead of the tag.
+      #
+      # --match 'v*' is load-bearing: this repo also carries non-release
+      # tags that trigger the arena workflow ('arena', 'arena-*'), and a
+      # bare `git describe` returns the nearest tag of ANY kind. Once such
+      # a tag sits closer to HEAD than the last release, an unmatched
+      # describe compares package.json against a trigger tag's name and
+      # every push to main fails.
       - name: npx package version matches latest tag
         if: github.event_name == 'push'
         run: |
-          latest=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          latest=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
           if [ -z "$latest" ]; then
             echo "no tags yet; skipping"
             exit 0
