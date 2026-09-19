@@ -72,6 +72,27 @@ mkdir "subjects/claude-playbooks"
 (cd "$REPO" && git describe --tags --always --dirty 2>/dev/null || echo dev) \
   > "subjects/claude-playbooks/.gentar-version"
 
+# The coordinator runs in a CONTAINER, so nothing in this script's
+# environment reaches it unless it is forwarded. Agent-in-the-loop suites
+# declare `credentials`, and the coordinator refuses before creating a bench
+# when none of the named variables is present -- which is what happens to a
+# correctly-configured run whose variables simply stopped at the container
+# boundary. Forward only the ones actually set, so an unset variable stays
+# unset inside rather than arriving empty-but-present.
+#
+#   ANTHROPIC_*                  credential, endpoint, optional model pin
+#   GENTAR_BUDGET_CAP            ceiling the budget guard enforces
+# ${FORWARD[@]+"..."} rather than "${FORWARD[@]}": under `set -u`, bash 3.2
+# (still the system bash on macOS) treats an EMPTY array expansion as an
+# unbound variable and aborts. Credential-less is the normal case on a dev
+# machine, so the plain form would break every local run.
+FORWARD=()
+for var in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
+           ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL \
+           ANTHROPIC_DEFAULT_HAIKU_MODEL GENTAR_BUDGET_CAP; do
+  [ -n "${!var:-}" ] && FORWARD+=(-e "$var")
+done
+
 # Run every requested scenario; report all, fail if any failed.
 mkdir -p "$HERE/reports"
 status=0
@@ -82,6 +103,7 @@ for s in "$SCENARIO" "$@"; do
   GENTAR_SUBJECTS_DIR="$PWD/subjects" \
     docker compose -p "arena-$(basename "$REPO")" run --rm \
       -e GENTAR_SCENARIOS_DIR=/extra \
+      ${FORWARD[@]+"${FORWARD[@]}"} \
       -v "$HERE/scenarios:/extra:ro" \
       coordinator run "$s"
   rc=$?
