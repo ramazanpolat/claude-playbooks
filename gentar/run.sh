@@ -72,6 +72,20 @@ mkdir "subjects/claude-playbooks"
 (cd "$REPO" && git describe --tags --always --dirty 2>/dev/null || echo dev) \
   > "subjects/claude-playbooks/.gentar-version"
 
+# Rebuild the coordinator image from the checkout we just detached.
+#
+# This is the difference between a fresh ENGINE and a fresh CHECKOUT. The
+# compose service is `build: ./coordinator`, so `docker compose run` happily
+# reuses a cached image -- and on a long-lived self-hosted runner that image
+# can be months older than the source above, silently. Symptom when it bit:
+# the credential guard refused a run for a variable it was given, because the
+# cached image predated the guard becoming "any of these" rather than "all".
+# GENTAR_REF was honoured perfectly the whole time; the code that ran was not
+# the code that was fetched. gentar's own gate builds before every run for
+# this reason.
+echo "building the coordinator image from $sha..." >&2
+docker compose -p "arena-$(basename "$REPO")" build coordinator
+
 # The coordinator runs in a CONTAINER, so nothing in this script's
 # environment reaches it unless it is forwarded. Agent-in-the-loop suites
 # declare `credentials`, and the coordinator refuses before creating a bench

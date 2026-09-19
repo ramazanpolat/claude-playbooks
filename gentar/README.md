@@ -36,6 +36,13 @@ agent:
 The subject is your **working tree** (uncommitted changes included) —
 fix and rerun, no commit needed to test.
 
+The engine is pinned by `GENTAR_REF` (default `main`), re-fetched and
+re-checked-out on every run, **and the coordinator image is rebuilt from it**.
+That last part is not optional: the compose service is `build: ./coordinator`,
+so without a build step `docker compose run` reuses a cached image, and on a
+long-lived runner that image drifts months behind the source while `GENTAR_REF`
+looks perfectly honoured. A fresh checkout is not a fresh engine.
+
 ## Suites
 
 | Suite | Proves |
