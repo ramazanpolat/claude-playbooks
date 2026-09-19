@@ -129,9 +129,21 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
-          # Optional cheaper-model pin, forwarded when set (slot var, not
-          # ANTHROPIC_MODEL -- claude-code rejects unknown main-model IDs).
+          # Model pins: SLOT vars, not ANTHROPIC_MODEL (claude-code rejects
+          # unknown main-model IDs). ALL FOUR, because claude-code picks a
+          # slot for itself -- an unpinned one sends a literal Anthropic ID
+          # to an endpoint that never heard of it. A routed endpoint needs
+          # every slot it could be asked for; unset is fine for a
+          # first-party key, which knows all of them.
+          #
+          # This is the FIRST link in the chain: repo var -> here -> run.sh
+          # forwards into the coordinator container -> gentar exports into
+          # the bench. Adding a pin anywhere downstream without adding it
+          # here does nothing at all.
           ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.ANTHROPIC_DEFAULT_OPUS_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.ANTHROPIC_DEFAULT_HAIKU_MODEL }}
+          ANTHROPIC_DEFAULT_FABLE_MODEL: ${{ vars.ANTHROPIC_DEFAULT_FABLE_MODEL }}
           # Ceiling the budget guard enforces; must be >= each agent
           # suite's declared [budget] tokens.
           GENTAR_BUDGET_CAP: "50000"
