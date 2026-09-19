@@ -255,9 +255,8 @@ Linked playbooks and manifests that select their config through a top-level
 
 ### Update every playbook at once
 
-Several installs of one playbook is the ordinary way to run one configuration
-under different environments — and updating them one command at a time gets old
-fast:
+A convenience over running `cpb update <name>` once per playbook — useful once a
+registry holds enough of them that doing it by hand is tedious:
 
 ```bash
 cpb update --all            # update them all

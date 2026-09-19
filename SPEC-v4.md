@@ -760,7 +760,11 @@ process environment
   = the child claude process's environment
 ```
 
-**Caller-supplied config directory (v3.14.0).** A playbook directory serves two roles at once: it is the playbook's **content** (`CLAUDE.md`, `settings.json`, `hooks/`, `skills/`) and the sink for Claude Code's **state** (`.claude.json`, `sessions/`, `projects/`, `history.jsonl`, `cache/`). A consumer wanting several sessions to share one playbook's content while each keeps its own memory cannot express that with one directory, so it provisions its own and names it:
+**Caller-supplied config directory (v3.14.0).** A playbook directory serves two roles at once: it is the playbook's **content** (`CLAUDE.md`, `settings.json`, `hooks/`, `skills/`) and the sink for Claude Code's **state** (`.claude.json`, `sessions/`, `projects/`, `history.jsonl`, `cache/`).
+
+Several sessions that share one playbook's content while each keeps its own state are **already expressible without this**, two ways: run the same playbook from different working directories, which partitions transcripts into `projects/<cwd>/` while sharing settings and login; or install the playbook more than once, which separates everything at the cost of a copy per install. Either is the ordinary answer.
+
+What this variable adds is narrower: a caller may supply a config directory **it built itself**, without registering a playbook for it. That is the case neither of the above covers — a supervisor that composes its own directory (playbook content reached however it likes, state real and local) and wants a playbook launch to bind it. It is a seam for such a consumer, with none in this repository; unset, which is the default, nothing about a launch changes.
 
 ```bash
 CLAUDE_CONFIG_DIR_OVERRIDE=/path/to/record  claude-playbook run <name>
@@ -1004,9 +1008,11 @@ claude-playbook update --all            # update them all
 claude-playbook update --all --check    # report what is available for each
 ```
 
-It exists because several installs of one playbook — the ordinary way to run one
-configuration under different environments — otherwise have to be updated by
-hand, one command each, and the count only grows.
+This is a convenience over invoking `update <name>` once per playbook, and
+nothing in the tool depends on it: every playbook it touches is individually
+updatable without it. It earns its place only where a registry holds enough
+playbooks that doing so by hand is tedious — several installs of one playbook
+being the usual way that happens.
 
 The loop is deliberately dumb: one independent update per playbook, with no
 shared staging and no cross-playbook reasoning. Each is exactly what
