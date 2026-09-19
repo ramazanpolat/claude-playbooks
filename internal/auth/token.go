@@ -211,8 +211,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// config dir: a broken profile meant to unset the token must not
 		// cost the playbook its stored grant on a launch that never
 		// happens. The returned env is still well-formed.
-		env = removeEnv(env, "CLAUDE_CONFIG_DIR")
-		return append(env, "CLAUDE_CONFIG_DIR="+configDir), err
+		return bindOwnEnv(env, configDir), err
 	}
 
 	// The block is resolved with its profiles flattened in. Any profile
@@ -251,9 +250,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 			}
 		}
 		env = applyManifestEnv(env, menv)
-		env = removeEnv(env, "CLAUDE_CONFIG_DIR")
-		env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
-		return env, firstErr(merr, syncErr)
+		return bindOwnEnv(env, configDir), firstErr(merr, syncErr)
 	}
 
 	inject, active := resolveToken(menv)
@@ -311,9 +308,33 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		}
 	}
 	env = applyManifestEnv(env, menv)
-	env = removeEnv(env, "CLAUDE_CONFIG_DIR")
-	env = append(env, "CLAUDE_CONFIG_DIR="+configDir)
-	return env, firstErr(merr, syncErr)
+	return bindOwnEnv(env, configDir), firstErr(merr, syncErr)
+}
+
+// bindOwnEnv is the LAST thing every path does, after the authentication
+// branch and after every override layer: the tool's own variables win over all
+// of them.
+//
+// CLAUDE_CONFIG_DIR is bound to the directory this launch decided.
+// CLAUDE_CONFIG_DIR_OVERRIDE is consumed -- the request has been read, and the
+// child must not see it, or an agent inside the session running
+// `claude-playbook run other-playbook` would have that launch redirected into
+// this one's directory: the wrong playbook writing into the wrong state.
+//
+// Both happen HERE rather than earlier because applyManifestEnv runs above and
+// applies manifest, profile and launch-flag entries: a strip before it could
+// be undone by a layer that names the variable. Manifest validation also
+// refuses both keys (see manifest.ReservedEnvKeys), and doing it again here is
+// what makes that refusal unnecessary to trust.
+//
+// Consuming is an omission while building the child's env array, not a
+// mutation with a matching restore: a process environment is copied at spawn,
+// is private to that process, and dies with it, so no signal, kill or crash
+// can leave it half-done, and the tool cannot alter its parent's environment
+// at all.
+func bindOwnEnv(env []string, configDir string) []string {
+	env = removeEnv(env, "CLAUDE_CONFIG_DIR", config.ConfigDirOverrideEnv)
+	return append(env, "CLAUDE_CONFIG_DIR="+configDir)
 }
 
 // EffectiveBlock is the flattened [env] block a launch of configDir applies:

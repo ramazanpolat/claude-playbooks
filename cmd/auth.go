@@ -143,7 +143,7 @@ func askClaude(dir string) *claudeAuth {
 		return &claudeAuth{Error: "claude not on PATH"}
 	}
 	c := exec.Command(claudePath, "auth", "status", "--json")
-	c.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+dir)
+	c.Env = append(config.WithoutConfigDirOverride(os.Environ()), "CLAUDE_CONFIG_DIR="+dir)
 	out, err := c.Output()
 	if err != nil {
 		msg := err.Error()

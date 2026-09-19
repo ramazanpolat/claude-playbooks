@@ -478,7 +478,7 @@ func runMigrations(name, root, from, to string) error {
 	fmt.Printf("Running migrations %s -> %s...\n", from, to)
 	c := exec.Command(script, from, to, root)
 	c.Dir = root
-	c.Env = append(os.Environ(),
+	c.Env = append(config.WithoutConfigDirOverride(os.Environ()),
 		"CLAUDE_CONFIG_DIR="+root,
 		"CLAUDE_PLAYBOOK_TARGET="+name,
 		"CLAUDE_PLAYBOOK_PATH="+root,

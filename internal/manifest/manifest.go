@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
 
 const FileName = ".playbook"
@@ -181,9 +183,21 @@ func ValidateEnvValue(key, value string) error {
 	return nil
 }
 
-// ReservedEnvKeys cannot be set or unset through the manifest: the tool
-// owns them and binds them after every override is applied.
-var ReservedEnvKeys = map[string]bool{"CLAUDE_CONFIG_DIR": true}
+// ReservedEnvKeys cannot be set or unset through the manifest, a profile,
+// --env or --env-file: the tool owns them and binds them after every override
+// is applied.
+//
+// CLAUDE_CONFIG_DIR_OVERRIDE is reserved for a subtler reason than
+// CLAUDE_CONFIG_DIR. Declaring it could never redirect the launch that
+// declares it (the request is read from the process environment before any
+// layer is applied), but it would place the variable in the child's
+// environment, from where it WOULD redirect a further launch made inside the
+// session. A key that cannot do the thing it names, yet silently affects the
+// next launch, is worth refusing outright.
+var ReservedEnvKeys = map[string]bool{
+	"CLAUDE_CONFIG_DIR":         true,
+	config.ConfigDirOverrideEnv: true,
+}
 
 var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 

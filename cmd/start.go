@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -19,6 +20,30 @@ var startCmd = &cobra.Command{
 	Short:              "Start an ad-hoc Claude Code session at a directory",
 	DisableFlagParsing: true,
 	RunE:               runStart,
+}
+
+// noteStartIgnoresOverride reports that start ignored a caller-supplied config
+// directory. start names its own on the command line, and the command line
+// outranks the environment.
+//
+// It has to be SAID: the variable is consumed either way, so from outside the
+// process "ignored" and "honoured" look identical, and a caller could believe
+// its directory was used. Silent when the override names the same directory
+// that is being used, since then nothing was ignored -- a notice that fires
+// when nothing happened stops being read. A malformed value is reported too,
+// as a warning rather than a refusal: start's own path is valid and the
+// session runs.
+//
+// dirShown is the directory start will actually use, spelled as the operator
+// will recognise it -- resolved locally, or as typed for a remote start.
+func noteStartIgnoresOverride(dirShown string) {
+	overrideDir, override, err := config.ResolveConfigDirOverride()
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "Warning: %v (start uses the directory you named, %s)\n", err, dirShown)
+	case override && overrideDir != dirShown:
+		fmt.Fprintf(os.Stderr, "%s ignored: start uses the directory you named, %s\n", config.ConfigDirOverrideEnv, dirShown)
+	}
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
@@ -96,12 +121,20 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if deleteAfter {
 			wrapper = []string{"--delete"}
 		}
+		// The whole start runs on the remote host, which never receives this
+		// variable, so the notice has to happen here or nowhere. The path is
+		// named as given: it is a path THERE, and resolving it against the
+		// local working directory would print a directory that is not the one
+		// being used.
+		noteStartIgnoresOverride(path)
 		return forwardToSandboxHost(sopts.host, "start", original, &sopts, tokens, wrapper, path, claudeArgs)
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("invalid path %q: %w", path, err)
 	}
+
+	noteStartIgnoresOverride(absPath)
 
 	if info, err := os.Stat(absPath); err == nil && !info.IsDir() {
 		return fmt.Errorf("%q is not a directory", absPath)
