@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -50,7 +52,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	// --force is self-update only. --check means the same thing on both paths
 	// (report, do not install), so it is also accepted after a playbook name.
-	var force, checkOnly bool
+	var force, checkOnly, all bool
 consume:
 	for len(rest) > 0 {
 		switch rest[0] {
@@ -60,6 +62,9 @@ consume:
 		case "--check":
 			checkOnly = true
 			rest = rest[1:]
+		case "--all":
+			all = true
+			rest = rest[1:]
 		default:
 			break consume
 		}
@@ -67,6 +72,18 @@ consume:
 	if restRequestsHelp(rest) {
 		printUpdateHelp()
 		return nil
+	}
+
+	if all {
+		// --all is about playbooks; the bare form's self-update is a different
+		// operation, and naming one playbook contradicts "all" outright.
+		if len(rest) > 0 {
+			return fmt.Errorf("--all updates every playbook; drop the name %q, or update that one alone", rest[0])
+		}
+		if force {
+			return fmt.Errorf("--force applies to the binary's self-update, not to playbooks")
+		}
+		return runAllPlaybooksUpdate(checkOnly)
 	}
 
 	if len(rest) == 0 {
@@ -85,7 +102,8 @@ consume:
 			return fmt.Errorf("unexpected argument %q; `update <name>` accepts only --check", arg)
 		}
 	}
-	return runPlaybookUpdate(name, checkOnly)
+	_, err = runPlaybookUpdate(os.Stdout, name, checkOnly, false)
+	return err
 }
 
 func printUpdateHelp() {
@@ -99,17 +117,33 @@ func printUpdateHelp() {
 	fmt.Println("(settings.json and anything under [update] preserve) survive, and the")
 	fmt.Println("playbook's migrations/apply.sh runs afterward.")
 	fmt.Println("  --check    report the available version without installing it")
+	fmt.Println()
+	fmt.Println("With --all: do that for every playbook that can be updated natively, in")
+	fmt.Println("name order. Playbooks without [source], linked ones, and manifest-subdir")
+	fmt.Println("layouts are listed as skipped. A failure is reported and the run continues;")
+	fmt.Println("the exit status is non-zero if any playbook failed.")
+	fmt.Println("  --check    report what is available for each, changing nothing")
+	fmt.Println("A playbook whose source carries the version already installed is left")
+	fmt.Println("alone; `update <name>` still re-applies unconditionally.")
 }
 
-func runPlaybookUpdate(name string, checkOnly bool) error {
+// updateResult reports what an update did, so a caller updating many
+// playbooks can tabulate without re-deriving it from printed text.
+type updateResult struct {
+	from, to string
+	upToDate bool
+}
+
+func runPlaybookUpdate(w io.Writer, name string, checkOnly, skipUnchanged bool) (updateResult, error) {
+	var res updateResult
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	pb, err := playbook.Require(playbooksDir, name)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if pb.Manifest == nil || pb.Manifest.Source == nil || pb.Manifest.Source.Repository == "" {
-		return fmt.Errorf("%q has no [source] metadata in .playbook; nothing to update from", name)
+		return res, fmt.Errorf("%q has no [source] metadata in .playbook; nothing to update from", name)
 	}
 
 	root := pb.RootPath
@@ -118,33 +152,33 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 	}
 	rootInfo, err := os.Lstat(root)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%q is linked; native update is disabled to avoid replacing its external source", name)
+		return res, fmt.Errorf("%q is linked; native update is disabled to avoid replacing its external source", name)
 	}
 	rootAbs, _ := filepath.Abs(root)
 	pathAbs, _ := filepath.Abs(pb.Path)
 	if rootAbs != pathAbs {
-		return fmt.Errorf("%q uses manifest subdir %q; native update requires a flat playbook", name, pb.Manifest.Subdir)
+		return res, fmt.Errorf("%q uses manifest subdir %q; native update requires a flat playbook", name, pb.Manifest.Subdir)
 	}
 
 	// Validate the preserve list before touching anything: a manifest that
 	// names an escaping path must fail loudly, not halfway through the swap.
 	preserve, err := preservePaths(root, pb.Manifest)
 	if err != nil {
-		return err
+		return res, err
 	}
 
-	work, cleanup, err := stageSource(pb.Manifest.Source.Repository, isGitURL(pb.Manifest.Source.Repository), pb.Manifest.Source.Branch, pb.Manifest.Source.Subdir)
+	work, cleanup, err := stageSource(w, pb.Manifest.Source.Repository, isGitURL(pb.Manifest.Source.Repository), pb.Manifest.Source.Branch, pb.Manifest.Source.Subdir)
 	if err != nil {
-		return fmt.Errorf("failed to fetch latest source: %w", err)
+		return res, fmt.Errorf("failed to fetch latest source: %w", err)
 	}
 	defer cleanup()
 
 	stagedManifest, err := manifest.Read(work)
 	if err != nil {
-		return fmt.Errorf("staged source has an invalid manifest: %w", err)
+		return res, fmt.Errorf("staged source has an invalid manifest: %w", err)
 	}
 	fromVersion := pb.Manifest.Version
 	toVersion := ""
@@ -155,14 +189,26 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 		toVersion = readVersionFile(work)
 	}
 
+	res.from, res.to = fromVersion, toVersion
+	res.upToDate = fromVersion != "" && fromVersion == toVersion
+
 	if checkOnly {
-		fmt.Printf("%s\n", name)
-		fmt.Printf("  installed: %s\n", displayVersion(fromVersion))
-		fmt.Printf("  available: %s\n", displayVersion(toVersion))
-		if fromVersion != "" && fromVersion == toVersion {
-			fmt.Println("  up to date")
+		fmt.Fprintf(w, "%s\n", name)
+		fmt.Fprintf(w, "  installed: %s\n", displayVersion(fromVersion))
+		fmt.Fprintf(w, "  available: %s\n", displayVersion(toVersion))
+		if res.upToDate {
+			fmt.Fprintln(w, "  up to date")
 		}
-		return nil
+		return res, nil
+	}
+
+	// A bulk run stops here when the source carries the version already
+	// installed. `update <name>` deliberately re-applies regardless -- that is
+	// how a drifted install is repaired -- but doing it across every playbook
+	// costs one backup directory each, per run, in the playbooks root, for no
+	// change. The single-playbook command remains the way to force a re-apply.
+	if skipUnchanged && res.upToDate {
+		return res, nil
 	}
 
 	// Staging ran unlocked (it may fetch from the network); the overlay must
@@ -172,12 +218,12 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 	// snapshot, leaving launchers and manifest disagreeing.
 	unlock, lerr := lockRegistry()
 	if lerr != nil {
-		return lerr
+		return res, lerr
 	}
 	defer unlock()
 	liveManifest, err := manifest.Read(root)
 	if err != nil {
-		return fmt.Errorf("cannot re-read manifest before activation: %w", err)
+		return res, fmt.Errorf("cannot re-read manifest before activation: %w", err)
 	}
 	// Bind activation to the exact installation we inspected: the DIRECTORY
 	// must be the same filesystem object as before staging (a delete +
@@ -188,7 +234,7 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 	if lierr != nil || !os.SameFile(rootInfo, liveInfo) ||
 		liveManifest == nil || liveManifest.Source == nil ||
 		*liveManifest.Source != *pb.Manifest.Source {
-		return fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update", name)
+		return res, fmt.Errorf("playbook %q changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update", name)
 	}
 
 	// The manifest that goes live is assembled in the STAGED tree before the
@@ -216,7 +262,7 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 	updated.Name = filepath.Base(root)
 	updated.Subdir = ""
 	if err := manifest.Write(work, updated); err != nil {
-		return fmt.Errorf("failed to prepare updated manifest: %w", err)
+		return res, fmt.Errorf("failed to prepare updated manifest: %w", err)
 	}
 	// Manifest.Write's never-loosen rule looked at the STAGED file's mode;
 	// the overlay is about to replace the live file with it, so the staged
@@ -226,23 +272,23 @@ func runPlaybookUpdate(name string, checkOnly bool) error {
 		staged := filepath.Join(work, manifest.FileName)
 		if info, err := os.Stat(staged); err == nil {
 			if err := os.Chmod(staged, live.Mode().Perm()&info.Mode().Perm()); err != nil {
-				return fmt.Errorf("failed to prepare updated manifest: %w", err)
+				return res, fmt.Errorf("failed to prepare updated manifest: %w", err)
 			}
 		}
 	}
 
-	fmt.Printf("Updating %s from %s...\n", name, pb.Manifest.Source.Repository)
+	fmt.Fprintf(w, "Updating %s from %s...\n", name, pb.Manifest.Source.Repository)
 	backupPath, err := overlaySource(work, root, preserve)
 	if err != nil {
-		return err
+		return res, err
 	}
 
-	fmt.Printf("Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
+	fmt.Fprintf(w, "Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
 
-	if err := runMigrations(name, root, fromVersion, toVersion); err != nil {
-		return fmt.Errorf("%q is at code version %s but migrations failed: %w", name, displayVersion(toVersion), err)
+	if err := runMigrations(w, name, root, fromVersion, toVersion); err != nil {
+		return res, fmt.Errorf("%q is at code version %s but migrations failed: %w", name, displayVersion(toVersion), err)
 	}
-	return nil
+	return res, nil
 }
 
 // overlaySource replaces root's copy of every top-level entry the staged
@@ -457,7 +503,7 @@ func preservePaths(root string, m *manifest.Manifest) ([]string, error) {
 // migrations/apply.sh <from-version> <to-version> <install-dir>, invoked after
 // the new code is in place. Runners are expected to be idempotent -- the CLI
 // re-invokes on every update and does not track which ones have run.
-func runMigrations(name, root, from, to string) error {
+func runMigrations(w io.Writer, name, root, from, to string) error {
 	script := filepath.Join(root, "migrations", "apply.sh")
 	info, err := os.Stat(script)
 	if err != nil {
@@ -475,7 +521,7 @@ func runMigrations(name, root, from, to string) error {
 		return nil
 	}
 
-	fmt.Printf("Running migrations %s -> %s...\n", from, to)
+	fmt.Fprintf(w, "Running migrations %s -> %s...\n", from, to)
 	c := exec.Command(script, from, to, root)
 	c.Dir = root
 	c.Env = append(config.WithoutConfigDirOverride(os.Environ()),
@@ -484,8 +530,8 @@ func runMigrations(name, root, from, to string) error {
 		"CLAUDE_PLAYBOOK_PATH="+root,
 	)
 	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	c.Stdout = w
+	c.Stderr = w
 	return c.Run()
 }
 
@@ -588,4 +634,129 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 		return copyDir(src, dst)
 	}
 	return copyFile(src, dst, info.Mode())
+}
+
+// updatableReason reports why a playbook cannot be updated natively, or "" when
+// it can. The three conditions runPlaybookUpdate refuses on are all decidable
+// from the registry alone, so `--all` can classify every playbook before
+// fetching anything and never stage a source it is going to reject.
+func updatableReason(pb *playbook.Playbook) string {
+	if pb.Manifest == nil || pb.Manifest.Source == nil || pb.Manifest.Source.Repository == "" {
+		return "no [source] metadata"
+	}
+	root := pb.RootPath
+	if root == "" {
+		root = pb.Path
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return "unreadable: " + err.Error()
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "linked to an external source"
+	}
+	rootAbs, _ := filepath.Abs(root)
+	pathAbs, _ := filepath.Abs(pb.Path)
+	if rootAbs != pathAbs {
+		return "uses a manifest subdir"
+	}
+	return ""
+}
+
+// runAllPlaybooksUpdate updates every updatable playbook in the registry.
+//
+// It exists because a pilot running several installs of one playbook otherwise
+// updates each by hand, and the count only grows. The loop is deliberately dumb:
+// one independent update per playbook, in name order, with no shared staging or
+// cross-playbook reasoning. Each is exactly what `update <name>` would do.
+//
+// A failure never stops the run. Playbooks are independent, and stopping at the
+// first failure would leave the rest on old code for a reason unrelated to them.
+// Each playbook's own output is captured and printed only when it fails, so the
+// summary stays scannable while a failure still shows everything it said.
+func runAllPlaybooksUpdate(checkOnly bool) error {
+	playbooksDir := config.ResolvePlaybooksDir()
+	pbs, err := playbook.Discover(playbooksDir)
+	if err != nil {
+		return err
+	}
+	if len(pbs) == 0 {
+		fmt.Printf("No playbooks in %s.\n", playbooksDir)
+		return nil
+	}
+	sort.Slice(pbs, func(i, j int) bool { return pbs[i].Name < pbs[j].Name })
+
+	width := 0
+	for _, pb := range pbs {
+		if len(pb.Name) > width {
+			width = len(pb.Name)
+		}
+	}
+
+	var updated, skipped, failed, current int
+	type failure struct {
+		name   string
+		err    error
+		output string
+	}
+	var failures []failure
+
+	for _, pb := range pbs {
+		if reason := updatableReason(pb); reason != "" {
+			fmt.Printf("%-*s  %s\n", width, pb.Name, reason)
+			skipped++
+			continue
+		}
+		var buf bytes.Buffer
+		res, err := runPlaybookUpdate(&buf, pb.Name, checkOnly, true)
+		switch {
+		case err != nil:
+			fmt.Printf("%-*s  FAILED: %v\n", width, pb.Name, err)
+			failures = append(failures, failure{pb.Name, err, buf.String()})
+			failed++
+		case res.upToDate:
+			fmt.Printf("%-*s  %s  up to date\n", width, pb.Name, displayVersion(res.from))
+			current++
+		case checkOnly:
+			fmt.Printf("%-*s  %s -> %s  available\n", width, pb.Name, displayVersion(res.from), displayVersion(res.to))
+			updated++
+		default:
+			fmt.Printf("%-*s  %s -> %s  ok\n", width, pb.Name, displayVersion(res.from), displayVersion(res.to))
+			updated++
+		}
+	}
+
+	// Detail after the table, so the table stays readable and a failure still
+	// shows every line the update printed before it gave up.
+	for _, f := range failures {
+		fmt.Printf("\n--- %s ---\n", f.name)
+		if out := strings.TrimRight(f.output, "\n"); out != "" {
+			fmt.Println(out)
+		}
+		fmt.Printf("error: %v\n", f.err)
+	}
+
+	fmt.Println()
+	verb := "updated"
+	if checkOnly {
+		verb = "with an update available"
+	}
+	parts := []string{fmt.Sprintf("%d %s", updated, verb)}
+	if current > 0 {
+		parts = append(parts, fmt.Sprintf("%d up to date", current))
+	}
+	if skipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d skipped", skipped))
+	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", failed))
+	}
+	fmt.Println(strings.Join(parts, ", ") + ".")
+
+	if failed > 0 {
+		// A non-zero exit without a second error line: the failures are already
+		// reported above, in more detail than a wrapped error could carry.
+		return &commandExitError{code: 1}
+	}
+	return nil
 }
