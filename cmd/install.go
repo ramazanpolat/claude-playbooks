@@ -81,7 +81,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Stage 1: place the source tree in a working area so we can read its
 	// .playbook before choosing a final name.
-	work, cleanup, err := stageSource(source, isGit, installBranch, subdir)
+	work, cleanup, err := stageSource(os.Stdout, source, isGit, installBranch, subdir)
 	if err != nil {
 		return err
 	}
@@ -294,7 +294,7 @@ func warnIfNoClaudeMD(dir, name string) {
 // path. For Git URLs it clones into a temp dir; for local paths it copies
 // the resolved source directory into one. The cleanup func removes any temp
 // state created.
-func stageSource(source string, isGit bool, ref, subdir string) (string, func(), error) {
+func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (string, func(), error) {
 	if isGit {
 		if _, err := exec.LookPath("git"); err != nil {
 			return "", func() {}, fmt.Errorf("'git' command not found")
@@ -311,18 +311,20 @@ func stageSource(source string, isGit bool, ref, subdir string) (string, func(),
 		}
 		args = append(args, source, tmp)
 
-		fmt.Printf("Cloning %s", source)
+		fmt.Fprintf(w, "Cloning %s", source)
 		if ref != "" {
-			fmt.Printf(" (branch %s)", ref)
+			fmt.Fprintf(w, " (branch %s)", ref)
 		}
 		if subdir != "" {
-			fmt.Printf(" (subdir %s)", subdir)
+			fmt.Fprintf(w, " (subdir %s)", subdir)
 		}
-		fmt.Println("...")
+		fmt.Fprintln(w, "...")
 
 		gitCmd := exec.Command("git", args...)
-		gitCmd.Stdout = os.Stdout
-		gitCmd.Stderr = os.Stderr
+		// git narrates progress on stderr; both go to the caller's writer so a
+		// bulk run can hold them back until a playbook actually fails.
+		gitCmd.Stdout = w
+		gitCmd.Stderr = w
 		if err := gitCmd.Run(); err != nil {
 			cleanup()
 			return "", func() {}, fmt.Errorf("git clone failed")

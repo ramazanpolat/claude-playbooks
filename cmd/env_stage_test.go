@@ -50,7 +50,7 @@ func TestLocalSourceStagesOutsideItselfWhenTmpdirIsInside(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "CLAUDE.md"), []byte("v2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runPlaybookUpdate("pb", false); err != nil {
+	if err := updateOnePlaybook("pb", false); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(installed, "CLAUDE.md")); string(got) != "v2\n" {

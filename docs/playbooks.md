@@ -253,6 +253,40 @@ taken from the old and new `.playbook`. Runners are expected to be idempotent.
 Linked playbooks and manifests that select their config through a top-level
 `subdir` cannot be updated this way.
 
+### Update every playbook at once
+
+A convenience over running `cpb update <name>` once per playbook — useful once a
+registry holds enough of them that doing it by hand is tedious:
+
+```bash
+cpb update --all            # update them all
+cpb update --all --check    # report what is available for each
+```
+
+```text
+kommander            3.11.4 -> 3.13.0  ok
+kommander-9router    3.11.4 -> 3.13.0  ok
+kommander-dev        3.11.4 -> 3.13.0  ok
+kommander-personal   3.13.0  up to date
+lifeos               no [source] metadata
+
+3 updated, 1 up to date, 1 skipped.
+```
+
+Each row is exactly what `cpb update <name>` would have done, with two
+differences worth knowing:
+
+- **A playbook already at the source's version is left alone.** `cpb update
+  <name>` re-applies regardless, which is how you repair an install that drifted;
+  doing that across every playbook would leave a backup directory per playbook
+  per run for no change. Use the single-playbook form when you want a re-apply.
+- **A failure doesn't stop the run.** The rest still update, the failing
+  playbook's output is printed after the table, and the exit status is non-zero.
+
+Playbooks that can't update natively — no `[source]`, linked, or a manifest
+`subdir` layout — are listed as skipped with the reason rather than treated as
+errors.
+
 Running `cpb update` with no name self-updates the binary instead; see
 [Installation](installation.md#updating-the-tool).
 

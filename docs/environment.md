@@ -189,10 +189,14 @@ A playbook directory does two jobs at once. It is the playbook's **content** —
 writes its **state**: `.claude.json`, `sessions/`, `projects/`, `history.jsonl`,
 `cache/`. For one person on one playbook that is exactly right and invisible.
 
-It breaks down if you want several sessions to share one playbook's content
-while each keeps its own memory. Pointing at the playbook gives them one shared
-history; pointing at an empty directory loses the content. So supply your own
-directory and name it:
+If you want several sessions sharing one playbook's content while each keeps its
+own state, you already have two ways: run the same playbook from different
+working directories (transcripts split by directory, settings and login shared),
+or install the playbook twice (everything separate, at the cost of a copy).
+
+This variable is for the narrower case neither covers — when you want to build
+the config directory yourself and have a playbook launch bind it, without
+registering a playbook for it:
 
 ```bash
 CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb run kommander

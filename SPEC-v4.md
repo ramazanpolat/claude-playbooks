@@ -760,7 +760,11 @@ process environment
   = the child claude process's environment
 ```
 
-**Caller-supplied config directory (v3.14.0).** A playbook directory serves two roles at once: it is the playbook's **content** (`CLAUDE.md`, `settings.json`, `hooks/`, `skills/`) and the sink for Claude Code's **state** (`.claude.json`, `sessions/`, `projects/`, `history.jsonl`, `cache/`). A consumer wanting several sessions to share one playbook's content while each keeps its own memory cannot express that with one directory, so it provisions its own and names it:
+**Caller-supplied config directory (v3.14.0).** A playbook directory serves two roles at once: it is the playbook's **content** (`CLAUDE.md`, `settings.json`, `hooks/`, `skills/`) and the sink for Claude Code's **state** (`.claude.json`, `sessions/`, `projects/`, `history.jsonl`, `cache/`).
+
+Several sessions that share one playbook's content while each keeps its own state are **already expressible without this**, two ways: run the same playbook from different working directories, which partitions transcripts into `projects/<cwd>/` while sharing settings and login; or install the playbook more than once, which separates everything at the cost of a copy per install. Either is the ordinary answer.
+
+What this variable adds is narrower: a caller may supply a config directory **it built itself**, without registering a playbook for it. That is the case neither of the above covers — a supervisor that composes its own directory (playbook content reached however it likes, state real and local) and wants a playbook launch to bind it. It is a seam for such a consumer, with none in this repository; unset, which is the default, nothing about a launch changes.
 
 ```bash
 CLAUDE_CONFIG_DIR_OVERRIDE=/path/to/record  claude-playbook run <name>
@@ -993,6 +997,62 @@ claude-playbook update sre --check
 - Extra arguments → `unexpected argument "..."; `update <name>` accepts only --check`
 - Install changed while staging → `playbook "sre" changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update`
 - Migration runner exits non-zero → `"sre" is at code version <v> but migrations failed: <err>`
+
+#### `claude-playbook update --all` — update every playbook (v3.14.0)
+
+Runs the playbook update above for every playbook in the registry that can be
+updated natively, in name order.
+
+```bash
+claude-playbook update --all            # update them all
+claude-playbook update --all --check    # report what is available for each
+```
+
+This is a convenience over invoking `update <name>` once per playbook, and
+nothing in the tool depends on it: every playbook it touches is individually
+updatable without it. It earns its place only where a registry holds enough
+playbooks that doing so by hand is tedious — several installs of one playbook
+being the usual way that happens.
+
+The loop is deliberately dumb: one independent update per playbook, with no
+shared staging and no cross-playbook reasoning. Each is exactly what
+`update <name>` would do, with two differences:
+
+- **Unchanged playbooks are left alone.** When the staged source carries the
+  version already installed, the overlay is skipped. `update <name>` re-applies
+  unconditionally — that is how a drifted install is repaired — but doing it
+  across every playbook costs one backup directory each, in the playbooks root,
+  per run, for no change. The single-playbook command remains the way to force a
+  re-apply. Reported as `up to date`.
+- **A failure never stops the run.** Playbooks are independent, so stopping at
+  the first failure would leave the rest on old code for an unrelated reason.
+  Each playbook's own output is captured and printed only if it fails, after the
+  table, so the summary stays scannable while a failure still shows everything
+  it said. The exit status is non-zero when any playbook failed.
+
+The three shapes `update <name>` refuses — no `[source]` metadata, a linked
+install, a manifest-`subdir` layout — are decidable from the registry alone, so
+they are classified before any source is fetched and listed as skipped with the
+reason. They are never an error: a registry legitimately contains playbooks that
+were never meant to update.
+
+```text
+alpha    0.9.0 -> 1.0.0  ok
+beta     0.9.0 -> 1.0.0  ok
+broken   FAILED: failed to fetch latest source: "/gone" not found
+current  9.9.9  up to date
+linked   linked to an external source
+orphan   no [source] metadata
+
+--- broken ---
+error: failed to fetch latest source: "/gone" not found
+
+2 updated, 1 up to date, 2 skipped, 1 failed.
+```
+
+**Errors:**
+- A playbook name alongside `--all` → `--all updates every playbook; drop the name "<name>", or update that one alone`
+- `--force` with `--all` → `--force applies to the binary's self-update, not to playbooks`
 
 ---
 
