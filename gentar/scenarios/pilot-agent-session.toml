@@ -1,0 +1,71 @@
+# claude-playbooks own-arena suite 13: agent-in-the-loop -- a REAL agent,
+# launched through a playbook, doing a real task.
+#
+# This is the only suite that tests what the product is FOR. Everything else
+# proves the CLI manipulates directories correctly; none of it proves that a
+# playbook launch produces a working, playbook-governed agent session. The
+# launcher suite gets as far as `--version`.
+#
+# The verdict is deliberately indirect. The prompt asks for a file and never
+# says what to put in it; the playbook's CLAUDE.md does. So a file with the
+# right content can only mean the playbook's content reached the session --
+# which is the entire claim `CLAUDE_CONFIG_DIR` isolation makes. The agent's
+# own account of events is never consulted.
+#
+# Credentials are tier-1 (env vars on a throwaway bench) and
+# provider-agnostic: the coordinator refuses (exit 2) before any bench
+# exists when none of the named variables is set, so this suite is left out
+# of the arena's sweep unless one is present (see .github/workflows/arena.yml)
+# while a direct dispatch still gets the honest refusal.
+
+[scenario]
+name = "pilot-agent-session"
+subject = "claude-playbooks"
+agent = "shell"
+template = "gentar-bench-v1"
+credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+# Optional cheaper-model pin, forwarded when set. A SLOT var, not
+# ANTHROPIC_MODEL: claude-code's catalog rejects unknown main-model IDs.
+pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '"$HOME/.local/bin/claude-playbook" create pilotpb --no-alias',
+  # The playbook's standing instruction. The prompt below never mentions
+  # ORBIT-7 -- only this file does, so the marker's presence is proof the
+  # session was governed by this playbook.
+  '''printf '%s\n' '# Pilot playbook' '' 'Standing rule: whenever you are asked to create a marker file, its entire contents must be exactly the token ORBIT-7 and nothing else.' > "$HOME/.claude-playbooks/pilotpb/CLAUDE.md"''',
+]
+
+[driver]
+# Headless -p: no turns, the file is the verdict. `timeout` bounds the CLI
+# itself -- an expired credential makes claude-code print an execution error
+# and retry indefinitely, which must fail honestly with the transcript
+# attached rather than hang the bench. Startup update/telemetry checks are
+# off; bench egress hangs on them.
+command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 claude-playbook run pilotpb -p "Create a marker file named marker.txt in the current working directory." --dangerously-skip-permissions'
+
+[budget]
+# Declared ceiling for the guard, not measured usage. The arena's
+# GENTAR_BUDGET_CAP must be >= this.
+tokens = 25000
+
+[[verify.commands]]
+# The file exists where the agent was working.
+command = 'test -f "$WORKSPACE_DIR/marker.txt" && echo marker-created'
+contains = "marker-created"
+
+[[verify.commands]]
+# And carries the token only the playbook's CLAUDE.md supplied. Case- and
+# whitespace-tolerant: the claim under test is that the instruction arrived,
+# not that a model formats perfectly.
+command = 'grep -qiF ORBIT-7 "$WORKSPACE_DIR/marker.txt" && echo playbook-governed'
+contains = "playbook-governed"
+
+[[verify.commands]]
+# The session ran in the playbook's own config directory, so its state
+# landed there rather than in a default ~/.claude.
+command = 'test -e "$HOME/.claude-playbooks/pilotpb/.claude.json" && echo state-in-playbook'
+contains = "state-in-playbook"

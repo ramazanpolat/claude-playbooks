@@ -36,3 +36,16 @@ contains = "read-only"
 # Unknown names are refused with the registry's own message.
 command = 'claude-playbook auth status nope 2>&1 | grep -F "unknown playbook \"nope\"" && echo unknown-ok'
 contains = "unknown-ok"
+
+[[verify.commands]]
+# isolate_auth is the one authentication mode with no other coverage: a
+# playbook that shares nothing, whose own login is the only one it has.
+# `auth status` must report it as isolated rather than as a shared login,
+# because that report is what a pilot checks before a headless run.
+command = '''claude-playbook create solo --no-alias && printf '%s\n' 'name = "solo"' 'isolate_auth = true' > "$HOME/.claude-playbooks/solo/.playbook" && claude-playbook auth status solo'''
+contains = "isolated"
+
+[[verify.commands]]
+# And the JSON form agrees -- it is what a script reads.
+command = 'claude-playbook auth status solo --json'
+contains = "isolated"

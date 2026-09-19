@@ -1,0 +1,59 @@
+# claude-playbooks own-arena suite 10: `link` -- the develop-in-place path,
+# and the one install shape whose DELETE must not follow the symlink.
+#
+# `link` was the only top-level command with no coverage at all. Its whole
+# risk is aliasing: the registry entry is a symlink to a directory the pilot
+# owns and is editing, so every operation that removes or replaces must stop
+# at the link. A regression here destroys work that exists nowhere else.
+
+[scenario]
+name = "playbook-link"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  'mkdir -p "$HOME/external/skills"',
+  '''printf '%s\n' '# external playbook' > "$HOME/external/CLAUDE.md"''',
+  '''printf '%s\n' 'name = "ext"' 'version = "0.1.0"' > "$HOME/external/.playbook"''',
+  '''printf '%s\n' 'a skill' > "$HOME/external/skills/thing.md"''',
+]
+
+[[verify.files]]
+path = "~/.local/bin/claude-playbook"
+
+[[verify.commands]]
+# The registry entry is a SYMLINK, not a copy.
+command = 'claude-playbook link "$HOME/external" --name linked --no-alias && test -L "$HOME/.claude-playbooks/linked" && echo linked'
+contains = "linked"
+
+[[verify.commands]]
+command = 'claude-playbook list'
+contains = "linked"
+
+[[verify.commands]]
+# Content is reached through the link, so an edit outside is visible inside.
+command = '''printf '%s\n' 'edited outside' >> "$HOME/external/CLAUDE.md" && grep -F "edited outside" "$HOME/.claude-playbooks/linked/CLAUDE.md" && echo live'''
+contains = "live"
+
+[[verify.commands]]
+# A linked playbook refuses native update: replacing entries would rewrite
+# the pilot's own working tree.
+command = 'claude-playbook update linked 2>&1 | grep -F linked'
+contains = "linked"
+
+[[verify.commands]]
+# Delete removes the LINK and nothing through it. This is the assertion the
+# suite exists for.
+command = 'claude-playbook delete linked -y && test ! -e "$HOME/.claude-playbooks/linked" && echo unlinked'
+contains = "unlinked"
+
+[[verify.commands]]
+command = 'test -f "$HOME/external/CLAUDE.md" && test -f "$HOME/external/skills/thing.md" && echo source-survived'
+contains = "source-survived"
+
+[[verify.commands]]
+command = 'grep -F "edited outside" "$HOME/external/CLAUDE.md" && echo content-intact'
+contains = "content-intact"

@@ -47,7 +47,39 @@ fix and rerun, no commit needed to test.
 | `launcher-run-version` | `run` (and the launcher alias) actually spawns claude with the playbook wired — keyless, via `--version` |
 | `docs-honesty` | README's documented commands answer `--help` in the built binary; referenced files exist and stay executable |
 | `env-overrides` | manifest `[env]`, an attached env profile, one-off launch flags (before/after the name, via the launcher), an env file, and the `start -- --delete` boundary, all proven against the environment a stub `claude` actually received |
-| `auth-status` | `auth status` table and JSON for a fresh playbook (shared-login, no grant), read-only against a timestamp marker, unknown-name refusal |
+| `auth-status` | `auth status` table and JSON for a fresh playbook (shared-login, no grant), read-only against a timestamp marker, unknown-name refusal, and `isolate_auth` reported as isolated |
+| `playbook-update` | native `update`: `--check` installs nothing, content moves, `settings.json` and `.claude.json` survive, the migration runs with the version pair, entries are backed up — and `--all` skips what it cannot update, leaves up-to-date playbooks alone, and refuses contradictory flags |
+| `playbook-link` | `link` develop-in-place: the entry is a symlink, edits outside are live inside, native update is refused, and `delete` removes the link without following it |
+| `config-dir-override` | `CLAUDE_CONFIG_DIR_OVERRIDE` end to end against the environment a stub `claude` received: honoured, consumed, a bare `CLAUDE_CONFIG_DIR` still ignored, refused in a layer, refused relative, refused with `--sandbox`, and reported-then-ignored by `start` |
+
+### Simulated pilots
+
+Suites with a `[driver]` block drive a **pty** instead of running a shell
+script, so paths that need a human at the terminal become testable. Everything
+above runs headless, where a confirmation prompt reads EOF and cancels — which
+is why `delete`'s interactive path had never been exercised at all.
+
+| Suite | Proves |
+|---|---|
+| `pilot-interactive-delete` | a scripted pilot declining a `delete` (nothing happens) and then confirming it (the playbook and both its launchers go, a bystander does not), both branches in one pty session |
+| `pilot-agent-session` | a **real agent**, launched through a playbook, doing a real task — and the marker it writes carries a token only the playbook's own `CLAUDE.md` supplied, so the file is proof the playbook governed the session. Needs an agent credential; left out of the sweep when none is set |
+
+## Before you push a suite
+
+```bash
+gentar/dryrun.py                                   # every suite
+gentar/dryrun.py gentar/scenarios/playbook-update.toml
+```
+
+Runs a suite's steps, driver turns and assertions in a scratch `HOME` in about
+a second — no bench, no sandbox, no network. A scenario is shell inside TOML,
+three levels of quoting deep, and the arena was the only thing that ever ran
+it: one missing quote cost a bench VM and several minutes to find. This finds
+it before the push.
+
+It is not a substitute for the arena. There is no sandbox, no template and no
+network policy, so it proves the shell and the assertions while the arena
+proves the isolation. Suites declaring `credentials` are skipped.
 
 Add a suite = add a TOML here. Schema and vocabulary:
 [gentar scenario schema](https://github.com/agent-realm/gentar/blob/main/coordinator/gentar/toml_scenario.py)
