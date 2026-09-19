@@ -24,6 +24,17 @@ var runCmd = &cobra.Command{
 	RunE:               runRun,
 }
 
+// errConfigDirOverrideSandbox refuses a sandboxed launch that also carries a
+// caller-supplied config directory. A sandbox mounts the config directory, and
+// a directory whose playbook content is reached through symlinks (the shape a
+// caller provisioning its own necessarily produces) dangles inside, because
+// the backend mounts directories: the same failure a shared login's symlinked
+// credentials have. Half-supporting that is worse than saying so.
+func errConfigDirOverrideSandbox() error {
+	return fmt.Errorf("%s and a sandboxed launch together are not supported: a sandbox mounts the config directory, and content reached through symlinks dangles inside it. Launch on the host, or unset %s",
+		config.ConfigDirOverrideEnv, config.ConfigDirOverrideEnv)
+}
+
 func runRun(cmd *cobra.Command, args []string) error {
 	original := args
 	rest, err := takePlaybooksDirArg(args)
@@ -72,12 +83,23 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	tokens = append(tokens, more...)
 
+	// A caller-supplied config directory, resolved before any sandbox
+	// decision so the refusal below happens whatever shape the sandbox
+	// request takes. Absent: every launch behaves exactly as before.
+	overrideDir, override, err := config.ResolveConfigDirOverride()
+	if err != nil {
+		return err
+	}
+
 	// An explicit --sandbox-host (before or after the name) runs the whole
 	// launch on that host: the playbook need not be registered here, and
 	// no launch flag is evaluated here (env files stay unread).
 	if sopts.host != "" {
 		if sopts.disabled {
 			return fmt.Errorf("--sandbox-host and --no-sandbox together: pick one")
+		}
+		if override {
+			return errConfigDirOverrideSandbox()
 		}
 		return forwardToSandboxHost(sopts.host, "run", original, &sopts, tokens, nil, name, claudeArgs)
 	}
@@ -100,6 +122,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if sandboxed {
+		if override {
+			return errConfigDirOverrideSandbox()
+		}
 		if host := sandboxHost(sbm, &sopts); host != "" {
 			return forwardToSandboxHost(host, "run", original, &sopts, tokens, nil, name, claudeArgs)
 		}
@@ -140,7 +165,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(pb.Path, layers)
+	// The config directory this launch binds: the playbook's install
+	// directory, or the one the caller supplied. Everything downstream --
+	// the authentication decision, credential sync, quarantine, the
+	// governing manifest lookup -- then operates on it uniformly, with no
+	// special case for where it came from.
+	configDir := pb.Path
+	if override {
+		configDir = overrideDir
+	}
+	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configDir, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the

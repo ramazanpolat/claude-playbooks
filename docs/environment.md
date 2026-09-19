@@ -182,6 +182,58 @@ Unsetting or setting `CLAUDE_CODE_OAUTH_TOKEN` through an env block or profile
 changes which account a playbook runs as. The full decision and every mode are in
 [Authentication](authentication.md).
 
+## A caller-supplied config directory
+
+A playbook directory does two jobs at once. It is the playbook's **content** —
+`CLAUDE.md`, `settings.json`, `hooks/`, `skills/` — and it is where Claude Code
+writes its **state**: `.claude.json`, `sessions/`, `projects/`, `history.jsonl`,
+`cache/`. For one person on one playbook that is exactly right and invisible.
+
+It breaks down if you want several sessions to share one playbook's content
+while each keeps its own memory. Pointing at the playbook gives them one shared
+history; pointing at an empty directory loses the content. So supply your own
+directory and name it:
+
+```bash
+CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb run kommander
+CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 k
+```
+
+That directory becomes the launch's config directory. Authentication, credential
+sync and the manifest lookup all treat it exactly as they would a playbook's own,
+so it can hold its own login.
+
+**You provision it.** `cpb` binds what you give it and creates nothing — a typo
+must not silently mint a fresh empty memory. Content is your job too: if the
+directory should expose the playbook's `CLAUDE.md`, `hooks/` or skills, put them
+there (a symlink farm is the usual answer). Note that a `settings.json` hook
+spelled `$CLAUDE_CONFIG_DIR/hooks/session-start.sh` will error at startup if the
+directory has no `hooks/`.
+
+The path must be absolute or `~`-prefixed. An empty value means unset.
+
+**A bare `CLAUDE_CONFIG_DIR` is ignored**, deliberately:
+
+```bash
+CLAUDE_CONFIG_DIR=~/somewhere k     # ignored; k runs the kommander playbook
+```
+
+If that variable were honoured, one stray `export` in a shell would silently
+redirect every launcher on your machine. The opt-in has its own name so it can
+only happen on purpose. `CLAUDE_CONFIG_DIR_OVERRIDE` is what you *request*;
+`CLAUDE_CONFIG_DIR` is what the session *receives*.
+
+**It does not travel.** `cpb` consumes the variable and strips it from the
+session, so an agent inside that runs `cpb run something-else` gets that
+playbook's own directory, not this one's. One exception worth knowing: if you
+`export` it in your shell rather than setting it for one command, it stays in
+that shell — nothing can un-export a parent's variable — so every launch from
+there honours it until you unset it.
+
+**Not with `--sandbox`.** A sandbox mounts the config directory, and the backend
+mounts directories, so symlinked content dangles inside. The combination is
+refused rather than half-supported.
+
 ## What stays yours
 
 The block and the profiles are **install-local**, like `alias`. `update` keeps

@@ -204,7 +204,19 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 // unset of CLAUDE_CODE_OAUTH_TOKEN takes the stored-credentials path for
 // this launch only. Nothing is written to disk.
 func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, error) {
-	env := os.Environ()
+	// The config-dir override is CONSUMED here, on every path and whether or
+	// not this launch used it: cpb reads the request, and the child must not
+	// see it. Otherwise it would reach claude and everything below, so an
+	// agent inside the session running `cpb run other-playbook` would have
+	// that launch redirected into this one's directory -- the wrong playbook
+	// writing into the wrong state.
+	//
+	// Stripping is an omission while building the child's env array, not a
+	// mutation with a matching restore: a process environment is copied at
+	// spawn, private to that process, and dies with it. No signal, kill, or
+	// crash can leave it half-done, and cpb cannot alter its parent's
+	// environment at all.
+	env := removeEnv(os.Environ(), config.ConfigDirOverrideEnv)
 	refuse := func(err error) ([]string, error) {
 		// The launch will be refused on this error (see cmd/run.go), so
 		// stop HERE, before credential sync or quarantine touches the
