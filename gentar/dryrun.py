@@ -16,6 +16,13 @@ no real agent. It proves the shell and the assertions; the arena still proves
 the isolation. Suites declaring `credentials` are skipped -- they need a real
 agent and a real key.
 
+One difference has bitten already, so expect more of its kind: the scratch HOME
+always has a stub `claude` on PATH, and a default bench has none. `run` looks up
+`claude` before it validates launch flags, so an assertion about a flag refusal
+passes here and reports "claude not found" there. A suite that depends on an
+agent EXISTING must put the stub on PATH itself rather than inherit it from this
+harness.
+
 The binary is built once from the checkout with the same version injection
 the scenarios use, because some of them assert on `--version`.
 """

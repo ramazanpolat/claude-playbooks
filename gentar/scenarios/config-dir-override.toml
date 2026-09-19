@@ -59,19 +59,32 @@ contains = "default-kept"
 [[verify.commands]]
 # Reserved: declaring it in a layer could never redirect its own launch, but
 # would leak into the next one. Refused at the front door.
-command = 'claude-playbook run --env CLAUDE_CONFIG_DIR_OVERRIDE=/leak ovr 2>&1 | grep -F "managed by claude-playbook"'
+#
+# The stub PATH is REQUIRED here, unlike the two refusals below. `run` looks
+# up `claude` (cmd/run.go) BEFORE it validates the launch flags, so on a bench
+# with no claude installed -- which the default template is -- this reports
+# "'claude' command not found" and never reaches the reserved-key check. Found
+# the hard way: it passed locally, where the dry-run harness always installs a
+# stub, and failed here where nothing does.
+command = 'PATH="$HOME/stub:$PATH" claude-playbook run --env CLAUDE_CONFIG_DIR_OVERRIDE=/leak ovr 2>&1 | grep -F "managed by claude-playbook"'
 contains = "managed by claude-playbook"
 
 [[verify.commands]]
 # Relative is refused rather than resolved: the child resolves
 # CLAUDE_CONFIG_DIR against ITS working directory, not ours.
+#
+# Deliberately WITHOUT the stub PATH: this refusal happens before the `claude`
+# lookup, so it holds on a machine with no agent installed at all. That
+# ordering is worth pinning -- a malformed override is a usage error the pilot
+# can fix, and reporting a missing agent instead would send them elsewhere.
 command = 'CLAUDE_CONFIG_DIR_OVERRIDE=rel/path claude-playbook run ovr 2>&1 | grep -F "absolute"'
 contains = "absolute"
 
 [[verify.commands]]
 # A sandboxed launch mounts the config directory; a supplied one whose
 # content is reached through symlinks dangles inside. Refused before any
-# backend call, so this passes with no sandbox backend installed.
+# backend call, so this passes with no sandbox backend installed -- and,
+# like the relative case, before the `claude` lookup, so no stub is needed.
 command = 'CLAUDE_CONFIG_DIR_OVERRIDE="$HOME/record" claude-playbook run --sandbox ovr 2>&1 | grep -F "not supported"'
 contains = "not supported"
 
