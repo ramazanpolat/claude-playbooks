@@ -1,0 +1,109 @@
+# claude-playbooks own-arena suite 9: native playbook update -- the path a
+# pilot takes to move an installed playbook onto a newer source.
+#
+# Nothing else in the suite covered `update` at all, which is the most
+# destructive non-delete operation the CLI has: it replaces top-level
+# entries in a live config directory. What must SURVIVE that is the point
+# of this suite, because a regression there is silent until a pilot loses
+# their settings.
+#
+# A local directory is the source, so no network and no git host. `install`
+# records [source] only for GIT sources, so the manifest is written by hand
+# -- exactly what a pilot converting a local install to an updatable one
+# has to do.
+#
+# Quoting: TOML LITERAL strings ('...' / '''...''') throughout. A basic
+# string ("...") processes backslash escapes before the shell sees them,
+# which mangles any command carrying \n or \". Files are written with
+# `printf '%s\n' line line ...`: POSIX printf does not reinterpret escapes
+# or % inside a %s ARGUMENT, so a line may hold quotes and % freely.
+
+[scenario]
+name = "playbook-update"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  'mkdir -p "$HOME/src/migrations"',
+  '''printf '%s\n' '# upstream v1' > "$HOME/src/CLAUDE.md"''',
+  '''printf '%s\n' 'name = "pb"' 'version = "1.0.0"' > "$HOME/src/.playbook"''',
+  # Single-quoted lines, so $1/$2/$3 land in the FILE instead of expanding here.
+  '''printf '%s\n' '#!/bin/sh' 'echo "$1 -> $2" > "$3/migrated"' > "$HOME/src/migrations/apply.sh"''',
+  'chmod 755 "$HOME/src/migrations/apply.sh"',
+]
+
+[[verify.files]]
+path = "~/.local/bin/claude-playbook"
+
+[[verify.commands]]
+# Install, then make it updatable: a local install records no [source].
+command = '''claude-playbook install "$HOME/src" --name pb --no-alias && printf '%s\n' 'name = "pb"' 'version = "1.0.0"' '' '[source]' "repository = \"$HOME/src\"" > "$HOME/.claude-playbooks/pb/.playbook" && echo installed'''
+
+[[verify.commands]]
+# A local file the source knows nothing about, and one it DOES ship. Both
+# must survive the overlay.
+command = '''printf '%s\n' '{"pilot":true}' > "$HOME/.claude-playbooks/pb/settings.json" && printf '%s\n' mine > "$HOME/.claude-playbooks/pb/.claude.json" && echo seeded'''
+
+[[verify.commands]]
+command = '''printf '%s\n' '# upstream v2' > "$HOME/src/CLAUDE.md" && printf '%s\n' 'name = "pb"' 'version = "2.0.0"' > "$HOME/src/.playbook" && echo bumped'''
+
+[[verify.commands]]
+# --check reports the move...
+command = 'claude-playbook update pb --check'
+contains = "2.0.0"
+
+[[verify.commands]]
+# ...and installs nothing.
+command = 'grep -F "upstream v1" "$HOME/.claude-playbooks/pb/CLAUDE.md" && echo check-installed-nothing'
+contains = "check-installed-nothing"
+
+[[verify.commands]]
+command = 'claude-playbook update pb && grep -F "upstream v2" "$HOME/.claude-playbooks/pb/CLAUDE.md" && echo updated'
+contains = "updated"
+
+[[verify.commands]]
+command = 'grep -F pilot "$HOME/.claude-playbooks/pb/settings.json" && echo settings-preserved'
+contains = "settings-preserved"
+
+[[verify.commands]]
+command = 'grep -F mine "$HOME/.claude-playbooks/pb/.claude.json" && echo state-preserved'
+contains = "state-preserved"
+
+[[verify.commands]]
+# The migration ran, and was handed the version pair.
+command = 'grep -F "1.0.0 -> 2.0.0" "$HOME/.claude-playbooks/pb/migrated" && echo migration-ran'
+contains = "migration-ran"
+
+[[verify.commands]]
+# Replaced entries are backed up beside the install, not destroyed.
+command = 'ls -d "$HOME/.claude-playbooks/".pb.bak.* >/dev/null 2>&1 && echo backed-up'
+contains = "backed-up"
+
+[[verify.commands]]
+command = 'claude-playbook info pb'
+contains = "2.0.0"
+
+[[verify.commands]]
+# --all over a registry holding one updatable playbook and one that is not:
+# the second is skipped with a reason, never an error.
+command = '''mkdir -p "$HOME/.claude-playbooks/orphan" && printf '%s\n' '# orphan' > "$HOME/.claude-playbooks/orphan/CLAUDE.md" && claude-playbook update --all'''
+contains = "no [source] metadata"
+
+[[verify.commands]]
+# pb is already at the source's version, so --all leaves it alone. That is
+# the documented difference from `update <name>`, which re-applies.
+command = 'claude-playbook update --all'
+contains = "up to date"
+
+[[verify.commands]]
+# And so backups do not accumulate: still the one from the single update.
+command = 'test "$(ls -d "$HOME/.claude-playbooks/".pb.bak.* | wc -l)" -eq 1 && echo no-churn'
+contains = "no-churn"
+
+[[verify.commands]]
+# Contradictions refused rather than guessed at.
+command = 'claude-playbook update --all pb 2>&1 | grep -F "drop the name"'
+contains = "drop the name"

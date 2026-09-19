@@ -36,6 +36,13 @@ agent:
 The subject is your **working tree** (uncommitted changes included) —
 fix and rerun, no commit needed to test.
 
+The engine is pinned by `GENTAR_REF` (default `main`), re-fetched and
+re-checked-out on every run, **and the coordinator image is rebuilt from it**.
+That last part is not optional: the compose service is `build: ./coordinator`,
+so without a build step `docker compose run` reuses a cached image, and on a
+long-lived runner that image drifts months behind the source while `GENTAR_REF`
+looks perfectly honoured. A fresh checkout is not a fresh engine.
+
 ## Suites
 
 | Suite | Proves |
@@ -47,7 +54,126 @@ fix and rerun, no commit needed to test.
 | `launcher-run-version` | `run` (and the launcher alias) actually spawns claude with the playbook wired — keyless, via `--version` |
 | `docs-honesty` | README's documented commands answer `--help` in the built binary; referenced files exist and stay executable |
 | `env-overrides` | manifest `[env]`, an attached env profile, one-off launch flags (before/after the name, via the launcher), an env file, and the `start -- --delete` boundary, all proven against the environment a stub `claude` actually received |
-| `auth-status` | `auth status` table and JSON for a fresh playbook (shared-login, no grant), read-only against a timestamp marker, unknown-name refusal |
+| `auth-status` | `auth status` table and JSON for a fresh playbook (shared-login, no grant), read-only against a timestamp marker, unknown-name refusal, and `isolate_auth` reported as isolated |
+| `playbook-update` | native `update`: `--check` installs nothing, content moves, `settings.json` and `.claude.json` survive, the migration runs with the version pair, entries are backed up — and `--all` skips what it cannot update, leaves up-to-date playbooks alone, and refuses contradictory flags |
+| `playbook-link` | `link` develop-in-place: the entry is a symlink, edits outside are live inside, native update is refused, and `delete` removes the link without following it |
+| `config-dir-override` | `CLAUDE_CONFIG_DIR_OVERRIDE` end to end against the environment a stub `claude` received: honoured, consumed, a bare `CLAUDE_CONFIG_DIR` still ignored, refused in a layer, refused relative, refused with `--sandbox`, and reported-then-ignored by `start` |
+
+### Simulated pilots
+
+Suites with a `[driver]` block drive a **pty** instead of running a shell
+script, so paths that need a human at the terminal become testable. Everything
+above runs headless, where a confirmation prompt reads EOF and cancels — which
+is why `delete`'s interactive path had never been exercised at all.
+
+| Suite | Proves |
+|---|---|
+| `pilot-interactive-delete` | a scripted pilot declining a `delete` (nothing happens) and then confirming it (the playbook and both its launchers go, a bystander does not), both branches in one pty session |
+| `pilot-agent-session` | a **real agent**, launched through a playbook, doing a real task — and the marker it writes carries a token only the playbook's own `CLAUDE.md` supplied, so the file is proof the playbook governed the session. Needs an agent credential; left out of the sweep when none is set |
+
+## The agent bench (one-time, for `pilot-agent-session` only)
+
+Everything else runs on gentar's shared `gentar-bench-v1`. The agent suite
+gets its own bench, for two reasons:
+
+- **The claude-code pin must not move under us.** 2.1.265+ sends the Artifact
+  tool, and at least one Anthropic-compatible backend (GLM) rejects its schema
+  with `400` on every interactive turn — see `SPEC-v4.md`, which is why cpb has
+  a `[sandbox] claude_version` pin at all. gentar bumps its own template on its
+  own schedule; a bump past 2.1.265 would break this suite for a reason
+  unrelated to claude-playbooks.
+- **Blast radius.** The endpoint credential enters benches made from this
+  template. Keeping it off the shared template means a suite of ours cannot
+  widen what gentar's own gate runs with.
+
+### 1. Build the template
+
+```bash
+ssh <bench-host> "VERSION=$(cat gentar/bench-template/VERSION) sh -s" \
+    < gentar/bench-template/build.sh
+```
+
+The version is passed explicitly because the script is *piped*: the bench-host
+has no checkout, so it cannot read `VERSION` itself.
+
+Pin lives in `gentar/bench-template/VERSION` (currently `2.1.234` — the
+version gentar proved live against a GLM endpoint). `pilot-agent-session`
+asserts that exact version from inside the bench **before** any other
+assertion, so a stale or rebuilt-at-the-wrong-version template fails loudly
+instead of producing a confusing agent failure.
+
+### 2. Check the endpoint is reachable — **on the bench-host**
+
+gentar applies no per-scenario egress rules, so whatever policy the bench-host
+carries is what a bench gets. Policy is **per machine**, and the answer differs
+between your laptop and the bench — run the check where the bench actually is:
+
+```bash
+ssh <bench-host> 'sbx policy check network <endpoint-host>'
+```
+
+- **Allowed** → nothing to do.
+- **Denied: no matching allow rule** → add a global rule on that host, then
+  re-check:
+  ```bash
+  ssh <bench-host> 'sbx policy allow network <endpoint-host>'
+  ```
+
+Confirm end to end from inside a real bench rather than trusting the policy
+read, since only this proves name resolution *and* routing:
+
+```bash
+ssh <bench-host> 'sbx create --name probe -t cpb-agent-bench-v1 shell /tmp/probe   && sbx exec probe sh -lc "curl -s -o /dev/null -w %{http_code} http://<endpoint>/v1"   ; sbx rm probe --force'
+```
+
+Any HTTP status — `401` included — means reachable; a hang or `blocked` does not.
+
+> **Worth knowing about the current bench-host.** Its policy is a single
+> `allow ** network` rule (`default-allow-all`), so sandboxes there have
+> unrestricted egress and this step is already satisfied. That is a reasonable
+> posture for a throwaway bench, and worth being deliberate about now that a
+> bench runs a **real agent with a real credential**: an agent on that bench can
+> reach anything the bench-host can.
+
+A first-party `api.anthropic.com` key needs none of this; it is in every default
+policy. The step exists only for a self-hosted or routed endpoint.
+
+### 3. Point the suite at it
+
+Repository **variables** (not secrets — they are not sensitive, and a variable
+is visible in logs, which is what you want for an endpoint):
+
+| Setting | Value |
+|---|---|
+| `vars.ANTHROPIC_BASE_URL` | the endpoint, e.g. `http://10.0.0.5:20128/v1` — an **address the bench can resolve**, not a short LAN name |
+| `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` | **all four**, for a routed endpoint. Slot vars: claude-code's catalog hard-rejects unknown IDs on the main-model path, so `--model` is not an option — but it also picks a slot for itself, and an unpinned slot sends a literal Anthropic ID to an endpoint that has never heard of it. Pinning only Sonnet fails with *"There's an issue with the selected model (claude-opus-5…)"* |
+
+And the credential as a **secret**: `secrets.ANTHROPIC_AUTH_TOKEN` (routed
+endpoint) or `secrets.ANTHROPIC_API_KEY` (first-party). With neither set, the
+suite is simply left out of the sweep.
+
+Two things to weigh before wiring a router. A routed suite tests **the
+router's availability** as much as it tests claude-playbooks: if the endpoint
+is down, the arena goes red for an unrelated reason. And a plain-`http`
+endpoint carries the token in cleartext to that host — fine on a trusted link,
+worth a thought on any other.
+
+## Before you push a suite
+
+```bash
+gentar/dryrun.py                                   # every suite
+gentar/dryrun.py gentar/scenarios/playbook-update.toml
+```
+
+Runs a suite's steps, driver turns and assertions in a scratch `HOME` in about
+a second — no bench, no sandbox, no network. A scenario is shell inside TOML,
+three levels of quoting deep, and the arena was the only thing that ever ran
+it: one missing quote cost a bench VM and several minutes to find. This finds
+it before the push.
+
+It is not a substitute for the arena. There is no sandbox, no template and no
+network policy, so it proves the shell and the assertions while the arena
+proves the isolation. Suites declaring `credentials` are skipped.
 
 Add a suite = add a TOML here. Schema and vocabulary:
 [gentar scenario schema](https://github.com/agent-realm/gentar/blob/main/coordinator/gentar/toml_scenario.py)

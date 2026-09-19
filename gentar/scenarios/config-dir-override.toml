@@ -1,0 +1,95 @@
+# claude-playbooks own-arena suite 11: CLAUDE_CONFIG_DIR_OVERRIDE -- a
+# caller supplying the config directory a launch binds.
+#
+# The variable's whole contract is about what the CHILD process receives,
+# which unit tests assert on a returned slice and only an end-to-end run
+# proves. A stub `claude` earlier on PATH records its own environment; the
+# bench template ships a real one, so PATH is prepended per command rather
+# than relying on ordering.
+#
+# Four behaviours, each a separate way to get this wrong:
+#   honoured · consumed (absent from the child) · a bare CLAUDE_CONFIG_DIR
+#   still ignored · refused where it cannot work (sandbox, relative path)
+
+[scenario]
+name = "config-dir-override"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  'mkdir -p "$HOME/stub" "$HOME/record"',
+  # Records the environment the launch handed it, then exits. The verdict is
+  # this file, never anything the launch printed about itself.
+  '''printf '%s\n' '#!/bin/sh' 'env > "$HOME/childenv"' 'exit 0' > "$HOME/stub/claude"''',
+  'chmod 755 "$HOME/stub/claude"',
+]
+
+[[verify.files]]
+path = "~/.local/bin/claude-playbook"
+
+[[verify.commands]]
+command = 'claude-playbook create ovr --no-alias && echo created'
+contains = "created"
+
+[[verify.commands]]
+# Honoured: the child binds the supplied directory, not the install.
+command = 'CLAUDE_CONFIG_DIR_OVERRIDE="$HOME/record" PATH="$HOME/stub:$PATH" claude-playbook run ovr && grep -qxF "CLAUDE_CONFIG_DIR=$HOME/record" "$HOME/childenv" && echo honoured'
+contains = "honoured"
+
+[[verify.commands]]
+# Consumed: the request must not reach the child, or a launch made from
+# inside the session would be redirected into this one's directory.
+command = '! grep -q "^CLAUDE_CONFIG_DIR_OVERRIDE=" "$HOME/childenv" && echo consumed'
+contains = "consumed"
+
+[[verify.commands]]
+# A bare inherited CLAUDE_CONFIG_DIR is still discarded -- the reason the
+# opt-in needs its own name.
+command = 'CLAUDE_CONFIG_DIR="$HOME/stray" PATH="$HOME/stub:$PATH" claude-playbook run ovr && grep -qxF "CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/ovr" "$HOME/childenv" && echo bare-ignored'
+contains = "bare-ignored"
+
+[[verify.commands]]
+# Default unchanged.
+command = 'PATH="$HOME/stub:$PATH" claude-playbook run ovr && grep -qxF "CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/ovr" "$HOME/childenv" && echo default-kept'
+contains = "default-kept"
+
+[[verify.commands]]
+# Reserved: declaring it in a layer could never redirect its own launch, but
+# would leak into the next one. Refused at the front door.
+#
+# The stub PATH is REQUIRED here, unlike the two refusals below. `run` looks
+# up `claude` (cmd/run.go) BEFORE it validates the launch flags, so on a bench
+# with no claude installed -- which the default template is -- this reports
+# "'claude' command not found" and never reaches the reserved-key check. Found
+# the hard way: it passed locally, where the dry-run harness always installs a
+# stub, and failed here where nothing does.
+command = 'PATH="$HOME/stub:$PATH" claude-playbook run --env CLAUDE_CONFIG_DIR_OVERRIDE=/leak ovr 2>&1 | grep -F "managed by claude-playbook"'
+contains = "managed by claude-playbook"
+
+[[verify.commands]]
+# Relative is refused rather than resolved: the child resolves
+# CLAUDE_CONFIG_DIR against ITS working directory, not ours.
+#
+# Deliberately WITHOUT the stub PATH: this refusal happens before the `claude`
+# lookup, so it holds on a machine with no agent installed at all. That
+# ordering is worth pinning -- a malformed override is a usage error the pilot
+# can fix, and reporting a missing agent instead would send them elsewhere.
+command = 'CLAUDE_CONFIG_DIR_OVERRIDE=rel/path claude-playbook run ovr 2>&1 | grep -F "absolute"'
+contains = "absolute"
+
+[[verify.commands]]
+# A sandboxed launch mounts the config directory; a supplied one whose
+# content is reached through symlinks dangles inside. Refused before any
+# backend call, so this passes with no sandbox backend installed -- and,
+# like the relative case, before the `claude` lookup, so no stub is needed.
+command = 'CLAUDE_CONFIG_DIR_OVERRIDE="$HOME/record" claude-playbook run --sandbox ovr 2>&1 | grep -F "not supported"'
+contains = "not supported"
+
+[[verify.commands]]
+# `start` names its own directory, so the override is ignored -- and said so,
+# because it is consumed either way and silence would look like success.
+command = 'CLAUDE_CONFIG_DIR_OVERRIDE="$HOME/record" PATH="$HOME/stub:$PATH" claude-playbook start "$HOME/adhoc" 2>&1 | grep -F "ignored"'
+contains = "ignored"

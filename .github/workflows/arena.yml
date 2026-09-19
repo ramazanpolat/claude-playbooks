@@ -10,6 +10,16 @@
 # to you, dispatch with gentar_ref pinned to an audited SHA.
 name: arena
 
+# The bench-host is a single VM, and gentar's own CI gate runs on the same
+# runner with its own `concurrency` group -- which serializes ITS jobs, not
+# ours. Without this, two of our own arena runs (a push landing during a
+# dispatch, say) spawn sandboxes on that bench concurrently and race on
+# names. Not cancel-in-progress: an arena run that is already touching the
+# bench should finish and clean up rather than be killed mid-sandbox.
+concurrency:
+  group: arena-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]
@@ -75,9 +85,26 @@ jobs:
             done
             exec gentar/run.sh $INPUT
           fi
+          # "Run everything" means every suite this run CAN run. A suite
+          # that declares `credentials` is refused by the coordinator
+          # (exit 2, before any bench exists) when none of the named
+          # variables is set -- correct for a direct ask, wrong for a push
+          # that never promised an agent credential. Such suites are left
+          # out of the sweep unless a credential is present, and named
+          # either way so the log says which and why. Dispatching one by
+          # name still reaches the honest refusal.
           suites=""
           for f in gentar/scenarios/*.toml; do
-            suites="$suites $(basename "$f" .toml)"
+            s=$(basename "$f" .toml)
+            if grep -q '^credentials = \[' "$f"; then
+              if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
+                echo "including $s (agent credential present)"
+              else
+                echo "skipping $s (needs an agent credential; none set)"
+                continue
+              fi
+            fi
+            suites="$suites $s"
           done
           exec gentar/run.sh $suites
         env:
@@ -85,10 +112,41 @@ jobs:
           GENTAR_REF: ${{ github.event.inputs.gentar_ref || 'main' }}
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
           GENTAR_CLONE_SSH_KEY: ${{ runner.temp }}/gentar_clone_key
-          # This runner also hosts gentar's own CI gate, whose stack owns
-          # host port 8123. The arena's debug binding moves to 8126
-          # (needs agent-realm/gentar#17; harmless no-op before it).
+          # This runner also hosts gentar's own CI gate, whose compose stack
+          # publishes the same host ports. Every shared binding is moved
+          # aside here; gentar's docker-compose.yml documents each override
+          # and reads them as ${VAR:-default}.
+          #   ClickHouse debug binding: gentar's gate owns 8123.
           GENTAR_CLICKHOUSE_HOST_PORT: "8126"
+          #   OTLP receiver: the collector publishes 4318 on ALL interfaces
+          #   (benches reach it from the bench-host), so two stacks on one
+          #   Docker host collide outright. gentar's gate pins 4319.
+          GENTAR_OTLP_HOST_PORT: "4320"
+          # Agent-in-the-loop suites. Providers are alternatives: a
+          # first-party key, or any Anthropic-compatible endpoint via
+          # token + base URL. All unset is the normal case and simply
+          # leaves those suites out of the sweep (see above).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+          # Model pins: SLOT vars, not ANTHROPIC_MODEL (claude-code rejects
+          # unknown main-model IDs). ALL FOUR, because claude-code picks a
+          # slot for itself -- an unpinned one sends a literal Anthropic ID
+          # to an endpoint that never heard of it. A routed endpoint needs
+          # every slot it could be asked for; unset is fine for a
+          # first-party key, which knows all of them.
+          #
+          # This is the FIRST link in the chain: repo var -> here -> run.sh
+          # forwards into the coordinator container -> gentar exports into
+          # the bench. Adding a pin anywhere downstream without adding it
+          # here does nothing at all.
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.ANTHROPIC_DEFAULT_OPUS_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.ANTHROPIC_DEFAULT_HAIKU_MODEL }}
+          ANTHROPIC_DEFAULT_FABLE_MODEL: ${{ vars.ANTHROPIC_DEFAULT_FABLE_MODEL }}
+          # Ceiling the budget guard enforces; must be >= each agent
+          # suite's declared [budget] tokens.
+          GENTAR_BUDGET_CAP: "50000"
 
       - name: upload reports
         if: always()

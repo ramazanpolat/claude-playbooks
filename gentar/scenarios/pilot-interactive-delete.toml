@@ -1,0 +1,60 @@
+# claude-playbooks own-arena suite 12: the first SIMULATED PILOT suite --
+# a scripted human at the terminal, answering prompts on a pty.
+#
+# Why it has to exist: `delete` without -y asks for confirmation on stdin.
+# Every shell suite runs headless, where that read gets EOF and the delete
+# silently cancels -- so the entire interactive path, including the refusal
+# branch a pilot relies on to back out, was unreachable by construction and
+# has never been exercised. A pty driver is the only way in.
+#
+# Both branches, in one session, in order: decline (nothing happens), then
+# confirm (everything named goes). The transcript proves the branches were
+# taken; the filesystem afterwards is the verdict.
+
+[scenario]
+name = "pilot-interactive-delete"
+subject = "claude-playbooks"
+agent = "shell"
+template = "gentar-bench-v1"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  # The target, with an alias so the retirement rule has two launchers to
+  # remove, and a bystander that must survive untouched.
+  '"$HOME/.local/bin/claude-playbook" create doomed --alias dmd',
+  '"$HOME/.local/bin/claude-playbook" create keeper --no-alias',
+  # Content, so the "Contents: N files" line the prompt is preceded by is
+  # non-trivial and the directory is worth confirming about.
+  '''printf '%s\n' 'notes' > "$HOME/.claude-playbooks/doomed/NOTES.md"''',
+]
+
+[driver]
+# Two deletes in one pty session: the first declined, the second confirmed.
+command = 'claude-playbook delete doomed; claude-playbook delete doomed'
+
+turns = [
+  # A pilot who changes their mind. "n" is anything that is not y/yes.
+  { type = "answer", prompt = "Permanently delete", send = "n", timeout = 60 },
+  { type = "expect", pattern = "Cancelled", timeout = 30 },
+  # And a pilot who means it.
+  { type = "answer", prompt = "Permanently delete", send = "y", timeout = 60 },
+  { type = "expect", pattern = "Deleted playbook", timeout = 60 },
+]
+
+[[verify.commands]]
+# Gone, with both launchers retired -- the one named for it and the one
+# named by its manifest alias.
+command = 'test ! -e "$HOME/.claude-playbooks/doomed" && test ! -e "$HOME/.local/bin/doomed" && test ! -e "$HOME/.local/bin/dmd" && echo deleted'
+contains = "deleted"
+
+[[verify.commands]]
+command = '! claude-playbook list | grep -F doomed && echo unlisted'
+contains = "unlisted"
+
+[[verify.commands]]
+# The bystander is untouched: a confirmed delete removes exactly what was
+# named.
+command = 'test -d "$HOME/.claude-playbooks/keeper" && claude-playbook list | grep -F keeper'
+contains = "keeper"
