@@ -232,10 +232,11 @@ redirect the launch that declares it, only leak into the next one:
 ```
 $ cpb run kommander --env CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1
 Error: CLAUDE_CONFIG_DIR_OVERRIDE is managed by claude-playbook and cannot be overridden
-``` One exception worth knowing: if you
-`export` it in your shell rather than setting it for one command, it stays in
-that shell — nothing can un-export a parent's variable — so every launch from
-there honours it until you unset it.
+```
+
+One exception worth knowing: if you `export` it in your shell rather than
+setting it for one command, it stays in that shell — nothing can un-export a
+parent's variable — so every launch from there honours it until you unset it.
 
 **Not with `--sandbox`.** A sandbox mounts the config directory, and the backend
 mounts directories, so symlinked content dangles inside. The combination is

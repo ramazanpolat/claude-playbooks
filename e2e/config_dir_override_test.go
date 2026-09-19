@@ -402,8 +402,13 @@ func TestRemoteStartStillReportsIgnoredOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A RELATIVE path, so "named as typed" and "resolved locally" are
+	// distinguishable: an absolute one looks identical either way, and the
+	// forwarding log would satisfy the assertion on its own.
+	const remotePath = "scratch/here"
 	work := t.TempDir()
-	cmd := exec.Command(binPath, "start", "--sandbox-host", "user@host", "/remote/scratch")
+	cmd := exec.Command(binPath, "start", "--sandbox-host", "user@host", remotePath)
+	cmd.Dir = work
 	cmd.Env = []string{
 		"PATH=" + shim + string(os.PathListSeparator) + shimDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"HOME=" + work,
@@ -415,13 +420,60 @@ func TestRemoteStartStillReportsIgnoredOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remote start: %v\n%s", err, out)
 	}
-	if !strings.Contains(string(out), overrideEnv) || !strings.Contains(string(out), "ignored") {
-		t.Errorf("a remote start did not report the ignored override:\n%s", out)
+
+	// Assert on the NOTICE line specifically. The forwarding log also echoes
+	// the path, so a whole-output match would pass even with the notice gone
+	// or naming the wrong directory.
+	var notice string
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, overrideEnv) && strings.Contains(line, "ignored") {
+			notice = line
+			break
+		}
 	}
-	// Named as typed: resolving it locally would print a directory that is not
-	// the one being used.
-	if !strings.Contains(string(out), "/remote/scratch") {
-		t.Errorf("the notice does not name the remote path as given:\n%s", out)
+	if notice == "" {
+		t.Fatalf("a remote start did not report the ignored override:\n%s", out)
+	}
+	if !strings.Contains(notice, remotePath) {
+		t.Errorf("the notice does not name the remote path: %q", notice)
+	}
+	// The local resolution must not appear: the path belongs to the remote host.
+	if localised := filepath.Join(work, remotePath); strings.Contains(notice, localised) {
+		t.Errorf("the notice resolved the remote path against the local cwd: %q", notice)
+	}
+}
+
+// REGRESSION (review round 2): cmd/auth.go builds the `claude auth status`
+// probe environment straight from os.Environ() and binds CLAUDE_CONFIG_DIR
+// itself. Reverting its consumption would restore the leak without failing any
+// other test here.
+func TestAuthProbeDoesNotLeakOverride(t *testing.T) {
+	root := t.TempDir()
+	playbook(t, root, "pb", false)
+
+	work := t.TempDir()
+	dump := filepath.Join(work, "envdump")
+	cmd := exec.Command(binPath, "--playbooks-dir", root, "auth", "status", "--claude", "pb")
+	cmd.Env = []string{
+		"PATH=" + shimDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + work,
+		dumpEnv + "=" + dump,
+		securityLogEnv + "=" + filepath.Join(work, "security.log"),
+		overrideEnv + "=/records/a",
+	}
+	// The probe's own exit status does not matter: the stub claude emits no
+	// JSON, so auth status records an error for it. The environment it was
+	// handed is what this test is about.
+	out, _ := cmd.CombinedOutput()
+
+	data, err := os.ReadFile(dump)
+	if err != nil {
+		t.Fatalf("the claude probe was never executed (no env dump): %v\n%s", err, out)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, overrideEnv+"=") {
+			t.Errorf("%s reached the claude auth probe as %q", overrideEnv, line)
+		}
 	}
 }
 

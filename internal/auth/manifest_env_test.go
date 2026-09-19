@@ -531,3 +531,59 @@ func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
 		t.Fatalf("inspect mode = %s, want own-login from the default's unset", r.Mode)
 	}
 }
+
+// REGRESSION (review round 2): the reservation in manifest.ReservedEnvKeys
+// stops a layer DECLARING the config-dir override, and the e2e tests pin that
+// refusal. Neither would catch the binding moving back ABOVE applyManifestEnv
+// while the reservation stayed: validation happens in the manifest package, so
+// a layer constructed in code reaches PrepareLaunchEnvWith unvalidated. These
+// call it directly with exactly such a layer, which is the only way to observe
+// the ordering rather than the refusal.
+func TestConfigDirOverrideConsumedAfterEveryLayer(t *testing.T) {
+	leaky := func() []*manifest.Env {
+		return []*manifest.Env{{Set: map[string]string{config.ConfigDirOverrideEnv: "/leak"}}}
+	}
+
+	assertConsumed := func(t *testing.T, env []string, configDir string) {
+		t.Helper()
+		if got, present := envValue(t, env, config.ConfigDirOverrideEnv); present {
+			t.Errorf("%s = %q survived into the child: it is bound after the layers, so no layer may reintroduce it", config.ConfigDirOverrideEnv, got)
+		}
+		if got, _ := envValue(t, env, "CLAUDE_CONFIG_DIR"); got != configDir {
+			t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, configDir)
+		}
+	}
+
+	t.Run("normal path", func(t *testing.T) {
+		configDir := t.TempDir()
+		writeStore(t, configDir, `{`+grantJSON+`}`)
+		env, err := PrepareLaunchEnvWith(configDir, leaky())
+		if err != nil {
+			t.Fatalf("advisory error: %v", err)
+		}
+		assertConsumed(t, env, configDir)
+	})
+
+	t.Run("isolated path", func(t *testing.T) {
+		configDir := t.TempDir()
+		writeManifest(t, configDir, "isolate_auth = true\n")
+		writeStore(t, configDir, `{`+grantJSON+`}`)
+		env, err := PrepareLaunchEnvWith(configDir, leaky())
+		if err != nil {
+			t.Fatalf("advisory error: %v", err)
+		}
+		assertConsumed(t, env, configDir)
+	})
+
+	t.Run("refusal path", func(t *testing.T) {
+		// A refusal returns early, before the layers are applied at all. The
+		// env it hands back is still well-formed and must still be bound.
+		configDir := t.TempDir()
+		layers := append(leaky(), &manifest.Env{Profiles: []string{"ghost"}})
+		env, err := PrepareLaunchEnvWith(configDir, layers)
+		if !errors.Is(err, envprofile.ErrProfile) {
+			t.Fatalf("want a profile refusal, got %v", err)
+		}
+		assertConsumed(t, env, configDir)
+	})
+}
