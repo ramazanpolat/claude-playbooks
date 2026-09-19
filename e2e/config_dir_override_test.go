@@ -334,4 +334,151 @@ func TestEmptyOverrideIsNotSet(t *testing.T) {
 	if got := env[configDirEnv]; got != install {
 		t.Errorf("%s = %q, want %q: an empty override means unset", configDirEnv, got, install)
 	}
+	// "Means unset" has to include being consumed: an empty entry left in the
+	// child is still an entry a nested launch would read.
+	if v, present := env[overrideEnv]; present {
+		t.Errorf("an empty %s reached the child as %q", overrideEnv, v)
+	}
+}
+
+// REGRESSION (review finding): the override was stripped before the manifest,
+// profile and launch-flag layers were applied, so any layer naming it put it
+// back into the child -- where it would redirect a nested launch. All four
+// declaring doors now refuse the key outright, and the binding happens after
+// every layer so the refusal does not have to be trusted.
+func TestOverrideCannotBeReintroducedByEnvLayers(t *testing.T) {
+	root := t.TempDir()
+	dir := playbook(t, root, "pb", false)
+
+	t.Run("launch flag", func(t *testing.T) {
+		out := runFailing(t, root, nil, []string{"run", "--env", overrideEnv + "=/leak", "pb"})
+		if !strings.Contains(out, "managed by claude-playbook") {
+			t.Errorf("--env %s was not refused:\n%s", overrideEnv, out)
+		}
+	})
+
+	t.Run("manifest env.set", func(t *testing.T) {
+		man := filepath.Join(dir, ".playbook")
+		original, err := os.ReadFile(man)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.WriteFile(man, original, 0o644) })
+		if err := os.WriteFile(man, []byte("name = \"pb\"\n\n[env.set]\n"+overrideEnv+" = \"/leak\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out := runFailing(t, root, nil, []string{"run", "pb"})
+		if !strings.Contains(out, "managed by claude-playbook") {
+			t.Errorf("a manifest setting %s was not refused:\n%s", overrideEnv, out)
+		}
+	})
+
+	t.Run("env file", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "leak.env")
+		if err := os.WriteFile(f, []byte(overrideEnv+"=/leak\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out := runFailing(t, root, nil, []string{"run", "--env-file", f, "pb"})
+		if !strings.Contains(out, "managed by claude-playbook") {
+			t.Errorf("an env file setting %s was not refused:\n%s", overrideEnv, out)
+		}
+	})
+
+	t.Run("env profile", func(t *testing.T) {
+		out := runFailing(t, root, nil, []string{"env-profile", "leaky", "set", overrideEnv + "=/leak"})
+		if !strings.Contains(out, "managed by claude-playbook") {
+			t.Errorf("a profile setting %s was not refused:\n%s", overrideEnv, out)
+		}
+	})
+}
+
+// REGRESSION (review finding): a remote start forwarded over ssh returned
+// before the notice was reached, so the override was ignored in silence -- and
+// the remote never receives the variable, so it could not report it either.
+func TestRemoteStartStillReportsIgnoredOverride(t *testing.T) {
+	// Stub ssh: the forward must succeed without a real host.
+	shim := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shim, "ssh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	work := t.TempDir()
+	cmd := exec.Command(binPath, "start", "--sandbox-host", "user@host", "/remote/scratch")
+	cmd.Env = []string{
+		"PATH=" + shim + string(os.PathListSeparator) + shimDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + work,
+		dumpEnv + "=" + filepath.Join(work, "envdump"),
+		securityLogEnv + "=" + filepath.Join(work, "security.log"),
+		overrideEnv + "=/records/a",
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("remote start: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), overrideEnv) || !strings.Contains(string(out), "ignored") {
+		t.Errorf("a remote start did not report the ignored override:\n%s", out)
+	}
+	// Named as typed: resolving it locally would print a directory that is not
+	// the one being used.
+	if !strings.Contains(string(out), "/remote/scratch") {
+		t.Errorf("the notice does not name the remote path as given:\n%s", out)
+	}
+}
+
+// REGRESSION (review finding): the migration runner built its environment
+// straight from os.Environ(), so an exported override survived into
+// migrations/apply.sh -- and into anything that script launched.
+func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
+	root := t.TempDir()
+	src := t.TempDir()
+	// A source the playbook can update from, shipping a migration that records
+	// the environment it was given.
+	if err := os.WriteFile(filepath.Join(src, "CLAUDE.md"), []byte("# pb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("name = \"pb\"\nversion = \"2.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "migrations"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "migration-env")
+	script := "#!/bin/sh\nenv > " + log + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(src, "migrations", "apply.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Install it, then update so the migration runs.
+	work := t.TempDir()
+	base := []string{
+		"PATH=" + shimDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + work,
+		dumpEnv + "=" + filepath.Join(work, "envdump"),
+		securityLogEnv + "=" + filepath.Join(work, "security.log"),
+	}
+	install := exec.Command(binPath, "--playbooks-dir", root, "install", src, "--name", "pb", "--no-alias")
+	install.Env = base
+	if out, err := install.CombinedOutput(); err != nil {
+		t.Fatalf("install: %v\n%s", err, out)
+	}
+	// Make the installed copy older so the update has something to do.
+	if err := os.WriteFile(filepath.Join(root, "pb", ".playbook"), []byte("name = \"pb\"\nversion = \"1.0.0\"\n\n[source]\nrepository = \""+src+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	update := exec.Command(binPath, "--playbooks-dir", root, "update", "pb")
+	update.Env = append(append([]string{}, base...), overrideEnv+"=/records/a")
+	if out, err := update.CombinedOutput(); err != nil {
+		t.Fatalf("update: %v\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("the migration never ran (no env log): %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, overrideEnv+"=") {
+			t.Errorf("%s reached migrations/apply.sh as %q", overrideEnv, line)
+		}
+	}
 }

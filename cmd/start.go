@@ -22,6 +22,30 @@ var startCmd = &cobra.Command{
 	RunE:               runStart,
 }
 
+// noteStartIgnoresOverride reports that start ignored a caller-supplied config
+// directory. start names its own on the command line, and the command line
+// outranks the environment.
+//
+// It has to be SAID: the variable is consumed either way, so from outside the
+// process "ignored" and "honoured" look identical, and a caller could believe
+// its directory was used. Silent when the override names the same directory
+// that is being used, since then nothing was ignored -- a notice that fires
+// when nothing happened stops being read. A malformed value is reported too,
+// as a warning rather than a refusal: start's own path is valid and the
+// session runs.
+//
+// dirShown is the directory start will actually use, spelled as the operator
+// will recognise it -- resolved locally, or as typed for a remote start.
+func noteStartIgnoresOverride(dirShown string) {
+	overrideDir, override, err := config.ResolveConfigDirOverride()
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "Warning: %v (start uses the directory you named, %s)\n", err, dirShown)
+	case override && overrideDir != dirShown:
+		fmt.Fprintf(os.Stderr, "%s ignored: start uses the directory you named, %s\n", config.ConfigDirOverrideEnv, dirShown)
+	}
+}
+
 func runStart(cmd *cobra.Command, args []string) error {
 	// start addresses a path, not a registry name, but the playbooks-dir
 	// value still names the root whose .env-profiles/ the path's manifest
@@ -97,6 +121,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if deleteAfter {
 			wrapper = []string{"--delete"}
 		}
+		// The whole start runs on the remote host, which never receives this
+		// variable, so the notice has to happen here or nowhere. The path is
+		// named as given: it is a path THERE, and resolving it against the
+		// local working directory would print a directory that is not the one
+		// being used.
+		noteStartIgnoresOverride(path)
 		return forwardToSandboxHost(sopts.host, "start", original, &sopts, tokens, wrapper, path, claudeArgs)
 	}
 	absPath, err := filepath.Abs(path)
@@ -104,19 +134,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid path %q: %w", path, err)
 	}
 
-	// start names its own config directory, so a caller-supplied one has
-	// nothing to override and the path argument wins -- the command line
-	// outranks the environment. Say so rather than letting a caller believe
-	// its directory was used: the variable is still CONSUMED (stripped from
-	// the child by PrepareLaunchEnv), so silence would be indistinguishable
-	// from having been honoured. A bad value is reported here too, for the
-	// same reason: a caller whose override is malformed should hear about it
-	// even on the one launch shape that would not have used it.
-	if overrideDir, override, oErr := config.ResolveConfigDirOverride(); oErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: %v (start uses the directory you named, %s)\n", oErr, absPath)
-	} else if override && overrideDir != absPath {
-		fmt.Fprintf(os.Stderr, "%s ignored: start uses the directory you named, %s\n", config.ConfigDirOverrideEnv, absPath)
-	}
+	noteStartIgnoresOverride(absPath)
 
 	if info, err := os.Stat(absPath); err == nil && !info.IsDir() {
 		return fmt.Errorf("%q is not a directory", absPath)

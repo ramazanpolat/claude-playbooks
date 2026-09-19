@@ -130,6 +130,27 @@ func ResolveConfigDirOverride() (string, bool, error) {
 	return filepath.Clean(v), true, nil
 }
 
+// WithoutConfigDirOverride removes CLAUDE_CONFIG_DIR_OVERRIDE from an
+// environment slice. Every subprocess the tool starts with an explicitly
+// chosen CLAUDE_CONFIG_DIR uses it: that choice is authoritative, and leaving
+// a request for a different directory beside it is incoherent. It also stops
+// the variable reaching anything the subprocess itself launches -- a migration
+// runner that calls `claude-playbook run` would otherwise be redirected.
+//
+// Launches go through auth.PrepareLaunchEnv, which consumes the variable as
+// part of binding CLAUDE_CONFIG_DIR; this is for the paths that build an
+// environment directly.
+func WithoutConfigDirOverride(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, ConfigDirOverrideEnv+"=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 func ResolvePlaybooksDir() string {
 	if PlaybooksDir != "" {
 		return PlaybooksDir

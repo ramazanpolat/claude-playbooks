@@ -225,7 +225,14 @@ only happen on purpose. `CLAUDE_CONFIG_DIR_OVERRIDE` is what you *request*;
 
 **It does not travel.** `cpb` consumes the variable and strips it from the
 session, so an agent inside that runs `cpb run something-else` gets that
-playbook's own directory, not this one's. One exception worth knowing: if you
+playbook's own directory, not this one's. Setting it through a manifest, a
+profile, `--env` or `--env-file` is refused outright — from there it could never
+redirect the launch that declares it, only leak into the next one:
+
+```
+$ cpb run kommander --env CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1
+Error: CLAUDE_CONFIG_DIR_OVERRIDE is managed by claude-playbook and cannot be overridden
+``` One exception worth knowing: if you
 `export` it in your shell rather than setting it for one command, it stays in
 that shell — nothing can un-export a parent's variable — so every launch from
 there honours it until you unset it.
