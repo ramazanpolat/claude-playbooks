@@ -94,7 +94,9 @@ docker compose -p "arena-$(basename "$REPO")" build coordinator
 # boundary. Forward only the ones actually set, so an unset variable stays
 # unset inside rather than arriving empty-but-present.
 #
-#   ANTHROPIC_*                  credential, endpoint, optional model pin
+#   ANTHROPIC_*                  credential, endpoint, and EVERY model slot
+#                                (see pilot-agent-session: pinning one slot is
+#                                not enough)
 #   GENTAR_BUDGET_CAP            ceiling the budget guard enforces
 # ${FORWARD[@]+"..."} rather than "${FORWARD[@]}": under `set -u`, bash 3.2
 # (still the system bash on macOS) treats an EMPTY array expansion as an
@@ -103,7 +105,8 @@ docker compose -p "arena-$(basename "$REPO")" build coordinator
 FORWARD=()
 for var in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
            ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL \
-           ANTHROPIC_DEFAULT_HAIKU_MODEL GENTAR_BUDGET_CAP; do
+           ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL \
+           GENTAR_BUDGET_CAP; do
   [ -n "${!var:-}" ] && FORWARD+=(-e "$var")
 done
 

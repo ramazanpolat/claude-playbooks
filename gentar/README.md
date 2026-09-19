@@ -146,7 +146,7 @@ is visible in logs, which is what you want for an endpoint):
 | Setting | Value |
 |---|---|
 | `vars.ANTHROPIC_BASE_URL` | the endpoint, e.g. `http://10.0.0.5:20128/v1` — an **address the bench can resolve**, not a short LAN name |
-| `vars.ANTHROPIC_DEFAULT_SONNET_MODEL` | optional model pin, e.g. a flash-class model. A **slot** var: claude-code's catalog hard-rejects unknown IDs on the main-model path |
+| `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` | **all four**, for a routed endpoint. Slot vars: claude-code's catalog hard-rejects unknown IDs on the main-model path, so `--model` is not an option — but it also picks a slot for itself, and an unpinned slot sends a literal Anthropic ID to an endpoint that has never heard of it. Pinning only Sonnet fails with *"There's an issue with the selected model (claude-opus-5…)"* |
 
 And the credential as a **secret**: `secrets.ANTHROPIC_AUTH_TOKEN` (routed
 endpoint) or `secrets.ANTHROPIC_API_KEY` (first-party). With neither set, the
