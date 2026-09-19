@@ -35,6 +35,87 @@ func runFailing(t *testing.T, playbooksDir string, env, args []string) string {
 	return string(out)
 }
 
+// runOutput runs claude-playbook expecting success, and returns its combined
+// output. childEnv asserts on the CHILD's environment; this asserts on what the
+// tool itself said to the operator.
+func runOutput(t *testing.T, playbooksDir string, env, args []string) string {
+	t.Helper()
+	work := t.TempDir()
+	cmd := exec.Command(binPath, append([]string{"--playbooks-dir", playbooksDir}, args...)...)
+	cmd.Env = append([]string{
+		"PATH=" + shimDir(t) + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + work,
+		dumpEnv + "=" + filepath.Join(work, "envdump"),
+		securityLogEnv + "=" + filepath.Join(work, "security.log"),
+	}, env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("claude-playbook %v: %v\n%s", args, err, out)
+	}
+	return string(out)
+}
+
+// start names its own config directory, so an override has nothing to override
+// and the path argument wins. That has to be SAID: the variable is consumed
+// either way, so silence would be indistinguishable from having been honoured.
+func TestStartSaysItIgnoredTheOverride(t *testing.T) {
+	dir, record := t.TempDir(), t.TempDir()
+
+	out := runOutput(t, t.TempDir(), []string{overrideEnv + "=" + record}, []string{"start", dir})
+
+	if !strings.Contains(out, overrideEnv) || !strings.Contains(out, "ignored") {
+		t.Errorf("start did not say it ignored the override:\n%s", out)
+	}
+	if !strings.Contains(out, dir) {
+		t.Errorf("the notice does not name the directory start actually used (%s):\n%s", dir, out)
+	}
+}
+
+// A malformed override is reported even on the one launch shape that would not
+// have used it: a caller whose value is wrong should hear about it. It is a
+// warning, not a refusal -- start's own path is valid and the session runs.
+func TestStartWarnsOnMalformedOverrideButLaunches(t *testing.T) {
+	dir := t.TempDir()
+
+	out := runOutput(t, t.TempDir(), []string{overrideEnv + "=rel/path"}, []string{"start", dir})
+
+	if !strings.Contains(out, "absolute") {
+		t.Errorf("start did not report the malformed override:\n%s", out)
+	}
+
+	// And it still launched, with its own directory bound.
+	env := childEnv(t, t.TempDir(), launch{
+		env:  []string{overrideEnv + "=rel/path"},
+		args: []string{"start", dir},
+	})
+	if got := env[configDirEnv]; got != dir {
+		t.Errorf("%s = %q, want %q", configDirEnv, got, dir)
+	}
+}
+
+// Nothing was actually ignored when the override names the same directory, so
+// there is nothing to report. Silence here keeps the notice meaningful.
+func TestStartSilentWhenOverrideMatchesPath(t *testing.T) {
+	dir := t.TempDir()
+
+	out := runOutput(t, t.TempDir(), []string{overrideEnv + "=" + dir}, []string{"start", dir})
+
+	if strings.Contains(out, "ignored") {
+		t.Errorf("start reported an override that named its own directory:\n%s", out)
+	}
+}
+
+// No override: not a word about it.
+func TestStartSilentWithoutOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	out := runOutput(t, t.TempDir(), nil, []string{"start", dir})
+
+	if strings.Contains(out, overrideEnv) {
+		t.Errorf("start mentioned %s although it was never set:\n%s", overrideEnv, out)
+	}
+}
+
 // The feature itself: a caller that supplies a config directory gets it, and
 // the playbook's install directory is not what the child binds.
 func TestConfigDirOverrideIsHonoured(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -101,6 +102,20 @@ func runStart(cmd *cobra.Command, args []string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("invalid path %q: %w", path, err)
+	}
+
+	// start names its own config directory, so a caller-supplied one has
+	// nothing to override and the path argument wins -- the command line
+	// outranks the environment. Say so rather than letting a caller believe
+	// its directory was used: the variable is still CONSUMED (stripped from
+	// the child by PrepareLaunchEnv), so silence would be indistinguishable
+	// from having been honoured. A bad value is reported here too, for the
+	// same reason: a caller whose override is malformed should hear about it
+	// even on the one launch shape that would not have used it.
+	if overrideDir, override, oErr := config.ResolveConfigDirOverride(); oErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v (start uses the directory you named, %s)\n", oErr, absPath)
+	} else if override && overrideDir != absPath {
+		fmt.Fprintf(os.Stderr, "%s ignored: start uses the directory you named, %s\n", config.ConfigDirOverrideEnv, absPath)
 	}
 
 	if info, err := os.Stat(absPath); err == nil && !info.IsDir() {

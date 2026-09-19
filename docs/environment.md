@@ -234,6 +234,20 @@ there honours it until you unset it.
 mounts directories, so symlinked content dangles inside. The combination is
 refused rather than half-supported.
 
+**`cpb start` ignores it, and says so.** `start` already names its own config
+directory on the command line, and the command line outranks the environment:
+
+```
+$ CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb start /tmp/scratch
+CLAUDE_CONFIG_DIR_OVERRIDE ignored: start uses the directory you named, /tmp/scratch
+```
+
+You get the notice because the variable is consumed either way — without it,
+"ignored" and "honoured" would look identical from the outside. It stays quiet
+when the override names the same directory you passed, since then nothing was
+ignored. A malformed override is reported here too, as a warning: the session
+still runs, on the path you gave.
+
 ## What stays yours
 
 The block and the profiles are **install-local**, like `alias`. `update` keeps
