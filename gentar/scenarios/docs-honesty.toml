@@ -24,10 +24,10 @@ command = 'for c in install list run create delete update info alias dealias ren
 contains = "cmds-ok"
 
 [[verify.commands]]
-command = 'for f in README.md install.sh uninstall.sh build.sh SPEC-v4.md CONTRIBUTING.md LICENSE gentar/README.md gentar/dryrun.py docs/README.md docs/installation.md docs/playbooks.md docs/authentication.md docs/environment.md docs/sandbox.md docs/AGENT-GUIDE.md; do test -f "$WORKSPACE_DIR/$f" || { echo "missing file: $f"; exit 1; }; done; echo files-ok'
+command = 'for f in README.md install.sh uninstall.sh build.sh SPEC-v4.md CONTRIBUTING.md LICENSE gentar/README.md gentar/dryrun.py gentar/bench-template/build.sh gentar/bench-template/VERSION docs/README.md docs/installation.md docs/playbooks.md docs/authentication.md docs/environment.md docs/sandbox.md docs/AGENT-GUIDE.md; do test -f "$WORKSPACE_DIR/$f" || { echo "missing file: $f"; exit 1; }; done; echo files-ok'
 contains = "files-ok"
 
 [[verify.commands]]
 # The two install entrypoints README points at must stay executable.
-command = 'test -x "$WORKSPACE_DIR/install.sh" && test -x "$WORKSPACE_DIR/uninstall.sh" && test -x "$WORKSPACE_DIR/gentar/dryrun.py" && echo exec-ok'
+command = 'test -x "$WORKSPACE_DIR/install.sh" && test -x "$WORKSPACE_DIR/uninstall.sh" && test -x "$WORKSPACE_DIR/gentar/dryrun.py" && test -x "$WORKSPACE_DIR/gentar/bench-template/build.sh" && echo exec-ok'
 contains = "exec-ok"

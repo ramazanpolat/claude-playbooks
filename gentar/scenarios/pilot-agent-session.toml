@@ -12,6 +12,13 @@
 # which is the entire claim `CLAUDE_CONFIG_DIR` isolation makes. The agent's
 # own account of events is never consulted.
 #
+# The bench is OURS, not the shared gate template: claude-code 2.1.265+
+# sends the Artifact tool, whose schema a third-party Anthropic-compatible
+# backend can reject with 400 on every interactive turn (SPEC-v4.md), so the
+# version this suite runs must not move on someone else's schedule. Built by
+# gentar/bench-template/build.sh; the pin lives in its VERSION file and is
+# asserted below, so a drifted template fails loudly.
+#
 # Credentials are tier-1 (env vars on a throwaway bench) and
 # provider-agnostic: the coordinator refuses (exit 2) before any bench
 # exists when none of the named variables is set, so this suite is left out
@@ -22,7 +29,7 @@
 name = "pilot-agent-session"
 subject = "claude-playbooks"
 agent = "shell"
-template = "gentar-bench-v1"
+template = "cpb-agent-bench-v1"
 credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
 # Optional cheaper-model pin, forwarded when set. A SLOT var, not
 # ANTHROPIC_MODEL: claude-code's catalog rejects unknown main-model IDs.
@@ -51,6 +58,12 @@ command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONE
 # Declared ceiling for the guard, not measured usage. The arena's
 # GENTAR_BUDGET_CAP must be >= this.
 tokens = 25000
+
+[[verify.commands]]
+# The bench is the template we pinned. Asserted FIRST: every failure below
+# is ambiguous if the agent that ran was a version this endpoint rejects.
+command = 'claude --version'
+contains = "2.1.234"
 
 [[verify.commands]]
 # The file exists where the agent was working.
