@@ -212,6 +212,16 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// The sixth way to get the flags wrong: a profile that does not resolve.
+	// Its refusal lives inside PrepareLaunchEnv, which cannot move above the
+	// lookup because it mutates credentials -- so resolve the block here,
+	// purely, and let the input name itself like the other five. EffectiveBlock
+	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
+	// twice costs a few file reads and cannot diverge, being one function.
+	if _, perr := auth.EffectiveBlock(absPath, layers); errors.Is(perr, envprofile.ErrProfile) {
+		return perr
+	}
+
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")

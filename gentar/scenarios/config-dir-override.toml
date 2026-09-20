@@ -10,6 +10,10 @@
 # Four behaviours, each a separate way to get this wrong:
 #   honoured · consumed (absent from the child) · a bare CLAUDE_CONFIG_DIR
 #   still ignored · refused where it cannot work (sandbox, relative path)
+#
+# Three of the refusals run WITHOUT the stub `claude` on PATH on purpose: they
+# are input errors, and since v3.15.0 input is decided before the machine is
+# inspected, so they must hold on a bench with no agent installed.
 
 [scenario]
 name = "config-dir-override"
@@ -60,13 +64,13 @@ contains = "default-kept"
 # Reserved: declaring it in a layer could never redirect its own launch, but
 # would leak into the next one. Refused at the front door.
 #
-# The stub PATH is REQUIRED here, unlike the two refusals below. `run` looks
-# up `claude` (cmd/run.go) BEFORE it validates the launch flags, so on a bench
-# with no claude installed -- which the default template is -- this reports
-# "'claude' command not found" and never reaches the reserved-key check. Found
-# the hard way: it passed locally, where the dry-run harness always installs a
-# stub, and failed here where nothing does.
-command = 'PATH="$HOME/stub:$PATH" claude-playbook run --env CLAUDE_CONFIG_DIR_OVERRIDE=/leak ovr 2>&1 | grep -F "managed by claude-playbook"'
+# Deliberately WITHOUT the stub PATH, and that is the assertion. This needed
+# the stub until v3.15.0, because `run` looked up `claude` before validating
+# the launch flags and so reported "'claude' command not found" on a bench with
+# no agent -- which the default template is. Input is now decided before the
+# machine is inspected, so the refusal stands on a machine with no agent at
+# all, and running it bare pins that.
+command = 'claude-playbook run --env CLAUDE_CONFIG_DIR_OVERRIDE=/leak ovr 2>&1 | grep -F "managed by claude-playbook"'
 contains = "managed by claude-playbook"
 
 [[verify.commands]]

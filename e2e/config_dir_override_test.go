@@ -534,3 +534,90 @@ func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
 		}
 	}
 }
+
+// noAgentEnv is a curated environment with NO `claude` anywhere on PATH, for
+// asserting what a launch says when the agent is missing. shimDir always
+// provides a stub, which is exactly what must not be there for these.
+func noAgentEnv(t *testing.T, home string) []string {
+	t.Helper()
+	bin := filepath.Join(home, "onlybin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// coreutils the CLI itself may shell out to, without an agent among them.
+	for _, tool := range []string{"git", "sh", "uname"} {
+		if p, err := exec.LookPath(tool); err == nil {
+			_ = os.Symlink(p, filepath.Join(bin, tool))
+		}
+	}
+	return []string{
+		"PATH=" + bin,
+		"HOME=" + home,
+		securityLogEnv + "=" + filepath.Join(home, "security.log"),
+	}
+}
+
+// REGRESSION: `run` looked up `claude` before validating the launch flags, so
+// five of the six ways to get a flag wrong reported "'claude' command not
+// found" -- sending a pilot who mistyped to install an agent they may already
+// have. Input is the pilot's and is decided first; the agent is the machine's.
+func TestInputErrorsPrecedeTheAgentLookup(t *testing.T) {
+	root := t.TempDir()
+	playbook(t, root, "pb", false)
+	home := t.TempDir()
+	env := noAgentEnv(t, home)
+
+	badFile := filepath.Join(home, "bad.env")
+	if err := os.WriteFile(badFile, []byte("NOTKEYVALUE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(args ...string) string {
+		cmd := exec.Command(binPath, append([]string{"--playbooks-dir", root}, args...)...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("%v unexpectedly succeeded:\n%s", args, out)
+		}
+		return string(out)
+	}
+
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"flag without a value", []string{"run", "--env"}, "needs an argument"},
+		{"--env not KEY=VALUE", []string{"run", "--env", "NOTKV", "pb"}, "expects KEY=VALUE"},
+		{"reserved key", []string{"run", "--env", overrideEnv + "=/x", "pb"}, "managed by claude-playbook"},
+		{"--env-file missing", []string{"run", "--env-file", filepath.Join(home, "nope.env"), "pb"}, "--env-file"},
+		{"--env-file malformed", []string{"run", "--env-file", badFile, "pb"}, "--env-file"},
+		{"profile does not resolve", []string{"run", "--env-profile", "ghost", "pb"}, "env profile"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out := run(c.args...)
+			if !strings.Contains(out, c.want) {
+				t.Errorf("want %q, got:\n%s", c.want, out)
+			}
+			if strings.Contains(out, "command not found") {
+				t.Errorf("the missing agent was reported instead of the input error:\n%s", out)
+			}
+		})
+	}
+
+	// The control: with nothing wrong in the input, the missing agent IS the
+	// error. Without this the test above would pass if the lookup vanished.
+	t.Run("no input error: the agent is reported", func(t *testing.T) {
+		if out := run("run", "pb"); !strings.Contains(out, "command not found") {
+			t.Errorf("want the missing-agent error, got:\n%s", out)
+		}
+	})
+
+	// start shares the shape, and shares the fix.
+	t.Run("start validates first too", func(t *testing.T) {
+		out := run("start", filepath.Join(home, "adhoc"), "--env-profile", "ghost")
+		if !strings.Contains(out, "env profile") || strings.Contains(out, "command not found") {
+			t.Errorf("start reported the agent instead of the input error:\n%s", out)
+		}
+	})
+}
