@@ -69,6 +69,7 @@ is why `delete`'s interactive path had never been exercised at all.
 | Suite | Proves |
 |---|---|
 | `pilot-interactive-delete` | a scripted pilot declining a `delete` (nothing happens) and then confirming it (the playbook and both its launchers go, a bystander does not), both branches in one pty session |
+| `pilot-self-uninstall` | a scripted pilot confirming `self-uninstall --keep-data` at the prompt: the binary, its `cpb` sibling and both launchers go, while every playbook, a neighbouring file in the same bin directory, and the lines around a completion line all survive. `--dry-run` is checked first, in the oracle, on a still-live install |
 | `pilot-agent-session` | a **real agent**, launched through a playbook, doing a real task — and the marker it writes carries a token only the playbook's own `CLAUDE.md` supplied, so the file is proof the playbook governed the session. Needs an agent credential; left out of the sweep when none is set |
 
 ## The agent bench (one-time, for `pilot-agent-session` only)

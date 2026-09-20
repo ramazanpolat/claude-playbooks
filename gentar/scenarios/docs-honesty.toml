@@ -17,7 +17,8 @@ steps = [
 ]
 
 # Every subcommand the README documents must answer --help in the
-# built binary. Extend the list when README gains commands — the
+# built binary. This proves EXISTENCE only -- what a command actually does
+# belongs in its own suite (self-uninstall: pilot-self-uninstall). Extend the list when README gains commands — the
 # failure mode this suite exists for is docs drifting AHEAD of code.
 [[verify.commands]]
 command = 'for c in install list run create delete update info alias dealias rename link start env env-profile auth self-uninstall completion; do claude-playbook "$c" --help >/dev/null 2>&1 || { echo "missing: $c"; exit 1; }; done; echo cmds-ok'

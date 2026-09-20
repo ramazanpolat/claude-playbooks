@@ -1,0 +1,99 @@
+# claude-playbooks own-arena suite 14: SIMULATED PILOT at the most
+# destructive prompt the tool has.
+#
+# `self-uninstall` removes the binary, its cpb sibling, every launcher
+# pointing at it, completion lines from rc files, and -- by default -- every
+# playbook and the playbooks root. Nothing tested it. It appeared in
+# docs-honesty's --help list, which proves the command exists, not that it
+# removes what it promises and nothing else.
+#
+# Its failure mode is REMOVING MORE THAN IT PROMISED, and that is the one
+# failure a pilot cannot undo. So the assertions here are mostly about
+# survival: --keep-data must leave the playbooks root and every playbook
+# exactly as they were, and must not touch a neighbouring file that merely
+# lives in the same bin directory.
+#
+# It is interactive, and a headless shell cannot answer the prompt (a bare
+# run reads stdin, gets EOF, and cancels), so this is a pty suite. --dry-run
+# is checked first, on a live install, because "prints what it would do and
+# changes nothing" is only meaningful when there is something to destroy.
+
+[scenario]
+name = "pilot-self-uninstall"
+subject = "claude-playbooks"
+agent = "shell"
+template = "gentar-bench-v1"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  # The cpb sibling, as a real install has it: a RELATIVE symlink.
+  'ln -sf claude-playbook "$HOME/.local/bin/cpb"',
+  # Two launchers for the sweep to find, and they have to be made the way a
+  # pilot makes them: `create X --alias y` registers ONLY y, replacing the
+  # default rather than adding to it, so a second command is what produces
+  # both. Asserted below before the uninstall, so "removed" cannot pass by
+  # having never existed -- which is exactly what an earlier draft of this
+  # suite did.
+  '"$HOME/.local/bin/claude-playbook" create keeper-one',
+  '"$HOME/.local/bin/claude-playbook" alias keeper-one k1',
+  # And one deliberately WITHOUT a launcher: it must still survive --keep-data.
+  '"$HOME/.local/bin/claude-playbook" create keeper-two --no-alias',
+  # A file that is NOT ours, in the same directory the sweep walks. It must
+  # survive: the sweep removes symlinks resolving to THIS binary, nothing else.
+  '''printf '%s\n' '#!/bin/sh' 'echo not ours' > "$HOME/.local/bin/bystander"''',
+  'chmod 755 "$HOME/.local/bin/bystander"',
+  # A completion line to remove, and a line around it that must not be.
+  '''printf '%s\n' '# my shell config' 'source <(cpb completion bash)' 'export KEEP_ME=1' > "$HOME/.bashrc"''',
+  # --dry-run on a LIVE install: says what it would do and destroys nothing.
+  # This is a step, not a verify: gentar runs steps, then the driver, then the
+  # verifies -- so anything asserted in verify happens after the uninstall,
+  # when there is nothing left to have preserved. A step that exits non-zero
+  # fails the suite, which is the assertion.
+  '"$HOME/.local/bin/claude-playbook" self-uninstall --dry-run >/dev/null',
+  'test -x "$HOME/.local/bin/claude-playbook"',
+  'test -d "$HOME/.claude-playbooks/keeper-one"',
+  # Both launchers exist NOW. Without this the removal assertions below are
+  # satisfied by absence that was never presence.
+  'test -x "$HOME/.local/bin/keeper-one"',
+  'test -x "$HOME/.local/bin/k1"',
+  'test ! -e "$HOME/.local/bin/keeper-two"',
+]
+
+[driver]
+# Interactive, with --keep-data: the pilot is removing the TOOL, not their
+# work. A bare run would read EOF and cancel, which is why this is a pty.
+command = 'claude-playbook self-uninstall --keep-data'
+
+turns = [
+  { type = "answer", prompt = "Permanently uninstall", send = "y", timeout = 60 },
+]
+
+[[verify.commands]]
+# The binary and its sibling are gone.
+command = 'test ! -e "$HOME/.local/bin/claude-playbook" && test ! -e "$HOME/.local/bin/cpb" && echo binary-removed'
+contains = "binary-removed"
+
+[[verify.commands]]
+# Both launchers that existed are gone -- the one named for the playbook and
+# the one named by its alias. (keeper-two never had one; see the steps.)
+command = 'test ! -e "$HOME/.local/bin/keeper-one" && test ! -e "$HOME/.local/bin/k1" && echo launchers-removed'
+contains = "launchers-removed"
+
+[[verify.commands]]
+# --keep-data: the playbooks root and BOTH playbooks survive, with content.
+command = 'test -d "$HOME/.claude-playbooks" && test -f "$HOME/.claude-playbooks/keeper-one/CLAUDE.md" && test -f "$HOME/.claude-playbooks/keeper-two/CLAUDE.md" && echo data-kept'
+contains = "data-kept"
+
+[[verify.commands]]
+# The file that was never ours is untouched, and still executable. This is the
+# assertion the suite exists for: the sweep removes symlinks resolving to the
+# binary, not whatever else shares the directory.
+command = 'test -x "$HOME/.local/bin/bystander" && "$HOME/.local/bin/bystander"'
+contains = "not ours"
+
+[[verify.commands]]
+# The completion line is gone and the lines around it are not.
+command = 'grep -q "my shell config" "$HOME/.bashrc" && grep -q "KEEP_ME" "$HOME/.bashrc" && ! grep -q "cpb completion" "$HOME/.bashrc" && echo rc-surgically-edited'
+contains = "rc-surgically-edited"
