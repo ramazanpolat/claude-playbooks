@@ -192,14 +192,39 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return runErr
 	}
 
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
-	}
-
+	// The pilot's input is validated before the machine is inspected.
+	//
+	// launchLayers is what rejects a --env that is not KEY=VALUE, a reserved
+	// key, an unreadable or malformed --env-file, and an unknown profile. With
+	// the claude lookup first, all of those reported "'claude' command not
+	// found" instead: a pilot who mistyped a flag was sent to install an agent
+	// they may already have. Only the token scan above survived, so of six ways
+	// to get the flags wrong, one named itself.
+	//
+	// Order is the whole fix, and it is safe in both directions: launchLayers
+	// only validates and reads (an --env-file), while everything that MUTATES
+	// -- credential quarantine and sync in PrepareLaunchEnv below -- still
+	// happens after the lookup, so a machine without an agent is never touched.
+	// It also stays after the remote-forward decision, which is what keeps a
+	// --sandbox-host launch from reading local env files at all.
 	layers, err := launchLayers(tokens)
 	if err != nil {
 		return err
+	}
+
+	// The sixth way to get the flags wrong: a profile that does not resolve.
+	// Its refusal lives inside PrepareLaunchEnv, which cannot move above the
+	// lookup because it mutates credentials -- so resolve the block here,
+	// purely, and let the input name itself like the other five. EffectiveBlock
+	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
+	// twice costs a few file reads and cannot diverge, being one function.
+	if _, perr := auth.EffectiveBlock(absPath, layers); errors.Is(perr, envprofile.ErrProfile) {
+		return perr
+	}
+
+	claudePath, err := exec.LookPath("claude")
+	if err != nil {
+		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
 	if errors.Is(syncErr, envprofile.ErrProfile) {
