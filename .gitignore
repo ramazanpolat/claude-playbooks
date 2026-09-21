@@ -94,3 +94,8 @@ docs/demo/cpb-linux
 # per-run output meant to be fed to an agent, not committed.
 gentar/.arena/
 gentar/reports/
+
+# ---------------------------------------------------------------------------
+# Local, untracked agent notes (per Kommander's CLAUDE.local.md convention)
+# ---------------------------------------------------------------------------
+/CLAUDE.local.md
