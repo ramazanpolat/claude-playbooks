@@ -2,8 +2,12 @@
 
 **From:** the `pilot-profile` project (`github.com/agent-realm/pilot-profile`, private)
 **Date:** 2026-09-22
-**Status:** proposed — nothing has been changed in this repo
+**Status:** accepted and implemented — `ff76081` on `claude/pilot-profile-wire`
 **Size:** two small, independent changes. Neither adds a dependency.
+**Contract:** `pilot wire`'s guarantees are frozen as of pilot-profile v0.1.3 — see
+*"`wire`: the contract"* in that repo's README. Exit codes are `0` ok / `1` usage /
+`2` bad target / `3` write failed; the per-install status *text* is explicitly not
+contract, so parse the exit code, never the output.
 
 ---
 
@@ -97,8 +101,11 @@ if pilot, err := exec.LookPath("pilot"); err == nil {
 
 `pilot wire` is idempotent, and is itself careful about what it touches: it decides per
 install whether to write `CLAUDE.md` or `CLAUDE.local.md`, skips rather than dirty a
-tracked `CLAUDE.md`, and records anything it creates in that clone's
-`.git/info/exclude` so `git status` stays clean. Running it twice is a no-op.
+tracked `CLAUDE.md`, and records anything *it creates* in that clone's
+`.git/info/exclude` so `git status` stays clean. Running it twice is a no-op. It never
+prompts, never reads stdin, never writes a file partially, and does not require
+`~/.pilot-profile/` to exist — wiring an install that has no profile is intended, since
+the import block is inert until a profile appears.
 
 ## 4. What NOT to do
 
@@ -128,9 +135,10 @@ kommander-style `update.sh` **refuses to run at all** on a dirty tree (only `VER
 `settings.json` are exempt). So **anything written into a tracked `CLAUDE.md` of an
 installed playbook is first a blocker, then a casualty.**
 
-On the author's machine, 8 of 20 installs are currently dirty on `CLAUDE.md` — the four
-`chaos` installs because a rename was hand-applied to their tracked file. Those installs
-cannot update until it is resolved.
+This is not hypothetical. In 2026-09 a profile-directory rename was hand-applied to
+install trees instead of arriving as a release, which left 8 of 20 installs on the
+author's machine dirty on their tracked `CLAUDE.md` and unable to update until they were
+cleaned up by hand. (They since have been — do not read this as a live status report.)
 
 If `claude-playbook` ever grows a feature that writes into an installed playbook's
 `CLAUDE.md`, the same trap is waiting. `CLAUDE.local.md` — untracked and gitignored — is
