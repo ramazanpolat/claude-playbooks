@@ -745,26 +745,35 @@ Effective at launch:
 ```
 
 **Redaction (v3.15.0, `--reveal`).** A `set` key that looks like a credential
--- an underscore-separated segment (case-insensitive) reads `TOKEN`, `KEY`,
-`SECRET`, `AUTH`, or `PASSWORD` -- prints a masked value instead of the
-resolved one, everywhere a `set` entry is shown: `env` (list, show, and the
-profile-expanded `Effective at launch` block alike), `env-profile` show, and
-`info`. There is no separate per-field secret marker in an env profile's
-TOML (its `set` is a plain `map[string]string`); the key-name heuristic is
-what decides it, deliberately over-matching a look-alike ordinary key
-(`ANTHROPIC_AUTH_URL`) rather than risk ever missing a real credential.
-The length is stated outright rather than left to be inferred from a run of
-masking characters. A value long enough keeps up to 4 characters at each
-end, scaled down for shorter values so the visible portion never exceeds the
-hidden one -- a fixed 4 at each end would show 8 of a 9-character secret's 9
-characters:
+prints a masked value instead of the resolved one, everywhere a `set` entry
+is shown: `env` (list, show, and the profile-expanded `Effective at launch`
+block alike), `env-profile` show, and `info`. There is no separate per-field
+secret marker in an env profile's TOML (its `set` is a plain
+`map[string]string`); a key-name heuristic (case-insensitive) is what decides
+it, in three rules, each as wide as it can be without swallowing an obvious
+non-secret:
+
+| Rule | Matches | Because | Cost |
+|---|---|---|---|
+| substring anywhere | `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `CREDENTIAL` | `GITHUBTOKEN` has no underscore to split on | over-matches `TOKENIZER_PATH` |
+| whole `_`-separated segment | `AUTH` | as a substring it would redact `AUTHOR_NAME` | over-matches `ANTHROPIC_AUTH_URL` |
+| end of a `_`-separated segment | `KEY`, `KEYS` | `API_KEY`, `MY_APIKEY` and `GPG_SIGNKEY` are all keys | spares `KEYBOARD_LAYOUT` |
+
+Over-matching is deliberate throughout: a missed credential is a silent leak,
+an over-redacted ordinary key costs one `--reveal`. The length is stated
+outright rather than left to be inferred from a run of masking characters. A
+value keeps up to 4 characters at each end, scaled down as it shortens, and
+**at least 8 characters always stay hidden** -- so anything under 12
+characters is redacted whole rather than showing half of itself, which
+matters because `PASSWORD` is in scope and a human-chosen password is short
+and guessable enough that half of one is most of one:
 
 ```
   set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
   set    ANTHROPIC_BASE_URL=http://proxy:1/v1
 ```
 
-A value too short for that to leave a meaningful gap is redacted whole
+A value too short to leave that gap is redacted whole
 (`<redacted, N chars>`). `--reveal` on
 `env`, `env-profile`, and `info` opts back into the resolved value for that
 one invocation; nothing is written to disk either way, and a key that does

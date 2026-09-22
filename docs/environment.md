@@ -104,13 +104,18 @@ ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 ## Secret-looking values are redacted in status output
 
 `env`, `env-profile`, and `info` mask a `set` value when its key looks like a
-credential (an underscore-separated segment reading `TOKEN`, `KEY`, `SECRET`,
-`AUTH`, or `PASSWORD`, case-insensitive):
+credential (case-insensitive): `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`,
+`PASSPHRASE` or `CREDENTIAL` anywhere in the name, `AUTH` as a whole
+`_`-separated word, or a word ending in `KEY`/`KEYS`. So `GITHUBTOKEN` and
+`MY_APIKEY` are masked, while `KEYBOARD_LAYOUT` and `AUTHOR_NAME` are not:
 
 ```text
   set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
   set    ANTHROPIC_BASE_URL=http://proxy:1/v1
 ```
+
+At least 8 characters always stay hidden, so a value under 12 characters is
+redacted whole (`<redacted, 9 chars>`) rather than showing half of itself.
 
 Pass `--reveal` to see the resolved value for one invocation
 (`cpb env kommander --reveal`); it is never written to disk. This applies

@@ -121,9 +121,34 @@ func TestLooksLikeSecretKey(t *testing.T) {
 		"OPENAI_SECRET":           true,
 		"AUTH_HEADER_VALUE":       true,
 		"DB_PASSWORD":             true,
-		"ANTHROPIC_BASE_URL":      false,
-		"FROM_MANIFEST":           false,
-		"A":                       false,
+		"AWS_SECRET_ACCESS_KEY":   true,
+
+		// No underscore to split on: a whole-word match misses these
+		// entirely, and a missed credential is the failure that costs.
+		"GITHUBTOKEN": true,
+		"APIKEY":      true,
+
+		// Well-formed, underscore-separated, and still not a word in any
+		// plausible word list -- the suffix and substring rules cover them
+		// without enumerating every spelling of "key".
+		"MY_APIKEY":      true,
+		"GPG_SIGNKEY":    true,
+		"SSH_KEYS":       true,
+		"MY_CREDENTIAL":  true,
+		"SSH_PASSPHRASE": true,
+
+		// Deliberate over-match: costs one --reveal, never a credential.
+		"TOKENIZER_PATH": true,
+
+		// The counterexamples each rule is shaped around. KEY is anchored to
+		// the end of a segment so KEYBOARD stays clear; AUTH matches a whole
+		// segment only so AUTHOR does.
+		"KEYBOARD_LAYOUT":    false,
+		"AUTHOR_NAME":        false,
+		"PRIVATE_NETWORK":    false,
+		"ANTHROPIC_BASE_URL": false,
+		"FROM_MANIFEST":      false,
+		"A":                  false,
 	}
 	for key, want := range cases {
 		if got := looksLikeSecretKey(key); got != want {
@@ -141,20 +166,22 @@ func TestRedactSecretValue(t *testing.T) {
 	}
 
 	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-	// keep scales with length so the visible portion never exceeds the
-	// hidden one: a fixed keep=4 would show 8 of a 9-character value's 9
-	// characters, leaking nearly all of it.
+	// At least 8 characters always stay hidden, so a short value is redacted
+	// whole rather than showing half of itself: a fixed keep=4 showed 8 of a
+	// 9-character value's 9, and even a scaled keep showed 4 of 8.
 	boundary := []struct {
 		n    int
 		want string
 	}{
-		{6, "<redacted, 6 chars>"},     // keep=1: too short to reveal any of
-		{7, "<redacted, 7 chars>"},     // keep=1: too short to reveal any of
-		{8, "01...67 (8 chars)"},       // keep=2, hidden=4: smallest partial reveal
-		{9, "01...78 (9 chars)"},       // keep=2, hidden=5: fixed keep=4 used to leak 8 of these 9
-		{11, "01...9a (11 chars)"},     // keep=2, hidden=7
-		{12, "012...9ab (12 chars)"},   // keep=3, hidden=6
-		{16, "0123...cdef (16 chars)"}, // keep=4 (cap), hidden=8
+		{6, "<redacted, 6 chars>"},
+		{8, "<redacted, 8 chars>"},     // would have shown 4 of 8
+		{9, "<redacted, 9 chars>"},     // would have shown 4 of 9
+		{11, "<redacted, 11 chars>"},   // would have shown 4 of 11
+		{12, "01...ab (12 chars)"},     // shortest partial reveal: 4 shown, 8 hidden
+		{13, "01...bc (13 chars)"},     //
+		{16, "0123...cdef (16 chars)"}, // keep reaches its cap of 4 here
+		{20, "0123...ghij (20 chars)"}, //
+		{32, "0123...stuv (32 chars)"}, // real-token length: 8 shown, 24 hidden
 	}
 	for _, c := range boundary {
 		if got := redactSecretValue(alphabet[:c.n]); got != c.want {
@@ -164,8 +191,8 @@ func TestRedactSecretValue(t *testing.T) {
 
 	// Runes, not bytes: slicing through a multi-byte character must never
 	// produce invalid UTF-8.
-	multiByte := strings.Repeat("é", 10)
-	if got := redactSecretValue(multiByte); got != "éé...éé (10 chars)" {
+	multiByte := strings.Repeat("é", 16)
+	if got := redactSecretValue(multiByte); got != "éééé...éééé (16 chars)" {
 		t.Fatalf("multi-byte value redacted as %q", got)
 	}
 }
