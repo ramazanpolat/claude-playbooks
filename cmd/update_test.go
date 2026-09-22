@@ -349,9 +349,11 @@ func TestNativeUpdateCheckDoesNotInstall(t *testing.T) {
 	}
 }
 
-// updateOnePlaybook is the single-playbook update as these tests exercise it:
-// output discarded, and unchanged versions re-applied exactly as
-// `update <name>` does. Only `update --all` skips unchanged playbooks.
+// updateOnePlaybook is the single-playbook update as these tests exercise it,
+// with output discarded. An already-current playbook is re-applied rather than
+// skipped, which is how a drifted install is repaired -- and is now the only
+// behaviour there is, since the bulk path that skipped unchanged playbooks was
+// withdrawn.
 func updateOnePlaybook(name string, checkOnly bool) error {
 	err := runPlaybookUpdate(io.Discard, name, checkOnly)
 	return err
