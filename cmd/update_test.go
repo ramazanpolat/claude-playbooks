@@ -353,7 +353,7 @@ func TestNativeUpdateCheckDoesNotInstall(t *testing.T) {
 // output discarded, and unchanged versions re-applied exactly as
 // `update <name>` does. Only `update --all` skips unchanged playbooks.
 func updateOnePlaybook(name string, checkOnly bool) error {
-	_, err := runPlaybookUpdate(io.Discard, name, checkOnly)
+	err := runPlaybookUpdate(io.Discard, name, checkOnly)
 	return err
 }
 
