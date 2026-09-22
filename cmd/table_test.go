@@ -69,3 +69,69 @@ func TestClipMarksTheLoss(t *testing.T) {
 		}
 	}
 }
+
+// A wide rune occupies two terminal cells. Measuring it as one rune is what
+// makes the flexible column overflow on exactly the content it should absorb.
+func TestDisplayWidthCountsCellsNotRunes(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want int
+	}{
+		{"abc", 3},
+		{"", 0},
+		{"日本語", 6},        // 3 runes, 6 cells
+		{"a日b", 4},        // mixed
+		{"\U0001F600", 2}, // emoji
+		{"é", 1},         // e + combining acute renders in one cell
+		{"ｆｕｌｌ", 8},       // fullwidth forms
+	} {
+		if got := displayWidth(c.in); got != c.want {
+			t.Errorf("displayWidth(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// clip must never return something WIDER than the budget -- that is what breaks
+// alignment. Coming in one cell under is fine: a wide rune is dropped rather
+// than half-printed.
+func TestClipNeverExceedsTheCellBudget(t *testing.T) {
+	for _, in := range []string{
+		"abcdefghijklmnop",
+		"日本語のテキストです",
+		"mixed 日本語 text here",
+		"\U0001F600\U0001F600\U0001F600\U0001F600",
+	} {
+		for w := 1; w <= 12; w++ {
+			got := clip(in, w)
+			if displayWidth(got) > w {
+				t.Errorf("clip(%q, %d) = %q, width %d exceeds %d", in, w, got, displayWidth(got), w)
+			}
+		}
+	}
+}
+
+// A narrow terminal must clip the flexible column, not leave it at full content
+// width. The original guard skipped the assignment entirely when the remaining
+// room fell under the stub, which meant the narrowest terminals -- the only ones
+// that needed it -- got no truncation at all.
+func TestNarrowTerminalStillClipsTheFlexibleColumn(t *testing.T) {
+	orig := terminalWidth
+	t.Cleanup(func() { terminalWidth = orig })
+	terminalWidth = func() int { return 24 }
+
+	long := strings.Repeat("x", 200)
+	tb := newTable("NAME", "DESCRIPTION").flexible(1)
+	tb.add("a-very-long-playbook-name-indeed", long)
+
+	var buf bytes.Buffer
+	tb.render(&buf)
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if displayWidth(line) >= displayWidth(long) {
+			t.Fatalf("flexible column was not clipped: line width %d, description width %d\n%s",
+				displayWidth(line), displayWidth(long), line)
+		}
+	}
+	if !strings.Contains(buf.String(), "…") {
+		t.Error("expected an ellipsis marking the clipped description")
+	}
+}

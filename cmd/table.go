@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
-	"unicode/utf8"
+	"unicode"
 
 	"golang.org/x/term"
 )
@@ -63,12 +63,12 @@ func (t *table) render(w io.Writer) {
 	}
 	widths := make([]int, len(t.headers))
 	for i, h := range t.headers {
-		widths[i] = utf8.RuneCountInString(h)
+		widths[i] = displayWidth(h)
 	}
 	for _, row := range t.rows {
 		for i, c := range row {
-			if i < len(widths) && utf8.RuneCountInString(c) > widths[i] {
-				widths[i] = utf8.RuneCountInString(c)
+			if i < len(widths) && displayWidth(c) > widths[i] {
+				widths[i] = displayWidth(c)
 			}
 		}
 	}
@@ -84,7 +84,14 @@ func (t *table) render(w io.Writer) {
 					fixed += x + 2
 				}
 			}
-			if room := avail - fixed; room >= 12 && room < widths[t.flex] {
+			// A narrow terminal (or a wide USED BY) can leave less than the
+			// stub. Clamp UP to it rather than skipping the assignment: doing
+			// nothing leaves the flexible column at full content width, which
+			// is the overflow this whole block exists to prevent.
+			if room := avail - fixed; room < widths[t.flex] {
+				if room < 12 {
+					room = 12
+				}
 				widths[t.flex] = room
 			}
 		}
@@ -113,7 +120,7 @@ func (t *table) render(w io.Writer) {
 	line(t.headers)
 	rule := make([]string, len(t.headers))
 	for i, h := range t.headers {
-		rule[i] = strings.Repeat("-", utf8.RuneCountInString(h))
+		rule[i] = strings.Repeat("-", displayWidth(h))
 	}
 	line(rule)
 	for _, row := range t.rows {
@@ -122,35 +129,101 @@ func (t *table) render(w io.Writer) {
 }
 
 func padLeft(s string, w int) string {
-	if n := w - utf8.RuneCountInString(s); n > 0 {
+	if n := w - displayWidth(s); n > 0 {
 		return strings.Repeat(" ", n) + s
 	}
 	return s
 }
 
 func pad(s string, w int) string {
-	if n := w - utf8.RuneCountInString(s); n > 0 {
+	if n := w - displayWidth(s); n > 0 {
 		return s + strings.Repeat(" ", n)
 	}
 	return s
 }
 
-// clip shortens s to w runes, marking the loss. Runes, not bytes: a description
-// may hold anything the pilot typed.
+// displayWidth is how many terminal CELLS s occupies -- not bytes, and not
+// runes. A CJK ideograph or an emoji takes two cells, so 20 Han characters fill
+// 40 columns; measuring them as 20 is what makes a table overflow on exactly
+// the content the flexible column was meant to absorb. Combining marks take
+// none, since they render into the preceding cell.
+//
+// This is a deliberately small approximation of Unicode TR11 rather than a
+// dependency: the wide ranges below cover CJK, Hangul, Kana, fullwidth forms
+// and the emoji planes, which is what shows up in a description or a playbook
+// name. It never under-counts those, so the table clips early rather than
+// overflowing.
+func displayWidth(s string) int {
+	n := 0
+	for _, r := range s {
+		switch {
+		case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r):
+			// combining: renders into the previous cell
+		case isWide(r):
+			n += 2
+		default:
+			n++
+		}
+	}
+	return n
+}
+
+func isWide(r rune) bool {
+	switch {
+	case r >= 0x1100 && r <= 0x115F, // Hangul Jamo
+		r >= 0x2E80 && r <= 0x303E, // CJK radicals, Kangxi
+		r >= 0x3041 && r <= 0x33FF, // Kana, CJK compatibility
+		r >= 0x3400 && r <= 0x4DBF, // CJK ext A
+		r >= 0x4E00 && r <= 0x9FFF, // CJK unified
+		r >= 0xA000 && r <= 0xA4CF, // Yi
+		r >= 0xAC00 && r <= 0xD7A3, // Hangul syllables
+		r >= 0xF900 && r <= 0xFAFF, // CJK compatibility ideographs
+		r >= 0xFE10 && r <= 0xFE19, // vertical forms
+		r >= 0xFE30 && r <= 0xFE6F, // CJK compatibility forms
+		r >= 0xFF00 && r <= 0xFF60, // fullwidth forms
+		r >= 0xFFE0 && r <= 0xFFE6,
+		r >= 0x1F300 && r <= 0x1FAFF, // emoji and pictographs
+		r >= 0x20000 && r <= 0x3FFFD: // CJK ext B and beyond
+		return true
+	}
+	return false
+}
+
+// clip shortens s to w terminal cells, marking the loss with an ellipsis (one
+// cell). A wide rune is dropped rather than half-printed, so the result can come
+// in one cell under w -- never over it, which is what matters for alignment.
 func clip(s string, w int) string {
-	if w <= 0 || utf8.RuneCountInString(s) <= w {
+	if w <= 0 || displayWidth(s) <= w {
 		return s
 	}
-	r := []rune(s)
 	if w == 1 {
 		return "…"
 	}
-	return string(r[:w-1]) + "…"
+	budget := w - 1 // room for the ellipsis
+	used := 0
+	var b strings.Builder
+	for _, r := range s {
+		cw := 1
+		switch {
+		case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r):
+			cw = 0
+		case isWide(r):
+			cw = 2
+		}
+		if used+cw > budget {
+			break
+		}
+		b.WriteRune(r)
+		used += cw
+	}
+	return b.String() + "…"
 }
 
 // terminalWidth is stdout's width, or 0 when stdout is not a terminal -- which
-// is the signal to truncate nothing.
-func terminalWidth() int {
+// is the signal to truncate nothing. A var, not a func, so the width rule is
+// testable: it shipped with a hole in it precisely because no test could set a
+// narrow terminal.
+var terminalWidth = func() int {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		return 0
 	}
