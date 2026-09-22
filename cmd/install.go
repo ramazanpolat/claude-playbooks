@@ -281,6 +281,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	installLauncher(launcherName, targetName, configDest)
+	wirePilotProfile(configDest)
 	return nil
 }
 
