@@ -12,6 +12,30 @@ import (
 // healthy one.
 const pilotWireTimeout = 5 * time.Second
 
+// releaseOnce wraps a lock's unlock function so it can be called early and
+// still be deferred safely. The create and install paths release the registry
+// lock before the optional wire step, but must keep the deferred release for
+// every error path that returns before reaching it.
+func releaseOnce(unlock func()) func() {
+	released := false
+	return func() {
+		if released {
+			return
+		}
+		released = true
+		unlock()
+	}
+}
+
+// lookPilot finds the pilot executable. A variable, not a direct
+// exec.LookPath call, so tests are hermetic: without it every test that
+// reaches create or install ran whatever `pilot` happened to be installed on
+// the machine running the suite. That made the suite pass on CI (where pilot
+// is absent) and fail on a developer machine with pilot-profile v0.2.0, whose
+// lock directory landed inside a test's deliberately-relocated TMPDIR.
+// resetCommandTestState stubs it to "not installed"; fakePilot opts back in.
+var lookPilot = func() (string, error) { return exec.LookPath("pilot") }
+
 // wirePilotProfile connects a newly created or installed playbook to the
 // pilot-profile component (https://github.com/agent-realm/pilot-profile), if
 // that component is installed on this machine.
@@ -36,23 +60,8 @@ const pilotWireTimeout = 5 * time.Second
 // lock before calling this, so even a pilot that burns the whole timeout cannot
 // stall claude-playbook for every other playbook on the machine. The timeout is
 // discarded exactly like any other failure.
-// releaseOnce wraps a lock's unlock function so it can be called early and
-// still be deferred safely. The create and install paths release the registry
-// lock before the optional wire step, but must keep the deferred release for
-// every error path that returns before reaching it.
-func releaseOnce(unlock func()) func() {
-	released := false
-	return func() {
-		if released {
-			return
-		}
-		released = true
-		unlock()
-	}
-}
-
 func wirePilotProfile(dest string) {
-	pilot, err := exec.LookPath("pilot")
+	pilot, err := lookPilot()
 	if err != nil {
 		return
 	}

@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // fakePilot puts an executable named `pilot` on PATH for the duration of the
@@ -20,6 +24,11 @@ func fakePilot(t *testing.T, body string) string {
 		t.Fatalf("writing fake pilot: %v", err)
 	}
 	t.Setenv("PATH", dir)
+	// Opt back in to a real lookup: resetCommandTestState stubs pilot to "not
+	// installed" so no other test reaches the machine's own pilot.
+	origLookPilot := lookPilot
+	lookPilot = func() (string, error) { return exec.LookPath("pilot") }
+	t.Cleanup(func() { lookPilot = origLookPilot })
 	return dir
 }
 
@@ -134,5 +143,84 @@ func TestDefaultClaudeMDCarriesProfileImports(t *testing.T) {
 	}
 	if got := strings.Count(content, "\n@~/.pilot-profile/"); got != 4 {
 		t.Errorf("defaultClaudeMD has %d profile imports, want 4", got)
+	}
+}
+
+// pilotArgsRecorder is a fake pilot that records how it was invoked. PATH is
+// the fake's directory followed by the real PATH, so create and install still
+// find anything else they need, while the fake wins the pilot lookup.
+func pilotArgsRecorder(t *testing.T) (argsFile string) {
+	t.Helper()
+	orig := os.Getenv("PATH")
+	dir := fakePilot(t, "printf '%s\\n' \"$@\" > \"$PILOT_ARGS_FILE\"\n")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+orig)
+	argsFile = filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("PILOT_ARGS_FILE", argsFile)
+	return argsFile
+}
+
+func assertWired(t *testing.T, argsFile, dest string) {
+	t.Helper()
+	got, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("pilot was never invoked (%v) -- the wire step was skipped", err)
+	}
+	if want := "wire\n" + dest + "\n"; string(got) != want {
+		t.Fatalf("pilot invoked with %q, want %q", got, want)
+	}
+}
+
+// --no-alias used to return from runCreate before reaching the wire call, so
+// the step was silently skipped on an otherwise successful create. The
+// handoff's own acceptance run uses --no-alias and still passed, because the
+// four @import lines come from the template and appear whether or not pilot
+// ever runs -- it proved the template half and could not see the wiring half.
+// This asserts the wiring half directly.
+func TestCreateNoAliasStillWiresPilot(t *testing.T) {
+	resetCommandTestState(t)
+	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	argsFile := pilotArgsRecorder(t)
+	createNoAlias = true
+
+	captureStdout(t, func() {
+		if err := runCreate(nil, []string{"pb"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	assertWired(t, argsFile, filepath.Join(config.PlaybooksDir, "pb"))
+}
+
+// The same early return existed in runInstall.
+func TestInstallNoAliasStillWiresPilot(t *testing.T) {
+	resetCommandTestState(t)
+	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	src := t.TempDir()
+	if err := manifest.Write(src, &manifest.Manifest{Name: "pb"}); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := pilotArgsRecorder(t)
+	installNoAlias = true
+
+	captureStdout(t, func() {
+		if err := runInstall(nil, []string{src}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	assertWired(t, argsFile, filepath.Join(config.PlaybooksDir, "pb"))
+}
+
+// No test may reach the real pilot on the machine running the suite. With the
+// seam stubbed by resetCommandTestState, even a pilot sitting on PATH is not
+// found -- which is what keeps the suite's result independent of what the
+// developer happens to have installed.
+func TestResetKeepsTheRealPilotOutOfReach(t *testing.T) {
+	resetCommandTestState(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "pilot"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	if p, err := lookPilot(); err == nil {
+		t.Fatalf("after reset, lookPilot found %q; tests would run the machine's own pilot", p)
 	}
 }

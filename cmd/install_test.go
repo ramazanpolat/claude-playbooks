@@ -428,6 +428,12 @@ func quoteTOML(s string) string {
 func resetCommandTestState(t *testing.T) {
 	t.Helper()
 	isolateCredentials(t)
+	// No test reaches a real pilot by accident: create and install call it, and
+	// a machine with pilot-profile installed would otherwise run it against
+	// every playbook these tests make. fakePilot opts back in explicitly.
+	origLookPilot := lookPilot
+	lookPilot = func() (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { lookPilot = origLookPilot })
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	config.PlaybooksDir = ""
 	config.LauncherDir = t.TempDir()
