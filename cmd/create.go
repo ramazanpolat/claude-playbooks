@@ -74,8 +74,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	releaseRegistry := releaseOnce(unlock)
-	defer releaseRegistry()
+	defer unlock()
 
 	// The directory name joins the registry even under --no-alias.
 	preflightNames := []string{name}
@@ -135,12 +134,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	// to sit after installLauncher, which meant --no-alias returned above and
 	// skipped it silently on an otherwise successful create.
 	//
-	// The registry lock guards command-name ownership, which nothing below
-	// touches: `pilot wire` edits this playbook's own CLAUDE.md. Releasing it
-	// first means an optional third-party binary can never stall create or
-	// install for every other playbook on the machine.
-	releaseRegistry()
-	wirePilotProfile(dest)
+	// It runs with the registry lock still held (the deferred unlock). The
+	// lock does not only guard command names: delete, rename and update take
+	// it too, and they move or remove the very directory `pilot wire` edits.
+	// Released early, a concurrent delete plus a same-name create could have
+	// this pilot modify the replacement playbook. Holding it costs at most
+	// pilotWireTimeout, and cannot deadlock -- pilot never calls back into
+	// claude-playbook.
+	wirePlaybook(dest)
 	return nil
 }
 

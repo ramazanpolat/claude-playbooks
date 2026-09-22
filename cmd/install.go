@@ -125,8 +125,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	releaseRegistry := releaseOnce(unlock)
-	defer releaseRegistry()
+	defer unlock()
 
 	// Preflight command names BEFORE the directory joins the registry:
 	// dispatch resolves directory names ahead of aliases, so a clash would
@@ -282,10 +281,10 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		installLauncher(launcherName, targetName, configDest)
 	}
 
-	// Last, and on EVERY successful path -- see the matching note in create.go.
-	// --no-alias previously returned above and skipped wiring silently.
-	releaseRegistry()
-	wirePilotProfile(configDest)
+	// Last, on EVERY successful path, and with the registry lock still held --
+	// see the matching note in create.go. --no-alias previously returned above
+	// and skipped wiring silently.
+	wirePlaybook(configDest)
 	return nil
 }
 

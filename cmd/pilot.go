@@ -12,21 +12,6 @@ import (
 // healthy one.
 const pilotWireTimeout = 5 * time.Second
 
-// releaseOnce wraps a lock's unlock function so it can be called early and
-// still be deferred safely. The create and install paths release the registry
-// lock before the optional wire step, but must keep the deferred release for
-// every error path that returns before reaching it.
-func releaseOnce(unlock func()) func() {
-	released := false
-	return func() {
-		if released {
-			return
-		}
-		released = true
-		unlock()
-	}
-}
-
 // lookPilot finds the pilot executable. A variable, not a direct
 // exec.LookPath call, so tests are hermetic: without it every test that
 // reaches create or install ran whatever `pilot` happened to be installed on
@@ -56,10 +41,17 @@ var lookPilot = func() (string, error) { return exec.LookPath("pilot") }
 // "Never fail the install" has to mean "never HANG the install" too, which is
 // why the call is bounded. An unbounded Run() on a pilot that starts and never
 // exits would block forever, and hanging is worse than failing because failing
-// is at least visible. Callers additionally release the machine-global registry
-// lock before calling this, so even a pilot that burns the whole timeout cannot
-// stall claude-playbook for every other playbook on the machine. The timeout is
-// discarded exactly like any other failure.
+// is at least visible. The timeout is discarded exactly like any other failure.
+//
+// Callers hold the registry lock across this call. That was once released
+// first, to keep a slow pilot from stalling other commands, but the lock also
+// serializes delete, rename and update of this playbook's directory -- so an
+// early release let a concurrent delete-and-recreate be edited by the old
+// install's pilot. The timeout bounds what holding it can cost.
+// wirePlaybook is the wire step as create and install call it -- a variable so
+// a test can observe what holds at the moment of wiring (the registry lock).
+var wirePlaybook = wirePilotProfile
+
 func wirePilotProfile(dest string) {
 	pilot, err := lookPilot()
 	if err != nil {

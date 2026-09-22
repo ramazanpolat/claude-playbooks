@@ -138,18 +138,19 @@ func invokedViaLauncher() bool {
 // to stay away from, or fail when that root is read-only. flock releases
 // automatically when the process dies, so a crashed holder never wedges
 // the registry.
-func lockRegistry() (unlock func(), err error) {
-	var path string
+// registryLockPath is the machine-user-global lock file lockRegistry flocks.
+func registryLockPath() string {
 	if cache, cerr := os.UserCacheDir(); cerr == nil {
 		dir := filepath.Join(cache, "claude-playbook")
 		if merr := os.MkdirAll(dir, 0o755); merr == nil {
-			path = filepath.Join(dir, "registry.lock")
+			return filepath.Join(dir, "registry.lock")
 		}
 	}
-	if path == "" {
-		path = filepath.Join(os.TempDir(), fmt.Sprintf("claude-playbook-registry-%d.lock", os.Getuid()))
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("claude-playbook-registry-%d.lock", os.Getuid()))
+}
+
+func lockRegistry() (unlock func(), err error) {
+	f, err := os.OpenFile(registryLockPath(), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
 	}

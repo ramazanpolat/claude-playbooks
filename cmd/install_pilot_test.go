@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -89,12 +90,19 @@ func TestWirePilotProfileDoesNotInheritOutput(t *testing.T) {
 	}
 }
 
-// A pilot that never exits must not hang the install. Before this was bounded,
-// an unbounded Run() waited forever -- and both call sites held the
-// machine-global registry lock while waiting, so one pathological optional
-// binary wedged claude-playbook for every playbook on the machine.
+// The wire step must be bounded: a pilot that starts and never exits must not
+// hang create or install. The fake execs a REAL sleep by absolute path --
+// fakePilot leaves only its own directory on PATH, and an earlier version of
+// this test used a bare `sleep`, which was not found, so the fake exited 127
+// at once and the test passed without ever reaching the timeout. It would also
+// have passed with the bound removed. The lower bound on elapsed time below is
+// what proves the sleeper actually ran until the timeout killed it.
 func TestWirePilotProfileIsBounded(t *testing.T) {
-	fakePilot(t, "sleep 300\n")
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("no sleep binary to build a hanging fake pilot from")
+	}
+	fakePilot(t, "exec "+sleep+" 300\n")
 
 	done := make(chan struct{})
 	start := time.Now()
@@ -105,24 +113,15 @@ func TestWirePilotProfileIsBounded(t *testing.T) {
 
 	select {
 	case <-done:
-		if elapsed := time.Since(start); elapsed > pilotWireTimeout+5*time.Second {
+		elapsed := time.Since(start)
+		if elapsed < pilotWireTimeout-time.Second {
+			t.Fatalf("wire returned after %s, before the %s timeout could fire: the fake did not hang, so the bound was never exercised", elapsed, pilotWireTimeout)
+		}
+		if elapsed > pilotWireTimeout+5*time.Second {
 			t.Errorf("wire took %s, want it bounded near %s", elapsed, pilotWireTimeout)
 		}
 	case <-time.After(pilotWireTimeout + 10*time.Second):
 		t.Fatal("wirePilotProfile did not return: the call is unbounded")
-	}
-}
-
-// releaseOnce must be safe to call early AND from the deferred release, or the
-// early release in create/install would double-unlock on every success.
-func TestReleaseOnceRunsExactlyOnce(t *testing.T) {
-	calls := 0
-	release := releaseOnce(func() { calls++ })
-	release()
-	release()
-	release()
-	if calls != 1 {
-		t.Errorf("unlock called %d times, want 1", calls)
 	}
 }
 
@@ -222,5 +221,75 @@ func TestResetKeepsTheRealPilotOutOfReach(t *testing.T) {
 	t.Setenv("PATH", dir)
 	if p, err := lookPilot(); err == nil {
 		t.Fatalf("after reset, lookPilot found %q; tests would run the machine's own pilot", p)
+	}
+}
+
+// registryHeldDuring replaces the wire step with a probe that tries to take the
+// registry lock without blocking, and reports whether it was already held.
+// flock locks belong to an open file description, so a second open of the same
+// file conflicts with the holder even inside one process.
+func registryHeldDuring(t *testing.T) (held *bool) {
+	t.Helper()
+	held = new(bool)
+	called := false
+	orig := wirePlaybook
+	wirePlaybook = func(string) {
+		called = true
+		f, err := os.OpenFile(registryLockPath(), os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			t.Errorf("opening the registry lock: %v", err)
+			return
+		}
+		defer f.Close()
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			*held = true // someone -- the command under test -- holds it
+			return
+		}
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+	t.Cleanup(func() {
+		wirePlaybook = orig
+		if !called {
+			t.Error("the wire step never ran")
+		}
+	})
+	return held
+}
+
+// The registry lock must still be held while pilot wires the playbook. It also
+// serializes delete, rename and update, which move or remove the directory being
+// wired; released early, a concurrent delete-and-recreate could have the old
+// install's pilot edit the replacement.
+func TestCreateHoldsRegistryLockWhileWiring(t *testing.T) {
+	resetCommandTestState(t)
+	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	held := registryHeldDuring(t)
+	createNoAlias = true
+	captureStdout(t, func() {
+		if err := runCreate(nil, []string{"pb"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !*held {
+		t.Fatal("create released the registry lock before wiring")
+	}
+}
+
+func TestInstallHoldsRegistryLockWhileWiring(t *testing.T) {
+	resetCommandTestState(t)
+	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
+	src := t.TempDir()
+	if err := manifest.Write(src, &manifest.Manifest{Name: "pb"}); err != nil {
+		t.Fatal(err)
+	}
+	held := registryHeldDuring(t)
+	installNoAlias = true
+	captureStdout(t, func() {
+		if err := runInstall(nil, []string{src}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !*held {
+		t.Fatal("install released the registry lock before wiring")
 	}
 }
