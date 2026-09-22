@@ -209,3 +209,52 @@ func TestVeryNarrowTerminalStillClips(t *testing.T) {
 		t.Error("expected an ellipsis")
 	}
 }
+
+// A variation selector modifies the PRECEDING character. U+FE0F promotes a
+// text-default symbol to emoji presentation, which terminals render in two
+// cells, so treating the selector as a zero-width combining mark under-counts
+// every such sequence -- and clip then lets it overflow.
+func TestDisplayWidthHandlesVariationSelectors(t *testing.T) {
+	heart := "❤️" // emoji-presentation heart
+	if got := displayWidth("❤"); got != 1 {
+		t.Errorf("bare U+2764 = %d, want 1", got)
+	}
+	if got := displayWidth(heart); got != 2 {
+		t.Errorf("U+2764 U+FE0F = %d, want 2", got)
+	}
+	if got := displayWidth("❤︎"); got != 1 {
+		t.Errorf("U+2764 U+FE0E (text presentation) = %d, want 1", got)
+	}
+	// A selector after an already-wide base adds nothing.
+	if got := displayWidth("\U0001F600️"); got != 2 {
+		t.Errorf("wide base + U+FE0F = %d, want 2", got)
+	}
+	// The case from the review: ten hearts are twenty cells, so a budget of ten
+	// must clip rather than return the lot.
+	ten := strings.Repeat(heart, 10)
+	if got := displayWidth(ten); got != 20 {
+		t.Errorf("ten emoji hearts = %d cells, want 20", got)
+	}
+	if got := clip(ten, 10); displayWidth(got) > 10 {
+		t.Errorf("clip(ten hearts, 10) = %q, width %d exceeds 10", got, displayWidth(got))
+	}
+}
+
+// displayWidth and clip must never disagree about what fits: they drifted apart
+// twice, each time because a rule was fixed in one and not the other.
+func TestClipAndDisplayWidthAgree(t *testing.T) {
+	for _, in := range []string{
+		"plain ascii text",
+		"日本語",
+		"❤️❤️ mixed ⌚",
+		"é́ combining",
+		"\U0001F600\U0001F601\U0001F602",
+	} {
+		for w := 1; w <= 16; w++ {
+			got := clip(in, w)
+			if displayWidth(got) > w {
+				t.Errorf("clip(%q, %d) = %q at width %d, exceeds budget", in, w, got, displayWidth(got))
+			}
+		}
+	}
+}

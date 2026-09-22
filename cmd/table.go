@@ -155,17 +155,48 @@ func pad(s string, w int) string {
 // overflowing.
 func displayWidth(s string) int {
 	n := 0
+	forEachCell(s, func(_ rune, add int) { n += add })
+	return n
+}
+
+// forEachCell walks s reporting how many terminal cells each rune adds, and is
+// the ONE place that decides. displayWidth and clip both go through it because
+// they had drifted apart twice: a rule fixed in one stayed missing from the
+// other, which is how the variation-selector case survived two rounds.
+//
+// Width is not a property of a rune in isolation. A variation selector modifies
+// what came BEFORE it: U+FE0F promotes a text-default symbol to emoji
+// presentation, which terminals render in two cells -- so a bare U+2764 is one
+// cell and U+2764 U+FE0F is two. Counting the selector as a combining mark worth
+// zero under-counts every such sequence.
+func forEachCell(s string, f func(r rune, add int)) {
+	prev := 0 // cells claimed by the last visible rune
 	for _, r := range s {
+		add := 1
 		switch {
+		case r == 0xFE0F:
+			// Emoji presentation selector: promote a narrow base to two cells.
+			// A base that is already wide gains nothing.
+			if prev == 1 {
+				add = 1
+			} else {
+				add = 0
+			}
+		case r == 0xFE0E:
+			add = 0 // text presentation selector: the base stays narrow
 		case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r):
-			// combining: renders into the previous cell
+			add = 0
 		case isWide(r):
-			n += 2
-		default:
-			n++
+			add = 2
+		}
+		f(r, add)
+		switch {
+		case r == 0xFE0F && add == 1:
+			prev = 2 // the pair now occupies two cells
+		case add > 0:
+			prev = add
 		}
 	}
-	return n
 }
 
 func isWide(r rune) bool {
@@ -219,33 +250,32 @@ func isWide(r rune) bool {
 }
 
 // clip shortens s to w terminal cells, marking the loss with an ellipsis (one
-// cell). A wide rune is dropped rather than half-printed, so the result can come
-// in one cell under w -- never over it, which is what matters for alignment.
+// cell). A wide rune or an emoji-presentation sequence is dropped whole rather
+// than split, so the result can come in a cell under w -- never over it, which
+// is what alignment depends on.
 func clip(s string, w int) string {
 	if w <= 0 || displayWidth(s) <= w {
 		return s
 	}
+	ell := "\u2026"
 	if w == 1 {
-		return "…"
+		return ell
 	}
 	budget := w - 1 // room for the ellipsis
-	used := 0
+	used, stop := 0, false
 	var b strings.Builder
-	for _, r := range s {
-		cw := 1
-		switch {
-		case unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r):
-			cw = 0
-		case isWide(r):
-			cw = 2
+	forEachCell(s, func(r rune, add int) {
+		if stop {
+			return
 		}
-		if used+cw > budget {
-			break
+		if used+add > budget {
+			stop = true
+			return
 		}
 		b.WriteRune(r)
-		used += cw
-	}
-	return b.String() + "…"
+		used += add
+	})
+	return b.String() + ell
 }
 
 // terminalWidth is stdout's width, or 0 when stdout is not a terminal -- which
