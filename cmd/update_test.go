@@ -353,65 +353,8 @@ func TestNativeUpdateCheckDoesNotInstall(t *testing.T) {
 // output discarded, and unchanged versions re-applied exactly as
 // `update <name>` does. Only `update --all` skips unchanged playbooks.
 func updateOnePlaybook(name string, checkOnly bool) error {
-	_, err := runPlaybookUpdate(io.Discard, name, checkOnly, false)
+	_, err := runPlaybookUpdate(io.Discard, name, checkOnly)
 	return err
-}
-
-// allFixture builds a registry shaped like a pilot running several installs of
-// one playbook: three from one source, one from another, plus the three shapes
-// --all must skip and one whose source has vanished.
-func allFixture(t *testing.T) (root, srcA, srcB string) {
-	t.Helper()
-	root = t.TempDir()
-	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	srcA, srcB = filepath.Join(root, "srcA"), filepath.Join(root, "srcB")
-
-	write := func(dir, name, version string) {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# "+name+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := manifest.Write(dir, &manifest.Manifest{Name: name, Version: version}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(srcA, "upstream", "1.0.0")
-	write(srcB, "other", "9.9.9")
-
-	install := func(name, src, version string) {
-		dir := filepath.Join(config.PlaybooksDir, name)
-		write(dir, name, version)
-		if err := manifest.Write(dir, &manifest.Manifest{
-			Name: name, Version: version,
-			Source: &manifest.Source{Repository: src},
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	install("alpha", srcA, "0.9.0")
-	install("beta", srcA, "0.9.0")
-	install("current", srcB, "9.9.9") // already at the source's version
-	install("broken", filepath.Join(root, "gone"), "0.9.0")
-
-	// no [source] at all
-	orphan := filepath.Join(config.PlaybooksDir, "orphan")
-	if err := os.MkdirAll(orphan, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// linked to an external directory
-	ext := filepath.Join(root, "ext")
-	write(ext, "ext", "0.1.0")
-	if err := manifest.Write(ext, &manifest.Manifest{
-		Name: "ext", Version: "0.1.0", Source: &manifest.Source{Repository: srcB},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(ext, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
-		t.Fatal(err)
-	}
-	return root, srcA, srcB
 }
 
 // --all shipped in v3.14.0 and was withdrawn in v3.15.0. It stays in the flag

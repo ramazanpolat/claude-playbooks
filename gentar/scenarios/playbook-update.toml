@@ -87,23 +87,19 @@ command = 'claude-playbook info pb'
 contains = "2.0.0"
 
 [[verify.commands]]
-# --all over a registry holding one updatable playbook and one that is not:
-# the second is skipped with a reason, never an error.
-command = '''mkdir -p "$HOME/.claude-playbooks/orphan" && printf '%s\n' '# orphan' > "$HOME/.claude-playbooks/orphan/CLAUDE.md" && claude-playbook update --all'''
+# A playbook with no [source] cannot update natively, and says so rather than
+# failing obscurely. (This used to be asserted through `update --all`, which
+# was withdrawn in v3.15.0; the single-playbook form carries the same message.)
+command = '''mkdir -p "$HOME/.claude-playbooks/orphan" && printf '%s\n' '# orphan' > "$HOME/.claude-playbooks/orphan/CLAUDE.md" && claude-playbook update orphan 2>&1 || true'''
 contains = "no [source] metadata"
 
 [[verify.commands]]
-# pb is already at the source's version, so --all leaves it alone. That is
-# the documented difference from `update <name>`, which re-applies.
-command = 'claude-playbook update --all'
-contains = "up to date"
+# --all is withdrawn but still parsed, so a script carrying it from v3.14.0
+# gets an explanation instead of having "--all" taken for a playbook name.
+command = 'claude-playbook update --all 2>&1 || true'
+contains = "not available in this version"
 
 [[verify.commands]]
-# And so backups do not accumulate: still the one from the single update.
+# And backups do not accumulate: still the one from the single update.
 command = 'test "$(ls -d "$HOME/.claude-playbooks/".pb.bak.* | wc -l)" -eq 1 && echo no-churn'
 contains = "no-churn"
-
-[[verify.commands]]
-# Contradictions refused rather than guessed at.
-command = 'claude-playbook update --all pb 2>&1 | grep -F "drop the name"'
-contains = "drop the name"

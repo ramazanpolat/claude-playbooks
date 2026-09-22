@@ -96,7 +96,7 @@ consume:
 			return fmt.Errorf("unexpected argument %q; `update <name>` accepts only --check", arg)
 		}
 	}
-	_, err = runPlaybookUpdate(os.Stdout, name, checkOnly, false)
+	_, err = runPlaybookUpdate(os.Stdout, name, checkOnly)
 	return err
 }
 
@@ -123,7 +123,7 @@ type updateResult struct {
 	upToDate bool
 }
 
-func runPlaybookUpdate(w io.Writer, name string, checkOnly, skipUnchanged bool) (updateResult, error) {
+func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) (updateResult, error) {
 	var res updateResult
 	playbooksDir := config.ResolvePlaybooksDir()
 
@@ -188,15 +188,6 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly, skipUnchanged bool) 
 		if res.upToDate {
 			fmt.Fprintln(w, "  up to date")
 		}
-		return res, nil
-	}
-
-	// A bulk run stops here when the source carries the version already
-	// installed. `update <name>` deliberately re-applies regardless -- that is
-	// how a drifted install is repaired -- but doing it across every playbook
-	// costs one backup directory each, per run, in the playbooks root, for no
-	// change. The single-playbook command remains the way to force a re-apply.
-	if skipUnchanged && res.upToDate {
 		return res, nil
 	}
 
@@ -624,11 +615,3 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 	}
 	return copyFile(src, dst, info.Mode())
 }
-
-// runAllPlaybooksUpdate updates every updatable playbook in the registry.
-//
-// It exists because a pilot running several installs of one playbook otherwise
-// updates each by hand, and the count only grows. The loop is deliberately dumb:
-// one independent update per playbook, in name order, with no shared staging or
-// cross-playbook reasoning. Each is exactly what `update <name>` would do.
-//
