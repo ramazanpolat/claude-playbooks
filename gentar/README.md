@@ -174,6 +174,13 @@ Carry these forward when re-copying the kit for an engine bump:
 - **`git describe` uses `--match 'v*'`** in `run.sh` and `dryrun.py`. The
   workflow's floating `arena` trigger tag would otherwise become the built
   binary's version whenever it sits nearer than the last release.
+- **The bench-host identity comes from repo secrets** `GENTAR_BENCH_HOST` and
+  `GENTAR_BENCH_USER`. Since v0.2.0 the engine's `.env.example` carries
+  placeholders rather than a real host, so a fresh CI clone would otherwise
+  target `bench.example.internal` and fail every suite at ssh. They are
+  secrets rather than variables only because this repo's Actions logs are
+  public. The workflow refuses (exit 2) before any bench if either is unset
+  or still the placeholder.
 - **Ports are pinned** in the workflow (ClickHouse `8126`, OTLP `4320`): the
   `arena` runner is shared with other arenas.
 - **`dryrun.py` gives each suite a fresh home**, matching the engine's fresh

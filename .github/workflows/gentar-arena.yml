@@ -89,6 +89,17 @@ jobs:
         run: |
           # Keyword tag → scenario: `arena` runs everything, `arena-<name>`
           # runs one. Dispatch input wins when both are set (explicit ask).
+          # Refuse before any bench, as the engine does for an UNSET host. A
+          # missing secret would otherwise fall back to the seeded .env's
+          # placeholder -- non-empty, so nothing refuses it -- and every suite
+          # would fail at ssh ("Could not resolve hostname
+          # bench.example.internal"), reading as a red arena, not a config gap.
+          for v in GENTAR_BENCH_HOST GENTAR_BENCH_USER; do
+            eval "val=\${$v:-}"
+            case "$val" in
+              ''|*example.internal*) echo "::error::$v is not set to a real bench-host (repo secret $v)" >&2; exit 2 ;;
+            esac
+          done
           INPUT="$SCENARIO_INPUT"
           if [ -z "$INPUT" ] && [ "$GITHUB_EVENT_NAME" = push ] \
              && [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
@@ -140,6 +151,12 @@ jobs:
           # so an empty file never becomes a broken ssh identity.
           GENTAR_CLONE_SSH_KEY: ${{ secrets.GENTAR_CLONE_KEY && format('{0}/gentar_clone_key', runner.temp) || '' }}
           GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
+          # The bench-host identity. Since v0.2.0 the engine ships
+          # placeholders here, not a real host, so CI must supply it. The
+          # values are SECRETS rather than variables only because this repo's
+          # Actions logs are public: secrets are masked, variables print.
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
           # The `arena` runner is shared with other arenas, which publish the
           # engine's default ClickHouse (8123) and OTLP (4318) ports. Pinned
           # here so two concurrent arenas on that Docker host do not collide
