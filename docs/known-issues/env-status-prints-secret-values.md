@@ -1,14 +1,22 @@
 # `claude-playbook env <name>` prints resolved secret values, not just presence
 
 **Status:** fixed (task `cpb-env-redact-secrets`, 2026-09-22). `env`,
-`env-profile`, and `info` now redact a `set` value whenever its key looks
-like a credential (an underscore-separated segment reading `TOKEN`, `KEY`,
-`SECRET`, or `AUTH`), keeping the first/last 4 characters and stating the
-length; `--reveal` opts back into the resolved value for one invocation. See
-`SPEC-v4.md`'s "Redaction (v3.15.0, `--reveal`)" amendment and
-`docs/environment.md`'s "Secret-looking values are redacted in status output"
-for the shipped behavior. The rest of this writeup is left as-is for the
-root-cause record.
+`env-profile`, and `info` now mask a `set` value rather than printing it
+resolved; `--reveal` opts back in for one invocation.
+
+**`SPEC-v4.md`'s "Redaction (v3.15.0, `--reveal`)" amendment is the
+contract** -- read it rather than this paragraph for the current rules, which
+three rounds of review widened well past what the fix first shipped. In
+outline: strong words (`TOKEN`, `SECRET`, `PASSWORD`, ...) match anywhere in
+the key, `AUTH` and the abbreviations (`PWD`, `PASS`, `PAT`) match a whole
+`_`-separated segment, a segment ending in `KEY`/`KEYS` matches unless a
+`PUBLIC`/`PUB` segment says the material is public, and a credential embedded
+in a connection URL is masked from the *value* since no key-based rule can
+see it. A masked value keeps up to 4 characters at each end with at least 8
+always hidden, so anything under 12 characters is redacted whole.
+`docs/environment.md` has the same thing for readers rather than
+implementers. The rest of this writeup is left as-is for the root-cause
+record.
 
 Found live 2026-09-21 while attaching the
 `claude-opus-5` env profile to `kommander-metu` for an unrelated task (a code

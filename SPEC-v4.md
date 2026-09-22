@@ -756,11 +756,30 @@ non-secret:
 | Rule | Matches | Because | Cost |
 |---|---|---|---|
 | substring anywhere | `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `CREDENTIAL` | `GITHUBTOKEN` has no underscore to split on | over-matches `TOKENIZER_PATH` |
-| whole `_`-separated segment | `AUTH` | as a substring it would redact `AUTHOR_NAME` | over-matches `ANTHROPIC_AUTH_URL` |
+| whole `_`-separated segment | `AUTH`, `PWD`, `PASS`, `PAT` | `MYSQL_PWD` is the standard MySQL password variable; as substrings these would redact `AUTHOR_NAME`, `COMPASS_URL` and `PATH` | over-matches a bare `PWD` |
 | end of a `_`-separated segment | `KEY`, `KEYS` | `API_KEY`, `MY_APIKEY` and `GPG_SIGNKEY` are all keys | spares `KEYBOARD_LAYOUT` |
+| exemption | a `PUBLIC` or `PUB` segment defeats the `KEY`/`KEYS` rule only | `PUBLIC_KEY` is meant to be read and compared | a `PUBLIC_SECRET` is still masked |
 
 Over-matching is deliberate throughout: a missed credential is a silent leak,
-an over-redacted ordinary key costs one `--reveal`. The length is stated
+an over-redacted ordinary key costs one `--reveal`. A bare `PWD` is masked on
+those terms -- it usually names the working directory, but it could name a
+password, and guessing "directory" is the assumption that leaks.
+
+**A credential inside a connection URL is masked from the value**, since no
+rule above can see it: `DATABASE_URL`, `REDIS_URL`, `AMQP_URL` and
+`MONGODB_URI` name nothing secret while carrying a password. Only the
+credential in the URL's userinfo is masked, not the whole value -- the
+scheme, host and database stay legible, because a wholly masked
+`DATABASE_URL` would train the pilot to reach for `--reveal` by habit, which
+is how a feature like this stops being used. Where the userinfo has no colon
+(`https://ghp_xxx@github.com`) the whole of it is the credential and is
+masked as such.
+
+```
+  set    DATABASE_URL=postgres://user:<redacted, 11 chars>@db.internal:5432/app
+```
+
+The length is stated
 outright rather than left to be inferred from a run of masking characters. A
 value keeps up to 4 characters at each end, scaled down as it shortens, and
 **at least 8 characters always stay hidden** -- so anything under 12

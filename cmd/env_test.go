@@ -137,6 +137,38 @@ func TestLooksLikeSecretKey(t *testing.T) {
 		"MY_CREDENTIAL":  true,
 		"SSH_PASSPHRASE": true,
 
+		// Conventional abbreviations. MYSQL_PWD is the standard MySQL
+		// password variable and was printing in full.
+		"MYSQL_PWD":  true,
+		"DB_PASS":    true,
+		"GITHUB_PAT": true,
+
+		// ...which is exactly why those three are segment-anchored, not
+		// substrings: PATH is not a PAT, and COMPASS/BYPASS merely contain
+		// PASS.
+		"PATH":         false,
+		"COMPASS_URL":  false,
+		"BYPASS_CACHE": false,
+
+		// A bare PWD is usually the working directory, and masking it is
+		// the accepted over-match: it could equally name a password, and
+		// guessing "directory" is the assumption that leaks. OLDPWD is
+		// unambiguous -- no password is ever called that -- and the
+		// segment-exact rule leaves it alone on its own.
+		"PWD":    true,
+		"OLDPWD": false,
+
+		// Public material is meant to be read and compared, so PUBLIC/PUB
+		// defeats the KEY suffix rule...
+		"PUBLIC_KEY":     false,
+		"SSH_PUBLIC_KEY": false,
+		"SSH_PUB_KEY":    false,
+
+		// ...but only that rule. A "public secret" is a contradiction, and
+		// the strong words still win.
+		"PUBLIC_SECRET": true,
+		"PUBLIC_TOKEN":  true,
+
 		// Deliberate over-match: costs one --reveal, never a credential.
 		"TOKENIZER_PATH": true,
 
@@ -194,6 +226,70 @@ func TestRedactSecretValue(t *testing.T) {
 	multiByte := strings.Repeat("é", 16)
 	if got := redactSecretValue(multiByte); got != "éééé...éééé (16 chars)" {
 		t.Fatalf("multi-byte value redacted as %q", got)
+	}
+}
+
+// A connection URL carries its credential in the value: DATABASE_URL,
+// REDIS_URL and MONGODB_URI all name nothing secret, so no key-based rule
+// can catch them.
+func TestDisplayEnvValueMasksURLCredentials(t *testing.T) {
+	cases := []struct {
+		name, key, value, want string
+	}{
+		{
+			name:  "password in userinfo is masked, the rest stays legible",
+			key:   "DATABASE_URL",
+			value: "postgres://user:hunter2pass@db.example.com:5432/app",
+			want:  "postgres://user:<redacted, 11 chars>@db.example.com:5432/app",
+		},
+		{
+			// Masking only "after the colon" would leave this fully exposed.
+			name:  "userinfo with no colon is entirely the credential",
+			key:   "GIT_REMOTE",
+			value: "https://ghp_abcdefghijklmnop@github.com/org/repo",
+			want:  "https://ghp_...mnop (20 chars)@github.com/org/repo",
+		},
+		{
+			name:  "a URL with no credential is untouched",
+			key:   "ANTHROPIC_BASE_URL",
+			value: "http://proxy:1/v1",
+			want:  "http://proxy:1/v1",
+		},
+		{
+			name:  "a port is not userinfo and a path is not a host",
+			key:   "SERVICE_URL",
+			value: "https://example.com:8443/a@b/c",
+			want:  "https://example.com:8443/a@b/c",
+		},
+		{
+			name:  "an ordinary value containing @ is untouched",
+			key:   "CONTACT",
+			value: "someone@example.com",
+			want:  "someone@example.com",
+		},
+		{
+			name:  "scheme with a plus, as mongodb+srv uses",
+			key:   "MONGODB_URI",
+			value: "mongodb+srv://admin:s3cr3tvalue@cluster0.example.net/db",
+			want:  "mongodb+srv://admin:<redacted, 11 chars>@cluster0.example.net/db",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := displayEnvValue(c.key, c.value, false); got != c.want {
+				t.Errorf("displayEnvValue(%q, %q) = %q, want %q", c.key, c.value, got, c.want)
+			}
+			// --reveal still shows everything, URL or not.
+			if got := displayEnvValue(c.key, c.value, true); got != c.value {
+				t.Errorf("--reveal changed %q to %q", c.value, got)
+			}
+		})
+	}
+
+	// A credential-looking key still redacts the whole value: the URL rule
+	// widens coverage, it does not narrow it.
+	if got := displayEnvValue("DATABASE_PASSWORD", "postgres://user:pw@host/db", false); !strings.HasPrefix(got, "<redacted") && !strings.Contains(got, "...") {
+		t.Errorf("credential-looking key should redact the whole value, got %q", got)
 	}
 }
 

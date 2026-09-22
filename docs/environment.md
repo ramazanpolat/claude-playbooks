@@ -105,9 +105,11 @@ ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 
 `env`, `env-profile`, and `info` mask a `set` value when its key looks like a
 credential (case-insensitive): `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`,
-`PASSPHRASE` or `CREDENTIAL` anywhere in the name, `AUTH` as a whole
-`_`-separated word, or a word ending in `KEY`/`KEYS`. So `GITHUBTOKEN` and
-`MY_APIKEY` are masked, while `KEYBOARD_LAYOUT` and `AUTHOR_NAME` are not:
+`PASSPHRASE` or `CREDENTIAL` anywhere in the name; `AUTH`, `PWD`, `PASS` or
+`PAT` as a whole `_`-separated word; or a word ending in `KEY`/`KEYS` unless
+a `PUBLIC`/`PUB` word says the material is public. So `GITHUBTOKEN`,
+`MY_APIKEY` and `MYSQL_PWD` are masked, while `KEYBOARD_LAYOUT`,
+`AUTHOR_NAME`, `PATH` and `PUBLIC_KEY` are not:
 
 ```text
   set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
@@ -116,6 +118,14 @@ credential (case-insensitive): `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`,
 
 At least 8 characters always stay hidden, so a value under 12 characters is
 redacted whole (`<redacted, 9 chars>`) rather than showing half of itself.
+
+A password inside a connection URL is masked too, even though the key names
+nothing secret — otherwise `DATABASE_URL` and friends would print it in
+full. Only the credential is hidden, so the URL stays readable:
+
+```text
+  set    DATABASE_URL=postgres://user:<redacted, 11 chars>@db.internal:5432/app
+```
 
 Pass `--reveal` to see the resolved value for one invocation
 (`cpb env kommander --reveal`); it is never written to disk. This applies

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -310,12 +311,21 @@ func printEnvBlock(indent string, e *manifest.Env, reveal bool) {
 //
 //	substring: GITHUBTOKEN has no underscore to split on. TOKENIZER_PATH is
 //	           over-redacted as a result, which is the cheap direction.
-//	segment:   AUTH as a substring would redact AUTHOR_NAME.
+//	segment:   AUTH as a substring would redact AUTHOR_NAME. The
+//	           abbreviations live here too and must: PWD is the standard
+//	           MySQL password variable (MYSQL_PWD) but also the standard
+//	           working directory, and PASS as a substring would redact
+//	           COMPASS_URL and BYPASS_CACHE. PAT stays clear of PATH only
+//	           because the match is a whole segment.
 //	suffix:    API_KEY and MY_APIKEY are keys; KEYBOARD_LAYOUT is not.
+//	public:    a key naming public material defeats the suffix rule only --
+//	           PUBLIC_KEY is meant to be read and compared, while a
+//	           PUBLIC_SECRET is a contradiction worth masking anyway.
 var (
 	secretKeySubstrings      = []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "PASSPHRASE", "CREDENTIAL"}
-	secretKeySegments        = map[string]bool{"AUTH": true}
+	secretKeySegments        = map[string]bool{"AUTH": true, "PWD": true, "PASS": true, "PAT": true}
 	secretKeySegmentSuffixes = []string{"KEY", "KEYS"}
+	publicKeySegments        = map[string]bool{"PUBLIC": true, "PUB": true}
 )
 
 func looksLikeSecretKey(key string) bool {
@@ -325,10 +335,18 @@ func looksLikeSecretKey(key string) bool {
 			return true
 		}
 	}
-	for _, part := range strings.Split(upper, "_") {
+	parts := strings.Split(upper, "_")
+	for _, part := range parts {
 		if secretKeySegments[part] {
 			return true
 		}
+	}
+	for _, part := range parts {
+		if publicKeySegments[part] {
+			return false
+		}
+	}
+	for _, part := range parts {
 		for _, suffix := range secretKeySegmentSuffixes {
 			if strings.HasSuffix(part, suffix) {
 				return true
@@ -342,10 +360,39 @@ func looksLikeSecretKey(key string) bool {
 // redacted by default when the key looks like a credential, full value when
 // it doesn't or --reveal was passed.
 func displayEnvValue(key, value string, reveal bool) string {
-	if reveal || value == "" || !looksLikeSecretKey(key) {
+	if reveal || value == "" {
 		return value
 	}
-	return redactSecretValue(value)
+	if looksLikeSecretKey(key) {
+		return redactSecretValue(value)
+	}
+	return redactURLCredentials(value)
+}
+
+// urlUserinfo matches the credential an absolute URL carries before its
+// host. Anchored on "://" so a bare "user:pass@host" or a mailto: address is
+// left alone, and stopped by "/" so a path or port never looks like userinfo.
+var urlUserinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s]+)@`)
+
+// redactURLCredentials masks the credential inside a connection URL. Every
+// other rule here reads the key, and this case cannot: DATABASE_URL,
+// REDIS_URL, AMQP_URL and MONGODB_URI all name nothing secret while carrying
+// a password in the value. Only the credential is masked, not the whole
+// value -- the scheme, host and database are what the pilot came to read,
+// and a wholly masked DATABASE_URL would just train them to reach for
+// --reveal, which is how a feature like this stops being used.
+func redactURLCredentials(value string) string {
+	return urlUserinfo.ReplaceAllStringFunc(value, func(match string) string {
+		parts := urlUserinfo.FindStringSubmatch(match)
+		scheme, userinfo := parts[1], parts[2]
+		if user, secret, hasPassword := strings.Cut(userinfo, ":"); hasPassword {
+			return scheme + user + ":" + redactSecretValue(secret) + "@"
+		}
+		// No colon: the userinfo IS the credential, as in
+		// https://ghp_xxx@github.com. Masking only "after the colon" would
+		// leave this shape fully exposed.
+		return scheme + redactSecretValue(userinfo) + "@"
+	})
 }
 
 // redactSecretValue keeps a few characters at each end -- enough to tell
