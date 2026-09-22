@@ -148,11 +148,19 @@ func pad(s string, w int) string {
 // the content the flexible column was meant to absorb. Combining marks take
 // none, since they render into the preceding cell.
 //
-// This is a deliberately small approximation of Unicode TR11 rather than a
-// dependency: the wide ranges below cover CJK, Hangul, Kana, fullwidth forms
-// and the emoji planes, which is what shows up in a description or a playbook
-// name. It never under-counts those, so the table clips early rather than
-// overflowing.
+// KNOWN LIMITATION: this is a hand-maintained PARTIAL approximation of Unicode
+// TR11, not the full East_Asian_Width table. It covers CJK, Hangul, Kana,
+// fullwidth forms, the emoji planes and the common double-width symbols, which
+// is what realistically appears in a description or a playbook name. It is NOT
+// complete: some unconditional W/F characters are counted as one cell -- e.g.
+// U+2329/U+232A and supplementary Kana such as U+1B000 -- so a description made
+// of those can overflow the flexible column. Only terminal-attached output is
+// affected; piped output is never truncated, so nothing is lost.
+//
+// Four review rounds each found the next missing range, which is the evidence
+// that patching ranges by hand does not converge. The fix is to derive widths
+// from real Unicode data rather than extend this list again: see
+// docs/known-issues/table-width-partial-unicode.md.
 func displayWidth(s string) int {
 	n := 0
 	forEachCell(s, func(_ rune, add int) { n += add })
