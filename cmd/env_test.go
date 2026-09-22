@@ -304,6 +304,25 @@ func TestDisplayEnvValueMasksURLCredentials(t *testing.T) {
 			want:  "mongodb+srv://<redacted, 5 chars>:<redacted, 11 chars>@cluster0.example.net/db",
 		},
 		{
+			name:  "IPv6 literal host with no credential is untouched",
+			key:   "PG_URL",
+			value: "http://[::1]:5432/db",
+			want:  "http://[::1]:5432/db",
+		},
+		{
+			name:  "IPv6 literal host keeps its brackets and port",
+			key:   "PG_URL",
+			value: "postgres://user:hunter2pass@[::1]:5432/db",
+			want:  "postgres://<redacted, 4 chars>:<redacted, 11 chars>@[::1]:5432/db",
+		},
+		{
+			// %40 is an encoded "@" and must not end the userinfo early.
+			name:  "percent-encoded @ inside userinfo",
+			key:   "DATABASE_URL",
+			value: "https://user%40corp:hunter2pass@host/db",
+			want:  "https://<redacted, 11 chars>:<redacted, 11 chars>@host/db",
+		},
+		{
 			name:  "every URL in a multi-URL value is masked, not just the first",
 			key:   "UPSTREAMS",
 			value: "redis://u1:secretalpha@a.internal,redis://u2:secretbravo@b.internal",
