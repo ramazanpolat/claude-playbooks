@@ -1,0 +1,72 @@
+package cmd
+
+import (
+	"context"
+	"os/exec"
+	"syscall"
+	"time"
+)
+
+// pilotWireTimeout bounds the optional wire step. `pilot wire` edits one
+// playbook's CLAUDE.md/CLAUDE.local.md and is idempotent, so seconds is
+// generous; the number exists to cap a pathological binary, not to pace a
+// healthy one.
+const pilotWireTimeout = 5 * time.Second
+
+// lookPilot finds the pilot executable. A variable, not a direct
+// exec.LookPath call, so tests are hermetic: without it every test that
+// reaches create or install ran whatever `pilot` happened to be installed on
+// the machine running the suite. That made the suite pass on CI (where pilot
+// is absent) and fail on a developer machine with pilot-profile v0.2.0, whose
+// lock directory landed inside a test's deliberately-relocated TMPDIR.
+// resetCommandTestState stubs it to "not installed"; fakePilot opts back in.
+var lookPilot = func() (string, error) { return exec.LookPath("pilot") }
+
+// wirePilotProfile connects a newly created or installed playbook to the
+// pilot-profile component (https://github.com/agent-realm/pilot-profile), if
+// that component is installed on this machine.
+//
+// pilot-profile is a separate component, not a playbook: it owns the user's
+// shared profile at ~/.pilot-profile/ and the tooling that maintains it. The
+// dependency edge points one way only -- claude-playbook may call pilot, and
+// pilot must never need claude-playbook, because the stock ~/.claude is not
+// managed by this tool and still deserves a profile. So nothing about the
+// profile's schema, capture protocol or migrations is vendored here; this
+// function is the entire integration surface.
+//
+// Best-effort by contract, and the discarded error is the point rather than an
+// oversight: a broken, half-installed or merely unlucky `pilot` must never be
+// able to fail a playbook create or install. When pilot is absent this does
+// nothing and says nothing -- it does not prompt, suggest, or fetch.
+//
+// "Never fail the install" has to mean "never HANG the install" too, which is
+// why the call is bounded. An unbounded Run() on a pilot that starts and never
+// exits would block forever, and hanging is worse than failing because failing
+// is at least visible. The timeout is discarded exactly like any other failure.
+//
+// Callers hold the registry lock across this call. That was once released
+// first, to keep a slow pilot from stalling other commands, but the lock also
+// serializes delete, rename and update of this playbook's directory -- so an
+// early release let a concurrent delete-and-recreate be edited by the old
+// install's pilot. The timeout bounds what holding it can cost.
+// wirePlaybook is the wire step as create and install call it -- a variable so
+// a test can observe what holds at the moment of wiring (the registry lock).
+var wirePlaybook = wirePilotProfile
+
+func wirePilotProfile(dest string) {
+	pilot, err := lookPilot()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), pilotWireTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, pilot, "wire", dest)
+	// Own process group, and cancellation kills the WHOLE group. CommandContext
+	// alone kills only the direct child, and pilot is a shell script that runs
+	// git and awk -- so a hung grandchild would survive the timeout and go on
+	// editing dest after Run returned and the registry lock was released,
+	// defeating both the timeout and the directory-stability guarantee.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	_ = cmd.Run()
+}

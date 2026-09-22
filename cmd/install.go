@@ -264,23 +264,27 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// Alias handling.
 	if installNoAlias {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", targetName)
-		return nil
-	}
-
-	// A custom command name must be resolvable at invocation time: record
-	// it as the manifest alias so multicall dispatch finds the playbook.
-	if installAlias != "" {
-		if err := writeAliasManifest(dest, targetName, installAlias); err != nil {
-			// Without the manifest entry the alias can never resolve; and
-			// dest already joined the registry, so leaving it would block a
-			// retry under the same name — roll it back like the other
-			// post-copy error paths.
-			os.RemoveAll(dest)
-			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", installAlias, err)
+	} else {
+		// A custom command name must be resolvable at invocation time: record
+		// it as the manifest alias so multicall dispatch finds the playbook.
+		if installAlias != "" {
+			if err := writeAliasManifest(dest, targetName, installAlias); err != nil {
+				// Without the manifest entry the alias can never resolve; and
+				// dest already joined the registry, so leaving it would block a
+				// retry under the same name — roll it back like the other
+				// post-copy error paths.
+				os.RemoveAll(dest)
+				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", installAlias, err)
+			}
 		}
+
+		installLauncher(launcherName, targetName, configDest)
 	}
 
-	installLauncher(launcherName, targetName, configDest)
+	// Last, on EVERY successful path, and with the registry lock still held --
+	// see the matching note in create.go. --no-alias previously returned above
+	// and skipped wiring silently.
+	wirePlaybook(configDest)
 	return nil
 }
 
