@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakePilot puts an executable named `pilot` on PATH for the duration of the
@@ -76,6 +77,43 @@ func TestWirePilotProfileDoesNotInheritOutput(t *testing.T) {
 	n, _ := r.Read(buf[:])
 	if n > 0 {
 		t.Errorf("pilot output leaked into our streams: %q", buf[:n])
+	}
+}
+
+// A pilot that never exits must not hang the install. Before this was bounded,
+// an unbounded Run() waited forever -- and both call sites held the
+// machine-global registry lock while waiting, so one pathological optional
+// binary wedged claude-playbook for every playbook on the machine.
+func TestWirePilotProfileIsBounded(t *testing.T) {
+	fakePilot(t, "sleep 300\n")
+
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		wirePilotProfile(t.TempDir())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if elapsed := time.Since(start); elapsed > pilotWireTimeout+5*time.Second {
+			t.Errorf("wire took %s, want it bounded near %s", elapsed, pilotWireTimeout)
+		}
+	case <-time.After(pilotWireTimeout + 10*time.Second):
+		t.Fatal("wirePilotProfile did not return: the call is unbounded")
+	}
+}
+
+// releaseOnce must be safe to call early AND from the deferred release, or the
+// early release in create/install would double-unlock on every success.
+func TestReleaseOnceRunsExactlyOnce(t *testing.T) {
+	calls := 0
+	release := releaseOnce(func() { calls++ })
+	release()
+	release()
+	release()
+	if calls != 1 {
+		t.Errorf("unlock called %d times, want 1", calls)
 	}
 }
 

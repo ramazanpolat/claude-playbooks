@@ -74,7 +74,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	releaseRegistry := releaseOnce(unlock)
+	defer releaseRegistry()
 
 	// The directory name joins the registry even under --no-alias.
 	preflightNames := []string{name}
@@ -114,22 +115,31 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	if createNoAlias {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
-		return nil
-	}
-
-	// A custom command name must be resolvable at invocation time: record
-	// it as the manifest alias so multicall dispatch finds the playbook.
-	if launcherName != name {
-		if err := writeAliasManifest(dest, name, launcherName); err != nil {
-			// Without the manifest entry the alias can never resolve; and
-			// dest already joined the registry, so leaving it would block a
-			// retry under the same name — roll it back, as install does.
-			os.RemoveAll(dest)
-			return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", launcherName, err)
+	} else {
+		// A custom command name must be resolvable at invocation time: record
+		// it as the manifest alias so multicall dispatch finds the playbook.
+		if launcherName != name {
+			if err := writeAliasManifest(dest, name, launcherName); err != nil {
+				// Without the manifest entry the alias can never resolve; and
+				// dest already joined the registry, so leaving it would block a
+				// retry under the same name — roll it back, as install does.
+				os.RemoveAll(dest)
+				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", launcherName, err)
+			}
 		}
+
+		installLauncher(launcherName, name, dest)
 	}
 
-	installLauncher(launcherName, name, dest)
+	// Wiring is the last thing and happens on EVERY successful path. It used
+	// to sit after installLauncher, which meant --no-alias returned above and
+	// skipped it silently on an otherwise successful create.
+	//
+	// The registry lock guards command-name ownership, which nothing below
+	// touches: `pilot wire` edits this playbook's own CLAUDE.md. Releasing it
+	// first means an optional third-party binary can never stall create or
+	// install for every other playbook on the machine.
+	releaseRegistry()
 	wirePilotProfile(dest)
 	return nil
 }
