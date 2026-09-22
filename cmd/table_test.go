@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -133,5 +134,78 @@ func TestNarrowTerminalStillClipsTheFlexibleColumn(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "…") {
 		t.Error("expected an ellipsis marking the clipped description")
+	}
+}
+
+// isWide originally jumped from Hangul Jamo (U+115F) straight to U+2E80,
+// missing the double-width symbols that live below it. These render two cells
+// in a terminal despite sitting among narrow neighbours.
+func TestDisplayWidthCoversWideSymbolsBelowCJK(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		name string
+	}{
+		{"⌚", "watch"},
+		{"⏰", "alarm clock"},
+		{"⭐", "star"},
+		{"✅", "check mark"},
+		{"❗", "exclamation"},
+		{"⚡", "high voltage"},
+		{"\U0001F004", "mahjong"},
+	} {
+		if got := displayWidth(c.in); got != 2 {
+			t.Errorf("displayWidth(%s %q) = %d, want 2", c.name, c.in, got)
+		}
+	}
+	// Narrow neighbours in the same neighbourhood must stay one cell.
+	for _, in := range []string{"✓", "✗", "←", "·"} {
+		if got := displayWidth(in); got != 1 {
+			t.Errorf("displayWidth(%q) = %d, want 1 (must not over-claim)", in, got)
+		}
+	}
+}
+
+// The width rule itself, tested where it lives. Stubbing terminalWidth
+// exercises render's clamp and never this function, which is how the narrow
+// case shipped broken: a 15-column terminal collapsed into the 0 that means
+// "not a terminal, truncate nothing".
+func TestRenderBudgetKeepsNarrowTerminals(t *testing.T) {
+	for _, c := range []struct {
+		w    int
+		err  error
+		want int
+	}{
+		{80, nil, 80},
+		{15, nil, 15}, // narrow, but still a terminal
+		{1, nil, 1},
+		{0, nil, 0},                  // not a terminal
+		{-1, nil, 0},                 // nonsense measurement
+		{80, errors.New("ioctl"), 0}, // failed measurement
+	} {
+		if got := renderBudget(c.w, c.err); got != c.want {
+			t.Errorf("renderBudget(%d, %v) = %d, want %d", c.w, c.err, got, c.want)
+		}
+	}
+}
+
+// A real terminal narrower than 20 columns must still clip. It used to collapse
+// to the same 0 that means "not a terminal", i.e. "truncate nothing", so the
+// narrowest terminals got no truncation at all.
+func TestVeryNarrowTerminalStillClips(t *testing.T) {
+	orig := terminalWidth
+	t.Cleanup(func() { terminalWidth = orig })
+	terminalWidth = func() int { return 15 }
+
+	long := strings.Repeat("y", 120)
+	tb := newTable("NAME", "DESCRIPTION").flexible(1)
+	tb.add("pb", long)
+
+	var buf bytes.Buffer
+	tb.render(&buf)
+	if strings.Contains(buf.String(), long) {
+		t.Fatalf("a 15-column terminal did not clip the description:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "…") {
+		t.Error("expected an ellipsis")
 	}
 }

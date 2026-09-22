@@ -171,6 +171,35 @@ func displayWidth(s string) int {
 func isWide(r rune) bool {
 	switch {
 	case r >= 0x1100 && r <= 0x115F, // Hangul Jamo
+		// Double-width symbols below the CJK blocks. These render two cells
+		// wide in a terminal despite sitting among narrow neighbours, so the
+		// range cannot simply jump from Hangul Jamo to U+2E80: a description
+		// holding a watch, a star or a check mark would be mismeasured.
+		r == 0x231A || r == 0x231B, // watch, hourglass
+		r >= 0x23E9 && r <= 0x23EC,
+		r == 0x23F0 || r == 0x23F3,
+		r >= 0x25FD && r <= 0x25FE,
+		r >= 0x2614 && r <= 0x2615,
+		r >= 0x2648 && r <= 0x2653,
+		r == 0x267F || r == 0x2693 || r == 0x26A1,
+		r >= 0x26AA && r <= 0x26AB,
+		r >= 0x26BD && r <= 0x26BE,
+		r >= 0x26C4 && r <= 0x26C5,
+		r == 0x26CE || r == 0x26D4 || r == 0x26EA,
+		r >= 0x26F2 && r <= 0x26F3,
+		r == 0x26F5 || r == 0x26FA || r == 0x26FD,
+		r == 0x2705,
+		r >= 0x270A && r <= 0x270B,
+		r == 0x2728 || r == 0x274C || r == 0x274E,
+		r >= 0x2753 && r <= 0x2755,
+		r == 0x2757,
+		r >= 0x2795 && r <= 0x2797,
+		r == 0x27B0 || r == 0x27BF,
+		r >= 0x2B1B && r <= 0x2B1C,
+		r == 0x2B50 || r == 0x2B55,
+		r == 0x1F004 || r == 0x1F0CF,
+		r == 0x1F18E,
+		r >= 0x1F191 && r <= 0x1F19A,
 		r >= 0x2E80 && r <= 0x303E, // CJK radicals, Kangxi
 		r >= 0x3041 && r <= 0x33FF, // Kana, CJK compatibility
 		r >= 0x3400 && r <= 0x4DBF, // CJK ext A
@@ -228,7 +257,19 @@ var terminalWidth = func() int {
 		return 0
 	}
 	w, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || w < 20 {
+	return renderBudget(w, err)
+}
+
+// renderBudget turns a measured terminal width into the render budget. It is
+// separate from the syscall so the rule itself is testable -- stubbing
+// terminalWidth exercises render's clamp, never this.
+//
+// 0 is the sentinel for "not a terminal", which means "truncate nothing". A
+// narrow terminal must not collapse into it: doing so gave the narrowest
+// terminals no truncation at all, the opposite of what they need. The stub
+// clamp in render handles the small end.
+func renderBudget(w int, err error) int {
+	if err != nil || w <= 0 {
 		return 0
 	}
 	return w
