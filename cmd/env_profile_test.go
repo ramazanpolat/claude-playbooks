@@ -133,8 +133,28 @@ func TestProfileLifecycleAndAttachment(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(list, "glm  GLM via router (1 set, 1 unset; used by router)") {
-		t.Fatalf("profile list:\n%s", list)
+	// Assert the FACTS in the row, not its spacing: column widths move with
+	// the longest value in them, so matching an exact rendering makes every
+	// later data change look like a regression. (The previous form asserted
+	// the whole concatenated sentence and broke the moment the list became a
+	// table.)
+	if !strings.Contains(list, "NAME") || !strings.Contains(list, "USED BY") {
+		t.Fatalf("profile list is not a table:\n%s", list)
+	}
+	var row string
+	for _, l := range strings.Split(list, "\n") {
+		if strings.HasPrefix(l, "glm ") || l == "glm" {
+			row = l
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("no row for glm:\n%s", list)
+	}
+	for _, want := range []string{"1", "router", "GLM via router"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("glm row missing %q: %q", want, row)
+		}
 	}
 	if err := runEnvProfile(nil, []string{"glm", "delete"}); err == nil || !strings.Contains(err.Error(), "used by router") {
 		t.Fatalf("delete of an attached profile: %v", err)
@@ -412,4 +432,82 @@ func TestEnvShowFollowsAncestorManifestForManifestFreePlaybook(t *testing.T) {
 	if strings.Contains(out, "governs the launch") || strings.Contains(out, "ANCESTOR") || !strings.Contains(out, "set    OWN=1\n") {
 		t.Fatalf("own manifest should govern:\n%s", out)
 	}
+}
+
+// --values exists to answer "what does this profile set", which is a question
+// about KEYS. Profiles are where credentials live -- SPEC-v4.md writes them
+// 0600 because "values may be secrets" -- so the expanded view must not be a
+// new way to put one on screen. On 2026-09-21 the sibling `env <name>` status
+// path put a live token into an agent transcript; this pins that --values
+// cannot repeat it.
+func TestEnvProfileValuesRedactsCredentials(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+
+	const token = "sk-super-secret-value-do-not-print"
+	if err := runEnvProfile(nil, []string{"router", "set",
+		"ANTHROPIC_AUTH_TOKEN=" + token,
+		"ANTHROPIC_BASE_URL=http://proxy:1/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("redacted by default", func(t *testing.T) {
+		envProfileValues, revealSecrets = true, false
+		t.Cleanup(func() { envProfileValues, revealSecrets = false, false })
+		out := captureStdout(t, func() {
+			if err := runEnvProfile(nil, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if strings.Contains(out, token) {
+			t.Errorf("the credential VALUE was printed whole:\n%s", out)
+		}
+		// The MIDDLE is the part that must not survive. Asserting only that the
+		// whole value is absent would pass on output that printed all but the
+		// last character.
+		if strings.Contains(out, "secret-value-do-not") {
+			t.Errorf("the middle of the credential was printed:\n%s", out)
+		}
+		// The ends ARE shown, which is the point: it has to be possible to tell
+		// this secret from another one at a glance.
+		if !strings.Contains(out, "ANTHROPIC_AUTH_TOKEN") {
+			t.Errorf("the credential key was not named:\n%s", out)
+		}
+		if !strings.Contains(out, "sk-s") || !strings.Contains(out, "rint") {
+			t.Errorf("the recognisable ends were not shown:\n%s", out)
+		}
+		if !strings.Contains(out, "chars)") {
+			t.Errorf("the length was not reported:\n%s", out)
+		}
+		// A non-secret value is shown in full, or the view is useless.
+		if !strings.Contains(out, "http://proxy:1/v1") {
+			t.Errorf("a non-credential value was hidden too:\n%s", out)
+		}
+	})
+
+	t.Run("--reveal is the deliberate way out", func(t *testing.T) {
+		envProfileValues, revealSecrets = true, true
+		t.Cleanup(func() { envProfileValues, revealSecrets = false, false })
+		out := captureStdout(t, func() {
+			if err := runEnvProfile(nil, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if !strings.Contains(out, token) {
+			t.Errorf("--reveal did not show the value:\n%s", out)
+		}
+	})
+
+	t.Run("the plain list never prints values at all", func(t *testing.T) {
+		out := captureStdout(t, func() {
+			if err := runEnvProfile(nil, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if strings.Contains(out, token) || strings.Contains(out, "proxy:1") {
+			t.Errorf("the table printed values:\n%s", out)
+		}
+	})
 }

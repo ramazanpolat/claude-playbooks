@@ -892,7 +892,9 @@ Linked playbooks: the manifest is the LINK TARGET's shared state, so mutations a
 Shows or manages **env profiles**: named, reusable `set`/`unset` blocks stored as `<playbooks root>/.env-profiles/<name>.toml` (mode `0600`; values may be secrets) and attached to playbooks with `env <playbook> use <name>`. **Read-only with zero or one argument.**
 
 ```bash
-claude-playbook env-profile                                # list profiles, with descriptions and users
+claude-playbook env-profile                                # list profiles as a table
+claude-playbook env-profile --values                       # ...and what each one sets
+claude-playbook env-profile --values --reveal               # ...with credential values in full
 claude-playbook env-profile glm                            # show one, and which playbooks use it
 claude-playbook env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1   # creates the profile on first use
 claude-playbook env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
@@ -919,6 +921,12 @@ The listing marks the default with `registry default` (matched by file identity,
 
 **Errors:**
 - Unknown profile → `unknown env profile "glm". Create it with 'claude-playbook env-profile glm set KEY=VALUE'`
+**Listing (v3.15.0).** The no-argument form prints an aligned table — `NAME`, `SET`, `UNSET`, `USED BY`, `DESCRIPTION` — with the counts right-aligned and the registry default marked `*` in the name column, followed by a legend when one is marked. `DESCRIPTION` is the flexible column: when stdout is a terminal it is clipped to the remaining width with an ellipsis, and when stdout is **not** a terminal nothing is clipped, so a pipe or a redirect receives every row whole. Before v3.15.0 the listing concatenated all of it into one sentence per profile (`<description> (6 set, 0 unset; used by a, b)`), which nested parentheses inside descriptions that had their own and wrapped on any ordinary terminal.
+
+`--values` expands each profile under the table: its description, then its `set` keys with values and its `unset` keys, aligned. **Credential values are masked**: a key whose name matches `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `APIKEY`, `AUTH`, or ends in `_KEY` (case-insensitive) prints as `first…last (N chars)` rather than in full — enough to tell one secret from another, which is the ordinary reason to look, without putting it on screen. At most 4 runes are shown at each end, and never so many that fewer than 8 stay hidden, so a short value is masked entirely as `<redacted, N chars>`. `--reveal` prints values in full and is the only way to do so.
+
+The masking exists because profiles are where credentials live — this spec writes those files `0600` *because* "values may be secrets", and a sandboxed launch refuses a key set in a playbook's own `[env.set]` in order to push it into a profile. A status display that printed them would therefore print credentials by default, into terminals and agent transcripts, which is not a place a secret returns from.
+
 - Delete while attached → `env profile "glm" is used by router, sre; detach it first with 'claude-playbook env <playbook> unuse glm'`
 - Delete while default → `env profile "glm" is the registry default; clear it first with 'claude-playbook env-profile glm undefault'`
 - `undefault` of a profile that is not the default → `the registry default is "x", not "glm"` or `no registry default is set`; `undefault` with an unreadable marker clears it and reports `Registry default marker was invalid (<reason>); cleared.`
