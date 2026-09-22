@@ -183,11 +183,48 @@ nothing changes nothing.
 Manage them:
 
 ```bash
-cpb env-profile                 # list profiles, descriptions, which playbooks use each
+cpb env-profile                 # list them as a table
+cpb env-profile --values        # ...and what each one sets
 cpb env-profile glm             # show one
 cpb env router unuse glm        # detach
 cpb env-profile glm delete      # refused while any playbook still uses it
 ```
+
+```text
+NAME              SET  UNSET  USED BY                DESCRIPTION
+----              ---  -----  -------                -----------
+glm                 6      0  router, sre            GLM 5.3 through the local router
+glm-flash *         6      0  -                      the cheap tier
+work                2      0  kommander              corporate account
+
+* registry default: applied under every playbook's own block.
+```
+
+`DESCRIPTION` gives up whatever width the terminal cannot spare, marked with an
+ellipsis — but only on a terminal. Pipe or redirect it and every row arrives
+whole, so `cpb env-profile | grep` never loses the end of a line.
+
+`--values` expands each profile: its description, then its keys.
+
+```text
+glm
+    GLM 5.3 through the local router
+    set    ANTHROPIC_AUTH_TOKEN  sk-3…df0b (35 chars)
+    set    ANTHROPIC_BASE_URL    http://proxy:1/v1
+    unset  CLAUDE_CODE_OAUTH_TOKEN
+```
+
+**Credential values are masked**, showing only the ends and the length — enough
+to tell one secret from another, which is usually why you are looking, without
+putting it on screen. Anything whose name looks like a credential (`*TOKEN*`,
+`*SECRET*`, `*PASSWORD*`, `*AUTH*`, `*_KEY`, …) is masked; a value too short to
+hide 8 characters is masked completely. `--reveal` prints them in full.
+
+That default is deliberate: profiles are exactly where credentials belong — cpb
+writes these files `0600` because of it, and a sandboxed launch pushes keys out
+of a playbook manifest *into* a profile — so a status display that printed
+values would be printing secrets into terminals and agent transcripts by
+default.
 
 A profile that a playbook names but that is missing, unreadable, or invalid
 **refuses the launch** rather than silently running without it: a dropped layer

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -37,8 +38,11 @@ With a name: show that profile and which playbooks use it.
 	RunE: runEnvProfile,
 }
 
+var envProfileValues bool
+
 func init() {
 	envProfileCmd.Flags().BoolVar(&revealSecrets, "reveal", false, "show credential-looking values instead of redacting them")
+	envProfileCmd.Flags().BoolVar(&envProfileValues, "values", false, "expand each profile's sets and unsets instead of counting them")
 }
 
 func runEnvProfile(cmd *cobra.Command, args []string) error {
@@ -70,24 +74,38 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		maxLen := 0
+		// One row per profile: identity, the two counts, who attaches it, and
+		// the description LAST because it is prose and the only part that can
+		// be clipped without losing a fact. The previous rendering glued all
+		// four into a sentence -- "<description> (6 set, 0 unset; used by a,
+		// b)" -- which nested parentheses inside descriptions that already had
+		// their own, and wrapped on any normal terminal.
+		t := newTable("NAME", "SET", "UNSET", "USED BY", "DESCRIPTION").flexible(4).rightAlign(1, 2)
+		anyDefault := false
 		for _, p := range profiles {
-			if len(p.Name) > maxLen {
-				maxLen = len(p.Name)
-			}
-		}
-		for _, p := range profiles {
-			summary := fmt.Sprintf("%d set, %d unset", len(p.Set), len(p.Unset))
+			name := p.Name
 			if isRegistryDefault(dir, defaultName, p.Name) {
-				summary += "; registry default"
+				// A marker, not a word in a sentence: the eye finds a column.
+				name += " *"
+				anyDefault = true
 			}
-			if u := users[p.Name]; len(u) > 0 {
-				summary += "; used by " + strings.Join(u, ", ")
+			used := strings.Join(users[p.Name], ", ")
+			if used == "" {
+				used = "-"
 			}
-			if p.Description != "" {
-				summary = p.Description + " (" + summary + ")"
-			}
-			fmt.Printf("%-*s  %s\n", maxLen, p.Name, summary)
+			t.add(name, fmt.Sprintf("%d", len(p.Set)), fmt.Sprintf("%d", len(p.Unset)), used, p.Description)
+		}
+		t.render(os.Stdout)
+
+		fmt.Println()
+		if anyDefault {
+			fmt.Println("* registry default: applied under every playbook's own block.")
+		}
+		if envProfileValues {
+			printProfileValues(profiles, revealSecrets)
+		} else {
+			fmt.Printf("%d profile(s). 'claude-playbook env-profile --values' to list what each sets,\n", len(profiles))
+			fmt.Println("or 'claude-playbook env-profile <name>' for one.")
 		}
 		reportDefaultProblem(defaultName, derr, defaultFound)
 		return nil
@@ -334,5 +352,60 @@ func reportDefaultProblem(defaultName string, derr error, found bool) {
 		fmt.Printf("Registry default marker is invalid (%v): every launch is refused until 'claude-playbook env-profile <name> undefault' clears it.\n", derr)
 	case defaultName != "" && !found:
 		fmt.Printf("Registry default %q names no profile: every launch is refused until 'claude-playbook env-profile %s set KEY=VALUE' creates it or 'claude-playbook env-profile %s undefault' clears it.\n", defaultName, defaultName, defaultName)
+	}
+}
+
+// printProfileValues expands every profile under the table: description, then
+// its keys aligned. VALUES ARE REDACTED for credential-shaped names unless
+// --reveal is passed -- this view exists to answer "what does this profile
+// set", which is a question about keys, and profiles are where credentials
+// live (see looksLikeSecretKey in cmd/env.go).
+func printProfileValues(profiles []*envprofile.Profile, reveal bool) {
+	if !reveal {
+		masked := false
+		for _, p := range profiles {
+			for k := range p.Set {
+				if looksLikeSecretKey(k) {
+					masked = true
+				}
+			}
+		}
+		if masked {
+			fmt.Println()
+			fmt.Println("Credential values are shown as first…last; --reveal prints them in full.")
+		}
+	}
+	for _, p := range profiles {
+		fmt.Println()
+		fmt.Printf("%s\n", p.Name)
+		if p.Description != "" {
+			fmt.Printf("    %s\n", p.Description)
+		}
+		if len(p.Set) == 0 && len(p.Unset) == 0 {
+			fmt.Println("    (sets nothing, unsets nothing)")
+			continue
+		}
+		keys := make([]string, 0, len(p.Set))
+		width := 0
+		for k := range p.Set {
+			keys = append(keys, k)
+			if len(k) > width {
+				width = len(k)
+			}
+		}
+		sort.Strings(keys)
+		unset := append([]string(nil), p.Unset...)
+		sort.Strings(unset)
+		for _, k := range unset {
+			if len(k) > width {
+				width = len(k)
+			}
+		}
+		for _, k := range keys {
+			fmt.Printf("    set    %-*s  %s\n", width, k, displayEnvValue(k, p.Set[k], reveal))
+		}
+		for _, k := range unset {
+			fmt.Printf("    unset  %s\n", k)
+		}
 	}
 }
