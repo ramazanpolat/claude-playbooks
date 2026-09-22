@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -75,15 +74,10 @@ consume:
 	}
 
 	if all {
-		// --all is about playbooks; the bare form's self-update is a different
-		// operation, and naming one playbook contradicts "all" outright.
-		if len(rest) > 0 {
-			return fmt.Errorf("--all updates every playbook; drop the name %q, or update that one alone", rest[0])
-		}
-		if force {
-			return fmt.Errorf("--force applies to the binary's self-update, not to playbooks")
-		}
-		return runAllPlaybooksUpdate(checkOnly)
+		// --all shipped in v3.14.0 and was withdrawn; it is still parsed so a
+		// script carrying it gets this sentence rather than having "--all"
+		// taken for a playbook name.
+		return errors.New("--all is not available in this version; update playbooks one at a time (`claude-playbook update <name>`)")
 	}
 
 	if len(rest) == 0 {
@@ -118,11 +112,6 @@ func printUpdateHelp() {
 	fmt.Println("playbook's migrations/apply.sh runs afterward.")
 	fmt.Println("  --check    report the available version without installing it")
 	fmt.Println()
-	fmt.Println("With --all: do that for every playbook that can be updated natively, in")
-	fmt.Println("name order. Playbooks without [source], linked ones, and manifest-subdir")
-	fmt.Println("layouts are listed as skipped. A failure is reported and the run continues;")
-	fmt.Println("the exit status is non-zero if any playbook failed.")
-	fmt.Println("  --check    report what is available for each, changing nothing")
 	fmt.Println("A playbook whose source carries the version already installed is left")
 	fmt.Println("alone; `update <name>` still re-applies unconditionally.")
 }
@@ -636,33 +625,6 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 	return copyFile(src, dst, info.Mode())
 }
 
-// updatableReason reports why a playbook cannot be updated natively, or "" when
-// it can. The three conditions runPlaybookUpdate refuses on are all decidable
-// from the registry alone, so `--all` can classify every playbook before
-// fetching anything and never stage a source it is going to reject.
-func updatableReason(pb *playbook.Playbook) string {
-	if pb.Manifest == nil || pb.Manifest.Source == nil || pb.Manifest.Source.Repository == "" {
-		return "no [source] metadata"
-	}
-	root := pb.RootPath
-	if root == "" {
-		root = pb.Path
-	}
-	info, err := os.Lstat(root)
-	if err != nil {
-		return "unreadable: " + err.Error()
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "linked to an external source"
-	}
-	rootAbs, _ := filepath.Abs(root)
-	pathAbs, _ := filepath.Abs(pb.Path)
-	if rootAbs != pathAbs {
-		return "uses a manifest subdir"
-	}
-	return ""
-}
-
 // runAllPlaybooksUpdate updates every updatable playbook in the registry.
 //
 // It exists because a pilot running several installs of one playbook otherwise
@@ -670,93 +632,3 @@ func updatableReason(pb *playbook.Playbook) string {
 // one independent update per playbook, in name order, with no shared staging or
 // cross-playbook reasoning. Each is exactly what `update <name>` would do.
 //
-// A failure never stops the run. Playbooks are independent, and stopping at the
-// first failure would leave the rest on old code for a reason unrelated to them.
-// Each playbook's own output is captured and printed only when it fails, so the
-// summary stays scannable while a failure still shows everything it said.
-func runAllPlaybooksUpdate(checkOnly bool) error {
-	playbooksDir := config.ResolvePlaybooksDir()
-	pbs, err := playbook.Discover(playbooksDir)
-	if err != nil {
-		return err
-	}
-	if len(pbs) == 0 {
-		fmt.Printf("No playbooks in %s.\n", playbooksDir)
-		return nil
-	}
-	sort.Slice(pbs, func(i, j int) bool { return pbs[i].Name < pbs[j].Name })
-
-	width := 0
-	for _, pb := range pbs {
-		if len(pb.Name) > width {
-			width = len(pb.Name)
-		}
-	}
-
-	var updated, skipped, failed, current int
-	type failure struct {
-		name   string
-		err    error
-		output string
-	}
-	var failures []failure
-
-	for _, pb := range pbs {
-		if reason := updatableReason(pb); reason != "" {
-			fmt.Printf("%-*s  %s\n", width, pb.Name, reason)
-			skipped++
-			continue
-		}
-		var buf bytes.Buffer
-		res, err := runPlaybookUpdate(&buf, pb.Name, checkOnly, true)
-		switch {
-		case err != nil:
-			fmt.Printf("%-*s  FAILED: %v\n", width, pb.Name, err)
-			failures = append(failures, failure{pb.Name, err, buf.String()})
-			failed++
-		case res.upToDate:
-			fmt.Printf("%-*s  %s  up to date\n", width, pb.Name, displayVersion(res.from))
-			current++
-		case checkOnly:
-			fmt.Printf("%-*s  %s -> %s  available\n", width, pb.Name, displayVersion(res.from), displayVersion(res.to))
-			updated++
-		default:
-			fmt.Printf("%-*s  %s -> %s  ok\n", width, pb.Name, displayVersion(res.from), displayVersion(res.to))
-			updated++
-		}
-	}
-
-	// Detail after the table, so the table stays readable and a failure still
-	// shows every line the update printed before it gave up.
-	for _, f := range failures {
-		fmt.Printf("\n--- %s ---\n", f.name)
-		if out := strings.TrimRight(f.output, "\n"); out != "" {
-			fmt.Println(out)
-		}
-		fmt.Printf("error: %v\n", f.err)
-	}
-
-	fmt.Println()
-	verb := "updated"
-	if checkOnly {
-		verb = "with an update available"
-	}
-	parts := []string{fmt.Sprintf("%d %s", updated, verb)}
-	if current > 0 {
-		parts = append(parts, fmt.Sprintf("%d up to date", current))
-	}
-	if skipped > 0 {
-		parts = append(parts, fmt.Sprintf("%d skipped", skipped))
-	}
-	if failed > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", failed))
-	}
-	fmt.Println(strings.Join(parts, ", ") + ".")
-
-	if failed > 0 {
-		// A non-zero exit without a second error line: the failures are already
-		// reported above, in more detail than a wrapped error could carry.
-		return &commandExitError{code: 1}
-	}
-	return nil
-}
