@@ -1,0 +1,198 @@
+# <REPO> own arena. Runs this repo's gentar suites on every pull
+# request, every push to main, every v* tag, and on demand. Conditions
+# live HERE — edit the `on:` block; the arena doesn't care.
+#
+# Runner: self-hosted with label `arena` (Docker + network reach to the
+# bench-host). One-time setup is documented in gentar/README.md.
+#
+# Trust note: the arena engine runs with reach to the bench SSH key.
+# The default ref is a release tag, not a branch, so the code holding
+# that key only changes when you bump the pin.
+name: arena
+
+# The bench-host is a single machine shared by every arena on the
+# runner, and each arena's own runs must not race each other on bench
+# names either. Not cancel-in-progress: an arena run already holding a
+# bench should finish and clean up rather than be killed mid-bench,
+# leaving a sandbox stranded on the shared host.
+concurrency:
+  group: arena-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  # Test the change BEFORE it lands. A scenario asserts reality, so a PR
+  # that changes what this repo does fails here until its scenarios are
+  # updated in the same PR — which is the point.
+  #
+  # The honest cost: every PR push runs the whole suite list on a bench
+  # that is SHARED with every other arena on this runner. The
+  # concurrency group above is per-ref, so N open PRs are N arenas
+  # queueing for that bench-host, and cancel-in-progress is deliberately
+  # false — a superseded push still finishes its run rather than
+  # stranding a bench. Suites are minutes each; a busy repo feels it.
+  #
+  # Too expensive for your repo? Delete the two lines below and the PR
+  # is tested by the `arena` keyword tag or a manual dispatch instead —
+  # on demand rather than on every push.
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*', 'arena', 'arena-*']   # v* = release proof · arena-* = keyword tags
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: scenario to run (empty = all suites)
+        default: ''
+      gentar_ref:
+        description: gentar ref to run the arena from (empty = the pin in run.sh)
+        default: ''
+
+# Keyword tags — run the arena on ANY commit by pushing a tag at it:
+#   arena                    → every suite in gentar/scenarios/
+#   arena-<scenario>         → that one suite (e.g. arena-first-suite)
+# The tag names the SUBJECT commit (this checkout); GENTAR_REF still
+# picks the engine. Tag a branch tip, a main commit, or a dirty
+# experiment — same path. Delete the tag to re-run.
+
+jobs:
+  arena:
+    runs-on: [self-hosted, arena]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # .gentar-version floats via git describe
+
+      # Dispatch inputs go through env, never into shell source — a
+      # quoted value can't become a command. The bench key lands in
+      # RUNNER_TEMP, which the runner wipes after the job; nothing
+      # secret persists in the workspace.
+      - name: stage bench access
+        run: |
+          printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
+          chmod 600 "$RUNNER_TEMP/bench_key"
+          # Only when the engine repo is private; a public engine needs
+          # no key, and writing an empty one would leave a file that
+          # looks like an identity and fails as one.
+          if [ -n "$CLONE_KEY" ]; then
+            printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key"
+            chmod 600 "$RUNNER_TEMP/gentar_clone_key"
+          fi
+        env:
+          BENCH_KEY: ${{ secrets.BENCH_SSH_KEY }}
+          # Only needed when the ENGINE repo is private (a fork, an
+          # internal mirror): a read-only deploy key on it. Leave the
+          # secret unset for a public engine — run.sh then clones over
+          # anonymous https and ignores the empty key file.
+          CLONE_KEY: ${{ secrets.GENTAR_CLONE_KEY }}
+
+      - name: run suites
+        run: |
+          # Keyword tag → scenario: `arena` runs everything, `arena-<name>`
+          # runs one. Dispatch input wins when both are set (explicit ask).
+          INPUT="$SCENARIO_INPUT"
+          if [ -z "$INPUT" ] && [ "$GITHUB_EVENT_NAME" = push ] \
+             && [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            tag=${GITHUB_REF#refs/tags/}
+            case "$tag" in
+              arena)    INPUT='' ;;
+              arena-*)  INPUT=${tag#arena-} ;;
+            esac
+          fi
+          if [ -n "$INPUT" ]; then
+            for s in $INPUT; do
+              [ -f "gentar/scenarios/$s.toml" ] \
+                || { echo "unknown scenario: $s" >&2; exit 2; }
+            done
+            exec gentar/run.sh $INPUT
+          fi
+          # "Run everything" means every suite this run CAN run. A suite
+          # that declares `credentials` is refused by the coordinator
+          # (exit 2, before any bench exists) when none of the named
+          # variables is set -- correct for a direct ask, wrong for a push
+          # that never promised an agent credential. Such suites are left
+          # out of the sweep unless a credential is present, and named
+          # either way so the log says which and why. Dispatching one by
+          # name still reaches the honest refusal.
+          suites=""
+          for f in gentar/scenarios/*.toml; do
+            s=$(basename "$f" .toml)
+            if grep -q '^credentials = \[' "$f"; then
+              if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
+                echo "including $s (agent credential present)"
+              else
+                echo "skipping $s (needs an agent credential; none set)"
+                continue
+              fi
+            fi
+            suites="$suites $s"
+          done
+          exec gentar/run.sh $suites
+        env:
+          SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
+          # Empty = run.sh's own default, which is a release tag. Keep
+          # the pin in ONE place: a default here would silently win over
+          # the script's and drift from it.
+          GENTAR_REF: ${{ github.event.inputs.gentar_ref }}
+          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          # Engine source. Both are only for a private or relocated
+          # engine repo; unset, run.sh clones the public upstream over
+          # https. The key path is passed only when the secret was set,
+          # so an empty file never becomes a broken ssh identity.
+          GENTAR_CLONE_SSH_KEY: ${{ secrets.GENTAR_CLONE_KEY && format('{0}/gentar_clone_key', runner.temp) || '' }}
+          GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
+          # The `arena` runner is shared with other arenas, which publish the
+          # engine's default ClickHouse (8123) and OTLP (4318) ports. Pinned
+          # here so two concurrent arenas on that Docker host do not collide
+          # ("port is already allocated").
+          GENTAR_CLICKHOUSE_HOST_PORT: "8126"
+          GENTAR_OTLP_HOST_PORT: "4320"
+          # Port moves: if another arena (or gentar's own gate) runs on
+          # the same Docker host, every shared host binding must move
+          # aside here — gentar's docker-compose.yml documents each
+          # override and reads them as ${VAR:-default}. The two that
+          # collide in practice:
+          #   ClickHouse debug binding (8123) and the OTLP receiver
+          #   (4318, published on all interfaces).
+          #GENTAR_CLICKHOUSE_HOST_PORT: "8126"
+          #GENTAR_OTLP_HOST_PORT: "4320"
+          # Agent-in-the-loop suites. Providers are alternatives: a
+          # first-party key, or any Anthropic-compatible endpoint via
+          # token + base URL. All unset is the normal case and simply
+          # leaves those suites out of the sweep (see above).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+          # Model pins: SLOT vars, not ANTHROPIC_MODEL (claude-code rejects
+          # unknown main-model IDs). ALL FOUR, because claude-code picks a
+          # slot for itself -- an unpinned one sends a literal Anthropic ID
+          # to an endpoint that never heard of it. A routed endpoint needs
+          # every slot it could be asked for; unset is fine for a
+          # first-party key, which knows all of them.
+          #
+          # This is the FIRST link in the chain: repo var -> here -> run.sh
+          # forwards into the coordinator container -> gentar exports into
+          # the bench. Adding a pin anywhere downstream without adding it
+          # here does nothing at all.
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.ANTHROPIC_DEFAULT_OPUS_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.ANTHROPIC_DEFAULT_HAIKU_MODEL }}
+          ANTHROPIC_DEFAULT_FABLE_MODEL: ${{ vars.ANTHROPIC_DEFAULT_FABLE_MODEL }}
+          # Ceiling the budget guard enforces; must be >= each agent
+          # suite's declared [budget] tokens.
+          GENTAR_BUDGET_CAP: "50000"
+
+      - name: upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arena-reports
+          path: gentar/reports/
+          if-no-files-found: error
+
+      - name: teardown
+        # Free the port and volumes for anything else on this host —
+        # the fix-loop artifact is already uploaded above.
+        if: always()
+        # Same project name gentar/run.sh uses (arena-$SUBJECT), where SUBJECT
+        # is set explicitly rather than taken from the checkout directory.
+        run: docker compose -p arena-claude-playbooks down -v --remove-orphans || true
