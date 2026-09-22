@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -292,4 +293,44 @@ func TestInstallHoldsRegistryLockWhileWiring(t *testing.T) {
 	if !*held {
 		t.Fatal("install released the registry lock before wiring")
 	}
+}
+
+// A timeout must kill everything pilot started, not just pilot. pilot is a
+// shell script that runs helpers without exec'ing into them, and
+// CommandContext by itself kills only the direct child -- a hung grandchild
+// survived and could keep editing the playbook after the registry lock was
+// released. TestWirePilotProfileIsBounded execs its sleeper, so the sleeper
+// IS the direct child and that test cannot see this case; this one backgrounds
+// it, making it a grandchild, and checks it is gone once wire returns.
+func TestWirePilotProfileTimeoutKillsTheWholeGroup(t *testing.T) {
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("no sleep binary to build a hanging fake pilot from")
+	}
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	t.Setenv("PILOT_CHILD_PID", pidFile)
+	fakePilot(t, sleep+" 300 &\necho $! > \"$PILOT_CHILD_PID\"\nwait\n")
+
+	wirePilotProfile(t.TempDir())
+
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("fake pilot never started its child: %v", err)
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(raw)), "%d", &pid); err != nil || pid <= 0 {
+		t.Fatalf("bad child pid %q", raw)
+	}
+	t.Cleanup(func() { syscall.Kill(pid, syscall.SIGKILL) }) // never leak it, even on failure
+
+	// A killed process is reaped by init shortly after; until then kill(pid, 0)
+	// still succeeds on the zombie. Allow a moment for that.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("pilot's child (pid %d) survived the timeout: only the direct process was killed", pid)
 }

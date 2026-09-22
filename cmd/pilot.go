@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -59,5 +60,13 @@ func wirePilotProfile(dest string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), pilotWireTimeout)
 	defer cancel()
-	_ = exec.CommandContext(ctx, pilot, "wire", dest).Run()
+	cmd := exec.CommandContext(ctx, pilot, "wire", dest)
+	// Own process group, and cancellation kills the WHOLE group. CommandContext
+	// alone kills only the direct child, and pilot is a shell script that runs
+	// git and awk -- so a hung grandchild would survive the timeout and go on
+	// editing dest after Run returned and the registry lock was released,
+	// defeating both the timeout and the directory-stability guarantee.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	_ = cmd.Run()
 }
