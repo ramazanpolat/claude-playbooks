@@ -744,6 +744,87 @@ Effective at launch:
   unset  CLAUDE_CODE_OAUTH_TOKEN
 ```
 
+**Redaction (v3.15.0, `--reveal`).** A `set` key that looks like a credential
+prints a masked value instead of the resolved one, everywhere a `set` entry
+is shown: `env` (list, show, and the profile-expanded `Effective at launch`
+block alike), `env-profile` show, and `info`. There is no separate per-field
+secret marker in an env profile's TOML (its `set` is a plain
+`map[string]string`); a key-name heuristic (case-insensitive) is what decides
+it, in three rules, each as wide as it can be without swallowing an obvious
+non-secret:
+
+| Rule | Matches | Because | Cost |
+|---|---|---|---|
+| substring anywhere | `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `CREDENTIAL` | `GITHUBTOKEN` has no underscore to split on | over-matches `TOKENIZER_PATH` |
+| whole `_`-separated segment | `AUTH`, `PWD`, `PASS`, `PAT` | `MYSQL_PWD` is the standard MySQL password variable; as substrings these would redact `AUTHOR_NAME`, `COMPASS_URL` and `PATH` | over-matches a bare `PWD` |
+| end of a `_`-separated segment | `KEY`, `KEYS` | `API_KEY`, `MY_APIKEY` and `GPG_SIGNKEY` are all keys | spares `KEYBOARD_LAYOUT` |
+| exemption | a `PUBLIC` or `PUB` segment defeats the `KEY`/`KEYS` rule only | `PUBLIC_KEY` is meant to be read and compared | a `PUBLIC_SECRET` is still masked |
+
+Over-matching is deliberate throughout: a missed credential is a silent leak,
+an over-redacted ordinary key costs one `--reveal`. A bare `PWD` is masked on
+those terms -- it usually names the working directory, but it could name a
+password, and guessing "directory" is the assumption that leaks.
+
+**A credential inside a connection URL is masked from the value**, since no
+rule above can see it: `DATABASE_URL`, `REDIS_URL`, `AMQP_URL` and
+`MONGODB_URI` name nothing secret while carrying a password. Only the URL's
+userinfo is masked, not the whole value -- the scheme, host and database stay
+legible, because a wholly masked `DATABASE_URL` would train the pilot to
+reach for `--reveal` by habit, which is how a feature like this stops being
+used.
+
+**Both userinfo fields are masked**, because a colon says only that there are
+two fields, never which one holds the secret:
+
+| Shape | Where the credential is |
+|---|---|
+| `postgres://user:pw@host` | the password, on the right |
+| `https://TOKEN:x-oauth-basic@host` | the username -- GitHub's documented form, beside a fixed dummy |
+| `https://TOKEN:@host` | the username -- what `git credential` writes, beside an empty password |
+| `https://TOKEN@host` | the whole userinfo, no colon at all |
+
+Nothing in the structure distinguishes them, so masking one side leaks the
+other half the time; the username is the cheaper thing to lose. An empty
+field stays empty rather than becoming `<redacted, 0 chars>`, which would
+be noise that also advertises which shape the URL is.
+
+The authority ends at the first `/`, `?` or `#`, none of which may appear in
+userinfo -- otherwise the `@` in
+`https://service.test?email=a@example.com` reads as a userinfo delimiter and
+an ordinary callback URL is mangled as though it carried a credential.
+
+```
+  set    DATABASE_URL=postgres://<redacted, 4 chars>:<redacted, 11 chars>@db.internal:5432/app
+```
+
+A credential in a URL **query parameter** (`?password=`, a presigned
+signature) is **not** covered: recognising one needs per-scheme parameter
+knowledge, and a list of parameter names would go stale the way a list of key
+names does.
+
+The length is stated
+outright rather than left to be inferred from a run of masking characters. A
+value keeps up to 4 characters at each end, scaled down as it shortens, and
+**at least 8 characters always stay hidden** -- so anything under 12
+characters is redacted whole rather than showing half of itself, which
+matters because `PASSWORD` is in scope and a human-chosen password is short
+and guessable enough that half of one is most of one:
+
+```
+  set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
+  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
+```
+
+A value too short to leave that gap is redacted whole
+(`<redacted, N chars>`). `--reveal` on
+`env`, `env-profile`, and `info` opts back into the resolved value for that
+one invocation; nothing is written to disk either way, and a key that does
+not match the heuristic (`ANTHROPIC_BASE_URL` above) is never touched. This
+brings the command in line with the presence-only convention the rest of the
+tool's secret handling already follows for env profiles (`0600` profile
+files, the sandbox's proxy-injection refusal for a key in `[env.set]`) --
+only this display path used to print the resolved value outright.
+
 **Layering.** Later layers win:
 
 ```text

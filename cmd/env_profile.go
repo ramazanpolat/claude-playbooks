@@ -37,6 +37,10 @@ With a name: show that profile and which playbooks use it.
 	RunE: runEnvProfile,
 }
 
+func init() {
+	envProfileCmd.Flags().BoolVar(&revealSecrets, "reveal", false, "show credential-looking values instead of redacting them")
+}
+
 func runEnvProfile(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
@@ -112,7 +116,7 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		} else if isRegistryDefault(dir, d, name) {
 			fmt.Println("Registry default: applied under every playbook's own block.")
 		}
-		printEnvBlock("  ", p.Env())
+		printEnvBlock("  ", p.Env(), revealSecrets)
 		users, err := profileUsers(playbooksDir)
 		if err != nil {
 			return err

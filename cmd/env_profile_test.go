@@ -11,6 +11,64 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
+// The incident this feature exists for: a credential reaches the display
+// through an ATTACHED PROFILE, so it appears only in the profile-expanded
+// "Effective at launch" block, not in the playbook's own. Every other
+// effective-block test uses ordinary keys, so without this one the exact
+// shape that leaked on 2026-09-21 has no regression test.
+func TestEffectiveBlockRedactsCredentialFromProfile(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "router")
+	const token = "abcdef0123456789fedcba9876543210"
+
+	if err := runEnvProfile(nil, []string{"glm", "set", "ANTHROPIC_AUTH_TOKEN=" + token, "ANTHROPIC_BASE_URL=http://proxy/v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnv(nil, []string{"router", "use", "glm"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, token) {
+		t.Fatalf("the profile's token reached the effective block in full:\n%s", out)
+	}
+	if !strings.Contains(out, "Effective at launch:") {
+		t.Fatalf("no effective block rendered, so this proved nothing:\n%s", out)
+	}
+	if !strings.Contains(out, "ANTHROPIC_AUTH_TOKEN=abcd...3210 (32 chars)") {
+		t.Fatalf("effective block did not mask the token:\n%s", out)
+	}
+	if !strings.Contains(out, "ANTHROPIC_BASE_URL=http://proxy/v1") {
+		t.Fatalf("effective block redacted a non-credential key:\n%s", out)
+	}
+
+	// The same credential shown through `env-profile <name>` directly.
+	profileOut := captureStdout(t, func() {
+		if err := runEnvProfile(nil, []string{"glm"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(profileOut, token) {
+		t.Fatalf("env-profile show printed the token in full:\n%s", profileOut)
+	}
+
+	revealSecrets = true
+	t.Cleanup(func() { revealSecrets = false })
+	revealed := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(revealed, "ANTHROPIC_AUTH_TOKEN="+token) {
+		t.Fatalf("--reveal did not restore the profile's token:\n%s", revealed)
+	}
+}
+
 func TestProfileLifecycleAndAttachment(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)

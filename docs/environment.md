@@ -101,6 +101,43 @@ ANTHROPIC_BASE_URL = "http://proxy:1/v1"
 ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 ```
 
+## Secret-looking values are redacted in status output
+
+`env`, `env-profile`, and `info` mask a `set` value when its key looks like a
+credential (case-insensitive): `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`,
+`PASSPHRASE` or `CREDENTIAL` anywhere in the name; `AUTH`, `PWD`, `PASS` or
+`PAT` as a whole `_`-separated word; or a word ending in `KEY`/`KEYS` unless
+a `PUBLIC`/`PUB` word says the material is public. So `GITHUBTOKEN`,
+`MY_APIKEY` and `MYSQL_PWD` are masked, while `KEYBOARD_LAYOUT`,
+`AUTHOR_NAME`, `PATH` and `PUBLIC_KEY` are not:
+
+```text
+  set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
+  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
+```
+
+At least 8 characters always stay hidden, so a value under 12 characters is
+redacted whole (`<redacted, 9 chars>`) rather than showing half of itself.
+
+A credential inside a connection URL is masked too, even though the key names
+nothing secret — otherwise `DATABASE_URL` and friends would print it in
+full. Only the `user:password` part is hidden, so the URL stays readable:
+
+```text
+  set    DATABASE_URL=postgres://<redacted, 4 chars>:<redacted, 11 chars>@db.internal:5432/app
+```
+
+Both halves are masked because the credential is not always the password:
+`https://TOKEN:x-oauth-basic@github.com` and `https://TOKEN:@github.com` are
+the standard ways a git remote carries a token, and there the *username* is
+the secret. A credential in a query parameter (`?password=`) is not covered.
+
+Pass `--reveal` to see the resolved value for one invocation
+(`cpb env kommander --reveal`); it is never written to disk. This applies
+whether the value comes from a playbook's own `[env.set]` or an attached env
+profile — which is why `.env-profiles/*.toml` above is written `0600` in the
+first place: values may be secrets.
+
 Attach it. The playbook's manifest records only the name:
 
 ```bash

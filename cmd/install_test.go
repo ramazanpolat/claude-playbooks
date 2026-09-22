@@ -449,6 +449,7 @@ func resetCommandTestState(t *testing.T) {
 	linkName = ""
 	linkAlias = ""
 	linkNoAlias = false
+	revealSecrets = false
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
 		config.LauncherDir = ""
