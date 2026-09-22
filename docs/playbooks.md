@@ -255,37 +255,16 @@ Linked playbooks and manifests that select their config through a top-level
 
 ### Update every playbook at once
 
-A convenience over running `cpb update <name>` once per playbook — useful once a
-registry holds enough of them that doing it by hand is tedious:
+Not available. `cpb update --all` shipped in v3.14.0 and was withdrawn in
+v3.15.0; it will be implemented again later. Update playbooks one at a time:
 
 ```bash
-cpb update --all            # update them all
-cpb update --all --check    # report what is available for each
+cpb update <name>
 ```
 
-```text
-kommander            3.11.4 -> 3.13.0  ok
-kommander-9router    3.11.4 -> 3.13.0  ok
-kommander-dev        3.11.4 -> 3.13.0  ok
-kommander-personal   3.13.0  up to date
-lifeos               no [source] metadata
+The flag is still recognised so that a script carrying it gets a clear message
+rather than having `--all` read as a playbook name.
 
-3 updated, 1 up to date, 1 skipped.
-```
-
-Each row is exactly what `cpb update <name>` would have done, with two
-differences worth knowing:
-
-- **A playbook already at the source's version is left alone.** `cpb update
-  <name>` re-applies regardless, which is how you repair an install that drifted;
-  doing that across every playbook would leave a backup directory per playbook
-  per run for no change. Use the single-playbook form when you want a re-apply.
-- **A failure doesn't stop the run.** The rest still update, the failing
-  playbook's output is printed after the table, and the exit status is non-zero.
-
-Playbooks that can't update natively — no `[source]`, linked, or a manifest
-`subdir` layout — are listed as skipped with the reason rather than treated as
-errors.
 
 Running `cpb update` with no name self-updates the binary instead; see
 [Installation](installation.md#updating-the-tool).

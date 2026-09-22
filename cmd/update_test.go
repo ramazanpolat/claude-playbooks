@@ -349,206 +349,34 @@ func TestNativeUpdateCheckDoesNotInstall(t *testing.T) {
 	}
 }
 
-// updateOnePlaybook is the single-playbook update as these tests exercise it:
-// output discarded, and unchanged versions re-applied exactly as
-// `update <name>` does. Only `update --all` skips unchanged playbooks.
+// updateOnePlaybook is the single-playbook update as these tests exercise it,
+// with output discarded. An already-current playbook is re-applied rather than
+// skipped, which is how a drifted install is repaired -- and is now the only
+// behaviour there is, since the bulk path that skipped unchanged playbooks was
+// withdrawn.
 func updateOnePlaybook(name string, checkOnly bool) error {
-	_, err := runPlaybookUpdate(io.Discard, name, checkOnly, false)
+	err := runPlaybookUpdate(io.Discard, name, checkOnly)
 	return err
 }
 
-// allFixture builds a registry shaped like a pilot running several installs of
-// one playbook: three from one source, one from another, plus the three shapes
-// --all must skip and one whose source has vanished.
-func allFixture(t *testing.T) (root, srcA, srcB string) {
-	t.Helper()
-	root = t.TempDir()
-	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	srcA, srcB = filepath.Join(root, "srcA"), filepath.Join(root, "srcB")
-
-	write := func(dir, name, version string) {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# "+name+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := manifest.Write(dir, &manifest.Manifest{Name: name, Version: version}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(srcA, "upstream", "1.0.0")
-	write(srcB, "other", "9.9.9")
-
-	install := func(name, src, version string) {
-		dir := filepath.Join(config.PlaybooksDir, name)
-		write(dir, name, version)
-		if err := manifest.Write(dir, &manifest.Manifest{
-			Name: name, Version: version,
-			Source: &manifest.Source{Repository: src},
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	install("alpha", srcA, "0.9.0")
-	install("beta", srcA, "0.9.0")
-	install("current", srcB, "9.9.9") // already at the source's version
-	install("broken", filepath.Join(root, "gone"), "0.9.0")
-
-	// no [source] at all
-	orphan := filepath.Join(config.PlaybooksDir, "orphan")
-	if err := os.MkdirAll(orphan, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// linked to an external directory
-	ext := filepath.Join(root, "ext")
-	write(ext, "ext", "0.1.0")
-	if err := manifest.Write(ext, &manifest.Manifest{
-		Name: "ext", Version: "0.1.0", Source: &manifest.Source{Repository: srcB},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(ext, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
-		t.Fatal(err)
-	}
-	return root, srcA, srcB
-}
-
-func TestUpdateAllUpdatesEveryUpdatablePlaybook(t *testing.T) {
+// --all shipped in v3.14.0 and was withdrawn in v3.15.0. It stays in the flag
+// parser deliberately: without the case, "--all" falls through to the default
+// branch and is taken for a playbook name, so a script carrying the flag from
+// v3.14.0 would get "playbook --all not found" instead of a real explanation.
+// This pins the explanation, not the removal.
+func TestUpdateAllIsWithdrawnWithAnExplanation(t *testing.T) {
 	resetCommandTestState(t)
-	root, _, _ := allFixture(t)
-
-	err := runAllPlaybooksUpdate(false)
-	// One playbook's source is gone, so the run must report failure overall...
-	if code, ok := exitCode(err); !ok || code != 1 {
-		t.Fatalf("want exit code 1 for the failed playbook, got err=%v", err)
+	err := runUpdate(nil, []string{"--all"})
+	if err == nil {
+		t.Fatal("expected --all to be rejected")
 	}
-	// ...while every healthy one was still updated: a failure must not stop the run.
-	for _, name := range []string{"alpha", "beta"} {
-		got, rerr := os.ReadFile(filepath.Join(config.PlaybooksDir, name, "CLAUDE.md"))
-		if rerr != nil {
-			t.Fatalf("%s: %v", name, rerr)
-		}
-		if string(got) != "# upstream\n" {
-			t.Errorf("%s was not updated from its source: content=%q", name, got)
+	for _, want := range []string{"--all", "not available", "one at a time"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error should mention %q, got: %v", want, err)
 		}
 	}
-	// The skipped shapes are untouched and still present.
-	for _, name := range []string{"orphan", "linked"} {
-		if _, serr := os.Lstat(filepath.Join(config.PlaybooksDir, name)); serr != nil {
-			t.Errorf("%s disappeared: %v", name, serr)
-		}
-	}
-	_ = root
-}
-
-// Unchanged playbooks are left alone in bulk mode. Re-applying each would cost
-// one backup directory per playbook per run, in the playbooks root, for no
-// change -- the thing that makes a bulk command unpleasant to run twice.
-func TestUpdateAllLeavesUnchangedPlaybooksAlone(t *testing.T) {
-	resetCommandTestState(t)
-	allFixture(t)
-
-	if err := runAllPlaybooksUpdate(false); err == nil {
-		t.Fatal("want a failure for the broken playbook")
-	}
-	backups, err := filepath.Glob(filepath.Join(config.PlaybooksDir, ".current.bak.*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(backups) != 0 {
-		t.Errorf("an up-to-date playbook was re-applied: backups=%v", backups)
-	}
-	// The ones that did change were backed up, so the absence above is the skip
-	// and not a broken backup path.
-	for _, name := range []string{"alpha", "beta"} {
-		b, gerr := filepath.Glob(filepath.Join(config.PlaybooksDir, "."+name+".bak.*"))
-		if gerr != nil || len(b) != 1 {
-			t.Errorf("%s: backups=%v err=%v", name, b, gerr)
-		}
-	}
-}
-
-// Running it twice must be a no-op the second time.
-func TestUpdateAllIsIdempotent(t *testing.T) {
-	resetCommandTestState(t)
-	allFixture(t)
-
-	_ = runAllPlaybooksUpdate(false)
-	before, err := filepath.Glob(filepath.Join(config.PlaybooksDir, ".*.bak.*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = runAllPlaybooksUpdate(false)
-	after, err := filepath.Glob(filepath.Join(config.PlaybooksDir, ".*.bak.*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after) != len(before) {
-		t.Errorf("a second run did more work: backups %d -> %d", len(before), len(after))
-	}
-}
-
-func TestUpdateAllCheckChangesNothing(t *testing.T) {
-	resetCommandTestState(t)
-	allFixture(t)
-
-	installed := filepath.Join(config.PlaybooksDir, "alpha", "CLAUDE.md")
-	before, err := os.ReadFile(installed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if aerr := runAllPlaybooksUpdate(true); aerr == nil {
-		t.Fatal("want a failure for the broken playbook even in check mode")
-	}
-	after, err := os.ReadFile(installed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Errorf("--check installed something: %q -> %q", before, after)
-	}
-	backups, err := filepath.Glob(filepath.Join(config.PlaybooksDir, ".*.bak.*"))
-	if err != nil || len(backups) != 0 {
-		t.Errorf("--check created backups: %v err=%v", backups, err)
-	}
-}
-
-func TestUpdateAllRejectsContradictoryFlags(t *testing.T) {
-	resetCommandTestState(t)
-	config.PlaybooksDir = t.TempDir()
-
-	if err := runUpdate(nil, []string{"--all", "somename"}); err == nil {
-		t.Error("--all with a playbook name was accepted")
-	}
-	if err := runUpdate(nil, []string{"--all", "--force"}); err == nil {
-		t.Error("--all --force was accepted; --force is self-update only")
-	}
-}
-
-func TestUpdatableReasonClassifies(t *testing.T) {
-	resetCommandTestState(t)
-	allFixture(t)
-
-	pbs, err := playbook.Discover(config.PlaybooksDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]bool{ // name -> updatable
-		"alpha": true, "beta": true, "current": true, "broken": true,
-		"orphan": false, "linked": false,
-	}
-	for _, pb := range pbs {
-		expect, known := want[pb.Name]
-		if !known {
-			continue
-		}
-		reason := updatableReason(pb)
-		if expect && reason != "" {
-			t.Errorf("%s: want updatable, got %q", pb.Name, reason)
-		}
-		if !expect && reason == "" {
-			t.Errorf("%s: want a skip reason, got updatable", pb.Name)
-		}
+	// The failure must not be the flag being read as a playbook name.
+	if strings.Contains(err.Error(), "not found") {
+		t.Fatalf("--all was taken for a playbook name: %v", err)
 	}
 }

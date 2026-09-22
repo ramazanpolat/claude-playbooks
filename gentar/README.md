@@ -55,7 +55,7 @@ looks perfectly honoured. A fresh checkout is not a fresh engine.
 | `docs-honesty` | README's documented commands answer `--help` in the built binary; referenced files exist and stay executable |
 | `env-overrides` | manifest `[env]`, an attached env profile, one-off launch flags (before/after the name, via the launcher), an env file, and the `start -- --delete` boundary, all proven against the environment a stub `claude` actually received |
 | `auth-status` | `auth status` table and JSON for a fresh playbook (shared-login, no grant), read-only against a timestamp marker, unknown-name refusal, and `isolate_auth` reported as isolated |
-| `playbook-update` | native `update`: `--check` installs nothing, content moves, `settings.json` and `.claude.json` survive, the migration runs with the version pair, entries are backed up — and `--all` skips what it cannot update, leaves up-to-date playbooks alone, and refuses contradictory flags |
+| `playbook-update` | native `update`: `--check` installs nothing, content moves, `settings.json` and `.claude.json` survive, the migration runs with the version pair, entries are backed up, a playbook with no `[source]` says so, and the withdrawn `--all` explains itself rather than being read as a playbook name |
 | `playbook-link` | `link` develop-in-place: the entry is a symlink, edits outside are live inside, native update is refused, and `delete` removes the link without following it |
 | `config-dir-override` | `CLAUDE_CONFIG_DIR_OVERRIDE` end to end against the environment a stub `claude` received: honoured, consumed, a bare `CLAUDE_CONFIG_DIR` still ignored, refused in a layer, refused relative, refused with `--sandbox`, and reported-then-ignored by `start` |
 
