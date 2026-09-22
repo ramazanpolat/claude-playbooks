@@ -105,7 +105,7 @@ ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 
 `env`, `env-profile`, and `info` mask a `set` value when its key looks like a
 credential (an underscore-separated segment reading `TOKEN`, `KEY`, `SECRET`,
-or `AUTH`, case-insensitive):
+`AUTH`, or `PASSWORD`, case-insensitive):
 
 ```text
   set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)

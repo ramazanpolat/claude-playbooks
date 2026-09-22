@@ -304,14 +304,19 @@ func printEnvBlock(indent string, e *manifest.Env, reveal bool) {
 
 // secretKeyWords are the SCREAMING_SNAKE_CASE segments (env keys are always
 // that shape, per ValidateEnvKey) that mark a key as credential-looking:
-// *_TOKEN, *_KEY, *_SECRET, *_AUTH*. No env profile field carries a real
-// per-field secret marker (internal/envprofile.Profile.Set is a plain
-// map[string]string), so this heuristic is what there is to go on.
+// *_TOKEN, *_KEY, *_SECRET, *_AUTH*, *_PASSWORD. No env profile field
+// carries a real per-field secret marker (internal/envprofile.Profile.Set is
+// a plain map[string]string), so this heuristic is what there is to go on.
+// It over-matches an ordinary key like ANTHROPIC_AUTH_URL as a deliberate
+// tradeoff: a heuristic that ever misses a real credential is a silent leak,
+// which costs more than an occasional over-redacted debugging session that
+// --reveal fixes for one invocation.
 var secretKeyWords = map[string]bool{
-	"TOKEN":  true,
-	"KEY":    true,
-	"SECRET": true,
-	"AUTH":   true,
+	"TOKEN":    true,
+	"KEY":      true,
+	"SECRET":   true,
+	"AUTH":     true,
+	"PASSWORD": true,
 }
 
 func looksLikeSecretKey(key string) bool {
@@ -336,15 +341,23 @@ func displayEnvValue(key, value string, reveal bool) string {
 // redactSecretValue keeps a few characters at each end -- enough to tell
 // which credential is attached without disclosing it -- and states the
 // length outright rather than leaving it to be inferred from a masked run of
-// characters. Values too short to partially reveal without giving most of
-// themselves away are redacted whole.
+// characters. keep scales down for shorter values (capped at 4) so the
+// visible portion never exceeds the hidden one: a fixed keep=4 would show 8
+// of a 9-character secret's 9 characters, leaking nearly all of it. Values
+// too short for even that to leave a meaningful gap are redacted whole.
+// Runes, not bytes, so a value is never sliced through a multi-byte
+// character.
 func redactSecretValue(value string) string {
-	const keep = 4
-	n := len(value)
-	if n <= keep*2 {
+	r := []rune(value)
+	n := len(r)
+	keep := n / 4
+	if keep > 4 {
+		keep = 4
+	}
+	if keep < 2 || n-2*keep < 4 {
 		return fmt.Sprintf("<redacted, %d chars>", n)
 	}
-	return fmt.Sprintf("%s...%s (%d chars)", value[:keep], value[n-keep:], n)
+	return fmt.Sprintf("%s...%s (%d chars)", string(r[:keep]), string(r[n-keep:]), n)
 }
 
 func dropString(list []string, s string) []string {

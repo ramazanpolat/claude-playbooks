@@ -746,21 +746,26 @@ Effective at launch:
 
 **Redaction (v3.15.0, `--reveal`).** A `set` key that looks like a credential
 -- an underscore-separated segment (case-insensitive) reads `TOKEN`, `KEY`,
-`SECRET`, or `AUTH` -- prints a masked value instead of the resolved one,
-everywhere a `set` entry is shown: `env` (list, show, and the profile-expanded
-`Effective at launch` block alike), `env-profile` show, and `info`. There is
-no separate per-field secret marker in an env profile's TOML (its `set` is a
-plain `map[string]string`); the key-name heuristic is what decides it. A
-value long enough to partially disclose without giving most of itself away
-keeps its first and last 4 characters, with the length stated outright rather
-than left to be inferred from a run of masking characters:
+`SECRET`, `AUTH`, or `PASSWORD` -- prints a masked value instead of the
+resolved one, everywhere a `set` entry is shown: `env` (list, show, and the
+profile-expanded `Effective at launch` block alike), `env-profile` show, and
+`info`. There is no separate per-field secret marker in an env profile's
+TOML (its `set` is a plain `map[string]string`); the key-name heuristic is
+what decides it, deliberately over-matching a look-alike ordinary key
+(`ANTHROPIC_AUTH_URL`) rather than risk ever missing a real credential.
+The length is stated outright rather than left to be inferred from a run of
+masking characters. A value long enough keeps up to 4 characters at each
+end, scaled down for shorter values so the visible portion never exceeds the
+hidden one -- a fixed 4 at each end would show 8 of a 9-character secret's 9
+characters:
 
 ```
   set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
   set    ANTHROPIC_BASE_URL=http://proxy:1/v1
 ```
 
-A shorter value is redacted whole (`<redacted, N chars>`). `--reveal` on
+A value too short for that to leave a meaningful gap is redacted whole
+(`<redacted, N chars>`). `--reveal` on
 `env`, `env-profile`, and `info` opts back into the resolved value for that
 one invocation; nothing is written to disk either way, and a key that does
 not match the heuristic (`ANTHROPIC_BASE_URL` above) is never touched. This

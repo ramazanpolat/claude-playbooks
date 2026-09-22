@@ -120,6 +120,7 @@ func TestLooksLikeSecretKey(t *testing.T) {
 		"API_KEY":                 true,
 		"OPENAI_SECRET":           true,
 		"AUTH_HEADER_VALUE":       true,
+		"DB_PASSWORD":             true,
 		"ANTHROPIC_BASE_URL":      false,
 		"FROM_MANIFEST":           false,
 		"A":                       false,
@@ -137,6 +138,35 @@ func TestRedactSecretValue(t *testing.T) {
 	}
 	if got := redactSecretValue("short1"); got != "<redacted, 6 chars>" {
 		t.Fatalf("short value redacted as %q", got)
+	}
+
+	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+	// keep scales with length so the visible portion never exceeds the
+	// hidden one: a fixed keep=4 would show 8 of a 9-character value's 9
+	// characters, leaking nearly all of it.
+	boundary := []struct {
+		n    int
+		want string
+	}{
+		{6, "<redacted, 6 chars>"},     // keep=1: too short to reveal any of
+		{7, "<redacted, 7 chars>"},     // keep=1: too short to reveal any of
+		{8, "01...67 (8 chars)"},       // keep=2, hidden=4: smallest partial reveal
+		{9, "01...78 (9 chars)"},       // keep=2, hidden=5: fixed keep=4 used to leak 8 of these 9
+		{11, "01...9a (11 chars)"},     // keep=2, hidden=7
+		{12, "012...9ab (12 chars)"},   // keep=3, hidden=6
+		{16, "0123...cdef (16 chars)"}, // keep=4 (cap), hidden=8
+	}
+	for _, c := range boundary {
+		if got := redactSecretValue(alphabet[:c.n]); got != c.want {
+			t.Errorf("redactSecretValue(%d chars) = %q, want %q", c.n, got, c.want)
+		}
+	}
+
+	// Runes, not bytes: slicing through a multi-byte character must never
+	// produce invalid UTF-8.
+	multiByte := strings.Repeat("é", 10)
+	if got := redactSecretValue(multiByte); got != "éé...éé (10 chars)" {
+		t.Fatalf("multi-byte value redacted as %q", got)
 	}
 }
 
