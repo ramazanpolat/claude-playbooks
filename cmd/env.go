@@ -48,6 +48,15 @@ overridden.`,
 	RunE:              runEnv,
 }
 
+// revealSecrets backs --reveal on env, env-profile, and info: without it,
+// credential-looking values are redacted in every status display that would
+// otherwise print them (see printEnvBlock and displayEnvValue).
+var revealSecrets bool
+
+func init() {
+	envCmd.Flags().BoolVar(&revealSecrets, "reveal", false, "show credential-looking values instead of redacting them")
+}
+
 func runEnv(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 	profileDir := envprofile.Dir(playbooksDir)
@@ -63,7 +72,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 				continue
 			}
 			fmt.Printf("%s\n", pb.Name)
-			printEnvBlock("  ", pb.Manifest.Env)
+			printEnvBlock("  ", pb.Manifest.Env, revealSecrets)
 			shown++
 		}
 		if shown == 0 {
@@ -107,7 +116,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 					fmt.Printf("Registry default profile %q applies to it, and the launch is refused: %v\n", defaultName, err)
 				} else {
 					fmt.Printf("Registry default profile %q applies to it. Effective at launch:\n", defaultName)
-					printEnvBlock("  ", effective)
+					printEnvBlock("  ", effective, revealSecrets)
 				}
 			}
 			fmt.Printf("Use 'claude-playbook env %s set KEY=VALUE' or 'claude-playbook env %s unset KEY' to add some.\n", name, name)
@@ -117,7 +126,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		if defaultName != "" {
 			fmt.Printf("  default   %s\n", defaultName)
 		}
-		printEnvBlock("  ", block)
+		printEnvBlock("  ", block, revealSecrets)
 		if len(block.Profiles) > 0 || defaultName != "" {
 			effective, err := envprofile.ExpandWithDefault(profileDir, block)
 			if err != nil {
@@ -125,7 +134,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 				return nil
 			}
 			fmt.Println("Effective at launch:")
-			printEnvBlock("  ", effective)
+			printEnvBlock("  ", effective, revealSecrets)
 		}
 		return nil
 	}
@@ -274,7 +283,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printEnvBlock(indent string, e *manifest.Env) {
+func printEnvBlock(indent string, e *manifest.Env, reveal bool) {
 	if len(e.Profiles) > 0 {
 		fmt.Printf("%sprofiles  %s\n", indent, strings.Join(e.Profiles, ", "))
 	}
@@ -284,13 +293,58 @@ func printEnvBlock(indent string, e *manifest.Env) {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		fmt.Printf("%sset    %s=%s\n", indent, key, e.Set[key])
+		fmt.Printf("%sset    %s=%s\n", indent, key, displayEnvValue(key, e.Set[key], reveal))
 	}
 	unset := append([]string(nil), e.Unset...)
 	sort.Strings(unset)
 	for _, key := range unset {
 		fmt.Printf("%sunset  %s\n", indent, key)
 	}
+}
+
+// secretKeyWords are the SCREAMING_SNAKE_CASE segments (env keys are always
+// that shape, per ValidateEnvKey) that mark a key as credential-looking:
+// *_TOKEN, *_KEY, *_SECRET, *_AUTH*. No env profile field carries a real
+// per-field secret marker (internal/envprofile.Profile.Set is a plain
+// map[string]string), so this heuristic is what there is to go on.
+var secretKeyWords = map[string]bool{
+	"TOKEN":  true,
+	"KEY":    true,
+	"SECRET": true,
+	"AUTH":   true,
+}
+
+func looksLikeSecretKey(key string) bool {
+	for _, part := range strings.Split(strings.ToUpper(key), "_") {
+		if secretKeyWords[part] {
+			return true
+		}
+	}
+	return false
+}
+
+// displayEnvValue is what every env status display prints for a value:
+// redacted by default when the key looks like a credential, full value when
+// it doesn't or --reveal was passed.
+func displayEnvValue(key, value string, reveal bool) string {
+	if reveal || value == "" || !looksLikeSecretKey(key) {
+		return value
+	}
+	return redactSecretValue(value)
+}
+
+// redactSecretValue keeps a few characters at each end -- enough to tell
+// which credential is attached without disclosing it -- and states the
+// length outright rather than leaving it to be inferred from a masked run of
+// characters. Values too short to partially reveal without giving most of
+// themselves away are redacted whole.
+func redactSecretValue(value string) string {
+	const keep = 4
+	n := len(value)
+	if n <= keep*2 {
+		return fmt.Sprintf("<redacted, %d chars>", n)
+	}
+	return fmt.Sprintf("%s...%s (%d chars)", value[:keep], value[n-keep:], n)
 }
 
 func dropString(list []string, s string) []string {

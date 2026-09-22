@@ -64,3 +64,11 @@ contains = "default-ok"
 # `--delete` after `--` belongs to claude, never to the wrapper.
 command = 'mkdir -p "$HOME/keepme"; claude-playbook start "$HOME/keepme" -- --delete && test -d "$HOME/keepme" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/keepme$" "$HOME/claude-env" && echo delete-boundary-ok'
 contains = "delete-boundary-ok"
+
+[[verify.commands]]
+# A credential-shaped value never appears in status output by default: the
+# key's value is masked to its first/last 4 characters plus a length, an
+# ordinary key alongside it (FROM_MANIFEST) stays fully visible, and
+# --reveal opts back into the raw value.
+command = '''claude-playbook env env-pb set THE_AUTH_TOKEN=abcdef0123456789fedcba9876543210 >/dev/null && OUT=$(claude-playbook env env-pb) && ! printf '%s' "$OUT" | grep -q abcdef0123456789fedcba9876543210 && printf '%s' "$OUT" | grep -qF "THE_AUTH_TOKEN=abcd...3210 (32 chars)" && printf '%s' "$OUT" | grep -qF "FROM_MANIFEST=yes" && claude-playbook env env-pb --reveal | grep -qF "THE_AUTH_TOKEN=abcdef0123456789fedcba9876543210" && echo redact-ok'''
+contains = "redact-ok"

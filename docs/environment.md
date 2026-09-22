@@ -101,6 +101,23 @@ ANTHROPIC_BASE_URL = "http://proxy:1/v1"
 ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 ```
 
+## Secret-looking values are redacted in status output
+
+`env`, `env-profile`, and `info` mask a `set` value when its key looks like a
+credential (an underscore-separated segment reading `TOKEN`, `KEY`, `SECRET`,
+or `AUTH`, case-insensitive):
+
+```text
+  set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
+  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
+```
+
+Pass `--reveal` to see the resolved value for one invocation
+(`cpb env kommander --reveal`); it is never written to disk. This applies
+whether the value comes from a playbook's own `[env.set]` or an attached env
+profile — which is why `.env-profiles/*.toml` above is written `0600` in the
+first place: values may be secrets.
+
 Attach it. The playbook's manifest records only the name:
 
 ```bash

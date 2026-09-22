@@ -1,6 +1,16 @@
 # `claude-playbook env <name>` prints resolved secret values, not just presence
 
-**Status:** known, unfixed. Found live 2026-09-21 while attaching the
+**Status:** fixed (task `cpb-env-redact-secrets`, 2026-09-22). `env`,
+`env-profile`, and `info` now redact a `set` value whenever its key looks
+like a credential (an underscore-separated segment reading `TOKEN`, `KEY`,
+`SECRET`, or `AUTH`), keeping the first/last 4 characters and stating the
+length; `--reveal` opts back into the resolved value for one invocation. See
+`SPEC-v4.md`'s "Redaction (v3.15.0, `--reveal`)" amendment and
+`docs/environment.md`'s "Secret-looking values are redacted in status output"
+for the shipped behavior. The rest of this writeup is left as-is for the
+root-cause record.
+
+Found live 2026-09-21 while attaching the
 `claude-opus-5` env profile to `kommander-metu` for an unrelated task (a code
 review run through that playbook). Running `claude-playbook env kommander-metu`
 to check which profiles were attached printed the fully resolved effective

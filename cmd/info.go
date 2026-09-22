@@ -21,6 +21,10 @@ var infoCmd = &cobra.Command{
 	RunE:              runInfo,
 }
 
+func init() {
+	infoCmd.Flags().BoolVar(&revealSecrets, "reveal", false, "show credential-looking values instead of redacting them")
+}
+
 func runInfo(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	playbooksDir := config.ResolvePlaybooksDir()
@@ -89,7 +93,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			fmt.Printf("%sset %s=%s\n", label, key, pb.Manifest.Env.Set[key])
+			fmt.Printf("%sset %s=%s\n", label, key, displayEnvValue(key, pb.Manifest.Env.Set[key], revealSecrets))
 			label = "             "
 		}
 		unset := append([]string(nil), pb.Manifest.Env.Unset...)

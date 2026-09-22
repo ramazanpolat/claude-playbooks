@@ -113,6 +113,74 @@ func TestEnvShowListsBlock(t *testing.T) {
 	}
 }
 
+func TestLooksLikeSecretKey(t *testing.T) {
+	cases := map[string]bool{
+		"ANTHROPIC_AUTH_TOKEN":    true,
+		"CLAUDE_CODE_OAUTH_TOKEN": true,
+		"API_KEY":                 true,
+		"OPENAI_SECRET":           true,
+		"AUTH_HEADER_VALUE":       true,
+		"ANTHROPIC_BASE_URL":      false,
+		"FROM_MANIFEST":           false,
+		"A":                       false,
+	}
+	for key, want := range cases {
+		if got := looksLikeSecretKey(key); got != want {
+			t.Errorf("looksLikeSecretKey(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
+func TestRedactSecretValue(t *testing.T) {
+	if got := redactSecretValue("sk-abcdef0123456789fedcba9876543210"); got != "sk-a...3210 (35 chars)" {
+		t.Fatalf("long value redacted as %q", got)
+	}
+	if got := redactSecretValue("short1"); got != "<redacted, 6 chars>" {
+		t.Fatalf("short value redacted as %q", got)
+	}
+}
+
+func TestEnvShowRedactsCredentialLookingValues(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "router")
+	longToken := "abcdef0123456789fedcba9876543210"
+	if err := manifest.Write(root, &manifest.Manifest{Name: "router", Env: &manifest.Env{
+		Set: map[string]string{
+			"ANTHROPIC_AUTH_TOKEN": longToken,
+			"ANTHROPIC_BASE_URL":   "https://api.example.com",
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, longToken) {
+		t.Fatalf("redacted show output still contains the raw value:\n%s", out)
+	}
+	if !strings.Contains(out, "ANTHROPIC_AUTH_TOKEN=abcd...3210 (32 chars)") {
+		t.Fatalf("show output missing masked token:\n%s", out)
+	}
+	if !strings.Contains(out, "ANTHROPIC_BASE_URL=https://api.example.com") {
+		t.Fatalf("show output redacted a non-credential key:\n%s", out)
+	}
+
+	revealSecrets = true
+	t.Cleanup(func() { revealSecrets = false })
+	revealed := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(revealed, "ANTHROPIC_AUTH_TOKEN="+longToken) {
+		t.Fatalf("--reveal output missing raw value:\n%s", revealed)
+	}
+}
+
 func TestEnvRejectsBadInputBeforeWriting(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
@@ -234,6 +302,37 @@ func TestInfoRendersEnvBlock(t *testing.T) {
 	})
 	if !strings.Contains(out, "Env:         set A=1\n             unset Z\n") {
 		t.Fatalf("info output missing env lines:\n%s", out)
+	}
+}
+
+func TestInfoRedactsCredentialLookingValues(t *testing.T) {
+	resetCommandTestState(t)
+	config.PlaybooksDir = sandboxRoot(t, "playbooks")
+	longToken := "abcdef0123456789fedcba9876543210"
+	writePlaybook(t, config.PlaybooksDir, "router", &manifest.Manifest{
+		Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_AUTH_TOKEN": longToken}},
+	})
+	out := captureStdout(t, func() {
+		if err := runInfo(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, longToken) {
+		t.Fatalf("info output still contains the raw value:\n%s", out)
+	}
+	if !strings.Contains(out, "ANTHROPIC_AUTH_TOKEN=abcd...3210 (32 chars)") {
+		t.Fatalf("info output missing masked token:\n%s", out)
+	}
+
+	revealSecrets = true
+	t.Cleanup(func() { revealSecrets = false })
+	revealed := captureStdout(t, func() {
+		if err := runInfo(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(revealed, "ANTHROPIC_AUTH_TOKEN="+longToken) {
+		t.Fatalf("info --reveal output missing raw value:\n%s", revealed)
 	}
 }
 
