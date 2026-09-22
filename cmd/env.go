@@ -371,8 +371,13 @@ func displayEnvValue(key, value string, reveal bool) string {
 
 // urlUserinfo matches the credential an absolute URL carries before its
 // host. Anchored on "://" so a bare "user:pass@host" or a mailto: address is
-// left alone, and stopped by "/" so a path or port never looks like userinfo.
-var urlUserinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s]+)@`)
+// left alone. The authority ends at the first "/", "?" or "#", so none of
+// them may appear in userinfo -- without "?" and "#" here, the "@" in
+// https://service.test?email=a@example.com reads as a userinfo delimiter and
+// an ordinary callback URL is mangled as though it carried a credential.
+// RFC 3986 requires both to be percent-encoded inside userinfo anyway, so
+// excluding them cannot miss a real one.
+var urlUserinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^/?#@\s]+)@`)
 
 // redactURLCredentials masks the credential inside a connection URL. Every
 // other rule here reads the key, and this case cannot: DATABASE_URL,
@@ -385,14 +390,29 @@ func redactURLCredentials(value string) string {
 	return urlUserinfo.ReplaceAllStringFunc(value, func(match string) string {
 		parts := urlUserinfo.FindStringSubmatch(match)
 		scheme, userinfo := parts[1], parts[2]
-		if user, secret, hasPassword := strings.Cut(userinfo, ":"); hasPassword {
-			return scheme + user + ":" + redactSecretValue(secret) + "@"
+		left, right, hasColon := strings.Cut(userinfo, ":")
+		if !hasColon {
+			return scheme + redactSecretValue(userinfo) + "@"
 		}
-		// No colon: the userinfo IS the credential, as in
-		// https://ghp_xxx@github.com. Masking only "after the colon" would
-		// leave this shape fully exposed.
-		return scheme + redactSecretValue(userinfo) + "@"
+		return scheme + maskUserinfoField(left) + ":" + maskUserinfoField(right) + "@"
 	})
+}
+
+// maskUserinfoField masks one side of a URL's user:password pair. Both sides
+// are masked, because the colon says only that there are two fields -- never
+// which one holds the secret. postgres://user:pw@host keeps it on the right,
+// while https://TOKEN:x-oauth-basic@host (GitHub's documented form) and
+// https://TOKEN:@host (what `git credential` writes) keep it on the left
+// beside a dummy or empty password. Nothing in the structure distinguishes
+// them, so masking only one side leaks the other half the time, and the
+// username is the cheaper thing to lose. An empty field stays empty: there
+// is nothing to hide, and "<redacted, 0 chars>" is noise that also advertises
+// which shape this is.
+func maskUserinfoField(field string) string {
+	if field == "" {
+		return ""
+	}
+	return redactSecretValue(field)
 }
 
 // redactSecretValue keeps a few characters at each end -- enough to tell

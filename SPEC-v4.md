@@ -767,17 +767,40 @@ password, and guessing "directory" is the assumption that leaks.
 
 **A credential inside a connection URL is masked from the value**, since no
 rule above can see it: `DATABASE_URL`, `REDIS_URL`, `AMQP_URL` and
-`MONGODB_URI` name nothing secret while carrying a password. Only the
-credential in the URL's userinfo is masked, not the whole value -- the
-scheme, host and database stay legible, because a wholly masked
-`DATABASE_URL` would train the pilot to reach for `--reveal` by habit, which
-is how a feature like this stops being used. Where the userinfo has no colon
-(`https://ghp_xxx@github.com`) the whole of it is the credential and is
-masked as such.
+`MONGODB_URI` name nothing secret while carrying a password. Only the URL's
+userinfo is masked, not the whole value -- the scheme, host and database stay
+legible, because a wholly masked `DATABASE_URL` would train the pilot to
+reach for `--reveal` by habit, which is how a feature like this stops being
+used.
+
+**Both userinfo fields are masked**, because a colon says only that there are
+two fields, never which one holds the secret:
+
+| Shape | Where the credential is |
+|---|---|
+| `postgres://user:pw@host` | the password, on the right |
+| `https://TOKEN:x-oauth-basic@host` | the username -- GitHub's documented form, beside a fixed dummy |
+| `https://TOKEN:@host` | the username -- what `git credential` writes, beside an empty password |
+| `https://TOKEN@host` | the whole userinfo, no colon at all |
+
+Nothing in the structure distinguishes them, so masking one side leaks the
+other half the time; the username is the cheaper thing to lose. An empty
+field stays empty rather than becoming `<redacted, 0 chars>`, which would
+be noise that also advertises which shape the URL is.
+
+The authority ends at the first `/`, `?` or `#`, none of which may appear in
+userinfo -- otherwise the `@` in
+`https://service.test?email=a@example.com` reads as a userinfo delimiter and
+an ordinary callback URL is mangled as though it carried a credential.
 
 ```
-  set    DATABASE_URL=postgres://user:<redacted, 11 chars>@db.internal:5432/app
+  set    DATABASE_URL=postgres://<redacted, 4 chars>:<redacted, 11 chars>@db.internal:5432/app
 ```
+
+A credential in a URL **query parameter** (`?password=`, a presigned
+signature) is **not** covered: recognising one needs per-scheme parameter
+knowledge, and a list of parameter names would go stale the way a list of key
+names does.
 
 The length is stated
 outright rather than left to be inferred from a run of masking characters. A

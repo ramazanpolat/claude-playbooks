@@ -237,10 +237,11 @@ func TestDisplayEnvValueMasksURLCredentials(t *testing.T) {
 		name, key, value, want string
 	}{
 		{
-			name:  "password in userinfo is masked, the rest stays legible",
+			// Both sides masked: structure cannot say which holds the secret.
+			name:  "user and password are both masked, the rest stays legible",
 			key:   "DATABASE_URL",
 			value: "postgres://user:hunter2pass@db.example.com:5432/app",
-			want:  "postgres://user:<redacted, 11 chars>@db.example.com:5432/app",
+			want:  "postgres://<redacted, 4 chars>:<redacted, 11 chars>@db.example.com:5432/app",
 		},
 		{
 			// Masking only "after the colon" would leave this fully exposed.
@@ -248,6 +249,35 @@ func TestDisplayEnvValueMasksURLCredentials(t *testing.T) {
 			key:   "GIT_REMOTE",
 			value: "https://ghp_abcdefghijklmnop@github.com/org/repo",
 			want:  "https://ghp_...mnop (20 chars)@github.com/org/repo",
+		},
+		{
+			// What `git credential` writes: the token is the USERNAME and the
+			// password is empty. Masking the password side leaked the token.
+			name:  "token username with an empty password",
+			key:   "GIT_REMOTE",
+			value: "https://ghp_abcdefghijklmnop:@github.com/org/repo",
+			want:  "https://ghp_...mnop (20 chars):@github.com/org/repo",
+		},
+		{
+			// GitHub's own documented form: the password is a fixed dummy.
+			name:  "token username with a dummy password",
+			key:   "GIT_REMOTE",
+			value: "https://ghp_abcdefghijklmnop:x-oauth-basic@github.com/o/r",
+			want:  "https://ghp_...mnop (20 chars):x-...ic (13 chars)@github.com/o/r",
+		},
+		{
+			// No path before the query, so the "@" of an email parameter used
+			// to read as a userinfo delimiter and mangle the whole URL.
+			name:  "an @ in a query parameter is not userinfo",
+			key:   "CALLBACK_URL",
+			value: "https://service.test?email=a@example.com",
+			want:  "https://service.test?email=a@example.com",
+		},
+		{
+			name:  "an @ in a fragment is not userinfo",
+			key:   "DOCS_URL",
+			value: "https://service.test#contact@example.com",
+			want:  "https://service.test#contact@example.com",
 		},
 		{
 			name:  "a URL with no credential is untouched",
@@ -271,7 +301,13 @@ func TestDisplayEnvValueMasksURLCredentials(t *testing.T) {
 			name:  "scheme with a plus, as mongodb+srv uses",
 			key:   "MONGODB_URI",
 			value: "mongodb+srv://admin:s3cr3tvalue@cluster0.example.net/db",
-			want:  "mongodb+srv://admin:<redacted, 11 chars>@cluster0.example.net/db",
+			want:  "mongodb+srv://<redacted, 5 chars>:<redacted, 11 chars>@cluster0.example.net/db",
+		},
+		{
+			name:  "every URL in a multi-URL value is masked, not just the first",
+			key:   "UPSTREAMS",
+			value: "redis://u1:secretalpha@a.internal,redis://u2:secretbravo@b.internal",
+			want:  "redis://<redacted, 2 chars>:<redacted, 11 chars>@a.internal,redis://<redacted, 2 chars>:<redacted, 11 chars>@b.internal",
 		},
 	}
 	for _, c := range cases {
