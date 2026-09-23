@@ -1,5 +1,6 @@
-# <REPO> own arena. Runs this repo's gentar suites on every pull
-# request, every push to main, every v* tag, and on demand. Conditions
+# claude-playbooks own arena. Runs this repo's gentar suites on every push
+# to main, every v* tag, the arena / arena-<suite> keyword tags, and on
+# demand. Deliberately NOT on pull requests -- see the `on:` block. Conditions
 # live HERE — edit the `on:` block; the arena doesn't care.
 #
 # Runner: self-hosted with label `arena` (Docker + network reach to the
@@ -56,7 +57,7 @@ on:
 
 # Keyword tags — run the arena on ANY commit by pushing a tag at it:
 #   arena                    → every suite in gentar/scenarios/
-#   arena-<scenario>         → that one suite (e.g. arena-first-suite)
+#   arena-<scenario>         → that one suite (e.g. arena-cli-head-build)
 # The tag names the SUBJECT commit (this checkout); GENTAR_REF still
 # picks the engine. Tag a branch tip, a main commit, or a dirty
 # experiment — same path. Delete the tag to re-run.

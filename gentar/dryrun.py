@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run an own-arena scenario locally, without a bench.
 
-    gentar/dryrun.py gentar/scenarios/first-suite.toml
+    gentar/dryrun.py gentar/scenarios/cli-head-build.toml
     gentar/dryrun.py gentar/scenarios/*.toml        # sweep
     gentar/dryrun.py                                # every suite
 

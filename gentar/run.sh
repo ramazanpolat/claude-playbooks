@@ -2,7 +2,7 @@
 # Kick this repo's arena: stage the working tree as the subject, run a
 # scenario, land the report in gentar/reports/.
 #
-#   gentar/run.sh <scenario>            # e.g. first-suite
+#   gentar/run.sh <scenario>            # e.g. cli-head-build
 #   GENTAR_REF=v0.2.0 gentar/run.sh …   # run against another engine version
 #   GENTAR_REF=main gentar/run.sh …     # …or the engine's tip, unpinned
 #
@@ -19,7 +19,7 @@
 # no file edit:
 #
 #   GENTAR_CLICKHOUSE_HOST_PORT=8124 GENTAR_OTLP_HOST_PORT=14320 \
-#     gentar/run.sh first-suite
+#     gentar/run.sh cli-head-build
 #
 # The only thing to edit below is SUBJECT, if your repo's directory name
 # is not the subject name your scenarios declare.
@@ -108,25 +108,31 @@ if [ "$REVIEW_ONLY" = 1 ]; then
   # Candidates the repo exposes: executables it ships, and the scripts a
   # README tells a person to run. Both are things a fresh machine would
   # encounter, which is what a scenario is for.
-  # Go test files are never something a scenario should mention, and this
-  # repo's cmd/ is Go package source, so they are dropped here -- otherwise
-  # they are most of the report and bury the real gaps.
-  cands=$( { git ls-files 2>/dev/null | grep -E '^(bin|scripts|cmd)/' | grep -vE '_test\.go$' || true
+  # Candidates are the surface a fresh machine exposes. For scripts and
+  # bin/, that is the file itself. For this Go CLI it is the REGISTERED
+  # SUBCOMMANDS -- cobra's Use: fields -- not cmd/'s source files, which are
+  # implementation and helpers a scenario can never invoke (root.go,
+  # table.go, ...). Listing files buried the real gaps under names no suite
+  # should ever mention. A subcommand candidate is printed as `cmd <name>`
+  # and dated by the file that defines it.
+  cands=$( { git ls-files 2>/dev/null | grep -E '^(bin|scripts)/' || true
              git ls-files 2>/dev/null | grep -E '\.(sh|py)$' | grep -vE '^(gentar|test|tests)/' || true
+             git grep -hoE 'Use:[[:space:]]*"[a-z][a-z0-9-]*' -- 'cmd/*.go' 2>/dev/null \
+               | sed -E 's/Use:[[:space:]]*"/cmd:/' || true
            } | sort -u)
 
   gaps=0
   for c in $cands; do
-    base=$(basename "$c"); stem=${base%.*}
-    # A Go file is named with underscores; the subcommand it implements is
-    # typed with dashes (env_profile.go is `env-profile`), so both count.
-    dashed=$(printf '%s' "$stem" | tr '_' '-')
+    case "$c" in
+      cmd:*) name=${c#cmd:}; base=$name; stem=$name; label="cmd $name"
+             src=$(git grep -lE "Use:[[:space:]]*\"$name([ \"])" -- 'cmd/*.go' 2>/dev/null | head -1) ;;
+      *)     base=$(basename "$c"); stem=${base%.*}; label=$c; src=$c ;;
+    esac
     if ! printf '%s\n' "$mentions" | grep -qxF "$base" \
-       && ! printf '%s\n' "$mentions" | grep -qxF "$stem" \
-       && ! printf '%s\n' "$mentions" | grep -qxF "$dashed"; then
+       && ! printf '%s\n' "$mentions" | grep -qxF "$stem"; then
       if [ "$gaps" = 0 ]; then echo "the repo ships these, and no suite mentions them:"; fi
-      last=$(git log -1 --format='%ad' --date=short -- "$c" 2>/dev/null || echo '?')
-      printf '  %-40s last changed %s\n' "$c" "$last"
+      last=$(git log -1 --format='%ad' --date=short -- "${src:-$c}" 2>/dev/null || echo '?')
+      printf '  %-40s last changed %s\n' "$label" "${last:-?}"
       gaps=$((gaps + 1))
     fi
   done

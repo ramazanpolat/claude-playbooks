@@ -194,6 +194,10 @@ Carry these forward when re-copying the kit for an engine bump:
   bench per scenario, and seals the pilot's own `claude-playbook` off `PATH`.
   With the kit's shared home, `pilot-self-uninstall` removed the scratch
   binary and later suites silently ran the pilot's real install.
+- **`--review` candidates are registered subcommands**, read from cobra's
+  `Use:` fields, plus scripts and `bin/` -- not every file under `cmd/`,
+  which is Go implementation a scenario can never invoke. The header names
+  the subject, not the directory.
 - **`cpb-agent-bench-v1`** is this repo's own bench image, built by
   `bench-template/build.sh` on the bench-host; only `pilot-agent-session`
   uses it. The other suites use the engine's `gentar-bench-v1` or the
@@ -261,8 +265,10 @@ Secrets/vars the workflow reads:
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
 - `GENTAR_BUDGET_CAP` in the workflow — ceiling the budget guard enforces
 
-All are optional except the bench key; unset agent credentials simply
-leave agent suites out of the sweep, named in the log either way.
+Required: the bench key, host and user -- the workflow refuses (exit 2)
+without any of them. Everything else is optional; an incomplete agent
+credential group simply leaves agent suites out of the sweep, named in
+the log either way.
 
 The workflow stages the checkout exactly like `run.sh` does, so local
 and CI run the same way.
