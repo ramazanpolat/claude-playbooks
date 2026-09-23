@@ -14,9 +14,14 @@ bench = "off"          # "off": PRs never reach the self-hosted runner.
 floor = ["cli-head-build", "docs-honesty", "playbook-lifecycle"]             # suites that run on the bench for every push to the
                        # default branch (and every declared PR): the cheap,
                        # deterministic guard rails
-setup = { go = "1.21" }     # toolchains dryrun's prepare() needs on the
+setup = { go = "1.26" }     # toolchains dryrun's prepare() needs on the
                             # GitHub-hosted runner (go, node, python);
                             # anything else: gentar/phase1-setup.sh
+# Go 1.26, not the bench's 1.21: the macOS leg's first run (#59) died with
+# "dyld: missing LC_UUID load command" -- current macOS will not load a
+# binary from Go 1.21's linker. setup is one version for every leg, and 1.21
+# is still enforced where it matters: CI's `test (ubuntu-latest, 1.21)` job
+# and the bench's golang:1.21 build.
 os = ["ubuntu-latest", "macos-latest"]   # where the checks run. macOS = the
                             # dry-run on macOS userland (bash 3.2, BSD tools):
                             # real bugs (bash 3.2 `source <(...)`), not a bench.
