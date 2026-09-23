@@ -135,7 +135,13 @@ jobs:
           for f in gentar/scenarios/*.toml; do
             s=$(basename "$f" .toml)
             if grep -q '^credentials = \[' "$f"; then
-              if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
+              # A COMPLETE group, mirroring pilot-agent-session's declaration:
+              # the first-party key alone, or the router token WITH its
+              # endpoint. A token without a base URL is half a provider; the
+              # coordinator refuses it (exit 2), which would turn the whole
+              # sweep red instead of skipping the one suite that needs it.
+              if [ -n "$ANTHROPIC_API_KEY" ] \
+                 || { [ -n "$ANTHROPIC_AUTH_TOKEN" ] && [ -n "$ANTHROPIC_BASE_URL" ]; }; then
                 echo "including $s (agent credential present)"
               else
                 echo "skipping $s (needs an agent credential; none set)"
