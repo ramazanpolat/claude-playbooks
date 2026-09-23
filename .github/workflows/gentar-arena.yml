@@ -22,7 +22,11 @@ name: arena
 on:
   pull_request:
   push:
-    branches: [main]
+    # Every branch, not `main`: the DEFAULT branch is the repository's
+    # (main, master, trunk…) and only the planner knows it, from the event.
+    # A push to any other branch costs one short GitHub-hosted plan job
+    # that answers "nothing".
+    branches: ['**']
     tags: ['v*', 'arena', 'arena-*']
   workflow_dispatch:
     inputs:
@@ -92,6 +96,17 @@ jobs:
           python-version: ${{ needs.plan.outputs.setup_python }}
       - if: hashFiles('gentar/phase1-setup.sh') != ''
         run: bash gentar/phase1-setup.sh
+      - name: make the runner bench-like
+        # A bench runs as an unprivileged user, so system bin dirs are not
+        # writable there. On a hosted runner they are, and an install a suite
+        # runs would land in /usr/local/bin instead of ~/.local/bin — passing
+        # or failing for the runner's reasons, not the bench's. After the
+        # toolchain setup above, which may still need them.
+        run: |
+          for d in /usr/local/bin /usr/local/sbin /usr/bin /usr/sbin; do
+            [ -d "$d" ] || continue
+            sudo chown root:root "$d" && sudo chmod 755 "$d"
+          done
       - name: bench-free checks
         run: |
           # Only when the ENGINE repo is private: a read-only deploy key on

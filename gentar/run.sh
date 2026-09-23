@@ -136,7 +136,13 @@ esac
 # mkdir lock with a pid and stale-holder detection where it does not
 # (stock macOS). /tmp, not TMPDIR: two runner users on one host share one
 # Docker daemon, so they must share the lock.
-LOCK_BASE="${GENTAR_LOCK_DIR:-/tmp}/gentar-arena-$SUBJECT"
+#
+# The locks live in their own world-writable, NON-sticky directory: in
+# sticky /tmp, a lock left by one runner user's dead run could not be
+# removed by another's, and one unclean exit blocked the host.
+LOCK_ROOT="${GENTAR_LOCK_DIR:-/tmp}/gentar-locks"
+[ -d "$LOCK_ROOT" ] || (umask 000; mkdir -p "$LOCK_ROOT") 2>/dev/null || true
+LOCK_BASE="$LOCK_ROOT/gentar-arena-$SUBJECT"
 _lock_mode=""
 _lock_holder() {
   cat "$LOCK_BASE.lock.holder" "$LOCK_BASE.lock.d/holder" 2>/dev/null | head -1
@@ -162,14 +168,19 @@ arena_lock() {            # wait|try -> 0 once this process holds the lock
     return 0
   fi
   while :; do
-    if mkdir "$d" 2>/dev/null; then
-      _lock_mode=mkdir; _lock_note "$d/holder"; return 0
+    if (umask 000; mkdir "$d") 2>/dev/null; then
+      _lock_mode=mkdir; ( umask 000; _lock_note "$d/holder" ); return 0
     fi
     pid=$(awk '{print $2; exit}' "$d/holder" 2>/dev/null || true)
     # Stale: a holder pid that no longer exists. kill -0 also fails for a
     # live process of ANOTHER user, so ask ps before deciding it is gone.
     if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; then
-      rm -rf "$d"; continue
+      rm -rf "$d" 2>/dev/null && continue
+      # Not ours to remove (a lock from before 0.4.0's shared directory, or
+      # permissions changed by hand). Say exactly what to do rather than
+      # hang or die on `set -e`.
+      echo "stale arena lock $d (holder pid $pid is gone) cannot be removed by $(id -un 2>/dev/null || echo this user); remove it: rm -rf '$d'" >&2
+      return 2
     fi
     [ "$1" = try ] && return 1
     [ "$said" = 1 ] || echo "arena-$SUBJECT is in use on this host by: $(_lock_holder || true) — waiting" >&2
@@ -203,7 +214,12 @@ if [ "$CHECK_ONLY" = 1 ]; then
   fi
   rc=0
   python3 "$HERE/plan.py" lint "${GENTAR_DIR:-$HERE/.arena}" || rc=1
-  (cd "$REPO" && GENTAR_DRYRUN_UNVERIFIED=ok python3 "$HERE/dryrun.py") || rc=1
+  # In CI the dry-run refuses a host whose system install dirs are
+  # writable (the kit's checks job makes the runner bench-like first);
+  # locally it warns.
+  strict=0; [ "${CI:-}" = true ] && strict=1
+  (cd "$REPO" && GENTAR_DRYRUN_UNVERIFIED=ok GENTAR_DRYRUN_STRICT=$strict \
+      python3 "$HERE/dryrun.py") || rc=1
   [ "$rc" = 0 ] && echo "check: clean" || echo "check: FAILED (see above)" >&2
   exit "$rc"
 fi
@@ -224,7 +240,10 @@ fi
 # host lock for: with runs waiting on each other rather than cancelling,
 # a cancelled job's teardown must not stop the run it was queued behind.
 if [ "$DOWN_ONLY" = 1 ]; then
-  if arena_lock try; then
+  lrc=0; arena_lock try || lrc=$?
+  if [ "$lrc" = 2 ]; then
+    echo "arena-$SUBJECT not torn down: its lock is stale and not removable (see above)"
+  elif [ "$lrc" = 0 ]; then
     cids=$(docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" 2>/dev/null || true)
     [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
     docker compose -p "arena-$SUBJECT" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -669,7 +688,7 @@ teardown_arena() {
 # _torn_down and does nothing, so teardown still happens exactly once.
 # Take the host lock before anything touches arena-<subject>: the image
 # build and every service start below come after it.
-arena_lock wait
+arena_lock wait || exit 2
 trap teardown_arena EXIT
 trap 'teardown_arena; exit 130' INT
 trap 'teardown_arena; exit 143' TERM

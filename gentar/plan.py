@@ -208,6 +208,10 @@ def plan(env, policy):
         if tag and tag.startswith("arena-"):
             return targeted([_suite(tag[len("arena-"):], "keyword tag")],
                             f"no policy.toml: keyword tag {tag}")
+        # The workflow triggers on every branch (it cannot name the default
+        # one); 0.3.x ran on the default branch only.
+        if event == "push" and ref.startswith("refs/heads/") and ref != f"refs/heads/{default}":
+            return {**res, "reason": "no policy.toml: pushes run on the default branch only"}
         if event in ("push", "workflow_dispatch"):
             return {**res, "bench": "phase2", "reason": "no policy.toml: full sweep"}
         return {**res, "reason": f"no policy.toml: nothing runs on {event or 'this event'}"}

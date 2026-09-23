@@ -395,8 +395,55 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
     return fails
 
 
+# Where an install script writes when it can: `install.sh` conventions try
+# these before ~/.local/bin. A bench runs as an unprivileged user, so there
+# they are never writable; on a host where one is, a suite's install lands
+# in the REAL directory — outside the scratch home — and the dry-run both
+# modifies the machine and stops describing the bench (claude-playbooks, on
+# a GitHub-hosted runner, where /usr/local/bin is writable). The sealed PATH
+# hides binaries; it cannot stop writes.
+# GENTAR_DRYRUN_SYSTEM_DIRS (colon-separated) replaces the list, for a host
+# whose installs go elsewhere.
+SYSTEM_BIN_DIRS = tuple(filter(None, os.environ.get(
+    "GENTAR_DRYRUN_SYSTEM_DIRS",
+    "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin").split(":")))
+
+
+def writable_system_dirs() -> list:
+    return [d for d in SYSTEM_BIN_DIRS if os.path.isdir(d) and os.access(d, os.W_OK)]
+
+
+def needs_prepare(path: Path) -> bool:
+    """prepare() stands in for the steps SKIP_STEP_SUBSTR skips, so it runs
+    for a suite that has one — not for a suite it has nothing to do with,
+    where its build would sit first on PATH and shadow what the suite
+    installs (claude-playbooks: a HEAD build shadowed the released CLI a
+    suite had just installed). A repo that declares no substrings keeps the
+    old rule: prepare() for every suite. Unparseable scenarios get it too;
+    run_one reports the parse error."""
+    if not SKIP_STEP_SUBSTR:
+        return True
+    try:
+        steps = TomlScenario(path).steps
+    except Exception:
+        return True
+    return any(s in step for step in steps for s in SKIP_STEP_SUBSTR)
+
+
 def main() -> int:
     paths = [Path(a) for a in sys.argv[1:]] or sorted((REPO / "gentar/scenarios").glob("*.toml"))
+    exposed = writable_system_dirs()
+    if exposed:
+        msg = (f"system install dirs are writable here: {', '.join(exposed)} — an "
+               "install a suite runs may write into this machine, outside the scratch "
+               "home, and pass where a bench (unprivileged) would not")
+        # In CI (`gentar/run.sh --check` on a hosted runner) that is a
+        # refusal: the kit's checks job makes the runner bench-like first,
+        # so reaching this there means that step is missing.
+        if os.environ.get("GENTAR_DRYRUN_STRICT") == "1":
+            print(f"dryrun: refusing: {msg}", file=sys.stderr)
+            return 2
+        print(f"dryrun: WARNING: {msg}", file=sys.stderr)
     # A FRESH home, workspace and prepare() per suite, as the engine gives
     # each scenario a fresh bench. Sharing one across the sweep let a suite's
     # state leak into the next (claude-playbooks: an uninstall suite removed
@@ -416,7 +463,8 @@ def main() -> int:
         # step and needs your toolchain. The SUITE then runs sealed.
         env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
                    PATH=f"{bindir}:" + os.environ["PATH"])
-        prepare(env)
+        if needs_prepare(p):
+            prepare(env)
         hidden = set(os.listdir(bindir)) | set(HIDE_FROM_PATH)
         env["PATH"] = sealed_path(home, hidden)
         failed = run_one(p, env, home, workspace)
