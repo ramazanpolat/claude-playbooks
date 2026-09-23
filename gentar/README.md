@@ -261,7 +261,11 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
 - **`gentar/hooks.py`**: `prepare()` builds `claude-playbook` the way the bench
   does; `SKIP_STEP_SUBSTR` skips the container build it replaces;
   `HIDE_FROM_PATH` hides `cpb` (suites create it) and `pilot` (create and
-  install call it; a bench has none).
+  install call it; a default bench has none); `TEMPLATES` stages the real
+  `pilot` for `cpb-pilot-bench-v1` suites (below).
+- **`gentar/policy.toml` `os`**: the bench-free checks run on Ubuntu and on
+  macOS. On macOS that is the dry-run on macOS userland (bash 3.2, BSD tools),
+  not a macOS bench.
 - **Repository variables** `GENTAR_CLICKHOUSE_HOST_PORT=8126` and
   `GENTAR_OTLP_HOST_PORT=4320`: the `arena` runner is shared with other arenas.
 - **`.github/workflows/release.yml`** runs `gentar/release-gate.sh` first; a
@@ -276,8 +280,11 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
   `bench-template/build-pilot.sh <bench-host>` from a machine that can read it,
   which checks the tag against the SHA and streams a `git archive` of the SHA
   over ssh. Rebuild after bumping the pin; the suite refuses a stale template.
-  Until the kit's dry-run learns template-provided tools (gentar v0.4.1), phase
-  1's bench-free check cannot run this suite.
+  In the bench-free dry-run, `hooks.TEMPLATES` maps the template to
+  `stage_pilot`, which installs the same pinned release from a local
+  pilot-profile checkout (`PILOT_PROFILE_SRC`, default `~/agentship/pilot-profile`).
+  Where there is none, as on GitHub-hosted runners, the suite reports
+  UNVERIFIED instead of failing or passing against a stub.
 
 ## Before you push a suite
 

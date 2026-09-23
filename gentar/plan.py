@@ -34,6 +34,7 @@ Output: KEY=value lines on stdout, and the same appended to $GITHUB_OUTPUT
 when it is set. Exit 0 with a plan; exit 2 for a policy or input that is
 wrong (unknown key, unknown suite, a bad name) -- a refusal, never a guess.
 """
+import json
 import os
 import re
 import shutil
@@ -59,11 +60,16 @@ NAME = re.compile(r"[A-Za-z0-9._-]+")
 
 PHASE2_TRIGGERS = ("dispatch", "arena", "rc")
 SETUP_TOOLS = ("go", "node", "python")
+# GitHub-HOSTED runner labels phase 1's checks may run on. Hosted only: the
+# checks job runs a pull request's code, which must never reach a
+# self-hosted runner by way of this list.
+CHECK_OS = ("ubuntu-latest", "macos-latest")
 
 # Every key the policy may hold, with its default. An unknown key is a
 # refusal: a typo like `benh = "declared"` must not silently mean "off".
 SCHEMA = {
-    "phase1": {"checks": True, "bench": "off", "floor": [], "setup": {}},
+    "phase1": {"checks": True, "bench": "off", "floor": [], "setup": {},
+               "os": ["ubuntu-latest"]},
     "phase2": {"on": list(PHASE2_TRIGGERS), "release_gate": True,
                "max_age_days": 0},
     "check": {"allow_drift": []},
@@ -125,6 +131,13 @@ def load_policy(path=POLICY):
                          "goes in gentar/phase1-setup.sh)")
         if not isinstance(ver, str) or not re.fullmatch(r"[0-9][0-9A-Za-z.x*-]*", ver):
             raise Refuse(f"[phase1] setup: {tool} version must be a string like \"1.21\"")
+    oses = _strings(p1["os"], "[phase1] os")
+    if not oses:
+        raise Refuse("[phase1] os must name at least one runner")
+    for o in oses:
+        if o not in CHECK_OS:
+            raise Refuse(f"[phase1] os: {o!r} is not a GitHub-hosted runner the "
+                         f"checks may use (known: {', '.join(CHECK_OS)})")
     for trig in _strings(p2["on"], "[phase2] on"):
         if trig not in PHASE2_TRIGGERS:
             raise Refuse(f"[phase2] on: unknown trigger {trig!r} "
@@ -187,7 +200,7 @@ def plan(env, policy):
                 for w in (env.get("SCENARIO_INPUT") or "").split()]
 
     res = {"checks": False, "bench": "none", "suites": [], "reason": "",
-           "setup": {}}
+           "setup": {}, "os": ["ubuntu-latest"]}
 
     def targeted(names, why):
         names = _dedup(names)
@@ -222,6 +235,7 @@ def plan(env, policy):
 
     p1, p2 = policy["phase1"], policy["phase2"]
     res["setup"] = dict(p1["setup"])
+    res["os"] = list(dict.fromkeys(p1["os"]))
 
     if event == "pull_request":
         res["checks"] = p1["checks"]
@@ -271,6 +285,7 @@ def emit(res):
         f"bench={res['bench']}",
         f"suites={' '.join(res['suites'])}",
         f"reason={res['reason']}",
+        f"os={json.dumps(res['os'])}",
     ] + [f"setup_{t}={res['setup'].get(t, '')}" for t in SETUP_TOOLS]
     out = "\n".join(lines) + "\n"
     sys.stdout.write(out)

@@ -17,6 +17,9 @@ floor = ["cli-head-build", "docs-honesty", "playbook-lifecycle"]             # s
 setup = { go = "1.21" }     # toolchains dryrun's prepare() needs on the
                             # GitHub-hosted runner (go, node, python);
                             # anything else: gentar/phase1-setup.sh
+os = ["ubuntu-latest", "macos-latest"]   # where the checks run. macOS = the
+                            # dry-run on macOS userland (bash 3.2, BSD tools):
+                            # real bugs (bash 3.2 `source <(...)`), not a bench.
 
 [phase2]
 # The full regression: every suite this environment can run.

@@ -29,6 +29,8 @@ The adaptations live in gentar/hooks.py (yours; this file is the kit's):
   SKIP_STEP_SUBSTR  substrings of [oracle].steps that prepare() already
                     covered locally (e.g. "docker build"), skipped verbatim
   HIDE_FROM_PATH    executables that must never be found on the real PATH
+  TEMPLATES         {template: stager | None} — suites whose bench template
+                    supplies tools this host lacks; unstaged = UNVERIFIED
 
 Layout matches the bench: the repo is staged into WORKSPACE_DIR, which is a
 directory UNDER HOME, and steps run with WORKSPACE_DIR as cwd. So a `~/...`
@@ -105,6 +107,7 @@ from gentar.toml_scenario import TomlScenario
 # in place: move them into hooks.py.)
 SKIP_STEP_SUBSTR = ()
 HIDE_FROM_PATH = ()
+TEMPLATES = {}
 
 
 def prepare(env: dict) -> None:
@@ -120,7 +123,7 @@ def _load_hooks() -> None:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     g = globals()
-    for name in ("SKIP_STEP_SUBSTR", "HIDE_FROM_PATH", "prepare"):
+    for name in ("SKIP_STEP_SUBSTR", "HIDE_FROM_PATH", "TEMPLATES", "prepare"):
         if hasattr(mod, name):
             g[name] = getattr(mod, name)
     # REPO is the checkout, for a prepare() that builds from it
@@ -434,6 +437,17 @@ def needs_prepare(path: Path) -> bool:
     return any(s in step for step in steps for s in SKIP_STEP_SUBSTR)
 
 
+def template_of(path: Path):
+    """The suite's template, or None when there is nothing to stage for:
+    no template, a parse error (run_one reports it), or a suite declaring
+    credentials (run_one skips it before it would run)."""
+    try:
+        sc = TomlScenario(path)
+    except Exception:
+        return None
+    return None if sc.credentials else sc.template
+
+
 def main() -> int:
     paths = [Path(a) for a in sys.argv[1:]] or sorted((REPO / "gentar/scenarios").glob("*.toml"))
     exposed = writable_system_dirs()
@@ -469,6 +483,31 @@ def main() -> int:
                    PATH=f"{bindir}:" + os.environ["PATH"])
         if needs_prepare(p):
             prepare(env)
+        # A suite whose bench template supplies tools this host lacks: the
+        # repo declares the template in hooks.TEMPLATES, with a stager that
+        # installs the real tool into the scratch bin (True), cannot here
+        # (False, e.g. a private source on a hosted runner), or None. Not
+        # staged = UNVERIFIED, naming the template; a stager that RAISES is
+        # broken, a failure. Undeclared templates run as before.
+        tpl = template_of(p)
+        if tpl in TEMPLATES:
+            stager = TEMPLATES[tpl]
+            try:
+                staged = bool(stager(env)) if stager else False
+            except Exception:
+                import traceback
+                print(f"{p.name}: FAILURE (stager for template {tpl} raised)")
+                print(traceback.format_exc().rstrip())
+                print(f"  scratch home kept for inspection: {home}")
+                fails += 1
+                continue
+            if not staged:
+                print(f"{p.name}: UNVERIFIED (template {tpl} provides tools "
+                      "the dry-run cannot)")
+                if os.environ.get("GENTAR_DRYRUN_UNVERIFIED") != "ok":
+                    fails += 1
+                shutil.rmtree(home, ignore_errors=True)
+                continue
         hidden = set(os.listdir(bindir)) | set(HIDE_FROM_PATH)
         env["PATH"] = sealed_path(home, hidden)
         failed = run_one(p, env, home, workspace)
