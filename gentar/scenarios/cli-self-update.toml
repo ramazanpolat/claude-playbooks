@@ -46,8 +46,9 @@ cpid=
 trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
 trap 'exit 143' INT TERM HUP
 i=0; port=
-while [ -z "$port" ] && [ "$i" -lt 100 ]; do port=$(sed -n 's/.* port \([0-9][0-9]*\).*/\1/p' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || sleep 0.1; done
-[ -n "$port" ] || { echo "fakegh: server did not start" >&2; exit 3; }
+# Up to 30 s: a cold python3 on a hosted macOS runner outlasted 10 s.
+while [ -z "$port" ] && [ "$i" -lt 300 ]; do port=$(sed -n 's/.* port \([0-9][0-9]*\).*/\1/p' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || { kill -0 "$pid" 2>/dev/null || break; sleep 0.1; }; done
+[ -n "$port" ] || { echo "fakegh: server did not start ($(command -v python3); alive: $(kill -0 "$pid" 2>/dev/null && echo yes || echo no)); its output:" >&2; cat "$log" >&2; exit 3; }
 export CLAUDE_PLAYBOOK_UPDATE_API_BASE="http://127.0.0.1:$port"
 [ "${FAKE_DL:-}" = 1 ] && export CLAUDE_PLAYBOOK_UPDATE_DOWNLOAD_BASE="http://127.0.0.1:$port/dl"
 # In the background and waited on: sh defers a trap until a FOREGROUND child

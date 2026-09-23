@@ -60,6 +60,7 @@ jobs:
       checks: ${{ steps.plan.outputs.checks }}
       bench: ${{ steps.plan.outputs.bench }}
       suites: ${{ steps.plan.outputs.suites }}
+      os: ${{ steps.plan.outputs.os }}
       setup_go: ${{ steps.plan.outputs.setup_go }}
       setup_node: ${{ steps.plan.outputs.setup_node }}
       setup_python: ${{ steps.plan.outputs.setup_python }}
@@ -79,7 +80,14 @@ jobs:
   checks:
     needs: plan
     if: needs.plan.outputs.checks == 'true'
-    runs-on: ubuntu-latest
+    # [phase1] os: GitHub-hosted runners only (plan.py refuses anything
+    # else). On macOS this is the dry-run on macOS userland — bash 3.2, BSD
+    # tools — not a macOS bench; that is gentar's tart tier.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       # Toolchains the dry-run's prepare() needs, declared in the policy
@@ -105,9 +113,10 @@ jobs:
         # or failing for the runner's reasons, not the bench's. After the
         # toolchain setup above, which may still need them.
         run: |
-          for d in /usr/local/bin /usr/local/sbin /usr/bin /usr/sbin; do
+          group=root; [ "$(uname)" = Darwin ] && group=wheel
+          for d in /usr/local/bin /usr/local/sbin; do
             [ -d "$d" ] || continue
-            sudo chown root:root "$d" && sudo chmod 755 "$d"
+            sudo chown "root:$group" "$d" && sudo chmod 755 "$d"
           done
       - name: bench-free checks
         run: |

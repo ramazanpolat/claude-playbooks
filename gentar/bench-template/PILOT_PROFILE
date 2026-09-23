@@ -1,0 +1,6 @@
+# The pilot-profile release baked into cpb-pilot-bench-v1 -- single source.
+# Sourced by build-pilot.sh (which refuses when the tag does not resolve to
+# this SHA) and by the pilot-wire-real suite (which refuses a template built
+# from any other SHA). Bump both lines together, then rebuild the template.
+TAG=v0.2.1
+SHA=be5eda81faa693f05c9171f8abc6404bd2a049e1

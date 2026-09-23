@@ -246,6 +246,7 @@ only says what each suite is for.
 | `pilot-interactive-delete` | a simulated pilot answering prompts on a pty |
 | `pilot-self-uninstall` | a simulated pilot at the most destructive prompt the tool has |
 | `pilot-agent-session` | a REAL agent launched through a playbook, governed by it (needs a credential; a one-token provider preflight names quota or auth failures as the provider's) |
+| `pilot-wire-real` | `create` and `install` against the REAL `pilot`: pilot-profile's `skills/profile` link lands, `wire --all` is a no-op after |
 
 ## This subject's adaptations of the kit
 
@@ -260,7 +261,11 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
 - **`gentar/hooks.py`**: `prepare()` builds `claude-playbook` the way the bench
   does; `SKIP_STEP_SUBSTR` skips the container build it replaces;
   `HIDE_FROM_PATH` hides `cpb` (suites create it) and `pilot` (create and
-  install call it; a bench has none).
+  install call it; a default bench has none); `TEMPLATES` stages the real
+  `pilot` for `cpb-pilot-bench-v1` suites (below).
+- **`gentar/policy.toml` `os`**: the bench-free checks run on Ubuntu and on
+  macOS. On macOS that is the dry-run on macOS userland (bash 3.2, BSD tools),
+  not a macOS bench.
 - **Repository variables** `GENTAR_CLICKHOUSE_HOST_PORT=8126` and
   `GENTAR_OTLP_HOST_PORT=4320`: the `arena` runner is shared with other arenas.
 - **`.github/workflows/release.yml`** runs `gentar/release-gate.sh` first; a
@@ -268,6 +273,18 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
 - **`cpb-agent-bench-v1`** is this repo's own bench image, built by
   `bench-template/build.sh` on the bench-host, used only by
   `pilot-agent-session`.
+- **`cpb-pilot-bench-v1`** is a default bench plus the real `pilot`, at the
+  pilot-profile release pinned by tag and SHA in `bench-template/PILOT_PROFILE`,
+  used only by `pilot-wire-real`. pilot-profile is private and this repo is
+  public, so the bench-host holds no credential for it: run
+  `bench-template/build-pilot.sh <bench-host>` from a machine that can read it,
+  which checks the tag against the SHA and streams a `git archive` of the SHA
+  over ssh. Rebuild after bumping the pin; the suite refuses a stale template.
+  In the bench-free dry-run, `hooks.TEMPLATES` maps the template to
+  `stage_pilot`, which installs the same pinned release from a local
+  pilot-profile checkout (`PILOT_PROFILE_SRC`, default `~/agentship/pilot-profile`).
+  Where there is none, as on GitHub-hosted runners, the suite reports
+  UNVERIFIED instead of failing or passing against a stub.
 
 ## Before you push a suite
 
