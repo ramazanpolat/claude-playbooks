@@ -1,0 +1,87 @@
+# claude-playbooks own-arena suite 17: shell completion, end to end.
+#
+# Nine commands complete playbook names (autocompletePlaybookNames), and
+# `completion` names the generated script after the binary it was invoked
+# as, so `cpb completion bash` must register for `cpb`. Until this suite,
+# completion only ran incidentally, inside pilot-self-uninstall, and nothing
+# ever pressed TAB.
+#
+# The claim is proven the way a shell sees it: the generated bash script is
+# sourced into a real bash and its entry function is called with COMP_WORDS
+# set, exactly as `complete -F` would -- so the prefix filtering, the
+# `__complete` round trip and the directive handling all run. Only bash: the
+# benches ship no zsh or fish, so for those this asserts only that the
+# script is generated.
+#
+# cobra's bash script needs the bash-completion package (it calls
+# _get_comp_words_by_ref), a documented prerequisite -- and the bench, like
+# a stock macOS, has none. So the real package is loaded from a pinned tag:
+# 2.11 on bash >= 4 (what Linux distributions ship), 1.3 on bash 3.2 (what
+# Homebrew ships for stock macOS bash, since 2.x needs bash 4).
+
+[scenario]
+name = "cli-completion"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '"$HOME/.local/bin/claude-playbook" create alpha --no-alias && "$HOME/.local/bin/claude-playbook" create beta --no-alias',
+  # The pinned bash-completion releases (see the header).
+  '''for v in 2.11 1.3; do curl -fsSL -o "$HOME/bash-completion-$v" "https://raw.githubusercontent.com/scop/bash-completion/$v/bash_completion" || exit 1; done''',
+  # cpb as a real install makes it: a relative symlink beside the binary.
+  'ln -sfn claude-playbook "$HOME/.local/bin/cpb"',
+  # tab.sh BIN WORD...: what bash offers after `BIN WORD...<TAB>`, one per
+  # line, from the script BIN itself generated. The last WORD is the one
+  # being completed ("" = an empty word).
+  '''cat > "$HOME/tab.sh" <<'EOF'
+#!/usr/bin/env bash
+bin=$1; shift
+# A file, not `source <(...)`: bash 3.2 (stock macOS) sources an empty
+# stream from a process substitution, silently.
+if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then bc=2.11; else bc=1.3; fi
+. "$HOME/bash-completion-$bc" || exit 3
+"$bin" completion bash > "$HOME/.tab-$bin.bash" && . "$HOME/.tab-$bin.bash" || exit 3
+COMP_WORDS=("$bin" "$@")
+COMP_CWORD=$(( ${#COMP_WORDS[@]} - 1 ))
+COMP_LINE="${COMP_WORDS[*]}"
+COMP_POINT=${#COMP_LINE}
+"__start_$bin" "$bin" "${COMP_WORDS[COMP_CWORD]}" "${COMP_WORDS[COMP_CWORD-1]}"
+printf '%s\n' "${COMPREPLY[@]}"
+EOF
+chmod +x "$HOME/tab.sh"''',
+]
+
+[[verify.commands]]
+# The hook every shell's script calls: both playbooks, file completion off
+# (cobra's directive :4 = ShellCompDirectiveNoFileComp).
+command = '''o=$(claude-playbook __complete run ""); echo "$o" | grep -qx alpha && echo "$o" | grep -qx beta && echo "$o" | grep -qx ':4' && echo hook-ok'''
+contains = "hook-ok"
+
+[[verify.commands]]
+# TAB on an empty word offers both playbooks.
+command = '''o=$("$HOME/tab.sh" claude-playbook run ""); echo "$o" | grep -qx alpha && echo "$o" | grep -qx beta && echo tab-both'''
+contains = "tab-both"
+
+[[verify.commands]]
+# TAB on a prefix offers only the match -- the shell side filters.
+command = '''o=$("$HOME/tab.sh" claude-playbook delete al); [ "$o" = alpha ] && echo tab-prefix'''
+contains = "tab-prefix"
+
+[[verify.commands]]
+# A name completes only in the first position: after one, nothing is offered.
+command = '''o=$("$HOME/tab.sh" claude-playbook run alpha ""); [ -z "$(echo "$o" | grep -x -e alpha -e beta)" ] && echo tab-first-arg-only'''
+contains = "tab-first-arg-only"
+
+[[verify.commands]]
+# Invoked as `cpb`, the script registers for cpb and completes through it.
+command = '''cpb completion bash | grep -qE 'complete .*__start_cpb cpb' && o=$("$HOME/tab.sh" cpb rename be) && [ "$o" = beta ] && echo cpb-tab'''
+contains = "cpb-tab"
+
+[[verify.commands]]
+# The other shells' scripts are generated (syntax not checkable: no zsh or
+# fish on the bench).
+command = '''for s in zsh fish powershell; do claude-playbook completion "$s" | grep -q claude-playbook || exit 1; done && echo other-shells-generated'''
+contains = "other-shells-generated"

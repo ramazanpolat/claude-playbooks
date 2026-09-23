@@ -58,6 +58,14 @@ pass_env = [
 steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  # Provider preflight, one token: is the endpoint answering THIS credential
+  # right now? Recorded, never fatal here -- the verdict below reads it. When
+  # this suite goes red, the first question is always "claude-playbooks, or
+  # the provider?" (a routed endpoint's quota has produced a missing
+  # marker.txt more than once), and without this the only answer was reading
+  # the driver transcript. The key travels in a mode-600 header file, never
+  # in argv, and the file is removed at once.
+  '''umask 077; H="$HOME/.probe-h"; if [ -n "${ANTHROPIC_API_KEY:-}" ]; then printf 'x-api-key: %s\n' "$ANTHROPIC_API_KEY" > "$H"; B=https://api.anthropic.com; elif [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then printf 'Authorization: Bearer %s\n' "$ANTHROPIC_AUTH_TOKEN" > "$H"; B=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}; else echo "provider-unprobed: no credential reached the oracle" > "$HOME/provider-probe.txt"; exit 0; fi; M=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}; code=$(curl -s -o "$HOME/.probe-body" -w '%{http_code}' --max-time 60 -H @"$H" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$M\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ok\"}]}" "${B%/}/v1/messages"); rm -f "$H"; if [ "$code" = 200 ] && grep -q '"content"' "$HOME/.probe-body"; then r=provider-ok; else case $code in 429) r="provider-quota (HTTP 429)";; 401|403) r="provider-auth (HTTP $code)";; *) r="provider-error (HTTP $code)";; esac; r="$r: $(head -c 300 "$HOME/.probe-body" | tr -d '\n')"; fi; echo "$r" > "$HOME/provider-probe.txt"''',
   '"$HOME/.local/bin/claude-playbook" create pilotpb --no-alias',
   # The playbook's standing instruction. The prompt below never mentions
   # ORBIT-7 -- only this file does, so the marker's presence is proof the
@@ -83,6 +91,13 @@ tokens = 25000
 # is ambiguous if the agent that ran was a version this endpoint rejects.
 command = 'claude --version'
 contains = "2.1.234"
+
+[[verify.commands]]
+# The provider answered the preflight. Asserted before the agent's results:
+# if this fails, the failures below are the provider's (quota, auth), not
+# claude-playbooks' -- the output names which, with the HTTP status.
+command = 'cat "$HOME/provider-probe.txt"'
+contains = "provider-ok"
 
 [[verify.commands]]
 # The file exists where the agent was working.
