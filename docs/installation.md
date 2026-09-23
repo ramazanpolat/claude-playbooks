@@ -73,9 +73,11 @@ loads nothing and TAB fails:
   (`[ -r ~/.bashrc ] && . ~/.bashrc`). Homebrew's own hint suggests
   `~/.bash_profile` instead, but `self-uninstall` only cleans `~/.bashrc`.
 
-Keep the line in exactly this form: `self-uninstall` finds and removes these
-`source <(... completion ...)` lines, so a rewritten one would outlive the
-binary and error in every new shell.
+Keep each line byte for byte as shown: `self-uninstall` removes only exact
+matches of `source <(cpb completion bash)` and `source <(cpb completion zsh)`
+(and the same with `claude-playbook` in place of `cpb`). Any other form (an
+absolute path, extra spaces, `eval "$(...)"`) outlives the binary and errors in
+every new shell.
 
 ## Run it with npx (no install needed)
 
