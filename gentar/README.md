@@ -248,6 +248,16 @@ only says what each suite is for.
 | `pilot-agent-session` | a REAL agent launched through a playbook, governed by it (needs a credential; a one-token provider preflight names quota or auth failures as the provider's) |
 | `pilot-wire-real` | `create` and `install` against the REAL `pilot`: pilot-profile's `skills/profile` link lands, `wire --all` is a no-op after |
 
+## Watching a run
+
+Every arena job (phase 2, targeted, and the main-push floor) uploads an
+`arena-reports` artifact holding the markdown reports and a self-contained
+`dashboard.html`: the verdict per suite, and each step's spans with durations.
+Open the run in the Actions tab, download `arena-reports`, and open
+`dashboard.html`; it needs no server. This repo is public, so both are redacted
+before upload: bench-host values and declared credentials are masked, and an
+agent transcript appears only as its length.
+
 ## This subject's adaptations of the kit
 
 Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
