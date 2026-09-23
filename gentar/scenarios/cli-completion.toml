@@ -62,19 +62,20 @@ contains = "hook-ok"
 
 [[verify.commands]]
 # TAB on an empty word offers both playbooks.
-command = '''o=$("$HOME/tab.sh" claude-playbook run ""); echo "$o" | grep -qx alpha && echo "$o" | grep -qx beta && echo tab-both'''
+command = '''o=$("$HOME/tab.sh" claude-playbook run "") && echo "$o" | grep -qx alpha && echo "$o" | grep -qx beta && echo tab-both'''
 contains = "tab-both"
 
 [[verify.commands]]
 # TAB on a prefix offers only the match -- the shell side filters.
-command = '''o=$("$HOME/tab.sh" claude-playbook delete al); [ "$o" = alpha ] && echo tab-prefix'''
+command = '''o=$("$HOME/tab.sh" claude-playbook delete al) && [ "$o" = alpha ] && echo tab-prefix'''
 contains = "tab-prefix"
 
 [[verify.commands]]
 # A name completes only in the first position: after one, NOTHING is
 # offered -- not just no playbook names (a filter for those would pass on a
 # script that offered files instead).
-command = '''o=$("$HOME/tab.sh" claude-playbook run alpha ""); [ -z "$o" ] && echo tab-first-arg-only'''
+# tab.sh must also SUCCEED: a crashed script prints nothing too.
+command = '''o=$("$HOME/tab.sh" claude-playbook run alpha "") && [ -z "$o" ] && echo tab-first-arg-only'''
 contains = "tab-first-arg-only"
 
 [[verify.commands]]
