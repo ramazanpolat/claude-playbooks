@@ -246,6 +246,7 @@ only says what each suite is for.
 | `pilot-interactive-delete` | a simulated pilot answering prompts on a pty |
 | `pilot-self-uninstall` | a simulated pilot at the most destructive prompt the tool has |
 | `pilot-agent-session` | a REAL agent launched through a playbook, governed by it (needs a credential; a one-token provider preflight names quota or auth failures as the provider's) |
+| `pilot-wire-real` | `create` and `install` against the REAL `pilot`: pilot-profile's `skills/profile` link lands, `wire --all` is a no-op after |
 
 ## This subject's adaptations of the kit
 
@@ -268,6 +269,15 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
 - **`cpb-agent-bench-v1`** is this repo's own bench image, built by
   `bench-template/build.sh` on the bench-host, used only by
   `pilot-agent-session`.
+- **`cpb-pilot-bench-v1`** is a default bench plus the real `pilot`, at the
+  pilot-profile release pinned by tag and SHA in `bench-template/PILOT_PROFILE`,
+  used only by `pilot-wire-real`. pilot-profile is private and this repo is
+  public, so the bench-host holds no credential for it: run
+  `bench-template/build-pilot.sh <bench-host>` from a machine that can read it,
+  which checks the tag against the SHA and streams a `git archive` of the SHA
+  over ssh. Rebuild after bumping the pin; the suite refuses a stale template.
+  Until the kit's dry-run learns template-provided tools (gentar v0.4.1), phase
+  1's bench-free check cannot run this suite.
 
 ## Before you push a suite
 
