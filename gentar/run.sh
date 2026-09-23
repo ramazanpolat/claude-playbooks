@@ -2,8 +2,8 @@
 # Kick this repo's arena: stage the working tree as the subject, run a
 # scenario, land the report in gentar/reports/.
 #
-#   gentar/run.sh <scenario>            # e.g. cli-head-build
-#   GENTAR_REF=v0.2.0 gentar/run.sh …   # run against another engine version
+#   gentar/run.sh <scenario>            # e.g. first-suite
+#   GENTAR_REF=v0.1.1 gentar/run.sh …   # run against another engine version
 #   GENTAR_REF=main gentar/run.sh …     # …or the engine's tip, unpinned
 #
 # First run: clones gentar into gentar/.arena and copies .env.example
@@ -19,7 +19,7 @@
 # no file edit:
 #
 #   GENTAR_CLICKHOUSE_HOST_PORT=8124 GENTAR_OTLP_HOST_PORT=14320 \
-#     gentar/run.sh cli-head-build
+#     gentar/run.sh first-suite
 #
 # The only thing to edit below is SUBJECT, if your repo's directory name
 # is not the subject name your scenarios declare.
@@ -29,27 +29,177 @@ set -euo pipefail
 # dryrun.py needs the engine's scenario parser but no bench, so without
 # this the only way to get one was a full bench run — the cheap check
 # would have required the expensive one first.
+#
+# --sweep runs every suite this environment CAN run: a suite declaring
+# `credentials` is included only when one of its groups is fully present.
+# --down tears this subject's arena down — the one teardown CI needs,
+# with the project name derived in exactly one place (here).
 STAGE_ONLY=0
 REVIEW_ONLY=0
+DOWN_ONLY=0
+SWEEP=0
 case "${1:-}" in
   --stage-engine) STAGE_ONLY=1; shift ;;
   --review)       REVIEW_ONLY=1; shift ;;
+  --down)         DOWN_ONLY=1; shift ;;
+  --sweep)        SWEEP=1; shift ;;
 esac
 
-if [ "$STAGE_ONLY" = 0 ] && [ "$REVIEW_ONLY" = 0 ]; then
-  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine|--review] <scenario> [more scenarios...]}
+if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP" = 0000 ]; then
+  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine|--review|--sweep|--down] <scenario> [more scenarios...]}
   shift || true
 else
   SCENARIO=""
 fi
 HERE=$(cd "$(dirname "$0")" && pwd)          # <repo>/gentar
 REPO=$(dirname "$HERE")
-# Set explicitly rather than taken from the directory name: this repo is
-# worked on in git worktrees (~/DEV/.worktrees/claude-playbooks/<agent>/<branch>),
-# whose basename is the branch, not the repo -- so the kit's default,
-# $(basename "$REPO"), names a subject no scenario declares.
-SUBJECT=claude-playbooks      # dir under the subjects root — MUST match
-                              # `subject = "…"` in your scenario TOMLs
+
+# The [scenario] table only — the one place the engine reads `subject`,
+# `credentials` and `pass_env`. Reading keys anywhere in the file let a
+# `subject` or `credentials` under another table (a review found both)
+# masquerade as the scenario's. A header is a WHOLE line holding only
+# `[name]` / `[[name]]`, so `[ -f x ]` inside a step never counts.
+scenario_table() {
+  awk '
+    # Inside a multi-line string (a step written as triple-quoted text), a
+    # line reading `[scenario]` is TEXT, not a header — without this, it
+    # re-entered the table and its `subject` was read.
+    function toggles(line, delim,   n) { n = gsub(delim, "", line); return n % 2 }
+    !inml && /^[[:space:]]*\[\[?[A-Za-z_][A-Za-z0-9_.-]*\]\]?[[:space:]]*(#.*)?$/ {
+      h = $0; gsub(/[][[:space:]]|#.*/, "", h); insc = (h == "scenario"); next
+    }
+    { if (insc) print
+      if (toggles($0, "\047\047\047")) inml = !inml
+      if (toggles($0, "\"\"\"")) inml = !inml }' "$1"
+}
+
+# The subject name is read FROM THE SCENARIOS, which must declare it
+# anyway. It used to be $(basename "$REPO") — which is wrong in a git
+# worktree, whose directory is named after the BRANCH: a checkout at
+# .worktrees/<repo>/<agent>/<branch> staged itself under a subject no
+# scenario declared. (Found by the first real adopter, claude-playbooks,
+# which is only ever worked on in worktrees.) One source of truth, and it
+# refuses rather than guesses: the template's REPLACE-ME, or scenarios
+# that disagree, stop here with exit 2 before anything is staged.
+# GENTAR_SUBJECT overrides, for a repo that genuinely wants otherwise.
+if [ -n "${GENTAR_SUBJECT:-}" ]; then
+  SUBJECT=$GENTAR_SUBJECT
+else
+  # Either TOML string style: "basic" or 'literal'. Missing the second
+  # made a single-quoted subject read as NO subject.
+  declared=$(for f in "$HERE"/scenarios/*.toml; do
+      [ -f "$f" ] && scenario_table "$f" \
+        | sed -n "s/^[[:space:]]*subject[[:space:]]*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/p"
+    done | sort -u)
+  nscen=$(ls "$HERE"/scenarios/*.toml 2>/dev/null | wc -l | tr -d ' ')
+  case "$(printf '%s\n' "$declared" | grep -c .)" in
+    0) if [ "$nscen" -gt 0 ]; then
+         # Scenarios exist but none declared a subject this could read. Never
+         # fall back to the directory: in a worktree that is the branch name,
+         # which is the bug this block exists to prevent.
+         echo "could not read subject = \"…\" from gentar/scenarios/*.toml" >&2
+         echo "declare it in each scenario, or set GENTAR_SUBJECT" >&2
+         exit 2
+       fi
+       SUBJECT=$(basename "$REPO") ;;          # no scenarios yet (--review says so)
+    1) SUBJECT=$declared ;;
+    *) echo "scenarios disagree on subject: $(echo $declared)" >&2
+       echo "every gentar/scenarios/*.toml must declare the same subject = \"…\"" >&2
+       exit 2 ;;
+  esac
+fi
+case "$SUBJECT" in
+  REPLACE-ME|'')
+    echo "subject is still the template placeholder (REPLACE-ME)" >&2
+    echo "set subject = \"<your repo name>\" in gentar/scenarios/*.toml" >&2
+    exit 2 ;;
+  *[!A-Za-z0-9._-]*)
+    echo "bad subject name: $SUBJECT (letters, digits, dot, dash, underscore)" >&2
+    exit 2 ;;
+esac
+
+# --down: tear down THIS subject's arena and nothing else. Run-created
+# containers are one-offs that `compose down` does not stop, so they are
+# stopped by label first (stopping is what fires their AutoRemove), then
+# the project's network and volumes go. Needs no engine checkout.
+if [ "$DOWN_ONLY" = 1 ]; then
+  cids=$(docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" 2>/dev/null || true)
+  [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
+  docker compose -p "arena-$SUBJECT" down -v --remove-orphans >/dev/null 2>&1 || true
+  echo "arena-$SUBJECT torn down"
+  exit 0
+fi
+
+# credentials = [...] -> one group per line, names space-separated. A
+# top-level string is a group of one; a nested list is ONE all-of group.
+# Mirrors the engine's satisfied_group() grammar exactly (cross-checked
+# against its parser on flat, nested, multi-line and commented shapes).
+# Both TOML string styles ("basic", 'literal'). awk, not python: this runs
+# on a stock CI runner.
+credential_groups() {
+  scenario_table "$1" | awk '
+    /^[[:space:]]*#/ { next }
+    !inarr && /^[[:space:]]*credentials[[:space:]]*=/ { inarr = 1; buf = ""; sub(/^[^=]*=/, "") }
+    inarr {
+      line = $0; sub(/#.*/, "", line); buf = buf " " line
+      t = buf; o = gsub(/\[/, "", t); t = buf; c = gsub(/\]/, "", t)
+      if (o > 0 && o == c) { inarr = 0; emit(buf) }
+    }
+    function emit(b,   i, ch, depth, instr, cur, grp, q) {
+      depth = 0; instr = 0; cur = ""; grp = ""
+      for (i = 1; i <= length(b); i++) {
+        ch = substr(b, i, 1)
+        if (instr) {
+          if (ch == q) { instr = 0
+            if (depth == 1) print cur; else grp = grp (grp == "" ? "" : " ") cur
+          } else cur = cur ch
+          continue
+        }
+        if (ch == "\"" || ch == "\047") { instr = 1; q = ch; cur = ""; continue }
+        if (ch == "[") { depth++; if (depth == 2) grp = ""; continue }
+        if (ch == "]") { if (depth == 2 && grp != "") print grp; depth--; continue }
+      }
+    }'
+}
+
+# 0 when the suite declares no credentials or one group is fully set.
+credentials_present() {
+  scenario_table "$1" | grep -q '^[[:space:]]*credentials[[:space:]]*=' || return 0
+  local g n full
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    full=1
+    for n in $g; do [ -n "${!n:-}" ] || { full=0; break; }; done
+    [ "$full" = 1 ] && return 0
+  done <<EOF
+$(credential_groups "$1")
+EOF
+  return 1
+}
+
+# --sweep: every suite this environment can run. A suite whose
+# credentials are absent is SKIPPED with its reason, not run into an
+# exit-2 refusal that would turn the whole sweep red for a key nobody
+# promised. The check is the engine's own grouping, not a hardcoded
+# provider list: `["TOKEN", "URL"]` is two ALTERNATIVES, so a token with
+# no URL counts as present here exactly as it does in the engine — and
+# the coordinator's forwarding warning then says the URL was dropped.
+if [ "$SWEEP" = 1 ]; then
+  runnable=""
+  for f in "$HERE"/scenarios/*.toml; do
+    [ -f "$f" ] || continue
+    s=$(basename "$f" .toml)
+    if credentials_present "$f"; then
+      runnable="$runnable $s"
+    else
+      echo "skipping $s — no credential group of it is fully set" >&2
+    fi
+  done
+  [ -n "$runnable" ] || { echo "no runnable suites in gentar/scenarios" >&2; exit 2; }
+  echo "sweep:$runnable" >&2
+  set -- $runnable
+  SCENARIO=$1; shift
+fi
 ARENA=${GENTAR_DIR:-$HERE/.arena}
 # Engine version. A RELEASE TAG by default, never a moving branch: the
 # engine is a separate repo on its own release cycle, so `main` means
@@ -59,7 +209,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.2.0}
+REF=${GENTAR_REF:-v0.3.0}
 
 # --review: has this repo outgrown its suites?
 #
@@ -108,31 +258,25 @@ if [ "$REVIEW_ONLY" = 1 ]; then
   # Candidates the repo exposes: executables it ships, and the scripts a
   # README tells a person to run. Both are things a fresh machine would
   # encounter, which is what a scenario is for.
-  # Candidates are the surface a fresh machine exposes. For scripts and
-  # bin/, that is the file itself. For this Go CLI it is the REGISTERED
-  # SUBCOMMANDS -- cobra's Use: fields -- not cmd/'s source files, which are
-  # implementation and helpers a scenario can never invoke (root.go,
-  # table.go, ...). Listing files buried the real gaps under names no suite
-  # should ever mention. A subcommand candidate is printed as `cmd <name>`
-  # and dated by the file that defines it.
-  cands=$( { git ls-files 2>/dev/null | grep -E '^(bin|scripts)/' || true
-             git ls-files 2>/dev/null | grep -E '\.(sh|py)$' | grep -vE '^(gentar|test|tests)/' || true
-             git grep -hoE 'Use:[[:space:]]*"[a-z][a-z0-9-]*' -- 'cmd/*.go' 2>/dev/null \
-               | sed -E 's/Use:[[:space:]]*"/cmd:/' || true
-           } | sort -u)
+  # A candidate is something a fresh machine can RUN: a tracked file with
+  # the executable bit, plus anything in bin/. Not "every file under cmd/"
+  # — for a Go CLI that listed root.go, table.go and the rest of the
+  # implementation, 27 names no suite should ever mention burying the one
+  # real gap (claude-playbooks). Not every .py either: a library module is
+  # not an entry point. The executable bit is the one signal that means
+  # "this is run, not imported", in any language.
+  cands=$( { git ls-files -s 2>/dev/null | awk '$1 == "100755" { print $4 }' || true
+             git ls-files 2>/dev/null | grep -E '^bin/' || true
+           } | grep -vE '^(gentar|test|tests|\.github)/' | sort -u)
 
   gaps=0
   for c in $cands; do
-    case "$c" in
-      cmd:*) name=${c#cmd:}; base=$name; stem=$name; label="cmd $name"
-             src=$(git grep -lE "Use:[[:space:]]*\"$name([ \"])" -- 'cmd/*.go' 2>/dev/null | head -1) ;;
-      *)     base=$(basename "$c"); stem=${base%.*}; label=$c; src=$c ;;
-    esac
+    base=$(basename "$c"); stem=${base%.*}
     if ! printf '%s\n' "$mentions" | grep -qxF "$base" \
        && ! printf '%s\n' "$mentions" | grep -qxF "$stem"; then
       if [ "$gaps" = 0 ]; then echo "the repo ships these, and no suite mentions them:"; fi
-      last=$(git log -1 --format='%ad' --date=short -- "${src:-$c}" 2>/dev/null || echo '?')
-      printf '  %-40s last changed %s\n' "$label" "${last:-?}"
+      last=$(git log -1 --format='%ad' --date=short -- "$c" 2>/dev/null || echo '?')
+      printf '  %-40s last changed %s\n' "$c" "$last"
       gaps=$((gaps + 1))
     fi
   done
@@ -203,7 +347,12 @@ fi
 # allows want-sha) — but resolves via FETCH_HEAD, NOT the ref name: a
 # plain `git fetch origin main` writes FETCH_HEAD only and never moves
 # the local branch, so rev-parse main would answer with the stale tip.
-if ! git -C "$ARENA" fetch -q --tags origin "$REF"; then
+# --force: .arena is a cache this script owns, and switching
+# GENTAR_REPO_URL to a fork that has its OWN tag of the same name made a
+# plain fetch refuse ("would clobber existing tag") — reported below as
+# "GENTAR_REF not found", for a tag that exists. The fork's tag is what
+# was asked for.
+if ! git -C "$ARENA" fetch -q --force --tags origin "$REF"; then
   echo "GENTAR_REF $REF not found in $CLONE_URL" >&2; exit 2
 fi
 sha=$(git -C "$ARENA" rev-parse -q --verify FETCH_HEAD^{commit}) || {
@@ -244,11 +393,11 @@ mkdir "subjects/$SUBJECT"
 # on the bench — so `git describe` there finds nothing. Freeze the
 # version HERE, where git works; scenarios read it instead of trusting
 # the bench's git.
-# --match 'v*': the workflow's keyword tags (`arena`, `arena-*`) are floating
-# triggers, and a bare `git describe --tags` returns whichever tag is NEAREST,
-# of any kind -- so moving `arena` onto a commit would make the built binary
-# report "arena-3-g..." as its version. That exact trap broke this repo's CI
-# before (the `arena` tag shadowed v3.13.0).
+# --match 'v*': the workflow's keyword tags (`arena`, `arena-*`) are
+# floating triggers, and a bare `git describe --tags` returns whichever
+# tag is NEAREST — so moving `arena` onto a commit made the frozen version
+# read "arena-3-g…" instead of the release it came from (claude-playbooks,
+# where the `arena` tag once shadowed a real v3.13.0).
 (cd "$REPO" && git describe --tags --always --dirty --match 'v*' 2>/dev/null || echo dev) \
   > "subjects/$SUBJECT/.gentar-version"
 
@@ -321,7 +470,34 @@ require_bench_key() {
     | head -1)
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
   case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
-  [ -r "$key" ] && return 0
+  # Never repeat a value that is not plainly a path. Setting
+  # GENTAR_BENCH_KEY_FILE to the key's CONTENTS instead of its path is an
+  # easy mistake (in CI, pointing it at the secret instead of the staged
+  # file), and the "not found at <value>" line below then printed the whole
+  # private key — to a terminal, or to a CI log where masking a multi-line
+  # secret is not something to rely on. Found in review; true since 0.1.0.
+  case "$key" in
+    *"
+"*|*BEGIN*|*PRIVATE*|*KEY-----*)
+      echo "GENTAR_BENCH_KEY_FILE holds what looks like KEY MATERIAL, not a path —" \
+           "it must be the PATH to the key file (value not shown)" >&2
+      exit 2 ;;
+  esac
+  if [ "${#key}" -gt 1024 ]; then
+    echo "GENTAR_BENCH_KEY_FILE is ${#key} characters — not a path (value not shown)" >&2
+    exit 2
+  fi
+  # Readable AND non-blank. CI stages the key with printf '%s\n', so an
+  # UNSET secret becomes a one-byte file holding only the newline — which
+  # passes -r and -s alike and then fails every suite at ssh, reading as a
+  # red arena rather than a missing secret (claude-playbooks). grep -q
+  # inspects without printing: the key's contents never reach a log.
+  if [ -r "$key" ] && grep -q '[^[:space:]]' "$key" 2>/dev/null; then return 0; fi
+  if [ -r "$key" ]; then
+    echo "bench ssh key at $key is EMPTY — the secret that should fill it is" \
+         "probably unset (BENCH_SSH_KEY in CI)" >&2
+    exit 2
+  fi
   echo "bench ssh key not found at $key — set GENTAR_BENCH_KEY_FILE" \
        "(in gentar/.arena/.env or the shell) to the key the coordinator" \
        "uses to reach the bench-host" >&2
@@ -357,13 +533,13 @@ teardown_arena() {
   return "$rc"
 }
 
-# EXIT tears down on any normal end. INT/TERM need their OWN handlers that
-# tear down AND exit: a signal trap that merely returns lets bash resume the
-# script after the interrupted command -- with _torn_down already set, so a
-# resumed run could start new services after a cancel, the final EXIT
-# would skip cleanup, and the run would end with status 0. Exiting 130/143
-# keeps the cancel a failure; the EXIT trap then sees _torn_down and does
-# nothing, so teardown still happens exactly once.
+# EXIT tears down on any normal end. INT and TERM need their OWN handlers
+# that tear down AND exit: a signal trap that merely returns lets bash
+# RESUME the script after the interrupted command, so the next suite starts
+# against an arena that was just torn down and the run can finish with
+# status 0. A CI cancel is a SIGTERM to this shell, so a cancelled run read
+# as a PASS. Exiting 130/143 keeps a cancel a failure; EXIT then sees
+# _torn_down and does nothing, so teardown still happens exactly once.
 trap teardown_arena EXIT
 trap 'teardown_arena; exit 130' INT
 trap 'teardown_arena; exit 143' TERM
@@ -428,19 +604,21 @@ arena_start otelcol
 # GENTAR_BUDGET_CAP is the one fixed addition: it configures the budget
 # guard itself, so no scenario declares it.
 extract_env_names() {         # files... -> one env var name per line
-  awk '
+  for _f in "$@"; do scenario_table "$_f"; done | awk '
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
       line = $0
-      while (match(line, /"[A-Za-z_][A-Za-z0-9_]*"/)) {
+      # either TOML quote style — a 'literal' name used to forward nothing,
+      # and the coordinator then refused credentials the caller had set
+      while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
         print substr(line, RSTART + 1, RLENGTH - 2)
         line = substr(line, RSTART + RLENGTH)
       }
       depth += gsub(/\[/, "[") - gsub(/\]/, "]")
       if (depth <= 0) inarr = 0
     }
-  ' "$@"
+  '
 }
 # ${FORWARD[@]+"..."} rather than "${FORWARD[@]}": under `set -u`, bash 3.2
 # (still the system bash on macOS) treats an EMPTY array expansion as an

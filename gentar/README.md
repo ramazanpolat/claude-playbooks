@@ -8,11 +8,11 @@ can hand to an agent to fix what failed.
 
 | Declaration | Where | This repo's value |
 |---|---|---|
-| subject name | `subject = "…"` in every scenario TOML + `SUBJECT` in `run.sh` | `claude-playbooks` |
+| subject name | `subject = "…"` in every scenario TOML (`run.sh` reads it from there) | `claude-playbooks` |
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.2.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.3.0` |
 
 ## Quickstart (local)
 
@@ -79,14 +79,11 @@ in use", because it does not stop one-off containers.
 The suites here assert what is true of this repo, so the two move
 together.
 
-- **Code changed, behaviour did not** — nothing to do before merging,
-  but know when the evidence arrives. This repo has **no pull-request
-  trigger** (see CI below), so the first automatic arena run is the
-  post-merge push to `main`. To prove a change *before* it lands, push the
-  `arena` keyword tag (every suite) or `arena-<suite>` (one), or dispatch
-  the workflow.
+- **Code changed, behaviour did not** — nothing to do. The PR trigger
+  re-runs the suites against the change before it lands; the pass is the
+  evidence.
 - **Behaviour changed** — the scenarios change in the **same pull
-  request**, and that PR is arena-tested by keyword tag before it merges. A scenario asserts reality; stale reality fails honestly,
+  request**. A scenario asserts reality; stale reality fails honestly,
   and that failure is the suite working. New behaviour is usually a new
   suite: dry-run it, run it once for real, ship it with the feature.
   Splitting the code change and the scenario change across two PRs
@@ -114,6 +111,40 @@ Its blind spot, stated so you do not trust it too far: it compares
 shipped executables and scripts against names the suites mention, so a
 **behaviour change inside a file a suite already names** does not show
 up. The diff is there for that.
+
+## Narrowing a pull request
+
+A PR runs every suite it can. The bench-host is one shared machine, so a
+README typo and a rewrite of the install path cost the same wall-clock —
+and when the expensive tier makes every PR slow, people stop running it
+at all. A PR can say what it needs:
+
+```
+gentar: auth-flow config-migration
+```
+
+anywhere in the **PR body**, one line. Those suites run, plus whatever
+`GENTAR_FLOOR` names, and nothing else. No line means today's behaviour:
+everything runnable.
+
+**Set `GENTAR_FLOOR`** (a repo variable) to the cheap deterministic
+suites. They run whatever a PR declares, so a too-narrow pick costs
+coverage on the slow tier and never on the fast guard rails.
+
+Two deliberate limits:
+
+- **Declared, not inferred.** A rule that reads the diff and picks for
+  you fails by silently *excluding* the suite that mattered — a green PR
+  that never tested the change, which is the one outcome this engine
+  exists to refuse. A human narrowing on purpose is visible in the PR and
+  reviewable like any other claim in it.
+- **Only a PR narrows.** Pushes to the default branch and `v*` tags
+  ignore the declaration and run everything, so nothing a PR skipped
+  stays skipped.
+
+A suite name is letters, digits, dot, dash, underscore; anything else in
+that line is refused with exit 2 before a bench is spent — a PR body is
+text a stranger can write.
 
 ## The fix loop
 
@@ -146,9 +177,9 @@ engine.
 
 ## Suites
 
-`gentar/run.sh --review` is the live inventory — every suite with its
-assertion count, and what the repo ships that no suite names. Prefer it to
-this table, which only says what each suite is for.
+`gentar/run.sh --review` is the live inventory: every suite with its
+assertion count, and what the repo ships that no suite names. This table
+only says what each suite is for.
 
 | Suite | Proves |
 |---|---|
@@ -169,39 +200,22 @@ this table, which only says what each suite is for.
 
 ## This subject's adaptations of the kit
 
-Carry these forward when re-copying the kit for an engine bump:
+`run.sh` is the pristine v0.3.0 kit. Everything this repo changed is below;
+carry it forward when re-copying the kit for an engine bump.
 
-- **`SUBJECT` is set explicitly** in `run.sh`. This repo is worked on in git
-  worktrees, whose directory name is the branch, so the kit's default
-  (`basename "$REPO"`) names a subject no scenario declares.
-- **`git describe` uses `--match 'v*'`** in `run.sh` and `dryrun.py`. The
-  workflow's floating `arena` trigger tag would otherwise become the built
-  binary's version whenever it sits nearer than the last release.
-- **The bench-host identity comes from repo secrets** `GENTAR_BENCH_HOST` and
-  `GENTAR_BENCH_USER`. Since v0.2.0 the engine's `.env.example` carries
-  placeholders rather than a real host, so a fresh CI clone would otherwise
-  target `bench.example.internal` and fail every suite at ssh. They are
-  secrets rather than variables only because this repo's Actions logs are
-  public. The workflow refuses (exit 2) before any bench if either is unset
-  or still the placeholder.
-- **No `pull_request` trigger**, which the kit's workflow has. Here it
-  would run fork code on the persistent self-hosted runner of a public repo.
-  The concurrency group is also constant rather than per-ref, since every
-  run shares one compose project and one pair of ports.
-- **Ports are pinned** in the workflow (ClickHouse `8126`, OTLP `4320`): the
+- **No `pull_request` trigger** in the workflow (one line removed, with a
+  note). The repo is public and the runner persistent; the pilot chose no PR
+  trigger at all, on top of requiring approval for all external
+  contributors. Test before merge with the `arena` / `arena-<suite>` tags.
+- **Ports pinned** to 8126 (ClickHouse) and 4320 (OTLP) in the workflow: the
   `arena` runner is shared with other arenas.
-- **`dryrun.py` gives each suite a fresh home**, matching the engine's fresh
-  bench per scenario, and seals the pilot's own `claude-playbook` off `PATH`.
-  With the kit's shared home, `pilot-self-uninstall` removed the scratch
-  binary and later suites silently ran the pilot's real install.
-- **`--review` candidates are registered subcommands**, read from cobra's
-  `Use:` fields, plus scripts and `bin/` -- not every file under `cmd/`,
-  which is Go implementation a scenario can never invoke. The header names
-  the subject, not the directory.
+- **`dryrun.py` hooks**: `prepare()` builds `claude-playbook` the way the
+  bench does; `SKIP_STEP_SUBSTR` skips the container build and install it
+  replaces; `HIDE_FROM_PATH` hides `cpb` (suites create it) and `pilot`
+  (`create`/`install` call it, and a bench has none).
 - **`cpb-agent-bench-v1`** is this repo's own bench image, built by
-  `bench-template/build.sh` on the bench-host; only `pilot-agent-session`
-  uses it. The other suites use the engine's `gentar-bench-v1` or the
-  default bench.
+  `bench-template/build.sh` on the bench-host, used only by
+  `pilot-agent-session`.
 
 ## Before you push a suite
 
@@ -209,6 +223,12 @@ Carry these forward when re-copying the kit for an engine bump:
 gentar/dryrun.py                                   # every suite
 gentar/dryrun.py gentar/scenarios/cli-head-build.toml
 ```
+
+Needs **python 3.11+, or 3.9/3.10 with `tomli`** (`pip install tomli`) —
+it parses TOML on your machine, and `tomllib` only became stdlib in 3.11
+while stock macOS still ships 3.9. It re-execs under a newer interpreter
+if one is on PATH, so on most machines this is invisible. The arena is
+unaffected: the coordinator runs python 3.12 in a container.
 
 Runs a suite's steps, driver turns and assertions in a scratch home in about
 a second — no bench, no sandbox, no network. A scenario is shell inside TOML,
@@ -241,12 +261,10 @@ face. Decisions and reality assertions, never scripts.
 
 ## CI (`.github/workflows/`)
 
-The arena workflow runs every suite on pushes to main, on `v*`/`arena*`
-tags, and on manual dispatch. It deliberately does **not** run on pull
-requests: this repo is public and the runner is persistent, so a PR run
-would execute a fork's code on a machine that holds bench keys and reaches
-the internal network. To arena-test a change before it lands, push the
-`arena` (every suite) or `arena-<suite>` keyword tag, or dispatch. It needs a self-hosted runner labeled `arena` with Docker +
+The arena workflow runs every suite on pull requests, pushes to main,
+and `v*`/`arena*` tags (edit its `on:` block to taste — triggers are
+yours, the arena doesn't care; the PR trigger's cost is documented in
+the file). It needs a self-hosted runner labeled `arena` with Docker +
 reach to the bench-host; GitHub-hosted runners cannot reach an internal
 bench-host. One-time setup, ~5 min on any always-on machine with Docker:
 
@@ -255,20 +273,27 @@ runner → follow the commands → when configuring, labels: `arena`.
 
 Secrets/vars the workflow reads:
 
-- `secrets.BENCH_SSH_KEY` — **required**: key the coordinator uses to reach the bench-host
-- `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — **required**: the bench-host
-  and the account that key logs in as. The workflow refuses (exit 2) before any bench
-  if either is unset or still the engine's `bench.example.internal` placeholder.
+- `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
+- `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
+  engine ships none, so without these no suite can run (secrets, because a public
+  repo's logs are public)
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
 - `GENTAR_BUDGET_CAP` in the workflow — ceiling the budget guard enforces
 
-Required: the bench key, host and user -- the workflow refuses (exit 2)
-without any of them. Everything else is optional; an incomplete agent
-credential group simply leaves agent suites out of the sweep, named in
-the log either way.
+The three bench values are required; the workflow refuses with a named error
+before staging anything if one is missing or still the placeholder. Everything
+else is optional. The workflow's sweep is `gentar/run.sh --sweep`: suites whose
+credentials are absent are skipped and named, not run into a red refusal. It
+tears down with `gentar/run.sh --down`.
+
+**Credential grouping.** `credentials` lists *alternatives*. A provider that is
+a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
+Written flat, the two are either-or: the token wins alone and the URL is
+dropped. The engine warns when a declared credential is set but not forwarded,
+in the log and in the report.
 
 The workflow stages the checkout exactly like `run.sh` does, so local
 and CI run the same way.

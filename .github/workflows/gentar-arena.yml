@@ -1,7 +1,8 @@
-# claude-playbooks own arena. Runs this repo's gentar suites on every push
-# to main, every v* tag, the arena / arena-<suite> keyword tags, and on
-# demand. Deliberately NOT on pull requests -- see the `on:` block. Conditions
-# live HERE — edit the `on:` block; the arena doesn't care.
+# gentar own arena. Runs this repo's gentar suites on pull requests from
+# THIS repository (never a fork's — see the job's `if:`), every push to
+# main, every v* tag, the arena / arena-<suite> keyword tags, and on
+# demand. Conditions live HERE — edit the `on:` block; the arena doesn't
+# care.
 #
 # Runner: self-hosted with label `arena` (Docker + network reach to the
 # bench-host). One-time setup is documented in gentar/README.md.
@@ -17,32 +18,55 @@ name: arena
 # bench should finish and clean up rather than be killed mid-bench,
 # leaving a sandbox stranded on the shared host.
 #
-# The group is CONSTANT, not per-ref. Every run of this workflow uses one
-# compose project (arena-claude-playbooks) and one pair of host ports
-# (8126/4320), so two runs on different refs -- main and a tag, or a
-# dispatch -- would stop each other's containers or fail to bind. A per-ref group only
-# serialized runs of the same ref. One runner hides that today; a second
-# `arena` runner would expose it.
+# The group is CONSTANT per repository, not per ref. Every run of this
+# workflow uses the same compose project (arena-<subject>) and the same
+# host ports, so a per-ref group only serialized runs of ONE ref: main
+# and a tag, or two PRs, ran side by side and stopped each other's
+# containers or failed to bind ("port is already allocated"). One runner
+# hid it; a second `arena` runner exposes it. (claude-playbooks.)
 concurrency:
-  group: arena-claude-playbooks
+  group: gentar-arena-${{ github.repository }}
   cancel-in-progress: false
 
 on:
-  # NO pull_request trigger, deliberately, and not for the kit's cost reason.
-  # This repo is PUBLIC and this job runs on a PERSISTENT self-hosted runner:
-  # a pull_request run executes the PR's code there, including a fork's --
-  # on a machine with Docker, reach into the internal network, and later
-  # trusted jobs that write BENCH_SSH_KEY to disk. Fork runs get no secrets,
-  # but code can persist on the runner and wait for the next trusted job.
-  # GitHub's own guidance is to not attach self-hosted runners to public
-  # repos. (Codex review on PR #52; the pilot chose to drop the trigger.)
+  # Test the change BEFORE it lands. A scenario asserts reality, so a PR
+  # that changes what this repo does fails here until its scenarios are
+  # updated in the same PR — which is the point.
   #
-  # So a change is arena-tested after it lands on main, or before, on
-  # demand: push the `arena` / `arena-<suite>` keyword tag, or dispatch.
-  # Both run only code a maintainer pushed to this repository. Fork PR
-  # workflows additionally require approval for every external contributor
-  # (repo setting), which also covers a fork adding its own workflow aimed
-  # at this runner.
+  # The honest cost: every PR push runs the whole suite list on a bench
+  # that is SHARED with every other arena on this runner. The
+  # concurrency group above is per-ref, so N open PRs are N arenas
+  # queueing for that bench-host, and cancel-in-progress is deliberately
+  # false — a superseded push still finishes its run rather than
+  # stranding a bench. Suites are minutes each; a busy repo feels it.
+  #
+  # Too expensive for your repo? Delete the two lines below and the PR
+  # is tested by the `arena` keyword tag or a manual dispatch instead —
+  # on demand rather than on every push.
+  #
+  # SECURITY — this runner is self-hosted and PERSISTENT. A pull_request
+  # run executes the PR's code on it, and a fork's PR is a stranger's code
+  # on a machine with Docker, reach to your bench-host, and later trusted
+  # jobs that write BENCH_SSH_KEY to disk. Fork runs get no secrets, but
+  # code can persist on the runner and wait for the next trusted job.
+  #
+  #   - The job's `if:` below runs only PRs whose head is in THIS
+  #     repository — code a maintainer pushed, the same trust as a push.
+  #   - That guards THIS workflow only. A fork can add its own workflow
+  #     aimed at `runs-on: [self-hosted, arena]`. On a PUBLIC repo, set
+  #     Settings → Actions → "Require approval for all external
+  #     contributors", or delete the pull_request line and test PRs by
+  #     keyword tag instead. GitHub's own advice is not to attach
+  #     self-hosted runners to public repos at all.
+  #
+  # (Codex review on the first real adoption, claude-playbooks, which is
+  # public and dropped the trigger.)
+  # claude-playbooks: the pull_request trigger is REMOVED, the second option
+  # above. This repo is public; the pilot chose no PR trigger at all (in
+  # addition to requiring approval for all external contributors). Test a
+  # change before merge with the `arena` / `arena-<suite>` keyword tags.
+  # The PR-only logic below is left as shipped, so it diffs cleanly on the
+  # next engine bump; without the trigger it never runs.
   push:
     branches: [main]
     tags: ['v*', 'arena', 'arena-*']   # v* = release proof · arena-* = keyword tags
@@ -57,13 +81,18 @@ on:
 
 # Keyword tags — run the arena on ANY commit by pushing a tag at it:
 #   arena                    → every suite in gentar/scenarios/
-#   arena-<scenario>         → that one suite (e.g. arena-cli-head-build)
+#   arena-<scenario>         → that one suite (e.g. arena-first-suite)
 # The tag names the SUBJECT commit (this checkout); GENTAR_REF still
 # picks the engine. Tag a branch tip, a main commit, or a dirty
 # experiment — same path. Delete the tag to re-run.
 
 jobs:
   arena:
+    # Same-repository PRs only. A fork's head repo differs, so its PR
+    # never reaches this self-hosted runner through this workflow.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, arena]
     steps:
       - uses: actions/checkout@v4
@@ -76,14 +105,28 @@ jobs:
       # secret persists in the workspace.
       - name: stage bench access
         run: |
-          # Refuse before staging an empty key. printf would still write a
-          # one-byte file (just the newline), which passes every readability
-          # check downstream and then fails each suite at ssh -- the same
-          # silent shape as a placeholder bench-host.
+          # Refuse BEFORE staging. printf would still write a one-byte file
+          # for an unset secret (just the newline), which passes every
+          # readability check downstream and fails each suite at ssh — a
+          # red arena that is really a missing secret.
           if [ -z "$BENCH_KEY" ]; then
-            echo "::error::BENCH_SSH_KEY is not set (repo secret BENCH_SSH_KEY)" >&2
+            echo "::error::repo secret BENCH_SSH_KEY is not set" >&2
             exit 2
           fi
+          # The engine ships NO bench-host: .env.example holds placeholders.
+          # Unset here would fall back to the seeded .env's placeholder —
+          # non-empty, so nothing refuses it — and every suite would fail
+          # at ssh ("Could not resolve hostname bench.example.internal").
+          # The kit's workflow used to pass neither variable at all, so no
+          # adopter's CI could have worked (claude-playbooks).
+          for v in GENTAR_BENCH_HOST GENTAR_BENCH_USER; do
+            eval "val=\${$v:-}"
+            case "$val" in
+              ''|*example.internal*)
+                echo "::error::$v is not set to a real bench-host (repo secret $v)" >&2
+                exit 2 ;;
+            esac
+          done
           printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
           chmod 600 "$RUNNER_TEMP/bench_key"
           # Only when the engine repo is private; a public engine needs
@@ -95,6 +138,8 @@ jobs:
           fi
         env:
           BENCH_KEY: ${{ secrets.BENCH_SSH_KEY }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
           # Only needed when the ENGINE repo is private (a fork, an
           # internal mirror): a read-only deploy key on it. Leave the
           # secret unset for a public engine — run.sh then clones over
@@ -105,17 +150,6 @@ jobs:
         run: |
           # Keyword tag → scenario: `arena` runs everything, `arena-<name>`
           # runs one. Dispatch input wins when both are set (explicit ask).
-          # Refuse before any bench, as the engine does for an UNSET host. A
-          # missing secret would otherwise fall back to the seeded .env's
-          # placeholder -- non-empty, so nothing refuses it -- and every suite
-          # would fail at ssh ("Could not resolve hostname
-          # bench.example.internal"), reading as a red arena, not a config gap.
-          for v in GENTAR_BENCH_HOST GENTAR_BENCH_USER; do
-            eval "val=\${$v:-}"
-            case "$val" in
-              ''|*example.internal*) echo "::error::$v is not set to a real bench-host (repo secret $v)" >&2; exit 2 ;;
-            esac
-          done
           INPUT="$SCENARIO_INPUT"
           if [ -z "$INPUT" ] && [ "$GITHUB_EVENT_NAME" = push ] \
              && [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
@@ -125,66 +159,93 @@ jobs:
               arena-*)  INPUT=${tag#arena-} ;;
             esac
           fi
+
+          # A pull request MAY narrow itself. The bench-host is one shared
+          # machine, so a README typo and an auth rewrite otherwise cost
+          # the same wall-clock, and the expensive tier is what people
+          # then start skipping entirely.
+          #
+          #     gentar: auth-flow config-migration
+          #
+          # in the PR body picks those suites. Declared, not inferred: a
+          # rule that reads the diff and decides for you fails by SILENTLY
+          # EXCLUDING the suite that mattered — a green PR that never ran
+          # the relevant test, which is the failure mode this whole engine
+          # exists to refuse. A human narrowing on purpose is visible in
+          # the PR and reviewable like any other claim in it.
+          #
+          # GENTAR_FLOOR is the safety net: those suites run whatever the
+          # body says, so a bad narrowing costs coverage on the slow tier
+          # and never on the fast guard rails. Pushes to the default
+          # branch and v* tags ignore all of this and run everything, so
+          # nothing a PR skipped stays skipped.
+          FLOOR="${GENTAR_FLOOR:-}"
+          if [ -z "$INPUT" ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            picked=$(printf '%s\n' "$PR_BODY" \
+              | sed -n 's/^[[:space:]]*gentar:[[:space:]]*//p' | head -1 | tr -d '\r')
+            # A scenario name is [A-Za-z0-9._-]; anything else in a PR
+            # body is not a suite. The name check below already refuses
+            # unknown names with exit 2, so `gentar: x; rm -rf /` fails
+            # there too — but that is a validator doing a sanitiser's job,
+            # and one refactor of the loop would turn a PR body into
+            # shell. Reject the characters explicitly, where the reason
+            # is visible.
+            for w in $picked; do
+              case "$w" in
+                *[!A-Za-z0-9._-]*)
+                  echo "refusing PR-declared suite name: $w" >&2
+                  echo "a scenario name is letters, digits, dot, dash, underscore" >&2
+                  exit 2 ;;
+              esac
+            done
+            if [ -n "$picked" ]; then
+              echo "PR narrows the run to: $picked"
+              [ -n "$FLOOR" ] && echo "floor suites always included: $FLOOR"
+              INPUT="$FLOOR $picked"
+            fi
+          fi
           if [ -n "$INPUT" ]; then
+            # A floor suite the body also named would otherwise run twice,
+            # spending a bench to learn the same thing.
+            INPUT=$(printf '%s\n' $INPUT | awk '!seen[$0]++' | tr '\n' ' ')
             for s in $INPUT; do
               [ -f "gentar/scenarios/$s.toml" ] \
                 || { echo "unknown scenario: $s" >&2; exit 2; }
             done
             exec gentar/run.sh $INPUT
           fi
-          # "Run everything" means every suite this run CAN run. A suite
-          # that declares `credentials` is refused by the coordinator
-          # (exit 2, before any bench exists) when none of the named
-          # variables is set -- correct for a direct ask, wrong for a push
-          # that never promised an agent credential. Such suites are left
-          # out of the sweep unless a credential is present, and named
-          # either way so the log says which and why. Dispatching one by
-          # name still reaches the honest refusal.
-          suites=""
-          for f in gentar/scenarios/*.toml; do
-            s=$(basename "$f" .toml)
-            if grep -q '^credentials = \[' "$f"; then
-              # A COMPLETE group, mirroring pilot-agent-session's declaration:
-              # the first-party key alone, or the router token WITH its
-              # endpoint. A token without a base URL is half a provider; the
-              # coordinator refuses it (exit 2), which would turn the whole
-              # sweep red instead of skipping the one suite that needs it.
-              if [ -n "$ANTHROPIC_API_KEY" ] \
-                 || { [ -n "$ANTHROPIC_AUTH_TOKEN" ] && [ -n "$ANTHROPIC_BASE_URL" ]; }; then
-                echo "including $s (agent credential present)"
-              else
-                echo "skipping $s (needs an agent credential; none set)"
-                continue
-              fi
-            fi
-            suites="$suites $s"
-          done
-          exec gentar/run.sh $suites
+          # "Run everything" means every suite this run CAN run: a suite
+          # whose credentials are absent is skipped with its reason rather
+          # than refused with exit 2, which would turn the whole sweep red
+          # for a key nobody promised. run.sh decides with the engine's own
+          # grouping — the old inline check here was hardcoded to
+          # ANTHROPIC_* and counted a lone token as a provider.
+          exec gentar/run.sh --sweep
         env:
           SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
+          # Through env, never interpolated into the script body: a PR
+          # body is attacker-controlled text and `${{ }}` would paste it
+          # straight into the shell.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          # Suites that run on a narrowed PR no matter what it declared.
+          # Name the cheap deterministic ones here, space separated.
+          GENTAR_FLOOR: ${{ vars.GENTAR_FLOOR }}
           # Empty = run.sh's own default, which is a release tag. Keep
           # the pin in ONE place: a default here would silently win over
           # the script's and drift from it.
           GENTAR_REF: ${{ github.event.inputs.gentar_ref }}
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          # The bench-host identity. SECRETS rather than variables because a
+          # public repo's Actions logs are public: secrets are masked,
+          # variables print. A private repo may use vars instead.
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
           # Engine source. Both are only for a private or relocated
           # engine repo; unset, run.sh clones the public upstream over
           # https. The key path is passed only when the secret was set,
           # so an empty file never becomes a broken ssh identity.
           GENTAR_CLONE_SSH_KEY: ${{ secrets.GENTAR_CLONE_KEY && format('{0}/gentar_clone_key', runner.temp) || '' }}
           GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
-          # The bench-host identity. Since v0.2.0 the engine ships
-          # placeholders here, not a real host, so CI must supply it. The
-          # values are SECRETS rather than variables only because this repo's
-          # Actions logs are public: secrets are masked, variables print.
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
-          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
-          # The `arena` runner is shared with other arenas, which publish the
-          # engine's default ClickHouse (8123) and OTLP (4318) ports. Pinned
-          # here so two concurrent arenas on that Docker host do not collide
-          # ("port is already allocated").
-          GENTAR_CLICKHOUSE_HOST_PORT: "8126"
-          GENTAR_OTLP_HOST_PORT: "4320"
           # Port moves: if another arena (or gentar's own gate) runs on
           # the same Docker host, every shared host binding must move
           # aside here — gentar's docker-compose.yml documents each
@@ -192,8 +253,8 @@ jobs:
           # collide in practice:
           #   ClickHouse debug binding (8123) and the OTLP receiver
           #   (4318, published on all interfaces).
-          #GENTAR_CLICKHOUSE_HOST_PORT: "8126"
-          #GENTAR_OTLP_HOST_PORT: "4320"
+          GENTAR_CLICKHOUSE_HOST_PORT: "8126"   # claude-playbooks: the arena runner is shared
+          GENTAR_OTLP_HOST_PORT: "4320"
           # Agent-in-the-loop suites. Providers are alternatives: a
           # first-party key, or any Anthropic-compatible endpoint via
           # token + base URL. All unset is the normal case and simply
@@ -232,6 +293,7 @@ jobs:
         # Free the port and volumes for anything else on this host —
         # the fix-loop artifact is already uploaded above.
         if: always()
-        # Same project name gentar/run.sh uses (arena-$SUBJECT), where SUBJECT
-        # is set explicitly rather than taken from the checkout directory.
-        run: docker compose -p arena-claude-playbooks down -v --remove-orphans || true
+        # run.sh derives the project name (arena-<subject>) from the
+        # scenarios; computing it again here from the checkout directory is
+        # how a worktree or renamed checkout ends up tearing down nothing.
+        run: gentar/run.sh --down || true

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run an own-arena scenario locally, without a bench.
 
-    gentar/dryrun.py gentar/scenarios/cli-head-build.toml
+    gentar/dryrun.py gentar/scenarios/first-suite.toml
     gentar/dryrun.py gentar/scenarios/*.toml        # sweep
     gentar/dryrun.py                                # every suite
 
@@ -63,14 +63,34 @@ if not ENGINE.exists():
              "GENTAR_ENGINE=/path/to/gentar/coordinator gentar/dryrun.py")
 sys.path.insert(0, str(ENGINE))
 
-# tomllib is 3.11+. Stock macOS ships 3.9, so rather than fail on the default
-# interpreter, re-exec under the first newer one on PATH.
+# tomllib is 3.11+, and stock macOS still ships 3.9 — so the cheap check an
+# adopter is told to run FIRST is the one most likely to fail on a machine
+# nobody prepared. Three ways out, in order of least surprise:
+#
+#   1. re-exec under a newer interpreter if one is already on PATH;
+#   2. otherwise use tomli, which IS tomllib under its pre-stdlib name —
+#      the same parser, so a scenario cannot mean one thing here and
+#      another in the arena;
+#   3. otherwise say exactly what to install, rather than "needs 3.11+".
+#
+# The arena itself never reaches any of this: the coordinator image is
+# python:3.12-slim. This is purely about the host-side replay.
 if sys.version_info < (3, 11):
     for candidate in ("python3.14", "python3.13", "python3.12", "python3.11"):
         if shutil.which(candidate):
             os.execvp(candidate, [candidate, os.path.abspath(__file__), *sys.argv[1:]])
-    sys.exit(f"needs python 3.11+ for tomllib; this is {sys.version.split()[0]} "
-             "and no newer python3.1x was found on PATH")
+    try:
+        import tomli  # noqa: F401  — imported for the check; the parser imports it
+    except ModuleNotFoundError:
+        sys.exit(
+            f"dryrun needs a TOML parser and this is python {sys.version.split()[0]} "
+            "(tomllib arrived in 3.11).\n"
+            "  either:  pip install tomli\n"
+            "  or:      install any python 3.11+ and re-run "
+            "(brew install python@3.12, apt install python3.12, ...)\n"
+            "The arena is unaffected either way — it runs python 3.12 in a "
+            "container. This is only the local replay."
+        )
 
 from gentar.toml_scenario import TomlScenario
 
@@ -79,26 +99,35 @@ from gentar.toml_scenario import TomlScenario
 SKIP_STEP_SUBSTR = (
     # Every suite begins by building claude-playbook in a golang:1.21
     # container from the staged checkout, then installing it to
-    # ~/.local/bin. prepare() does both once, with the local toolchain.
+    # ~/.local/bin. prepare() does both, with the local toolchain.
     'docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src',
     'install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
 )
 
+# Executables that must NEVER be found on your real PATH while a suite
+# runs — names your suites CREATE themselves (a launcher, an alias
+# binary). Anything prepare() installs into the scratch ~/.local/bin is
+# hidden automatically; list only what it does not. Example: ("cpb",).
+# cpb: suites create it themselves, as a real install does (a relative
+# symlink). pilot: not created by a suite, but claude-playbook's create and
+# install call `pilot wire` whenever pilot is on PATH, and a bench has none --
+# reaching the pilot's real one would edit scratch playbooks through the
+# host's own lock dir.
+HIDE_FROM_PATH = ("cpb", "pilot")
+
 
 def prepare(env: dict) -> None:
-    """Stand in for the suites' own build-and-install, once per sweep.
+    """Stand in for this suite's own build-and-install, in its fresh home.
 
-    Mirrors the bench exactly. gentar/run.sh freezes the version into the
-    staged checkout as .gentar-version (the bench has no usable .git), the
-    container step builds $WORKSPACE_DIR/claude-playbook with that version,
-    and the install step copies it to ~/.local/bin. cli-head-build asserts
-    the binary reports the frozen version, so it has to be the same one,
-    resolved the same way -- including --match 'v*', so the floating
-    `arena` trigger tag can never become the version.
+    Mirrors the bench: run.sh freezes the version into the staged checkout
+    as .gentar-version (the bench has no usable .git), the container step
+    builds $WORKSPACE_DIR/claude-playbook with it, and the install step
+    copies it to ~/.local/bin. cli-head-build asserts the binary reports that
+    version, so it is resolved the same way, --match 'v*' included.
 
-    Deliberately NOT created: a `cpb` symlink. Nothing on the bench makes
-    one; the suites that need it create it themselves, as a real install
-    does. Providing it here would let a suite pass locally that fails there.
+    No `cpb` symlink: nothing on the bench makes one; the suites that need it
+    create it themselves. `go build` caches on its own, so building per suite
+    costs little.
     """
     ws = env["WORKSPACE_DIR"]
     v = subprocess.run(
@@ -113,6 +142,7 @@ def prepare(env: dict) -> None:
     if r.returncode:
         sys.exit("build failed:\n" + r.stderr)
     dest = Path(env["HOME"], ".local/bin/claude-playbook")
+    dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(built, dest)
     os.chmod(dest, 0o755)
 
@@ -154,6 +184,91 @@ def stage_subject(workspace: str) -> None:
     shutil.copytree(REPO, workspace, dirs_exist_ok=True, symlinks=True,
                     ignore=skip)
 
+
+
+def sealed_path(home: str, hidden: set) -> str:
+    """The scratch bin, then the host PATH with `hidden` made unreachable.
+
+    The host PATH stays so steps find git, go and the rest of userland. But
+    the subject's own executables must not be found there: once a suite
+    removes the scratch copy — an uninstall suite does exactly that — a
+    later call must fail as "not found", not fall through to the pilot's
+    REAL install and run it against the scratch HOME. That happened to the
+    first real adopter (claude-playbooks): the dry-run reached the pilot's
+    installed CLI, which created launchers next to itself in the real
+    ~/.local/bin. A local check that can modify the machine it runs on is
+    worse than no check.
+
+    `hidden` is everything prepare() put in the scratch bin — subject-
+    provided by definition, including the stub `claude`, so a suite that
+    deletes the stub cannot reach the pilot's real, authenticated agent —
+    plus HIDE_FROM_PATH.
+
+    Hiding is per executable, not per directory. A directory holding a
+    hidden name is replaced by a shim directory of symlinks to everything
+    ELSE in it, so a tool that shares ~/.local/bin with the CLI stays
+    reachable. Dropping the whole directory fails in ways a fresh bench
+    cannot.
+    """
+    # Two ways a hidden binary stayed reachable, both found in review:
+    #   - CASE. macOS filesystems are case-insensitive by default: a real
+    #     `Widget` on disk is what `widget` resolves to, but a plain `n in
+    #     hidden` test said "not hidden" and symlinked it into the shim.
+    #     Names are compared casefolded.
+    #   - ALIASES. `cpb` ships as a symlink to `claude-playbook`. Hiding the
+    #     name `claude-playbook` left `cpb` pointing straight at the pilot's
+    #     real install — the adopter's exact shape. Anything that resolves to
+    #     the SAME FILE (device + inode, after following links — which also
+    #     catches hardlinks) as a hidden binary is hidden too.
+    hidden_cf = {h.casefold() for h in hidden}
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep)
+            if d and d != f"{home}/.local/bin"]
+
+    def listing(d):
+        try:
+            return os.listdir(d)
+        except OSError:
+            return []
+
+    def ident(path):
+        try:
+            st = os.stat(path)            # follows symlinks: the real file
+            return (st.st_dev, st.st_ino)
+        except OSError:
+            return None
+
+    targets = set()                        # the real files behind hidden names
+    for d in dirs:
+        for n in listing(d):
+            if n.casefold() in hidden_cf:
+                t = ident(os.path.join(d, n))
+                if t:
+                    targets.add(t)
+
+    def is_hidden(d, n):
+        return n.casefold() in hidden_cf or (
+            bool(targets) and ident(os.path.join(d, n)) in targets)
+
+    shims = Path(home, ".dryrun-path-shims")
+    out = [f"{home}/.local/bin"]
+    for i, d in enumerate(dirs):
+        names = listing(d)
+        if not any(is_hidden(d, n) for n in names):
+            out.append(d)
+            continue
+        shim = shims / str(i)
+        # Rebuilt from empty, never topped up: an entry left from an earlier
+        # sealing would survive a skip, and a stale link to a hidden binary
+        # is exactly the leak this function exists to close.
+        shutil.rmtree(shim, ignore_errors=True)
+        shim.mkdir(parents=True)
+        for n in names:
+            src = os.path.join(d, n)
+            if is_hidden(d, n) or os.path.isdir(src) or not os.access(src, os.X_OK):
+                continue
+            os.symlink(src, shim / n)
+        out.append(str(shim))
+    return os.pathsep.join(out)
 
 def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
     sc = TomlScenario(path)
@@ -293,58 +408,14 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
     return fails
 
 
-# Executables a fresh bench does not have, which the dry-run must therefore
-# not reach on the host. claude-playbook/cpb: the subject itself. pilot:
-# claude-playbook's create and install call `pilot wire` whenever pilot is on
-# PATH, and a bench has none -- reaching the pilot's real one would edit
-# scratch playbooks the bench never would, through the host's own lock dir.
-SUBJECT_CLIS = ("claude-playbook", "cpb", "pilot")
-
-
-def sealed_path(home: str) -> str:
-    """The scratch bin, then the host PATH with the pilot's own CLI hidden.
-
-    The host PATH stays so steps find git, go and the rest of userland. But
-    the pilot's real claude-playbook/cpb must be unreachable: once a suite
-    removes the scratch binary -- pilot-self-uninstall does exactly that -- a
-    later `claude-playbook` must fail as "not found", not fall through and run
-    the pilot's real install against the scratch HOME. It did, once: launchers
-    were created next to the real binary.
-
-    Hiding is per executable, not per directory. A dir holding the CLI is
-    replaced by a shim dir of symlinks to everything ELSE in it, so a tool
-    that shares ~/.local/bin with the CLI stays reachable. Dropping the whole
-    dir made the dry-run fail in ways a fresh bench cannot.
-    """
-    shims = Path(home, ".dryrun-path-shims")
-    out = [f"{home}/.local/bin"]
-    for i, d in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
-        if not d:
-            continue
-        if not any(os.path.exists(os.path.join(d, n)) for n in SUBJECT_CLIS):
-            out.append(d)
-            continue
-        shim = shims / str(i)
-        shim.mkdir(parents=True, exist_ok=True)
-        try:
-            names = os.listdir(d)
-        except OSError:
-            names = []
-        for n in names:
-            src = os.path.join(d, n)
-            if n in SUBJECT_CLIS or not os.access(src, os.X_OK) or os.path.isdir(src):
-                continue
-            os.symlink(src, shim / n)
-        out.append(str(shim))
-    return os.pathsep.join(out)
-
-
 def main() -> int:
     paths = [Path(a) for a in sys.argv[1:]] or sorted((REPO / "gentar/scenarios").glob("*.toml"))
-    # A FRESH home, workspace and build per suite, as the engine guarantees a
-    # fresh bench per scenario. The kit's default shares one home across the
-    # sweep, so one suite's state leaks into the next: here pilot-self-uninstall
-    # removed the binary and every later suite ran without it.
+    # A FRESH home, workspace and prepare() per suite, as the engine gives
+    # each scenario a fresh bench. Sharing one across the sweep let a suite's
+    # state leak into the next (claude-playbooks: an uninstall suite removed
+    # the binary and every later suite ran without it — then past it, see
+    # sealed_path). A suite that passes here only because an earlier one
+    # left something behind is a harness lie.
     fails = 0
     for p in paths:
         home = scratch_home()
@@ -353,10 +424,20 @@ def main() -> int:
         workspace = os.path.join(home, "gentar-workspaces/dryrun")
         os.makedirs(workspace, exist_ok=True)
         stage_subject(workspace)
+        bindir = f"{home}/.local/bin"
+        # prepare() runs with the ordinary PATH: it is your trusted build
+        # step and needs your toolchain. The SUITE then runs sealed.
         env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
-                   PATH=sealed_path(home))
+                   PATH=f"{bindir}:" + os.environ["PATH"])
         prepare(env)
-        fails += run_one(p, env, home, workspace)
+        hidden = set(os.listdir(bindir)) | set(HIDE_FROM_PATH)
+        env["PATH"] = sealed_path(home, hidden)
+        failed = run_one(p, env, home, workspace)
+        fails += failed
+        if failed:
+            print(f"  scratch home kept for inspection: {home}")
+        else:
+            shutil.rmtree(home, ignore_errors=True)
     return 1 if fails else 0
 
 
