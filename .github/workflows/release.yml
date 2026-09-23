@@ -5,13 +5,35 @@ on:
     tags:
       - 'v*'
 
-# Three jobs, so a Darwin artifact is executed on macOS BEFORE anything is
+# Four jobs. arena-gate refuses a commit with no green full regression.
+# Then a Darwin artifact is executed on macOS BEFORE anything is
 # published: build (ubuntu) produces every binary, smoke-darwin (macOS,
 # arm64) runs the darwin-arm64 asset and checks it reports the tag, and
 # release publishes only when both succeeded. CI covers the source; this is
 # the only place the downloadable binaries themselves are exercised.
 jobs:
+  # FIRST: may this commit be released at all? gentar/release-gate.sh passes
+  # only when the arena workflow has a SUCCESSFUL `arena / phase2` job on
+  # exactly this commit -- the full regression, however it was triggered (a
+  # dispatch, the `arena` tag, a `v*-rc*` tag). build needs this job, and
+  # smoke-darwin and release need build, so nothing ships without it. It
+  # names its reason when it refuses, including a phase 2 that GitHub
+  # cancelled before it started. The flow: push `arena` (or tag v*-rc*) on
+  # the commit, wait for phase 2 to go green, then tag v* on that commit.
+  arena-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read     # to find the arena workflow's jobs for this sha
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: a green arena / phase2 on this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gentar/release-gate.sh "$GITHUB_SHA"
+
   build:
+    needs: arena-gate
     runs-on: ubuntu-latest
     outputs:
       release: ${{ steps.release_gate.outputs.release }}

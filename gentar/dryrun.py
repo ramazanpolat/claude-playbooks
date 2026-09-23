@@ -20,14 +20,15 @@ back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
 picker that never matched or a danger gate that never fired must not read as
 a pass.
 
-Two adaptations live at the top of the file (the only edits most subjects
-need):
+The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
-  prepare(env)      called once before the sweep; build your CLI or stage
-                    fixtures here (env["HOME"] is the scratch home,
-                    env["WORKSPACE_DIR"] the staged checkout)
+  prepare(env)      called per suite — for the suites with a step matching
+                    SKIP_STEP_SUBSTR, or every suite when that is empty;
+                    build your CLI or stage fixtures here (env["HOME"] is
+                    the scratch home, env["WORKSPACE_DIR"] the checkout)
   SKIP_STEP_SUBSTR  substrings of [oracle].steps that prepare() already
                     covered locally (e.g. "docker build"), skipped verbatim
+  HIDE_FROM_PATH    executables that must never be found on the real PATH
 
 Layout matches the bench: the repo is staged into WORKSPACE_DIR, which is a
 directory UNDER HOME, and steps run with WORKSPACE_DIR as cwd. So a `~/...`
@@ -57,10 +58,12 @@ _engine_env = os.environ.get("GENTAR_ENGINE")
 _here = Path(__file__).resolve().parent
 ENGINE = Path(_engine_env) if _engine_env else _here / ".arena/coordinator"
 if not ENGINE.exists():
-    sys.exit(f"gentar engine not found at {ENGINE}\n"
+    print(f"gentar engine not found at {ENGINE}\n"
              "  stage it once:  gentar/run.sh --stage-engine\n"
              "  or point at an existing checkout:  "
-             "GENTAR_ENGINE=/path/to/gentar/coordinator gentar/dryrun.py")
+             "GENTAR_ENGINE=/path/to/gentar/coordinator gentar/dryrun.py",
+          file=sys.stderr)
+    sys.exit(2)                                 # a refusal, not a failure
 sys.path.insert(0, str(ENGINE))
 
 # tomllib is 3.11+, and stock macOS still ships 3.9 — so the cheap check an
@@ -82,74 +85,51 @@ if sys.version_info < (3, 11):
     try:
         import tomli  # noqa: F401  — imported for the check; the parser imports it
     except ModuleNotFoundError:
-        sys.exit(
+        print(
             f"dryrun needs a TOML parser and this is python {sys.version.split()[0]} "
             "(tomllib arrived in 3.11).\n"
             "  either:  pip install tomli\n"
             "  or:      install any python 3.11+ and re-run "
             "(brew install python@3.12, apt install python3.12, ...)\n"
             "The arena is unaffected either way — it runs python 3.12 in a "
-            "container. This is only the local replay."
-        )
+            "container. This is only the local replay.",
+            file=sys.stderr)
+        sys.exit(2)                             # a refusal, not a failure
 
 from gentar.toml_scenario import TomlScenario
 
-# Steps whose substring appears here are skipped verbatim (prepare()
-# already did the equivalent locally). Example: ("docker build",).
-SKIP_STEP_SUBSTR = (
-    # Every suite begins by building claude-playbook in a golang:1.21
-    # container from the staged checkout, then installing it to
-    # ~/.local/bin. prepare() does both, with the local toolchain.
-    'docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src',
-    'install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
-)
-
-# Executables that must NEVER be found on your real PATH while a suite
-# runs. Two reasons to list one:
-#   - your suites CREATE it (a launcher, an alias binary), so finding
-#     the installed copy would let a broken install pass;
-#   - your code CALLS it and a bench does not have it, so finding it here
-#     would let a suite pass that fails on the bench. (claude-playbooks'
-#     CLI runs `pilot` on every create; benches have no `pilot`.)
-# Anything prepare() installs into the scratch ~/.local/bin is hidden
-# automatically; list only what it does not. Example: ("cpb", "pilot").
-# cpb: suites create it themselves, as a real install does (a relative
-# symlink). pilot: not created by a suite, but claude-playbook's create and
-# install call `pilot wire` whenever pilot is on PATH, and a bench has none --
-# reaching the pilot's real one would edit scratch playbooks through the
-# host's own lock dir.
-HIDE_FROM_PATH = ("cpb", "pilot")
+# The three adaptation hooks live in gentar/hooks.py, which is YOURS; this
+# file is the kit's and stays byte-identical to it (`gentar/run.sh --check`
+# compares), so an engine bump is a plain re-copy. The defaults below apply
+# when hooks.py is absent or leaves a name out. (0.3.x adopters edited these
+# in place: move them into hooks.py.)
+SKIP_STEP_SUBSTR = ()
+HIDE_FROM_PATH = ()
 
 
 def prepare(env: dict) -> None:
-    """Stand in for this suite's own build-and-install, in its fresh home.
+    return None
 
-    Mirrors the bench: run.sh freezes the version into the staged checkout
-    as .gentar-version (the bench has no usable .git), the container step
-    builds $WORKSPACE_DIR/claude-playbook with it, and the install step
-    copies it to ~/.local/bin. cli-head-build asserts the binary reports that
-    version, so it is resolved the same way, --match 'v*' included.
 
-    No `cpb` symlink: nothing on the bench makes one; the suites that need it
-    create it themselves. `go build` caches on its own, so building per suite
-    costs little.
-    """
-    ws = env["WORKSPACE_DIR"]
-    v = subprocess.run(
-        ["git", "-C", str(REPO), "describe", "--tags", "--always", "--dirty", "--match", "v*"],
-        capture_output=True, text=True).stdout.strip() or "dev"
-    Path(ws, ".gentar-version").write_text(v + "\n")
-    built = Path(ws, "claude-playbook")
-    r = subprocess.run(
-        ["go", "build", "-ldflags",
-         f"-X github.com/ramazanpolat/claude-playbooks/cmd.Version={v}", "-o", str(built), "."],
-        cwd=ws, capture_output=True, text=True)
-    if r.returncode:
-        sys.exit("build failed:\n" + r.stderr)
-    dest = Path(env["HOME"], ".local/bin/claude-playbook")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(built, dest)
-    os.chmod(dest, 0o755)
+def _load_hooks() -> None:
+    hooks = _here / "hooks.py"
+    if not hooks.exists():
+        return
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gentar_hooks", hooks)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    g = globals()
+    for name in ("SKIP_STEP_SUBSTR", "HIDE_FROM_PATH", "prepare"):
+        if hasattr(mod, name):
+            g[name] = getattr(mod, name)
+    # REPO is the checkout, for a prepare() that builds from it
+    if not hasattr(mod, "REPO"):
+        mod.REPO = REPO
+
+
+_load_hooks()
+
 
 def scratch_home() -> str:
     home = tempfile.mkdtemp(prefix="dryrun-home-")
@@ -344,6 +324,13 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
         print(line)
     if fails:
         print(f"  (home kept for inspection: {home})")
+    # `run.sh --check` (phase 1, bench-free) sets this: a suite that is
+    # only UNVERIFIED has no defect the dry-run can see, and failing every
+    # PR on turns only the arena can replay would train people to ignore
+    # the check. The verdict line above still says UNVERIFIED.
+    if (os.environ.get("GENTAR_DRYRUN_UNVERIFIED") == "ok"
+            and unreplayed and fails == len(unreplayed)):
+        return 0
     return fails
 
 
@@ -412,8 +399,55 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
     return fails
 
 
+# Where an install script writes when it can: `install.sh` conventions try
+# these before ~/.local/bin. A bench runs as an unprivileged user, so there
+# they are never writable; on a host where one is, a suite's install lands
+# in the REAL directory — outside the scratch home — and the dry-run both
+# modifies the machine and stops describing the bench (claude-playbooks, on
+# a GitHub-hosted runner, where /usr/local/bin is writable). The sealed PATH
+# hides binaries; it cannot stop writes.
+# GENTAR_DRYRUN_SYSTEM_DIRS (colon-separated) replaces the list, for a host
+# whose installs go elsewhere.
+SYSTEM_BIN_DIRS = tuple(filter(None, os.environ.get(
+    "GENTAR_DRYRUN_SYSTEM_DIRS",
+    "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin").split(":")))
+
+
+def writable_system_dirs() -> list:
+    return [d for d in SYSTEM_BIN_DIRS if os.path.isdir(d) and os.access(d, os.W_OK)]
+
+
+def needs_prepare(path: Path) -> bool:
+    """prepare() stands in for the steps SKIP_STEP_SUBSTR skips, so it runs
+    for a suite that has one — not for a suite it has nothing to do with,
+    where its build would sit first on PATH and shadow what the suite
+    installs (claude-playbooks: a HEAD build shadowed the released CLI a
+    suite had just installed). A repo that declares no substrings keeps the
+    old rule: prepare() for every suite. Unparseable scenarios get it too;
+    run_one reports the parse error."""
+    if not SKIP_STEP_SUBSTR:
+        return True
+    try:
+        steps = TomlScenario(path).steps
+    except Exception:
+        return True
+    return any(s in step for step in steps for s in SKIP_STEP_SUBSTR)
+
+
 def main() -> int:
     paths = [Path(a) for a in sys.argv[1:]] or sorted((REPO / "gentar/scenarios").glob("*.toml"))
+    exposed = writable_system_dirs()
+    if exposed:
+        msg = (f"system install dirs are writable here: {', '.join(exposed)} — an "
+               "install a suite runs may write into this machine, outside the scratch "
+               "home, and pass where a bench (unprivileged) would not")
+        # In CI (`gentar/run.sh --check` on a hosted runner) that is a
+        # refusal: the kit's checks job makes the runner bench-like first,
+        # so reaching this there means that step is missing.
+        if os.environ.get("GENTAR_DRYRUN_STRICT") == "1":
+            print(f"dryrun: refusing: {msg}", file=sys.stderr)
+            return 2
+        print(f"dryrun: WARNING: {msg}", file=sys.stderr)
     # A FRESH home, workspace and prepare() per suite, as the engine gives
     # each scenario a fresh bench. Sharing one across the sweep let a suite's
     # state leak into the next (claude-playbooks: an uninstall suite removed
@@ -433,7 +467,8 @@ def main() -> int:
         # step and needs your toolchain. The SUITE then runs sealed.
         env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
                    PATH=f"{bindir}:" + os.environ["PATH"])
-        prepare(env)
+        if needs_prepare(p):
+            prepare(env)
         hidden = set(os.listdir(bindir)) | set(HIDE_FROM_PATH)
         env["PATH"] = sealed_path(home, hidden)
         failed = run_one(p, env, home, workspace)
