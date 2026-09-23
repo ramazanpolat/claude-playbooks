@@ -181,6 +181,10 @@ Carry these forward when re-copying the kit for an engine bump:
   secrets rather than variables only because this repo's Actions logs are
   public. The workflow refuses (exit 2) before any bench if either is unset
   or still the placeholder.
+- **No `pull_request` trigger**, which the kit's workflow has. Here it
+  would run fork code on the persistent self-hosted runner of a public repo.
+  The concurrency group is also constant rather than per-ref, since every
+  run shares one compose project and one pair of ports.
 - **Ports are pinned** in the workflow (ClickHouse `8126`, OTLP `4320`): the
   `arena` runner is shared with other arenas.
 - **`dryrun.py` gives each suite a fresh home**, matching the engine's fresh
@@ -230,10 +234,12 @@ face. Decisions and reality assertions, never scripts.
 
 ## CI (`.github/workflows/`)
 
-The arena workflow runs every suite on pull requests, pushes to main,
-and `v*`/`arena*` tags (edit its `on:` block to taste — triggers are
-yours, the arena doesn't care; the PR trigger's cost is documented in
-the file). It needs a self-hosted runner labeled `arena` with Docker +
+The arena workflow runs every suite on pushes to main, on `v*`/`arena*`
+tags, and on manual dispatch. It deliberately does **not** run on pull
+requests: this repo is public and the runner is persistent, so a PR run
+would execute a fork's code on a machine that holds bench keys and reaches
+the internal network. To arena-test a change before it lands, push the
+`arena` (every suite) or `arena-<suite>` keyword tag, or dispatch. It needs a self-hosted runner labeled `arena` with Docker +
 reach to the bench-host; GitHub-hosted runners cannot reach an internal
 bench-host. One-time setup, ~5 min on any always-on machine with Docker:
 

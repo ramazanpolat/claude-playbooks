@@ -18,8 +18,8 @@ name: arena
 #
 # The group is CONSTANT, not per-ref. Every run of this workflow uses one
 # compose project (arena-claude-playbooks) and one pair of host ports
-# (8126/4320), so two runs on different refs -- two PRs, or a PR and main --
-# would stop each other's containers or fail to bind. A per-ref group only
+# (8126/4320), so two runs on different refs -- main and a tag, or a
+# dispatch -- would stop each other's containers or fail to bind. A per-ref group only
 # serialized runs of the same ref. One runner hides that today; a second
 # `arena` runner would expose it.
 concurrency:
@@ -27,21 +27,21 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  # Test the change BEFORE it lands. A scenario asserts reality, so a PR
-  # that changes what this repo does fails here until its scenarios are
-  # updated in the same PR — which is the point.
+  # NO pull_request trigger, deliberately, and not for the kit's cost reason.
+  # This repo is PUBLIC and this job runs on a PERSISTENT self-hosted runner:
+  # a pull_request run executes the PR's code there, including a fork's --
+  # on a machine with Docker, reach into the internal network, and later
+  # trusted jobs that write BENCH_SSH_KEY to disk. Fork runs get no secrets,
+  # but code can persist on the runner and wait for the next trusted job.
+  # GitHub's own guidance is to not attach self-hosted runners to public
+  # repos. (Codex review on PR #52; the pilot chose to drop the trigger.)
   #
-  # The honest cost: every PR push runs the whole suite list on a bench
-  # that is SHARED with every other arena on this runner. The
-  # concurrency group above is per-ref, so N open PRs are N arenas
-  # queueing for that bench-host, and cancel-in-progress is deliberately
-  # false — a superseded push still finishes its run rather than
-  # stranding a bench. Suites are minutes each; a busy repo feels it.
-  #
-  # Too expensive for your repo? Delete the two lines below and the PR
-  # is tested by the `arena` keyword tag or a manual dispatch instead —
-  # on demand rather than on every push.
-  pull_request:
+  # So a change is arena-tested after it lands on main, or before, on
+  # demand: push the `arena` / `arena-<suite>` keyword tag, or dispatch.
+  # Both run only code a maintainer pushed to this repository. Fork PR
+  # workflows additionally require approval for every external contributor
+  # (repo setting), which also covers a fork adding its own workflow aimed
+  # at this runner.
   push:
     branches: [main]
     tags: ['v*', 'arena', 'arena-*']   # v* = release proof · arena-* = keyword tags
