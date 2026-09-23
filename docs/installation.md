@@ -43,6 +43,42 @@ echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh
 echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash
 ```
 
+Each shell has a prerequisite the line cannot supply. Without it, the line
+loads nothing and TAB fails:
+
+- **zsh** needs its completion system started *before* that line. Frameworks
+  (oh-my-zsh, prezto) already do it; a bare `~/.zshrc` does not, and the line
+  then prints `command not found: compdef`. Put
+  `autoload -U compinit && compinit` above it.
+- **bash** needs **bash 4.2 or newer** and the **bash-completion** package
+  (`apt install bash-completion`, `dnf install bash-completion`, or on macOS
+  `brew install bash bash-completion@2`). Without the package, TAB prints
+  `_get_comp_words_by_ref: command not found`. The bash that ships with macOS
+  is 3.2, where `source <(...)` silently loads nothing.
+
+  Installing the packages is not enough on macOS. Your terminal must actually
+  run Homebrew's bash (`chsh -s "$(brew --prefix)/bin/bash"`, after adding that
+  path to `/etc/shells`), and Homebrew does not load bash-completion for you.
+  Add this above the completion line in `~/.bashrc` (under the stock bash 3.2
+  it skips itself quietly):
+
+  ```bash
+  [[ -r "$(brew --prefix)/etc/profile.d/bash_completion.sh" ]] && . "$(brew --prefix)/etc/profile.d/bash_completion.sh"
+  ```
+
+  Linux packages load it themselves, from `/etc/bash.bashrc` or `/etc/profile.d`.
+
+  macOS terminals start *login* shells, which read `~/.bash_profile`, not
+  `~/.bashrc`. Keep both lines in `~/.bashrc` and have `~/.bash_profile` load it
+  (`[ -r ~/.bashrc ] && . ~/.bashrc`). Homebrew's own hint suggests
+  `~/.bash_profile` instead, but `self-uninstall` only cleans `~/.bashrc`.
+
+Keep each line byte for byte as shown: `self-uninstall` removes only exact
+matches of `source <(cpb completion bash)` and `source <(cpb completion zsh)`
+(and the same with `claude-playbook` in place of `cpb`). Any other form (an
+absolute path, extra spaces, `eval "$(...)"`) outlives the binary and errors in
+every new shell.
+
 ## Run it with npx (no install needed)
 
 On a machine with Node:
