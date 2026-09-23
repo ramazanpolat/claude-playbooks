@@ -372,7 +372,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.4.1}
+REF=${GENTAR_REF:-v0.4.2}
 
 # --review: has this repo outgrown its suites?
 #
@@ -817,9 +817,54 @@ for var in $declared; do
   [ -n "${!var:-}" ] && FORWARD+=(-e "$var")
 done
 
+# What this run publishes (reports, dashboard) may be a PUBLIC repository's
+# CI artifact, and GitHub masks secrets in logs, not in artifacts. Every
+# file is passed through the engine's bin/redact, which replaces the VALUES
+# of these variables: the bench-host identity, plus every credential a
+# suite here declares.
+REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY"
+for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
+  REDACT_NAMES="$REDACT_NAMES $(credential_groups "$f" | tr '\n' ' ')"
+done
+redact() { GENTAR_REDACT_NAMES="$REDACT_NAMES" "$ARENA/bin/redact" "$@"; }
+# Files are prepared and redacted HERE, outside gentar/reports/, and only
+# then moved in: a CI cancel between writing and redacting must not leave
+# an unredacted file where the always-run upload step would publish it.
+STAGE="$ARENA/.publish"      # not under out/, which the report loop scans
+mkdir -p "$STAGE"
+publish() {             # $1 = staged file, $2 = destination in reports/
+  if redact "$1"; then mv -f "$1" "$2"; else rm -f "$1"; return 1; fi
+}
+
+# One self-contained dashboard.html per run.sh invocation, rendered from
+# this run's ClickHouse before teardown takes it (the spans die with the
+# stack; the report alone is a page of text). Every suite of the
+# invocation, not the renderer's default ten. It never touches the
+# verdict: a render that fails is said and skipped, and a dashboard that
+# cannot be redacted is not published at all.
+render_dashboard() {
+  local out="$ARENA/dashboard/out/dashboard.html"
+  mkdir -p "$ARENA/dashboard/out" 2>/dev/null || true
+  rm -f "$out" 2>/dev/null || true
+  if ! arena run --rm --no-deps dashboard \
+       python /dashboard/generate.py --out /out/dashboard.html --runs 500 \
+         --since "$RUN_T0" >/dev/null 2>&1 \
+     || [ ! -s "$out" ]; then
+    echo "dashboard: not rendered (the verdict is unaffected)" >&2
+    return 0
+  fi
+  if cp "$out" "$STAGE/dashboard.html" \
+     && publish "$STAGE/dashboard.html" "$HERE/reports/dashboard.html"; then
+    echo "dashboard: gentar/reports/dashboard.html"
+  else
+    echo "dashboard: NOT published — it could not be redacted" >&2
+  fi
+}
+
 # Run every requested scenario; report all, fail if any failed.
 mkdir -p "$HERE/reports"
 status=0
+RUN_T0=$(( $(date +%s) - 5 ))   # the dashboard shows this invocation's runs only
 for s in "$SCENARIO" "$@"; do
   # Exit code is the verdict: 0 pass · 1 fail · 2 usage/config refusal.
   MARKER=$(mktemp)
@@ -837,8 +882,15 @@ for s in "$SCENARIO" "$@"; do
   # engine's default assumes the central arena's invocation).
   found=0
   while IFS= read -r f; do
+    staged="$STAGE/$(basename "$f")"
     sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
-      > "$HERE/reports/$(basename "$f")" && found=1
+      > "$staged" && found=1
+    # gentar/reports/ is what CI publishes. A report that cannot be
+    # redacted does not go there — the original stays in the arena's out/
+    # for the fix loop, and the run's verdict is unchanged (agy review).
+    if ! publish "$staged" "$HERE/reports/$(basename "$f")"; then
+      echo "report: $(basename "$f") NOT published — it could not be redacted; the original is $ARENA/out/$(basename "$f")" >&2
+    fi
   done < <(find out -name 'report-*.md' -newer "$MARKER" 2>/dev/null)
   rm -f "$MARKER"
   if [ "$found" -ne 1 ]; then
@@ -850,4 +902,5 @@ for s in "$SCENARIO" "$@"; do
   fi
   [ "$rc" -eq 0 ] || status=$rc
 done
+render_dashboard || true
 exit "$status"
