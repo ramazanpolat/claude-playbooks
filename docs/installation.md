@@ -56,6 +56,15 @@ loads nothing and TAB fails:
   `_get_comp_words_by_ref: command not found`. The bash that ships with macOS
   is 3.2, where `source <(...)` silently loads nothing.
 
+  Installing the package is not enough on macOS: Homebrew does not load it
+  for you. Add this above the completion line in `~/.bashrc`:
+
+  ```bash
+  [[ -r "$(brew --prefix)/etc/profile.d/bash_completion.sh" ]] && . "$(brew --prefix)/etc/profile.d/bash_completion.sh"
+  ```
+
+  Linux packages load it themselves, from `/etc/bash.bashrc` or `/etc/profile.d`.
+
 Keep the line in exactly this form: `self-uninstall` finds and removes these
 `source <(... completion ...)` lines, so a rewritten one would outlive the
 binary and error in every new shell.
