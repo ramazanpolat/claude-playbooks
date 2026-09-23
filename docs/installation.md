@@ -68,6 +68,11 @@ loads nothing and TAB fails:
 
   Linux packages load it themselves, from `/etc/bash.bashrc` or `/etc/profile.d`.
 
+  macOS terminals start *login* shells, which read `~/.bash_profile`, not
+  `~/.bashrc`. Keep both lines in `~/.bashrc` and have `~/.bash_profile` load it
+  (`[ -r ~/.bashrc ] && . ~/.bashrc`). Homebrew's own hint suggests
+  `~/.bash_profile` instead, but `self-uninstall` only cleans `~/.bashrc`.
+
 Keep the line in exactly this form: `self-uninstall` finds and removes these
 `source <(... completion ...)` lines, so a rewritten one would outlive the
 binary and error in every new shell.
