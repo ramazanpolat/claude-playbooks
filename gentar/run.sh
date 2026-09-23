@@ -140,22 +140,38 @@ esac
 # The locks live in their own world-writable, NON-sticky directory: in
 # sticky /tmp, a lock left by one runner user's dead run could not be
 # removed by another's, and one unclean exit blocked the host.
+#
+# Shared and world-writable makes the lock advisory between local users —
+# fine on a single-tenant runner host — but it must not become a way to make
+# this user write somewhere else: a symlinked root or lock file is refused,
+# and notes are written to a fresh temp file and renamed into place, which
+# replaces a planted symlink instead of following it (claude-playbooks).
 LOCK_ROOT="${GENTAR_LOCK_DIR:-/tmp}/gentar-locks"
-[ -d "$LOCK_ROOT" ] || (umask 000; mkdir -p "$LOCK_ROOT") 2>/dev/null || true
+[ -e "$LOCK_ROOT" ] || [ -L "$LOCK_ROOT" ] || (umask 000; mkdir "$LOCK_ROOT") 2>/dev/null || true
 LOCK_BASE="$LOCK_ROOT/gentar-arena-$SUBJECT"
 _lock_mode=""
 _lock_holder() {
   cat "$LOCK_BASE.lock.holder" "$LOCK_BASE.lock.d/holder" 2>/dev/null | head -1
 }
-_lock_note() {
+_lock_note() {           # write a holder note via temp + rename, never through a link
+  local tmp
+  tmp=$(mktemp "$(dirname "$1")/.note.XXXXXX" 2>/dev/null) || return 0
   { printf '%s' "pid $$ on $(hostname 2>/dev/null || echo ?) since $(date '+%Y-%m-%d %H:%M:%S')"
     [ -n "${GITHUB_RUN_ID:-}" ] && printf ' (%s run %s)' "${GITHUB_REPOSITORY:-}" "$GITHUB_RUN_ID"
-    echo; } > "$1" 2>/dev/null || true
+    echo; } > "$tmp" 2>/dev/null
+  chmod 644 "$tmp" 2>/dev/null
+  mv -f "$tmp" "$1" 2>/dev/null || rm -f "$tmp"
 }
-arena_lock() {            # wait|try -> 0 once this process holds the lock
+arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
   local lock="$LOCK_BASE.lock" d="$LOCK_BASE.lock.d" pid said=0
+  if [ -L "$LOCK_ROOT" ] || [ ! -d "$LOCK_ROOT" ] || [ -L "$lock" ] || [ -L "$d" ]; then
+    echo "arena lock refused: $LOCK_ROOT (or a lock in it) is a symlink or not a directory — remove it, or set GENTAR_LOCK_DIR" >&2
+    return 2
+  fi
   if command -v flock >/dev/null 2>&1; then
-    [ -e "$lock" ] || (umask 000; : > "$lock") 2>/dev/null || true
+    # noclobber: O_EXCL create, so a link planted after the check above
+    # makes this fail rather than creating the link's target
+    [ -e "$lock" ] || (set -C; umask 000; : > "$lock") 2>/dev/null || true
     [ -r "$lock" ] || { echo "cannot read arena lock $lock" >&2; return 1; }
     exec 9<"$lock"
     if ! flock -n 9; then
@@ -164,12 +180,12 @@ arena_lock() {            # wait|try -> 0 once this process holds the lock
       flock 9
     fi
     _lock_mode=flock
-    ( umask 000; _lock_note "$lock.holder" )
+    _lock_note "$lock.holder"
     return 0
   fi
   while :; do
     if (umask 000; mkdir "$d") 2>/dev/null; then
-      _lock_mode=mkdir; ( umask 000; _lock_note "$d/holder" ); return 0
+      _lock_mode=mkdir; _lock_note "$d/holder"; return 0
     fi
     pid=$(awk '{print $2; exit}' "$d/holder" 2>/dev/null || true)
     # Stale: a holder pid that no longer exists. kill -0 also fails for a
@@ -242,7 +258,7 @@ fi
 if [ "$DOWN_ONLY" = 1 ]; then
   lrc=0; arena_lock try || lrc=$?
   if [ "$lrc" = 2 ]; then
-    echo "arena-$SUBJECT not torn down: its lock is stale and not removable (see above)"
+    echo "arena-$SUBJECT not torn down: its lock was refused (see above)"
   elif [ "$lrc" = 0 ]; then
     cids=$(docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" 2>/dev/null || true)
     [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
