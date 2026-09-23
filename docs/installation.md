@@ -50,14 +50,17 @@ loads nothing and TAB fails:
   (oh-my-zsh, prezto) already do it; a bare `~/.zshrc` does not, and the line
   then prints `command not found: compdef`. Put
   `autoload -U compinit && compinit` above it.
-- **bash** needs **bash 4 or newer** and the **bash-completion** package
+- **bash** needs **bash 4.2 or newer** and the **bash-completion** package
   (`apt install bash-completion`, `dnf install bash-completion`, or on macOS
   `brew install bash bash-completion@2`). Without the package, TAB prints
   `_get_comp_words_by_ref: command not found`. The bash that ships with macOS
   is 3.2, where `source <(...)` silently loads nothing.
 
-  Installing the package is not enough on macOS: Homebrew does not load it
-  for you. Add this above the completion line in `~/.bashrc`:
+  Installing the packages is not enough on macOS. Your terminal must actually
+  run Homebrew's bash (`chsh -s "$(brew --prefix)/bin/bash"`, after adding that
+  path to `/etc/shells`), and Homebrew does not load bash-completion for you.
+  Add this above the completion line in `~/.bashrc` (under the stock bash 3.2
+  it skips itself quietly):
 
   ```bash
   [[ -r "$(brew --prefix)/etc/profile.d/bash_completion.sh" ]] && . "$(brew --prefix)/etc/profile.d/bash_completion.sh"

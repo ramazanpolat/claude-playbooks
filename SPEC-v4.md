@@ -1157,7 +1157,7 @@ claude-playbook completion fish > ~/.config/fish/completions/claude-playbook.fis
 
 Playbook name completion is wired for commands that take a name: `run`, `delete`, `info`, `rename`, `alias`, `dealias`, `auth status`, `env`, and `update`. It completes the first argument only.
 
-The bash script needs bash 4+ and the bash-completion package (it calls `_get_comp_words_by_ref`); the zsh script needs `compinit` to have run (it calls `compdef`). See `docs/installation.md`.
+The bash script needs bash 4.2+ and the bash-completion package (it calls `_get_comp_words_by_ref`); the zsh script needs `compinit` to have run (it calls `compdef`). See `docs/installation.md`.
 
 ---
 
