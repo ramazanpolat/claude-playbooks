@@ -31,6 +31,25 @@ jobs:
             echo "Tag ${{ github.ref_name }} points to $GITHUB_SHA, which is not on origin/main. Skipping release."
           fi
 
+      # package.json's version is what `npx github:ramazanpolat/claude-playbooks`
+      # runs (bin/npx-shim.sh reads npm_package_version), so a release whose
+      # package.json still names the previous version ships the NEW binaries
+      # while npx keeps serving the OLD one. ci.yml checks this too, but only
+      # on a push to main -- after the tag has already published. v3.15.0 went
+      # out that way: npx served v3.14.0, without the credential masking, until
+      # the next main push turned CI red. Refuse the release here instead.
+      - name: package.json version matches the tag
+        if: steps.release_gate.outputs.release == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          pkg=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)
+          if [ "v$pkg" != "$TAG" ]; then
+            echo "::error::package.json version ($pkg) != release tag ($TAG). Bump package.json in the commit the tag points to, then re-tag."
+            exit 1
+          fi
+          echo "package.json version ($pkg) matches $TAG"
+
       # Build with the same current Go the macOS CI leg uses. go.mod keeps
       # the 1.21 language floor (the ubuntu CI leg proves it); the release
       # artifacts should not be the one build path CI never exercises.
