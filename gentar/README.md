@@ -79,11 +79,14 @@ in use", because it does not stop one-off containers.
 The suites here assert what is true of this repo, so the two move
 together.
 
-- **Code changed, behaviour did not** — nothing to do. The PR trigger
-  re-runs the suites against the change before it lands; the pass is the
-  evidence.
+- **Code changed, behaviour did not** — nothing to do before merging,
+  but know when the evidence arrives. This repo has **no pull-request
+  trigger** (see CI below), so the first automatic arena run is the
+  post-merge push to `main`. To prove a change *before* it lands, push the
+  `arena` keyword tag (every suite) or `arena-<suite>` (one), or dispatch
+  the workflow.
 - **Behaviour changed** — the scenarios change in the **same pull
-  request**. A scenario asserts reality; stale reality fails honestly,
+  request**, and that PR is arena-tested by keyword tag before it merges. A scenario asserts reality; stale reality fails honestly,
   and that failure is the suite working. New behaviour is usually a new
   suite: dry-run it, run it once for real, ship it with the feature.
   Splitting the code change and the scenario change across two PRs

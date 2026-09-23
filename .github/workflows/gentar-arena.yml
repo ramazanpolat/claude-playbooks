@@ -75,6 +75,14 @@ jobs:
       # secret persists in the workspace.
       - name: stage bench access
         run: |
+          # Refuse before staging an empty key. printf would still write a
+          # one-byte file (just the newline), which passes every readability
+          # check downstream and then fails each suite at ssh -- the same
+          # silent shape as a placeholder bench-host.
+          if [ -z "$BENCH_KEY" ]; then
+            echo "::error::BENCH_SSH_KEY is not set (repo secret BENCH_SSH_KEY)" >&2
+            exit 2
+          fi
           printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
           chmod 600 "$RUNNER_TEMP/bench_key"
           # Only when the engine repo is private; a public engine needs
