@@ -1,0 +1,90 @@
+# claude-playbooks own-arena suite 16: `claude-playbook update` with no
+# name -- the binary replacing itself with the latest release.
+#
+# `playbook-update` covers `update <playbook>`; nothing ran the self-update,
+# which downloads a release asset, checks it against SHA256SUMS, execs it
+# with --version, and renames it over the running binary. Unit tests do all
+# of that against an httptest server; this does it with the REAL released
+# assets and a real installed binary, reached through the `cpb` symlink as a
+# user would.
+#
+# The "latest release" lookup is served locally (CLAUDE_PLAYBOOK_UPDATE_API_BASE)
+# and pinned to v3.15.0: an unauthenticated api.github.com call from the
+# shared bench egress IP is rate-limited (see cli-release-install), and a
+# real "latest" would move under the suite. Downloads are real: they go to
+# github.com release storage, not the REST API. The start point is v3.14.0,
+# installed by the documented install path. Bump both pins deliberately.
+#
+# Mid-sequence state is proven inside chained commands -- gentar runs
+# verify.files (post-steps only) before verify.commands, in order.
+
+[scenario]
+name = "cli-self-update"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  "curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v3.14.0/install.sh | VERSION=v3.14.0 sh",
+  # A stand-in for api.github.com: /repos/<repo>/releases/latest names v3.15.0.
+  '''mkdir -p "$HOME/fakegh/repos/ramazanpolat/claude-playbooks/releases" && printf '{"tag_name":"v3.15.0"}\n' > "$HOME/fakegh/repos/ramazanpolat/claude-playbooks/releases/latest"''',
+  # A corrupted release: the REAL v3.15.0 SHA256SUMS next to an asset that
+  # does not match it. Served only when FAKE_DL=1.
+  '''os=$(uname -s | tr '[:upper:]' '[:lower:]'); case $(uname -m) in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; esac; d="$HOME/fakegh/dl/v3.15.0"; mkdir -p "$d" && curl -fsSL -o "$d/SHA256SUMS" https://github.com/ramazanpolat/claude-playbooks/releases/download/v3.15.0/SHA256SUMS && printf 'not a binary\n' > "$d/claude-playbook-$os-$a"''',
+  # fakegh.sh CMD...: serve ~/fakegh on a free loopback port for the length
+  # of CMD, with the API base pointed at it (and the download base too when
+  # FAKE_DL=1). One server per command, so nothing outlives a step.
+  '''cat > "$HOME/fakegh.sh" <<'EOF'
+#!/bin/sh
+# The server binds port 0 itself and reports what it got, so no port is
+# picked and then released for someone else to take; the trap stops it
+# however this script ends.
+log=$(mktemp)
+python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$HOME/fakegh" >"$log" 2>&1 &
+pid=$!
+cpid=
+trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
+trap 'exit 143' INT TERM HUP
+i=0; port=
+while [ -z "$port" ] && [ "$i" -lt 100 ]; do port=$(sed -n 's/.* port \([0-9][0-9]*\).*/\1/p' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || sleep 0.1; done
+[ -n "$port" ] || { echo "fakegh: server did not start" >&2; exit 3; }
+export CLAUDE_PLAYBOOK_UPDATE_API_BASE="http://127.0.0.1:$port"
+[ "${FAKE_DL:-}" = 1 ] && export CLAUDE_PLAYBOOK_UPDATE_DOWNLOAD_BASE="http://127.0.0.1:$port/dl"
+# In the background and waited on: sh defers a trap until a FOREGROUND child
+# returns, but `wait` is interrupted at once, so a killed step still stops
+# the server (measured: foreground left it running).
+"$@" & cpid=$!
+wait "$cpid"
+EOF
+chmod +x "$HOME/fakegh.sh"''',
+]
+
+[[verify.files]]
+path = "~/.local/bin/cpb"
+
+[[verify.commands]]
+# The start point is the pinned old release.
+command = "claude-playbook --version"
+contains = "v3.14.0"
+
+[[verify.commands]]
+# --check reports the update and replaces nothing.
+command = '''out=$("$HOME/fakegh.sh" claude-playbook update --check) && echo "$out" | grep -qF 'v3.14.0 -> v3.15.0' && claude-playbook --version | grep -qF v3.14.0 && echo check-only-ok'''
+contains = "check-only-ok"
+
+[[verify.commands]]
+# A download that fails its checksum is refused: nonzero exit, the old binary
+# still in place and still running, no staged temp file left beside it.
+command = '''out=$(FAKE_DL=1 "$HOME/fakegh.sh" claude-playbook update 2>&1); rc=$?; [ "$rc" != 0 ] && echo "$out" | grep -qi checksum && claude-playbook --version | grep -qF v3.14.0 && [ -z "$(ls -A "$HOME/.local/bin" | grep '^\.claude-playbook\.update-')" ] && echo corrupt-refused'''
+contains = "corrupt-refused"
+
+[[verify.commands]]
+# The real update, through the `cpb` symlink: the binary behind it is
+# replaced, the link stays a link, and nothing is left staged.
+command = '''out=$("$HOME/fakegh.sh" cpb update) && echo "$out" | grep -qF 'Updated to v3.15.0' && claude-playbook --version | grep -qF v3.15.0 && test -L "$HOME/.local/bin/cpb" && cpb --version | grep -qF v3.15.0 && [ -z "$(ls -A "$HOME/.local/bin" | grep '^\.claude-playbook\.update-')" ] && echo updated'''
+contains = "updated"
+
+[[verify.commands]]
+# And a second run is a no-op.
+command = '''"$HOME/fakegh.sh" claude-playbook update'''
+contains = "Already up to date."

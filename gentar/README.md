@@ -232,6 +232,8 @@ only says what each suite is for.
 |---|---|
 | `cli-head-build` | the CLI builds from THIS checkout, uncommitted changes included, and reports its version |
 | `cli-release-install` | the README's documented install path works against a published release |
+| `cli-self-update` | `update` with no name replaces the binary with the real latest release through `cpb`, refuses a checksum mismatch, and is a no-op when current |
+| `cli-completion` | real TAB through the generated bash script: names offered, prefix filtered, first argument only, and registered for `cpb` |
 | `docs-honesty` | the surface README and `docs/` document exists in the shipped binary and checkout |
 | `playbook-lifecycle` | create / alias / rename / delete, each stage checked against the filesystem |
 | `playbook-install-local` | `install` from a local directory |
@@ -243,7 +245,7 @@ only says what each suite is for.
 | `auth-status` | `auth status` reports without touching anything |
 | `pilot-interactive-delete` | a simulated pilot answering prompts on a pty |
 | `pilot-self-uninstall` | a simulated pilot at the most destructive prompt the tool has |
-| `pilot-agent-session` | a REAL agent launched through a playbook, governed by it (needs a credential) |
+| `pilot-agent-session` | a REAL agent launched through a playbook, governed by it (needs a credential; a one-token provider preflight names quota or auth failures as the provider's) |
 
 ## This subject's adaptations of the kit
 
