@@ -105,9 +105,14 @@ SKIP_STEP_SUBSTR = (
 )
 
 # Executables that must NEVER be found on your real PATH while a suite
-# runs — names your suites CREATE themselves (a launcher, an alias
-# binary). Anything prepare() installs into the scratch ~/.local/bin is
-# hidden automatically; list only what it does not. Example: ("cpb",).
+# runs. Two reasons to list one:
+#   - your suites CREATE it (a launcher, an alias binary), so finding
+#     the installed copy would let a broken install pass;
+#   - your code CALLS it and a bench does not have it, so finding it here
+#     would let a suite pass that fails on the bench. (claude-playbooks'
+#     CLI runs `pilot` on every create; benches have no `pilot`.)
+# Anything prepare() installs into the scratch ~/.local/bin is hidden
+# automatically; list only what it does not. Example: ("cpb", "pilot").
 # cpb: suites create it themselves, as a real install does (a relative
 # symlink). pilot: not created by a suite, but claude-playbook's create and
 # install call `pilot wire` whenever pilot is on PATH, and a bench has none --
@@ -145,7 +150,6 @@ def prepare(env: dict) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(built, dest)
     os.chmod(dest, 0o755)
-
 
 def scratch_home() -> str:
     home = tempfile.mkdtemp(prefix="dryrun-home-")

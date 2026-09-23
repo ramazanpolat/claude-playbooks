@@ -122,11 +122,26 @@ esac
 # containers are one-offs that `compose down` does not stop, so they are
 # stopped by label first (stopping is what fires their AutoRemove), then
 # the project's network and volumes go. Needs no engine checkout.
+#
+# With GENTAR_NAME_PREFIX set (the kit workflow sets one per CI job), it
+# also removes the bench-host sandboxes that prefix names: a cancelled job
+# never reaches the coordinator's own rm, and the sandbox would otherwise
+# stay on a bench-host shared with every other arena. The engine's
+# bin/bench-reap matches whole names only, so it cannot remove another
+# run's bench. Unset (a local run), the bench-host is not touched.
 if [ "$DOWN_ONLY" = 1 ]; then
   cids=$(docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" 2>/dev/null || true)
   [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
   docker compose -p "arena-$SUBJECT" down -v --remove-orphans >/dev/null 2>&1 || true
   echo "arena-$SUBJECT torn down"
+  if [ -n "${GENTAR_NAME_PREFIX:-}" ]; then
+    reap="${GENTAR_DIR:-$HERE/.arena}/bin/bench-reap"
+    if [ -x "$reap" ]; then
+      "$reap" || echo "bench sandboxes of $GENTAR_NAME_PREFIX may remain (see above)" >&2
+    else
+      echo "no engine staged at ${reap%/bin/bench-reap}; bench-host not checked" >&2
+    fi
+  fi
   exit 0
 fi
 
@@ -209,7 +224,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.3.0}
+REF=${GENTAR_REF:-v0.3.1}
 
 # --review: has this repo outgrown its suites?
 #
@@ -521,12 +536,23 @@ teardown_arena() {
   [ "$_torn_down" = "1" ] && return "$rc"
   _torn_down=1
   if [ "${GENTAR_KEEP_ARENA:-0}" = "1" ]; then
-    # Two steps, not one: `compose down` alone refuses the network with
-    # "Resource is still in use", because it does not stop one-off
-    # containers. Stopping them is also what triggers their AutoRemove.
-    echo "arena kept up (GENTAR_KEEP_ARENA=1) -- tear down with:" >&2
-    echo "  docker stop \$(docker ps -q --filter label=com.docker.compose.project=arena-$SUBJECT)" >&2
-    echo "  docker compose -p arena-$SUBJECT down -v --remove-orphans" >&2
+    # Point at --down, not raw docker: it knows the two steps (`compose
+    # down` alone refuses the network with "Resource is still in use",
+    # because it does not stop one-off containers). (claude-playbooks.)
+    #
+    # The ClickHouse port is the one compose PUBLISHED, not the shell's:
+    # a port moved only in the arena's .env would otherwise print 8123,
+    # and on a host where another arena holds 8123 the dashboard renders
+    # that arena. Line-oriented read of `config --format json`, as for the
+    # bench key above (the "published" line follows "target": 8123).
+    local chport
+    chport=$({ arena config --format json 2>/dev/null || true; } \
+      | sed -E -n '/"target": *8123[,]?$/,/"published"/{ s/.*"published": *"?([0-9]+).*/\1/p; }' \
+      | head -1)
+    chport=${chport:-${GENTAR_CLICKHOUSE_HOST_PORT:-8123}}
+    echo "arena kept up (GENTAR_KEEP_ARENA=1). Watch it, then tear it down:" >&2
+    echo "  GENTAR_CLICKHOUSE_HOST_PORT=$chport python3 $ARENA/dashboard/generate.py --watch --out $HERE/reports/dashboard.html" >&2
+    echo "  gentar/run.sh --down" >&2
     return "$rc"
   fi
   arena_stop_all
