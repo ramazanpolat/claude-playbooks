@@ -1,0 +1,5 @@
+reports/
+.arena/
+.env
+__pycache__/
+*.pyc
