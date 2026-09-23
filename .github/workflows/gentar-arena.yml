@@ -35,10 +35,10 @@ on:
   #
   # The honest cost: every PR push runs the whole suite list on a bench
   # that is SHARED with every other arena on this runner. The
-  # concurrency group above is per-ref, so N open PRs are N arenas
-  # queueing for that bench-host, and cancel-in-progress is deliberately
-  # false — a superseded push still finishes its run rather than
-  # stranding a bench. Suites are minutes each; a busy repo feels it.
+  # concurrency group above is one per repository, so N open PRs are N
+  # arena runs queued one after another, and cancel-in-progress is
+  # deliberately false — a superseded push still finishes its run rather
+  # than stranding a bench. Suites are minutes each; a busy repo feels it.
   #
   # Too expensive for your repo? Delete the two lines below and the PR
   # is tested by the `arena` keyword tag or a manual dispatch instead —
@@ -85,6 +85,11 @@ on:
 # The tag names the SUBJECT commit (this checkout); GENTAR_REF still
 # picks the engine. Tag a branch tip, a main commit, or a dirty
 # experiment — same path. Delete the tag to re-run.
+#
+# A tag push runs the workflow file of the TAGGED commit, even when that
+# file is not on the default branch yet. So an adoption PR can prove
+# itself in CI before it merges: push `arena` at the PR's head commit.
+# (claude-playbooks found this; everyone assumes the opposite.)
 
 jobs:
   arena:
@@ -94,6 +99,18 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, arena]
+    env:
+      # Names every bench sandbox this job creates, so the teardown step
+      # can remove the ones a CANCELLED job strands — and only those: the
+      # bench-host is shared, and bin/bench-reap matches whole names.
+      # Unique per repository (GitHub promises run ids unique only within
+      # one, and every adopter's job is called `arena`), per run and per
+      # attempt (a re-run's attempt 2 never reaps attempt 1's leftovers;
+      # attempt 1's own teardown already did). sbx names allow letters,
+      # digits and hyphens here and cap at 64 characters, 23 of them the
+      # run id: a job id holding `_`, or one long enough to push this past
+      # 41, makes the engine refuse (exit 2).
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -296,4 +313,10 @@ jobs:
         # run.sh derives the project name (arena-<subject>) from the
         # scenarios; computing it again here from the checkout directory is
         # how a worktree or renamed checkout ends up tearing down nothing.
+        # With GENTAR_NAME_PREFIX (job env above) it also removes this job's
+        # stranded bench sandboxes, so it needs the bench-host too.
         run: gentar/run.sh --down || true
+        env:
+          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
