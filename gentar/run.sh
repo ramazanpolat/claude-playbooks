@@ -34,19 +34,27 @@ set -euo pipefail
 # `credentials` is included only when one of its groups is fully present.
 # --down tears this subject's arena down — the one teardown CI needs,
 # with the project name derived in exactly one place (here).
+#
+# --plan prints what this CI event should run under gentar/policy.toml (the
+# kit's plan job; see plan.py). --check is phase 1's bench-free half:
+# stage the engine, lint the adaptation, dry-run every suite. Neither
+# needs Docker or a bench.
 STAGE_ONLY=0
 REVIEW_ONLY=0
 DOWN_ONLY=0
 SWEEP=0
+CHECK_ONLY=0
 case "${1:-}" in
   --stage-engine) STAGE_ONLY=1; shift ;;
   --review)       REVIEW_ONLY=1; shift ;;
   --down)         DOWN_ONLY=1; shift ;;
   --sweep)        SWEEP=1; shift ;;
+  --check)        CHECK_ONLY=1; shift ;;
+  --plan)         exec python3 "$(cd "$(dirname "$0")" && pwd)/plan.py" plan ;;
 esac
 
-if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP" = 0000 ]; then
-  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine|--review|--sweep|--down] <scenario> [more scenarios...]}
+if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP$CHECK_ONLY" = 00000 ]; then
+  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine|--review|--sweep|--down|--check|--plan] <scenario> [more scenarios...]}
   shift || true
 else
   SCENARIO=""
@@ -118,6 +126,88 @@ case "$SUBJECT" in
     exit 2 ;;
 esac
 
+# One arena per subject per Docker host, at a time. Every run of this
+# subject uses the same compose project (arena-<subject>), image and host
+# ports, so two at once stop each other's containers or fail to bind. CI
+# used to serialise them with one GitHub concurrency group per repository
+# — which CANCELS a pending run when a newer one queues, so keyword and
+# phase 2 runs were silently dropped behind main pushes. Here a later run
+# WAITS, and says for whom. flock where it exists (Linux runners); a
+# mkdir lock with a pid and stale-holder detection where it does not
+# (stock macOS). /tmp, not TMPDIR: two runner users on one host share one
+# Docker daemon, so they must share the lock.
+LOCK_BASE="${GENTAR_LOCK_DIR:-/tmp}/gentar-arena-$SUBJECT"
+_lock_mode=""
+_lock_holder() {
+  cat "$LOCK_BASE.lock.holder" "$LOCK_BASE.lock.d/holder" 2>/dev/null | head -1
+}
+_lock_note() {
+  { printf '%s' "pid $$ on $(hostname 2>/dev/null || echo ?) since $(date '+%Y-%m-%d %H:%M:%S')"
+    [ -n "${GITHUB_RUN_ID:-}" ] && printf ' (%s run %s)' "${GITHUB_REPOSITORY:-}" "$GITHUB_RUN_ID"
+    echo; } > "$1" 2>/dev/null || true
+}
+arena_lock() {            # wait|try -> 0 once this process holds the lock
+  local lock="$LOCK_BASE.lock" d="$LOCK_BASE.lock.d" pid said=0
+  if command -v flock >/dev/null 2>&1; then
+    [ -e "$lock" ] || (umask 000; : > "$lock") 2>/dev/null || true
+    [ -r "$lock" ] || { echo "cannot read arena lock $lock" >&2; return 1; }
+    exec 9<"$lock"
+    if ! flock -n 9; then
+      [ "$1" = try ] && { exec 9<&-; return 1; }
+      echo "arena-$SUBJECT is in use on this host by: $(_lock_holder || true) — waiting" >&2
+      flock 9
+    fi
+    _lock_mode=flock
+    ( umask 000; _lock_note "$lock.holder" )
+    return 0
+  fi
+  while :; do
+    if mkdir "$d" 2>/dev/null; then
+      _lock_mode=mkdir; _lock_note "$d/holder"; return 0
+    fi
+    pid=$(awk '{print $2; exit}' "$d/holder" 2>/dev/null || true)
+    # Stale: a holder pid that no longer exists. kill -0 also fails for a
+    # live process of ANOTHER user, so ask ps before deciding it is gone.
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; then
+      rm -rf "$d"; continue
+    fi
+    [ "$1" = try ] && return 1
+    [ "$said" = 1 ] || echo "arena-$SUBJECT is in use on this host by: $(_lock_holder || true) — waiting" >&2
+    said=1; sleep 3
+  done
+}
+arena_unlock() {
+  case "$_lock_mode" in
+    mkdir) rm -rf "$LOCK_BASE.lock.d" ;;
+    flock) exec 9<&- ;;
+  esac
+  _lock_mode=""
+}
+
+# --check: phase 1's bench-free half — everything that can be proven about
+# this adaptation without Docker or a bench, so it runs on a GitHub-hosted
+# runner and a pull request's code never reaches the self-hosted one.
+#   1. the engine stages at the pin (and the subject resolves, above);
+#   2. plan.py lint: the policy parses, credential grouping, kit drift;
+#   3. every suite dry-runs (UNVERIFIED-only suites need the arena; they
+#      are reported, not failed).
+# A fork's pull request gets no secrets, so a private engine cannot be
+# cloned there: that is a NAMED skip, never a silent pass.
+if [ "$CHECK_ONLY" = 1 ]; then
+  if ! "$HERE/$(basename "$0")" --stage-engine; then
+    if [ "${GENTAR_FORK_PR:-false}" = true ]; then
+      echo "::notice::gentar check SKIPPED: the engine could not be staged from a fork's pull request (no secrets reach forks); a maintainer's run checks it"
+      exit 0
+    fi
+    exit 2
+  fi
+  rc=0
+  python3 "$HERE/plan.py" lint "${GENTAR_DIR:-$HERE/.arena}" || rc=1
+  (cd "$REPO" && GENTAR_DRYRUN_UNVERIFIED=ok python3 "$HERE/dryrun.py") || rc=1
+  [ "$rc" = 0 ] && echo "check: clean" || echo "check: FAILED (see above)" >&2
+  exit "$rc"
+fi
+
 # --down: tear down THIS subject's arena and nothing else. Run-created
 # containers are one-offs that `compose down` does not stop, so they are
 # stopped by label first (stopping is what fires their AutoRemove), then
@@ -129,11 +219,20 @@ esac
 # stay on a bench-host shared with every other arena. The engine's
 # bin/bench-reap matches whole names only, so it cannot remove another
 # run's bench. Unset (a local run), the bench-host is not touched.
+#
+# It never tears down an arena another live run of this subject holds the
+# host lock for: with runs waiting on each other rather than cancelling,
+# a cancelled job's teardown must not stop the run it was queued behind.
 if [ "$DOWN_ONLY" = 1 ]; then
-  cids=$(docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" 2>/dev/null || true)
-  [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
-  docker compose -p "arena-$SUBJECT" down -v --remove-orphans >/dev/null 2>&1 || true
-  echo "arena-$SUBJECT torn down"
+  if arena_lock try; then
+    cids=$(docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" 2>/dev/null || true)
+    [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
+    docker compose -p "arena-$SUBJECT" down -v --remove-orphans >/dev/null 2>&1 || true
+    arena_unlock
+    echo "arena-$SUBJECT torn down"
+  else
+    echo "arena-$SUBJECT is in use by another run ($(_lock_holder || true)); left alone"
+  fi
   if [ -n "${GENTAR_NAME_PREFIX:-}" ]; then
     reap="${GENTAR_DIR:-$HERE/.arena}/bin/bench-reap"
     if [ -x "$reap" ]; then
@@ -224,7 +323,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.3.1}
+REF=${GENTAR_REF:-v0.4.0}
 
 # --review: has this repo outgrown its suites?
 #
@@ -553,9 +652,11 @@ teardown_arena() {
     echo "arena kept up (GENTAR_KEEP_ARENA=1). Watch it, then tear it down:" >&2
     echo "  GENTAR_CLICKHOUSE_HOST_PORT=$chport python3 $ARENA/dashboard/generate.py --watch --out $HERE/reports/dashboard.html" >&2
     echo "  gentar/run.sh --down" >&2
+    arena_unlock
     return "$rc"
   fi
   arena_stop_all
+  arena_unlock
   return "$rc"
 }
 
@@ -566,6 +667,9 @@ teardown_arena() {
 # status 0. A CI cancel is a SIGTERM to this shell, so a cancelled run read
 # as a PASS. Exiting 130/143 keeps a cancel a failure; EXIT then sees
 # _torn_down and does nothing, so teardown still happens exactly once.
+# Take the host lock before anything touches arena-<subject>: the image
+# build and every service start below come after it.
+arena_lock wait
 trap teardown_arena EXIT
 trap 'teardown_arena; exit 130' INT
 trap 'teardown_arena; exit 143' TERM

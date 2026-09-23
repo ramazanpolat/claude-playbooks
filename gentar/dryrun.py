@@ -20,14 +20,14 @@ back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
 picker that never matched or a danger gate that never fired must not read as
 a pass.
 
-Two adaptations live at the top of the file (the only edits most subjects
-need):
+The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
-  prepare(env)      called once before the sweep; build your CLI or stage
+  prepare(env)      called once per suite; build your CLI or stage
                     fixtures here (env["HOME"] is the scratch home,
                     env["WORKSPACE_DIR"] the staged checkout)
   SKIP_STEP_SUBSTR  substrings of [oracle].steps that prepare() already
                     covered locally (e.g. "docker build"), skipped verbatim
+  HIDE_FROM_PATH    executables that must never be found on the real PATH
 
 Layout matches the bench: the repo is staged into WORKSPACE_DIR, which is a
 directory UNDER HOME, and steps run with WORKSPACE_DIR as cwd. So a `~/...`
@@ -94,62 +94,38 @@ if sys.version_info < (3, 11):
 
 from gentar.toml_scenario import TomlScenario
 
-# Steps whose substring appears here are skipped verbatim (prepare()
-# already did the equivalent locally). Example: ("docker build",).
-SKIP_STEP_SUBSTR = (
-    # Every suite begins by building claude-playbook in a golang:1.21
-    # container from the staged checkout, then installing it to
-    # ~/.local/bin. prepare() does both, with the local toolchain.
-    'docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src',
-    'install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
-)
-
-# Executables that must NEVER be found on your real PATH while a suite
-# runs. Two reasons to list one:
-#   - your suites CREATE it (a launcher, an alias binary), so finding
-#     the installed copy would let a broken install pass;
-#   - your code CALLS it and a bench does not have it, so finding it here
-#     would let a suite pass that fails on the bench. (claude-playbooks'
-#     CLI runs `pilot` on every create; benches have no `pilot`.)
-# Anything prepare() installs into the scratch ~/.local/bin is hidden
-# automatically; list only what it does not. Example: ("cpb", "pilot").
-# cpb: suites create it themselves, as a real install does (a relative
-# symlink). pilot: not created by a suite, but claude-playbook's create and
-# install call `pilot wire` whenever pilot is on PATH, and a bench has none --
-# reaching the pilot's real one would edit scratch playbooks through the
-# host's own lock dir.
-HIDE_FROM_PATH = ("cpb", "pilot")
+# The three adaptation hooks live in gentar/hooks.py, which is YOURS; this
+# file is the kit's and stays byte-identical to it (`gentar/run.sh --check`
+# compares), so an engine bump is a plain re-copy. The defaults below apply
+# when hooks.py is absent or leaves a name out. (0.3.x adopters edited these
+# in place: move them into hooks.py.)
+SKIP_STEP_SUBSTR = ()
+HIDE_FROM_PATH = ()
 
 
 def prepare(env: dict) -> None:
-    """Stand in for this suite's own build-and-install, in its fresh home.
+    return None
 
-    Mirrors the bench: run.sh freezes the version into the staged checkout
-    as .gentar-version (the bench has no usable .git), the container step
-    builds $WORKSPACE_DIR/claude-playbook with it, and the install step
-    copies it to ~/.local/bin. cli-head-build asserts the binary reports that
-    version, so it is resolved the same way, --match 'v*' included.
 
-    No `cpb` symlink: nothing on the bench makes one; the suites that need it
-    create it themselves. `go build` caches on its own, so building per suite
-    costs little.
-    """
-    ws = env["WORKSPACE_DIR"]
-    v = subprocess.run(
-        ["git", "-C", str(REPO), "describe", "--tags", "--always", "--dirty", "--match", "v*"],
-        capture_output=True, text=True).stdout.strip() or "dev"
-    Path(ws, ".gentar-version").write_text(v + "\n")
-    built = Path(ws, "claude-playbook")
-    r = subprocess.run(
-        ["go", "build", "-ldflags",
-         f"-X github.com/ramazanpolat/claude-playbooks/cmd.Version={v}", "-o", str(built), "."],
-        cwd=ws, capture_output=True, text=True)
-    if r.returncode:
-        sys.exit("build failed:\n" + r.stderr)
-    dest = Path(env["HOME"], ".local/bin/claude-playbook")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(built, dest)
-    os.chmod(dest, 0o755)
+def _load_hooks() -> None:
+    hooks = _here / "hooks.py"
+    if not hooks.exists():
+        return
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("gentar_hooks", hooks)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    g = globals()
+    for name in ("SKIP_STEP_SUBSTR", "HIDE_FROM_PATH", "prepare"):
+        if hasattr(mod, name):
+            g[name] = getattr(mod, name)
+    # REPO is the checkout, for a prepare() that builds from it
+    if not hasattr(mod, "REPO"):
+        mod.REPO = REPO
+
+
+_load_hooks()
+
 
 def scratch_home() -> str:
     home = tempfile.mkdtemp(prefix="dryrun-home-")
@@ -344,6 +320,13 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
         print(line)
     if fails:
         print(f"  (home kept for inspection: {home})")
+    # `run.sh --check` (phase 1, bench-free) sets this: a suite that is
+    # only UNVERIFIED has no defect the dry-run can see, and failing every
+    # PR on turns only the arena can replay would train people to ignore
+    # the check. The verdict line above still says UNVERIFIED.
+    if (os.environ.get("GENTAR_DRYRUN_UNVERIFIED") == "ok"
+            and unreplayed and fails == len(unreplayed)):
+        return 0
     return fails
 
 
