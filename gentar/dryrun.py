@@ -293,20 +293,50 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
     return fails
 
 
-def sealed_path(home: str) -> str:
-    """The scratch bin, then the host PATH minus any dir holding the CLI.
+# Executables a fresh bench does not have, which the dry-run must therefore
+# not reach on the host. claude-playbook/cpb: the subject itself. pilot:
+# claude-playbook's create and install call `pilot wire` whenever pilot is on
+# PATH, and a bench has none -- reaching the pilot's real one would edit
+# scratch playbooks the bench never would, through the host's own lock dir.
+SUBJECT_CLIS = ("claude-playbook", "cpb", "pilot")
 
-    The host PATH stays so steps find git, go and the rest of userland.
-    But a directory that holds the pilot's own claude-playbook/cpb is
-    dropped: once a suite removes the scratch binary -- pilot-self-uninstall
-    does exactly that -- a later `claude-playbook` must fail as "not found",
-    not fall through and run the pilot's real install against the scratch
-    HOME. It did, once: launchers were created next to the real binary.
+
+def sealed_path(home: str) -> str:
+    """The scratch bin, then the host PATH with the pilot's own CLI hidden.
+
+    The host PATH stays so steps find git, go and the rest of userland. But
+    the pilot's real claude-playbook/cpb must be unreachable: once a suite
+    removes the scratch binary -- pilot-self-uninstall does exactly that -- a
+    later `claude-playbook` must fail as "not found", not fall through and run
+    the pilot's real install against the scratch HOME. It did, once: launchers
+    were created next to the real binary.
+
+    Hiding is per executable, not per directory. A dir holding the CLI is
+    replaced by a shim dir of symlinks to everything ELSE in it, so a tool
+    that shares ~/.local/bin with the CLI stays reachable. Dropping the whole
+    dir made the dry-run fail in ways a fresh bench cannot.
     """
-    keep = [d for d in os.environ.get("PATH", "").split(os.pathsep)
-            if d and not any(os.path.exists(os.path.join(d, n))
-                             for n in ("claude-playbook", "cpb"))]
-    return os.pathsep.join([f"{home}/.local/bin", *keep])
+    shims = Path(home, ".dryrun-path-shims")
+    out = [f"{home}/.local/bin"]
+    for i, d in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
+        if not d:
+            continue
+        if not any(os.path.exists(os.path.join(d, n)) for n in SUBJECT_CLIS):
+            out.append(d)
+            continue
+        shim = shims / str(i)
+        shim.mkdir(parents=True, exist_ok=True)
+        try:
+            names = os.listdir(d)
+        except OSError:
+            names = []
+        for n in names:
+            src = os.path.join(d, n)
+            if n in SUBJECT_CLIS or not os.access(src, os.X_OK) or os.path.isdir(src):
+                continue
+            os.symlink(src, shim / n)
+        out.append(str(shim))
+    return os.pathsep.join(out)
 
 
 def main() -> int:

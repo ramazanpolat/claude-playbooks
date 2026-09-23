@@ -108,15 +108,22 @@ if [ "$REVIEW_ONLY" = 1 ]; then
   # Candidates the repo exposes: executables it ships, and the scripts a
   # README tells a person to run. Both are things a fresh machine would
   # encounter, which is what a scenario is for.
-  cands=$( { git ls-files 2>/dev/null | grep -E '^(bin|scripts|cmd)/' || true
+  # Go test files are never something a scenario should mention, and this
+  # repo's cmd/ is Go package source, so they are dropped here -- otherwise
+  # they are most of the report and bury the real gaps.
+  cands=$( { git ls-files 2>/dev/null | grep -E '^(bin|scripts|cmd)/' | grep -vE '_test\.go$' || true
              git ls-files 2>/dev/null | grep -E '\.(sh|py)$' | grep -vE '^(gentar|test|tests)/' || true
            } | sort -u)
 
   gaps=0
   for c in $cands; do
     base=$(basename "$c"); stem=${base%.*}
+    # A Go file is named with underscores; the subcommand it implements is
+    # typed with dashes (env_profile.go is `env-profile`), so both count.
+    dashed=$(printf '%s' "$stem" | tr '_' '-')
     if ! printf '%s\n' "$mentions" | grep -qxF "$base" \
-       && ! printf '%s\n' "$mentions" | grep -qxF "$stem"; then
+       && ! printf '%s\n' "$mentions" | grep -qxF "$stem" \
+       && ! printf '%s\n' "$mentions" | grep -qxF "$dashed"; then
       if [ "$gaps" = 0 ]; then echo "the repo ships these, and no suite mentions them:"; fi
       last=$(git log -1 --format='%ad' --date=short -- "$c" 2>/dev/null || echo '?')
       printf '  %-40s last changed %s\n' "$c" "$last"

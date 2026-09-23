@@ -242,7 +242,10 @@ runner → follow the commands → when configuring, labels: `arena`.
 
 Secrets/vars the workflow reads:
 
-- `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
+- `secrets.BENCH_SSH_KEY` — **required**: key the coordinator uses to reach the bench-host
+- `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — **required**: the bench-host
+  and the account that key logs in as. The workflow refuses (exit 2) before any bench
+  if either is unset or still the engine's `bench.example.internal` placeholder.
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites

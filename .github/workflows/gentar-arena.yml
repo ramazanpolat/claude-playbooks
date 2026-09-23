@@ -15,8 +15,15 @@ name: arena
 # names either. Not cancel-in-progress: an arena run already holding a
 # bench should finish and clean up rather than be killed mid-bench,
 # leaving a sandbox stranded on the shared host.
+#
+# The group is CONSTANT, not per-ref. Every run of this workflow uses one
+# compose project (arena-claude-playbooks) and one pair of host ports
+# (8126/4320), so two runs on different refs -- two PRs, or a PR and main --
+# would stop each other's containers or fail to bind. A per-ref group only
+# serialized runs of the same ref. One runner hides that today; a second
+# `arena` runner would expose it.
 concurrency:
-  group: arena-${{ github.ref }}
+  group: arena-claude-playbooks
   cancel-in-progress: false
 
 on:
