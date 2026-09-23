@@ -43,6 +43,23 @@ echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh
 echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash
 ```
 
+Each shell has a prerequisite the line cannot supply. Without it, the line
+loads nothing and TAB fails:
+
+- **zsh** needs its completion system started *before* that line. Frameworks
+  (oh-my-zsh, prezto) already do it; a bare `~/.zshrc` does not, and the line
+  then prints `command not found: compdef`. Put
+  `autoload -U compinit && compinit` above it.
+- **bash** needs **bash 4 or newer** and the **bash-completion** package
+  (`apt install bash-completion`, `dnf install bash-completion`, or on macOS
+  `brew install bash bash-completion@2`). Without the package, TAB prints
+  `_get_comp_words_by_ref: command not found`. The bash that ships with macOS
+  is 3.2, where `source <(...)` silently loads nothing.
+
+Keep the line in exactly this form: `self-uninstall` finds and removes these
+`source <(... completion ...)` lines, so a rewritten one would outlive the
+binary and error in every new shell.
+
 ## Run it with npx (no install needed)
 
 On a machine with Node:
