@@ -357,7 +357,16 @@ teardown_arena() {
   return "$rc"
 }
 
-trap teardown_arena EXIT INT TERM
+# EXIT tears down on any normal end. INT/TERM need their OWN handlers that
+# tear down AND exit: a signal trap that merely returns lets bash resume the
+# script after the interrupted command -- with _torn_down already set, so a
+# resumed run could start new services after a cancel, the final EXIT
+# would skip cleanup, and the run would end with status 0. Exiting 130/143
+# keeps the cancel a failure; the EXIT trap then sees _torn_down and does
+# nothing, so teardown still happens exactly once.
+trap teardown_arena EXIT
+trap 'teardown_arena; exit 130' INT
+trap 'teardown_arena; exit 143' TERM
 
 arena_container() {   # service -> container id, empty if not up
   docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" \
