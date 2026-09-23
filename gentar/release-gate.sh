@@ -30,7 +30,8 @@ case "$SHA" in
   ''|*[!0-9a-f]*) echo "usage: gentar/release-gate.sh <full commit sha>" >&2; exit 2 ;;
 esac
 [ "${#SHA}" = 40 ] || { echo "release-gate: need the full 40-character sha" >&2; exit 2; }
-REPO=${GITHUB_REPOSITORY:?release-gate: GITHUB_REPOSITORY is not set}
+REPO=${GITHUB_REPOSITORY:-}
+[ -n "$REPO" ] || { echo "release-gate: GITHUB_REPOSITORY is not set" >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 WF=gentar-arena.yml
 JOB="arena / phase2"
@@ -42,13 +43,19 @@ MAXAGE=$(printf '%s\n' "$cfg" | sed -n 's/^max_age_days=//p')
 
 runs=$(gh api "repos/$REPO/actions/workflows/$WF/runs?head_sha=$SHA&per_page=100" \
   --jq '.workflow_runs[] | "\(.id)\t\(.status)\t\(.conclusion // "-")\t\(.event)\t\(.head_branch // "-")"') || {
+  # A disabled gate is a report that always passes — including when the
+  # API cannot answer. An enabled one cannot pass on no evidence.
+  if [ "$GATE" = false ]; then
+    echo "release-gate: could not list $WF runs for $SHA — NOT refusing ([phase2] release_gate = false)"
+    exit 0
+  fi
   echo "release-gate: could not list $WF runs for $SHA" >&2; exit 1; }
 
 ok="" notes=""
 while IFS=$'\t' read -r id status concl event branch; do
   [ -n "$id" ] || continue
   jobs=$(gh api "repos/$REPO/actions/runs/$id/jobs?per_page=100" \
-    --jq ".jobs[] | select(.name == \"$JOB\") | \"\(.conclusion // \"-\")\t\(if (.completed_at // .started_at) then (((now - ((.completed_at // .started_at) | fromdateiso8601)) / 86400) | floor) else 0 end)\"") || jobs=""
+    --jq ".jobs[] | select(.name == \"$JOB\") | \"\(.conclusion // \"-\")\t\(if (.completed_at // .started_at) then ((now - ((.completed_at // .started_at) | fromdateiso8601)) | floor) else 0 end)\"") || jobs=""
   if [ -z "$jobs" ]; then
     # No phase 2 job in this run. Only worth saying when the RUN died
     # before deciding anything: that is the eviction case.
@@ -57,10 +64,13 @@ while IFS=$'\t' read -r id status concl event branch; do
     fi
     continue
   fi
-  while IFS=$'\t' read -r jc age; do
+  while IFS=$'\t' read -r jc secs; do
+    # Seconds, compared unrounded: flooring to days first let a pass 7d 23h
+    # old through a 7-day limit. Days are for the message only.
+    age=$(( ${secs:-0} / 86400 ))
     case "$jc" in
       success)
-        if [ "${MAXAGE:-0}" -gt 0 ] && [ "$age" -gt "$MAXAGE" ]; then
+        if [ "${MAXAGE:-0}" -gt 0 ] && [ "${secs:-0}" -gt $(( MAXAGE * 86400 )) ]; then
           notes="${notes}  phase 2 in run $id passed, but $age day(s) ago (max_age_days = $MAXAGE)\n"
         else
           ok="run $id ($event, $branch), $age day(s) ago"

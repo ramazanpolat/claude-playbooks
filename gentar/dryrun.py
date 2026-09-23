@@ -22,9 +22,10 @@ a pass.
 
 The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
-  prepare(env)      called once per suite; build your CLI or stage
-                    fixtures here (env["HOME"] is the scratch home,
-                    env["WORKSPACE_DIR"] the staged checkout)
+  prepare(env)      called per suite — for the suites with a step matching
+                    SKIP_STEP_SUBSTR, or every suite when that is empty;
+                    build your CLI or stage fixtures here (env["HOME"] is
+                    the scratch home, env["WORKSPACE_DIR"] the checkout)
   SKIP_STEP_SUBSTR  substrings of [oracle].steps that prepare() already
                     covered locally (e.g. "docker build"), skipped verbatim
   HIDE_FROM_PATH    executables that must never be found on the real PATH
@@ -57,10 +58,12 @@ _engine_env = os.environ.get("GENTAR_ENGINE")
 _here = Path(__file__).resolve().parent
 ENGINE = Path(_engine_env) if _engine_env else _here / ".arena/coordinator"
 if not ENGINE.exists():
-    sys.exit(f"gentar engine not found at {ENGINE}\n"
+    print(f"gentar engine not found at {ENGINE}\n"
              "  stage it once:  gentar/run.sh --stage-engine\n"
              "  or point at an existing checkout:  "
-             "GENTAR_ENGINE=/path/to/gentar/coordinator gentar/dryrun.py")
+             "GENTAR_ENGINE=/path/to/gentar/coordinator gentar/dryrun.py",
+          file=sys.stderr)
+    sys.exit(2)                                 # a refusal, not a failure
 sys.path.insert(0, str(ENGINE))
 
 # tomllib is 3.11+, and stock macOS still ships 3.9 — so the cheap check an
@@ -82,15 +85,16 @@ if sys.version_info < (3, 11):
     try:
         import tomli  # noqa: F401  — imported for the check; the parser imports it
     except ModuleNotFoundError:
-        sys.exit(
+        print(
             f"dryrun needs a TOML parser and this is python {sys.version.split()[0]} "
             "(tomllib arrived in 3.11).\n"
             "  either:  pip install tomli\n"
             "  or:      install any python 3.11+ and re-run "
             "(brew install python@3.12, apt install python3.12, ...)\n"
             "The arena is unaffected either way — it runs python 3.12 in a "
-            "container. This is only the local replay."
-        )
+            "container. This is only the local replay.",
+            file=sys.stderr)
+        sys.exit(2)                             # a refusal, not a failure
 
 from gentar.toml_scenario import TomlScenario
 

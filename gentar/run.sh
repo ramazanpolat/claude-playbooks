@@ -54,8 +54,13 @@ case "${1:-}" in
 esac
 
 if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP$CHECK_ONLY" = 00000 ]; then
-  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine|--review|--sweep|--down|--check|--plan] <scenario> [more scenarios...]}
-  shift || true
+  # A usage error is a refusal: exit 2. (`${1:?…}` exits 1 or 127.)
+  if [ $# -lt 1 ]; then
+    echo "usage: gentar/run.sh [--stage-engine|--review|--sweep|--down|--check|--plan] <scenario> [more scenarios...]" >&2
+    exit 2
+  fi
+  SCENARIO=$1
+  shift
 else
   SCENARIO=""
 fi
@@ -188,14 +193,19 @@ arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
       _lock_mode=mkdir; _lock_note "$d/holder"; return 0
     fi
     pid=$(awk '{print $2; exit}' "$d/holder" 2>/dev/null || true)
+    case "$pid" in *[!0-9]*) pid="" ;; esac
     # Stale: a holder pid that no longer exists. kill -0 also fails for a
     # live process of ANOTHER user, so ask ps before deciding it is gone.
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; then
+    # Or no readable holder at all in a lock dir more than a minute old: a
+    # run killed between mkdir and writing its note (a live one writes it
+    # in milliseconds) — without this, every later run waited forever.
+    if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; } \
+       || { [ -z "$pid" ] && [ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
       rm -rf "$d" 2>/dev/null && continue
       # Not ours to remove (a lock from before 0.4.0's shared directory, or
       # permissions changed by hand). Say exactly what to do rather than
       # hang or die on `set -e`.
-      echo "stale arena lock $d (holder pid $pid is gone) cannot be removed by $(id -un 2>/dev/null || echo this user); remove it: rm -rf '$d'" >&2
+      echo "stale arena lock $d (holder ${pid:+pid $pid }is gone) cannot be removed by $(id -un 2>/dev/null || echo this user); remove it: rm -rf '$d'" >&2
       return 2
     fi
     [ "$1" = try ] && return 1
@@ -228,14 +238,18 @@ if [ "$CHECK_ONLY" = 1 ]; then
     fi
     exit 2
   fi
+  # 0 clean · 1 a check failed · 2 a refusal (bad policy, a host the
+  # dry-run will not trust) — a refusal wins, so a caller can tell a
+  # misconfiguration from a failing assertion.
   rc=0
-  python3 "$HERE/plan.py" lint "${GENTAR_DIR:-$HERE/.arena}" || rc=1
+  worst() { [ "$1" = 2 ] && rc=2 || { [ "$rc" = 2 ] || rc=1; }; }
+  python3 "$HERE/plan.py" lint "${GENTAR_DIR:-$HERE/.arena}" || worst $?
   # In CI the dry-run refuses a host whose system install dirs are
   # writable (the kit's checks job makes the runner bench-like first);
   # locally it warns.
   strict=0; [ "${CI:-}" = true ] && strict=1
   (cd "$REPO" && GENTAR_DRYRUN_UNVERIFIED=ok GENTAR_DRYRUN_STRICT=$strict \
-      python3 "$HERE/dryrun.py") || rc=1
+      python3 "$HERE/dryrun.py") || worst $?
   [ "$rc" = 0 ] && echo "check: clean" || echo "check: FAILED (see above)" >&2
   exit "$rc"
 fi

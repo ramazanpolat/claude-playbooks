@@ -37,15 +37,17 @@ on:
         description: gentar ref to run the arena from (empty = the pin in run.sh)
         default: ''
 
-# Per ref, for dedup only: a newer push to the same ref replaces its own
-# pending run. NOT one group for the whole repository — GitHub keeps one
-# running and one pending run per group and CANCELS the pending one when
-# a newer run queues, so a shared group silently dropped phase 2 and
-# keyword runs behind ordinary main pushes (claude-playbooks, observed).
-# Arenas of this repo are serialised on the runner host instead, by a lock
-# run.sh takes, where waiting never discards anything.
+# GitHub keeps one running and one PENDING run per concurrency group and
+# cancels the pending one when a newer run queues. A shared group therefore
+# silently dropped phase 2 and keyword runs behind ordinary main pushes
+# (claude-playbooks, observed) — and a per-ref group still drops a phase 2
+# dispatched on main behind the next main push. So only a pull request is
+# grouped (its newer push supersedes the older one, which is the point);
+# every other run has a group of its own and is never dropped. Arenas are
+# serialised on the runner host by the lock run.sh takes, where waiting
+# never discards anything.
 concurrency:
-  group: gentar-arena-${{ github.ref }}
+  group: gentar-arena-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: false
 
 permissions:
