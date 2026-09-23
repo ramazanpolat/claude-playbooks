@@ -30,7 +30,13 @@ name = "pilot-agent-session"
 subject = "claude-playbooks"
 agent = "shell"
 template = "cpb-agent-bench-v1"
-credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+# ALTERNATIVES, in preference order; a nested list is an all-of GROUP. A
+# router token without its endpoint is half a provider, so the token and base
+# URL travel together. Since gentar v0.2.0 only the WINNING group reaches the
+# bench -- written as three flat names (as before v0.2.0), the lone token won,
+# ANTHROPIC_BASE_URL was dropped as a stray, and the agent sent the router's
+# token to Anthropic's API: "Invalid API key".
+credentials = ["ANTHROPIC_API_KEY", ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
 # Model pins, forwarded when set. SLOT vars, never ANTHROPIC_MODEL:
 # claude-code's catalog rejects unknown IDs on the main-model path, while the
 # slot vars accept whatever the endpoint serves.
