@@ -71,8 +71,10 @@ command = '''o=$("$HOME/tab.sh" claude-playbook delete al); [ "$o" = alpha ] && 
 contains = "tab-prefix"
 
 [[verify.commands]]
-# A name completes only in the first position: after one, nothing is offered.
-command = '''o=$("$HOME/tab.sh" claude-playbook run alpha ""); [ -z "$(echo "$o" | grep -x -e alpha -e beta)" ] && echo tab-first-arg-only'''
+# A name completes only in the first position: after one, NOTHING is
+# offered -- not just no playbook names (a filter for those would pass on a
+# script that offered files instead).
+command = '''o=$("$HOME/tab.sh" claude-playbook run alpha ""); [ -z "$o" ] && echo tab-first-arg-only'''
 contains = "tab-first-arg-only"
 
 [[verify.commands]]

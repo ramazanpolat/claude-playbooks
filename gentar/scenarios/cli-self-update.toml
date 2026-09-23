@@ -36,15 +36,25 @@ steps = [
   # FAKE_DL=1). One server per command, so nothing outlives a step.
   '''cat > "$HOME/fakegh.sh" <<'EOF'
 #!/bin/sh
-port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-python3 -m http.server "$port" --bind 127.0.0.1 --directory "$HOME/fakegh" >/dev/null 2>&1 &
+# The server binds port 0 itself and reports what it got, so no port is
+# picked and then released for someone else to take; the trap stops it
+# however this script ends.
+log=$(mktemp)
+python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$HOME/fakegh" >"$log" 2>&1 &
 pid=$!
-i=0; until curl -s -o /dev/null "http://127.0.0.1:$port/"; do i=$((i+1)); [ "$i" -gt 100 ] && break; sleep 0.1; done
+cpid=
+trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
+trap 'exit 143' INT TERM HUP
+i=0; port=
+while [ -z "$port" ] && [ "$i" -lt 100 ]; do port=$(sed -n 's/.* port \([0-9][0-9]*\).*/\1/p' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || sleep 0.1; done
+[ -n "$port" ] || { echo "fakegh: server did not start" >&2; exit 3; }
 export CLAUDE_PLAYBOOK_UPDATE_API_BASE="http://127.0.0.1:$port"
 [ "${FAKE_DL:-}" = 1 ] && export CLAUDE_PLAYBOOK_UPDATE_DOWNLOAD_BASE="http://127.0.0.1:$port/dl"
-"$@"; rc=$?
-kill "$pid" 2>/dev/null
-exit $rc
+# In the background and waited on: sh defers a trap until a FOREGROUND child
+# returns, but `wait` is interrupted at once, so a killed step still stops
+# the server (measured: foreground left it running).
+"$@" & cpid=$!
+wait "$cpid"
 EOF
 chmod +x "$HOME/fakegh.sh"''',
 ]

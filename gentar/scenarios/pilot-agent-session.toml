@@ -64,7 +64,9 @@ steps = [
   # the provider?" (a routed endpoint's quota has produced a missing
   # marker.txt more than once), and without this the only answer was reading
   # the driver transcript. The key travels in a mode-600 header file, never
-  # in argv, and the file is removed at once.
+  # in argv, and a trap removes it however the step ends. curl runs in the
+  # background and is waited on: sh defers a trap until a FOREGROUND child
+  # returns, so a step killed mid-request would otherwise leave the file.
   #
   # Same precedence as Claude Code: the auth token first, and
   # ANTHROPIC_BASE_URL for either credential. Probing an API key first was
@@ -73,7 +75,7 @@ steps = [
   # directly and reported a 401 on a run whose agent passed. That stray key
   # is sbx's credential-proxy placeholder, the literal `proxy-managed`, set
   # in every sandbox; it is treated as absent.
-  '''umask 077; H="$HOME/.probe-h"; B=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}; if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then printf 'Authorization: Bearer %s\n' "$ANTHROPIC_AUTH_TOKEN" > "$H"; via=auth-token; elif [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "$ANTHROPIC_API_KEY" != proxy-managed ]; then printf 'x-api-key: %s\n' "$ANTHROPIC_API_KEY" > "$H"; via=api-key; else echo "provider-unprobed: no credential reached the oracle" > "$HOME/provider-probe.txt"; exit 0; fi; M=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}; code=$(curl -s -o "$HOME/.probe-body" -w '%{http_code}' --max-time 60 -H @"$H" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$M\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ok\"}]}" "${B%/}/v1/messages"); rm -f "$H"; if [ "$code" = 200 ] && grep -q '"content"' "$HOME/.probe-body"; then r="provider-ok (via $via)"; else case $code in 429) r="provider-quota (HTTP 429)";; 401|403) r="provider-auth (HTTP $code)";; *) r="provider-error (HTTP $code)";; esac; r="$r via $via at ${B%%://*}://${B#*://}: $(head -c 300 "$HOME/.probe-body" | tr -d '\n')"; fi; echo "$r" > "$HOME/provider-probe.txt"''',
+  '''umask 077; H="$HOME/.probe-h"; trap 'rm -f "$H" "$HOME/.probe-code"' EXIT; trap 'exit 143' INT TERM HUP; B=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}; if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then printf 'Authorization: Bearer %s\n' "$ANTHROPIC_AUTH_TOKEN" > "$H"; via=auth-token; elif [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "$ANTHROPIC_API_KEY" != proxy-managed ]; then printf 'x-api-key: %s\n' "$ANTHROPIC_API_KEY" > "$H"; via=api-key; else echo "provider-unprobed: no credential reached the oracle" > "$HOME/provider-probe.txt"; exit 0; fi; M=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}; curl -s -o "$HOME/.probe-body" -w '%{http_code}' --max-time 60 -H @"$H" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$M\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ok\"}]}" "${B%/}/v1/messages" > "$HOME/.probe-code" & wait $!; code=$(cat "$HOME/.probe-code"); rm -f "$H"; if [ "$code" = 200 ] && grep -q '"content"' "$HOME/.probe-body"; then r="provider-ok (via $via)"; else case $code in 429) r="provider-quota (HTTP 429)";; 401|403) r="provider-auth (HTTP $code)";; *) r="provider-error (HTTP $code)";; esac; r="$r via $via at ${B%%://*}://${B#*://}: $(head -c 300 "$HOME/.probe-body" | tr -d '\n')"; fi; echo "$r" > "$HOME/provider-probe.txt"''',
   '"$HOME/.local/bin/claude-playbook" create pilotpb --no-alias',
   # The playbook's standing instruction. The prompt below never mentions
   # ORBIT-7 -- only this file does, so the marker's presence is proof the
