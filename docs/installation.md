@@ -107,9 +107,10 @@ nix profile install "git+https://github.com/ramazanpolat/claude-playbooks?ref=re
   it reports is the last release's, so a commit between releases would claim a
   version it isn't.
 - **The first install compiles.** There is no binary cache, so Nix fetches the
-  Go toolchain and builds: measured 39 s cold on an 8-core Linux VM, and up to
-  111 s in a fresh devbox container on 4 cores including devbox's own first-run
-  setup. Later installs of the same ref are instant.
+  Go toolchain and builds: measured 39 s cold on an 8-core Linux VM. On a 4-core
+  host, a full devbox project install took 188 s with the flake against 73 s
+  with a downloaded release binary, so the build adds about two minutes there.
+  Later installs of the same ref are instant.
 - **Update through devbox**, not with `cpb update`: the binary lives in the
   read-only Nix store, and `cpb update` refuses to touch it. Re-add with the new
   tag (`devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<new-tag>#claude-playbook"`).
