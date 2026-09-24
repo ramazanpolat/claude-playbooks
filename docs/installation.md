@@ -79,6 +79,37 @@ matches of `source <(cpb completion bash)` and `source <(cpb completion zsh)`
 absolute path, extra spaces, `eval "$(...)"`) outlives the binary and errors in
 every new shell.
 
+## With devbox or Nix
+
+claude-playbooks is a Nix flake, so a devbox project pins it like any other
+package (v3.18.0 or later):
+
+```bash
+devbox add github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook
+devbox run -- cpb --version
+```
+
+or, without devbox:
+
+```bash
+nix run github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook -- --version
+nix profile install github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook
+```
+
+- **Pin a tag.** The flake builds from source at the ref you give; the version
+  it reports is the last release's, so a commit between releases would claim a
+  version it isn't.
+- **The first install compiles.** There is no binary cache, so Nix fetches the
+  Go toolchain and builds (about 40 s cold on an 8-core Linux VM); later installs
+  of the same ref are instant.
+- **Update through devbox**, not with `cpb update`: the binary lives in the
+  read-only Nix store, and `cpb update` refuses to touch it. Re-add with the new
+  tag (`devbox add github:ramazanpolat/claude-playbooks/<new-tag>#claude-playbook`).
+- Inside a devbox project, point `CLAUDE_PLAYBOOKS_DIR` at a project-local folder
+  to keep that project's playbooks out of `~/.claude-playbooks`. Launchers are
+  only managed for the default root, so there you run playbooks with
+  `cpb run <name>`.
+
 ## Run it with npx (no install needed)
 
 On a machine with Node:
@@ -157,7 +188,9 @@ cpb update --force    # reinstall even if already on the latest
 It downloads the release asset for your OS/architecture, verifies it, and
 atomically replaces the running binary (resolving the `cpb` symlink so the real
 binary is updated). If the install directory needs elevated privileges to write,
-it says so.
+it says so. A binary installed through devbox or Nix is never replaced: `update`
+refuses and tells you to re-pin the tag in devbox instead (see
+[With devbox or Nix](#with-devbox-or-nix)).
 
 To update a *playbook* rather than the tool, see
 [Managing playbooks](playbooks.md#update).

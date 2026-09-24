@@ -14,6 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/
 ```
 
 Linux and macOS, amd64/arm64. Installs `claude-playbook` and the shorter `cpb`.
+In a devbox project: `devbox add github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook`.
 [Other ways to install →](docs/installation.md)
 
 ## 60-second start
@@ -117,7 +118,7 @@ Add `--sandbox` to any launch to run it in a microVM.
 
 | | |
 |---|---|
-| [Installation](docs/installation.md) | install script, npx, source builds, uninstalling |
+| [Installation](docs/installation.md) | install script, devbox/Nix, npx, source builds, uninstalling |
 | [Managing playbooks](docs/playbooks.md) | create, install, link, launch, rename, update, delete |
 | [Authentication](docs/authentication.md) | shared logins, long-lived tokens, isolated accounts |
 | [Environment overrides](docs/environment.md) | per-playbook variables and shared env profiles |

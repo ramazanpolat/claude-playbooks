@@ -298,3 +298,65 @@ func TestSelfUpdateOversizedSumsWarnsAndProceeds(t *testing.T) {
 		t.Fatalf("no oversize warning:\n%s", out.String())
 	}
 }
+
+func TestIsNixStorePath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/nix/store/2y7j-claude-playbook-3.17.0/bin/claude-playbook": true,
+		"/home/u/.local/bin/claude-playbook":                         false,
+		"/nix/var/nix/profiles/default/bin/claude-playbook":          false,
+		"/tmp/nix/store/x/bin/claude-playbook":                       false,
+	} {
+		if got := isNixStorePath(p); got != want {
+			t.Errorf("isNixStorePath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
+// A Nix-managed binary is never replaced: the store is read-only, and the
+// generic permission-error advice ("re-run with sudo") would corrupt it.
+func TestSelfUpdateRefusesNixManagedBinary(t *testing.T) {
+	tag := "v9.9.9"
+	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	defer srv.Close()
+	exe := newExecutable(t)
+
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v0.0.1"
+	cfg.nixManaged = true
+
+	var out bytes.Buffer
+	err := selfUpdate(&out, cfg)
+	if err == nil || !strings.Contains(err.Error(), "managed by Nix") || !strings.Contains(err.Error(), "devbox add github:") {
+		t.Fatalf("expected a Nix refusal naming devbox, got err=%v out=%s", err, out.String())
+	}
+	if strings.Contains(err.Error(), "sudo") {
+		t.Fatalf("the refusal must not suggest sudo: %v", err)
+	}
+	if got, _ := os.ReadFile(exe); string(got) != "OLD-BINARY" {
+		t.Fatalf("a Nix-managed binary was replaced: %q", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), ".claude-playbook.update-*")); len(left) != 0 {
+		t.Fatalf("staged files left behind: %v", left)
+	}
+}
+
+// --check still reports, and points at devbox rather than at self-update.
+func TestSelfUpdateCheckOnlyNixManagedHintsDevbox(t *testing.T) {
+	tag := "v9.9.9"
+	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	defer srv.Close()
+	exe := newExecutable(t)
+
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v0.0.1"
+	cfg.checkOnly = true
+	cfg.nixManaged = true
+
+	var out bytes.Buffer
+	if err := selfUpdate(&out, cfg); err != nil {
+		t.Fatalf("selfUpdate: %v", err)
+	}
+	if !strings.Contains(out.String(), "update is available") || !strings.Contains(out.String(), "devbox add github:") || strings.Contains(out.String(), "Run 'claude-playbook update'") {
+		t.Fatalf("expected the devbox hint instead of the self-update hint, got:\n%s", out.String())
+	}
+}
