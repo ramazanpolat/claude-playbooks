@@ -48,7 +48,11 @@ I=$(CLAUDE_PLAYBOOKS_DIR=$ENVR $C info penv 2>&1); DETAIL="got: $(printf '%s' "$
 chk "1d info: env root"              sh -c "printf '%s' \"\$0\" | grep -q '^Path: *$ENVR/penv'" "$I"
 I=$(CLAUDE_PLAYBOOKS_DIR=$ENVR $C --playbooks-dir "$FLAG" info pflag 2>&1)
 chk "1e info: flag beats env"        sh -c "printf '%s' \"\$0\" | grep -q '^Path: *$FLAG/pflag'" "$I"
-chk "1f info: flag root hides env-only playbook" sh -c "! CLAUDE_PLAYBOOKS_DIR=$ENVR $C --playbooks-dir $FLAG info penv"
+# A refusal, not a crash: non-zero AND the not-found message. A negated
+# command would also "pass" on a missing binary or a mangled path.
+unknown_pb() { local o rc; o=$("$@" 2>&1); rc=$?; [ "$rc" != 0 ] && printf '%s' "$o" | grep -q 'unknown playbook'; }
+flag_hides_env() { CLAUDE_PLAYBOOKS_DIR=$ENVR unknown_pb "$C" --playbooks-dir "$FLAG" info penv; }
+chk "1f info: flag root hides env-only playbook" flag_hides_env
 rm -f "$HOME/claude-called"; CLAUDE_PLAYBOOKS_DIR=$ENVR $C run penv >/dev/null 2>&1
 chk "1g run: env root sets CLAUDE_CONFIG_DIR" grep -qx "CFG=$ENVR/penv" "$HOME/claude-called"
 rm -f "$HOME/claude-called"; CLAUDE_PLAYBOOKS_DIR=$ENVR $C --playbooks-dir "$FLAG" run pflag >/dev/null 2>&1
@@ -71,7 +75,11 @@ DETAIL="rc=$rc out: $(printf '%s' "$O" | tr '\n' ' ' | cut -c1-160)"
 chk "2b --alias under custom root: installs" sh -c "[ $rc = 0 ] && test -f '$FLAG/pal/CLAUDE.md'"
 chk "2c --alias under custom root: prints the default-root note" sh -c "printf '%s' \"\$0\" | grep -q 'launchers are managed only for the default playbooks root'" "$O"
 DETAIL="bin before/after differ"
-chk "2d --alias under custom root: writes no launcher" test "$before" = "$after"
+# Nowhere at all: the binary's own dir, and ~/.local/bin (the fallback for
+# an unwritable binary dir), and anywhere else under this sandbox.
+DETAIL="found: $(find "$W" -name palx 2>/dev/null | tr '\n' ' ')"
+no_launcher() { test "$before" = "$after" && [ -z "$(find "$W" -name palx 2>/dev/null)" ]; }
+chk "2d --alias under custom root: writes no launcher" no_launcher
 
 # 3. install <git-url> --branch <tag> --subdir <dir> --name N
 G=$W/src; mkdir -p "$G/sub/pb"; printf 'name = "g"\nversion = "1.0.0"\n' > "$G/sub/pb/.playbook"; printf 'TAGGED\n' > "$G/sub/pb/CLAUDE.md"
@@ -118,7 +126,7 @@ chk "info §5.1 manifest rewrite drops an unknown [cockpit] table" dropped_ok
 
 # 10. info exits non-zero for a name that is not installed, 0 for one that is
 #     (cockpit setup.sh:36 chooses fresh install vs refresh on it)
-chk "10a info <missing> exits non-zero" sh -c "! $C --playbooks-dir $FLAG info not-installed"
+chk "10a info <missing> exits non-zero" unknown_pb "$C" --playbooks-dir "$FLAG" info not-installed
 chk "10b info <installed> exits 0"      $C --playbooks-dir "$FLAG" info pflag
 
 # 11. run propagates claude's exit status (cockpit check.sh:38)
