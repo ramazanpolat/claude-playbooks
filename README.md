@@ -23,7 +23,7 @@ devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v
 devbox run -- cpb --version
 ```
 
-[Using it in a devbox project →](docs/installation.md#with-devbox-or-nix) ·
+[Using it in a devbox project →](docs/installation.md#using-it-in-a-devbox-project) ·
 [Other ways to install →](docs/installation.md)
 
 ## 60-second start
