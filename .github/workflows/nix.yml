@@ -96,6 +96,8 @@ jobs:
           # Self-update refuses a Nix-managed binary even when it is current
           # (this commit reports the latest release's version), before any
           # lookup, and never suggests sudo.
-          if out=$(devbox run -- claude-playbook update 2>&1); then echo "::error::self-update did not refuse"; echo "$out"; exit 1; fi
-          echo "$out" | grep -q 'managed by Nix'
-          ! echo "$out" | grep -qi -e sudo -e 'up to date'
+          for args in "update" "update --force"; do
+            if out=$(devbox run -- claude-playbook $args 2>&1); then echo "::error::'$args' did not refuse"; echo "$out"; exit 1; fi
+            echo "$out" | grep -q 'managed by Nix'
+            ! echo "$out" | grep -qi -e sudo -e 'up to date'
+          done
