@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # check-cockpit-contract -- the nine behaviours cockpit relies on
-# (docs/handoffs/cockpit-ship.md §4), checked against one claude-playbook binary.
+# (docs/handoffs/cockpit-ship.md §4, plus 10-12 from cockpit's own call sites),
+# checked against one claude-playbook binary.
 #
 #   check-cockpit-contract.sh <path-to-claude-playbook>
 #
@@ -19,6 +20,7 @@ cat > "$HOME/bin/claude" <<'EOF'
 #!/bin/sh
 { echo "CFG=${CLAUDE_CONFIG_DIR:-}"; echo "OVR=${CLAUDE_CONFIG_DIR_OVERRIDE-<unset>}"
   for a in "$@"; do echo "ARG=$a"; done; } > "$HOME/claude-called"
+exit "${STUB_RC:-0}"
 EOF
 chmod +x "$HOME/bin/claude"
 ok() { echo "PASS $1"; }
@@ -69,7 +71,7 @@ DETAIL="bin before/after differ"
 chk "2d --alias under custom root: writes no launcher" test "$before" = "$after"
 
 # 3. install <git-url> --branch <tag> --subdir <dir> --name N
-G=$W/src; mkdir -p "$G/sub/pb"; printf 'name = "g"\n' > "$G/sub/pb/.playbook"; printf 'TAGGED\n' > "$G/sub/pb/CLAUDE.md"
+G=$W/src; mkdir -p "$G/sub/pb"; printf 'name = "g"\nversion = "1.0.0"\n' > "$G/sub/pb/.playbook"; printf 'TAGGED\n' > "$G/sub/pb/CLAUDE.md"
 git -C "$G" init -q -b main && git -C "$G" -c user.email=t@t -c user.name=t add -A && git -C "$G" -c user.email=t@t -c user.name=t commit -qm one && git -C "$G" tag v1.0.0
 printf 'MOVED\n' > "$G/sub/pb/CLAUDE.md"; git -C "$G" -c user.email=t@t -c user.name=t commit -qam two
 O=$($C --playbooks-dir "$FLAG" install "file://$G" --branch v1.0.0 --subdir sub/pb --name gpb --no-alias 2>&1); DETAIL="out: $(printf '%s' "$O" | tr '\n' ' ' | cut -c1-200)"
@@ -106,3 +108,24 @@ chk "8d manifest: [env] profiles = [...]" sh -c "grep -q '^\[env\]' '$FLAG/pflag
 printf '\n[cockpit]\nbase = "x"\n' >> "$FLAG/pal/.playbook"
 $C --playbooks-dir "$FLAG" env pal use pf >/dev/null 2>&1
 chk "info §5.1 manifest rewrite keeps an unknown [cockpit] table" grep -q '^\[cockpit\]' "$FLAG/pal/.playbook"
+
+# 10. info exits non-zero for a name that is not installed, 0 for one that is
+#     (cockpit setup.sh:36 chooses fresh install vs refresh on it)
+chk "10a info <missing> exits non-zero" sh -c "! $C --playbooks-dir $FLAG info not-installed"
+chk "10b info <installed> exits 0"      $C --playbooks-dir "$FLAG" info pflag
+
+# 11. run propagates claude's exit status (cockpit check.sh:38)
+STUB_RC=3 $C --playbooks-dir "$FLAG" run pflag >/dev/null 2>&1; rc=$?; DETAIL="rc=$rc"
+chk "11a run returns claude's rc (3)"   test "$rc" = 3
+STUB_RC=0 $C --playbooks-dir "$FLAG" run pflag >/dev/null 2>&1; rc=$?; DETAIL="rc=$rc"
+chk "11b run returns claude's rc (0)"   test "$rc" = 0
+
+# 12. [source] (repository, subdir) and version survive install and an env rewrite
+#     (/cockpit new reinstalls the running release from them)
+M=$FLAG/gpb/.playbook
+src_ok() { grep -q '^\[source\]' "$M" && grep -Eq "^repository *= *\"file://$G\"" "$M" && grep -Eq '^subdir *= *"sub/pb"' "$M" && grep -Eq '^version *= *"1\.0\.0"' "$M"; }
+DETAIL="manifest: $(tr '\n' '|' < "$M" 2>/dev/null)"
+chk "12a after install: [source] repository+subdir, version" src_ok
+$C --playbooks-dir "$FLAG" env gpb use pf >/dev/null 2>&1
+DETAIL="manifest: $(tr '\n' '|' < "$M" 2>/dev/null)"
+chk "12b after env use rewrite: [source] repository+subdir, version kept" src_ok

@@ -183,7 +183,7 @@ contract, or flag the change before cockpit bumps its pin.
 3. **§8.3: yes.** cockpit moves its pin from v3.14.0 to **v3.17.0**.
 4. **The universe name** is still open.
 
-**§4 verified against v3.17.0: all nine hold, unchanged from v3.14.0.** The check is `docs/handoffs/cockpit-contract-check.sh`: a throwaway HOME, a stub `claude`, and a local git repo for item 3. It ran on Linux x86-64 against both release binaries, each verified against `SHA256SUMS`, and the two outputs are identical:
+**§4 verified against v3.17.0: all nine hold, plus three more cockpit named from its own call sites (10–12), all unchanged from v3.14.0.** The check is `docs/handoffs/cockpit-contract-check.sh`: a throwaway HOME, a stub `claude`, and a local git repo for item 3. It ran on Linux x86-64 against both release binaries, each verified against `SHA256SUMS`, and the two outputs are identical (32 checks):
 
 | § 4 item | Result |
 |---|---|
@@ -196,6 +196,9 @@ contract, or flag the change before cockpit bumps its pin.
 | 7 `--version` prints `claude-playbook version vX.Y.Z` | PASS |
 | 8 env-profile store format (`[set]`, `unset`, `description`) and `[env] profiles = [...]` | PASS |
 | 9 release asset names and `SHA256SUMS` | PASS (v3.17.0: `claude-playbook-{darwin,linux}-{arm64,amd64}` + `SHA256SUMS`) |
+| 10 `info <missing>` exits non-zero, `info <installed>` exits 0 (cockpit `setup.sh:36` chooses between install and refresh on it) | PASS |
+| 11 `run` returns claude's exit status (a stub exiting 3 gives rc 3; cockpit `check.sh:38`) | PASS |
+| 12 `[source]` (`repository`, `subdir`) and `version` survive `install` and an `env use` rewrite (`/cockpit new` reinstalls the running release from them) | PASS |
 
 What changed since v3.14.0, and why it doesn't touch cockpit:
 
