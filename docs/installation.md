@@ -110,8 +110,10 @@ devbox needs none of this: it enables flakes itself.
   exact commit. One caveat: a **brand-new** devbox project also resolves devbox's
   own `github:NixOS/nixpkgs` reference once, through that same API, so behind a
   shared IP its first `devbox add`/`devbox run` can still hit the rate limit.
-  Retry after the hourly reset, or configure a GitHub token for Nix
-  (`access-tokens`). Once `devbox.lock` is committed, no call is made at all.
+  The dependable fixes are a committed `devbox.lock` (it pins nixpkgs, so no call
+  is made at all) or a GitHub token for Nix (`access-tokens`). Waiting for the
+  hourly reset is not: on a busy shared IP, other users can spend the whole
+  60-call budget before devbox's lookup runs (seen three times in a row on one).
 - **Pin a tag.** The flake builds from source at the ref you give; the version
   it reports is the last release's, so a commit between releases would claim a
   version it isn't.
