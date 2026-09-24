@@ -36,6 +36,16 @@ type selfUpdateConfig struct {
 	force          bool
 	checkOnly      bool
 	verifyExec     bool // exec the downloaded binary with --version before swapping it in
+	nixManaged     bool // execPath lives in the Nix store (devbox, nix profile): never replace it
+}
+
+// isNixStorePath reports whether a (symlink-resolved) path is inside the Nix
+// store. A binary there was installed by Nix -- devbox, `nix profile`, a
+// flake -- and the store is read-only and content-addressed: replacing a file
+// in it would corrupt that package, and the advice this command otherwise
+// gives on a permission error ("re-run with sudo") would do exactly that.
+func isNixStorePath(p string) bool {
+	return strings.HasPrefix(p, "/nix/store/")
 }
 
 // runSelfUpdate builds a selfUpdateConfig from the real runtime/env and runs it.
@@ -64,9 +74,15 @@ func runSelfUpdate(force, checkOnly bool) error {
 		force:          force,
 		checkOnly:      checkOnly,
 		verifyExec:     true,
+		// Judged on the RESOLVED path: under devbox, argv[0] is the profile's
+		// stable symlink (.devbox/nix/profile/default/bin/...), not the store.
+		nixManaged: isNixStorePath(exe),
 	}
 	return selfUpdate(os.Stdout, cfg)
 }
+
+const nixUpdateHint = "Installed through Nix (devbox or a flake): update there instead -- pin the new tag, e.g.\n" +
+	"  devbox add github:ramazanpolat/claude-playbooks/<tag>#claude-playbook"
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -80,6 +96,13 @@ func envOr(key, def string) string {
 func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 	fmt.Fprintf(w, "Current version: %s\n", cfg.currentVersion)
 
+	// A Nix-managed binary is refused before anything else -- no release
+	// lookup, no network, whatever the latest version is: it is never this
+	// command's to replace. --check below still reports, as information.
+	if cfg.nixManaged && !cfg.checkOnly {
+		return fmt.Errorf("%s is managed by Nix and cannot be replaced in place.\n%s", cfg.execPath, nixUpdateHint)
+	}
+
 	latest, err := fetchLatestReleaseTag(cfg)
 	if err != nil {
 		return fmt.Errorf("could not determine the latest release: %w", err)
@@ -92,7 +115,11 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 			fmt.Fprintln(w, "You are on the latest version.")
 		} else {
 			fmt.Fprintf(w, "An update is available: %s -> %s\n", cfg.currentVersion, latest)
-			fmt.Fprintln(w, "Run 'claude-playbook update' to install it.")
+			if cfg.nixManaged {
+				fmt.Fprintln(w, nixUpdateHint)
+			} else {
+				fmt.Fprintln(w, "Run 'claude-playbook update' to install it.")
+			}
 		}
 		return nil
 	}

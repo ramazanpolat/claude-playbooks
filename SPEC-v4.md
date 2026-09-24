@@ -96,7 +96,7 @@ Since v2.13.0, per-playbook commands are **launchers** — symlinks to the `clau
 
 ## Distribution
 
-The binary reaches a machine by one of three routes. All of them land the same
+The binary reaches a machine by one of four routes. All of them land the same
 artifact: a `claude-playbook` executable and a relative `cpb` symlink beside it,
 in one directory on `PATH`.
 
@@ -105,12 +105,31 @@ in one directory on `PATH`.
 | Install script | `install.sh`, piped from the raw repository URL or run from a clone | `$INSTALL_DIR`, else `/usr/local/bin` when writable, else `~/.local/bin` |
 | npm / npx | the `cpb-cli` package, whose `bin` entries both point at `bin/npx-shim.sh` | `~/.local/bin` only |
 | Source | `build.sh`, then a manual `mv` | wherever the operator puts it |
+| devbox / Nix | `flake.nix`, as `github:ramazanpolat/claude-playbooks/<tag>#claude-playbook` | the Nix store, reached through the devbox (or `nix profile`) profile's `bin` |
 
 Neither script edits a shell rc file. Completion lines are printed for the
 operator to add, never appended. `cpb` is created as a **relative** symlink to
 `claude-playbook`: a symlink to the binary under any other name is dispatched as
 a playbook launcher (see *Launcher Commands*), so the short name is the one
 exception the binary recognises as itself, together with `claude-playbook`.
+
+### The flake (devbox / Nix)
+
+`flake.nix` builds `claude-playbook` **from source** at the pinned ref with
+`buildGoModule` (`CGO_ENABLED=0`, so a static binary whose runtime closure is
+data only: tzdata, iana-etc, mailcap), for `x86_64`/`aarch64` × `linux`/`darwin`.
+It never fetches release binaries: a tagged commit cannot carry the hashes of
+binaries built after it was tagged. The version stamped in is `v` + the
+`package.json` version, which `release.yml` requires to equal the tag, so a
+**tag** is the ref to pin; a commit between releases reports the previous
+release's version. `vendorHash` must be recomputed whenever `go.mod`/`go.sum`
+change. The flake's `nixpkgs` input affects only the build, never a user's
+profile. `.github/workflows/nix.yml` builds it on Linux and macOS and adds it to
+a fresh devbox project by a real `github:` reference.
+
+Launchers written from a devbox-installed binary target the path as invoked (the
+profile's stable `bin` entry), never the versioned store path, and an unwritable
+binary directory falls back to `~/.local/bin` as for any read-only install.
 
 ### Release asset naming
 
@@ -1056,6 +1075,18 @@ If already on the latest version, it prints `Already up to date.` and exits
 (e.g. a root-owned `/usr/local/bin`), it reports that elevated privileges are
 needed. `GITHUB_TOKEN`, when set, is used for the GitHub API request to avoid
 rate limits.
+
+**A Nix-managed binary is never replaced.** When the resolved executable lies in
+`/nix/store/` (installed through devbox, `nix profile` or the flake), the store
+is read-only and content-addressed: replacing a file there would corrupt the
+package, and the generic permission advice would suggest `sudo` against it. So
+`update` and `update --force` exit non-zero **before any release lookup** (no
+network, whatever the latest version is), naming devbox and the `github:`
+reference to re-pin; an up-to-date store binary never answers *Already up to
+date.* as if it could update itself. `update --check` still reports, and prints
+the same hint instead of *Run 'claude-playbook update'*. The decision uses the
+symlink-resolved path, because under devbox `argv[0]` is the profile's symlink,
+not the store.
 
 #### `claude-playbook update <name>` — update a playbook
 

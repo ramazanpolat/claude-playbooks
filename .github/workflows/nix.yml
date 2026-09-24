@@ -1,0 +1,105 @@
+name: nix
+
+# The flake is how devbox and Nix users install claude-playbook:
+#
+#   devbox add github:ramazanpolat/claude-playbooks/<tag>#claude-playbook
+#
+# This proves it on both OSes, the way a user meets it: a plain `nix build`,
+# then a fresh devbox project that adds the flake by a REAL github: reference
+# (this commit), so devbox.lock records a genuine resolution -- `path:` alone
+# is not what anyone runs.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  flake:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: nix build
+        run: |
+          nix build .#claude-playbook
+          want="claude-playbook version v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
+          got=$(./result/bin/claude-playbook --version)
+          echo "$got"
+          [ "$got" = "$want" ] || { echo "::error::--version is '$got', want '$want'"; exit 1; }
+          [ "$(./result/bin/cpb --version)" = "$want" ] || { echo "::error::cpb does not report $want"; exit 1; }
+          [ -L result/bin/cpb ] || { echo "::error::cpb is not a symlink"; exit 1; }
+
+      - name: static on Linux
+        if: runner.os == 'Linux'
+        run: |
+          file -L result/bin/claude-playbook | tee /dev/stderr | grep -q 'statically linked'
+
+      # devbox's own installer, not jetify-com/devbox-install-action: the
+      # action runs `devbox install` in the repository root and fails without
+      # a devbox.json there, and this repo is the package, not a devbox project.
+      - name: install devbox
+        run: |
+          curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
+          devbox version
+
+      - name: devbox add github:<this commit>
+        env:
+          # Self-update's release lookup; authenticated so a hosted runner's
+          # shared IP is not rate-limited.
+          GITHUB_TOKEN: ${{ github.token }}
+          REF: github:${{ github.repository }}/${{ github.event.pull_request.head.sha || github.sha }}#claude-playbook
+        run: |
+          set -eu
+          P=$(mktemp -d); cd "$P"
+          devbox init
+          devbox add "$REF"
+          # The lock records the pinned github: resolution, not a moving ref.
+          grep -F "$REF" devbox.lock
+          want="claude-playbook version v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/package.json" | head -1)"
+          [ "$(devbox run -- claude-playbook --version)" = "$want" ]
+          # command -v resolves inside the project's profile, not the store.
+          devbox run -- sh -c 'command -v claude-playbook' | tee /dev/stderr | grep -q "$P/.devbox/"
+
+          # Project-local playbooks root: install + info land under it, and
+          # no launcher is written even when one is ASKED for (--alias):
+          # launchers are managed only for the default root. ~/.local/bin is
+          # created first, so an unchanged listing means nothing was written
+          # there, not that there was nowhere to write.
+          mkdir -p fix "$HOME/.local/bin"; printf 'name = "fx"\n' > fix/.playbook; printf '# fx\n' > fix/CLAUDE.md
+          before=$(ls -A "$HOME/.local/bin" | sort)
+          out=$(devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook install "$P/fix" --name fx --alias fxcmd 2>&1)
+          echo "$out"
+          echo "$out" | grep -q 'launchers are managed only for the default playbooks root'
+          devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook info fx | grep -q "^Path: *$P/pb/fx"
+          [ "$before" = "$(ls -A "$HOME/.local/bin" | sort)" ]
+          [ ! -e "$HOME/.local/bin/fxcmd" ] && [ ! -e "$P/.devbox/nix/profile/default/bin/fxcmd" ]
+
+          # run reaches claude with CLAUDE_CONFIG_DIR = the install.
+          mkdir -p stub; printf '#!/bin/sh\necho "CFG=$CLAUDE_CONFIG_DIR"\n' > stub/claude; chmod +x stub/claude
+          # A script FILE with the values written in: PATH must be extended
+          # inside devbox's environment (an outer "$PATH" drops the profile),
+          # and `devbox run` re-wraps its command as a script, so `sh -c ...`
+          # positional arguments do not survive it.
+          printf '#!/bin/sh\nPATH="%s:$PATH" CLAUDE_PLAYBOOKS_DIR="%s" exec claude-playbook run fx\n' "$P/stub" "$P/pb" > runfx.sh
+          devbox run -- sh "$P/runfx.sh" | tee /dev/stderr | grep -qx "CFG=$P/pb/fx"
+
+          # Self-update refuses a Nix-managed binary even when it is current
+          # (this commit reports the latest release's version), before any
+          # lookup, and never suggests sudo.
+          # Explicit exits: a negated pipeline never trips set -e, and inside a
+          # loop only the last iteration's status would count.
+          for args in "update" "update --force"; do
+            if out=$(devbox run -- claude-playbook $args 2>&1); then echo "::error::'$args' did not refuse"; echo "$out"; exit 1; fi
+            echo "$out" | grep -q 'managed by Nix' || { echo "::error::'$args' refused without naming Nix"; echo "$out"; exit 1; }
+            if echo "$out" | grep -qi -e sudo -e 'up to date'; then echo "::error::'$args' mentions sudo or 'up to date'"; echo "$out"; exit 1; fi
+          done
