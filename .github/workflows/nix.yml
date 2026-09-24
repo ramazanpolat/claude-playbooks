@@ -44,10 +44,13 @@ jobs:
         run: |
           file -L result/bin/claude-playbook | tee /dev/stderr | grep -q 'statically linked'
 
-      - uses: jetify-com/devbox-install-action@v0.13.0
-        with:
-          enable-cache: false
-          skip-nix-installation: true
+      # devbox's own installer, not jetify-com/devbox-install-action: the
+      # action runs `devbox install` in the repository root and fails without
+      # a devbox.json there, and this repo is the package, not a devbox project.
+      - name: install devbox
+        run: |
+          curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
+          devbox version
 
       - name: devbox add github:<this commit>
         env:
