@@ -15,6 +15,9 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 export HOME=$W/home; mkdir -p "$HOME/bin"
 export PATH=$HOME/bin:/usr/bin:/bin
 unset CLAUDE_PLAYBOOKS_DIR CLAUDE_CONFIG_DIR CLAUDE_CONFIG_DIR_OVERRIDE
+# create/install run `pilot wire` when pilot is on PATH (v3.15.0+). A real one
+# would touch state outside this sandbox, so refuse rather than run unhermetic.
+if command -v pilot >/dev/null 2>&1; then echo "refusing: a 'pilot' is on PATH ($(command -v pilot)); not hermetic" >&2; exit 2; fi
 cp "$BIN" "$HOME/bin/claude-playbook"; C=$HOME/bin/claude-playbook
 cat > "$HOME/bin/claude" <<'EOF'
 #!/bin/sh
@@ -104,10 +107,14 @@ chk "8c store: description key"    grep -Eq '^description *=' "$P"
 $C --playbooks-dir "$FLAG" env pflag use pf >/dev/null 2>&1
 chk "8d manifest: [env] profiles = [...]" sh -c "grep -q '^\[env\]' '$FLAG/pflag/.playbook' && grep -Eq '^profiles *= *\[' '$FLAG/pflag/.playbook'"
 
-# §5.1 (informational): does a manifest rewrite keep an unknown table?
+# §5.1 (informational, not contract): a manifest rewrite DROPS an unknown
+# table -- why cockpit keeps its base pin in base.toml. Asserted as documented,
+# and only after the rewrite demonstrably ran.
 printf '\n[cockpit]\nbase = "x"\n' >> "$FLAG/pal/.playbook"
-$C --playbooks-dir "$FLAG" env pal use pf >/dev/null 2>&1
-chk "info §5.1 manifest rewrite keeps an unknown [cockpit] table" grep -q '^\[cockpit\]' "$FLAG/pal/.playbook"
+$C --playbooks-dir "$FLAG" env pal use pf >/dev/null 2>&1; rc=$?
+DETAIL="rc=$rc manifest: $(tr '\n' '|' < "$FLAG/pal/.playbook")"
+dropped_ok() { [ "$rc" = 0 ] && grep -Eq '^profiles *= *\[.*"pf"' "$FLAG/pal/.playbook" && ! grep -q '^\[cockpit\]' "$FLAG/pal/.playbook"; }
+chk "info §5.1 manifest rewrite drops an unknown [cockpit] table" dropped_ok
 
 # 10. info exits non-zero for a name that is not installed, 0 for one that is
 #     (cockpit setup.sh:36 chooses fresh install vs refresh on it)
@@ -126,6 +133,10 @@ M=$FLAG/gpb/.playbook
 src_ok() { grep -q '^\[source\]' "$M" && grep -Eq "^repository *= *\"file://$G\"" "$M" && grep -Eq '^subdir *= *"sub/pb"' "$M" && grep -Eq '^version *= *"1\.0\.0"' "$M"; }
 DETAIL="manifest: $(tr '\n' '|' < "$M" 2>/dev/null)"
 chk "12a after install: [source] repository+subdir, version" src_ok
-$C --playbooks-dir "$FLAG" env gpb use pf >/dev/null 2>&1
-DETAIL="manifest: $(tr '\n' '|' < "$M" 2>/dev/null)"
-chk "12b after env use rewrite: [source] repository+subdir, version kept" src_ok
+# The rewrite must have RUN (exit 0, and the manifest now names the profile),
+# or a failed command would leave 12a's file and pass on stale content.
+$C --playbooks-dir "$FLAG" env gpb use pf >/dev/null 2>&1; rc=$?
+DETAIL="rc=$rc manifest: $(tr '\n' '|' < "$M" 2>/dev/null)"
+uses_pf() { grep -Eq '^profiles *= *\[.*"pf"' "$1"; }
+rewrite_ok() { [ "$rc" = 0 ] && uses_pf "$M" && src_ok; }
+chk "12b after env use rewrite: [source] repository+subdir, version kept" rewrite_ok

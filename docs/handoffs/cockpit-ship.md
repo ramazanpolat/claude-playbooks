@@ -183,7 +183,7 @@ contract, or flag the change before cockpit bumps its pin.
 3. **§8.3: yes.** cockpit moves its pin from v3.14.0 to **v3.17.0**.
 4. **The universe name** is still open.
 
-**§4 verified against v3.17.0: all nine hold, plus three more cockpit named from its own call sites (10–12), all unchanged from v3.14.0.** The check is `docs/handoffs/cockpit-contract-check.sh`: a throwaway HOME, a stub `claude`, and a local git repo for item 3. It ran on Linux x86-64 against both release binaries, each verified against `SHA256SUMS`, and the two outputs are identical (32 checks):
+**§4 verified against v3.17.0: all nine hold, plus three more cockpit named from its own call sites (10–12), all unchanged from v3.14.0.** The check is `docs/handoffs/cockpit-contract-check.sh`: a throwaway HOME, a stub `claude`, and a local git repo for item 3. It ran on Linux x86-64 against both release binaries, each verified against `SHA256SUMS`, and the two outputs are identical (32 contract checks, all PASS, plus one informational check of §5.1, also PASS):
 
 | § 4 item | Result |
 |---|---|
@@ -208,4 +208,4 @@ What changed since v3.14.0, and why it doesn't touch cockpit:
 - **`create`/`install` run `pilot wire` when `pilot` is on PATH.** It is best-effort and silent, and a ship without `pilot` sees nothing.
 - **No CLI code changed after v3.15.0.** v3.16.0 and v3.17.0 are test and release infrastructure.
 
-§5.1 still holds on v3.17.0, as on v3.14.0: a manifest rewrite (`env <pb> use …`) drops an unknown table. Keeping the base pin in `base.toml` stays right.
+§5.1 still holds on v3.17.0, as on v3.14.0: a manifest rewrite (`env <pb> use …`) drops an unknown table. The script asserts that as documented, and only after checking the rewrite ran. The script refuses to start (exit 2) when a `pilot` is on PATH, because `install` would call it and the run would no longer be hermetic. Keeping the base pin in `base.toml` stays right.
