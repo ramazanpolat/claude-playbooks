@@ -66,20 +66,26 @@ CLAUDE_PLAYBOOKS_DIR=$ENVR $C --playbooks-dir "$FLAG" env pflag set KF=1 >/dev/n
 chk "1k env: env root manifest"      grep -q KE "$ENVR/penv/.playbook"
 chk "1l env: flag beats env"         grep -q KF "$FLAG/pflag/.playbook"
 
-# 2. install <local-dir> --name --no-alias under a custom root; --alias there writes no launcher
-before=$(ls "$HOME/bin" | sort)
+# 2. install <local-dir> --name --no-alias under a custom root; --alias there writes no launcher.
+#    "No launcher" is judged on BOTH candidate launcher dirs -- the binary's own
+#    ($HOME/bin here) and ~/.local/bin (the fallback for an unwritable one) --
+#    and on every entry, whatever its name.
+bins() { ls -A "$HOME/bin" "$HOME/.local/bin" 2>/dev/null | sort; }
+mkdir -p "$HOME/.local/bin"
+before=$(bins)
+O=$($C --playbooks-dir "$FLAG" install "$FIX" --name pna --no-alias 2>&1); rc=$?
+DETAIL="rc=$rc bins changed: $(diff <(printf '%s\n' "$before") <(bins) | grep '^[<>]' | tr '\n' ' ')"
+na_ok() { [ "$rc" = 0 ] && test -f "$FLAG/pna/CLAUDE.md" && [ "$before" = "$(bins)" ]; }
+chk "2a install --no-alias under custom root: installs, writes no launcher" na_ok
+before=$(bins)
 O=$($C --playbooks-dir "$FLAG" install "$FIX" --name pal --alias palx 2>&1); rc=$?
-after=$(ls "$HOME/bin" | sort)
-chk "2a install --no-alias under custom root" test -f "$FLAG/pflag/CLAUDE.md"
+after=$(bins)
 DETAIL="rc=$rc out: $(printf '%s' "$O" | tr '\n' ' ' | cut -c1-160)"
 chk "2b --alias under custom root: installs" sh -c "[ $rc = 0 ] && test -f '$FLAG/pal/CLAUDE.md'"
 chk "2c --alias under custom root: prints the default-root note" sh -c "printf '%s' \"\$0\" | grep -q 'launchers are managed only for the default playbooks root'" "$O"
-DETAIL="bin before/after differ"
-# Nowhere at all: the binary's own dir, and ~/.local/bin (the fallback for
-# an unwritable binary dir), and anywhere else under this sandbox.
-DETAIL="found: $(find "$W" -name palx 2>/dev/null | tr '\n' ' ')"
-no_launcher() { test "$before" = "$after" && [ -z "$(find "$W" -name palx 2>/dev/null)" ]; }
-chk "2d --alias under custom root: writes no launcher" no_launcher
+DETAIL="bins changed: $(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") | grep '^[<>]' | tr '\n' ' ')"
+no_launcher() { [ "$before" = "$after" ] && [ -z "$(find "$W" -name palx 2>/dev/null)" ]; }
+chk "2d --alias under custom root: writes no launcher (any name, either dir)" no_launcher
 
 # 3. install <git-url> --branch <tag> --subdir <dir> --name N
 G=$W/src; mkdir -p "$G/sub/pb"; printf 'name = "g"\nversion = "1.0.0"\n' > "$G/sub/pb/.playbook"; printf 'TAGGED\n' > "$G/sub/pb/CLAUDE.md"
