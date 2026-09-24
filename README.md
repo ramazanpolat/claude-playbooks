@@ -14,7 +14,16 @@ curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/
 ```
 
 Linux and macOS, amd64/arm64. Installs `claude-playbook` and the shorter `cpb`.
-In a devbox project: `devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook"`.
+
+In a [devbox](https://www.jetify.com/devbox) project, add it as a package instead;
+devbox pins it in `devbox.lock`:
+
+```bash
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook"
+devbox run -- cpb --version
+```
+
+[Using it in a devbox project →](docs/installation.md#using-it-in-a-devbox-project) ·
 [Other ways to install →](docs/installation.md)
 
 ## 60-second start

@@ -81,28 +81,73 @@ every new shell.
 
 ## With devbox or Nix
 
-claude-playbooks is a Nix flake, so a devbox project pins it like any other
-package (v3.18.0 or later):
+claude-playbooks is a Nix flake, so a [devbox](https://www.jetify.com/devbox)
+project pins it like any other package (v3.18.0 or later):
 
 ```bash
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook"
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook"
 devbox run -- cpb --version
 ```
 
-or, without devbox (flakes must be enabled, which a default Nix install does
-not do; the flag below enables them for one command, or set
-`experimental-features = nix-command flakes` in `nix.conf`):
+### Using it in a devbox project
+
+The usual shape keeps a project's playbooks **inside** the project and gives each
+one a `devbox run` command. A `devbox.json` like this:
+
+```json
+{
+  "packages": [
+    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook",
+    "claude-code@latest"
+  ],
+  "env": {
+    "CLAUDE_PLAYBOOKS_DIR": "$DEVBOX_PROJECT_ROOT/.playbooks"
+  },
+  "shell": {
+    "scripts": {
+      "myplaybook": "exec claude-playbook run myplaybook \"$@\""
+    }
+  }
+}
+```
+
+then:
 
 ```bash
-nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook" -- --version
-nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook"
+devbox run -- cpb install <git-url-or-local-dir> --name myplaybook
+devbox run myplaybook         # launch; arguments go to claude
+```
+
+- **`CLAUDE_PLAYBOOKS_DIR`** puts installs in `.playbooks/` in the project, so
+  nothing lands in `~/.claude-playbooks`. Add `.playbooks/` to `.gitignore`: it
+  holds each playbook's own logins and history.
+- **The script is the launcher.** claude-playbook writes launcher commands only
+  for its default folder, so a project-local playbook is launched with
+  `devbox run <name>` (or `devbox run -- cpb run <name>`). The `"$@"` passes your
+  arguments through to claude, and `exec` makes claude's exit code the command's.
+- **`claude-code@latest`** brings Claude Code itself into the project; drop it to
+  use the `claude` already on your PATH.
+- **Commit `devbox.json` and `devbox.lock`**: the lock pins claude-playbooks to the
+  tag's exact commit, and nixpkgs too (see the rate-limit note below).
+
+### Without devbox
+
+Flakes must be enabled, which a default Nix install does not do; the flag below
+enables them for one command, or set `experimental-features = nix-command flakes`
+in `nix.conf`:
+
+```bash
+nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook" -- --version
+nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook"
 ```
 
 (`nix profile add` is the current name; older Nix versions call it `nix profile install`.)
 devbox needs none of this: it enables flakes itself.
 
+### Notes
+
 - **Use the `git+https:` form shown here.** The shorter
-  `github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook` also works, but it
+  `github:ramazanpolat/claude-playbooks/v3.19.0#claude-playbook` also works, but it
   is resolved through GitHub's API, which rate-limits unauthenticated callers per
   IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
   it only with a GitHub token configured for Nix (`access-tokens`) or on a
@@ -132,10 +177,6 @@ devbox needs none of this: it enables flakes itself.
   devbox rm "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<old-tag>#claude-playbook"
   devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<new-tag>#claude-playbook"
   ```
-- Inside a devbox project, point `CLAUDE_PLAYBOOKS_DIR` at a project-local folder
-  to keep that project's playbooks out of `~/.claude-playbooks`. Launchers are
-  only managed for the default root, so there you run playbooks with
-  `cpb run <name>`.
 
 ## Run it with npx (no install needed)
 
