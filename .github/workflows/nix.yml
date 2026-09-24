@@ -80,9 +80,12 @@ jobs:
 
           # run reaches claude with CLAUDE_CONFIG_DIR = the install.
           mkdir -p stub; printf '#!/bin/sh\necho "CFG=$CLAUDE_CONFIG_DIR"\n' > stub/claude; chmod +x stub/claude
-          # PATH is extended INSIDE devbox's environment: an outer "$PATH"
-          # would drop the devbox profile and lose claude-playbook itself.
-          devbox run -- sh -c 'PATH="$1:$PATH" CLAUDE_PLAYBOOKS_DIR="$2" claude-playbook run fx' _ "$P/stub" "$P/pb" | grep -qx "CFG=$P/pb/fx"
+          # A script FILE with the values written in: PATH must be extended
+          # inside devbox's environment (an outer "$PATH" drops the profile),
+          # and `devbox run` re-wraps its command as a script, so `sh -c ...`
+          # positional arguments do not survive it.
+          printf '#!/bin/sh\nPATH="%s:$PATH" CLAUDE_PLAYBOOKS_DIR="%s" exec claude-playbook run fx\n' "$P/stub" "$P/pb" > runfx.sh
+          devbox run -- sh "$P/runfx.sh" | tee /dev/stderr | grep -qx "CFG=$P/pb/fx"
 
           # Self-update refuses a Nix-managed binary even when it is current
           # (this commit reports the latest release's version), before any
