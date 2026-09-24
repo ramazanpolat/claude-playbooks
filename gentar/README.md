@@ -247,6 +247,7 @@ only says what each suite is for.
 | `pilot-self-uninstall` | a simulated pilot at the most destructive prompt the tool has |
 | `pilot-agent-session` | a REAL agent launched through a playbook, governed by it (needs a credential; a one-token provider preflight names quota or auth failures as the provider's) |
 | `pilot-wire-real` | `create` and `install` against the REAL `pilot`: pilot-profile's `skills/profile` link lands, `wire --all` is a no-op after |
+| `cockpit-contract` | the twelve behaviours cockpit relies on (`docs/handoffs/cockpit-ship.md` §4), by `docs/handoffs/cockpit-contract-check.sh` against the binary built from this checkout |
 
 ## Watching a run
 

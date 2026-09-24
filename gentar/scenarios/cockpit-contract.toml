@@ -1,0 +1,32 @@
+# claude-playbooks own-arena suite 18: the contract cockpit relies on.
+#
+# cockpit (santiment/cockpit) installs and launches its playbooks through
+# claude-playbook and pins it by release. docs/handoffs/cockpit-ship.md §4 lists
+# the twelve behaviours it depends on -- root precedence, local and git
+# installs, launchers under a custom root, run's argument and exit-status
+# forwarding, the config-dir override, info's lines and exit code, --version,
+# the env-profile store, and [source]/version surviving a manifest rewrite.
+# docs/handoffs/cockpit-contract-check.sh checks them hermetically (throwaway
+# HOME, stub claude, local git repo) against one binary.
+#
+# Here it runs against the binary built from THIS checkout, so the release
+# gate refuses any v* that would break cockpit, instead of cockpit finding out
+# after its next pin bump. The script is the single source of the checks; this
+# suite only builds the binary and demands a clean result.
+
+[scenario]
+name = "cockpit-contract"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+]
+
+[[verify.commands]]
+# Every check PASSes -- the 32 contract checks and the informational §5.1 one --
+# and none FAILs. On failure the output names the failing checks.
+command = '''out=$(bash "$WORKSPACE_DIR/docs/handoffs/cockpit-contract-check.sh" "$HOME/.local/bin/claude-playbook" 2>&1); rc=$?; fails=$(printf '%s\n' "$out" | grep '^FAIL'); passes=$(printf '%s\n' "$out" | grep -c '^PASS'); if [ "$rc" = 0 ] && [ -z "$fails" ] && [ "$passes" -ge 33 ]; then echo "contract-ok ($passes PASS)"; else echo "rc=$rc passes=$passes"; printf '%s\n' "$fails"; fi'''
+contains = "contract-ok"
