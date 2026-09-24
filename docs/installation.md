@@ -107,8 +107,11 @@ devbox needs none of this: it enables flakes itself.
   IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
   it only with a GitHub token configured for Nix (`access-tokens`) or on a
   non-shared IP. `git+https` makes no API call, and devbox.lock pins the tag's
-  exact commit. (A new devbox project's lock also gets a `github:NixOS/nixpkgs`
-  entry: that is devbox's own nixpkgs reference, not claude-playbooks.)
+  exact commit. One caveat: a **brand-new** devbox project also resolves devbox's
+  own `github:NixOS/nixpkgs` reference once, through that same API, so behind a
+  shared IP its first `devbox add`/`devbox run` can still hit the rate limit.
+  Retry after the hourly reset, or configure a GitHub token for Nix
+  (`access-tokens`). Once `devbox.lock` is committed, no call is made at all.
 - **Pin a tag.** The flake builds from source at the ref you give; the version
   it reports is the last release's, so a commit between releases would claim a
   version it isn't.
