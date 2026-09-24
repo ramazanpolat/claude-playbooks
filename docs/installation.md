@@ -89,12 +89,17 @@ devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v
 devbox run -- cpb --version
 ```
 
-or, without devbox:
+or, without devbox (flakes must be enabled, which a default Nix install does
+not do; the flag below enables them for one command, or set
+`experimental-features = nix-command flakes` in `nix.conf`):
 
 ```bash
-nix run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook" -- --version
-nix profile install "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook"
+nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook" -- --version
+nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook"
 ```
+
+(`nix profile add` is the current name; older Nix versions call it `nix profile install`.)
+devbox needs none of this: it enables flakes itself.
 
 - **Use the `git+https:` form shown here.** The shorter
   `github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook` also works, but it
@@ -102,7 +107,8 @@ nix profile install "git+https://github.com/ramazanpolat/claude-playbooks?ref=re
   IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
   it only with a GitHub token configured for Nix (`access-tokens`) or on a
   non-shared IP. `git+https` makes no API call, and devbox.lock pins the tag's
-  exact commit.
+  exact commit. (A new devbox project's lock also gets a `github:NixOS/nixpkgs`
+  entry: that is devbox's own nixpkgs reference, not claude-playbooks.)
 - **Pin a tag.** The flake builds from source at the ref you give; the version
   it reports is the last release's, so a commit between releases would claim a
   version it isn't.
@@ -112,8 +118,15 @@ nix profile install "git+https://github.com/ramazanpolat/claude-playbooks?ref=re
   with a downloaded release binary, so the build adds about two minutes there.
   Later installs of the same ref are instant.
 - **Update through devbox**, not with `cpb update`: the binary lives in the
-  read-only Nix store, and `cpb update` refuses to touch it. Re-add with the new
-  tag (`devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<new-tag>#claude-playbook"`).
+  read-only Nix store, and `cpb update` refuses to touch it. **Replace** the
+  entry -- a `devbox add` with a different tag does not replace the old one, it
+  adds a second claude-playbook package beside it. Either change the tag in
+  `devbox.json` and run `devbox install`, or remove the old reference first:
+
+  ```bash
+  devbox rm "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<old-tag>#claude-playbook"
+  devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<new-tag>#claude-playbook"
+  ```
 - Inside a devbox project, point `CLAUDE_PLAYBOOKS_DIR` at a project-local folder
   to keep that project's playbooks out of `~/.claude-playbooks`. Launchers are
   only managed for the default root, so there you run playbooks with
@@ -198,7 +211,7 @@ It downloads the release asset for your OS/architecture, verifies it, and
 atomically replaces the running binary (resolving the `cpb` symlink so the real
 binary is updated). If the install directory needs elevated privileges to write,
 it says so. A binary installed through devbox or Nix is never replaced: `update`
-refuses and tells you to re-pin the tag in devbox instead (see
+refuses and tells you to change the tag in devbox instead (see
 [With devbox or Nix](#with-devbox-or-nix)).
 
 To update a *playbook* rather than the tool, see

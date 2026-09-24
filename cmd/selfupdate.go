@@ -81,8 +81,11 @@ func runSelfUpdate(force, checkOnly bool) error {
 	return selfUpdate(os.Stdout, cfg)
 }
 
-const nixUpdateHint = "Installed through Nix (devbox or a flake): update there instead -- pin the new tag, e.g.\n" +
-	"  devbox add \"git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook\""
+// A devbox `add` with a different ref APPENDS a second package rather than
+// replacing the first, so the hint says to change the ref, not to re-add.
+const nixUpdateHint = "Installed through Nix (devbox or a flake): update there instead. In a devbox project, change\n" +
+	"the tag in devbox.json and run `devbox install`; the package is\n" +
+	"  git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook"
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {

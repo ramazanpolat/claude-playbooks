@@ -1088,8 +1088,9 @@ rate limits.
 is read-only and content-addressed: replacing a file there would corrupt the
 package, and the generic permission advice would suggest `sudo` against it. So
 `update` and `update --force` exit non-zero **before any release lookup** (no
-network, whatever the latest version is), naming devbox and the `github:`
-reference to re-pin; an up-to-date store binary never answers *Already up to
+network, whatever the latest version is), telling the operator to change the
+tag in `devbox.json` and run `devbox install` (a `devbox add` with a different
+ref appends a second package rather than replacing the first); an up-to-date store binary never answers *Already up to
 date.* as if it could update itself. `update --check` still reports, and prints
 the same hint instead of *Run 'claude-playbook update'*. The decision uses the
 symlink-resolved path, because under devbox `argv[0]` is the profile's symlink,
