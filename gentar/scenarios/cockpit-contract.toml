@@ -28,9 +28,10 @@ steps = [
 [[verify.commands]]
 # Every check PASSes -- the 32 contract checks and the informational §5.1 one --
 # and none FAILs. On failure the output names the failing checks.
-# CONTRACT_ALLOW_DEV_VERSION=1: this binary is built from a checkout, so it
-# reports `git describe` (phase 2 runs on a release commit BEFORE its tag
-# exists); check 7 then also accepts -N-g<sha> and -dirty. Release binaries
-# are held to the bare vX.Y.Z by the script's default.
-command = '''out=$(CONTRACT_ALLOW_DEV_VERSION=1 bash "$WORKSPACE_DIR/docs/handoffs/cockpit-contract-check.sh" "$HOME/.local/bin/claude-playbook" 2>&1); rc=$?; fails=$(printf '%s\n' "$out" | grep '^FAIL'); passes=$(printf '%s\n' "$out" | grep -c '^PASS'); if [ "$rc" = 0 ] && [ -z "$fails" ] && [ "$passes" -ge 33 ]; then echo "contract-ok ($passes PASS)"; else echo "rc=$rc passes=$passes"; printf '%s\n' "$fails"; fi'''
+# CONTRACT_EXPECT_VERSION: this binary is built from a checkout and stamped
+# with .gentar-version (git describe: v3.18.0-1-g<sha> on the bench, since
+# phase 2 runs on a release commit BEFORE its tag exists; a bare commit in a
+# tagless shallow CI clone). Check 7 then requires exactly that stamp. Release
+# binaries are held to the bare vX.Y.Z by the script's default.
+command = '''out=$(CONTRACT_EXPECT_VERSION="$(cat "$WORKSPACE_DIR/.gentar-version")" bash "$WORKSPACE_DIR/docs/handoffs/cockpit-contract-check.sh" "$HOME/.local/bin/claude-playbook" 2>&1); rc=$?; fails=$(printf '%s\n' "$out" | grep '^FAIL'); passes=$(printf '%s\n' "$out" | grep -c '^PASS'); if [ "$rc" = 0 ] && [ -z "$fails" ] && [ "$passes" -ge 33 ]; then echo "contract-ok ($passes PASS)"; else echo "rc=$rc passes=$passes"; printf '%s\n' "$fails"; fi'''
 contains = "contract-ok"
