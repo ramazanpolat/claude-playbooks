@@ -3,8 +3,12 @@
 
   # For devbox and Nix users:
   #
-  #   devbox add github:ramazanpolat/claude-playbooks/<tag>#claude-playbook
-  #   nix run   github:ramazanpolat/claude-playbooks/<tag>#claude-playbook -- --version
+  #   devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook"
+  #   nix run   "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook" -- --version
+  #
+  # git+https, not github: -- a github: ref is resolved through GitHub's API,
+  # which rate-limits unauthenticated callers per IP (403 behind a shared IP,
+  # through devbox as well). git+https makes no API call and pins the commit.
   #
   # Built from source at the pinned ref, never from release binaries: a tagged
   # commit cannot carry the hashes of binaries built after it was tagged. Pin a

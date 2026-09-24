@@ -326,7 +326,7 @@ func TestSelfUpdateRefusesNixManagedBinary(t *testing.T) {
 
 	var out bytes.Buffer
 	err := selfUpdate(&out, cfg)
-	if err == nil || !strings.Contains(err.Error(), "managed by Nix") || !strings.Contains(err.Error(), "devbox add github:") {
+	if err == nil || !strings.Contains(err.Error(), "managed by Nix") || !strings.Contains(err.Error(), "devbox add \"git+https://github.com/") {
 		t.Fatalf("expected a Nix refusal naming devbox, got err=%v out=%s", err, out.String())
 	}
 	if strings.Contains(err.Error(), "sudo") {
@@ -356,7 +356,7 @@ func TestSelfUpdateCheckOnlyNixManagedHintsDevbox(t *testing.T) {
 	if err := selfUpdate(&out, cfg); err != nil {
 		t.Fatalf("selfUpdate: %v", err)
 	}
-	if !strings.Contains(out.String(), "update is available") || !strings.Contains(out.String(), "devbox add github:") || strings.Contains(out.String(), "Run 'claude-playbook update'") {
+	if !strings.Contains(out.String(), "update is available") || !strings.Contains(out.String(), "devbox add \"git+https://github.com/") || strings.Contains(out.String(), "Run 'claude-playbook update'") {
 		t.Fatalf("expected the devbox hint instead of the self-update hint, got:\n%s", out.String())
 	}
 }

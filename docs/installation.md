@@ -85,17 +85,24 @@ claude-playbooks is a Nix flake, so a devbox project pins it like any other
 package (v3.18.0 or later):
 
 ```bash
-devbox add github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook"
 devbox run -- cpb --version
 ```
 
 or, without devbox:
 
 ```bash
-nix run github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook -- --version
-nix profile install github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook
+nix run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook" -- --version
+nix profile install "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.18.0#claude-playbook"
 ```
 
+- **Use the `git+https:` form shown here.** The shorter
+  `github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook` also works, but it
+  is resolved through GitHub's API, which rate-limits unauthenticated callers per
+  IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
+  it only with a GitHub token configured for Nix (`access-tokens`) or on a
+  non-shared IP. `git+https` makes no API call, and devbox.lock pins the tag's
+  exact commit.
 - **Pin a tag.** The flake builds from source at the ref you give; the version
   it reports is the last release's, so a commit between releases would claim a
   version it isn't.
@@ -105,7 +112,7 @@ nix profile install github:ramazanpolat/claude-playbooks/v3.18.0#claude-playbook
   setup. Later installs of the same ref are instant.
 - **Update through devbox**, not with `cpb update`: the binary lives in the
   read-only Nix store, and `cpb update` refuses to touch it. Re-add with the new
-  tag (`devbox add github:ramazanpolat/claude-playbooks/<new-tag>#claude-playbook`).
+  tag (`devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<new-tag>#claude-playbook"`).
 - Inside a devbox project, point `CLAUDE_PLAYBOOKS_DIR` at a project-local folder
   to keep that project's playbooks out of `~/.claude-playbooks`. Launchers are
   only managed for the default root, so there you run playbooks with

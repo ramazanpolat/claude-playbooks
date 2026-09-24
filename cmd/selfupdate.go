@@ -82,7 +82,7 @@ func runSelfUpdate(force, checkOnly bool) error {
 }
 
 const nixUpdateHint = "Installed through Nix (devbox or a flake): update there instead -- pin the new tag, e.g.\n" +
-	"  devbox add github:ramazanpolat/claude-playbooks/<tag>#claude-playbook"
+	"  devbox add \"git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook\""
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {

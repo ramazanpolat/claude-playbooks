@@ -7,7 +7,8 @@ name: nix
 # This proves it on both OSes, the way a user meets it: a plain `nix build`,
 # then a fresh devbox project that adds the flake by a REAL github: reference
 # (this commit), so devbox.lock records a genuine resolution -- `path:` alone
-# is not what anyone runs.
+# is not what anyone runs. The git+https form is the documented one: a github:
+# ref goes through GitHub's API and is rate-limited per IP.
 
 on:
   pull_request:
@@ -52,12 +53,12 @@ jobs:
           curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
           devbox version
 
-      - name: devbox add github:<this commit>
+      - name: devbox add git+https:<this commit>
         env:
           # Self-update's release lookup; authenticated so a hosted runner's
           # shared IP is not rate-limited.
           GITHUB_TOKEN: ${{ github.token }}
-          REF: github:${{ github.repository }}/${{ github.event.pull_request.head.sha || github.sha }}#claude-playbook
+          REF: git+https://github.com/${{ github.repository }}?rev=${{ github.event.pull_request.head.sha || github.sha }}#claude-playbook
         run: |
           set -eu
           P=$(mktemp -d); cd "$P"
