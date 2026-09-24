@@ -96,6 +96,13 @@ func envOr(key, def string) string {
 func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 	fmt.Fprintf(w, "Current version: %s\n", cfg.currentVersion)
 
+	// A Nix-managed binary is refused before anything else -- no release
+	// lookup, no network, whatever the latest version is: it is never this
+	// command's to replace. --check below still reports, as information.
+	if cfg.nixManaged && !cfg.checkOnly {
+		return fmt.Errorf("%s is managed by Nix and cannot be replaced in place.\n%s", cfg.execPath, nixUpdateHint)
+	}
+
 	latest, err := fetchLatestReleaseTag(cfg)
 	if err != nil {
 		return fmt.Errorf("could not determine the latest release: %w", err)
@@ -119,9 +126,6 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 	if upToDate && !cfg.force {
 		fmt.Fprintln(w, "Already up to date.")
 		return nil
-	}
-	if cfg.nixManaged {
-		return fmt.Errorf("%s is managed by Nix and cannot be replaced in place.\n%s", cfg.execPath, nixUpdateHint)
 	}
 
 	asset := fmt.Sprintf("claude-playbook-%s-%s", cfg.goos, cfg.goarch)

@@ -1080,11 +1080,13 @@ rate limits.
 `/nix/store/` (installed through devbox, `nix profile` or the flake), the store
 is read-only and content-addressed: replacing a file there would corrupt the
 package, and the generic permission advice would suggest `sudo` against it. So
-`update` exits non-zero before downloading anything, naming devbox and the
-`github:` reference to re-pin; `update --check` still reports and prints the same
-hint instead of *Run 'claude-playbook update'*. `Already up to date.` is still
-reported first. The decision uses the symlink-resolved path, because under
-devbox `argv[0]` is the profile's symlink, not the store.
+`update` and `update --force` exit non-zero **before any release lookup** (no
+network, whatever the latest version is), naming devbox and the `github:`
+reference to re-pin; an up-to-date store binary never answers *Already up to
+date.* as if it could update itself. `update --check` still reports, and prints
+the same hint instead of *Run 'claude-playbook update'*. The decision uses the
+symlink-resolved path, because under devbox `argv[0]` is the profile's symlink,
+not the store.
 
 #### `claude-playbook update <name>` — update a playbook
 

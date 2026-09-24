@@ -360,3 +360,25 @@ func TestSelfUpdateCheckOnlyNixManagedHintsDevbox(t *testing.T) {
 		t.Fatalf("expected the devbox hint instead of the self-update hint, got:\n%s", out.String())
 	}
 }
+
+// Refused even when already current, and before any network: an up-to-date
+// store binary must not answer "Already up to date." as if it could update
+// itself (found by the cockpit journey against the flake).
+func TestSelfUpdateRefusesNixManagedBeforeLookup(t *testing.T) {
+	exe := newExecutable(t)
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	cfg := baseConfig(exe, srv)
+	cfg.apiBase = "http://127.0.0.1:1" // nothing listens: a lookup would fail differently
+	cfg.currentVersion = "v9.9.9"
+	cfg.nixManaged = true
+
+	var out bytes.Buffer
+	err := selfUpdate(&out, cfg)
+	if err == nil || !strings.Contains(err.Error(), "managed by Nix") {
+		t.Fatalf("expected the Nix refusal before any lookup, got err=%v out=%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "Latest version") || strings.Contains(out.String(), "up to date") {
+		t.Fatalf("a Nix-managed binary talked about updating itself:\n%s", out.String())
+	}
+}

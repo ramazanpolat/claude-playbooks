@@ -80,10 +80,13 @@ jobs:
 
           # run reaches claude with CLAUDE_CONFIG_DIR = the install.
           mkdir -p stub; printf '#!/bin/sh\necho "CFG=$CLAUDE_CONFIG_DIR"\n' > stub/claude; chmod +x stub/claude
-          devbox run -- env PATH="$P/stub:$PATH" CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook run fx | grep -qx "CFG=$P/pb/fx"
+          # PATH is extended INSIDE devbox's environment: an outer "$PATH"
+          # would drop the devbox profile and lose claude-playbook itself.
+          devbox run -- sh -c 'PATH="$1:$PATH" CLAUDE_PLAYBOOKS_DIR="$2" claude-playbook run fx' _ "$P/stub" "$P/pb" | grep -qx "CFG=$P/pb/fx"
 
-          # Self-update refuses a Nix-managed binary (--force skips the
-          # already-current shortcut) and never suggests sudo.
-          if out=$(devbox run -- claude-playbook update --force 2>&1); then echo "::error::self-update did not refuse"; echo "$out"; exit 1; fi
+          # Self-update refuses a Nix-managed binary even when it is current
+          # (this commit reports the latest release's version), before any
+          # lookup, and never suggests sudo.
+          if out=$(devbox run -- claude-playbook update 2>&1); then echo "::error::self-update did not refuse"; echo "$out"; exit 1; fi
           echo "$out" | grep -q 'managed by Nix'
-          ! echo "$out" | grep -qi sudo
+          ! echo "$out" | grep -qi -e sudo -e 'up to date'
