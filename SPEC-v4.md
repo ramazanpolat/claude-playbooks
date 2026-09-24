@@ -105,7 +105,7 @@ in one directory on `PATH`.
 | Install script | `install.sh`, piped from the raw repository URL or run from a clone | `$INSTALL_DIR`, else `/usr/local/bin` when writable, else `~/.local/bin` |
 | npm / npx | the `cpb-cli` package, whose `bin` entries both point at `bin/npx-shim.sh` | `~/.local/bin` only |
 | Source | `build.sh`, then a manual `mv` | wherever the operator puts it |
-| devbox / Nix | `flake.nix`, as `github:ramazanpolat/claude-playbooks/<tag>#claude-playbook` | the Nix store, reached through the devbox (or `nix profile`) profile's `bin` |
+| devbox / Nix | `flake.nix`, as `git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook` | the Nix store, reached through the devbox (or `nix profile`) profile's `bin` |
 
 Neither script edits a shell rc file. Completion lines are printed for the
 operator to add, never appended. `cpb` is created as a **relative** symlink to
@@ -125,7 +125,14 @@ binaries built after it was tagged. The version stamped in is `v` + the
 release's version. `vendorHash` must be recomputed whenever `go.mod`/`go.sum`
 change. The flake's `nixpkgs` input affects only the build, never a user's
 profile. `.github/workflows/nix.yml` builds it on Linux and macOS and adds it to
-a fresh devbox project by a real `github:` reference.
+a fresh devbox project by a real `git+https:` reference pinned to the commit.
+
+The documented reference form is `git+https://…?ref=refs/tags/<tag>`, not
+`github:…/<tag>`: a `github:` reference is resolved through GitHub's REST API,
+which rate-limits unauthenticated callers per IP, and behind a shared IP both
+`nix` and `devbox` then fail with HTTP 403 (devbox supplies no token for it).
+`git+https` fetches over git, makes no API call, and devbox.lock records the
+tag's exact `rev`.
 
 Launchers written from a devbox-installed binary target the path as invoked (the
 profile's stable `bin` entry), never the versioned store path, and an unwritable
