@@ -28,5 +28,9 @@ steps = [
 [[verify.commands]]
 # Every check PASSes -- the 32 contract checks and the informational §5.1 one --
 # and none FAILs. On failure the output names the failing checks.
-command = '''out=$(bash "$WORKSPACE_DIR/docs/handoffs/cockpit-contract-check.sh" "$HOME/.local/bin/claude-playbook" 2>&1); rc=$?; fails=$(printf '%s\n' "$out" | grep '^FAIL'); passes=$(printf '%s\n' "$out" | grep -c '^PASS'); if [ "$rc" = 0 ] && [ -z "$fails" ] && [ "$passes" -ge 33 ]; then echo "contract-ok ($passes PASS)"; else echo "rc=$rc passes=$passes"; printf '%s\n' "$fails"; fi'''
+# CONTRACT_ALLOW_DEV_VERSION=1: this binary is built from a checkout, so it
+# reports `git describe` (phase 2 runs on a release commit BEFORE its tag
+# exists); check 7 then also accepts -N-g<sha> and -dirty. Release binaries
+# are held to the bare vX.Y.Z by the script's default.
+command = '''out=$(CONTRACT_ALLOW_DEV_VERSION=1 bash "$WORKSPACE_DIR/docs/handoffs/cockpit-contract-check.sh" "$HOME/.local/bin/claude-playbook" 2>&1); rc=$?; fails=$(printf '%s\n' "$out" | grep '^FAIL'); passes=$(printf '%s\n' "$out" | grep -c '^PASS'); if [ "$rc" = 0 ] && [ -z "$fails" ] && [ "$passes" -ge 33 ]; then echo "contract-ok ($passes PASS)"; else echo "rc=$rc passes=$passes"; printf '%s\n' "$fails"; fi'''
 contains = "contract-ok"

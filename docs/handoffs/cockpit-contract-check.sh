@@ -35,7 +35,14 @@ DEF=$HOME/.claude-playbooks ENVR=$W/root-env FLAG=$W/root-flag
 
 # 7. --version
 V=$($C --version 2>&1); DETAIL="got: $V"
-chk "7 --version prints 'claude-playbook version vX.Y.Z'" sh -c "printf '%s' '$V' | grep -Eq '^claude-playbook version v[0-9]+\.[0-9]+\.[0-9]+$'"
+# Strict by default: a RELEASE binary prints a bare vX.Y.Z, and that is what
+# cockpit parses. A build from a checkout reports `git describe`
+# (v3.18.0-1-gce1c8b0, -dirty), which is correct for it -- the arena suite
+# opts into that with CONTRACT_ALLOW_DEV_VERSION=1, and nothing looser.
+VRE='^claude-playbook version v[0-9]+\.[0-9]+\.[0-9]+$'
+[ "${CONTRACT_ALLOW_DEV_VERSION:-}" = 1 ] && VRE='^claude-playbook version v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+-g[0-9a-f]+)?(-dirty)?$'
+version_ok() { printf '%s' "$V" | grep -Eq "$VRE"; }
+chk "7 --version prints 'claude-playbook version vX.Y.Z'" version_ok
 
 # 1. playbooks-root precedence: flag > CLAUDE_PLAYBOOKS_DIR > ~/.claude-playbooks
 $C install "$FIX" --name pdef --no-alias >/dev/null 2>&1
