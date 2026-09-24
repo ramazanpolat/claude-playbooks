@@ -71,12 +71,18 @@ jobs:
           devbox run -- sh -c 'command -v claude-playbook' | tee /dev/stderr | grep -q "$P/.devbox/"
 
           # Project-local playbooks root: install + info land under it, and
-          # nothing is written to ~/.local/bin.
-          mkdir -p fix; printf 'name = "fx"\n' > fix/.playbook; printf '# fx\n' > fix/CLAUDE.md
-          before=$(ls -A "$HOME/.local/bin" 2>/dev/null | sort || true)
-          devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook install "$P/fix" --name fx --no-alias
+          # no launcher is written even when one is ASKED for (--alias):
+          # launchers are managed only for the default root. ~/.local/bin is
+          # created first, so an unchanged listing means nothing was written
+          # there, not that there was nowhere to write.
+          mkdir -p fix "$HOME/.local/bin"; printf 'name = "fx"\n' > fix/.playbook; printf '# fx\n' > fix/CLAUDE.md
+          before=$(ls -A "$HOME/.local/bin" | sort)
+          out=$(devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook install "$P/fix" --name fx --alias fxcmd 2>&1)
+          echo "$out"
+          echo "$out" | grep -q 'launchers are managed only for the default playbooks root'
           devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook info fx | grep -q "^Path: *$P/pb/fx"
-          [ "$before" = "$(ls -A "$HOME/.local/bin" 2>/dev/null | sort || true)" ]
+          [ "$before" = "$(ls -A "$HOME/.local/bin" | sort)" ]
+          [ ! -e "$HOME/.local/bin/fxcmd" ] && [ ! -e "$P/.devbox/nix/profile/default/bin/fxcmd" ]
 
           # run reaches claude with CLAUDE_CONFIG_DIR = the install.
           mkdir -p stub; printf '#!/bin/sh\necho "CFG=$CLAUDE_CONFIG_DIR"\n' > stub/claude; chmod +x stub/claude
