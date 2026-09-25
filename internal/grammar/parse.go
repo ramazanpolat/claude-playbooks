@@ -606,9 +606,18 @@ func (p *parser) apply(s *Stmt) *Error {
 	}
 	s.File = p.toks[p.i].Text
 	p.i++
-	if p.kw("--dry-run") != "" {
-		s.DryRun = true
+	// --yes is the second confirmation a file with DROP PLAYBOOK needs.
+	for !p.atEnd() {
+		switch p.kw("--dry-run", "--yes") {
+		case "--dry-run":
+			s.DryRun = true
+		case "--yes":
+			s.Yes = true
+		default:
+			return nil
+		}
 	}
+	p.kw("--dry-run", "--yes")
 	return nil
 }
 

@@ -63,7 +63,7 @@ here reads, writes or calls anything of pilot-profile's.
 ## Grammar
 
 ```
-command    := write | read | select | APPLY <file> [--dry-run]
+command    := write | read | select | APPLY <file> [--dry-run] [--yes]
                                            select: v3.21.0, see SELECT
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
@@ -122,6 +122,24 @@ and `BRANCH` / `SUBDIR` only with `FROM`; `ALIAS` and `NO ALIAS` exclude each
 other. The clauses of `origin` and `launcher` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal, as `delete` does;
 `--yes` skips it.
+
+Two limits keep every statement whole-or-nothing (decided 2026-09-26):
+
+- `RENAME TO`, `ALIAS` and `NO ALIAS` are not combined with environment or
+  variable clauses in one statement: a rename after an environment write
+  could not be undone as one step. `RENAME TO <name> ALIAS <launcher>` is
+  one statement; the environment change is a second.
+- `CREATE PLAYBOOK … LINK <dir>` needs the target to have a `.playbook`: a
+  statement never prompts, and the hidden `link` command asks for the
+  metadata when it is missing. The error names both ways out: add a
+  `.playbook` to the target, or run `claude-playbook link <dir>`
+  interactively. `SANDBOX` does not apply to `LINK`, whose manifest belongs
+  to the target.
+
+The lifecycle statements (`CREATE`/`DROP PLAYBOOK`, `RENAME TO`, `ALIAS`,
+`NO ALIAS`) run the same code as the hidden `install`, `create`, `link`,
+`delete`, `rename` and `alias` commands, with the statement's options in
+place of flags; that code is not changed by them.
 
 Inside `ALTER ENV` the word `VAR` is optional (`SET FOO=1`): the object
 already says it. Inside `ALTER PLAYBOOK` it is required (`SET VAR FOO=1`),
@@ -342,6 +360,17 @@ File rules:
 Decided with the pilot on 2026-09-25.
 
 `cpb APPLY <file> --dry-run` does step 1 and reports what step 2 would do.
+
+**A file never consents to `DROP PLAYBOOK`** (decided 2026-09-26). It is the
+one irreversible statement: it deletes the install directory, and for a
+Kommander install that includes `data/` (tasks and logs). So `APPLY <file>`
+refuses at validation, writing nothing, when the file contains any
+`DROP PLAYBOOK`, and lists each one with its line, unless `--yes` is given.
+`--dry-run` shows the drops, and what each would delete, without `--yes`.
+`SHOW CREATE` never emits `DROP PLAYBOOK`, so a drop in a file is always
+hand-written, which is exactly when a second confirmation is worth it.
+`DROP ENV` and the `DROP ENV` clause only detach or delete an env set file
+and need no `--yes`.
 
 ## Examples
 

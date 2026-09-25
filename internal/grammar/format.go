@@ -56,6 +56,9 @@ func (s *Stmt) String() string {
 		if s.DryRun {
 			w = append(w, "--dry-run")
 		}
+		if s.Yes {
+			w = append(w, "--yes")
+		}
 	}
 	// VAR is required inside ALTER PLAYBOOK and optional in an env set,
 	// where the canonical form leaves it out.
