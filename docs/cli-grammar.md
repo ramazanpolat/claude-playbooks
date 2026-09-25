@@ -591,11 +591,12 @@ and the rule is exact:
 - Everything else is read word by word, as the shell split it, as before.
 - **The unquoted `*`.** `cpb SELECT * FROM PLAYBOOKS` without quotes is
   globbed by the shell: zsh stops with "no matches found", and bash silently
-  passes the file names in the current directory. When a `SELECT` column list
-  holds a word that is an existing path in the current directory and not a
-  known column, the parse error says so: "looks like the shell expanded `*`;
-  quote the statement: cpb "SELECT * …"". A test pins the hint. zsh users can
-  add `alias cpb='noglob cpb'` to their shell; cpb installs nothing.
+  passes the file names in the current directory. cpb does not probe the
+  filesystem to guess at this. The unknown-column error carries one fixed
+  sentence instead: "unknown column 'X' (columns: …). If you typed *
+  unquoted, the shell expanded it: quote the statement." A test pins the
+  message. zsh users can add `alias cpb='noglob cpb'` to their shell; cpb
+  installs nothing.
 
 This works for any statement:
 
@@ -606,7 +607,12 @@ cpb "SELECT count() FROM PLAYBOOKS WHERE version < '3.12'"
 cpb "SELECT * FROM ENVS WHERE default FORMAT JSONEachRow" | clickhouse-client -q "INSERT INTO envs FORMAT JSONEachRow"
 ```
 
-Not in scope: a history or journal table (a separate idea, not approved).
+**Not planned.** The scope above is closed (decided 2026-09-26): `SELECT`
+columns or `*` `FROM` a table, `WHERE` with the listed operators, `ORDER BY`,
+`LIMIT`, `count()`, `FORMAT`, plus `SHOW TABLES` and `DESCRIBE <table>`.
+Anything beyond it needs the pilot's explicit approval first: functions,
+`GROUP BY`, joins, subqueries, expressions or aliases in the column list, and
+a history or journal table. It is not added because it would be easy.
 
 ## Completion
 
