@@ -74,6 +74,8 @@ func runStatement(args []string) error {
 		return defaultsStatement(st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Playbook:
 		return playbookStatement(st)
+	case st.Verb == grammar.Show || st.Verb == grammar.Explain:
+		return readStatement(st)
 	}
 	return notYet(st.String())
 }

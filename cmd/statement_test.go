@@ -308,8 +308,7 @@ func TestStatementNotYet(t *testing.T) {
 	root := seedFlatPlaybook(t, "router")
 	mustStmt(t, "CREATE ENV e")
 	for _, line := range []string{
-		"SHOW ENVS",
-		"EXPLAIN PLAYBOOK router",
+		"SHOW CREATE ALL",
 		"CREATE PLAYBOOK fresh",
 		"DROP PLAYBOOK router",
 		"ALTER PLAYBOOK router SET VAR A=1 ALIAS r2",
