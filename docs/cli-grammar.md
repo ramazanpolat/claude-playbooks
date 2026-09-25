@@ -111,9 +111,10 @@ Clauses in one command apply **atomically**: all or none, validated before
 anything is written. Validation includes `pilot wire --pilot <name> --check <install>` for
 `USE PILOT` and `with-secret --check` for every `SET … FROM`. `USE PILOT` /
 `DROP PILOT` are applied **last**, after cpb's own writes, because they write
-outside cpb's state. If one of them fails, cpb restores its own writes; if a
-pilot step succeeded and something after it fails, cpb re-wires the previous
-pilot from `<install>/.pilot` (or unwires when there was none).
+outside cpb's state. A statement holds at most one of them, so nothing runs
+after a pilot step: if it fails, cpb restores its own writes, and a failed
+`pilot wire` / `unwire` has written nothing (pilot-profile's contract). cpb
+never needs to re-wire a previous pilot.
 
 ## Where each clause writes
 
@@ -193,7 +194,10 @@ person** — presence and secrets stay shared.
 
 - `USE PILOT <name>` runs `pilot wire --pilot <name> <install>`;
   `DROP PILOT` (no name: a playbook has at most one) runs
-  `pilot unwire <install>`. cpb reads exit codes only, never the output text.
+  `pilot unwire <install>`, which also removes an import block written by the
+  pre-multi-pilot `pilot wire` (no `.pilot` marker). Exit codes decide; the
+  `ERROR: <reason>` line `pilot` prints for 2–6 is shown as detail, never
+  parsed.
 - **Flags always come before the install path**, in every `pilot` call
   (`pilot wire --pilot <name> --check <install>`). An old `pilot` parses
   flags only before the target: with the flags after it, it wires the
@@ -205,17 +209,30 @@ person** — presence and secrets stay shared.
 - `DROP PILOT` only **detaches**. cpb never creates or deletes a pilot: a
   pilot is the pilot's memory, managed with `pilot new` and `pilot`'s own
   commands.
-- Exit codes, per pilot-profile's wire contract v2:
+- `default` is a reserved pilot name that always means `~/.pilot-profile`,
+  so `USE PILOT default` works on every machine, single-pilot ones included.
+  cpb does not copy pilot-profile's name rule; exit 1 decides.
+- Exit codes, per pilot-profile's wire contract v2 (settled 2026-09-26
+  between claude-playbooks and pilot-profile):
 
   | `pilot wire --pilot` | cpb says |
   |---|---|
   | 0 ok (also an idempotent re-wire, or a switch to another pilot) | done |
-  | 1 usage, including a malformed pilot name | the name is invalid |
+  | 1 usage, including a malformed pilot name | the pilot name is invalid |
   | 2 bad target | internal error: cpb passed a bad install path |
   | 3 write failed | could not write the playbook's files |
   | 4 no such pilot | no pilot `<name>`; create it with `pilot new <name>` |
+  | 5 the playbook has no `CLAUDE.md` | playbook `<p>` has no CLAUDE.md to wire a pilot into |
+  | 6 a hand-written `~/.pilot-profile` import is present; nothing written | playbook `<p>` already imports the profile by hand in `<file>`; remove it, then retry |
 
-  `pilot unwire` returns 0 (also when not wired), 2 or 3; never 4.
+  `pilot unwire` returns 0 (also when not wired), 2 or 3.
+- **Reading a playbook's pilot never touches pilot-profile's files.**
+  `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK` and `SHOW CREATE` ask
+  `pilot which --json <install>` → `{"pilot": "<name>" | "default" | null}`
+  (null: not wired; an install wired before multi-pilot reports `default`),
+  read-only, no lock, exit 0 or 2. cpb never reads `<install>/.pilot` or
+  `CLAUDE.local.md` itself. (Command name provisional, pilot-profile's to
+  pick.)
 - Without `pilot` on `PATH`, `USE PILOT` fails with a one-line message; no
   other command is affected.
 - **Detection touches no playbook.** Before any `USE PILOT`, `DROP PILOT` or
@@ -224,9 +241,12 @@ person** — presence and secrets stay shared.
   command") means cpb refuses with "pilot-profile too old for USE PILOT;
   update it". `pilot --version` is for display only, never detection.
 - `SHOW PILOTS` parses `pilot list --json`
-  (`[{"name", "path", "default"}]`), never the human form.
+  (`[{"name", "path", "default"}]`, the `default` pilot always first), never
+  the human form.
 - The pilot side (`~/.pilots/<name>/`, `<install>/.pilot`, `pilot list/new/
-  default`, `wire --check`) is owned and specified by pilot-profile, not here.
+  default/which`, `wire --check`) is owned and specified by pilot-profile,
+  not here. The launcher exports `CLAUDE_CONFIG_DIR`, which is what lets
+  `pilot` inside a session resolve that playbook's pilot.
 
 ## setup.cpb: SHOW CREATE and APPLY
 
