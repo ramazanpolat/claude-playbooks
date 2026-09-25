@@ -647,20 +647,41 @@ ALTER PLAYBOOK work USE ENV glm;
 statement := … | INCLUDE '<path>'
 ```
 
-- **Local paths only**, relative to the file that includes them (absolute
-  paths work too). A URL, or anything else that is not a local path, is
-  refused: a playbook file runs with the pilot's authority, so what it
-  pulls in must be on this machine.
+- **A directive, not a statement about state.** The playbook-file rule "only
+  write statements" admits `INCLUDE` besides `CREATE`, `ALTER` and `DROP`;
+  every other read stays refused.
+- **Local regular files only.** A path is absolute, or relative to the
+  directory of the file that includes it. It must name a regular file: a
+  URL, a pipe, a device (`/dev/stdin`, `/dev/fd/…`) or a directory is
+  refused. A playbook file runs with the pilot's authority, so what it pulls
+  in must be a file on this machine. A root file that is not itself a
+  regular file (a pipe given to `APPLY`) may be applied, but may not
+  `INCLUDE` a relative path, which would have nothing to resolve against.
 - **Only in playbook files.** `INCLUDE` on the command line is refused;
   `APPLY <file> [<file> ...]` is the command-line form of the same thing.
-- **Expanded before anything runs.** Validation (parsing, secret-reference
-  checks, the `DROP PLAYBOOK` confirmation) runs over the whole expanded
-  set, so an error anywhere in any included file means nothing is written.
-  Reports locate each statement by the file it came from, `file:line`.
+- **Expanded before anything runs.** Includes are expanded first, and the
+  checks `APPLY` makes before writing (parsing, secret references, the
+  `DROP PLAYBOOK` confirmation) run over the whole expanded set: an error
+  they find anywhere means nothing is written. Execution then follows
+  `APPLY`'s rule unchanged: statements in order, each atomic, stopping at
+  the first failure with what was applied reported; there is no rollback of
+  what ran before. Reports locate each statement as `file:line`.
+- **File identity** is the fully resolved path (symlinks resolved, made
+  absolute). Two spellings of one file are the same file.
 - **A cycle is refused**, naming its chain (`a.cpb -> b.cpb -> a.cpb`).
 - **A file reached twice runs once**, at its first occurrence, so a shared
   base included by two files is applied a single time.
-- `INCLUDE` is a keyword and joins the reserved words.
+- `INCLUDE` is a keyword and joins the reserved words. An existing object
+  whose name is a keyword stays reachable: `SHOW CREATE` quotes such a name,
+  and a quoted keyword is accepted as a new name, so its output still
+  applies (a change to the reserved-word rule, made with this section).
+
+**Secret references and a helper set in the same run.** A playbook file may
+set the secret helper and use it: the reference check that runs before
+anything is written uses, for each `SET … FROM`, the helper an earlier
+`ALTER DEFAULTS SET SECRET HELPER` of the expanded set would configure, and
+the configured one otherwise. (The same rule applies to `APPLY` without
+`INCLUDE`.)
 
 **Not planned** in playbook files: variables, loops and conditionals. A
 playbook file stays a flat list of statements that reads the same every
