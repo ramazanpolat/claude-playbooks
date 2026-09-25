@@ -275,6 +275,10 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("cannot determine the registry default: %w", err)
 		}
 		if isRegistryDefault(dir, d, name) {
+			// One default keeps the wording this command has always printed.
+			if len(d) == 1 {
+				return fmt.Errorf("env profile %q is the registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, d[0])
+			}
 			return fmt.Errorf("env profile %q is a registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, name)
 		}
 		if err := envprofile.Delete(dir, name); err != nil {
@@ -336,11 +340,21 @@ func profileUsers(playbooksDir string) (map[string][]string, error) {
 	}
 	users := map[string][]string{}
 	for _, pb := range pbs {
-		if pb.Manifest == nil || pb.Manifest.Env == nil {
-			continue
-		}
-		for _, name := range pb.Manifest.Env.Profiles {
-			users[name] = append(users[name], pb.Name)
+		// A launch reads the governing manifest, which in a subdir layout
+		// can be a nested one; the root manifest is what `env` edits. Both
+		// count, so a set either one names is never deleted from under it.
+		named := map[string]bool{}
+		governing, _ := governingManifest(pb)
+		for _, m := range []*manifest.Manifest{pb.Manifest, governing} {
+			if m == nil || m.Env == nil {
+				continue
+			}
+			for _, name := range m.Env.Profiles {
+				if !named[name] {
+					named[name] = true
+					users[name] = append(users[name], pb.Name)
+				}
+			}
 		}
 	}
 	for name := range users {
