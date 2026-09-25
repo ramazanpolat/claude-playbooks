@@ -84,8 +84,8 @@ type Stmt struct {
 
 	Clauses []Clause
 
-	File   string // APPLY <file>
-	DryRun bool   // APPLY <file> --dry-run
+	Files  []string // APPLY <file> [<file> ...]
+	DryRun bool     // APPLY <file> --dry-run
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
 	Yes         bool // DROP PLAYBOOK ... --yes, APPLY ... --yes

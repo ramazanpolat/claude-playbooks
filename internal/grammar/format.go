@@ -76,7 +76,9 @@ func (s *Stmt) headWords() []string {
 			w = append(w, "--json")
 		}
 	case Apply:
-		w = append(w, quoteWord(s.File))
+		for _, f := range s.Files {
+			w = append(w, quoteWord(f))
+		}
 		if s.DryRun {
 			w = append(w, "--dry-run")
 		}

@@ -57,17 +57,31 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 }
 
 func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
-	found, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
+	pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
 	if err != nil { // discovery failed: whether it exists is unknown
 		return err
 	}
-	exists := found != nil || r.playbooks[st.Name]
+	exists := pb != nil || r.playbooks[st.Name]
+	o := createOptionsOf(st)
 	if exists && st.IfNotExists {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" already exists; unchanged", nil)
+		// Drift: the file names another source than the install records.
+		// A warning, never an error, and nothing changes.
+		if pb != nil && o.from != "" {
+			var have string
+			if m := pb.Manifest; m != nil && m.Source != nil {
+				have = describeSource(m.Source.Repository, m.Source.Branch, m.Source.Subdir)
+			}
+			if want := describeSource(o.from, o.branch, o.subdir); have != want {
+				if have == "" {
+					have = "no recorded source"
+				}
+				r.warning = fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want)
+			}
+		}
 		return nil
 	}
-	o := createOptionsOf(st)
 	if r.dryRun {
 		if exists {
 			return fmt.Errorf("playbook %q already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)", st.Name)
@@ -210,4 +224,16 @@ func retireNameLauncher(name string) error {
 	}
 	defer unlock()
 	return retireAliasLauncher(name, name)
+}
+
+// describeSource spells a source for the drift warning.
+func describeSource(url, branch, subdir string) string {
+	s := url
+	if branch != "" {
+		s += " branch " + branch
+	}
+	if subdir != "" {
+		s += " subdir " + subdir
+	}
+	return s
 }

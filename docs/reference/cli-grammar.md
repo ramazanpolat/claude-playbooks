@@ -63,7 +63,7 @@ here reads, writes or calls anything of pilot-profile's.
 ## Grammar
 
 ```
-command    := write | read | select | APPLY <file> [--dry-run] [--yes]
+command    := write | read | select | APPLY <file> [<file> ...] [--dry-run] [--yes]
                                            select: v3.21.0, see SELECT
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
@@ -345,27 +345,42 @@ File rules:
 - `SHOW CREATE ALL` orders statements: env sets by name, `DEFAULTS`,
   playbooks by name.
 
-`cpb APPLY <file>`:
+`cpb APPLY <file> [<file> ...]` (several files decided 2026-09-26):
 
-1. Parses the whole file and validates every statement — syntax, names,
-   the secret helper's check, sources reachable — and
-   writes nothing if any fails.
-2. Executes the statements in order, each one atomic, reporting each as
-   `created`, `changed` or `unchanged`.
-3. **Stops at the first failure** and reports which statement failed and
-   which were already applied. There is no whole-file rollback: a clone
-   cannot be undone cheaply. Because every statement `SHOW CREATE` emits is
-   idempotent, re-running the fixed file is the recovery.
+1. Parses **every** file and validates every statement: syntax, names, the
+   secret helper's check of each reference, and the `DROP PLAYBOOK`
+   confirmation below. If anything in any file fails, nothing is written.
+   (A source is fetched only when its `CREATE PLAYBOOK` runs.)
+2. Runs the files in the order given, and their statements in order, each
+   statement atomic, reporting each as `created`, `changed`, `unchanged` or
+   `dropped`, located as `file:line`.
+3. **Stops at the first failure** and reports the failing `file:line` and
+   how many statements of each file were applied (`a.cpb 3 of 3, b.cpb 1 of
+   4`). There is no whole-file rollback: a clone cannot be undone cheaply.
+   Because every statement `SHOW CREATE` emits is idempotent, running the
+   fixed files again is the recovery.
 
-Decided with the pilot on 2026-09-25.
+Decided with the pilot on 2026-09-25/26.
 
-`cpb APPLY <file> --dry-run` does step 1 and reports what step 2 would do.
+`--dry-run` does step 1 and reports what step 2 would do, judging each
+statement against the files as they are plus what earlier statements, in
+any of the files, would have created.
+
+**Source drift is a warning, never an error** (decided 2026-09-26). When
+`CREATE PLAYBOOK IF NOT EXISTS x FROM <source> [BRANCH b] [SUBDIR d]` meets an
+existing `x` whose recorded source, branch or subdirectory differs, `APPLY`
+reports `PLAYBOOK x exists; source differs (installed <…>, file says <…>)`
+and changes nothing; `--dry-run` shows it too, and the summary counts the
+warnings. The exit code stays 0 when that is the only issue: moving an
+install to another source is `DROP PLAYBOOK` and `CREATE PLAYBOOK`, a
+deliberate step.
 
 **A file never consents to `DROP PLAYBOOK`** (decided 2026-09-26). It is the
 one irreversible statement: it deletes the install directory, and for a
 Kommander install that includes `data/` (tasks and logs). So `APPLY <file>`
-refuses at validation, writing nothing, when the file contains any
-`DROP PLAYBOOK`, and lists each one with its line, unless `--yes` is given.
+refuses at validation, writing nothing, when any of its files contains a
+`DROP PLAYBOOK`, and lists each one as `file:line`, unless `--yes` is given;
+`--yes` covers the drops in all of them.
 `--dry-run` shows the drops, and what each would delete, without `--yes`.
 `SHOW CREATE` never emits `DROP PLAYBOOK`, so a drop in a file is always
 hand-written, which is exactly when a second confirmation is worth it.

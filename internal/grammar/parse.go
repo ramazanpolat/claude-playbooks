@@ -600,13 +600,8 @@ func (p *parser) apply(s *Stmt) *Error {
 	if p.file {
 		return errAt(s.Pos, "APPLY cannot appear inside a playbook file")
 	}
-	if p.atEnd() {
-		p.note("<file>")
-		return p.fail("APPLY needs <file>")
-	}
-	s.File = p.toks[p.i].Text
-	p.i++
-	// --yes is the second confirmation a file with DROP PLAYBOOK needs.
+	// One or more files, run in the order given; --yes is the second
+	// confirmation a file with DROP PLAYBOOK needs.
 	for !p.atEnd() {
 		switch p.kw("--dry-run", "--yes") {
 		case "--dry-run":
@@ -614,10 +609,19 @@ func (p *parser) apply(s *Stmt) *Error {
 		case "--yes":
 			s.Yes = true
 		default:
-			return nil
+			t := p.toks[p.i]
+			if !t.Quoted && strings.HasPrefix(t.Text, "--") {
+				return nil // an unknown flag: the caller reports it
+			}
+			s.Files = append(s.Files, t.Text)
+			p.i++
 		}
 	}
+	p.note("<file>")
 	p.kw("--dry-run", "--yes")
+	if len(s.Files) == 0 {
+		return p.fail("APPLY needs <file>")
+	}
 	return nil
 }
 

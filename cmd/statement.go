@@ -72,7 +72,12 @@ func runStatement(args []string) error {
 	if st.Verb == grammar.Apply {
 		return runApply(st)
 	}
-	return execStatement(&stmtRun{}, st)
+	r := &stmtRun{}
+	err = execStatement(r, st)
+	if r.warning != "" {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", r.warning)
+	}
+	return err
 }
 
 // Outcomes a write statement reports to APPLY.
@@ -93,6 +98,7 @@ type stmtRun struct {
 	playbooks map[string]bool // playbooks created earlier in a dry run
 	outcome   string
 	note      string // a dry run's detail, e.g. what a drop would delete
+	warning   string // reported, never an error: e.g. a source that drifted
 }
 
 // say prints a statement's report; a dry run prints only APPLY's summary.

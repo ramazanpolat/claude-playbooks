@@ -155,7 +155,7 @@ func TestApplyStopsAtTheFirstFailure(t *testing.T) {
 	aliasTestHome(t)
 	path := writePlaybookFile(t, "CREATE ENV a;\nALTER PLAYBOOK ghost SET VAR X=1;\nCREATE ENV b;\n")
 	_, err := apply(t, path)
-	if err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "1 of 3 statements were applied") {
+	if err == nil || !strings.Contains(err.Error(), path+":2 (ALTER PLAYBOOK ghost)") || !strings.Contains(err.Error(), "applied before it: "+path+" 1 of 3") {
 		t.Fatalf("failure report: %v", err)
 	}
 	if readProfile(t, "a") == nil || readProfile(t, "b") != nil {
@@ -184,7 +184,7 @@ func TestApplyDropsNeedYes(t *testing.T) {
 	path := writePlaybookFile(t, "CREATE ENV e;\nDROP PLAYBOOK old;\n")
 
 	_, err := apply(t, path)
-	if err == nil || !strings.Contains(err.Error(), "line 2: DROP PLAYBOOK old") || !strings.Contains(err.Error(), "--yes") {
+	if err == nil || !strings.Contains(err.Error(), path+":2: DROP PLAYBOOK old") || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("a drop without --yes: %v", err)
 	}
 	if readProfile(t, "e") != nil {
@@ -202,5 +202,82 @@ func TestApplyDropsNeedYes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "old")); !os.IsNotExist(err) {
 		t.Fatal("--yes did not drop")
+	}
+}
+
+// A CREATE PLAYBOOK IF NOT EXISTS whose source differs from the install's
+// is a warning, never an error, and changes nothing.
+func TestApplyWarnsOnSourceDrift(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "src", &manifest.Manifest{Alias: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
+	before := snapshot(t, root)
+
+	same := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS src FROM https://example.com/s.git BRANCH v1;\n")
+	out, err := apply(t, same)
+	if err != nil || strings.Contains(out, "warning") {
+		t.Fatalf("no drift: %v\n%s", err, out)
+	}
+
+	drift := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS src FROM https://example.com/s.git BRANCH v2;\n")
+	out, err = apply(t, drift, "--dry-run")
+	want := "WARNING: PLAYBOOK src exists; source differs (installed https://example.com/s.git branch v1, file says https://example.com/s.git branch v2)"
+	if err != nil || !strings.Contains(out, want) || !strings.Contains(out, "1 warning(s)") {
+		t.Fatalf("dry run with drift: %v\n%s", err, out)
+	}
+	out, err = apply(t, drift)
+	if err != nil || !strings.Contains(out, "0 created, 0 changed, 1 unchanged, 0 dropped, 1 warning(s)") {
+		t.Fatalf("drift must warn and exit 0: %v\n%s", err, out)
+	}
+	if after := snapshot(t, root); after != before {
+		t.Fatal("a drift warning changed a file")
+	}
+}
+
+// Several files: all validated first, then run in order; a failure reports
+// how much of each file was applied.
+func TestApplySeveralFiles(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	base := writePlaybookFile(t, "CREATE OR REPLACE ENV base SET A=1;\n")
+	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;\n")
+	broken := writePlaybookFile(t, "CREATE ENV other;\nALTER ENV other FOO;\n")
+
+	// A later file that does not parse: nothing from the first is written.
+	if _, err := apply(t, base, broken); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		t.Fatalf("a broken second file: %v", err)
+	}
+	if readProfile(t, "base") != nil {
+		t.Fatal("the first file was applied although the second does not parse")
+	}
+
+	// In order: the second file uses what the first creates, in a dry run too.
+	if out, err := apply(t, base, machine, "--dry-run"); err != nil {
+		t.Fatalf("dry run across files: %v\n%s", err, out)
+	}
+	if out, err := apply(t, base, machine); err != nil {
+		t.Fatalf("apply across files: %v\n%s", err, out)
+	}
+	if d, _ := envprofile.Defaults(envprofile.Dir(root)); strings.Join(d, ",") != "base" {
+		t.Fatalf("DEFAULTS: %q", d)
+	}
+
+	// A failure in the second file reports each file's count.
+	failing := writePlaybookFile(t, "CREATE ENV more;\nALTER PLAYBOOK ghost SET VAR X=1;\n")
+	_, err := apply(t, base, failing)
+	if err == nil || !strings.Contains(err.Error(), base+" 1 of 1, "+failing+" 1 of 2") {
+		t.Fatalf("per-file counts: %v", err)
+	}
+
+	// --yes covers drops in any file, and a drop is listed with file:line.
+	drop := writePlaybookFile(t, "DROP PLAYBOOK work;\n")
+	if _, err := apply(t, base, drop); err == nil || !strings.Contains(err.Error(), drop+":1: DROP PLAYBOOK work") {
+		t.Fatalf("a drop in the second file: %v", err)
+	}
+	if _, err := apply(t, base, drop, "--yes"); err != nil {
+		t.Fatalf("--yes across files: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "work")); !os.IsNotExist(err) {
+		t.Fatal("the drop in the second file did not run")
 	}
 }
