@@ -62,14 +62,18 @@ here reads, writes or calls anything of pilot-profile's.
 ```
 command    := write | read | APPLY <file> [--dry-run]
 
-write      := CREATE [OR REPLACE] ENV [IF NOT EXISTS] <name> [env-clause ...]
+write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
+            | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [FROM <source>] [BRANCH <ref>]
-                     [SUBDIR <dir>] [LINK <dir>] [ALIAS <launcher>] [NO ALIAS] [SANDBOX]
+            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX]
             | ALTER  PLAYBOOK <name> pb-clause ...
-            | DROP   PLAYBOOK [IF EXISTS] <name>
+            | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
+
+origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
+            | LINK <dir>                                    develop in place
+launcher   := ALIAS <launcher> | NO ALIAS                   default: the name
 
 env-clause := SET [VAR] <key>=<value> ...  literal values
             | SET [VAR] <key> FROM '<ref>' secret by reference; resolved at launch
@@ -97,9 +101,16 @@ pb-clause  := set-clause
 
 read       := SHOW PLAYBOOKS | SHOW ENVS | SHOW DEFAULTS
             | SHOW PLAYBOOK <name> | SHOW ENV <name>
-            | SHOW CREATE PLAYBOOK <name> | SHOW CREATE ENV <name> | SHOW CREATE ALL
+            | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name>
 ```
+
+The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
+and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
+and `BRANCH` / `SUBDIR` only with `FROM`; `ALIAS` and `NO ALIAS` exclude each
+other. The clauses of `origin` and `launcher` may come in any order.
+`DROP PLAYBOOK` asks for confirmation on a terminal, as `delete` does;
+`--yes` skips it.
 
 Inside `ALTER ENV` the word `VAR` is optional (`SET FOO=1`): the object
 already says it. Inside `ALTER PLAYBOOK` it is required (`SET VAR FOO=1`),
@@ -216,8 +227,16 @@ disambiguates (decided 2026-09-25).
 - A sandboxed launch of a playbook with references is refused in the first
   release, with a message saying so.
 
-A literal `SET` whose key looks like a credential (`*_TOKEN`, `*_KEY`,
-`*_SECRET`, `*PASSWORD*`) is accepted but warned about, pointing at `FROM`.
+**The grammar refuses a credential-looking literal** (ruled 2026-09-26): a
+`SET [VAR] K=V` whose key looks like a credential (the rule `env` already
+uses to redact: `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `*_KEY`, …) is
+refused, naming the key and never the value, and pointing at
+`SET K FROM '<ref>'`. A value that cannot be a secret is let through: empty,
+an integer, or `true`/`false`, so `SET VAR MAX_THINKING_TOKENS=8000` works.
+**The short forms are the plain-text escape hatch**: `env <n> set K=V` and
+`env-profile <set> set K=V` keep today's behaviour and store the literal,
+because existing setups rely on it.
+
 All output redacts credential-looking literals, as `env` does today; there is
 no `--reveal` in the new grammar.
 
@@ -335,23 +354,26 @@ and print no nag.
 
 | Short form | Grammar |
 |---|---|
-| `install <src> [--name n] [--branch b] [--subdir d] [--alias a]` | `CREATE PLAYBOOK n FROM <src> [BRANCH b] [SUBDIR d] [ALIAS a]` |
-| `create <n> [--alias a]` | `CREATE PLAYBOOK <n> [ALIAS a]` |
-| `link <dir> <n>` | `CREATE PLAYBOOK <n> LINK <dir>` |
-| `delete <n>` | `DROP PLAYBOOK <n>` |
-| `rename <a> <b>` | `ALTER PLAYBOOK <a> RENAME TO <b>` |
-| `alias <n> <a>` / `dealias <n>` | `ALTER PLAYBOOK <n> ALIAS <a>` / `NO ALIAS` |
-| `list`, `info <n>` | `SHOW PLAYBOOKS`, `SHOW PLAYBOOK <n>` |
-| `env <n> set K=V` | `ALTER PLAYBOOK <n> SET VAR K=V` |
-| `env <n> unset K` | `ALTER PLAYBOOK <n> BLOCK VAR K` |
-| `env <n> clear K` | `ALTER PLAYBOOK <n> UNSET VAR K` |
-| `env <n> use P` / `unuse P` | `ALTER PLAYBOOK <n> ADD ENV P` / `DROP ENV P` |
-| `env <n>` | `EXPLAIN PLAYBOOK <n>` |
-| `env-profile P set K=V` | `ALTER ENV P SET K=V` (`CREATE ENV` when new) |
-| `env-profile P unset K` / `clear K` | `ALTER ENV P BLOCK K` / `UNSET K` |
-| `env-profile P default` / `undefault` | `ALTER DEFAULTS ADD ENV P` / `DROP ENV P` |
+| `install <src> [--name n] [--branch b] [--subdir d] [--alias a \| --no-alias] [--sandbox]` | `CREATE PLAYBOOK n FROM <src> [BRANCH b] [SUBDIR d] [ALIAS a \| NO ALIAS] [SANDBOX]` (`n` defaults to the source manifest's name) |
+| `create <n> [--alias a \| --no-alias] [--sandbox]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX]` |
+| `link <target> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK n LINK <target> [ALIAS a \| NO ALIAS]` (`n` defaults to the target's basename) |
+| `delete <n> [--yes]` | `DROP PLAYBOOK <n> [--yes]` |
+| `rename <a> <b> [--alias x \| --no-alias]` | `ALTER PLAYBOOK <a> RENAME TO <b> [ALIAS x \| NO ALIAS]` |
+| `alias <n> <a>` | `ALTER PLAYBOOK <n> ALIAS <a>` |
+| `alias <n> --remove`, `dealias <n>` | `ALTER PLAYBOOK <n> NO ALIAS` |
+| `list [prefix]`, `alias` | `SHOW PLAYBOOKS` (the prefix filter stays a short-form convenience) |
+| `info <n> [--reveal]` | `SHOW PLAYBOOK <n>` (no `--reveal` in the grammar) |
+| `env <n> set K=V ...` | `ALTER PLAYBOOK <n> SET VAR K=V ...` (the short form also stores credential-looking literals) |
+| `env <n> unset K ...` | `ALTER PLAYBOOK <n> BLOCK VAR K ...` |
+| `env <n> clear K ...` | `ALTER PLAYBOOK <n> UNSET VAR K ...` |
+| `env <n> use P ...` / `unuse P ...` | `ALTER PLAYBOOK <n> ADD ENV P ...` (moves an attached set to the end) / `DROP ENV P ...` |
+| `env <n> [--reveal]` | `EXPLAIN PLAYBOOK <n>` |
+| `env-profile P set K=V ...` | `ALTER ENV P SET K=V ...` (`CREATE ENV` when new; the short form also stores credential-looking literals) |
+| `env-profile P unset K ...` / `clear K ...` | `ALTER ENV P BLOCK K ...` / `UNSET K ...` |
+| `env-profile P describe TEXT` | `ALTER ENV P DESCRIBE 'TEXT'` |
+| `env-profile P default` / `undefault` | `ALTER DEFAULTS USE ENV P` (replaces the list, as `default` replaced the single default) / `ALTER DEFAULTS DROP ENV P` |
 | `env-profile P delete` | `DROP ENV P` |
-| `env-profile` | `SHOW ENVS` |
+| `env-profile [--values] [--reveal]` | `SHOW ENVS` |
 
 Action commands stay as they are, lowercase verbs with no object: `run`,
 `start`, `update`, `auth`, `completion`, `self-uninstall`. They do
