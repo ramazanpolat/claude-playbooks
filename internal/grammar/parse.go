@@ -25,7 +25,7 @@ func init() {
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
 		"RENAME", "TO", "ALIAS", "NO",
 		"BRANCH", "SUBDIR", "LINK", "SANDBOX",
-		"SECRET", "HELPER",
+		"SECRET", "HELPER", "AS", "PLAINTEXT",
 	} {
 		keywords[w] = true
 	}
@@ -34,16 +34,26 @@ func init() {
 // IsKeyword reports whether word is a reserved word, in any case.
 func IsKeyword(word string) bool { return keywords[strings.ToUpper(word)] }
 
-// IsStatement reports whether a command line is a grammar statement: its
-// first word is a verb, in any case. Everything else is an action command
-// (run, update, ...) or a removed pre-grammar command.
+// IsStatement reports whether a command line is a grammar statement rather
+// than a pre-grammar command (kept hidden, on its own code path, as a
+// fallback). Only "create" is both: "cpb create x" is the hidden command,
+// "cpb create playbook x" is the grammar, told apart by whether an object
+// keyword (or OR, of CREATE OR REPLACE) follows.
 func IsStatement(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
 	switch strings.ToUpper(args[0]) {
-	case "CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY":
+	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY":
 		return true
+	case "CREATE":
+		if len(args) < 2 {
+			return false
+		}
+		switch strings.ToUpper(args[1]) {
+		case "PLAYBOOK", "ENV", "OR":
+			return true
+		}
 	}
 	return false
 }
@@ -536,12 +546,23 @@ func (p *parser) show(s *Stmt) *Error {
 	case "PLAYBOOK", "ENV":
 		s.Object = Object(w)
 		name, err := p.name(s.Object, false)
+		if err != nil {
+			return err
+		}
 		s.Name = name
-		return err
 	default:
 		s.Object = Object(w)
 	}
+	p.jsonFlag(s)
 	return nil
+}
+
+// jsonFlag reads the optional --json of SHOW and EXPLAIN: the stable,
+// scriptable form of their output.
+func (p *parser) jsonFlag(s *Stmt) {
+	if p.kw("--json") != "" {
+		s.JSON = true
+	}
 }
 
 func (p *parser) explain(s *Stmt) *Error {
@@ -550,8 +571,12 @@ func (p *parser) explain(s *Stmt) *Error {
 	}
 	s.Object = Playbook
 	name, err := p.name(Playbook, false)
+	if err != nil {
+		return err
+	}
 	s.Name = name
-	return err
+	p.jsonFlag(s)
+	return nil
 }
 
 func (p *parser) apply(s *Stmt) *Error {
@@ -787,7 +812,8 @@ func (p *parser) set(c *Clause) *Error {
 		return p.setRef(c, t)
 	}
 	c.Kind = SetVar
-	for !p.atEnd() && !p.isStarter() {
+	var credentials []Token // credential-looking literals, checked once AS PLAINTEXT is known
+	for !p.atEnd() && !p.isStarter() && !p.at("AS") {
 		t := p.toks[p.i]
 		k, v, ok := strings.Cut(t.Text, "=")
 		if !ok {
@@ -808,18 +834,34 @@ func (p *parser) set(c *Clause) *Error {
 		if err := manifest.ValidateEnvValue(k, v); err != nil {
 			return errAt(t.Pos, err.Error())
 		}
-		// The grammar never stores a credential as plain text.
 		if manifest.LooksLikeSecretKey(k) && !plainSetting(v) {
-			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential, and cpb does not store one as plain text: "+
-				"use SET %s FROM '<ref>' (needs a secret helper)", k, k))
+			credentials = append(credentials, Token{Text: k, Pos: t.Pos})
 		}
 		c.Vars = append(c.Vars, Var{Key: k, Value: v})
 		p.i++
 		p.quiet = true
 	}
 	p.note("<key>=<value>")
+	if p.kw("AS") != "" {
+		if p.kw("PLAINTEXT") == "" {
+			return p.fail("expected PLAINTEXT after AS")
+		}
+		c.Plaintext = true
+	}
+	// A credential is never stored as plain text by accident: it takes a
+	// reference, or AS PLAINTEXT saying so. The error names the key only.
+	if len(credentials) > 0 && !c.Plaintext {
+		k := credentials[0]
+		return errAt(k.Pos, fmt.Sprintf("%s looks like a credential: use SET %s FROM '<ref>' (needs a secret helper), "+
+			"or add AS PLAINTEXT to store the literal knowingly", k.Text, k.Text))
+	}
 	p.note(p.starters...)
 	return nil
+}
+
+// at reports whether the next token is the unquoted keyword w.
+func (p *parser) at(w string) bool {
+	return !p.atEnd() && !p.toks[p.i].Quoted && strings.EqualFold(p.toks[p.i].Text, w)
 }
 
 var plainNumber = regexp.MustCompile(`^-?[0-9]+$`)
@@ -872,6 +914,9 @@ func (p *parser) setRef(c *Clause, t Token) *Error {
 	p.quiet = true
 	c.Kind = SetRef
 	c.Vars = []Var{{Key: t.Text, Ref: r.Text}}
+	if p.at("AS") {
+		return p.fail("AS PLAINTEXT applies to literal values, not to a reference")
+	}
 	return nil
 }
 

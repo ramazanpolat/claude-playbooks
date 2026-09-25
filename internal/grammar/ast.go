@@ -89,6 +89,7 @@ type Stmt struct {
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
 	Yes         bool // DROP PLAYBOOK ... --yes
+	JSON        bool // SHOW ... --json, EXPLAIN ... --json
 
 	Pos Pos
 }
@@ -104,6 +105,8 @@ type Clause struct {
 	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER
 	Where  Where    // ADD ENV
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
+
+	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
 
 	Pos Pos
 }

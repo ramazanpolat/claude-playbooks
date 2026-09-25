@@ -45,6 +45,8 @@ func TestStringQuoting(t *testing.T) {
 		{Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{{Kind: SetVar, Vars: []Var{
 			{Key: "A", Value: "hello world"}, {Key: "B", Value: "it's"}, {Key: "C", Value: "x,"}, {Key: "D", Value: ""}, {Key: "E", Value: "SET"}}}}},
 			"ALTER ENV e SET A='hello world' B='it''s' C='x,' D= E=SET"},
+		{Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: SetVar, Vars: []Var{{Key: "API_KEY", Value: "x y"}}, Plaintext: true}}},
+			"ALTER PLAYBOOK k SET VAR API_KEY='x y' AS PLAINTEXT"},
 		{Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{{Kind: BlockVar, Keys: []string{"SET", "A"}}}},
 			"ALTER ENV e BLOCK 'SET' A"},
 		{Stmt{Verb: Alter, Object: Playbook, Name: "sandbox", Clauses: []Clause{{Kind: SetVar, Vars: []Var{{Key: "A", Value: "a;b"}}}}},

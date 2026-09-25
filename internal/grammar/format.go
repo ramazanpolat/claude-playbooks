@@ -43,8 +43,14 @@ func (s *Stmt) String() string {
 		if s.SkipSecrets {
 			w = append(w, "--skip-secrets")
 		}
+		if s.JSON {
+			w = append(w, "--json")
+		}
 	case Explain:
 		w = append(w, string(s.Object), quoteWord(s.Name))
+		if s.JSON {
+			w = append(w, "--json")
+		}
 	case Apply:
 		w = append(w, quoteWord(s.File))
 		if s.DryRun {
@@ -72,6 +78,9 @@ func (c *Clause) words(varWord bool) []string {
 		w := kw("SET")
 		for _, v := range c.Vars {
 			w = append(w, v.Key+"="+quoteValue(v.Value))
+		}
+		if c.Plaintext {
+			w = append(w, "AS", "PLAINTEXT")
 		}
 		return w
 	case SetRef:
