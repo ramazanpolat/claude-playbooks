@@ -194,10 +194,19 @@ person** — presence and secrets stay shared.
 
 - `USE PILOT <name>` runs `pilot wire --pilot <name> <install>`;
   `DROP PILOT` (no name: a playbook has at most one) runs
-  `pilot unwire <install>`, which also removes an import block written by the
-  pre-multi-pilot `pilot wire` (no `.pilot` marker). Exit codes decide; the
-  `ERROR: <reason>` line `pilot` prints for 2–6 is shown as detail, never
-  parsed.
+  `pilot unwire <install>`, which also removes the canonical import lines
+  written by the pre-multi-pilot `pilot wire`. Exit codes decide; the
+  `ERROR: <reason>` line `pilot` prints on failure is shown verbatim as
+  detail, never parsed.
+- **How pilot-profile records the choice (its design, not cpb's):** each
+  wired install holds a symlink to `~/.pilot-profile` (the default) or
+  `~/.pilots/<name>`, and its imports read through that link, so switching
+  pilots is an atomic repoint. The link is the marker; there is no marker
+  file. cpb neither reads nor writes it. cpb's own handling is safe with it:
+  `DROP PLAYBOOK` removes the link without following it, `RENAME TO` moves it
+  with the directory, and `update` touches it only if a source ships an entry
+  of the same name. (Link name `.pilot`, pending pilot-profile's
+  confirmation.)
 - **Flags always come before the install path**, in every `pilot` call
   (`pilot wire --pilot <name> --check <install>`). An old `pilot` parses
   flags only before the target: with the flags after it, it wires the
@@ -222,17 +231,20 @@ person** — presence and secrets stay shared.
   | 2 bad target | internal error: cpb passed a bad install path |
   | 3 write failed | could not write the playbook's files |
   | 4 no such pilot | no pilot `<name>`; create it with `pilot new <name>` |
-  | 5 the playbook has no `CLAUDE.md` | playbook `<p>` has no CLAUDE.md to wire a pilot into |
-  | 6 a hand-written `~/.pilot-profile` import is present; nothing written | playbook `<p>` already imports the profile by hand in `<file>`; remove it, then retry |
+  | 5 this playbook cannot be wired as asked; nothing written | playbook `<p>` cannot take a pilot: *(the ERROR line)* |
 
-  `pilot unwire` returns 0 (also when not wired), 2 or 3.
+  Exit 5's reasons, named on the ERROR line: no `CLAUDE.md`; a tracked
+  `CLAUDE.md` that imports `~/.pilot-profile` directly; a non-canonical pilot
+  import at `file:line`.
+
+  `pilot unwire` returns 0 (also when not wired), 2, 3 or 5 (another pilot
+  import remains, so it refuses rather than claim success).
 - **Reading a playbook's pilot never touches pilot-profile's files.**
   `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK` and `SHOW CREATE` ask
   `pilot which --json <install>` → `{"pilot": "<name>" | "default" | null}`
   (null: not wired; an install wired before multi-pilot reports `default`),
-  read-only, no lock, exit 0 or 2. cpb never reads `<install>/.pilot` or
-  `CLAUDE.local.md` itself. (Command name provisional, pilot-profile's to
-  pick.)
+  read-only, no lock, exit 0, 2 or 5. cpb never reads the pilot link or
+  `CLAUDE.local.md` itself.
 - Without `pilot` on `PATH`, `USE PILOT` fails with a one-line message; no
   other command is affected.
 - **Detection touches no playbook.** Before any `USE PILOT`, `DROP PILOT` or
@@ -243,8 +255,8 @@ person** — presence and secrets stay shared.
 - `SHOW PILOTS` parses `pilot list --json`
   (`[{"name", "path", "default"}]`, the `default` pilot always first), never
   the human form.
-- The pilot side (`~/.pilots/<name>/`, `<install>/.pilot`, `pilot list/new/
-  default/which`, `wire --check`) is owned and specified by pilot-profile,
+- The pilot side (`~/.pilots/<name>/`, `pilot list/new/
+  default/which`, `wire --check`, the per-install link) is owned and specified by pilot-profile,
   not here. The launcher exports `CLAUDE_CONFIG_DIR`, which is what lets
   `pilot` inside a session resolve that playbook's pilot.
 
