@@ -7,6 +7,30 @@ import "strings"
 // yields the same statement, which is what lets SHOW CREATE emit statements
 // and hints print the grammar form of a short-form command.
 func (s *Stmt) String() string {
+	w := s.headWords()
+	// VAR is required inside ALTER PLAYBOOK and optional in an env set,
+	// where the canonical form leaves it out.
+	varWord := s.Object == Playbook
+	for _, c := range s.Clauses {
+		w = append(w, c.words(varWord)...)
+	}
+	return strings.Join(w, " ")
+}
+
+// Pretty renders the statement for a setup file: the head on one line and
+// each clause on its own, indented. It parses back to the same statement.
+func (s *Stmt) Pretty() string {
+	var b strings.Builder
+	b.WriteString(strings.Join(s.headWords(), " "))
+	varWord := s.Object == Playbook
+	for _, c := range s.Clauses {
+		b.WriteString("\n  ")
+		b.WriteString(strings.Join(c.words(varWord), " "))
+	}
+	return b.String()
+}
+
+func (s *Stmt) headWords() []string {
 	w := []string{string(s.Verb)}
 	switch s.Verb {
 	case Create:
@@ -60,13 +84,7 @@ func (s *Stmt) String() string {
 			w = append(w, "--yes")
 		}
 	}
-	// VAR is required inside ALTER PLAYBOOK and optional in an env set,
-	// where the canonical form leaves it out.
-	varWord := s.Object == Playbook
-	for _, c := range s.Clauses {
-		w = append(w, c.words(varWord)...)
-	}
-	return strings.Join(w, " ")
+	return w
 }
 
 func (c *Clause) words(varWord bool) []string {

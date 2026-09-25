@@ -70,3 +70,17 @@ func TestStringQuoting(t *testing.T) {
 		}
 	}
 }
+
+// Pretty, the setup-file layout, parses back to the same statement too.
+func TestPrettyRoundTrip(t *testing.T) {
+	for _, tc := range validCases {
+		s, err := ParseArgs(tc.args)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		text := s.Pretty()
+		if back := parseText(t, text); !reflect.DeepEqual(strip(back), strip(s)) {
+			t.Errorf("%s: %q did not round-trip", tc.name, text)
+		}
+	}
+}

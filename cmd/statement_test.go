@@ -301,25 +301,6 @@ func TestStatementDefaults(t *testing.T) {
 	}
 }
 
-// Statements whose phase has not landed are refused before any write.
-func TestStatementNotYet(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	root := seedFlatPlaybook(t, "router")
-	mustStmt(t, "CREATE ENV e")
-	for _, line := range []string{
-		"SHOW CREATE ALL",
-		"APPLY setup.cpb",
-	} {
-		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), "not implemented yet") {
-			t.Errorf("%s: %v", line, err)
-		}
-	}
-	if e := readEnv(t, root); !e.Empty() {
-		t.Fatalf("a refused statement wrote the manifest: %#v", e)
-	}
-}
-
 func TestStatementArgs(t *testing.T) {
 	resetCommandTestState(t)
 	cases := []struct {

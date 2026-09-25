@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -68,33 +69,59 @@ func runStatement(args []string) error {
 	if err != nil {
 		return err
 	}
+	if st.Verb == grammar.Apply {
+		return runApply(st)
+	}
+	return execStatement(&stmtRun{}, st)
+}
+
+// Outcomes a write statement reports to APPLY.
+const (
+	outCreated   = "created"
+	outChanged   = "changed"
+	outUnchanged = "unchanged"
+	outDropped   = "dropped"
+)
+
+// stmtRun is one statement's execution: whether it may write, and, in an
+// APPLY --dry-run, what the file's earlier statements would have created,
+// so a later statement that depends on them is judged as it would run.
+type stmtRun struct {
+	dryRun    bool
+	yes       bool            // APPLY --yes: confirms the file's DROP PLAYBOOKs
+	envs      map[string]bool // env sets created earlier in a dry run
+	playbooks map[string]bool // playbooks created earlier in a dry run
+	outcome   string
+	note      string // a dry run's detail, e.g. what a drop would delete
+}
+
+// say prints a statement's report; a dry run prints only APPLY's summary.
+func (r *stmtRun) say(head string, lines []string) {
+	if !r.dryRun {
+		report(head, lines)
+	}
+}
+
+func execStatement(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case st.Object == grammar.Env && st.Write():
-		return envStatement(st)
+		return envStatement(r, st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Defaults:
-		return defaultsStatement(st)
+		return defaultsStatement(r, st)
 	case st.Verb == grammar.Create && st.Object == grammar.Playbook:
-		return createPlaybookStatement(st)
+		return createPlaybookStatement(r, st)
 	case st.Verb == grammar.Drop && st.Object == grammar.Playbook:
-		return dropPlaybookStatement(st)
+		return dropPlaybookStatement(r, st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Playbook:
 		if lifecycle(st) {
-			return alterPlaybookLifecycle(st)
+			return alterPlaybookLifecycle(r, st)
 		}
-		return playbookStatement(st)
-	case st.Verb == grammar.Show || st.Verb == grammar.Explain:
-		return readStatement(st)
+		return playbookStatement(r, st)
 	}
-	return notYet(st.String())
+	return readStatement(st)
 }
 
-// notYet refuses a statement the grammar accepts but this build does not
-// carry out yet. It is refused before anything is written.
-func notYet(what string) error {
-	return fmt.Errorf("not implemented yet: %s (the grammar work lands in phases; see docs/cli-grammar.md)", what)
-}
-
-func envStatement(st *grammar.Stmt) error {
+func envStatement(r *stmtRun, st *grammar.Stmt) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
 
@@ -110,51 +137,52 @@ func envStatement(st *grammar.Stmt) error {
 	}
 	// CREATE ... IF NOT EXISTS on an existing set writes nothing, so its
 	// references are not checked: the helper is not even asked.
-	if !(st.Verb == grammar.Create && p != nil && st.IfNotExists) {
+	if !(st.Verb == grammar.Create && (p != nil || r.envs[st.Name]) && st.IfNotExists) {
 		if err := checkRefs(st.Clauses); err != nil {
 			return err
 		}
 	}
 	switch st.Verb {
 	case grammar.Create:
-		if p != nil && st.IfNotExists {
-			fmt.Printf("ENV %s already exists; unchanged\n", st.Name)
+		if (p != nil || r.envs[st.Name]) && st.IfNotExists {
+			r.outcome = outUnchanged
+			r.say("ENV "+st.Name+" already exists; unchanged", nil)
 			return nil
 		}
 		if p != nil && !st.OrReplace {
 			return fmt.Errorf("env set %q already exists: change it with ALTER ENV %s, or use CREATE OR REPLACE ENV / CREATE ENV IF NOT EXISTS", st.Name, st.Name)
 		}
-		verb := "Created"
-		if p != nil {
-			verb = "Replaced"
-		}
+		old := p
 		p = &envprofile.Profile{Name: st.Name, Set: map[string]string{}}
 		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
-		if err := envprofile.Write(dir, p); err != nil {
-			return fmt.Errorf("cannot write env set: %w", err)
-		}
-		report(verb+" ENV "+st.Name, lines)
-		return nil
+		return r.writeProfile(dir, old, p, "Replaced", "ENV "+st.Name, lines)
 
 	case grammar.Alter:
 		if p == nil {
+			if r.envs[st.Name] { // created earlier in this dry run
+				r.outcome = outChanged
+				return nil
+			}
 			return fmt.Errorf("no env set %q: create it with CREATE ENV %s", st.Name, st.Name)
 		}
+		old := cloneProfile(p)
 		if p.Set == nil {
 			p.Set = map[string]string{}
 		}
 		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
-		if err := envprofile.Write(dir, p); err != nil {
-			return fmt.Errorf("cannot write env set: %w", err)
-		}
-		report("Altered ENV "+st.Name, lines)
-		return nil
+		return r.writeProfile(dir, old, p, "Altered", "ENV "+st.Name, lines)
 	}
 
 	// DROP ENV
 	if p == nil {
+		if r.envs[st.Name] {
+			delete(r.envs, st.Name)
+			r.outcome = outDropped
+			return nil
+		}
 		if st.IfExists {
-			fmt.Printf("No env set %s; nothing to drop\n", st.Name)
+			r.outcome = outUnchanged
+			r.say("No env set "+st.Name+"; nothing to drop", nil)
 			return nil
 		}
 		return fmt.Errorf("no env set %q", st.Name)
@@ -175,6 +203,10 @@ func envStatement(st *grammar.Stmt) error {
 	if isRegistryDefault(dir, defaults, st.Name) {
 		return fmt.Errorf("env set %q is in DEFAULTS: remove it first with ALTER DEFAULTS DROP ENV %s", st.Name, st.Name)
 	}
+	r.outcome = outDropped
+	if r.dryRun {
+		return nil
+	}
 	if err := envprofile.Delete(dir, st.Name); err != nil {
 		return err
 	}
@@ -182,7 +214,38 @@ func envStatement(st *grammar.Stmt) error {
 	return nil
 }
 
-func defaultsStatement(st *grammar.Stmt) error {
+// writeProfile writes an env set unless nothing changed or this is a dry
+// run, and records the outcome. old is nil for a new set; changed is the
+// report's verb when it existed ("Replaced", "Altered").
+func (r *stmtRun) writeProfile(dir string, old, p *envprofile.Profile, changed, what string, lines []string) error {
+	switch {
+	case old == nil:
+		r.outcome = outCreated
+	case profileEqual(old, p):
+		r.outcome = outUnchanged
+		r.say(what+" unchanged", nil)
+		return nil
+	default:
+		r.outcome = outChanged
+	}
+	if r.dryRun {
+		if old == nil {
+			r.envs[p.Name] = true
+		}
+		return nil
+	}
+	if err := envprofile.Write(dir, p); err != nil {
+		return fmt.Errorf("cannot write env set: %w", err)
+	}
+	head := changed + " " + what
+	if r.outcome == outCreated {
+		head = "Created " + what
+	}
+	r.say(head, lines)
+	return nil
+}
+
+func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	dir := envprofile.Dir(config.ResolvePlaybooksDir())
 
 	var listClauses, helperClauses []grammar.Clause
@@ -201,10 +264,10 @@ func defaultsStatement(st *grammar.Stmt) error {
 	defer unlock()
 
 	// Everything is decided before anything is written.
-	var names, lines []string
+	var names, lines, current []string
 	write := envprofile.WriteDefaultsUnchecked
 	if len(listClauses) > 0 {
-		current, err := envprofile.Defaults(dir)
+		current, err = envprofile.Defaults(dir)
 		if err != nil {
 			// A broken marker can still be replaced outright: USE ENV
 			// states the whole list and needs nothing from the old one.
@@ -213,7 +276,7 @@ func defaultsStatement(st *grammar.Stmt) error {
 			}
 			current = nil
 		}
-		if names, lines, err = applyEnvList(dir, current, listClauses); err != nil {
+		if names, lines, err = r.applyEnvList(dir, current, listClauses); err != nil {
 			return err
 		}
 		// Removing needs no profile to be readable, which matters exactly
@@ -224,6 +287,25 @@ func defaultsStatement(st *grammar.Stmt) error {
 			}
 		}
 	}
+
+	// Unchanged when the list and the helper setting would stay as they are.
+	listSame := len(listClauses) == 0 || slices.Equal(current, names)
+	helperSame := true
+	for _, c := range helperClauses {
+		h, _ := os.ReadFile(filepath.Join(dir, envprofile.SecretHelperFile))
+		stored := strings.TrimSpace(string(h))
+		helperSame = (c.Kind == grammar.SetHelper && stored == c.Arg) || (c.Kind == grammar.UnsetHelper && stored == "")
+	}
+	switch {
+	case listSame && helperSame:
+		r.outcome = outUnchanged
+		r.say("DEFAULTS unchanged", nil)
+		return nil
+	case r.dryRun:
+		r.outcome = outChanged
+		return nil
+	}
+	r.outcome = outChanged
 
 	// The helper setting is written first and restored if the list write
 	// then fails, so the statement applies whole or not at all.
@@ -260,11 +342,11 @@ func defaultsStatement(st *grammar.Stmt) error {
 			return fmt.Errorf("cannot write DEFAULTS: %w", err)
 		}
 	}
-	report("Altered DEFAULTS", lines)
+	r.say("Altered DEFAULTS", lines)
 	return nil
 }
 
-func playbookStatement(st *grammar.Stmt) error {
+func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err := checkRefs(st.Clauses); err != nil {
 		return err
 	}
@@ -279,6 +361,10 @@ func playbookStatement(st *grammar.Stmt) error {
 
 	pb, err := playbook.Require(playbooksDir, st.Name)
 	if err != nil {
+		if r.playbooks[st.Name] { // created earlier in this dry run
+			r.outcome = outChanged
+			return nil
+		}
 		return err
 	}
 	// A linked playbook's manifest is shared with every registration of
@@ -290,13 +376,14 @@ func playbookStatement(st *grammar.Stmt) error {
 	if m == nil {
 		m = &manifest.Manifest{Name: pb.Name}
 	}
+	before := cloneEnv(m.Env)
 	if m.Env == nil {
 		m.Env = &manifest.Env{}
 	}
 	if m.Env.Set == nil {
 		m.Env.Set = map[string]string{}
 	}
-	profiles, lines, err := applyEnvList(dir, m.Env.Profiles, st.Clauses)
+	profiles, lines, err := r.applyEnvList(dir, m.Env.Profiles, st.Clauses)
 	if err != nil {
 		return err
 	}
@@ -305,10 +392,19 @@ func playbookStatement(st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
+	if envEqual(before, m.Env) {
+		r.outcome = outUnchanged
+		r.say("PLAYBOOK "+st.Name+" unchanged", nil)
+		return nil
+	}
+	r.outcome = outChanged
+	if r.dryRun {
+		return nil
+	}
 	if err := manifest.Write(pb.RootPath, m); err != nil {
 		return fmt.Errorf("cannot record the environment: %w", err)
 	}
-	report("Altered PLAYBOOK "+st.Name, lines)
+	r.say("Altered PLAYBOOK "+st.Name, lines)
 	for _, c := range st.Clauses {
 		if c.Kind == grammar.BlockVar && slices.Contains(c.Keys, auth.OAuthTokenEnv) {
 			fmt.Printf("Playbook %q now authenticates from stored credentials: the long-lived token is not injected and its login is left alone. Run it and /login once if it asks.\n", st.Name)
@@ -320,7 +416,7 @@ func playbookStatement(st *grammar.Stmt) error {
 // applyEnvList applies USE / ADD / DROP ENV to an ordered list of env sets
 // and returns the new list with one report line per change. Every set a
 // clause attaches must exist.
-func applyEnvList(dir string, list []string, clauses []grammar.Clause) ([]string, []string, error) {
+func (r *stmtRun) applyEnvList(dir string, list []string, clauses []grammar.Clause) ([]string, []string, error) {
 	out := slices.Clone(list)
 	var lines []string
 	changed := false
@@ -328,7 +424,7 @@ func applyEnvList(dir string, list []string, clauses []grammar.Clause) ([]string
 		switch c.Kind {
 		case grammar.UseEnv:
 			for _, n := range c.Names {
-				if err := requireEnv(dir, n); err != nil {
+				if err := r.requireEnv(dir, n); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -336,7 +432,7 @@ func applyEnvList(dir string, list []string, clauses []grammar.Clause) ([]string
 			changed = true
 		case grammar.AddEnv:
 			n := c.Names[0]
-			if err := requireEnv(dir, n); err != nil {
+			if err := r.requireEnv(dir, n); err != nil {
 				return nil, nil, err
 			}
 			out = dropString(out, n)
@@ -377,7 +473,10 @@ func applyEnvList(dir string, list []string, clauses []grammar.Clause) ([]string
 	return out, lines, nil
 }
 
-func requireEnv(dir, name string) error {
+func (r *stmtRun) requireEnv(dir, name string) error {
+	if r.envs[name] { // created earlier in this dry run
+		return nil
+	}
 	p, err := envprofile.Read(dir, name)
 	if err != nil {
 		return err
@@ -448,4 +547,33 @@ func report(head string, lines []string) {
 	for _, l := range lines {
 		fmt.Println("  " + l)
 	}
+}
+
+func cloneProfile(p *envprofile.Profile) *envprofile.Profile {
+	c := *p
+	c.Set, c.Refs, c.Unset = maps.Clone(p.Set), maps.Clone(p.Refs), slices.Clone(p.Unset)
+	return &c
+}
+
+func profileEqual(a, b *envprofile.Profile) bool {
+	return a.Description == b.Description && envEqual(a.Env(), b.Env())
+}
+
+func cloneEnv(e *manifest.Env) *manifest.Env {
+	if e == nil {
+		return nil
+	}
+	return &manifest.Env{Profiles: slices.Clone(e.Profiles), Set: maps.Clone(e.Set), Refs: maps.Clone(e.Refs), Unset: slices.Clone(e.Unset)}
+}
+
+// envEqual compares two blocks as a launch sees them: attached sets in
+// order, and set, refs and unset as sets of entries.
+func envEqual(a, b *manifest.Env) bool {
+	if a.Empty() || b.Empty() {
+		return a.Empty() && b.Empty()
+	}
+	ua, ub := slices.Clone(a.Unset), slices.Clone(b.Unset)
+	slices.Sort(ua)
+	slices.Sort(ub)
+	return slices.Equal(a.Profiles, b.Profiles) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
 }

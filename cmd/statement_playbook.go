@@ -56,18 +56,32 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 	return o
 }
 
-func createPlaybookStatement(st *grammar.Stmt) error {
-	if st.IfNotExists {
-		pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
-		if err != nil { // discovery failed: whether it exists is unknown
-			return err
-		}
-		if pb != nil {
-			fmt.Printf("PLAYBOOK %s already exists; unchanged\n", st.Name)
-			return nil
-		}
+func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
+	found, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
+	if err != nil { // discovery failed: whether it exists is unknown
+		return err
+	}
+	exists := found != nil || r.playbooks[st.Name]
+	if exists && st.IfNotExists {
+		r.outcome = outUnchanged
+		r.say("PLAYBOOK "+st.Name+" already exists; unchanged", nil)
+		return nil
 	}
 	o := createOptionsOf(st)
+	if r.dryRun {
+		if exists {
+			return fmt.Errorf("playbook %q already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)", st.Name)
+		}
+		if o.link != "" {
+			if abs, err := filepath.Abs(o.link); err != nil || !manifest.Exists(abs) {
+				return fmt.Errorf("LINK %s: the directory has no %s", o.link, manifest.FileName)
+			}
+		}
+		r.playbooks[st.Name] = true
+		r.outcome = outCreated
+		return nil
+	}
+	r.outcome = outCreated
 	switch {
 	case o.from != "":
 		return doInstall(installOpts{name: st.Name, branch: o.branch, subdir: o.subdir,
@@ -91,27 +105,40 @@ func createPlaybookStatement(st *grammar.Stmt) error {
 	return doCreate(createOpts{alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox}, []string{st.Name})
 }
 
-func dropPlaybookStatement(st *grammar.Stmt) error {
-	if st.IfExists {
-		// Only a playbook that is not there is a no-op; a registry that
-		// cannot be read is an error, never "nothing to drop".
-		pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
-		if err != nil {
-			return err
-		}
-		if pb == nil {
-			fmt.Printf("No playbook %s; nothing to drop\n", st.Name)
+func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
+	// Only a playbook that is not there is "nothing to drop"; a registry
+	// that cannot be read is an error.
+	pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
+	if err != nil {
+		return err
+	}
+	if pb == nil {
+		if r.playbooks[st.Name] {
+			delete(r.playbooks, st.Name)
+			r.outcome = outDropped
 			return nil
 		}
+		if st.IfExists {
+			r.outcome = outUnchanged
+			r.say("No playbook "+st.Name+"; nothing to drop", nil)
+			return nil
+		}
+		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", st.Name)
 	}
-	return doDelete(deleteOpts{yes: st.Yes}, []string{st.Name})
+	r.outcome = outDropped
+	if r.dryRun {
+		// What a drop deletes is shown before anything is confirmed.
+		r.note = "deletes " + pb.RootPath
+		return nil
+	}
+	return doDelete(deleteOpts{yes: st.Yes || r.yes}, []string{st.Name})
 }
 
 // alterPlaybookLifecycle carries out RENAME TO, ALIAS and NO ALIAS. They
 // are not combined with environment clauses: a rename after an environment
 // write could not be undone as one step, so the statement would not apply
 // whole or not at all.
-func alterPlaybookLifecycle(st *grammar.Stmt) error {
+func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 	var rename, alias string
 	noAlias := false
 	for _, c := range st.Clauses {
@@ -125,6 +152,17 @@ func alterPlaybookLifecycle(st *grammar.Stmt) error {
 		default:
 			return fmt.Errorf("RENAME TO, ALIAS and NO ALIAS cannot be combined with %s in one statement: use two statements", c.Kind)
 		}
+	}
+	r.outcome = outChanged
+	if r.dryRun {
+		if _, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name); err != nil && !r.playbooks[st.Name] {
+			return err
+		}
+		if rename != "" { // later statements of the file address the new name
+			delete(r.playbooks, st.Name)
+			r.playbooks[rename] = true
+		}
+		return nil
 	}
 	if rename != "" {
 		return doRename(renameOpts{alias: alias, noAlias: noAlias}, []string{st.Name, rename})
