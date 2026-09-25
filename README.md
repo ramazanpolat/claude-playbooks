@@ -23,8 +23,8 @@ devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v
 devbox run -- cpb --version
 ```
 
-[Using it in a devbox project →](docs/installation.md#using-it-in-a-devbox-project) ·
-[Other ways to install →](docs/installation.md)
+[Using it in a devbox project →](docs/guides/installation.md#using-it-in-a-devbox-project) ·
+[Other ways to install →](docs/guides/installation.md)
 
 ## 60-second start
 
@@ -71,9 +71,9 @@ they compose.
 | | What it separates | Turn it on |
 |---|---|---|
 | **Config** | settings, hooks, memory, history, MCP servers | always — every playbook is its own `CLAUDE_CONFIG_DIR` |
-| **[Identity](docs/authentication.md)** | which account or token the session runs as | a shared login, a long-lived token, a per-playbook `/login`, or `isolate_auth` |
-| **[Environment](docs/environment.md)** | variables, API endpoints, proxies | `cpb env <name> set …`, or a profile shared by several playbooks |
-| **[Process](docs/sandbox.md)** | kernel, filesystem, network | `--sandbox` — the session runs in a microVM that cannot see your home |
+| **[Identity](docs/guides/authentication.md)** | which account or token the session runs as | a shared login, a long-lived token, a per-playbook `/login`, or `isolate_auth` |
+| **[Environment](docs/guides/environment.md)** | variables, API endpoints, proxies | `cpb env <name> set …`, or a profile shared by several playbooks |
+| **[Process](docs/guides/sandbox.md)** | kernel, filesystem, network | `--sandbox` — the session runs in a microVM that cannot see your home |
 
 ### How the first one works
 
@@ -127,12 +127,12 @@ Add `--sandbox` to any launch to run it in a microVM.
 
 | | |
 |---|---|
-| [Installation](docs/installation.md) | install script, devbox/Nix, npx, source builds, uninstalling |
-| [Managing playbooks](docs/playbooks.md) | create, install, link, launch, rename, update, delete |
-| [Authentication](docs/authentication.md) | shared logins, long-lived tokens, isolated accounts |
-| [Environment overrides](docs/environment.md) | per-playbook variables and shared env profiles |
-| [Sandboxed sessions](docs/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
-| [Agent guide](docs/AGENT-GUIDE.md) | driving `cpb` unattended from an agent or CI |
+| [Installation](docs/guides/installation.md) | install script, devbox/Nix, npx, source builds, uninstalling |
+| [Managing playbooks](docs/guides/managing-playbooks.md) | create, install, link, launch, rename, update, delete |
+| [Authentication](docs/guides/authentication.md) | shared logins, long-lived tokens, isolated accounts |
+| [Environment overrides](docs/guides/environment.md) | per-playbook variables and shared env profiles |
+| [Sandboxed sessions](docs/guides/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
+| [Agent guide](docs/guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
 | [SPEC-v4.md](SPEC-v4.md) | the behavioral contract |
 | [Contributing](CONTRIBUTING.md) | development, tests, pull requests |
 

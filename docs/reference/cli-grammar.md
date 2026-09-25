@@ -250,14 +250,19 @@ without a secret helper: `SET VAR ANTHROPIC_AUTH_TOKEN=… AS PLAINTEXT`. It
 applies to every literal in its `SET` clause and never to a reference. It
 keeps cpb usable standalone, and it is loud where it matters: `EXPLAIN` marks
 such an entry `(plaintext)`, and `SHOW CREATE` never carries the value (see
-setup files). Files that already hold such literals keep working unchanged.
+playbook files). Files that already hold such literals keep working unchanged.
 
 All output redacts credential-looking literals, as `env` does today; there is
 no `--reveal` in the new grammar.
 
-## setup.cpb: SHOW CREATE and APPLY
+## playbook.cpb: SHOW CREATE and APPLY
 
-A **setup file** (conventionally `setup.cpb`) is plain text holding cpb
+Two senses of "playbook", kept apart (pilot, 2026-09-26):
+
+- **`PLAYBOOK`**, an *installed playbook*: a Claude Code config directory cpb manages.
+- **a playbook file**, also *a playbook script* or *the agent's playbook*: a `.cpb` file of statements, conventionally `playbook.cpb`, that `APPLY` runs. `APPLY` accepts any file name.
+
+A **playbook file** (conventionally `playbook.cpb`) is plain text holding cpb
 statements: the same grammar as the command line, without the `cpb` prefix.
 It describes a machine's setup: env sets, DEFAULTS, playbooks and their
 wiring. It is the script beside the database, never inside it: the manifest
@@ -265,7 +270,7 @@ keeps holding state, the file holds the recipe. It belongs in dotfiles or a
 devbox project, and moving a setup to another machine is one command.
 
 ```
--- setup.cpb (macminim), from: cpb SHOW CREATE ALL > setup.cpb
+-- playbook.cpb (macminim), from: cpb SHOW CREATE ALL > playbook.cpb
 
 CREATE OR REPLACE ENV evren-router
   DESCRIBE 'GLM via 9router on tr0'
@@ -299,7 +304,7 @@ File rules:
   by the statement that fixes it (`ALTER ENV <set> SET K FROM '<ref>'`, or
   `ALTER PLAYBOOK <name> SET VAR K FROM '<ref>'`), and exits
   non-zero, unless `--skip-secrets` is given. Plain text never travels in a
-  setup file.
+  playbook file.
 - **Idempotent.** `SHOW CREATE` emits only idempotent forms (`CREATE OR
   REPLACE ENV`, `CREATE PLAYBOOK IF NOT EXISTS …`, `USE ENV` with the full
   list), so applying a file twice changes nothing the second time.
@@ -343,8 +348,8 @@ cpb ALTER PLAYBOOK kommander-x RENAME TO kommander-lab
 cpb DROP PLAYBOOK kommander-lab
 cpb SHOW ENVS
 cpb EXPLAIN PLAYBOOK kommander-idea
-cpb SHOW CREATE ALL > setup.cpb
-cpb APPLY setup.cpb --dry-run
+cpb SHOW CREATE ALL > playbook.cpb
+cpb APPLY playbook.cpb --dry-run
 ```
 
 ## Pre-grammar commands: a hidden fallback
@@ -563,7 +568,7 @@ Comparisons are on strings as text; `version` is compared as text.
 
 **Only what is listed.** `count()` is the one aggregate, and only without
 grouping. There are no joins, no `GROUP BY`, no subqueries, and no writes:
-`SELECT` only reads, so a setup file refuses it like any other read.
+`SELECT` only reads, so a playbook file refuses it like any other read.
 
 **Formats.** `Pretty` (the default: an aligned table) and `TSV` (tab-separated,
 no header) are for people and `cut`; `JSON` is one array; `JSONEachRow` is one
@@ -593,10 +598,10 @@ and the rule is exact:
 
 - It applies when the whole command line after the global flags is **exactly
   one word, and that word contains whitespace**. The word is read with the
-  setup-file lexer as exactly one statement: single quotes, doubled quotes
+  playbook-file lexer as exactly one statement: single quotes, doubled quotes
   and `-- ` comments work, a trailing `;` is optional, and a second
   statement is an error.
-- Reads are allowed in this form, unlike in a setup file: it is still the
+- Reads are allowed in this form, unlike in a playbook file: it is still the
   command line.
 - Everything else is read word by word, as the shell split it, as before.
 - **The unquoted `*`.** `cpb SELECT * FROM PLAYBOOKS` without quotes is

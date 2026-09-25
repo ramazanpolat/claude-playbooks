@@ -261,7 +261,7 @@ refuses and tells you to change the tag in devbox instead (see
 [With devbox or Nix](#with-devbox-or-nix)).
 
 To update a *playbook* rather than the tool, see
-[Managing playbooks](playbooks.md#update).
+[Managing playbooks](managing-playbooks.md#update).
 
 ## Uninstalling
 
