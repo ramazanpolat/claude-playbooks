@@ -1,0 +1,75 @@
+# claude-playbooks own-arena suite: cli-grammar -- the statement grammar
+# (docs/cli-grammar.md) on the REAL binary and launch path, and only the
+# new code: env sets, DEFAULTS, playbook variables, a secret reference
+# resolved by a stub helper at launch, EXPLAIN --json, SHOW CREATE feeding
+# APPLY with no change, APPLY across files and its DROP PLAYBOOK guard, the
+# source-drift warning, a bare SHOW, and a credential literal that is
+# refused, then stored AS PLAINTEXT and never printed. A stub `claude` dumps
+# the environment it received; a stub secret helper follows cpb's helper
+# interface and resolves keychain:ok… references. No real secret exists.
+
+[scenario]
+name = "cli-grammar"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
+  '''printf '%s\n' '#!/bin/sh' 'if [ "$1" = --check ]; then case "$2" in *=keychain:ok*) exit 0 ;; *) echo MISSING >&2; exit 4 ;; esac; fi' 'while [ $# -gt 0 ] && [ "$1" != -- ]; do k=${1%%=*}; r=${1#*=}; export "$k=resolved:$r"; shift; done' 'shift' 'exec "$@"' > "$HOME/.local/bin/test-helper" && chmod 755 "$HOME/.local/bin/test-helper"''',
+  'claude-playbook CREATE PLAYBOOK gpb NO ALIAS',
+  'claude-playbook CREATE ENV glm SET FROM_ENV=yes MODEL=glm DESCRIBE router',
+  'claude-playbook ALTER DEFAULTS SET SECRET HELPER "$HOME/.local/bin/test-helper"',
+  'claude-playbook ALTER ENV glm SET API_TOKEN FROM keychain:ok/glm',
+  'claude-playbook ALTER PLAYBOOK gpb USE ENV glm SET VAR OWN=yes BLOCK VAR NOISY',
+]
+
+[[verify.files]]
+path = "~/.claude-playbooks/.env-profiles/glm.toml"
+
+[[verify.commands]]
+# The launch execs through the helper: the reference resolves, the shell's
+# stale value never reaches claude, the env set and the playbook's own
+# layer apply, BLOCK removes an exported variable.
+command = 'rm -f "$HOME/claude-env"; NOISY=1 API_TOKEN=stale-from-shell claude-playbook run gpb && grep -x FROM_ENV=yes "$HOME/claude-env" >/dev/null && grep -x OWN=yes "$HOME/claude-env" >/dev/null && grep -x API_TOKEN=resolved:keychain:ok/glm "$HOME/claude-env" >/dev/null && ! grep -q "^NOISY=" "$HOME/claude-env" && ! grep -q stale-from-shell "$HOME/claude-env" && echo launch-ok'
+contains = "launch-ok"
+
+[[verify.commands]]
+# EXPLAIN --json names the reference and the layer that decided each key.
+command = 'OUT=$(claude-playbook EXPLAIN PLAYBOOK gpb --json) && printf "%s" "$OUT" | grep -qF "\"ref\": \"keychain:ok/glm\"" && printf "%s" "$OUT" | grep -qF "\"kind\": \"ENV\"" && printf "%s" "$OUT" | grep -qF "\"blocked\": true" && printf "%s" "$OUT" | grep -qF "\"command\": \"$HOME/.local/bin/test-helper\"" && echo explain-ok'
+contains = "explain-ok"
+
+[[verify.commands]]
+# A bare SHOW is SHOW PLAYBOOKS.
+command = '[ "$(claude-playbook SHOW)" = "$(claude-playbook SHOW PLAYBOOKS)" ] && claude-playbook SHOW --json | grep -qF "\"name\": \"gpb\"" && echo bare-show-ok'
+contains = "bare-show-ok"
+
+[[verify.commands]]
+# SHOW CREATE ALL writes a playbook file that APPLY finds already true:
+# nothing created or changed, and no file differs.
+command = 'sum() { find "$HOME/.claude-playbooks" \( -name .playbook -o -name "*.toml" -o -name .default -o -name .secret-helper \) -type f | sort | xargs cat | cksum; }; claude-playbook SHOW CREATE ALL > "$HOME/playbook.cpb" && B=$(sum) && claude-playbook APPLY "$HOME/playbook.cpb" > "$HOME/apply.out" && grep -q " 0 created, 0 changed," "$HOME/apply.out" && [ "$B" = "$(sum)" ] && echo roundtrip-ok'
+contains = "roundtrip-ok"
+
+[[verify.commands]]
+# APPLY across two files, in order; a dry run writes nothing.
+command = 'printf "CREATE OR REPLACE ENV extra SET E=1;\n" > "$HOME/a.cpb"; printf "ALTER PLAYBOOK gpb ADD ENV extra;\n" > "$HOME/b.cpb"; claude-playbook APPLY "$HOME/a.cpb" "$HOME/b.cpb" --dry-run >/dev/null && test ! -e "$HOME/.claude-playbooks/.env-profiles/extra.toml" && claude-playbook APPLY "$HOME/a.cpb" "$HOME/b.cpb" >/dev/null && grep -F "profiles = [\"glm\", \"extra\"]" "$HOME/.claude-playbooks/gpb/.playbook" >/dev/null && echo multi-file-ok'
+contains = "multi-file-ok"
+
+[[verify.commands]]
+# A playbook file never consents to DROP PLAYBOOK on its own: refused and
+# nothing written without --yes, dropped with it.
+command = 'claude-playbook CREATE PLAYBOOK dpb NO ALIAS >/dev/null && printf "CREATE OR REPLACE ENV side;\nDROP PLAYBOOK dpb;\n" > "$HOME/drop.cpb" && if claude-playbook APPLY "$HOME/drop.cpb" >/dev/null 2>&1; then echo drop-not-refused; else test -d "$HOME/.claude-playbooks/dpb" && test ! -e "$HOME/.claude-playbooks/.env-profiles/side.toml" && claude-playbook APPLY "$HOME/drop.cpb" --yes >/dev/null && test ! -e "$HOME/.claude-playbooks/dpb" && echo drop-guard-ok; fi'
+contains = "drop-guard-ok"
+
+[[verify.commands]]
+# Source drift is a warning, exit 0, nothing changed.
+command = 'printf "CREATE PLAYBOOK IF NOT EXISTS gpb FROM https://example.com/other.git;\n" > "$HOME/drift.cpb" && claude-playbook APPLY "$HOME/drift.cpb" 2> "$HOME/drift.err" > "$HOME/drift.out" && grep -q "source differs" "$HOME/drift.err" && grep -q "1 warning(s)" "$HOME/drift.out" && echo drift-ok'
+contains = "drift-ok"
+
+[[verify.commands]]
+# A credential literal is refused without AS PLAINTEXT, stored with it, and
+# never printed by SHOW, EXPLAIN or SHOW CREATE.
+command = 'S=sk-live-0123456789abcdef; if claude-playbook ALTER PLAYBOOK gpb SET VAR X_TOKEN=$S >/dev/null 2>&1; then echo literal-accepted; else claude-playbook ALTER PLAYBOOK gpb SET VAR X_TOKEN=$S AS PLAINTEXT >/dev/null && O=$( { claude-playbook SHOW PLAYBOOK gpb; claude-playbook SHOW PLAYBOOK gpb --json; claude-playbook EXPLAIN PLAYBOOK gpb; claude-playbook EXPLAIN PLAYBOOK gpb --json; claude-playbook SHOW CREATE PLAYBOOK gpb --skip-secrets; } 2>&1 ) && ! printf "%s" "$O" | grep -q "$S" && echo plaintext-ok; fi'
+contains = "plaintext-ok"
