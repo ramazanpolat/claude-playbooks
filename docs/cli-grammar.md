@@ -178,7 +178,13 @@ ANTHROPIC_MODEL       glm-5.3                          <- PLAYBOOK kommander-ide
 HTTP_PROXY            (blocked)                        <- PLAYBOOK kommander-idea
 OPENAI_API_KEY        sk-a...9f2c (51 chars, plaintext) <- PLAYBOOK kommander-idea
 FOO                   bar                              <- DEFAULTS (ENV claude-default)
+
+Secret helper: my-keychain-helper (from CPB_SECRET_HELPER)
 ```
+
+The last line names the helper that resolves this playbook's references and
+where it came from (`setting` or `CPB_SECRET_HELPER`), or reads
+`Secret helper: (none)`.
 
 ## Secrets (optional)
 
@@ -287,7 +293,8 @@ File rules:
 - **No secret values.** Secrets appear only as `FROM '<ref>'`. `SHOW CREATE`
   never prints a credential-looking literal: it writes it as a commented-out
   line with the value masked, `-- SET VAR K=<masked> AS PLAINTEXT`, followed
-  by the statement that fixes it (`ALTER … SET K FROM '<ref>'`), and exits
+  by the statement that fixes it (`ALTER ENV <set> SET K FROM '<ref>'`, or
+  `ALTER PLAYBOOK <name> SET VAR K FROM '<ref>'`), and exits
   non-zero, unless `--skip-secrets` is given. Plain text never travels in a
   setup file.
 - **Idempotent.** `SHOW CREATE` emits only idempotent forms (`CREATE OR
