@@ -372,7 +372,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.6.0}
+REF=${GENTAR_REF:-v0.6.1}
 
 # --review: has this repo outgrown its suites?
 #
