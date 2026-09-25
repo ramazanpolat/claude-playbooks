@@ -372,7 +372,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.4.2}
+REF=${GENTAR_REF:-v0.5.0}
 
 # --review: has this repo outgrown its suites?
 #
@@ -601,6 +601,10 @@ mkdir "subjects/$SUBJECT"
 # until the trap's `down -v`.
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
+# History store on this host's docker network (optional; see the engine's
+# history/). The redaction list below covers its password too.
+[ -n "${GENTAR_HISTORY_NETWORK:-}" ] && [ -f "$ARENA/compose.history.yml" ] \
+  && ARENA_FILES+=(-f compose.history.yml)
 
 arena() { docker compose "${ARENA_FILES[@]}" -p "arena-$SUBJECT" "$@"; }
 
@@ -822,7 +826,7 @@ done
 # file is passed through the engine's bin/redact, which replaces the VALUES
 # of these variables: the bench-host identity, plus every credential a
 # suite here declares.
-REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY"
+REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY GENTAR_HISTORY_PASSWORD"
 for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
   REDACT_NAMES="$REDACT_NAMES $(credential_groups "$f" | tr '\n' ' ')"
 done
