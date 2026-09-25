@@ -90,7 +90,12 @@ evren-router` inside `ALTER PLAYBOOK` detaches that ENV, and `UNSET ENV FOO`
 forgets the playbook's own `FOO`.
 
 Clauses in one command apply **atomically**: all or none, validated before
-anything is written.
+anything is written. Validation includes `pilot wire … --check` for
+`USE PILOT` and `with-secret --check` for every `SET … FROM`. `USE PILOT` /
+`DROP PILOT` are applied **last**, after cpb's own writes, because they write
+outside cpb's state. If one of them fails, cpb restores its own writes; if a
+pilot step succeeded and something after it fails, cpb re-wires the previous
+pilot from `<install>/.pilot` (or unwires when there was none).
 
 ## Layers at launch
 
@@ -115,11 +120,22 @@ PILOT                 ramazan-metu                     <- PLAYBOOK kommander-ide
 
 ## Secrets
 
-`SET <key> FROM '<ref>'` stores the **reference** only (`keychain:…`,
-`op://…`, `env:…`, `file:…`), in the pilot-profile reference forms. cpb
-resolves it at launch through `with-secret` and hands the value to the child
-process only. It never appears in a file, in argv, or in any `SHOW`/`EXPLAIN`
-output.
+`SET <key> FROM '<ref>'` stores the **reference** only. The accepted forms
+are pilot-profile's, cited rather than copied so they cannot drift (its
+`capture-protocol` *Secrets* section and `ADAPTERS.md`): `keychain:pilot/<name>`,
+`keychain:<service>`, `op://…`, `age:<file>#<key>`, `env:…`, `file:…`, and
+adapter schemes such as `vault:<path>#<field>`.
+
+- **At write time** cpb runs `with-secret --check KEY=REF`: presence only,
+  never the value. Anything but present fails the command, so a mistyped
+  reference is caught before launch.
+- **At launch** cpb does not fetch values. It **execs the launch through
+  `with-secret`**: `with-secret K1=REF1 [K2=REF2 …] -- claude …`. There is no
+  value-returning call and none may be built. On `with-secret` exit 3
+  (refused), 4 (missing) or 5 (adapter unavailable) cpb does not launch and
+  prints the reason, which never contains the value.
+- The value never appears in a file, in argv, or in any `SHOW`/`EXPLAIN`
+  output.
 
 A literal `SET` whose key looks like a credential (`*_TOKEN`, `*_KEY`,
 `*_SECRET`, `*PASSWORD*`) is accepted but warned about, pointing at `FROM`.
@@ -151,8 +167,10 @@ person** — presence and secrets stay shared.
   `pilot unwire` returns 0 (also when not wired), 2 or 3; never 4.
 - Without `pilot` on `PATH`, `USE PILOT` fails with a one-line message; no
   other command is affected.
+- `SHOW PILOTS` parses `pilot list --json`
+  (`[{"name", "path", "default"}]`), never the human form.
 - The pilot side (`~/.pilots/<name>/`, `<install>/.pilot`, `pilot list/new/
-  default`) is owned and specified by pilot-profile, not here.
+  default`, `wire --check`) is owned and specified by pilot-profile, not here.
 
 ## Examples
 
