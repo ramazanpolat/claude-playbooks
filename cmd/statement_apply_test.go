@@ -281,3 +281,31 @@ func TestApplySeveralFiles(t *testing.T) {
 		t.Fatal("the drop in the second file did not run")
 	}
 }
+
+// A playbook file may set the secret helper and use it in the same run:
+// the reference check before any write uses the helper the file sets, and
+// so does a dry run.
+func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	helper, _ := fakeHelper(t)
+	path := writePlaybookFile(t, "ALTER DEFAULTS SET SECRET HELPER '"+helper+"';\nCREATE OR REPLACE ENV r;\nALTER ENV r SET TOKEN FROM 'keychain:ok/r';\n")
+	if out, err := apply(t, path, "--dry-run"); err != nil {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	if out, err := apply(t, path); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if p := readProfile(t, "r"); p.Refs["TOKEN"] != "keychain:ok/r" {
+		t.Fatalf("reference not stored: %#v", p)
+	}
+	_ = root
+	// A reference the helper cannot resolve is still refused before any write.
+	bad := writePlaybookFile(t, "CREATE OR REPLACE ENV s;\nALTER ENV s SET TOKEN FROM 'keychain:gone';\n")
+	if _, err := apply(t, bad); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		t.Fatalf("an unresolvable reference: %v", err)
+	}
+	if readProfile(t, "s") != nil {
+		t.Fatal("the refused file wrote its first statement")
+	}
+}

@@ -42,16 +42,10 @@ func runApply(st *grammar.Stmt) error {
 	// A file never consents to DROP PLAYBOOK on its own: it deletes an
 	// install directory, data and all.
 	var drops []string
-	var refs []grammar.Clause
 	for _, f := range files {
 		for _, s := range f.stmts {
 			if s.Verb == grammar.Drop && s.Object == grammar.Playbook {
 				drops = append(drops, fmt.Sprintf("  %s:%d: DROP PLAYBOOK %s", f.path, s.Pos.Line, s.Name))
-			}
-			for _, c := range s.Clauses {
-				if c.Kind == grammar.SetRef {
-					refs = append(refs, c)
-				}
 			}
 		}
 	}
@@ -59,10 +53,21 @@ func runApply(st *grammar.Stmt) error {
 		return fmt.Errorf("the files drop playbooks, deleting their directories:\n%s\nnothing was written: review them with APPLY … --dry-run, then confirm with --yes",
 			strings.Join(drops, "\n"))
 	}
-	// What can be checked before any write is checked for every file:
-	// each secret reference must resolve.
-	if err := checkRefs(refs); err != nil {
-		return fmt.Errorf("%w\nnothing was written", err)
+	// What can be checked before any write is checked for every file: each
+	// secret reference must resolve, against the helper the files will have
+	// set by then (a file may set the helper and use it in one run).
+	var helper helperState
+	for _, f := range files {
+		for _, s := range f.stmts {
+			for _, c := range s.Clauses {
+				helper = helper.after(c)
+				if c.Kind == grammar.SetRef {
+					if err := checkRefsWith(helper, []grammar.Clause{c}); err != nil {
+						return fmt.Errorf("%s:%d: %w\nnothing was written", f.path, s.Pos.Line, err)
+					}
+				}
+			}
+		}
 	}
 
 	r := &stmtRun{dryRun: st.DryRun, yes: st.Yes, envs: map[string]bool{}, playbooks: map[string]bool{}}

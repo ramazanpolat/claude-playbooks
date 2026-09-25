@@ -348,8 +348,9 @@ File rules:
 `cpb APPLY <file> [<file> ...]` (several files decided 2026-09-26):
 
 1. Parses **every** file and validates every statement: syntax, names, the
-   secret helper's check of each reference, and the `DROP PLAYBOOK`
-   confirmation below. If anything in any file fails, nothing is written.
+   secret helper's check of each reference (against the helper the files
+   will have set by then: a file may set the helper and use it in one run),
+   and the `DROP PLAYBOOK` confirmation below. If anything in any file fails, nothing is written.
    (A source is fetched only when its `CREATE PLAYBOOK` runs.)
 2. Runs the files in the order given, and their statements in order, each
    statement atomic, reporting each as `created`, `changed`, `unchanged` or

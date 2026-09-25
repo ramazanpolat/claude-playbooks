@@ -97,8 +97,15 @@ type stmtRun struct {
 	envs      map[string]bool // env sets created earlier in a dry run
 	playbooks map[string]bool // playbooks created earlier in a dry run
 	outcome   string
-	note      string // a dry run's detail, e.g. what a drop would delete
-	warning   string // reported, never an error: e.g. a source that drifted
+	note      string      // a dry run's detail, e.g. what a drop would delete
+	warning   string      // reported, never an error: e.g. a source that drifted
+	helper    helperState // in a dry run: the helper earlier statements would set
+}
+
+// checkRefs checks a statement's references against the helper in effect
+// at this point of the run.
+func (r *stmtRun) checkRefs(clauses []grammar.Clause) error {
+	return checkRefsWith(r.helper, clauses)
 }
 
 // say prints a statement's report; a dry run prints only APPLY's summary.
@@ -144,7 +151,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 	// CREATE ... IF NOT EXISTS on an existing set writes nothing, so its
 	// references are not checked: the helper is not even asked.
 	if !(st.Verb == grammar.Create && (p != nil || r.envs[st.Name]) && st.IfNotExists) {
-		if err := checkRefs(st.Clauses); err != nil {
+		if err := r.checkRefs(st.Clauses); err != nil {
 			return err
 		}
 	}
@@ -309,6 +316,9 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		return nil
 	case r.dryRun:
 		r.outcome = outChanged
+		for _, c := range helperClauses {
+			r.helper = r.helper.after(c)
+		}
 		return nil
 	}
 	r.outcome = outChanged
@@ -353,7 +363,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 }
 
 func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
-	if err := checkRefs(st.Clauses); err != nil {
+	if err := r.checkRefs(st.Clauses); err != nil {
 		return err
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
