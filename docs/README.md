@@ -21,6 +21,7 @@ Pages are grouped by what you came for:
 | | |
 |---|---|
 | [CLI grammar](reference/cli-grammar.md) | the `cpb <VERB> <OBJECT>` statements, playbook files, output formats |
+| [System-prompt files](reference/system-prompt-files.md) | files a playbook declares that `claude` appends to its system prompt (draft) |
 
 The behavioral contract is [`SPEC-v4.md`](../SPEC-v4.md) in the repository root;
 when a document here and the spec disagree, the spec wins. Development and
