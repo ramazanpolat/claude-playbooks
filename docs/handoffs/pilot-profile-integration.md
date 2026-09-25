@@ -2,7 +2,10 @@
 
 **From:** the `pilot-profile` project (`github.com/agent-realm/pilot-profile`, private)
 **Date:** 2026-09-22
-**Status:** accepted and implemented — `ff76081` on `claude/pilot-profile-wire`
+**Status:** 3a (the inert `@import` lines in the `create` template) accepted and kept. 3b (create/install
+calling `pilot wire`) was implemented in `ff76081` and **withdrawn on 2026-09-26**: the pilot decided that
+components stay standalone and loosely coupled, integration is the import alone, and wiring a playbook to
+a pilot profile is the pilot's own step (`pilot wire`). claude-playbook no longer calls `pilot`.
 **Size:** two small, independent changes. Neither adds a dependency.
 **Contract:** `pilot wire`'s guarantees are frozen as of pilot-profile v0.1.3 — see
 *"`wire`: the contract"* in that repo's README. Exit codes are `0` ok / `1` usage /

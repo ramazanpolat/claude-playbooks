@@ -15,9 +15,6 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 export HOME=$W/home; mkdir -p "$HOME/bin"
 export PATH=$HOME/bin:/usr/bin:/bin
 unset CLAUDE_PLAYBOOKS_DIR CLAUDE_CONFIG_DIR CLAUDE_CONFIG_DIR_OVERRIDE
-# create/install run `pilot wire` when pilot is on PATH (v3.15.0+). A real one
-# would touch state outside this sandbox, so refuse rather than run unhermetic.
-if command -v pilot >/dev/null 2>&1; then echo "refusing: a 'pilot' is on PATH ($(command -v pilot)); not hermetic" >&2; exit 2; fi
 cp "$BIN" "$HOME/bin/claude-playbook"; C=$HOME/bin/claude-playbook
 cat > "$HOME/bin/claude" <<'EOF'
 #!/bin/sh

@@ -281,10 +281,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		installLauncher(launcherName, targetName, configDest)
 	}
 
-	// Last, on EVERY successful path, and with the registry lock still held --
-	// see the matching note in create.go. --no-alias previously returned above
-	// and skipped wiring silently.
-	wirePlaybook(configDest)
 	return nil
 }
 

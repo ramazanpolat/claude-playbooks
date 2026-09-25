@@ -205,7 +205,7 @@ What changed since v3.14.0, and why it doesn't touch cockpit:
 - **v3.15.0 masks credential-looking values in the *output* of `env`, `env-profile` and `info`.** cockpit reads the store as data, never command output. The masking is display-only per `SPEC-v4.md` (*Redaction*), and the store-format checks (8) pass unchanged.
 - **`env-profile` without arguments now prints a table.** Same reason.
 - **`update --all` is withdrawn.** cockpit doesn't use it.
-- **`create`/`install` run `pilot wire` when `pilot` is on PATH.** It is best-effort and silent, and a ship without `pilot` sees nothing.
+- **`create`/`install` do not run `pilot`** (since 2026-09-26; earlier releases ran `pilot wire` best-effort when it was on PATH). A new playbook's CLAUDE.md carries the inert pilot-profile imports; wiring is the pilot's own step.
 - **No CLI code changed after v3.15.0.** v3.16.0 and v3.17.0 are test and release infrastructure.
 
 §5.1 still holds on v3.17.0, as on v3.14.0: a manifest rewrite (`env <pb> use …`) drops an unknown table. The script asserts that as documented, and only after checking the rewrite ran. The script refuses to start (exit 2) when a `pilot` is on PATH, because `install` would call it and the run would no longer be hermetic. Keeping the base pin in `base.toml` stays right.
