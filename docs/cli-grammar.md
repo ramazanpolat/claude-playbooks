@@ -130,7 +130,7 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … BLOCK VAR K` | `.playbook` `[env] unset = [...]` |
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
 | `ALTER DEFAULTS …` | `<root>/.env-profiles/.default`, one set name per line, in order |
-| `USE PILOT` / `DROP PILOT` | nothing of cpb's: `pilot wire` / `pilot unwire` write `<install>/.pilot` and the import block in the playbook's `CLAUDE.local.md` |
+| `USE PILOT` / `DROP PILOT` | nothing of cpb's: `pilot wire` / `pilot unwire` manage the install's pilot link and imports (see PILOT) |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher, as `create`/`install`/`link`/`delete`/`rename`/`alias` do today |
 
 A key lives in exactly one of `set`, `refs`, `unset` within a layer; writing
