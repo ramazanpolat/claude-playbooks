@@ -552,7 +552,7 @@ one playbook, which the *Output* variable object never needs to say. A nested ob
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | `name version path source linked launcher envs vars sandbox` (the `SHOW PLAYBOOK` object) |
+| `PLAYBOOKS` | playbook | `name version path source linked launcher envs vars sandbox marketplaces plugins agent` (the `SHOW PLAYBOOK` object) |
 | `ENVS` | env set | `name description vars used_by default` (the `SHOW ENV` object) |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` (with `layer.kind`, `layer.name`) |
 | `DEFAULTS` | (one row) | `envs secret_helper` (the `SHOW DEFAULTS` object) |
@@ -655,7 +655,9 @@ ALTER PLAYBOOK kommander
 
 -- chaos.cpb
 INCLUDE 'kommander.cpb';
-ALTER PLAYBOOK kommander ADD PLUGIN chaos@chaos;
+ALTER PLAYBOOK kommander
+  ADD MARKETPLACE chaos FROM 'github:santiment/chaos'
+  ADD PLUGIN chaos@chaos;
 ```
 
 **What the clauses write: the playbook's `settings.json`, and nothing
@@ -707,10 +709,17 @@ a plugin id is `<plugin>@<marketplace>`.
 - A linked playbook's `settings.json` belongs to the target, so these
   clauses are refused on it, as the environment clauses are.
 - A statement that combines them with environment clauses writes two files
-  (the manifest and `settings.json`) and still applies whole or not at all:
-  the first file written is restored if the second write fails.
+  (the manifest and `settings.json`), each through a rename. A failed second
+  write restores the first, so an error leaves both as they were. A process
+  killed between the two renames, or a failed restore, can leave only the
+  first written: there is no journal. The recovery is the usual one, running
+  the statement again, since every statement is safe to repeat; `SHOW` shows
+  which file holds the change.
 - `enabledPlugins` entries set to `false` by hand are shown, not changed: the
-  grammar adds and drops, it does not disable.
+  grammar adds and drops, it does not disable. `SHOW CREATE` does not
+  reproduce such an entry: it writes a comment line
+  (`-- PLUGIN p@m is false in settings.json; not written`), since an absent
+  entry and a `false` one both leave the plugin off in this scope.
 
 **The agent** (verified 2026-09-26, nine `claude -p` runs). A plugin can
 name an agent in its own `settings.json`, and two plugins that both do are
@@ -732,10 +741,11 @@ tell: `agent: kommander (playbook settings)` when the playbook sets it, or
 `(from plugin <p>)` when only an enabled plugin's own `settings.json` names
 one. `SHOW CREATE` writes the clauses, so a
 playbook's plugins and agent travel in its playbook file. `SELECT` sees the
-fields on `PLAYBOOKS` when it lands.
+fields on `PLAYBOOKS` when it lands (the *Tables* list includes them).
 
-**INCLUDE** (its own section) is built in the same release, so the stacked
-files above run with one `cpb APPLY kommander.cpb`.
+**INCLUDE** is specified in its own section, which lands separately
+(PR #85); this section depends on it, and both are built in the same
+release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
 
 These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
 form in the first cut (decided 2026-09-26).
