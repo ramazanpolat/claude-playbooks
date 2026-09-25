@@ -56,6 +56,15 @@ func Execute() {
 		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook. (If this symlink is your own alias for the CLI, name it %q or %q, or use a hard link.)\n", base, "claude-playbook", "cpb")
 		os.Exit(1)
 	}
+	// A grammar statement never reaches cobra, which would read its words
+	// as flags and subcommands (docs/cli-grammar.md).
+	if stmt, ok := statementArgs(os.Args[1:]); ok {
+		if err := runStatement(stmt); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := rootCmd.Execute(); err != nil {
 		if code, ok := exitCode(err); ok {
 			os.Exit(code)

@@ -878,7 +878,7 @@ func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
 	if err := envprofile.Write(root, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := envprofile.SetDefault(root, "glm"); err != nil {
+	if err := envprofile.WriteDefaults(root, []string{"glm"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
@@ -893,7 +893,7 @@ func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
 	if p, err := envprofile.Read(root, "glm"); err != nil || p == nil {
 		t.Fatalf("profile damaged: %v %v", p, err)
 	}
-	if d, err := envprofile.Default(root); err != nil || d != "glm" {
+	if d, err := envprofile.Defaults(root); err != nil || strings.Join(d, ",") != "glm" {
 		t.Fatalf("default damaged: %q %v", d, err)
 	}
 	seedFlatPlaybook(t, "beside")

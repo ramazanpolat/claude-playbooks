@@ -186,11 +186,11 @@ func TestReadDoesNotEchoBrokenProfileContent(t *testing.T) {
 
 func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 	dir := Dir(t.TempDir())
-	if name, err := Default(dir); name != "" || err != nil {
-		t.Fatalf("Default(no marker) = %q, %v", name, err)
+	if names, err := Defaults(dir); names != nil || err != nil {
+		t.Fatalf("Defaults(no marker) = %q, %v", names, err)
 	}
-	if err := SetDefault(dir, "ghost"); !errors.Is(err, ErrProfile) {
-		t.Fatalf("SetDefault of a missing profile: %v", err)
+	if err := WriteDefaults(dir, []string{"ghost"}); !errors.Is(err, ErrProfile) {
+		t.Fatalf("WriteDefaults of a missing profile: %v", err)
 	}
 	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"A": "default", "B": "default"}, Unset: []string{"TOKEN"}}); err != nil {
 		t.Fatal(err)
@@ -198,11 +198,11 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 	if err := Write(dir, &Profile{Name: "pb", Set: map[string]string{"B": "profile"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetDefault(dir, "base"); err != nil {
+	if err := WriteDefaults(dir, []string{"base"}); err != nil {
 		t.Fatal(err)
 	}
-	if name, _ := Default(dir); name != "base" {
-		t.Fatalf("Default = %q", name)
+	if names, _ := Defaults(dir); strings.Join(names, ",") != "base" {
+		t.Fatalf("Defaults = %q", names)
 	}
 	info, _ := os.Stat(filepath.Join(dir, DefaultMarker))
 	if info.Mode().Perm() != 0o600 {
@@ -223,14 +223,14 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 		t.Fatalf("layering: %#v", got)
 	}
 
-	if err := ClearDefault(dir); err != nil {
+	if err := ClearDefaults(dir); err != nil {
 		t.Fatal(err)
 	}
-	if name, _ := Default(dir); name != "" {
-		t.Fatalf("Default after clear = %q", name)
+	if names, _ := Defaults(dir); names != nil {
+		t.Fatalf("Defaults after clear = %q", names)
 	}
-	if err := ClearDefault(dir); err != nil {
-		t.Fatalf("clearing an absent default: %v", err)
+	if err := ClearDefaults(dir); err != nil {
+		t.Fatalf("clearing absent defaults: %v", err)
 	}
 
 	// a default that names a missing profile refuses like any other
@@ -239,5 +239,72 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 	}
 	if _, err := ExpandWithDefault(dir, nil); !errors.Is(err, ErrProfile) {
 		t.Fatalf("missing default: %v", err)
+	}
+}
+
+// DEFAULTS became a list with the grammar: layered in listed order, later
+// wins, all under the playbook's own profiles and block.
+func TestRegistryDefaultsLayerInOrder(t *testing.T) {
+	dir := Dir(t.TempDir())
+	for name, v := range map[string]string{"a": "from-a", "b": "from-b"} {
+		if err := Write(dir, &Profile{Name: name, Set: map[string]string{"X": v, "ONLY_" + strings.ToUpper(name): "1"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := WriteDefaults(dir, []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, DefaultMarker))
+	if string(data) != "a\nb\n" {
+		t.Fatalf("marker = %q", data)
+	}
+	got, err := ExpandWithDefault(dir, nil)
+	if err != nil || got.Set["X"] != "from-b" || got.Set["ONLY_A"] != "1" || got.Set["ONLY_B"] != "1" {
+		t.Fatalf("a then b: %#v %v", got, err)
+	}
+	if err := WriteDefaults(dir, []string{"b", "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ExpandWithDefault(dir, nil); got.Set["X"] != "from-a" {
+		t.Fatalf("b then a: %#v", got)
+	}
+	got, err = ExpandWithDefault(dir, &manifest.Env{Set: map[string]string{"X": "own"}})
+	if err != nil || got.Set["X"] != "own" {
+		t.Fatalf("own block over defaults: %#v %v", got, err)
+	}
+	if err := WriteDefaults(dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, DefaultMarker)); !os.IsNotExist(err) {
+		t.Fatalf("an empty list must remove the marker: %v", err)
+	}
+}
+
+func TestDefaultsMarkerFormats(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for content, want := range map[string]string{
+		"base\n":            "base",  // the single-name format before DEFAULTS was a list
+		"base":              "base",  // no trailing newline
+		"a\nb\n":            "a,b",   // one per line
+		"  a  \n\n b\n":     "a,b",   // blank lines and padding ignored
+		"":                  "ERROR", // empty is an error, not "no defaults"
+		"\n\n":              "ERROR", // so is only blank lines
+		"a\na\n":            "ERROR", // a name listed twice
+		"not a valid name!": "ERROR", // invalid name
+	} {
+		if err := os.WriteFile(filepath.Join(dir, DefaultMarker), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		names, err := Defaults(dir)
+		got := strings.Join(names, ",")
+		if err != nil {
+			got = "ERROR"
+		}
+		if got != want {
+			t.Errorf("marker %q: got %q (%v), want %q", content, got, err, want)
+		}
 	}
 }

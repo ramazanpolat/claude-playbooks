@@ -215,7 +215,7 @@ func TestProfileDefaultLifecycle(t *testing.T) {
 	if err := runEnvProfile(nil, []string{"base", "default"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := envprofile.Default(dir); d != "base" {
+	if d, _ := envprofile.Defaults(dir); strings.Join(d, ",") != "base" {
 		t.Fatalf("default = %q", d)
 	}
 	list := captureStdout(t, func() {
@@ -257,7 +257,7 @@ func TestProfileDefaultLifecycle(t *testing.T) {
 	if err := runEnvProfile(nil, []string{"base", "undefault"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := envprofile.Default(dir); d != "" {
+	if d, _ := envprofile.Defaults(dir); len(d) != 0 {
 		t.Fatalf("default after undefault = %q", d)
 	}
 	if err := runEnvProfile(nil, []string{"base", "delete"}); err != nil {
@@ -286,7 +286,7 @@ func TestProfileDefaultGuardsUnderBrokenState(t *testing.T) {
 	if err := runEnvProfile(nil, []string{"base", "undefault"}); err != nil {
 		t.Fatalf("undefault with a broken profile: %v", err)
 	}
-	if d, _ := envprofile.Default(dir); d != "" {
+	if d, _ := envprofile.Defaults(dir); len(d) != 0 {
 		t.Fatalf("marker not cleared: %q", d)
 	}
 	// Repair, set default again, then make the MARKER unreadable: delete refuses.
@@ -510,4 +510,64 @@ func TestEnvProfileValuesRedactsCredentials(t *testing.T) {
 			t.Errorf("the table printed values:\n%s", out)
 		}
 	})
+}
+
+// The hidden env-profile command keeps its own code path, and must tolerate
+// the grammar's DEFAULTS list (spec: "a hidden fallback"): `default` still
+// replaces the whole list, `undefault` removes one name and keeps the rest,
+// and the listing marks every default.
+func TestHiddenEnvProfileDefaultsWithList(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "router")
+	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	for _, n := range []string{"a", "b", "c"} {
+		if err := runEnvProfile(nil, []string{n, "set", "FROM_" + strings.ToUpper(n) + "=1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marker := filepath.Join(dir, envprofile.DefaultMarker)
+	if err := os.WriteFile(marker, []byte("a\nb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	list := captureStdout(t, func() {
+		if err := runEnvProfile(nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(list, "a *") || !strings.Contains(list, "b *") || strings.Contains(list, "c *") {
+		t.Fatalf("listing does not mark exactly the defaults:\n%s", list)
+	}
+	show := captureStdout(t, func() {
+		if err := runEnv(nil, []string{"router"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(show, "Registry default profiles a, b apply") {
+		t.Fatalf("env show with two defaults:\n%s", show)
+	}
+
+	if err := runEnvProfile(nil, []string{"c", "undefault"}); err == nil || !strings.Contains(err.Error(), "not a registry default") {
+		t.Fatalf("undefault of a non-default: %v", err)
+	}
+	if err := runEnvProfile(nil, []string{"a", "undefault"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := envprofile.Defaults(dir); strings.Join(d, ",") != "b" {
+		t.Fatalf("undefault a from [a b] = %q, want [b]", d)
+	}
+	if err := runEnvProfile(nil, []string{"b", "delete"}); err == nil || !strings.Contains(err.Error(), "registry default") {
+		t.Fatalf("delete of a default in the list: %v", err)
+	}
+
+	if err := os.WriteFile(marker, []byte("a\nb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"c", "default"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := envprofile.Defaults(dir); strings.Join(d, ",") != "c" {
+		t.Fatalf("default c over [a b] = %q, want [c] (default replaces)", d)
+	}
 }

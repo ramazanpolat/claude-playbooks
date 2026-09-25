@@ -57,17 +57,23 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		// The default is reported even when it is broken: a marker naming a
 		// missing profile, or one that cannot be read, refuses every launch,
 		// and the listing is where a pilot looks first.
-		defaultName, derr := envprofile.Default(dir)
-		defaultFound := false
-		for _, p := range profiles {
-			if isRegistryDefault(dir, defaultName, p.Name) {
-				defaultFound = true
+		defaults, derr := envprofile.Defaults(dir)
+		var missing []string
+		for _, d := range defaults {
+			found := false
+			for _, p := range profiles {
+				if isRegistryDefault(dir, []string{d}, p.Name) {
+					found = true
+				}
+			}
+			if !found {
+				missing = append(missing, d)
 			}
 		}
 		if len(profiles) == 0 {
 			fmt.Println("No env profiles defined.")
 			fmt.Println("Create one with 'claude-playbook env-profile <name> set KEY=VALUE', then 'claude-playbook env <playbook> use <name>'.")
-			reportDefaultProblem(defaultName, derr, defaultFound)
+			reportDefaultProblem(missing, derr)
 			return nil
 		}
 		users, err := profileUsers(playbooksDir)
@@ -84,7 +90,7 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		anyDefault := false
 		for _, p := range profiles {
 			name := p.Name
-			if isRegistryDefault(dir, defaultName, p.Name) {
+			if isRegistryDefault(dir, defaults, p.Name) {
 				// A marker, not a word in a sentence: the eye finds a column.
 				name += " *"
 				anyDefault = true
@@ -107,7 +113,7 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%d profile(s). 'claude-playbook env-profile --values' to list what each sets,\n", len(profiles))
 			fmt.Println("or 'claude-playbook env-profile <name>' for one.")
 		}
-		reportDefaultProblem(defaultName, derr, defaultFound)
+		reportDefaultProblem(missing, derr)
 		return nil
 	}
 
@@ -129,7 +135,7 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 			fmt.Printf(": %s", p.Description)
 		}
 		fmt.Println()
-		if d, err := envprofile.Default(dir); err != nil {
+		if d, err := envprofile.Defaults(dir); err != nil {
 			fmt.Printf("Registry default marker is invalid (%v): every launch is refused until 'claude-playbook env-profile %s undefault' clears it.\n", err, name)
 		} else if isRegistryDefault(dir, d, name) {
 			fmt.Println("Registry default: applied under every playbook's own block.")
@@ -200,24 +206,36 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 	// exactly the situation in which every launch is refused and the pilot
 	// needs to clear the marker. Only the marker is consulted.
 	if verb == "undefault" {
-		current, err := envprofile.Default(dir)
+		current, err := envprofile.Defaults(dir)
 		if err != nil {
 			// The marker cannot name any profile (empty, invalid, dangling):
 			// there is no default it could belong to, and every launch is
 			// refused until it goes. Clearing it is what the pilot asked for.
-			if cerr := envprofile.ClearDefault(dir); cerr != nil {
+			if cerr := envprofile.ClearDefaults(dir); cerr != nil {
 				return fmt.Errorf("%v; and it could not be cleared: %w", err, cerr)
 			}
 			fmt.Printf("Registry default marker was invalid (%v); cleared. No registry default is set.\n", err)
 			return nil
 		}
-		if current != name && !envprofile.SameProfile(dir, current, name) {
-			if current == "" {
+		if !isRegistryDefault(dir, current, name) {
+			if len(current) == 0 {
 				return fmt.Errorf("no registry default is set")
 			}
-			return fmt.Errorf("the registry default is %q, not %q", current, name)
+			// One default keeps the wording this command has always printed.
+			if len(current) == 1 {
+				return fmt.Errorf("the registry default is %q, not %q", current[0], name)
+			}
+			return fmt.Errorf("env profile %q is not a registry default (the defaults are %s)", name, strings.Join(current, ", "))
 		}
-		if err := envprofile.ClearDefault(dir); err != nil {
+		// The marker may hold several defaults since the grammar made
+		// DEFAULTS a list; undefault removes this one and keeps the rest.
+		var rest []string
+		for _, d := range current {
+			if !isRegistryDefault(dir, []string{d}, name) {
+				rest = append(rest, d)
+			}
+		}
+		if err := envprofile.WriteDefaultsUnchecked(dir, rest); err != nil {
 			return err
 		}
 		fmt.Printf("Env profile %q is no longer the registry default.\n", name)
@@ -234,7 +252,9 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		if p == nil {
 			return fmt.Errorf("unknown env profile %q. Create it with 'claude-playbook env-profile %s set KEY=VALUE'", name, name)
 		}
-		if err := envprofile.SetDefault(dir, name); err != nil {
+		// Replaces the whole list, as it replaced the single default before
+		// DEFAULTS became a list.
+		if err := envprofile.WriteDefaults(dir, []string{name}); err != nil {
 			return err
 		}
 		fmt.Printf("Env profile %q is now the registry default: every playbook launch layers it under its own block.\n", name)
@@ -254,12 +274,16 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 		// case-insensitive filesystem "BASE" and "base" are one profile. An
 		// unreadable marker refuses the delete: the profile may still be the
 		// one every launch depends on.
-		d, err := envprofile.Default(dir)
+		d, err := envprofile.Defaults(dir)
 		if err != nil {
 			return fmt.Errorf("cannot determine the registry default: %w", err)
 		}
 		if isRegistryDefault(dir, d, name) {
-			return fmt.Errorf("env profile %q is the registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, d)
+			// One default keeps the wording this command has always printed.
+			if len(d) == 1 {
+				return fmt.Errorf("env profile %q is the registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, d[0])
+			}
+			return fmt.Errorf("env profile %q is a registry default; clear it first with 'claude-playbook env-profile %s undefault'", name, name)
 		}
 		if err := envprofile.Delete(dir, name); err != nil {
 			return err
@@ -320,11 +344,21 @@ func profileUsers(playbooksDir string) (map[string][]string, error) {
 	}
 	users := map[string][]string{}
 	for _, pb := range pbs {
-		if pb.Manifest == nil || pb.Manifest.Env == nil {
-			continue
-		}
-		for _, name := range pb.Manifest.Env.Profiles {
-			users[name] = append(users[name], pb.Name)
+		// A launch reads the governing manifest, which in a subdir layout
+		// can be a nested one; the root manifest is what `env` edits. Both
+		// count, so a set either one names is never deleted from under it.
+		named := map[string]bool{}
+		governing, _ := governingManifest(pb)
+		for _, m := range []*manifest.Manifest{pb.Manifest, governing} {
+			if m == nil || m.Env == nil {
+				continue
+			}
+			for _, name := range m.Env.Profiles {
+				if !named[name] {
+					named[name] = true
+					users[name] = append(users[name], pb.Name)
+				}
+			}
 		}
 	}
 	for name := range users {
@@ -333,25 +367,28 @@ func profileUsers(playbooksDir string) (map[string][]string, error) {
 	return users, nil
 }
 
-// isRegistryDefault reports whether name is the registry default defaultName,
+// isRegistryDefault reports whether name is one of the registry defaults,
 // by spelling or by file identity (one file, two spellings, on a
-// case-insensitive filesystem). An unset default matches nothing.
-func isRegistryDefault(dir, defaultName, name string) bool {
-	if defaultName == "" {
-		return false
+// case-insensitive filesystem). No defaults match nothing.
+func isRegistryDefault(dir string, defaults []string, name string) bool {
+	for _, d := range defaults {
+		if d == name || envprofile.SameProfile(dir, d, name) {
+			return true
+		}
 	}
-	return defaultName == name || envprofile.SameProfile(dir, defaultName, name)
+	return false
 }
 
 // reportDefaultProblem prints, after a listing, the state that refuses every
 // launch: a marker that cannot be read, or one naming a profile that does not
 // exist. Nothing is printed when the default is absent or healthy.
-func reportDefaultProblem(defaultName string, derr error, found bool) {
-	switch {
-	case derr != nil:
+func reportDefaultProblem(missing []string, derr error) {
+	if derr != nil {
 		fmt.Printf("Registry default marker is invalid (%v): every launch is refused until 'claude-playbook env-profile <name> undefault' clears it.\n", derr)
-	case defaultName != "" && !found:
-		fmt.Printf("Registry default %q names no profile: every launch is refused until 'claude-playbook env-profile %s set KEY=VALUE' creates it or 'claude-playbook env-profile %s undefault' clears it.\n", defaultName, defaultName, defaultName)
+		return
+	}
+	for _, d := range missing {
+		fmt.Printf("Registry default %q names no profile: every launch is refused until 'claude-playbook env-profile %s set KEY=VALUE' creates it or 'claude-playbook env-profile %s undefault' clears it.\n", d, d, d)
 	}
 }
 

@@ -224,54 +224,86 @@ func List(dir string) ([]*Profile, error) {
 }
 
 // DefaultMarker is the file under the profiles directory naming the registry
-// default profile: applied under every playbook's own block, the bottom layer
-// above the shell environment. Absent means no default.
+// defaults: env sets applied under every playbook's own block, in order, the
+// bottom layer above the shell environment. One name per line; a marker from
+// before DEFAULTS became a list holds a single name and reads unchanged.
+// Absent means no defaults.
 const DefaultMarker = ".default"
 
-// Default returns the registry default profile's name, "" when none is set.
-// Only an ABSENT marker means none: an empty one, one holding an invalid
-// name, or a dangling symlink is an error, because silently treating it as
-// "no default" would let a launch proceed without the layer every playbook
-// depends on (and with the machine-global token the default may unset).
-func Default(dir string) (string, error) {
+// Defaults returns the registry default env sets in order, nil when none.
+// Only an ABSENT marker means none: an empty one, one holding an invalid or
+// repeated name, or a dangling symlink is an error, because silently
+// treating it as "no defaults" would let a launch proceed without the layers
+// every playbook depends on (and with the machine-global token a default may
+// unset).
+func Defaults(dir string) ([]string, error) {
 	marker := filepath.Join(dir, DefaultMarker)
 	data, err := os.ReadFile(marker)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if _, lerr := os.Lstat(marker); lerr == nil {
-				return "", fmt.Errorf("%s: dangling symlink", marker)
+				return nil, fmt.Errorf("%s: dangling symlink", marker)
 			}
-			return "", nil
+			return nil, nil
 		}
-		return "", err
+		return nil, err
 	}
-	name := strings.TrimSpace(string(data))
-	if name == "" {
-		return "", fmt.Errorf("%s: empty registry default marker", marker)
+	var names []string
+	for _, line := range strings.Split(string(data), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if err := manifest.ValidateProfileName(name); err != nil {
+			return nil, fmt.Errorf("%s: %w", marker, err)
+		}
+		for _, seen := range names {
+			if seen == name {
+				return nil, fmt.Errorf("%s: %q is listed twice", marker, name)
+			}
+		}
+		names = append(names, name)
 	}
-	if err := manifest.ValidateProfileName(name); err != nil {
-		return "", fmt.Errorf("%s: %w", marker, err)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("%s: empty registry default marker", marker)
 	}
-	return name, nil
+	return names, nil
 }
 
-// SetDefault records name as the registry default; the profile must exist.
-func SetDefault(dir, name string) error {
-	p, err := Read(dir, name)
-	if err != nil {
-		return err
+// WriteDefaults records names as the registry defaults, in order; an empty
+// list removes the marker. Every named profile must exist.
+func WriteDefaults(dir string, names []string) error {
+	if len(names) == 0 {
+		return ClearDefaults(dir)
 	}
-	if p == nil {
-		return &MissingError{Name: name, Dir: dir}
+	for _, name := range names {
+		p, err := Read(dir, name)
+		if err != nil {
+			return err
+		}
+		if p == nil {
+			return &MissingError{Name: name, Dir: dir}
+		}
+	}
+	return WriteDefaultsUnchecked(dir, names)
+}
+
+// WriteDefaultsUnchecked records names without reading any profile. It is
+// for removing a default, which must work exactly when a profile is broken
+// (every launch is refused then, and clearing the default is the way out);
+// adding one goes through WriteDefaults.
+func WriteDefaultsUnchecked(dir string, names []string) error {
+	if len(names) == 0 {
+		return ClearDefaults(dir)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return manifest.WritePrivate(filepath.Join(dir, DefaultMarker), []byte(name+"\n"), 0o600)
+	return manifest.WritePrivate(filepath.Join(dir, DefaultMarker), []byte(strings.Join(names, "\n")+"\n"), 0o600)
 }
 
-// ClearDefault removes the registry default; clearing an absent one is fine.
-func ClearDefault(dir string) error {
+// ClearDefaults removes the marker; clearing an absent one is fine.
+func ClearDefaults(dir string) error {
 	err := os.Remove(filepath.Join(dir, DefaultMarker))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -293,19 +325,20 @@ func SameProfile(dir, a, b string) bool {
 	return os.SameFile(ia, ib)
 }
 
-// ExpandWithDefault is Expand with the registry default profile, when one is
-// set, layered UNDER e: default first, then e's profiles in order, then e's
-// own set/unset. A default that is named but missing or broken refuses the
-// launch like any other profile (errors.Is(err, ErrProfile)).
+// ExpandWithDefault is Expand with the registry defaults, when any are set,
+// layered UNDER e: defaults first in their listed order, then e's profiles in
+// order, then e's own set/unset. A default that is named but missing or
+// broken refuses the launch like any other profile (errors.Is(err,
+// ErrProfile)).
 func ExpandWithDefault(dir string, e *manifest.Env) (*manifest.Env, error) {
-	name, err := Default(dir)
+	names, err := Defaults(dir)
 	if err != nil {
 		return nil, &ResolveError{Name: DefaultMarker, Err: err}
 	}
-	if name == "" {
+	if len(names) == 0 {
 		return Expand(dir, e)
 	}
-	base, err := Expand(dir, &manifest.Env{Profiles: []string{name}})
+	base, err := Expand(dir, &manifest.Env{Profiles: names})
 	if err != nil {
 		return nil, err
 	}
