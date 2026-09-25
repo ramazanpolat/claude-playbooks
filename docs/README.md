@@ -1,13 +1,28 @@
 # Documentation
 
+Three kinds of page, by what you came for:
+
+- **tutorials/**: learning from zero, in order, each runnable end to end.
+  (They arrive with the grammar release.)
+- **guides/**: how to do one common task.
+- **reference/**: complete and dry: every statement, flag, file and format.
+
+## Guides
+
 | | |
 |---|---|
-| [Installation](installation.md) | install script, npx, source builds, uninstalling |
-| [Managing playbooks](playbooks.md) | create, install, link, launch, rename, update, delete |
-| [Authentication](authentication.md) | shared logins, long-lived tokens, isolated accounts |
-| [Environment overrides](environment.md) | per-playbook variables and shared env profiles |
-| [Sandboxed sessions](sandbox.md) | running a playbook inside a Docker Sandbox microVM |
-| [Agent guide](AGENT-GUIDE.md) | driving `cpb` unattended from an agent or CI |
+| [Installation](guides/installation.md) | install script, devbox/Nix, npx, source builds, updating, uninstalling |
+| [Managing playbooks](guides/managing-playbooks.md) | create, install, link, launch, rename, update, delete |
+| [Authentication](guides/authentication.md) | shared logins, long-lived tokens, isolated accounts |
+| [Environment overrides](guides/environment.md) | per-playbook variables and shared env profiles |
+| [Sandboxed sessions](guides/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
+| [Agent guide](guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
+
+## Reference
+
+| | |
+|---|---|
+| [CLI grammar](reference/cli-grammar.md) | the `cpb <VERB> <OBJECT>` statements, setup files, output formats |
 
 The behavioral contract is [`SPEC-v4.md`](../SPEC-v4.md) in the repository root;
 when a document here and the spec disagree, the spec wins. Development and
