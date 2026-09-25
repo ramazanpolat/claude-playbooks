@@ -106,6 +106,13 @@ var validCases = []struct {
 		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist NO ALIAS SANDBOX"),
 		Stmt{Verb: Create, Object: Playbook, Name: "second", IfNotExists: true, Clauses: []Clause{
 			{Kind: From, Arg: "repo"}, {Kind: Branch, Arg: "v0.5.0"}, {Kind: Subdir, Arg: "dist"}, {Kind: NoAlias}, {Kind: Sandbox}}}},
+	{"keyword-shaped arguments are values, not names",
+		w("CREATE PLAYBOOK x FROM link SUBDIR env BRANCH all"),
+		Stmt{Verb: Create, Object: Playbook, Name: "x", Clauses: []Clause{
+			{Kind: From, Arg: "link"}, {Kind: Subdir, Arg: "env"}, {Kind: Branch, Arg: "all"}}}},
+	{"a keyword-shaped secret helper",
+		w("ALTER DEFAULTS SET SECRET HELPER env"),
+		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: SetHelper, Arg: "env"}}}},
 	{"create playbook link",
 		w("CREATE PLAYBOOK my-dev LINK ~/DEV/my-playbook"),
 		Stmt{Verb: Create, Object: Playbook, Name: "my-dev", Clauses: []Clause{{Kind: Link, Arg: "~/DEV/my-playbook"}}}},
@@ -217,6 +224,11 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER PLAYBOOK k RENAME TO use"), "is a keyword"},
 		{w("ALTER PLAYBOOK k ALIAS"), "ALIAS needs <launcher>"},
 		{w("ALTER PLAYBOOK k ALIAS set"), `"set" is a keyword and cannot name a launcher`},
+		{w("ALTER PLAYBOOK k ALIAS a/b"), "invalid launcher name"},
+		{w("ALTER PLAYBOOK k ALIAS cpb"), "invalid launcher name"},
+		{w("CREATE PLAYBOOK ../outside"), "invalid playbook name"},
+		{w("CREATE PLAYBOOK a.b"), "invalid playbook name"},
+		{[]string{"ALTER", "PLAYBOOK", "old", "RENAME", "TO", "bad name"}, "invalid playbook name"},
 		{w("ALTER PLAYBOOK k NO"), "expected ALIAS after NO"},
 		{w("ALTER DEFAULTS SET VAR A=1"), "SET inside ALTER DEFAULTS takes SECRET HELPER"},
 		{w("ALTER DEFAULTS UNSET SECRET"), "UNSET inside ALTER DEFAULTS takes SECRET HELPER"},
@@ -300,6 +312,9 @@ func TestErrorsNeverEchoSecrets(t *testing.T) {
 		{"ALTER", "ENV", "e", "SET", "ghp_" + "abcDEF123456", "x"},
 		{"ALTER", "ENV", "e", "SET", "ANTHROPIC_AUTH_TOKEN=" + secret},
 		{"ALTER", "PLAYBOOK", "k", "SET", "VAR", "API_KEY=" + secret},
+		{"ALTER", "ENV", "op://vault/" + secret, "SET", "A=1"},
+		{"CREATE", "PLAYBOOK", secret + "/x"},
+		{"ALTER", "PLAYBOOK", "k", "ALIAS", secret + "/x"},
 	}
 	for _, args := range cases {
 		_, err := ParseArgs(args)
@@ -439,6 +454,7 @@ func TestExpect(t *testing.T) {
 		{w("ALTER DEFAULTS SET SECRET HELPER"), []string{"'<command>'"}},
 		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV"}},
 		{w("APPLY f"), []string{"--dry-run"}},
+		{w("CREATE PLAYBOOK x BRANCH main"), createPlaybookStarters}, // FROM may still follow
 		{w("DROP PLAYBOOK k"), []string{"--yes"}},
 		{w("SHOW CREATE ALL"), []string{"--skip-secrets"}},
 		{w("SHOW PLAYBOOKS"), []string{"--json"}},

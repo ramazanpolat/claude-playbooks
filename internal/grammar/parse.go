@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // keywords are the grammar's reserved words. None may name a new playbook,
@@ -269,10 +271,12 @@ func (p *parser) unexpected() *Error {
 	return p.fail(fmt.Sprintf("unexpected %q", t.Text))
 }
 
-// take consumes one required argument token. A keyword is refused unless
-// quoted, so "ALIAS" followed by the next clause reads as a missing argument.
+// take consumes one required argument token: a source, a ref, a directory,
+// a command. Any word is accepted, keywords included: only NEW NAMES are
+// reserved, and on the command line the shell has already removed any
+// quotes that could have said otherwise.
 func (p *parser) take(what, placeholder string) (Token, *Error) {
-	if p.atEnd() || (!p.toks[p.i].Quoted && IsKeyword(p.toks[p.i].Text)) {
+	if p.atEnd() {
 		p.note(placeholder)
 		return Token{}, p.fail(what + " needs " + placeholder)
 	}
@@ -310,8 +314,13 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	if isNew && IsKeyword(t.Text) {
 		return errAt(t.Pos, fmt.Sprintf("%q is a keyword and cannot name %s", t.Text, label))
 	}
+	// The invalid name is never quoted back: whatever landed in a name slot
+	// may be a value, a reference or a pasted token.
 	if obj == Env && manifest.ValidateProfileName(t.Text) != nil {
-		return errAt(t.Pos, fmt.Sprintf("invalid env set name %q: use letters, digits, dots, dashes, underscores", t.Text))
+		return errAt(t.Pos, "invalid env set name: use letters, digits, dots, dashes and underscores")
+	}
+	if obj == Playbook && isNew && !playbook.NewNamePattern.MatchString(t.Text) {
+		return errAt(t.Pos, "invalid playbook name: use letters, digits, underscores and dashes (a name is one safe word)")
 	}
 	return nil
 }
@@ -324,6 +333,9 @@ func (p *parser) launcher() (string, *Error) {
 	t := p.toks[p.i]
 	if IsKeyword(t.Text) {
 		return "", errAt(t.Pos, fmt.Sprintf("%q is a keyword and cannot name a launcher", t.Text))
+	}
+	if launcher.ValidateName(t.Text) != nil {
+		return "", errAt(t.Pos, "invalid launcher name: one word, with no path separator or whitespace (cpb and claude-playbook are reserved)")
 	}
 	p.i++
 	return t.Text, nil
@@ -970,9 +982,14 @@ func validate(s *Stmt) *Error {
 	}
 	if s.Verb == Create && s.Object == Playbook {
 		_, from := seen[From]
+		_, link := seen[Link]
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {
-				return errAt(pos, string(k)+" needs FROM <source>")
+				e := errAt(pos, string(k)+" needs FROM <source>")
+				// Unfinished rather than wrong: FROM may still follow, so
+				// completion keeps offering it. LINK rules it out.
+				e.AtEnd = !link
+				return e
 			}
 		}
 	}
