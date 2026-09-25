@@ -162,6 +162,12 @@ jobs:
       # Empty = the engine's default.
       GENTAR_CLICKHOUSE_HOST_PORT: ${{ vars.GENTAR_CLICKHOUSE_HOST_PORT }}
       GENTAR_OTLP_HOST_PORT: ${{ vars.GENTAR_OTLP_HOST_PORT }}
+      # History (optional): the host's persistent store, which every run ALSO
+      # writes to (redacted, numbers-only for agents). Set the two variables
+      # and the writer secret to turn it on; unset = off.
+      GENTAR_HISTORY_URL: ${{ vars.GENTAR_HISTORY_URL }}
+      GENTAR_HISTORY_NETWORK: ${{ vars.GENTAR_HISTORY_NETWORK }}
+      GENTAR_HISTORY_PASSWORD: ${{ secrets.GENTAR_HISTORY_WRITER_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
