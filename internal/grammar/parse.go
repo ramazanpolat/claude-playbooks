@@ -34,26 +34,16 @@ func init() {
 // IsKeyword reports whether word is a reserved word, in any case.
 func IsKeyword(word string) bool { return keywords[strings.ToUpper(word)] }
 
-// IsStatement reports whether a command line is a grammar statement rather
-// than one of the short forms (the pre-grammar commands, kept indefinitely).
-// Only "create" is both: "cpb create x" is the short form, "cpb create
-// playbook x" is the grammar, told apart by whether an object keyword (or
-// OR, of CREATE OR REPLACE) follows.
+// IsStatement reports whether a command line is a grammar statement: its
+// first word is a verb, in any case. Everything else is an action command
+// (run, update, ...) or a removed pre-grammar command.
 func IsStatement(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
 	switch strings.ToUpper(args[0]) {
-	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY":
+	case "CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY":
 		return true
-	case "CREATE":
-		if len(args) < 2 {
-			return false
-		}
-		switch strings.ToUpper(args[1]) {
-		case "PLAYBOOK", "ENV", "OR":
-			return true
-		}
 	}
 	return false
 }
@@ -502,8 +492,15 @@ func (p *parser) drop(s *Stmt) *Error {
 		s.IfExists = true
 	}
 	name, err := p.name(s.Object, false)
+	if err != nil {
+		return err
+	}
 	s.Name = name
-	return err
+	// DROP PLAYBOOK confirms on a terminal, as `delete` does.
+	if s.Object == Playbook && p.kw("--yes") != "" {
+		s.Yes = true
+	}
+	return nil
 }
 
 func (p *parser) show(s *Stmt) *Error {
@@ -811,6 +808,11 @@ func (p *parser) set(c *Clause) *Error {
 		if err := manifest.ValidateEnvValue(k, v); err != nil {
 			return errAt(t.Pos, err.Error())
 		}
+		// The grammar never stores a credential as plain text.
+		if manifest.LooksLikeSecretKey(k) && !plainSetting(v) {
+			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential, and cpb does not store one as plain text: "+
+				"use SET %s FROM '<ref>' (needs a secret helper)", k, k))
+		}
 		c.Vars = append(c.Vars, Var{Key: k, Value: v})
 		p.i++
 		p.quiet = true
@@ -818,6 +820,15 @@ func (p *parser) set(c *Clause) *Error {
 	p.note("<key>=<value>")
 	p.note(p.starters...)
 	return nil
+}
+
+var plainNumber = regexp.MustCompile(`^-?[0-9]+$`)
+
+// plainSetting reports whether a value cannot be a secret, so that a
+// credential-looking key holding it is a setting: MAX_THINKING_TOKENS=8000,
+// SOME_AUTH_ENABLED=true, an empty value.
+func plainSetting(v string) bool {
+	return v == "" || plainNumber.MatchString(v) || strings.EqualFold(v, "true") || strings.EqualFold(v, "false")
 }
 
 func (p *parser) kvAt(i int) bool {

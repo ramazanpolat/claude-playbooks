@@ -121,6 +121,13 @@ var validCases = []struct {
 	{"drop playbook if exists", w("DROP PLAYBOOK IF EXISTS kommander-lab"),
 		Stmt{Verb: Drop, Object: Playbook, Name: "kommander-lab", IfExists: true}},
 	{"drop env", w("drop env e"), Stmt{Verb: Drop, Object: Env, Name: "e"}},
+	{"drop playbook without confirmation", w("DROP PLAYBOOK IF EXISTS k --yes"),
+		Stmt{Verb: Drop, Object: Playbook, Name: "k", IfExists: true, Yes: true}},
+	{"credential-looking keys holding settings",
+		w("ALTER PLAYBOOK k SET VAR MAX_THINKING_TOKENS=8000 CLAUDE_CODE_MAX_OUTPUT_TOKENS=-1 AUTH_ENABLED=true API_KEY="),
+		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: SetVar, Vars: []Var{
+			{Key: "MAX_THINKING_TOKENS", Value: "8000"}, {Key: "CLAUDE_CODE_MAX_OUTPUT_TOKENS", Value: "-1"},
+			{Key: "AUTH_ENABLED", Value: "true"}, {Key: "API_KEY", Value: ""}}}}}},
 	{"show envs", w("SHOW ENVS"), Stmt{Verb: Show, Object: Envs}},
 	{"show playbooks", w("show playbooks"), Stmt{Verb: Show, Object: Playbooks}},
 	{"show defaults", w("SHOW DEFAULTS"), Stmt{Verb: Show, Object: Defaults}},
@@ -238,6 +245,14 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("CREATE PLAYBOOK x BRANCH main"), "BRANCH needs FROM <source>"},
 		{w("CREATE PLAYBOOK x SUBDIR d"), "SUBDIR needs FROM <source>"},
 		{w("CREATE PLAYBOOK x FROM a LINK b"), "FROM and LINK cannot be combined"},
+		{w("CREATE PLAYBOOK x LINK d BRANCH main"), "BRANCH needs FROM <source>"},
+		{w("CREATE PLAYBOOK x LINK d SUBDIR s"), "SUBDIR needs FROM <source>"},
+		{w("CREATE PLAYBOOK x ALIAS a NO ALIAS"), "ALIAS and NO ALIAS cannot be combined"},
+		{w("CREATE PLAYBOOK x SANDBOX SANDBOX"), "SANDBOX appears twice"},
+		{w("DROP ENV e --yes"), `unexpected word`},
+		{w("ALTER ENV e SET ANTHROPIC_AUTH_TOKEN=abc123"), "ANTHROPIC_AUTH_TOKEN looks like a credential"},
+		{w("ALTER PLAYBOOK k SET VAR GITHUB_TOKEN=ghp_x"), "use SET GITHUB_TOKEN FROM '<ref>'"},
+		{w("CREATE ENV e SET DB_PASSWORD=hunter2"), "needs a secret helper"},
 		{w("CREATE PLAYBOOK x FROM"), "FROM needs <source>"},
 		{w("CREATE PLAYBOOK x FROM a FROM b"), "FROM appears twice"},
 		{w("CREATE PLAYBOOK x USE ENV a"), `unexpected "USE"`},
@@ -269,6 +284,8 @@ func TestErrorsNeverEchoSecrets(t *testing.T) {
 		{"ALTER", "ENV", "e", "BLOCK", secret},
 		{"ALTER", "PLAYBOOK", "k", secret},
 		{"ALTER", "ENV", "e", "SET", "ghp_" + "abcDEF123456", "x"},
+		{"ALTER", "ENV", "e", "SET", "ANTHROPIC_AUTH_TOKEN=" + secret},
+		{"ALTER", "PLAYBOOK", "k", "SET", "VAR", "API_KEY=" + secret},
 	}
 	for _, args := range cases {
 		_, err := ParseArgs(args)
@@ -407,9 +424,10 @@ func TestExpect(t *testing.T) {
 		{w("ALTER DEFAULTS SET SECRET HELPER"), []string{"'<command>'"}},
 		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV"}},
 		{w("APPLY f"), []string{"--dry-run"}},
+		{w("DROP PLAYBOOK k"), []string{"--yes"}},
 		{w("SHOW CREATE ALL"), []string{"--skip-secrets"}},
 		{w("SHOW CREATE ENV e"), []string{"--skip-secrets"}},
-		{w("DROP PLAYBOOK k"), nil},
+		{w("DROP ENV e"), nil},
 		{w("ALTER FOO"), nil},
 	}
 	for _, tc := range cases {
@@ -422,8 +440,8 @@ func TestExpect(t *testing.T) {
 func TestIsStatement(t *testing.T) {
 	for args, want := range map[string]bool{
 		"":                          false,
-		"create kommander-x":        false, // the short form
-		"create":                    false,
+		"create kommander-x":        true, // the pre-grammar form is gone; the parser explains
+		"create":                    true,
 		"create playbook x":         true,
 		"CREATE ENV e":              true,
 		"create or replace env e":   true,

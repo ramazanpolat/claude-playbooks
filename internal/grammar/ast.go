@@ -88,6 +88,7 @@ type Stmt struct {
 	DryRun bool   // APPLY <file> --dry-run
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
+	Yes         bool // DROP PLAYBOOK ... --yes
 
 	Pos Pos
 }

@@ -359,7 +359,7 @@ func reportDefaultProblem(defaultName string, derr error, found bool) {
 // its keys aligned. VALUES ARE REDACTED for credential-shaped names unless
 // --reveal is passed -- this view exists to answer "what does this profile
 // set", which is a question about keys, and profiles are where credentials
-// live (see looksLikeSecretKey in cmd/env.go).
+// live (see manifest.LooksLikeSecretKey).
 func printProfileValues(profiles []*envprofile.Profile, reveal bool) {
 	if !reveal {
 		masked := false

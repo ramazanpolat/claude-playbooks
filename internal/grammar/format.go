@@ -29,6 +29,9 @@ func (s *Stmt) String() string {
 			w = append(w, "IF", "EXISTS")
 		}
 		w = append(w, quoteWord(s.Name))
+		if s.Yes {
+			w = append(w, "--yes")
+		}
 	case Show:
 		if s.ShowCreate {
 			w = append(w, "CREATE")
