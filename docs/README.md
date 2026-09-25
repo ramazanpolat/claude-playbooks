@@ -22,7 +22,7 @@ Three kinds of page, by what you came for:
 
 | | |
 |---|---|
-| [CLI grammar](reference/cli-grammar.md) | the `cpb <VERB> <OBJECT>` statements, setup files, output formats |
+| [CLI grammar](reference/cli-grammar.md) | the `cpb <VERB> <OBJECT>` statements, playbook files, output formats |
 
 The behavioral contract is [`SPEC-v4.md`](../SPEC-v4.md) in the repository root;
 when a document here and the spec disagree, the spec wins. Development and
