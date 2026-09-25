@@ -1,7 +1,7 @@
 # CLI grammar — spec (draft)
 
 Status: **draft for the pilot's review.** Nothing here is implemented yet.
-Decided with the pilot on 2026-09-25; the one open point is listed at the end.
+Decided with the pilot on 2026-09-25; no open points remain.
 
 ## Why
 
@@ -273,8 +273,12 @@ File rules:
    writes nothing if any fails.
 2. Executes the statements in order, each one atomic, reporting each as
    `created`, `changed` or `unchanged`.
-3. A clone cannot be rolled back cheaply, so a failure part-way stops and
-   reports which statements applied. Re-running the file converges.
+3. **Stops at the first failure** and reports which statement failed and
+   which were already applied. There is no whole-file rollback: a clone
+   cannot be undone cheaply. Because every statement `SHOW CREATE` emits is
+   idempotent, re-running the fixed file is the recovery.
+
+Decided with the pilot on 2026-09-25.
 
 `cpb APPLY <file> --dry-run` does step 1 and reports what step 2 would do.
 
@@ -365,9 +369,3 @@ make them harder to read, not easier.
 Every slot has a closed set, so TAB completes verbs, then objects, then
 existing names of that object, then the clause keywords valid for it, then
 keys (from the object's current entries).
-
-## Open point
-
-1. `APPLY` is validate-all, then per-statement atomic (above), not whole-file
-   rollback, because a clone cannot be undone cheaply. Drafted this way;
-   awaiting the pilot's confirmation.
