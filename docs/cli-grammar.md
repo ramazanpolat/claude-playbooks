@@ -63,7 +63,8 @@ here reads, writes or calls anything of pilot-profile's.
 ## Grammar
 
 ```
-command    := write | read | APPLY <file> [--dry-run]
+command    := write | read | select | APPLY <file> [--dry-run]
+                                           select: v3.21.0, see SELECT
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
@@ -501,6 +502,127 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 ```
 
 `layer.kind` is `DEFAULTS` (with `name` the env set), `ENV` or `PLAYBOOK`.
+
+## SELECT (v3.21.0)
+
+Decided with the pilot on 2026-09-26; implemented after v3.20.0 ships.
+`SELECT` queries the same state `SHOW` prints, as tables. **Files stay the
+only store:** each query builds its tables from the playbooks, env sets and
+DEFAULTS as they are on disk at that moment, and nothing is cached or kept.
+
+```
+select  := SELECT { * | count() | <column> ... } FROM <table>
+           [WHERE <condition>]
+           [ORDER BY <column> [ASC | DESC] ...]
+           [LIMIT <n>]
+           [FORMAT { Pretty | TSV | JSON | JSONEachRow }]
+         | SHOW TABLES [FORMAT …]
+         | DESCRIBE <table> [FORMAT …]
+```
+
+`SHOW TABLES` lists the tables with their row counts; `DESCRIBE <table>`
+lists a table's columns and their types (`String`, `Bool`, `Nullable(…)`,
+`Array(String)`, `Object`), as in ClickHouse. `DESCRIBE` is also the clause
+that sets an env set's description (`ALTER ENV e DESCRIBE '…'`). The
+position tells them apart: as the first word of a statement it is the verb,
+inside `ALTER ENV` / `CREATE ENV` it is the clause.
+
+`select` is a third kind of `command`, beside `write` and `read`; like a
+read, it never writes. Column and `ORDER BY` lists follow the list rule of
+*Shape*: items are separated by spaces, and the SQL habit `name, version`
+works because an unquoted comma at the end of an item is read as a
+separator.
+
+**Tables.** Their columns are exactly the `--json` fields of *Output*; there
+is no second schema. The one addition is two `VARS` columns that place a
+row, `playbook` and `effective`, because a `VARS` row is a variable seen from
+one playbook, which the *Output* variable object never needs to say. A nested object is addressed with a dot
+(`source.url`, `layer.kind`), and an array is filtered with `HAS`.
+
+| Table | One row per | Columns |
+|---|---|---|
+| `PLAYBOOKS` | playbook | `name version path source linked launcher envs vars sandbox` (the `SHOW PLAYBOOK` object) |
+| `ENVS` | env set | `name description vars used_by default` (the `SHOW ENV` object) |
+| `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` (with `layer.kind`, `layer.name`) |
+| `DEFAULTS` | (one row) | `envs secret_helper` (the `SHOW DEFAULTS` object) |
+
+A `VARS` row is one variable as one layer of one playbook's launch declares
+it: the *Output* variable object (`key`, `value`, `ref`, `redacted`,
+`plaintext`, `blocked`, and `layer`, the same object `EXPLAIN --json` gives:
+`layer.kind` is `DEFAULTS`, `ENV` or `PLAYBOOK`, `layer.name` the env set,
+absent for `PLAYBOOK`), plus `playbook`, and `effective`, which is true on the
+one row per `(playbook, key)` that decides the launch, which is the row
+`EXPLAIN` shows. So `WHERE effective` is `EXPLAIN` for every playbook at once,
+and the other rows show what was overridden.
+
+**Conditions.** `=`, `!=`, `<`, `>`, `LIKE` (`%` and `_`), `HAS` (an array
+contains a value), `IS NULL`, `IS NOT NULL`, combined with `AND`, `OR`, `NOT`
+and parentheses. Literals are single-quoted strings, integers, `true` and
+`false`. A bare boolean column is a condition (`WHERE effective`).
+Comparisons are on strings as text; `version` is compared as text.
+
+**Only what is listed.** `count()` is the one aggregate, and only without
+grouping. There are no joins, no `GROUP BY`, no subqueries, and no writes:
+`SELECT` only reads, so a setup file refuses it like any other read.
+
+**Formats.** `Pretty` (the default: an aligned table) and `TSV` (tab-separated,
+no header) are for people and `cut`; `JSON` is one array; `JSONEachRow` is one
+object per line, which pipes straight into real ClickHouse
+(`… FORMAT JSONEachRow | clickhouse-client -q "INSERT INTO t FORMAT
+JSONEachRow"`). In `TSV` a nested object or array is printed as its JSON
+text. cpb embeds and calls no database.
+
+**Secrets.** A `SELECT` can never produce a value that `SHOW` or `EXPLAIN`
+would redact: the rows are the *Output* objects, with the same redaction, so
+a credential-looking literal has `value` null and `redacted` true in every
+format, and a reference is a reference. The tests check the output bytes of
+every format for the secret, as `SHOW`'s do. Filtering on a redacted value
+is impossible by construction: its `value` is null.
+
+**Keywords.** `SELECT`, `WHERE`, `ORDER`, `BY`, `ASC`, `DESC`, `LIMIT`,
+`FORMAT`, `LIKE`, `HAS`, `IS`, `NULL`, `AND`, `TABLES` and the table name
+`VARS` join the reserved words (with `OR`, `NOT`, `FROM`, `PLAYBOOKS`, `ENVS`,
+`DEFAULTS` already there). None collides with a playbook, env set or
+launcher name on the pilot's machine (checked 2026-09-26: 85 names,
+`TABLES` included).
+Format names and `count` are not reserved.
+
+**On the command line.** `*`, `<`, `>` and `(` mean something to the shell,
+so a query is best passed as **one quoted argument** (decided 2026-09-26),
+and the rule is exact:
+
+- It applies when the whole command line after the global flags is **exactly
+  one word, and that word contains whitespace**. The word is read with the
+  setup-file lexer as exactly one statement: single quotes, doubled quotes
+  and `-- ` comments work, a trailing `;` is optional, and a second
+  statement is an error.
+- Reads are allowed in this form, unlike in a setup file: it is still the
+  command line.
+- Everything else is read word by word, as the shell split it, as before.
+- **The unquoted `*`.** `cpb SELECT * FROM PLAYBOOKS` without quotes is
+  globbed by the shell: zsh stops with "no matches found", and bash silently
+  passes the file names in the current directory. cpb does not probe the
+  filesystem to guess at this. The unknown-column error carries one fixed
+  sentence instead: "unknown column 'X' (columns: …). If you typed *
+  unquoted, the shell expanded it: quote the statement." A test pins the
+  message. zsh users can add `alias cpb='noglob cpb'` to their shell; cpb
+  installs nothing.
+
+This works for any statement:
+
+```
+cpb "SELECT name, version FROM PLAYBOOKS WHERE envs HAS 'glm-5.3' ORDER BY name"
+cpb "SELECT playbook, key, layer.kind, layer.name FROM VARS WHERE effective AND ref IS NOT NULL"
+cpb "SELECT count() FROM PLAYBOOKS WHERE version < '3.12'"
+cpb "SELECT * FROM ENVS WHERE default FORMAT JSONEachRow" | clickhouse-client -q "INSERT INTO envs FORMAT JSONEachRow"
+```
+
+**Not planned.** The scope above is closed (decided 2026-09-26): `SELECT`
+columns or `*` `FROM` a table, `WHERE` with the listed operators, `ORDER BY`,
+`LIMIT`, `count()`, `FORMAT`, plus `SHOW TABLES` and `DESCRIBE <table>`.
+Anything beyond it needs the pilot's explicit approval first: functions,
+`GROUP BY`, joins, subqueries, expressions or aliases in the column list, and
+a history or journal table. It is not added because it would be easy.
 
 ## Completion
 
