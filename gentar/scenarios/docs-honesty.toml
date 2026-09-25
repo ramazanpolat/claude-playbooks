@@ -25,7 +25,7 @@ command = 'for c in install list run create delete update info alias dealias ren
 contains = "cmds-ok"
 
 [[verify.commands]]
-command = 'for f in README.md install.sh uninstall.sh build.sh SPEC-v4.md CONTRIBUTING.md LICENSE gentar/README.md gentar/dryrun.py gentar/bench-template/build.sh gentar/bench-template/VERSION docs/README.md docs/guides/installation.md docs/guides/managing-playbooks.md docs/guides/authentication.md docs/guides/environment.md docs/guides/sandbox.md docs/guides/agent-guide.md docs/reference/cli-grammar.md; do test -f "$WORKSPACE_DIR/$f" || { echo "missing file: $f"; exit 1; }; done; echo files-ok'
+command = 'for f in README.md AGENTS.md install.sh uninstall.sh build.sh SPEC-v4.md CONTRIBUTING.md LICENSE gentar/README.md gentar/dryrun.py gentar/bench-template/build.sh gentar/bench-template/VERSION docs/README.md docs/guides/installation.md docs/guides/managing-playbooks.md docs/guides/authentication.md docs/guides/environment.md docs/guides/sandbox.md docs/guides/agent-guide.md docs/reference/cli-grammar.md; do test -f "$WORKSPACE_DIR/$f" || { echo "missing file: $f"; exit 1; }; done; echo files-ok'
 contains = "files-ok"
 
 [[verify.commands]]
