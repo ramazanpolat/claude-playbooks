@@ -105,7 +105,7 @@ pb-clause  := set-clause
             | ALIAS <launcher>             set or replace the launcher (one per playbook)
             | NO ALIAS                     remove the launcher
 
-read       := SHOW { PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> } [--json]
+read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> ] [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name> [--json]
 ```
@@ -470,7 +470,7 @@ created empty; `Launcher:` reads `(none)` without one.
 `source` is null for a playbook without one; `linked` is the target directory
 of a linked playbook, else null; `launcher` is null without one.
 
-**`SHOW PLAYBOOKS`**: human form, one header line and then one line per
+**`SHOW PLAYBOOKS`** (also a bare `SHOW`, and `SHOW --json`): human form, one header line and then one line per
 playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 (`-` for none). `--json`: an array of the `SHOW PLAYBOOK` objects.
 
