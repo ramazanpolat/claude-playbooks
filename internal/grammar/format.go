@@ -96,9 +96,11 @@ func (c *Clause) words(varWord bool) []string {
 			w = append(w, string(c.Where), quoteWord(c.Anchor))
 		}
 		return w
+	case SetHelper:
+		return []string{"SET", "SECRET", "HELPER", quote(c.Arg)}
 	case RenameTo, Alias, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	default: // NoAlias, Sandbox: no argument
+	default: // NoAlias, Sandbox, UnsetHelper: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

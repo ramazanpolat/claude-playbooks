@@ -25,6 +25,7 @@ func init() {
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
 		"RENAME", "TO", "ALIAS", "NO",
 		"BRANCH", "SUBDIR", "LINK", "SANDBOX",
+		"SECRET", "HELPER",
 	} {
 		keywords[w] = true
 	}
@@ -145,7 +146,7 @@ func Expect(args []string) []string {
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIBE"}
 	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALIAS", "NO"}
-	defaultsStarters       = []string{"USE", "ADD", "DROP"}
+	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
 	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "ALIAS", "NO", "SANDBOX"}
 )
 
@@ -684,6 +685,26 @@ func (p *parser) defaultsClause() (*Clause, *Error) {
 		return c, p.envList(c, w)
 	case "ADD":
 		return c, p.addEnv(c)
+	case "SET", "UNSET":
+		if p.kw("SECRET") == "" || p.kw("HELPER") == "" {
+			return nil, p.fail(w + " inside ALTER DEFAULTS takes SECRET HELPER: " + w + " SECRET HELPER")
+		}
+		if w == "UNSET" {
+			c.Kind = UnsetHelper
+			return c, nil
+		}
+		c.Kind = SetHelper
+		t, err := p.take("SET SECRET HELPER", "'<command>'")
+		if err != nil {
+			return nil, err
+		}
+		// One command, exec'd with an argument vector and never through a
+		// shell: anything with whitespace would be read as arguments.
+		if t.Text == "" || strings.ContainsAny(t.Text, " \t\r\n") {
+			return nil, errAt(t.Pos, "the secret helper is one command (a name on PATH or an absolute path), without arguments")
+		}
+		c.Arg = t.Text
+		return c, nil
 	}
 	return nil, nil
 }
@@ -852,6 +873,7 @@ func validate(s *Stmt) *Error {
 	once := map[Kind]bool{
 		Describe: true, UseEnv: true, RenameTo: true,
 		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
+		SetHelper: true, UnsetHelper: true,
 	}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
@@ -878,7 +900,7 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
 		}
 	}
-	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}}
+	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]

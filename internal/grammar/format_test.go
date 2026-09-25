@@ -51,6 +51,8 @@ func TestStringQuoting(t *testing.T) {
 			"ALTER PLAYBOOK 'sandbox' SET VAR A='a;b'"},
 		{Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{{Kind: Describe, Arg: "plain"}}},
 			"ALTER ENV e DESCRIBE 'plain'"},
+		{Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: SetHelper, Arg: "/opt/bin/helper"}}},
+			"ALTER DEFAULTS SET SECRET HELPER '/opt/bin/helper'"},
 		{Stmt{Verb: Apply, File: "my setup.cpb", DryRun: true},
 			"APPLY 'my setup.cpb' --dry-run"},
 		{Stmt{Verb: Create, Object: Playbook, Name: "x", Clauses: []Clause{{Kind: Link, Arg: "--odd"}}},

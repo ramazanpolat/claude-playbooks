@@ -56,6 +56,9 @@ const (
 	Subdir   Kind = "SUBDIR"    // CREATE PLAYBOOK ... SUBDIR <dir>
 	Link     Kind = "LINK"      // CREATE PLAYBOOK ... LINK <dir>
 	Sandbox  Kind = "SANDBOX"   // CREATE PLAYBOOK ... SANDBOX
+
+	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
+	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
 )
 
 // Where places an env set added with ADD ENV.
@@ -97,7 +100,7 @@ type Clause struct {
 	Vars   []Var    // SET: one per K=V; SET FROM: exactly one, with Ref
 	Keys   []string // BLOCK, UNSET
 	Names  []string // USE ENV, DROP ENV; ADD ENV: exactly one
-	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK
+	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER
 	Where  Where    // ADD ENV
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
 
