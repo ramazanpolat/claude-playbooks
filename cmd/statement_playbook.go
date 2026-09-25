@@ -11,9 +11,10 @@ import (
 )
 
 // The playbook lifecycle statements run the code the pre-grammar commands
-// run (install, create, link, delete, rename, alias), with the statement's
-// options in place of flags. That code is not changed by them: the hidden
-// commands keep their own paths, and these statements add none.
+// run (install, create, link, delete, rename, alias) through each command's
+// options struct: the cobra handler fills it from flags, a statement from
+// its clauses. No package state is shared, so statements in one APPLY
+// cannot leak options into each other.
 
 // lifecycle reports whether an ALTER PLAYBOOK renames or changes the
 // launcher rather than the environment.
@@ -65,10 +66,8 @@ func createPlaybookStatement(st *grammar.Stmt) error {
 	o := createOptionsOf(st)
 	switch {
 	case o.from != "":
-		defer restoreInstallFlags(installName, installBranch, installSubdir, installAlias, installNoAlias, installSandbox)
-		installName, installBranch, installSubdir = st.Name, o.branch, o.subdir
-		installAlias, installNoAlias, installSandbox = o.alias, o.noAlias, o.sandbox
-		return runInstall(nil, []string{o.from})
+		return doInstall(installOpts{name: st.Name, branch: o.branch, subdir: o.subdir,
+			alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox}, []string{o.from})
 
 	case o.link != "":
 		if o.sandbox {
@@ -83,13 +82,9 @@ func createPlaybookStatement(st *grammar.Stmt) error {
 		if !manifest.Exists(abs) {
 			return fmt.Errorf("LINK %s: the directory has no %s, and a statement does not prompt for one: add a %s to the target, or run `claude-playbook link %s` interactively", o.link, manifest.FileName, manifest.FileName, o.link)
 		}
-		defer restoreLinkFlags(linkName, linkAlias, linkNoAlias)
-		linkName, linkAlias, linkNoAlias = st.Name, o.alias, o.noAlias
-		return runLink(nil, []string{o.link})
+		return doLink(linkOpts{name: st.Name, alias: o.alias, noAlias: o.noAlias}, []string{o.link})
 	}
-	defer restoreCreateFlags(createAlias, createNoAlias, createSandbox)
-	createAlias, createNoAlias, createSandbox = o.alias, o.noAlias, o.sandbox
-	return runCreate(nil, []string{st.Name})
+	return doCreate(createOpts{alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox}, []string{st.Name})
 }
 
 func dropPlaybookStatement(st *grammar.Stmt) error {
@@ -99,9 +94,7 @@ func dropPlaybookStatement(st *grammar.Stmt) error {
 			return nil
 		}
 	}
-	defer func(v bool) { deleteYes = v }(deleteYes)
-	deleteYes = st.Yes
-	return runDelete(nil, []string{st.Name})
+	return doDelete(deleteOpts{yes: st.Yes}, []string{st.Name})
 }
 
 // alterPlaybookLifecycle carries out RENAME TO, ALIAS and NO ALIAS. They
@@ -124,31 +117,10 @@ func alterPlaybookLifecycle(st *grammar.Stmt) error {
 		}
 	}
 	if rename != "" {
-		defer restoreRenameFlags(renameAlias, renameNoAlias)
-		renameAlias, renameNoAlias = alias, noAlias
-		return runRename(nil, []string{st.Name, rename})
+		return doRename(renameOpts{alias: alias, noAlias: noAlias}, []string{st.Name, rename})
 	}
-	defer func(v bool) { aliasRemove = v }(aliasRemove)
 	if noAlias {
-		aliasRemove = true
-		return runAlias(nil, []string{st.Name})
+		return doAlias(aliasOpts{remove: true}, []string{st.Name})
 	}
-	aliasRemove = false
-	return runAlias(nil, []string{st.Name, alias})
-}
-
-func restoreInstallFlags(name, branch, subdir, alias string, noAlias, sandbox bool) {
-	installName, installBranch, installSubdir, installAlias, installNoAlias, installSandbox = name, branch, subdir, alias, noAlias, sandbox
-}
-
-func restoreLinkFlags(name, alias string, noAlias bool) {
-	linkName, linkAlias, linkNoAlias = name, alias, noAlias
-}
-
-func restoreCreateFlags(alias string, noAlias, sandbox bool) {
-	createAlias, createNoAlias, createSandbox = alias, noAlias, sandbox
-}
-
-func restoreRenameFlags(alias string, noAlias bool) {
-	renameAlias, renameNoAlias = alias, noAlias
+	return doAlias(aliasOpts{}, []string{st.Name, alias})
 }

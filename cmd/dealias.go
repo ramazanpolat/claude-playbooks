@@ -11,8 +11,6 @@ var dealiasCmd = &cobra.Command{
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: autocompletePlaybookNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		aliasRemove = true
-		defer func() { aliasRemove = false }()
-		return runAlias(cmd, args)
+		return doAlias(aliasOpts{remove: true}, args)
 	},
 }

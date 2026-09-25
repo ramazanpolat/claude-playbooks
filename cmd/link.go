@@ -34,8 +34,20 @@ func init() {
 	linkCmd.Flags().BoolVar(&linkNoAlias, "no-alias", false, "skip launcher command creation")
 }
 
-func runLink(cmd *cobra.Command, args []string) (retErr error) {
-	if err := checkAliasFlagConflict(linkAlias, linkNoAlias); err != nil {
+// linkOpts carries link's options: its flags for the command, the statement's
+// clauses for the grammar. No state is shared between two calls.
+type linkOpts struct {
+	name    string
+	alias   string
+	noAlias bool
+}
+
+func runLink(cmd *cobra.Command, args []string) error {
+	return doLink(linkOpts{name: linkName, alias: linkAlias, noAlias: linkNoAlias}, args)
+}
+
+func doLink(o linkOpts, args []string) (retErr error) {
+	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
 		return err
 	}
 
@@ -61,7 +73,7 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 		return err
 	}
 
-	name := linkName
+	name := o.name
 	if name == "" {
 		name = filepath.Base(abs)
 	}
@@ -80,7 +92,7 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	// The launcher name (explicit --alias or the link name) must be writable
 	// BEFORE the interactive prompt: failing after it would waste the
 	// user's metadata entry on a link that can never get its command.
-	if _, verr := resolveLauncherName(linkNoAlias, linkAlias, name, "link"); verr != nil {
+	if _, verr := resolveLauncherName(o.noAlias, o.alias, name, "link"); verr != nil {
 		return verr
 	}
 
@@ -90,8 +102,8 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	var prompted *manifest.Manifest
 	if !manifest.Exists(abs) {
 		aliasDefault := name
-		if linkAlias != "" {
-			aliasDefault = linkAlias
+		if o.alias != "" {
+			aliasDefault = o.alias
 		}
 		var perr error
 		prompted, perr = promptForManifest(abs, name, aliasDefault)
@@ -156,7 +168,7 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	// Preflight command names BEFORE the symlink joins the registry (the
 	// link name registers even under --no-alias, and the target manifest's
 	// alias registers without any flag).
-	effectiveAlias := linkAlias
+	effectiveAlias := o.alias
 	if effectiveAlias == "" && m != nil {
 		effectiveAlias = m.Alias
 	}
@@ -164,7 +176,7 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	// falling back to the link name — an unwritable name (reserved link
 	// name, invalid manifest alias) must fail before dest joins the
 	// registry, not as a post-link warning.
-	launcherName, err := resolveLauncherName(linkNoAlias, effectiveAlias, name, "link")
+	launcherName, err := resolveLauncherName(o.noAlias, effectiveAlias, name, "link")
 	if err != nil {
 		return err
 	}
@@ -177,17 +189,17 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	// launchers resolve through it. Any differing alias mutation — changing
 	// one, or adding one where none existed — could break or reroute those
 	// registrations, so refuse unless this invocation created the manifest.
-	if linkAlias != "" && !createdManifest && m != nil && m.Alias != linkAlias {
-		return fmt.Errorf("target's %s is shared state (alias %q); --alias %q would mutate it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Alias, linkAlias, manifest.FileName)
+	if o.alias != "" && !createdManifest && m != nil && m.Alias != o.alias {
+		return fmt.Errorf("target's %s is shared state (alias %q); --alias %q would mutate it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Alias, o.alias, manifest.FileName)
 	}
 
 	// For a manifest created by this invocation, the --alias flag wins over
 	// whatever was typed at the prompt. Persist BEFORE the symlink joins
 	// the registry: failing afterwards would leave the playbook registered
 	// with an unresolvable advertised command.
-	if linkAlias != "" && createdManifest {
-		if err := writeAliasManifest(abs, name, linkAlias); err != nil {
-			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", linkAlias, abs, err)
+	if o.alias != "" && createdManifest {
+		if err := writeAliasManifest(abs, name, o.alias); err != nil {
+			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", o.alias, abs, err)
 		}
 	}
 
@@ -200,7 +212,7 @@ func runLink(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	fmt.Printf("Linked %s -> %s\n", dest, abs)
 
-	if linkNoAlias {
+	if o.noAlias {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
 		return nil
 	}
