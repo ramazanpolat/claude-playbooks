@@ -238,6 +238,14 @@ disambiguates (decided 2026-09-25).
   output.
 - A sandboxed launch of a playbook with references is refused in the first
   release, with a message saying so.
+- **Keys cpb reads itself never take a reference** (decided 2026-09-26):
+  today `CLAUDE_CODE_OAUTH_TOKEN`, whose value cpb's authentication handling
+  reads to decide injection and credential quarantine. A reference hides the
+  value by design, and "set, value unknown" would break that logic silently.
+  `SET CLAUDE_CODE_OAUTH_TOKEN FROM …` is refused in a playbook's block and
+  in every env set (so under DEFAULTS too), and a hand-written reference for
+  it makes the file invalid. The list lives in one place
+  (`manifest.RefRefusedKeys`); a future key cpb reads joins it.
 
 **The grammar refuses a credential-looking literal** (ruled 2026-09-26): a
 `SET [VAR] K=V` whose key looks like a credential (the rule `env` already

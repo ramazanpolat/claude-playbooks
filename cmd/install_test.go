@@ -429,6 +429,8 @@ func resetCommandTestState(t *testing.T) {
 	t.Helper()
 	isolateCredentials(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	// A developer's own secret helper must not reach a test.
+	t.Setenv("CPB_SECRET_HELPER", "")
 	config.PlaybooksDir = ""
 	config.LauncherDir = t.TempDir()
 	installName = ""
