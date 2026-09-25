@@ -336,11 +336,11 @@ func TestStatementArgs(t *testing.T) {
 		ok       bool
 		playbook string
 	}{
-		{words("alter playbook k USE ENV a"), w("alter playbook k USE ENV a"), true, ""},
-		{words("--playbooks-dir /x ALTER ENV e SET A=1"), w("ALTER ENV e SET A=1"), true, "/x"},
-		{words("--playbooks-dir=/y --launcher-dir /l SHOW ENVS"), w("SHOW ENVS"), true, "/y"},
-		{words("ALTER PLAYBOOK k SET VAR OPTS=-v"), w("ALTER PLAYBOOK k SET VAR OPTS=-v"), true, ""},
-		{words("create playbook x"), w("create playbook x"), true, ""},
+		{words("alter playbook k USE ENV a"), words("alter playbook k USE ENV a"), true, ""},
+		{words("--playbooks-dir /x ALTER ENV e SET A=1"), words("ALTER ENV e SET A=1"), true, "/x"},
+		{words("--playbooks-dir=/y --launcher-dir /l SHOW ENVS"), words("SHOW ENVS"), true, "/y"},
+		{words("ALTER PLAYBOOK k SET VAR OPTS=-v"), words("ALTER PLAYBOOK k SET VAR OPTS=-v"), true, ""},
+		{words("create playbook x"), words("create playbook x"), true, ""},
 		{words("create x --alias y"), nil, false, ""}, // the hidden pre-grammar create
 		{words("--playbooks-dir /z list"), nil, false, ""},
 		{words("env k set A=1"), nil, false, ""},
