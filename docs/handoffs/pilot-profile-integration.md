@@ -19,8 +19,9 @@ contract, so parse the exit code, never the output.
 Two optional touchpoints, both no-ops when `pilot-profile` is not installed:
 
 1. **`cmd/create.go:140`** — add four `@import` lines to `defaultClaudeMD`.
-2. **`cmd/create.go:132`** and **`cmd/install.go:283`** — after `installLauncher(...)`,
-   run `pilot wire <dest>` if `pilot` is on `PATH`; ignore any failure.
+2. ~~**`cmd/create.go:132`** and **`cmd/install.go:283`** — after `installLauncher(...)`,
+   run `pilot wire <dest>` if `pilot` is on `PATH`; ignore any failure.~~ **Withdrawn
+   2026-09-26 (see Status); historical, do not reintroduce.**
 
 Do **not** vendor the profile schema, tooling, or migrations into this repo. §4 says why.
 
@@ -57,6 +58,9 @@ claude-playbook  ──optionally calls──▶  pilot   (component)
 and never the reverse. `pilot` must never need `claude-playbook`, because the stock
 `~/.claude` is not managed by it and still deserves a profile.
 
+**Superseded 2026-09-26:** there is no call edge in either direction any more. The only
+connection is the inert `@import` lines (3a); the pilot runs `pilot wire` themselves.
+
 ## 3. The two changes
 
 ### 3a. Pointer in the `create` template
@@ -81,7 +85,11 @@ with a profile gets it in every new playbook with no wiring step.
 `CLAUDE.md` is not tracked by git and is never reset over. (That distinction matters a
 lot elsewhere — see §5.)
 
-### 3b. Wire on create and install
+### 3b. Wire on create and install -- WITHDRAWN 2026-09-26, historical
+
+**Do not implement.** Kept as the record of what shipped from v3.15.0 until the pilot's
+loose-coupling decision. Wiring is now the pilot's own step: `pilot wire <dir>` or
+`pilot wire --all`.
 
 `cmd/create.go:132` and `cmd/install.go:283`, immediately after `installLauncher(...)`:
 
@@ -169,7 +177,8 @@ grep -c '^@~/.pilot-profile/' /tmp/pb/testpb/CLAUDE.md   # want 4
 ```
 
 With `pilot` absent from `PATH`, the same command must still succeed and print nothing
-extra. That is the whole acceptance criterion for 3b.
+extra. (This was 3b's acceptance criterion; 3b is withdrawn, and `create`/`install` never
+run `pilot` now, with or without it on `PATH`.)
 
 ---
 
