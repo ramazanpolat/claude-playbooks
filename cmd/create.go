@@ -130,18 +130,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		installLauncher(launcherName, name, dest)
 	}
 
-	// Wiring is the last thing and happens on EVERY successful path. It used
-	// to sit after installLauncher, which meant --no-alias returned above and
-	// skipped it silently on an otherwise successful create.
-	//
-	// It runs with the registry lock still held (the deferred unlock). The
-	// lock does not only guard command names: delete, rename and update take
-	// it too, and they move or remove the very directory `pilot wire` edits.
-	// Released early, a concurrent delete plus a same-name create could have
-	// this pilot modify the replacement playbook. Holding it costs at most
-	// pilotWireTimeout, and cannot deadlock -- pilot never calls back into
-	// claude-playbook.
-	wirePlaybook(dest)
 	return nil
 }
 
