@@ -63,7 +63,8 @@ here reads, writes or calls anything of pilot-profile's.
 ## Grammar
 
 ```
-command    := write | read | APPLY <file> [--dry-run]
+command    := write | read | select | APPLY <file> [--dry-run]
+                                           select: v3.21.0, see SELECT
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
@@ -526,21 +527,28 @@ that sets an env set's description (`ALTER ENV e DESCRIBE '…'`). The
 position tells them apart: as the first word of a statement it is the verb,
 inside `ALTER ENV` / `CREATE ENV` it is the clause.
 
+`select` is a third kind of `command`, beside `write` and `read`; like a
+read, it never writes. Column and `ORDER BY` lists follow the list rule of
+*Shape*: items are separated by spaces, and the SQL habit `name, version`
+works because an unquoted comma at the end of an item is read as a
+separator.
+
 **Tables.** Their columns are exactly the `--json` fields of *Output*; there
 is no second schema. A nested object is addressed with a dot
-(`source.url`), and an array is filtered with `HAS`.
+(`source.url`, `layer.kind`), and an array is filtered with `HAS`.
 
 | Table | One row per | Columns |
 |---|---|---|
 | `PLAYBOOKS` | playbook | `name version path source linked launcher envs vars sandbox` (the `SHOW PLAYBOOK` object) |
 | `ENVS` | env set | `name description vars used_by default` (the `SHOW ENV` object) |
-| `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked kind layer effective` |
+| `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` (with `layer.kind`, `layer.name`) |
 | `DEFAULTS` | (one row) | `envs secret_helper` (the `SHOW DEFAULTS` object) |
 
 A `VARS` row is one variable as one layer of one playbook's launch declares
-it: `kind` is `DEFAULTS`, `ENV` or `PLAYBOOK`; `layer` names the env set
-(empty for `PLAYBOOK`); `value`, `ref`, `redacted`, `plaintext` and
-`blocked` are the *Output* variable object; and `effective` is true on the
+it: the *Output* variable object (`key`, `value`, `ref`, `redacted`,
+`plaintext`, `blocked`, and `layer`, the same object `EXPLAIN --json` gives:
+`layer.kind` is `DEFAULTS`, `ENV` or `PLAYBOOK`, `layer.name` the env set,
+absent for `PLAYBOOK`), plus `playbook`, and `effective`, which is true on the
 one row per `(playbook, key)` that decides the launch, which is the row
 `EXPLAIN` shows. So `WHERE effective` is `EXPLAIN` for every playbook at once,
 and the other rows show what was overridden.
@@ -602,7 +610,7 @@ This works for any statement:
 
 ```
 cpb "SELECT name, version FROM PLAYBOOKS WHERE envs HAS 'glm-5.3' ORDER BY name"
-cpb "SELECT playbook, key, kind, layer FROM VARS WHERE effective AND ref IS NOT NULL"
+cpb "SELECT playbook, key, layer.kind, layer.name FROM VARS WHERE effective AND ref IS NOT NULL"
 cpb "SELECT count() FROM PLAYBOOKS WHERE version < '3.12'"
 cpb "SELECT * FROM ENVS WHERE default FORMAT JSONEachRow" | clickhouse-client -q "INSERT INTO envs FORMAT JSONEachRow"
 ```
