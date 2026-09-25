@@ -517,11 +517,20 @@ func (p *parser) show(s *Stmt) *Error {
 			s.Object = Env
 		case "ALL":
 			s.Object = All
-			return nil
 		}
-		name, err := p.name(s.Object, false)
-		s.Name = name
-		return err
+		if s.Object != All {
+			name, err := p.name(s.Object, false)
+			if err != nil {
+				return err
+			}
+			s.Name = name
+		}
+		// Without it, SHOW CREATE refuses a playbook or env set that holds a
+		// credential-looking literal rather than print it.
+		if p.kw("--skip-secrets") != "" {
+			s.SkipSecrets = true
+		}
+		return nil
 	}
 	switch w := p.kw("PLAYBOOKS", "ENVS", "PILOTS", "DEFAULTS", "PLAYBOOK", "ENV"); w {
 	case "":

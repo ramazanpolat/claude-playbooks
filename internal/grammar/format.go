@@ -37,6 +37,9 @@ func (s *Stmt) String() string {
 		if s.Name != "" {
 			w = append(w, quoteWord(s.Name))
 		}
+		if s.SkipSecrets {
+			w = append(w, "--skip-secrets")
+		}
 	case Explain:
 		w = append(w, string(s.Object), quoteWord(s.Name))
 	case Apply:

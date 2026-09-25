@@ -88,6 +88,8 @@ type Stmt struct {
 	File   string // APPLY <file>
 	DryRun bool   // APPLY <file> --dry-run
 
+	SkipSecrets bool // SHOW CREATE ... --skip-secrets
+
 	Pos Pos
 }
 
