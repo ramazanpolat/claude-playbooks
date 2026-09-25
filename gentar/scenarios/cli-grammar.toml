@@ -1,10 +1,12 @@
 # claude-playbooks own-arena suite: cli-grammar -- the statement grammar
 # (docs/cli-grammar.md) on the REAL binary and launch path, and only the
-# new code: env sets, DEFAULTS, playbook variables, a secret reference
-# resolved by a stub helper at launch, EXPLAIN --json, SHOW CREATE feeding
-# APPLY with no change, APPLY across files and its DROP PLAYBOOK guard, the
-# source-drift warning, a bare SHOW, and a credential literal that is
-# refused, then stored AS PLAINTEXT and never printed. A stub `claude` dumps
+# new code: env sets, DEFAULTS (a list, in order), playbook variables and
+# env-set order, a secret reference resolved by a stub helper at launch,
+# EXPLAIN / SHOW --json, SHOW CREATE feeding APPLY with no change, APPLY
+# across files and its DROP PLAYBOOK guard, the source-drift warning, a bare
+# SHOW, RENAME TO / ALIAS / NO ALIAS, DROP ENV refused while in use, the
+# hidden env command keeping the grammar's formats, and a credential
+# literal that is refused, then stored AS PLAINTEXT and never printed. A stub `claude` dumps
 # the environment it received; a stub secret helper follows cpb's helper
 # interface and resolves keychain:ok… references. No real secret exists.
 
@@ -73,3 +75,39 @@ contains = "drift-ok"
 # never printed by SHOW, EXPLAIN or SHOW CREATE.
 command = 'S=sk-live-0123456789abcdef; if claude-playbook ALTER PLAYBOOK gpb SET VAR X_TOKEN=$S >/dev/null 2>&1; then echo literal-accepted; else claude-playbook ALTER PLAYBOOK gpb SET VAR X_TOKEN=$S AS PLAINTEXT >/dev/null && O=$( { claude-playbook SHOW PLAYBOOK gpb; claude-playbook SHOW PLAYBOOK gpb --json; claude-playbook EXPLAIN PLAYBOOK gpb; claude-playbook EXPLAIN PLAYBOOK gpb --json; claude-playbook SHOW CREATE PLAYBOOK gpb --skip-secrets; } 2>&1 ) && ! printf "%s" "$O" | grep -q "$S" && echo plaintext-ok; fi'
 contains = "plaintext-ok"
+
+[[verify.commands]]
+# RENAME TO moves the playbook and ALIAS gives it a launcher; NO ALIAS
+# removes the launcher again.
+command = 'L=$(dirname "$(command -v claude-playbook)"); claude-playbook CREATE PLAYBOOK rpb NO ALIAS >/dev/null && claude-playbook ALTER PLAYBOOK rpb RENAME TO rpb2 ALIAS rl >/dev/null && test ! -e "$HOME/.claude-playbooks/rpb" && test -d "$HOME/.claude-playbooks/rpb2" && test -L "$L/rl" && claude-playbook ALTER PLAYBOOK rpb2 NO ALIAS >/dev/null && test ! -e "$L/rl" && echo rename-alias-ok'
+contains = "rename-alias-ok"
+
+[[verify.commands]]
+# Env-set order is the manifest's list, and a later set wins at launch;
+# ADD ENV … FIRST reorders it.
+command = 'claude-playbook CREATE ENV o1 SET ORD=one >/dev/null && claude-playbook CREATE ENV o2 SET ORD=two >/dev/null && claude-playbook CREATE PLAYBOOK opb NO ALIAS >/dev/null && claude-playbook ALTER PLAYBOOK opb USE ENV o1 o2 >/dev/null && rm -f "$HOME/claude-env" && claude-playbook run opb && grep -x ORD=two "$HOME/claude-env" >/dev/null && claude-playbook ALTER PLAYBOOK opb ADD ENV o2 FIRST >/dev/null && grep -F "profiles = [\"o2\", \"o1\"]" "$HOME/.claude-playbooks/opb/.playbook" >/dev/null && rm -f "$HOME/claude-env" && claude-playbook run opb && grep -x ORD=one "$HOME/claude-env" >/dev/null && echo order-ok'
+contains = "order-ok"
+
+[[verify.commands]]
+# DEFAULTS holds several env sets, layered in order under every playbook.
+command = 'claude-playbook CREATE ENV d1 SET D1=yes SHARED=d1 >/dev/null && claude-playbook CREATE ENV d2 SET D2=yes SHARED=d2 >/dev/null && claude-playbook ALTER DEFAULTS USE ENV d1 d2 >/dev/null && [ "$(cat "$HOME/.claude-playbooks/.env-profiles/.default")" = "$(printf "d1\nd2")" ] && rm -f "$HOME/claude-env" && claude-playbook run opb && grep -x D1=yes "$HOME/claude-env" >/dev/null && grep -x D2=yes "$HOME/claude-env" >/dev/null && grep -x SHARED=d2 "$HOME/claude-env" >/dev/null && grep -x ORD=one "$HOME/claude-env" >/dev/null && echo defaults-list-ok'
+contains = "defaults-list-ok"
+
+[[verify.commands]]
+# The --json of SHOW ENV and SHOW DEFAULTS carries default, used_by and
+# where the secret helper came from.
+command = 'claude-playbook SHOW ENV d1 --json | grep -qF "\"default\": true" && claude-playbook SHOW ENV o1 --json | grep -qF "\"opb\"" && D=$(claude-playbook SHOW DEFAULTS --json) && printf "%s" "$D" | grep -qF "\"d2\"" && printf "%s" "$D" | grep -qF "\"from\": \"setting\"" && CPB_SECRET_HELPER=other-helper claude-playbook SHOW DEFAULTS --json | grep -qF "\"from\": \"CPB_SECRET_HELPER\"" && echo show-json-ok'
+contains = "show-json-ok"
+
+[[verify.commands]]
+# The hidden pre-grammar env command keeps its own path and the grammar's
+# formats: it preserves a reference for another key, and a literal it sets
+# replaces a reference for the same key.
+command = 'M="$HOME/.claude-playbooks/gpb/.playbook"; claude-playbook ALTER PLAYBOOK gpb SET VAR PB_TOKEN FROM keychain:ok/pb >/dev/null && claude-playbook env gpb set OTHER=1 >/dev/null && grep -F "PB_TOKEN = \"keychain:ok/pb\"" "$M" >/dev/null && grep -F "OTHER = \"1\"" "$M" >/dev/null && claude-playbook env gpb set PB_TOKEN=literal >/dev/null && ! grep -F "keychain:ok/pb" "$M" >/dev/null && grep -F "PB_TOKEN = \"literal\"" "$M" >/dev/null && echo fallback-ok'
+contains = "fallback-ok"
+
+[[verify.commands]]
+# DROP ENV is refused while a playbook, DEFAULTS, or a nested (subdir
+# layout) manifest the launch reads still uses the set.
+command = 'P="$HOME/.claude-playbooks"; claude-playbook CREATE ENV nest >/dev/null && mkdir -p "$P/npb/config" && printf "version = \"0.1.0\"\nname = \"npb\"\nsubdir = \"config\"\n" > "$P/npb/.playbook" && printf "version = \"0.1.0\"\nname = \"npb\"\n\n[env]\nprofiles = [\"nest\"]\n" > "$P/npb/config/.playbook" && for e in o1 d1 nest; do if claude-playbook DROP ENV $e >/dev/null 2>&1; then echo "dropped-in-use-$e"; exit 1; fi; done && test -e "$P/.env-profiles/o1.toml" && test -e "$P/.env-profiles/d1.toml" && test -e "$P/.env-profiles/nest.toml" && claude-playbook DROP ENV IF EXISTS never-was >/dev/null && echo drop-env-guard-ok'
+contains = "drop-env-guard-ok"
