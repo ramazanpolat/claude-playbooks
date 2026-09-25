@@ -626,8 +626,45 @@ cpb "SELECT * FROM ENVS WHERE default FORMAT JSONEachRow" | clickhouse-client -q
 columns or `*` `FROM` a table, `WHERE` with the listed operators, `ORDER BY`,
 `LIMIT`, `count()`, `FORMAT`, plus `SHOW TABLES` and `DESCRIBE <table>`.
 Anything beyond it needs the pilot's explicit approval first: functions,
-`GROUP BY`, joins, subqueries, expressions or aliases in the column list, and
-a history or journal table. It is not added because it would be easy.
+`GROUP BY`, joins, subqueries, expressions or aliases in the column list, a
+history or journal table, and variables, loops or conditionals in playbook
+files. It is not added because it would be easy.
+
+## INCLUDE (v3.21.0)
+
+Decided with the pilot on 2026-09-26; implemented after v3.20.0 ships. A
+playbook file can pull in another, so one machine's file can share a base
+with the next:
+
+```
+-- playbook.cpb
+INCLUDE 'base.cpb';
+INCLUDE 'envs/routers.cpb';
+ALTER PLAYBOOK work USE ENV glm;
+```
+
+```
+statement := … | INCLUDE '<path>'
+```
+
+- **Local paths only**, relative to the file that includes them (absolute
+  paths work too). A URL, or anything else that is not a local path, is
+  refused: a playbook file runs with the pilot's authority, so what it
+  pulls in must be on this machine.
+- **Only in playbook files.** `INCLUDE` on the command line is refused;
+  `APPLY <file> [<file> ...]` is the command-line form of the same thing.
+- **Expanded before anything runs.** Validation (parsing, secret-reference
+  checks, the `DROP PLAYBOOK` confirmation) runs over the whole expanded
+  set, so an error anywhere in any included file means nothing is written.
+  Reports locate each statement by the file it came from, `file:line`.
+- **A cycle is refused**, naming its chain (`a.cpb -> b.cpb -> a.cpb`).
+- **A file reached twice runs once**, at its first occurrence, so a shared
+  base included by two files is applied a single time.
+- `INCLUDE` is a keyword and joins the reserved words.
+
+**Not planned** in playbook files: variables, loops and conditionals. A
+playbook file stays a flat list of statements that reads the same every
+time; anything more needs the pilot's explicit approval first.
 
 ## Completion
 
