@@ -27,8 +27,10 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 
 - Keywords are **case-insensitive**. Docs write them in capitals.
 - Clauses are **two words** (`SET VAR`, `USE ENV`), never hyphenated.
-- Lists are **space-separated**. No commas; a trailing comma on a token is
-  tolerated and ignored.
+- Lists are **space-separated**, without commas. An unquoted comma at the
+  end of an item is read as a separator when another item follows it
+  (`SET A=1, B=2`, `USE ENV a, b`); a final value keeps its comma, so
+  `SET NO_PROXY=a,b,` stores `a,b,`. Quote a value to be explicit.
 - Names follow the rules each object already has: a playbook name is
   letters, digits, `_` and `-`; an env set name also allows dots
   (`glm-5.3`). A **keyword is not a valid new name**
