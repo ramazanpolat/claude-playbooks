@@ -852,8 +852,12 @@ func (p *parser) set(c *Clause) *Error {
 	// reference, or AS PLAINTEXT saying so. The error names the key only.
 	if len(credentials) > 0 && !c.Plaintext {
 		k := credentials[0]
-		return errAt(k.Pos, fmt.Sprintf("%s looks like a credential: use SET %s FROM '<ref>' (needs a secret helper), "+
-			"or add AS PLAINTEXT to store the literal knowingly", k.Text, k.Text))
+		set := "SET" // the fix must parse where it is suggested: a playbook takes SET VAR
+		if slices.Equal(p.starters, alterPlaybookStarters) {
+			set = "SET VAR"
+		}
+		return errAt(k.Pos, fmt.Sprintf("%s looks like a credential: use %s %s FROM '<ref>' (needs a secret helper), "+
+			"or add AS PLAINTEXT to store the literal knowingly", k.Text, set, k.Text))
 	}
 	p.note(p.starters...)
 	return nil
