@@ -124,6 +124,15 @@ func TestShowPlaybooks(t *testing.T) {
 	if !strings.Contains(human, "NAME") || !strings.Contains(human, "router") || !strings.Contains(human, "glm") {
 		t.Fatalf("human form:\n%s", human)
 	}
+	if bare := mustStmt(t, "SHOW"); bare != human {
+		t.Fatalf("a bare SHOW must print SHOW PLAYBOOKS:\n%s\n---\n%s", bare, human)
+	}
+	if bare := mustStmt(t, "show --json"); bare != out {
+		t.Fatalf("SHOW --json must print SHOW PLAYBOOKS --json")
+	}
+	if _, err := stmt(t, "SHOW FOO"); err == nil {
+		t.Fatal("SHOW followed by a non-object must stay an error")
+	}
 }
 
 func TestShowEnvsAndDefaults(t *testing.T) {

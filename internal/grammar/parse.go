@@ -552,6 +552,15 @@ func (p *parser) show(s *Stmt) *Error {
 		}
 		return nil
 	}
+	// A bare SHOW (or SHOW --json) is SHOW PLAYBOOKS. Anything else that is
+	// not an object is still an error, never a silent fallback, and
+	// completion still offers every object here.
+	if p.atEnd() || p.at("--json") {
+		p.kw("PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV")
+		s.Object = Playbooks
+		p.jsonFlag(s)
+		return nil
+	}
 	switch w := p.kw("PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV"); w {
 	case "":
 		return p.fail("SHOW needs an object")
