@@ -1,7 +1,8 @@
 # CLI grammar — spec (draft)
 
 Status: **agreed 2026-09-26; implementation in progress (phase 1, the
-parser).** Decided with the pilot on 2026-09-25/26; no open points remain.
+parser). Ships as v4.0.0.** Decided with the pilot on 2026-09-25/26; one
+open point, listed at the end.
 
 ## Why
 
@@ -233,9 +234,9 @@ uses to redact: `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `*_KEY`, …) is
 refused, naming the key and never the value, and pointing at
 `SET K FROM '<ref>'`. A value that cannot be a secret is let through: empty,
 an integer, or `true`/`false`, so `SET VAR MAX_THINKING_TOKENS=8000` works.
-**The short forms are the plain-text escape hatch**: `env <n> set K=V` and
-`env-profile <set> set K=V` keep today's behaviour and store the literal,
-because existing setups rely on it.
+Existing files that already hold such literals keep working: launch reads
+them as before, and output redacts them. Whether the grammar offers an
+explicit way to store a new one is the open point below.
 
 All output redacts credential-looking literals, as `env` does today; there is
 no `--reveal` in the new grammar.
@@ -329,61 +330,59 @@ cpb SHOW CREATE ALL > setup.cpb
 cpb APPLY setup.cpb --dry-run
 ```
 
-## Today's commands
+## Pre-grammar commands: removed in v4.0.0
 
-**They stay, indefinitely** (decided 2026-09-25): none of them clashes with
-the grammar, so there is no reason to remove them. They are not deprecated
-and print no nag.
+Decided with the pilot on 2026-09-26, replacing the earlier "keep them
+indefinitely": the state-changing commands are **removed**, with no hidden
+aliases and no translation layer. The grammar is the one way to change state.
 
-- **`install <source>` is a first-class shortcut**, shown in help like `run`
-  and `update`: clone, install and create the launcher in one step, taking
-  the name and launcher from the source's manifest. It is sugar for
-  `CREATE PLAYBOOK <name> FROM <source> ALIAS <launcher>`. `SHOW CREATE`
-  always writes the long form.
-- The other state-changing commands (`create`, `link`, `delete`, `rename`,
-  `alias`, `dealias`, `list`, `info`, `env`, `env-profile`) keep working with
-  their flags. Help leads with the grammar and lists these under
-  "short forms".
-- They are re-implemented as translations onto the same engine, so there is
-  one code path and one set of rules; their existing tests become the
-  compatibility suite.
-- **The one routing rule:** `create` is both a legacy command
-  (`cpb create <name>`) and a grammar verb. If the word after it is an object
-  keyword (`PLAYBOOK`, `ENV`, …), the grammar applies; otherwise the legacy
-  command. That is one more reason keywords are not valid names.
+- **Removed:** `env`, `env-profile`, `create <name>`, `link`, `delete`,
+  `rename`, `alias`, `dealias`, `list`, `info`. Each removed word answers
+  with one line naming the statement to use, and exits non-zero:
+  `cpb env-profile …` → "`env-profile` was removed in v4.0.0; use: cpb ALTER
+  ENV … (see cpb help grammar)". A word that points the way is worth more
+  than one that means nothing.
+- **Kept, unchanged:** the action commands `run`, `start`, `update`, `auth`,
+  `completion`, `self-uninstall`, and `install <source>`, the one shortcut:
+  clone, install and create the launcher in one step, taking the name and
+  launcher from the source's manifest (sugar for `CREATE PLAYBOOK <name> FROM
+  <source> ALIAS <launcher>`). They act rather than manage state. `SHOW
+  CREATE` always writes the long form.
+- **`create` is only the grammar verb.** `cpb create x` is a statement that
+  fails to parse ("CREATE needs an object"), with the expected words listed.
+- **Semver:** this breaks every script and document using the removed forms,
+  so the release is **v4.0.0**.
+- **Tests:** each removed command's tests become tests of the equivalent
+  statements (same behaviour, new syntax), plus the removed-word errors.
 
-| Short form | Grammar |
+**Migration** (the table the removed-word errors and the docs draw on):
+
+| Removed | Use instead |
 |---|---|
-| `install <src> [--name n] [--branch b] [--subdir d] [--alias a \| --no-alias] [--sandbox]` | `CREATE PLAYBOOK n FROM <src> [BRANCH b] [SUBDIR d] [ALIAS a \| NO ALIAS] [SANDBOX]` (`n` defaults to the source manifest's name) |
 | `create <n> [--alias a \| --no-alias] [--sandbox]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX]` |
 | `link <target> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK n LINK <target> [ALIAS a \| NO ALIAS]` (`n` defaults to the target's basename) |
 | `delete <n> [--yes]` | `DROP PLAYBOOK <n> [--yes]` |
 | `rename <a> <b> [--alias x \| --no-alias]` | `ALTER PLAYBOOK <a> RENAME TO <b> [ALIAS x \| NO ALIAS]` |
 | `alias <n> <a>` | `ALTER PLAYBOOK <n> ALIAS <a>` |
 | `alias <n> --remove`, `dealias <n>` | `ALTER PLAYBOOK <n> NO ALIAS` |
-| `list [prefix]`, `alias` | `SHOW PLAYBOOKS` (the prefix filter stays a short-form convenience) |
+| `list [prefix]`, `alias` | `SHOW PLAYBOOKS` (the prefix filter is gone) |
 | `info <n> [--reveal]` | `SHOW PLAYBOOK <n>` (no `--reveal` in the grammar) |
-| `env <n> set K=V ...` | `ALTER PLAYBOOK <n> SET VAR K=V ...` (the short form also stores credential-looking literals) |
+| `env <n> set K=V ...` | `ALTER PLAYBOOK <n> SET VAR K=V ...` |
 | `env <n> unset K ...` | `ALTER PLAYBOOK <n> BLOCK VAR K ...` |
 | `env <n> clear K ...` | `ALTER PLAYBOOK <n> UNSET VAR K ...` |
-| `env <n> use P ...` / `unuse P ...` | `ALTER PLAYBOOK <n> ADD ENV P ...` (moves an attached set to the end) / `DROP ENV P ...` |
+| `env <n> use P Q` / `unuse P Q` | `ALTER PLAYBOOK <n> ADD ENV P ADD ENV Q` (one `ADD ENV` per set; an attached set moves to the end) / `DROP ENV P Q` |
 | `env <n> [--reveal]` | `EXPLAIN PLAYBOOK <n>` |
-| `env-profile P set K=V ...` | `ALTER ENV P SET K=V ...` (`CREATE ENV` when new; the short form also stores credential-looking literals) |
+| `env-profile P set K=V ...` | `ALTER ENV P SET K=V ...` (`CREATE ENV` when new) |
 | `env-profile P unset K ...` / `clear K ...` | `ALTER ENV P BLOCK K ...` / `UNSET K ...` |
 | `env-profile P describe TEXT` | `ALTER ENV P DESCRIBE 'TEXT'` |
 | `env-profile P default` / `undefault` | `ALTER DEFAULTS USE ENV P` (replaces the list, as `default` replaced the single default) / `ALTER DEFAULTS DROP ENV P` |
 | `env-profile P delete` | `DROP ENV P` |
 | `env-profile [--values] [--reveal]` | `SHOW ENVS` |
 
-Action commands stay as they are, lowercase verbs with no object: `run`,
-`start`, `update`, `auth`, `completion`, `self-uninstall`. They do
-something rather than change state, and forcing them into DDL shape would
-make them harder to read, not easier.
-
 ## Compatibility
 
-- Scripts that parse today's output keep working for the short forms; `SHOW`
-  output is new.
+- Scripts using the removed commands break (v4.0.0); each removed word
+  names its replacement. `SHOW` output is new.
 - The manifest (`.playbook` `[env]`) and `.env-profiles/*.toml` formats gain
   one table, `refs`; everything else is unchanged.
 - `.env-profiles/.default` changes from one name to one name per line. A
@@ -397,3 +396,12 @@ make them harder to read, not easier.
 Every slot has a closed set, so TAB completes verbs, then objects, then
 existing names of that object, then the clause keywords valid for it, then
 keys (from the object's current entries).
+
+## Open point
+
+1. **A plain-text escape for credentials.** With the short forms gone, a
+   pilot without a secret helper has no way to store a credential-looking
+   literal (for example an `ANTHROPIC_AUTH_TOKEN` for a router). Options: an
+   explicit clause that says what it does (`SET VAR K=V AS PLAINTEXT`), or no
+   escape (a helper becomes required for credentials). Raised with the root
+   agent 2026-09-26.
