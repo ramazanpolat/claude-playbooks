@@ -400,4 +400,10 @@ func TestHiddenDeleteOfTheSingleDefaultKeepsItsWording(t *testing.T) {
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v\nwant %s", err, want)
 	}
+	mustStmt(t, "CREATE ENV other")
+	err = runEnvProfile(nil, []string{"other", "undefault"})
+	want = `the registry default is "base", not "other"`
+	if err == nil || err.Error() != want {
+		t.Fatalf("undefault of a non-default: got %v\nwant %s", err, want)
+	}
 }

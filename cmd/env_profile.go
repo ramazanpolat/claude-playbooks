@@ -221,6 +221,10 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 			if len(current) == 0 {
 				return fmt.Errorf("no registry default is set")
 			}
+			// One default keeps the wording this command has always printed.
+			if len(current) == 1 {
+				return fmt.Errorf("the registry default is %q, not %q", current[0], name)
+			}
 			return fmt.Errorf("env profile %q is not a registry default (the defaults are %s)", name, strings.Join(current, ", "))
 		}
 		// The marker may hold several defaults since the grammar made
