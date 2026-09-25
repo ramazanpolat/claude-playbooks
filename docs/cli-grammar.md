@@ -205,8 +205,12 @@ person** — presence and secrets stay shared.
   file. cpb neither reads nor writes it. cpb's own handling is safe with it:
   `DROP PLAYBOOK` removes the link without following it, `RENAME TO` moves it
   with the directory, and `update` touches it only if a source ships an entry
-  of the same name. (Link name `.pilot`, pending pilot-profile's
-  confirmation.)
+  of the same name. The link is `<install>/.pilot` and the imports read
+  `@.pilot/PROFILE.md` and the other three; they live in the playbook's own
+  `CLAUDE.md` (user-level memory), since Claude Code's external-import gate
+  blocks a project `CLAUDE.md` from importing outside the project. A
+  dangling or missing link is skipped silently. (Confirmed by pilot-profile,
+  2026-09-26, with a throwaway `CLAUDE_CONFIG_DIR` and `claude -p`.)
 - **Flags always come before the install path**, in every `pilot` call
   (`pilot wire --pilot <name> --check <install>`). An old `pilot` parses
   flags only before the target: with the flags after it, it wires the
@@ -295,7 +299,9 @@ ALTER PLAYBOOK kommander-idea
 File rules:
 
 - **Only write statements** (`CREATE`, `ALTER`, `DROP`). A read is refused.
-- **`;` ends a statement**, newlines are whitespace, `--` starts a comment.
+- **`;` ends a statement**, newlines are whitespace, and `-- ` (two dashes
+  and a space, or at the end of a line, as in MySQL) starts a comment, so a
+  word such as `--dry-run` stays a word.
   On the command line no `;` is needed.
 - **No secret values.** Secrets appear only as `FROM '<ref>'`. `SHOW CREATE`
   never prints a credential-looking literal: it writes a comment telling the
