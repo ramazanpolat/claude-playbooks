@@ -687,8 +687,10 @@ a plugin id is `<plugin>@<marketplace>`.
 **Rules**
 
 - `ADD PLUGIN p@m` is refused unless `m` is a marketplace this playbook's
-  `settings.json` declares, or one Claude Code knows without declaring it
-  (`claude-plugins-official`, **to verify**).
+  `settings.json` declares. There is no exception for a marketplace Claude
+  Code knows by default (decided 2026-09-26): a plugin id always names its
+  marketplace, so a playbook that uses the official one declares it
+  (`ADD MARKETPLACE claude-plugins-official FROM 'github:anthropics/claude-plugins-official'`).
 - `DROP MARKETPLACE m` is refused while an entry of `enabledPlugins` names
   `m`; the error lists them.
 - Every other key of `settings.json`, and their order, is kept as it was.
@@ -727,12 +729,8 @@ fields on `PLAYBOOKS` when it lands.
 **INCLUDE** (its own section) is built in the same release, so the stacked
 files above run with one `cpb APPLY kommander.cpb`.
 
-**Open**
-
-1. `ALTER DEFAULTS` forms of these clauses (every playbook), or playbook
-   only. Proposed: playbook only in the first cut.
-2. The local-directory source and the official marketplace's default
-   status: to verify.
+These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
+form in the first cut (decided 2026-09-26).
 
 ## Completion
 
