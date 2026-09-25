@@ -1,9 +1,7 @@
 # Documentation
 
-Three kinds of page, by what you came for:
+Pages are grouped by what you came for:
 
-- **tutorials/**: learning from zero, in order, each runnable end to end.
-  (They arrive with the grammar release.)
 - **guides/**: how to do one common task.
 - **reference/**: complete and dry: every statement, flag, file and format.
 

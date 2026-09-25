@@ -14,7 +14,7 @@ the key, `AUTH` and the abbreviations (`PWD`, `PASS`, `PAT`) match a whole
 in a connection URL is masked from the *value* since no key-based rule can
 see it. A masked value keeps up to 4 characters at each end with at least 8
 always hidden, so anything under 12 characters is redacted whole.
-`docs/environment.md` has the same thing for readers rather than
+`docs/guides/environment.md` has the same thing for readers rather than
 implementers. The rest of this writeup is left as-is for the root-cause
 record.
 
@@ -49,7 +49,7 @@ fmt.Printf("%sset    %s=%s\n", indent, key, e.Set[key])
 
 There's no distinction between an ordinary override (`ANTHROPIC_BASE_URL`,
 safe to show) and a credential (`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
-anything an env profile's TOML marks as secret per `docs/environment.md`'s own
+anything an env profile's TOML marks as secret per `docs/guides/environment.md`'s own
 "values may be secrets" note about `.env-profiles/*.toml`) — both print the
 same way.
 
@@ -77,7 +77,7 @@ Redact values for keys that look like credentials before printing, or add a
 treat any key matching `*_TOKEN`, `*_KEY`, `*_SECRET`, `*_AUTH*` (case-
 insensitive) as sensitive and print `set    KEY=<redacted, N chars>` instead
 of the value, unless the flag is passed. Cross-check against whatever env
-profile TOML files already mark a field as secret (`docs/environment.md`
+profile TOML files already mark a field as secret (`docs/guides/environment.md`
 mentions "values may be secrets" for `.env-profiles/*.toml` — if that's a real
 per-field flag rather than just a comment, prefer it over a key-name
 heuristic).
