@@ -8,7 +8,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
-// runApply runs a setup file (docs/cli-grammar.md, "setup.cpb"): it parses
+// runApply runs a playbook file (docs/cli-grammar.md, "playbook.cpb"): it parses
 // and validates the whole file and writes nothing if any of it fails, then
 // runs the statements in order, each whole-or-nothing, and stops at the
 // first failure. Every statement SHOW CREATE writes is safe to repeat, so

@@ -2,7 +2,7 @@
 //
 //	cpb <VERB> <OBJECT> <name> <clause> <clause> ...
 //
-// from command-line arguments or from a setup file (setup.cpb). It is pure:
+// from command-line arguments or from a playbook file (playbook.cpb). It is pure:
 // it reads no files beyond the source it is handed, checks nothing on disk,
 // and runs nothing. Whether a playbook exists, whether an env set is in use,
 // and whether a secret reference resolves are the engine's questions; this

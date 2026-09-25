@@ -8,7 +8,7 @@ import (
 // Token is one word of a statement.
 type Token struct {
 	Text string
-	// Quoted reports that some part of the word was quoted in a setup file.
+	// Quoted reports that some part of the word was quoted in a playbook file.
 	// A quoted word is never a keyword, which is how a file spells a key or
 	// a name that collides with one. Words from argv are never Quoted: the
 	// shell has already removed the quotes, so there is nothing to record.
@@ -16,7 +16,7 @@ type Token struct {
 	Pos    Pos
 }
 
-// Pos locates a token: a line and column in a setup file, or a word number
+// Pos locates a token: a line and column in a playbook file, or a word number
 // on the command line (1 = the word after "cpb").
 type Pos struct {
 	Line int
@@ -40,7 +40,7 @@ func argTokens(args []string) []Token {
 	return toks
 }
 
-// lexFile splits a setup file into statements of tokens.
+// lexFile splits a playbook file into statements of tokens.
 //
 // The rules are SQL's where SQL has one: whitespace (newlines included)
 // separates words, ';' ends a statement, and '--' followed by whitespace

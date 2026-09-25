@@ -15,7 +15,7 @@ import (
 // keywords are the grammar's reserved words. None may name a new playbook,
 // env set or launcher (spec: "a keyword is not a valid name"). An
 // EXISTING object whose name happens to be a keyword can still be addressed
-// in the name slot, where there is no ambiguity, and quoted in a setup file.
+// in the name slot, where there is no ambiguity, and quoted in a playbook file.
 var keywords = map[string]bool{}
 
 func init() {
@@ -94,9 +94,9 @@ func ParseArgs(args []string) (*Stmt, error) {
 	return s, nil
 }
 
-// ParseFile parses a setup file. Every statement is parsed even after an
+// ParseFile parses a playbook file. Every statement is parsed even after an
 // error, and all errors are returned together, so one run reports every
-// problem in the file. A setup file holds only CREATE, ALTER and DROP.
+// problem in the file. A playbook file holds only CREATE, ALTER and DROP.
 func ParseFile(src string) ([]*Stmt, error) {
 	groups, lerr := lexFile(src)
 	if lerr != nil {
@@ -115,7 +115,7 @@ func ParseFile(src string) ([]*Stmt, error) {
 		}
 		if !s.Write() {
 			errs = append(errs, &Error{Pos: s.Pos,
-				Msg: string(s.Verb) + " only reads; a setup file holds CREATE, ALTER and DROP statements"})
+				Msg: string(s.Verb) + " only reads; a playbook file holds CREATE, ALTER and DROP statements"})
 			continue
 		}
 		out = append(out, s)
@@ -598,7 +598,7 @@ func (p *parser) explain(s *Stmt) *Error {
 
 func (p *parser) apply(s *Stmt) *Error {
 	if p.file {
-		return errAt(s.Pos, "APPLY cannot appear inside a setup file")
+		return errAt(s.Pos, "APPLY cannot appear inside a playbook file")
 	}
 	if p.atEnd() {
 		p.note("<file>")

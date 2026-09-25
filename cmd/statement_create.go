@@ -15,7 +15,7 @@ import (
 )
 
 // SHOW CREATE writes the statements that rebuild the state (docs/cli-grammar.md,
-// "setup.cpb"). Every form it writes is safe to repeat, so APPLY of its own
+// "playbook.cpb"). Every form it writes is safe to repeat, so APPLY of its own
 // output changes nothing. Plain text never travels in the output: a
 // credential-looking literal becomes a comment with the value withheld and
 // the statement that would store it by reference, and SHOW CREATE then
@@ -83,7 +83,7 @@ func showCreate(st *grammar.Stmt) error {
 	return nil
 }
 
-// withheldLiteral reports whether a literal must not go into a setup file:
+// withheldLiteral reports whether a literal must not go into a playbook file:
 // the same test SHOW uses to redact it.
 func withheldLiteral(key, value string) bool {
 	return (manifest.LooksLikeSecretKey(key) && !manifest.PlainSetting(value)) || redactURLCredentials(value) != value

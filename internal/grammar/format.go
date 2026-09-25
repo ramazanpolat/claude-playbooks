@@ -3,7 +3,7 @@ package grammar
 import "strings"
 
 // String renders the statement in canonical form: keywords in capitals, one
-// line, words quoted setup-file style where they need it. Parsing the result
+// line, words quoted playbook-file style where they need it. Parsing the result
 // yields the same statement, which is what lets SHOW CREATE emit statements
 // and hints print the grammar form of a short-form command.
 func (s *Stmt) String() string {
@@ -17,7 +17,7 @@ func (s *Stmt) String() string {
 	return strings.Join(w, " ")
 }
 
-// Pretty renders the statement for a setup file: the head on one line and
+// Pretty renders the statement for a playbook file: the head on one line and
 // each clause on its own, indented. It parses back to the same statement.
 func (s *Stmt) Pretty() string {
 	var b strings.Builder

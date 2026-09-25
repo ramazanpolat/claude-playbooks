@@ -11,9 +11,9 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-func writeSetup(t *testing.T, text string) string {
+func writePlaybookFile(t *testing.T, text string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "setup.cpb")
+	path := filepath.Join(t.TempDir(), "playbook.cpb")
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func apply(t *testing.T, path string, flags ...string) (string, error) {
 	return out, err
 }
 
-const scratchSetup = `-- a machine from nothing
+const scratchPlaybook = `-- a machine from nothing
 CREATE OR REPLACE ENV glm
   DESCRIBE 'GLM via the router'
   SET BASE=http://tr0:20128/v1 MODEL=glm-5.3;
@@ -43,7 +43,7 @@ ALTER PLAYBOOK work
 func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	path := writeSetup(t, scratchSetup)
+	path := writePlaybookFile(t, scratchPlaybook)
 
 	out, err := apply(t, path, "--dry-run")
 	if err != nil {
@@ -84,7 +84,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	helper, _ := fakeHelper(t)
-	if out, err := apply(t, writeSetup(t, scratchSetup)); err != nil {
+	if out, err := apply(t, writePlaybookFile(t, scratchPlaybook)); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
@@ -100,7 +100,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 		}
 	}
 	before := snapshot(t, root)
-	out, err := apply(t, writeSetup(t, dump))
+	out, err := apply(t, writePlaybookFile(t, dump))
 	if err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
 		t.Fatalf("applying SHOW CREATE ALL's output must change nothing: %v\n%s", err, out)
 	}
@@ -153,7 +153,7 @@ func TestShowCreateWithholdsCredentialLiterals(t *testing.T) {
 func TestApplyStopsAtTheFirstFailure(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	path := writeSetup(t, "CREATE ENV a;\nALTER PLAYBOOK ghost SET VAR X=1;\nCREATE ENV b;\n")
+	path := writePlaybookFile(t, "CREATE ENV a;\nALTER PLAYBOOK ghost SET VAR X=1;\nCREATE ENV b;\n")
 	_, err := apply(t, path)
 	if err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "1 of 3 statements were applied") {
 		t.Fatalf("failure report: %v", err)
@@ -166,7 +166,7 @@ func TestApplyStopsAtTheFirstFailure(t *testing.T) {
 func TestApplyWritesNothingOnAParseError(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	path := writeSetup(t, "CREATE ENV a;\nSHOW ENVS;\nALTER ENV a FOO;\n")
+	path := writePlaybookFile(t, "CREATE ENV a;\nSHOW ENVS;\nALTER ENV a FOO;\n")
 	_, err := apply(t, path)
 	if err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "line 3") || !strings.Contains(err.Error(), "nothing was written") {
 		t.Fatalf("parse errors: %v", err)
@@ -181,7 +181,7 @@ func TestApplyDropsNeedYes(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{})
-	path := writeSetup(t, "CREATE ENV e;\nDROP PLAYBOOK old;\n")
+	path := writePlaybookFile(t, "CREATE ENV e;\nDROP PLAYBOOK old;\n")
 
 	_, err := apply(t, path)
 	if err == nil || !strings.Contains(err.Error(), "line 2: DROP PLAYBOOK old") || !strings.Contains(err.Error(), "--yes") {
