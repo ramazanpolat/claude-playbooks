@@ -184,10 +184,13 @@ func layerVars(set map[string]string, unset []string) []varJSON {
 	return vars
 }
 
-// literalVar is a literal value, or redacted when displaying it would
-// reveal a credential (a credential-looking key, or a URL carrying one).
+// literalVar is a literal value, or redacted when it may be a credential:
+// a credential-looking key holding more than a plain setting, or a URL
+// carrying a password. MAX_THINKING_TOKENS=8000 is shown, as the grammar
+// accepts it without AS PLAINTEXT.
 func literalVar(key, value string) varJSON {
-	if displayEnvValue(key, value, false) != value {
+	secret := manifest.LooksLikeSecretKey(key) && !manifest.PlainSetting(value)
+	if secret || redactURLCredentials(value) != value {
 		return varJSON{Key: key, Redacted: true, Plaintext: true}
 	}
 	return varJSON{Key: key, Value: strPtr(value)}

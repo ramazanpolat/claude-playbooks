@@ -846,7 +846,7 @@ func (p *parser) set(c *Clause) *Error {
 		if err := manifest.ValidateEnvValue(k, v); err != nil {
 			return errAt(t.Pos, err.Error())
 		}
-		if manifest.LooksLikeSecretKey(k) && !plainSetting(v) {
+		if manifest.LooksLikeSecretKey(k) && !manifest.PlainSetting(v) {
 			credentials = append(credentials, Token{Text: k, Pos: t.Pos})
 		}
 		c.Vars = append(c.Vars, Var{Key: k, Value: v})
@@ -878,15 +878,6 @@ func (p *parser) set(c *Clause) *Error {
 // at reports whether the next token is the unquoted keyword w.
 func (p *parser) at(w string) bool {
 	return !p.atEnd() && !p.toks[p.i].Quoted && strings.EqualFold(p.toks[p.i].Text, w)
-}
-
-var plainNumber = regexp.MustCompile(`^-?[0-9]+$`)
-
-// plainSetting reports whether a value cannot be a secret, so that a
-// credential-looking key holding it is a setting: MAX_THINKING_TOKENS=8000,
-// SOME_AUTH_ENABLED=true, an empty value.
-func plainSetting(v string) bool {
-	return v == "" || plainNumber.MatchString(v) || strings.EqualFold(v, "true") || strings.EqualFold(v, "false")
 }
 
 func (p *parser) kvAt(i int) bool {

@@ -1,6 +1,9 @@
 package manifest
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // What marks a key as credential-looking. No env profile field carries a
 // real per-field secret marker (internal/envprofile.Profile.Set is a plain
@@ -56,4 +59,14 @@ func LooksLikeSecretKey(key string) bool {
 		}
 	}
 	return false
+}
+
+var plainNumber = regexp.MustCompile(`^-?[0-9]+$`)
+
+// PlainSetting reports whether a value cannot be a secret, so that a
+// credential-looking key holding it is a setting: MAX_THINKING_TOKENS=8000,
+// SOME_AUTH_ENABLED=true, an empty value. The grammar lets these through
+// without AS PLAINTEXT, and SHOW prints them.
+func PlainSetting(v string) bool {
+	return v == "" || plainNumber.MatchString(v) || strings.EqualFold(v, "true") || strings.EqualFold(v, "false")
 }
