@@ -11,7 +11,7 @@ import (
 )
 
 // keywords are the grammar's reserved words. None may name a new playbook,
-// env set, pilot or launcher (spec: "a keyword is not a valid name"). An
+// env set or launcher (spec: "a keyword is not a valid name"). An
 // EXISTING object whose name happens to be a keyword can still be addressed
 // in the name slot, where there is no ambiguity, and quoted in a setup file.
 var keywords = map[string]bool{}
@@ -20,7 +20,7 @@ func init() {
 	for _, w := range []string{
 		"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY",
 		"OR", "REPLACE", "IF", "NOT", "EXISTS",
-		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "PILOT", "PILOTS", "DEFAULTS", "ALL",
+		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "DEFAULTS", "ALL",
 		"SET", "VAR", "FROM", "BLOCK", "UNSET", "DESCRIBE",
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
 		"RENAME", "TO", "ALIAS", "NO",
@@ -280,7 +280,7 @@ func (p *parser) take(what, placeholder string) (Token, *Error) {
 	return t, nil
 }
 
-var placeholders = map[Object]string{Playbook: "<playbook>", Env: "<env>", Pilot: "<pilot>"}
+var placeholders = map[Object]string{Playbook: "<playbook>", Env: "<env>"}
 
 // name reads an object name. A new name (CREATE, RENAME TO) may not be a
 // keyword; an existing one may, since the slot is unambiguous.
@@ -532,7 +532,7 @@ func (p *parser) show(s *Stmt) *Error {
 		}
 		return nil
 	}
-	switch w := p.kw("PLAYBOOKS", "ENVS", "PILOTS", "DEFAULTS", "PLAYBOOK", "ENV"); w {
+	switch w := p.kw("PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV"); w {
 	case "":
 		return p.fail("SHOW needs an object")
 	case "PLAYBOOK", "ENV":
@@ -624,39 +624,13 @@ func (p *parser) envClause() (*Clause, *Error) {
 
 func (p *parser) playbookClause() (*Clause, *Error) {
 	c := &Clause{Pos: p.pos()}
-	switch p.kw(alterPlaybookStarters...) {
+	switch w := p.kw(alterPlaybookStarters...); w {
 	case "":
 		return nil, p.unexpected()
-	case "USE":
-		switch p.kw("ENV", "PILOT") {
-		case "":
-			return nil, p.fail("USE needs ENV or PILOT")
-		case "ENV":
-			c.Kind = UseEnv
-			names, err := p.envNames("USE ENV")
-			c.Names = names
-			return c, err
-		case "PILOT":
-			c.Kind = UsePilot
-			name, err := p.name(Pilot, false)
-			c.Arg = name
-			return c, err
-		}
+	case "USE", "DROP":
+		return c, p.envList(c, w)
 	case "ADD":
 		return c, p.addEnv(c)
-	case "DROP":
-		switch p.kw("ENV", "PILOT") {
-		case "":
-			return nil, p.fail("DROP needs ENV or PILOT")
-		case "ENV":
-			c.Kind = DropEnv
-			names, err := p.envNames("DROP ENV")
-			c.Names = names
-			return c, err
-		case "PILOT":
-			c.Kind = DropPilot
-			return c, nil
-		}
 	case "SET":
 		if p.kw("VAR") == "" {
 			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR: SET VAR <key>=<value>")
@@ -707,20 +681,25 @@ func (p *parser) defaultsClause() (*Clause, *Error) {
 	case "":
 		return nil, p.unexpected()
 	case "USE", "DROP":
-		if p.kw("ENV") == "" {
-			return nil, p.fail(w + " inside ALTER DEFAULTS takes ENV: DEFAULTS is a list of env sets")
-		}
-		c.Kind = UseEnv
-		if w == "DROP" {
-			c.Kind = DropEnv
-		}
-		names, err := p.envNames(w + " ENV")
-		c.Names = names
-		return c, err
+		return c, p.envList(c, w)
 	case "ADD":
 		return c, p.addEnv(c)
 	}
 	return nil, nil
+}
+
+// envList reads the rest of USE ENV <env> ... or DROP ENV <env> ...
+func (p *parser) envList(c *Clause, verb string) *Error {
+	if p.kw("ENV") == "" {
+		return p.fail(verb + " takes ENV: " + verb + " ENV <env> ...")
+	}
+	c.Kind = UseEnv
+	if verb == "DROP" {
+		c.Kind = DropEnv
+	}
+	names, err := p.envNames(verb + " ENV")
+	c.Names = names
+	return err
 }
 
 func (p *parser) addEnv(c *Clause) *Error {
@@ -855,7 +834,7 @@ func (p *parser) setRef(c *Clause, t Token) *Error {
 	}
 	r := p.toks[p.i]
 	if !refPattern.MatchString(r.Text) {
-		return errAt(r.Pos, "not a secret reference: use a form such as 'keychain:pilot/<name>' (the value itself is never stored)")
+		return errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>' or 'op://<vault>/<item>/<field>' (the value itself is never stored)")
 	}
 	p.i++
 	p.quiet = true
@@ -871,7 +850,7 @@ func validate(s *Stmt) *Error {
 	keys := map[string]bool{}
 	envs := map[string]bool{}
 	once := map[Kind]bool{
-		Describe: true, UseEnv: true, UsePilot: true, DropPilot: true, RenameTo: true,
+		Describe: true, UseEnv: true, RenameTo: true,
 		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 	}
 	for _, c := range s.Clauses {
@@ -899,7 +878,7 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
 		}
 	}
-	pairs := [][2]Kind{{UsePilot, DropPilot}, {Alias, NoAlias}, {From, Link}}
+	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]

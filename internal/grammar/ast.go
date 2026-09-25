@@ -29,11 +29,9 @@ type Object string
 const (
 	Playbook  Object = "PLAYBOOK"
 	Env       Object = "ENV"
-	Pilot     Object = "PILOT"
 	Defaults  Object = "DEFAULTS"
 	Playbooks Object = "PLAYBOOKS"
 	Envs      Object = "ENVS"
-	Pilots    Object = "PILOTS"
 	All       Object = "ALL" // SHOW CREATE ALL
 )
 
@@ -42,24 +40,22 @@ const (
 type Kind string
 
 const (
-	SetVar    Kind = "SET"        // SET [VAR] K=V ...
-	SetRef    Kind = "SET FROM"   // SET [VAR] K FROM '<ref>'
-	BlockVar  Kind = "BLOCK"      // BLOCK [VAR] K ...
-	UnsetVar  Kind = "UNSET"      // UNSET [VAR] K ...
-	Describe  Kind = "DESCRIBE"   // DESCRIBE '<text>'
-	UseEnv    Kind = "USE ENV"    // USE ENV a b ...
-	AddEnv    Kind = "ADD ENV"    // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
-	DropEnv   Kind = "DROP ENV"   // DROP ENV a b ...
-	UsePilot  Kind = "USE PILOT"  // USE PILOT p
-	DropPilot Kind = "DROP PILOT" // DROP PILOT
-	RenameTo  Kind = "RENAME TO"  // RENAME TO n
-	Alias     Kind = "ALIAS"      // ALIAS launcher
-	NoAlias   Kind = "NO ALIAS"   // NO ALIAS
-	From      Kind = "FROM"       // CREATE PLAYBOOK ... FROM <source>
-	Branch    Kind = "BRANCH"     // CREATE PLAYBOOK ... BRANCH <ref>
-	Subdir    Kind = "SUBDIR"     // CREATE PLAYBOOK ... SUBDIR <dir>
-	Link      Kind = "LINK"       // CREATE PLAYBOOK ... LINK <dir>
-	Sandbox   Kind = "SANDBOX"    // CREATE PLAYBOOK ... SANDBOX
+	SetVar   Kind = "SET"       // SET [VAR] K=V ...
+	SetRef   Kind = "SET FROM"  // SET [VAR] K FROM '<ref>'
+	BlockVar Kind = "BLOCK"     // BLOCK [VAR] K ...
+	UnsetVar Kind = "UNSET"     // UNSET [VAR] K ...
+	Describe Kind = "DESCRIBE"  // DESCRIBE '<text>'
+	UseEnv   Kind = "USE ENV"   // USE ENV a b ...
+	AddEnv   Kind = "ADD ENV"   // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
+	DropEnv  Kind = "DROP ENV"  // DROP ENV a b ...
+	RenameTo Kind = "RENAME TO" // RENAME TO n
+	Alias    Kind = "ALIAS"     // ALIAS launcher
+	NoAlias  Kind = "NO ALIAS"  // NO ALIAS
+	From     Kind = "FROM"      // CREATE PLAYBOOK ... FROM <source>
+	Branch   Kind = "BRANCH"    // CREATE PLAYBOOK ... BRANCH <ref>
+	Subdir   Kind = "SUBDIR"    // CREATE PLAYBOOK ... SUBDIR <dir>
+	Link     Kind = "LINK"      // CREATE PLAYBOOK ... LINK <dir>
+	Sandbox  Kind = "SANDBOX"   // CREATE PLAYBOOK ... SANDBOX
 )
 
 // Where places an env set added with ADD ENV.
@@ -101,7 +97,7 @@ type Clause struct {
 	Vars   []Var    // SET: one per K=V; SET FROM: exactly one, with Ref
 	Keys   []string // BLOCK, UNSET
 	Names  []string // USE ENV, DROP ENV; ADD ENV: exactly one
-	Arg    string   // USE PILOT, RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK
+	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK
 	Where  Where    // ADD ENV
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
 

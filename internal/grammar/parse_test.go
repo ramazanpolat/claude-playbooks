@@ -66,14 +66,10 @@ var validCases = []struct {
 	{"drop env",
 		w("ALTER PLAYBOOK k DROP ENV deepseek-flash"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: DropEnv, Names: []string{"deepseek-flash"}}}}},
-	{"use pilot and block var",
-		w("ALTER PLAYBOOK k USE PILOT ramazan-metu BLOCK VAR HTTP_PROXY"),
+	{"block var, set var, unset var",
+		w("ALTER PLAYBOOK k BLOCK VAR HTTP_PROXY SET VAR MAX_THINKING_TOKENS=8000 UNSET VAR FOO"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{
-			{Kind: UsePilot, Arg: "ramazan-metu"}, {Kind: BlockVar, Keys: []string{"HTTP_PROXY"}}}}},
-	{"drop pilot, set var, unset var",
-		w("ALTER PLAYBOOK k DROP PILOT SET VAR MAX_THINKING_TOKENS=8000 UNSET VAR FOO"),
-		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{
-			{Kind: DropPilot}, {Kind: SetVar, Vars: []Var{{Key: "MAX_THINKING_TOKENS", Value: "8000"}}}, {Kind: UnsetVar, Keys: []string{"FOO"}}}}},
+			{Kind: BlockVar, Keys: []string{"HTTP_PROXY"}}, {Kind: SetVar, Vars: []Var{{Key: "MAX_THINKING_TOKENS", Value: "8000"}}}, {Kind: UnsetVar, Keys: []string{"FOO"}}}}},
 	{"playbook secret by reference",
 		w("ALTER PLAYBOOK k SET VAR TOKEN FROM op://Vault/item/field"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: SetRef, Vars: []Var{{Key: "TOKEN", Ref: "op://Vault/item/field"}}}}}},
@@ -121,7 +117,6 @@ var validCases = []struct {
 	{"drop env", w("drop env e"), Stmt{Verb: Drop, Object: Env, Name: "e"}},
 	{"show envs", w("SHOW ENVS"), Stmt{Verb: Show, Object: Envs}},
 	{"show playbooks", w("show playbooks"), Stmt{Verb: Show, Object: Playbooks}},
-	{"show pilots", w("SHOW PILOTS"), Stmt{Verb: Show, Object: Pilots}},
 	{"show defaults", w("SHOW DEFAULTS"), Stmt{Verb: Show, Object: Defaults}},
 	{"show playbook", w("SHOW PLAYBOOK k"), Stmt{Verb: Show, Object: Playbook, Name: "k"}},
 	{"show env", w("SHOW ENV e"), Stmt{Verb: Show, Object: Env, Name: "e"}},
@@ -184,11 +179,12 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER PLAYBOOK k BLOCK A"), "BLOCK inside ALTER PLAYBOOK takes VAR"},
 		{w("ALTER PLAYBOOK k UNSET A"), "UNSET inside ALTER PLAYBOOK takes VAR"},
 		{w("ALTER PLAYBOOK k FOO"), `unexpected "FOO"`},
-		{w("ALTER PLAYBOOK k USE"), "USE needs ENV or PILOT"},
+		{w("ALTER PLAYBOOK k USE"), "USE takes ENV"},
+		{w("ALTER PLAYBOOK k USE PILOT a"), "USE takes ENV"},
+		{w("ALTER PLAYBOOK k DROP PILOT"), "DROP takes ENV"},
+		{w("SHOW PILOTS"), "SHOW needs an object"},
 		{w("ALTER PLAYBOOK k USE ENV"), "USE ENV needs at least one <env>"},
 		{w("ALTER PLAYBOOK k USE ENV a USE ENV b"), "USE ENV appears twice"},
-		{w("ALTER PLAYBOOK k USE PILOT a USE PILOT b"), "USE PILOT appears twice"},
-		{w("ALTER PLAYBOOK k USE PILOT a DROP PILOT"), "USE PILOT and DROP PILOT cannot be combined"},
 		{w("ALTER PLAYBOOK k ALIAS a NO ALIAS"), "ALIAS and NO ALIAS cannot be combined"},
 		{w("ALTER PLAYBOOK k SET VAR A=1 BLOCK VAR A"), "A appears twice"},
 		{w("ALTER PLAYBOOK k SET VAR A=1 A=2"), "A appears twice"},
@@ -202,7 +198,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER PLAYBOOK k ALIAS set"), `"set" is a keyword and cannot name a launcher`},
 		{w("ALTER PLAYBOOK k NO"), "expected ALIAS after NO"},
 		{w("ALTER DEFAULTS SET VAR A=1"), `unexpected "SET"`},
-		{w("ALTER DEFAULTS USE PILOT x"), "USE inside ALTER DEFAULTS takes ENV"},
+		{w("ALTER DEFAULTS USE PILOT x"), "USE takes ENV"},
 		{w("ALTER ENV e SET"), "SET needs <key>=<value> or <key> FROM '<ref>'"},
 		{w("ALTER ENV e SET 1BAD=x"), "invalid variable name before '='"},
 		{w("ALTER ENV e SET CLAUDE_CONFIG_DIR=x"), "managed by claude-playbook"},
@@ -221,7 +217,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("DROP PLAYBOOK k extra"), `unexpected "extra"`},
 		{w("SHOW"), "SHOW needs an object"},
 		{w("SHOW CREATE"), "SHOW CREATE needs an object"},
-		{w("SHOW CREATE PILOTS"), "SHOW CREATE needs an object"},
+		{w("SHOW CREATE ENVS"), "SHOW CREATE needs an object"},
 		{w("SHOW ENVS extra"), `unexpected "extra"`},
 		{w("SHOW ENVS --skip-secrets"), "unexpected word"},
 		{w("SHOW CREATE ALL --dry-run"), "unexpected word"},
@@ -313,7 +309,6 @@ CREATE PLAYBOOK IF NOT EXISTS kommander-idea
 
 ALTER PLAYBOOK kommander-idea
   USE ENV evren-router
-  USE PILOT ramazan-metu
   SET VAR MAX_THINKING_TOKENS=8000
   BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN;
 `
@@ -329,7 +324,7 @@ ALTER PLAYBOOK kommander-idea
 		"CREATE OR REPLACE ENV claude-default BLOCK HTTP_PROXY",
 		"ALTER DEFAULTS USE ENV claude-default",
 		"CREATE PLAYBOOK IF NOT EXISTS kommander-idea FROM https://github.com/ramazanpolat/kommander-playbook BRANCH v3.12.2 ALIAS ki",
-		"ALTER PLAYBOOK kommander-idea USE ENV evren-router USE PILOT ramazan-metu SET VAR MAX_THINKING_TOKENS=8000 BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN",
+		"ALTER PLAYBOOK kommander-idea USE ENV evren-router SET VAR MAX_THINKING_TOKENS=8000 BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN",
 	}
 	for i, s := range stmts {
 		if got := s.String(); got != want[i] {
@@ -391,13 +386,13 @@ func TestExpect(t *testing.T) {
 		{w("ALTER"), []string{"PLAYBOOK", "ENV", "DEFAULTS"}},
 		{w("ALTER PLAYBOOK"), []string{"<playbook>"}},
 		{w("ALTER PLAYBOOK k"), alterPlaybookStarters},
-		{w("ALTER PLAYBOOK k USE"), []string{"ENV", "PILOT"}},
+		{w("ALTER PLAYBOOK k USE"), []string{"ENV"}},
 		{w("ALTER PLAYBOOK k USE ENV a"), append([]string{"<env>"}, alterPlaybookStarters...)},
 		{w("ALTER PLAYBOOK k ADD ENV a"), append([]string{"FIRST", "LAST", "BEFORE", "AFTER"}, alterPlaybookStarters...)},
 		{w("ALTER ENV e SET"), []string{"VAR", "<key>=<value>", "<key>"}},
 		{w("ALTER ENV e SET A=1"), append([]string{"<key>=<value>"}, envStarters...)},
 		{w("ALTER DEFAULTS"), defaultsStarters},
-		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "PILOTS", "DEFAULTS", "PLAYBOOK", "ENV"}},
+		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV"}},
 		{w("APPLY f"), []string{"--dry-run"}},
 		{w("SHOW CREATE ALL"), []string{"--skip-secrets"}},
 		{w("SHOW CREATE ENV e"), []string{"--skip-secrets"}},
@@ -435,8 +430,8 @@ func TestIsStatement(t *testing.T) {
 }
 
 func TestKeywordsAreReserved(t *testing.T) {
-	for _, k := range []string{"playbook", "ENV", "Pilot", "sandbox", "all", "--dry-run"} {
-		if got := IsKeyword(k); got != (k != "--dry-run") {
+	for _, k := range []string{"playbook", "ENV", "Defaults", "sandbox", "all", "pilot", "--dry-run"} {
+		if got := IsKeyword(k); got != (k != "--dry-run" && k != "pilot") {
 			t.Errorf("IsKeyword(%q) = %v", k, got)
 		}
 	}
