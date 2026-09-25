@@ -511,9 +511,9 @@ only store:** each query builds its tables from the playbooks, env sets and
 DEFAULTS as they are on disk at that moment, and nothing is cached or kept.
 
 ```
-select  := SELECT { * | count() | <column> [, <column> ...] } FROM <table>
+select  := SELECT { * | count() | <column> ... } FROM <table>
            [WHERE <condition>]
-           [ORDER BY <column> [ASC | DESC] [, <column> [ASC | DESC] ...]]
+           [ORDER BY <column> [ASC | DESC] ...]
            [LIMIT <n>]
            [FORMAT { Pretty | TSV | JSON | JSONEachRow }]
          | SHOW TABLES [FORMAT …]
@@ -534,7 +534,9 @@ works because an unquoted comma at the end of an item is read as a
 separator.
 
 **Tables.** Their columns are exactly the `--json` fields of *Output*; there
-is no second schema. A nested object is addressed with a dot
+is no second schema. The one addition is two `VARS` columns that place a
+row, `playbook` and `effective`, because a `VARS` row is a variable seen from
+one playbook, which the *Output* variable object never needs to say. A nested object is addressed with a dot
 (`source.url`, `layer.kind`), and an array is filtered with `HAS`.
 
 | Table | One row per | Columns |
