@@ -515,7 +515,16 @@ select  := SELECT { * | count() | <column> [, <column> ...] } FROM <table>
            [ORDER BY <column> [ASC | DESC] [, <column> [ASC | DESC] ...]]
            [LIMIT <n>]
            [FORMAT { Pretty | TSV | JSON | JSONEachRow }]
+         | SHOW TABLES [FORMAT …]
+         | DESCRIBE <table> [FORMAT …]
 ```
+
+`SHOW TABLES` lists the tables with their row counts; `DESCRIBE <table>`
+lists a table's columns and their types (`String`, `Bool`, `Nullable(…)`,
+`Array(String)`, `Object`), as in ClickHouse. `DESCRIBE` is also the clause
+that sets an env set's description (`ALTER ENV e DESCRIBE '…'`). The
+position tells them apart: as the first word of a statement it is the verb,
+inside `ALTER ENV` / `CREATE ENV` it is the clause.
 
 **Tables.** Their columns are exactly the `--json` fields of *Output*; there
 is no second schema. A nested object is addressed with a dot
@@ -561,15 +570,34 @@ every format for the secret, as `SHOW`'s do. Filtering on a redacted value
 is impossible by construction: its `value` is null.
 
 **Keywords.** `SELECT`, `WHERE`, `ORDER`, `BY`, `ASC`, `DESC`, `LIMIT`,
-`FORMAT`, `LIKE`, `HAS`, `IS`, `NULL`, `AND` and the table name `VARS` join
-the reserved words (with `OR`, `NOT`, `FROM`, `PLAYBOOKS`, `ENVS`,
+`FORMAT`, `LIKE`, `HAS`, `IS`, `NULL`, `AND`, `TABLES` and the table name
+`VARS` join the reserved words (with `OR`, `NOT`, `FROM`, `PLAYBOOKS`, `ENVS`,
 `DEFAULTS` already there). None collides with a playbook, env set or
-launcher name on the pilot's machine (checked 2026-09-26: 85 names).
+launcher name on the pilot's machine (checked 2026-09-26: 85 names,
+`TABLES` included).
 Format names and `count` are not reserved.
 
 **On the command line.** `*`, `<`, `>` and `(` mean something to the shell,
-so a query is best passed as **one quoted argument**; cpb then reads it with
-the setup-file lexer, single quotes and all. This works for any statement:
+so a query is best passed as **one quoted argument** (decided 2026-09-26),
+and the rule is exact:
+
+- It applies when the whole command line after the global flags is **exactly
+  one word, and that word contains whitespace**. The word is read with the
+  setup-file lexer as exactly one statement: single quotes, doubled quotes
+  and `-- ` comments work, a trailing `;` is optional, and a second
+  statement is an error.
+- Reads are allowed in this form, unlike in a setup file: it is still the
+  command line.
+- Everything else is read word by word, as the shell split it, as before.
+- **The unquoted `*`.** `cpb SELECT * FROM PLAYBOOKS` without quotes is
+  globbed by the shell: zsh stops with "no matches found", and bash silently
+  passes the file names in the current directory. When a `SELECT` column list
+  holds a word that is an existing path in the current directory and not a
+  known column, the parse error says so: "looks like the shell expanded `*`;
+  quote the statement: cpb "SELECT * …"". A test pins the hint. zsh users can
+  add `alias cpb='noglob cpb'` to their shell; cpb installs nothing.
+
+This works for any statement:
 
 ```
 cpb "SELECT name, version FROM PLAYBOOKS WHERE envs HAS 'glm-5.3' ORDER BY name"
