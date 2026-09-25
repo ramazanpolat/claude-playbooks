@@ -2,8 +2,9 @@
 
 Status: **draft for the pilot's review.** Nothing here is implemented.
 Queued 2026-09-26 as P11 and pulled forward the same day ("let's build next
-layers"). Open points are marked **Open** and listed at the end; facts
-still being verified empirically are marked **To verify**.
+layers"). The launch behaviour rests on a verification run on 2026-09-26
+(twelve `claude -p` calls on GLM through a throwaway playbook); what it did
+not cover is marked **Unverified**. Open points are listed at the end.
 
 ## What it is
 
@@ -17,9 +18,10 @@ rather than only as `CLAUDE.md` memory.
 system_prompt_files = ["prompts/kommander.md"]
 ```
 
-cpb passes the files to `claude` with `--append-system-prompt-file` at
-launch. **cpb never reads, parses or interprets their contents**; it only
-checks where they are.
+cpb joins the files into one file and passes it to `claude` with
+`--append-system-prompt-file` at launch. **cpb never parses or interprets
+their contents**: joining copies bytes, and cpb checks only where the files
+are.
 
 ## The declaration
 
@@ -39,27 +41,51 @@ checks where they are.
 
 ## At launch
 
-`cpb run`, a launcher and `cpb start` (for a directory with a manifest) add
+`claude` honours **one** `--append-system-prompt-file`: given several, it
+applies only the last and silently drops the rest (verified, in both
+orders). So cpb never passes two. At every launch (`cpb run`, a launcher,
+`cpb start` for a directory with a manifest) it:
 
-```
-claude --append-system-prompt-file <install>/<file> [...]
-```
+1. **Joins** the declared files, in manifest order, into one generated
+   file, each preceded by a one-line header naming its source path:
 
-before the pilot's own arguments; an `--append-system-prompt[-file]` the
-pilot passes is kept and comes after. A sandboxed launch passes the paths as
-they are mounted inside the sandbox.
+   ```
+   <!-- cpb: prompts/kommander.md -->
+   …the file's bytes…
+   <!-- cpb: prompts/chaos.md -->
+   …
+   ```
 
-- **Open (to verify):** whether `claude` accepts the flag more than once
-  and appends each file in order. If it takes only one, cpb writes the files
-  in declaration order into one generated file in the config directory
-  (`.cpb-system-prompt.md`, rewritten at every launch and never edited by
-  hand) and passes that. Concatenation copies bytes; it still interprets
-  nothing.
-- **To verify:** a size limit on the appended text; how the text sits next
-  to `CLAUDE.md` memory; and resume. `claude --help` says a resumed
-  conversation keeps its recorded system prompt (`--system-prompt-snapshot`)
-  until it is compacted, so a changed file reaches a resumed session only
-  after that. `EXPLAIN` says so.
+2. **Writes it outside the install**, in cpb's own state under the
+   playbooks root (`<root>/.state/<playbook>/system-prompt.md`, mode 0600,
+   rewritten at every launch, never to be edited by hand). Never inside the
+   install: a playbook installed from git must not see an untracked file
+   appear in its tree, which would make its own update refuse a dirty tree.
+3. **Passes one flag**, `claude --append-system-prompt-file <that file>`,
+   before the pilot's arguments.
+
+The two append slots are independent (verified): `--append-system-prompt
+<text>` and `--append-system-prompt-file <file>` both apply, but neither
+stacks with itself. So:
+
+- a pilot's own `--append-system-prompt <text>` passes through unchanged;
+- a pilot's own `--append-system-prompt-file <f>` is **folded in last**: cpb
+  appends `<f>` to the generated file, with its own header, and removes the
+  flag from the arguments it passes, so the playbook's files are never
+  silently dropped by a second flag.
+
+A sandboxed launch writes the generated file where the sandbox mounts it and
+passes the path as seen inside.
+
+**What was verified** (2026-09-26, GLM, `claude -p`): a 40 KB file with a
+marker at its end was followed; the file's rules land in the system prompt
+while `CLAUDE.md` stays memory, and the two coexist; `--continue` reuses the
+first session's recorded system prompt and ignores a changed file, so
+**updated files reach new sessions only**, and `EXPLAIN` says so.
+
+**Unverified:** `/compact`, an interactive launch, `--resume <id>`,
+Anthropic models, and any hard size limit above 40 KB. The spec assumes the
+same behaviour and the implementation's suite checks what it can.
 
 ## Visible where state is visible
 
@@ -133,8 +159,5 @@ per-launch selection of prompt files are not planned.
 
 ## Open points
 
-1. One `--append-system-prompt-file` flag or several (verification running).
-2. Size limit, coexistence with `CLAUDE.md`, resume behaviour (verification
-   running).
-3. Files the pilot adds: a clause stored install-local, or none.
-4. Layering: A, B or C, the pilot's decision.
+1. Files the pilot adds: a clause stored install-local, or none.
+2. Layering: A, B or C, the pilot's decision.
