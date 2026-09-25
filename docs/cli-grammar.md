@@ -108,7 +108,7 @@ instead of an error; they sit before the name, as in ClickHouse.
 lists the users.
 
 Clauses in one command apply **atomically**: all or none, validated before
-anything is written. Validation includes `pilot wire … --check` for
+anything is written. Validation includes `pilot wire --pilot <name> --check <install>` for
 `USE PILOT` and `with-secret --check` for every `SET … FROM`. `USE PILOT` /
 `DROP PILOT` are applied **last**, after cpb's own writes, because they write
 outside cpb's state. If one of them fails, cpb restores its own writes; if a
@@ -191,9 +191,17 @@ Decided with the pilot on 2026-09-25: the unit is a **PILOT**, pilot-profile
 keeps its name, and several pilots on one machine are **personas of one
 person** — presence and secrets stay shared.
 
-- `USE PILOT <name>` runs `pilot wire <install> --pilot <name>`;
+- `USE PILOT <name>` runs `pilot wire --pilot <name> <install>`;
   `DROP PILOT` (no name: a playbook has at most one) runs
   `pilot unwire <install>`. cpb reads exit codes only, never the output text.
+- **Flags always come before the install path**, in every `pilot` call
+  (`pilot wire --pilot <name> --check <install>`). An old `pilot` parses
+  flags only before the target: with the flags after it, it wires the
+  install to the default profile (a write) and then fails on the flags as
+  extra targets with exit 2. With the flags first, an old `pilot` stops at
+  the first unknown flag, exit 1, nothing written. (Found by pilot-profile,
+  2026-09-26; the new `pilot` accepts flags anywhere, cpb still puts them
+  first.)
 - `DROP PILOT` only **detaches**. cpb never creates or deletes a pilot: a
   pilot is the pilot's memory, managed with `pilot new` and `pilot`'s own
   commands.
@@ -209,9 +217,12 @@ person** — presence and secrets stay shared.
 
   `pilot unwire` returns 0 (also when not wired), 2 or 3; never 4.
 - Without `pilot` on `PATH`, `USE PILOT` fails with a one-line message; no
-  other command is affected. A `pilot` too old for `--pilot` / `--check`
-  answers usage (1) to `--check`; cpb reports "pilot-profile too old for USE
-  PILOT".
+  other command is affected.
+- **Detection touches no playbook.** Before any `USE PILOT`, `DROP PILOT` or
+  `SHOW PILOTS`, cpb probes once per run with `pilot list --json`: exit 0
+  with JSON means multi-pilot support; exit 1 (an old `pilot`: "unknown
+  command") means cpb refuses with "pilot-profile too old for USE PILOT;
+  update it". `pilot --version` is for display only, never detection.
 - `SHOW PILOTS` parses `pilot list --json`
   (`[{"name", "path", "default"}]`), never the human form.
 - The pilot side (`~/.pilots/<name>/`, `<install>/.pilot`, `pilot list/new/
