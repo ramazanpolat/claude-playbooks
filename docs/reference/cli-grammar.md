@@ -670,7 +670,7 @@ and loads the plugins; cpb copies no file, runs nothing, and pins no version
 | `DROP MARKETPLACE m` | removes `extraKnownMarketplaces.m` |
 | `ADD PLUGIN p@m` | `enabledPlugins["p@m"] = true` |
 | `DROP PLUGIN p@m` | removes `enabledPlugins["p@m"]` |
-| `SET AGENT '<agent>'` | `agent = "<agent>"`: the main session runs as that agent |
+| `SET AGENT '<agent>'` | `agent = "<agent>"`, as typed: the main session runs as that agent |
 | `UNSET AGENT` | removes `agent` |
 
 **Sources**, in the forms Claude Code's own `settings.json` files use:
@@ -702,11 +702,25 @@ a plugin id is `<plugin>@<marketplace>`.
 - `enabledPlugins` entries set to `false` by hand are shown, not changed: the
   grammar adds and drops, it does not disable.
 
+**The agent** (verified 2026-09-26, nine `claude -p` runs). A plugin can
+name an agent in its own `settings.json`, and two plugins that both do are
+resolved by load order, the last one winning. The `agent` of the user
+scope overrides every plugin, and a playbook's `settings.json` *is* its user
+scope, so `SET AGENT` is the deterministic pin. It accepts an agent's bare
+name (`kommander`) or its namespaced id (`kommander:kommander`); both
+resolve, and cpb stores what was typed. A layer above does not need `SET
+AGENT`: its plugin's SessionStart context stacks on top of the agent's.
+The agent's prompt replaces Claude Code's default system prompt; that is
+the plugin's concern, not cpb's.
+
 **Visible where state is visible.** `SHOW PLAYBOOK --json` gains
 `"marketplaces": [{"name", "source"}]`, `"plugins": [{"id", "enabled"}]` and
 `"agent"` (null when unset); the human form gains `Marketplaces:`, `Plugins:`
 and `Agent:` lines. `EXPLAIN PLAYBOOK` names the agent and the enabled
-plugins a launch starts with. `SHOW CREATE` writes the clauses, so a
+plugins a launch starts with, and where the agent comes from where cpb can
+tell: `agent: kommander (playbook settings)` when the playbook sets it, or
+`(from plugin <p>)` when only an enabled plugin's own `settings.json` names
+one. `SHOW CREATE` writes the clauses, so a
 playbook's plugins and agent travel in its playbook file. `SELECT` sees the
 fields on `PLAYBOOKS` when it lands.
 
@@ -717,9 +731,7 @@ files above run with one `cpb APPLY kommander.cpb`.
 
 1. `ALTER DEFAULTS` forms of these clauses (every playbook), or playbook
    only. Proposed: playbook only in the first cut.
-2. The value `SET AGENT` takes for an agent a plugin ships (its bare name,
-   or a `plugin:agent` form): to verify.
-3. The local-directory source and the official marketplace's default
+2. The local-directory source and the official marketplace's default
    status: to verify.
 
 ## Completion
