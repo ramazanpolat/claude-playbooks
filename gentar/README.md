@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.4.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.6.0` |
 
 ## Quickstart (local)
 
@@ -258,6 +258,23 @@ Open the run in the Actions tab, download `arena-reports`, and open
 `dashboard.html`; it needs no server. This repo is public, so both are redacted
 before upload: bench-host values and declared credentials are masked, and an
 agent transcript appears only as its length.
+
+**Telemetry to ClickStack.** This repo sets the repository secrets
+`GENTAR_OTLP_EXPORT` (the collector's base URL on arf's internal network) and
+`GENTAR_OTLP_KEY` (its ingestion key), so every arena run also lands in the
+pilot's ClickStack as one trace: the scenario at the root, each step and the
+agent's session, turns and tool calls as child spans, and the run's CI
+identity on the resource. It is scrubbed exactly as the dashboard is, and a
+collector that is down never changes a verdict. Locally, lend the key for one
+run instead of writing it anywhere:
+
+```bash
+GENTAR_OTLP_EXPORT=<collector base URL> \
+  with-secret GENTAR_OTLP_KEY=keychain:pilot/clickstack-ingest -- gentar/run.sh cli-head-build
+```
+
+Both or neither: one without the other is refused (exit 2) before any bench
+exists.
 
 ## This subject's adaptations of the kit
 
