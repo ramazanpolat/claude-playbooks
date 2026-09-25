@@ -70,7 +70,7 @@ func TestSetFromChecksTheReference(t *testing.T) {
 	helper, log := fakeHelper(t)
 	root := seedFlatPlaybook(t, "router")
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
-	mustStmt(t, "CREATE ENV e SET TOKEN=literal")
+	mustStmt(t, "CREATE ENV e SET TOKEN=literal AS PLAINTEXT")
 
 	out := mustStmt(t, "ALTER ENV e SET TOKEN FROM keychain:ok/router")
 	p := readProfile(t, "e")
