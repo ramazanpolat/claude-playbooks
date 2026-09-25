@@ -679,9 +679,17 @@ and loads the plugins; cpb copies no file, runs nothing, and pins no version
 |---|---|
 | `'github:<owner>/<repo>'` | `{"source": "github", "repo": "<owner>/<repo>"}` |
 | `'https://…'`, `'git@…'` (a git URL) | `{"source": "git", "url": "…"}` |
-| an absolute local directory (**to verify**) | `{"source": "directory", "path": "…"}` |
+| `'/abs/path'` or `'~/path'`, a local directory | `{"source": "directory", "path": "/abs/path"}` |
 
-Anything else is refused. A marketplace name follows the env-set name rule;
+The shapes are Claude Code's (its marketplace reference, "Fields by type").
+A directory source is the marketplace root, the directory that holds
+`.claude-plugin/marketplace.json`: cpb requires an absolute path (or one
+under `~/`, which it expands) because the docs do not say how a relative one
+resolves, and refuses the statement when that file is missing, so a
+mistyped checkout path fails when written rather than at the next launch.
+This is how a plugin is used from a local checkout before it is published.
+The optional `ref`, `path` and `sparsePaths` fields of git sources are not
+in the first cut. Anything else is refused. A marketplace name follows the env-set name rule;
 a plugin id is `<plugin>@<marketplace>`.
 
 **Rules**
