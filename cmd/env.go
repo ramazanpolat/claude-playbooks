@@ -89,7 +89,8 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		defaultName, derr := envprofile.Default(profileDir)
+		defaults, derr := envprofile.Defaults(profileDir)
+		defaultNames := strings.Join(defaults, ", ")
 		if derr != nil {
 			// Shown, not returned: the pilot came here to see the launch's
 			// environment, and "refused" is the true answer.
@@ -109,14 +110,20 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		}
 		if block.Empty() {
 			fmt.Printf("Playbook %q declares no environment overrides.\n", name)
-			if defaultName != "" {
-				// The default still decides this playbook's launch: show
-				// what it contributes, or that it would refuse.
+			if len(defaults) > 0 {
+				// The defaults still decide this playbook's launch: show
+				// what they contribute, or that it would refuse.
 				effective, err := envprofile.ExpandWithDefault(profileDir, nil)
+				// One default keeps the wording this command has always
+				// printed; DEFAULTS became a list with the grammar.
+				subject := fmt.Sprintf("Registry default profile %q applies", defaults[0])
+				if len(defaults) > 1 {
+					subject = fmt.Sprintf("Registry default profiles %s apply", defaultNames)
+				}
 				if err != nil {
-					fmt.Printf("Registry default profile %q applies to it, and the launch is refused: %v\n", defaultName, err)
+					fmt.Printf("%s to it, and the launch is refused: %v\n", subject, err)
 				} else {
-					fmt.Printf("Registry default profile %q applies to it. Effective at launch:\n", defaultName)
+					fmt.Printf("%s to it. Effective at launch:\n", subject)
 					printEnvBlock("  ", effective, revealSecrets)
 				}
 			}
@@ -124,11 +131,11 @@ func runEnv(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		fmt.Printf("Environment overrides for %q:\n", name)
-		if defaultName != "" {
-			fmt.Printf("  default   %s\n", defaultName)
+		if len(defaults) > 0 {
+			fmt.Printf("  default   %s\n", defaultNames)
 		}
 		printEnvBlock("  ", block, revealSecrets)
-		if len(block.Profiles) > 0 || defaultName != "" {
+		if len(block.Profiles) > 0 || len(defaults) > 0 {
 			effective, err := envprofile.ExpandWithDefault(profileDir, block)
 			if err != nil {
 				fmt.Printf("Effective at launch: launch refused -- %v\n", err)

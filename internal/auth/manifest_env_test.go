@@ -488,7 +488,7 @@ func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
 	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{Name: "base", Set: map[string]string{"FROM_DEFAULT": "yes", "MODEL": "default"}, Unset: []string{OAuthTokenEnv}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := envprofile.SetDefault(envprofile.Dir(root), "base"); err != nil {
+	if err := envprofile.WriteDefaults(envprofile.Dir(root), []string{"base"}); err != nil {
 		t.Fatal(err)
 	}
 
