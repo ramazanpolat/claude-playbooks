@@ -25,12 +25,12 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 ```
 
 - Keywords are **case-insensitive**. Docs write them in capitals.
-- Clauses are **two words** (`SET VAR`, `USE PILOT`), never hyphenated.
+- Clauses are **two words** (`SET VAR`, `USE ENV`), never hyphenated.
 - Lists are **space-separated**. No commas; a trailing comma on a token is
   tolerated and ignored.
 - Names follow the rules each object already has: a playbook name is
-  letters, digits, `_` and `-`; an env set name also allows dots (`glm-5.3`);
-  pilot names are pilot-profile's. A **keyword is not a valid new name**
+  letters, digits, `_` and `-`; an env set name also allows dots
+  (`glm-5.3`). A **keyword is not a valid new name**
   (refused with an error naming the keyword); an existing object whose name
   is a keyword can still be addressed in the name slot.
 - **Global flags go before the verb** (`cpb --playbooks-dir X ALTER …`), and
@@ -43,14 +43,19 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 
 | Object | What it is | Lives at |
 |---|---|---|
-| `PLAYBOOK` | an installed playbook: dir, launcher, source, attached ENVs and PILOT, own variables | `<root>/<name>/` |
+| `PLAYBOOK` | an installed playbook: dir, launcher, source, attached ENVs, own variables | `<root>/<name>/` |
 | `ENV` | an **env set**: a named, reusable set of variables (formerly "env profile") | `<root>/.env-profiles/<name>.toml` |
-| `PILOT` | a pilot profile — one persona of the pilot — attachable to a playbook | `~/.pilots/<name>/` (pilot-profile) |
 | `DEFAULTS` | the machine-wide layer under every playbook: an ordered list of env sets; a singleton, no name | `<root>/.env-profiles/.default` |
 
 Two words keep the variables apart: **`ENV` is a named set**, **`VAR` is one
-variable**. "Profile" is deliberately not a keyword: it would be ambiguous
-between an `ENV` and a `PILOT`.
+variable**. "Profile" is deliberately not a keyword: it would be ambiguous with other
+tools' profiles.
+
+**cpb knows nothing about pilots** (decided with the pilot on 2026-09-26:
+components stay standalone and loosely coupled). A playbook takes the pilot
+profile through its own `CLAUDE.md` imports, and choosing a pilot for a
+playbook is pilot-profile's own command, run by the pilot. No statement
+here reads, writes or calls anything of pilot-profile's.
 
 ## Grammar
 
@@ -64,7 +69,7 @@ write      := CREATE [OR REPLACE] ENV [IF NOT EXISTS] <name> [env-clause ...]
                      [SUBDIR <dir>] [LINK <dir>] [ALIAS <launcher>] [NO ALIAS] [SANDBOX]
             | ALTER  PLAYBOOK <name> pb-clause ...
             | DROP   PLAYBOOK [IF EXISTS] <name>
-            | ALTER  DEFAULTS set-clause ...
+            | ALTER  DEFAULTS defaults-clause ...
 
 env-clause := SET [VAR] <key>=<value> ...  literal values
             | SET [VAR] <key> FROM '<ref>' secret by reference; resolved at launch
@@ -77,9 +82,11 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
                                            insert one (default LAST)
             | DROP ENV <env> ...           detach
 
+defaults-clause := set-clause
+            | SET SECRET HELPER '<command>' the secret helper (see Secrets)
+            | UNSET SECRET HELPER
+
 pb-clause  := set-clause
-            | USE PILOT <pilot>            attach a pilot (one per playbook)
-            | DROP PILOT
             | SET VAR <key>=<value> ...    the playbook's own layer
             | SET VAR <key> FROM '<ref>'
             | BLOCK VAR <key> ...
@@ -88,7 +95,7 @@ pb-clause  := set-clause
             | ALIAS <launcher>             set or replace the launcher (one per playbook)
             | NO ALIAS                     remove the launcher
 
-read       := SHOW PLAYBOOKS | SHOW ENVS | SHOW PILOTS | SHOW DEFAULTS
+read       := SHOW PLAYBOOKS | SHOW ENVS | SHOW DEFAULTS
             | SHOW PLAYBOOK <name> | SHOW ENV <name>
             | SHOW CREATE PLAYBOOK <name> | SHOW CREATE ENV <name> | SHOW CREATE ALL
             | EXPLAIN PLAYBOOK <name>
@@ -103,7 +110,7 @@ states the whole list, so it is the idempotent form; `ADD ENV` places one set
 without restating the rest.
 
 One rule keeps the verbs apart: **`DROP` acts on objects** (an ENV, a
-PILOT, a playbook) and **`UNSET` acts on variables**. So `DROP ENV
+playbook) and **`UNSET` acts on variables**. So `DROP ENV
 evren-router` inside `ALTER PLAYBOOK` detaches that set, and `UNSET VAR FOO`
 forgets the playbook's own `FOO`.
 
@@ -116,13 +123,8 @@ instead of an error; they sit before the name, as in ClickHouse.
 lists the users.
 
 Clauses in one command apply **atomically**: all or none, validated before
-anything is written. Validation includes `pilot wire --pilot <name> --check <install>` for
-`USE PILOT` and `with-secret --check` for every `SET … FROM`. `USE PILOT` /
-`DROP PILOT` are applied **last**, after cpb's own writes, because they write
-outside cpb's state. A statement holds at most one of them, so nothing runs
-after a pilot step: if it fails, cpb restores its own writes, and a failed
-`pilot wire` / `unwire` has written nothing (pilot-profile's contract). cpb
-never needs to re-wire a previous pilot.
+anything is written. Validation includes the secret helper's check for
+every `SET … FROM` (see Secrets).
 
 ## Where each clause writes
 
@@ -137,8 +139,8 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … SET VAR K FROM '<ref>'` | `.playbook` `[env.refs]` (new) |
 | `ALTER PLAYBOOK … BLOCK VAR K` | `.playbook` `[env] unset = [...]` |
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
-| `ALTER DEFAULTS …` | `<root>/.env-profiles/.default`, one set name per line, in order |
-| `USE PILOT` / `DROP PILOT` | nothing of cpb's: `pilot wire` / `pilot unwire` manage the install's pilot link and imports (see PILOT) |
+| `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-profiles/.default`, one set name per line, in order |
+| `ALTER DEFAULTS SET / UNSET SECRET HELPER` | `<root>/.env-profiles/.secret-helper`, one line: the command |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher, as `create`/`install`/`link`/`delete`/`rename`/`alias` do today |
 
 A key lives in exactly one of `set`, `refs`, `unset` within a layer; writing
@@ -158,32 +160,57 @@ its effective value, and the layer that decided it:
 
 ```
 ANTHROPIC_BASE_URL    http://tr0:20128/v1              <- ENV evren-router
-ANTHROPIC_AUTH_TOKEN  <from keychain:pilot/9router>    <- ENV evren-router
+ANTHROPIC_AUTH_TOKEN  <from keychain:9router>          <- ENV evren-router
 ANTHROPIC_MODEL       glm-5.3                          <- PLAYBOOK kommander-idea
 HTTP_PROXY            (blocked)                        <- PLAYBOOK kommander-idea
 FOO                   bar                              <- DEFAULTS (ENV claude-default)
-PILOT                 ramazan-metu                     <- PLAYBOOK kommander-idea
 ```
 
-## Secrets
+## Secrets (optional)
 
-`SET <key> FROM '<ref>'` stores the **reference** only. The accepted forms
-are pilot-profile's, cited rather than copied so they cannot drift (its
-`capture-protocol` *Secrets* section and `ADAPTERS.md`): `keychain:pilot/<name>`,
-`keychain:<service>`, `op://…`, `age:<file>#<key>`, `env:…`, `file:…`, and
-adapter schemes such as `vault:<path>#<field>`.
+Secret references are **optional**: cpb works fully without them, and
+nothing else in the grammar depends on them. They follow git's
+`credential.helper` pattern: cpb defines a small interface, and the pilot
+configures a program that implements it (for example a keychain helper).
+cpb never names or discovers one.
+
+**Configuring the helper** (decided 2026-09-26):
+
+- `ALTER DEFAULTS SET SECRET HELPER '<command>'` stores it and
+  `ALTER DEFAULTS UNSET SECRET HELPER` removes it. It appears in
+  `SHOW DEFAULTS` and in `SHOW CREATE ALL`.
+- `CPB_SECRET_HELPER=<command>` in the environment overrides the stored
+  setting for that process (devbox projects, tests). `EXPLAIN PLAYBOOK`
+  says which of the two is in effect.
+- The helper is **one command**: a name on `PATH` or an absolute path, with
+  no arguments. cpb execs it directly with an argument vector, never
+  through `sh -c`. A value with whitespace is refused.
+
+`SET <key> FROM '<ref>'` stores the **reference** only, as an opaque string.
+cpb checks one thing about its shape, a scheme followed by a colon
+(`keychain:…`, `op://…`, `vault:…`), so a value pasted where a reference
+belongs is refused, and never echoed. Everything else about a reference is
+the helper's business.
+
+**The helper interface** (cpb's own contract):
+
+- **Check**, at write time: `<helper> --check KEY=REF`. Exit 0 means the
+  reference resolves. Anything else fails the statement, showing the
+  helper's own message, which must never contain the value.
+- **Exec**, at launch: `<helper> K1=REF1 [K2=REF2 …] -- claude <args>`. The
+  helper resolves the references, sets them in the environment of that one
+  command, and execs it. cpb fetches no values; there is no value-returning
+  call, and none may be built. A non-zero exit before `claude` starts means
+  cpb did not launch, and the helper's message says why.
+
+**Without a configured helper**, cpb stays fully usable. `SET … FROM` is
+refused, and so is launching a playbook whose layers hold a reference, each
+with one line: "no secret helper configured (ALTER DEFAULTS SET SECRET HELPER
+…)". Literal values work as today.
 
 `FROM` also names a playbook's source in `CREATE PLAYBOOK`; the position
 disambiguates (decided 2026-09-25).
 
-- **At write time** cpb runs `with-secret --check KEY=REF`: presence only,
-  never the value. Anything but present fails the command, so a mistyped
-  reference is caught before launch.
-- **At launch** cpb does not fetch values. It **execs the launch through
-  `with-secret`**: `with-secret K1=REF1 [K2=REF2 …] -- claude …`. There is no
-  value-returning call and none may be built. On `with-secret` exit 3
-  (refused), 4 (missing) or 5 (adapter unavailable) cpb does not launch and
-  prints the reason, which never contains the value.
 - The value never appears in a file, in argv, or in any `SHOW`/`EXPLAIN`
   output.
 - A sandboxed launch of a playbook with references is refused in the first
@@ -193,84 +220,6 @@ A literal `SET` whose key looks like a credential (`*_TOKEN`, `*_KEY`,
 `*_SECRET`, `*PASSWORD*`) is accepted but warned about, pointing at `FROM`.
 All output redacts credential-looking literals, as `env` does today; there is
 no `--reveal` in the new grammar.
-
-## PILOT
-
-Decided with the pilot on 2026-09-25: the unit is a **PILOT**, pilot-profile
-keeps its name, and several pilots on one machine are **personas of one
-person** — presence and secrets stay shared.
-
-- `USE PILOT <name>` runs `pilot wire --pilot <name> <install>`;
-  `DROP PILOT` (no name: a playbook has at most one) runs
-  `pilot unwire <install>`, which also removes the canonical import lines
-  written by the pre-multi-pilot `pilot wire`. Exit codes decide; the
-  `ERROR: <reason>` line `pilot` prints on failure is shown verbatim as
-  detail, never parsed.
-- **How pilot-profile records the choice (its design, not cpb's):** each
-  wired install holds a symlink to `~/.pilot-profile` (the default) or
-  `~/.pilots/<name>`, and its imports read through that link, so switching
-  pilots is an atomic repoint. The link is the marker; there is no marker
-  file. cpb neither reads nor writes it. cpb's own handling is safe with it:
-  `DROP PLAYBOOK` removes the link without following it, `RENAME TO` moves it
-  with the directory, and `update` touches it only if a source ships an entry
-  of the same name. The link is `<install>/.pilot` and the imports read
-  `@.pilot/PROFILE.md` and the other three; they live in the playbook's own
-  `CLAUDE.md` (user-level memory), since Claude Code's external-import gate
-  blocks a project `CLAUDE.md` from importing outside the project. A
-  dangling or missing link is skipped silently. (Confirmed by pilot-profile,
-  2026-09-26, with a throwaway `CLAUDE_CONFIG_DIR` and `claude -p`.)
-- **Flags always come before the install path**, in every `pilot` call
-  (`pilot wire --pilot <name> --check <install>`). An old `pilot` parses
-  flags only before the target: with the flags after it, it wires the
-  install to the default profile (a write) and then fails on the flags as
-  extra targets with exit 2. With the flags first, an old `pilot` stops at
-  the first unknown flag, exit 1, nothing written. (Found by pilot-profile,
-  2026-09-26; the new `pilot` accepts flags anywhere, cpb still puts them
-  first.)
-- `DROP PILOT` only **detaches**. cpb never creates or deletes a pilot: a
-  pilot is the pilot's memory, managed with `pilot new` and `pilot`'s own
-  commands.
-- `default` is a reserved pilot name that always means `~/.pilot-profile`,
-  so `USE PILOT default` works on every machine, single-pilot ones included.
-  cpb does not copy pilot-profile's name rule; exit 1 decides.
-- Exit codes, per pilot-profile's wire contract v2 (settled 2026-09-26
-  between claude-playbooks and pilot-profile):
-
-  | `pilot wire --pilot` | cpb says |
-  |---|---|
-  | 0 ok (also an idempotent re-wire, or a switch to another pilot) | done |
-  | 1 usage, including a malformed pilot name | the pilot name is invalid |
-  | 2 bad target | internal error: cpb passed a bad install path |
-  | 3 write failed | could not write the playbook's files |
-  | 4 no such pilot | no pilot `<name>`; create it with `pilot new <name>` |
-  | 5 this playbook cannot be wired as asked; nothing written | playbook `<p>` cannot take a pilot: *(the ERROR line)* |
-
-  Exit 5's reasons, named on the ERROR line: no `CLAUDE.md`; a tracked
-  `CLAUDE.md` that imports `~/.pilot-profile` directly; a non-canonical pilot
-  import at `file:line`.
-
-  `pilot unwire` returns 0 (also when not wired), 2, 3 or 5 (another pilot
-  import remains, so it refuses rather than claim success).
-- **Reading a playbook's pilot never touches pilot-profile's files.**
-  `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK` and `SHOW CREATE` ask
-  `pilot which --json <install>` → `{"pilot": "<name>" | "default" | null}`
-  (null: not wired; an install wired before multi-pilot reports `default`),
-  read-only, no lock, exit 0, 2 or 5. cpb never reads the pilot link or
-  `CLAUDE.local.md` itself.
-- Without `pilot` on `PATH`, `USE PILOT` fails with a one-line message; no
-  other command is affected.
-- **Detection touches no playbook.** Before any `USE PILOT`, `DROP PILOT` or
-  `SHOW PILOTS`, cpb probes once per run with `pilot list --json`: exit 0
-  with JSON means multi-pilot support; exit 1 (an old `pilot`: "unknown
-  command") means cpb refuses with "pilot-profile too old for USE PILOT;
-  update it". `pilot --version` is for display only, never detection.
-- `SHOW PILOTS` parses `pilot list --json`
-  (`[{"name", "path", "default"}]`, the `default` pilot always first), never
-  the human form.
-- The pilot side (`~/.pilots/<name>/`, `pilot list/new/
-  default/which`, `wire --check`, the per-install link) is owned and specified by pilot-profile,
-  not here. The launcher exports `CLAUDE_CONFIG_DIR`, which is what lets
-  `pilot` inside a session resolve that playbook's pilot.
 
 ## setup.cpb: SHOW CREATE and APPLY
 
@@ -287,7 +236,7 @@ devbox project, and moving a setup to another machine is one command.
 CREATE OR REPLACE ENV evren-router
   DESCRIBE 'GLM via 9router on tr0'
   SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 ANTHROPIC_MODEL=glm-5.3
-  SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/9router-client';
+  SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:9router-client';
 
 CREATE OR REPLACE ENV claude-default
   BLOCK HTTP_PROXY;
@@ -299,7 +248,6 @@ CREATE PLAYBOOK IF NOT EXISTS kommander-idea
 
 ALTER PLAYBOOK kommander-idea
   USE ENV evren-router
-  USE PILOT ramazan-metu
   SET VAR MAX_THINKING_TOKENS=8000
   BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN;
 ```
@@ -326,7 +274,7 @@ File rules:
 `cpb APPLY <file>`:
 
 1. Parses the whole file and validates every statement — syntax, names,
-   `with-secret --check`, `pilot wire --check`, sources reachable — and
+   the secret helper's check, sources reachable — and
    writes nothing if any fails.
 2. Executes the statements in order, each one atomic, reporting each as
    `created`, `changed` or `unchanged`.
@@ -343,14 +291,15 @@ Decided with the pilot on 2026-09-25.
 
 ```
 cpb CREATE ENV evren-router SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 ANTHROPIC_MODEL=glm-5.3
-cpb ALTER ENV evren-router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/9router-client'
+cpb ALTER ENV evren-router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:9router-client'
 cpb ALTER ENV evren-router UNSET ANTHROPIC_MODEL
 cpb ALTER PLAYBOOK kommander-idea USE ENV glm-5.3 deepseek-flash
 cpb ALTER PLAYBOOK kommander-idea ADD ENV claude-metu FIRST
 cpb ALTER PLAYBOOK kommander-idea ADD ENV evren-router AFTER glm-5.3
 cpb ALTER PLAYBOOK kommander-idea DROP ENV deepseek-flash
-cpb ALTER PLAYBOOK kommander-idea USE PILOT ramazan-metu BLOCK VAR HTTP_PROXY
+cpb ALTER PLAYBOOK kommander-idea BLOCK VAR HTTP_PROXY
 cpb ALTER DEFAULTS USE ENV claude-default metu-proxy
+cpb ALTER DEFAULTS SET SECRET HELPER 'my-keychain-helper'
 cpb CREATE PLAYBOOK kommander-x FROM https://github.com/ramazanpolat/kommander-playbook ALIAS kx
 cpb ALTER PLAYBOOK kommander-x ALIAS kxx
 cpb ALTER PLAYBOOK kommander-x RENAME TO kommander-lab
