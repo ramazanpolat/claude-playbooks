@@ -372,7 +372,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.5.0}
+REF=${GENTAR_REF:-v0.6.1}
 
 # --review: has this repo outgrown its suites?
 #
@@ -601,6 +601,17 @@ mkdir "subjects/$SUBJECT"
 # until the trap's `down -v`.
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
+# Telemetry destination (optional; AGENTS.md decision 6): the arena's
+# collector forwards what the coordinator scrubbed to GENTAR_OTLP_EXPORT
+# with GENTAR_OTLP_KEY. Both or neither — half a destination is a refusal, not a
+# run whose telemetry silently goes nowhere.
+if [ -n "${GENTAR_OTLP_EXPORT:-}" ] || [ -n "${GENTAR_OTLP_KEY:-}" ]; then
+  if [ -z "${GENTAR_OTLP_EXPORT:-}" ] || [ -z "${GENTAR_OTLP_KEY:-}" ]; then
+    echo "telemetry destination needs BOTH GENTAR_OTLP_EXPORT and GENTAR_OTLP_KEY (one is unset)" >&2
+    exit 2
+  fi
+  [ -f "$ARENA/compose.export.yml" ] && ARENA_FILES+=(-f compose.export.yml)
+fi
 # History store on this host's docker network (optional; see the engine's
 # history/). The redaction list below covers its password too.
 [ -n "${GENTAR_HISTORY_NETWORK:-}" ] && [ -f "$ARENA/compose.history.yml" ] \
@@ -826,7 +837,7 @@ done
 # file is passed through the engine's bin/redact, which replaces the VALUES
 # of these variables: the bench-host identity, plus every credential a
 # suite here declares.
-REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY GENTAR_HISTORY_PASSWORD"
+REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY GENTAR_HISTORY_PASSWORD GENTAR_OTLP_KEY GENTAR_OTLP_EXPORT"
 for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
   REDACT_NAMES="$REDACT_NAMES $(credential_groups "$f" | tr '\n' ' ')"
 done

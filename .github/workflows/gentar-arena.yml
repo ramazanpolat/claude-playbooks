@@ -168,6 +168,11 @@ jobs:
       GENTAR_HISTORY_URL: ${{ vars.GENTAR_HISTORY_URL }}
       GENTAR_HISTORY_NETWORK: ${{ vars.GENTAR_HISTORY_NETWORK }}
       GENTAR_HISTORY_PASSWORD: ${{ secrets.GENTAR_HISTORY_WRITER_PASSWORD }}
+      # Telemetry destination (optional): the collector every run ALSO
+      # forwards its whole trace to — ClickStack, say. Both or neither.
+      # SECRETS, not variables: an internal address and an ingestion key.
+      GENTAR_OTLP_EXPORT: ${{ secrets.GENTAR_OTLP_EXPORT }}
+      GENTAR_OTLP_KEY: ${{ secrets.GENTAR_OTLP_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
