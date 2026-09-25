@@ -1,7 +1,7 @@
 # CLI grammar — spec (draft)
 
-Status: **draft for the pilot's review.** Nothing here is implemented yet.
-Decided with the pilot on 2026-09-25; no open points remain.
+Status: **agreed 2026-09-26; implementation in progress (phase 1, the
+parser).** Decided with the pilot on 2026-09-25/26; no open points remain.
 
 ## Why
 
@@ -28,8 +28,16 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 - Clauses are **two words** (`SET VAR`, `USE PILOT`), never hyphenated.
 - Lists are **space-separated**. No commas; a trailing comma on a token is
   tolerated and ignored.
-- Names are lowercase-with-dashes. A **keyword is not a valid name**
-  (refused with an error naming the keyword).
+- Names follow the rules each object already has: a playbook name is
+  letters, digits, `_` and `-`; an env set name also allows dots (`glm-5.3`);
+  pilot names are pilot-profile's. A **keyword is not a valid new name**
+  (refused with an error naming the keyword); an existing object whose name
+  is a keyword can still be addressed in the name slot.
+- **Global flags go before the verb** (`cpb --playbooks-dir X ALTER …`), and
+  `CLAUDE_PLAYBOOKS_DIR` works as today. cpb recognises a statement before
+  its flag parser runs, so every word after the verb belongs to the
+  statement: `SET VAR OPTS=-v` is a value, and `--dry-run` /
+  `--skip-secrets` are the statement's own.
 
 ## Objects
 
