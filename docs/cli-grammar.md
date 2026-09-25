@@ -1,8 +1,8 @@
 # CLI grammar — spec (draft)
 
 Status: **agreed 2026-09-26; implementation in progress (phase 1, the
-parser). Ships as v4.0.0.** Decided with the pilot on 2026-09-25/26; one
-open point, listed at the end.
+parser). Ships as v3.20.0.** Decided with the pilot on 2026-09-25/26; no
+open points remain.
 
 ## Why
 
@@ -76,7 +76,8 @@ origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a sour
             | LINK <dir>                                    develop in place
 launcher   := ALIAS <launcher> | NO ALIAS                   default: the name
 
-env-clause := SET [VAR] <key>=<value> ...  literal values
+env-clause := SET [VAR] <key>=<value> ... [AS PLAINTEXT]
+                                           literal values; AS PLAINTEXT: see Secrets
             | SET [VAR] <key> FROM '<ref>' secret by reference; resolved at launch
             | BLOCK [VAR] <key> ...        removed at launch even if the shell exports it
             | UNSET [VAR] <key> ...        forgotten; the layer below applies again
@@ -92,7 +93,8 @@ defaults-clause := set-clause
             | UNSET SECRET HELPER
 
 pb-clause  := set-clause
-            | SET VAR <key>=<value> ...    the playbook's own layer
+            | SET VAR <key>=<value> ... [AS PLAINTEXT]
+                                           the playbook's own layer
             | SET VAR <key> FROM '<ref>'
             | BLOCK VAR <key> ...
             | UNSET VAR <key> ...          forget the playbook's own entry (set, ref or block)
@@ -100,10 +102,9 @@ pb-clause  := set-clause
             | ALIAS <launcher>             set or replace the launcher (one per playbook)
             | NO ALIAS                     remove the launcher
 
-read       := SHOW PLAYBOOKS | SHOW ENVS | SHOW DEFAULTS
-            | SHOW PLAYBOOK <name> | SHOW ENV <name>
+read       := SHOW { PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> } [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
-            | EXPLAIN PLAYBOOK <name>
+            | EXPLAIN PLAYBOOK <name> [--json]
 ```
 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
@@ -175,6 +176,7 @@ ANTHROPIC_BASE_URL    http://tr0:20128/v1              <- ENV evren-router
 ANTHROPIC_AUTH_TOKEN  <from keychain:9router>          <- ENV evren-router
 ANTHROPIC_MODEL       glm-5.3                          <- PLAYBOOK kommander-idea
 HTTP_PROXY            (blocked)                        <- PLAYBOOK kommander-idea
+OPENAI_API_KEY        sk-a...9f2c (51 chars, plaintext) <- PLAYBOOK kommander-idea
 FOO                   bar                              <- DEFAULTS (ENV claude-default)
 ```
 
@@ -234,9 +236,12 @@ uses to redact: `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `*_KEY`, …) is
 refused, naming the key and never the value, and pointing at
 `SET K FROM '<ref>'`. A value that cannot be a secret is let through: empty,
 an integer, or `true`/`false`, so `SET VAR MAX_THINKING_TOKENS=8000` works.
-Existing files that already hold such literals keep working: launch reads
-them as before, and output redacts them. Whether the grammar offers an
-explicit way to store a new one is the open point below.
+**`AS PLAINTEXT` stores one knowingly** (ruled 2026-09-26), for a pilot
+without a secret helper: `SET VAR ANTHROPIC_AUTH_TOKEN=… AS PLAINTEXT`. It
+applies to every literal in its `SET` clause and never to a reference. It
+keeps cpb usable standalone, and it is loud where it matters: `EXPLAIN` marks
+such an entry `(plaintext)`, and `SHOW CREATE` never carries the value (see
+setup files). Files that already hold such literals keep working unchanged.
 
 All output redacts credential-looking literals, as `env` does today; there is
 no `--reveal` in the new grammar.
@@ -280,9 +285,11 @@ File rules:
   word such as `--dry-run` stays a word.
   On the command line no `;` is needed.
 - **No secret values.** Secrets appear only as `FROM '<ref>'`. `SHOW CREATE`
-  never prints a credential-looking literal: it writes a comment telling the
-  pilot to convert it to `SET VAR K FROM '<ref>'` and exits non-zero, unless
-  `--skip-secrets` is given.
+  never prints a credential-looking literal: it writes it as a commented-out
+  line with the value masked, `-- SET VAR K=<masked> AS PLAINTEXT`, followed
+  by the statement that fixes it (`ALTER … SET K FROM '<ref>'`), and exits
+  non-zero, unless `--skip-secrets` is given. Plain text never travels in a
+  setup file.
 - **Idempotent.** `SHOW CREATE` emits only idempotent forms (`CREATE OR
   REPLACE ENV`, `CREATE PLAYBOOK IF NOT EXISTS …`, `USE ENV` with the full
   list), so applying a file twice changes nothing the second time.
@@ -330,34 +337,40 @@ cpb SHOW CREATE ALL > setup.cpb
 cpb APPLY setup.cpb --dry-run
 ```
 
-## Pre-grammar commands: removed in v4.0.0
+## Pre-grammar commands: a hidden fallback
 
-Decided with the pilot on 2026-09-26, replacing the earlier "keep them
-indefinitely": the state-changing commands are **removed**, with no hidden
-aliases and no translation layer. The grammar is the one way to change state.
+Decided with the pilot on 2026-09-26: the grammar release is **v3.20.0**
+and breaks nothing. The pre-grammar state-changing commands stay working as a
+fallback, in case the new code is buggy, and are removed in a later release
+the pilot names (that one is v4.0.0).
 
-- **Removed:** `env`, `env-profile`, `create <name>`, `link`, `delete`,
-  `rename`, `alias`, `dealias`, `list`, `info`. Each removed word answers
-  with one line naming the statement to use, and exits non-zero:
-  `cpb env-profile …` → "`env-profile` was removed in v4.0.0; use: cpb ALTER
-  ENV … (see cpb help grammar)". A word that points the way is worth more
-  than one that means nothing.
-- **Kept, unchanged:** the action commands `run`, `start`, `update`, `auth`,
-  `completion`, `self-uninstall`, and `install <source>`, the one shortcut:
-  clone, install and create the launcher in one step, taking the name and
-  launcher from the source's manifest (sugar for `CREATE PLAYBOOK <name> FROM
-  <source> ALIAS <launcher>`). They act rather than manage state. `SHOW
-  CREATE` always writes the long form.
-- **`create` is only the grammar verb.** `cpb create x` is a statement that
-  fails to parse ("CREATE needs an object"), with the expected words listed.
-- **Semver:** this breaks every script and document using the removed forms,
-  so the release is **v4.0.0**.
-- **Tests:** each removed command's tests become tests of the equivalent
-  statements (same behaviour, new syntax), plus the removed-word errors.
+- **Hidden:** `env`, `env-profile`, `create <name>`, `link`, `delete`,
+  `rename`, `alias`, `dealias`, `list`, `info` are hidden from help and
+  completion and keep working with all their flags. Nothing is printed on
+  stdout; when stderr is a terminal, one line goes there:
+  `(hidden command; the grammar form is: cpb …)`, with the exact statement
+  for the given arguments where it can be derived. Scripts see no change.
+- **Their own code paths.** They are **not** re-implemented on the new
+  engine: a bug there must not take the fallback down with it. The two paths
+  share the same files, so the old code must tolerate the grammar's two
+  format additions: rewriting a manifest preserves `[env.refs]`, and reading
+  `.env-profiles/.default` accepts a multi-line list (`env-profile P default`
+  still replaces it with `P`). Tests pin both on the old paths.
+- **Visible and unchanged:** the action commands `run`, `start`, `update`,
+  `auth`, `completion`, `self-uninstall`, and `install <source>`, the one
+  shortcut: clone, install and create the launcher in one step, taking the
+  name and launcher from the source's manifest (sugar for `CREATE PLAYBOOK
+  <name> FROM <source> ALIAS <launcher>`). `SHOW CREATE` always writes the
+  long form.
+- **`create` routing:** if the word after `create` is an object keyword
+  (`PLAYBOOK`, `ENV`, or `OR`), the grammar applies; otherwise the hidden
+  `create`. That is one more reason keywords are not valid names.
+- `AS PLAINTEXT` stays regardless: the hidden commands are a fallback, not
+  the plain-text route.
 
-**Migration** (the table the removed-word errors and the docs draw on):
+**Migration** (the table the stderr hints and the docs draw on):
 
-| Removed | Use instead |
+| Hidden | Grammar |
 |---|---|
 | `create <n> [--alias a \| --no-alias] [--sandbox]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX]` |
 | `link <target> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK n LINK <target> [ALIAS a \| NO ALIAS]` (`n` defaults to the target's basename) |
@@ -381,8 +394,8 @@ aliases and no translation layer. The grammar is the one way to change state.
 
 ## Compatibility
 
-- Scripts using the removed commands break (v4.0.0); each removed word
-  names its replacement. `SHOW` output is new.
+- Nothing breaks in v3.20.0: the pre-grammar commands keep working, hidden.
+  Scripts should move to `SHOW … --json` (below) before the removal release.
 - The manifest (`.playbook` `[env]`) and `.env-profiles/*.toml` formats gain
   one table, `refs`; everything else is unchanged.
 - `.env-profiles/.default` changes from one name to one name per line. A
@@ -391,17 +404,97 @@ aliases and no translation layer. The grammar is the one way to change state.
   guess, so downgrading after `ALTER DEFAULTS` with two sets needs a
   one-line edit.
 
+## Output
+
+Every `SHOW` and `EXPLAIN` has two forms. The **human form** is for reading;
+its layout may change between releases. The **`--json` form** is the
+contract for scripts: fields may be added, and an existing field never
+changes meaning within a major version. Nothing should grep the human form.
+
+A variable, wherever it appears, is one JSON object with exactly one of:
+
+```
+{"key": "MODEL",   "value": "glm-5.3"}                       literal
+{"key": "TOKEN",   "ref": "keychain:9router"}                secret by reference
+{"key": "API_KEY", "redacted": true, "plaintext": true}      credential-looking literal: value never shown
+{"key": "HTTP_PROXY", "blocked": true}                       BLOCK
+```
+
+**`SHOW PLAYBOOK <name>`**, human form (one `Label:` per line; labels
+aligned; `Version:` keeps today's `info` spelling):
+
+```
+Name:       kommander-idea
+Version:    3.12.2
+Path:       /Users/polat/.claude-playbooks/kommander-idea
+Source:     https://github.com/ramazanpolat/kommander-playbook (branch v3.12.2)
+Launcher:   ki
+Env sets:   evren-router, glm-5.3
+Variables:  MAX_THINKING_TOKENS=8000
+            ANTHROPIC_AUTH_TOKEN <from keychain:9router>
+            HTTP_PROXY (blocked)
+Sandbox:    no
+```
+
+`Source:` reads `(linked) <dir>` for a linked playbook and `(none)` for one
+created empty; `Launcher:` reads `(none)` without one.
+
+`--json`, one object:
+
+```
+{"name": "kommander-idea", "version": "3.12.2",
+ "path": "/Users/polat/.claude-playbooks/kommander-idea",
+ "source": {"url": "https://github.com/ramazanpolat/kommander-playbook", "branch": "v3.12.2", "subdir": null},
+ "linked": null,
+ "launcher": "ki",
+ "envs": ["evren-router", "glm-5.3"],
+ "vars": [<variable>, ...],
+ "sandbox": false}
+```
+
+`source` is null for a playbook without one; `linked` is the target directory
+of a linked playbook, else null; `launcher` is null without one.
+
+**`SHOW PLAYBOOKS`**: human form, one header line and then one line per
+playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
+(`-` for none). `--json`: an array of the `SHOW PLAYBOOK` objects.
+
+**`SHOW ENV <name>`**: human form, `Name:`, `Description:`, `Used by:`,
+`Default:` (yes/no), then `Variables:` as above. `--json`:
+
+```
+{"name": "evren-router", "description": "GLM via 9router on tr0",
+ "vars": [<variable>, ...], "used_by": ["kommander-idea"], "default": false}
+```
+
+**`SHOW ENVS`**: human form, one line per set, columns
+`NAME SET BLOCKED USED BY DESCRIPTION`, a `*` after the name of each set in
+`DEFAULTS`. `--json`: an array of the `SHOW ENV` objects.
+
+**`SHOW DEFAULTS`**: human form, `Env sets:` in order, and
+`Secret helper:` with the command and where it came from (`setting` or
+`CPB_SECRET_HELPER`), or `(none)`. `--json`:
+
+```
+{"envs": ["claude-default", "metu-proxy"],
+ "secret_helper": {"command": "my-keychain-helper", "from": "setting"}}
+```
+
+(`secret_helper` is null when none is configured.)
+
+**`EXPLAIN PLAYBOOK <name>`**: human form as in *Layers at launch*.
+`--json`:
+
+```
+{"playbook": "kommander-idea",
+ "vars": [{<variable>, "layer": {"kind": "ENV", "name": "evren-router"}}, ...],
+ "secret_helper": {"command": "...", "from": "setting"} | null}
+```
+
+`layer.kind` is `DEFAULTS` (with `name` the env set), `ENV` or `PLAYBOOK`.
+
 ## Completion
 
 Every slot has a closed set, so TAB completes verbs, then objects, then
 existing names of that object, then the clause keywords valid for it, then
 keys (from the object's current entries).
-
-## Open point
-
-1. **A plain-text escape for credentials.** With the short forms gone, a
-   pilot without a secret helper has no way to store a credential-looking
-   literal (for example an `ANTHROPIC_AUTH_TOKEN` for a router). Options: an
-   explicit clause that says what it does (`SET VAR K=V AS PLAINTEXT`), or no
-   escape (a helper becomes required for credentials). Raised with the root
-   agent 2026-09-26.
