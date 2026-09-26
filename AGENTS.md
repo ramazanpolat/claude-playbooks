@@ -157,7 +157,8 @@ release:
 - [ ] **examples/** covers every new clause, from the smallest use to the
       full-blown one, each directory with its own README.md, and all of them
       pass in CI (`examples/check.sh`; `examples/coverage.sh` fails when a
-      grammar clause has no reference entry or no example).
+      grammar clause has no reference entry, or appears in no `.cpb` file
+      or `.check` command that CI runs: README prose does not count).
 - [ ] **AGENTS.md** (this file) is current: install, verify, update, deploy.
 
 If any is missing, build it first; never tag without it.

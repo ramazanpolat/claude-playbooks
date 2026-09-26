@@ -1,0 +1,3 @@
+# No helper: the reference stays, and nothing can resolve it.
+cpb ALTER DEFAULTS UNSET SECRET HELPER
+cpb SHOW DEFAULTS --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["secret_helper"] is None, d'

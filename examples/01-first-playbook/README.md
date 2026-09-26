@@ -13,6 +13,8 @@ changes nothing: `CREATE PLAYBOOK IF NOT EXISTS` never re-creates.
 The same statement works on the command line: `cpb CREATE PLAYBOOK scratch`.
 
 Later, on the command line: `cpb ALTER PLAYBOOK scratch RENAME TO sandbox-lab`
-renames it and its command, and `cpb CREATE PLAYBOOK boxed SANDBOX` makes one
+renames it and its command, `cpb CREATE PLAYBOOK boxed SANDBOX` makes one
 that always runs inside a Docker Sandbox
-([Sandboxed sessions](../../docs/guides/sandbox.md)).
+([Sandboxed sessions](../../docs/guides/sandbox.md)), and
+`cpb CREATE PLAYBOOK dev LINK <dir>` registers a directory you develop in
+place (it needs a `.playbook` there). `.check` runs all three.
