@@ -492,15 +492,14 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
 	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
-	// Plugin and MCP commands run as one list, in the order their clauses
-	// are written.
+	// Plugin and MCP commands and skill operations run as one list, in the
+	// order their clauses are written.
 	steps = append([]pluginStep(nil), steps...)
 	if mcp != nil {
 		steps = append(steps, mcp.steps...)
 	}
-	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
-	// Skills: file operations under skills/, recorded in the manifest once
-	// they are done.
+	// Skills: file operations under skills/, each recorded in the manifest
+	// as soon as it is done.
 	var skills *skillPlan
 	beforeSkills := cloneSkills(r.skillRecords(st.Name, m))
 	afterSkills := beforeSkills
@@ -526,6 +525,10 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	skillChange := skills != nil && (len(skills.ops) > 0 || !reflect.DeepEqual(beforeSkills, afterSkills))
+	if skills != nil {
+		steps = append(steps, skills.steps()...)
+	}
+	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
 	finishMCP := func() {
 		mcp.applyToManifest(m, true)
 		if m.Env.Empty() {
@@ -555,9 +558,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			cmds = append(cmds, s.command())
 		}
 		if skills != nil {
-			for _, op := range skills.ops {
-				cmds = append(cmds, op.what)
-			}
 			r.recordSkills(st.Name, afterSkills, skills)
 		}
 		if len(cmds) > 0 {
@@ -570,6 +570,20 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}
 	}
+	if skills != nil {
+		// Each operation is recorded as soon as it is done, so a failure
+		// leaves every finished skill recorded (a later DROP SKILL still
+		// owns it) and running the statement again finishes the rest.
+		cur := cloneSkills(beforeSkills)
+		if cur == nil {
+			cur = map[string]*manifest.SkillRecord{}
+		}
+		write := func() error { return manifest.Write(pb.RootPath, m) }
+		for i := range skills.ops {
+			op := &skills.ops[i]
+			op.record = func() error { return recordSkillOp(op, cur, m, write) }
+		}
+	}
 	ran, err := runPluginSteps(pb.Path, steps)
 	lines = append(append(lines, pluginLines...), ran...)
 	if err == nil && mcpRemovals {
@@ -580,31 +594,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	if err == nil && skills != nil {
-		// Each operation is recorded as soon as it is done, so a failure
-		// leaves every finished skill recorded (a later DROP SKILL still
-		// owns it) and running the statement again finishes the rest.
-		cur := cloneSkills(beforeSkills)
-		for _, op := range skills.ops {
-			if err = op.do(); err != nil {
-				break
-			}
-			lines = append(lines, op.line)
-			if op.rec == nil {
-				delete(cur, op.name)
-			} else {
-				if cur == nil {
-					cur = map[string]*manifest.SkillRecord{}
-				}
-				c := *op.rec
-				cur[op.name] = &c
-			}
-			m.Skills = cloneSkills(cur)
-			if werr := manifest.Write(pb.RootPath, m); werr != nil {
-				err = fmt.Errorf("cannot record skill %s: %w", op.name, werr)
-				break
-			}
-		}
-		if err == nil && !reflect.DeepEqual(cloneSkills(m.Skills), afterSkills) {
+		if !reflect.DeepEqual(cloneSkills(m.Skills), afterSkills) {
 			// Records that change without a file operation (a DROP of a
 			// skill already gone).
 			m.Skills = afterSkills

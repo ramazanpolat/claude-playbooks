@@ -1199,7 +1199,10 @@ The source is recorded in the manifest, `[skills.<name>]` (`source`, `branch`,
   `skills/<name>` it did not put there.
 - Each skill is recorded as soon as it is in place, so a statement that
   stops at a failed skill leaves the finished ones recorded, and running it
-  again finishes the rest.
+  again finishes the rest. A skill whose record cannot be written is taken
+  away again, so the disk never holds a skill cpb has no record of.
+- Skill clauses run in clause order with the plugin and MCP commands: a
+  failed `ADD SKILL` stops the statement before a later clause's command.
 - A skill name in the manifest is held to the grammar's rule when the
   manifest is read: a record cannot name a path outside `skills/`.
 - `cpb update <playbook>` overlays the entries the playbook's source ships,

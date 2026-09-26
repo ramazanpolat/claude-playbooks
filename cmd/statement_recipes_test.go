@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 func TestApplyRecipes(t *testing.T) {
@@ -49,5 +53,26 @@ func TestApplyRecipes(t *testing.T) {
 	}
 	if readEnv(t, filepath.Join(root, "b")).Set["T"] != "2" || readEnv(t, filepath.Join(root, "a")).Set["T"] != "" {
 		t.Fatal("TO did not win over USE PLAYBOOK")
+	}
+}
+
+// A registry that cannot be read stops the apply before anything is
+// written, rather than skipping the missing target's CREATE.
+func TestApplyTargetDiscoveryError(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.MkdirAll(filepath.Join(root, "broken"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "broken", manifest.FileName), []byte("version = [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recipe := writeCpb(t, dir, "recipe.cpb", "CREATE OR REPLACE ENV e SET S=1;\nALTER PLAYBOOK SET VAR A=1;\n")
+	if _, err := apply(t, recipe, "TO", "fresh"); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		t.Fatalf("discovery error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(envprofile.Dir(root), "e.toml")); !os.IsNotExist(err) {
+		t.Fatal("a statement ran before the registry error")
 	}
 }

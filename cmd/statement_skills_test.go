@@ -205,3 +205,55 @@ func TestUpdateRecordedSkillWinsOverShipped(t *testing.T) {
 		t.Fatalf("the recorded skill did not win: %q %v", got, err)
 	}
 }
+
+// Skill operations run in clause order with the MCP and plugin commands: a
+// failed skill stops the statement before a later clause's command runs.
+func TestSkillRunsInClauseOrder(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	calls := fakeMCP(t)
+	seedFlatPlaybook(t, "k")
+	missing := "file://" + filepath.Join(t.TempDir(), "no-such-repo")
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD SKILL b FROM "+missing+" ADD MCP SERVER s COMMAND x"); err == nil {
+		t.Fatal("the failing clone was not reported")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a later clause ran after the failed skill: %v", *calls)
+	}
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k ADD SKILL b FROM '"+missing+"' ADD MCP SERVER s COMMAND x;\n")
+	out, err := apply(t, path, "--dry-run")
+	if i, j := strings.Index(out, "copy skills/b"), strings.Index(out, "claude mcp add-json"); err != nil || i < 0 || j < i {
+		t.Fatalf("dry run order: %v\n%s", err, out)
+	}
+}
+
+// A skill whose record cannot be written is taken away again, so running
+// the statement again adds it rather than refusing an unrecorded skill.
+func TestSkillRecordFailureTakesItAway(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only directory")
+	}
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "k")
+	src, _ := filepath.EvalSymlinks(makeSkill(t, filepath.Join(t.TempDir(), "notes")))
+	if err := os.MkdirAll(filepath.Join(root, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	add := "ALTER PLAYBOOK k ADD SKILL notes FROM " + src
+	_, err := stmt(t, add)
+	_ = os.Chmod(root, 0o755)
+	if err == nil || !strings.Contains(err.Error(), "taken away again") {
+		t.Fatalf("record failure: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "skills", "notes")); !os.IsNotExist(err) {
+		t.Fatal("an unrecorded skill was left in place")
+	}
+	mustStmt(t, add)
+	if m, _ := manifest.Read(root); m == nil || m.Skills["notes"] == nil {
+		t.Fatal("the retry did not record the skill")
+	}
+}

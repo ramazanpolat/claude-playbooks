@@ -37,7 +37,10 @@ func runApply(st *grammar.Stmt) error {
 	for _, w := range l.warnings {
 		fmt.Fprintln(os.Stderr, "Warning: "+w)
 	}
-	stmts := l.withTargetsCreated()
+	stmts, err := l.withTargetsCreated()
+	if err != nil {
+		return err
+	}
 
 	// A file never consents to DROP PLAYBOOK on its own: it deletes an
 	// install directory, data and all.
@@ -360,8 +363,9 @@ func stmtHead(s *grammar.Stmt) string {
 // withTargetsCreated returns the statements to run, with a bare CREATE
 // PLAYBOOK IF NOT EXISTS before the first recipe for a target that neither
 // exists nor is created earlier in the files (docs: "Targets"): the dry run
-// lists it like any other statement.
-func (l *applyLoader) withTargetsCreated() []located {
+// lists it like any other statement. A registry that cannot be read stops
+// the apply before anything is written.
+func (l *applyLoader) withTargetsCreated() ([]located, error) {
 	root := config.ResolvePlaybooksDir()
 	created := map[string]bool{}
 	out := make([]located, 0, len(l.out))
@@ -371,7 +375,11 @@ func (l *applyLoader) withTargetsCreated() []located {
 		}
 		if x.recipe && !created[x.s.Name] {
 			created[x.s.Name] = true
-			if pb, err := playbook.Find(root, x.s.Name); err == nil && pb == nil {
+			pb, err := playbook.Find(root, x.s.Name)
+			if err != nil {
+				return nil, fmt.Errorf("%s: target %s: %w\nnothing was written", x.file, x.s.Name, err)
+			}
+			if pb == nil {
 				out = append(out, located{file: x.file, s: &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook,
 					Name: x.s.Name, IfNotExists: true, Pos: x.s.Pos}})
 				l.total[x.file]++
@@ -379,7 +387,7 @@ func (l *applyLoader) withTargetsCreated() []located {
 		}
 		out = append(out, x)
 	}
-	return out
+	return out, nil
 }
 
 // dirTarget reports whether a TO target is a directory rather than a
