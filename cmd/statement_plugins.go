@@ -148,13 +148,17 @@ func readPluginWorld(configDir string) (*pluginWorld, error) {
 // pluginStep is one `claude plugin` command a statement runs.
 type pluginStep struct {
 	args   []string
-	line   string // the report line once it ran
-	market string // ADD MARKETPLACE: the name the source must declare
-	mcp    bool   // a `claude mcp` command, not `claude plugin`
-	clause int    // the clause it comes from: steps run in clause order
+	line   string   // the report line once it ran
+	market string   // ADD MARKETPLACE: the name the source must declare
+	mcp    bool     // a `claude mcp` command, not `claude plugin`
+	clause int      // the clause it comes from: steps run in clause order
+	skill  *skillOp // a file operation under skills/, not a command
 }
 
 func (s pluginStep) command() string {
+	if s.skill != nil {
+		return s.skill.what
+	}
 	if s.mcp {
 		// The server's config is not shown in full: it may be long, and its
 		// placeholders never hold a secret anyway.
@@ -255,7 +259,11 @@ func runPluginSteps(configDir string, steps []pluginStep) ([]string, error) {
 		}
 		var out []byte
 		var err error
-		if s.mcp {
+		if s.skill != nil {
+			if err = s.skill.do(); err == nil && s.skill.record != nil {
+				err = s.skill.record()
+			}
+		} else if s.mcp {
 			if _, err = claudeMCP(configDir, s.args...); err != nil {
 				err = fmt.Errorf("%s: %w", s.command(), err)
 			}

@@ -10,6 +10,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // runApply runs one or more playbook files, in the order given
@@ -19,14 +20,27 @@ import (
 // statement SHOW CREATE writes is safe to repeat, so running the fixed
 // files again is the recovery.
 func runApply(st *grammar.Stmt) error {
-	l := &applyLoader{seen: map[string]bool{}, total: map[string]int{}}
+	l := &applyLoader{seen: map[string]bool{}, seenFor: map[string]bool{}, total: map[string]int{}}
+	if st.Target != "" {
+		name, err := resolveTarget(st.Target)
+		if err != nil {
+			return fmt.Errorf("TO %s: %w\nnothing was written", st.Target, err)
+		}
+		l.to = name
+	}
 	for _, path := range st.Files {
 		l.root(path)
 	}
 	if len(l.errs) > 0 {
 		return fmt.Errorf("%w\nnothing was written", errors.Join(l.errs...))
 	}
-	stmts := l.out
+	for _, w := range l.warnings {
+		fmt.Fprintln(os.Stderr, "Warning: "+w)
+	}
+	stmts, err := l.withTargetsCreated()
+	if err != nil {
+		return err
+	}
 
 	// A file never consents to DROP PLAYBOOK on its own: it deletes an
 	// install directory, data and all.
@@ -153,10 +167,12 @@ func runApply(st *grammar.Stmt) error {
 	return nil
 }
 
-// located is one statement to run and the file it came from.
+// located is one statement to run and the file it came from. recipe marks
+// a name-less ALTER PLAYBOOK, named here with its target.
 type located struct {
-	file string
-	s    *grammar.Stmt
+	file   string
+	s      *grammar.Stmt
+	recipe bool
 }
 
 // applyLoader reads the files APPLY runs and expands their INCLUDEs
@@ -169,7 +185,12 @@ type applyLoader struct {
 	files []string       // in load order, as reports name them
 	total map[string]int // statements per file, INCLUDEs not counted
 	seen  map[string]bool
-	errs  []error
+	// seenFor marks a file reached for a target: its name-less statements
+	// run once per target, everything else once (docs: "Targets").
+	seenFor  map[string]bool
+	to       string // APPLY … TO: the target of every name-less statement
+	warnings []string
+	errs     []error
 }
 
 // root loads a file named on the command line. It may be a pipe (a file
@@ -192,7 +213,7 @@ func (l *applyLoader) root(path string) {
 		}
 		base = filepath.Dir(id)
 	}
-	l.load(path, id, base, nil)
+	l.load(path, id, base, nil, l.to)
 }
 
 // fileIdentity is a file's fully resolved path: two spellings of one file
@@ -207,7 +228,7 @@ func fileIdentity(path string) (string, error) {
 
 type chainLink struct{ id, name string }
 
-func (l *applyLoader) load(name, id, base string, chain []chainLink) {
+func (l *applyLoader) load(name, id, base string, chain []chainLink, target string) {
 	for i, c := range chain {
 		if c.id == id {
 			names := make([]string, 0, len(chain)-i+1)
@@ -219,10 +240,14 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink) {
 			return
 		}
 	}
-	if l.seen[id] {
-		return
-	}
+	first := !l.seen[id]
 	l.seen[id] = true
+	forKey := id + "\x00" + target
+	firstFor := !l.seenFor[forKey]
+	l.seenFor[forKey] = true
+	if !first && !firstFor {
+		return // reached before for this target: nothing new would run
+	}
 	read := id
 	if base == "" { // a pipe: read it by the name given
 		read = name
@@ -237,10 +262,30 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink) {
 		l.errs = append(l.errs, fmt.Errorf("%s: %w", name, err))
 		return
 	}
-	l.files = append(l.files, name)
+	if first {
+		l.files = append(l.files, name)
+	}
 	chain = append(chain, chainLink{id, name})
+	cur := target // this file's target: inherited, changed by USE PLAYBOOK
 	for _, s := range stmts {
+		if s.Verb == grammar.Use {
+			if l.to != "" {
+				l.warnings = append(l.warnings, fmt.Sprintf("%s:%d: USE PLAYBOOK %s is ignored: TO %s sets the target", name, s.Pos.Line, s.Name, l.to))
+				continue
+			}
+			cur = s.Name
+			continue
+		}
 		if s.Verb != grammar.Include {
+			switch {
+			case s.Recipe && !firstFor:
+				continue
+			case !s.Recipe && !first:
+				continue
+			case s.Recipe && cur == "":
+				l.errs = append(l.errs, fmt.Errorf("%s:%d: this file has name-less statements and no target: add TO <playbook|dir> to APPLY, or a USE PLAYBOOK line", name, s.Pos.Line))
+				continue
+			}
 			// A relative directory source resolves against this file's
 			// directory, as INCLUDE does.
 			for i, c := range s.Clauses {
@@ -265,7 +310,13 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink) {
 					s.Clauses[i].Arg = filepath.Join(base, rel)
 				}
 			}
-			l.out = append(l.out, located{name, s})
+			if s.Recipe {
+				named := *s
+				named.Name, named.Recipe = cur, false
+				l.out = append(l.out, located{file: name, s: &named, recipe: true})
+			} else {
+				l.out = append(l.out, located{file: name, s: s})
+			}
 			l.total[name]++
 			continue
 		}
@@ -296,7 +347,7 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink) {
 			l.errs = append(l.errs, fmt.Errorf("%s: INCLUDE: %w", at, err))
 			continue
 		}
-		l.load(p, cid, filepath.Dir(cid), chain)
+		l.load(p, cid, filepath.Dir(cid), chain, cur)
 	}
 }
 
@@ -307,4 +358,81 @@ func stmtHead(s *grammar.Stmt) string {
 		h += " " + s.Name
 	}
 	return h
+}
+
+// withTargetsCreated returns the statements to run, with a bare CREATE
+// PLAYBOOK IF NOT EXISTS before the first recipe for a target that neither
+// exists nor is created earlier in the files (docs: "Targets"): the dry run
+// lists it like any other statement. A registry that cannot be read stops
+// the apply before anything is written.
+func (l *applyLoader) withTargetsCreated() ([]located, error) {
+	root := config.ResolvePlaybooksDir()
+	created := map[string]bool{}
+	out := make([]located, 0, len(l.out))
+	for _, x := range l.out {
+		if x.s.Verb == grammar.Create && x.s.Object == grammar.Playbook {
+			created[x.s.Name] = true
+		}
+		if x.recipe && !created[x.s.Name] {
+			created[x.s.Name] = true
+			pb, err := playbook.Find(root, x.s.Name)
+			if err != nil {
+				return nil, fmt.Errorf("%s: target %s: %w\nnothing was written", x.file, x.s.Name, err)
+			}
+			if pb == nil {
+				out = append(out, located{file: x.file, s: &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook,
+					Name: x.s.Name, IfNotExists: true, Pos: x.s.Pos}})
+				l.total[x.file]++
+			}
+		}
+		out = append(out, x)
+	}
+	return out, nil
+}
+
+// dirTarget reports whether a TO target is a directory rather than a
+// playbook name: a playbook name never has a '/' and never starts with '~'
+// or '.'.
+func dirTarget(t string) bool {
+	return strings.Contains(t, "/") || strings.HasPrefix(t, "~") || strings.HasPrefix(t, ".")
+}
+
+// resolveTarget turns APPLY's TO into a playbook name. A directory that is
+// a registered playbook (its directory or its config directory, symlinks
+// followed) is that playbook; one claimed by several registrations is
+// refused. A plain config directory is not a playbook target.
+func resolveTarget(t string) (string, error) {
+	if !dirTarget(t) {
+		return t, nil
+	}
+	dir, err := expandSkillPath(t)
+	if err != nil {
+		return "", err
+	}
+	if dir, err = filepath.Abs(dir); err != nil {
+		return "", err
+	}
+	if dir, err = filepath.EvalSymlinks(dir); err != nil {
+		return "", fmt.Errorf("no such directory")
+	}
+	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, pb := range pbs {
+		for _, p := range []string{pb.Path, pb.RootPath} {
+			if r, err := filepath.EvalSymlinks(p); err == nil && r == dir {
+				names = append(names, pb.Name)
+				break
+			}
+		}
+	}
+	switch len(names) {
+	case 1:
+		return names[0], nil
+	case 0:
+		return "", fmt.Errorf("%s is not a playbook, and applying to a plain config directory is not built yet", dir)
+	}
+	return "", fmt.Errorf("the directory belongs to several playbooks (%s): name one, TO <playbook>", strings.Join(names, ", "))
 }

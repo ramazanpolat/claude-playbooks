@@ -30,13 +30,61 @@ func skillClauses(clauses []grammar.Clause) bool {
 }
 
 // skillOp is one file operation a statement makes under skills/, and the
-// record it leaves once done (rec nil: the record is forgotten).
+// record it leaves once done (rec nil: the record is forgotten). It runs in
+// clause order with the plugin and MCP commands.
 type skillOp struct {
-	what string       // what a dry run reports
-	line string       // the report line once done
-	do   func() error // the operation
-	name string
-	rec  *manifest.SkillRecord
+	what   string       // what a dry run reports
+	line   string       // the report line once done
+	do     func() error // the operation
+	undo   func() error // takes an added skill away again (nil for a drop)
+	record func() error // records it once done; set by the caller
+	name   string
+	rec    *manifest.SkillRecord
+	clause int
+}
+
+// steps turns a plan's operations into steps for runPluginSteps,
+// which runs them in clause order with the commands.
+func (p *skillPlan) steps() []pluginStep {
+	out := make([]pluginStep, 0, len(p.ops))
+	for i := range p.ops {
+		op := &p.ops[i]
+		out = append(out, pluginStep{clause: op.clause, line: op.line, skill: op})
+	}
+	return out
+}
+
+// recordSkillOp is the record step after a skill operation: it updates
+// cur, puts it in the manifest and writes it with write. When the write
+// fails, an added skill is taken away again, so the disk never holds a
+// skill cpb has no record of and running the statement again adds it.
+func recordSkillOp(op *skillOp, cur map[string]*manifest.SkillRecord, m *manifest.Manifest, write func() error) error {
+	prev, had := cur[op.name]
+	if op.rec == nil {
+		delete(cur, op.name)
+	} else {
+		c := *op.rec
+		cur[op.name] = &c
+	}
+	m.Skills = cloneSkills(cur)
+	err := write()
+	if err == nil {
+		return nil
+	}
+	if had {
+		cur[op.name] = prev
+	} else {
+		delete(cur, op.name)
+	}
+	m.Skills = cloneSkills(cur)
+	err = fmt.Errorf("cannot record skill %s: %w", op.name, err)
+	if op.undo != nil {
+		if uerr := op.undo(); uerr != nil {
+			return fmt.Errorf("%w; taking it away again failed too (%v): remove skills/%s yourself", err, uerr, op.name)
+		}
+		return fmt.Errorf("%w; it was taken away again, run the statement again", err)
+	}
+	return err
 }
 
 type skillPlan struct {
@@ -96,7 +144,7 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 		_, err := os.Lstat(skillPath(configDir, name))
 		return err == nil
 	}
-	for _, c := range clauses {
+	for ci, c := range clauses {
 		name := ""
 		if len(c.Names) > 0 {
 			name = c.Names[0]
@@ -128,7 +176,7 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 			if already {
 				continue
 			}
-			op := skillOp{name: name, rec: want, line: "skill     " + name + " (" + want.Mode + " of " + want.Source + ")"}
+			op := skillOp{name: name, rec: want, clause: ci, line: "skill     " + name + " (" + want.Mode + " of " + want.Source + ")"}
 			if want.Mode == "link" {
 				op.what = "link skills/" + name + " to " + want.Source
 			} else {
@@ -136,6 +184,7 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 			}
 			if configDir != "" {
 				op.do = func() error { return putSkill(configDir, name, old, want) }
+				op.undo = func() error { return removeSkill(configDir, name, want) }
 			}
 			p.ops = append(p.ops, op)
 		case grammar.DropSkill:
@@ -153,7 +202,7 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 			if !present {
 				continue
 			}
-			op := skillOp{name: name, what: "remove skills/" + name, line: "dropped   skill " + name}
+			op := skillOp{name: name, clause: ci, what: "remove skills/" + name, line: "dropped   skill " + name}
 			if configDir != "" {
 				op.do = func() error { return removeSkill(configDir, name, old) }
 			}
