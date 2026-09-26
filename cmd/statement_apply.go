@@ -60,12 +60,28 @@ func runApply(st *grammar.Stmt) error {
 	// set by then (a file may set the helper and use it in one run).
 	var helper helperState
 	envDir := envprofile.Dir(config.ResolvePlaybooksDir())
+	// Whether each env set exists at that point of the files: an earlier
+	// CREATE makes it, an earlier DROP removes it, and the disk says the rest.
+	envExists := map[string]bool{}
+	existsNow := func(name string) bool {
+		if e, ok := envExists[name]; ok {
+			return e
+		}
+		p, _ := envprofile.Read(envDir, name)
+		return p != nil
+	}
 	for _, f := range files {
 		for _, s := range f.stmts {
+			if s.Object == grammar.Env && s.Verb == grammar.Drop {
+				envExists[s.Name] = false
+				continue
+			}
 			// CREATE ENV IF NOT EXISTS on a set that exists writes nothing,
 			// so its references are not checked (as on the command line).
-			if s.Verb == grammar.Create && s.Object == grammar.Env && s.IfNotExists {
-				if p, _ := envprofile.Read(envDir, s.Name); p != nil {
+			if s.Verb == grammar.Create && s.Object == grammar.Env {
+				existed := existsNow(s.Name)
+				envExists[s.Name] = true
+				if s.IfNotExists && existed {
 					continue
 				}
 			}
@@ -80,7 +96,10 @@ func runApply(st *grammar.Stmt) error {
 		}
 	}
 
-	r := &stmtRun{dryRun: st.DryRun, yes: st.Yes, envs: map[string]bool{}, playbooks: map[string]bool{}}
+	r := &stmtRun{dryRun: st.DryRun, yes: st.Yes}
+	if st.DryRun {
+		r.dry = newDryState()
+	}
 	counts := map[string]int{}
 	applied := make([]string, 0, len(files))
 	for fi, f := range files {

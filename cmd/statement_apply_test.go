@@ -315,3 +315,64 @@ func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 		t.Fatalf("IF NOT EXISTS on an existing set: %v\n%s", err, out)
 	}
 }
+
+// A dry run judges each statement against what the earlier ones would have
+// written, not only against what they would have created.
+func TestApplyDryRunSeesEarlierChanges(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "p", &manifest.Manifest{})
+	mustStmt(t, "CREATE ENV a")
+	mustStmt(t, "CREATE ENV b")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK p USE ENV a;\nALTER PLAYBOOK p ADD ENV b AFTER a;\nALTER PLAYBOOK p DROP ENV a b;\nDROP ENV a;\nALTER PLAYBOOK p RENAME TO q;\nALTER PLAYBOOK q USE ENV b;\n")
+	if out, err := apply(t, path, "--dry-run"); err != nil {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	if readProfile(t, "a") == nil {
+		t.Fatal("the dry run dropped a")
+	}
+	if out, err := apply(t, path); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if e := readEnv(t, filepath.Join(root, "q")); strings.Join(e.Profiles, ",") != "b" {
+		t.Fatalf("applied: %#v", e)
+	}
+}
+
+// The reference check before any write follows earlier drops: a set the
+// file drops and then re-creates IF NOT EXISTS has its references checked.
+func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
+	sandboxDefaultRoot(t)
+	helper, _ := fakeHelper(t)
+	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "CREATE ENV r")
+	path := writePlaybookFile(t, "DROP ENV r;\nCREATE ENV IF NOT EXISTS r SET TOKEN FROM 'keychain:gone';\n")
+	if _, err := apply(t, path); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		t.Fatalf("an unresolvable reference after a drop: %v", err)
+	}
+	if readProfile(t, "r") == nil {
+		t.Fatal("the drop ran before the refused reference")
+	}
+}
+
+// SHOW CREATE never prints a source URL's credentials, and keeps the
+// default launcher (named after the playbook) instead of writing NO ALIAS.
+func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "tok", &manifest.Manifest{Source: &manifest.Source{Repository: "https://user:ghp_s3cret@example.com/r.git"}})
+	var err error
+	out := captureStdout(t, func() { err = runStatement(words("SHOW CREATE PLAYBOOK tok")) })
+	if err == nil || strings.Contains(out, "ghp_s3cret") || !strings.Contains(out, "-- withheld: the source URL of PLAYBOOK tok") {
+		t.Fatalf("credentialed source: %v\n%s", err, out)
+	}
+
+	mustStmt(t, "CREATE PLAYBOOK named")
+	mustStmt(t, "CREATE PLAYBOOK bare NO ALIAS")
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "NO ALIAS") {
+		t.Errorf("the default launcher became NO ALIAS:\n%s", out)
+	}
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "NO ALIAS") {
+		t.Errorf("a playbook with no launcher lost NO ALIAS:\n%s", out)
+	}
+}

@@ -61,7 +61,13 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err != nil { // discovery failed: whether it exists is unknown
 		return err
 	}
-	exists := pb != nil || r.playbooks[st.Name]
+	exists := pb != nil
+	if known, alive := r.playbookState(st.Name); known {
+		exists = alive
+		if !alive {
+			pb = nil // dropped earlier in this dry run
+		}
+	}
 	o := createOptionsOf(st)
 	if exists && st.IfNotExists {
 		r.outcome = outUnchanged
@@ -91,7 +97,8 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 				return fmt.Errorf("LINK %s: the directory has no %s", o.link, manifest.FileName)
 			}
 		}
-		r.playbooks[st.Name] = true
+		r.recordPlaybook(st.Name, true)
+		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
 		r.outcome = outCreated
 		return nil
 	}
@@ -126,9 +133,13 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
+	known, alive := r.playbookState(st.Name)
+	if known && !alive {
+		pb = nil // dropped earlier in this dry run
+	}
 	if pb == nil {
-		if r.playbooks[st.Name] {
-			delete(r.playbooks, st.Name)
+		if known && alive { // created earlier in this dry run
+			r.recordPlaybook(st.Name, false)
 			r.outcome = outDropped
 			return nil
 		}
@@ -143,6 +154,7 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if r.dryRun {
 		// What a drop deletes is shown before anything is confirmed.
 		r.note = "deletes " + pb.RootPath
+		r.recordPlaybook(st.Name, false)
 		return nil
 	}
 	return doDelete(deleteOpts{yes: st.Yes || r.yes}, []string{st.Name})
@@ -169,12 +181,24 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 	}
 	r.outcome = outChanged
 	if r.dryRun {
-		if _, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name); err != nil && !r.playbooks[st.Name] {
-			return err
+		known, alive := r.playbookState(st.Name)
+		var disk *manifest.Env
+		if !known {
+			pb, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name)
+			if err != nil {
+				return err
+			}
+			if pb.Manifest != nil {
+				disk = pb.Manifest.Env
+			}
+		} else if !alive {
+			return fmt.Errorf("unknown playbook %q (dropped earlier in the file)", st.Name)
 		}
-		if rename != "" { // later statements of the file address the new name
-			delete(r.playbooks, st.Name)
-			r.playbooks[rename] = true
+		if rename != "" { // later statements of the file address the new name, with its environment
+			env := r.playbookEnv(st.Name, disk)
+			r.recordPlaybook(st.Name, false)
+			r.recordPlaybook(rename, true)
+			r.recordPlaybookEnv(rename, env)
 		}
 		return nil
 	}

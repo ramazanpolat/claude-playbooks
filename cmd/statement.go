@@ -89,17 +89,16 @@ const (
 )
 
 // stmtRun is one statement's execution: whether it may write, and, in an
-// APPLY --dry-run, what the file's earlier statements would have created,
-// so a later statement that depends on them is judged as it would run.
+// APPLY --dry-run, what the file's earlier statements would have written,
+// so a later statement is judged against the state it would really meet.
 type stmtRun struct {
-	dryRun    bool
-	yes       bool            // APPLY --yes: confirms the file's DROP PLAYBOOKs
-	envs      map[string]bool // env sets created earlier in a dry run
-	playbooks map[string]bool // playbooks created earlier in a dry run
-	outcome   string
-	note      string      // a dry run's detail, e.g. what a drop would delete
-	warning   string      // reported, never an error: e.g. a source that drifted
-	helper    helperState // in a dry run: the helper earlier statements would set
+	dryRun  bool
+	yes     bool      // APPLY --yes: confirms the file's DROP PLAYBOOKs
+	dry     *dryState // in a dry run: what earlier statements would have written
+	outcome string
+	note    string      // a dry run's detail, e.g. what a drop would delete
+	warning string      // reported, never an error: e.g. a source that drifted
+	helper  helperState // in a dry run: the helper earlier statements would set
 }
 
 // checkRefs checks a statement's references against the helper in effect
@@ -144,20 +143,20 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	defer unlock()
 
-	p, err := envprofile.Read(dir, st.Name)
+	p, err := r.profile(dir, st.Name)
 	if err != nil {
 		return err
 	}
 	// CREATE ... IF NOT EXISTS on an existing set writes nothing, so its
 	// references are not checked: the helper is not even asked.
-	if !(st.Verb == grammar.Create && (p != nil || r.envs[st.Name]) && st.IfNotExists) {
+	if !(st.Verb == grammar.Create && p != nil && st.IfNotExists) {
 		if err := r.checkRefs(st.Clauses); err != nil {
 			return err
 		}
 	}
 	switch st.Verb {
 	case grammar.Create:
-		if (p != nil || r.envs[st.Name]) && st.IfNotExists {
+		if p != nil && st.IfNotExists {
 			r.outcome = outUnchanged
 			r.say("ENV "+st.Name+" already exists; unchanged", nil)
 			return nil
@@ -172,10 +171,6 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 
 	case grammar.Alter:
 		if p == nil {
-			if r.envs[st.Name] { // created earlier in this dry run
-				r.outcome = outChanged
-				return nil
-			}
 			return fmt.Errorf("no env set %q: create it with CREATE ENV %s", st.Name, st.Name)
 		}
 		old := cloneProfile(p)
@@ -188,11 +183,6 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 
 	// DROP ENV
 	if p == nil {
-		if r.envs[st.Name] {
-			delete(r.envs, st.Name)
-			r.outcome = outDropped
-			return nil
-		}
 		if st.IfExists {
 			r.outcome = outUnchanged
 			r.say("No env set "+st.Name+"; nothing to drop", nil)
@@ -200,7 +190,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return fmt.Errorf("no env set %q", st.Name)
 	}
-	users, err := profileUsers(playbooksDir)
+	users, err := r.envUsers(playbooksDir)
 	if err != nil {
 		return err
 	}
@@ -209,7 +199,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	// An unreadable marker refuses the drop: the set may be one every
 	// launch depends on.
-	defaults, err := envprofile.Defaults(dir)
+	defaults, err := r.defaultsList(dir)
 	if err != nil {
 		return fmt.Errorf("cannot read DEFAULTS: %w", err)
 	}
@@ -218,6 +208,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	r.outcome = outDropped
 	if r.dryRun {
+		r.recordProfile(st.Name, nil)
 		return nil
 	}
 	if err := envprofile.Delete(dir, st.Name); err != nil {
@@ -242,9 +233,7 @@ func (r *stmtRun) writeProfile(dir string, old, p *envprofile.Profile, changed, 
 		r.outcome = outChanged
 	}
 	if r.dryRun {
-		if old == nil {
-			r.envs[p.Name] = true
-		}
+		r.recordProfile(p.Name, p)
 		return nil
 	}
 	if err := envprofile.Write(dir, p); err != nil {
@@ -280,7 +269,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	var names, lines, current []string
 	write := envprofile.WriteDefaultsUnchecked
 	if len(listClauses) > 0 {
-		current, err = envprofile.Defaults(dir)
+		current, err = r.defaultsList(dir)
 		if err != nil {
 			// A broken marker can still be replaced outright: USE ENV
 			// states the whole list and needs nothing from the old one.
@@ -318,6 +307,9 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.outcome = outChanged
 		for _, c := range helperClauses {
 			r.helper = r.helper.after(c)
+		}
+		if len(listClauses) > 0 {
+			r.recordDefaults(names)
 		}
 		return nil
 	}
@@ -375,23 +367,40 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	defer unlock()
 
-	pb, err := playbook.Require(playbooksDir, st.Name)
-	if err != nil {
-		if r.playbooks[st.Name] { // created earlier in this dry run
-			r.outcome = outChanged
-			return nil
+	// A playbook an earlier statement of a dry run created (or renamed to)
+	// is not on disk yet: it starts as a new one would, with no manifest.
+	known, exists := r.playbookState(st.Name)
+	var pb *playbook.Playbook
+	if !known || exists {
+		found, err := playbook.Find(playbooksDir, st.Name)
+		if err != nil {
+			return err
 		}
-		return err
+		pb = found
 	}
-	// A linked playbook's manifest is shared with every registration of
-	// the target directory: same refusal as the pre-grammar env command.
-	if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("cannot change the environment of %q: it is linked, and its %s is shared with the target. Edit the target's manifest directly if you really mean it", st.Name, manifest.FileName)
+	switch {
+	case known && !exists:
+		pb = nil
+	case pb == nil && !(known && exists):
+		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", st.Name)
 	}
-	m := pb.Manifest
+	var m *manifest.Manifest
+	if pb != nil {
+		// A linked playbook's manifest is shared with every registration of
+		// the target directory: same refusal as the pre-grammar env command.
+		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("cannot change the environment of %q: it is linked, and its %s is shared with the target. Edit the target's manifest directly if you really mean it", st.Name, manifest.FileName)
+		}
+		m = pb.Manifest
+	}
 	if m == nil {
-		m = &manifest.Manifest{Name: pb.Name}
+		m = &manifest.Manifest{Name: st.Name}
 	}
+	var disk *manifest.Env
+	if pb != nil && pb.Manifest != nil {
+		disk = pb.Manifest.Env
+	}
+	m.Env = r.playbookEnv(st.Name, disk)
 	before := cloneEnv(m.Env)
 	if m.Env == nil {
 		m.Env = &manifest.Env{}
@@ -415,6 +424,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	r.outcome = outChanged
 	if r.dryRun {
+		r.recordPlaybookEnv(st.Name, m.Env)
 		return nil
 	}
 	if err := manifest.Write(pb.RootPath, m); err != nil {
@@ -490,10 +500,7 @@ func (r *stmtRun) applyEnvList(dir string, list []string, clauses []grammar.Clau
 }
 
 func (r *stmtRun) requireEnv(dir, name string) error {
-	if r.envs[name] { // created earlier in this dry run
-		return nil
-	}
-	p, err := envprofile.Read(dir, name)
+	p, err := r.profile(dir, name)
 	if err != nil {
 		return err
 	}

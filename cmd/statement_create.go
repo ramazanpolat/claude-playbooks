@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -178,17 +180,38 @@ func createPlaybookBlock(pb *playbook.Playbook) createBlock {
 			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Subdir, Arg: *v.Source.Subdir})
 		}
 	}
-	if v.Launcher != nil {
+	switch {
+	case v.Launcher != nil:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Alias, Arg: *v.Launcher})
-	} else {
+	case hasNameLauncher(pb.Name):
+		// The default launcher, named after the playbook: no clause
+		// creates it again.
+	default:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoAlias})
 	}
 	if v.Sandbox && v.Linked == nil {
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Sandbox})
 	}
 	text := st.Pretty() + ";"
+	// A source URL that carries credentials is never printed: the whole
+	// statement is withheld, shown with the URL masked.
+	withheldSource := 0
+	if v.Source != nil && redactURLCredentials(v.Source.URL) != v.Source.URL {
+		masked := *st
+		masked.Clauses = slices.Clone(st.Clauses)
+		for i, c := range masked.Clauses {
+			if c.Kind == grammar.From {
+				masked.Clauses[i].Arg = redactURLCredentials(c.Arg)
+			}
+		}
+		lines := []string{"-- withheld: the source URL of PLAYBOOK " + pb.Name + " carries credentials; install it from a URL without them"}
+		for _, l := range strings.Split(masked.Pretty()+";", "\n") {
+			lines = append(lines, "-- "+l)
+		}
+		text, withheldSource = strings.Join(lines, "\n"), 1
+	}
 	if m == nil || m.Env.Empty() {
-		return createBlock{text: text}
+		return createBlock{text: text, withheld: withheldSource}
 	}
 	if v.Linked != nil {
 		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName}
@@ -204,7 +227,22 @@ func createPlaybookBlock(pb *playbook.Playbook) createBlock {
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}
-	return createBlock{text: joinComments(comments, text), withheld: len(comments) / 2}
+	return createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource}
+}
+
+// hasNameLauncher reports whether the launcher named after a playbook is
+// one cpb manages: the default launcher, which CREATE PLAYBOOK writes when
+// no launcher clause says otherwise.
+func hasNameLauncher(name string) bool {
+	if !launcherOpsAllowed() {
+		return false
+	}
+	dir, err := config.ResolveLauncherDir()
+	if err != nil {
+		return false
+	}
+	_, exists, foreign := launcher.Lookup(dir, name)
+	return exists && !foreign
 }
 
 func joinComments(comments []string, text string) string {
