@@ -1,10 +1,8 @@
 # CLI grammar
 
-Status: **implemented, v3.20.0.** Decided with the pilot on 2026-09-25/26.
-`SELECT` is not planned: it is superseded by the `--json` + clickhouse-local
-recipe ([guide](../guides/query-with-sql.md)). Sections marked **planned**
-(v3.21.0) are specified and not built yet; everything else on this page is
-built.
+Status: **implemented, v3.21.0.** Decided with the pilot on 2026-09-25/26.
+Sections marked **planned** are specified and not built yet; everything else
+on this page is built.
 
 ## Why
 
@@ -65,9 +63,9 @@ here reads, writes or calls anything of pilot-profile's.
 ## Grammar
 
 ```
-command    := write | read | APPLY <file> [<file> ...] [TO <playbook|dir>] [--dry-run] [--yes]
+command    := write | read | select | APPLY <file> [<file> ...] [TO <playbook|dir>] [--dry-run] [--yes]
                                            TO: see "Targets"
-                                           (select: not planned, see SELECT)
+                                           select: see SELECT
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
@@ -598,134 +596,64 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 
 `layer.kind` is `DEFAULTS` (with `name` the env set), `ENV` or `PLAYBOOK`.
 
-## SELECT (not planned)
+## SELECT (v3.21.0)
 
-**Not planned; superseded by the `--json` + clickhouse-local recipe (pilot,
-2026-09-26):** `cpb SHOW … --json | ch local --input-format JSONEachRow -q
-"SELECT … FROM table"` gives the whole of ClickHouse's SQL over the same
-state ([guide](../guides/query-with-sql.md)). `--json` stays the contract.
-The text below is kept as the record of what was specified.
-
-(Historical: it was decided with the pilot on 2026-09-26 and planned for the
-release after v3.20.0, then withdrawn the same day.)
-`SELECT` queries the same state `SHOW` prints, as tables. **Files stay the
-only store:** each query builds its tables from the playbooks, env sets and
-DEFAULTS as they are on disk at that moment, and nothing is cached or kept.
+Decided with the pilot on 2026-09-26 (a first design was withdrawn the same
+day, then replaced by this one). `SELECT` queries the same state `SHOW`
+prints, as tables, with two engines:
 
 ```
-select  := SELECT { * | count() | <column> ... } FROM <table>
-           [WHERE <condition>]
-           [ORDER BY <column> [ASC | DESC] ...]
-           [LIMIT <n>]
-           [FORMAT { Pretty | TSV | JSON | JSONEachRow }]
-         | SHOW TABLES [FORMAT …]
-         | DESCRIBE <table> [FORMAT …]
+select := [EXPLAIN] SELECT … FROM <table> …        [--json]
+cpb "SELECT name, version FROM PLAYBOOKS"                              built in
+cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   clickhouse-local
 ```
 
-`SHOW TABLES` lists the tables with their row counts; `DESCRIBE <table>`
-lists a table's columns and their types (`String`, `Bool`, `Nullable(…)`,
-`Array(String)`, `Object`), as in ClickHouse. `DESCRIBE` is also the clause
-that sets an env set's description (`ALTER ENV e DESCRIBE '…'`). The
-position tells them apart: as the first word of a statement it is the verb,
-inside `ALTER ENV` / `CREATE ENV` it is the clause.
+- **Built in, always:** exactly `SELECT <col>[, <col> …] FROM <table>`: plain
+  column names, spelled exactly (ClickHouse identifiers are case-sensitive:
+  `name`, not `NAME`), no `*`, no functions, no `WHERE`. It is a strict subset
+  of ClickHouse SQL, so a query means the same on both paths. The output is a
+  table as `SHOW` prints one; `--json` prints the selected fields.
+- **Anything else goes to ClickHouse** when it is installed: `clickhouse` or
+  `ch` on `PATH`, or the command `CPB_CLICKHOUSE` names. cpb pipes the
+  table's rows to `clickhouse local --input-format JSONEachRow --structure
+  '<typed columns>' -q "<query>"`, with `FROM <table>` rewritten to read
+  stdin (`FROM table`; for `PLAYBOOKS`, a subquery over it that adds
+  `version_tuple`). The `FROM` is found as ClickHouse reads the query, so
+  `'FROM VARS'` in a string or a comment is not a table. The output is
+  ClickHouse's own: a table on a terminal, TSV in a pipe, or the query's
+  `FORMAT`. One statement per query: text after a `;` is refused. Without ClickHouse the query is refused in one line: "this
+  query needs ClickHouse (clickhouse local); install it, or pick columns
+  only". One table per query.
+- **Only what `--json` already shows is handed over:** the rows are exactly
+  the `SHOW … --json` objects (a credential redacted, a reference shown as the
+  reference), one per line, and nothing else. A test pins those bytes.
+- **`EXPLAIN SELECT …`** prints which engine would run it and the exact
+  clickhouse command, and runs nothing.
+- **On the command line** a statement can be one quoted argument (the shell
+  would glob `*` and split `(`): `cpb "SELECT …"`. It is read with the
+  playbook-file lexer and the command line's rules; any statement works this
+  way, flags inside the quotes (`cpb "SELECT name FROM PLAYBOOKS --json"`). An unknown column's error says "If you typed * unquoted, the shell
+  expanded it: quote the statement."
 
-`select` is a third kind of `command`, beside `write` and `read`; like a
-read, it never writes. Column and `ORDER BY` lists follow the list rule of
-*Shape*: items are separated by spaces, and the SQL habit `name, version`
-works because an unquoted comma at the end of an item is read as a
-separator.
-
-**Tables.** Their columns are exactly the `--json` fields of *Output*; there
-is no second schema. The one addition is two `VARS` columns that place a
-row, `playbook` and `effective`, because a `VARS` row is a variable seen from
-one playbook, which the *Output* variable object never needs to say. A nested object is addressed with a dot
-(`source.url`, `layer.kind`), and an array is filtered with `HAS`.
+**Tables.** Their columns are the `--json` fields, and ClickHouse reads each
+with a typed structure (a nested object or list as `JSON` / `Array(JSON)`,
+so `source.url` and `vars[1].key` work):
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | `name version path source linked launcher envs vars sandbox marketplaces plugins agent` (the `SHOW PLAYBOOK` object) |
-| `ENVS` | env set | `name description vars used_by default` (the `SHOW ENV` object) |
-| `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` (with `layer.kind`, `layer.name`) |
-| `DEFAULTS` | (one row) | `envs secret_helper` (the `SHOW DEFAULTS` object) |
+| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` |
+| `ENVS` | env set | `name description vars used_by default` |
+| `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
+| `DEFAULTS` | (one row) | `envs secret_helper` |
 
-A `VARS` row is one variable as one layer of one playbook's launch declares
-it: the *Output* variable object (`key`, `value`, `ref`, `redacted`,
-`plaintext`, `blocked`, and `layer`, the same object `EXPLAIN --json` gives:
-`layer.kind` is `DEFAULTS`, `ENV` or `PLAYBOOK`, `layer.name` the env set,
-absent for `PLAYBOOK`), plus `playbook`, and `effective`, which is true on the
-one row per `(playbook, key)` that decides the launch, which is the row
-`EXPLAIN` shows. So `WHERE effective` is `EXPLAIN` for every playbook at once,
-and the other rows show what was overridden.
-
-**Conditions.** `=`, `!=`, `<`, `>`, `LIKE` (`%` and `_`), `HAS` (an array
-contains a value), `IS NULL`, `IS NOT NULL`, combined with `AND`, `OR`, `NOT`
-and parentheses. Literals are single-quoted strings, integers, `true` and
-`false`. A bare boolean column is a condition (`WHERE effective`).
-Comparisons are on strings as text; `version` is compared as text.
-
-**Only what is listed.** `count()` is the one aggregate, and only without
-grouping. There are no joins, no `GROUP BY`, no subqueries, and no writes:
-`SELECT` only reads, so a playbook file refuses it like any other read.
-
-**Formats.** `Pretty` (the default: an aligned table) and `TSV` (tab-separated,
-no header) are for people and `cut`; `JSON` is one array; `JSONEachRow` is one
-object per line, which pipes straight into real ClickHouse
-(`… FORMAT JSONEachRow | clickhouse-client -q "INSERT INTO t FORMAT
-JSONEachRow"`). In `TSV` a nested object or array is printed as its JSON
-text. cpb embeds and calls no database.
-
-**Secrets.** A `SELECT` can never produce a value that `SHOW` or `EXPLAIN`
-would redact: the rows are the *Output* objects, with the same redaction, so
-a credential-looking literal has `value` null and `redacted` true in every
-format, and a reference is a reference. The tests check the output bytes of
-every format for the secret, as `SHOW`'s do. Filtering on a redacted value
-is impossible by construction: its `value` is null.
-
-**Keywords.** `SELECT`, `WHERE`, `ORDER`, `BY`, `ASC`, `DESC`, `LIMIT`,
-`FORMAT`, `LIKE`, `HAS`, `IS`, `NULL`, `AND`, `TABLES` and the table name
-`VARS` join the reserved words (with `OR`, `NOT`, `FROM`, `PLAYBOOKS`, `ENVS`,
-`DEFAULTS` already there). None collides with a playbook, env set or
-launcher name on the pilot's machine (checked 2026-09-26: 85 names,
-`TABLES` included).
-Format names and `count` are not reserved.
-
-**On the command line.** `*`, `<`, `>` and `(` mean something to the shell,
-so a query is best passed as **one quoted argument** (decided 2026-09-26),
-and the rule is exact:
-
-- It applies when the whole command line after the global flags is **exactly
-  one word, and that word contains whitespace**. The word is read with the
-  playbook-file lexer as exactly one statement: single quotes, doubled quotes
-  and `-- ` comments work, a trailing `;` is optional, and a second
-  statement is an error.
-- Reads are allowed in this form, unlike in a playbook file: it is still the
-  command line.
-- Everything else is read word by word, as the shell split it, as before.
-- **The unquoted `*`.** `cpb SELECT * FROM PLAYBOOKS` without quotes is
-  globbed by the shell: zsh stops with "no matches found", and bash silently
-  passes the file names in the current directory. cpb does not probe the
-  filesystem to guess at this. The unknown-column error carries one fixed
-  sentence instead: "unknown column 'X' (columns: …). If you typed *
-  unquoted, the shell expanded it: quote the statement." A test pins the
-  message. zsh users can add `alias cpb='noglob cpb'` to their shell; cpb
-  installs nothing.
-
-This works for any statement:
-
-```
-cpb "SELECT name, version FROM PLAYBOOKS WHERE envs HAS 'glm-5.3' ORDER BY name"
-cpb "SELECT playbook, key, layer.kind, layer.name FROM VARS WHERE effective AND ref IS NOT NULL"
-cpb "SELECT count() FROM PLAYBOOKS WHERE version < '3.12'"
-cpb "SELECT * FROM ENVS WHERE default FORMAT JSONEachRow" | clickhouse-client -q "INSERT INTO envs FORMAT JSONEachRow"
-```
-
-**Not planned.** The scope above is closed (decided 2026-09-26): `SELECT`
-columns or `*` `FROM` a table, `WHERE` with the listed operators, `ORDER BY`,
-`LIMIT`, `count()`, `FORMAT`, plus `SHOW TABLES` and `DESCRIBE <table>`.
-Anything beyond it needs the pilot's explicit approval first: functions,
-`GROUP BY`, joins, subqueries, expressions or aliases in the column list, a
-history or journal table, and variables, loops or conditionals in playbook
-files. It is not added because it would be easy.
+`version_tuple` is `Array(UInt32)`, the numbers of the version's leading
+numeric part (`"v3.12.3-rc1"` → `[3, 12, 3]`; no version → `[]`): compare
+and sort versions with it, because strings sort `"v3.9.0"` after
+`"v3.12.3"`. It is computed, not handed over: cpb computes it for the
+built-in form, the query computes it for ClickHouse. A `VARS` row is one entry of one layer
+(`DEFAULTS` sets, the playbook's sets, its own block), `effective` when it is
+the one a launch uses. The manual form, piping `SHOW … --json` yourself, is in
+[Query with SQL](../guides/query-with-sql.md).
 
 ## INCLUDE
 

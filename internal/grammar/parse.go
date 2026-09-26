@@ -49,8 +49,13 @@ func IsStatement(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
+	// One quoted argument holding a whole statement (docs: "On the command
+	// line"): the shell has nothing to glob or split in it.
+	if strings.ContainsAny(args[0], " \t\r\n") {
+		return true
+	}
 	switch strings.ToUpper(args[0]) {
-	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE": // INCLUDE and USE, to be refused with their reason
+	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT": // INCLUDE and USE, to be refused with their reason
 		return true
 	case "CREATE":
 		if len(args) < 2 {
@@ -92,6 +97,25 @@ func ParseArgs(args []string) (*Stmt, error) {
 	}
 	p := newParser(argTokens(args), false)
 	s, err := p.statement()
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// ParseLine parses a statement given as one quoted command-line argument:
+// the playbook-file lexer reads it (quotes, doubled quotes, -- comments, an
+// optional trailing ';'), and the command line's rules apply to it. It is
+// exactly one statement.
+func ParseLine(src string) (*Stmt, error) {
+	groups, lerr := lexFile(src)
+	if lerr != nil {
+		return nil, lerr
+	}
+	if len(groups) != 1 {
+		return nil, &Error{Pos: Pos{Word: 1}, Msg: "one quoted argument holds exactly one statement"}
+	}
+	s, err := newParser(groups[0], false).statement()
 	if err != nil {
 		return nil, err
 	}

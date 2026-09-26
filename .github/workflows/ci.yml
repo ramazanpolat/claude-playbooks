@@ -91,3 +91,39 @@ jobs:
         run: go build -o "$RUNNER_TEMP/cpb" .
       - name: Apply the examples
         run: examples/check.sh "$RUNNER_TEMP/cpb"
+
+  # SELECT beyond the built-in form runs through a real clickhouse-local:
+  # the rows cpb pipes in and the query it rewrites are checked end to end.
+  select-clickhouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Build
+        run: go build -o "$RUNNER_TEMP/cpb" .
+      - name: Install clickhouse-local
+        run: |
+          cd "$RUNNER_TEMP" && curl -fsSL https://clickhouse.com/ | sh
+          "$RUNNER_TEMP/clickhouse" local --version
+      - name: Query
+        run: |
+          set -eu
+          export HOME="$(mktemp -d)" CPB_CLICKHOUSE="$RUNNER_TEMP/clickhouse"
+          cpb="$RUNNER_TEMP/cpb"
+          # want <expected> <query>: runs the query, joins its lines with spaces.
+          want() {
+            got="$("$cpb" "$2" | tr '\n' ' ' | sed 's/ $//')"
+            if [ "$got" != "$1" ]; then echo "FAIL: $2"; echo "  want: $1"; echo "  got:  $got"; exit 1; fi
+            echo "ok: $2"
+          }
+          "$cpb" CREATE PLAYBOOK alpha NO ALIAS
+          "$cpb" CREATE PLAYBOOK beta NO ALIAS
+          "$cpb" ALTER PLAYBOOK beta SET VAR MODEL=glm X_TOKEN=sk-live-0123456789 AS PLAINTEXT >/dev/null
+          "$cpb" "SELECT name, version FROM PLAYBOOKS"
+          want 2 "SELECT count() FROM PLAYBOOKS FORMAT TSV"
+          want "MODEL X_TOKEN" "SELECT key FROM VARS WHERE playbook = 'beta' AND effective ORDER BY key FORMAT TSV"
+          want 1 "SELECT countIf(redacted) FROM VARS FORMAT TSV"
+          # alpha has no manifest version: an empty version_tuple.
+          want beta "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [0, 1] ORDER BY name FORMAT TSV"
