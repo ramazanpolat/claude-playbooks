@@ -2,8 +2,9 @@
 
 Status: **implemented, v3.20.0.** Decided with the pilot on 2026-09-25/26.
 `SELECT` is not planned: it is superseded by the `--json` + clickhouse-local
-recipe ([guide](../guides/query-with-sql.md)); everything else on this page
-is built.
+recipe ([guide](../guides/query-with-sql.md)). Sections marked **planned**
+(v3.21.0) are specified and not built yet; everything else on this page is
+built.
 
 ## Why
 
@@ -111,6 +112,23 @@ pb-clause  := set-clause
             | DROP PLUGIN <plugin>@<marketplace>
             | SET AGENT '<agent>'
             | UNSET AGENT
+            | ADD MCP SERVER <name> mcp-target [mcp-part ...]   planned (v3.21.0), see "An agent's configuration"
+            | DROP MCP SERVER <name>
+            | ALLOW TOOL '<rule>' ...      settings.json permissions.allow
+            | DENY TOOL '<rule>' ...       settings.json permissions.deny
+            | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
+            | SET STATUSLINE '<command>' | UNSET STATUSLINE
+            | SET MODEL '<model>' | UNSET MODEL
+            | ADD SKILL <name> FROM '<dir>'
+            | ADD SKILL <name> FROM <git-url> [BRANCH <ref>] [SUBDIR <dir>]
+            | DROP SKILL <name>
+
+mcp-target := COMMAND '<command>' [ARGS '<arg>' ...]    a stdio server
+            | URL '<url>' [TRANSPORT SSE]               a remote server (HTTP unless SSE)
+mcp-part   := ENV <key>=<value> ...          literal values; a credential needs FROM
+            | ENV <key> FROM '<ref>'
+            | HEADER '<name>' '<value>'
+            | HEADER '<name>' FROM '<ref>'
 
 read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> ] [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
@@ -165,10 +183,11 @@ lists the users.
 
 Clauses in one command apply **atomically**: all or none, validated before
 anything is written. Validation includes the secret helper's check for
-every `SET … FROM` (see Secrets). The one exception is the marketplace and
-plugin clauses, which run Claude Code's commands in order: the first
-failure stops the statement, and running it again finishes it (see
-"Plugins and the agent").
+every `SET … FROM` (see Secrets). The exception is the clauses that run
+Claude Code's own commands, the marketplace, plugin and (planned) MCP server
+clauses: they run in order, the first failure stops the statement and names
+what already ran, and running it again finishes it (see "Plugins and the
+agent", and "An agent's configuration" for replacing an MCP server).
 
 ## Where each clause writes
 
@@ -188,6 +207,10 @@ stores commands; files store the result.
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher, as `create`/`install`/`link`/`delete`/`rename`/`alias` do today |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
 | `ALTER PLAYBOOK … SET / UNSET AGENT` | the playbook's `settings.json`, `agent` |
+| `ALTER PLAYBOOK … ADD / DROP MCP SERVER` | nothing directly: runs `claude mcp add-json / remove --scope user` for the playbook; a reference also writes the playbook's `[env.refs]` (see "An agent's configuration") |
+| `ALTER PLAYBOOK … ALLOW / DENY / UNSET TOOL` | the playbook's `settings.json`, `permissions.allow` / `permissions.deny` |
+| `ALTER PLAYBOOK … SET / UNSET STATUSLINE`, `SET / UNSET MODEL` | the playbook's `settings.json`, `statusLine` / `model` |
+| `ALTER PLAYBOOK … ADD / DROP SKILL` | `<playbook>/skills/<name>` (a link or a copy) and the manifest's `[skills.<name>]` record |
 
 A key lives in exactly one of `set`, `refs`, `unset` within a layer; writing
 it to one removes it from the others.
@@ -909,6 +932,146 @@ release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
 
 These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
 form in the first cut (decided 2026-09-26).
+
+## An agent's configuration (v3.21.0, planned)
+
+Decided with the pilot on 2026-09-26: a playbook file describes a Claude Code
+agent completely, from its route to its tools. Four clause groups, on
+`ALTER PLAYBOOK` only, in the order they are built:
+
+```
+ALTER PLAYBOOK kommander-agent
+  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth'
+  ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/data'
+  ALLOW TOOL 'Bash(kommander-helper *)'
+  DENY TOOL 'Bash(rm -rf *)'
+  SET STATUSLINE '~/.claude-playbooks/kommander-agent/bin/statusline.sh'
+  SET MODEL 'claude-opus-5-5'
+  ADD SKILL release-notes FROM '~/src/skills/release-notes';
+```
+
+**One rule for all of them.** The grammar has named clauses and never raw
+settings JSON. Where Claude Code has a CLI for a setting, cpb runs it with the
+playbook as `CLAUDE_CONFIG_DIR` (its user scope), as the plugin clauses do;
+where it has none, cpb writes that one key of the playbook's `settings.json`,
+keeping every other key. A linked playbook's configuration belongs to its
+target, so these clauses are refused on it. Like the plugin clauses, a clause
+that already holds runs and writes nothing, and `APPLY --dry-run` reports what
+would change and runs nothing.
+
+### MCP servers
+
+`ADD MCP SERVER <name>` declares one server, stdio (`COMMAND … [ARGS …]`) or
+remote (`URL …`, HTTP unless `TRANSPORT SSE`), with its environment (`ENV`)
+and, for a remote server, its request headers (`HEADER`). `DROP MCP SERVER
+<name>` removes it.
+
+- **Delegated.** cpb runs `claude mcp add-json <name> '<config>' --scope user`
+  and `claude mcp remove <name> --scope user` (verified on Claude Code
+  2.1.283). The JSON is built from the clauses; it is never part of the
+  grammar. `add` refuses an existing name, so a server whose declaration
+  changed is removed and added again. That replacement is not atomic: if the
+  add fails after the remove, the old server is gone until the statement is
+  run again, which finishes it; the error says so. It is the same ordered,
+  stop-at-first-failure rule the plugin clauses follow.
+- **State.** User-scope servers live under `mcpServers` in the playbook's
+  `.claude.json`. cpb reads them from there to decide what already holds;
+  `claude mcp list` is not used, because it connects to every server to
+  check its health.
+- **Secrets never enter Claude's config.** `ENV K FROM '<ref>'` and
+  `HEADER '<name>' FROM '<ref>'` store the reference in the playbook's own
+  layer (`[env.refs]`) under a derived variable and write only `${<variable>}`
+  into the server's config. The variable is
+  `CPB_MCP_<SERVER>_<E|H>_<KEY>_<h8>`: the server name and the key upper-cased
+  with other characters as `_` (for reading), `E` for an env entry or `H` for
+  a header, and `<h8>` the first 8 hex digits of the SHA-256 of the exact
+  server name, kind and key (for uniqueness). An env entry and a header of the
+  same name, or two names that normalize alike, never share a variable, and
+  cpb records which variables each server derived, so dropping one server
+  forgets exactly its own. At launch the
+  secret helper resolves the variable into claude's environment, and Claude
+  Code expands `${…}` in an MCP server's `env` and `headers` when it starts
+  the server (verified for both, in user scope). The value is therefore in
+  the session's environment, as every `SET … FROM` value is, and in no file.
+  A header's reference resolves to the whole value: store
+  `Bearer <token>`, not the bare token.
+- **Credentials take a reference, always.** A credential-looking `ENV` key or
+  `HEADER` name (the variable rule, plus `Authorization`, `Proxy-Authorization`
+  and `Cookie`) must use `FROM '<ref>'`; a literal is refused, and `AS
+  PLAINTEXT` is not accepted on an MCP server, because the literal would be
+  written into Claude's config. Other literals are written as given.
+- `DROP MCP SERVER` also forgets the references it derived.
+- **Visible.** `SHOW PLAYBOOK --json` gains `"mcp_servers"`: name, transport,
+  command and args or URL, and env and headers as variable objects (a
+  reference shown as the reference, a credential-looking literal redacted).
+  `SHOW CREATE` writes the clauses, turning a derived placeholder back into
+  its `FROM '<ref>'`. `EXPLAIN PLAYBOOK` lists the servers and the derived
+  variables the launch supplies.
+- Not in the first cut: OAuth (`--client-id`, `--client-secret`, `claude mcp
+  login`: interactive, the pilot's to run), WebSocket servers, and the
+  `local` and `project` scopes.
+
+### Tool permissions
+
+`ALLOW TOOL '<rule>'` and `DENY TOOL '<rule>'` add rules to the playbook's
+`settings.json` `permissions.allow` / `permissions.deny`; `UNSET TOOL
+'<rule>'` removes a rule from either. A rule is Claude Code's own permission
+syntax, stored as typed (`'Bash(kommander-helper *)'`, `'Read(~/secrets/**)'`,
+`'mcp__sentry'`). Adding a rule to one list removes it from the other, so a
+rule is in at most one. Order and every rule cpb did not write are kept.
+Claude Code has no CLI for permissions, so cpb writes the key.
+`permissions.ask`, `defaultMode` and `additionalDirectories` are not in the
+first cut.
+
+`SHOW CREATE` writes every rule; `EXPLAIN PLAYBOOK` shows
+`Tools: allow …; deny …`. Kommander as an agent needs one today:
+`ALLOW TOOL 'Bash(kommander-helper *)'` (the gap example 08 names).
+
+### Status line and model
+
+- `SET STATUSLINE '<command>'` writes `statusLine = {"type": "command",
+  "command": "<command>"}`, keeping any other field of an existing
+  `statusLine` (such as `padding`); `UNSET STATUSLINE` removes it.
+- `SET MODEL '<model>'` writes `model`; `UNSET MODEL` removes it. It is the
+  playbook's default model and the lowest-priority choice: `ANTHROPIC_MODEL`
+  from an env set or `SET VAR`, a launch's `--model`, and `/model` in a
+  session all win over it. `EXPLAIN PLAYBOOK` says which one decides.
+
+Both are settings keys with no CLI. No other settings key gets a clause in
+this release.
+
+### Skills
+
+`ADD SKILL <name> FROM <source>` puts a skill directory (one that holds
+`SKILL.md`) at `<playbook>/skills/<name>`; `DROP SKILL <name>` removes it.
+How depends on the source, and that is deliberate:
+
+- **A directory is linked.** `FROM '/abs/dir'`, `'~/dir'`, or in a playbook
+  file `'./dir'`: `skills/<name>` becomes a symlink to it. A local directory
+  is a skill under development, so edits there reach the next session
+  without another `APPLY`, as `LINK` does for a playbook.
+- **A git source is copied.** `FROM <url> [BRANCH <ref>] [SUBDIR <dir>]`:
+  cpb clones it and copies the skill directory (the repository root, or
+  `SUBDIR`) into `skills/<name>`. A published skill is a pinned artifact: the
+  copy survives the source moving or disappearing, and `cpb update` refreshes
+  it from the recorded source (`cpb update <playbook>`; a bare `cpb update`
+  updates cpb itself).
+
+The source is recorded in the manifest, `[skills.<name>]` (`source`, `branch`,
+`subdir`, `mode = "link" | "copy"`). The record is what makes the skill cpb's:
+
+- `DROP SKILL` removes only a skill cpb recorded, and refuses a
+  `skills/<name>` it did not put there.
+- `cpb update <playbook>` overlays the entries the playbook's source ships,
+  which can replace `skills/` as a whole; it restores every recorded skill afterwards
+  (re-links it, or re-copies it from its source).
+- `SHOW CREATE` writes the recorded skills, and `SHOW PLAYBOOK --json` gains
+  `"skills"`.
+
+Claude Code has no CLI that installs an existing skill (`claude plugin init`
+scaffolds a new, empty skills-dir plugin under `skills/`), so cpb manages the
+directory. A skill that ships inside a
+plugin stays the plugin's: `ADD PLUGIN` brings it.
 
 ## Completion
 
