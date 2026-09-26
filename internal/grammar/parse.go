@@ -31,7 +31,7 @@ func init() {
 		"SECRET", "HELPER", "AS", "PLAINTEXT",
 		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
-		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL",
+		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 	} {
 		keywords[w] = true
 	}
@@ -712,7 +712,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	case "USE":
 		return c, p.envList(c, w)
 	case "ADD", "DROP":
-		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP") {
+		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL") {
 		case "ENV":
 			if w == "ADD" {
 				return c, p.addEnvRest(c)
@@ -724,8 +724,10 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.plugin(c, w)
 		case "MCP":
 			return c, p.mcpServer(c, w)
+		case "SKILL":
+			return c, p.skill(c, w)
 		}
-		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN or MCP SERVER")
+		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER or SKILL")
 	case "SET":
 		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL") {
 		case "AGENT":
@@ -1065,7 +1067,8 @@ func validate(s *Stmt) *Error {
 		for _, n := range c.Names {
 			what := map[Kind]string{AddMarketplace: "marketplace", DropMarketplace: "marketplace",
 				AddPlugin: "plugin", DropPlugin: "plugin", AddMCP: "MCP server", DropMCP: "MCP server",
-				AllowTool: "tool rule", DenyTool: "tool rule", UnsetTool: "tool rule"}[c.Kind]
+				AllowTool: "tool rule", DenyTool: "tool rule", UnsetTool: "tool rule",
+				AddSkill: "skill", DropSkill: "skill"}[c.Kind]
 			if what == "" {
 				what = "env set"
 			}
@@ -1441,4 +1444,90 @@ func (p *parser) oneWord(c *Clause, what, placeholder string, noSpace bool) *Err
 	}
 	c.Arg = t.Text
 	return nil
+}
+
+// Skill source kinds.
+const (
+	SkillDirectory = "directory"
+	SkillGit       = "git"
+)
+
+// SkillSource classifies an ADD SKILL source by its shape: a directory
+// ('/abs', '~/path', or in a playbook file './path' or '../path'), or a git
+// source (https://, http://, git@, file://, or github:<owner>/<repo>).
+func SkillSource(src string) (string, error) {
+	switch {
+	case strings.HasPrefix(src, "/"), strings.HasPrefix(src, "~/"), RelativeSource(src):
+		return SkillDirectory, nil
+	case strings.HasPrefix(src, "https://"), strings.HasPrefix(src, "http://"), strings.HasPrefix(src, "file://"):
+		if u, err := url.Parse(src); err != nil || u.User != nil {
+			return "", errors.New("a git URL carrying credentials is refused")
+		}
+		return SkillGit, nil
+	case strings.HasPrefix(src, "git@"):
+		return SkillGit, nil
+	case strings.HasPrefix(src, "github:"):
+		if !githubRepo.MatchString(strings.TrimPrefix(src, "github:")) {
+			return "", errors.New("a github source is 'github:<owner>/<repo>'")
+		}
+		return SkillGit, nil
+	}
+	return "", errors.New("unsupported skill source: use a directory ('/abs/dir', '~/dir', or in a playbook file './dir') or a git source (https://…, git@…, github:<owner>/<repo>)")
+}
+
+// skill reads the rest of ADD SKILL n FROM <source> [BRANCH b] [SUBDIR d]
+// or DROP SKILL n.
+func (p *parser) skill(c *Clause, verb string) *Error {
+	c.Kind = AddSkill
+	if verb == "DROP" {
+		c.Kind = DropSkill
+	}
+	if p.atEnd() {
+		p.note("<skill>")
+		return p.fail(verb + " SKILL needs <skill>")
+	}
+	t := p.toks[p.i]
+	if manifest.ValidateProfileName(t.Text) != nil {
+		return errAt(t.Pos, "invalid skill name: use letters, digits, dots, dashes and underscores")
+	}
+	p.i++
+	c.Names = []string{t.Text}
+	if verb == "DROP" {
+		return nil
+	}
+	if p.kw("FROM") == "" {
+		return p.fail("ADD SKILL needs FROM <source>")
+	}
+	src, err := p.take("FROM", "<source>")
+	if err != nil {
+		return err
+	}
+	kind, serr := SkillSource(src.Text)
+	if serr != nil {
+		return errAt(src.Pos, serr.Error())
+	}
+	if RelativeSource(src.Text) && !p.file {
+		return errAt(src.Pos, "a relative directory resolves against its playbook file; on the command line, use '/abs/dir' or '~/dir'")
+	}
+	sk := &Skill{From: src.Text}
+	c.Skill = sk
+	for {
+		switch w := p.kw("BRANCH", "SUBDIR"); w {
+		case "":
+			return nil
+		default:
+			if kind != SkillGit {
+				return errAt(p.toks[p.i-1].Pos, w+" applies to a git source; a directory is linked as it is")
+			}
+			t, err := p.take(w, "<"+strings.ToLower(w)+">")
+			if err != nil {
+				return err
+			}
+			if w == "BRANCH" {
+				sk.Branch = t.Text
+			} else {
+				sk.Subdir = t.Text
+			}
+		}
+	}
 }

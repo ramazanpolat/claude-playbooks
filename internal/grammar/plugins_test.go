@@ -54,7 +54,7 @@ func TestParsePluginErrors(t *testing.T) {
 		{w("ALTER PLAYBOOK k ADD PLUGIN a@b ADD PLUGIN a@b"), "plugin a@b appears twice"},
 		{w("ALTER PLAYBOOK k SET AGENT a UNSET AGENT"), "cannot be combined"},
 		{w("ALTER PLAYBOOK k SET AGENT a/b"), "an agent is <name> or <plugin>:<name>"},
-		{w("ALTER PLAYBOOK k ADD FOO"), "ADD takes ENV, MARKETPLACE, PLUGIN or MCP SERVER"},
+		{w("ALTER PLAYBOOK k ADD FOO"), "ADD takes ENV, MARKETPLACE, PLUGIN, MCP SERVER or SKILL"},
 		{w("ALTER DEFAULTS ADD PLUGIN a@b"), "ADD takes ENV"},
 		{w("INCLUDE base.cpb"), "INCLUDE appears only in a playbook file"},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM ./mkt"), "resolves against its playbook file"},
@@ -110,7 +110,7 @@ func TestExpectPlugins(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{w("ALTER PLAYBOOK k ADD"), []string{"ENV", "MARKETPLACE", "PLUGIN", "MCP"}},
+		{w("ALTER PLAYBOOK k ADD"), []string{"ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL"}},
 		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "AGENT", "STATUSLINE", "MODEL"}},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m"), []string{"FROM"}},
 	}

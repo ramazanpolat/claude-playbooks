@@ -149,6 +149,17 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case SetStatusline, SetModel:
 		return append(strings.Fields(string(c.Kind)), quote(c.Arg))
+	case DropSkill:
+		return []string{"DROP", "SKILL", quoteWord(c.Names[0])}
+	case AddSkill:
+		w := []string{"ADD", "SKILL", quoteWord(c.Names[0]), "FROM", quote(c.Skill.From)}
+		if c.Skill.Branch != "" {
+			w = append(w, "BRANCH", quote(c.Skill.Branch))
+		}
+		if c.Skill.Subdir != "" {
+			w = append(w, "SUBDIR", quote(c.Skill.Subdir))
+		}
+		return w
 	case DropMCP:
 		return []string{"DROP", "MCP", "SERVER", quoteWord(c.Names[0])}
 	case AddMCP:

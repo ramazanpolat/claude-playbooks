@@ -267,6 +267,19 @@ type Manifest struct {
 	// derived for its secret references, so dropping the server forgets
 	// exactly those (docs/reference/cli-grammar.md, "MCP servers").
 	MCP map[string]*MCPRecord `toml:"mcp,omitempty"`
+
+	// Skills records, per skill a statement added, where it came from and
+	// how it was put in place, so DROP SKILL removes only what cpb added and
+	// update restores it (docs/reference/cli-grammar.md, "Skills").
+	Skills map[string]*SkillRecord `toml:"skills,omitempty"`
+}
+
+// SkillRecord is one skill cpb put at <config>/skills/<name>.
+type SkillRecord struct {
+	Source string `toml:"source"`
+	Branch string `toml:"branch,omitempty"`
+	Subdir string `toml:"subdir,omitempty"`
+	Mode   string `toml:"mode"` // "link" (a directory) or "copy" (a git source)
 }
 
 // MCPRecord is what cpb derived for one MCP server.
@@ -378,6 +391,22 @@ func Exists(dir string) bool {
 // validate checks structural invariants. Path existence is checked by callers
 // that have access to the playbook directory.
 func (m *Manifest) validate(path string) error {
+	// Record names become path segments (skills/<name>) and command
+	// arguments: a name from a hand-written or source-shipped manifest is
+	// held to the same rule the grammar applies, never trusted.
+	for name, r := range m.Skills {
+		if ValidateProfileName(name) != nil {
+			return fmt.Errorf("invalid %s at %s: [skills] entry %q is not a valid skill name", FileName, path, name)
+		}
+		if r != nil && r.Mode != "link" && r.Mode != "copy" {
+			return fmt.Errorf("invalid %s at %s: [skills.%s] mode must be \"link\" or \"copy\"", FileName, path, name)
+		}
+	}
+	for name := range m.MCP {
+		if ValidateProfileName(name) != nil {
+			return fmt.Errorf("invalid %s at %s: [mcp] entry %q is not a valid MCP server name", FileName, path, name)
+		}
+	}
 	if m.Sandbox != nil {
 		if err := m.Sandbox.validate(); err != nil {
 			return fmt.Errorf("invalid %s at %s: %w", FileName, path, err)
@@ -616,6 +645,28 @@ func Write(dir string, m *Manifest) error {
 		for _, n := range names {
 			fmt.Fprintf(&b, "\n[mcp.%s]\n", QuoteTOML(n))
 			writeTOMLList(&b, "vars", m.MCP[n].Vars)
+		}
+	}
+	// [skills.<name>]: the skills cpb added.
+	if len(m.Skills) > 0 {
+		names := make([]string, 0, len(m.Skills))
+		for n, r := range m.Skills {
+			if r != nil {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			r := m.Skills[n]
+			fmt.Fprintf(&b, "\n[skills.%s]\n", QuoteTOML(n))
+			fmt.Fprintf(&b, "source = %s\n", QuoteTOML(r.Source))
+			if r.Branch != "" {
+				fmt.Fprintf(&b, "branch = %s\n", QuoteTOML(r.Branch))
+			}
+			if r.Subdir != "" {
+				fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(r.Subdir))
+			}
+			fmt.Fprintf(&b, "mode = %s\n", QuoteTOML(r.Mode))
 		}
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
