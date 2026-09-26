@@ -652,10 +652,12 @@ func launchModel(pb *playbook.Playbook, vars []varJSON) *modelJSON {
 		switch {
 		case v.Value != nil:
 			return &modelJSON{Name: *v.Value, From: "ANTHROPIC_MODEL"}
-		case v.Ref != nil, v.Redacted:
-			// Set by reference (or withheld): it still decides, and its
-			// value is not shown.
+		case v.Ref != nil:
+			// Set by reference: it still decides; its value is not shown.
 			return &modelJSON{Name: "(by reference)", From: "ANTHROPIC_MODEL"}
+		case v.Redacted:
+			// A literal withheld from output (never with its Value set).
+			return &modelJSON{Name: "(withheld)", From: "ANTHROPIC_MODEL"}
 		}
 	}
 	if m := describePlaybook(pb).Model; m != nil {
