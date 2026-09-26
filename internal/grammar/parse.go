@@ -31,6 +31,7 @@ func init() {
 		"SECRET", "HELPER", "AS", "PLAINTEXT",
 		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
+		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL",
 	} {
 		keywords[w] = true
 	}
@@ -151,7 +152,7 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIBE"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALIAS", "NO"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALIAS", "NO", "ALLOW", "DENY"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
 	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "ALIAS", "NO", "SANDBOX"}
 )
@@ -726,13 +727,30 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN or MCP SERVER")
 	case "SET":
-		switch p.kw("VAR", "AGENT") {
+		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL") {
 		case "AGENT":
 			return c, p.agent(c)
+		case "STATUSLINE":
+			c.Kind = SetStatusline
+			return c, p.oneWord(c, "SET STATUSLINE", "'<command>'", false)
+		case "MODEL":
+			c.Kind = SetModel
+			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR or AGENT: SET VAR <key>=<value>, SET AGENT '<agent>'")
+			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE or MODEL")
 		}
 		return c, p.set(c)
+	case "ALLOW", "DENY":
+		if p.kw("TOOL") == "" {
+			return nil, p.fail(w + " takes TOOL: " + w + " TOOL '<rule>'")
+		}
+		c.Kind = AllowTool
+		if w == "DENY" {
+			c.Kind = DenyTool
+		}
+		rules, err := p.toolRules(w + " TOOL")
+		c.Names = rules
+		return c, err
 	case "BLOCK":
 		if p.kw("VAR") == "" {
 			return nil, p.fail("BLOCK inside ALTER PLAYBOOK takes VAR: BLOCK VAR <key>")
@@ -742,12 +760,23 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		switch p.kw("VAR", "AGENT") {
+		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL") {
 		case "AGENT":
 			c.Kind = UnsetAgent
 			return c, nil
+		case "STATUSLINE":
+			c.Kind = UnsetStatusline
+			return c, nil
+		case "MODEL":
+			c.Kind = UnsetModel
+			return c, nil
+		case "TOOL":
+			c.Kind = UnsetTool
+			rules, err := p.toolRules("UNSET TOOL")
+			c.Names = rules
+			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR or AGENT: UNSET VAR <key>, UNSET AGENT")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE or MODEL")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -1016,6 +1045,7 @@ func validate(s *Stmt) *Error {
 		Describe: true, UseEnv: true, RenameTo: true,
 		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
+		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 	}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
@@ -1034,7 +1064,8 @@ func validate(s *Stmt) *Error {
 		}
 		for _, n := range c.Names {
 			what := map[Kind]string{AddMarketplace: "marketplace", DropMarketplace: "marketplace",
-				AddPlugin: "plugin", DropPlugin: "plugin", AddMCP: "MCP server", DropMCP: "MCP server"}[c.Kind]
+				AddPlugin: "plugin", DropPlugin: "plugin", AddMCP: "MCP server", DropMCP: "MCP server",
+				AllowTool: "tool rule", DenyTool: "tool rule", UnsetTool: "tool rule"}[c.Kind]
 			if what == "" {
 				what = "env set"
 			}
@@ -1047,7 +1078,8 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
 		}
 	}
-	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent}}
+	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
+		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]
@@ -1383,5 +1415,30 @@ func (p *parser) mcpHeader(m *MCP) *Error {
 	}
 	p.quiet = true
 	m.Headers = append(m.Headers, Var{Key: n.Text, Value: v.Text})
+	return nil
+}
+
+// toolRules reads the rules of ALLOW / DENY / UNSET TOOL: Claude Code's own
+// permission syntax, stored as typed (quote a rule with spaces).
+func (p *parser) toolRules(what string) ([]string, *Error) {
+	return p.list(what, "'<rule>'", func(t Token) *Error {
+		if t.Text == "" || strings.ContainsAny(t.Text, "\r\n") {
+			return errAt(t.Pos, what+" takes a rule such as 'Bash(git status)' or 'mcp__server'")
+		}
+		return nil
+	})
+}
+
+// oneWord reads the one argument of SET STATUSLINE / SET MODEL; a model id
+// has no whitespace.
+func (p *parser) oneWord(c *Clause, what, placeholder string, noSpace bool) *Error {
+	t, err := p.take(what, placeholder)
+	if err != nil {
+		return err
+	}
+	if t.Text == "" || strings.ContainsAny(t.Text, "\r\n") || (noSpace && strings.ContainsAny(t.Text, " \t")) {
+		return errAt(t.Pos, what+" needs "+placeholder)
+	}
+	c.Arg = t.Text
 	return nil
 }

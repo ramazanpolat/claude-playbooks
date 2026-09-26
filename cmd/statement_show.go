@@ -58,6 +58,9 @@ type playbookJSON struct {
 	Plugins      []pluginJSON      `json:"plugins"`
 	Agent        *string           `json:"agent"`
 	MCPServers   []mcpServerJSON   `json:"mcp_servers"`
+	Tools        toolsJSON         `json:"tools"`
+	Statusline   *string           `json:"statusline"`
+	Model        *string           `json:"model"`
 }
 
 type envJSON struct {
@@ -84,6 +87,8 @@ type explainJSON struct {
 	SecretHelper *helperJSON `json:"secret_helper"`
 	Plugins      []string    `json:"plugins"` // enabled in the playbook's settings.json
 	MCPServers   []string    `json:"mcp_servers"`
+	Tools        toolsJSON   `json:"tools"`
+	Model        *modelJSON  `json:"model"`
 	Agent        *agentJSON  `json:"agent"`
 }
 
@@ -191,6 +196,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		if mps, plugins, agent, err := pluginState(sf.Root); err == nil {
 			v.Marketplaces, v.Plugins, v.Agent = mps, plugins, agent
 		}
+		v.Tools, v.Statusline, v.Model = settingsExtras(sf.Root)
 	}
 	root := pb.RootPath
 	if root == "" {
@@ -314,6 +320,15 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.
+	if len(v.Tools.Allow)+len(v.Tools.Deny) > 0 {
+		rows = append(rows, [2]string{"Tools", toolsLine(v.Tools)})
+	}
+	if v.Statusline != nil {
+		rows = append(rows, [2]string{"Status line", *v.Statusline})
+	}
+	if v.Model != nil {
+		rows = append(rows, [2]string{"Model", *v.Model})
+	}
 	if len(v.MCPServers) > 0 {
 		names := make([]string, len(v.MCPServers))
 		for i, m := range v.MCPServers {
@@ -478,13 +493,15 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	}
 	plugins, agent := launchPlugins(pb)
 	if st.JSON {
-		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb)})
+		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
+			Tools: describePlaybook(pb).Tools, Model: launchModel(pb, vars)})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
 		fmt.Printf("\nSecret helper: %s\n", humanHelper(helper))
 		printLaunchPlugins(plugins, agent)
 		printMCPNames(mcpNames(pb))
+		printToolsAndModel(pb, vars)
 		return nil
 	}
 	t := newTable("VARIABLE", "VALUE", "FROM").flexible(1)
@@ -509,6 +526,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	}
 	printLaunchPlugins(plugins, agent)
 	printMCPNames(mcpNames(pb))
+	printToolsAndModel(pb, vars)
 	return nil
 }
 
@@ -605,5 +623,59 @@ func mcpNames(pb *playbook.Playbook) []string {
 func printMCPNames(names []string) {
 	if len(names) > 0 {
 		fmt.Printf("MCP servers: %s\n", strings.Join(names, ", "))
+	}
+}
+
+func toolsLine(t toolsJSON) string {
+	var parts []string
+	if len(t.Allow) > 0 {
+		parts = append(parts, "allow "+strings.Join(t.Allow, ", "))
+	}
+	if len(t.Deny) > 0 {
+		parts = append(parts, "deny "+strings.Join(t.Deny, ", "))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// modelJSON is the model a launch starts with and what decides it: an
+// ANTHROPIC_MODEL a layer sets wins over the settings model.
+type modelJSON struct {
+	Name string `json:"name"`
+	From string `json:"from"` // "ANTHROPIC_MODEL" or "playbook settings"
+}
+
+func launchModel(pb *playbook.Playbook, vars []varJSON) *modelJSON {
+	for _, v := range vars {
+		if v.Key != "ANTHROPIC_MODEL" || v.Blocked {
+			continue
+		}
+		switch {
+		case v.Value != nil:
+			return &modelJSON{Name: *v.Value, From: "ANTHROPIC_MODEL"}
+		case v.Ref != nil:
+			// Set by reference: it still decides; its value is not shown.
+			return &modelJSON{Name: "(by reference)", From: "ANTHROPIC_MODEL"}
+		case v.Redacted:
+			// A literal withheld from output (never with its Value set).
+			return &modelJSON{Name: "(withheld)", From: "ANTHROPIC_MODEL"}
+		}
+	}
+	if m := describePlaybook(pb).Model; m != nil {
+		return &modelJSON{Name: *m, From: "playbook settings"}
+	}
+	return nil
+}
+
+func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
+	v := describePlaybook(pb)
+	if len(v.Tools.Allow)+len(v.Tools.Deny) > 0 {
+		fmt.Printf("Tools: %s\n", toolsLine(v.Tools))
+	}
+	if m := launchModel(pb, vars); m != nil {
+		line := fmt.Sprintf("Model: %s (%s)", m.Name, m.From)
+		if m.From == "ANTHROPIC_MODEL" && v.Model != nil {
+			line += "; the settings model " + *v.Model + " is overridden"
+		}
+		fmt.Println(line + "; a launch's --model and /model still win")
 	}
 }

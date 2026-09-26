@@ -1084,7 +1084,7 @@ would change and runs nothing.
 
 ### MCP servers
 
-Built (v3.21.0); the other groups of this section are still planned.
+Built (v3.21.0).
 
 `ADD MCP SERVER <name>` declares one server, stdio (`COMMAND … [ARGS …]`) or
 remote (`URL …`, HTTP unless `TRANSPORT SSE`), with its environment (`ENV`)
@@ -1138,6 +1138,8 @@ and, for a remote server, its request headers (`HEADER`). `DROP MCP SERVER
 
 ### Tool permissions
 
+Built (v3.21.0).
+
 `ALLOW TOOL '<rule>'` and `DENY TOOL '<rule>'` add rules to the playbook's
 `settings.json` `permissions.allow` / `permissions.deny`; `UNSET TOOL
 '<rule>'` removes a rule from either. A rule is Claude Code's own permission
@@ -1153,6 +1155,8 @@ first cut.
 `ALLOW TOOL 'Bash(kommander-helper *)'` (the gap example 08 names).
 
 ### Status line and model
+
+Built (v3.21.0).
 
 - `SET STATUSLINE '<command>'` writes `statusLine = {"type": "command",
   "command": "<command>"}`, keeping any other field of an existing

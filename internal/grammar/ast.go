@@ -73,6 +73,16 @@ const (
 	// MCP servers (ALTER PLAYBOOK only): claude mcp add-json / remove.
 	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, ENV …, HEADER …
 	DropMCP Kind = "DROP MCP SERVER" // DROP MCP SERVER n
+
+	// Tool permissions, status line and model (ALTER PLAYBOOK only): keys
+	// of the playbook's settings.json, which Claude Code has no CLI for.
+	AllowTool       Kind = "ALLOW TOOL"       // ALLOW TOOL '<rule>' ...
+	DenyTool        Kind = "DENY TOOL"        // DENY TOOL '<rule>' ...
+	UnsetTool       Kind = "UNSET TOOL"       // UNSET TOOL '<rule>' ...
+	SetStatusline   Kind = "SET STATUSLINE"   // SET STATUSLINE '<command>'
+	UnsetStatusline Kind = "UNSET STATUSLINE" // UNSET STATUSLINE
+	SetModel        Kind = "SET MODEL"        // SET MODEL '<model>'
+	UnsetModel      Kind = "UNSET MODEL"      // UNSET MODEL
 )
 
 // MCP is one ADD MCP SERVER declaration: a stdio server (Command, Args) or

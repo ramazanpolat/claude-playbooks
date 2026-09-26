@@ -25,7 +25,7 @@ type dryState struct {
 	// would have installed and pinned, and, for a playbook renamed earlier,
 	// the config directory it still has under its old name.
 	worlds     map[string]*pluginWorld
-	agents     map[string]*string // nil: unset
+	settings   map[string][]byte // settings.json as earlier statements left it (agent, tools, status line, model)
 	configDirs map[string]string
 
 	// MCP servers, per playbook name: the servers earlier statements would
@@ -40,7 +40,7 @@ func newDryState() *dryState {
 		playbooks:  map[string]bool{},
 		pbEnvs:     map[string]*manifest.Env{},
 		worlds:     map[string]*pluginWorld{},
-		agents:     map[string]*string{},
+		settings:   map[string][]byte{},
 		configDirs: map[string]string{},
 		mcp:        map[string]map[string]json.RawMessage{},
 		mcpRecords: map[string]map[string]*manifest.MCPRecord{},
@@ -90,7 +90,7 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 	if !exists {
 		delete(r.dry.pbEnvs, name)
 		delete(r.dry.worlds, name)
-		delete(r.dry.agents, name)
+		delete(r.dry.settings, name)
 		delete(r.dry.configDirs, name)
 		delete(r.dry.mcp, name)
 		delete(r.dry.mcpRecords, name)
@@ -107,7 +107,7 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 		cfg = r.dry.configDirs[from]
 	}
 	w, wok := r.dry.worlds[from]
-	a, aok := r.dry.agents[from]
+	a, aok := r.dry.settings[from]
 	ms, msok := r.dry.mcp[from]
 	mr, mrok := r.dry.mcpRecords[from]
 	r.recordPlaybook(from, false)
@@ -122,7 +122,7 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 		r.dry.mcpRecords[to] = mr
 	}
 	if aok {
-		r.dry.agents[to] = a
+		r.dry.settings[to] = a
 	}
 	if cfg != "" {
 		r.dry.configDirs[to] = cfg
