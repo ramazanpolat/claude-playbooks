@@ -2,8 +2,9 @@
 
 Status: **implemented, v3.20.0.** Decided with the pilot on 2026-09-25/26.
 `SELECT` is not planned: it is superseded by the `--json` + clickhouse-local
-recipe ([guide](../guides/query-with-sql.md)); everything else on this page
-is built.
+recipe ([guide](../guides/query-with-sql.md)). Sections marked **planned**
+(v3.21.0) are specified and not built yet; everything else on this page is
+built.
 
 ## Why
 
@@ -111,7 +112,7 @@ pb-clause  := set-clause
             | DROP PLUGIN <plugin>@<marketplace>
             | SET AGENT '<agent>'
             | UNSET AGENT
-            | ADD MCP SERVER <name> mcp-target [mcp-part ...]   v3.21.0, see "An agent's configuration"
+            | ADD MCP SERVER <name> mcp-target [mcp-part ...]   planned (v3.21.0), see "An agent's configuration"
             | DROP MCP SERVER <name>
             | ALLOW TOOL '<rule>' ...      settings.json permissions.allow
             | DENY TOOL '<rule>' ...       settings.json permissions.deny
@@ -124,9 +125,9 @@ pb-clause  := set-clause
 
 mcp-target := COMMAND '<command>' [ARGS '<arg>' ...]    a stdio server
             | URL '<url>' [TRANSPORT SSE]               a remote server (HTTP unless SSE)
-mcp-part   := ENV <key>=<value> ... [AS PLAINTEXT]
+mcp-part   := ENV <key>=<value> ...          literal values; a credential needs FROM
             | ENV <key> FROM '<ref>'
-            | HEADER '<name>' '<value>' [AS PLAINTEXT]
+            | HEADER '<name>' '<value>'
             | HEADER '<name>' FROM '<ref>'
 
 read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> ] [--json]
@@ -182,10 +183,11 @@ lists the users.
 
 Clauses in one command apply **atomically**: all or none, validated before
 anything is written. Validation includes the secret helper's check for
-every `SET … FROM` (see Secrets). The one exception is the marketplace and
-plugin clauses, which run Claude Code's commands in order: the first
-failure stops the statement, and running it again finishes it (see
-"Plugins and the agent").
+every `SET … FROM` (see Secrets). The exception is the clauses that run
+Claude Code's own commands, the marketplace, plugin and (planned) MCP server
+clauses: they run in order, the first failure stops the statement and names
+what already ran, and running it again finishes it (see "Plugins and the
+agent", and "An agent's configuration" for replacing an MCP server).
 
 ## Where each clause writes
 
@@ -931,7 +933,7 @@ release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
 These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
 form in the first cut (decided 2026-09-26).
 
-## An agent's configuration (v3.21.0)
+## An agent's configuration (v3.21.0, planned)
 
 Decided with the pilot on 2026-09-26: a playbook file describes a Claude Code
 agent completely, from its route to its tools. Four clause groups, on
@@ -968,24 +970,36 @@ and, for a remote server, its request headers (`HEADER`). `DROP MCP SERVER
   and `claude mcp remove <name> --scope user` (verified on Claude Code
   2.1.283). The JSON is built from the clauses; it is never part of the
   grammar. `add` refuses an existing name, so a server whose declaration
-  changed is removed and added again; if the add then fails, running the
-  statement again finishes it.
+  changed is removed and added again. That replacement is not atomic: if the
+  add fails after the remove, the old server is gone until the statement is
+  run again, which finishes it; the error says so. It is the same ordered,
+  stop-at-first-failure rule the plugin clauses follow.
 - **State.** User-scope servers live under `mcpServers` in the playbook's
   `.claude.json`. cpb reads them from there to decide what already holds;
   `claude mcp list` is not used, because it connects to every server to
   check its health.
 - **Secrets never enter Claude's config.** `ENV K FROM '<ref>'` and
   `HEADER '<name>' FROM '<ref>'` store the reference in the playbook's own
-  layer (`[env.refs]`) under a derived variable,
-  `CPB_MCP_<SERVER>_<KEY>` (upper-case, other characters as `_`), and write
-  only `${CPB_MCP_<SERVER>_<KEY>}` into the server's config. At launch the
+  layer (`[env.refs]`) under a derived variable and write only `${<variable>}`
+  into the server's config. The variable is
+  `CPB_MCP_<SERVER>_<E|H>_<KEY>_<h8>`: the server name and the key upper-cased
+  with other characters as `_` (for reading), `E` for an env entry or `H` for
+  a header, and `<h8>` the first 8 hex digits of the SHA-256 of the exact
+  server name, kind and key (for uniqueness). An env entry and a header of the
+  same name, or two names that normalize alike, never share a variable, and
+  cpb records which variables each server derived, so dropping one server
+  forgets exactly its own. At launch the
   secret helper resolves the variable into claude's environment, and Claude
   Code expands `${…}` in an MCP server's `env` and `headers` when it starts
   the server (verified for both, in user scope). The value is therefore in
   the session's environment, as every `SET … FROM` value is, and in no file.
   A header's reference resolves to the whole value: store
-  `Bearer <token>`, not the bare token. A credential-looking literal is
-  refused unless `AS PLAINTEXT`, as for variables.
+  `Bearer <token>`, not the bare token.
+- **Credentials take a reference, always.** A credential-looking `ENV` key or
+  `HEADER` name (the variable rule, plus `Authorization`, `Proxy-Authorization`
+  and `Cookie`) must use `FROM '<ref>'`; a literal is refused, and `AS
+  PLAINTEXT` is not accepted on an MCP server, because the literal would be
+  written into Claude's config. Other literals are written as given.
 - `DROP MCP SERVER` also forgets the references it derived.
 - **Visible.** `SHOW PLAYBOOK --json` gains `"mcp_servers"`: name, transport,
   command and args or URL, and env and headers as variable objects (a
@@ -1040,15 +1054,16 @@ How depends on the source, and that is deliberate:
   cpb clones it and copies the skill directory (the repository root, or
   `SUBDIR`) into `skills/<name>`. A published skill is a pinned artifact: the
   copy survives the source moving or disappearing, and `cpb update` refreshes
-  it from the recorded source.
+  it from the recorded source (`cpb update <playbook>`; a bare `cpb update`
+  updates cpb itself).
 
 The source is recorded in the manifest, `[skills.<name>]` (`source`, `branch`,
 `subdir`, `mode = "link" | "copy"`). The record is what makes the skill cpb's:
 
 - `DROP SKILL` removes only a skill cpb recorded, and refuses a
   `skills/<name>` it did not put there.
-- `cpb update` overlays the entries the playbook's source ships, which can
-  replace `skills/` as a whole; it restores every recorded skill afterwards
+- `cpb update <playbook>` overlays the entries the playbook's source ships,
+  which can replace `skills/` as a whole; it restores every recorded skill afterwards
   (re-links it, or re-copies it from its source).
 - `SHOW CREATE` writes the recorded skills, and `SHOW PLAYBOOK --json` gains
   `"skills"`.
