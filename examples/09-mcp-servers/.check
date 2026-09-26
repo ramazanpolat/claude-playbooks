@@ -5,6 +5,7 @@ grep -q 'keychain:pilot/sentry-auth' "$cfg/.playbook"
 cpb EXPLAIN PLAYBOOK researcher | grep -q sentry
 # DROP MCP SERVER removes the server and forgets its reference.
 cpb ALTER PLAYBOOK researcher DROP MCP SERVER sentry
+test -f "$cfg/.playbook" && test -f "$cfg/.claude.json"   # the negative greps below need both
 if grep -q '"sentry"' "$cfg/.claude.json"; then echo "sentry still configured"; exit 1; fi
 if grep -q 'keychain:pilot/sentry-auth' "$cfg/.playbook"; then echo "reference kept"; exit 1; fi
 grep -q '"files"' "$cfg/.claude.json"
