@@ -8,8 +8,10 @@ without a server: pipe one into the other.
 cpb SHOW PLAYBOOKS --json | ch local --input-format JSONEachRow -q "SELECT … FROM table"
 ```
 
-`--json` prints an array of objects, which `JSONEachRow` reads as rows of a
-table named `table`. Nested fields (`source`, `vars`, `layer`, `plugins`) arrive
+The plural reads (`SHOW PLAYBOOKS`, `SHOW ENVS`) print an array of objects and
+the singular ones (`SHOW PLAYBOOK <name>`, `SHOW ENV <name>`, `SHOW DEFAULTS`,
+`EXPLAIN PLAYBOOK <name>`) print one object; `JSONEachRow` reads either, as
+the rows of a table named `table` (one row for a single object). Nested fields (`source`, `vars`, `layer`, `plugins`) arrive
 as nested values, so `arrayJoin`, `ARRAY JOIN` and dotted names work.
 Credential-looking values are masked in `--json`, so no secret reaches the
 query.
@@ -60,8 +62,7 @@ cpb SHOW PLAYBOOKS --json | ch local --input-format JSONEachRow -q "SELECT * FRO
 The `--json` objects are the contract
 ([reference, Output](../reference/cli-grammar.md#output)): fields may be
 added, and a field never changes meaning within a major version. Parse
-them, never the human form. The shapes are `SHOW PLAYBOOK(S)`, `SHOW ENV(S)`,
-`SHOW DEFAULTS` and `EXPLAIN PLAYBOOK`.
+them, never the human form.
 
 A built-in `SELECT` was specified and then dropped in favour of this
 (pilot, 2026-09-26): ClickHouse already offers the whole language.

@@ -82,8 +82,9 @@ cpb DROP PLAYBOOK scratch --yes
 - **Playbook files:** `APPLY` validates every statement before writing
   anything, runs them in order, and applying again changes nothing.
   `INCLUDE` stacks files.
-- **Plugins and the agent:** `ADD MARKETPLACE`, `ADD PLUGIN` and `SET AGENT`
-  run Claude Code's own `claude plugin` commands for that playbook only.
+- **Plugins and the agent:** `ADD MARKETPLACE` and `ADD PLUGIN` run Claude
+  Code's own `claude plugin` commands for that playbook only; `SET AGENT` pins
+  the main-thread agent in the playbook's `settings.json`.
 
 Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
 `cpb run <name>`, `cpb start <dir>`, `cpb update`, `cpb auth status`, and

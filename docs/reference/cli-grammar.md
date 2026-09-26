@@ -581,7 +581,8 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 state ([guide](../guides/query-with-sql.md)). `--json` stays the contract.
 The text below is kept as the record of what was specified.
 
-Decided with the pilot on 2026-09-26; implemented after v3.20.0 ships.
+(Historical: it was decided with the pilot on 2026-09-26 and planned for the
+release after v3.20.0, then withdrawn the same day.)
 `SELECT` queries the same state `SHOW` prints, as tables. **Files stay the
 only store:** each query builds its tables from the playbooks, env sets and
 DEFAULTS as they are on disk at that moment, and nothing is cached or kept.
