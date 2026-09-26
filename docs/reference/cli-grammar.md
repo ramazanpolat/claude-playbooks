@@ -976,9 +976,12 @@ statements after it, as `USE <db>` does in SQL. It is a directive, like
 - An included file starts with the including file's target at the point of
   the `INCLUDE`, and a `USE PLAYBOOK` inside it applies to that file and the
   files it includes; the including file's target resumes after the `INCLUDE`.
-- **"A file reached twice runs once" is per target.** A recipe included for
-  two targets runs for each; included twice for the same target, it runs
-  once.
+- **"A file reached twice runs once" is per target, for the statements that
+  depend on it.** A file's name-less statements run once per target it is
+  reached under; everything else in it (statements that name their object,
+  env sets, `DEFAULTS`) runs at its first occurrence only. So a shared file
+  that creates an env set and then alters "the" playbook, included for two
+  targets, creates the env set once and applies its recipe to both.
 
 ### Which target a name-less statement gets
 
@@ -1007,7 +1010,11 @@ recipe form (`SHOW CREATE … --recipe`) may come later.
 `TO '<dir>'` targets a Claude Code config directory that is not a playbook,
 for example `~/.claude`. A target is a directory when it contains `/` or
 starts with `~` or `.`; a playbook name never does. The directory must exist;
-cpb creates nothing but what the clauses write.
+cpb creates nothing but what the clauses write. **A directory that is a
+registered playbook is that playbook:** cpb resolves the path (symlinks
+followed) and, when it is a playbook's directory or config directory, applies
+with that playbook's semantics and safeguards (its manifest, its launcher,
+the refusals on a linked playbook), never the plain-directory rules below.
 
 Only the clauses that are Claude Code's own configuration apply, because
 nothing of cpb runs at that directory's launches:
@@ -1033,7 +1040,9 @@ Refused, each with its reason:
 
 **Safety.** Before its first write to a directory in a run, cpb copies that
 directory's `settings.json` to `settings.json.cpb-backup-<YYYY-MM-DD-HH_MM_SS>`
-beside it, and `.claude.json` the same way before an MCP change. Applying to a
+beside it, and `.claude.json` the same way before an MCP change. A file that
+does not exist yet has nothing to back up: the clause creates it, and the dry
+run says which files would be created rather than backed up. Applying to a
 directory that is not a playbook asks for confirmation on a terminal, and
 `--yes` gives it (as for `DROP PLAYBOOK`); without a terminal and without
 `--yes` it is refused before anything is written. `--dry-run` works as
