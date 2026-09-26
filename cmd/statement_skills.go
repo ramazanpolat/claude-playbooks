@@ -55,10 +55,11 @@ func (p *skillPlan) steps() []pluginStep {
 }
 
 // recordSkillOp is the record step after a skill operation: it updates
-// cur, puts it in the manifest and writes it with write. When the write
-// fails, an added skill is taken away again, so the disk never holds a
-// skill cpb has no record of and running the statement again adds it.
-func recordSkillOp(op *skillOp, cur map[string]*manifest.SkillRecord, m *manifest.Manifest, write func() error) error {
+// cur and writes the records with write (the manifest, or a directory's
+// state). When the write fails, an added skill is taken away again, so the
+// disk never holds a skill cpb has no record of and running the statement
+// again adds it.
+func recordSkillOp(op *skillOp, cur map[string]*manifest.SkillRecord, write func(map[string]*manifest.SkillRecord) error) error {
 	prev, had := cur[op.name]
 	if op.rec == nil {
 		delete(cur, op.name)
@@ -66,8 +67,7 @@ func recordSkillOp(op *skillOp, cur map[string]*manifest.SkillRecord, m *manifes
 		c := *op.rec
 		cur[op.name] = &c
 	}
-	m.Skills = cloneSkills(cur)
-	err := write()
+	err := write(cloneSkills(cur))
 	if err == nil {
 		return nil
 	}
@@ -76,7 +76,6 @@ func recordSkillOp(op *skillOp, cur map[string]*manifest.SkillRecord, m *manifes
 	} else {
 		delete(cur, op.name)
 	}
-	m.Skills = cloneSkills(cur)
 	err = fmt.Errorf("cannot record skill %s: %w", op.name, err)
 	if op.undo != nil {
 		if uerr := op.undo(); uerr != nil {

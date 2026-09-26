@@ -140,6 +140,9 @@ type Stmt struct {
 	// playbook is decided when the file is applied (APPLY … TO, USE
 	// PLAYBOOK).
 	Recipe bool
+	// Dir: a recipe applied TO a plain Claude Code config directory (not
+	// a playbook), set by APPLY; Name is then empty.
+	Dir    string
 	DryRun bool // APPLY <file> --dry-run
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets

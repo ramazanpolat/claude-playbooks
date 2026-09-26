@@ -102,6 +102,9 @@ type stmtRun struct {
 	note    string      // a dry run's detail, e.g. what a drop would delete
 	warning string      // reported, never an error: e.g. a source that drifted
 	helper  helperState // in a dry run: the helper earlier statements would set
+	// backedUp marks the files of plain config directories a run already
+	// backed up (TO '<dir>'): each is backed up once, before its first write.
+	backedUp map[string]bool
 }
 
 // checkRefs checks a statement's references against the helper in effect
@@ -119,6 +122,8 @@ func (r *stmtRun) say(head string, lines []string) {
 
 func execStatement(r *stmtRun, st *grammar.Stmt) error {
 	switch {
+	case st.Dir != "":
+		return dirStatement(r, st)
 	case st.Object == grammar.Env && st.Write():
 		return envStatement(r, st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Defaults:
@@ -578,10 +583,18 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if cur == nil {
 			cur = map[string]*manifest.SkillRecord{}
 		}
-		write := func() error { return manifest.Write(pb.RootPath, m) }
+		write := func(recs map[string]*manifest.SkillRecord) error {
+			prev := m.Skills
+			m.Skills = recs
+			if err := manifest.Write(pb.RootPath, m); err != nil {
+				m.Skills = prev
+				return err
+			}
+			return nil
+		}
 		for i := range skills.ops {
 			op := &skills.ops[i]
-			op.record = func() error { return recordSkillOp(op, cur, m, write) }
+			op.record = func() error { return recordSkillOp(op, cur, write) }
 		}
 	}
 	ran, err := runPluginSteps(pb.Path, steps)

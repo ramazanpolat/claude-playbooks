@@ -26,7 +26,7 @@ func runApply(st *grammar.Stmt) error {
 		if err != nil {
 			return fmt.Errorf("TO %s: %w\nnothing was written", st.Target, err)
 		}
-		l.to = name
+		l.to, l.toShown = name, st.Target
 	}
 	for _, path := range st.Files {
 		l.root(path)
@@ -40,6 +40,17 @@ func runApply(st *grammar.Stmt) error {
 	stmts, err := l.withTargetsCreated()
 	if err != nil {
 		return err
+	}
+	// A plain config directory is not a playbook: applying to one is
+	// confirmed on a terminal, or by --yes, before anything runs.
+	if strings.HasPrefix(l.to, dirMark) && !st.DryRun && !st.Yes {
+		dir := strings.TrimPrefix(l.to, dirMark)
+		if !(isTerminal(os.Stdin) && isTerminal(os.Stdout)) {
+			return fmt.Errorf("TO %s is a Claude Code config directory, not a playbook: confirm with --yes (review with --dry-run first)\nnothing was written", dir)
+		}
+		if !confirm(fmt.Sprintf("Apply to %s, a Claude Code config directory that is not a playbook? Its settings are backed up first. [y/N] ", dir)) {
+			return fmt.Errorf("not confirmed; nothing was written")
+		}
 	}
 
 	// A file never consents to DROP PLAYBOOK on its own: it deletes an
@@ -71,6 +82,14 @@ func runApply(st *grammar.Stmt) error {
 	}
 	for _, x := range stmts {
 		s := x.s
+		if s.Dir != "" {
+			// A plain directory: its refusals are checked here, before any
+			// write; it takes no reference to check.
+			if err := validateDirClauses(s); err != nil {
+				return fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err)
+			}
+			continue
+		}
 		if s.Object == grammar.Env && s.Verb == grammar.Drop {
 			envExists[s.Name] = false
 			continue
@@ -188,7 +207,8 @@ type applyLoader struct {
 	// seenFor marks a file reached for a target: its name-less statements
 	// run once per target, everything else once (docs: "Targets").
 	seenFor  map[string]bool
-	to       string // APPLY … TO: the target of every name-less statement
+	to       string // APPLY … TO: the target of every name-less statement (dirMark+path for a directory)
+	toShown  string // TO as written, for messages
 	warnings []string
 	errs     []error
 }
@@ -270,7 +290,7 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink, target stri
 	for _, s := range stmts {
 		if s.Verb == grammar.Use {
 			if l.to != "" {
-				l.warnings = append(l.warnings, fmt.Sprintf("%s:%d: USE PLAYBOOK %s is ignored: TO %s sets the target", name, s.Pos.Line, s.Name, l.to))
+				l.warnings = append(l.warnings, fmt.Sprintf("%s:%d: USE PLAYBOOK %s is ignored: TO %s sets the target", name, s.Pos.Line, s.Name, l.toShown))
 				continue
 			}
 			cur = s.Name
@@ -313,6 +333,9 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink, target stri
 			if s.Recipe {
 				named := *s
 				named.Name, named.Recipe = cur, false
+				if strings.HasPrefix(cur, dirMark) {
+					named.Name, named.Dir = "", strings.TrimPrefix(cur, dirMark)
+				}
 				l.out = append(l.out, located{file: name, s: &named, recipe: true})
 			} else {
 				l.out = append(l.out, located{file: name, s: s})
@@ -351,8 +374,15 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink, target stri
 	}
 }
 
+// dirMark marks a target that is a plain config directory, not a playbook
+// name (a name never holds a NUL).
+const dirMark = "\x00dir:"
+
 // stmtHead names a statement in reports: verb, object and name.
 func stmtHead(s *grammar.Stmt) string {
+	if s.Dir != "" {
+		return string(s.Verb) + " '" + s.Dir + "'"
+	}
 	h := string(s.Verb) + " " + string(s.Object)
 	if s.Name != "" {
 		h += " " + s.Name
@@ -373,7 +403,7 @@ func (l *applyLoader) withTargetsCreated() ([]located, error) {
 		if x.s.Verb == grammar.Create && x.s.Object == grammar.Playbook {
 			created[x.s.Name] = true
 		}
-		if x.recipe && !created[x.s.Name] {
+		if x.recipe && x.s.Dir == "" && !created[x.s.Name] {
 			created[x.s.Name] = true
 			pb, err := playbook.Find(root, x.s.Name)
 			if err != nil {
@@ -432,7 +462,10 @@ func resolveTarget(t string) (string, error) {
 	case 1:
 		return names[0], nil
 	case 0:
-		return "", fmt.Errorf("%s is not a playbook, and applying to a plain config directory is not built yet", dir)
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			return "", fmt.Errorf("%s is not a directory", dir)
+		}
+		return dirMark + dir, nil
 	}
 	return "", fmt.Errorf("the directory belongs to several playbooks (%s): name one, TO <playbook>", strings.Join(names, ", "))
 }

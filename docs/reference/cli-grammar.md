@@ -66,7 +66,7 @@ here reads, writes or calls anything of pilot-profile's.
 
 ```
 command    := write | read | APPLY <file> [<file> ...] [TO <playbook|dir>] [--dry-run] [--yes]
-                                           TO: see "Targets" (a plain directory: planned)
+                                           TO: see "Targets"
                                            (select: not planned, see SELECT)
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
@@ -937,9 +937,7 @@ form in the first cut (decided 2026-09-26).
 
 ## Targets: recipes, USE PLAYBOOK and APPLY … TO (v3.21.0)
 
-Built: name-less statements, `USE PLAYBOOK`, and `APPLY … TO <playbook>` (a
-path that is a registered playbook included). Still planned: `TO '<dir>'`
-for a plain config directory.
+Built (v3.21.0), `TO '<dir>'` included.
 
 Decided with the pilot on 2026-09-26: a playbook file can be a **recipe**,
 written once and applied to any playbook, or to a plain Claude Code config
@@ -1052,7 +1050,9 @@ Refused, each with its reason:
 
 **Safety.** Before its first write to a directory in a run, cpb copies that
 directory's `settings.json` to `settings.json.cpb-backup-<YYYY-MM-DD-HH_MM_SS>`
-beside it, and `.claude.json` the same way before an MCP change. A file that
+beside it, and `.claude.json` the same way before an MCP change; a skill
+change is a write too. Each file is backed up once per run, and a dry run
+plans the same single backup. A file that
 does not exist yet has nothing to back up: the clause creates it, and the dry
 run says which files would be created rather than backed up. Applying to a
 directory that is not a playbook asks for confirmation on a terminal, and
