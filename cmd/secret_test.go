@@ -240,3 +240,31 @@ func TestHiddenEnvCommandAndReferences(t *testing.T) {
 		t.Fatalf("set over a reference: %#v", e)
 	}
 }
+
+// The check helper never sees a value the shell exports under the key it
+// is asked about; and CREATE ENV IF NOT EXISTS on an existing set asks it
+// nothing, since nothing is written.
+func TestCheckHelperEnvAndIfNotExists(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	dir := t.TempDir()
+	log := filepath.Join(dir, "helper.log")
+	helper := filepath.Join(dir, "env-helper")
+	script := "#!/bin/sh\nprintf 'TOKEN=%s\\n' \"${TOKEN-unset}\" >> \"$HELPER_LOG\"\nexit 0\n"
+	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HELPER_LOG", log)
+	t.Setenv(envprofile.SecretHelperEnv, "")
+	t.Setenv("TOKEN", "stale-shell-value")
+	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+
+	mustStmt(t, "CREATE ENV e SET TOKEN FROM keychain:x")
+	if got := readLog(t, log); got != "TOKEN=unset\n" {
+		t.Fatalf("the check helper saw the shell's value: %q", got)
+	}
+	mustStmt(t, "CREATE ENV IF NOT EXISTS e SET TOKEN FROM keychain:y")
+	if got := readLog(t, log); got != "TOKEN=unset\n" {
+		t.Fatalf("IF NOT EXISTS on an existing set asked the helper: %q", got)
+	}
+}

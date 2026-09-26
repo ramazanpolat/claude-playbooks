@@ -67,11 +67,19 @@ func checkRefs(clauses []grammar.Clause) error {
 	if err != nil {
 		return err
 	}
+	// The helper never sees a value the shell already exports under a key
+	// it is asked about: the check is about the reference alone.
+	keys := make([]string, len(refs))
+	for i, v := range refs {
+		keys[i] = v.Key
+	}
+	env := withoutKeys(os.Environ(), keys)
 	for _, v := range refs {
 		if err := manifest.ValidateRefKey(v.Key); err != nil {
 			return err
 		}
 		c := exec.Command(path, "--check", v.Key+"="+v.Ref)
+		c.Env = env
 		c.Stdout, c.Stderr = os.Stderr, os.Stderr
 		if err := c.Run(); err != nil {
 			return fmt.Errorf("secret helper %s could not resolve the reference for %s (%v); nothing was written", h.Command, v.Key, err)

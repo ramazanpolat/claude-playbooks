@@ -103,9 +103,6 @@ func envStatement(st *grammar.Stmt) error {
 	if err := refuseUnbuilt(st); err != nil {
 		return err
 	}
-	if err := checkRefs(st.Clauses); err != nil {
-		return err
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
 
@@ -118,6 +115,13 @@ func envStatement(st *grammar.Stmt) error {
 	p, err := envprofile.Read(dir, st.Name)
 	if err != nil {
 		return err
+	}
+	// CREATE ... IF NOT EXISTS on an existing set writes nothing, so its
+	// references are not checked: the helper is not even asked.
+	if !(st.Verb == grammar.Create && p != nil && st.IfNotExists) {
+		if err := checkRefs(st.Clauses); err != nil {
+			return err
+		}
 	}
 	switch st.Verb {
 	case grammar.Create:
