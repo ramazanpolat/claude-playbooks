@@ -583,10 +583,18 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if cur == nil {
 			cur = map[string]*manifest.SkillRecord{}
 		}
-		write := func() error { return manifest.Write(pb.RootPath, m) }
+		write := func(recs map[string]*manifest.SkillRecord) error {
+			prev := m.Skills
+			m.Skills = recs
+			if err := manifest.Write(pb.RootPath, m); err != nil {
+				m.Skills = prev
+				return err
+			}
+			return nil
+		}
 		for i := range skills.ops {
 			op := &skills.ops[i]
-			op.record = func() error { return recordSkillOp(op, cur, m, write) }
+			op.record = func() error { return recordSkillOp(op, cur, write) }
 		}
 	}
 	ran, err := runPluginSteps(pb.Path, steps)

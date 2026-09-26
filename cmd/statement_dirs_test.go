@@ -87,3 +87,60 @@ func TestPlainDirectoryRefusals(t *testing.T) {
 		}
 	}
 }
+
+// A skill-only change backs up settings.json too; a dry run plans each
+// backup once per run, as the real run makes it; a skill whose record
+// cannot be written to cpb's state is taken away again.
+func TestPlainDirectoryBackupsAndSkillRecords(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	cfg, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	makeSkill(t, filepath.Join(dir, "notes"))
+
+	twice := writeCpb(t, dir, "twice.cpb", "ALTER PLAYBOOK SET MODEL 'a';\nALTER PLAYBOOK SET MODEL 'b';\n")
+	out, err := apply(t, twice, "TO", cfg, "--dry-run")
+	if err != nil || strings.Count(out, "back up "+filepath.Join(cfg, "settings.json")) != 1 {
+		t.Fatalf("dry run backs up once: %v\n%s", err, out)
+	}
+
+	skill := writeCpb(t, dir, "skill.cpb", "ALTER PLAYBOOK ADD SKILL notes FROM './notes';\n")
+	if os.Geteuid() != 0 {
+		state := filepath.Join(root, ".state")
+		if err := os.MkdirAll(state, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(state, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		_, err := apply(t, skill, "TO", cfg, "--yes")
+		_ = os.Chmod(state, 0o755)
+		if err == nil || !strings.Contains(err.Error(), "taken away again") {
+			t.Fatalf("state write failure: %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(cfg, "skills", "notes")); !os.IsNotExist(err) {
+			t.Fatal("an unrecorded skill was left in place")
+		}
+		for _, b := range mustGlob(t, filepath.Join(cfg, "settings.json.cpb-backup-*")) {
+			_ = os.Remove(b)
+		}
+	}
+	if out, err := apply(t, skill, "TO", cfg, "--yes"); err != nil {
+		t.Fatalf("skill only: %v\n%s", err, out)
+	}
+	if b := mustGlob(t, filepath.Join(cfg, "settings.json.cpb-backup-*")); len(b) != 1 {
+		t.Fatalf("a skill-only change made no settings backup: %v", b)
+	}
+}
+
+func mustGlob(t *testing.T, pattern string) []string {
+	t.Helper()
+	m, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}

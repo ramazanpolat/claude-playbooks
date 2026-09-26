@@ -102,8 +102,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		lines = append(lines, mp.lines...)
 		mcpChange = len(mp.steps) > 0
 	}
-	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
-
 	sf, err := settings.Load(dir)
 	if err != nil {
 		return err
@@ -155,6 +153,11 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	skillChange := skills != nil && (len(skills.ops) > 0 || !reflect.DeepEqual(before, after))
+	if skills != nil {
+		// Skill operations run in clause order with the commands.
+		steps = append(steps, skills.steps()...)
+	}
+	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
 	settingsChange := setChange || envChange
 	if len(steps) == 0 && !settingsChange && !skillChange {
 		r.outcome = outUnchanged
@@ -176,9 +179,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 			what = append(what, "write "+filepath.Join(dir, settings.FileName))
 		}
 		if skills != nil {
-			for _, op := range skills.ops {
-				what = append(what, op.what)
-			}
 			r.recordSkills(key, after, skills)
 		}
 		if settingsChange && r.dry != nil {
@@ -192,8 +192,21 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		if err := b.run(); err != nil {
 			return fmt.Errorf("cannot back up %s, nothing was changed: %w", b.src, err)
 		}
-		r.markBackedUp(b.src)
 		lines = append(lines, b.done())
+	}
+	var cur map[string]*manifest.SkillRecord
+	if skills != nil {
+		// Each operation is recorded as soon as it is done; one whose record
+		// cannot be written is taken away again.
+		cur = cloneSkills(before)
+		if cur == nil {
+			cur = map[string]*manifest.SkillRecord{}
+		}
+		write := func(recs map[string]*manifest.SkillRecord) error { return writeDirSkillRecords(dir, recs) }
+		for i := range skills.ops {
+			op := &skills.ops[i]
+			op.record = func() error { return recordSkillOp(op, cur, write) }
+		}
 	}
 	ran, err := runPluginSteps(dir, steps)
 	lines = append(lines, ran...)
@@ -210,29 +223,10 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 			lines = append(append(lines, setLines...), envLines...)
 		}
 	}
-	if err == nil && skills != nil {
-		cur := cloneSkills(before)
-		for _, op := range skills.ops {
-			if err = op.do(); err != nil {
-				break
-			}
-			lines = append(lines, op.line)
-			if op.rec == nil {
-				delete(cur, op.name)
-			} else {
-				if cur == nil {
-					cur = map[string]*manifest.SkillRecord{}
-				}
-				c := *op.rec
-				cur[op.name] = &c
-			}
-			if err = writeDirSkillRecords(dir, cur); err != nil {
-				break
-			}
-		}
-		if err == nil && !reflect.DeepEqual(cur, after) {
-			err = writeDirSkillRecords(dir, after)
-		}
+	if err == nil && skills != nil && !reflect.DeepEqual(cloneSkills(cur), after) {
+		// Records that change without a file operation (a DROP of a skill
+		// already gone).
+		err = writeDirSkillRecords(dir, after)
 	}
 	if err != nil {
 		if len(lines) > 0 {
@@ -305,7 +299,9 @@ func (b dirBackup) run() error {
 
 // dirBackupPlan lists the backups due before this statement writes: each
 // file once per run, and only a file that exists (the clause creates one
-// that does not).
+// that does not). A file is marked when first planned, in a dry run too, so
+// a later statement of the run neither backs it up again nor backs up the
+// file an earlier statement created.
 func dirBackupPlan(r *stmtRun, dir string, settingsWrite, mcpWrite bool) []dirBackup {
 	stamp := time.Now().Format("2006-01-02-15_04_05")
 	var out []dirBackup
@@ -314,6 +310,7 @@ func dirBackupPlan(r *stmtRun, dir string, settingsWrite, mcpWrite bool) []dirBa
 		if r.backedUp[src] {
 			return
 		}
+		r.markBackedUp(src)
 		if _, err := os.Stat(src); err != nil {
 			return
 		}

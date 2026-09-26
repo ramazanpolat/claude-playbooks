@@ -1050,7 +1050,9 @@ Refused, each with its reason:
 
 **Safety.** Before its first write to a directory in a run, cpb copies that
 directory's `settings.json` to `settings.json.cpb-backup-<YYYY-MM-DD-HH_MM_SS>`
-beside it, and `.claude.json` the same way before an MCP change. A file that
+beside it, and `.claude.json` the same way before an MCP change; a skill
+change is a write too. Each file is backed up once per run, and a dry run
+plans the same single backup. A file that
 does not exist yet has nothing to back up: the clause creates it, and the dry
 run says which files would be created rather than backed up. Applying to a
 directory that is not a playbook asks for confirmation on a terminal, and
