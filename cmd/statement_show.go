@@ -300,7 +300,7 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	if v.Sandbox {
 		sandbox = "yes"
 	}
-	printLabels([][2]string{
+	rows := [][2]string{
 		{"Name", v.Name},
 		{"Version", deref(v.Version, "(none)")},
 		{"Path", v.Path},
@@ -309,10 +309,16 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		{"Env sets", listOrNone(v.Envs)},
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
 		{"Sandbox", sandbox},
-		{"Marketplaces", listOrNone(marketplaceNames(v.Marketplaces))},
-		{"Plugins", listOrNone(pluginNames(v.Plugins))},
-		{"Agent", deref(v.Agent, "(none)")},
-	})
+	}
+	// Shown when the playbook has any, so the rest of the layout stays as
+	// it was for the playbooks that have none.
+	if len(v.Marketplaces) > 0 || len(v.Plugins) > 0 || v.Agent != nil {
+		rows = append(rows,
+			[2]string{"Marketplaces", listOrNone(marketplaceNames(v.Marketplaces))},
+			[2]string{"Plugins", listOrNone(pluginNames(v.Plugins))},
+			[2]string{"Agent", deref(v.Agent, "(none)")})
+	}
+	printLabels(rows)
 }
 
 func marketplaceNames(mps []marketplaceJSON) []string {
