@@ -646,8 +646,16 @@ type modelJSON struct {
 
 func launchModel(pb *playbook.Playbook, vars []varJSON) *modelJSON {
 	for _, v := range vars {
-		if v.Key == "ANTHROPIC_MODEL" && !v.Blocked && v.Value != nil {
+		if v.Key != "ANTHROPIC_MODEL" || v.Blocked {
+			continue
+		}
+		switch {
+		case v.Value != nil:
 			return &modelJSON{Name: *v.Value, From: "ANTHROPIC_MODEL"}
+		case v.Ref != nil, v.Redacted:
+			// Set by reference (or withheld): it still decides, and its
+			// value is not shown.
+			return &modelJSON{Name: "(by reference)", From: "ANTHROPIC_MODEL"}
 		}
 	}
 	if m := describePlaybook(pb).Model; m != nil {

@@ -68,3 +68,17 @@ func TestSettingsDryRunCarries(t *testing.T) {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
 }
+
+// An ANTHROPIC_MODEL set by reference still decides the model; EXPLAIN says
+// so without the value.
+func TestExplainModelByReference(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	helper, _ := fakeHelper(t)
+	seedFlatPlaybook(t, "k")
+	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER PLAYBOOK k SET MODEL claude-opus-5-5 SET VAR ANTHROPIC_MODEL FROM keychain:ok/model")
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Model: (by reference) (ANTHROPIC_MODEL); the settings model claude-opus-5-5 is overridden") {
+		t.Fatalf("EXPLAIN:\n%s", out)
+	}
+}
