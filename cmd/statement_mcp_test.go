@@ -148,3 +148,37 @@ func TestMCPVarIsCollisionFree(t *testing.T) {
 		t.Fatalf("not readable: %s", a)
 	}
 }
+
+// APPLY checks an MCP server's references before writing anything, and
+// plugin and MCP commands run in the order their clauses are written.
+func TestMCPApplyPreflightAndOrder(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	helper, _ := fakeHelper(t)
+	calls := fakeMCP(t)
+	root := seedFlatPlaybook(t, "k")
+	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	bad := writePlaybookFile(t, "ALTER PLAYBOOK k SET VAR A=1;\nALTER PLAYBOOK k ADD MCP SERVER web URL 'https://x.example/mcp' HEADER 'Authorization' FROM 'keychain:gone';\n")
+	if _, err := apply(t, bad); err == nil || !strings.Contains(err.Error(), "nothing was written") {
+		t.Fatalf("preflight: %v", err)
+	}
+	if m, _ := manifest.Read(root); m != nil && m.Env != nil && m.Env.Set["A"] != "" {
+		t.Fatal("the first statement ran before the refused reference")
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("calls: %v", *calls)
+	}
+
+	// A failed replacement keeps the old server's reference.
+	mustStmt(t, "ALTER PLAYBOOK k ADD MCP SERVER s COMMAND x ENV TOKEN FROM keychain:ok/a")
+	v := mcpVar("s", "E", "TOKEN")
+	old := claudeMCP
+	claudeMCP = func(dir string, args ...string) ([]byte, error) { return nil, errString("boom") }
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MCP SERVER s COMMAND x ENV OTHER FROM keychain:ok/b"); err == nil {
+		t.Fatal("the failing command was not reported")
+	}
+	claudeMCP = old
+	if m, _ := manifest.Read(root); m.Env.Refs[v] != "keychain:ok/a" {
+		t.Fatalf("the old reference was forgotten before the command succeeded: %v", m.Env.Refs)
+	}
+}

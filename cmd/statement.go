@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
@@ -484,7 +485,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			return err
 		}
 		m.MCP = cloneMCP(beforeMCP)
-		mcp.applyToManifest(m)
+		mcp.applyToManifest(m, false)
 		lines = append(lines, mcp.lines...)
 	}
 	if m.Env.Empty() {
@@ -492,11 +493,21 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
-	var mcpSteps []pluginStep
+	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
+	// Plugin and MCP commands run as one list, in the order their clauses
+	// are written.
+	steps = append([]pluginStep(nil), steps...)
 	if mcp != nil {
-		mcpSteps = mcp.steps
+		steps = append(steps, mcp.steps...)
 	}
-	if !envChange && !mcpRecordChange && !agentChange && len(steps) == 0 && len(mcpSteps) == 0 {
+	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
+	finishMCP := func() {
+		mcp.applyToManifest(m, true)
+		if m.Env.Empty() {
+			m.Env = nil
+		}
+	}
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
@@ -504,8 +515,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	r.outcome = outChanged
 	if r.dryRun {
 		r.recordPlaybookEnv(st.Name, m.Env)
-		if mcp != nil && r.dry != nil {
-			r.dry.mcpRecords[st.Name] = cloneMCP(m.MCP)
+		if mcp != nil {
+			finishMCP()
+			r.recordPlaybookEnv(st.Name, m.Env)
+			if r.dry != nil {
+				r.dry.mcpRecords[st.Name] = cloneMCP(m.MCP)
+			}
 		}
 		if agentChange && r.dry != nil {
 			var a string
@@ -515,13 +530,10 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 				r.dry.agents[st.Name] = nil
 			}
 		}
-		if len(steps)+len(mcpSteps) > 0 {
+		if len(steps) > 0 {
 			var cmds []string
 			for _, s := range steps {
 				cmds = append(cmds, s.command())
-			}
-			for _, s := range mcpSteps {
-				cmds = append(cmds, mcpCommand(s))
 			}
 			r.note = "would run: " + strings.Join(cmds, "; ")
 		}
@@ -534,9 +546,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	ran, err := runPluginSteps(pb.Path, steps)
 	lines = append(append(lines, pluginLines...), ran...)
-	if err == nil {
-		ran, err = runMCPSteps(pb.Path, mcpSteps)
-		lines = append(lines, ran...)
+	if err == nil && mcpRemovals {
+		// Only now that the commands succeeded: forget what is no longer used.
+		finishMCP()
+		if werr := manifest.Write(pb.RootPath, m); werr != nil {
+			err = fmt.Errorf("cannot record the environment: %w", werr)
+		}
 	}
 	if err != nil {
 		if len(lines) > 0 {

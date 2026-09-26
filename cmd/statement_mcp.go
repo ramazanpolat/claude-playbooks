@@ -202,7 +202,7 @@ func planMCP(state map[string]json.RawMessage, rec map[string]*manifest.MCPRecor
 		}
 		return nil
 	}
-	for _, c := range clauses {
+	for ci, c := range clauses {
 		switch c.Kind {
 		case grammar.AddMCP:
 			name := c.Names[0]
@@ -236,9 +236,9 @@ func planMCP(state map[string]json.RawMessage, rec map[string]*manifest.MCPRecor
 			}
 			js, _ := cfg.MarshalJSON()
 			if exists {
-				p.steps = append(p.steps, pluginStep{args: []string{"remove", name, "--scope", "user"}, line: "replaced  MCP server " + name})
+				p.steps = append(p.steps, pluginStep{mcp: true, clause: ci, args: []string{"remove", name, "--scope", "user"}, line: "replaced  MCP server " + name})
 			}
-			p.steps = append(p.steps, pluginStep{args: []string{"add-json", name, string(js), "--scope", "user"}, line: "MCP server " + name})
+			p.steps = append(p.steps, pluginStep{mcp: true, clause: ci, args: []string{"add-json", name, string(js), "--scope", "user"}, line: "MCP server " + name})
 			state[name] = js
 		case grammar.DropMCP:
 			name := c.Names[0]
@@ -249,67 +249,76 @@ func planMCP(state map[string]json.RawMessage, rec map[string]*manifest.MCPRecor
 				continue
 			}
 			delete(state, name)
-			p.steps = append(p.steps, pluginStep{args: []string{"remove", name, "--scope", "user"}, line: "dropped   MCP server " + name})
+			p.steps = append(p.steps, pluginStep{mcp: true, clause: ci, args: []string{"remove", name, "--scope", "user"}, line: "dropped   MCP server " + name})
 		}
 	}
 	return p, nil
 }
 
-// applyToManifest applies the plan's references and records to a
-// manifest's env block and MCP table.
-func (p *mcpPlan) applyToManifest(m *manifest.Manifest) {
+// applyToManifest applies the plan to a manifest in two phases. The first
+// (removals false) adds: new references and records. The second (removals
+// true) forgets the references and records a statement no longer needs; it
+// runs only after the commands succeeded, so a failed command never leaves a
+// server that is still declared without its references.
+func (p *mcpPlan) applyToManifest(m *manifest.Manifest, removals bool) {
 	if m.Env == nil {
 		m.Env = &manifest.Env{}
 	}
-	for _, v := range p.dropRefs {
-		delete(m.Env.Refs, v)
-	}
-	for v, ref := range p.setRefs {
-		if m.Env.Refs == nil {
-			m.Env.Refs = map[string]string{}
+	if removals {
+		for _, v := range p.dropRefs {
+			delete(m.Env.Refs, v)
 		}
-		m.Env.Refs[v] = ref
-	}
-	for name, r := range p.records {
-		if r == nil {
-			delete(m.MCP, name)
-			continue
+		for name, r := range p.records {
+			if r == nil {
+				delete(m.MCP, name)
+			} else {
+				m.MCP[name] = r // exactly the new variables
+			}
 		}
-		if m.MCP == nil {
-			m.MCP = map[string]*manifest.MCPRecord{}
+	} else {
+		for v, ref := range p.setRefs {
+			if m.Env.Refs == nil {
+				m.Env.Refs = map[string]string{}
+			}
+			m.Env.Refs[v] = ref
 		}
-		m.MCP[name] = r
+		for name, r := range p.records {
+			if r == nil {
+				continue
+			}
+			if m.MCP == nil {
+				m.MCP = map[string]*manifest.MCPRecord{}
+			}
+			// Until the commands succeed, the record keeps the old variables
+			// too, so a later DROP still forgets them all.
+			vars := slices.Clone(r.Vars)
+			if old := m.MCP[name]; old != nil {
+				for _, v := range old.Vars {
+					if !slices.Contains(vars, v) {
+						vars = append(vars, v)
+					}
+				}
+				sort.Strings(vars)
+			}
+			m.MCP[name] = &manifest.MCPRecord{Vars: vars}
+		}
 	}
 	if len(m.MCP) == 0 {
 		m.MCP = nil
 	}
 }
 
-// runMCPSteps runs the planned commands in order and stops at the first
-// failure, saying what already ran: re-running the statement finishes it.
-func runMCPSteps(configDir string, steps []pluginStep) ([]string, error) {
-	var lines []string
-	for i, s := range steps {
-		if _, err := claudeMCP(configDir, s.args...); err != nil {
-			err = fmt.Errorf("claude mcp %s %s: %w", s.args[0], s.args[1], err)
-			if i > 0 {
-				ran := make([]string, i)
-				for j := range ran {
-					ran[j] = "claude mcp " + steps[j].args[0] + " " + steps[j].args[1]
-				}
-				err = fmt.Errorf("%w\nalready run: %s; run the statement again to finish (it is safe to repeat)", err, strings.Join(ran, "; "))
-			}
-			return lines, err
-		}
-		lines = append(lines, s.line)
+// hasRemovals reports whether the second phase changes anything.
+func (p *mcpPlan) hasRemovals(before map[string]*manifest.MCPRecord) bool {
+	if len(p.dropRefs) > 0 {
+		return true
 	}
-	return lines, nil
-}
-
-// mcpCommand is how a dry run names a step: the server config is not
-// shown in full (it may be long); its placeholders never hold a secret.
-func mcpCommand(s pluginStep) string {
-	return "claude mcp " + s.args[0] + " " + s.args[1] + " --scope user"
+	for name, r := range p.records {
+		if r == nil && before[name] != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // mcpServerJSON is one server as SHOW prints it.
