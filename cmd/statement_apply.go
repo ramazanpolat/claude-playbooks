@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
@@ -57,8 +59,16 @@ func runApply(st *grammar.Stmt) error {
 	// secret reference must resolve, against the helper the files will have
 	// set by then (a file may set the helper and use it in one run).
 	var helper helperState
+	envDir := envprofile.Dir(config.ResolvePlaybooksDir())
 	for _, f := range files {
 		for _, s := range f.stmts {
+			// CREATE ENV IF NOT EXISTS on a set that exists writes nothing,
+			// so its references are not checked (as on the command line).
+			if s.Verb == grammar.Create && s.Object == grammar.Env && s.IfNotExists {
+				if p, _ := envprofile.Read(envDir, s.Name); p != nil {
+					continue
+				}
+			}
 			for _, c := range s.Clauses {
 				helper = helper.after(c)
 				if c.Kind == grammar.SetRef {

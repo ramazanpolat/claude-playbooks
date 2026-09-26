@@ -308,4 +308,10 @@ func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 	if readProfile(t, "s") != nil {
 		t.Fatal("the refused file wrote its first statement")
 	}
+	// CREATE ENV IF NOT EXISTS on a set that exists writes nothing, so its
+	// reference is not checked, even one the helper cannot resolve.
+	noop := writePlaybookFile(t, "CREATE ENV IF NOT EXISTS r SET TOKEN FROM 'keychain:gone';\n")
+	if out, err := apply(t, noop); err != nil || !strings.Contains(out, "0 created, 0 changed, 1 unchanged") {
+		t.Fatalf("IF NOT EXISTS on an existing set: %v\n%s", err, out)
+	}
 }
