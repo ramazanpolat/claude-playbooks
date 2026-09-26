@@ -1,8 +1,8 @@
 # CLI grammar
 
 Status: **implemented, v3.21.0.** Decided with the pilot on 2026-09-25/26.
-Sections marked **planned** are specified and not built yet; everything else
-on this page is built.
+Everything on this page is built; a section specified before it is built is
+marked **planned**.
 
 ## Why
 
@@ -438,7 +438,18 @@ cpb SHOW ENVS
 cpb EXPLAIN PLAYBOOK kommander-idea
 cpb SHOW CREATE ALL > playbook.cpb
 cpb APPLY playbook.cpb --dry-run
+cpb ALTER PLAYBOOK kommander-idea ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth'
+cpb ALTER PLAYBOOK kommander-idea ALLOW TOOL 'Bash(kommander-helper *)' SET MODEL 'claude-opus-5-5'
+cpb ALTER PLAYBOOK kommander-idea SET STATUSLINE 'bash ~/bin/statusline.sh'
+cpb ALTER PLAYBOOK kommander-idea ADD SKILL release-notes FROM 'github:acme/skills' SUBDIR release-notes
+cpb APPLY kommander.cpb TO kommander-lab
+cpb APPLY kommander.cpb TO '~/.claude' --dry-run
+cpb "SELECT name, version FROM PLAYBOOKS"
+cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook"
 ```
+
+Every clause has a runnable example under [`examples/`](../../examples/),
+applied in CI.
 
 ## Pre-grammar commands: a hidden fallback
 
@@ -988,7 +999,7 @@ directory that is not a playbook asks for confirmation on a terminal, and
 `--yes` it is refused before anything is written. `--dry-run` works as
 always and names the backups it would make.
 
-## An agent's configuration (v3.21.0, planned)
+## An agent's configuration (v3.21.0)
 
 Decided with the pilot on 2026-09-26: a playbook file describes a Claude Code
 agent completely, from its route to its tools. Four clause groups, on
@@ -1084,7 +1095,7 @@ first cut.
 
 `SHOW CREATE` writes every rule; `EXPLAIN PLAYBOOK` shows
 `Tools: allow …; deny …`. Kommander as an agent needs one today:
-`ALLOW TOOL 'Bash(kommander-helper *)'` (the gap example 08 names).
+`ALLOW TOOL 'Bash(kommander-helper *)'`, which example 08 sets.
 
 ### Status line and model
 

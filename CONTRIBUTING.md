@@ -54,6 +54,11 @@ and an exact command sequence beat any amount of description.
 
 ## Release process
 
+A release needs its docs first: README, docs/ (tutorials, guides,
+reference), examples/ for every new clause, and AGENTS.md. The pilot's rule
+and the checklist are in [AGENTS.md, "Before any release"](AGENTS.md#before-any-release);
+never tag without them.
+
 GitHub releases are created from `v*` tags only when the tagged commit is
 already on `main`. Tags pushed from feature branches are ignored by the
 release workflow.

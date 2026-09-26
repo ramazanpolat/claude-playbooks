@@ -12,7 +12,7 @@ commands with the playbook as `CLAUDE_CONFIG_DIR`, so the plugin is installed
 for this playbook only. cpb reads the state first: applying again runs
 nothing. `'./hello-marketplace'` resolves against this file's directory. A
 marketplace can also come from `'github:<owner>/<repo>'` or a git URL.
-`SET AGENT` pins the main-thread agent. A plugin that runs a command its
+`SET AGENT` pins the main-thread agent; `UNSET AGENT` removes the pin. A plugin that runs a command its
 marketplace declares is never accepted for you: the statement fails and shows
 the command to review and confirm by hand.
 Example 08 stacks this into layers.

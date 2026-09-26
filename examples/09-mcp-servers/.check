@@ -1,0 +1,5 @@
+# The server's config holds a placeholder, never the secret; the manifest holds the reference.
+cfg="$HOME/.claude-playbooks/researcher"
+grep -q '"Authorization": "${CPB_MCP_SENTRY_H_AUTHORIZATION_' "$cfg/.claude.json"
+grep -q 'keychain:pilot/sentry-auth' "$cfg/.playbook"
+cpb EXPLAIN PLAYBOOK researcher | grep -q sentry

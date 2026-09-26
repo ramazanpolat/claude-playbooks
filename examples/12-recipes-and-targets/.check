@@ -1,0 +1,10 @@
+# TO <playbook> fills the name-less statements; this one is already done.
+cpb APPLY recipe.cpb TO frontend | grep -q '0 changed, 1 unchanged'
+# TO '<dir>': a plain Claude Code config directory, backed up first.
+cfg=$(cd "$(mktemp -d)" && pwd -P)
+printf '{"theme": "dark"}\n' > "$cfg/settings.json"
+cpb APPLY recipe.cpb TO "$cfg" --dry-run | grep -q "back up $cfg/settings.json"
+cpb APPLY recipe.cpb TO "$cfg" --yes
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"]=="claude-sonnet-5" and s["theme"]=="dark", s' "$cfg/settings.json"
+ls "$cfg"/settings.json.cpb-backup-* >/dev/null
+rm -rf "$cfg"

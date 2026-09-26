@@ -12,3 +12,6 @@ only. Any helper with that interface works; `with-secret` is one. A
 credential-looking literal (`SET TOKEN=…`) is refused unless you write
 `AS PLAINTEXT`, and `SHOW CREATE` never prints one. Store the secret first,
 yourself: `with-secret --store router-token`.
+`ALTER DEFAULTS UNSET SECRET HELPER` removes the helper; launching a playbook
+whose layers still hold a reference is then refused in one line, "no secret
+helper configured".

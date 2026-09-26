@@ -1,0 +1,6 @@
+-- Something to query: two playbooks, one on an env set with its own variable.
+CREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1;
+
+CREATE PLAYBOOK IF NOT EXISTS alpha NO ALIAS;
+CREATE PLAYBOOK IF NOT EXISTS beta NO ALIAS;
+ALTER PLAYBOOK beta USE ENV router SET VAR MODEL=glm;

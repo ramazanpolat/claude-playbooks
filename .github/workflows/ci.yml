@@ -91,6 +91,8 @@ jobs:
         run: go build -o "$RUNNER_TEMP/cpb" .
       - name: Apply the examples
         run: examples/check.sh "$RUNNER_TEMP/cpb"
+      - name: Every clause has a reference entry and an example
+        run: examples/coverage.sh
 
   # SELECT beyond the built-in form runs through a real clickhouse-local:
   # the rows cpb pipes in and the query it rewrites are checked end to end.

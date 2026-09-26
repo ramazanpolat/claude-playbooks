@@ -1,0 +1,3 @@
+test -L "$HOME/.claude-playbooks/writer/skills/release-notes"
+test -f "$HOME/.claude-playbooks/writer/skills/release-notes/SKILL.md"
+cpb SHOW CREATE PLAYBOOK writer | grep -q 'ADD SKILL release-notes FROM'

@@ -1,18 +1,23 @@
-# 08 — the Kommander agent, built from stacked playbook files
+# 08 — the Kommander agent, built from stacked recipes
 
-Three playbook files build one playbook, `kommander-agent`, layer by layer:
+Three layer files and one entry file build one playbook, `kommander-agent`.
+The layers are **recipes**: their `ALTER PLAYBOOK` names no playbook, so the
+same files build the agent under any name.
 
 | File | Layer | What it adds |
 |---|---|---|
-| `bare.cpb` | bare | the playbook and its model route |
-| `kommander.cpb` | kommander | `INCLUDE 'bare.cpb'`, the kommander marketplace and plugin, and the `kommander` agent as the main thread |
+| `bare.cpb` | bare | the model route |
+| `kommander.cpb` | kommander | `INCLUDE 'bare.cpb'`, the kommander marketplace and plugin, the `kommander` agent as the main thread, the `kommander-helper` permission and Kommander's status line |
 | `chaos.cpb` | chaos (stub) | `INCLUDE 'kommander.cpb'`, and `chaos-stub/`: a local marketplace whose plugin adds one line of session context |
+| `kommander-agent.cpb` | entry | `USE PLAYBOOK kommander-agent` and `INCLUDE 'chaos.cpb'` |
 
 ```
-cpb APPLY chaos.cpb --dry-run     # what would run, including every `claude plugin` command
-cpb APPLY chaos.cpb               # build it
-kommander-agent                   # run it (or: cpb run kommander-agent)
+cpb APPLY kommander-agent.cpb --dry-run   # what would run, including every `claude plugin` command
+cpb APPLY kommander-agent.cpb             # build it (kommander-agent is created bare first)
+kommander-agent                           # run it (or: cpb run kommander-agent)
 cpb EXPLAIN PLAYBOOK kommander-agent
+
+cpb APPLY chaos.cpb TO kommander-lab      # the same layers, another playbook
 ```
 
 Applying a layer applies everything under it. Applying again changes nothing.
@@ -20,15 +25,20 @@ Applying a layer applies everything under it. Applying again changes nothing.
 ## Before you apply
 
 - **The route.** `bare.cpb` attaches the env set `glm-5.3-flash`. Use one you
-  have (`cpb SHOW ENVS`), or remove that line to run on the machine's
-  `DEFAULTS`.
+  have (`cpb SHOW ENVS`), or remove that statement to run on the machine's
+  `DEFAULTS`. A plain config directory (`TO '~/.claude'`) has no env sets
+  and refuses `USE ENV`, so these layers go to playbooks; a recipe without
+  `bare.cpb` could go there.
 - **The kommander plugin.** `kommander.cpb` installs it from a checkout of
   `ramazanpolat/kommander-playbook`, whose root is both the marketplace and
   the plugin. The repository is private: edit `~/path/to/kommander-playbook`
-  to your checkout. With access, `FROM 'github:ramazanpolat/kommander-playbook'`
-  fetches it instead (the proof run below used that form). A playbook
-  that already has the marketplace from another source keeps it until you
+  (twice: the marketplace and the status line) to your checkout. With access,
+  `FROM 'github:ramazanpolat/kommander-playbook'` fetches it instead (the
+  proof run below used that form). A playbook that already has the
+  marketplace from another source keeps it until you
   `DROP PLUGIN kommander@kommander DROP MARKETPLACE kommander`.
+- **It moves.** Agent Kommander is moving to its own repository,
+  `agent-kommander`; `kommander.cpb` will then read that marketplace.
 - **The chaos layer** is a stub. `'./chaos-stub'` resolves against the
   directory of `chaos.cpb`. The real layer adds its own marketplace and
   plugin in the same two clauses.
@@ -37,6 +47,10 @@ Applying a layer applies everything under it. Applying again changes nothing.
 
 - The playbook's `settings.json` pins `agent: kommander` (`SET AGENT`), so the
   kommander agent's prompt is the main thread's system prompt.
+- `ALLOW TOOL 'Bash(kommander-helper *)'` lets the agent run its helper
+  without asking; plugins cannot grant permissions, so the playbook does.
+- `SET STATUSLINE` points the playbook's status line at the checkout's
+  `hooks/statusline.sh`; plugins cannot set one either.
 - The chaos plugin's SessionStart hook adds its line of context on top. It
   does not set an agent, so Kommander stays the main thread.
 - `EXPLAIN PLAYBOOK kommander-agent` shows both plugins and where the agent
@@ -44,7 +58,11 @@ Applying a layer applies everything under it. Applying again changes nothing.
 
 ## Proof run (2026-09-26, macminim, GLM via 9router)
 
-A cpb build of this branch, against the machine's real registry:
+This run is from v3.20.0, when each layer named `kommander-agent` and the
+kommander layer had no `ALLOW TOOL` or `SET STATUSLINE`; the recipe form
+above builds the same playbook plus those two settings (CI applies it with
+stand-ins for `claude` and the checkout). A cpb build, against the
+machine's real registry:
 
 ```
 $ cpb APPLY chaos.cpb --dry-run
@@ -86,14 +104,8 @@ being followed: both layers reached the model. Claude Code also prints a
 `[claude-code:unrecognized_model]` notice for the GLM model name; it is
 harmless.
 
-## Known gaps (first cut)
+## Known gaps
 
-- **statusLine.** Kommander's status line is part of a full Kommander install
-  (`settings.json` `statusLine`), and cpb has no clause that sets it yet.
-- **The `kommander-helper` permission.** The Kommander agent runs its helper
-  through Bash. A full install allows it in `settings.json`
-  (`permissions.allow`); cpb has no clause for permissions yet, so a session
-  asks the first time, and you approve it there.
 - **Updates.** The plugin loads from the checkout in place: `git pull` there
   and start a new session. A published marketplace updates through
   `claude plugin marketplace update`.

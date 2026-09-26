@@ -1,0 +1,7 @@
+-- kommander-agent.cpb: which playbook the layers build. The layers are
+-- recipes (their ALTER PLAYBOOK names no playbook); USE PLAYBOOK gives them
+-- their target, and a target that does not exist is created bare first (its
+-- launcher is its name). `cpb APPLY chaos.cpb TO <another>` builds the same
+-- agent under another name.
+USE PLAYBOOK kommander-agent;
+INCLUDE 'chaos.cpb';

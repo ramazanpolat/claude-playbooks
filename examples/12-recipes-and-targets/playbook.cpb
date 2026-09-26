@@ -1,0 +1,8 @@
+-- One recipe, two playbooks. USE PLAYBOOK sets the target for the name-less
+-- statements after it, including those in an included file. A target that
+-- does not exist is created bare first (its launcher is its name).
+USE PLAYBOOK frontend;
+INCLUDE 'recipe.cpb';
+
+USE PLAYBOOK backend;
+INCLUDE 'recipe.cpb';

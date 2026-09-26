@@ -14,8 +14,9 @@ Never assume a playbook exists or a name is free. The registry is the filesystem
 
 ```bash
 cpb SHOW PLAYBOOKS --json            # an array of playbook objects (a bare `cpb SHOW --json` is the same)
-cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, launcher, envs, vars, sandbox, marketplaces, plugins, agent
+cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, launcher, envs, vars, sandbox, marketplaces, plugins, agent, mcp_servers, tools, skills, statusline, model
 cpb SHOW ENVS --json                 # env sets: name, description, vars, used_by, default
+cpb "SELECT name, envs FROM PLAYBOOKS" --json   # chosen columns, one table (anything beyond columns needs clickhouse-local)
 cpb SHOW DEFAULTS --json             # {"envs": [...], "secret_helper": {...} | null}
 cpb EXPLAIN PLAYBOOK <name> --json   # every variable a launch would change, with its layer
 ```
@@ -63,7 +64,7 @@ cpb start /tmp/scratch-$$ -p "..." --delete    # directory created, then removed
 
 ## Change state without prompts
 
-Statements never prompt, with one exception: `DROP PLAYBOOK` asks on a terminal, so pass `--yes`.
+Statements never prompt, with two exceptions: `DROP PLAYBOOK`, and `APPLY … TO '<dir>'` to a config directory that is not a playbook, ask on a terminal, so pass `--yes`.
 
 ```bash
 cpb CREATE PLAYBOOK IF NOT EXISTS <name> NO ALIAS            # no launcher; run via `run <name>`
@@ -77,7 +78,7 @@ cpb update <name>                                           # from [source]; set
 cpb update <name> --check                                   # versions only, touches nothing
 ```
 
-`IF NOT EXISTS` / `IF EXISTS` make a statement safe to repeat: "already there" and "not there" become no-ops. Name collisions are hard errors before anything is copied (`command name "x" already addresses playbook "y"`). A statement applies whole or not at all, and a non-zero exit means nothing changed, with one exception: the plugin clauses run `claude plugin` commands in order, and the error names the ones that already ran (running the statement again finishes it).
+`IF NOT EXISTS` / `IF EXISTS` make a statement safe to repeat: "already there" and "not there" become no-ops. Name collisions are hard errors before anything is copied (`command name "x" already addresses playbook "y"`). A statement applies whole or not at all, and a non-zero exit means nothing changed, with one exception: the plugin, MCP server and skill clauses run in clause order (`claude plugin`, `claude mcp`, files under `skills/`), and the error names what already ran (running the statement again finishes it).
 
 ## Keep a whole setup in one file
 
@@ -92,7 +93,15 @@ cpb APPLY base.cpb machine.cpb --yes                # several files; --yes confi
 
 `APPLY` writes nothing when any statement fails validation (syntax, secret references, a `DROP PLAYBOOK` without `--yes`). It then runs the statements in order and stops at the first failure, reporting what was applied per file; there is no rollback, and running the fixed file again is the recovery. The summary line is `Applied <files>: N created, N changed, N unchanged, N dropped`. `SHOW CREATE` without `--skip-secrets` exits non-zero when it had to withhold a credential-looking literal.
 
-A file may `INCLUDE '<path>'` another (relative to itself; local regular files only; a cycle is refused; a file reached twice runs once).
+A file may `INCLUDE '<path>'` another (relative to itself; local regular files only; a cycle is refused; a file reached twice runs once per target).
+
+A **recipe** is a file whose `ALTER PLAYBOOK` names no playbook. Give it a target when you apply it, or with a `USE PLAYBOOK <name>;` line in the file; a file with name-less statements and no target is refused before anything is written:
+
+```bash
+cpb APPLY recipe.cpb TO <name>                  # created bare if missing; USE PLAYBOOK lines are ignored, with a warning
+cpb APPLY recipe.cpb TO ~/.claude --dry-run     # a plain config directory: Claude Code's own settings only
+cpb APPLY recipe.cpb TO ~/.claude --yes         # backs up settings.json (and .claude.json) once per run first
+```
 
 ## Sandbox with --playbooks-dir
 

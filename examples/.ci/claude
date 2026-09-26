@@ -1,6 +1,6 @@
 #!/bin/sh
 # A stand-in for `claude` in the examples check: it answers the
-# `claude plugin` commands cpb runs, keeping its state in the playbook's
+# `claude plugin` and `claude mcp` commands cpb runs, keeping its state in the playbook's
 # config directory, and records any other launch. No network, no model.
 st="$CLAUDE_CONFIG_DIR/.fake-claude"
 mkdir -p "$st"
@@ -24,6 +24,25 @@ case "$*" in
     entry="{\"id\":\"$3\",\"scope\":\"user\",\"enabled\":true}"
     if [ "$old" = "[]" ]; then echo "[$entry]"; else echo "${old%]},$entry]"; fi > "$st/plugins.json"
     echo '{"command":"install","outcome":"ok"}' ;;
-  plugin*) echo "fake claude: not handled: $*" >&2; exit 2 ;;
+  "mcp add-json "*|"mcp remove "*)
+    # The servers live where Claude Code keeps them: .claude.json mcpServers.
+    python3 - "$CLAUDE_CONFIG_DIR/.claude.json" "$@" <<'PYEOF'
+import json, sys
+path, verb, name = sys.argv[1], sys.argv[3], sys.argv[4]
+try:
+    root = json.load(open(path))
+except FileNotFoundError:
+    root = {}
+servers = root.setdefault("mcpServers", {})
+if verb == "add-json":
+    if name in servers:
+        sys.exit("MCP server %s already exists in user config" % name)
+    servers[name] = json.loads(sys.argv[5])
+elif servers.pop(name, None) is None:
+    sys.exit("No MCP server named " + name)
+json.dump(root, open(path, "w"), indent=2)
+PYEOF
+    ;;
+  plugin*|mcp*) echo "fake claude: not handled: $*" >&2; exit 2 ;;
   *) env > "$CLAUDE_CONFIG_DIR/.fake-claude/launch-env" ;;
 esac
