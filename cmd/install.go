@@ -43,33 +43,48 @@ func init() {
 	installCmd.Flags().BoolVar(&installSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
 }
 
+// installOpts carries install's options: its flags for the command, the statement's
+// clauses for the grammar. No state is shared between two calls.
+type installOpts struct {
+	name    string
+	subdir  string
+	branch  string
+	alias   string
+	noAlias bool
+	sandbox bool
+}
+
 func runInstall(cmd *cobra.Command, args []string) error {
-	if err := checkAliasFlagConflict(installAlias, installNoAlias); err != nil {
+	return doInstall(installOpts{name: installName, subdir: installSubdir, branch: installBranch, alias: installAlias, noAlias: installNoAlias, sandbox: installSandbox}, args)
+}
+
+func doInstall(o installOpts, args []string) error {
+	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
 		return err
 	}
 
 	source := args[0]
 
 	// Parse GitHub /tree/<ref>/<path> URLs into source + branch + subdir.
-	repoURL, parsedRef, parsedSubdir, parsed := parseGitTreeURLWithRef(source, installBranch)
+	repoURL, parsedRef, parsedSubdir, parsed := parseGitTreeURLWithRef(source, o.branch)
 	if parsed {
 		source = repoURL
-		if installBranch == "" {
+		if o.branch == "" {
 			treePath := path.Join(parsedRef, parsedSubdir)
 			if resolvedRef, resolvedSubdir, ok := resolveRemoteTreeRef(repoURL, treePath); ok {
 				parsedRef = resolvedRef
 				parsedSubdir = resolvedSubdir
 			}
 		}
-		if installBranch == "" {
-			installBranch = parsedRef
+		if o.branch == "" {
+			o.branch = parsedRef
 		}
-		if installSubdir == "" {
-			installSubdir = parsedSubdir
+		if o.subdir == "" {
+			o.subdir = parsedSubdir
 		}
 	}
 
-	subdir := strings.Trim(installSubdir, "/")
+	subdir := strings.Trim(o.subdir, "/")
 	cherryPick := subdir != ""
 
 	playbooksDir := config.ResolvePlaybooksDir()
@@ -81,7 +96,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Stage 1: place the source tree in a working area so we can read its
 	// .playbook before choosing a final name.
-	work, cleanup, err := stageSource(os.Stdout, source, isGit, installBranch, subdir)
+	work, cleanup, err := stageSource(os.Stdout, source, isGit, o.branch, subdir)
 	if err != nil {
 		return err
 	}
@@ -93,7 +108,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 
 	// Stage 2: pick the target name. Order: --name, manifest's name, then a
 	// fallback derived from the source.
-	targetName := installName
+	targetName := o.name
 	if targetName == "" {
 		if mPre != nil && mPre.Name != "" {
 			targetName = mPre.Name
@@ -132,7 +147,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// silently re-route an existing command. The target name joins the
 	// registry even under --no-alias, and an imported manifest's alias
 	// registers without any flag.
-	effectiveAlias := installAlias
+	effectiveAlias := o.alias
 	if effectiveAlias == "" && mPre != nil {
 		effectiveAlias = mPre.Alias
 	}
@@ -141,7 +156,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	// the source is copied into the registry, not as a post-copy warning.
 	// The installed manifest normalizes its name to targetName, so this
 	// resolved name is still the command to write after the copy.
-	launcherName, err := resolveLauncherName(installNoAlias, effectiveAlias, targetName, "install")
+	launcherName, err := resolveLauncherName(o.noAlias, effectiveAlias, targetName, "install")
 	if err != nil {
 		return err
 	}
@@ -193,7 +208,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}
-	if installSandbox {
+	if o.sandbox {
 		mPre.IsolateAuth = true
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
 		needsManifestWrite = true
@@ -207,7 +222,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if isGit {
 		mPre.Source = &manifest.Source{
 			Repository: source,
-			Branch:     installBranch,
+			Branch:     o.branch,
 			Subdir:     sourceSubdir,
 		}
 		needsManifestWrite = true
@@ -262,19 +277,19 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	warnIfNoClaudeMD(configDest, targetName)
 
 	// Alias handling.
-	if installNoAlias {
+	if o.noAlias {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", targetName)
 	} else {
 		// A custom command name must be resolvable at invocation time: record
 		// it as the manifest alias so multicall dispatch finds the playbook.
-		if installAlias != "" {
-			if err := writeAliasManifest(dest, targetName, installAlias); err != nil {
+		if o.alias != "" {
+			if err := writeAliasManifest(dest, targetName, o.alias); err != nil {
 				// Without the manifest entry the alias can never resolve; and
 				// dest already joined the registry, so leaving it would block a
 				// retry under the same name — roll it back like the other
 				// post-copy error paths.
 				os.RemoveAll(dest)
-				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", installAlias, err)
+				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", o.alias, err)
 			}
 		}
 

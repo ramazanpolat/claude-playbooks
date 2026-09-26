@@ -30,7 +30,17 @@ func init() {
 	deleteCmd.Flags().BoolVarP(&deleteYes, "yes", "y", false, "skip confirmation prompt")
 }
 
+// deleteOpts carries delete's options: its flags for the command, the statement's
+// clauses for the grammar. No state is shared between two calls.
+type deleteOpts struct {
+	yes bool
+}
+
 func runDelete(cmd *cobra.Command, args []string) error {
+	return doDelete(deleteOpts{yes: deleteYes}, args)
+}
+
+func doDelete(o deleteOpts, args []string) error {
 	name := args[0]
 	playbooksDir := config.ResolvePlaybooksDir()
 
@@ -55,10 +65,10 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		if _, err := os.Lstat(path); os.IsNotExist(err) {
 			return fmt.Errorf("%q not found under %s", name, playbooksDir)
 		}
-		return deleteOrphan(playbooksDir, name, path)
+		return deleteOrphan(playbooksDir, name, path, o.yes)
 	}
 
-	if !deleteYes {
+	if !o.yes {
 		aliasInfo := "(none)"
 		if a := pb.Alias(); a != "" {
 			aliasInfo = a // the alias's launcher, if any, gets its own Command line
@@ -129,8 +139,8 @@ func runDelete(cmd *cobra.Command, args []string) error {
 // deleteOrphan handles a directory that exists at the expected path but is
 // not a discoverable playbook (e.g. a dotfile-named entry). Cleans up any
 // aliases pointing into it and removes the directory.
-func deleteOrphan(playbooksDir, name, path string) error {
-	if !deleteYes {
+func deleteOrphan(playbooksDir, name, path string, yes bool) error {
+	if !yes {
 		fmt.Printf("Directory %q exists at %s but is not a discoverable playbook.\n", name, path)
 		if !confirm("Permanently delete the directory and any aliases pointing into it? [y/N] ") {
 			fmt.Println("Cancelled.")

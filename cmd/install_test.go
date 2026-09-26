@@ -440,6 +440,9 @@ func resetCommandTestState(t *testing.T) {
 	installNoAlias = false
 	installSandbox = false
 	createSandbox = false
+	createAlias = ""
+	createNoAlias = false
+	aliasRemove = false
 	renameAlias = ""
 	renameNoAlias = false
 	selfUninstallYes = false
@@ -462,6 +465,9 @@ func resetCommandTestState(t *testing.T) {
 		installNoAlias = false
 		installSandbox = false
 		createSandbox = false
+		createAlias = ""
+		createNoAlias = false
+		aliasRemove = false
 		renameAlias = ""
 		renameNoAlias = false
 		selfUninstallYes = false

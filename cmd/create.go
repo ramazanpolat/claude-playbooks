@@ -32,8 +32,20 @@ func init() {
 	createCmd.Flags().BoolVar(&createSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
 }
 
+// createOpts carries create's options: its flags for the command, the statement's
+// clauses for the grammar. No state is shared between two calls.
+type createOpts struct {
+	alias   string
+	noAlias bool
+	sandbox bool
+}
+
 func runCreate(cmd *cobra.Command, args []string) error {
-	if err := checkAliasFlagConflict(createAlias, createNoAlias); err != nil {
+	return doCreate(createOpts{alias: createAlias, noAlias: createNoAlias, sandbox: createSandbox}, args)
+}
+
+func doCreate(o createOpts, args []string) error {
+	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
 		return err
 	}
 
@@ -59,7 +71,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	// itself) must be writable, or creation would succeed without its
 	// advertised command. --no-alias opts out of a launcher entirely and
 	// skips this.
-	launcherName, err := resolveLauncherName(createNoAlias, createAlias, name, "create the playbook")
+	launcherName, err := resolveLauncherName(o.noAlias, o.alias, name, "create the playbook")
 	if err != nil {
 		return err
 	}
@@ -92,7 +104,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	// An always-sandboxed playbook authenticates on its own: the machine
 	// login cannot follow it into the sandbox. Written before the
 	// credential sync so the sync already sees the isolation.
-	if createSandbox {
+	if o.sandbox {
 		if err := manifest.Write(dest, &manifest.Manifest{Name: name, IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}}); err != nil {
 			os.RemoveAll(dest)
 			return fmt.Errorf("cannot record the sandbox setting in the manifest: %w", err)
@@ -108,11 +120,11 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Created playbook %q at %s\n", name, dest)
-	if createSandbox {
+	if o.sandbox {
 		fmt.Printf("Always sandboxed (%s); authentication isolated: run /login once inside the sandbox.\n", defaultSandboxBackend)
 	}
 
-	if createNoAlias {
+	if o.noAlias {
 		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
 	} else {
 		// A custom command name must be resolvable at invocation time: record

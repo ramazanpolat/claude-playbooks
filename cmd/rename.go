@@ -33,8 +33,19 @@ func init() {
 	renameCmd.Flags().BoolVar(&renameNoAlias, "no-alias", false, "drop the launcher command and manifest alias")
 }
 
+// renameOpts carries rename's options: its flags for the command, the statement's
+// clauses for the grammar. No state is shared between two calls.
+type renameOpts struct {
+	alias   string
+	noAlias bool
+}
+
 func runRename(cmd *cobra.Command, args []string) error {
-	if err := checkAliasFlagConflict(renameAlias, renameNoAlias); err != nil {
+	return doRename(renameOpts{alias: renameAlias, noAlias: renameNoAlias}, args)
+}
+
+func doRename(o renameOpts, args []string) error {
+	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
 		return err
 	}
 	oldName := args[0]
@@ -86,7 +97,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// renamed to C with stale launcher state. Registry ownership applies to
 	// every name that will address this playbook; the foreign-file check
 	// applies only to the launcher name that will actually be written.
-	for _, cand := range []string{renameAlias, newName} {
+	for _, cand := range []string{o.alias, newName} {
 		if cand == "" {
 			continue
 		}
@@ -100,7 +111,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// (explicit --alias or the new name) must be writable before any
 	// mutation — the late launcher.Write warning would leave a renamed
 	// playbook without its replacement command. --no-alias is the opt-out.
-	writeName, werr := resolveLauncherName(renameNoAlias, renameAlias, newName, "rename")
+	writeName, werr := resolveLauncherName(o.noAlias, o.alias, newName, "rename")
 	if werr != nil {
 		return werr
 	}
@@ -122,17 +133,17 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// registrations (collisions are only preflighted in the selected
 	// root), so every differing alias mutation is refused.
 	if linkedOld {
-		if renameNoAlias && oldManifestAlias != "" {
+		if o.noAlias && oldManifestAlias != "" {
 			return fmt.Errorf("cannot clear alias %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", oldManifestAlias, manifest.FileName)
 		}
-		if renameAlias != "" && renameAlias != oldManifestAlias {
-			return fmt.Errorf("cannot set alias %q on a linked target's shared %s (current alias %q). Edit the target's manifest directly if you really mean it", renameAlias, manifest.FileName, oldManifestAlias)
+		if o.alias != "" && o.alias != oldManifestAlias {
+			return fmt.Errorf("cannot set alias %q on a linked target's shared %s (current alias %q). Edit the target's manifest directly if you really mean it", o.alias, manifest.FileName, oldManifestAlias)
 		}
 	}
 	// A manifest alias that merely mirrors the old directory name (link's
 	// default) follows the rename for local playbooks: leaving it would
 	// keep the old name registered while its launcher goes away.
-	aliasFollows := !linkedOld && renameAlias == "" && !renameNoAlias && oldManifestAlias == oldName
+	aliasFollows := !linkedOld && o.alias == "" && !o.noAlias && oldManifestAlias == oldName
 
 	// Persist a requested alias change BEFORE the directory rename and the
 	// shell-alias rewrites: failing afterwards would leave the playbook
@@ -140,7 +151,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 	// reporting an unknown playbook. The manifest sits at the pre-rename
 	// location (through the symlink for linked playbooks).
 	restoreManifest := func() {}
-	if renameAlias != "" || renameNoAlias || aliasFollows {
+	if o.alias != "" || o.noAlias || aliasFollows {
 		oldManifestDir := oldRoot
 		if linkedOld {
 			if resolved, rerr := filepath.EvalSymlinks(oldRoot); rerr == nil {
@@ -155,10 +166,10 @@ func runRename(cmd *cobra.Command, args []string) error {
 			m = &manifest.Manifest{}
 		}
 		switch {
-		case renameNoAlias && m.Alias != "":
+		case o.noAlias && m.Alias != "":
 			m.Alias = ""
-		case renameAlias != "" && m.Alias != renameAlias:
-			m.Alias = renameAlias
+		case o.alias != "" && m.Alias != o.alias:
+			m.Alias = o.alias
 		case aliasFollows:
 			m.Alias = newName
 		default:
@@ -219,24 +230,24 @@ func runRename(cmd *cobra.Command, args []string) error {
 		// whose manifest alias equals it — keeps its launcher.
 		removeUnclaimedLaunchers([]string{oldName}, oldName)
 		switch {
-		case renameNoAlias:
+		case o.noAlias:
 			// An alias-named link resolves through the manifest, which was
 			// cleared — retire it too (unless someone else claims it), or
 			// --no-alias leaves a working command behind.
 			if oldManifestAlias != "" {
 				removeUnclaimedLaunchers([]string{oldManifestAlias}, oldName)
 			}
-		case renameAlias != "":
+		case o.alias != "":
 			// The previous alias no longer resolves through this playbook
 			// once the manifest changes — retire its link too, unless
 			// another playbook claims it.
-			if oldManifestAlias != "" && oldManifestAlias != renameAlias {
+			if oldManifestAlias != "" && oldManifestAlias != o.alias {
 				removeUnclaimedLaunchers([]string{oldManifestAlias}, oldName)
 			}
-			if _, werr := launcher.Write(ldir, renameAlias); werr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", renameAlias, werr)
+			if _, werr := launcher.Write(ldir, o.alias); werr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", o.alias, werr)
 			} else {
-				fmt.Printf("Command %q now runs %q\n", renameAlias, newName)
+				fmt.Printf("Command %q now runs %q\n", o.alias, newName)
 			}
 		default:
 			if _, werr := launcher.Write(ldir, newName); werr != nil {

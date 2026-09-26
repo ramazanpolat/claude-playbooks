@@ -309,10 +309,6 @@ func TestStatementNotYet(t *testing.T) {
 	mustStmt(t, "CREATE ENV e")
 	for _, line := range []string{
 		"SHOW CREATE ALL",
-		"CREATE PLAYBOOK fresh",
-		"DROP PLAYBOOK router",
-		"ALTER PLAYBOOK router SET VAR A=1 ALIAS r2",
-		"ALTER PLAYBOOK router SET VAR A=1 RENAME TO r2",
 		"APPLY setup.cpb",
 	} {
 		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), "not implemented yet") {

@@ -160,6 +160,7 @@ var validCases = []struct {
 	{"show env as json", w("SHOW ENV e --json"), Stmt{Verb: Show, Object: Env, Name: "e", JSON: true}},
 	{"apply dry run", w("APPLY setup.cpb --dry-run"), Stmt{Verb: Apply, File: "setup.cpb", DryRun: true}},
 	{"apply", w("apply setup.cpb"), Stmt{Verb: Apply, File: "setup.cpb"}},
+	{"apply with drops confirmed", w("APPLY setup.cpb --yes --dry-run"), Stmt{Verb: Apply, File: "setup.cpb", DryRun: true, Yes: true}},
 	{"trailing commas separate K=V",
 		w("ALTER ENV e SET A=1, B=2"),
 		Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{{Kind: SetVar, Vars: []Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}}}}},
@@ -454,7 +455,7 @@ func TestExpect(t *testing.T) {
 		{w("ALTER DEFAULTS SET"), []string{"SECRET"}},
 		{w("ALTER DEFAULTS SET SECRET HELPER"), []string{"'<command>'"}},
 		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "--json"}},
-		{w("APPLY f"), []string{"--dry-run"}},
+		{w("APPLY f"), []string{"--dry-run", "--yes"}},
 		{w("CREATE PLAYBOOK x BRANCH main"), createPlaybookStarters}, // FROM may still follow
 		{w("DROP PLAYBOOK k"), []string{"--yes"}},
 		{w("SHOW CREATE ALL"), []string{"--skip-secrets"}},

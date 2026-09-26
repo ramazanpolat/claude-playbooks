@@ -36,12 +36,22 @@ func init() {
 	aliasCmd.Flags().BoolVar(&aliasRemove, "remove", false, "remove the alias for the named playbook")
 }
 
+// aliasOpts carries alias's options: its flags for the command, the statement's
+// clauses for the grammar. No state is shared between two calls.
+type aliasOpts struct {
+	remove bool
+}
+
 func runAlias(cmd *cobra.Command, args []string) error {
+	return doAlias(aliasOpts{remove: aliasRemove}, args)
+}
+
+func doAlias(o aliasOpts, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	// No args — list all aliases.
 	if len(args) == 0 {
-		if aliasRemove {
+		if o.remove {
 			return fmt.Errorf("--remove requires a playbook name")
 		}
 		pbs, err := playbook.Discover(playbooksDir)
@@ -75,7 +85,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	// two overlapping replacements read the same "old" value, so the loser
 	// never retires the winner's launcher — and an unlocked removal could
 	// delete a launcher another process just legitimately claimed.
-	if aliasRemove || len(args) == 2 {
+	if o.remove || len(args) == 2 {
 		unlock, lerr := lockRegistry()
 		if lerr != nil {
 			return lerr
@@ -97,7 +107,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	}
 
 	// --remove
-	if aliasRemove {
+	if o.remove {
 		old := pb.Alias()
 		if old == "" {
 			fmt.Printf("Playbook %q has no alias set.\n", name)

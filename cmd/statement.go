@@ -73,7 +73,14 @@ func runStatement(args []string) error {
 		return envStatement(st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Defaults:
 		return defaultsStatement(st)
+	case st.Verb == grammar.Create && st.Object == grammar.Playbook:
+		return createPlaybookStatement(st)
+	case st.Verb == grammar.Drop && st.Object == grammar.Playbook:
+		return dropPlaybookStatement(st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Playbook:
+		if lifecycle(st) {
+			return alterPlaybookLifecycle(st)
+		}
 		return playbookStatement(st)
 	case st.Verb == grammar.Show || st.Verb == grammar.Explain:
 		return readStatement(st)
@@ -87,22 +94,7 @@ func notYet(what string) error {
 	return fmt.Errorf("not implemented yet: %s (the grammar work lands in phases; see docs/cli-grammar.md)", what)
 }
 
-// refuseUnbuilt refuses clauses whose phase has not landed, before any
-// lock or write, so a statement never applies partly.
-func refuseUnbuilt(st *grammar.Stmt) error {
-	for _, c := range st.Clauses {
-		switch c.Kind {
-		case grammar.RenameTo, grammar.Alias, grammar.NoAlias:
-			return notYet(fmt.Sprintf("ALTER PLAYBOOK … %s", c.Kind))
-		}
-	}
-	return nil
-}
-
 func envStatement(st *grammar.Stmt) error {
-	if err := refuseUnbuilt(st); err != nil {
-		return err
-	}
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
 
@@ -191,9 +183,6 @@ func envStatement(st *grammar.Stmt) error {
 }
 
 func defaultsStatement(st *grammar.Stmt) error {
-	if err := refuseUnbuilt(st); err != nil {
-		return err
-	}
 	dir := envprofile.Dir(config.ResolvePlaybooksDir())
 
 	var listClauses, helperClauses []grammar.Clause
@@ -276,9 +265,6 @@ func defaultsStatement(st *grammar.Stmt) error {
 }
 
 func playbookStatement(st *grammar.Stmt) error {
-	if err := refuseUnbuilt(st); err != nil {
-		return err
-	}
 	if err := checkRefs(st.Clauses); err != nil {
 		return err
 	}
