@@ -83,7 +83,19 @@ const (
 	UnsetStatusline Kind = "UNSET STATUSLINE" // UNSET STATUSLINE
 	SetModel        Kind = "SET MODEL"        // SET MODEL '<model>'
 	UnsetModel      Kind = "UNSET MODEL"      // UNSET MODEL
+
+	// Skills (ALTER PLAYBOOK only): <config>/skills/<name>.
+	AddSkill  Kind = "ADD SKILL"  // ADD SKILL n FROM <source> [BRANCH <ref>] [SUBDIR <dir>]
+	DropSkill Kind = "DROP SKILL" // DROP SKILL n
 )
+
+// Skill is where an ADD SKILL takes a skill from: a directory (linked) or a
+// git source (cloned and copied), with BRANCH and SUBDIR for git only.
+type Skill struct {
+	From   string
+	Branch string
+	Subdir string
+}
 
 // MCP is one ADD MCP SERVER declaration: a stdio server (Command, Args) or
 // a remote one (URL, SSE), with its environment and, remote only, headers.
@@ -144,7 +156,8 @@ type Clause struct {
 
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
 
-	MCP *MCP // ADD MCP SERVER
+	MCP   *MCP   // ADD MCP SERVER
+	Skill *Skill // ADD SKILL
 
 	Pos Pos
 }

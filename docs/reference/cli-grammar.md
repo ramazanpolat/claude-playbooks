@@ -1171,6 +1171,8 @@ this release.
 
 ### Skills
 
+Built (v3.21.0). A git source may also be `file://…` (a local repository).
+
 `ADD SKILL <name> FROM <source>` puts a skill directory (one that holds
 `SKILL.md`) at `<playbook>/skills/<name>`; `DROP SKILL <name>` removes it.
 How depends on the source, and that is deliberate:

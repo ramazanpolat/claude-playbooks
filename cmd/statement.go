@@ -392,7 +392,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		// A linked playbook's manifest is shared with every registration of
 		// the target directory: same refusal as the pre-grammar env command.
 		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
-			if pluginClauses(st.Clauses) || mcpClauses(st.Clauses) {
+			if pluginClauses(st.Clauses) || mcpClauses(st.Clauses) || skillClauses(st.Clauses) {
 				return fmt.Errorf("cannot change the plugins or MCP servers of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
 			}
 			return fmt.Errorf("cannot change the environment of %q: it is linked, and its %s is shared with the target. Edit the target's manifest directly if you really mean it", st.Name, manifest.FileName)
@@ -499,13 +499,40 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		steps = append(steps, mcp.steps...)
 	}
 	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
+	// Skills: file operations under skills/, recorded in the manifest once
+	// they are done.
+	var skills *skillPlan
+	beforeSkills := cloneSkills(r.skillRecords(st.Name, m))
+	afterSkills := beforeSkills
+	if skillClauses(st.Clauses) {
+		if skills, err = planSkills(r.configDir(st.Name, pb), beforeSkills, r.skillKnown(st.Name), st.Clauses); err != nil {
+			return err
+		}
+		lines = append(lines, skills.lines...)
+		afterSkills = cloneSkills(beforeSkills)
+		for n, rec := range skills.records {
+			if rec == nil {
+				delete(afterSkills, n)
+				continue
+			}
+			if afterSkills == nil {
+				afterSkills = map[string]*manifest.SkillRecord{}
+			}
+			c := *rec
+			afterSkills[n] = &c
+		}
+		if len(afterSkills) == 0 {
+			afterSkills = nil
+		}
+	}
+	skillChange := skills != nil && (len(skills.ops) > 0 || !reflect.DeepEqual(beforeSkills, afterSkills))
 	finishMCP := func() {
 		mcp.applyToManifest(m, true)
 		if m.Env.Empty() {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
@@ -523,11 +550,17 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if agentChange && r.dry != nil {
 			r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
 		}
-		if len(steps) > 0 {
-			var cmds []string
-			for _, s := range steps {
-				cmds = append(cmds, s.command())
+		var cmds []string
+		for _, s := range steps {
+			cmds = append(cmds, s.command())
+		}
+		if skills != nil {
+			for _, op := range skills.ops {
+				cmds = append(cmds, op.what)
 			}
+			r.recordSkills(st.Name, afterSkills, skills)
+		}
+		if len(cmds) > 0 {
 			r.note = "would run: " + strings.Join(cmds, "; ")
 		}
 		return nil
@@ -544,6 +577,20 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		finishMCP()
 		if werr := manifest.Write(pb.RootPath, m); werr != nil {
 			err = fmt.Errorf("cannot record the environment: %w", werr)
+		}
+	}
+	if err == nil && skills != nil {
+		for _, op := range skills.ops {
+			if err = op.do(); err != nil {
+				break
+			}
+			lines = append(lines, op.line)
+		}
+		if err == nil && !reflect.DeepEqual(beforeSkills, afterSkills) {
+			m.Skills = afterSkills
+			if werr := manifest.Write(pb.RootPath, m); werr != nil {
+				err = fmt.Errorf("cannot record the skills: %w", werr)
+			}
 		}
 	}
 	if err != nil {

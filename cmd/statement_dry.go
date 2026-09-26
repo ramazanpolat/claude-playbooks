@@ -32,18 +32,26 @@ type dryState struct {
 	// have declared, and the derived variables they would have recorded.
 	mcp        map[string]map[string]json.RawMessage
 	mcpRecords map[string]map[string]*manifest.MCPRecord
+
+	// Skills, per playbook name: the records earlier statements would have
+	// left, and which skill directories they would have put in place (true)
+	// or removed (false).
+	skillRecords map[string]map[string]*manifest.SkillRecord
+	skillKnown   map[string]map[string]bool
 }
 
 func newDryState() *dryState {
 	return &dryState{
-		profiles:   map[string]*envprofile.Profile{},
-		playbooks:  map[string]bool{},
-		pbEnvs:     map[string]*manifest.Env{},
-		worlds:     map[string]*pluginWorld{},
-		settings:   map[string][]byte{},
-		configDirs: map[string]string{},
-		mcp:        map[string]map[string]json.RawMessage{},
-		mcpRecords: map[string]map[string]*manifest.MCPRecord{},
+		profiles:     map[string]*envprofile.Profile{},
+		playbooks:    map[string]bool{},
+		pbEnvs:       map[string]*manifest.Env{},
+		worlds:       map[string]*pluginWorld{},
+		settings:     map[string][]byte{},
+		configDirs:   map[string]string{},
+		mcp:          map[string]map[string]json.RawMessage{},
+		mcpRecords:   map[string]map[string]*manifest.MCPRecord{},
+		skillRecords: map[string]map[string]*manifest.SkillRecord{},
+		skillKnown:   map[string]map[string]bool{},
 	}
 }
 
@@ -94,6 +102,8 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.configDirs, name)
 		delete(r.dry.mcp, name)
 		delete(r.dry.mcpRecords, name)
+		delete(r.dry.skillRecords, name)
+		delete(r.dry.skillKnown, name)
 	}
 }
 
@@ -110,6 +120,8 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	a, aok := r.dry.settings[from]
 	ms, msok := r.dry.mcp[from]
 	mr, mrok := r.dry.mcpRecords[from]
+	sr, srok := r.dry.skillRecords[from]
+	sk, skok := r.dry.skillKnown[from]
 	r.recordPlaybook(from, false)
 	r.recordPlaybook(to, true)
 	if wok {
@@ -120,6 +132,12 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	if mrok {
 		r.dry.mcpRecords[to] = mr
+	}
+	if srok {
+		r.dry.skillRecords[to] = sr
+	}
+	if skok {
+		r.dry.skillKnown[to] = sk
 	}
 	if aok {
 		r.dry.settings[to] = a
@@ -250,4 +268,42 @@ func cloneMCP(in map[string]*manifest.MCPRecord) map[string]*manifest.MCPRecord 
 		return nil
 	}
 	return out
+}
+
+// skillRecords is a playbook's skill record as the run sees it.
+func (r *stmtRun) skillRecords(name string, m *manifest.Manifest) map[string]*manifest.SkillRecord {
+	if r.dry != nil {
+		if rec, ok := r.dry.skillRecords[name]; ok {
+			return rec
+		}
+	}
+	if m == nil {
+		return nil
+	}
+	return m.Skills
+}
+
+// skillKnown is what a dry run's earlier statements decided about which
+// skill directories exist.
+func (r *stmtRun) skillKnown(name string) map[string]bool {
+	if r.dry == nil {
+		return nil
+	}
+	return r.dry.skillKnown[name]
+}
+
+// recordSkills keeps a dry run's skill changes for later statements.
+func (r *stmtRun) recordSkills(name string, after map[string]*manifest.SkillRecord, p *skillPlan) {
+	if r.dry == nil {
+		return
+	}
+	r.dry.skillRecords[name] = cloneSkills(after)
+	known := r.dry.skillKnown[name]
+	if known == nil {
+		known = map[string]bool{}
+	}
+	for n, rec := range p.records {
+		known[n] = rec != nil
+	}
+	r.dry.skillKnown[name] = known
 }

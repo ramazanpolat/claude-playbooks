@@ -211,7 +211,8 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 	// lock, and a source-shipped [env] block that was live even briefly --
 	// or permanently, had a later rewrite failed -- could redirect the
 	// install's endpoint or strip its authentication. Install-local fields
-	// (alias, isolation, source, [env]) come from the live manifest; the
+	// (alias, isolation, source, [env], and the [mcp] and [skills] records
+	// statements keep) come from the live manifest; the
 	// install's name is its directory name (this also heals installs whose
 	// manifest predates name rewriting).
 	updated := stagedManifest
@@ -226,6 +227,8 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 		updated.Source = liveManifest.Source
 		updated.Env = liveManifest.Env
 		updated.Sandbox = liveManifest.Sandbox
+		updated.MCP = liveManifest.MCP
+		updated.Skills = liveManifest.Skills
 	}
 	updated.Name = filepath.Base(root)
 	updated.Subdir = ""
@@ -252,6 +255,14 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 	}
 
 	fmt.Fprintf(w, "Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
+
+	// The overlay can replace skills/ as a whole: put back the skills
+	// statements added (docs/reference/cli-grammar.md, "Skills").
+	if updated.Skills != nil {
+		if err := restoreSkills(w, pb.Path, updated.Skills); err != nil {
+			return fmt.Errorf("%q is updated, but restoring its skills failed: %w (run its ADD SKILL statements again)", name, err)
+		}
+	}
 
 	if err := runMigrations(w, name, root, fromVersion, toVersion); err != nil {
 		return fmt.Errorf("%q is at code version %s but migrations failed: %w", name, displayVersion(toVersion), err)

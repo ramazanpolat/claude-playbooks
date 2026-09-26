@@ -232,8 +232,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		if plugins, err = pluginCreateBlock(pb.Name, sf.Root); err != nil {
 			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %s: %w", pb.Name, settings.FileName, err)
 		}
-		// MCP servers, as ADD MCP SERVER clauses of their own statement.
+		// MCP servers and skills, as clauses of their own statement.
 		mcps, mcpComments := mcpCreateClauses(pb.Path, m)
+		mcps = append(mcps, skillCreateClauses(m)...)
 		if len(mcps)+len(mcpComments) > 0 {
 			t := strings.Join(mcpComments, "\n")
 			if len(mcps) > 0 {

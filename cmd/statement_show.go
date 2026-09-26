@@ -59,6 +59,7 @@ type playbookJSON struct {
 	Agent        *string           `json:"agent"`
 	MCPServers   []mcpServerJSON   `json:"mcp_servers"`
 	Tools        toolsJSON         `json:"tools"`
+	Skills       []skillJSON       `json:"skills"`
 	Statusline   *string           `json:"statusline"`
 	Model        *string           `json:"model"`
 }
@@ -189,7 +190,8 @@ func readStatement(st *grammar.Stmt) error {
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
-		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest)}
+		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
+		Skills: describeSkills(pb.Manifest)}
 	// What the playbook's settings.json declares; an unreadable file shows
 	// none rather than failing the whole SHOW.
 	if sf, err := settings.Load(pb.Path); err == nil {
@@ -328,6 +330,13 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	}
 	if v.Model != nil {
 		rows = append(rows, [2]string{"Model", *v.Model})
+	}
+	if len(v.Skills) > 0 {
+		names := make([]string, len(v.Skills))
+		for i, s := range v.Skills {
+			names[i] = s.Name + " (" + s.Mode + ")"
+		}
+		rows = append(rows, [2]string{"Skills", strings.Join(names, ", ")})
 	}
 	if len(v.MCPServers) > 0 {
 		names := make([]string, len(v.MCPServers))
@@ -668,6 +677,13 @@ func launchModel(pb *playbook.Playbook, vars []varJSON) *modelJSON {
 
 func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	v := describePlaybook(pb)
+	if len(v.Skills) > 0 {
+		names := make([]string, len(v.Skills))
+		for i, s := range v.Skills {
+			names[i] = s.Name
+		}
+		fmt.Printf("Skills: %s\n", strings.Join(names, ", "))
+	}
 	if len(v.Tools.Allow)+len(v.Tools.Deny) > 0 {
 		fmt.Printf("Tools: %s\n", toolsLine(v.Tools))
 	}
