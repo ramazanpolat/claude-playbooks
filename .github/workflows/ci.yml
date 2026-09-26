@@ -112,12 +112,18 @@ jobs:
           set -eu
           export HOME="$(mktemp -d)" CPB_CLICKHOUSE="$RUNNER_TEMP/clickhouse"
           cpb="$RUNNER_TEMP/cpb"
-          "$cpb" CREATE PLAYBOOK alpha NO ALIAS >/dev/null
-          "$cpb" CREATE PLAYBOOK beta NO ALIAS >/dev/null
+          # want <expected> <query>: runs the query, joins its lines with spaces.
+          want() {
+            got="$("$cpb" "$2" | tr '\n' ' ' | sed 's/ $//')"
+            if [ "$got" != "$1" ]; then echo "FAIL: $2"; echo "  want: $1"; echo "  got:  $got"; exit 1; fi
+            echo "ok: $2"
+          }
+          "$cpb" CREATE PLAYBOOK alpha NO ALIAS
+          "$cpb" CREATE PLAYBOOK beta NO ALIAS
           "$cpb" ALTER PLAYBOOK beta SET VAR MODEL=glm X_TOKEN=sk-live-0123456789 AS PLAINTEXT >/dev/null
-          test "$("$cpb" "SELECT count() FROM PLAYBOOKS FORMAT TSV")" = 2
-          test "$("$cpb" "SELECT key FROM VARS WHERE playbook = 'beta' AND effective ORDER BY key FORMAT TSV" | tr '\n' ' ')" = "MODEL X_TOKEN "
-          test "$("$cpb" "SELECT countIf(redacted) FROM VARS FORMAT TSV")" = 1
-          # alpha has no manifest, so no version: an empty version_tuple.
-          test "$("$cpb" "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [0, 1] ORDER BY name FORMAT TSV" | tr '\n' ' ')" = "beta "
           "$cpb" "SELECT name, version FROM PLAYBOOKS"
+          want 2 "SELECT count() FROM PLAYBOOKS FORMAT TSV"
+          want "MODEL X_TOKEN" "SELECT key FROM VARS WHERE playbook = 'beta' AND effective ORDER BY key FORMAT TSV"
+          want 1 "SELECT countIf(redacted) FROM VARS FORMAT TSV"
+          # alpha has no manifest version: an empty version_tuple.
+          want beta "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [0, 1] ORDER BY name FORMAT TSV"
