@@ -147,6 +147,15 @@ func alterPlaybookLifecycle(st *grammar.Stmt) error {
 	// replaces is cleared and its launcher retired first (the hidden
 	// command's same spelling only repairs the name launcher).
 	if alias == st.Name && pb.Alias() != "" {
+		// Checked before the alias is cleared, so a name that cannot be the
+		// launcher leaves the playbook with the launcher it has.
+		owner, err := commandNameOwner(st.Name, st.Name)
+		if err != nil {
+			return fmt.Errorf("cannot verify command name %q: %w", st.Name, err)
+		}
+		if owner != nil {
+			return fmt.Errorf("command name %q already addresses playbook %q; alias %q kept", st.Name, owner.Name, pb.Alias())
+		}
 		if err := doAlias(aliasOpts{remove: true}, []string{st.Name}); err != nil {
 			return err
 		}
