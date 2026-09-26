@@ -232,6 +232,21 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		if plugins, err = pluginCreateBlock(pb.Name, sf.Root); err != nil {
 			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %s: %w", pb.Name, settings.FileName, err)
 		}
+		// MCP servers, as ADD MCP SERVER clauses of their own statement.
+		mcps, mcpComments := mcpCreateClauses(pb.Path, m)
+		if len(mcps)+len(mcpComments) > 0 {
+			t := strings.Join(mcpComments, "\n")
+			if len(mcps) > 0 {
+				if t != "" {
+					t += "\n"
+				}
+				t += (&grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name, Clauses: mcps}).Pretty() + ";"
+			}
+			if plugins != "" {
+				plugins += "\n\n"
+			}
+			plugins += t
+		}
 	}
 	withPlugins := func(b createBlock) createBlock {
 		if plugins != "" {
@@ -239,17 +254,28 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		}
 		return b
 	}
-	if m == nil || m.Env.Empty() {
+	// The variables cpb derived for MCP servers travel in their ADD MCP
+	// SERVER clauses, not as variables of their own.
+	var env *manifest.Env
+	if m != nil {
+		env = cloneEnv(m.Env)
+		for v := range mcpVarsOf(m) {
+			if env != nil {
+				delete(env.Refs, v)
+			}
+		}
+	}
+	if env.Empty() {
 		return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
 	}
 	if v.Linked != nil {
 		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName, withheld: withheldSource}, nil
 	}
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
-	if len(m.Env.Profiles) > 0 {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: m.Env.Profiles})
+	if len(env.Profiles) > 0 {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Profiles})
 	}
-	clauses, comments := varClauses(m.Env.Set, m.Env.Refs, m.Env.Unset, func(k string) string {
+	clauses, comments := varClauses(env.Set, env.Refs, env.Unset, func(k string) string {
 		return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
 	})
 	alter.Clauses = append(alter.Clauses, clauses...)

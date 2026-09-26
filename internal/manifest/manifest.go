@@ -262,6 +262,16 @@ type Manifest struct {
 	Update      *Update  `toml:"update,omitempty"`
 	Env         *Env     `toml:"env,omitempty"`
 	Sandbox     *Sandbox `toml:"sandbox,omitempty"`
+
+	// MCP records, per MCP server a statement declared, the variables cpb
+	// derived for its secret references, so dropping the server forgets
+	// exactly those (docs/reference/cli-grammar.md, "MCP servers").
+	MCP map[string]*MCPRecord `toml:"mcp,omitempty"`
+}
+
+// MCPRecord is what cpb derived for one MCP server.
+type MCPRecord struct {
+	Vars []string `toml:"vars"`
 }
 
 // Sandbox describes how `run --sandbox` boxes this playbook: what of the

@@ -141,6 +141,40 @@ func (c *Clause) words(varWord bool) []string {
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Names[0]))
 	case SetAgent:
 		return []string{"SET", "AGENT", quote(c.Arg)}
+	case DropMCP:
+		return []string{"DROP", "MCP", "SERVER", quoteWord(c.Names[0])}
+	case AddMCP:
+		w := []string{"ADD", "MCP", "SERVER", quoteWord(c.Names[0])}
+		m := c.MCP
+		if m.URL != "" {
+			w = append(w, "URL", quote(m.URL))
+			if m.SSE {
+				w = append(w, "TRANSPORT", "SSE")
+			}
+		} else {
+			w = append(w, "COMMAND", quote(m.Command))
+			if len(m.Args) > 0 {
+				w = append(w, "ARGS")
+				for _, a := range m.Args {
+					w = append(w, quote(a))
+				}
+			}
+		}
+		for _, v := range m.Env {
+			if v.Ref != "" {
+				w = append(w, "ENV", quoteWord(v.Key), "FROM", quote(v.Ref))
+			} else {
+				w = append(w, "ENV", v.Key+"="+quoteValue(v.Value))
+			}
+		}
+		for _, h := range m.Headers {
+			if h.Ref != "" {
+				w = append(w, "HEADER", quote(h.Key), "FROM", quote(h.Ref))
+			} else {
+				w = append(w, "HEADER", quote(h.Key), quote(h.Value))
+			}
+		}
+		return w
 	case RenameTo, Alias, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
 	default: // NoAlias, Sandbox, UnsetHelper, UnsetAgent: no argument

@@ -57,6 +57,7 @@ type playbookJSON struct {
 	Marketplaces []marketplaceJSON `json:"marketplaces"`
 	Plugins      []pluginJSON      `json:"plugins"`
 	Agent        *string           `json:"agent"`
+	MCPServers   []mcpServerJSON   `json:"mcp_servers"`
 }
 
 type envJSON struct {
@@ -82,6 +83,7 @@ type explainJSON struct {
 	Vars         []varJSON   `json:"vars"`
 	SecretHelper *helperJSON `json:"secret_helper"`
 	Plugins      []string    `json:"plugins"` // enabled in the playbook's settings.json
+	MCPServers   []string    `json:"mcp_servers"`
 	Agent        *agentJSON  `json:"agent"`
 }
 
@@ -182,7 +184,7 @@ func readStatement(st *grammar.Stmt) error {
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
-		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}}
+		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest)}
 	// What the playbook's settings.json declares; an unreadable file shows
 	// none rather than failing the whole SHOW.
 	if sf, err := settings.Load(pb.Path); err == nil {
@@ -312,6 +314,13 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.
+	if len(v.MCPServers) > 0 {
+		names := make([]string, len(v.MCPServers))
+		for i, m := range v.MCPServers {
+			names[i] = m.Name + " (" + m.Transport + ")"
+		}
+		rows = append(rows, [2]string{"MCP servers", strings.Join(names, ", ")})
+	}
 	if len(v.Marketplaces) > 0 || len(v.Plugins) > 0 || v.Agent != nil {
 		rows = append(rows,
 			[2]string{"Marketplaces", listOrNone(marketplaceNames(v.Marketplaces))},
@@ -469,12 +478,13 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	}
 	plugins, agent := launchPlugins(pb)
 	if st.JSON {
-		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent})
+		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb)})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
 		fmt.Printf("\nSecret helper: %s\n", humanHelper(helper))
 		printLaunchPlugins(plugins, agent)
+		printMCPNames(mcpNames(pb))
 		return nil
 	}
 	t := newTable("VARIABLE", "VALUE", "FROM").flexible(1)
@@ -498,6 +508,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		fmt.Println("This launch uses secret references and no helper is configured: it would be refused.")
 	}
 	printLaunchPlugins(plugins, agent)
+	printMCPNames(mcpNames(pb))
 	return nil
 }
 
@@ -581,4 +592,18 @@ func listOrNone(s []string) string {
 		return "(none)"
 	}
 	return strings.Join(s, ", ")
+}
+
+func mcpNames(pb *playbook.Playbook) []string {
+	names := []string{}
+	for _, s := range describeMCP(pb.Path, pb.Manifest) {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+func printMCPNames(names []string) {
+	if len(names) > 0 {
+		fmt.Printf("MCP servers: %s\n", strings.Join(names, ", "))
+	}
 }

@@ -112,7 +112,7 @@ pb-clause  := set-clause
             | DROP PLUGIN <plugin>@<marketplace>
             | SET AGENT '<agent>'
             | UNSET AGENT
-            | ADD MCP SERVER <name> mcp-target [mcp-part ...]   planned (v3.21.0), see "An agent's configuration"
+            | ADD MCP SERVER <name> mcp-target [mcp-part ...]   v3.21.0, see "An agent's configuration"
             | DROP MCP SERVER <name>
             | ALLOW TOOL '<rule>' ...      settings.json permissions.allow
             | DENY TOOL '<rule>' ...       settings.json permissions.deny
@@ -960,6 +960,8 @@ that already holds runs and writes nothing, and `APPLY --dry-run` reports what
 would change and runs nothing.
 
 ### MCP servers
+
+Built (v3.21.0); the other groups of this section are still planned.
 
 `ADD MCP SERVER <name>` declares one server, stdio (`COMMAND … [ARGS …]`) or
 remote (`URL …`, HTTP unless `TRANSPORT SSE`), with its environment (`ENV`)

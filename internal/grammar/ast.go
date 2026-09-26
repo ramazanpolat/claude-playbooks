@@ -69,7 +69,23 @@ const (
 	DropPlugin      Kind = "DROP PLUGIN"      // DROP PLUGIN p@m
 	SetAgent        Kind = "SET AGENT"        // SET AGENT '<agent>'
 	UnsetAgent      Kind = "UNSET AGENT"      // UNSET AGENT
+
+	// MCP servers (ALTER PLAYBOOK only): claude mcp add-json / remove.
+	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, ENV …, HEADER …
+	DropMCP Kind = "DROP MCP SERVER" // DROP MCP SERVER n
 )
+
+// MCP is one ADD MCP SERVER declaration: a stdio server (Command, Args) or
+// a remote one (URL, SSE), with its environment and, remote only, headers.
+// A value is a literal or a secret reference, never both.
+type MCP struct {
+	Command string
+	Args    []string
+	URL     string
+	SSE     bool // TRANSPORT SSE; a remote server is HTTP otherwise
+	Env     []Var
+	Headers []Var // Key is the header name
+}
 
 // Where places an env set added with ADD ENV.
 type Where string
@@ -117,6 +133,8 @@ type Clause struct {
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
 
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
+
+	MCP *MCP // ADD MCP SERVER
 
 	Pos Pos
 }
