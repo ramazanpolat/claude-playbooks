@@ -68,7 +68,19 @@ scan:
 
 // runStatement parses and executes one statement.
 func runStatement(args []string) error {
-	st, err := grammar.ParseArgs(args)
+	if q, explain, asJSON, ok := selectArgs(args); ok {
+		return runSelect(q, explain, asJSON)
+	}
+	var st *grammar.Stmt
+	var err error
+	if len(args) >= 1 && strings.ContainsAny(args[0], " \t\r\n") {
+		if len(args) > 1 {
+			return fmt.Errorf("a quoted statement is the whole command line: put %s inside the quotes", args[1])
+		}
+		st, err = grammar.ParseLine(args[0])
+	} else {
+		st, err = grammar.ParseArgs(args)
+	}
 	if err != nil {
 		return err
 	}

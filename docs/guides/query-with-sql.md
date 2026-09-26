@@ -64,5 +64,7 @@ The `--json` objects are the contract
 added, and a field never changes meaning within a major version. Parse
 them, never the human form.
 
-A built-in `SELECT` was specified and then dropped in favour of this
-(pilot, 2026-09-26): ClickHouse already offers the whole language.
+`cpb SELECT …` does this for you ([reference](../reference/cli-grammar.md#select-v3210)):
+columns alone are answered by cpb itself, and any other query is piped to
+`clickhouse local` the same way, over the same `--json` rows. This page is
+the manual form, for a pipeline of your own.

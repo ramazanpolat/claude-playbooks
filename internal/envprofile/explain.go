@@ -83,3 +83,64 @@ func Explain(dir string, e *manifest.Env) ([]Origin, error) {
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
 }
+
+// LayerOrigin is one entry of one layer, and whether it is the one a launch
+// uses (a later layer overrides an earlier one).
+type LayerOrigin struct {
+	Origin
+	Effective bool
+}
+
+// ExplainAll is Explain keeping every layer's entries, not only the one
+// that decides, in layer order (DEFAULTS sets, the playbook's sets, its own
+// block), each marked Effective when it decides its key.
+func ExplainAll(dir string, e *manifest.Env) ([]LayerOrigin, error) {
+	decided, err := Explain(dir, e)
+	if err != nil {
+		return nil, err
+	}
+	wins := map[string]Origin{}
+	for _, o := range decided {
+		wins[o.Key] = o
+	}
+	defaults, err := Defaults(dir)
+	if err != nil {
+		return nil, &ResolveError{Name: DefaultMarker, Err: err}
+	}
+	var out []LayerOrigin
+	add := func(kind, set string, env *manifest.Env) {
+		var entries []Origin
+		for key, ref := range env.Refs {
+			entries = append(entries, Origin{Key: key, Ref: ref, Kind: kind, Set: set})
+		}
+		for key, value := range env.Set {
+			entries = append(entries, Origin{Key: key, Value: value, Kind: kind, Set: set})
+		}
+		for _, key := range env.Unset {
+			entries = append(entries, Origin{Key: key, Blocked: true, Kind: kind, Set: set})
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Key < entries[j].Key })
+		for _, o := range entries {
+			w := wins[o.Key]
+			out = append(out, LayerOrigin{Origin: o, Effective: w.Kind == o.Kind && w.Set == o.Set})
+		}
+	}
+	for _, name := range defaults {
+		p, err := Read(dir, name)
+		if err != nil || p == nil {
+			continue // Explain above already refused a broken layer
+		}
+		add(LayerDefaults, name, p.Env())
+	}
+	if e != nil {
+		for _, name := range e.Profiles {
+			p, err := Read(dir, name)
+			if err != nil || p == nil {
+				continue
+			}
+			add(LayerEnv, name, p.Env())
+		}
+		add(LayerPlaybook, "", &manifest.Env{Set: e.Set, Refs: e.Refs, Unset: e.Unset})
+	}
+	return out, nil
+}
