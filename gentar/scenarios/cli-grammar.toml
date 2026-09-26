@@ -12,7 +12,13 @@
 # Also: INCLUDE stacking playbook files (a shared base runs once, a cycle is
 # refused), and the plugin clauses against a second stub `claude` (in
 # ~/fakeclaude, put first on PATH only there) that answers `claude plugin`
-# and logs each call with its CLAUDE_CONFIG_DIR.
+# and `claude mcp` and logs each call with its CLAUDE_CONFIG_DIR.
+# v3.21.0: MCP servers (a credential header by reference, resolved only at
+# launch), tools / status line / model in settings.json, skills (linked
+# directory, copied git source), recipes (USE PLAYBOOK, TO <playbook>), TO a
+# plain config directory (backup, refusals, state outside the directory),
+# SELECT (built in, and through a stub clickhouse-local: the real one runs
+# in GitHub CI's select-clickhouse job), and a git marketplace's #ref.
 
 [scenario]
 name = "cli-grammar"
@@ -25,7 +31,7 @@ steps = [
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
   '''printf '%s\n' '#!/bin/sh' 'if [ "$1" = --check ]; then case "$2" in *=keychain:ok*) exit 0 ;; *) echo MISSING >&2; exit 4 ;; esac; fi' 'while [ $# -gt 0 ] && [ "$1" != -- ]; do k=${1%%=*}; r=${1#*=}; export "$k=resolved:$r"; shift; done' 'shift' 'exec "$@"' > "$HOME/.local/bin/test-helper" && chmod 755 "$HOME/.local/bin/test-helper"''',
-  '''mkdir -p "$HOME/fakeclaude" && printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$CLAUDE_CONFIG_DIR" "$*" >> "$HOME/fake-claude.log"' 'st="$CLAUDE_CONFIG_DIR/.fake"; mkdir -p "$st"' 'case "$*" in' '"plugin marketplace list --json") cat "$st/mkts" 2>/dev/null || echo "[]" ;;' '"plugin list --json") cat "$st/plugins" 2>/dev/null || echo "[]" ;;' '"plugin marketplace add "*) printf "[{\"name\":\"%s\",\"source\":\"directory\",\"path\":\"%s\"}]" "$(basename "$4")" "$4" > "$st/mkts" ;;' '"plugin marketplace remove "*) echo "[]" > "$st/mkts" ;;' '"plugin install needs@"*) echo "{\"outcome\":\"failed\",\"message\":\"confirm\",\"shownCommand\":{\"command\":\"curl x | sh\",\"sha256\":\"abc123\"}}"; exit 1 ;;' '"plugin install "*) printf "[{\"id\":\"%s\",\"scope\":\"user\",\"enabled\":true}]" "$3" > "$st/plugins"; echo "{\"outcome\":\"ok\"}" ;;' '"plugin uninstall "*) echo "[]" > "$st/plugins"; echo "{\"outcome\":\"ok\"}" ;;' '*) exit 2 ;;' 'esac' > "$HOME/fakeclaude/claude" && chmod 755 "$HOME/fakeclaude/claude"''',
+  '''mkdir -p "$HOME/fakeclaude" && printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$CLAUDE_CONFIG_DIR" "$*" >> "$HOME/fake-claude.log"' 'st="$CLAUDE_CONFIG_DIR/.fake"; mkdir -p "$st"' 'case "$*" in' '"plugin marketplace list --json") cat "$st/mkts" 2>/dev/null || echo "[]" ;;' '"plugin list --json") cat "$st/plugins" 2>/dev/null || echo "[]" ;;' '"plugin marketplace add https://"*) u=${4%%#*}; r=""; case "$4" in *#*) r=",\"ref\":\"${4#*#}\"" ;; esac; printf "[{\"name\":\"gitmkt\",\"source\":\"git\",\"url\":\"%s\"%s}]" "$u" "$r" > "$st/mkts" ;;' '"plugin marketplace add "*) printf "[{\"name\":\"%s\",\"source\":\"directory\",\"path\":\"%s\"}]" "$(basename "$4")" "$4" > "$st/mkts" ;;' '"plugin marketplace remove "*) echo "[]" > "$st/mkts" ;;' '"plugin install needs@"*) echo "{\"outcome\":\"failed\",\"message\":\"confirm\",\"shownCommand\":{\"command\":\"curl x | sh\",\"sha256\":\"abc123\"}}"; exit 1 ;;' '"plugin install "*) printf "[{\"id\":\"%s\",\"scope\":\"user\",\"enabled\":true}]" "$3" > "$st/plugins"; echo "{\"outcome\":\"ok\"}" ;;' '"plugin uninstall "*) echo "[]" > "$st/plugins"; echo "{\"outcome\":\"ok\"}" ;;' 'mcp\ add-json\ *) mkdir -p "$st/mcp"; if [ -e "$st/mcp/$3" ]; then echo "MCP server $3 already exists" >&2; exit 1; fi; printf "%s" "$4" > "$st/mcp/$3" ;;' 'mcp\ remove\ *) [ -e "$st/mcp/$3" ] || { echo "No MCP server named $3" >&2; exit 1; }; rm "$st/mcp/$3" ;;' '*) exit 2 ;;' 'esac' 'case "$1" in mcp) { printf "{\"mcpServers\":{"; sep=""; for f in "$st"/mcp/*; do [ -e "$f" ] || continue; printf "%s\"%s\":" "$sep" "$(basename "$f")"; cat "$f"; sep=","; done; printf "}}"; } > "$CLAUDE_CONFIG_DIR/.claude.json" ;;' 'esac' > "$HOME/fakeclaude/claude" && chmod 755 "$HOME/fakeclaude/claude"''',
   'claude-playbook CREATE PLAYBOOK gpb NO ALIAS',
   'claude-playbook CREATE ENV glm SET FROM_ENV=yes MODEL=glm DESCRIBE router',
   'claude-playbook ALTER DEFAULTS SET SECRET HELPER "$HOME/.local/bin/test-helper"',
@@ -133,3 +139,73 @@ contains = "include-ok"
 # needs a marketplace-declared command fails and shows the confirm line.
 command = '''export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; M="$HOME/mkt/loc"; mkdir -p "$M/.claude-plugin" && printf "{\"name\":\"loc\",\"owner\":{\"name\":\"t\"},\"plugins\":[]}\n" > "$M/.claude-plugin/marketplace.json" && claude-playbook CREATE PLAYBOOK kpb NO ALIAS >/dev/null && printf "ALTER PLAYBOOK kpb ADD MARKETPLACE loc FROM '$M' ADD PLUGIN hello@loc SET AGENT 'hello';\n" > "$HOME/plug.cpb" && claude-playbook APPLY "$HOME/plug.cpb" --dry-run > "$HOME/plug-dry.out" && grep -qF "would run: claude plugin marketplace add $M --scope user; claude plugin install hello@loc --scope user --json" "$HOME/plug-dry.out" && ! grep -q "|plugin marketplace add\||plugin install" "$L" && claude-playbook APPLY "$HOME/plug.cpb" >/dev/null && grep -qF "/kpb|plugin marketplace add $M --scope user" "$L" && grep -qF "/kpb|plugin install hello@loc --scope user --json" "$L" && grep -qF "\"agent\": \"hello\"" "$HOME/.claude-playbooks/kpb/settings.json" && claude-playbook APPLY "$HOME/plug.cpb" > "$HOME/plug-again.out" && grep -q " 0 created, 0 changed, 1 unchanged," "$HOME/plug-again.out" && [ "$(grep -c "|plugin install hello@loc" "$L")" = 1 ] && if claude-playbook ALTER PLAYBOOK kpb DROP MARKETPLACE loc > "$HOME/plug-drop.out" 2>&1; then echo drop-not-refused; elif ! grep -q "plugins still use it: hello@loc" "$HOME/plug-drop.out"; then echo drop-wrong-error; elif claude-playbook ALTER PLAYBOOK kpb ADD PLUGIN needs@loc > "$HOME/plug-needs.out" 2>&1; then echo command-accepted; else grep -qF -- "--accept-command abc123" "$HOME/plug-needs.out" && echo plugins-ok; fi'''
 contains = "plugins-ok"
+
+# --- v3.21.0: an agent's configuration, targets and SELECT (new code only;
+# assertions confirmed by root as the pilot's delegate, 2026-09-27) ---
+
+[[verify.commands]]
+# MCP servers run `claude mcp add-json` with the playbook as
+# CLAUDE_CONFIG_DIR. A credential header is a reference: Claude's config gets
+# only ${CPB_MCP_…}, the launch gets it resolved, SHOW and EXPLAIN show the
+# reference and never a resolved value. A repeat runs nothing, a literal
+# credential is refused, DROP runs `mcp remove` and forgets the reference.
+command = '''O=$PATH; export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; P="$HOME/.claude-playbooks/mpb"; A="ALTER PLAYBOOK mpb ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'server-fs' '/srv' ADD MCP SERVER sentry URL 'https://mcp.example/mcp' HEADER 'Authorization' FROM 'keychain:ok/sentry'"; claude-playbook CREATE PLAYBOOK mpb NO ALIAS >/dev/null && claude-playbook "$A" >/dev/null && grep -qF "/mpb|mcp add-json files " "$L" && grep -qF "/mpb|mcp add-json sentry " "$L" && grep -Eq '"Authorization": ?"\$\{CPB_MCP_SENTRY_H_AUTHORIZATION_[0-9a-fA-F]{8}\}"' "$P/.claude.json" && ! grep -q "keychain:\|resolved:" "$P/.claude.json" && grep -qF "keychain:ok/sentry" "$P/.playbook" && rm -f "$HOME/claude-env" && env PATH="$O" claude-playbook run mpb && grep -Eq "^CPB_MCP_SENTRY_H_AUTHORIZATION_[0-9a-fA-F]{8}=resolved:keychain:ok/sentry$" "$HOME/claude-env" && V=$( { claude-playbook SHOW PLAYBOOK mpb --json; claude-playbook EXPLAIN PLAYBOOK mpb; claude-playbook EXPLAIN PLAYBOOK mpb --json; claude-playbook SHOW CREATE PLAYBOOK mpb; } 2>&1 ) && printf "%s" "$V" | grep -qF "keychain:ok/sentry" && ! printf "%s" "$V" | grep -q "resolved:" && printf "%s" "$V" | grep -qF "HEADER 'Authorization' FROM 'keychain:ok/sentry'" && claude-playbook "$A" | grep -q unchanged && [ "$(grep -c "|mcp add-json sentry " "$L")" = 1 ] && if claude-playbook "ALTER PLAYBOOK mpb ADD MCP SERVER lit URL 'https://x.example/mcp' HEADER 'Authorization' 'Bearer abc'" >/dev/null 2>&1; then echo literal-credential-accepted; elif grep -q "mcp add-json lit" "$L"; then echo literal-ran; else claude-playbook ALTER PLAYBOOK mpb DROP MCP SERVER sentry >/dev/null && grep -qF "/mpb|mcp remove sentry --scope user" "$L" && ! grep -qF "keychain:ok/sentry" "$P/.playbook" && ! grep -q '"sentry"' "$P/.claude.json" && grep -q '"files"' "$P/.claude.json" && echo mcp-ok; fi'''
+contains = "mcp-ok"
+
+[[verify.commands]]
+# Tools, status line and model land in settings.json and keep a key cpb did
+# not write; allowing a denied rule moves it; EXPLAIN shows the tools, and
+# that an env set's ANTHROPIC_MODEL decides over SET MODEL; UNSET removes.
+command = '''P="$HOME/.claude-playbooks/spb"; c() { tr -d ' \n' < "$P/settings.json"; }; claude-playbook CREATE PLAYBOOK spb NO ALIAS >/dev/null && printf '{"theme": "dark"}\n' > "$P/settings.json" && claude-playbook "ALTER PLAYBOOK spb DENY TOOL 'Bash(rm *)' ALLOW TOOL 'Bash(git diff *)' SET STATUSLINE 'echo spb' SET MODEL 'claude-opus-5-5'" >/dev/null && c | grep -qF '"theme":"dark"' && c | grep -qF '"allow":["Bash(gitdiff*)"]' && c | grep -qF '"deny":["Bash(rm*)"]' && c | grep -qF '"statusLine":{"type":"command","command":"echospb"}' && c | grep -qF '"model":"claude-opus-5-5"' && claude-playbook EXPLAIN PLAYBOOK spb | grep -qxF "Tools: allow Bash(git diff *); deny Bash(rm *)" && claude-playbook EXPLAIN PLAYBOOK spb | grep -qF "Model: claude-opus-5-5 (playbook settings)" && claude-playbook "ALTER PLAYBOOK spb ALLOW TOOL 'Bash(rm *)'" >/dev/null && c | grep -qF '"allow":["Bash(gitdiff*)","Bash(rm*)"]' && ! c | grep -qF '"deny":["Bash(rm*)"]' && claude-playbook CREATE ENV mdl SET ANTHROPIC_MODEL=glm-x >/dev/null && claude-playbook ALTER PLAYBOOK spb ADD ENV mdl >/dev/null && claude-playbook EXPLAIN PLAYBOOK spb | grep -qF "Model: glm-x (ANTHROPIC_MODEL); the settings model claude-opus-5-5 is overridden" && claude-playbook "ALTER PLAYBOOK spb UNSET TOOL 'Bash(rm *)' 'Bash(git diff *)' UNSET STATUSLINE UNSET MODEL" >/dev/null && ! c | grep -q 'Bash(\|statusLine\|"model"' && c | grep -qF '"theme":"dark"' && echo agent-settings-ok'''
+contains = "agent-settings-ok"
+
+[[verify.commands]]
+# ADD SKILL from a directory links it and records it; a repeat is unchanged;
+# a skills/<x> cpb did not add is refused by ADD and DROP; DROP SKILL removes
+# the link and never the linked directory.
+command = '''P="$HOME/.claude-playbooks/skpb"; S="$HOME/sk/notes"; mkdir -p "$S" && printf -- "---\nname: notes\n---\nbody\n" > "$S/SKILL.md" && claude-playbook CREATE PLAYBOOK skpb NO ALIAS >/dev/null && claude-playbook ALTER PLAYBOOK skpb ADD SKILL notes FROM "$S" >/dev/null && [ "$(readlink "$P/skills/notes")" = "$S" ] && grep -q 'skills.*notes' "$P/.playbook" && grep -qF 'mode = "link"' "$P/.playbook" && claude-playbook ALTER PLAYBOOK skpb ADD SKILL notes FROM "$S" | grep -q unchanged && mkdir -p "$P/skills/mine" && printf x > "$P/skills/mine/SKILL.md" && if claude-playbook ALTER PLAYBOOK skpb ADD SKILL mine FROM "$S" >/dev/null 2>&1; then echo unrecorded-replaced; elif claude-playbook ALTER PLAYBOOK skpb DROP SKILL mine >/dev/null 2>&1; then echo unrecorded-dropped; else test -f "$P/skills/mine/SKILL.md" && claude-playbook ALTER PLAYBOOK skpb DROP SKILL notes >/dev/null && test ! -e "$P/skills/notes" && test -f "$S/SKILL.md" && ! grep -q 'skills.*notes' "$P/.playbook" && echo skills-ok; fi'''
+contains = "skills-ok"
+
+[[verify.commands]]
+# A git source is cloned and copied: the skill directory without .git.
+command = '''P="$HOME/.claude-playbooks/skpb"; G="$HOME/skrepo"; mkdir -p "$G" && printf -- "---\nname: g\n---\nbody\n" > "$G/SKILL.md" && git -C "$G" init -q && git -C "$G" -c user.name=t -c user.email=t@t.example add SKILL.md && git -C "$G" -c user.name=t -c user.email=t@t.example commit -qm skill && claude-playbook ALTER PLAYBOOK skpb ADD SKILL gnotes FROM "file://$G" >/dev/null && test -f "$P/skills/gnotes/SKILL.md" && test ! -L "$P/skills/gnotes" && test ! -e "$P/skills/gnotes/.git" && grep -qF 'mode = "copy"' "$P/.playbook" && echo skills-git-ok'''
+contains = "skills-git-ok"
+
+[[verify.commands]]
+# Recipes: name-less statements need a target (refused before anything is
+# written without one); USE PLAYBOOK gives one recipe two targets, created
+# bare with their launchers; TO overrides USE PLAYBOOK with a warning; a
+# statement that names its playbook stays literal.
+command = '''D="$HOME/rec"; B=$(dirname "$(command -v claude-playbook)"); M="$HOME/.claude-playbooks"; mkdir -p "$D" && printf "CREATE OR REPLACE ENV notarget;\nALTER PLAYBOOK SET VAR RECIPE=yes;\n" > "$D/recipe.cpb" && if claude-playbook APPLY "$D/recipe.cpb" > "$D/nt.out" 2>&1; then echo no-target-accepted; elif ! grep -q "name-less statements and no target" "$D/nt.out"; then echo no-target-wrong-error; elif test -e "$M/.env-profiles/notarget.toml"; then echo no-target-wrote; else printf "USE PLAYBOOK ra;\nINCLUDE 'recipe.cpb';\nUSE PLAYBOOK rb;\nINCLUDE 'recipe.cpb';\n" > "$D/two.cpb" && claude-playbook APPLY "$D/two.cpb" >/dev/null && grep -qF 'RECIPE = "yes"' "$M/ra/.playbook" && grep -qF 'RECIPE = "yes"' "$M/rb/.playbook" && test -L "$B/ra" && test -L "$B/rb" && claude-playbook APPLY "$D/two.cpb" TO rc 2> "$D/to.err" >/dev/null && grep -q "USE PLAYBOOK ra is ignored" "$D/to.err" && grep -qF 'RECIPE = "yes"' "$M/rc/.playbook" && printf "ALTER PLAYBOOK ra SET VAR LIT=yes;\nALTER PLAYBOOK SET VAR LIT2=yes;\n" > "$D/lit.cpb" && claude-playbook APPLY "$D/lit.cpb" TO rb >/dev/null && grep -qF 'LIT = "yes"' "$M/ra/.playbook" && grep -qF 'LIT2 = "yes"' "$M/rb/.playbook" && ! grep -qF 'LIT = "yes"' "$M/rb/.playbook" && echo recipes-ok; fi'''
+contains = "recipes-ok"
+
+[[verify.commands]]
+# TO '<dir>', a plain config directory: refused without --yes and no TTY;
+# the dry run names the backup; --yes writes settings.json (keeping theme,
+# variables into env), one backup per run holding the original bytes;
+# launcher-only clauses refused with nothing written; a skill's record in
+# cpb's own state, not in the directory; a registered playbook's directory
+# is that playbook.
+command = '''mkdir -p "$HOME/plaincfg" && C=$(cd "$HOME/plaincfg" && pwd -P); D="$HOME/dirt"; mkdir -p "$D" && printf '{"theme": "dark"}\n' > "$C/settings.json" && cp "$C/settings.json" "$D/orig" && printf "ALTER PLAYBOOK ALLOW TOOL 'Bash(make *)' SET MODEL 'claude-sonnet-5' SET VAR DIRV=1;\nALTER PLAYBOOK SET STATUSLINE 'echo d';\n" > "$D/r.cpb" && if claude-playbook APPLY "$D/r.cpb" TO "$C" < /dev/null > "$D/o" 2>&1; then echo no-yes-accepted; elif ! grep -q -- "--yes" "$D/o" || ! cmp -s "$C/settings.json" "$D/orig"; then echo no-yes-wrote; else claude-playbook APPLY "$D/r.cpb" TO "$C" --dry-run | grep -qF "back up $C/settings.json" && cmp -s "$C/settings.json" "$D/orig" && claude-playbook APPLY "$D/r.cpb" TO "$C" --yes >/dev/null && T=$(tr -d ' \n' < "$C/settings.json") && printf "%s" "$T" | grep -qF '"theme":"dark"' && printf "%s" "$T" | grep -qF '"model":"claude-sonnet-5"' && printf "%s" "$T" | grep -qF '"DIRV":"1"' && printf "%s" "$T" | grep -qF '"Bash(make*)"' && printf "%s" "$T" | grep -qF '"command":"echod"' && [ "$(ls "$C" | grep -c '^settings.json.cpb-backup-')" = 1 ] && cmp -s "$C"/settings.json.cpb-backup-* "$D/orig" && printf "ALTER PLAYBOOK USE ENV o1;\n" > "$D/u.cpb" && printf "ALTER PLAYBOOK SET VAR K FROM 'keychain:ok/k';\n" > "$D/f.cpb" && cp "$C/settings.json" "$D/now" && ! claude-playbook APPLY "$D/u.cpb" TO "$C" --yes > "$D/u.out" 2>&1 && grep -q launcher "$D/u.out" && ! claude-playbook APPLY "$D/f.cpb" TO "$C" --yes > "$D/f.out" 2>&1 && grep -q launcher "$D/f.out" && cmp -s "$C/settings.json" "$D/now" && printf "ALTER PLAYBOOK ADD SKILL dn FROM '$HOME/sk/notes';\n" > "$D/s.cpb" && claude-playbook APPLY "$D/s.cpb" TO "$C" --yes >/dev/null && test -L "$C/skills/dn" && grep -qF "$C" "$HOME/.claude-playbooks/.state/dirs.toml" && test ! -e "$C/.playbook" && claude-playbook APPLY "$D/r.cpb" TO "$HOME/.claude-playbooks/opb" --yes >/dev/null && grep -qF 'DIRV = "1"' "$HOME/.claude-playbooks/opb/.playbook" && echo dir-target-ok; fi'''
+contains = "dir-target-ok"
+
+[[verify.commands]]
+# SELECT: the built-in form (columns only) needs no ClickHouse, spells
+# columns exactly, and takes --json inside the quotes. Anything else goes to
+# clickhouse-local; here a stub (CPB_CLICKHOUSE) records argv and stdin: the
+# query is rewritten to read stdin (not a FROM inside a string), stdin is one
+# object per playbook, and the plaintext secret stored earlier never reaches
+# it. The real clickhouse-local is not assumed on the bench: GitHub CI's
+# select-clickhouse job runs it end to end, and a unit test pins stdin to
+# SHOW … --json byte for byte.
+command = '''H="$HOME/chstub"; mkdir -p "$H" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "$HOME/ch.args"' 'cat > "$HOME/ch.in"' 'echo stub-ok' > "$H/clickhouse" && chmod 755 "$H/clickhouse" && N=$(claude-playbook "SELECT name FROM PLAYBOOKS" | tail -n +3 | wc -l) && [ "$N" -ge 5 ] && claude-playbook "SELECT name, envs FROM PLAYBOOKS" | grep -q "^opb " && claude-playbook "SELECT name FROM PLAYBOOKS --json" | grep -qF '"name": "gpb"' && if claude-playbook "SELECT NAME FROM PLAYBOOKS" > "$HOME/sel.err" 2>&1; then echo case-accepted; elif ! grep -q "unknown column 'NAME'" "$HOME/sel.err"; then echo case-wrong-error; elif claude-playbook "SELECT count() FROM PLAYBOOKS; SELECT 1" >/dev/null 2>&1; then echo second-statement-accepted; else CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT name FROM PLAYBOOKS WHERE name != 'FROM VARS' ORDER BY name" | grep -qx stub-ok && [ "$(head -1 "$HOME/ch.args")" = local ] && grep -qx JSONEachRow "$HOME/ch.args" && grep -qx -- "--structure" "$HOME/ch.args" && tail -1 "$HOME/ch.args" | grep -qF "AS version_tuple FROM table) WHERE name != 'FROM VARS' ORDER BY name" && [ "$(wc -l < "$HOME/ch.in")" = "$N" ] && [ "$(grep -c '^{"name":"' "$HOME/ch.in")" = "$N" ] && ! grep -q "sk-live" "$HOME/ch.in" && CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT key FROM VARS WHERE playbook = 'gpb'" | grep -qx stub-ok && grep -q '"key":"X_TOKEN"' "$HOME/ch.in" && ! grep -q "sk-live" "$HOME/ch.in" && echo select-ok; fi'''
+contains = "select-ok"
+
+[[verify.commands]]
+# A git marketplace with #ref (the stub records url and ref apart, as Claude
+# Code 2.1.283 does): a repeat is unchanged and runs nothing; another ref is
+# another source, refused. (SHOW CREATE's url#ref reads settings.json, which
+# the stub does not write; a unit test and a run against the real claude
+# cover it.)
+command = '''export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; U="https://git.example/mkt.git"; claude-playbook CREATE PLAYBOOK grp NO ALIAS >/dev/null && claude-playbook "ALTER PLAYBOOK grp ADD MARKETPLACE gitmkt FROM '$U#v1'" >/dev/null && [ "$(grep -c "/grp|plugin marketplace add $U#v1 --scope user" "$L")" = 1 ] && claude-playbook "ALTER PLAYBOOK grp ADD MARKETPLACE gitmkt FROM '$U#v1'" | grep -q unchanged && [ "$(grep -c "/grp|plugin marketplace add" "$L")" = 1 ] && if claude-playbook "ALTER PLAYBOOK grp ADD MARKETPLACE gitmkt FROM '$U#v2'" > "$HOME/gr.out" 2>&1; then echo ref-change-accepted; else grep -q "already declared from another source" "$HOME/gr.out" && [ "$(grep -c "/grp|plugin marketplace add" "$L")" = 1 ] && echo git-ref-ok; fi'''
+contains = "git-ref-ok"
