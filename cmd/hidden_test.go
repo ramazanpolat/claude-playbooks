@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -101,6 +102,10 @@ func TestGrammarForm(t *testing.T) {
 		{[]string{"env-profile"}, "cpb SHOW ENVS"},
 		{[]string{"env-profile", "p", "describe", "secret words"}, "cpb ALTER ENV p DESCRIBE '<text>'"},
 		{[]string{"env-profile", "p", "default"}, "cpb ALTER DEFAULTS USE ENV p"},
+		{[]string{"env", "x", "unset", "TOKEN=sk-live-secret"}, "cpb ALTER PLAYBOOK x BLOCK VAR TOKEN=<value>"},
+		{[]string{"env"}, hintReference},
+		{[]string{"create", "sandbox"}, hintReference},
+		{[]string{"link", "/src/has space"}, hintReference},
 	}
 	for _, tc := range cases {
 		c, rest, err := rootCmd.Find(tc.args)
@@ -119,5 +124,25 @@ func TestGrammarForm(t *testing.T) {
 		if strings.Contains(got, "sk-live-secret") || strings.Contains(got, "secret words") {
 			t.Errorf("%q: the hint echoes a value: %s", tc.args, got)
 		}
+	}
+}
+
+// link derives its default name from the absolute target, and so does the
+// hint: `link .` names the working directory, never ".".
+func TestGrammarFormLinkDot(t *testing.T) {
+	c, rest, err := rootCmd.Find([]string{"link", "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ParseFlags(rest); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	got := grammarForm(c, c.Flags().Args())
+	if want := "cpb CREATE PLAYBOOK " + filepath.Base(wd) + " LINK ."; got != want && got != hintReference {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+	if strings.Contains(got, "PLAYBOOK . ") {
+		t.Fatalf("the hint names the playbook '.': %s", got)
 	}
 }

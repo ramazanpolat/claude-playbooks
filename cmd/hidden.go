@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
 // The pre-grammar commands (env, env-profile, create <name>, link, delete,
@@ -42,6 +44,19 @@ The grammar: https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/ref
 // typed may be a secret. Where no single statement fits, it names the
 // reference.
 func grammarForm(cmd *cobra.Command, args []string) string {
+	// An operand the command line cannot carry as a statement word (a
+	// keyword, a --flag-like word, shell metacharacters) has no one-line
+	// form: the hint names the reference instead.
+	sub := cmd.Name() == "env" || cmd.Name() == "env-profile"
+	for i, a := range args {
+		switch {
+		case sub && i == 1: // the old subcommand word (set, use, ...)
+		case strings.Contains(a, "="): // K=V: its value is masked where written
+		case sub && i >= 2 && args[1] == "describe": // the text is never shown
+		case !plainOperand(a):
+			return hintReference
+		}
+	}
 	flag := func(name string) string {
 		if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
 			return f.Value.String()
@@ -73,8 +88,14 @@ func grammarForm(cmd *cobra.Command, args []string) string {
 	case "link":
 		target := arg(0, "<target>")
 		name := flag("name")
-		if name == "" {
-			name = filepath.Base(target)
+		if name == "" && len(args) > 0 {
+			// As link derives it: from the absolute target (`link .`).
+			if abs, err := filepath.Abs(target); err == nil {
+				name = filepath.Base(abs)
+			}
+		}
+		if name == "" || !plainOperand(name) {
+			return hintReference
 		}
 		return "cpb CREATE PLAYBOOK " + name + " LINK " + target + launcher()
 	case "delete":
@@ -102,8 +123,11 @@ func grammarForm(cmd *cobra.Command, args []string) string {
 	case "info":
 		return "cpb SHOW PLAYBOOK " + arg(0, "<name>")
 	case "env":
-		if len(args) < 2 {
-			return "cpb EXPLAIN PLAYBOOK " + arg(0, "<name>")
+		if len(args) == 0 {
+			return hintReference // the listing has no one statement
+		}
+		if len(args) == 1 {
+			return "cpb EXPLAIN PLAYBOOK " + args[0]
 		}
 		head := "cpb ALTER PLAYBOOK " + args[0]
 		rest := args[2:]
@@ -111,9 +135,9 @@ func grammarForm(cmd *cobra.Command, args []string) string {
 		case "set":
 			return head + " SET VAR " + maskedPairs(rest)
 		case "unset":
-			return head + " BLOCK VAR " + strings.Join(rest, " ")
+			return head + " BLOCK VAR " + maskedPairs(rest)
 		case "clear":
-			return head + " UNSET VAR " + strings.Join(rest, " ")
+			return head + " UNSET VAR " + maskedPairs(rest)
 		case "use":
 			var w []string
 			for _, p := range rest {
@@ -135,9 +159,9 @@ func grammarForm(cmd *cobra.Command, args []string) string {
 		case "set":
 			return "cpb ALTER ENV " + p + " SET " + maskedPairs(rest) + " (CREATE ENV when new)"
 		case "unset":
-			return "cpb ALTER ENV " + p + " BLOCK " + strings.Join(rest, " ")
+			return "cpb ALTER ENV " + p + " BLOCK " + maskedPairs(rest)
 		case "clear":
-			return "cpb ALTER ENV " + p + " UNSET " + strings.Join(rest, " ")
+			return "cpb ALTER ENV " + p + " UNSET " + maskedPairs(rest)
 		case "describe":
 			return "cpb ALTER ENV " + p + " DESCRIBE '<text>'"
 		case "default":
@@ -148,7 +172,20 @@ func grammarForm(cmd *cobra.Command, args []string) string {
 			return "cpb DROP ENV " + p
 		}
 	}
-	return "see docs/reference/cli-grammar.md, \"Pre-grammar commands\""
+	return hintReference
+}
+
+const hintReference = `see docs/reference/cli-grammar.md, "Pre-grammar commands"`
+
+// plainOperand reports whether a word can stand in a one-line statement as
+// typed: not a keyword (a new name cannot be one on the command line), not
+// flag-like, and free of anything the shell or the lexer treats specially.
+// K=V words pass: their values are masked where they are written.
+func plainOperand(w string) bool {
+	if w == "" || grammar.IsKeyword(w) || strings.HasPrefix(w, "--") {
+		return false
+	}
+	return !strings.ContainsAny(w, " \t\r\n'\"`$;&|<>()*?[]{}~!#\\")
 }
 
 // maskedPairs writes K=V words as K=<value>.
