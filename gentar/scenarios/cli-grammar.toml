@@ -9,6 +9,10 @@
 # literal that is refused, then stored AS PLAINTEXT and never printed. A stub `claude` dumps
 # the environment it received; a stub secret helper follows cpb's helper
 # interface and resolves keychain:ok… references. No real secret exists.
+# Also: INCLUDE stacking playbook files (a shared base runs once, a cycle is
+# refused), and the plugin clauses against a second stub `claude` (in
+# ~/fakeclaude, put first on PATH only there) that answers `claude plugin`
+# and logs each call with its CLAUDE_CONFIG_DIR.
 
 [scenario]
 name = "cli-grammar"
@@ -21,6 +25,7 @@ steps = [
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
   '''printf '%s\n' '#!/bin/sh' 'if [ "$1" = --check ]; then case "$2" in *=keychain:ok*) exit 0 ;; *) echo MISSING >&2; exit 4 ;; esac; fi' 'while [ $# -gt 0 ] && [ "$1" != -- ]; do k=${1%%=*}; r=${1#*=}; export "$k=resolved:$r"; shift; done' 'shift' 'exec "$@"' > "$HOME/.local/bin/test-helper" && chmod 755 "$HOME/.local/bin/test-helper"''',
+  '''mkdir -p "$HOME/fakeclaude" && printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$CLAUDE_CONFIG_DIR" "$*" >> "$HOME/fake-claude.log"' 'st="$CLAUDE_CONFIG_DIR/.fake"; mkdir -p "$st"' 'case "$*" in' '"plugin marketplace list --json") cat "$st/mkts" 2>/dev/null || echo "[]" ;;' '"plugin list --json") cat "$st/plugins" 2>/dev/null || echo "[]" ;;' '"plugin marketplace add "*) printf "[{\"name\":\"%s\",\"source\":\"directory\",\"path\":\"%s\"}]" "$(basename "$4")" "$4" > "$st/mkts" ;;' '"plugin marketplace remove "*) echo "[]" > "$st/mkts" ;;' '"plugin install needs@"*) echo "{\"outcome\":\"failed\",\"message\":\"confirm\",\"shownCommand\":{\"command\":\"curl x | sh\",\"sha256\":\"abc123\"}}"; exit 1 ;;' '"plugin install "*) printf "[{\"id\":\"%s\",\"scope\":\"user\",\"enabled\":true}]" "$3" > "$st/plugins"; echo "{\"outcome\":\"ok\"}" ;;' '"plugin uninstall "*) echo "[]" > "$st/plugins"; echo "{\"outcome\":\"ok\"}" ;;' '*) exit 2 ;;' 'esac' > "$HOME/fakeclaude/claude" && chmod 755 "$HOME/fakeclaude/claude"''',
   'claude-playbook CREATE PLAYBOOK gpb NO ALIAS',
   'claude-playbook CREATE ENV glm SET FROM_ENV=yes MODEL=glm DESCRIBE router',
   'claude-playbook ALTER DEFAULTS SET SECRET HELPER "$HOME/.local/bin/test-helper"',
@@ -111,3 +116,20 @@ contains = "fallback-ok"
 # layout) manifest the launch reads still uses the set.
 command = 'P="$HOME/.claude-playbooks"; claude-playbook CREATE ENV nest >/dev/null && mkdir -p "$P/npb/config" && printf "version = \"0.1.0\"\nname = \"npb\"\nsubdir = \"config\"\n" > "$P/npb/.playbook" && printf "version = \"0.1.0\"\nname = \"npb\"\n\n[env]\nprofiles = [\"nest\"]\n" > "$P/npb/config/.playbook" && for e in o1 d1 nest; do if claude-playbook DROP ENV $e >/dev/null 2>&1; then echo "dropped-in-use-$e"; exit 1; fi; done && test -e "$P/.env-profiles/o1.toml" && test -e "$P/.env-profiles/d1.toml" && test -e "$P/.env-profiles/nest.toml" && claude-playbook DROP ENV IF EXISTS never-was >/dev/null && echo drop-env-guard-ok'
 contains = "drop-env-guard-ok"
+
+[[verify.commands]]
+# INCLUDE stacks playbook files: bare -> kommander -> chaos. The shared base,
+# included twice (once through a symlink), runs once; the later layer wins
+# (chaos's ADD ENV over kommander's USE ENV, at launch); a cycle is refused
+# with its chain and nothing is written.
+command = '''D="$HOME/inc"; mkdir -p "$D" && printf "CREATE OR REPLACE ENV ib SET LAYER=base;\nCREATE OR REPLACE ENV ik SET LAYER=kommander;\nCREATE OR REPLACE ENV ic SET LAYER=chaos;\nCREATE PLAYBOOK IF NOT EXISTS ipb NO ALIAS;\n" > "$D/base.cpb" && ln -sf base.cpb "$D/base-link.cpb" && printf "INCLUDE 'base.cpb';\nALTER PLAYBOOK ipb USE ENV ib ik;\n" > "$D/kommander.cpb" && printf "INCLUDE 'kommander.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK ipb ADD ENV ic;\n" > "$D/chaos.cpb" && claude-playbook APPLY "$D/chaos.cpb" > "$D/apply.out" && grep -q " 4 created, 2 changed, 0 unchanged," "$D/apply.out" && grep -F "profiles = [\"ib\", \"ik\", \"ic\"]" "$HOME/.claude-playbooks/ipb/.playbook" >/dev/null && rm -f "$HOME/claude-env" && claude-playbook run ipb && grep -x LAYER=chaos "$HOME/claude-env" >/dev/null && printf "CREATE ENV cyc;\nINCLUDE 'b.cpb';\n" > "$D/a.cpb" && printf "INCLUDE 'a.cpb';\n" > "$D/b.cpb" && if claude-playbook APPLY "$D/a.cpb" > "$D/cyc.out" 2>&1; then echo cycle-accepted; else grep -q "INCLUDE cycle: .*a.cpb -> .*b.cpb -> .*a.cpb" "$D/cyc.out" && test ! -e "$HOME/.claude-playbooks/.env-profiles/cyc.toml" && echo include-ok; fi'''
+contains = "include-ok"
+
+[[verify.commands]]
+# The plugin clauses run `claude plugin` with the playbook as
+# CLAUDE_CONFIG_DIR: a dry run lists the commands and runs none; APPLY runs
+# marketplace add and install and sets the agent; a repeat runs nothing;
+# DROP MARKETPLACE is refused while its plugin is installed; a plugin that
+# needs a marketplace-declared command fails and shows the confirm line.
+command = '''export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; M="$HOME/mkt/loc"; mkdir -p "$M/.claude-plugin" && printf "{\"name\":\"loc\",\"owner\":{\"name\":\"t\"},\"plugins\":[]}\n" > "$M/.claude-plugin/marketplace.json" && claude-playbook CREATE PLAYBOOK kpb NO ALIAS >/dev/null && printf "ALTER PLAYBOOK kpb ADD MARKETPLACE loc FROM '$M' ADD PLUGIN hello@loc SET AGENT 'hello';\n" > "$HOME/plug.cpb" && claude-playbook APPLY "$HOME/plug.cpb" --dry-run > "$HOME/plug-dry.out" && grep -qF "would run: claude plugin marketplace add $M --scope user; claude plugin install hello@loc --scope user --json" "$HOME/plug-dry.out" && ! grep -q "|plugin marketplace add\||plugin install" "$L" && claude-playbook APPLY "$HOME/plug.cpb" >/dev/null && grep -qF "/kpb|plugin marketplace add $M --scope user" "$L" && grep -qF "/kpb|plugin install hello@loc --scope user --json" "$L" && grep -qF "\"agent\": \"hello\"" "$HOME/.claude-playbooks/kpb/settings.json" && claude-playbook APPLY "$HOME/plug.cpb" > "$HOME/plug-again.out" && grep -q " 0 created, 0 changed, 1 unchanged," "$HOME/plug-again.out" && [ "$(grep -c "|plugin install hello@loc" "$L")" = 1 ] && if claude-playbook ALTER PLAYBOOK kpb DROP MARKETPLACE loc > "$HOME/plug-drop.out" 2>&1; then echo drop-not-refused; elif ! grep -q "plugins still use it: hello@loc" "$HOME/plug-drop.out"; then echo drop-wrong-error; elif claude-playbook ALTER PLAYBOOK kpb ADD PLUGIN needs@loc > "$HOME/plug-needs.out" 2>&1; then echo command-accepted; else grep -qF -- "--accept-command abc123" "$HOME/plug-needs.out" && echo plugins-ok; fi'''
+contains = "plugins-ok"

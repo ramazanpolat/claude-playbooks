@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -18,37 +19,21 @@ import (
 // statement SHOW CREATE writes is safe to repeat, so running the fixed
 // files again is the recovery.
 func runApply(st *grammar.Stmt) error {
-	type file struct {
-		path  string
-		stmts []*grammar.Stmt
-	}
-	var files []file
-	var errs []error
+	l := &applyLoader{seen: map[string]bool{}, total: map[string]int{}}
 	for _, path := range st.Files {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		stmts, err := grammar.ParseFile(string(data))
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", path, err))
-			continue
-		}
-		files = append(files, file{path, stmts})
+		l.root(path)
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("%w\nnothing was written", errors.Join(errs...))
+	if len(l.errs) > 0 {
+		return fmt.Errorf("%w\nnothing was written", errors.Join(l.errs...))
 	}
+	stmts := l.out
 
 	// A file never consents to DROP PLAYBOOK on its own: it deletes an
 	// install directory, data and all.
 	var drops []string
-	for _, f := range files {
-		for _, s := range f.stmts {
-			if s.Verb == grammar.Drop && s.Object == grammar.Playbook {
-				drops = append(drops, fmt.Sprintf("  %s:%d: DROP PLAYBOOK %s", f.path, s.Pos.Line, s.Name))
-			}
+	for _, x := range stmts {
+		if x.s.Verb == grammar.Drop && x.s.Object == grammar.Playbook {
+			drops = append(drops, fmt.Sprintf("  %s:%d: DROP PLAYBOOK %s", x.file, x.s.Pos.Line, x.s.Name))
 		}
 	}
 	if len(drops) > 0 && !st.Yes && !st.DryRun {
@@ -70,27 +55,26 @@ func runApply(st *grammar.Stmt) error {
 		p, _ := envprofile.Read(envDir, name)
 		return p != nil
 	}
-	for _, f := range files {
-		for _, s := range f.stmts {
-			if s.Object == grammar.Env && s.Verb == grammar.Drop {
-				envExists[s.Name] = false
+	for _, x := range stmts {
+		s := x.s
+		if s.Object == grammar.Env && s.Verb == grammar.Drop {
+			envExists[s.Name] = false
+			continue
+		}
+		// CREATE ENV IF NOT EXISTS on a set that exists writes nothing,
+		// so its references are not checked (as on the command line).
+		if s.Verb == grammar.Create && s.Object == grammar.Env {
+			existed := existsNow(s.Name)
+			envExists[s.Name] = true
+			if s.IfNotExists && existed {
 				continue
 			}
-			// CREATE ENV IF NOT EXISTS on a set that exists writes nothing,
-			// so its references are not checked (as on the command line).
-			if s.Verb == grammar.Create && s.Object == grammar.Env {
-				existed := existsNow(s.Name)
-				envExists[s.Name] = true
-				if s.IfNotExists && existed {
-					continue
-				}
-			}
-			for _, c := range s.Clauses {
-				helper = helper.after(c)
-				if c.Kind == grammar.SetRef {
-					if err := checkRefsWith(helper, []grammar.Clause{c}); err != nil {
-						return fmt.Errorf("%s:%d: %w\nnothing was written", f.path, s.Pos.Line, err)
-					}
+		}
+		for _, c := range s.Clauses {
+			helper = helper.after(c)
+			if c.Kind == grammar.SetRef {
+				if err := checkRefsWith(helper, []grammar.Clause{c}); err != nil {
+					return fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err)
 				}
 			}
 		}
@@ -101,43 +85,42 @@ func runApply(st *grammar.Stmt) error {
 		r.dry = newDryState()
 	}
 	counts := map[string]int{}
-	applied := make([]string, 0, len(files))
-	for fi, f := range files {
-		for i, s := range f.stmts {
-			r.outcome, r.note, r.warning = "", "", ""
-			where := fmt.Sprintf("%s:%d", f.path, s.Pos.Line)
-			head := stmtHead(s)
-			if !st.DryRun {
-				fmt.Printf("-- %s: %s\n", where, head)
-			}
-			if err := execStatement(r, s); err != nil {
-				if st.DryRun {
-					return fmt.Errorf("%s (%s) would fail: %w\nthe dry run stops here; nothing was written", where, head, err)
-				}
-				applied = append(applied, fmt.Sprintf("%s %d of %d", f.path, i, len(f.stmts)))
-				for _, rest := range files[fi+1:] {
-					applied = append(applied, fmt.Sprintf("%s 0 of %d", rest.path, len(rest.stmts)))
-				}
-				return fmt.Errorf("%s (%s): %w\napplied before it: %s; fix the files and APPLY them again (every statement is safe to repeat)",
-					where, head, err, strings.Join(applied, ", "))
-			}
-			counts[r.outcome]++
-			if r.warning != "" {
-				counts["warning"]++
-				fmt.Fprintf(os.Stderr, "Warning: %s: %s\n", where, r.warning)
-			}
-			if st.DryRun {
-				line := fmt.Sprintf("%-20s %-9s %s", where, r.outcome, head)
-				if r.note != "" {
-					line += "  (" + r.note + ")"
-				}
-				if r.warning != "" {
-					line += "  WARNING: " + r.warning
-				}
-				fmt.Println(line)
-			}
+	done := map[string]int{} // statements applied per file
+	for _, x := range stmts {
+		s := x.s
+		r.outcome, r.note, r.warning = "", "", ""
+		where := fmt.Sprintf("%s:%d", x.file, s.Pos.Line)
+		head := stmtHead(s)
+		if !st.DryRun {
+			fmt.Printf("-- %s: %s\n", where, head)
 		}
-		applied = append(applied, fmt.Sprintf("%s %d of %d", f.path, len(f.stmts), len(f.stmts)))
+		if err := execStatement(r, s); err != nil {
+			if st.DryRun {
+				return fmt.Errorf("%s (%s) would fail: %w\nthe dry run stops here; nothing was written", where, head, err)
+			}
+			applied := make([]string, 0, len(l.files))
+			for _, f := range l.files {
+				applied = append(applied, fmt.Sprintf("%s %d of %d", f, done[f], l.total[f]))
+			}
+			return fmt.Errorf("%s (%s): %w\napplied before it: %s; fix the files and APPLY them again (every statement is safe to repeat)",
+				where, head, err, strings.Join(applied, ", "))
+		}
+		done[x.file]++
+		counts[r.outcome]++
+		if r.warning != "" {
+			counts["warning"]++
+			fmt.Fprintf(os.Stderr, "Warning: %s: %s\n", where, r.warning)
+		}
+		if st.DryRun {
+			line := fmt.Sprintf("%-20s %-9s %s", where, r.outcome, head)
+			if r.note != "" {
+				line += "  (" + r.note + ")"
+			}
+			if r.warning != "" {
+				line += "  WARNING: " + r.warning
+			}
+			fmt.Println(line)
+		}
 	}
 	verb := "Applied"
 	if st.DryRun {
@@ -150,6 +133,129 @@ func runApply(st *grammar.Stmt) error {
 	}
 	fmt.Println(summary)
 	return nil
+}
+
+// located is one statement to run and the file it came from.
+type located struct {
+	file string
+	s    *grammar.Stmt
+}
+
+// applyLoader reads the files APPLY runs and expands their INCLUDEs
+// (docs/reference/cli-grammar.md, "INCLUDE"): included files run in place
+// of the directive, a file reached twice runs once, at its first
+// occurrence, and a cycle is refused. Every error is collected, so one run
+// reports every problem and nothing is written.
+type applyLoader struct {
+	out   []located
+	files []string       // in load order, as reports name them
+	total map[string]int // statements per file, INCLUDEs not counted
+	seen  map[string]bool
+	errs  []error
+}
+
+// root loads a file named on the command line. It may be a pipe (a file
+// that is not regular), which then may not INCLUDE a relative path.
+func (l *applyLoader) root(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		l.errs = append(l.errs, err)
+		return
+	}
+	if info.IsDir() {
+		l.errs = append(l.errs, fmt.Errorf("%s is a directory, not a playbook file", path))
+		return
+	}
+	id, base := path, ""
+	if info.Mode().IsRegular() {
+		if id, err = fileIdentity(path); err != nil {
+			l.errs = append(l.errs, err)
+			return
+		}
+		base = filepath.Dir(id)
+	}
+	l.load(path, id, base, nil)
+}
+
+// fileIdentity is a file's fully resolved path: two spellings of one file
+// are the same file.
+func fileIdentity(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
+}
+
+type chainLink struct{ id, name string }
+
+func (l *applyLoader) load(name, id, base string, chain []chainLink) {
+	for i, c := range chain {
+		if c.id == id {
+			names := make([]string, 0, len(chain)-i+1)
+			for _, d := range chain[i:] {
+				names = append(names, d.name)
+			}
+			names = append(names, name)
+			l.errs = append(l.errs, fmt.Errorf("INCLUDE cycle: %s", strings.Join(names, " -> ")))
+			return
+		}
+	}
+	if l.seen[id] {
+		return
+	}
+	l.seen[id] = true
+	read := id
+	if base == "" { // a pipe: read it by the name given
+		read = name
+	}
+	data, err := os.ReadFile(read)
+	if err != nil {
+		l.errs = append(l.errs, err)
+		return
+	}
+	stmts, err := grammar.ParseFile(string(data))
+	if err != nil {
+		l.errs = append(l.errs, fmt.Errorf("%s: %w", name, err))
+		return
+	}
+	l.files = append(l.files, name)
+	chain = append(chain, chainLink{id, name})
+	for _, s := range stmts {
+		if s.Verb != grammar.Include {
+			l.out = append(l.out, located{name, s})
+			l.total[name]++
+			continue
+		}
+		at := fmt.Sprintf("%s:%d", name, s.Pos.Line)
+		p := s.Files[0]
+		if strings.Contains(p, "://") {
+			l.errs = append(l.errs, fmt.Errorf("%s: INCLUDE takes a local file, not a URL", at))
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			if base == "" {
+				l.errs = append(l.errs, fmt.Errorf("%s: INCLUDE of a relative path from a file that is not a regular file (a pipe) has nothing to resolve against", at))
+				continue
+			}
+			p = filepath.Join(base, p)
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			l.errs = append(l.errs, fmt.Errorf("%s: INCLUDE: %w", at, err))
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			l.errs = append(l.errs, fmt.Errorf("%s: INCLUDE takes a regular file; %s is not one", at, p))
+			continue
+		}
+		cid, err := fileIdentity(p)
+		if err != nil {
+			l.errs = append(l.errs, fmt.Errorf("%s: INCLUDE: %w", at, err))
+			continue
+		}
+		l.load(p, cid, filepath.Dir(cid), chain)
+	}
 }
 
 // stmtHead names a statement in reports: verb, object and name.

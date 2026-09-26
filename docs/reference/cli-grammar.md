@@ -164,7 +164,10 @@ lists the users.
 
 Clauses in one command apply **atomically**: all or none, validated before
 anything is written. Validation includes the secret helper's check for
-every `SET … FROM` (see Secrets).
+every `SET … FROM` (see Secrets). The one exception is the marketplace and
+plugin clauses, which run Claude Code's commands in order: the first
+failure stops the statement, and running it again finishes it (see
+"Plugins and the agent").
 
 ## Where each clause writes
 
@@ -182,6 +185,8 @@ stores commands; files store the result.
 | `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-profiles/.default`, one set name per line, in order |
 | `ALTER DEFAULTS SET / UNSET SECRET HELPER` | `<root>/.env-profiles/.secret-helper`, one line: the command |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher, as `create`/`install`/`link`/`delete`/`rename`/`alias` do today |
+| `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
+| `ALTER PLAYBOOK … SET / UNSET AGENT` | the playbook's `settings.json`, `agent` |
 
 A key lives in exactly one of `set`, `refs`, `unset` within a layer; writing
 it to one removes it from the others.
@@ -689,9 +694,10 @@ Anything beyond it needs the pilot's explicit approval first: functions,
 history or journal table, and variables, loops or conditionals in playbook
 files. It is not added because it would be easy.
 
-## INCLUDE (v3.21.0)
+## INCLUDE
 
-Decided with the pilot on 2026-09-26; implemented after v3.20.0 ships. A
+Decided with the pilot on 2026-09-26; built with "Plugins and the agent",
+in the release after v3.20.0. A
 playbook file can pull in another, so one machine's file can share a base
 with the next:
 
@@ -771,66 +777,98 @@ ALTER PLAYBOOK kommander
   ADD PLUGIN chaos@chaos;
 ```
 
-**What the clauses write: the playbook's `settings.json`, and nothing
-else.** A playbook's `settings.json` is its Claude Code user scope, so what is
-written there applies to that playbook only. Claude Code installs, updates
-and loads the plugins; cpb copies no file, runs nothing, and pins no version
-(plugins have none to pin).
+**How the clauses act: through Claude Code's own CLI** (decided with the
+pilot on 2026-09-26, replacing an earlier cut that wrote `settings.json`
+itself). A playbook is a Claude Code config directory, so with
+`CLAUDE_CONFIG_DIR` set to it, Claude Code's *user* scope is that playbook.
+The marketplace and plugin clauses run `claude plugin …` there, with
+`--scope user`: the format of `settings.json` and of the plugin cache stays
+Claude Code's to own, and cpb writes neither. `SET AGENT` has no command in
+that CLI, so it is the one key cpb writes itself.
 
-| Clause | `settings.json` |
+| Clause | What runs |
 |---|---|
-| `ADD MARKETPLACE m FROM '<source>'` | `extraKnownMarketplaces.m = {"source": <source object>}` |
-| `DROP MARKETPLACE m` | removes `extraKnownMarketplaces.m` |
-| `ADD PLUGIN p@m` | `enabledPlugins["p@m"] = true` |
-| `DROP PLUGIN p@m` | removes `enabledPlugins["p@m"]` |
-| `SET AGENT '<agent>'` | `agent = "<agent>"`, as typed: the main session runs as that agent |
-| `UNSET AGENT` | removes `agent` |
+| `ADD MARKETPLACE m FROM '<source>'` | `claude plugin marketplace add <source> --scope user` |
+| `DROP MARKETPLACE m` | `claude plugin marketplace remove m --scope user` |
+| `ADD PLUGIN p@m` | `claude plugin install p@m --scope user --json` (also re-enables a disabled one) |
+| `DROP PLUGIN p@m` | `claude plugin uninstall p@m --scope user --keep-data --json` |
+| `SET AGENT '<agent>'` | `settings.json`: `agent = "<agent>"`, as typed; the main session runs as that agent |
+| `UNSET AGENT` | `settings.json`: removes `agent` |
 
-**Sources**, in the forms Claude Code's own `settings.json` files use:
+Every command runs with `CLAUDE_CONFIG_DIR` set to the playbook, from a
+neutral working directory (so no project's settings join in), and never on
+a terminal, so Claude Code never prompts.
 
-| `FROM` | source object |
-|---|---|
-| `'github:<owner>/<repo>'` | `{"source": "github", "repo": "<owner>/<repo>"}` |
-| `'https://…'`, `'git@…'` (a git URL) | `{"source": "git", "url": "…"}` |
-| `'/abs/path'` or `'~/path'`, a local directory | `{"source": "directory", "path": "/abs/path"}` |
+**Sources**, as `marketplace add` takes them:
 
-The shapes are Claude Code's (its marketplace reference, "Fields by type").
+| `FROM` | passed as | recorded by Claude Code as |
+|---|---|---|
+| `'github:<owner>/<repo>'` | `<owner>/<repo>` | `{"source": "github", "repo": "<owner>/<repo>"}` |
+| `'https://…'`, `'git@…'` (a git URL) | the URL | `{"source": "git", "url": "…"}` |
+| `'/abs/path'` or `'~/path'`, a local directory | the absolute path (`~/` expanded) | `{"source": "directory", "path": "/abs/path"}` |
+
 A directory source is the marketplace root, the directory that holds
-`.claude-plugin/marketplace.json`: cpb requires an absolute path (or one
-under `~/`, which it expands) because the docs do not say how a relative one
-resolves, and refuses the statement when that file is missing, so a
-mistyped checkout path fails when written rather than at the next launch.
-This is how a plugin is used from a local checkout before it is published.
-The optional `ref`, `path` and `sparsePaths` fields of git sources are not
-in the first cut. Anything else is refused. A marketplace name follows the env-set name rule;
-a plugin id is `<plugin>@<marketplace>`.
+`.claude-plugin/marketplace.json`; a relative path is refused, and so is a
+URL carrying credentials. This is how a plugin is used from a local checkout
+before it is published. `--sparse` and git refs are not in the first cut.
+A marketplace name follows the env-set name rule; a plugin id is
+`<plugin>@<marketplace>`.
+
+**A marketplace's name is its source's.** `marketplace add` takes no name:
+the source's `marketplace.json` declares it. The statement names one anyway,
+so a playbook file reads the same as the state it makes, and cpb checks that
+they agree: before anything runs for a directory source (it reads the file),
+after the command for a git or GitHub one. A source that declares another
+name is removed again, and the statement fails naming both.
+
+**State first, so repeats run nothing.** Before a statement runs anything,
+cpb reads the playbook's state (`claude plugin marketplace list --json`,
+`claude plugin list --json`) and plans the commands: a marketplace already
+declared from the same source, a plugin already installed and enabled, runs
+nothing, and a statement whose clauses all hold reports `unchanged`. A
+marketplace declared under the same name from another source is refused:
+`DROP MARKETPLACE` it first. `APPLY --dry-run` reads the state and reports
+the commands it would run, and runs none.
 
 **Rules**
 
-- `ADD PLUGIN p@m` is refused unless `m` is a marketplace this playbook's
-  `settings.json` declares. There is no exception for a marketplace Claude
-  Code knows by default (decided 2026-09-26): a plugin id always names its
-  marketplace, so a playbook that uses the official one declares it
+- `ADD PLUGIN p@m` is refused unless `m` is declared in this playbook, by
+  its state or by an earlier clause. There is no exception for a
+  marketplace Claude Code knows by default (decided 2026-09-26): a plugin id
+  always names its marketplace, so a playbook that uses the official one
+  declares it
   (`ADD MARKETPLACE claude-plugins-official FROM 'github:anthropics/claude-plugins-official'`).
-- `DROP MARKETPLACE m` is refused while an entry of `enabledPlugins` names
-  `m`; the error lists them.
-- Every other key of `settings.json`, and their order, is kept as it was.
-  The file is rewritten through a temporary file and a rename, as the
-  manifest is.
+- `DROP MARKETPLACE m` is refused while installed plugins come from `m`; the
+  error lists them. (`marketplace remove` would uninstall them silently.)
+- `DROP PLUGIN` keeps the plugin's saved data (`--keep-data`): dropping
+  detaches it, as `DROP ENV` detaches a set. Purging the data is not in the
+  first cut.
+- **A marketplace-declared command is never accepted for the pilot.** A
+  plugin installed by running a command its marketplace declares (or whose
+  archive is fetched through one) needs a confirmation. cpb never passes `-y`
+  or `--accept-command`: the statement fails, shows the command and its
+  `sha256`, and gives the line the pilot runs by hand after reviewing it
+  (`CLAUDE_CONFIG_DIR=<playbook> claude plugin install p@m --accept-command <sha256>`).
+  It is a supply-chain guard.
+- **Network.** `ADD MARKETPLACE` from git or GitHub, and `ADD PLUGIN`, fetch
+  from the network; so does an `APPLY` of a file that holds them. A
+  directory source is read in place.
 - A linked playbook's `settings.json` belongs to the target, so these
   clauses are refused on it, as the environment clauses are.
-- A statement that combines them with environment clauses writes two files
-  (the manifest and `settings.json`), each through a rename. A failed second
-  write restores the first, so an error leaves both as they were. A process
-  killed between the two renames, or a failed restore, can leave only the
-  first written: there is no journal. The recovery is the usual one, running
-  the statement again, since every statement is safe to repeat; `SHOW` shows
-  which file holds the change.
-- `enabledPlugins` entries set to `false` by hand are shown, not changed: the
-  grammar adds and drops, it does not disable. `SHOW CREATE` does not
-  reproduce such an entry: it writes a comment line
-  (`-- PLUGIN p@m is false in settings.json; not written`), since an absent
-  entry and a `false` one both leave the plugin off in this scope.
+- A statement's commands run in the order its clauses are written, after its
+  manifest write and before its agent write. The first failure stops the
+  statement and names the commands that already ran; there is no rollback.
+  Every clause is safe to repeat, so running the statement (or the file)
+  again finishes it, as with `APPLY`.
+- `claude` must be on `PATH` for these clauses; the reads (`SHOW`,
+  `EXPLAIN`, `SHOW CREATE`) do not run it.
+- Plugin entries set to `false` (a plugin disabled by hand) are shown, not
+  changed: the grammar adds and drops, it does not disable. `SHOW CREATE`
+  does not reproduce such an entry: it writes a comment line
+  (`-- PLUGIN p@m is false in settings.json; not written`).
+- A playbook file never runs a shell command: there is no `RUN` statement,
+  and none is planned (decided 2026-09-26). It would end dry runs,
+  validation before writing, `SHOW CREATE` and every safety rule above.
 
 **The agent** (verified 2026-09-26, nine `claude -p` runs). A plugin can
 name an agent in its own `settings.json`, and two plugins that both do are
@@ -846,16 +884,16 @@ the plugin's concern, not cpb's.
 **Visible where state is visible.** `SHOW PLAYBOOK --json` gains
 `"marketplaces": [{"name", "source"}]`, `"plugins": [{"id", "enabled"}]` and
 `"agent"` (null when unset); the human form gains `Marketplaces:`, `Plugins:`
-and `Agent:` lines. `EXPLAIN PLAYBOOK` names the agent and the enabled
-plugins a launch starts with, and where the agent comes from where cpb can
-tell: `agent: kommander (playbook settings)` when the playbook sets it, or
-`(from plugin <p>)` when only an enabled plugin's own `settings.json` names
-one. `SHOW CREATE` writes the clauses, so a
+and `Agent:` lines when the playbook has any. These reads take the
+playbook's `settings.json` as Claude Code wrote it and run nothing.
+`EXPLAIN PLAYBOOK` names the enabled plugins a launch starts with and the
+agent the playbook pins, `Agent: kommander (playbook settings)`; with no pin
+and plugins enabled, it says that a plugin may name one (cpb does not read
+the plugins' own files). `SHOW CREATE` writes the clauses, so a
 playbook's plugins and agent travel in its playbook file. `SELECT` sees the
 fields on `PLAYBOOKS` when it lands (the *Tables* list includes them).
 
-**INCLUDE** is specified in its own section, which lands separately
-(PR #85); this section depends on it, and both are built in the same
+**INCLUDE** is specified in its own section and built in the same
 release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
 
 These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`

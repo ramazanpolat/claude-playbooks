@@ -14,6 +14,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // Statements (docs/cli-grammar.md) are recognised before cobra runs, so
@@ -389,9 +390,61 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		// A linked playbook's manifest is shared with every registration of
 		// the target directory: same refusal as the pre-grammar env command.
 		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			if pluginClauses(st.Clauses) {
+				return fmt.Errorf("cannot change the plugins of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
+			}
 			return fmt.Errorf("cannot change the environment of %q: it is linked, and its %s is shared with the target. Edit the target's manifest directly if you really mean it", st.Name, manifest.FileName)
 		}
 		m = pb.Manifest
+	}
+	// Plugins and the agent: planned against the current state before
+	// anything is written, so a statement that cannot run writes nothing.
+	// A playbook an earlier statement of a dry run created has none yet.
+	var (
+		steps       []pluginStep
+		pluginLines []string
+		sf          *settings.File
+		agentLines  []string
+		agentChange bool
+	)
+	if pluginClauses(st.Clauses) {
+		cfg := r.configDir(st.Name, pb)
+		if plansPluginCommands(st.Clauses) {
+			var w *pluginWorld
+			if r.dry != nil {
+				w = r.dry.worlds[st.Name]
+			}
+			if w == nil {
+				if cfg == "" { // created earlier in this dry run: nothing installed yet
+					w = &pluginWorld{markets: map[string]cliMarketplace{}, plugins: map[string]bool{}}
+				} else if w, err = readPluginWorld(cfg); err != nil {
+					return err
+				}
+				if r.dry != nil { // later statements see what this one would do
+					r.dry.worlds[st.Name] = w
+				}
+			}
+			if steps, pluginLines, err = planPlugins(w, st.Clauses); err != nil {
+				return err
+			}
+		}
+		if cfg == "" {
+			sf = &settings.File{Root: settings.NewObject()}
+		} else if sf, err = settings.Load(cfg); err != nil {
+			return err
+		}
+		if r.dry != nil { // the agent as earlier statements of the dry run left it
+			if a, ok := r.dry.agents[st.Name]; ok {
+				if a == nil {
+					sf.Root.Delete(keyAgent)
+				} else if err := sf.Root.Set(keyAgent, *a); err != nil {
+					return err
+				}
+			}
+		}
+		if agentLines, agentChange, err = applyAgent(sf, st.Clauses); err != nil {
+			return err
+		}
 	}
 	if m == nil {
 		m = &manifest.Manifest{Name: st.Name}
@@ -417,18 +470,57 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
-	if envEqual(before, m.Env) {
+	envChange := !envEqual(before, m.Env)
+	if !envChange && !agentChange && len(steps) == 0 {
 		r.outcome = outUnchanged
-		r.say("PLAYBOOK "+st.Name+" unchanged", nil)
+		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
 	}
 	r.outcome = outChanged
 	if r.dryRun {
 		r.recordPlaybookEnv(st.Name, m.Env)
+		if agentChange && r.dry != nil {
+			var a string
+			if ok, _ := sf.Root.Get(keyAgent, &a); ok {
+				r.dry.agents[st.Name] = &a
+			} else {
+				r.dry.agents[st.Name] = nil
+			}
+		}
+		if len(steps) > 0 {
+			cmds := make([]string, len(steps))
+			for i, s := range steps {
+				cmds[i] = s.command()
+			}
+			r.note = "would run: " + strings.Join(cmds, "; ")
+		}
 		return nil
 	}
-	if err := manifest.Write(pb.RootPath, m); err != nil {
-		return fmt.Errorf("cannot record the environment: %w", err)
+	if envChange {
+		if err := manifest.Write(pb.RootPath, m); err != nil {
+			return fmt.Errorf("cannot record the environment: %w", err)
+		}
+	}
+	ran, err := runPluginSteps(pb.Path, steps)
+	lines = append(append(lines, pluginLines...), ran...)
+	if err != nil {
+		if len(lines) > 0 {
+			r.say("Partly altered PLAYBOOK "+st.Name, lines)
+		}
+		return err
+	}
+	if agentChange {
+		// Loaded again: the commands above rewrite settings.json.
+		if sf, err = settings.Load(pb.Path); err != nil {
+			return err
+		}
+		if _, _, err := applyAgent(sf, st.Clauses); err != nil {
+			return err
+		}
+		if err := sf.Write(); err != nil {
+			return fmt.Errorf("cannot set the agent: %w", err)
+		}
+		lines = append(lines, agentLines...)
 	}
 	r.say("Altered PLAYBOOK "+st.Name, lines)
 	for _, c := range st.Clauses {

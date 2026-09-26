@@ -3,6 +3,7 @@ package grammar
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -28,6 +29,7 @@ func init() {
 		"RENAME", "TO", "ALIAS", "NO",
 		"BRANCH", "SUBDIR", "LINK", "SANDBOX",
 		"SECRET", "HELPER", "AS", "PLAINTEXT",
+		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
 	} {
 		keywords[w] = true
 	}
@@ -46,7 +48,7 @@ func IsStatement(args []string) bool {
 		return false
 	}
 	switch strings.ToUpper(args[0]) {
-	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY":
+	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE": // INCLUDE, to be refused with its reason
 		return true
 	case "CREATE":
 		if len(args) < 2 {
@@ -96,7 +98,8 @@ func ParseArgs(args []string) (*Stmt, error) {
 
 // ParseFile parses a playbook file. Every statement is parsed even after an
 // error, and all errors are returned together, so one run reports every
-// problem in the file. A playbook file holds only CREATE, ALTER and DROP.
+// problem in the file. A playbook file holds CREATE, ALTER and DROP, and
+// INCLUDE, which the caller expands (the parser reads no files).
 func ParseFile(src string) ([]*Stmt, error) {
 	groups, lerr := lexFile(src)
 	if lerr != nil {
@@ -113,9 +116,9 @@ func ParseFile(src string) ([]*Stmt, error) {
 			errs = append(errs, err)
 			continue
 		}
-		if !s.Write() {
+		if !s.Write() && s.Verb != Include {
 			errs = append(errs, &Error{Pos: s.Pos,
-				Msg: string(s.Verb) + " only reads; a playbook file holds CREATE, ALTER and DROP statements"})
+				Msg: string(s.Verb) + " only reads; a playbook file holds CREATE, ALTER and DROP statements, and INCLUDE"})
 			continue
 		}
 		out = append(out, s)
@@ -307,7 +310,7 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	if t.Text == "" {
 		return errAt(t.Pos, "empty name for "+label)
 	}
-	if isNew && IsKeyword(t.Text) {
+	if isNew && IsKeyword(t.Text) && !t.Quoted { // quoted, a keyword is a name: SHOW CREATE writes it so
 		return errAt(t.Pos, fmt.Sprintf("%q is a keyword and cannot name %s", t.Text, label))
 	}
 	// The invalid name is never quoted back: whatever landed in a name slot
@@ -383,7 +386,13 @@ func (p *parser) keys(what string) ([]string, *Error) {
 func (p *parser) statement() (*Stmt, *Error) {
 	s := &Stmt{Pos: p.pos()}
 	var err *Error
-	switch p.kw("CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY") {
+	verbs := []string{"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY"}
+	if p.file {
+		verbs = append(verbs, "INCLUDE")
+	} else if p.at("INCLUDE") {
+		return nil, errAt(s.Pos, "INCLUDE appears only in a playbook file; on the command line, APPLY <file> [<file> ...] runs several")
+	}
+	switch p.kw(verbs...) {
 	case "":
 		return nil, p.fail("not a statement")
 	case "CREATE":
@@ -404,6 +413,9 @@ func (p *parser) statement() (*Stmt, *Error) {
 	case "APPLY":
 		s.Verb = Apply
 		err = p.apply(s)
+	case "INCLUDE":
+		s.Verb = Include
+		err = p.include(s)
 	}
 	if err == nil && !p.atEnd() {
 		err = p.unexpected()
@@ -625,6 +637,21 @@ func (p *parser) apply(s *Stmt) *Error {
 	return nil
 }
 
+// include reads INCLUDE '<path>'. Which files may be included, and how a
+// relative path resolves, is the caller's question: this package reads no
+// files.
+func (p *parser) include(s *Stmt) *Error {
+	t, err := p.take("INCLUDE", "'<path>'")
+	if err != nil {
+		return err
+	}
+	if t.Text == "" {
+		return errAt(t.Pos, "INCLUDE needs a path")
+	}
+	s.Files = []string{t.Text}
+	return nil
+}
+
 // clauses reads clauses with one until the statement ends.
 func (p *parser) clauses(s *Stmt, one func() (*Clause, *Error), min int) *Error {
 	for !p.atEnd() {
@@ -680,13 +707,27 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	switch w := p.kw(alterPlaybookStarters...); w {
 	case "":
 		return nil, p.unexpected()
-	case "USE", "DROP":
+	case "USE":
 		return c, p.envList(c, w)
-	case "ADD":
-		return c, p.addEnv(c)
+	case "ADD", "DROP":
+		switch p.kw("ENV", "MARKETPLACE", "PLUGIN") {
+		case "ENV":
+			if w == "ADD" {
+				return c, p.addEnvRest(c)
+			}
+			return c, p.envListRest(c, w)
+		case "MARKETPLACE":
+			return c, p.marketplace(c, w)
+		case "PLUGIN":
+			return c, p.plugin(c, w)
+		}
+		return nil, p.fail(w + " takes ENV, MARKETPLACE or PLUGIN")
 	case "SET":
-		if p.kw("VAR") == "" {
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR: SET VAR <key>=<value>")
+		switch p.kw("VAR", "AGENT") {
+		case "AGENT":
+			return c, p.agent(c)
+		case "":
+			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR or AGENT: SET VAR <key>=<value>, SET AGENT '<agent>'")
 		}
 		return c, p.set(c)
 	case "BLOCK":
@@ -698,8 +739,12 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		if p.kw("VAR") == "" {
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR: UNSET VAR <key>")
+		switch p.kw("VAR", "AGENT") {
+		case "AGENT":
+			c.Kind = UnsetAgent
+			return c, nil
+		case "":
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR or AGENT: UNSET VAR <key>, UNSET AGENT")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -766,6 +811,10 @@ func (p *parser) envList(c *Clause, verb string) *Error {
 	if p.kw("ENV") == "" {
 		return p.fail(verb + " takes ENV: " + verb + " ENV <env> ...")
 	}
+	return p.envListRest(c, verb)
+}
+
+func (p *parser) envListRest(c *Clause, verb string) *Error {
 	c.Kind = UseEnv
 	if verb == "DROP" {
 		c.Kind = DropEnv
@@ -779,6 +828,10 @@ func (p *parser) addEnv(c *Clause) *Error {
 	if p.kw("ENV") == "" {
 		return p.fail("ADD takes ENV: ADD ENV <env>")
 	}
+	return p.addEnvRest(c)
+}
+
+func (p *parser) addEnvRest(c *Clause) *Error {
 	c.Kind = AddEnv
 	name, err := p.name(Env, false)
 	if err != nil {
@@ -959,7 +1012,7 @@ func validate(s *Stmt) *Error {
 	once := map[Kind]bool{
 		Describe: true, UseEnv: true, RenameTo: true,
 		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
-		SetHelper: true, UnsetHelper: true,
+		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 	}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
@@ -977,16 +1030,21 @@ func validate(s *Stmt) *Error {
 			keys[k] = true
 		}
 		for _, n := range c.Names {
-			if envs[n] {
-				return errAt(c.Pos, "env set "+n+" appears twice")
+			what := map[Kind]string{AddMarketplace: "marketplace", DropMarketplace: "marketplace",
+				AddPlugin: "plugin", DropPlugin: "plugin"}[c.Kind]
+			if what == "" {
+				what = "env set"
 			}
-			envs[n] = true
+			if envs[what+" "+n] {
+				return errAt(c.Pos, what+" "+n+" appears twice")
+			}
+			envs[what+" "+n] = true
 		}
 		if c.Kind == AddEnv && c.Anchor == c.Names[0] {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
 		}
 	}
-	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}}
+	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]
@@ -1013,4 +1071,124 @@ func validate(s *Stmt) *Error {
 		}
 	}
 	return nil
+}
+
+// marketplace reads the rest of ADD MARKETPLACE m FROM '<source>' or
+// DROP MARKETPLACE m.
+func (p *parser) marketplace(c *Clause, verb string) *Error {
+	c.Kind = AddMarketplace
+	if verb == "DROP" {
+		c.Kind = DropMarketplace
+	}
+	if p.atEnd() {
+		p.note("<marketplace>")
+		return p.fail(verb + " MARKETPLACE needs <marketplace>")
+	}
+	t := p.toks[p.i]
+	if manifest.ValidateProfileName(t.Text) != nil {
+		return errAt(t.Pos, "invalid marketplace name: use letters, digits, dots, dashes and underscores")
+	}
+	p.i++
+	c.Names = []string{t.Text}
+	if verb == "DROP" {
+		return nil
+	}
+	if p.kw("FROM") == "" {
+		return p.fail("ADD MARKETPLACE needs FROM '<source>'")
+	}
+	src, err := p.take("FROM", "'<source>'")
+	if err != nil {
+		return err
+	}
+	if _, serr := MarketplaceSource(src.Text); serr != nil {
+		return errAt(src.Pos, serr.Error())
+	}
+	c.Arg = src.Text
+	return nil
+}
+
+// plugin reads the rest of ADD PLUGIN p@m or DROP PLUGIN p@m.
+func (p *parser) plugin(c *Clause, verb string) *Error {
+	c.Kind = AddPlugin
+	if verb == "DROP" {
+		c.Kind = DropPlugin
+	}
+	if p.atEnd() {
+		p.note("<plugin>@<marketplace>")
+		return p.fail(verb + " PLUGIN needs <plugin>@<marketplace>")
+	}
+	t := p.toks[p.i]
+	if _, _, ok := PluginID(t.Text); !ok {
+		return errAt(t.Pos, "a plugin id is <plugin>@<marketplace>, each part letters, digits, dots, dashes and underscores")
+	}
+	p.i++
+	c.Names = []string{t.Text}
+	return nil
+}
+
+var agentPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)?$`)
+
+// agent reads the rest of SET AGENT '<agent>': a bare agent name or a
+// plugin-namespaced one, stored as typed.
+func (p *parser) agent(c *Clause) *Error {
+	c.Kind = SetAgent
+	t, err := p.take("SET AGENT", "'<agent>'")
+	if err != nil {
+		return err
+	}
+	if !agentPattern.MatchString(t.Text) {
+		return errAt(t.Pos, "an agent is <name> or <plugin>:<name>, letters, digits, dots, dashes and underscores")
+	}
+	c.Arg = t.Text
+	return nil
+}
+
+// ValidAgent reports whether SET AGENT accepts a: <name> or <plugin>:<name>.
+func ValidAgent(a string) bool { return agentPattern.MatchString(a) }
+
+// PluginID splits a plugin id, <plugin>@<marketplace>.
+func PluginID(id string) (plugin, marketplace string, ok bool) {
+	plugin, marketplace, ok = strings.Cut(id, "@")
+	if !ok || manifest.ValidateProfileName(plugin) != nil || manifest.ValidateProfileName(marketplace) != nil {
+		return "", "", false
+	}
+	return plugin, marketplace, true
+}
+
+// Source kinds of ADD MARKETPLACE, named as Claude Code's settings.json
+// names them.
+const (
+	SourceGitHub    = "github"
+	SourceGit       = "git"
+	SourceDirectory = "directory"
+)
+
+var githubRepo = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+// MarketplaceSource classifies an ADD MARKETPLACE source by its shape only:
+// 'github:<owner>/<repo>', a git URL (https://… or git@…), or a directory
+// ('/abs/path' or '~/path'). Anything else is refused. The error never
+// quotes the source: a URL may carry a token.
+func MarketplaceSource(src string) (string, error) {
+	switch {
+	case strings.HasPrefix(src, "github:"):
+		if !githubRepo.MatchString(strings.TrimPrefix(src, "github:")) {
+			return "", errors.New("a github source is 'github:<owner>/<repo>'")
+		}
+		return SourceGitHub, nil
+	case strings.HasPrefix(src, "https://"):
+		u, err := url.Parse(src)
+		if err != nil || u.Host == "" {
+			return "", errors.New("not a valid git URL")
+		}
+		if u.User != nil {
+			return "", errors.New("a source URL carrying credentials is refused: a playbook's settings.json is not a secret store")
+		}
+		return SourceGit, nil
+	case strings.HasPrefix(src, "git@"):
+		return SourceGit, nil
+	case strings.HasPrefix(src, "/"), strings.HasPrefix(src, "~/"):
+		return SourceDirectory, nil
+	}
+	return "", errors.New("unsupported marketplace source: use 'github:<owner>/<repo>', a git URL (https://… or git@…), or a directory ('/abs/path' or '~/path')")
 }

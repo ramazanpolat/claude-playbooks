@@ -14,6 +14,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // SHOW CREATE writes the statements that rebuild the state (docs/cli-grammar.md,
@@ -48,7 +49,11 @@ func showCreate(st *grammar.Stmt) error {
 		if err != nil {
 			return err
 		}
-		blocks = append(blocks, createPlaybookBlock(pb))
+		b, err := createPlaybookBlock(pb)
+		if err != nil {
+			return err
+		}
+		blocks = append(blocks, b)
 	default: // ALL: env sets, DEFAULTS, playbooks, so each statement finds what it names
 		profiles, err := envprofile.List(dir)
 		if err != nil {
@@ -69,7 +74,11 @@ func showCreate(st *grammar.Stmt) error {
 			return err
 		}
 		for _, pb := range pbs {
-			blocks = append(blocks, createPlaybookBlock(pb))
+			b, err := createPlaybookBlock(pb)
+			if err != nil {
+				return err
+			}
+			blocks = append(blocks, b)
 		}
 	}
 	withheld := 0
@@ -164,7 +173,7 @@ func createDefaultsBlock(dir string) (createBlock, error) {
 	return createBlock{text: st.Pretty() + ";"}, nil
 }
 
-func createPlaybookBlock(pb *playbook.Playbook) createBlock {
+func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook, Name: pb.Name, IfNotExists: true}
 	v := describePlaybook(pb)
 	m := pb.Manifest
@@ -210,11 +219,31 @@ func createPlaybookBlock(pb *playbook.Playbook) createBlock {
 		}
 		text, withheldSource = strings.Join(lines, "\n"), 1
 	}
+	// Plugins and the agent: what settings.json declares, as the clauses
+	// that declare it. A linked playbook's settings belong to its target.
+	// A settings.json that cannot be read fails SHOW CREATE: an export
+	// that silently left out the plugins would rebuild a different playbook.
+	plugins := ""
+	if v.Linked == nil {
+		sf, err := settings.Load(pb.Path)
+		if err != nil {
+			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %w", pb.Name, err)
+		}
+		if plugins, err = pluginCreateBlock(pb.Name, sf.Root); err != nil {
+			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %s: %w", pb.Name, settings.FileName, err)
+		}
+	}
+	withPlugins := func(b createBlock) createBlock {
+		if plugins != "" {
+			b.text += "\n\n" + plugins
+		}
+		return b
+	}
 	if m == nil || m.Env.Empty() {
-		return createBlock{text: text, withheld: withheldSource}
+		return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
 	}
 	if v.Linked != nil {
-		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName}
+		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName, withheld: withheldSource}, nil
 	}
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
 	if len(m.Env.Profiles) > 0 {
@@ -227,7 +256,7 @@ func createPlaybookBlock(pb *playbook.Playbook) createBlock {
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}
-	return createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource}
+	return withPlugins(createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource}), nil
 }
 
 // hasNameLauncher reports whether the launcher named after a playbook is
