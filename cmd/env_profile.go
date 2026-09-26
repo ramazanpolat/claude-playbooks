@@ -15,6 +15,7 @@ import (
 )
 
 var envProfileCmd = &cobra.Command{
+	Hidden:  true, // pre-grammar fallback: docs/reference/cli-grammar.md
 	Use:     "env-profile [name] [set KEY=VALUE... | unset KEY... | clear KEY... | describe TEXT | default | undefault | delete]",
 	Short:   "Show or manage shared env profiles",
 	Aliases: []string{"envprofile"},

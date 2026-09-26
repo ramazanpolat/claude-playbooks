@@ -20,10 +20,11 @@ var (
 )
 
 var createCmd = &cobra.Command{
-	Use:   "create <name>",
-	Short: "Create a new top-level playbook",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runCreate,
+	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
+	Use:    "create <name>",
+	Short:  "Create a new top-level playbook",
+	Args:   cobra.ExactArgs(1),
+	RunE:   runCreate,
 }
 
 func init() {

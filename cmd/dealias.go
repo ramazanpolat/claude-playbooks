@@ -5,6 +5,7 @@ import (
 )
 
 var dealiasCmd = &cobra.Command{
+	Hidden:            true, // pre-grammar fallback: docs/reference/cli-grammar.md
 	Use:               "dealias <name>",
 	Short:             "Remove the alias for a playbook",
 	Long:              `Removes the playbook's alias and its launcher command. Equivalent to 'alias <name> --remove'.`,

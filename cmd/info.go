@@ -14,6 +14,7 @@ import (
 )
 
 var infoCmd = &cobra.Command{
+	Hidden:            true, // pre-grammar fallback: docs/reference/cli-grammar.md
 	Use:               "info <name>",
 	Short:             "Show detailed information about a playbook",
 	Args:              cobra.ExactArgs(1),

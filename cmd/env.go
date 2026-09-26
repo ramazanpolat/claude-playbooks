@@ -18,8 +18,9 @@ import (
 )
 
 var envCmd = &cobra.Command{
-	Use:   "env [name] [set KEY=VALUE... | unset KEY... | clear KEY... | use PROFILE... | unuse PROFILE...]",
-	Short: "Show or manage a playbook's environment overrides",
+	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
+	Use:    "env [name] [set KEY=VALUE... | unset KEY... | clear KEY... | use PROFILE... | unuse PROFILE...]",
+	Short:  "Show or manage a playbook's environment overrides",
 	Long: `A playbook can declare environment variables in the [env] block of its
 .playbook manifest. Every launch of that playbook (its launcher command,
 'run', or 'start' at its directory) applies them to the child claude

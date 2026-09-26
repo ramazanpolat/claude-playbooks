@@ -18,6 +18,7 @@ import (
 var deleteYes bool
 
 var deleteCmd = &cobra.Command{
+	Hidden:            true, // pre-grammar fallback: docs/reference/cli-grammar.md
 	Use:               "delete <name>",
 	Aliases:           []string{"uninstall", "unlink"},
 	Short:             "Delete a playbook",

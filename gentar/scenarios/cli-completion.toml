@@ -1,6 +1,9 @@
 # claude-playbooks own-arena suite 17: shell completion, end to end.
 #
-# Nine commands complete playbook names (autocompletePlaybookNames), and
+# Nine commands complete playbook names (autocompletePlaybookNames); six of
+# them (alias, dealias, delete, env, info, rename) are hidden since v3.20.0,
+# and the bash script (cobra's per-command script) has no entry for a hidden
+# command, so in bash only run, update and auth complete names. And
 # `completion` names the generated script after the binary it was invoked
 # as, so `cpb completion bash` must register for `cpb`. Until this suite,
 # completion only ran incidentally, inside pilot-self-uninstall, and nothing
@@ -66,8 +69,9 @@ command = '''o=$("$HOME/tab.sh" claude-playbook run "") && echo "$o" | grep -qx 
 contains = "tab-both"
 
 [[verify.commands]]
-# TAB on a prefix offers only the match -- the shell side filters.
-command = '''o=$("$HOME/tab.sh" claude-playbook delete al) && [ "$o" = alpha ] && echo tab-prefix'''
+# TAB on a prefix offers only the match -- the shell side filters. A hidden
+# command (delete, since v3.20.0) completes nothing in bash.
+command = '''o=$("$HOME/tab.sh" claude-playbook update al) && [ "$o" = alpha ] && h=$("$HOME/tab.sh" claude-playbook delete al) && [ -z "$h" ] && echo tab-prefix'''
 contains = "tab-prefix"
 
 [[verify.commands]]
@@ -80,7 +84,7 @@ contains = "tab-first-arg-only"
 
 [[verify.commands]]
 # Invoked as `cpb`, the script registers for cpb and completes through it.
-command = '''cpb completion bash | grep -qE 'complete .*__start_cpb cpb' && o=$("$HOME/tab.sh" cpb rename be) && [ "$o" = beta ] && echo cpb-tab'''
+command = '''cpb completion bash | grep -qE 'complete .*__start_cpb cpb' && o=$("$HOME/tab.sh" cpb update be) && [ "$o" = beta ] && echo cpb-tab'''
 contains = "cpb-tab"
 
 [[verify.commands]]
