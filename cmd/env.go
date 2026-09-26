@@ -248,6 +248,9 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		default:
 			m.Env.Unset = dropString(m.Env.Unset, key)
 			delete(m.Env.Set, key)
+			// A grammar-written secret reference for the key gives way too:
+			// a key lives in one of set, refs and unset.
+			delete(m.Env.Refs, key)
 			switch verb {
 			case "set":
 				m.Env.Set[key] = set[key]

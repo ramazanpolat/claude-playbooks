@@ -17,6 +17,7 @@ const (
 type Origin struct {
 	Key     string
 	Value   string // when set
+	Ref     string // when set by a secret reference
 	Blocked bool   // removed at launch
 	Kind    string // LayerDefaults, LayerEnv or LayerPlaybook
 	Set     string // the env set's name, for LayerDefaults and LayerEnv
@@ -25,7 +26,7 @@ type Origin struct {
 // Explain is ExpandWithDefault keeping provenance: for each variable the
 // launch would set or remove, the layer that decided it. It merges exactly
 // as ExpandWithDefault does (defaults in order, then e's profiles in order,
-// then e's own block; within a layer, sets then unsets), so the two cannot
+// then e's own block; within a layer, refs, then sets, then unsets), so the two cannot
 // disagree about a value. Errors are ExpandWithDefault's: a missing or
 // broken layer refuses (errors.Is(err, ErrProfile)). Sorted by key.
 func Explain(dir string, e *manifest.Env) ([]Origin, error) {
@@ -60,11 +61,14 @@ func Explain(dir string, e *manifest.Env) ([]Origin, error) {
 				return nil, err
 			}
 		}
-		layers = append(layers, layer{LayerPlaybook, "", &manifest.Env{Set: e.Set, Unset: e.Unset}})
+		layers = append(layers, layer{LayerPlaybook, "", &manifest.Env{Set: e.Set, Refs: e.Refs, Unset: e.Unset}})
 	}
 
 	decided := map[string]Origin{}
 	for _, l := range layers {
+		for key, ref := range l.env.Refs {
+			decided[key] = Origin{Key: key, Ref: ref, Kind: l.kind, Set: l.set}
+		}
 		for key, value := range l.env.Set {
 			decided[key] = Origin{Key: key, Value: value, Kind: l.kind, Set: l.set}
 		}

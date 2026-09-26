@@ -313,9 +313,6 @@ func TestStatementNotYet(t *testing.T) {
 		"DROP PLAYBOOK router",
 		"ALTER PLAYBOOK router SET VAR A=1 ALIAS r2",
 		"ALTER PLAYBOOK router SET VAR A=1 RENAME TO r2",
-		"ALTER PLAYBOOK router SET VAR TOKEN FROM keychain:x",
-		"ALTER ENV e SET TOKEN FROM keychain:x",
-		"ALTER DEFAULTS SET SECRET HELPER h",
 		"APPLY setup.cpb",
 	} {
 		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), "not implemented yet") {

@@ -307,6 +307,7 @@ func runEnvProfile(cmd *cobra.Command, args []string) error {
 	for _, key := range keys {
 		p.Unset = dropString(p.Unset, key)
 		delete(p.Set, key)
+		delete(p.Refs, key) // a grammar-written reference gives way too
 		switch verb {
 		case "set":
 			p.Set[key] = set[key]

@@ -175,6 +175,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if eff, perr := auth.EffectiveBlock(absPath, layers); perr == nil {
+			if err := refuseRefsInSandbox(eff, "directory "+absPath); err != nil {
+				return err
+			}
+		}
 		name := startSandboxName(absPath)
 		started, runErr := runSandboxed(sandboxTarget{
 			label: "directory " + absPath, name: name,
@@ -218,8 +223,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// purely, and let the input name itself like the other five. EffectiveBlock
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
-	if _, perr := auth.EffectiveBlock(absPath, layers); errors.Is(perr, envprofile.ErrProfile) {
+	eff, perr := auth.EffectiveBlock(absPath, layers)
+	if errors.Is(perr, envprofile.ErrProfile) {
 		return perr
+	}
+	// See cmd/run.go: references exec through the helper, or refuse here.
+	plan, err := planLaunch(eff)
+	if err != nil {
+		return err
 	}
 
 	claudePath, err := exec.LookPath("claude")
@@ -238,8 +249,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
-	c := exec.Command(claudePath, claudeArgs...)
-	c.Env = launchEnv
+	c := plan.command(claudePath, claudeArgs, launchEnv)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

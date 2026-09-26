@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -91,8 +92,6 @@ func notYet(what string) error {
 func refuseUnbuilt(st *grammar.Stmt) error {
 	for _, c := range st.Clauses {
 		switch c.Kind {
-		case grammar.SetRef, grammar.SetHelper, grammar.UnsetHelper:
-			return notYet(fmt.Sprintf("%s (secret references)", c.Kind))
 		case grammar.RenameTo, grammar.Alias, grammar.NoAlias:
 			return notYet(fmt.Sprintf("ALTER PLAYBOOK … %s", c.Kind))
 		}
@@ -117,6 +116,13 @@ func envStatement(st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
+	// CREATE ... IF NOT EXISTS on an existing set writes nothing, so its
+	// references are not checked: the helper is not even asked.
+	if !(st.Verb == grammar.Create && p != nil && st.IfNotExists) {
+		if err := checkRefs(st.Clauses); err != nil {
+			return err
+		}
+	}
 	switch st.Verb {
 	case grammar.Create:
 		if p != nil && st.IfNotExists {
@@ -131,7 +137,7 @@ func envStatement(st *grammar.Stmt) error {
 			verb = "Replaced"
 		}
 		p = &envprofile.Profile{Name: st.Name, Set: map[string]string{}}
-		lines := applyVarClauses(&p.Set, &p.Unset, &p.Description, st.Clauses)
+		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
 		if err := envprofile.Write(dir, p); err != nil {
 			return fmt.Errorf("cannot write env set: %w", err)
 		}
@@ -145,7 +151,7 @@ func envStatement(st *grammar.Stmt) error {
 		if p.Set == nil {
 			p.Set = map[string]string{}
 		}
-		lines := applyVarClauses(&p.Set, &p.Unset, &p.Description, st.Clauses)
+		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
 		if err := envprofile.Write(dir, p); err != nil {
 			return fmt.Errorf("cannot write env set: %w", err)
 		}
@@ -190,35 +196,80 @@ func defaultsStatement(st *grammar.Stmt) error {
 	}
 	dir := envprofile.Dir(config.ResolvePlaybooksDir())
 
+	var listClauses, helperClauses []grammar.Clause
+	for _, c := range st.Clauses {
+		if c.Kind == grammar.SetHelper || c.Kind == grammar.UnsetHelper {
+			helperClauses = append(helperClauses, c)
+		} else {
+			listClauses = append(listClauses, c)
+		}
+	}
+
 	unlock, err := lockRegistry()
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	current, err := envprofile.Defaults(dir)
-	if err != nil {
-		// A broken marker can still be replaced outright: USE ENV states
-		// the whole list and needs nothing from the old one.
-		if st.Clauses[0].Kind != grammar.UseEnv {
-			return fmt.Errorf("DEFAULTS cannot be read (%v); replace the list with ALTER DEFAULTS USE ENV …", err)
-		}
-		current = nil
-	}
-	names, lines, err := applyEnvList(dir, current, st.Clauses)
-	if err != nil {
-		return err
-	}
-	// Removing needs no profile to be readable, which matters exactly when
-	// one is broken; adding checks every name.
+	// Everything is decided before anything is written.
+	var names, lines []string
 	write := envprofile.WriteDefaultsUnchecked
-	for _, c := range st.Clauses {
-		if c.Kind == grammar.UseEnv || c.Kind == grammar.AddEnv {
-			write = envprofile.WriteDefaults
+	if len(listClauses) > 0 {
+		current, err := envprofile.Defaults(dir)
+		if err != nil {
+			// A broken marker can still be replaced outright: USE ENV
+			// states the whole list and needs nothing from the old one.
+			if listClauses[0].Kind != grammar.UseEnv {
+				return fmt.Errorf("DEFAULTS cannot be read (%v); replace the list with ALTER DEFAULTS USE ENV …", err)
+			}
+			current = nil
+		}
+		if names, lines, err = applyEnvList(dir, current, listClauses); err != nil {
+			return err
+		}
+		// Removing needs no profile to be readable, which matters exactly
+		// when one is broken; adding checks every name.
+		for _, c := range listClauses {
+			if c.Kind == grammar.UseEnv || c.Kind == grammar.AddEnv {
+				write = envprofile.WriteDefaults
+			}
 		}
 	}
-	if err := write(dir, names); err != nil {
-		return fmt.Errorf("cannot write DEFAULTS: %w", err)
+
+	// The helper setting is written first and restored if the list write
+	// then fails, so the statement applies whole or not at all.
+	restore := func() {}
+	for _, c := range helperClauses {
+		path := filepath.Join(dir, envprofile.SecretHelperFile)
+		old, rerr := os.ReadFile(path)
+		existed := rerr == nil
+		restore = func() {
+			if existed {
+				_ = manifest.WritePrivate(path, old, 0o600)
+			} else {
+				_ = os.Remove(path)
+			}
+		}
+		if c.Kind == grammar.SetHelper {
+			if err := envprofile.SetSecretHelper(dir, c.Arg); err != nil {
+				return fmt.Errorf("cannot store the secret helper: %w", err)
+			}
+			lines = append(lines, "secret helper  "+c.Arg)
+		} else {
+			if err := envprofile.ClearSecretHelper(dir); err != nil {
+				return fmt.Errorf("cannot remove the secret helper: %w", err)
+			}
+			lines = append(lines, "secret helper  (none)")
+		}
+		if v, ok := os.LookupEnv(envprofile.SecretHelperEnv); ok && v != "" {
+			lines = append(lines, "(note: "+envprofile.SecretHelperEnv+" is set in this environment and overrides the setting here)")
+		}
+	}
+	if len(listClauses) > 0 {
+		if err := write(dir, names); err != nil {
+			restore()
+			return fmt.Errorf("cannot write DEFAULTS: %w", err)
+		}
 	}
 	report("Altered DEFAULTS", lines)
 	return nil
@@ -226,6 +277,9 @@ func defaultsStatement(st *grammar.Stmt) error {
 
 func playbookStatement(st *grammar.Stmt) error {
 	if err := refuseUnbuilt(st); err != nil {
+		return err
+	}
+	if err := checkRefs(st.Clauses); err != nil {
 		return err
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
@@ -261,7 +315,7 @@ func playbookStatement(st *grammar.Stmt) error {
 		return err
 	}
 	m.Env.Profiles = profiles
-	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Unset, nil, st.Clauses)...)
+	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Refs, &m.Env.Unset, nil, st.Clauses)...)
 	if m.Env.Empty() {
 		m.Env = nil
 	}
@@ -348,16 +402,28 @@ func requireEnv(dir, name string) error {
 	return nil
 }
 
-// applyVarClauses applies SET / BLOCK / UNSET (and DESCRIBE, when desc is
-// not nil) to one layer and returns a report line per change. A key lives
-// in exactly one of set and unset. Values are never reported.
-func applyVarClauses(set *map[string]string, unset *[]string, desc *string, clauses []grammar.Clause) []string {
+// applyVarClauses applies SET, SET … FROM, BLOCK and UNSET (and DESCRIBE,
+// when desc is not nil) to one layer and returns a report line per change.
+// A key lives in exactly one of set, refs and unset. Values are never
+// reported; references are not secrets and are.
+func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string, clauses []grammar.Clause) []string {
 	var lines []string
 	for _, c := range clauses {
 		switch c.Kind {
+		case grammar.SetRef:
+			for _, v := range c.Vars {
+				*unset = dropString(*unset, v.Key)
+				delete(*set, v.Key)
+				if *refs == nil {
+					*refs = map[string]string{}
+				}
+				(*refs)[v.Key] = v.Ref
+				lines = append(lines, "ref       "+v.Key+" <from "+v.Ref+">")
+			}
 		case grammar.SetVar:
 			for _, v := range c.Vars {
 				*unset = dropString(*unset, v.Key)
+				delete(*refs, v.Key)
 				(*set)[v.Key] = v.Value
 				line := "set       " + v.Key
 				if c.Plaintext && manifest.LooksLikeSecretKey(v.Key) {
@@ -368,6 +434,7 @@ func applyVarClauses(set *map[string]string, unset *[]string, desc *string, clau
 		case grammar.BlockVar:
 			for _, k := range c.Keys {
 				delete(*set, k)
+				delete(*refs, k)
 				if !slices.Contains(*unset, k) {
 					*unset = append(*unset, k)
 				}
@@ -376,6 +443,7 @@ func applyVarClauses(set *map[string]string, unset *[]string, desc *string, clau
 		case grammar.UnsetVar:
 			for _, k := range c.Keys {
 				delete(*set, k)
+				delete(*refs, k)
 				*unset = dropString(*unset, k)
 				lines = append(lines, "unset     "+k)
 			}

@@ -134,6 +134,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if eff, perr := auth.EffectiveBlock(pb.Path, layers); perr == nil {
+			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name)); err != nil {
+				return err
+			}
+		}
 		// The registry's spelling of the config directory, made absolute
 		// so a relative --playbooks-dir cannot leak a relative
 		// CLAUDE_CONFIG_DIR into a sandbox whose working directory is
@@ -192,8 +197,15 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// purely, and let the input name itself like the other five. EffectiveBlock
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
-	if _, perr := auth.EffectiveBlock(configDir, layers); errors.Is(perr, envprofile.ErrProfile) {
+	eff, perr := auth.EffectiveBlock(configDir, layers)
+	if errors.Is(perr, envprofile.ErrProfile) {
 		return perr
+	}
+	// Secret references exec the launch through the helper; with none
+	// configured the launch is refused here, before anything is mutated.
+	plan, err := planLaunch(eff)
+	if err != nil {
+		return err
 	}
 
 	claudePath, err := exec.LookPath("claude")
@@ -215,8 +227,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
-	c := exec.Command(claudePath, claudeArgs...)
-	c.Env = launchEnv
+	c := plan.command(claudePath, claudeArgs, launchEnv)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

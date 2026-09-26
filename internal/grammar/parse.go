@@ -157,10 +157,6 @@ var (
 	// first so that a malformed key, which may be a pasted secret, is
 	// refused without being echoed.
 	keyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	// refPattern is the shape shared by every secret reference form:
-	// scheme, colon, the rest. Anything else is almost certainly a value
-	// pasted where a reference belongs.
-	refPattern = regexp.MustCompile(`^[a-z][a-z0-9+.-]*:.+`)
 	// safeWord is what an error message may quote back: letters and dashes,
 	// the shape of a mistyped keyword. Values, references, and anything
 	// token-like (tokens nearly always carry digits) are shown by position
@@ -923,8 +919,13 @@ func (p *parser) setRef(c *Clause, t Token) *Error {
 		return p.fail("FROM needs '<ref>'")
 	}
 	r := p.toks[p.i]
-	if !refPattern.MatchString(r.Text) {
+	if !manifest.LooksLikeRef(r.Text) {
 		return errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>' or 'op://<vault>/<item>/<field>' (the value itself is never stored)")
+	}
+	// Keys whose value cpb itself reads never take a reference, at any
+	// layer (manifest.RefRefusedKeys).
+	if err := manifest.ValidateRefKey(t.Text); err != nil {
+		return errAt(t.Pos, err.Error())
 	}
 	p.i++
 	p.quiet = true

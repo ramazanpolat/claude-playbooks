@@ -55,9 +55,15 @@ type Update struct {
 // .env-profiles/ directory) layered UNDER this block: profiles apply in
 // list order, later ones overriding earlier, and the block's own Set/Unset
 // apply last. Resolution happens at launch; the manifest records names only.
+//
+// Refs holds secret REFERENCES (keychain:…, op://…), never values: the
+// launch execs claude through the configured secret helper, which resolves
+// them (docs/cli-grammar.md, "Secrets"). A key lives in at most one of Set,
+// Refs and Unset.
 type Env struct {
 	Profiles []string          `toml:"profiles,omitempty"`
 	Set      map[string]string `toml:"set,omitempty"`
+	Refs     map[string]string `toml:"refs,omitempty"`
 	Unset    []string          `toml:"unset,omitempty"`
 }
 
@@ -84,23 +90,34 @@ func (e *Env) Uses(profile string) bool {
 	return false
 }
 
-// MergeEnv flattens layers into one block: each layer's Set entries override
-// earlier values and cancel an earlier Unset of the same key; each layer's
-// Unset entries drop earlier Set values. Profiles are not carried into the
-// result -- callers resolve them into layers first. The result never lists a
-// key in both Set and Unset, and Unset keeps first-seen order.
+// MergeEnv flattens layers into one block: within a layer, Refs, then Set,
+// then Unset. A Ref or a Set entry overrides the key's earlier value,
+// reference or removal; an Unset entry drops it. Profiles are not carried
+// into the result -- callers resolve them into layers first. The result
+// lists a key in at most one of Set, Refs and Unset, and Unset keeps
+// first-seen order.
 func MergeEnv(layers ...*Env) *Env {
 	out := &Env{Set: map[string]string{}}
 	for _, layer := range layers {
 		if layer == nil {
 			continue
 		}
+		for key, ref := range layer.Refs {
+			out.Unset = dropKey(out.Unset, key)
+			delete(out.Set, key)
+			if out.Refs == nil {
+				out.Refs = map[string]string{}
+			}
+			out.Refs[key] = ref
+		}
 		for key, value := range layer.Set {
 			out.Unset = dropKey(out.Unset, key)
+			delete(out.Refs, key)
 			out.Set[key] = value
 		}
 		for _, key := range layer.Unset {
 			delete(out.Set, key)
+			delete(out.Refs, key)
 			if !out.Unsets(key) {
 				out.Unset = append(out.Unset, key)
 			}
@@ -215,7 +232,7 @@ func ValidateEnvKey(key string) error {
 
 // Empty reports whether the block declares nothing.
 func (e *Env) Empty() bool {
-	return e == nil || (len(e.Profiles) == 0 && len(e.Set) == 0 && len(e.Unset) == 0)
+	return e == nil || (len(e.Profiles) == 0 && len(e.Set) == 0 && len(e.Refs) == 0 && len(e.Unset) == 0)
 }
 
 // Unsets reports whether key is listed for removal.
@@ -393,6 +410,9 @@ func (m *Manifest) validate(path string) error {
 				return fmt.Errorf("invalid .playbook at %s: env: %s is both set and unset", path, key)
 			}
 		}
+		if err := ValidateRefs(m.Env.Refs, m.Env.Set, m.Env.Unset); err != nil {
+			return fmt.Errorf("invalid .playbook at %s: env.refs: %w", path, err)
+		}
 	}
 	return nil
 }
@@ -546,6 +566,7 @@ func Write(dir string, m *Manifest) error {
 				fmt.Fprintf(&b, "%s = %s\n", key, QuoteTOML(m.Env.Set[key]))
 			}
 		}
+		WriteRefsTable(&b, "[env.refs]", m.Env.Refs)
 	}
 	if !m.Sandbox.Empty() {
 		b.WriteString("\n[sandbox]\n")

@@ -43,17 +43,18 @@ type Profile struct {
 	Name        string            `toml:"-"`
 	Description string            `toml:"description,omitempty"`
 	Set         map[string]string `toml:"set,omitempty"`
+	Refs        map[string]string `toml:"refs,omitempty"` // secret references, never values
 	Unset       []string          `toml:"unset,omitempty"`
 }
 
 // Env returns the profile as a manifest env layer.
 func (p *Profile) Env() *manifest.Env {
-	return &manifest.Env{Set: p.Set, Unset: p.Unset}
+	return &manifest.Env{Set: p.Set, Refs: p.Refs, Unset: p.Unset}
 }
 
 // Empty reports whether the profile declares no variables.
 func (p *Profile) Empty() bool {
-	return p == nil || (len(p.Set) == 0 && len(p.Unset) == 0)
+	return p == nil || (len(p.Set) == 0 && len(p.Refs) == 0 && len(p.Unset) == 0)
 }
 
 // ErrProfile is matched (errors.Is) by every error Expand returns, whether
@@ -129,6 +130,9 @@ func validate(p *Profile, at string) error {
 			return fmt.Errorf("invalid env profile at %s: %s is both set and unset", at, key)
 		}
 	}
+	if err := manifest.ValidateRefs(p.Refs, p.Set, p.Unset); err != nil {
+		return fmt.Errorf("invalid env profile at %s: refs: %w", at, err)
+	}
 	return nil
 }
 
@@ -175,6 +179,7 @@ func Write(dir string, p *Profile) error {
 			fmt.Fprintf(&b, "%s = %s\n", key, manifest.QuoteTOML(p.Set[key]))
 		}
 	}
+	manifest.WriteRefsTable(&b, "[refs]", p.Refs)
 	// Through a 0600 temp file and a rename: a profile created 0644 by an
 	// editor or shell redirection must not expose the value being written,
 	// not even between a truncating write and a later chmod.
@@ -369,6 +374,6 @@ func Expand(dir string, e *manifest.Env) (*manifest.Env, error) {
 		}
 		layers = append(layers, p.Env())
 	}
-	layers = append(layers, &manifest.Env{Set: e.Set, Unset: e.Unset})
+	layers = append(layers, &manifest.Env{Set: e.Set, Refs: e.Refs, Unset: e.Unset})
 	return manifest.MergeEnv(layers...), nil
 }

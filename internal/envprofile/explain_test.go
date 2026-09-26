@@ -70,3 +70,26 @@ func TestExplainRefusesLikeTheLaunch(t *testing.T) {
 		t.Fatalf("nothing configured: %+v %v", got, err)
 	}
 }
+
+func TestExplainAndExpandCarryReferences(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := Write(dir, &Profile{Name: "r", Set: map[string]string{"URL": "http://x"}, Refs: map[string]string{"TOKEN": "keychain:r"}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Read(dir, "r")
+	if err != nil || p.Refs["TOKEN"] != "keychain:r" {
+		t.Fatalf("profile round trip: %#v %v", p, err)
+	}
+	block := &manifest.Env{Profiles: []string{"r"}}
+	merged, err := ExpandWithDefault(dir, block)
+	if err != nil || merged.Refs["TOKEN"] != "keychain:r" {
+		t.Fatalf("expand: %#v %v", merged, err)
+	}
+	got, err := Explain(dir, block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != (Origin{Key: "TOKEN", Ref: "keychain:r", Kind: LayerEnv, Set: "r"}) {
+		t.Fatalf("explain: %+v", got)
+	}
+}

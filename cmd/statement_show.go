@@ -123,11 +123,15 @@ func readStatement(st *grammar.Stmt) error {
 		if err != nil {
 			return fmt.Errorf("DEFAULTS cannot be read: %w", err)
 		}
-		v := defaultsJSON{Envs: nonNil(names)}
+		helper, err := helperInEffect(dir)
+		if err != nil {
+			return err
+		}
+		v := defaultsJSON{Envs: nonNil(names), SecretHelper: helper}
 		if st.JSON {
 			return printJSON(v)
 		}
-		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Secret helper", "(none)"}})
+		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Secret helper", humanHelper(helper)}})
 		return nil
 	}
 	return notYet(st.String())
@@ -160,20 +164,28 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v.Sandbox = m.Sandbox != nil && m.Sandbox.Always
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Profiles)
-		v.Vars = layerVars(m.Env.Set, m.Env.Unset)
+		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Unset)
 	}
 	return v
 }
 
-// layerVars lists one layer's own entries, sorted: literals, then blocked.
-func layerVars(set map[string]string, unset []string) []varJSON {
+// layerVars lists one layer's own entries, sorted: literals and
+// references by key, then blocked.
+func layerVars(set, refs map[string]string, unset []string) []varJSON {
 	vars := []varJSON{}
-	keys := make([]string, 0, len(set))
+	keys := make([]string, 0, len(set)+len(refs))
 	for k := range set {
+		keys = append(keys, k)
+	}
+	for k := range refs {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
+		if ref, ok := refs[k]; ok {
+			vars = append(vars, varJSON{Key: k, Ref: strPtr(ref)})
+			continue
+		}
 		vars = append(vars, literalVar(k, set[k]))
 	}
 	blocked := append([]string(nil), unset...)
@@ -294,7 +306,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 	for _, p := range profiles {
 		all = append(all, envJSON{
 			Name: p.Name, Description: p.Description,
-			Vars: layerVars(p.Set, p.Unset), UsedBy: nonNil(users[p.Name]),
+			Vars: layerVars(p.Set, p.Refs, p.Unset), UsedBy: nonNil(users[p.Name]),
 			Default: isRegistryDefault(dir, defaults, p.Name),
 		})
 	}
@@ -354,11 +366,20 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if err != nil {
 		return fmt.Errorf("the launch of %q would be refused: %w", st.Name, err)
 	}
+	helper, err := helperInEffect(dir)
+	if err != nil {
+		return err
+	}
 	vars := make([]varJSON, 0, len(origins))
 	values := map[string]string{}
+	refs := 0
 	for _, o := range origins {
 		v := varJSON{Key: o.Key, Blocked: o.Blocked}
-		if !o.Blocked {
+		switch {
+		case o.Ref != "":
+			v = varJSON{Key: o.Key, Ref: strPtr(o.Ref)}
+			refs++
+		case !o.Blocked:
 			v = literalVar(o.Key, o.Value)
 			values[o.Key] = o.Value
 		}
@@ -366,10 +387,11 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		vars = append(vars, v)
 	}
 	if st.JSON {
-		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars})
+		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
+		fmt.Printf("\nSecret helper: %s\n", humanHelper(helper))
 		return nil
 	}
 	t := newTable("VARIABLE", "VALUE", "FROM").flexible(1)
@@ -388,7 +410,27 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		t.add(v.Key, shown, from)
 	}
 	t.render(os.Stdout)
+	fmt.Printf("\nSecret helper: %s\n", humanHelper(helper))
+	if refs > 0 && helper == nil {
+		fmt.Println("This launch uses secret references and no helper is configured: it would be refused.")
+	}
 	return nil
+}
+
+// helperInEffect is the configured secret helper for --json, nil if none.
+func helperInEffect(dir string) (*helperJSON, error) {
+	h, err := envprofile.SecretHelper(dir)
+	if err != nil || h == nil {
+		return nil, err
+	}
+	return &helperJSON{Command: h.Command, From: h.From}, nil
+}
+
+func humanHelper(h *helperJSON) string {
+	if h == nil {
+		return "(none)"
+	}
+	return h.Command + " (from " + h.From + ")"
 }
 
 func humanVars(vars []varJSON, values map[string]string) []string {
