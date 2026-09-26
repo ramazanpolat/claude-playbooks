@@ -66,7 +66,7 @@ here reads, writes or calls anything of pilot-profile's.
 
 ```
 command    := write | read | APPLY <file> [<file> ...] [TO <playbook|dir>] [--dry-run] [--yes]
-                                           TO: see "Targets" (a plain directory: planned)
+                                           TO: see "Targets"
                                            (select: not planned, see SELECT)
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
@@ -937,9 +937,7 @@ form in the first cut (decided 2026-09-26).
 
 ## Targets: recipes, USE PLAYBOOK and APPLY … TO (v3.21.0)
 
-Built: name-less statements, `USE PLAYBOOK`, and `APPLY … TO <playbook>` (a
-path that is a registered playbook included). Still planned: `TO '<dir>'`
-for a plain config directory.
+Built (v3.21.0), `TO '<dir>'` included.
 
 Decided with the pilot on 2026-09-26: a playbook file can be a **recipe**,
 written once and applied to any playbook, or to a plain Claude Code config
