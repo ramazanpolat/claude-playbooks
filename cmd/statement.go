@@ -380,7 +380,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	switch {
 	case known && !exists:
-		pb = nil
+		return fmt.Errorf("unknown playbook %q (dropped earlier in the file)", st.Name)
 	case pb == nil && !(known && exists):
 		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", st.Name)
 	}

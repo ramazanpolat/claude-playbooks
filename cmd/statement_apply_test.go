@@ -376,3 +376,15 @@ func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 		t.Errorf("a playbook with no launcher lost NO ALIAS:\n%s", out)
 	}
 }
+
+// A dry run refuses a statement on a playbook the file dropped earlier, as
+// the real run would.
+func TestApplyDryRunRefusesDroppedPlaybook(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "gone", &manifest.Manifest{})
+	mustStmt(t, "CREATE ENV a")
+	path := writePlaybookFile(t, "DROP PLAYBOOK gone;\nALTER PLAYBOOK gone USE ENV a;\n")
+	if _, err := apply(t, path, "--dry-run"); err == nil || !strings.Contains(err.Error(), "dropped earlier in the file") {
+		t.Fatalf("dry run on a dropped playbook: %v", err)
+	}
+}

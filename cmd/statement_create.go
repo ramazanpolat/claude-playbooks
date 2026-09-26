@@ -241,8 +241,13 @@ func hasNameLauncher(name string) bool {
 	if err != nil {
 		return false
 	}
-	_, exists, foreign := launcher.Lookup(dir, name)
-	return exists && !foreign
+	if _, exists, foreign := launcher.Lookup(dir, name); !exists || foreign {
+		return false
+	}
+	// A launcher answers to its name; if another playbook claims the name
+	// as its alias, the launcher is not this playbook's default.
+	owner, err := commandNameOwner(name, name)
+	return err == nil && owner == nil
 }
 
 func joinComments(comments []string, text string) string {
