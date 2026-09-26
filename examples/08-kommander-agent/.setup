@@ -1,2 +1,6 @@
 # The route bare.cpb attaches; in the check, an empty stand-in.
 cpb CREATE ENV IF NOT EXISTS glm-5.3-flash
+# The kommander checkout kommander.cpb names; in the check, a stand-in
+# marketplace (the plugin itself is never fetched: claude is a stub).
+mkdir -p "$HOME/path/to/kommander-playbook/.claude-plugin"
+printf '{\n  "name": "kommander",\n  "owner": {"name": "stand-in"},\n  "plugins": []\n}\n' > "$HOME/path/to/kommander-playbook/.claude-plugin/marketplace.json"

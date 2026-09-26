@@ -19,10 +19,14 @@ ALTER PLAYBOOK kommander-agent USE ENV glm-5.3-flash;
 ```
 INCLUDE 'bare.cpb';
 ALTER PLAYBOOK kommander-agent
-  ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook'
+  ADD MARKETPLACE kommander FROM '~/path/to/kommander-playbook'
   ADD PLUGIN kommander@kommander
   SET AGENT 'kommander';
 ```
+
+The kommander repository is private: the path is your checkout of it, and
+with access the same clause can read
+`FROM 'github:ramazanpolat/kommander-playbook'`.
 
 `ADD MARKETPLACE` and `ADD PLUGIN` run `claude plugin marketplace add` and
 `claude plugin install` with the playbook as `CLAUDE_CONFIG_DIR`: Claude Code

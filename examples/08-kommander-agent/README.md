@@ -22,11 +22,11 @@ Applying a layer applies everything under it. Applying again changes nothing.
 - **The route.** `bare.cpb` attaches the env set `glm-5.3-flash`. Use one you
   have (`cpb SHOW ENVS`), or remove that line to run on the machine's
   `DEFAULTS`.
-- **The kommander plugin.** `kommander.cpb` installs it from
-  `github:ramazanpolat/kommander-playbook`, whose root is both the
-  marketplace and the plugin (so `APPLY` fetches it). To run a local checkout
-  instead, a branch under development, write
-  `ADD MARKETPLACE kommander FROM '~/DEV/kommander-playbook'`. A playbook
+- **The kommander plugin.** `kommander.cpb` installs it from a checkout of
+  `ramazanpolat/kommander-playbook`, whose root is both the marketplace and
+  the plugin. The repository is private: edit `~/path/to/kommander-playbook`
+  to your checkout. With access, `FROM 'github:ramazanpolat/kommander-playbook'`
+  fetches it instead (the proof run below used that form). A playbook
   that already has the marketplace from another source keeps it until you
   `DROP PLUGIN kommander@kommander DROP MARKETPLACE kommander`.
 - **The chaos layer** is a stub. `'./chaos-stub'` resolves against the

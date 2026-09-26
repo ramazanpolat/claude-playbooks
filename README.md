@@ -14,7 +14,7 @@ ALTER PLAYBOOK kommander-agent USE ENV glm-5.3-flash;
 -- kommander.cpb
 INCLUDE 'bare.cpb';
 ALTER PLAYBOOK kommander-agent
-  ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook'
+  ADD MARKETPLACE kommander FROM '~/path/to/kommander-playbook'
   ADD PLUGIN kommander@kommander
   SET AGENT 'kommander';
 
@@ -32,7 +32,9 @@ kommander-agent                 # run it
 ```
 
 That is an agent built from three stacked layers: a bare playbook, Kommander as
-a plugin and the main-thread agent, and a layer on top.
+a plugin and the main-thread agent, and a layer on top. The kommander
+repository is private: point the path at your checkout, or, with access, use
+`FROM 'github:ramazanpolat/kommander-playbook'`.
 [The full example →](examples/08-kommander-agent/)
 
 ![claude-playbook demo](docs/demo.gif)
@@ -96,7 +98,7 @@ Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top |
 | [Examples 01-08](examples/) | one small `playbook.cpb` per idea, all applied in CI |
 | [CLI grammar](docs/reference/cli-grammar.md) | every statement, clause, file rule and output format |
-| [Guides](docs/README.md) | installation, playbooks, environment, authentication, sandbox, agents |
+| [Guides](docs/README.md) | installation, playbooks, environment, authentication, sandbox, agents, SQL over `--json` |
 | [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |
 
 ## License
