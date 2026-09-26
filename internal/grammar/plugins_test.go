@@ -47,7 +47,7 @@ func TestParsePluginErrors(t *testing.T) {
 		want string
 	}{
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m"), "ADD MARKETPLACE needs FROM '<source>'"},
-		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM ./rel"), "unsupported marketplace source"},
+		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM rel/dir"), "unsupported marketplace source"},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM github:only-owner"), "'github:<owner>/<repo>'"},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM https://user:tok@example.com/r.git"), "carrying credentials"},
 		{w("ALTER PLAYBOOK k ADD PLUGIN noat"), "<plugin>@<marketplace>"},
@@ -57,6 +57,7 @@ func TestParsePluginErrors(t *testing.T) {
 		{w("ALTER PLAYBOOK k ADD FOO"), "ADD takes ENV, MARKETPLACE or PLUGIN"},
 		{w("ALTER DEFAULTS ADD PLUGIN a@b"), "ADD takes ENV"},
 		{w("INCLUDE base.cpb"), "INCLUDE appears only in a playbook file"},
+		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM ./mkt"), "resolves against its playbook file"},
 	}
 	for _, tc := range cases {
 		_, err := ParseArgs(tc.args)

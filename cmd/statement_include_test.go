@@ -67,3 +67,22 @@ func TestApplyIncludeRefusals(t *testing.T) {
 		t.Errorf("the cycle is not named as a chain: %v", err)
 	}
 }
+
+// A relative directory source in a playbook file resolves against the
+// file's directory, as INCLUDE does.
+func TestApplyRelativeMarketplaceSource(t *testing.T) {
+	sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	fakeClaude(t)
+	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.MkdirAll(filepath.Join(dir, "stub", ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCpb(t, filepath.Join(dir, "stub", ".claude-plugin"), "marketplace.json", `{"name":"stub","owner":{"name":"t"},"plugins":[]}`)
+	path := writeCpb(t, dir, "layer.cpb", "ALTER PLAYBOOK k ADD MARKETPLACE stub FROM './stub';\n")
+	out, err := apply(t, path, "--dry-run")
+	if err != nil || !strings.Contains(out, "claude plugin marketplace add "+filepath.Join(dir, "stub")+" --scope user") {
+		t.Fatalf("relative source: %v\n%s", err, out)
+	}
+}

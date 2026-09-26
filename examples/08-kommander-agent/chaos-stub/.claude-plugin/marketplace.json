@@ -1,0 +1,14 @@
+{
+  "name": "chaos-stub",
+  "owner": {
+    "name": "claude-playbooks examples"
+  },
+  "description": "A stand-in for the chaos layer: one plugin that adds one line of session context.",
+  "plugins": [
+    {
+      "name": "chaos",
+      "source": "./",
+      "description": "The chaos layer (stub): a SessionStart hook that adds one line of context."
+    }
+  ]
+}
