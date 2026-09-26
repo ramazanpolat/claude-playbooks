@@ -1,0 +1,7 @@
+-- Someone else's playbook, from a Git repository, pinned to a tag, with a
+-- short launcher command. SUBDIR picks one playbook out of a repository that
+-- ships several.
+CREATE PLAYBOOK IF NOT EXISTS kommander
+  FROM https://github.com/ramazanpolat/kommander-playbook
+  BRANCH v3.12.2
+  ALIAS k;

@@ -2,8 +2,38 @@
 
 [![CI](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml/badge.svg)](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml)
 
-**Run many isolated Claude Codes on one machine.** Separate settings, hooks,
-memory, environment, and logins — each behind its own command.
+**Run many isolated Claude Codes on one machine, and describe each one in a
+file.** Separate settings, hooks, memory, environment, plugins and logins,
+each behind its own command.
+
+```
+-- bare.cpb
+CREATE PLAYBOOK IF NOT EXISTS kommander-agent;
+ALTER PLAYBOOK kommander-agent USE ENV glm-5.3-flash;
+
+-- kommander.cpb
+INCLUDE 'bare.cpb';
+ALTER PLAYBOOK kommander-agent
+  ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook'
+  ADD PLUGIN kommander@kommander
+  SET AGENT 'kommander';
+
+-- chaos.cpb
+INCLUDE 'kommander.cpb';
+ALTER PLAYBOOK kommander-agent
+  ADD MARKETPLACE chaos-stub FROM './chaos-stub'
+  ADD PLUGIN chaos@chaos-stub;
+```
+
+```bash
+cpb APPLY chaos.cpb --dry-run   # what would change, and every command it would run
+cpb APPLY chaos.cpb             # build it, layer by layer
+kommander-agent                 # run it
+```
+
+That is an agent built from three stacked layers: a bare playbook, Kommander as
+a plugin and the main-thread agent, and a layer on top.
+[The full example →](examples/08-kommander-agent/)
 
 ![claude-playbook demo](docs/demo.gif)
 
@@ -14,127 +44,60 @@ curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/
 ```
 
 Linux and macOS, amd64/arm64. Installs `claude-playbook` and the shorter `cpb`.
+[devbox, Nix, npx and source builds →](docs/guides/installation.md)
 
-In a [devbox](https://www.jetify.com/devbox) project, add it as a package instead;
-devbox pins it in `devbox.lock`:
-
-```bash
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook"
-devbox run -- cpb --version
-```
-
-[Using it in a devbox project →](docs/guides/installation.md#using-it-in-a-devbox-project) ·
-[Other ways to install →](docs/guides/installation.md)
-
-## 60-second start
-
-```bash
-cpb create experiment     # a fresh, isolated Claude Code setup
-experiment                # a real command on your PATH — launches it
-```
-
-That's the whole loop. `experiment` is now a directory under
-`~/.claude-playbooks/` holding its own `CLAUDE.md`, `settings.json`, hooks,
-history, and MCP servers — and a launcher command that opens Claude Code bound to
-it. Your `~/.claude` never moved.
-
-Three more you'll want on day one:
-
-```bash
-cpb list                                      # what you have, and its command
-cpb install https://github.com/user/awesome   # someone else's playbook
-cpb delete experiment                         # gone, launcher and all
-```
-
-## Why
-
-Claude Code keeps everything in `~/.claude/`: settings, conversation history,
-permissions, hooks, MCP servers. Trying a different model, a custom hook, or a
-new `CLAUDE.md` behavior means touching your daily setup, and one wrong change
-breaks it.
-
-A playbook gives each experiment — or each role, client, or account — its own
-directory.
-
-- **Test a hook or setting** without risking your main `~/.claude`
-- **Keep work and personal** configurations apart
-- **Run two Claude Codes concurrently** with different personalities
-- **Stay logged into two accounts at once** — corporate in one, personal in another
-- **Share a setup with your team** by putting the playbook in a Git repo
-- **Install one role** out of a repo that ships several
-
-## Four boundaries
-
-A playbook can isolate more than its config directory. Each layer is opt-in, and
-they compose.
-
-| | What it separates | Turn it on |
-|---|---|---|
-| **Config** | settings, hooks, memory, history, MCP servers | always — every playbook is its own `CLAUDE_CONFIG_DIR` |
-| **[Identity](docs/guides/authentication.md)** | which account or token the session runs as | a shared login, a long-lived token, a per-playbook `/login`, or `isolate_auth` |
-| **[Environment](docs/guides/environment.md)** | variables, API endpoints, proxies | `cpb env <name> set …`, or a profile shared by several playbooks |
-| **[Process](docs/guides/sandbox.md)** | kernel, filesystem, network | `--sandbox` — the session runs in a microVM that cannot see your home |
-
-### How the first one works
+## What a playbook is
 
 Claude Code reads its configuration from `CLAUDE_CONFIG_DIR` (default
-`~/.claude`). Change that variable and you get a completely fresh, independent
-instance:
+`~/.claude`). A playbook is one such directory under `~/.claude-playbooks/`
+with its own `CLAUDE.md`, `settings.json`, hooks, history, MCP servers and
+plugins, plus a launcher command that opens Claude Code bound to it. Your
+`~/.claude` never moves.
+
+- Test a hook, a model or a plugin without touching your daily setup
+- Keep work and personal setups, or two accounts, apart and running at once
+- Share a setup as a Git repository, or as one `playbook.cpb`
+
+## The grammar
+
+`cpb <VERB> <OBJECT> <name> <clause> ...`, read and written like SQL DDL:
 
 ```bash
-claude                                                      # your normal setup
-CLAUDE_CONFIG_DIR=~/.claude-playbooks/experiment claude      # an isolated playbook
+cpb CREATE PLAYBOOK scratch                        # a fresh playbook and its `scratch` command
+cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
+cpb ALTER PLAYBOOK scratch USE ENV router SET VAR MAX_THINKING_TOKENS=8000
+cpb ALTER DEFAULTS USE ENV router                  # env sets under every playbook, in order
+cpb SHOW PLAYBOOK scratch --json                   # state; EXPLAIN shows what a launch sets, and why
+cpb SHOW CREATE ALL > playbook.cpb                 # this machine, as statements
+cpb APPLY playbook.cpb                             # on the next machine
+cpb DROP PLAYBOOK scratch --yes
 ```
 
-That's all a playbook is under the hood. `cpb` makes creating, launching,
-sharing, and managing them easy.
+- **Objects:** `PLAYBOOK`, `ENV` (a named env set), `DEFAULTS`.
+- **Secrets by reference:** `SET TOKEN FROM 'keychain:pilot/token'` through a
+  secret helper you configure; a credential-looking literal is refused unless
+  you say `AS PLAINTEXT`, and `SHOW CREATE` never prints one.
+- **Playbook files:** `APPLY` validates every statement before writing
+  anything, runs them in order, and applying again changes nothing.
+  `INCLUDE` stacks files.
+- **Plugins and the agent:** `ADD MARKETPLACE`, `ADD PLUGIN` and `SET AGENT`
+  run Claude Code's own `claude plugin` commands for that playbook only.
 
-```
-~/.claude-playbooks/                Launcher commands (on PATH):
+Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
+`cpb run <name>`, `cpb start <dir>`, `cpb update`, `cpb auth status`, and
+`--sandbox` on any launch. The older `env`, `env-profile`, `list`, `info`,
+`alias`, `rename`, `link` and `delete` commands still work, hidden from help.
 
-├── experiment/                     ◄── ~/.local/bin/experiment -> claude-playbook
-│   ├── CLAUDE.md                       (typing `experiment` runs this playbook)
-│   └── settings.json
-│
-└── awesome/                        ◄── ~/.local/bin/ap -> claude-playbook
-    ├── .playbook                       (marker + metadata; `alias = "ap"` names the command)
-    └── CLAUDE.md
-```
-
-A directory is a playbook if it exists under the playbooks root. The `.playbook`
-manifest is optional — it holds metadata like version, alias, source, env
-overrides, and sandbox settings.
-
-## Commands
+## Learn it
 
 | | |
 |---|---|
-| `cpb create <name>` | a new playbook, plus its launcher command |
-| `cpb install <url\|dir>` | copy a playbook in from a Git repo or directory |
-| `cpb link <dir>` | symlink an external directory you're editing live |
-| `cpb list` / `cpb info <name>` | what exists; one playbook in detail |
-| `cpb run <name> [claude flags…]` | launch without the launcher command |
-| `cpb start <dir>` | a throwaway session at any directory |
-| `cpb alias` / `cpb rename` / `cpb delete` | manage names and remove playbooks |
-| `cpb env` / `cpb env-profile` | per-playbook and shared environment overrides |
-| `cpb auth status` | which login or token each playbook would use |
-| `cpb update [name]` | update a playbook, or the tool itself |
-| `cpb self-uninstall` | remove everything `cpb` installed |
-
-Add `--sandbox` to any launch to run it in a microVM.
-
-## Documentation
-
-| | |
-|---|---|
-| [Installation](docs/guides/installation.md) | install script, devbox/Nix, npx, source builds, uninstalling |
-| [Managing playbooks](docs/guides/managing-playbooks.md) | create, install, link, launch, rename, update, delete |
-| [Authentication](docs/guides/authentication.md) | shared logins, long-lived tokens, isolated accounts |
-| [Environment overrides](docs/guides/environment.md) | per-playbook variables and shared env profiles |
-| [Sandboxed sessions](docs/guides/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
-| [Agent guide](docs/guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
-| [SPEC-v4.md](SPEC-v4.md) | the behavioral contract |
-| [Contributing](CONTRIBUTING.md) | development, tests, pull requests |
+| [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
+| [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top |
+| [Examples 01-08](examples/) | one small `playbook.cpb` per idea, all applied in CI |
+| [CLI grammar](docs/reference/cli-grammar.md) | every statement, clause, file rule and output format |
+| [Guides](docs/README.md) | installation, playbooks, environment, authentication, sandbox, agents |
+| [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |
 
 ## License
 

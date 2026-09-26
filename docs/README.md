@@ -2,8 +2,17 @@
 
 Pages are grouped by what you came for:
 
+- **tutorials/**: learn it once, start to finish.
 - **guides/**: how to do one common task.
 - **reference/**: complete and dry: every statement, flag, file and format.
+- **[examples/](../examples/)**: one small `playbook.cpb` per idea, applied in CI.
+
+## Tutorials
+
+| | |
+|---|---|
+| [Your first playbook.cpb](tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
+| [Stack layers into an agent](tutorials/stacked-agent.md) | `INCLUDE`, plugins and the agent, layer by layer |
 
 ## Guides
 

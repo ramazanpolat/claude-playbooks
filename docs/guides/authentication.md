@@ -36,8 +36,8 @@ session.
 |---|---|---|
 | Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; `/login` anywhere logs in everywhere |
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
-| One playbook keeps its own `/login` while the others use the token | `cpb env <name> unset CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
-| One playbook uses its own token | `cpb env <name> set CLAUDE_CODE_OAUTH_TOKEN=...` | that token wins over the file; its own login removed |
+| One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
+| One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT` (this key never takes a reference: cpb reads it itself) | that token wins over the file; its own login removed |
 | One playbook is a different account, sharing nothing | `isolate_auth = true` in its `.playbook`, or `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` | detached; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token |
 
 The unset and set forms can come from an

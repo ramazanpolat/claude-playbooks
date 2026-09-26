@@ -1,0 +1,11 @@
+-- What `cpb SHOW CREATE ALL > playbook.cpb` writes, in short: env sets,
+-- DEFAULTS, then playbooks, each in a form that is safe to apply again.
+CREATE OR REPLACE ENV thinking
+  SET MAX_THINKING_TOKENS=8000;
+
+ALTER DEFAULTS USE ENV thinking;
+
+CREATE PLAYBOOK IF NOT EXISTS notes NO ALIAS;
+
+ALTER PLAYBOOK notes
+  SET VAR DISABLE_TELEMETRY=1;

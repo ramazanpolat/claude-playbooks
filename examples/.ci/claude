@@ -1,0 +1,29 @@
+#!/bin/sh
+# A stand-in for `claude` in the examples check: it answers the
+# `claude plugin` commands cpb runs, keeping its state in the playbook's
+# config directory, and records any other launch. No network, no model.
+st="$CLAUDE_CONFIG_DIR/.fake-claude"
+mkdir -p "$st"
+case "$*" in
+  "plugin marketplace list --json") cat "$st/markets.json" 2>/dev/null || echo "[]" ;;
+  "plugin list --json") cat "$st/plugins.json" 2>/dev/null || echo "[]" ;;
+  "plugin marketplace add "*)
+    src=$4
+    if [ -d "$src" ]; then
+      name=$(sed -n 's/^ *"name": *"\([^"]*\)".*/\1/p' "$src/.claude-plugin/marketplace.json" | head -1)
+      entry="{\"name\":\"$name\",\"source\":\"directory\",\"path\":\"$src\"}"
+    else
+      # FAKE_MARKETS maps a source to the name it declares: "owner/repo=name ..."
+      name=$(printf '%s\n' $FAKE_MARKETS | sed -n "s|^$src=||p" | head -1)
+      entry="{\"name\":\"$name\",\"source\":\"github\",\"repo\":\"$src\"}"
+    fi
+    old=$(cat "$st/markets.json" 2>/dev/null || echo "[]")
+    if [ "$old" = "[]" ]; then echo "[$entry]"; else echo "${old%]},$entry]"; fi > "$st/markets.json" ;;
+  "plugin install "*)
+    old=$(cat "$st/plugins.json" 2>/dev/null || echo "[]")
+    entry="{\"id\":\"$3\",\"scope\":\"user\",\"enabled\":true}"
+    if [ "$old" = "[]" ]; then echo "[$entry]"; else echo "${old%]},$entry]"; fi > "$st/plugins.json"
+    echo '{"command":"install","outcome":"ok"}' ;;
+  plugin*) echo "fake claude: not handled: $*" >&2; exit 2 ;;
+  *) env > "$CLAUDE_CONFIG_DIR/.fake-claude/launch-env" ;;
+esac

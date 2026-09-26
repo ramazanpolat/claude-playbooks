@@ -1,0 +1,2 @@
+# The route bare.cpb attaches; in the check, an empty stand-in.
+cpb CREATE ENV IF NOT EXISTS glm-5.3-flash

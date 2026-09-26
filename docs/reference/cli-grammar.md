@@ -1,8 +1,8 @@
-# CLI grammar — spec (draft)
+# CLI grammar
 
-Status: **agreed 2026-09-26; implementation in progress (phase 1, the
-parser). Ships as v3.20.0.** Decided with the pilot on 2026-09-25/26; no
-open points remain.
+Status: **implemented, v3.20.0.** Decided with the pilot on 2026-09-25/26.
+`SELECT` is specified for v3.21.0 and not built yet; everything else on this
+page is.
 
 ## Why
 
@@ -696,8 +696,8 @@ files. It is not added because it would be easy.
 
 ## INCLUDE
 
-Decided with the pilot on 2026-09-26; built with "Plugins and the agent",
-in the release after v3.20.0. A
+Decided with the pilot on 2026-09-26; ships in v3.20.0 with "Plugins and
+the agent". A
 playbook file can pull in another, so one machine's file can share a base
 with the next:
 
@@ -754,8 +754,7 @@ time; anything more needs the pilot's explicit approval first.
 
 ## Plugins and the agent
 
-Decided with the pilot on 2026-09-26, for the release after v3.20.0 (before
-`SELECT`). The goal it serves: a playbook built by stacking playbook files,
+Decided with the pilot on 2026-09-26; ships in v3.20.0. The goal it serves: a playbook built by stacking playbook files,
 for example Kommander as a plugin and an agent on a bare playbook:
 
 ```
