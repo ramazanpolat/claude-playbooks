@@ -588,11 +588,14 @@ func sourceString(raw json.RawMessage) (string, bool) {
 	if ok, err := o.Get(field, &v); !ok || err != nil {
 		return "", false
 	}
-	if ref != "" {
+	if kind == grammar.SourceGit {
+		// A '#' in the url itself would read back as a ref.
 		if strings.Contains(v, "#") {
 			return "", false
 		}
-		v += "#" + ref
+		if ref != "" {
+			v += "#" + ref
+		}
 	}
 	if kind == grammar.SourceGitHub {
 		v = "github:" + v

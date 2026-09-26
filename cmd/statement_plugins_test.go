@@ -263,7 +263,7 @@ func TestMarketplaceGitRefSource(t *testing.T) {
 	if err != nil || !strings.Contains(out, "unchanged") || len(runs(t, log)) != 1 {
 		t.Fatalf("an unchanged #ref source: %v\n%s", err, out)
 	}
-	for _, other := range []string{"https://example.com/kommander.git#v1.3.0", "https://example.com/kommander.git"} {
+	for _, other := range []string{"https://example.com/kommander.git#v1.3.0", "https://example.com/kommander.git", "https://example.com/other.git#v1.2.0"} {
 		if _, err := quoted("ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM '" + other + "'"); err == nil || !strings.Contains(err.Error(), "already declared from another source") {
 			t.Errorf("%s: %v, want the refusal", other, err)
 		}
@@ -285,6 +285,7 @@ func TestSourceStringGitRef(t *testing.T) {
 		`{"source":"git","url":"https://example.com/k.git","ref":""}`,
 		`{"source":"github","repo":"a/b","ref":"v1"}`,
 		`{"source":"git","url":"https://example.com/k.git#x","ref":"v1"}`,
+		`{"source":"git","url":"https://example.com/k.git#x"}`,
 	} {
 		if got, ok := sourceString(json.RawMessage(raw)); ok {
 			t.Errorf("%s: written as %q, want not written", raw, got)
