@@ -776,6 +776,7 @@ a terminal, so Claude Code never prompts.
 |---|---|---|
 | `'github:<owner>/<repo>'` | `<owner>/<repo>` | `{"source": "github", "repo": "<owner>/<repo>"}` |
 | `'https://…'`, `'git@…'` (a git URL) | the URL | `{"source": "git", "url": "…"}` |
+| a git URL with `#<ref>` (`'https://…/repo.git#v1.2.0'`) | the URL with its ref | `{"source": "git", "url": "…", "ref": "<ref>"}`: url and ref apart |
 | `'/abs/path'` or `'~/path'`, a local directory | the absolute path (`~/` expanded) | `{"source": "directory", "path": "/abs/path"}` |
 | `'./path'` or `'../path'`, in a playbook file only | resolved against the file's directory | as above, absolute |
 
@@ -785,7 +786,11 @@ A directory source is the marketplace root, the directory that holds
 `INCLUDE` does (decided 2026-09-26), so a layer can ship its plugin beside
 it; on the command line, and in a file read from a pipe, it is refused. Any
 other relative path is refused, and so is a URL carrying credentials. This is how a plugin is used from a local checkout
-before it is published. `--sparse` and git refs are not in the first cut.
+before it is published. `--sparse` is not in the first cut. A git URL's
+`#<ref>` is compared as Claude Code records it, url and ref apart (v3.21.1):
+applying the same `url#ref` again changes nothing, another ref or none is
+another source, and `SHOW CREATE` writes it back as `url#ref`. The
+`github:` form takes no ref.
 A marketplace name follows the env-set name rule; a plugin id is
 `<plugin>@<marketplace>`.
 

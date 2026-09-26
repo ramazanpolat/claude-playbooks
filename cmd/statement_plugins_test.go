@@ -25,6 +25,15 @@ mkdir -p "$st"
 case "$*" in
   "plugin marketplace list --json") cat "$st/mkts" 2>/dev/null || echo '[]' ;;
   "plugin list --json") cat "$st/plugins" 2>/dev/null || echo '[]' ;;
+  "plugin marketplace add https://"*|"plugin marketplace add git@"*)
+    # As Claude Code does: url and #ref recorded apart.
+    u="${4%%#*}"; ref=""
+    case "$4" in *#*) ref="${4#*#}" ;; esac
+    if [ -n "$ref" ]; then
+      printf '[{"name":"%s","source":"git","url":"%s","ref":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$u" "$ref" > "$st/mkts"
+    else
+      printf '[{"name":"%s","source":"git","url":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$u" > "$st/mkts"
+    fi ;;
   "plugin marketplace add "*)
     printf '[{"name":"%s","source":"github","repo":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$4" > "$st/mkts" ;;
   "plugin marketplace remove "*) echo '[]' > "$st/mkts" ;;
@@ -228,5 +237,57 @@ func TestShowCreatePluginsIncomplete(t *testing.T) {
 	out := mustStmt(t, "SHOW CREATE PLAYBOOK k")
 	if strings.Contains(out, "ADD PLUGIN p@m") || !strings.Contains(out, "-- PLUGIN p@m: its marketplace m is not written") {
 		t.Fatalf("a plugin without its marketplace:\n%s", out)
+	}
+}
+
+// A git source with #ref: Claude Code records url and ref apart, so an
+// unchanged source reads as unchanged, and a changed ref is still refused.
+func TestMarketplaceGitRefSource(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	log := fakeClaude(t)
+	seedFlatPlaybook(t, "k")
+	quoted := func(line string) (string, error) {
+		var err error
+		out := captureStdout(t, func() { err = runStatement([]string{line}) })
+		return out, err
+	}
+	add := "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM 'https://example.com/kommander.git#v1.2.0'"
+	if _, err := quoted(add); err != nil {
+		t.Fatal(err)
+	}
+	if got := runs(t, log); len(got) != 1 || !strings.HasSuffix(got[0], "|plugin marketplace add https://example.com/kommander.git#v1.2.0 --scope user") {
+		t.Fatalf("add ran:\n%s", strings.Join(got, "\n"))
+	}
+	out, err := quoted(add)
+	if err != nil || !strings.Contains(out, "unchanged") || len(runs(t, log)) != 1 {
+		t.Fatalf("an unchanged #ref source: %v\n%s", err, out)
+	}
+	for _, other := range []string{"https://example.com/kommander.git#v1.3.0", "https://example.com/kommander.git"} {
+		if _, err := quoted("ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM '" + other + "'"); err == nil || !strings.Contains(err.Error(), "already declared from another source") {
+			t.Errorf("%s: %v, want the refusal", other, err)
+		}
+	}
+}
+
+// SHOW CREATE writes a git source's ref back as url#ref.
+func TestSourceStringGitRef(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"source":"git","url":"https://example.com/k.git","ref":"v1"}`: "https://example.com/k.git#v1",
+		`{"source":"git","url":"https://example.com/k.git"}`:            "https://example.com/k.git",
+		`{"source":"github","repo":"a/b"}`:                              "github:a/b",
+	} {
+		if got, ok := sourceString(json.RawMessage(raw)); !ok || got != want {
+			t.Errorf("%s: %q %v, want %q", raw, got, ok, want)
+		}
+	}
+	for _, raw := range []string{
+		`{"source":"git","url":"https://example.com/k.git","ref":""}`,
+		`{"source":"github","repo":"a/b","ref":"v1"}`,
+		`{"source":"git","url":"https://example.com/k.git#x","ref":"v1"}`,
+	} {
+		if got, ok := sourceString(json.RawMessage(raw)); ok {
+			t.Errorf("%s: written as %q, want not written", raw, got)
+		}
 	}
 }
