@@ -47,7 +47,7 @@ func TestParsePluginErrors(t *testing.T) {
 		want string
 	}{
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m"), "ADD MARKETPLACE needs FROM '<source>'"},
-		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM ./rel"), "unsupported marketplace source"},
+		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM rel/dir"), "unsupported marketplace source"},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM github:only-owner"), "'github:<owner>/<repo>'"},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM https://user:tok@example.com/r.git"), "carrying credentials"},
 		{w("ALTER PLAYBOOK k ADD PLUGIN noat"), "<plugin>@<marketplace>"},

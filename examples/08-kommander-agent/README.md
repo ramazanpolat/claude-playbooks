@@ -93,7 +93,7 @@ harmless.
 - **The `kommander-helper` permission.** The Kommander agent runs its helper
   through Bash. A full install allows it in `settings.json`
   (`permissions.allow`); cpb has no clause for permissions yet, so a session
-  asks the first time, or it is added by hand.
+  asks the first time, and you approve it there.
 - **Updates.** The plugin loads from the checkout in place: `git pull` there
   and start a new session. A published marketplace updates through
   `claude plugin marketplace update`.
