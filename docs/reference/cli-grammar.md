@@ -65,7 +65,8 @@ here reads, writes or calls anything of pilot-profile's.
 ## Grammar
 
 ```
-command    := write | read | APPLY <file> [<file> ...] [--dry-run] [--yes]
+command    := write | read | APPLY <file> [<file> ...] [TO <playbook|dir>] [--dry-run] [--yes]
+                                           TO: planned (v3.21.0), see "Targets"
                                            (select: not planned, see SELECT)
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
@@ -73,7 +74,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
             | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX]
-            | ALTER  PLAYBOOK <name> pb-clause ...
+            | ALTER  PLAYBOOK [<name>] pb-clause ...   no name (planned): a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
 
@@ -354,7 +355,8 @@ ALTER PLAYBOOK kommander-idea
 
 File rules:
 
-- **Only write statements** (`CREATE`, `ALTER`, `DROP`). A read is refused.
+- **Only write statements** (`CREATE`, `ALTER`, `DROP`), and the directives
+  `INCLUDE` and `USE PLAYBOOK` (planned, see "Targets"). A read is refused.
 - **`;` ends a statement**, newlines are whitespace, and `-- ` (two dashes
   and a space, or at the end of a line, as in MySQL) starts a comment, so a
   word such as `--dry-run` stays a word.
@@ -932,6 +934,110 @@ release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
 
 These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
 form in the first cut (decided 2026-09-26).
+
+## Targets: recipes, USE PLAYBOOK and APPLY … TO (v3.21.0, planned)
+
+Decided with the pilot on 2026-09-26: a playbook file can be a **recipe**,
+written once and applied to any playbook, or to a plain Claude Code config
+directory such as `~/.claude`.
+
+```
+-- kommander.cpb, a recipe: no playbook named in its statements
+INCLUDE 'bare.cpb';
+ALTER PLAYBOOK
+  ADD MARKETPLACE kommander FROM '~/path/to/kommander-playbook'
+  ADD PLUGIN kommander@kommander
+  SET AGENT 'kommander'
+  ALLOW TOOL 'Bash(kommander-helper *)';
+```
+
+```
+cpb APPLY kommander.cpb TO kommander-agent     # a playbook (created bare if missing)
+cpb APPLY kommander.cpb TO '~/.claude'         # a plain config directory
+```
+
+### The name is optional
+
+`ALTER PLAYBOOK [<name>] <clause> ...`: when the word after `PLAYBOOK` is a
+clause keyword, the statement names no playbook and its **target** is decided
+when the file is applied. No new keyword is needed, and nothing is
+ambiguous: a name cannot be an unquoted keyword, and a quoted word is always
+a name. Only `ALTER PLAYBOOK` may leave the name out; `CREATE` and `DROP`
+always name what they create or drop. On the command line a statement always
+names its playbook.
+
+### USE PLAYBOOK
+
+`USE PLAYBOOK <name>;` in a playbook file sets the target of the name-less
+statements after it, as `USE <db>` does in SQL. It is a directive, like
+`INCLUDE`, and appears only in playbook files.
+
+- A later `USE PLAYBOOK` changes the target for the statements after it.
+- An included file starts with the including file's target at the point of
+  the `INCLUDE`, and a `USE PLAYBOOK` inside it applies to that file and the
+  files it includes; the including file's target resumes after the `INCLUDE`.
+- **"A file reached twice runs once" is per target.** A recipe included for
+  two targets runs for each; included twice for the same target, it runs
+  once.
+
+### Which target a name-less statement gets
+
+1. `cpb APPLY <file> TO <playbook|dir>`: every name-less statement in the
+   files goes to that target, and the files' `USE PLAYBOOK` lines are
+   ignored, each named in a warning.
+2. Otherwise the `USE PLAYBOOK` in effect at the statement.
+3. Otherwise the file is refused when it is validated, before anything is
+   written: "this file has name-less statements and no target: add
+   `TO <playbook|dir>` or a `USE PLAYBOOK` line".
+
+There is no implicit target: not the current directory, not a default
+playbook. `TO .` names the current directory, explicitly. A playbook named by
+`TO` or `USE PLAYBOOK` that does not exist is created bare first, as
+`CREATE PLAYBOOK <name>` would (its launcher is its name), and the dry run
+lists that creation.
+
+**Explicit names are literal.** A statement that names its playbook applies
+to that playbook, whatever `TO` says; `TO` only fills the name-less ones. A
+reusable recipe therefore names no playbook; a machine's setup
+(`SHOW CREATE`'s output) names every one. `SHOW CREATE` keeps writing names; a
+recipe form (`SHOW CREATE … --recipe`) may come later.
+
+### TO a plain config directory
+
+`TO '<dir>'` targets a Claude Code config directory that is not a playbook,
+for example `~/.claude`. A target is a directory when it contains `/` or
+starts with `~` or `.`; a playbook name never does. The directory must exist;
+cpb creates nothing but what the clauses write.
+
+Only the clauses that are Claude Code's own configuration apply, because
+nothing of cpb runs at that directory's launches:
+
+| Allowed | How |
+|---|---|
+| `ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | `claude plugin …` with `CLAUDE_CONFIG_DIR=<dir>`, as for a playbook |
+| `SET / UNSET AGENT`, `ALLOW / DENY / UNSET TOOL`, `SET / UNSET STATUSLINE`, `SET / UNSET MODEL` | the directory's `settings.json`, as for a playbook |
+| `ADD / DROP MCP SERVER` without credentials | `claude mcp … --scope user` with `CLAUDE_CONFIG_DIR=<dir>`; a credential needs a reference, which a plain directory cannot resolve, so a server that needs one is refused there |
+| `ADD / DROP SKILL` | `<dir>/skills/<name>`; the record lives in cpb's own state, `<playbooks root>/.state/dirs.toml`, keyed by the directory's absolute path, never inside the directory |
+| `SET VAR K=V ...` / `UNSET VAR K ...` | the `env` map of the directory's `settings.json` (Claude Code's own per-install variables); a credential-looking literal still needs `AS PLAINTEXT` |
+
+Refused, each with its reason:
+
+- `SET VAR K FROM '<ref>'`, and `ENV` / `HEADER … FROM` on an MCP server: a
+  reference is resolved by cpb's launcher, which never runs for that
+  directory.
+- `BLOCK VAR`: removing a variable at launch is the launcher's job.
+- `USE / ADD / DROP ENV`, and `ALTER DEFAULTS`: env sets and `DEFAULTS` are
+  layered by the launcher.
+- `RENAME TO`, `ALIAS`, `NO ALIAS`, `SANDBOX`: the directory is not in the
+  registry and has no launcher.
+
+**Safety.** Before its first write to a directory in a run, cpb copies that
+directory's `settings.json` to `settings.json.cpb-backup-<YYYY-MM-DD-HH_MM_SS>`
+beside it, and `.claude.json` the same way before an MCP change. Applying to a
+directory that is not a playbook asks for confirmation on a terminal, and
+`--yes` gives it (as for `DROP PLAYBOOK`); without a terminal and without
+`--yes` it is refused before anything is written. `--dry-run` works as
+always and names the backups it would make.
 
 ## An agent's configuration (v3.21.0, planned)
 
