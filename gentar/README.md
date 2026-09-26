@@ -241,6 +241,7 @@ only says what each suite is for.
 | `playbook-update` | native `update` onto a newer source; the withdrawn `--all` explains itself |
 | `launcher-run-version` | `run` launches claude with the playbook wired (keyless, via `--version`) |
 | `env-overrides` | manifest `[env]`, env profiles and launch flags reach the child process |
+| `cli-grammar` | the statement grammar on the real launch path: env sets, DEFAULTS, a secret reference resolved by a stub helper, `EXPLAIN --json`, `SHOW CREATE` into `APPLY` with no change, `APPLY` across files, the `DROP PLAYBOOK` guard, source drift, and a credential literal never printed |
 | `config-dir-override` | `CLAUDE_CONFIG_DIR_OVERRIDE` end to end |
 | `auth-status` | `auth status` reports without touching anything |
 | `pilot-interactive-delete` | a simulated pilot answering prompts on a pty |

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// parseText parses one statement from setup-file text without the
+// parseText parses one statement from playbook-file text without the
 // write-only rule, so reads and APPLY round-trip too.
 func parseText(t *testing.T, text string) *Stmt {
 	t.Helper()
@@ -55,8 +55,8 @@ func TestStringQuoting(t *testing.T) {
 			"ALTER ENV e DESCRIBE 'plain'"},
 		{Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: SetHelper, Arg: "/opt/bin/helper"}}},
 			"ALTER DEFAULTS SET SECRET HELPER '/opt/bin/helper'"},
-		{Stmt{Verb: Apply, File: "my setup.cpb", DryRun: true},
-			"APPLY 'my setup.cpb' --dry-run"},
+		{Stmt{Verb: Apply, Files: []string{"my playbook.cpb"}, DryRun: true},
+			"APPLY 'my playbook.cpb' --dry-run"},
 		{Stmt{Verb: Create, Object: Playbook, Name: "x", Clauses: []Clause{{Kind: Link, Arg: "--odd"}}},
 			"CREATE PLAYBOOK x LINK '--odd'"},
 	}
@@ -67,6 +67,20 @@ func TestStringQuoting(t *testing.T) {
 		back := parseText(t, tc.want)
 		if !reflect.DeepEqual(strip(back), strip(&tc.stmt)) {
 			t.Errorf("%q did not round-trip\n got %+v\nwant %+v", tc.want, *strip(back), tc.stmt)
+		}
+	}
+}
+
+// Pretty, the playbook-file layout, parses back to the same statement too.
+func TestPrettyRoundTrip(t *testing.T) {
+	for _, tc := range validCases {
+		s, err := ParseArgs(tc.args)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		text := s.Pretty()
+		if back := parseText(t, text); !reflect.DeepEqual(strip(back), strip(s)) {
+			t.Errorf("%s: %q did not round-trip", tc.name, text)
 		}
 	}
 }

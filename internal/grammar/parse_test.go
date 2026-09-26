@@ -158,9 +158,10 @@ var validCases = []struct {
 	{"explain as json", w("explain playbook k --json"), Stmt{Verb: Explain, Object: Playbook, Name: "k", JSON: true}},
 	{"show playbooks as json", w("SHOW PLAYBOOKS --json"), Stmt{Verb: Show, Object: Playbooks, JSON: true}},
 	{"show env as json", w("SHOW ENV e --json"), Stmt{Verb: Show, Object: Env, Name: "e", JSON: true}},
-	{"apply dry run", w("APPLY setup.cpb --dry-run"), Stmt{Verb: Apply, File: "setup.cpb", DryRun: true}},
-	{"apply", w("apply setup.cpb"), Stmt{Verb: Apply, File: "setup.cpb"}},
-	{"apply with drops confirmed", w("APPLY setup.cpb --yes --dry-run"), Stmt{Verb: Apply, File: "setup.cpb", DryRun: true, Yes: true}},
+	{"apply dry run", w("APPLY playbook.cpb --dry-run"), Stmt{Verb: Apply, Files: []string{"playbook.cpb"}, DryRun: true}},
+	{"apply", w("apply playbook.cpb"), Stmt{Verb: Apply, Files: []string{"playbook.cpb"}}},
+	{"apply several files in order", w("APPLY base.cpb --dry-run machine.cpb"), Stmt{Verb: Apply, Files: []string{"base.cpb", "machine.cpb"}, DryRun: true}},
+	{"apply with drops confirmed", w("APPLY playbook.cpb --yes --dry-run"), Stmt{Verb: Apply, Files: []string{"playbook.cpb"}, DryRun: true, Yes: true}},
 	{"trailing commas separate K=V",
 		w("ALTER ENV e SET A=1, B=2"),
 		Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{{Kind: SetVar, Vars: []Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}}}}},
@@ -351,7 +352,7 @@ func TestErrorPosition(t *testing.T) {
 }
 
 func TestParseFile(t *testing.T) {
-	src := `-- setup.cpb (macminim), from: cpb SHOW CREATE ALL > setup.cpb
+	src := `-- playbook.cpb (macminim), from: cpb SHOW CREATE ALL > playbook.cpb
 
 CREATE OR REPLACE ENV evren-router
   DESCRIBE 'GLM via 9router on tr0'
@@ -412,7 +413,7 @@ func TestParseFileRefusesReadsAndApply(t *testing.T) {
 	for src, want := range map[string]string{
 		"SHOW ENVS;":            "SHOW only reads",
 		"EXPLAIN PLAYBOOK k;":   "EXPLAIN only reads",
-		"APPLY other.cpb;":      "APPLY cannot appear inside a setup file",
+		"APPLY other.cpb;":      "APPLY cannot appear inside a playbook file",
 		"ALTER PLAYBOOK k FOO;": `unexpected "FOO"`,
 	} {
 		_, err := ParseFile(src)
@@ -455,7 +456,7 @@ func TestExpect(t *testing.T) {
 		{w("ALTER DEFAULTS SET"), []string{"SECRET"}},
 		{w("ALTER DEFAULTS SET SECRET HELPER"), []string{"'<command>'"}},
 		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "--json"}},
-		{w("APPLY f"), []string{"--dry-run", "--yes"}},
+		{w("APPLY f"), []string{"<file>", "--dry-run", "--yes"}},
 		{w("CREATE PLAYBOOK x BRANCH main"), createPlaybookStarters}, // FROM may still follow
 		{w("DROP PLAYBOOK k"), []string{"--yes"}},
 		{w("SHOW CREATE ALL"), []string{"--skip-secrets"}},
@@ -484,7 +485,7 @@ func TestIsStatement(t *testing.T) {
 		"drop playbook k":           true,
 		"show envs":                 true,
 		"explain playbook k":        true,
-		"apply setup.cpb":           true,
+		"apply playbook.cpb":        true,
 		"env k set A=1":             false,
 		"install https://x":         false,
 		"list":                      false,

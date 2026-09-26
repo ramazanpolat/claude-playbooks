@@ -54,6 +54,52 @@ func resolveHelper() (*envprofile.Helper, string, error) {
 // resolves, before anything is written. The helper reports presence only;
 // its own words go to stderr.
 func checkRefs(clauses []grammar.Clause) error {
+	return checkRefsWith(helperState{}, clauses)
+}
+
+// helperState is the secret helper a run will have configured by a given
+// point: a playbook file may set the helper and use it in the same run, so
+// its references are checked against that helper, not the one configured
+// before the file ran. Unset means "whatever is configured now".
+type helperState struct {
+	set bool
+	h   *envprofile.Helper // nil after UNSET SECRET HELPER
+}
+
+// after returns the state once c has run. CPB_SECRET_HELPER still wins over
+// any setting, as it does at launch.
+func (s helperState) after(c grammar.Clause) helperState {
+	if v, ok := os.LookupEnv(envprofile.SecretHelperEnv); ok && v != "" {
+		return s
+	}
+	switch c.Kind {
+	case grammar.SetHelper:
+		return helperState{set: true, h: &envprofile.Helper{Command: c.Arg, From: "setting"}}
+	case grammar.UnsetHelper:
+		return helperState{set: true}
+	}
+	return s
+}
+
+func (s helperState) resolve() (*envprofile.Helper, string, error) {
+	if !s.set {
+		return resolveHelper()
+	}
+	if s.h == nil {
+		return nil, "", errNoHelper
+	}
+	if filepath.IsAbs(s.h.Command) {
+		return s.h, s.h.Command, nil
+	}
+	path, err := lookHelper(s.h.Command)
+	if err != nil {
+		return nil, "", fmt.Errorf("secret helper %q (set earlier in this run) is not on PATH", s.h.Command)
+	}
+	return s.h, path, nil
+}
+
+// checkRefsWith is checkRefs against the helper state s.
+func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 	var refs []grammar.Var
 	for _, c := range clauses {
 		if c.Kind == grammar.SetRef {
@@ -63,7 +109,7 @@ func checkRefs(clauses []grammar.Clause) error {
 	if len(refs) == 0 {
 		return nil
 	}
-	h, path, err := resolveHelper()
+	h, path, err := s.resolve()
 	if err != nil {
 		return err
 	}

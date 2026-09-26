@@ -3,10 +3,34 @@ package grammar
 import "strings"
 
 // String renders the statement in canonical form: keywords in capitals, one
-// line, words quoted setup-file style where they need it. Parsing the result
+// line, words quoted playbook-file style where they need it. Parsing the result
 // yields the same statement, which is what lets SHOW CREATE emit statements
 // and hints print the grammar form of a short-form command.
 func (s *Stmt) String() string {
+	w := s.headWords()
+	// VAR is required inside ALTER PLAYBOOK and optional in an env set,
+	// where the canonical form leaves it out.
+	varWord := s.Object == Playbook
+	for _, c := range s.Clauses {
+		w = append(w, c.words(varWord)...)
+	}
+	return strings.Join(w, " ")
+}
+
+// Pretty renders the statement for a playbook file: the head on one line and
+// each clause on its own, indented. It parses back to the same statement.
+func (s *Stmt) Pretty() string {
+	var b strings.Builder
+	b.WriteString(strings.Join(s.headWords(), " "))
+	varWord := s.Object == Playbook
+	for _, c := range s.Clauses {
+		b.WriteString("\n  ")
+		b.WriteString(strings.Join(c.words(varWord), " "))
+	}
+	return b.String()
+}
+
+func (s *Stmt) headWords() []string {
 	w := []string{string(s.Verb)}
 	switch s.Verb {
 	case Create:
@@ -52,7 +76,9 @@ func (s *Stmt) String() string {
 			w = append(w, "--json")
 		}
 	case Apply:
-		w = append(w, quoteWord(s.File))
+		for _, f := range s.Files {
+			w = append(w, quoteWord(f))
+		}
 		if s.DryRun {
 			w = append(w, "--dry-run")
 		}
@@ -60,13 +86,7 @@ func (s *Stmt) String() string {
 			w = append(w, "--yes")
 		}
 	}
-	// VAR is required inside ALTER PLAYBOOK and optional in an env set,
-	// where the canonical form leaves it out.
-	varWord := s.Object == Playbook
-	for _, c := range s.Clauses {
-		w = append(w, c.words(varWord)...)
-	}
-	return strings.Join(w, " ")
+	return w
 }
 
 func (c *Clause) words(varWord bool) []string {

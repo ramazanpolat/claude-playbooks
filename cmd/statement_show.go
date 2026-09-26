@@ -80,7 +80,7 @@ type explainJSON struct {
 
 func readStatement(st *grammar.Stmt) error {
 	if st.Verb == grammar.Show && st.ShowCreate {
-		return notYet(st.String())
+		return showCreate(st)
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
@@ -134,7 +134,7 @@ func readStatement(st *grammar.Stmt) error {
 		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Secret helper", humanHelper(helper)}})
 		return nil
 	}
-	return notYet(st.String())
+	return fmt.Errorf("cannot run %s", st.String())
 }
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
