@@ -1,0 +1,7 @@
+test -L "$HOME/.claude-playbooks/writer/skills/release-notes"
+test -f "$HOME/.claude-playbooks/writer/skills/release-notes/SKILL.md"
+cpb SHOW CREATE PLAYBOOK writer | grep -q 'ADD SKILL release-notes FROM'
+# DROP SKILL removes the link, never the linked directory.
+cpb ALTER PLAYBOOK writer DROP SKILL release-notes
+test ! -e "$HOME/.claude-playbooks/writer/skills/release-notes"
+test -f release-notes/SKILL.md

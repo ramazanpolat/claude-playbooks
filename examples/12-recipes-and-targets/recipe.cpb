@@ -1,0 +1,5 @@
+-- recipe.cpb: a recipe. Its ALTER PLAYBOOK names no playbook; the target is
+-- decided when the file is applied (TO, or a USE PLAYBOOK line).
+ALTER PLAYBOOK
+  ALLOW TOOL 'Bash(make *)'
+  SET MODEL 'claude-sonnet-5';

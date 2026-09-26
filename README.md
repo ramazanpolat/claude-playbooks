@@ -7,35 +7,28 @@ file.** Separate settings, hooks, memory, environment, plugins and logins,
 each behind its own command.
 
 ```
--- bare.cpb
-CREATE PLAYBOOK IF NOT EXISTS kommander-agent;
-ALTER PLAYBOOK kommander-agent USE ENV glm-5.3-flash;
-
--- kommander.cpb
-INCLUDE 'bare.cpb';
-ALTER PLAYBOOK kommander-agent
+-- kommander.cpb: a recipe (it names no playbook)
+INCLUDE 'bare.cpb';                           -- the model route
+ALTER PLAYBOOK
   ADD MARKETPLACE kommander FROM '~/path/to/kommander-playbook'
   ADD PLUGIN kommander@kommander
-  SET AGENT 'kommander';
-
--- chaos.cpb
-INCLUDE 'kommander.cpb';
-ALTER PLAYBOOK kommander-agent
-  ADD MARKETPLACE chaos-stub FROM './chaos-stub'
-  ADD PLUGIN chaos@chaos-stub;
+  SET AGENT 'kommander'
+  ALLOW TOOL 'Bash(kommander-helper *)'
+  SET STATUSLINE 'bash ~/path/to/kommander-playbook/hooks/statusline.sh';
 ```
 
 ```bash
-cpb APPLY chaos.cpb --dry-run   # what would change, and every command it would run
-cpb APPLY chaos.cpb             # build it, layer by layer
-kommander-agent                 # run it
+cpb APPLY kommander.cpb TO kommander-agent --dry-run   # what would change, and every command it would run
+cpb APPLY kommander.cpb TO kommander-agent             # build it (the playbook is created if missing)
+kommander-agent                                        # run it
 ```
 
-That is an agent built from three stacked layers: a bare playbook, Kommander as
-a plugin and the main-thread agent, and a layer on top. The kommander
+That is an agent in one file: a route, Kommander as a plugin and the
+main-thread agent, its tool permission and its status line. The same recipe
+builds it under any name, and a layer on top `INCLUDE`s it. The kommander
 repository is private: point the path at your checkout, or, with access, use
 `FROM 'github:ramazanpolat/kommander-playbook'`.
-[The full example →](examples/08-kommander-agent/)
+[The full example, three stacked layers →](examples/08-kommander-agent/)
 
 ![claude-playbook demo](docs/demo.gif)
 
@@ -85,6 +78,14 @@ cpb DROP PLAYBOOK scratch --yes
 - **Plugins and the agent:** `ADD MARKETPLACE` and `ADD PLUGIN` run Claude
   Code's own `claude plugin` commands for that playbook only; `SET AGENT` pins
   the main-thread agent in the playbook's `settings.json`.
+- **The rest of the agent:** `ADD MCP SERVER` (a credential only by
+  reference), `ALLOW` / `DENY TOOL`, `SET STATUSLINE`, `SET MODEL`, and
+  `ADD SKILL` from a directory or a git repository.
+- **Recipes:** an `ALTER PLAYBOOK` with no name applies to whatever
+  `APPLY … TO <playbook>`, `TO '~/.claude'` or a `USE PLAYBOOK` line names.
+- **Queries:** `cpb "SELECT name, envs FROM PLAYBOOKS"`; anything beyond
+  columns runs in ClickHouse's `clickhouse local`, over the same redacted
+  `--json` rows.
 
 Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
 `cpb run <name>`, `cpb start <dir>`, `cpb update`, `cpb auth status`, and
@@ -96,10 +97,10 @@ Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
 | | |
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
-| [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top |
-| [Examples 01-08](examples/) | one small `playbook.cpb` per idea, all applied in CI |
+| [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top, as recipes |
+| [Examples 01-13](examples/) | one small `playbook.cpb` per idea, from a first playbook to a stacked agent, all applied in CI |
 | [CLI grammar](docs/reference/cli-grammar.md) | every statement, clause, file rule and output format |
-| [Guides](docs/README.md) | installation, playbooks, environment, authentication, sandbox, agents, SQL over `--json` |
+| [Guides](docs/README.md) | installation, playbooks, configuring an agent, environment, authentication, sandbox, agents, SQL |
 | [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |
 
 ## License

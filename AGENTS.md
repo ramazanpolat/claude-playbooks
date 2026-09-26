@@ -6,7 +6,8 @@ verify, update, deploy or uninstall **claude-playbooks** (`cpb`,
 worked. The human docs are linked, not repeated.
 
 If you are writing or driving playbooks rather than installing the tool,
-read [docs/guides/agent-guide.md](docs/guides/agent-guide.md).
+read [docs/guides/agent-guide.md](docs/guides/agent-guide.md). If you are
+preparing a release, read [Before any release](#before-any-release) first.
 
 ## Safety rules
 
@@ -15,11 +16,13 @@ read [docs/guides/agent-guide.md](docs/guides/agent-guide.md).
   reference (`SET … FROM '<ref>'`, see
   [docs/reference/cli-grammar.md](docs/reference/cli-grammar.md), "Secrets").
 - **Ask the human first** before: `cpb self-uninstall`, `DROP PLAYBOOK`,
-  `APPLY … --yes`, deleting anything under `~/.claude-playbooks/`, and any
-  login (`/login`, `claude setup-token`): those need a person.
+  `APPLY … --yes`, `APPLY … TO '<dir>'`, deleting anything under
+  `~/.claude-playbooks/`, and any login (`/login`, `claude setup-token`):
+  those need a person.
 - **Do not edit** an installed playbook's files by hand; change state
   through `cpb` statements. Do not touch `~/.claude` (the machine's own
-  Claude Code config).
+  Claude Code config) unless the human asks; then use
+  `APPLY … TO '~/.claude' --dry-run` first, and apply only on their yes.
 
 ## Prerequisites
 
@@ -65,8 +68,12 @@ When the human hands you a `playbook.cpb` (or a stack of them joined by
 cpb APPLY playbook.cpb --dry-run   # exit 0; one line per statement, nothing written
 cpb APPLY playbook.cpb             # exit 0; ends "Applied …: N created, N changed, …"
 cpb APPLY playbook.cpb             # verify: "0 created, 0 changed" (the file holds)
-cpb EXPLAIN PLAYBOOK <name> --json # verify: the variables, plugins and agent a launch gets
+cpb EXPLAIN PLAYBOOK <name> --json # verify: the variables, plugins, agent, MCP servers, tools and model a launch gets
 ```
+
+A **recipe** (an `ALTER PLAYBOOK` that names no playbook) needs a target:
+`cpb APPLY recipe.cpb TO <playbook>`, or a `USE PLAYBOOK <name>;` line in the
+file. Without one it is refused before anything is written.
 
 - A file with `DROP PLAYBOOK` refuses without `--yes`: show the human the
   dry run's list and ask before adding it.
@@ -76,6 +83,9 @@ cpb EXPLAIN PLAYBOOK <name> --json # verify: the variables, plugins and agent a 
   printed; confirming it is theirs to do.
 - A failure stops the run and says what already ran. Fix the file and apply
   it again; every statement is safe to repeat.
+- `ADD MCP SERVER` runs `claude mcp add-json`; `ADD SKILL` from a git
+  source clones it. Both need `claude` or `git` on `PATH` and, for a remote
+  source, the network.
 - A `SET … FROM '<ref>'` that fails its check means the secret is not stored:
   ask the human to store it (`with-secret --store <name>` or their helper's
   equivalent). Never ask for the value.
@@ -127,3 +137,28 @@ fallback: [docs/guides/installation.md](docs/guides/installation.md), "Uninstall
 - Report it at https://github.com/ramazanpolat/claude-playbooks/issues with
   the command, the output, `cpb --version` and `uname -a`. Never include a
   secret value; redact tokens before posting.
+
+## Before any release
+
+No release without its docs. The pilot's rule (2026-09-26), verbatim:
+
+```
+"1) a good readme, short, precise, represents a) what is it b) why it exists c) how it is used 2) a docs with full tutorials and some guides for some common operations 3) examples with smallest features/usages/utilities to full blown ones, each has their own readme.md files 4) an agent entry for installation and deployment, etc."
+```
+
+Before a version is tagged, check each item, for every feature in that
+release:
+
+- [ ] **README.md** says what cpb is, why it exists and how it is used:
+      short and precise, with the current grammar in its first example.
+- [ ] **docs/**: the tutorials, the guides for common operations, and the
+      reference ([docs/reference/cli-grammar.md](docs/reference/cli-grammar.md))
+      are current. Nothing built is still marked **planned**.
+- [ ] **examples/** covers every new clause, from the smallest use to the
+      full-blown one, each directory with its own README.md, and all of them
+      pass in CI (`examples/check.sh`; `examples/coverage.sh` fails when a
+      grammar clause has no reference entry, or appears in no `.cpb` file
+      or `.check` command that CI runs: README prose does not count).
+- [ ] **AGENTS.md** (this file) is current: install, verify, update, deploy.
+
+If any is missing, build it first; never tag without it.

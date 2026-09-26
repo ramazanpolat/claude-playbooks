@@ -6,6 +6,6 @@
 --   ADD PLUGIN chaos@chaos;
 INCLUDE 'kommander.cpb';
 
-ALTER PLAYBOOK kommander-agent
+ALTER PLAYBOOK
   ADD MARKETPLACE chaos-stub FROM './chaos-stub'
   ADD PLUGIN chaos@chaos-stub;

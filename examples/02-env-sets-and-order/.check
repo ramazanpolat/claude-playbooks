@@ -1,0 +1,8 @@
+# Place a set without restating the list: take thinking out, put it first.
+cpb ALTER PLAYBOOK work DROP ENV thinking
+cpb SHOW PLAYBOOK work --json | python3 -c 'import json,sys; e=json.load(sys.stdin)["envs"]; assert e==["router"], e'
+cpb ALTER PLAYBOOK work ADD ENV thinking FIRST
+cpb SHOW PLAYBOOK work --json | python3 -c 'import json,sys; e=json.load(sys.stdin)["envs"]; assert e==["thinking","router"], e'
+# Unset the playbook's own model: router's value decides again.
+cpb ALTER PLAYBOOK work UNSET VAR ANTHROPIC_MODEL
+cpb SHOW PLAYBOOK work --json | python3 -c 'import json,sys; v=json.load(sys.stdin)["vars"]; assert all(x["key"]!="ANTHROPIC_MODEL" for x in v), v'

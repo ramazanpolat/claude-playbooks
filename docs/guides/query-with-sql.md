@@ -1,8 +1,18 @@
 # Query your setup with SQL
 
-cpb has no query language of its own. Every read has a stable `--json` form,
-and ClickHouse's `clickhouse local` (`ch local`) runs full SQL over it
-without a server: pipe one into the other.
+Since v3.21.0, `cpb SELECT` does this for one table at a time (see
+[example 13](../../examples/13-select/) and the reference's
+[SELECT](../reference/cli-grammar.md#select-v3210)):
+
+```bash
+cpb "SELECT name, envs FROM PLAYBOOKS"                                  # built in
+cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook"  # through clickhouse-local
+```
+
+This guide is the manual form underneath it, for what `SELECT` does not do:
+joining two reads, or feeding ClickHouse settings of your own. Every read has
+a stable `--json` form, and ClickHouse's `clickhouse local` (`ch local`) runs
+full SQL over it without a server: pipe one into the other.
 
 ```bash
 cpb SHOW PLAYBOOKS --json | ch local --input-format JSONEachRow -q "SELECT … FROM table"

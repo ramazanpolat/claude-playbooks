@@ -1,6 +1,7 @@
 #!/bin/sh
 # Applies every example the way its README does, in a throwaway HOME:
-# dry run, apply, apply again (which must change nothing).
+# dry run, apply, apply again (which must change nothing), then the
+# example's own .check, if it has one.
 # Usage: examples/check.sh <path to the cpb binary>   (CI builds it first)
 set -eu
 cpb=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -23,6 +24,8 @@ for dir in "$here"/[0-9][0-9]-*/; do
     cpb APPLY "$entry" --yes > "$home/apply.out"
     cpb APPLY "$entry" --yes > "$home/again.out"
     grep -q " 0 created, 0 changed, " "$home/again.out"
+    # .check: what the README shows beyond APPLY (a query, a second target).
+    if [ -f .check ]; then sh -e .check; fi
   ) > "$home/log" 2>&1 && echo "ok    $name" || { echo "FAIL  $name"; sed 's/^/      /' "$home/log" "$home"/*.out 2>/dev/null | tail -30; fail=1; }
   rm -rf "$home"
 done

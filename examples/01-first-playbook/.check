@@ -1,0 +1,9 @@
+# The lifecycle clauses the README names, on the command line.
+cpb CREATE PLAYBOOK boxed NO ALIAS SANDBOX
+cpb SHOW PLAYBOOK boxed --json | grep -q '"sandbox": true'
+cpb ALTER PLAYBOOK boxed RENAME TO boxed-lab
+cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"name": "boxed-lab"'
+dev=$(mktemp -d)
+printf 'name = "dev"\nversion = "0.1.0"\n' > "$dev/.playbook"
+cpb CREATE PLAYBOOK dev LINK "$dev" NO ALIAS
+cpb SHOW PLAYBOOK dev --json | grep -q "\"linked\": \"$dev\""
