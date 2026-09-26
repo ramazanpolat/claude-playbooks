@@ -22,6 +22,7 @@ const (
 	Explain Verb = "EXPLAIN"
 	Apply   Verb = "APPLY"
 	Include Verb = "INCLUDE" // playbook files only: INCLUDE '<path>'
+	Use     Verb = "USE"     // playbook files only: USE PLAYBOOK <name>
 )
 
 // Object is what a statement acts on or reads.
@@ -133,7 +134,13 @@ type Stmt struct {
 	Clauses []Clause
 
 	Files  []string // APPLY <file> [<file> ...]; INCLUDE: exactly one
-	DryRun bool     // APPLY <file> --dry-run
+	Target string   // APPLY … TO <playbook|dir>
+
+	// Recipe: ALTER PLAYBOOK with no name (playbook files only); the
+	// playbook is decided when the file is applied (APPLY … TO, USE
+	// PLAYBOOK).
+	Recipe bool
+	DryRun bool // APPLY <file> --dry-run
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
 	Yes         bool // DROP PLAYBOOK ... --yes, APPLY ... --yes

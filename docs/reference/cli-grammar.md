@@ -66,7 +66,7 @@ here reads, writes or calls anything of pilot-profile's.
 
 ```
 command    := write | read | APPLY <file> [<file> ...] [TO <playbook|dir>] [--dry-run] [--yes]
-                                           TO: planned (v3.21.0), see "Targets"
+                                           TO: see "Targets" (a plain directory: planned)
                                            (select: not planned, see SELECT)
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
@@ -74,7 +74,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
             | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX]
-            | ALTER  PLAYBOOK [<name>] pb-clause ...   no name (planned): a recipe, see "Targets"
+            | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
 
@@ -356,7 +356,7 @@ ALTER PLAYBOOK kommander-idea
 File rules:
 
 - **Only write statements** (`CREATE`, `ALTER`, `DROP`), and the directives
-  `INCLUDE` and `USE PLAYBOOK` (planned, see "Targets"). A read is refused.
+  `INCLUDE` and `USE PLAYBOOK` (see "Targets"). A read is refused.
 - **`;` ends a statement**, newlines are whitespace, and `-- ` (two dashes
   and a space, or at the end of a line, as in MySQL) starts a comment, so a
   word such as `--dry-run` stays a word.
@@ -935,7 +935,11 @@ release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
 These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
 form in the first cut (decided 2026-09-26).
 
-## Targets: recipes, USE PLAYBOOK and APPLY … TO (v3.21.0, planned)
+## Targets: recipes, USE PLAYBOOK and APPLY … TO (v3.21.0)
+
+Built: name-less statements, `USE PLAYBOOK`, and `APPLY … TO <playbook>` (a
+path that is a registered playbook included). Still planned: `TO '<dir>'`
+for a plain config directory.
 
 Decided with the pilot on 2026-09-26: a playbook file can be a **recipe**,
 written once and applied to any playbook, or to a plain Claude Code config

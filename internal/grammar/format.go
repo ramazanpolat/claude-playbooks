@@ -44,9 +44,11 @@ func (s *Stmt) headWords() []string {
 		w = append(w, quoteWord(s.Name))
 	case Alter:
 		w = append(w, string(s.Object))
-		if s.Object != Defaults {
+		if s.Object != Defaults && !s.Recipe {
 			w = append(w, quoteWord(s.Name))
 		}
+	case Use:
+		w = append(w, string(s.Object), quoteWord(s.Name))
 	case Drop:
 		w = append(w, string(s.Object))
 		if s.IfExists {
@@ -80,6 +82,9 @@ func (s *Stmt) headWords() []string {
 	case Apply:
 		for _, f := range s.Files {
 			w = append(w, quoteWord(f))
+		}
+		if s.Target != "" {
+			w = append(w, "TO", quoteWord(s.Target))
 		}
 		if s.DryRun {
 			w = append(w, "--dry-run")

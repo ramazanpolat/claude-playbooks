@@ -50,7 +50,7 @@ func IsStatement(args []string) bool {
 		return false
 	}
 	switch strings.ToUpper(args[0]) {
-	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE": // INCLUDE, to be refused with its reason
+	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE": // INCLUDE and USE, to be refused with their reason
 		return true
 	case "CREATE":
 		if len(args) < 2 {
@@ -118,7 +118,7 @@ func ParseFile(src string) ([]*Stmt, error) {
 			errs = append(errs, err)
 			continue
 		}
-		if !s.Write() && s.Verb != Include {
+		if !s.Write() && s.Verb != Include && s.Verb != Use {
 			errs = append(errs, &Error{Pos: s.Pos,
 				Msg: string(s.Verb) + " only reads; a playbook file holds CREATE, ALTER and DROP statements, and INCLUDE"})
 			continue
@@ -390,9 +390,11 @@ func (p *parser) statement() (*Stmt, *Error) {
 	var err *Error
 	verbs := []string{"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY"}
 	if p.file {
-		verbs = append(verbs, "INCLUDE")
+		verbs = append(verbs, "INCLUDE", "USE")
 	} else if p.at("INCLUDE") {
 		return nil, errAt(s.Pos, "INCLUDE appears only in a playbook file; on the command line, APPLY <file> [<file> ...] runs several")
+	} else if p.at("USE") {
+		return nil, errAt(s.Pos, "USE PLAYBOOK appears only in a playbook file; on the command line, APPLY <file> TO <playbook> picks the target")
 	}
 	switch p.kw(verbs...) {
 	case "":
@@ -418,6 +420,14 @@ func (p *parser) statement() (*Stmt, *Error) {
 	case "INCLUDE":
 		s.Verb = Include
 		err = p.include(s)
+	case "USE":
+		s.Verb = Use
+		if p.kw("PLAYBOOK") == "" {
+			err = p.fail("USE takes PLAYBOOK: USE PLAYBOOK <name>")
+			break
+		}
+		s.Object = Playbook
+		s.Name, err = p.name(Playbook, false)
 	}
 	if err == nil && !p.atEnd() {
 		err = p.unexpected()
@@ -496,6 +506,15 @@ func (p *parser) alter(s *Stmt) *Error {
 		s.Object = Defaults
 		p.starters = defaultsStarters
 		return p.clauses(s, p.defaultsClause, 1)
+	}
+	// ALTER PLAYBOOK <clause> …: no name, a recipe. A name is never an
+	// unquoted keyword, so a clause word here is unambiguous.
+	if s.Object == Playbook && !p.atEnd() && p.isStarter() {
+		if !p.file {
+			return errAt(p.pos(), "on the command line a statement names its playbook: ALTER PLAYBOOK <name> …")
+		}
+		s.Recipe = true
+		return p.clauses(s, p.playbookClause, 1)
 	}
 	name, err := p.name(s.Object, false)
 	if err != nil {
@@ -617,11 +636,23 @@ func (p *parser) apply(s *Stmt) *Error {
 	// One or more files, run in the order given; --yes is the second
 	// confirmation a file with DROP PLAYBOOK needs.
 	for !p.atEnd() {
-		switch p.kw("--dry-run", "--yes") {
+		switch p.kw("--dry-run", "--yes", "TO") {
 		case "--dry-run":
 			s.DryRun = true
 		case "--yes":
 			s.Yes = true
+		case "TO":
+			if s.Target != "" {
+				return errAt(p.toks[p.i-1].Pos, "TO appears twice")
+			}
+			t, err := p.take("TO", "<playbook|dir>")
+			if err != nil {
+				return err
+			}
+			if t.Text == "" {
+				return errAt(t.Pos, "TO needs <playbook|dir>")
+			}
+			s.Target = t.Text
 		default:
 			t := p.toks[p.i]
 			if !t.Quoted && strings.HasPrefix(t.Text, "--") {
