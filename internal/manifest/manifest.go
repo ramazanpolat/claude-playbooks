@@ -262,6 +262,16 @@ type Manifest struct {
 	Update      *Update  `toml:"update,omitempty"`
 	Env         *Env     `toml:"env,omitempty"`
 	Sandbox     *Sandbox `toml:"sandbox,omitempty"`
+
+	// MCP records, per MCP server a statement declared, the variables cpb
+	// derived for its secret references, so dropping the server forgets
+	// exactly those (docs/reference/cli-grammar.md, "MCP servers").
+	MCP map[string]*MCPRecord `toml:"mcp,omitempty"`
+}
+
+// MCPRecord is what cpb derived for one MCP server.
+type MCPRecord struct {
+	Vars []string `toml:"vars"`
 }
 
 // Sandbox describes how `run --sandbox` boxes this playbook: what of the
@@ -592,6 +602,20 @@ func Write(dir string, m *Manifest) error {
 		writeTOMLList(&b, "allow_net", m.Sandbox.AllowNet)
 		if m.Sandbox.ClaudeVersion != "" {
 			fmt.Fprintf(&b, "claude_version = %s\n", QuoteTOML(m.Sandbox.ClaudeVersion))
+		}
+	}
+	// [mcp.<server>]: the variables cpb derived for each MCP server.
+	if len(m.MCP) > 0 {
+		names := make([]string, 0, len(m.MCP))
+		for n, r := range m.MCP {
+			if r != nil && len(r.Vars) > 0 {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Fprintf(&b, "\n[mcp.%s]\n", QuoteTOML(n))
+			writeTOMLList(&b, "vars", m.MCP[n].Vars)
 		}
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest

@@ -5,7 +5,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
@@ -390,8 +392,8 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		// A linked playbook's manifest is shared with every registration of
 		// the target directory: same refusal as the pre-grammar env command.
 		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
-			if pluginClauses(st.Clauses) {
-				return fmt.Errorf("cannot change the plugins of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
+			if pluginClauses(st.Clauses) || mcpClauses(st.Clauses) {
+				return fmt.Errorf("cannot change the plugins or MCP servers of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
 			}
 			return fmt.Errorf("cannot change the environment of %q: it is linked, and its %s is shared with the target. Edit the target's manifest directly if you really mean it", st.Name, manifest.FileName)
 		}
@@ -467,11 +469,45 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	m.Env.Profiles = profiles
 	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Refs, &m.Env.Unset, nil, st.Clauses)...)
+	// MCP servers: planned against the playbook's .claude.json; their
+	// secret references land in this same layer, under derived variables.
+	var mcp *mcpPlan
+	beforeMCP := cloneMCP(r.mcpRecords(st.Name, m))
+	if mcpClauses(st.Clauses) {
+		state, err := r.mcpState(st.Name, r.configDir(st.Name, pb))
+		if err != nil {
+			return err
+		}
+		if mcp, err = planMCP(state, beforeMCP, st.Clauses); err != nil {
+			return err
+		}
+		if err := r.checkRefs(mcp.checkRefs); err != nil {
+			return err
+		}
+		m.MCP = cloneMCP(beforeMCP)
+		mcp.applyToManifest(m, false)
+		lines = append(lines, mcp.lines...)
+	}
 	if m.Env.Empty() {
 		m.Env = nil
 	}
 	envChange := !envEqual(before, m.Env)
-	if !envChange && !agentChange && len(steps) == 0 {
+	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
+	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
+	// Plugin and MCP commands run as one list, in the order their clauses
+	// are written.
+	steps = append([]pluginStep(nil), steps...)
+	if mcp != nil {
+		steps = append(steps, mcp.steps...)
+	}
+	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
+	finishMCP := func() {
+		mcp.applyToManifest(m, true)
+		if m.Env.Empty() {
+			m.Env = nil
+		}
+	}
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
@@ -479,6 +515,13 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	r.outcome = outChanged
 	if r.dryRun {
 		r.recordPlaybookEnv(st.Name, m.Env)
+		if mcp != nil {
+			finishMCP()
+			r.recordPlaybookEnv(st.Name, m.Env)
+			if r.dry != nil {
+				r.dry.mcpRecords[st.Name] = cloneMCP(m.MCP)
+			}
+		}
 		if agentChange && r.dry != nil {
 			var a string
 			if ok, _ := sf.Root.Get(keyAgent, &a); ok {
@@ -488,21 +531,28 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 		if len(steps) > 0 {
-			cmds := make([]string, len(steps))
-			for i, s := range steps {
-				cmds[i] = s.command()
+			var cmds []string
+			for _, s := range steps {
+				cmds = append(cmds, s.command())
 			}
 			r.note = "would run: " + strings.Join(cmds, "; ")
 		}
 		return nil
 	}
-	if envChange {
+	if envChange || mcpRecordChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}
 	}
 	ran, err := runPluginSteps(pb.Path, steps)
 	lines = append(append(lines, pluginLines...), ran...)
+	if err == nil && mcpRemovals {
+		// Only now that the commands succeeded: forget what is no longer used.
+		finishMCP()
+		if werr := manifest.Write(pb.RootPath, m); werr != nil {
+			err = fmt.Errorf("cannot record the environment: %w", werr)
+		}
+	}
 	if err != nil {
 		if len(lines) > 0 {
 			r.say("Partly altered PLAYBOOK "+st.Name, lines)

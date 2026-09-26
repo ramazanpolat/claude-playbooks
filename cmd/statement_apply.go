@@ -72,6 +72,24 @@ func runApply(st *grammar.Stmt) error {
 		}
 		for _, c := range s.Clauses {
 			helper = helper.after(c)
+			// An MCP server's references are checked here too, under the
+			// variables they will be stored as.
+			if c.Kind == grammar.AddMCP {
+				var refs []grammar.Clause
+				for _, v := range c.MCP.Env {
+					if v.Ref != "" {
+						refs = append(refs, grammar.Clause{Kind: grammar.SetRef, Vars: []grammar.Var{{Key: mcpVar(c.Names[0], "E", v.Key), Ref: v.Ref}}})
+					}
+				}
+				for _, h := range c.MCP.Headers {
+					if h.Ref != "" {
+						refs = append(refs, grammar.Clause{Kind: grammar.SetRef, Vars: []grammar.Var{{Key: mcpVar(c.Names[0], "H", h.Key), Ref: h.Ref}}})
+					}
+				}
+				if err := checkRefsWith(helper, refs); err != nil {
+					return fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err)
+				}
+			}
 			if c.Kind == grammar.SetRef {
 				if err := checkRefsWith(helper, []grammar.Clause{c}); err != nil {
 					return fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err)

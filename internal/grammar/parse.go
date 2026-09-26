@@ -30,6 +30,7 @@ func init() {
 		"BRANCH", "SUBDIR", "LINK", "SANDBOX",
 		"SECRET", "HELPER", "AS", "PLAINTEXT",
 		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
+		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 	} {
 		keywords[w] = true
 	}
@@ -710,7 +711,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	case "USE":
 		return c, p.envList(c, w)
 	case "ADD", "DROP":
-		switch p.kw("ENV", "MARKETPLACE", "PLUGIN") {
+		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP") {
 		case "ENV":
 			if w == "ADD" {
 				return c, p.addEnvRest(c)
@@ -720,8 +721,10 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.marketplace(c, w)
 		case "PLUGIN":
 			return c, p.plugin(c, w)
+		case "MCP":
+			return c, p.mcpServer(c, w)
 		}
-		return nil, p.fail(w + " takes ENV, MARKETPLACE or PLUGIN")
+		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN or MCP SERVER")
 	case "SET":
 		switch p.kw("VAR", "AGENT") {
 		case "AGENT":
@@ -1031,7 +1034,7 @@ func validate(s *Stmt) *Error {
 		}
 		for _, n := range c.Names {
 			what := map[Kind]string{AddMarketplace: "marketplace", DropMarketplace: "marketplace",
-				AddPlugin: "plugin", DropPlugin: "plugin"}[c.Kind]
+				AddPlugin: "plugin", DropPlugin: "plugin", AddMCP: "MCP server", DropMCP: "MCP server"}[c.Kind]
 			if what == "" {
 				what = "env set"
 			}
@@ -1201,4 +1204,184 @@ func MarketplaceSource(src string) (string, error) {
 // directory before the statement runs; the command line refuses it.
 func RelativeSource(src string) bool {
 	return strings.HasPrefix(src, "./") || strings.HasPrefix(src, "../")
+}
+
+// credentialHeaders are header names that always carry a credential.
+var credentialHeaders = map[string]bool{"authorization": true, "proxy-authorization": true, "cookie": true}
+
+// CredentialHeader reports whether an MCP header must take a reference.
+func CredentialHeader(name string) bool {
+	return credentialHeaders[strings.ToLower(name)] || manifest.LooksLikeSecretKey(strings.ReplaceAll(name, "-", "_"))
+}
+
+// mcpServer reads the rest of ADD MCP SERVER n <target> [<part> ...] or
+// DROP MCP SERVER n. A credential in ENV or HEADER takes a reference:
+// AS PLAINTEXT is not accepted here, because the literal would be written
+// into Claude Code's config.
+func (p *parser) mcpServer(c *Clause, verb string) *Error {
+	if p.kw("SERVER") == "" {
+		return p.fail(verb + " MCP takes SERVER: " + verb + " MCP SERVER <name>")
+	}
+	c.Kind = AddMCP
+	if verb == "DROP" {
+		c.Kind = DropMCP
+	}
+	if p.atEnd() {
+		p.note("<server>")
+		return p.fail(verb + " MCP SERVER needs <server>")
+	}
+	t := p.toks[p.i]
+	if manifest.ValidateProfileName(t.Text) != nil {
+		return errAt(t.Pos, "invalid MCP server name: use letters, digits, dots, dashes and underscores")
+	}
+	p.i++
+	c.Names = []string{t.Text}
+	if verb == "DROP" {
+		return nil
+	}
+	m := &MCP{}
+	c.MCP = m
+	switch p.kw("COMMAND", "URL") {
+	case "":
+		return p.fail("ADD MCP SERVER needs COMMAND '<command>' or URL '<url>'")
+	case "COMMAND":
+		cmd, err := p.take("COMMAND", "'<command>'")
+		if err != nil {
+			return err
+		}
+		if cmd.Text == "" {
+			return errAt(cmd.Pos, "COMMAND needs a command")
+		}
+		m.Command = cmd.Text
+		if p.kw("ARGS") != "" {
+			for !p.atEnd() && !p.mcpPartOrStarter() {
+				m.Args = append(m.Args, p.toks[p.i].Text)
+				p.i++
+			}
+			if len(m.Args) == 0 {
+				p.note("'<arg>'")
+				return p.fail("ARGS needs at least one '<arg>'")
+			}
+		}
+	case "URL":
+		u, err := p.take("URL", "'<url>'")
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(u.Text, "https://") && !strings.HasPrefix(u.Text, "http://") {
+			return errAt(u.Pos, "URL needs an http:// or https:// address")
+		}
+		if pu, perr := url.Parse(u.Text); perr != nil || pu.User != nil {
+			return errAt(u.Pos, "a URL carrying credentials is refused: put them in a HEADER … FROM '<ref>'")
+		}
+		m.URL = u.Text
+		if p.kw("TRANSPORT") != "" {
+			if p.kw("SSE") == "" {
+				return p.fail("TRANSPORT takes SSE (a remote server is HTTP otherwise)")
+			}
+			m.SSE = true
+		}
+	}
+	for {
+		switch p.kw("ENV", "HEADER") {
+		case "ENV":
+			if m.URL != "" {
+				return errAt(p.toks[p.i-1].Pos, "ENV applies to a COMMAND server; a remote server (URL) takes HEADER")
+			}
+			if err := p.mcpEnv(m); err != nil {
+				return err
+			}
+		case "HEADER":
+			if m.URL == "" {
+				return errAt(p.toks[p.i-1].Pos, "HEADER applies to a remote server (URL), not a COMMAND")
+			}
+			if err := p.mcpHeader(m); err != nil {
+				return err
+			}
+		default:
+			p.note(p.starters...)
+			return nil
+		}
+	}
+}
+
+// mcpPartOrStarter reports whether the next word ends an ARGS list.
+func (p *parser) mcpPartOrStarter() bool {
+	return p.at("ENV") || p.at("HEADER") || p.isStarter()
+}
+
+func (p *parser) mcpEnv(m *MCP) *Error {
+	if p.atEnd() || p.mcpPartOrStarter() {
+		p.note("<key>=<value>", "<key>")
+		return p.fail("ENV needs <key>=<value> or <key> FROM '<ref>'")
+	}
+	t := p.toks[p.i]
+	k, v, isKV := strings.Cut(t.Text, "=")
+	if !isKV {
+		if !keyPattern.MatchString(t.Text) {
+			return errAt(t.Pos, "ENV needs <key>=<value> or <key> FROM '<ref>'")
+		}
+		p.i++
+		p.quiet = true
+		if p.kw("FROM") == "" {
+			return p.fail("expected FROM after the key: ENV <key>=<value>, or ENV <key> FROM '<ref>'")
+		}
+		r, err := p.take("FROM", "'<ref>'")
+		if err != nil {
+			return err
+		}
+		if !manifest.LooksLikeRef(r.Text) {
+			return errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>'")
+		}
+		m.Env = append(m.Env, Var{Key: t.Text, Ref: r.Text})
+		return nil
+	}
+	for !p.atEnd() && !p.mcpPartOrStarter() {
+		t := p.toks[p.i]
+		k, v, isKV = strings.Cut(t.Text, "=")
+		if !isKV {
+			return errAt(t.Pos, "expected <key>=<value> (a value with spaces must be quoted)")
+		}
+		if !keyPattern.MatchString(k) {
+			return errAt(t.Pos, "invalid variable name before '='")
+		}
+		if manifest.LooksLikeSecretKey(k) && !manifest.PlainSetting(v) {
+			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential: on an MCP server it takes a reference, ENV %s FROM '<ref>' (a literal would be written into Claude Code's config)", k, k))
+		}
+		m.Env = append(m.Env, Var{Key: k, Value: v})
+		p.i++
+		p.quiet = true
+	}
+	return nil
+}
+
+func (p *parser) mcpHeader(m *MCP) *Error {
+	n, err := p.take("HEADER", "'<name>'")
+	if err != nil {
+		return err
+	}
+	if n.Text == "" || strings.ContainsAny(n.Text, ": \t\r\n") {
+		return errAt(n.Pos, "a header name is one word, without ':'")
+	}
+	if p.kw("FROM") != "" {
+		r, err := p.take("FROM", "'<ref>'")
+		if err != nil {
+			return err
+		}
+		if !manifest.LooksLikeRef(r.Text) {
+			return errAt(r.Pos, "not a secret reference: use a scheme form such as 'keychain:<service>'")
+		}
+		m.Headers = append(m.Headers, Var{Key: n.Text, Ref: r.Text})
+		return nil
+	}
+	if CredentialHeader(n.Text) {
+		return errAt(n.Pos, fmt.Sprintf("header %s carries a credential: it takes a reference, HEADER '%s' FROM '<ref>' (the whole value, e.g. 'Bearer …')", n.Text, n.Text))
+	}
+	v, err := p.take("HEADER", "'<value>'")
+	if err != nil {
+		return err
+	}
+	p.quiet = true
+	m.Headers = append(m.Headers, Var{Key: n.Text, Value: v.Text})
+	return nil
 }

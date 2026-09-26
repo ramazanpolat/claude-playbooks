@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"slices"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
@@ -26,6 +27,11 @@ type dryState struct {
 	worlds     map[string]*pluginWorld
 	agents     map[string]*string // nil: unset
 	configDirs map[string]string
+
+	// MCP servers, per playbook name: the servers earlier statements would
+	// have declared, and the derived variables they would have recorded.
+	mcp        map[string]map[string]json.RawMessage
+	mcpRecords map[string]map[string]*manifest.MCPRecord
 }
 
 func newDryState() *dryState {
@@ -36,6 +42,8 @@ func newDryState() *dryState {
 		worlds:     map[string]*pluginWorld{},
 		agents:     map[string]*string{},
 		configDirs: map[string]string{},
+		mcp:        map[string]map[string]json.RawMessage{},
+		mcpRecords: map[string]map[string]*manifest.MCPRecord{},
 	}
 }
 
@@ -84,6 +92,8 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.worlds, name)
 		delete(r.dry.agents, name)
 		delete(r.dry.configDirs, name)
+		delete(r.dry.mcp, name)
+		delete(r.dry.mcpRecords, name)
 	}
 }
 
@@ -98,10 +108,18 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	w, wok := r.dry.worlds[from]
 	a, aok := r.dry.agents[from]
+	ms, msok := r.dry.mcp[from]
+	mr, mrok := r.dry.mcpRecords[from]
 	r.recordPlaybook(from, false)
 	r.recordPlaybook(to, true)
 	if wok {
 		r.dry.worlds[to] = w
+	}
+	if msok {
+		r.dry.mcp[to] = ms
+	}
+	if mrok {
+		r.dry.mcpRecords[to] = mr
 	}
 	if aok {
 		r.dry.agents[to] = a
@@ -184,4 +202,52 @@ func (r *stmtRun) envUsers(playbooksDir string) (map[string][]string, error) {
 		}
 	}
 	return users, nil
+}
+
+// mcpState is a playbook's MCP servers as the run sees them; a dry run
+// keeps what earlier statements would have declared.
+func (r *stmtRun) mcpState(name, configDir string) (map[string]json.RawMessage, error) {
+	if r.dry != nil {
+		if s, ok := r.dry.mcp[name]; ok {
+			return s, nil
+		}
+	}
+	s, _, err := readMCPServers(configDir)
+	if err != nil {
+		return nil, err
+	}
+	if r.dry != nil {
+		r.dry.mcp[name] = s
+	}
+	return s, nil
+}
+
+// mcpRecords is a playbook's MCP record as the run sees it.
+func (r *stmtRun) mcpRecords(name string, m *manifest.Manifest) map[string]*manifest.MCPRecord {
+	if r.dry != nil {
+		if rec, ok := r.dry.mcpRecords[name]; ok {
+			return rec
+		}
+	}
+	if m == nil {
+		return nil
+	}
+	return m.MCP
+}
+
+func cloneMCP(in map[string]*manifest.MCPRecord) map[string]*manifest.MCPRecord {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]*manifest.MCPRecord, len(in))
+	for k, v := range in {
+		if v == nil {
+			continue
+		}
+		out[k] = &manifest.MCPRecord{Vars: slices.Clone(v.Vars)}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

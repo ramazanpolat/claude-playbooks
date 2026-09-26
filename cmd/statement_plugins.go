@@ -145,9 +145,18 @@ type pluginStep struct {
 	args   []string
 	line   string // the report line once it ran
 	market string // ADD MARKETPLACE: the name the source must declare
+	mcp    bool   // a `claude mcp` command, not `claude plugin`
+	clause int    // the clause it comes from: steps run in clause order
 }
 
-func (s pluginStep) command() string { return "claude plugin " + strings.Join(s.args, " ") }
+func (s pluginStep) command() string {
+	if s.mcp {
+		// The server's config is not shown in full: it may be long, and its
+		// placeholders never hold a secret anyway.
+		return "claude mcp " + s.args[0] + " " + s.args[1] + " --scope user"
+	}
+	return "claude plugin " + strings.Join(s.args, " ")
+}
 
 // planPlugins turns the marketplace and plugin clauses, in the order
 // written, into the commands that make them true, checked against the
@@ -156,7 +165,7 @@ func (s pluginStep) command() string { return "claude plugin " + strings.Join(s.
 func planPlugins(w *pluginWorld, clauses []grammar.Clause) ([]pluginStep, []string, error) {
 	var steps []pluginStep
 	var lines []string
-	for _, c := range clauses {
+	for ci, c := range clauses {
 		switch c.Kind {
 		case grammar.AddMarketplace:
 			name := c.Names[0]
@@ -180,7 +189,7 @@ func planPlugins(w *pluginWorld, clauses []grammar.Clause) ([]pluginStep, []stri
 				return nil, nil, fmt.Errorf("ADD MARKETPLACE %s: already declared from another source; DROP MARKETPLACE %s first", name, name)
 			}
 			w.markets[name] = want
-			steps = append(steps, pluginStep{args: []string{"marketplace", "add", arg, "--scope", "user"},
+			steps = append(steps, pluginStep{clause: ci, args: []string{"marketplace", "add", arg, "--scope", "user"},
 				line: "marketplace " + name + " from " + c.Arg, market: name})
 		case grammar.DropMarketplace:
 			name := c.Names[0]
@@ -200,7 +209,7 @@ func planPlugins(w *pluginWorld, clauses []grammar.Clause) ([]pluginStep, []stri
 				return nil, nil, fmt.Errorf("DROP MARKETPLACE %s: plugins still use it: %s; drop them first with DROP PLUGIN", name, strings.Join(users, ", "))
 			}
 			delete(w.markets, name)
-			steps = append(steps, pluginStep{args: []string{"marketplace", "remove", name, "--scope", "user"},
+			steps = append(steps, pluginStep{clause: ci, args: []string{"marketplace", "remove", name, "--scope", "user"},
 				line: "dropped   marketplace " + name})
 		case grammar.AddPlugin:
 			id := c.Names[0]
@@ -212,7 +221,7 @@ func planPlugins(w *pluginWorld, clauses []grammar.Clause) ([]pluginStep, []stri
 				continue
 			}
 			w.plugins[id] = true
-			steps = append(steps, pluginStep{args: []string{"install", id, "--scope", "user", "--json"}, line: "plugin    " + id})
+			steps = append(steps, pluginStep{clause: ci, args: []string{"install", id, "--scope", "user", "--json"}, line: "plugin    " + id})
 		case grammar.DropPlugin:
 			id := c.Names[0]
 			if _, ok := w.plugins[id]; !ok {
@@ -222,7 +231,7 @@ func planPlugins(w *pluginWorld, clauses []grammar.Clause) ([]pluginStep, []stri
 			delete(w.plugins, id)
 			// --keep-data: dropping a plugin detaches it; its saved data
 			// stays, as a detached env set stays.
-			steps = append(steps, pluginStep{args: []string{"uninstall", id, "--scope", "user", "--keep-data", "--json"},
+			steps = append(steps, pluginStep{clause: ci, args: []string{"uninstall", id, "--scope", "user", "--keep-data", "--json"},
 				line: "dropped   plugin " + id})
 		}
 	}
@@ -239,12 +248,22 @@ func runPluginSteps(configDir string, steps []pluginStep) ([]string, error) {
 		if s.market != "" {
 			before = marketNames(configDir)
 		}
-		out, err := claudePlugin(configDir, s.args...)
-		if res := parseResult(out); res != nil && err == nil && res.Outcome != "" && res.Outcome != "ok" {
-			err = errors.New(res.Message)
+		var out []byte
+		var err error
+		if s.mcp {
+			if _, err = claudeMCP(configDir, s.args...); err != nil {
+				err = fmt.Errorf("%s: %w", s.command(), err)
+			}
+		} else {
+			out, err = claudePlugin(configDir, s.args...)
+			if res := parseResult(out); res != nil && err == nil && res.Outcome != "" && res.Outcome != "ok" {
+				err = errors.New(res.Message)
+			}
+			if err != nil {
+				err = stepError(configDir, s, out, err)
+			}
 		}
 		if err != nil {
-			err = stepError(configDir, s, out, err)
 			if i > 0 {
 				ran := make([]string, i)
 				for j := range ran {
