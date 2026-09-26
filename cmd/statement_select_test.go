@@ -70,20 +70,25 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
 	want := strings.Join([]string{"local", "--input-format", "JSONEachRow", "--structure", selectTables["PLAYBOOKS"].structure,
-		"--output-format", "PrettyCompact", "-q", "SELECT name FROM table WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
+		"-q", "SELECT name FROM (SELECT *, " + versionTupleSQL + " AS version_tuple FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
 	if string(args) != want {
 		t.Fatalf("args:\n%s\nwant:\n%s", args, want)
 	}
+	// Byte for byte, SHOW PLAYBOOKS --json's objects, one per line.
 	stdin, _ := os.ReadFile(filepath.Join(dir, "stdin"))
-	rows, _ := playbookRows()
+	var shown []json.RawMessage
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOKS --json")), &shown); err != nil || len(shown) != 2 {
+		t.Fatalf("SHOW PLAYBOOKS --json: %v", err)
+	}
 	var exp bytes.Buffer
-	for _, r := range rows {
-		line, _ := json.Marshal(r)
-		exp.Write(line)
+	for _, r := range shown {
+		if err := json.Compact(&exp, r); err != nil {
+			t.Fatal(err)
+		}
 		exp.WriteByte('\n')
 	}
 	if !bytes.Equal(stdin, exp.Bytes()) {
-		t.Fatalf("stdin differs from the --json rows:\n%s\nwant:\n%s", stdin, exp.Bytes())
+		t.Fatalf("stdin differs from SHOW PLAYBOOKS --json:\n%s\nwant:\n%s", stdin, exp.Bytes())
 	}
 	if bytes.Contains(stdin, []byte("sk-live")) {
 		t.Fatal("a secret value reached ClickHouse")
@@ -114,5 +119,61 @@ func TestSelectVarsAndQuotedStatement(t *testing.T) {
 	out = captureStdout(t, func() { err = runStatement([]string{"SHOW PLAYBOOK alpha --json"}) })
 	if err != nil || !strings.Contains(out, `"name": "alpha"`) {
 		t.Fatalf("quoted SHOW: %v\n%s", err, out)
+	}
+}
+
+// The FROM that names a table is found as ClickHouse reads the query: not
+// inside a string, a quoted identifier or a comment.
+func TestScanSQL(t *testing.T) {
+	cases := []struct {
+		q      string
+		tables string
+		second bool
+	}{
+		{"SELECT 'FROM VARS' AS m, name FROM PLAYBOOKS", "PLAYBOOKS", false},
+		{"SELECT name FROM PLAYBOOKS -- FROM VARS", "PLAYBOOKS", false},
+		{"SELECT name /* FROM VARS */ FROM envs", "ENVS", false},
+		{"SELECT 'it''s; FROM VARS', `FROM VARS` FROM vars", "VARS", false},
+		{"SELECT 'a\\' FROM VARS' FROM DEFAULTS", "DEFAULTS", false},
+		{"SELECT count() FROM PLAYBOOKS; SELECT 1", "PLAYBOOKS", true},
+		{"SELECT count() FROM PLAYBOOKS; -- done", "PLAYBOOKS", false},
+		{"SELECT a FROM PLAYBOOKS p JOIN (SELECT b FROM VARS) v ON 1", "PLAYBOOKS VARS", false},
+		{"SELECT from_x FROM numbers(3)", "", false},
+	}
+	for _, c := range cases {
+		froms, second := scanSQL(c.q)
+		var got []string
+		for _, f := range froms {
+			got = append(got, f.table)
+		}
+		if strings.Join(got, " ") != c.tables || second != c.second {
+			t.Errorf("%s: tables %v second %v, want %q %v", c.q, got, second, c.tables, c.second)
+		}
+	}
+	p, err := planSelect("SELECT 'FROM VARS' AS m FROM VARS")
+	if err != nil || p.query != "SELECT 'FROM VARS' AS m FROM table" {
+		t.Fatalf("rewrite: %+v %v", p, err)
+	}
+	if _, err := planSelect("SELECT count() FROM PLAYBOOKS; SELECT 1"); err == nil || !strings.Contains(err.Error(), "one statement") {
+		t.Fatalf("a second statement: %v", err)
+	}
+}
+
+func TestSelectQuotedJSONAndExactColumns(t *testing.T) {
+	selectFixture(t)
+	t.Setenv("CPB_CLICKHOUSE", "")
+	t.Setenv("PATH", t.TempDir())
+	var got []map[string]any
+	var err error
+	js := captureStdout(t, func() { err = runStatement([]string{"SELECT name FROM PLAYBOOKS --json"}) })
+	if err != nil || json.Unmarshal([]byte(js), &got) != nil || len(got) != 2 {
+		t.Fatalf("quoted --json: %v\n%s", err, js)
+	}
+	// ClickHouse identifiers are case-sensitive, so the built-in form is too.
+	if _, err := stmt(t, "SELECT NAME FROM PLAYBOOKS"); err == nil || !strings.Contains(err.Error(), "unknown column 'NAME'") {
+		t.Fatalf("NAME: %v", err)
+	}
+	if !reflect.DeepEqual(versionTuple("v3.12.3-rc1"), []uint64{3, 12, 3}) || len(versionTuple("")) != 0 || len(versionTuple("dev")) != 0 {
+		t.Fatalf("versionTuple: %v", versionTuple("v3.12.3-rc1"))
 	}
 }

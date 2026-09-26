@@ -609,15 +609,19 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
 ```
 
 - **Built in, always:** exactly `SELECT <col>[, <col> …] FROM <table>`: plain
-  column names, no `*`, no functions, no `WHERE`. It is a strict subset of
-  ClickHouse SQL, so a query means the same on both paths. The output is a
+  column names, spelled exactly (ClickHouse identifiers are case-sensitive:
+  `name`, not `NAME`), no `*`, no functions, no `WHERE`. It is a strict subset
+  of ClickHouse SQL, so a query means the same on both paths. The output is a
   table as `SHOW` prints one; `--json` prints the selected fields.
 - **Anything else goes to ClickHouse** when it is installed: `clickhouse` or
   `ch` on `PATH`, or the command `CPB_CLICKHOUSE` names. cpb pipes the
   table's rows to `clickhouse local --input-format JSONEachRow --structure
-  '<typed columns>' --output-format PrettyCompact -q "<query>"`, with
-  `FROM <table>` rewritten to `FROM table`; a `FORMAT` in the query wins over
-  the default. Without ClickHouse the query is refused in one line: "this
+  '<typed columns>' -q "<query>"`, with `FROM <table>` rewritten to read
+  stdin (`FROM table`; for `PLAYBOOKS`, a subquery over it that adds
+  `version_tuple`). The `FROM` is found as ClickHouse reads the query, so
+  `'FROM VARS'` in a string or a comment is not a table. The output is
+  ClickHouse's own: a table on a terminal, TSV in a pipe, or the query's
+  `FORMAT`. One statement per query: text after a `;` is refused. Without ClickHouse the query is refused in one line: "this
   query needs ClickHouse (clickhouse local); install it, or pick columns
   only". One table per query.
 - **Only what `--json` already shows is handed over:** the rows are exactly
@@ -628,7 +632,7 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
 - **On the command line** a statement can be one quoted argument (the shell
   would glob `*` and split `(`): `cpb "SELECT …"`. It is read with the
   playbook-file lexer and the command line's rules; any statement works this
-  way. An unknown column's error says "If you typed * unquoted, the shell
+  way, flags inside the quotes (`cpb "SELECT name FROM PLAYBOOKS --json"`). An unknown column's error says "If you typed * unquoted, the shell
   expanded it: quote the statement."
 
 **Tables.** Their columns are the `--json` fields, and ClickHouse reads each
@@ -637,14 +641,16 @@ so `source.url` and `vars[1].key` work):
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus `version_tuple` |
+| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` |
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
 | `DEFAULTS` | (one row) | `envs secret_helper` |
 
-`version_tuple` is `Array(UInt32)`, the version's numbers (`"v3.12.3"` →
-`[3, 12, 3]`): compare and sort versions with it, because strings sort
-`"v3.9.0"` after `"v3.12.3"`. A `VARS` row is one entry of one layer
+`version_tuple` is `Array(UInt32)`, the numbers of the version's leading
+numeric part (`"v3.12.3-rc1"` → `[3, 12, 3]`; no version → `[]`): compare
+and sort versions with it, because strings sort `"v3.9.0"` after
+`"v3.12.3"`. It is computed, not handed over: cpb computes it for the
+built-in form, the query computes it for ClickHouse. A `VARS` row is one entry of one layer
 (`DEFAULTS` sets, the playbook's sets, its own block), `effective` when it is
 the one a launch uses. The manual form, piping `SHOW … --json` yourself, is in
 [Query with SQL](../guides/query-with-sql.md).
