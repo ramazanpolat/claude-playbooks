@@ -1,0 +1,6 @@
+-- bare.cpb: the bottom layer. A playbook named kommander-agent (its launcher
+-- is its name) on a model route. glm-5.3-flash is an env set on the author's
+-- machine; use any route you have (SHOW ENVS lists them), or leave USE ENV
+-- out to run on the machine's DEFAULTS.
+CREATE PLAYBOOK IF NOT EXISTS kommander-agent;
+ALTER PLAYBOOK kommander-agent USE ENV glm-5.3-flash;

@@ -1,0 +1,5 @@
+{
+  "name": "chaos",
+  "version": "0.0.1",
+  "description": "The chaos layer (stub): a SessionStart hook that adds one line of context."
+}

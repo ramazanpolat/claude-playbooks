@@ -806,10 +806,14 @@ a terminal, so Claude Code never prompts.
 | `'github:<owner>/<repo>'` | `<owner>/<repo>` | `{"source": "github", "repo": "<owner>/<repo>"}` |
 | `'https://…'`, `'git@…'` (a git URL) | the URL | `{"source": "git", "url": "…"}` |
 | `'/abs/path'` or `'~/path'`, a local directory | the absolute path (`~/` expanded) | `{"source": "directory", "path": "/abs/path"}` |
+| `'./path'` or `'../path'`, in a playbook file only | resolved against the file's directory | as above, absolute |
 
 A directory source is the marketplace root, the directory that holds
-`.claude-plugin/marketplace.json`; a relative path is refused, and so is a
-URL carrying credentials. This is how a plugin is used from a local checkout
+`.claude-plugin/marketplace.json`. In a playbook file, a path starting with
+`./` or `../` resolves against the directory of that file, exactly as
+`INCLUDE` does (decided 2026-09-26), so a layer can ship its plugin beside
+it; on the command line, and in a file read from a pipe, it is refused. Any
+other relative path is refused, and so is a URL carrying credentials. This is how a plugin is used from a local checkout
 before it is published. `--sparse` and git refs are not in the first cut.
 A marketplace name follows the env-set name rule; a plugin id is
 `<plugin>@<marketplace>`.

@@ -1103,6 +1103,9 @@ func (p *parser) marketplace(c *Clause, verb string) *Error {
 	if _, serr := MarketplaceSource(src.Text); serr != nil {
 		return errAt(src.Pos, serr.Error())
 	}
+	if RelativeSource(src.Text) && !p.file {
+		return errAt(src.Pos, "a relative directory source resolves against its playbook file; on the command line, use '/abs/path' or '~/path'")
+	}
 	c.Arg = src.Text
 	return nil
 }
@@ -1187,8 +1190,15 @@ func MarketplaceSource(src string) (string, error) {
 		return SourceGit, nil
 	case strings.HasPrefix(src, "git@"):
 		return SourceGit, nil
-	case strings.HasPrefix(src, "/"), strings.HasPrefix(src, "~/"):
+	case strings.HasPrefix(src, "/"), strings.HasPrefix(src, "~/"), RelativeSource(src):
 		return SourceDirectory, nil
 	}
-	return "", errors.New("unsupported marketplace source: use 'github:<owner>/<repo>', a git URL (https://… or git@…), or a directory ('/abs/path' or '~/path')")
+	return "", errors.New("unsupported marketplace source: use 'github:<owner>/<repo>', a git URL (https://… or git@…), or a directory ('/abs/path', '~/path', or in a playbook file './path')")
+}
+
+// RelativeSource reports a directory source written relative to its
+// playbook file ('./…' or '../…'). APPLY resolves it against the file's
+// directory before the statement runs; the command line refuses it.
+func RelativeSource(src string) bool {
+	return strings.HasPrefix(src, "./") || strings.HasPrefix(src, "../")
 }

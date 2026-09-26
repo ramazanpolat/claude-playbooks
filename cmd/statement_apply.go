@@ -223,6 +223,18 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink) {
 	chain = append(chain, chainLink{id, name})
 	for _, s := range stmts {
 		if s.Verb != grammar.Include {
+			// A relative directory source resolves against this file's
+			// directory, as INCLUDE does.
+			for i, c := range s.Clauses {
+				if c.Kind != grammar.AddMarketplace || !grammar.RelativeSource(c.Arg) {
+					continue
+				}
+				if base == "" {
+					l.errs = append(l.errs, fmt.Errorf("%s:%d: a relative directory source in a file that is not a regular file (a pipe) has nothing to resolve against", name, s.Pos.Line))
+					continue
+				}
+				s.Clauses[i].Arg = filepath.Join(base, c.Arg)
+			}
 			l.out = append(l.out, located{name, s})
 			l.total[name]++
 			continue

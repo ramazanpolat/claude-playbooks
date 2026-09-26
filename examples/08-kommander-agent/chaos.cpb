@@ -1,0 +1,11 @@
+-- chaos.cpb: a layer on top of kommander. chaos-stub/ stands in for the real
+-- chaos plugin: its SessionStart hook adds one line of context, which proves
+-- that a layer's plugin stacks on the kommander agent. It does not SET AGENT:
+-- the kommander agent stays the main thread. The real layer will read
+--   ADD MARKETPLACE chaos FROM 'github:santiment/chaos'
+--   ADD PLUGIN chaos@chaos;
+INCLUDE 'kommander.cpb';
+
+ALTER PLAYBOOK kommander-agent
+  ADD MARKETPLACE chaos-stub FROM './chaos-stub'
+  ADD PLUGIN chaos@chaos-stub;

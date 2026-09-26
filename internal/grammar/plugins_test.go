@@ -57,6 +57,7 @@ func TestParsePluginErrors(t *testing.T) {
 		{w("ALTER PLAYBOOK k ADD FOO"), "ADD takes ENV, MARKETPLACE or PLUGIN"},
 		{w("ALTER DEFAULTS ADD PLUGIN a@b"), "ADD takes ENV"},
 		{w("INCLUDE base.cpb"), "INCLUDE appears only in a playbook file"},
+		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM ./mkt"), "resolves against its playbook file"},
 	}
 	for _, tc := range cases {
 		_, err := ParseArgs(tc.args)
