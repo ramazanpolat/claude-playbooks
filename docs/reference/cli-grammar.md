@@ -981,7 +981,11 @@ statements after it, as `USE <db>` does in SQL. It is a directive, like
   reached under; everything else in it (statements that name their object,
   env sets, `DEFAULTS`) runs at its first occurrence only. So a shared file
   that creates an env set and then alters "the" playbook, included for two
-  targets, creates the env set once and applies its recipe to both.
+  targets, creates the env set once and applies its recipe to both. The
+  directives are not statements that run: an `INCLUDE` is followed at every
+  occurrence and a `USE PLAYBOOK` takes effect at every occurrence, so a
+  shared file reached again for a second target still includes its files and
+  switches its target.
 
 ### Which target a name-less statement gets
 
@@ -1007,14 +1011,18 @@ recipe form (`SHOW CREATE … --recipe`) may come later.
 
 ### TO a plain config directory
 
-`TO '<dir>'` targets a Claude Code config directory that is not a playbook,
-for example `~/.claude`. A target is a directory when it contains `/` or
+`TO '<dir>'` targets a Claude Code config directory, typically one that is
+not a playbook, for example `~/.claude`. A target is a directory when it contains `/` or
 starts with `~` or `.`; a playbook name never does. The directory must exist;
 cpb creates nothing but what the clauses write. **A directory that is a
 registered playbook is that playbook:** cpb resolves the path (symlinks
 followed) and, when it is a playbook's directory or config directory, applies
 with that playbook's semantics and safeguards (its manifest, its launcher,
 the refusals on a linked playbook), never the plain-directory rules below.
+When the path belongs to more than one registered playbook (several
+registrations linked to one directory), the target is refused and the
+playbooks are named: `TO <name>` picks one. The rules below are for a
+directory no playbook claims.
 
 Only the clauses that are Claude Code's own configuration apply, because
 nothing of cpb runs at that directory's launches:
