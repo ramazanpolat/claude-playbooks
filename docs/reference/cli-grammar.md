@@ -104,6 +104,12 @@ pb-clause  := set-clause
             | RENAME TO <name>
             | ALIAS <launcher>             set or replace the launcher (one per playbook)
             | NO ALIAS                     remove the launcher
+            | ADD MARKETPLACE <name> FROM '<source>'   see "Plugins and the agent"
+            | DROP MARKETPLACE <name>
+            | ADD PLUGIN <plugin>@<marketplace>
+            | DROP PLUGIN <plugin>@<marketplace>
+            | SET AGENT '<agent>'
+            | UNSET AGENT
 
 read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> ] [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
@@ -546,7 +552,7 @@ one playbook, which the *Output* variable object never needs to say. A nested ob
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | `name version path source linked launcher envs vars sandbox` (the `SHOW PLAYBOOK` object) |
+| `PLAYBOOKS` | playbook | `name version path source linked launcher envs vars sandbox marketplaces plugins agent` (the `SHOW PLAYBOOK` object) |
 | `ENVS` | env set | `name description vars used_by default` (the `SHOW ENV` object) |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` (with `layer.kind`, `layer.name`) |
 | `DEFAULTS` | (one row) | `envs secret_helper` (the `SHOW DEFAULTS` object) |
@@ -686,6 +692,121 @@ the configured one otherwise. (The same rule applies to `APPLY` without
 **Not planned** in playbook files: variables, loops and conditionals. A
 playbook file stays a flat list of statements that reads the same every
 time; anything more needs the pilot's explicit approval first.
+
+## Plugins and the agent
+
+Decided with the pilot on 2026-09-26, for the release after v3.20.0 (before
+`SELECT`). The goal it serves: a playbook built by stacking playbook files,
+for example Kommander as a plugin and an agent on a bare playbook:
+
+```
+-- bare.cpb
+CREATE PLAYBOOK IF NOT EXISTS kommander NO ALIAS;
+ALTER PLAYBOOK kommander USE ENV glm-5.3;
+
+-- kommander.cpb
+INCLUDE 'bare.cpb';
+ALTER PLAYBOOK kommander
+  ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook'
+  ADD PLUGIN kommander@kommander
+  SET AGENT 'kommander';
+
+-- chaos.cpb
+INCLUDE 'kommander.cpb';
+ALTER PLAYBOOK kommander
+  ADD MARKETPLACE chaos FROM 'github:santiment/chaos'
+  ADD PLUGIN chaos@chaos;
+```
+
+**What the clauses write: the playbook's `settings.json`, and nothing
+else.** A playbook's `settings.json` is its Claude Code user scope, so what is
+written there applies to that playbook only. Claude Code installs, updates
+and loads the plugins; cpb copies no file, runs nothing, and pins no version
+(plugins have none to pin).
+
+| Clause | `settings.json` |
+|---|---|
+| `ADD MARKETPLACE m FROM '<source>'` | `extraKnownMarketplaces.m = {"source": <source object>}` |
+| `DROP MARKETPLACE m` | removes `extraKnownMarketplaces.m` |
+| `ADD PLUGIN p@m` | `enabledPlugins["p@m"] = true` |
+| `DROP PLUGIN p@m` | removes `enabledPlugins["p@m"]` |
+| `SET AGENT '<agent>'` | `agent = "<agent>"`, as typed: the main session runs as that agent |
+| `UNSET AGENT` | removes `agent` |
+
+**Sources**, in the forms Claude Code's own `settings.json` files use:
+
+| `FROM` | source object |
+|---|---|
+| `'github:<owner>/<repo>'` | `{"source": "github", "repo": "<owner>/<repo>"}` |
+| `'https://…'`, `'git@…'` (a git URL) | `{"source": "git", "url": "…"}` |
+| `'/abs/path'` or `'~/path'`, a local directory | `{"source": "directory", "path": "/abs/path"}` |
+
+The shapes are Claude Code's (its marketplace reference, "Fields by type").
+A directory source is the marketplace root, the directory that holds
+`.claude-plugin/marketplace.json`: cpb requires an absolute path (or one
+under `~/`, which it expands) because the docs do not say how a relative one
+resolves, and refuses the statement when that file is missing, so a
+mistyped checkout path fails when written rather than at the next launch.
+This is how a plugin is used from a local checkout before it is published.
+The optional `ref`, `path` and `sparsePaths` fields of git sources are not
+in the first cut. Anything else is refused. A marketplace name follows the env-set name rule;
+a plugin id is `<plugin>@<marketplace>`.
+
+**Rules**
+
+- `ADD PLUGIN p@m` is refused unless `m` is a marketplace this playbook's
+  `settings.json` declares. There is no exception for a marketplace Claude
+  Code knows by default (decided 2026-09-26): a plugin id always names its
+  marketplace, so a playbook that uses the official one declares it
+  (`ADD MARKETPLACE claude-plugins-official FROM 'github:anthropics/claude-plugins-official'`).
+- `DROP MARKETPLACE m` is refused while an entry of `enabledPlugins` names
+  `m`; the error lists them.
+- Every other key of `settings.json`, and their order, is kept as it was.
+  The file is rewritten through a temporary file and a rename, as the
+  manifest is.
+- A linked playbook's `settings.json` belongs to the target, so these
+  clauses are refused on it, as the environment clauses are.
+- A statement that combines them with environment clauses writes two files
+  (the manifest and `settings.json`), each through a rename. A failed second
+  write restores the first, so an error leaves both as they were. A process
+  killed between the two renames, or a failed restore, can leave only the
+  first written: there is no journal. The recovery is the usual one, running
+  the statement again, since every statement is safe to repeat; `SHOW` shows
+  which file holds the change.
+- `enabledPlugins` entries set to `false` by hand are shown, not changed: the
+  grammar adds and drops, it does not disable. `SHOW CREATE` does not
+  reproduce such an entry: it writes a comment line
+  (`-- PLUGIN p@m is false in settings.json; not written`), since an absent
+  entry and a `false` one both leave the plugin off in this scope.
+
+**The agent** (verified 2026-09-26, nine `claude -p` runs). A plugin can
+name an agent in its own `settings.json`, and two plugins that both do are
+resolved by load order, the last one winning. The `agent` of the user
+scope overrides every plugin, and a playbook's `settings.json` *is* its user
+scope, so `SET AGENT` is the deterministic pin. It accepts an agent's bare
+name (`kommander`) or its namespaced id (`kommander:kommander`); both
+resolve, and cpb stores what was typed. A layer above does not need `SET
+AGENT`: its plugin's SessionStart context stacks on top of the agent's.
+The agent's prompt replaces Claude Code's default system prompt; that is
+the plugin's concern, not cpb's.
+
+**Visible where state is visible.** `SHOW PLAYBOOK --json` gains
+`"marketplaces": [{"name", "source"}]`, `"plugins": [{"id", "enabled"}]` and
+`"agent"` (null when unset); the human form gains `Marketplaces:`, `Plugins:`
+and `Agent:` lines. `EXPLAIN PLAYBOOK` names the agent and the enabled
+plugins a launch starts with, and where the agent comes from where cpb can
+tell: `agent: kommander (playbook settings)` when the playbook sets it, or
+`(from plugin <p>)` when only an enabled plugin's own `settings.json` names
+one. `SHOW CREATE` writes the clauses, so a
+playbook's plugins and agent travel in its playbook file. `SELECT` sees the
+fields on `PLAYBOOKS` when it lands (the *Tables* list includes them).
+
+**INCLUDE** is specified in its own section, which lands separately
+(PR #85); this section depends on it, and both are built in the same
+release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
+
+These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
+form in the first cut (decided 2026-09-26).
 
 ## Completion
 
