@@ -317,3 +317,16 @@ func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
 		}
 	}
 }
+
+// The MCP record survives a write and a read.
+func TestMCPRecordRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manifest{Name: "k", MCP: map[string]*MCPRecord{"files": {Vars: []string{"CPB_MCP_FILES_E_T_12345678"}}}}
+	if err := Write(dir, m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(dir)
+	if err != nil || got.MCP["files"] == nil || got.MCP["files"].Vars[0] != "CPB_MCP_FILES_E_T_12345678" {
+		t.Fatalf("round trip: %+v %v", got, err)
+	}
+}

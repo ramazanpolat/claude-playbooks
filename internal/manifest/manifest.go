@@ -604,6 +604,20 @@ func Write(dir string, m *Manifest) error {
 			fmt.Fprintf(&b, "claude_version = %s\n", QuoteTOML(m.Sandbox.ClaudeVersion))
 		}
 	}
+	// [mcp.<server>]: the variables cpb derived for each MCP server.
+	if len(m.MCP) > 0 {
+		names := make([]string, 0, len(m.MCP))
+		for n, r := range m.MCP {
+			if r != nil && len(r.Vars) > 0 {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Fprintf(&b, "\n[mcp.%s]\n", QuoteTOML(n))
+			writeTOMLList(&b, "vars", m.MCP[n].Vars)
+		}
+	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
 	// carrying any is written private, like an env profile. Existing files
 	// are only ever tightened, never loosened.
