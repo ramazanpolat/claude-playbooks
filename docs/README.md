@@ -2,8 +2,17 @@
 
 Pages are grouped by what you came for:
 
+- **tutorials/**: learn it once, start to finish.
 - **guides/**: how to do one common task.
 - **reference/**: complete and dry: every statement, flag, file and format.
+- **[examples/](../examples/)**: one small `playbook.cpb` per idea, applied in CI.
+
+## Tutorials
+
+| | |
+|---|---|
+| [Your first playbook.cpb](tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
+| [Stack layers into an agent](tutorials/stacked-agent.md) | `INCLUDE`, plugins and the agent, layer by layer |
 
 ## Guides
 
@@ -14,6 +23,7 @@ Pages are grouped by what you came for:
 | [Authentication](guides/authentication.md) | shared logins, long-lived tokens, isolated accounts |
 | [Environment overrides](guides/environment.md) | per-playbook variables and shared env profiles |
 | [Sandboxed sessions](guides/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
+| [Query with SQL](guides/query-with-sql.md) | `cpb SHOW … --json` piped into `ch local` |
 | [Agent guide](guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
 
 ## Reference

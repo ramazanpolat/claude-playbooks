@@ -1,0 +1,3 @@
+-- A fresh, isolated Claude Code setup named scratch. Its launcher command
+-- is its name: type `scratch` to run it.
+CREATE PLAYBOOK IF NOT EXISTS scratch;

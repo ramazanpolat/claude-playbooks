@@ -56,6 +56,34 @@ cpb auth status             # exit 0, reports how each playbook authenticates
 
 Parse `--json` output, never the human form.
 
+## Set up from a playbook file
+
+When the human hands you a `playbook.cpb` (or a stack of them joined by
+`INCLUDE`), apply it and prove it converged:
+
+```sh
+cpb APPLY playbook.cpb --dry-run   # exit 0; one line per statement, nothing written
+cpb APPLY playbook.cpb             # exit 0; ends "Applied …: N created, N changed, …"
+cpb APPLY playbook.cpb             # verify: "0 created, 0 changed" (the file holds)
+cpb EXPLAIN PLAYBOOK <name> --json # verify: the variables, plugins and agent a launch gets
+```
+
+- A file with `DROP PLAYBOOK` refuses without `--yes`: show the human the
+  dry run's list and ask before adding it.
+- `ADD MARKETPLACE` / `ADD PLUGIN` run `claude plugin …` and fetch from the
+  network; `claude` must be on `PATH`. If one fails because a plugin wants to
+  run a command its marketplace declares, show the human the command it
+  printed; confirming it is theirs to do.
+- A failure stops the run and says what already ran. Fix the file and apply
+  it again; every statement is safe to repeat.
+- A `SET … FROM '<ref>'` that fails its check means the secret is not stored:
+  ask the human to store it (`with-secret --store <name>` or their helper's
+  equivalent). Never ask for the value.
+
+The statements and file rules:
+[docs/reference/cli-grammar.md](docs/reference/cli-grammar.md). Worked
+examples: [examples/](examples/).
+
 ## Update
 
 ```sh

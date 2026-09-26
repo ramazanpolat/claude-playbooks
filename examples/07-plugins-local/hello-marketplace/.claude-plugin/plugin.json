@@ -1,0 +1,5 @@
+{
+  "name": "greet",
+  "version": "0.0.1",
+  "description": "One agent that greets, for the plugins example."
+}

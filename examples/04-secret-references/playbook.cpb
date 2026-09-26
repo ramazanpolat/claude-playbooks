@@ -1,0 +1,10 @@
+-- A token by reference: the file holds where the secret lives, never the
+-- secret. The helper resolves it at launch and hands it to claude only.
+ALTER DEFAULTS SET SECRET HELPER 'with-secret';
+
+CREATE OR REPLACE ENV router
+  SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
+  SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/router-token';
+
+CREATE PLAYBOOK IF NOT EXISTS routed NO ALIAS;
+ALTER PLAYBOOK routed USE ENV router;

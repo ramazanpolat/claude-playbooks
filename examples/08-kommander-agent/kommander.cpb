@@ -1,10 +1,10 @@
 -- kommander.cpb: Kommander as a plugin and the main-thread agent, on bare.
 -- The kommander-playbook repository is both the marketplace and the plugin.
--- To use a local checkout instead (a branch under development), write
---   ADD MARKETPLACE kommander FROM '~/DEV/kommander-playbook'
+-- It is private: point the path at your checkout. With access to it, the
+-- same clause can read FROM 'github:ramazanpolat/kommander-playbook'.
 INCLUDE 'bare.cpb';
 
 ALTER PLAYBOOK kommander-agent
-  ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook'
+  ADD MARKETPLACE kommander FROM '~/path/to/kommander-playbook'
   ADD PLUGIN kommander@kommander
   SET AGENT 'kommander';

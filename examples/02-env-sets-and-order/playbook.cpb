@@ -1,0 +1,15 @@
+-- Two env sets, attached in order: a later set wins over an earlier one,
+-- and the playbook's own variables win over both.
+CREATE OR REPLACE ENV router
+  DESCRIBE 'A model router on this machine'
+  SET ANTHROPIC_BASE_URL=http://localhost:20128/v1 ANTHROPIC_MODEL=glm-5.3;
+
+CREATE OR REPLACE ENV thinking
+  SET MAX_THINKING_TOKENS=8000;
+
+CREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;
+
+ALTER PLAYBOOK work
+  USE ENV router thinking
+  SET VAR ANTHROPIC_MODEL=glm-5.3-flash
+  BLOCK VAR HTTP_PROXY;

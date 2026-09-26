@@ -1,23 +1,12 @@
 # Environment overrides
 
-Variables set or unset for every launch of one playbook and no other — so one
+Variables set or blocked for every launch of one playbook and no other, so one
 playbook talks to a proxy or keeps its own login while the rest of your shell
-does not. Available since v3.5.0.
+does not. The statements below are the [CLI grammar](../reference/cli-grammar.md)
+(v3.20.0); the older `env` / `env-profile` commands still work, see the end.
 
-A fresh install has none. This manifest is complete and normal:
-
-```toml
-version = "3.11.4"
-name = "kommander"
-alias = "k"
-
-[source]
-repository = "https://github.com/ramazanpolat/kommander-playbook"
-```
-
-Launching `k` runs `claude` with your shell's environment plus
-`CLAUDE_CONFIG_DIR`, exactly as before. Nothing changes until you add an
-override.
+A fresh playbook has no overrides. Launching it runs `claude` with your shell's
+environment plus `CLAUDE_CONFIG_DIR`, exactly as before.
 
 ## What happens at launch
 
@@ -27,32 +16,32 @@ layers winning:
 
 ```text
 your shell's environment
-  + the registry default env profile, if one is set             (cpb env-profile <name> default)
-  + each env profile the playbook uses, in the order listed     (~/.claude-playbooks/.env-profiles/<name>.toml)
-  + the playbook's own [env.set]                                 (in its .playbook)
-  - the playbook's own [env] unset
+  + DEFAULTS: each env set in the list, in order        (ALTER DEFAULTS USE ENV …)
+  + each env set the playbook uses, in order             (ALTER PLAYBOOK p USE ENV …)
+  + the playbook's own SET VAR, minus its BLOCK VAR      (in its .playbook)
   + one-off launch flags (--env-profile, --env, --unset, --env-file)
   + CLAUDE_CONFIG_DIR, bound by the tool, cannot be overridden
   = what claude sees
 ```
 
-A playbook with no `[env]` block still gets the registry default, when one is
-set; without one it inherits only your shell's environment.
+`EXPLAIN PLAYBOOK <name>` prints that result: every variable a launch would
+change, its value (masked when it looks like a credential), and the layer that
+decided it. `--json` gives the same as a stable object for scripts.
 
-`set` overrides whatever the shell exported; `unset` removes a variable even when
-the shell exports it. Raw `claude` launches bypass all of this. Claude Code's own
-`env` block in `settings.json` is applied later, inside the `claude` process, and
-wins over these layers; it can set variables but cannot unset one the shell
-exported, which is what the manifest block is for.
+A `SET` overrides whatever the shell exported; a `BLOCK` removes a variable
+even when the shell exports it. Raw `claude` launches bypass all of this.
+Claude Code's own `env` block in `settings.json` is applied later, inside the
+`claude` process, and wins over these layers; it can set variables but cannot
+remove one the shell exported, which is what `BLOCK` is for.
 
-## One playbook, its own overrides
+## One playbook, its own variables
 
 ```bash
-cpb env kommander set ANTHROPIC_MODEL=claude-opus-5
-cpb env kommander unset CLAUDE_CODE_OAUTH_TOKEN
+cpb ALTER PLAYBOOK kommander SET VAR ANTHROPIC_MODEL=claude-opus-5
+cpb ALTER PLAYBOOK kommander BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN
 ```
 
-The manifest above now ends with:
+The playbook's `.playbook` now ends with:
 
 ```toml
 [env]
@@ -65,35 +54,30 @@ ANTHROPIC_MODEL = "claude-opus-5"
 Inspect and undo:
 
 ```bash
-cpb env kommander                        # show this playbook's block
-cpb env                                  # every playbook that declares overrides
-cpb env kommander clear ANTHROPIC_MODEL  # forget the entry; the shell's value applies again
-cpb info kommander                       # "Env:" lines appear when a block exists
+cpb SHOW PLAYBOOK kommander                      # its own layer, under "Variables:"
+cpb EXPLAIN PLAYBOOK kommander                   # what a launch would apply, and from where
+cpb ALTER PLAYBOOK kommander UNSET VAR ANTHROPIC_MODEL   # forget the entry; the layer below applies again
 ```
 
-```text
-Environment overrides for "kommander":
-  set    ANTHROPIC_MODEL=claude-opus-5
-  unset  CLAUDE_CODE_OAUTH_TOKEN
-```
+`UNSET VAR` forgets the playbook's own entry, whether it was a `SET`, a
+reference or a `BLOCK`. Inside `ALTER PLAYBOOK` the word `VAR` is required.
 
 ## Env profiles: define once, attach to many
 
-When several playbooks want the same overrides, put them in a **profile**: a
-named file under `~/.claude-playbooks/.env-profiles/`, managed with
-`env-profile`, attached to playbooks by name with `env <playbook> use`.
+When several playbooks want the same variables, put them in an **env set**
+(called an env profile before v3.20.0): a named file under
+`~/.claude-playbooks/.env-profiles/`, attached to playbooks by name.
 
 ```bash
-cpb env-profile glm set ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.3
-cpb env-profile glm unset CLAUDE_CODE_OAUTH_TOKEN
-cpb env-profile glm describe "GLM 5.3 through the local router, own /login"
+cpb CREATE ENV glm DESCRIBE 'GLM through the local router' \
+    SET ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.3 \
+    BLOCK CLAUDE_CODE_OAUTH_TOKEN
 ```
 
-That wrote `~/.claude-playbooks/.env-profiles/glm.toml` (mode `0600`, values may
-be secrets):
+That wrote `~/.claude-playbooks/.env-profiles/glm.toml` (mode `0600`):
 
 ```toml
-description = "GLM 5.3 through the local router, own /login"
+description = "GLM through the local router"
 unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
 
 [set]
@@ -101,59 +85,14 @@ ANTHROPIC_BASE_URL = "http://proxy:1/v1"
 ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 ```
 
-## Secret-looking values are redacted in status output
-
-`env`, `env-profile`, and `info` mask a `set` value when its key looks like a
-credential (case-insensitive): `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`,
-`PASSPHRASE` or `CREDENTIAL` anywhere in the name; `AUTH`, `PWD`, `PASS` or
-`PAT` as a whole `_`-separated word; or a word ending in `KEY`/`KEYS` unless
-a `PUBLIC`/`PUB` word says the material is public. So `GITHUBTOKEN`,
-`MY_APIKEY` and `MYSQL_PWD` are masked, while `KEYBOARD_LAYOUT`,
-`AUTHOR_NAME`, `PATH` and `PUBLIC_KEY` are not:
-
-```text
-  set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
-  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
-```
-
-At least 8 characters always stay hidden, so a value under 12 characters is
-redacted whole (`<redacted, 9 chars>`) rather than showing half of itself.
-
-A credential inside a connection URL is masked too, even though the key names
-nothing secret — otherwise `DATABASE_URL` and friends would print it in
-full. Only the `user:password` part is hidden, so the URL stays readable:
-
-```text
-  set    DATABASE_URL=postgres://<redacted, 4 chars>:<redacted, 11 chars>@db.internal:5432/app
-```
-
-Both halves are masked because the credential is not always the password:
-`https://TOKEN:x-oauth-basic@github.com` and `https://TOKEN:@github.com` are
-the standard ways a git remote carries a token, and there the *username* is
-the secret. A credential in a query parameter (`?password=`) is not covered.
-
-Pass `--reveal` to see the resolved value for one invocation
-(`cpb env kommander --reveal`); it is never written to disk. This applies
-whether the value comes from a playbook's own `[env.set]` or an attached env
-profile — which is why `.env-profiles/*.toml` above is written `0600` in the
-first place: values may be secrets.
-
-Attach it. The playbook's manifest records only the name:
+Inside `CREATE ENV` / `ALTER ENV` the word `VAR` is optional. Attach the set;
+the playbook's manifest records only its name:
 
 ```bash
-cpb env router use glm
-cpb env router set ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # local entry on top of the profile
-cpb env router
-```
-
-```text
-Environment overrides for "router":
-  profiles  glm
-  set    ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4
-Effective at launch:
-  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
-  set    ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4
-  unset  CLAUDE_CODE_OAUTH_TOKEN
+cpb ALTER PLAYBOOK router USE ENV glm                 # the whole list, in order
+cpb ALTER PLAYBOOK router ADD ENV work FIRST          # insert one: FIRST, LAST (default), BEFORE x, AFTER x
+cpb ALTER PLAYBOOK router DROP ENV work               # detach
+cpb ALTER PLAYBOOK router SET VAR ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # own entry on top
 ```
 
 ```toml
@@ -164,71 +103,80 @@ profiles = ["glm"]
 ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.4"
 ```
 
-Profiles apply in the order listed, later ones overriding earlier, and the
-playbook's own entries apply last.
+Sets apply in the order listed, later ones overriding earlier; the playbook's
+own entries apply last. `USE ENV` states the whole list, so it is the form to
+repeat safely; `ADD ENV` places one set without restating the rest.
 
-One profile can be the **registry default**, applied under every playbook's own
-block, manifest or not, `start` included:
-
-```bash
-cpb env-profile personal default      # every launch starts from this layer
-cpb env-profile personal undefault    # back to no default
-```
-
-An empty `[env]` block and a missing one are the same thing: the identity layer.
-So a launch is a stack — shell environment, registry default, the playbook's
-profiles, the playbook's own entries, one-off flags — and every layer that says
-nothing changes nothing.
-
-Manage them:
+Manage the sets:
 
 ```bash
-cpb env-profile                 # list them as a table
-cpb env-profile --values        # ...and what each one sets
-cpb env-profile glm             # show one
-cpb env router unuse glm        # detach
-cpb env-profile glm delete      # refused while any playbook still uses it
+cpb SHOW ENVS                   # one line per set: NAME SET BLOCKED USED BY DESCRIPTION
+cpb SHOW ENV glm                # one set: description, users, whether it is in DEFAULTS, variables
+cpb ALTER ENV glm SET ANTHROPIC_DEFAULT_HAIKU_MODEL=glm/glm-5.3-flash
+cpb CREATE OR REPLACE ENV glm SET …          # replace the whole content
+cpb DROP ENV glm                # refused while a playbook or DEFAULTS uses it; the error lists them
 ```
 
-```text
-NAME              SET  UNSET  USED BY                DESCRIPTION
-----              ---  -----  -------                -----------
-glm                 6      0  router, sre            GLM 5.3 through the local router
-glm-flash *         6      0  -                      the cheap tier
-work                2      0  kommander              corporate account
-
-* registry default: applied under every playbook's own block.
-```
-
-`DESCRIPTION` gives up whatever width the terminal cannot spare, marked with an
-ellipsis — but only on a terminal. Pipe or redirect it and every row arrives
-whole, so `cpb env-profile | grep` never loses the end of a line.
-
-`--values` expands each profile: its description, then its keys.
-
-```text
-glm
-    GLM 5.3 through the local router
-    set    ANTHROPIC_AUTH_TOKEN  sk-3…df0b (35 chars)
-    set    ANTHROPIC_BASE_URL    http://proxy:1/v1
-    unset  CLAUDE_CODE_OAUTH_TOKEN
-```
-
-**Credential values are masked**, showing only the ends and the length — enough
-to tell one secret from another, which is usually why you are looking, without
-putting it on screen. Anything whose name looks like a credential (`*TOKEN*`,
-`*SECRET*`, `*PASSWORD*`, `*AUTH*`, `*_KEY`, …) is masked; a value too short to
-hide 8 characters is masked completely. `--reveal` prints them in full.
-
-That default is deliberate: profiles are exactly where credentials belong — cpb
-writes these files `0600` because of it, and a sandboxed launch pushes keys out
-of a playbook manifest *into* a profile — so a status display that printed
-values would be printing secrets into terminals and agent transcripts by
-default.
-
-A profile that a playbook names but that is missing, unreadable, or invalid
+A set that a playbook names but that is missing, unreadable or invalid
 **refuses the launch** rather than silently running without it: a dropped layer
 could send traffic to the wrong endpoint with the wrong credentials.
+
+## DEFAULTS: layers under every playbook
+
+`DEFAULTS` is an ordered list of env sets applied under every playbook's own
+layers, manifest or not, `start` included:
+
+```bash
+cpb ALTER DEFAULTS USE ENV claude-default          # the whole list
+cpb ALTER DEFAULTS ADD ENV metu-proxy              # append (or FIRST / BEFORE x / AFTER x)
+cpb ALTER DEFAULTS DROP ENV metu-proxy
+cpb SHOW DEFAULTS                                  # the list, and the secret helper
+```
+
+The list lives in `~/.claude-playbooks/.env-profiles/.default`, one name per
+line; a single-name file from an older cpb is read as a one-element list. An
+older cpb refuses a multi-line file rather than guess.
+
+## Secrets
+
+**A credential-looking literal is refused.** `SET` of a key that looks like a
+credential is refused, naming the key and never the value. The rule is the one
+the output uses for masking (case-insensitive): `TOKEN`, `SECRET`, `PASSWORD`,
+`PASSWD`, `PASSPHRASE` or `CREDENTIAL` anywhere in the name; `AUTH`, `PWD`,
+`PASS` or `PAT` as a whole `_`-separated word; or a word ending in `KEY`/`KEYS`
+unless a `PUBLIC`/`PUB` word says the material is public. A value that cannot
+be a secret passes: empty, an integer, or `true`/`false`, so
+`SET VAR MAX_THINKING_TOKENS=8000` works. Two ways through:
+
+- **By reference**, when a secret helper is configured:
+  ```bash
+  cpb ALTER DEFAULTS SET SECRET HELPER my-keychain-helper   # one command, no arguments
+  cpb ALTER ENV glm SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:9router'
+  ```
+  cpb stores the reference (`[refs]` in the set, `[env.refs]` in a manifest)
+  and never the value. The helper is asked `--check KEY=REF` when the statement
+  runs, and at launch cpb execs `<helper> KEY=REF … -- claude <args>`, so the
+  value exists only in that one process. `CPB_SECRET_HELPER` in the environment
+  overrides the stored setting. Without a helper, `SET … FROM` is refused, and
+  so is launching a playbook whose layers hold a reference.
+  `CLAUDE_CODE_OAUTH_TOKEN` never takes a reference: cpb reads its value itself.
+  A sandboxed launch of a playbook with references is refused in this release.
+- **As plain text, knowingly:** add `AS PLAINTEXT` to the `SET` clause.
+  `EXPLAIN` marks such an entry `(plaintext)`, and `SHOW CREATE` never carries
+  its value.
+
+**Output never prints a credential.** `SHOW` and `EXPLAIN` mask credential-looking
+values, showing only the ends and the length (`sk-a...7f2c (43 chars)`); a value
+too short to hide 8 characters is masked whole. A credential inside a connection
+URL is masked too, both halves of `user:password`, since a git remote often
+carries the token as the user name:
+
+```text
+DATABASE_URL  postgres://<redacted, 4 chars>:<redacted, 11 chars>@db.internal:5432/app
+```
+
+A credential in a query parameter (`?password=`) is not covered. The grammar has
+no `--reveal`; the older `env … --reveal` still exists.
 
 ## One launch only
 
@@ -237,7 +185,7 @@ Launch flags go before the playbook name, or right after it, and stop at the
 first argument that is not one of them; everything after that is `claude`'s:
 
 ```bash
-cpb run --env-profile work kommander                     # an existing profile, this launch only
+cpb run --env-profile work kommander                     # an existing env set, this launch only
 cpb run kommander --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
 cpb run --unset CLAUDE_CODE_OAUTH_TOKEN kommander        # this launch uses the stored login
 cpb run --env-file ./work-account.env kommander          # KEY=VALUE lines, dotenv style
@@ -245,101 +193,68 @@ cpb start --env-profile glm /tmp/scratch
 kommander --env-profile work -p "..."                    # launchers take them too, at the start
 ```
 
-They apply on top of the playbook's own block, in command-line order, and obey
-the same rules: `CLAUDE_CONFIG_DIR` refused, a missing profile refuses the
-launch, an unset of the token switches this launch to the stored login.
-`cpb run --help` lists them.
+They apply on top of the playbook's own layer, in command-line order, and obey
+the same rules: `CLAUDE_CONFIG_DIR` refused, a missing set refuses the launch, an
+unset of the token switches this launch to the stored login. `cpb run --help`
+lists them.
 
 ## The authentication case
 
-Unsetting or setting `CLAUDE_CODE_OAUTH_TOKEN` through an env block or profile
-changes which account a playbook runs as. The full decision and every mode are in
+Setting or blocking `CLAUDE_CODE_OAUTH_TOKEN` changes which account a playbook
+runs as. The full decision and every mode are in
 [Authentication](authentication.md).
 
 ## A caller-supplied config directory
 
-A playbook directory does two jobs at once. It is the playbook's **content** —
-`CLAUDE.md`, `settings.json`, `hooks/`, `skills/` — and it is where Claude Code
-writes its **state**: `.claude.json`, `sessions/`, `projects/`, `history.jsonl`,
-`cache/`. For one person on one playbook that is exactly right and invisible.
-
-If you want several sessions sharing one playbook's content while each keeps its
-own state, you already have two ways: run the same playbook from different
-working directories (transcripts split by directory, settings and login shared),
-or install the playbook twice (everything separate, at the cost of a copy).
-
-This variable is for the narrower case neither covers — when you want to build
-the config directory yourself and have a playbook launch bind it, without
-registering a playbook for it:
+A playbook directory is both its **content** (`CLAUDE.md`, `settings.json`,
+`hooks/`, `skills/`) and where Claude Code writes its **state** (`.claude.json`,
+`sessions/`, `projects/`, `history.jsonl`). To give several sessions one
+playbook's content but separate state, run it from different working
+directories, or install it twice. For the narrower case of binding a config
+directory you built yourself:
 
 ```bash
 CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb run kommander
 CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 k
 ```
 
-That directory becomes the launch's config directory. Authentication, credential
-sync and the manifest lookup all treat it exactly as they would a playbook's own,
-so it can hold its own login.
+That directory becomes the launch's config directory; authentication, credential
+sync and the manifest lookup treat it as they would the playbook's own.
 
-**You provision it.** `cpb` binds what you give it and creates nothing — a typo
-must not silently mint a fresh empty memory. Content is your job too: if the
-directory should expose the playbook's `CLAUDE.md`, `hooks/` or skills, put them
-there (a symlink farm is the usual answer). Note that a `settings.json` hook
-spelled `$CLAUDE_CONFIG_DIR/hooks/session-start.sh` will error at startup if the
-directory has no `hooks/`.
-
-The path must be absolute or `~`-prefixed. An empty value means unset.
-
-**A bare `CLAUDE_CONFIG_DIR` is ignored**, deliberately:
-
-```bash
-CLAUDE_CONFIG_DIR=~/somewhere k     # ignored; k runs the kommander playbook
-```
-
-If that variable were honoured, one stray `export` in a shell would silently
-redirect every launcher on your machine. The opt-in has its own name so it can
-only happen on purpose. `CLAUDE_CONFIG_DIR_OVERRIDE` is what you *request*;
-`CLAUDE_CONFIG_DIR` is what the session *receives*.
-
-**It does not travel.** `cpb` consumes the variable and strips it from the
-session, so an agent inside that runs `cpb run something-else` gets that
-playbook's own directory, not this one's. Setting it through a manifest, a
-profile, `--env` or `--env-file` is refused outright — from there it could never
-redirect the launch that declares it, only leak into the next one:
-
-```
-$ cpb run kommander --env CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1
-Error: CLAUDE_CONFIG_DIR_OVERRIDE is managed by claude-playbook and cannot be overridden
-```
-
-One exception worth knowing: if you `export` it in your shell rather than
-setting it for one command, it stays in that shell — nothing can un-export a
-parent's variable — so every launch from there honours it until you unset it.
-
-**Not with `--sandbox`.** A sandbox mounts the config directory, and the backend
-mounts directories, so symlinked content dangles inside. The combination is
-refused rather than half-supported.
-
-**`cpb start` ignores it, and says so.** `start` already names its own config
-directory on the command line, and the command line outranks the environment:
-
-```
-$ CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb start /tmp/scratch
-CLAUDE_CONFIG_DIR_OVERRIDE ignored: start uses the directory you named, /tmp/scratch
-```
-
-You get the notice because the variable is consumed either way — without it,
-"ignored" and "honoured" would look identical from the outside. It stays quiet
-when the override names the same directory you passed, since then nothing was
-ignored. A malformed override is reported here too, as a warning: the session
-still runs, on the path you gave.
+- **You provision it.** cpb creates nothing, so a typo cannot mint an empty
+  memory. If it should expose the playbook's `CLAUDE.md`, `hooks/` or skills,
+  put them there (a symlink farm is the usual answer).
+- The path must be absolute or `~`-prefixed; an empty value means unset.
+- **A bare `CLAUDE_CONFIG_DIR` is ignored**, so one stray `export` cannot
+  redirect every launcher on the machine.
+- **It does not travel.** cpb strips it from the session, and setting it
+  through a manifest, an env set, `--env` or `--env-file` is refused. An
+  `export` in your shell stays in that shell until you unset it.
+- **Not with `--sandbox`**: symlinked content would dangle inside the VM.
+- **`cpb start` ignores it, and says so**, because `start` names its own
+  directory on the command line.
 
 ## What stays yours
 
-The block and the profiles are **install-local**, like `alias`. `update` keeps
-your block and ignores one the source ships, and the source's block is never
-live, not even during the update; `install` drops a source-shipped block with a
-note; nothing ships profiles and `update` never touches their directory. A shared
-playbook repository cannot redirect your API endpoint or strip your
-authentication by publishing a manifest. Manifests holding `set` values are
-written `0600`; a file's mode is never loosened by a rewrite.
+Env blocks and env sets are **install-local**, like the launcher. `update` keeps
+your block and ignores one the source ships; `install` drops a source-shipped
+block with a note; nothing ships env sets and `update` never touches their
+directory. A shared playbook repository cannot redirect your API endpoint or
+strip your authentication by publishing a manifest. Manifests holding values
+are written `0600`; a file's mode is never loosened by a rewrite.
+
+## Older commands
+
+`env` and `env-profile` still work, with their flags, and write the same files. They are hidden from help, and on a terminal each prints one stderr line naming its statement.
+The statement for each:
+
+| Older | Statement |
+|---|---|
+| `env <n> set K=V` / `unset K` / `clear K` | `ALTER PLAYBOOK <n> SET VAR K=V` / `BLOCK VAR K` / `UNSET VAR K` |
+| `env <n> use P` / `unuse P` | `ALTER PLAYBOOK <n> ADD ENV P` / `DROP ENV P` |
+| `env <n>` | `EXPLAIN PLAYBOOK <n>` |
+| `env-profile P set K=V` / `unset K` / `clear K` | `ALTER ENV P SET K=V` / `BLOCK K` / `UNSET K` (`CREATE ENV` when new) |
+| `env-profile P describe TEXT` | `ALTER ENV P DESCRIBE 'TEXT'` |
+| `env-profile P default` / `undefault` | `ALTER DEFAULTS USE ENV P` / `DROP ENV P` |
+| `env-profile P delete` | `DROP ENV P` |
+| `env-profile [--values]` | `SHOW ENVS` |

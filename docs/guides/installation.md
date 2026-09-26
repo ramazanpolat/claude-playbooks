@@ -85,7 +85,7 @@ claude-playbooks is a Nix flake, so a [devbox](https://www.jetify.com/devbox)
 project pins it like any other package (v3.18.0 or later):
 
 ```bash
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook"
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.20.0#claude-playbook"
 devbox run -- cpb --version
 ```
 
@@ -97,7 +97,7 @@ one a `devbox run` command. A `devbox.json` like this:
 ```json
 {
   "packages": [
-    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook",
+    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.20.0#claude-playbook",
     "claude-code@latest"
   ],
   "env": {
@@ -137,8 +137,8 @@ enables them for one command, or set `experimental-features = nix-command flakes
 in `nix.conf`:
 
 ```bash
-nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook" -- --version
-nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.19.0#claude-playbook"
+nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.20.0#claude-playbook" -- --version
+nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.20.0#claude-playbook"
 ```
 
 (`nix profile add` is the current name; older Nix versions call it `nix profile install`.)
@@ -147,7 +147,7 @@ devbox needs none of this: it enables flakes itself.
 ### Notes
 
 - **Use the `git+https:` form shown here.** The shorter
-  `github:ramazanpolat/claude-playbooks/v3.19.0#claude-playbook` also works, but it
+  `github:ramazanpolat/claude-playbooks/v3.20.0#claude-playbook` also works, but it
   is resolved through GitHub's API, which rate-limits unauthenticated callers per
   IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
   it only with a GitHub token configured for Nix (`access-tokens`) or on a

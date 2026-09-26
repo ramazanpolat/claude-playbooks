@@ -1,8 +1,9 @@
-# CLI grammar — spec (draft)
+# CLI grammar
 
-Status: **agreed 2026-09-26; implementation in progress (phase 1, the
-parser). Ships as v3.20.0.** Decided with the pilot on 2026-09-25/26; no
-open points remain.
+Status: **implemented, v3.20.0.** Decided with the pilot on 2026-09-25/26.
+`SELECT` is not planned: it is superseded by the `--json` + clickhouse-local
+recipe ([guide](../guides/query-with-sql.md)); everything else on this page
+is built.
 
 ## Why
 
@@ -63,8 +64,8 @@ here reads, writes or calls anything of pilot-profile's.
 ## Grammar
 
 ```
-command    := write | read | select | APPLY <file> [<file> ...] [--dry-run] [--yes]
-                                           select: v3.21.0, see SELECT
+command    := write | read | APPLY <file> [<file> ...] [--dry-run] [--yes]
+                                           (select: not planned, see SELECT)
 
 write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
@@ -572,9 +573,16 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 
 `layer.kind` is `DEFAULTS` (with `name` the env set), `ENV` or `PLAYBOOK`.
 
-## SELECT (v3.21.0)
+## SELECT (not planned)
 
-Decided with the pilot on 2026-09-26; implemented after v3.20.0 ships.
+**Not planned; superseded by the `--json` + clickhouse-local recipe (pilot,
+2026-09-26):** `cpb SHOW … --json | ch local --input-format JSONEachRow -q
+"SELECT … FROM table"` gives the whole of ClickHouse's SQL over the same
+state ([guide](../guides/query-with-sql.md)). `--json` stays the contract.
+The text below is kept as the record of what was specified.
+
+(Historical: it was decided with the pilot on 2026-09-26 and planned for the
+release after v3.20.0, then withdrawn the same day.)
 `SELECT` queries the same state `SHOW` prints, as tables. **Files stay the
 only store:** each query builds its tables from the playbooks, env sets and
 DEFAULTS as they are on disk at that moment, and nothing is cached or kept.
@@ -696,8 +704,8 @@ files. It is not added because it would be easy.
 
 ## INCLUDE
 
-Decided with the pilot on 2026-09-26; built with "Plugins and the agent",
-in the release after v3.20.0. A
+Decided with the pilot on 2026-09-26; ships in v3.20.0 with "Plugins and
+the agent". A
 playbook file can pull in another, so one machine's file can share a base
 with the next:
 
@@ -754,8 +762,7 @@ time; anything more needs the pilot's explicit approval first.
 
 ## Plugins and the agent
 
-Decided with the pilot on 2026-09-26, for the release after v3.20.0 (before
-`SELECT`). The goal it serves: a playbook built by stacking playbook files,
+Decided with the pilot on 2026-09-26; ships in v3.20.0. The goal it serves: a playbook built by stacking playbook files,
 for example Kommander as a plugin and an agent on a bare playbook:
 
 ```
@@ -894,8 +901,8 @@ playbook's `settings.json` as Claude Code wrote it and run nothing.
 agent the playbook pins, `Agent: kommander (playbook settings)`; with no pin
 and plugins enabled, it says that a plugin may name one (cpb does not read
 the plugins' own files). `SHOW CREATE` writes the clauses, so a
-playbook's plugins and agent travel in its playbook file. `SELECT` sees the
-fields on `PLAYBOOKS` when it lands (the *Tables* list includes them).
+playbook's plugins and agent travel in its playbook file. The fields are in
+`SHOW PLAYBOOK --json`, so the SQL recipe sees them.
 
 **INCLUDE** is specified in its own section and built in the same
 release, so the stacked files above run with one `cpb APPLY chaos.cpb`.

@@ -1,0 +1,9 @@
+-- DEFAULTS: env sets applied under every playbook, in order, below each
+-- playbook's own sets and variables.
+CREATE OR REPLACE ENV no-proxy
+  BLOCK HTTP_PROXY HTTPS_PROXY;
+
+CREATE OR REPLACE ENV thinking
+  SET MAX_THINKING_TOKENS=8000;
+
+ALTER DEFAULTS USE ENV no-proxy thinking;
