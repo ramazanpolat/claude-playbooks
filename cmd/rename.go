@@ -21,6 +21,7 @@ var (
 )
 
 var renameCmd = &cobra.Command{
+	Hidden:            true, // pre-grammar fallback: docs/reference/cli-grammar.md
 	Use:               "rename <old-name> <new-name>",
 	Short:             "Rename a top-level playbook",
 	Args:              cobra.ExactArgs(2),

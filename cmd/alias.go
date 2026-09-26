@@ -16,8 +16,9 @@ import (
 var aliasRemove bool
 
 var aliasCmd = &cobra.Command{
-	Use:   "alias [name] [alias]",
-	Short: "Show or manage playbook aliases",
+	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
+	Use:    "alias [name] [alias]",
+	Short:  "Show or manage playbook aliases",
 	Long: `A playbook is addressed by its directory name and, optionally, one alias —
 an alternate command name recorded in its .playbook manifest and
 materialized as a launcher command.

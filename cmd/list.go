@@ -13,10 +13,11 @@ import (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list [prefix]",
-	Short: "List all playbooks (optionally filtered by prefix)",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runList,
+	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
+	Use:    "list [prefix]",
+	Short:  "List all playbooks (optionally filtered by prefix)",
+	Args:   cobra.MaximumNArgs(1),
+	RunE:   runList,
 }
 
 func runList(cmd *cobra.Command, args []string) error {

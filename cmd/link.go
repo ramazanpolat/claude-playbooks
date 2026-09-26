@@ -22,10 +22,11 @@ var (
 )
 
 var linkCmd = &cobra.Command{
-	Use:   "link <target>",
-	Short: "Symlink an external directory into the playbooks root",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runLink,
+	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
+	Use:    "link <target>",
+	Short:  "Symlink an external directory into the playbooks root",
+	Args:   cobra.ExactArgs(1),
+	RunE:   runLink,
 }
 
 func init() {
