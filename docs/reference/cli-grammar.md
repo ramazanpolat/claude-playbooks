@@ -185,8 +185,8 @@ lists the users.
 Clauses in one command apply **atomically**: all or none, validated before
 anything is written. Validation includes the secret helper's check for
 every `SET … FROM` (see Secrets). The exception is the clauses that run
-Claude Code's own commands, the marketplace, plugin and (planned) MCP server
-clauses: they run in order, the first failure stops the statement and names
+Claude Code's own commands or change files under the playbook, the
+marketplace, plugin, MCP server and skill clauses: they run in order, the first failure stops the statement and names
 what already ran, and running it again finishes it (see "Plugins and the
 agent", and "An agent's configuration" for replacing an MCP server).
 
@@ -1193,8 +1193,14 @@ The source is recorded in the manifest, `[skills.<name>]` (`source`, `branch`,
 
 - `DROP SKILL` removes only a skill cpb recorded, and refuses a
   `skills/<name>` it did not put there.
+- Each skill is recorded as soon as it is in place, so a statement that
+  stops at a failed skill leaves the finished ones recorded, and running it
+  again finishes the rest.
+- A skill name in the manifest is held to the grammar's rule when the
+  manifest is read: a record cannot name a path outside `skills/`.
 - `cpb update <playbook>` overlays the entries the playbook's source ships,
-  which can replace `skills/` as a whole; it restores every recorded skill afterwards
+  which can replace `skills/` as a whole; it restores every recorded skill afterwards,
+  and a recorded skill wins over a skill of the same name the source ships
   (re-links it, or re-copies it from its source).
 - `SHOW CREATE` writes the recorded skills, and `SHOW PLAYBOOK --json` gains
   `"skills"`.

@@ -580,13 +580,33 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	if err == nil && skills != nil {
+		// Each operation is recorded as soon as it is done, so a failure
+		// leaves every finished skill recorded (a later DROP SKILL still
+		// owns it) and running the statement again finishes the rest.
+		cur := cloneSkills(beforeSkills)
 		for _, op := range skills.ops {
 			if err = op.do(); err != nil {
 				break
 			}
 			lines = append(lines, op.line)
+			if op.rec == nil {
+				delete(cur, op.name)
+			} else {
+				if cur == nil {
+					cur = map[string]*manifest.SkillRecord{}
+				}
+				c := *op.rec
+				cur[op.name] = &c
+			}
+			m.Skills = cloneSkills(cur)
+			if werr := manifest.Write(pb.RootPath, m); werr != nil {
+				err = fmt.Errorf("cannot record skill %s: %w", op.name, werr)
+				break
+			}
 		}
-		if err == nil && !reflect.DeepEqual(beforeSkills, afterSkills) {
+		if err == nil && !reflect.DeepEqual(cloneSkills(m.Skills), afterSkills) {
+			// Records that change without a file operation (a DROP of a
+			// skill already gone).
 			m.Skills = afterSkills
 			if werr := manifest.Write(pb.RootPath, m); werr != nil {
 				err = fmt.Errorf("cannot record the skills: %w", werr)

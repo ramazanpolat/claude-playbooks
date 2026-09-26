@@ -391,6 +391,22 @@ func Exists(dir string) bool {
 // validate checks structural invariants. Path existence is checked by callers
 // that have access to the playbook directory.
 func (m *Manifest) validate(path string) error {
+	// Record names become path segments (skills/<name>) and command
+	// arguments: a name from a hand-written or source-shipped manifest is
+	// held to the same rule the grammar applies, never trusted.
+	for name, r := range m.Skills {
+		if ValidateProfileName(name) != nil {
+			return fmt.Errorf("invalid %s at %s: [skills] entry %q is not a valid skill name", FileName, path, name)
+		}
+		if r != nil && r.Mode != "link" && r.Mode != "copy" {
+			return fmt.Errorf("invalid %s at %s: [skills.%s] mode must be \"link\" or \"copy\"", FileName, path, name)
+		}
+	}
+	for name := range m.MCP {
+		if ValidateProfileName(name) != nil {
+			return fmt.Errorf("invalid %s at %s: [mcp] entry %q is not a valid MCP server name", FileName, path, name)
+		}
+	}
 	if m.Sandbox != nil {
 		if err := m.Sandbox.validate(); err != nil {
 			return fmt.Errorf("invalid %s at %s: %w", FileName, path, err)

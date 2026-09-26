@@ -145,3 +145,63 @@ func TestUpdateKeepsRecordsAndRestoresSkills(t *testing.T) {
 		t.Fatal("the source's own skill is missing")
 	}
 }
+
+// A manifest record cannot name a path outside skills/.
+func TestSkillRecordNameValidated(t *testing.T) {
+	dir := t.TempDir()
+	bad := "version = \"0.1.0\"\nname = \"k\"\n\n[skills.\"../../victim\"]\nsource = \"/x\"\nmode = \"copy\"\n"
+	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manifest.Read(dir); err == nil || !strings.Contains(err.Error(), "not a valid skill name") {
+		t.Fatalf("a traversing record name was accepted: %v", err)
+	}
+}
+
+// A statement that stops at a failed skill keeps the finished ones recorded.
+func TestSkillFailureKeepsEarlierRecorded(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "k")
+	src, _ := filepath.EvalSymlinks(makeSkill(t, filepath.Join(t.TempDir(), "a")))
+	missing := "file://" + filepath.Join(t.TempDir(), "no-such-repo")
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD SKILL a FROM "+src+" ADD SKILL b FROM "+missing); err == nil {
+		t.Fatal("the failing clone was not reported")
+	}
+	m, _ := manifest.Read(root)
+	if m == nil || m.Skills["a"] == nil || m.Skills["b"] != nil {
+		t.Fatalf("records after a partial statement: %+v", m)
+	}
+	mustStmt(t, "ALTER PLAYBOOK k DROP SKILL a")
+}
+
+// After an update whose source ships a skill of the same name, the
+// recorded skill is the one in place.
+func TestUpdateRecordedSkillWinsOverShipped(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "source")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	makeSkill(t, filepath.Join(source, "skills", "mine"))
+	if err := manifest.Write(source, &manifest.Manifest{Version: "2.0.0", Name: "pb"}); err != nil {
+		t.Fatal(err)
+	}
+	skill, _ := filepath.EvalSymlinks(makeSkill(t, filepath.Join(root, "mine")))
+	if err := os.MkdirAll(filepath.Join(installed, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(skill, filepath.Join(installed, "skills", "mine")); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(installed, &manifest.Manifest{Version: "1.0.0", Name: "pb", Source: &manifest.Source{Repository: source},
+		Skills: map[string]*manifest.SkillRecord{"mine": {Source: skill, Mode: "link"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateOnePlaybook("pb", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(filepath.Join(installed, "skills", "mine")); err != nil || got != skill {
+		t.Fatalf("the recorded skill did not win: %q %v", got, err)
+	}
+}

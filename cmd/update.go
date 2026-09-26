@@ -249,6 +249,14 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 	}
 
 	fmt.Fprintf(w, "Updating %s from %s...\n", name, pb.Manifest.Source.Repository)
+	// The skills the source ships, before the overlay moves them: a
+	// recorded skill of the same name is put back over them.
+	shipped := map[string]bool{}
+	if entries, derr := os.ReadDir(filepath.Join(work, "skills")); derr == nil {
+		for _, e := range entries {
+			shipped[e.Name()] = true
+		}
+	}
 	backupPath, err := overlaySource(work, root, preserve)
 	if err != nil {
 		return err
@@ -259,7 +267,7 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 	// The overlay can replace skills/ as a whole: put back the skills
 	// statements added (docs/reference/cli-grammar.md, "Skills").
 	if updated.Skills != nil {
-		if err := restoreSkills(w, pb.Path, updated.Skills); err != nil {
+		if err := restoreSkills(w, pb.Path, updated.Skills, shipped); err != nil {
 			return fmt.Errorf("%q is updated, but restoring its skills failed: %w (run its ADD SKILL statements again)", name, err)
 		}
 	}

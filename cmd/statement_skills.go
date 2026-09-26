@@ -29,11 +29,14 @@ func skillClauses(clauses []grammar.Clause) bool {
 	return false
 }
 
-// skillOp is one file operation a statement makes under skills/.
+// skillOp is one file operation a statement makes under skills/, and the
+// record it leaves once done (rec nil: the record is forgotten).
 type skillOp struct {
 	what string       // what a dry run reports
 	line string       // the report line once done
 	do   func() error // the operation
+	name string
+	rec  *manifest.SkillRecord
 }
 
 type skillPlan struct {
@@ -77,7 +80,13 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 		}
 		return rec[name]
 	}
+	// What the statement's own earlier clauses leave, then what earlier
+	// statements of a dry run left, then the disk.
+	planned := map[string]bool{}
 	exists := func(name string) bool {
+		if present, ok := planned[name]; ok {
+			return present
+		}
 		if present, ok := known[name]; ok {
 			return present
 		}
@@ -113,11 +122,13 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 					return nil, fmt.Errorf("ADD SKILL %s: %s is not a skill: it has no SKILL.md", name, dir)
 				}
 			}
+			already := old != nil && *old == *want && exists(name) && (want.Mode != "link" || linkPointsTo(configDir, name, want.Source))
 			p.records[name] = want
-			if old != nil && *old == *want && exists(name) && (want.Mode != "link" || linkPointsTo(configDir, name, want.Source)) {
-				continue // already true
+			planned[name] = true
+			if already {
+				continue
 			}
-			op := skillOp{line: "skill     " + name + " (" + want.Mode + " of " + want.Source + ")"}
+			op := skillOp{name: name, rec: want, line: "skill     " + name + " (" + want.Mode + " of " + want.Source + ")"}
 			if want.Mode == "link" {
 				op.what = "link skills/" + name + " to " + want.Source
 			} else {
@@ -137,10 +148,12 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 				continue
 			}
 			p.records[name] = nil
-			if !exists(name) {
+			present := exists(name)
+			planned[name] = false
+			if !present {
 				continue
 			}
-			op := skillOp{what: "remove skills/" + name, line: "dropped   skill " + name}
+			op := skillOp{name: name, what: "remove skills/" + name, line: "dropped   skill " + name}
 			if configDir != "" {
 				op.do = func() error { return removeSkill(configDir, name, old) }
 			}
@@ -227,8 +240,10 @@ func removeSkill(configDir, name string, old *manifest.SkillRecord) error {
 }
 
 // restoreSkills puts back every recorded skill after an update's overlay:
-// a link is re-made, a copy refreshed from its source.
-func restoreSkills(w io.Writer, configDir string, records map[string]*manifest.SkillRecord) error {
+// a link is re-made, a copy refreshed from its source. shipped names the
+// skills the source itself ships: the overlay just put those there, and a
+// recorded skill of the same name wins over them.
+func restoreSkills(w io.Writer, configDir string, records map[string]*manifest.SkillRecord, shipped map[string]bool) error {
 	names := make([]string, 0, len(records))
 	for n, r := range records {
 		if r != nil {
@@ -241,9 +256,18 @@ func restoreSkills(w io.Writer, configDir string, records map[string]*manifest.S
 		if r.Mode == "link" && linkPointsTo(configDir, n, r.Source) {
 			continue
 		}
-		// What the overlay left there is replaced only if it is cpb's kind
-		// of entry; anything else is refused, as ADD SKILL would.
-		if err := putSkill(configDir, n, r, r); err != nil {
+		old := r
+		if shipped[n] {
+			// The source's own skills/<name>, laid down by the overlay: it
+			// gives way to the recorded one.
+			if err := os.RemoveAll(skillPath(configDir, n)); err != nil {
+				return err
+			}
+			old = nil
+		}
+		// Anything else in the way is refused unless it is cpb's kind of
+		// entry, as ADD SKILL would refuse it.
+		if err := putSkill(configDir, n, old, r); err != nil {
 			return err
 		}
 		fmt.Fprintf(w, "Restored skill %s (%s of %s)\n", n, r.Mode, r.Source)
