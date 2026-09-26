@@ -28,6 +28,9 @@ const (
 	keyMarketplaces = "extraKnownMarketplaces"
 	keyPlugins      = "enabledPlugins"
 	keyAgent        = "agent"
+	keyModel        = "model"
+	keyStatusline   = "statusLine"
+	keyPermissions  = "permissions"
 )
 
 type marketplaceJSON struct {
@@ -45,7 +48,9 @@ func pluginClauses(clauses []grammar.Clause) bool {
 	for _, c := range clauses {
 		switch c.Kind {
 		case grammar.AddMarketplace, grammar.DropMarketplace, grammar.AddPlugin,
-			grammar.DropPlugin, grammar.SetAgent, grammar.UnsetAgent:
+			grammar.DropPlugin, grammar.SetAgent, grammar.UnsetAgent,
+			grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool,
+			grammar.SetStatusline, grammar.UnsetStatusline, grammar.SetModel, grammar.UnsetModel:
 			return true
 		}
 	}
@@ -393,28 +398,110 @@ func directoryMarketplaceName(dir string) (string, error) {
 	return m.Name, nil
 }
 
-// applyAgent applies SET AGENT / UNSET AGENT to a loaded settings.json and
-// reports whether it changed.
-func applyAgent(f *settings.File, clauses []grammar.Clause) ([]string, bool, error) {
+// applySettings applies the clauses that are one key of the playbook's
+// settings.json (Claude Code has no CLI for them): the agent, tool
+// permissions, the status line and the model. It reports whether anything
+// changed; every other key, and the order of keys, is kept.
+func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, error) {
 	var lines []string
 	changed := false
+	setString := func(key, value, label string) error {
+		var cur string
+		if ok, _ := f.Root.Get(key, &cur); ok && cur == value {
+			return nil
+		}
+		if err := f.Root.Set(key, value); err != nil {
+			return err
+		}
+		changed = true
+		lines = append(lines, label+value)
+		return nil
+	}
+	unset := func(key, label string) {
+		if f.Root.Delete(key) {
+			changed = true
+			lines = append(lines, "unset     "+label)
+		}
+	}
 	for _, c := range clauses {
 		switch c.Kind {
 		case grammar.SetAgent:
-			var cur string
-			if ok, _ := f.Root.Get(keyAgent, &cur); ok && cur == c.Arg {
-				continue
-			}
-			if err := f.Root.Set(keyAgent, c.Arg); err != nil {
+			if err := setString(keyAgent, c.Arg, "agent     "); err != nil {
 				return nil, false, err
 			}
-			changed = true
-			lines = append(lines, "agent     "+c.Arg)
 		case grammar.UnsetAgent:
-			if f.Root.Delete(keyAgent) {
-				changed = true
-				lines = append(lines, "unset     agent")
+			unset(keyAgent, "agent")
+		case grammar.SetModel:
+			if err := setString(keyModel, c.Arg, "model     "); err != nil {
+				return nil, false, err
 			}
+		case grammar.UnsetModel:
+			unset(keyModel, "model")
+		case grammar.SetStatusline:
+			sl, err := f.Root.Object(keyStatusline)
+			if err != nil {
+				return nil, false, err
+			}
+			var typ, cmd string
+			_, _ = sl.Get("type", &typ)
+			_, _ = sl.Get("command", &cmd)
+			if typ == "command" && cmd == c.Arg {
+				continue
+			}
+			_ = sl.Set("type", "command")
+			_ = sl.Set("command", c.Arg)
+			f.Root.SetObject(keyStatusline, sl)
+			changed = true
+			lines = append(lines, "statusline "+c.Arg)
+		case grammar.UnsetStatusline:
+			unset(keyStatusline, "statusline")
+		case grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool:
+			perms, err := f.Root.Object(keyPermissions)
+			if err != nil {
+				return nil, false, err
+			}
+			var allow, deny []string
+			if _, err := perms.Get("allow", &allow); err != nil {
+				return nil, false, fmt.Errorf("%s.allow: %w", keyPermissions, err)
+			}
+			if _, err := perms.Get("deny", &deny); err != nil {
+				return nil, false, fmt.Errorf("%s.deny: %w", keyPermissions, err)
+			}
+			a0, d0 := slices.Clone(allow), slices.Clone(deny)
+			for _, r := range c.Names {
+				allow = slices.DeleteFunc(allow, func(x string) bool { return x == r && c.Kind != grammar.AllowTool })
+				deny = slices.DeleteFunc(deny, func(x string) bool { return x == r && c.Kind != grammar.DenyTool })
+				switch c.Kind {
+				case grammar.AllowTool:
+					if !slices.Contains(allow, r) {
+						allow = append(allow, r)
+						lines = append(lines, "allow     "+r)
+					}
+				case grammar.DenyTool:
+					if !slices.Contains(deny, r) {
+						deny = append(deny, r)
+						lines = append(lines, "deny      "+r)
+					}
+				default:
+					if slices.Contains(a0, r) || slices.Contains(d0, r) {
+						lines = append(lines, "unset     tool "+r)
+					}
+				}
+			}
+			if slices.Equal(a0, allow) && slices.Equal(d0, deny) {
+				continue
+			}
+			setList := func(key string, v []string) {
+				if len(v) == 0 {
+					perms.Delete(key)
+				} else {
+					_ = perms.Set(key, v)
+				}
+			}
+			setList("allow", allow)
+			setList("deny", deny)
+			f.Root.SetObject(keyPermissions, perms)
+			changed = true
 		}
 	}
 	return lines, changed, nil
@@ -532,6 +619,19 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 	default:
 		comments = append(comments, "-- the agent in "+settings.FileName+" is not a name the grammar writes; not written")
 	}
+	tools, statusline, model := settingsExtras(root)
+	if len(tools.Allow) > 0 {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.AllowTool, Names: tools.Allow})
+	}
+	if len(tools.Deny) > 0 {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.DenyTool, Names: tools.Deny})
+	}
+	if statusline != nil {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetStatusline, Arg: *statusline})
+	}
+	if model != nil && *model != "" && !strings.ContainsAny(*model, " \t\r\n") {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetModel, Arg: *model})
+	}
 	text := strings.Join(comments, "\n")
 	if len(alter.Clauses) > 0 {
 		if text != "" {
@@ -540,4 +640,42 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 		text += alter.Pretty() + ";"
 	}
 	return text, nil
+}
+
+// toolsJSON is a playbook's tool permissions as SHOW prints them.
+type toolsJSON struct {
+	Allow []string `json:"allow"`
+	Deny  []string `json:"deny"`
+}
+
+// settingsExtras reads the keys cpb writes besides the agent: tool
+// permissions, the status line command (nil unless it is a command status
+// line) and the model.
+func settingsExtras(root *settings.Object) (toolsJSON, *string, *string) {
+	t := toolsJSON{Allow: []string{}, Deny: []string{}}
+	if perms, err := root.Object(keyPermissions); err == nil {
+		_, _ = perms.Get("allow", &t.Allow)
+		_, _ = perms.Get("deny", &t.Deny)
+		if t.Allow == nil {
+			t.Allow = []string{}
+		}
+		if t.Deny == nil {
+			t.Deny = []string{}
+		}
+	}
+	var statusline *string
+	if sl, err := root.Object(keyStatusline); err == nil {
+		var typ, cmd string
+		_, _ = sl.Get("type", &typ)
+		_, _ = sl.Get("command", &cmd)
+		if typ == "command" && cmd != "" {
+			statusline = &cmd
+		}
+	}
+	var model *string
+	var m string
+	if ok, err := root.Get(keyModel, &m); ok && err == nil {
+		model = &m
+	}
+	return t, statusline, model
 }

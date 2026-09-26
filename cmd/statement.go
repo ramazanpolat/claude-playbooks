@@ -435,16 +435,14 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		} else if sf, err = settings.Load(cfg); err != nil {
 			return err
 		}
-		if r.dry != nil { // the agent as earlier statements of the dry run left it
-			if a, ok := r.dry.agents[st.Name]; ok {
-				if a == nil {
-					sf.Root.Delete(keyAgent)
-				} else if err := sf.Root.Set(keyAgent, *a); err != nil {
+		if r.dry != nil { // settings.json as earlier statements of the dry run left it
+			if raw, ok := r.dry.settings[st.Name]; ok {
+				if sf.Root, err = settings.ParseObject(raw); err != nil {
 					return err
 				}
 			}
 		}
-		if agentLines, agentChange, err = applyAgent(sf, st.Clauses); err != nil {
+		if agentLines, agentChange, err = applySettings(sf, st.Clauses); err != nil {
 			return err
 		}
 	}
@@ -523,12 +521,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 		if agentChange && r.dry != nil {
-			var a string
-			if ok, _ := sf.Root.Get(keyAgent, &a); ok {
-				r.dry.agents[st.Name] = &a
-			} else {
-				r.dry.agents[st.Name] = nil
-			}
+			r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
 		}
 		if len(steps) > 0 {
 			var cmds []string
@@ -564,7 +557,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if sf, err = settings.Load(pb.Path); err != nil {
 			return err
 		}
-		if _, _, err := applyAgent(sf, st.Clauses); err != nil {
+		if _, _, err := applySettings(sf, st.Clauses); err != nil {
 			return err
 		}
 		if err := sf.Write(); err != nil {
