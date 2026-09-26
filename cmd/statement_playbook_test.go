@@ -9,6 +9,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 func TestStatementCreateAndDropPlaybook(t *testing.T) {
@@ -122,5 +123,52 @@ func TestStatementRenameAndAlias(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "newer")); !os.IsNotExist(err) {
 		t.Fatal("the refused statement renamed")
+	}
+}
+
+// A playbook has one launcher, its alias or its name. NO ALIAS removes the
+// name launcher too; ALIAS <its name> retires the alias it replaces.
+func TestStatementLauncherIsOneOrNone(t *testing.T) {
+	sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	has := func(cmd string) bool {
+		_, exists, _ := launcher.Lookup(config.LauncherDir, cmd)
+		return exists
+	}
+	mustStmt(t, "CREATE PLAYBOOK plain")
+	if !has("plain") {
+		t.Fatal("the name launcher was not written")
+	}
+	mustStmt(t, "ALTER PLAYBOOK plain NO ALIAS")
+	if has("plain") {
+		t.Fatal("NO ALIAS kept the name launcher")
+	}
+
+	mustStmt(t, "ALTER PLAYBOOK plain ALIAS pl")
+	mustStmt(t, "ALTER PLAYBOOK plain ALIAS plain")
+	if has("pl") || !has("plain") {
+		t.Fatalf("ALIAS <name> over alias pl: pl=%v plain=%v", has("pl"), has("plain"))
+	}
+	if pb, _ := playbook.Require(config.ResolvePlaybooksDir(), "plain"); pb.Alias() != "" {
+		t.Fatalf("the replaced alias is still recorded: %q", pb.Alias())
+	}
+}
+
+// DROP IF EXISTS is a no-op only when the playbook is not there; a registry
+// that cannot be read is an error.
+func TestStatementDropIfExistsKeepsDiscoveryErrors(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "target", &manifest.Manifest{})
+	if err := os.MkdirAll(filepath.Join(root, "broken"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "broken", manifest.FileName), []byte("not = [toml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stmt(t, "DROP PLAYBOOK IF EXISTS target --yes"); err == nil {
+		t.Fatal("a discovery error became nothing to drop")
+	}
+	if _, err := os.Stat(filepath.Join(root, "target")); err != nil {
+		t.Fatalf("target: %v", err)
 	}
 }

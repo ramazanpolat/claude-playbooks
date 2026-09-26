@@ -58,7 +58,11 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 
 func createPlaybookStatement(st *grammar.Stmt) error {
 	if st.IfNotExists {
-		if _, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name); err == nil {
+		pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
+		if err != nil { // discovery failed: whether it exists is unknown
+			return err
+		}
+		if pb != nil {
 			fmt.Printf("PLAYBOOK %s already exists; unchanged\n", st.Name)
 			return nil
 		}
@@ -89,7 +93,13 @@ func createPlaybookStatement(st *grammar.Stmt) error {
 
 func dropPlaybookStatement(st *grammar.Stmt) error {
 	if st.IfExists {
-		if _, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name); err != nil {
+		// Only a playbook that is not there is a no-op; a registry that
+		// cannot be read is an error, never "nothing to drop".
+		pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
+		if err != nil {
+			return err
+		}
+		if pb == nil {
 			fmt.Printf("No playbook %s; nothing to drop\n", st.Name)
 			return nil
 		}
@@ -119,8 +129,38 @@ func alterPlaybookLifecycle(st *grammar.Stmt) error {
 	if rename != "" {
 		return doRename(renameOpts{alias: alias, noAlias: noAlias}, []string{st.Name, rename})
 	}
+	pb, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name)
+	if err != nil {
+		return err
+	}
 	if noAlias {
-		return doAlias(aliasOpts{remove: true}, []string{st.Name})
+		// A playbook has one launcher: its alias, or its name. NO ALIAS
+		// removes whichever it is (the hidden dealias clears an alias only).
+		if pb.Alias() != "" {
+			if err := doAlias(aliasOpts{remove: true}, []string{st.Name}); err != nil {
+				return err
+			}
+		}
+		return retireNameLauncher(st.Name)
+	}
+	// ALIAS <its own name> makes the name the launcher: the alias it
+	// replaces is cleared and its launcher retired first (the hidden
+	// command's same spelling only repairs the name launcher).
+	if alias == st.Name && pb.Alias() != "" {
+		if err := doAlias(aliasOpts{remove: true}, []string{st.Name}); err != nil {
+			return err
+		}
 	}
 	return doAlias(aliasOpts{}, []string{st.Name, alias})
+}
+
+// retireNameLauncher removes the launcher named after a playbook, when cpb
+// wrote it and no other playbook answers to that command.
+func retireNameLauncher(name string) error {
+	unlock, err := lockRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return retireAliasLauncher(name, name)
 }
