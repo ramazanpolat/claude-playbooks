@@ -46,7 +46,7 @@ func skillPath(configDir, name string) string {
 	return filepath.Join(configDir, "skills", name)
 }
 
-func expandHome(p string) (string, error) {
+func expandSkillPath(p string) (string, error) {
 	if strings.HasPrefix(p, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -105,7 +105,7 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 			want := &manifest.SkillRecord{Source: c.Skill.From, Branch: c.Skill.Branch, Subdir: c.Skill.Subdir, Mode: "copy"}
 			if kind == grammar.SkillDirectory {
 				want.Mode = "link"
-				dir, err := expandHome(c.Skill.From)
+				dir, err := expandSkillPath(c.Skill.From)
 				if err != nil {
 					return nil, err
 				}
@@ -154,7 +154,7 @@ func linkPointsTo(configDir, name, source string) bool {
 	if configDir == "" {
 		return true
 	}
-	want, err := expandHome(source)
+	want, err := expandSkillPath(source)
 	if err != nil {
 		return false
 	}
@@ -169,7 +169,7 @@ func putSkill(configDir, name string, old, want *manifest.SkillRecord) error {
 		return err
 	}
 	if want.Mode == "link" {
-		dir, err := expandHome(want.Source)
+		dir, err := expandSkillPath(want.Source)
 		if err != nil {
 			return err
 		}
