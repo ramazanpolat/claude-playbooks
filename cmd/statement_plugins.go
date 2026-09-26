@@ -99,6 +99,7 @@ type cliMarketplace struct {
 	Source string `json:"source"`
 	Repo   string `json:"repo"`
 	URL    string `json:"url"`
+	Ref    string `json:"ref"` // a git source's #ref, which Claude Code keeps apart from url
 	Path   string `json:"path"`
 }
 
@@ -371,7 +372,10 @@ func marketplaceArg(src string) (string, cliMarketplace, error) {
 		repo := strings.TrimPrefix(src, "github:")
 		return repo, cliMarketplace{Source: kind, Repo: repo}, nil
 	case grammar.SourceGit:
-		return src, cliMarketplace{Source: kind, URL: src}, nil
+		// Claude Code takes url#ref and records url and ref apart; compare
+		// the same way, or an unchanged source reads as another one.
+		u, ref, _ := strings.Cut(src, "#")
+		return src, cliMarketplace{Source: kind, URL: u, Ref: ref}, nil
 	}
 	path := src
 	if strings.HasPrefix(path, "~/") {
@@ -386,7 +390,7 @@ func marketplaceArg(src string) (string, cliMarketplace, error) {
 }
 
 func sameSource(a, b cliMarketplace) bool {
-	return a.Source == b.Source && a.Repo == b.Repo && a.URL == b.URL &&
+	return a.Source == b.Source && a.Repo == b.Repo && a.URL == b.URL && a.Ref == b.Ref &&
 		filepath.Clean(a.Path) == filepath.Clean(b.Path)
 }
 
@@ -567,12 +571,31 @@ func sourceString(raw json.RawMessage) (string, bool) {
 		return "", false
 	}
 	field := map[string]string{grammar.SourceGitHub: "repo", grammar.SourceGit: "url", grammar.SourceDirectory: "path"}[kind]
-	if field == "" || !slices.Equal(o.Keys(), []string{"source", field}) {
+	keys := o.Keys()
+	// A git source may carry its #ref apart from the url, as Claude Code
+	// records it; it is written back as url#ref.
+	var ref string
+	if kind == grammar.SourceGit && slices.Contains(keys, "ref") {
+		if ok, err := o.Get("ref", &ref); !ok || err != nil || ref == "" {
+			return "", false
+		}
+		keys = slices.DeleteFunc(slices.Clone(keys), func(k string) bool { return k == "ref" })
+	}
+	if field == "" || !slices.Equal(keys, []string{"source", field}) {
 		return "", false
 	}
 	var v string
 	if ok, err := o.Get(field, &v); !ok || err != nil {
 		return "", false
+	}
+	if kind == grammar.SourceGit {
+		// A '#' in the url itself would read back as a ref.
+		if strings.Contains(v, "#") {
+			return "", false
+		}
+		if ref != "" {
+			v += "#" + ref
+		}
 	}
 	if kind == grammar.SourceGitHub {
 		v = "github:" + v
