@@ -11,6 +11,6 @@ with no change.
 | [03-defaults](03-defaults/) | env sets under every playbook |
 | [04-secret-references](04-secret-references/) | a token by reference, through a secret helper |
 | [05-show-create-roundtrip](05-show-create-roundtrip/) | a machine as one file, applied elsewhere |
-| [06-install-from-git](06-install-from-git/) | a playbook from a Git repository, pinned |
+| [06-install-from-git](06-install-from-git/) | one playbook out of a Git repository, pinned |
 | [07-plugins-local](07-plugins-local/) | a plugin and an agent from a local marketplace |
 | [08-kommander-agent](08-kommander-agent/) | an agent from three stacked layers |
