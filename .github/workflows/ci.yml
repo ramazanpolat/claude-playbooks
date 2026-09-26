@@ -118,5 +118,6 @@ jobs:
           test "$("$cpb" "SELECT count() FROM PLAYBOOKS FORMAT TSV")" = 2
           test "$("$cpb" "SELECT key FROM VARS WHERE playbook = 'beta' AND effective ORDER BY key FORMAT TSV" | tr '\n' ' ')" = "MODEL X_TOKEN "
           test "$("$cpb" "SELECT countIf(redacted) FROM VARS FORMAT TSV")" = 1
-          test "$("$cpb" "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [0, 1] ORDER BY name FORMAT TSV" | tr '\n' ' ')" = "alpha beta "
+          # alpha has no manifest, so no version: an empty version_tuple.
+          test "$("$cpb" "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [0, 1] ORDER BY name FORMAT TSV" | tr '\n' ' ')" = "beta "
           "$cpb" "SELECT name, version FROM PLAYBOOKS"
