@@ -479,12 +479,14 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 	}
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: name}
 	var comments []string
+	written := map[string]bool{}
 	for _, m := range mps {
 		src, ok := sourceString(m.Source)
 		if !ok || manifest.ValidateProfileName(m.Name) != nil {
 			comments = append(comments, fmt.Sprintf("-- MARKETPLACE %s has a source the grammar does not write; not written", m.Name))
 			continue
 		}
+		written[m.Name] = true
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.AddMarketplace, Names: []string{m.Name}, Arg: src})
 	}
 	for _, p := range plugins {
@@ -492,8 +494,14 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 			comments = append(comments, fmt.Sprintf("-- PLUGIN %s is false in %s; not written", p.ID, settings.FileName))
 			continue
 		}
-		if _, _, ok := grammar.PluginID(p.ID); !ok {
+		_, m, ok := grammar.PluginID(p.ID)
+		if !ok {
 			comments = append(comments, fmt.Sprintf("-- PLUGIN %s is not a <plugin>@<marketplace> id; not written", p.ID))
+			continue
+		}
+		// Its ADD PLUGIN would fail without the marketplace it names.
+		if !written[m] {
+			comments = append(comments, fmt.Sprintf("-- PLUGIN %s: its marketplace %s is not written; not written", p.ID, m))
 			continue
 		}
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.AddPlugin, Names: []string{p.ID}})

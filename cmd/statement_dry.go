@@ -5,6 +5,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // dryState is what an APPLY --dry-run's earlier statements would have
@@ -18,13 +19,23 @@ type dryState struct {
 	pbEnvs      map[string]*manifest.Env       // a playbook's env block after earlier statements; nil: empty
 	defaults    []string
 	hasDefaults bool
+
+	// Plugins and the agent, per playbook name: what earlier statements
+	// would have installed and pinned, and, for a playbook renamed earlier,
+	// the config directory it still has under its old name.
+	worlds     map[string]*pluginWorld
+	agents     map[string]*string // nil: unset
+	configDirs map[string]string
 }
 
 func newDryState() *dryState {
 	return &dryState{
-		profiles:  map[string]*envprofile.Profile{},
-		playbooks: map[string]bool{},
-		pbEnvs:    map[string]*manifest.Env{},
+		profiles:   map[string]*envprofile.Profile{},
+		playbooks:  map[string]bool{},
+		pbEnvs:     map[string]*manifest.Env{},
+		worlds:     map[string]*pluginWorld{},
+		agents:     map[string]*string{},
+		configDirs: map[string]string{},
 	}
 }
 
@@ -70,7 +81,46 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 	r.dry.playbooks[name] = exists
 	if !exists {
 		delete(r.dry.pbEnvs, name)
+		delete(r.dry.worlds, name)
+		delete(r.dry.agents, name)
+		delete(r.dry.configDirs, name)
 	}
+}
+
+// renamePlaybook moves what a dry run knows of a playbook's plugins and
+// agent to its new name; cfg is its config directory when it is on disk.
+func (r *stmtRun) renamePlaybook(from, to, cfg string) {
+	if r.dry == nil {
+		return
+	}
+	if cfg == "" {
+		cfg = r.dry.configDirs[from]
+	}
+	w, wok := r.dry.worlds[from]
+	a, aok := r.dry.agents[from]
+	r.recordPlaybook(from, false)
+	r.recordPlaybook(to, true)
+	if wok {
+		r.dry.worlds[to] = w
+	}
+	if aok {
+		r.dry.agents[to] = a
+	}
+	if cfg != "" {
+		r.dry.configDirs[to] = cfg
+	}
+}
+
+// configDir is where a playbook's settings live as the run sees it: its
+// directory, or, renamed earlier in a dry run, the directory it keeps.
+func (r *stmtRun) configDir(name string, pb *playbook.Playbook) string {
+	if pb != nil {
+		return pb.Path
+	}
+	if r.dry != nil {
+		return r.dry.configDirs[name]
+	}
+	return ""
 }
 
 // playbookEnv is a playbook's env block as the run sees it; disk is the

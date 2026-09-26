@@ -183,6 +183,7 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 	if r.dryRun {
 		known, alive := r.playbookState(st.Name)
 		var disk *manifest.Env
+		cfg := ""
 		if !known {
 			pb, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name)
 			if err != nil {
@@ -191,13 +192,13 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 			if pb.Manifest != nil {
 				disk = pb.Manifest.Env
 			}
+			cfg = pb.Path
 		} else if !alive {
 			return fmt.Errorf("unknown playbook %q (dropped earlier in the file)", st.Name)
 		}
-		if rename != "" { // later statements of the file address the new name, with its environment
+		if rename != "" { // later statements of the file address the new name, with its environment and plugins
 			env := r.playbookEnv(st.Name, disk)
-			r.recordPlaybook(st.Name, false)
-			r.recordPlaybook(rename, true)
+			r.renamePlaybook(st.Name, rename, cfg)
 			r.recordPlaybookEnv(rename, env)
 		}
 		return nil

@@ -180,3 +180,53 @@ func TestShowPluginsAndAgent(t *testing.T) {
 		t.Errorf("EXPLAIN:\n%s", out)
 	}
 }
+
+// A dry run carries the agent and the installed plugins from statement to
+// statement, across a rename.
+func TestPluginDryRunCarriesState(t *testing.T) {
+	sandboxDefaultRoot(t)
+	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	log := fakeClaude(t)
+	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
+	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET AGENT 'x';\nALTER PLAYBOOK k UNSET AGENT;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN kommander@kommander;\n")
+	out, err := apply(t, path, "--dry-run")
+	if err != nil {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	// UNSET AGENT after SET AGENT changes something, and the renamed
+	// playbook still has the plugin to uninstall.
+	for _, want := range []string{
+		"would run: claude plugin uninstall kommander@kommander --scope user --keep-data --json",
+		"0 created, 4 changed, 0 unchanged, 0 dropped",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run missing %q:\n%s", want, out)
+		}
+	}
+	if got := runs(t, log); len(got) != 2 {
+		t.Fatalf("the dry run ran commands:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+// SHOW CREATE fails on a settings.json it cannot read, and does not write a
+// plugin whose marketplace it could not write.
+func TestShowCreatePluginsIncomplete(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "k")
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stmt(t, "SHOW CREATE PLAYBOOK k"); err == nil {
+		t.Fatal("SHOW CREATE ignored a malformed settings.json")
+	}
+	odd := `{"extraKnownMarketplaces":{"m":{"source":{"source":"url","url":"https://example.com/m.json"}}},"enabledPlugins":{"p@m":true}}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(odd), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := mustStmt(t, "SHOW CREATE PLAYBOOK k")
+	if strings.Contains(out, "ADD PLUGIN p@m") || !strings.Contains(out, "-- PLUGIN p@m: its marketplace m is not written") {
+		t.Fatalf("a plugin without its marketplace:\n%s", out)
+	}
+}

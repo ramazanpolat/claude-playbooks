@@ -97,10 +97,9 @@ type stmtRun struct {
 	yes     bool      // APPLY --yes: confirms the file's DROP PLAYBOOKs
 	dry     *dryState // in a dry run: what earlier statements would have written
 	outcome string
-	note    string                  // a dry run's detail, e.g. what a drop would delete
-	warning string                  // reported, never an error: e.g. a source that drifted
-	helper  helperState             // in a dry run: the helper earlier statements would set
-	worlds  map[string]*pluginWorld // in a dry run: plugins earlier statements would add, per config dir
+	note    string      // a dry run's detail, e.g. what a drop would delete
+	warning string      // reported, never an error: e.g. a source that drifted
+	helper  helperState // in a dry run: the helper earlier statements would set
 }
 
 // checkRefs checks a statement's references against the helper in effect
@@ -409,33 +408,39 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		agentChange bool
 	)
 	if pluginClauses(st.Clauses) {
-		key := "pending:" + st.Name
-		if pb != nil {
-			key = pb.Path
-		}
+		cfg := r.configDir(st.Name, pb)
 		if plansPluginCommands(st.Clauses) {
-			w := r.worlds[key]
+			var w *pluginWorld
+			if r.dry != nil {
+				w = r.dry.worlds[st.Name]
+			}
 			if w == nil {
-				if pb == nil {
+				if cfg == "" { // created earlier in this dry run: nothing installed yet
 					w = &pluginWorld{markets: map[string]cliMarketplace{}, plugins: map[string]bool{}}
-				} else if w, err = readPluginWorld(pb.Path); err != nil {
+				} else if w, err = readPluginWorld(cfg); err != nil {
 					return err
 				}
-				if r.dryRun { // later statements see what this one would do
-					if r.worlds == nil {
-						r.worlds = map[string]*pluginWorld{}
-					}
-					r.worlds[key] = w
+				if r.dry != nil { // later statements see what this one would do
+					r.dry.worlds[st.Name] = w
 				}
 			}
 			if steps, pluginLines, err = planPlugins(w, st.Clauses); err != nil {
 				return err
 			}
 		}
-		if pb == nil {
+		if cfg == "" {
 			sf = &settings.File{Root: settings.NewObject()}
-		} else if sf, err = settings.Load(pb.Path); err != nil {
+		} else if sf, err = settings.Load(cfg); err != nil {
 			return err
+		}
+		if r.dry != nil { // the agent as earlier statements of the dry run left it
+			if a, ok := r.dry.agents[st.Name]; ok {
+				if a == nil {
+					sf.Root.Delete(keyAgent)
+				} else if err := sf.Root.Set(keyAgent, *a); err != nil {
+					return err
+				}
+			}
 		}
 		if agentLines, agentChange, err = applyAgent(sf, st.Clauses); err != nil {
 			return err
@@ -474,6 +479,14 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	r.outcome = outChanged
 	if r.dryRun {
 		r.recordPlaybookEnv(st.Name, m.Env)
+		if agentChange && r.dry != nil {
+			var a string
+			if ok, _ := sf.Root.Get(keyAgent, &a); ok {
+				r.dry.agents[st.Name] = &a
+			} else {
+				r.dry.agents[st.Name] = nil
+			}
+		}
 		if len(steps) > 0 {
 			cmds := make([]string, len(steps))
 			for i, s := range steps {
