@@ -14,6 +14,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // SHOW CREATE writes the statements that rebuild the state (docs/cli-grammar.md,
@@ -210,8 +211,22 @@ func createPlaybookBlock(pb *playbook.Playbook) createBlock {
 		}
 		text, withheldSource = strings.Join(lines, "\n"), 1
 	}
+	// Plugins and the agent: what settings.json declares, as the clauses
+	// that declare it. A linked playbook's settings belong to its target.
+	plugins := ""
+	if v.Linked == nil {
+		if sf, err := settings.Load(pb.Path); err == nil {
+			plugins, _ = pluginCreateBlock(pb.Name, sf.Root)
+		}
+	}
+	withPlugins := func(b createBlock) createBlock {
+		if plugins != "" {
+			b.text += "\n\n" + plugins
+		}
+		return b
+	}
 	if m == nil || m.Env.Empty() {
-		return createBlock{text: text, withheld: withheldSource}
+		return withPlugins(createBlock{text: text, withheld: withheldSource})
 	}
 	if v.Linked != nil {
 		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName}
@@ -227,7 +242,7 @@ func createPlaybookBlock(pb *playbook.Playbook) createBlock {
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}
-	return createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource}
+	return withPlugins(createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource})
 }
 
 // hasNameLauncher reports whether the launcher named after a playbook is

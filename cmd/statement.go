@@ -14,6 +14,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // Statements (docs/cli-grammar.md) are recognised before cobra runs, so
@@ -96,9 +97,10 @@ type stmtRun struct {
 	yes     bool      // APPLY --yes: confirms the file's DROP PLAYBOOKs
 	dry     *dryState // in a dry run: what earlier statements would have written
 	outcome string
-	note    string      // a dry run's detail, e.g. what a drop would delete
-	warning string      // reported, never an error: e.g. a source that drifted
-	helper  helperState // in a dry run: the helper earlier statements would set
+	note    string                  // a dry run's detail, e.g. what a drop would delete
+	warning string                  // reported, never an error: e.g. a source that drifted
+	helper  helperState             // in a dry run: the helper earlier statements would set
+	worlds  map[string]*pluginWorld // in a dry run: plugins earlier statements would add, per config dir
 }
 
 // checkRefs checks a statement's references against the helper in effect
@@ -389,9 +391,55 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		// A linked playbook's manifest is shared with every registration of
 		// the target directory: same refusal as the pre-grammar env command.
 		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			if pluginClauses(st.Clauses) {
+				return fmt.Errorf("cannot change the plugins of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
+			}
 			return fmt.Errorf("cannot change the environment of %q: it is linked, and its %s is shared with the target. Edit the target's manifest directly if you really mean it", st.Name, manifest.FileName)
 		}
 		m = pb.Manifest
+	}
+	// Plugins and the agent: planned against the current state before
+	// anything is written, so a statement that cannot run writes nothing.
+	// A playbook an earlier statement of a dry run created has none yet.
+	var (
+		steps       []pluginStep
+		pluginLines []string
+		sf          *settings.File
+		agentLines  []string
+		agentChange bool
+	)
+	if pluginClauses(st.Clauses) {
+		key := "pending:" + st.Name
+		if pb != nil {
+			key = pb.Path
+		}
+		if plansPluginCommands(st.Clauses) {
+			w := r.worlds[key]
+			if w == nil {
+				if pb == nil {
+					w = &pluginWorld{markets: map[string]cliMarketplace{}, plugins: map[string]bool{}}
+				} else if w, err = readPluginWorld(pb.Path); err != nil {
+					return err
+				}
+				if r.dryRun { // later statements see what this one would do
+					if r.worlds == nil {
+						r.worlds = map[string]*pluginWorld{}
+					}
+					r.worlds[key] = w
+				}
+			}
+			if steps, pluginLines, err = planPlugins(w, st.Clauses); err != nil {
+				return err
+			}
+		}
+		if pb == nil {
+			sf = &settings.File{Root: settings.NewObject()}
+		} else if sf, err = settings.Load(pb.Path); err != nil {
+			return err
+		}
+		if agentLines, agentChange, err = applyAgent(sf, st.Clauses); err != nil {
+			return err
+		}
 	}
 	if m == nil {
 		m = &manifest.Manifest{Name: st.Name}
@@ -417,18 +465,49 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
-	if envEqual(before, m.Env) {
+	envChange := !envEqual(before, m.Env)
+	if !envChange && !agentChange && len(steps) == 0 {
 		r.outcome = outUnchanged
-		r.say("PLAYBOOK "+st.Name+" unchanged", nil)
+		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
 	}
 	r.outcome = outChanged
 	if r.dryRun {
 		r.recordPlaybookEnv(st.Name, m.Env)
+		if len(steps) > 0 {
+			cmds := make([]string, len(steps))
+			for i, s := range steps {
+				cmds[i] = s.command()
+			}
+			r.note = "would run: " + strings.Join(cmds, "; ")
+		}
 		return nil
 	}
-	if err := manifest.Write(pb.RootPath, m); err != nil {
-		return fmt.Errorf("cannot record the environment: %w", err)
+	if envChange {
+		if err := manifest.Write(pb.RootPath, m); err != nil {
+			return fmt.Errorf("cannot record the environment: %w", err)
+		}
+	}
+	ran, err := runPluginSteps(pb.Path, steps)
+	lines = append(append(lines, pluginLines...), ran...)
+	if err != nil {
+		if len(lines) > 0 {
+			r.say("Partly altered PLAYBOOK "+st.Name, lines)
+		}
+		return err
+	}
+	if agentChange {
+		// Loaded again: the commands above rewrite settings.json.
+		if sf, err = settings.Load(pb.Path); err != nil {
+			return err
+		}
+		if _, _, err := applyAgent(sf, st.Clauses); err != nil {
+			return err
+		}
+		if err := sf.Write(); err != nil {
+			return fmt.Errorf("cannot set the agent: %w", err)
+		}
+		lines = append(lines, agentLines...)
 	}
 	r.say("Altered PLAYBOOK "+st.Name, lines)
 	for _, c := range st.Clauses {

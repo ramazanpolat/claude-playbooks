@@ -21,6 +21,7 @@ const (
 	Show    Verb = "SHOW"
 	Explain Verb = "EXPLAIN"
 	Apply   Verb = "APPLY"
+	Include Verb = "INCLUDE" // playbook files only: INCLUDE '<path>'
 )
 
 // Object is what a statement acts on or reads.
@@ -59,6 +60,15 @@ const (
 
 	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
 	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
+
+	// Plugins and the agent (ALTER PLAYBOOK only): they write the playbook's
+	// settings.json, never the manifest.
+	AddMarketplace  Kind = "ADD MARKETPLACE"  // ADD MARKETPLACE m FROM '<source>'
+	DropMarketplace Kind = "DROP MARKETPLACE" // DROP MARKETPLACE m
+	AddPlugin       Kind = "ADD PLUGIN"       // ADD PLUGIN p@m
+	DropPlugin      Kind = "DROP PLUGIN"      // DROP PLUGIN p@m
+	SetAgent        Kind = "SET AGENT"        // SET AGENT '<agent>'
+	UnsetAgent      Kind = "UNSET AGENT"      // UNSET AGENT
 )
 
 // Where places an env set added with ADD ENV.
@@ -84,7 +94,7 @@ type Stmt struct {
 
 	Clauses []Clause
 
-	Files  []string // APPLY <file> [<file> ...]
+	Files  []string // APPLY <file> [<file> ...]; INCLUDE: exactly one
 	DryRun bool     // APPLY <file> --dry-run
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
@@ -101,8 +111,8 @@ type Clause struct {
 
 	Vars   []Var    // SET: one per K=V; SET FROM: exactly one, with Ref
 	Keys   []string // BLOCK, UNSET
-	Names  []string // USE ENV, DROP ENV; ADD ENV: exactly one
-	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER
+	Names  []string // USE ENV, DROP ENV; ADD ENV, the MARKETPLACE and PLUGIN clauses: exactly one
+	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER, SET AGENT, ADD MARKETPLACE's source
 	Where  Where    // ADD ENV
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
 

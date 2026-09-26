@@ -75,6 +75,8 @@ func (s *Stmt) headWords() []string {
 		if s.JSON {
 			w = append(w, "--json")
 		}
+	case Include:
+		w = append(w, quote(s.Files[0]))
 	case Apply:
 		for _, f := range s.Files {
 			w = append(w, quoteWord(f))
@@ -133,9 +135,15 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case SetHelper:
 		return []string{"SET", "SECRET", "HELPER", quote(c.Arg)}
+	case AddMarketplace:
+		return []string{"ADD", "MARKETPLACE", quoteWord(c.Names[0]), "FROM", quote(c.Arg)}
+	case DropMarketplace, AddPlugin, DropPlugin:
+		return append(strings.Fields(string(c.Kind)), quoteWord(c.Names[0]))
+	case SetAgent:
+		return []string{"SET", "AGENT", quote(c.Arg)}
 	case RenameTo, Alias, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	default: // NoAlias, Sandbox, UnsetHelper: no argument
+	default: // NoAlias, Sandbox, UnsetHelper, UnsetAgent: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

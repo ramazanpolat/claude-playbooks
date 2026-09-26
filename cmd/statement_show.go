@@ -12,6 +12,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // The read statements. Their --json form is a contract (docs/cli-grammar.md,
@@ -52,6 +53,10 @@ type playbookJSON struct {
 	Envs     []string    `json:"envs"`
 	Vars     []varJSON   `json:"vars"`
 	Sandbox  bool        `json:"sandbox"`
+
+	Marketplaces []marketplaceJSON `json:"marketplaces"`
+	Plugins      []pluginJSON      `json:"plugins"`
+	Agent        *string           `json:"agent"`
 }
 
 type envJSON struct {
@@ -76,6 +81,44 @@ type explainJSON struct {
 	Playbook     string      `json:"playbook"`
 	Vars         []varJSON   `json:"vars"`
 	SecretHelper *helperJSON `json:"secret_helper"`
+	Plugins      []string    `json:"plugins"` // enabled in the playbook's settings.json
+	Agent        *agentJSON  `json:"agent"`
+}
+
+// agentJSON is the agent a launch starts as, when the playbook names one.
+type agentJSON struct {
+	Name string `json:"name"`
+	From string `json:"from"` // "playbook settings"
+}
+
+// launchPlugins is what EXPLAIN says of plugins and the agent: the enabled
+// plugins, and the agent the playbook's settings.json pins. An agent that
+// only a plugin names is not resolved here (that needs the plugin's own
+// files); the human form says it may exist.
+func launchPlugins(pb *playbook.Playbook) ([]string, *agentJSON) {
+	v := describePlaybook(pb)
+	enabled := []string{}
+	for _, p := range v.Plugins {
+		if p.Enabled {
+			enabled = append(enabled, p.ID)
+		}
+	}
+	if v.Agent == nil {
+		return enabled, nil
+	}
+	return enabled, &agentJSON{Name: *v.Agent, From: "playbook settings"}
+}
+
+func printLaunchPlugins(plugins []string, agent *agentJSON) {
+	fmt.Printf("Plugins: %s\n", listOrNone(plugins))
+	switch {
+	case agent != nil:
+		fmt.Printf("Agent: %s (%s)\n", agent.Name, agent.From)
+	case len(plugins) > 0:
+		fmt.Println("Agent: not set by the playbook (an enabled plugin may name one)")
+	default:
+		fmt.Println("Agent: (none)")
+	}
 }
 
 func readStatement(st *grammar.Stmt) error {
@@ -138,7 +181,15 @@ func readStatement(st *grammar.Stmt) error {
 }
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
-	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{}}
+	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
+		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}}
+	// What the playbook's settings.json declares; an unreadable file shows
+	// none rather than failing the whole SHOW.
+	if sf, err := settings.Load(pb.Path); err == nil {
+		if mps, plugins, agent, err := pluginState(sf.Root); err == nil {
+			v.Marketplaces, v.Plugins, v.Agent = mps, plugins, agent
+		}
+	}
 	root := pb.RootPath
 	if root == "" {
 		root = pb.Path
@@ -258,7 +309,31 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		{"Env sets", listOrNone(v.Envs)},
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
 		{"Sandbox", sandbox},
+		{"Marketplaces", listOrNone(marketplaceNames(v.Marketplaces))},
+		{"Plugins", listOrNone(pluginNames(v.Plugins))},
+		{"Agent", deref(v.Agent, "(none)")},
 	})
+}
+
+func marketplaceNames(mps []marketplaceJSON) []string {
+	out := make([]string, 0, len(mps))
+	for _, m := range mps {
+		out = append(out, m.Name)
+	}
+	return out
+}
+
+// pluginNames lists plugin ids, marking one settings.json holds disabled.
+func pluginNames(ps []pluginJSON) []string {
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		if p.Enabled {
+			out = append(out, p.ID)
+		} else {
+			out = append(out, p.ID+" (disabled)")
+		}
+	}
+	return out
 }
 
 func printPlaybooks(all []playbookJSON) {
@@ -386,12 +461,14 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		v.Layer = &layerJSON{Kind: o.Kind, Name: o.Set}
 		vars = append(vars, v)
 	}
+	plugins, agent := launchPlugins(pb)
 	if st.JSON {
-		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper})
+		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
 		fmt.Printf("\nSecret helper: %s\n", humanHelper(helper))
+		printLaunchPlugins(plugins, agent)
 		return nil
 	}
 	t := newTable("VARIABLE", "VALUE", "FROM").flexible(1)
@@ -414,6 +491,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if refs > 0 && helper == nil {
 		fmt.Println("This launch uses secret references and no helper is configured: it would be refused.")
 	}
+	printLaunchPlugins(plugins, agent)
 	return nil
 }
 
