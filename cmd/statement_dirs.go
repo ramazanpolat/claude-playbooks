@@ -119,6 +119,9 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 	}
+	if held := statuslineHeld(sf.Root, st.Clauses, st.Dir); held != "" {
+		r.warning, r.warningCode = held, warnStatuslineHeldByHost
+	}
 	setLines, setChange, err := applySettings(sf, st.Clauses)
 	if err != nil {
 		return err
