@@ -141,7 +141,7 @@ func TestScanSQL(t *testing.T) {
 		{"SELECT from_x FROM numbers(3)", "", false},
 	}
 	for _, c := range cases {
-		froms, second := scanSQL(c.q)
+		froms, second, _ := scanSQL(c.q)
 		var got []string
 		for _, f := range froms {
 			got = append(got, f.table)
@@ -175,5 +175,130 @@ func TestSelectQuotedJSONAndExactColumns(t *testing.T) {
 	}
 	if !reflect.DeepEqual(versionTuple("v3.12.3-rc1"), []uint64{3, 12, 3}) || len(versionTuple("")) != 0 || len(versionTuple("dev")) != 0 {
 		t.Fatalf("versionTuple: %v", versionTuple("v3.12.3-rc1"))
+	}
+}
+
+// On a terminal, with no FORMAT in the query, cpb asks clickhouse-local for
+// JSONCompact and renders it; a pipe, or a FORMAT of the query's own, gets
+// clickhouse-local's output untouched.
+func TestSelectOutputChoice(t *testing.T) {
+	selectFixture(t)
+	old := selectTTY
+	t.Cleanup(func() { selectTTY = old })
+	args := func(tty bool, q string) string {
+		selectTTY = func() bool { return tty }
+		p, err := planSelect(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(p.clickhouseArgs(), " ")
+	}
+	if a := args(false, "SELECT count() FROM PLAYBOOKS"); strings.Contains(a, "--output-format") {
+		t.Errorf("pipe: %s", a)
+	}
+	if a := args(true, "SELECT count() FROM PLAYBOOKS"); !strings.Contains(a, "--output-format JSONCompact --output_format_json_escape_forward_slashes=0") {
+		t.Errorf("terminal: %s", a)
+	}
+	if a := args(true, "SELECT count() FROM PLAYBOOKS format TSV"); strings.Contains(a, "--output-format") {
+		t.Errorf("the query's FORMAT lost: %s", a)
+	}
+	for _, q := range []string{
+		"SELECT 'FORMAT' AS f FROM PLAYBOOKS -- FORMAT TSV",    // a string and a comment
+		"SELECT launcher AS format FROM PLAYBOOKS",             // an alias
+		"SELECT format('{}', name) FROM PLAYBOOKS",             // a function
+		"SELECT name AS format FROM PLAYBOOKS ORDER BY format", // a column, last
+		"SELECT name FROM PLAYBOOKS WHERE name = 'format'",
+	} {
+		if a := args(true, q); !strings.Contains(a, "JSONCompact") {
+			t.Errorf("not the query's FORMAT clause: %s\n%s", q, a)
+		}
+	}
+	for _, q := range []string{
+		"SELECT name FROM PLAYBOOKS FORMAT Vertical",
+		"SELECT name FROM PLAYBOOKS ORDER BY name FORMAT JSONEachRow SETTINGS max_threads = 1",
+	} {
+		if a := args(true, q); strings.Contains(a, "--output-format") {
+			t.Errorf("the query's FORMAT lost: %s\n%s", q, a)
+		}
+	}
+}
+
+// What cpb prints from clickhouse-local's JSONCompact: a table for a narrow
+// result, one block per row for a wide one; objects and arrays of objects
+// as JSON with '/' unescaped, NULL as '-'.
+func TestSelectRendersForATerminal(t *testing.T) {
+	selectFixture(t)
+	old := selectTTY
+	t.Cleanup(func() { selectTTY = old })
+	selectTTY = func() bool { return true }
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "clickhouse")
+	write := func(doc string) {
+		script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + dir + "/args\"\ncat >/dev/null\ncat <<'EOF'\n" + doc + "\nEOF\n"
+		if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CPB_CLICKHOUSE", stub)
+	write(`{"meta":[{"name":"name","type":"String"},{"name":"vars","type":"Array(JSON)"},{"name":"version","type":"Nullable(String)"}],` +
+		`"data":[["alpha",[{"key":"K","ref":"https:\/\/x.example\/y"}],null]],"rows":1}`)
+	var err error
+	out := captureStdout(t, func() { err = runStatement([]string{"SELECT name, vars, version FROM PLAYBOOKS WHERE 1"}) })
+	if err != nil || !strings.Contains(out, "NAME") || !strings.Contains(out, `[{"key":"K","ref":"https://x.example/y"}]`) ||
+		strings.Contains(out, `\/`) || strings.Contains(out, `\N`) || !strings.Contains(out, " -") {
+		t.Fatalf("narrow:\n%s %v", out, err)
+	}
+	if a, _ := os.ReadFile(filepath.Join(dir, "args")); !strings.Contains(string(a), "--output-format\nJSONCompact\n--output_format_json_escape_forward_slashes=0\n") {
+		t.Fatalf("args:\n%s", a)
+	}
+	// The boundary: six columns are a table, seven go vertical.
+	write(`{"meta":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"},{"name":"f"}],"data":[["1","2","3","4","5",{}]],"rows":1}`)
+	out = captureStdout(t, func() { err = runStatement([]string{"SELECT * FROM PLAYBOOKS WHERE 1"}) })
+	if err != nil || strings.Contains(out, "Row 1") || !strings.Contains(out, "F") || strings.Contains(out, "{}") {
+		t.Fatalf("six columns:\n%s %v", out, err)
+	}
+	write(`{"meta":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"},{"name":"f"},{"name":"g"}],"data":[["1","2","3","4","5","6",null]],"rows":1}`)
+	out = captureStdout(t, func() { err = runStatement([]string{"SELECT * FROM PLAYBOOKS WHERE 1"}) })
+	if err != nil || !strings.Contains(out, "Row 1") || !strings.Contains(out, "G:  -") {
+		t.Fatalf("seven columns:\n%s %v", out, err)
+	}
+}
+
+// The built-in form: a wide selection is one block per row on a terminal,
+// a table in a pipe, with the same headers.
+func TestSelectBuiltInOnATerminal(t *testing.T) {
+	selectFixture(t)
+	old := selectTTY
+	t.Cleanup(func() { selectTTY = old })
+	q := "SELECT name, version, path, linked, launcher, envs, sandbox FROM PLAYBOOKS"
+	selectTTY = func() bool { return true }
+	if out := mustStmt(t, q); !strings.Contains(out, "Row 1") || !strings.Contains(out, "SANDBOX:") {
+		t.Fatalf("terminal:\n%s", out)
+	}
+	selectTTY = func() bool { return false }
+	if out := mustStmt(t, q); strings.Contains(out, "Row 1") || !strings.Contains(out, "SANDBOX") {
+		t.Fatalf("pipe:\n%s", out)
+	}
+}
+
+func TestDescribe(t *testing.T) {
+	selectFixture(t)
+	out := mustStmt(t, "DESCRIBE playbooks")
+	for _, want := range []string{"NAME", "TYPE", "version_tuple", "Array(UInt32)", "source", "JSON", "model"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("DESCRIBE playbooks lacks %q:\n%s", want, out)
+		}
+	}
+	var cols []columnJSON
+	var err error
+	js := captureStdout(t, func() { err = runStatement([]string{"DESC TABLE envs --json"}) })
+	if err != nil || json.Unmarshal([]byte(js), &cols) != nil || len(cols) != 5 || cols[4] != (columnJSON{Name: "default", Type: "Bool"}) {
+		t.Fatalf("DESC TABLE envs --json: %v %v\n%s", err, cols, js)
+	}
+	if _, err := stmt(t, "DESCRIBE nope"); err == nil || !strings.Contains(err.Error(), `unknown table "nope"`) {
+		t.Fatalf("unknown table: %v", err)
+	}
+	if _, err := stmt(t, "DESCRIBE"); err == nil || !strings.Contains(err.Error(), "needs one table") {
+		t.Fatalf("no table: %v", err)
 	}
 }

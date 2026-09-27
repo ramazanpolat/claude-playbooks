@@ -2,6 +2,8 @@
 cpb "SELECT name, envs FROM PLAYBOOKS" | grep -q 'beta  *router'
 cpb "SELECT playbook, key, effective FROM VARS" --json | grep -q '"key": "MODEL"'
 cpb EXPLAIN SELECT name FROM ENVS | grep -q 'engine: built in'
+cpb DESCRIBE playbooks | grep -q '^version_tuple  *Array(UInt32)'
+cpb "DESC TABLE vars --json" | grep -q '"name": "effective"'
 # Anything else goes to clickhouse-local, when it is installed.
 if command -v clickhouse >/dev/null 2>&1 || command -v ch >/dev/null 2>&1; then
   test "$(cpb "SELECT count() FROM VARS WHERE effective FORMAT TSV")" -ge 2

@@ -19,8 +19,9 @@
 # plain config directory (backup, refusals, state outside the directory),
 # SELECT (built in, and through a stub clickhouse-local: the real one runs
 # in GitHub CI's select-clickhouse job), and a git marketplace's #ref.
-# v3.22.0: APPLY --dry-run --json, the model picker, and the Claude Code
-# minimum for the plugin clauses (28 assertions in all: 27 commands, 1 file).
+# v3.22.0: APPLY --dry-run --json, the model picker, the Claude Code minimum
+# for the plugin clauses, and DESCRIBE (29 assertions in all: 28 commands,
+# 1 file).
 
 [scenario]
 name = "cli-grammar"
@@ -236,3 +237,11 @@ contains = "model-picker-ok"
 # `claude plugin` command runs; a current claude goes ahead.
 command = '''export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; M="$HOME/mkt/loc"; claude-playbook CREATE PLAYBOOK oldc NO ALIAS >/dev/null && if FAKE_CLAUDE_VERSION=2.1.245 claude-playbook "ALTER PLAYBOOK oldc ADD MARKETPLACE loc FROM '$M' ADD PLUGIN hello@loc" > "$HOME/oldc.out" 2>&1; then echo old-claude-accepted; elif ! grep -qF "need Claude Code 2.1.268 or newer" "$HOME/oldc.out" || ! grep -qF "this claude is 2.1.245" "$HOME/oldc.out"; then echo wrong-message; elif grep -qE "/oldc\|plugin (install|marketplace add)" "$L"; then echo commands-ran; else FAKE_CLAUDE_VERSION=2.1.283 claude-playbook "ALTER PLAYBOOK oldc ADD MARKETPLACE loc FROM '$M' ADD PLUGIN hello@loc" >/dev/null && grep -qF "/oldc|plugin install hello@loc" "$L" && echo claude-version-ok; fi'''
 contains = "claude-version-ok"
+
+[[verify.commands]]
+# DESCRIBE (v3.22.0): DESCRIBE [TABLE] <table> / DESC lists a SELECT table's
+# columns and types, --json too; an unknown table is refused. And a SELECT
+# in a pipe still prints clickhouse-local's TSV (stub clickhouse, as
+# select-ok): the terminal rendering is for a terminal only.
+command = '''claude-playbook DESCRIBE playbooks > "$HOME/desc.out" && grep -q '^version_tuple  *Array(UInt32)' "$HOME/desc.out" && grep -q '^model_picker  *JSON' "$HOME/desc.out" && claude-playbook "DESC TABLE vars --json" | tr -d ' \n' | grep -qF '{"name":"effective","type":"Bool"}' && if claude-playbook DESCRIBE nope > "$HOME/desc.err" 2>&1; then echo unknown-accepted; elif ! grep -q 'unknown table "nope"' "$HOME/desc.err"; then echo wrong-error; else CPB_CLICKHOUSE="$HOME/chstub/clickhouse" claude-playbook "SELECT name FROM PLAYBOOKS WHERE 1" | cat > /dev/null && ! grep -qx -- "--output-format" "$HOME/ch.args" && echo describe-ok; fi'''
+contains = "describe-ok"
