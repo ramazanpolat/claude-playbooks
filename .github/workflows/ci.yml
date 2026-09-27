@@ -94,6 +94,37 @@ jobs:
       - name: Every clause has a reference entry and an example
         run: examples/coverage.sh
 
+  # The upgrade from the previous release: that release's binary applies
+  # its own examples, then this build takes over the same state and must
+  # read it identically (examples/upgrade.sh says what is compared). The
+  # previous release is the newest tag reachable from HEAD that is not on
+  # HEAD itself, so a release commit is checked against the one before it.
+  upgrade:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - name: Build this commit and the previous release
+        run: |
+          set -eu
+          here=$(git tag --points-at HEAD)
+          prev=$(git tag --merged HEAD --sort=-v:refname | grep '^v[0-9]' | grep -vxF -e "${here:-none}" | head -1)
+          echo "previous release: $prev"
+          echo "PREV=$prev" >> "$GITHUB_ENV"
+          git worktree add -q "$RUNNER_TEMP/prev" "$prev"
+          (cd "$RUNNER_TEMP/prev" && go build -o "$RUNNER_TEMP/cpb-prev" .)
+          go build -o "$RUNNER_TEMP/cpb" .
+      - name: Upgrade from the previous release
+        run: examples/upgrade.sh "$RUNNER_TEMP/cpb-prev" "$RUNNER_TEMP/cpb" "$RUNNER_TEMP/prev/examples"
+
   # SELECT beyond the built-in form runs through a real clickhouse-local:
   # the rows cpb pipes in and the query it rewrites are checked end to end.
   select-clickhouse:

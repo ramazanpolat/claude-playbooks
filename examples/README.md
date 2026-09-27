@@ -4,6 +4,15 @@ One idea per directory, each a `playbook.cpb` you can apply as it is. CI
 applies every one of them (`examples/check.sh`): dry run, apply, apply again
 with no change, then what the README shows beyond `APPLY` (`.check`).
 
+`examples/upgrade.sh` checks the upgrade from the previous release, and CI
+runs it on every change. The previous release's binary applies that
+release's own examples. This build then takes over the same state and must
+read it identically:
+- `SHOW CREATE ALL`, `EXPLAIN --json` and `auth status --json` are the same;
+- a re-apply changes nothing;
+- every playbook launches and drops;
+- a made-up machine login is never touched.
+
 | | |
 |---|---|
 | [01-first-playbook](01-first-playbook/) | a playbook and its command |
