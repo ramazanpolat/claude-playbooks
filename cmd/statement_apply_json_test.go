@@ -306,3 +306,22 @@ func TestApplyJSONParseErrorAndLocalFetch(t *testing.T) {
 		t.Fatalf("local fetch: %v", a)
 	}
 }
+
+// A syntax error in a file named by a relative path: the report's
+// error.file is the resolved path, as everywhere else in the report.
+func TestApplyJSONParseErrorFileResolved(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	writeCpb(t, dir, "bad.cpb", "CREATE OR REPLACE ENV e;\nALTER PLAYBOOK k SET SET;\n")
+	wd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	rep, _, code := applyJSON(t, "bad.cpb", "--dry-run", "--json")
+	e, _ := rep["error"].(map[string]any)
+	if code != 1 || e == nil || e["file"] != filepath.Join(dir, "bad.cpb") || e["line"] != float64(2) {
+		t.Fatalf("parse error: code %d, %v", code, rep)
+	}
+}

@@ -357,16 +357,17 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink, target stri
 		l.errs = append(l.errs, err)
 		return
 	}
-	stmts, err := grammar.ParseFile(string(data))
-	if err != nil {
-		l.errs = append(l.errs, fmt.Errorf("%s: %w", name, err))
-		return
-	}
+	// Known before the parse, so a parse error names the file resolved.
 	resolved := id
 	if base == "" { // a pipe has no path but its name
 		resolved = name
 	}
 	l.pathOf[name] = resolved
+	stmts, err := grammar.ParseFile(string(data))
+	if err != nil {
+		l.errs = append(l.errs, fmt.Errorf("%s: %w", name, err))
+		return
+	}
 	if first {
 		l.files = append(l.files, name)
 		l.paths = append(l.paths, resolved)

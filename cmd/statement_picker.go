@@ -30,14 +30,6 @@ type pickerRowJSON struct {
 	BehavesAs   *string `json:"behaves_as"`
 }
 
-func pickerClause(k grammar.Kind) bool {
-	switch k {
-	case grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
-		return true
-	}
-	return false
-}
-
 // pickerRows reads modelPicker.options as ordered objects, so a field cpb
 // does not know survives an edit.
 func pickerRows(mp *settings.Object) ([]*settings.Object, error) {
@@ -212,6 +204,12 @@ func pickerCreateClauses(root *settings.Object) ([]grammar.Clause, []string) {
 			comments = append(comments, "-- a model picker row without a one-word model id; not written")
 			continue
 		}
+		// What the parser takes back: a one-line label and description, a
+		// one-word behavesAs. Anything else is kept in the file, not written.
+		if bad := unwritableRowField(r); bad != "" {
+			comments = append(comments, "-- model picker row "+r.Model+": its "+bad+" is not what ADD MODEL takes; not written")
+			continue
+		}
 		out = append(out, grammar.Clause{Kind: grammar.AddModel, Names: []string{r.Model},
 			Row: &grammar.PickerRow{Model: r.Model, Label: r.Label, Description: r.Description, BehavesAs: r.BehavesAs}})
 	}
@@ -234,4 +232,18 @@ func compactJSON(data []byte) []byte {
 		return data
 	}
 	return b.Bytes()
+}
+
+// unwritableRowField names the first field of a picker row that ADD MODEL
+// cannot say, "" when the row can be written.
+func unwritableRowField(r pickerRowJSON) string {
+	switch {
+	case r.Label != nil && strings.ContainsAny(*r.Label, "\r\n"):
+		return "label (more than one line)"
+	case r.Description != nil && strings.ContainsAny(*r.Description, "\r\n"):
+		return "description (more than one line)"
+	case r.BehavesAs != nil && (*r.BehavesAs == "" || strings.ContainsAny(*r.BehavesAs, " \t\r\n")):
+		return "behavesAs (not one word)"
+	}
+	return ""
 }

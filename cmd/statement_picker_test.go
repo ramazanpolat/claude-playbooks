@@ -134,3 +134,31 @@ func TestModelPickerDirTarget(t *testing.T) {
 		t.Fatalf("dir target: %v", s)
 	}
 }
+
+// A row SHOW CREATE could not write back as a clause that re-parses (a
+// multi-line label, a behavesAs with a space) is left out with a comment,
+// and what SHOW CREATE writes re-applies unchanged.
+func TestModelPickerShowCreateUnwritableRows(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "k")
+	hand := `{"modelPicker": {"options": [
+	  {"model": "ok", "label": "Fine"},
+	  {"model": "spaced", "behavesAs": "claude sonnet"},
+	  {"model": "lines", "label": "two\nlines"},
+	  {"model": "desc", "description": "a\nb"},
+	  {"model": "empty", "behavesAs": ""}]}}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(hand), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
+	if !strings.Contains(created, "ADD MODEL 'ok' LABEL 'Fine'") || strings.Contains(created, "ADD MODEL 'spaced'") || strings.Contains(created, "ADD MODEL 'lines'") ||
+		!strings.Contains(created, "-- model picker row spaced: its behavesAs (not one word)") || !strings.Contains(created, "-- model picker row lines: its label (more than one line)") ||
+		!strings.Contains(created, "-- model picker row desc: its description (more than one line)") || !strings.Contains(created, "-- model picker row empty: its behavesAs (not one word)") {
+		t.Fatalf("SHOW CREATE:\n%s", created)
+	}
+	f := writePlaybookFile(t, created)
+	if out, err := apply(t, f); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
+		t.Fatalf("SHOW CREATE did not re-apply unchanged: %v\n%s", err, out)
+	}
+}
