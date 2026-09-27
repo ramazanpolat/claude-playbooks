@@ -235,6 +235,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		// MCP servers and skills, as clauses of their own statement.
 		mcps, mcpComments := mcpCreateClauses(pb.Path, m)
 		mcps = append(mcps, skillCreateClauses(m)...)
+		mcps = append(mcps, panelCreateClauses(pb.Path)...)
 		if len(mcps)+len(mcpComments) > 0 {
 			t := strings.Join(mcpComments, "\n")
 			if len(mcps) > 0 {

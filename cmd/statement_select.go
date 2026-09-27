@@ -67,6 +67,11 @@ var selectTables = map[string]selectTable{
 		structure: "playbook String, key String, value Nullable(String), ref Nullable(String), redacted Bool, plaintext Bool, blocked Bool, layer JSON, effective Bool",
 		rows:      varRows,
 	},
+	"PANELS": {
+		columns:   []string{"playbook", "panel", "type", "source", "cpb", "row", "priority", "align"},
+		structure: "playbook String, panel String, type String, source String, cpb Bool, row Nullable(UInt32), priority Nullable(UInt32), align String",
+		rows:      panelRows,
+	},
 	"DEFAULTS": {
 		columns:   []string{"envs", "secret_helper"},
 		structure: "envs Array(String), secret_helper JSON",
@@ -116,6 +121,26 @@ func playbookRows() ([]any, error) {
 	rows := []any{}
 	for _, pb := range pbs {
 		rows = append(rows, describePlaybook(pb))
+	}
+	return rows, nil
+}
+
+// panelRowJSON is one PANELS row: a panel of one playbook (v3.25.0).
+type panelRowJSON struct {
+	Playbook string `json:"playbook"`
+	panelJSON
+}
+
+func panelRows() ([]any, error) {
+	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+	if err != nil {
+		return nil, err
+	}
+	rows := []any{}
+	for _, pb := range pbs {
+		for _, p := range describePanels(pb.Path) {
+			rows = append(rows, panelRowJSON{Playbook: pb.Name, panelJSON: p})
+		}
 	}
 	return rows, nil
 }
@@ -330,7 +355,7 @@ func planSelect(q string) (*selectPlan, error) {
 		table := strings.ToUpper(m[2])
 		t, ok := selectTables[table]
 		if !ok {
-			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, DEFAULTS)", m[2])
+			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, DEFAULTS)", m[2])
 		}
 		var cols []string
 		for _, c := range strings.Split(m[1], ",") {
@@ -355,7 +380,7 @@ func planSelect(q string) (*selectPlan, error) {
 		return nil, errors.New("one statement at a time: remove what follows the semicolon")
 	}
 	if len(froms) == 0 {
-		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, DEFAULTS")
+		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, PANELS, DEFAULTS")
 	}
 	if len(froms) > 1 {
 		return nil, errors.New("a query reads one table; join them in ClickHouse yourself: cpb SHOW … --json | clickhouse local …")
@@ -684,7 +709,7 @@ type columnJSON struct {
 func describeTable(name string) ([]columnJSON, error) {
 	t, ok := selectTables[strings.ToUpper(name)]
 	if !ok {
-		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, DEFAULTS)", name)
+		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, DEFAULTS)", name)
 	}
 	types := map[string]string{"version_tuple": "Array(UInt32)"} // computed, not in the structure
 	depth, start := 0, 0
@@ -717,7 +742,7 @@ func describeTable(name string) ([]columnJSON, error) {
 
 func runDescribe(table string, asJSON bool) error {
 	if table == "" {
-		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS or DEFAULTS")
+		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, PANELS or DEFAULTS")
 	}
 	cols, err := describeTable(table)
 	if err != nil {

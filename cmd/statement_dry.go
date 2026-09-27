@@ -51,6 +51,10 @@ type dryState struct {
 	// slHistory, per config directory key: the status line history as
 	// earlier statements would leave it.
 	slHistory map[string][]slEntry
+
+	// panels, per playbook or directory key: manifests earlier statements
+	// would have written (bytes) or removed (nil), by path.
+	panels map[string]map[string][]byte
 }
 
 func newDryState() *dryState {
@@ -69,6 +73,7 @@ func newDryState() *dryState {
 		isolated:     map[string]bool{},
 		sandboxed:    map[string]bool{},
 		slHistory:    map[string][]slEntry{},
+		panels:       map[string]map[string][]byte{},
 	}
 }
 

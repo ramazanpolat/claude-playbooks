@@ -597,6 +597,30 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	skillChange := skills != nil && (len(skills.ops) > 0 || !reflect.DeepEqual(beforeSkills, afterSkills))
+	// Panels: SPC/1 manifests in the config directory, planned against the
+	// files as the run sees them.
+	var panelOps []panelOp
+	if hasPanelClauses(st.Clauses) {
+		cfg := r.configDir(st.Name, pb)
+		root := settings.NewObject()
+		if cfg != "" {
+			if f, err := settings.Load(cfg); err == nil {
+				root = f.Root
+			}
+		}
+		if r.dry != nil {
+			if raw, ok := r.dry.settings[st.Name]; ok {
+				if o, err := settings.ParseObject(raw); err == nil {
+					root = o
+				}
+			}
+		}
+		var panelLines []string
+		if panelOps, panelLines, err = r.planPanels(st.Name, cfg, root, st.Clauses); err != nil {
+			return err
+		}
+		lines = append(lines, panelLines...)
+	}
 	if skills != nil {
 		steps = append(steps, skills.steps()...)
 	}
@@ -607,7 +631,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && len(steps) == 0 && len(panelOps) == 0 {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
@@ -642,6 +666,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		for _, s := range steps {
 			cmds = append(cmds, s.command())
 			r.actions = append(r.actions, stepActions(dir, s, refOf)...)
+		}
+		if len(panelOps) > 0 {
+			_ = r.applyPanels(st.Name, panelOps)
 		}
 		if skills != nil {
 			r.recordSkills(st.Name, afterSkills, skills)
@@ -728,6 +755,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 		lines = append(lines, agentLines...)
+	}
+	if len(panelOps) > 0 {
+		if err := r.applyPanels(st.Name, panelOps); err != nil {
+			return fmt.Errorf("cannot write the panels: %w", err)
+		}
 	}
 	r.say("Altered PLAYBOOK "+st.Name, lines)
 	for _, c := range st.Clauses {

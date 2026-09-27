@@ -31,3 +31,4 @@ read it identically:
 | [14-model-picker](14-model-picker/) | the `/model` picker: its rows, ONLY or APPEND |
 | [15-third-party-route](15-third-party-route/) | a routed playbook without the pilot profile; the warning |
 | [16-isolated-login](16-isolated-login/) | a playbook that shares no login with `~/.claude` |
+| [17-statusline-panels](17-statusline-panels/) | a status line host and its panels (SPC/1) |
