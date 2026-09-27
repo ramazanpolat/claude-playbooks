@@ -69,8 +69,11 @@ type playbookJSON struct {
 	// StatuslineHistory is what SET STATUSLINE PREVIOUS can go back to,
 	// newest first (v3.25.0).
 	StatuslineHistory []slHistoryJSON `json:"statusline_history"`
-	Model             *string         `json:"model"`
-	ModelPicker       *pickerJSON     `json:"model_picker"`
+	// Panels are the SPC/1 panels of the config directory and its enabled
+	// plugins (v3.25.0).
+	Panels      []panelJSON `json:"panels"`
+	Model       *string     `json:"model"`
+	ModelPicker *pickerJSON `json:"model_picker"`
 }
 
 type envJSON struct {
@@ -212,6 +215,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.StatuslineRefresh = statuslineRefresh(sf.Root)
 	}
 	v.StatuslineHistory = describeSLHistory(pb.Path)
+	v.Panels = describePanels(pb.Path)
 	root := pb.RootPath
 	if root == "" {
 		root = pb.Path
@@ -719,6 +723,17 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	}
 	if v.Statusline != nil {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
+	}
+	if n := len(v.Panels); n > 0 {
+		ids := make([]string, n)
+		for i, p := range v.Panels {
+			ids[i] = p.Panel
+		}
+		line := fmt.Sprintf("Panels: %d (%s)", n, strings.Join(ids, ", "))
+		if v.Statusline == nil || !isHostCommand(*v.Statusline) {
+			line += "; the status line is not a host, so they do not render"
+		}
+		fmt.Println(line)
 	}
 	if n := len(v.StatuslineHistory); n > 0 {
 		fmt.Printf("Status line history: %d earlier (SET STATUSLINE PREVIOUS restores %s)\n", n, v.StatuslineHistory[0].Command)

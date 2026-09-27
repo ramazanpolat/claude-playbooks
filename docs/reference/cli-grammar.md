@@ -174,6 +174,8 @@ pb-clause  := set-clause
             | SET STATUSLINE '<command>' [REFRESH <n>] | UNSET STATUSLINE
             | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH   v3.23.0
             | SET STATUSLINE PREVIOUS      v3.25.0, the status line cpb replaced last
+            | ADD PANEL <ns>.<id> panel-body   v3.25.0, see "Status line panels"
+            | DROP PANEL <ns>.<id>
             | SET ISOLATED LOGIN | UNSET ISOLATED LOGIN   v3.23.0, see "Isolated login"
             | SET MODEL '<model>' | UNSET MODEL
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
@@ -605,7 +607,7 @@ planned as empty.
   | `fetch` | `source`, `branch`, `subdir`, `to` | `CREATE PLAYBOOK … FROM`: what a real run installs. `network` is false for a local directory. |
   | `backup` | `path`, `to` | TO a plain directory: a file backed up before its first write. |
   | `write` | `path` | TO a plain directory: its `settings.json`. |
-  | `delete` | `what` (`playbook` or `skill`), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
+  | `delete` | `what` (`playbook`, `skill`, or `panel` from v3.25.0), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
 
 - **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs) from v3.23.0 `pilot_profile_third_party_endpoint` (a playbook importing `~/.pilot-profile/` now has a non-Anthropic `ANTHROPIC_BASE_URL`; see "The pilot profile and non-Anthropic routes"), and `statusline_held_by_host` (a `SET STATUSLINE` left a host's status line as it is; see the status line clauses). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
 - **No secret value** appears anywhere: references stay references, and a literal credential a file sets is not in the plan.
@@ -751,7 +753,7 @@ changes only by these rules (the stabilization week, decided by the pilot on
 |---|---|
 | The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
 | The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
-| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
+| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
 | `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json` |
 | Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
 
@@ -925,6 +927,7 @@ so `source.url` and `vars[1].key` work):
 | `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` |
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
+| `PANELS` | status line panel, per playbook (v3.25.0) | `playbook panel type source cpb row priority align` |
 | `DEFAULTS` | (one row) | `envs secret_helper` |
 
 `version_tuple` is `Array(UInt32)`, the numbers of the version's leading
@@ -1476,6 +1479,78 @@ Built (v3.21.0).
   session all win over it. `EXPLAIN PLAYBOOK` says which one decides.
 
 Both are settings keys with no CLI.
+
+### Status line panels (v3.25.0)
+
+A status line **host**, statusmux, holds Claude Code's one `statusLine` slot
+and composes the bar from **panels**. A panel is a small manifest file,
+defined by SPC/1 (`docs/spc-1.md` in agent-realm/statusmux). cpb writes and
+removes those manifests; it never runs or calls the host.
+
+```
+ADD PANEL <ns>.<id> EXEC '<command>' [FORMAT TEXT | RECORDS] [ROW <n>] [PRIORITY <n>] [ALIGN LEFT | RIGHT]
+                                     [TIMEOUT <ms>] [MAX RUN <ms>] [TTL <ms>] [STALE <ms>] [WIDTH <n>]
+ADD PANEL <ns>.<id> TEMPLATE '<text>' [WHEN '<field>'] [ROW …] [PRIORITY …] [ALIGN …]
+ADD PANEL <ns>.<id> RECORDS '<path>' [STALE <ms>] [ROW …] [PRIORITY …] [ALIGN …]
+ADD PANEL <ns>.<id> OBSERVE '<command>' EVERY <ms> [MAX RUN <ms>]
+ADD PANEL <ns>.<id> FROM STATUSLINE [ROW …] …       the current status line's command, as an exec panel
+DROP PANEL <ns>.<id>
+```
+
+- **Where it writes.** One manifest,
+  `<config dir>/statusline.d/<ns>/<id>.toml`, with `contract = 1` and only
+  the fields the clause gives; the host's defaults apply to the rest. The
+  options map to the SPC/1 fields `row`, `priority`, `align`, `format`,
+  `timeout_ms`, `max_run_ms`, `ttl_ms`, `stale_ms`, `max_width`, `when` and
+  `every_ms`, and each is accepted only where SPC/1 gives it a meaning.
+- **Never the pilot's layout.** cpb never writes `statusline.toml`, the
+  pilot's layout (SPC/1 §6 reserves it for the pilot), and never touches a
+  plugin's or a project's panels.
+- **The id** is always qualified: `<ns>.<id>`, each part lowercase letters,
+  digits and dashes.
+  - `local` is the namespace for your own panels.
+  - A recipe that ships panels uses its own name as the namespace
+    (SPC/1 §2).
+  - `project` is refused, since it belongs to a repository.
+- **Commands.** `${PANEL_DIR}`, `${HOME}`, `${CLAUDE_CONFIG_DIR}` and
+  `${CLAUDE_PLUGIN_ROOT}` are expanded by the host, which quotes each value
+  itself. So a command that puts one inside quotes of its own is refused
+  (`sh ${PANEL_DIR}/x.sh`, never `sh "${PANEL_DIR}/x.sh"`).
+- **Ownership.** A manifest cpb writes starts with a `# Written by cpb
+  (ADD PANEL) sha256=<hash>` line, the hash of the rest of the file.
+  - cpb overwrites or drops a manifest only while it still matches that
+    hash.
+  - A manifest without the line is yours, and so is one cpb wrote and you
+    edited since, marker kept or not. `ADD PANEL` over it and `DROP PANEL`
+    of it are refused, naming the file, and cpb never changes it.
+- **Credentials.** A panel manifest ships with the playbook, so a
+  credential-looking literal in an `EXEC` or `OBSERVE` command or `TEMPLATE`
+  text is refused unless `AS PLAINTEXT` is given (at the end of the clause).
+  - The detector is `SET VAR`'s, applied to what has a name: a `KEY=value`
+    or `--flag=value` word, a `--flag value` pair, a quoted
+    `"Authorization: …"`-style header, or a URL carrying a password.
+  - There is no reference here, since the host runs the command and nothing
+    resolves one. Read a secret at run time, from a file or the environment.
+  - `SHOW CREATE` never prints such a panel: it is withheld as a comment.
+- **Repeats and removal.** A repeated `ADD PANEL` with the same options is
+  unchanged. `DROP PANEL` of an absent panel is unchanged. An emptied
+  namespace directory is removed.
+- **`FROM STATUSLINE`** adopts the bar you have today, the equivalent of
+  `statusmux adopt`. It is refused when there is no status line command,
+  and when the status line is the host itself.
+- **Reads:**
+  - `SHOW PLAYBOOK --json` has `panels`: `[{"panel", "type", "source",
+    "cpb", "row", "priority", "align"}]`. It lists the config directory's
+    own panels (`source: "config"`) and, read-only, those of every enabled
+    plugin, found as SPC/1 §2 finds them (`source: "plugin <name@market>"`).
+  - `SELECT … FROM PANELS` has the same rows, with the playbook.
+  - `EXPLAIN` lists them, and says when the status line is not a host, so
+    they do not render.
+  - `SHOW CREATE` writes the panels cpb wrote as `ADD PANEL` clauses; a
+    panel made `FROM STATUSLINE` is written with its command. It writes
+    neither yours nor a plugin's.
+- It is valid on a plain config directory (`TO '<dir>'`), and dry runs
+  write nothing. The clause words are not reserved.
 
 ### Model picker
 

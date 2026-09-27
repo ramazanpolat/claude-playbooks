@@ -774,7 +774,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	case "USE":
 		return c, p.envList(c, w)
 	case "ADD", "DROP":
-		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL") {
+		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL", "PANEL") {
+		case "PANEL":
+			return c, p.panel(c, w)
 		case "ENV":
 			if w == "ADD" {
 				return c, p.addEnvRest(c)
@@ -791,7 +793,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		case "MODEL":
 			return c, p.pickerModel(c, w)
 		}
-		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
+		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL, MODEL or PANEL")
 	case "SET":
 		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED") {
 		case "ISOLATED":
@@ -1208,6 +1210,13 @@ func validate(s *Stmt) *Error {
 		}
 		if c.Kind == AddEnv && c.Anchor == c.Names[0] {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
+		}
+		if c.Panel != nil {
+			id := "panel " + c.Panel.NS + "." + c.Panel.ID
+			if envs[id] {
+				return errAt(c.Pos, id+" appears twice")
+			}
+			envs[id] = true
 		}
 	}
 	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},

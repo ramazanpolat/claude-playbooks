@@ -135,6 +135,11 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
+	panelOps, panelLines, err := r.planPanels(key, dir, sf.Root, st.Clauses)
+	if err != nil {
+		return err
+	}
+	lines = append(lines, panelLines...)
 
 	var skills *skillPlan
 	recs, err := dirSkillRecords(dir)
@@ -173,7 +178,7 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
 	settingsChange := setChange || envChange
-	if len(steps) == 0 && !settingsChange && !skillChange {
+	if len(steps) == 0 && !settingsChange && !skillChange && len(panelOps) == 0 {
 		r.outcome = outUnchanged
 		r.say(stmtHead(st)+" unchanged", lines)
 		return nil
@@ -199,6 +204,16 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		if skills != nil {
 			r.recordSkills(key, after, skills)
 		}
+		for _, op := range panelOps {
+			if op.data == nil {
+				what = append(what, "remove "+op.path)
+				r.actions = append(r.actions, deleteAction("panel", op.path))
+			} else {
+				what = append(what, "write "+op.path)
+				r.actions = append(r.actions, planAction{Type: "write", Path: op.path})
+			}
+		}
+		_ = r.applyPanels(key, panelOps)
 		if settingsChange && r.dry != nil {
 			r.dry.settings[key], _ = sf.Root.MarshalJSON()
 			if slp.changed {
@@ -247,6 +262,9 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		if err == nil {
 			lines = append(append(lines, setLines...), envLines...)
 		}
+	}
+	if err == nil && len(panelOps) > 0 {
+		err = r.applyPanels(key, panelOps)
 	}
 	if err == nil && skills != nil && !reflect.DeepEqual(cloneSkills(cur), after) {
 		// Records that change without a file operation (a DROP of a skill

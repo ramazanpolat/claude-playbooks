@@ -106,7 +106,11 @@ const (
 	UnsetStatuslineRefresh Kind = "UNSET STATUSLINE REFRESH"
 	// SetStatuslinePrevious: SET STATUSLINE PREVIOUS, the status line cpb
 	// replaced last, from its history.
-	SetStatuslinePrevious Kind = "SET STATUSLINE PREVIOUS" // UNSET STATUSLINE REFRESH
+	SetStatuslinePrevious Kind = "SET STATUSLINE PREVIOUS"
+
+	// Panels (SPC/1 manifests, v3.25.0): ADD PANEL <ns>.<id> …, DROP PANEL.
+	AddPanel  Kind = "ADD PANEL"
+	DropPanel Kind = "DROP PANEL" // UNSET STATUSLINE REFRESH
 
 	AddModel         Kind = "ADD MODEL"          // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
 	DropModel        Kind = "DROP MODEL"         // DROP MODEL '<id>'
@@ -206,7 +210,32 @@ type Clause struct {
 	// whole seconds (0: not given).
 	Refresh int
 
+	Panel *Panel // ADD PANEL, DROP PANEL
+
 	Pos Pos
+}
+
+// Panel is one SPC/1 panel manifest (ADD PANEL, v3.25.0): the panel
+// statusmux-style hosts discover under <config dir>/statusline.d/<NS>/.
+// Numbers are nil when not given (the host's default applies).
+type Panel struct {
+	NS, ID string
+	// Type is exec, template, records or observe. FromStatusline: an exec
+	// panel whose command is the current status line's.
+	Type           string
+	FromStatusline bool
+	Source         string // exec/observe: the command; template: the text; records: the path
+	Format         string // exec: "text" or "records"
+	When           string // template
+	Align          string // "left" or "right"
+	Row, Priority  *int
+	Timeout        *int // ms, exec
+	MaxRun         *int // ms, exec and observe
+	TTL, Width     *int // exec
+	Stale          *int // ms, exec and records
+	Every          *int // ms, observe
+	// Plaintext: AS PLAINTEXT, a credential-looking literal stored knowingly.
+	Plaintext bool
 }
 
 // Var is one variable of a SET clause: a literal Value, or a secret
