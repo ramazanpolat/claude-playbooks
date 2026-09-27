@@ -19,3 +19,4 @@ with no change, then what the README shows beyond `APPLY` (`.check`).
 | [11-skills](11-skills/) | a skill, linked from a directory |
 | [12-recipes-and-targets](12-recipes-and-targets/) | one recipe for two playbooks, `TO <playbook>`, `TO '<dir>'` |
 | [13-select](13-select/) | `SELECT` over playbooks, env sets and variables |
+| [14-model-picker](14-model-picker/) | the `/model` picker: its rows, ONLY or APPEND |

@@ -50,7 +50,8 @@ func pluginClauses(clauses []grammar.Clause) bool {
 		case grammar.AddMarketplace, grammar.DropMarketplace, grammar.AddPlugin,
 			grammar.DropPlugin, grammar.SetAgent, grammar.UnsetAgent,
 			grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool,
-			grammar.SetStatusline, grammar.UnsetStatusline, grammar.SetModel, grammar.UnsetModel:
+			grammar.SetStatusline, grammar.UnsetStatusline, grammar.SetModel, grammar.UnsetModel,
+			grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
 			return true
 		}
 	}
@@ -467,6 +468,13 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 			lines = append(lines, "statusline "+c.Arg)
 		case grammar.UnsetStatusline:
 			unset(keyStatusline, "statusline")
+		case grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
+			l, ch, err := applyPicker(f.Root, c)
+			if err != nil {
+				return nil, false, err
+			}
+			lines = append(lines, l...)
+			changed = changed || ch
 		case grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool:
 			perms, err := f.Root.Object(keyPermissions)
 			if err != nil {
@@ -663,6 +671,9 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 	if model != nil && *model != "" && !strings.ContainsAny(*model, " \t\r\n") {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetModel, Arg: *model})
 	}
+	picker, pickerComments := pickerCreateClauses(root)
+	alter.Clauses = append(alter.Clauses, picker...)
+	comments = append(comments, pickerComments...)
 	text := strings.Join(comments, "\n")
 	if len(alter.Clauses) > 0 {
 		if text != "" {

@@ -62,6 +62,7 @@ type playbookJSON struct {
 	Skills       []skillJSON       `json:"skills"`
 	Statusline   *string           `json:"statusline"`
 	Model        *string           `json:"model"`
+	ModelPicker  *pickerJSON       `json:"model_picker"`
 }
 
 type envJSON struct {
@@ -199,6 +200,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 			v.Marketplaces, v.Plugins, v.Agent = mps, plugins, agent
 		}
 		v.Tools, v.Statusline, v.Model = settingsExtras(sf.Root)
+		v.ModelPicker = readPicker(sf.Root)
 	}
 	root := pb.RootPath
 	if root == "" {
@@ -330,6 +332,9 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	}
 	if v.Model != nil {
 		rows = append(rows, [2]string{"Model", *v.Model})
+	}
+	if v.ModelPicker != nil {
+		rows = append(rows, [2]string{"Model picker", pickerLine(v.ModelPicker)})
 	}
 	if len(v.Skills) > 0 {
 		names := make([]string, len(v.Skills))
@@ -693,5 +698,8 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 			line += "; the settings model " + *v.Model + " is overridden"
 		}
 		fmt.Println(line + "; a launch's --model and /model still win")
+	}
+	if v.ModelPicker != nil {
+		fmt.Printf("Model picker: %s\n", pickerLine(v.ModelPicker))
 	}
 }

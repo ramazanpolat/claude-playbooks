@@ -19,7 +19,8 @@
 # plain config directory (backup, refusals, state outside the directory),
 # SELECT (built in, and through a stub clickhouse-local: the real one runs
 # in GitHub CI's select-clickhouse job), and a git marketplace's #ref.
-# v3.22.0: APPLY --dry-run --json (26 assertions in all: 25 commands, 1 file).
+# v3.22.0: APPLY --dry-run --json and the model picker (27 assertions in all:
+# 26 commands, 1 file).
 
 [scenario]
 name = "cli-grammar"
@@ -219,3 +220,12 @@ contains = "git-ref-ok"
 # appears.
 command = '''D="$HOME/jsonplan"; P="$HOME/.claude-playbooks"; mkdir -p "$D" && claude-playbook CREATE PLAYBOOK jpb NO ALIAS >/dev/null && printf x > "$P/jpb/data.txt" && printf "DROP PLAYBOOK jpb;\nCREATE OR REPLACE ENV jenv SET J=1;\n" > "$D/p.cpb" && B=$(find "$P" | sort | cksum) && claude-playbook APPLY "$D/p.cpb" --dry-run --json > "$D/p.json" && [ "$(find "$P" | sort | cksum)" = "$B" ] && J=$(tr -d ' \n' < "$D/p.json") && printf "%s" "$J" | grep -qF '"schema":1' && printf "%s" "$J" | grep -qF '"ok":true' && printf "%s" "$J" | grep -qF '"verdict":"dropped"' && printf "%s" "$J" | grep -qF "\"type\":\"delete\",\"what\":\"playbook\",\"path\":\"$P/jpb\"" && { claude-playbook APPLY "$D/p.cpb" --json > "$D/u.json"; [ $? = 2 ]; } && grep -q '"ok": false' "$D/u.json" && printf "ALTER PLAYBOOK ghost SET VAR A=1;\n" > "$D/r.cpb" && { claude-playbook APPLY "$D/r.cpb" --dry-run --json > "$D/r.json"; [ $? = 1 ]; } && grep -q '"verdict": "refused"' "$D/r.json" && test -f "$P/jpb/data.txt" && claude-playbook CREATE PLAYBOOK jref NO ALIAS >/dev/null && printf "ALTER PLAYBOOK jref SET VAR K FROM 'keychain:ok/x' ADD MCP SERVER s URL 'https://mcp.example/mcp' HEADER 'Authorization' FROM 'keychain:ok/x';\n" > "$D/ref.cpb" && claude-playbook APPLY "$D/ref.cpb" --dry-run --json > "$D/ref.json" && tr -d ' \n' < "$D/ref.json" | grep -Eq '"refs":\{"CPB_MCP_S_H_AUTHORIZATION_[0-9a-fA-F]{8}":"keychain:ok/x"\}' && ! grep -q "resolved:" "$D/ref.json" && echo apply-json-ok'''
 contains = "apply-json-ok"
+
+[[verify.commands]]
+# The model picker (v3.22.0), on a throwaway playbook: a playbook with only
+# ADD MODEL rows gets a settings.json holding just modelPicker; ONLY writes
+# replaceBuiltInOptions; a hand-added row and key survive an ADD of another
+# row; DROP MODEL removes one; SHOW --json shows the picker; SHOW CREATE
+# re-applies with nothing changed.
+command = '''P="$HOME/.claude-playbooks/mpk"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK mpk NO ALIAS >/dev/null && rm -f "$S" && claude-playbook "ALTER PLAYBOOK mpk ADD MODEL 'glm-5.3' LABEL 'GLM 5.3'" >/dev/null && [ "$(c)" = '{"modelPicker":{"options":[{"model":"glm-5.3","label":"GLM5.3"}]}}' ] && claude-playbook "ALTER PLAYBOOK mpk SET MODEL PICKER ONLY" >/dev/null && c | grep -qF '"replaceBuiltInOptions":true' && printf '{"theme":"dark","modelPicker":{"options":[{"model":"hand","label":"Hand"},{"model":"glm-5.3","label":"GLM 5.3"}],"replaceBuiltInOptions":true}}\n' > "$S" && claude-playbook "ALTER PLAYBOOK mpk ADD MODEL 'glm-5.3-flash' BEHAVES AS 'claude-sonnet-5'" >/dev/null && c | grep -qF '"theme":"dark"' && c | grep -qF '{"model":"hand","label":"Hand"},{"model":"glm-5.3","label":"GLM5.3"},{"model":"glm-5.3-flash","behavesAs":"claude-sonnet-5"}' && claude-playbook "ALTER PLAYBOOK mpk DROP MODEL 'hand'" >/dev/null && ! c | grep -qF '"model":"hand"' && claude-playbook SHOW PLAYBOOK mpk --json | tr -d ' \n' | grep -qF '"model_picker":{"mode":"only","options":[{"model":"glm-5.3","label":"GLM5.3","description":null,"behaves_as":null}' && claude-playbook "SELECT name, model_picker FROM PLAYBOOKS --json" | tr -d ' \n' | grep -qF '"model_picker":{"mode":"only","options":[{"behaves_as":null,"description":null,"label":"GLM5.3","model":"glm-5.3"}' && claude-playbook SHOW CREATE PLAYBOOK mpk > "$HOME/mpk.cpb" && grep -qF "SET MODEL PICKER ONLY" "$HOME/mpk.cpb" && claude-playbook APPLY "$HOME/mpk.cpb" | grep -q " 0 created, 0 changed," && echo model-picker-ok'''
+contains = "model-picker-ok"

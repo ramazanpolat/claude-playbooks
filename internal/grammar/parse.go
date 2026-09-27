@@ -32,6 +32,7 @@ func init() {
 		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
+		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES",
 	} {
 		keywords[w] = true
 	}
@@ -769,7 +770,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	case "USE":
 		return c, p.envList(c, w)
 	case "ADD", "DROP":
-		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL") {
+		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL") {
 		case "ENV":
 			if w == "ADD" {
 				return c, p.addEnvRest(c)
@@ -783,8 +784,10 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.mcpServer(c, w)
 		case "SKILL":
 			return c, p.skill(c, w)
+		case "MODEL":
+			return c, p.pickerModel(c, w)
 		}
-		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER or SKILL")
+		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
 	case "SET":
 		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL") {
 		case "AGENT":
@@ -793,6 +796,16 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Kind = SetStatusline
 			return c, p.oneWord(c, "SET STATUSLINE", "'<command>'", false)
 		case "MODEL":
+			if p.kw("PICKER") != "" {
+				c.Kind = SetModelPicker
+				switch m := p.kw("ONLY", "APPEND"); m {
+				case "":
+					return nil, p.fail("SET MODEL PICKER takes ONLY (the picker shows these rows only) or APPEND (after the built-in ones)")
+				default:
+					c.Arg = m
+				}
+				return c, nil
+			}
 			c.Kind = SetModel
 			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
@@ -828,6 +841,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, nil
 		case "MODEL":
 			c.Kind = UnsetModel
+			if p.kw("PICKER") != "" {
+				c.Kind = UnsetModelPicker
+			}
 			return c, nil
 		case "TOOL":
 			c.Kind = UnsetTool
@@ -1105,6 +1121,7 @@ func validate(s *Stmt) *Error {
 		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
+		SetModelPicker: true, UnsetModelPicker: true,
 	}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
@@ -1125,7 +1142,7 @@ func validate(s *Stmt) *Error {
 			what := map[Kind]string{AddMarketplace: "marketplace", DropMarketplace: "marketplace",
 				AddPlugin: "plugin", DropPlugin: "plugin", AddMCP: "MCP server", DropMCP: "MCP server",
 				AllowTool: "tool rule", DenyTool: "tool rule", UnsetTool: "tool rule",
-				AddSkill: "skill", DropSkill: "skill"}[c.Kind]
+				AddSkill: "skill", DropSkill: "skill", AddModel: "model", DropModel: "model"}[c.Kind]
 			if what == "" {
 				what = "env set"
 			}
@@ -1139,7 +1156,8 @@ func validate(s *Stmt) *Error {
 		}
 	}
 	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
-		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}}
+		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
+		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]
@@ -1487,6 +1505,54 @@ func (p *parser) toolRules(what string) ([]string, *Error) {
 		}
 		return nil
 	})
+}
+
+// pickerModel reads the rest of ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION
+// '…'] [BEHAVES AS '<id>'] or DROP MODEL '<id>'.
+func (p *parser) pickerModel(c *Clause, w string) *Error {
+	c.Kind = AddModel
+	if w == "DROP" {
+		c.Kind = DropModel
+	}
+	if err := p.oneWord(c, w+" MODEL", "'<id>'", true); err != nil {
+		return err
+	}
+	c.Names = []string{c.Arg}
+	if w == "DROP" {
+		return nil
+	}
+	row := &PickerRow{Model: c.Arg}
+	c.Row = row
+	for {
+		at := p.pos()
+		var dst **string
+		what := ""
+		switch p.kw("LABEL", "DESCRIPTION", "BEHAVES") {
+		case "LABEL":
+			dst, what = &row.Label, "LABEL"
+		case "DESCRIPTION":
+			dst, what = &row.Description, "DESCRIPTION"
+		case "BEHAVES":
+			if p.kw("AS") == "" {
+				return p.fail("BEHAVES takes AS: BEHAVES AS '<model>'")
+			}
+			dst, what = &row.BehavesAs, "BEHAVES AS"
+		default:
+			return nil
+		}
+		if *dst != nil {
+			return errAt(at, what+" appears twice")
+		}
+		t, err := p.take(what, "'<text>'")
+		if err != nil {
+			return err
+		}
+		if strings.ContainsAny(t.Text, "\r\n") || (what == "BEHAVES AS" && (t.Text == "" || strings.ContainsAny(t.Text, " \t"))) {
+			return errAt(t.Pos, what+" needs a one-line value")
+		}
+		v := t.Text
+		*dst = &v
+	}
 }
 
 // oneWord reads the one argument of SET STATUSLINE / SET MODEL; a model id

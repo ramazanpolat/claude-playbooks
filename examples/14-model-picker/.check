@@ -1,0 +1,17 @@
+s="$HOME/.claude-playbooks/router-agent/settings.json"
+python3 - "$s" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+assert list(s) == ["modelPicker"], s          # only the key the clauses give
+mp = s["modelPicker"]
+assert mp["replaceBuiltInOptions"] is True, mp
+assert [o["model"] for o in mp["options"]] == ["glm-5.3", "glm-5.3-flash"], mp
+assert mp["options"][0] == {"model": "glm-5.3", "label": "GLM 5.3", "description": "via the router"}, mp
+assert mp["options"][1] == {"model": "glm-5.3-flash", "label": "GLM 5.3 Flash", "behavesAs": "claude-sonnet-5"}, mp
+PY
+cpb EXPLAIN PLAYBOOK router-agent | grep -q 'Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)'
+# Back to the built-in rows plus these, one row fewer, then no picker at all.
+cpb "ALTER PLAYBOOK router-agent SET MODEL PICKER APPEND DROP MODEL 'glm-5.3-flash'"
+python3 -c 'import json,sys; mp=json.load(open(sys.argv[1]))["modelPicker"]; assert mp["replaceBuiltInOptions"] is False and len(mp["options"])==1, mp' "$s"
+cpb "ALTER PLAYBOOK router-agent UNSET MODEL PICKER"
+python3 -c 'import json,sys; assert "modelPicker" not in json.load(open(sys.argv[1]))' "$s"
