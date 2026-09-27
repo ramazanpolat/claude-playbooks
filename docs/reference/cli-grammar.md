@@ -118,6 +118,9 @@ pb-clause  := set-clause
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
             | SET STATUSLINE '<command>' | UNSET STATUSLINE
             | SET MODEL '<model>' | UNSET MODEL
+            | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
+            | DROP MODEL '<id>'
+            | SET MODEL PICKER ONLY | SET MODEL PICKER APPEND | UNSET MODEL PICKER
             | ADD SKILL <name> FROM '<dir>'
             | ADD SKILL <name> FROM <git-url> [BRANCH <ref>] [SUBDIR <dir>]
             | DROP SKILL <name>
@@ -1191,8 +1194,36 @@ Built (v3.21.0).
   from an env set or `SET VAR`, a launch's `--model`, and `/model` in a
   session all win over it. `EXPLAIN PLAYBOOK` says which one decides.
 
-Both are settings keys with no CLI. No other settings key gets a clause in
-this release.
+Both are settings keys with no CLI.
+
+### Model picker
+
+Built for v3.22.0. The pilot said "do it" on 2026-09-27; root confirmed
+the shape. The `/model` picker of a playbook, or of a plain config
+directory (it is user scope), from settings.json `modelPicker` =
+`{options: [{model, label, description, behavesAs}], replaceBuiltInOptions}`:
+
+```
+ALTER PLAYBOOK router-agent
+  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'
+  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
+  SET MODEL PICKER ONLY;
+```
+
+- `ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']` adds a row, or updates the row with that model id in place.
+  - A field left out keeps what the row has.
+  - A field given is written: `label`, `description`, `behavesAs`.
+- `DROP MODEL '<id>'` removes that row, and is refused when there is no such row. Dropping the last row removes `options`.
+- `SET MODEL PICKER ONLY` shows these rows only (`replaceBuiltInOptions: true`), and `APPEND` adds them after the built-in ones (`false`). Without either, Claude Code appends.
+- `UNSET MODEL PICKER` removes `modelPicker` whole.
+- **Rows no clause names are kept**, whatever wrote them, and so is a field cpb does not know. A key is written only when a clause gives it, so a playbook with only `ADD MODEL` rows has a `settings.json` holding just `modelPicker`.
+- **Reads:**
+  - `SHOW PLAYBOOK --json` gains `"model_picker": null | {"mode": "only" | "append", "options": [{"model", "label", "description", "behaves_as"}]}`, with `mode` "append" unless `replaceBuiltInOptions` is true.
+  - `EXPLAIN PLAYBOOK` and the human `SHOW` print a `Model picker:` line.
+  - `SHOW CREATE` writes the clauses back.
+  - `SELECT`'s `PLAYBOOKS` has a `model_picker` column.
+- **Claude Code versions:** `modelPicker` is read from Claude Code 2.1.242, and `behavesAs` from 2.1.257. cpb writes the key either way and does not check the version.
+- `SET MODEL '<model>'` (the `model` key, above) is a separate clause. After `SET MODEL`, `PICKER` begins this one; a model id is quoted.
 
 ### Skills
 

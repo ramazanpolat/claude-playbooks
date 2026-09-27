@@ -156,6 +156,22 @@ func (c *Clause) words(varWord bool) []string {
 		return append(strings.Fields(string(c.Kind)), quote(c.Arg))
 	case DropSkill:
 		return []string{"DROP", "SKILL", quoteWord(c.Names[0])}
+	case SetModelPicker:
+		return []string{"SET", "MODEL", "PICKER", c.Arg}
+	case DropModel:
+		return []string{"DROP", "MODEL", quote(c.Names[0])}
+	case AddModel:
+		w := []string{"ADD", "MODEL", quote(c.Row.Model)}
+		if c.Row.Label != nil {
+			w = append(w, "LABEL", quote(*c.Row.Label))
+		}
+		if c.Row.Description != nil {
+			w = append(w, "DESCRIPTION", quote(*c.Row.Description))
+		}
+		if c.Row.BehavesAs != nil {
+			w = append(w, "BEHAVES", "AS", quote(*c.Row.BehavesAs))
+		}
+		return w
 	case AddSkill:
 		w := []string{"ADD", "SKILL", quoteWord(c.Names[0]), "FROM", quote(c.Skill.From)}
 		if c.Skill.Branch != "" {
@@ -201,7 +217,7 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case RenameTo, Alias, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	default: // NoAlias, Sandbox, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel: no argument
+	default: // NoAlias, Sandbox, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

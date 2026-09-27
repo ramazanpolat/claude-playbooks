@@ -88,10 +88,25 @@ const (
 	// Skills (ALTER PLAYBOOK only): <config>/skills/<name>.
 	AddSkill  Kind = "ADD SKILL"  // ADD SKILL n FROM <source> [BRANCH <ref>] [SUBDIR <dir>]
 	DropSkill Kind = "DROP SKILL" // DROP SKILL n
+
+	// The model picker (v3.22.0): settings.json modelPicker.
+	AddModel         Kind = "ADD MODEL"          // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
+	DropModel        Kind = "DROP MODEL"         // DROP MODEL '<id>'
+	SetModelPicker   Kind = "SET MODEL PICKER"   // SET MODEL PICKER ONLY | APPEND
+	UnsetModelPicker Kind = "UNSET MODEL PICKER" // UNSET MODEL PICKER
 )
 
 // Skill is where an ADD SKILL takes a skill from: a directory (linked) or a
 // git source (cloned and copied), with BRANCH and SUBDIR for git only.
+// PickerRow is one ADD MODEL: a row of the model picker. A field left out
+// (nil) keeps what the row already has.
+type PickerRow struct {
+	Model       string
+	Label       *string
+	Description *string
+	BehavesAs   *string
+}
+
 type Skill struct {
 	From   string
 	Branch string
@@ -166,8 +181,9 @@ type Clause struct {
 
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
 
-	MCP   *MCP   // ADD MCP SERVER
-	Skill *Skill // ADD SKILL
+	MCP   *MCP       // ADD MCP SERVER
+	Skill *Skill     // ADD SKILL
+	Row   *PickerRow // ADD MODEL
 
 	Pos Pos
 }

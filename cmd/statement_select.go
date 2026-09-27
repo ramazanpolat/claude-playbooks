@@ -49,10 +49,10 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
 		columns: []string{"name", "version", "version_tuple", "path", "source", "linked", "launcher", "envs", "vars", "sandbox",
-			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "model"},
+			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "model", "model_picker"},
 		structure: "name String, version Nullable(String), path String, source JSON, linked Nullable(String), " +
 			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox Bool, marketplaces Array(JSON), plugins Array(JSON), " +
-			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), model Nullable(String)",
+			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), model Nullable(String), model_picker JSON",
 		rows: playbookRows,
 	},
 	"ENVS": {

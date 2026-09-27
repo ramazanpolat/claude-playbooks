@@ -79,8 +79,9 @@ cpb DROP PLAYBOOK scratch --yes
   Code's own `claude plugin` commands for that playbook only; `SET AGENT` pins
   the main-thread agent in the playbook's `settings.json`.
 - **The rest of the agent:** `ADD MCP SERVER` (a credential only by
-  reference), `ALLOW` / `DENY TOOL`, `SET STATUSLINE`, `SET MODEL`, and
-  `ADD SKILL` from a directory or a git repository.
+  reference), `ALLOW` / `DENY TOOL`, `SET STATUSLINE`, `SET MODEL`, the
+  `/model` picker (`ADD MODEL … SET MODEL PICKER ONLY`), and `ADD SKILL`
+  from a directory or a git repository.
 - **Recipes:** an `ALTER PLAYBOOK` with no name applies to whatever
   `APPLY … TO <playbook>`, `TO '~/.claude'` or a `USE PLAYBOOK` line names.
 - **Queries:** `cpb "SELECT name, envs FROM PLAYBOOKS"`; anything beyond
@@ -98,7 +99,7 @@ Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top, as recipes |
-| [Examples 01-13](examples/) | one small `playbook.cpb` per idea, from a first playbook to a stacked agent, all applied in CI |
+| [Examples 01-14](examples/) | one small `playbook.cpb` per idea, from a first playbook to a stacked agent, all applied in CI |
 | [CLI grammar](docs/reference/cli-grammar.md) | every statement, clause, file rule and output format |
 | [Guides](docs/README.md) | installation, playbooks, configuring an agent, environment, authentication, sandbox, agents, SQL |
 | [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |

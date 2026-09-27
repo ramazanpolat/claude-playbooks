@@ -1,0 +1,9 @@
+-- The /model picker of one playbook: its own rows, in place of the
+-- built-in ones. Written into the playbook's settings.json (modelPicker);
+-- rows and keys cpb did not write are kept.
+CREATE PLAYBOOK IF NOT EXISTS router-agent NO ALIAS;
+
+ALTER PLAYBOOK router-agent
+  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'
+  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
+  SET MODEL PICKER ONLY;

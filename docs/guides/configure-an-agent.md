@@ -48,6 +48,22 @@ model is the playbook's default and the weakest choice: `ANTHROPIC_MODEL`,
 `--model` and `/model` all win over it, and `EXPLAIN PLAYBOOK` says which
 one decides. Example: [10](../../examples/10-tools-statusline-model/).
 
+## The model picker
+
+```
+ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
+DROP MODEL '<id>'
+SET MODEL PICKER ONLY | APPEND      UNSET MODEL PICKER
+```
+
+These are the rows `/model` offers in a session, written to `settings.json`
+`modelPicker`. `ONLY` shows these rows alone, and `APPEND` adds them after
+the built-in ones. `BEHAVES AS` names the model whose behaviour Claude Code
+should assume for an id it does not know (a router's model, say). A row
+is keyed by its model id, and rows cpb did not write are kept. Claude Code
+reads the picker from 2.1.242, and `behavesAs` from 2.1.257. Example:
+[14](../../examples/14-model-picker/).
+
 ## Skills
 
 ```
