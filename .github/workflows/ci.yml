@@ -94,6 +94,45 @@ jobs:
       - name: Every clause has a reference entry and an example
         run: examples/coverage.sh
 
+  # The upgrade from the previous release: that release's binary applies
+  # its own examples, then this build takes over the same state and must
+  # read it identically (examples/upgrade.sh says what is compared). The
+  # previous release is the newest release tag reachable from HEAD^, so a
+  # release commit is checked against the one before it.
+  upgrade:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            go-version: '1.21'
+          # macOS needs a current Go for the same LC_UUID reason as the
+          # test job above; old releases build with it too.
+          - os: macos-latest
+            go-version: '1.26'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - name: Build this commit and the previous release
+        run: |
+          set -eu
+          # HEAD^ is main's previous commit on a release or main push, and
+          # the base branch's tip on a pull request's merge ref: its newest
+          # release tag is the previous release, whatever HEAD carries.
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^)
+          echo "previous release: $prev"
+          echo "PREV=$prev" >> "$GITHUB_ENV"
+          git worktree add -q "$RUNNER_TEMP/prev" "$prev"
+          (cd "$RUNNER_TEMP/prev" && go build -o "$RUNNER_TEMP/cpb-prev" .)
+          go build -o "$RUNNER_TEMP/cpb" .
+      - name: Upgrade from the previous release
+        run: examples/upgrade.sh "$RUNNER_TEMP/cpb-prev" "$RUNNER_TEMP/cpb" "$RUNNER_TEMP/prev/examples"
+
   # SELECT beyond the built-in form runs through a real clickhouse-local:
   # the rows cpb pipes in and the query it rewrites are checked end to end.
   select-clickhouse:
