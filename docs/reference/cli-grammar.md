@@ -93,6 +93,12 @@ is a data-governance leak. It happened once, on 2026-09-27.
     playbook's env sets and its own block. A host of `anthropic.com` or
     `*.anthropic.com` is Anthropic's; any other host is not, `localhost`
     included, since a local router forwards elsewhere.
+  - A local proxy that only passes through to Anthropic warns too. cpb sees
+    the proxy's host, not where the proxy sends a request, and the proxy
+    decides that per request: 9router and LiteLLM can pass one model through
+    to Anthropic and route the next to GLM. The 2026-09-27 leak went through
+    exactly such a local proxy. For a pure passthrough, ignore the warning:
+    it never refuses.
   - Any statement that makes this so is warned: `ALTER PLAYBOOK` (`USE ENV`,
     `ADD ENV`, `SET VAR`, `UNSET VAR`, …), `ALTER ENV` / `CREATE OR REPLACE
     ENV` on a set the playbook uses, `ALTER DEFAULTS`, and `CREATE PLAYBOOK`
