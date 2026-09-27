@@ -881,6 +881,18 @@ they agree: before anything runs for a directory source (it reads the file),
 after the command for a git or GitHub one. A source that declares another
 name is removed again, and the statement fails naming both.
 
+**Claude Code 2.1.268 or newer** runs the plugin clauses: they use
+`claude plugin install --json` and `uninstall --json`, which arrived then
+(the changelog's 2.1.268; nixpkgs carried 2.1.245 at the time). A
+statement whose plan installs or uninstalls a plugin reads `claude
+--version` first and, on an older claude, is refused in one line before
+any command that changes anything runs (the state reads, `plugin list
+--json` and `marketplace list --json`, come first; they are older than
+2.1.268): `the plugin clauses need Claude Code 2.1.268 or newer (they
+run claude plugin install --json); this claude is 2.1.245: update Claude
+Code`. A dry run says the same. A version that cannot be read is let
+through, and the command then reports what is wrong.
+
 **State first, so repeats run nothing.** Before a statement runs anything,
 cpb reads the playbook's state (`claude plugin marketplace list --json`,
 `claude plugin list --json`) and plans the commands: a marketplace already

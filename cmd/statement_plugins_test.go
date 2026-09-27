@@ -56,12 +56,13 @@ esac
 	return log
 }
 
-// runs lists the logged calls that change state (not the list reads).
+// runs lists the logged calls that change state (not the list reads, nor
+// the --version probe).
 func runs(t *testing.T, log string) []string {
 	t.Helper()
 	var out []string
 	for _, l := range strings.Split(strings.TrimSpace(readLog(t, log)), "\n") {
-		if l != "" && !strings.HasSuffix(l, " list --json") {
+		if l != "" && !strings.HasSuffix(l, " list --json") && !strings.HasSuffix(l, "|--version") {
 			out = append(out, l)
 		}
 	}
@@ -289,6 +290,47 @@ func TestSourceStringGitRef(t *testing.T) {
 	} {
 		if got, ok := sourceString(json.RawMessage(raw)); ok {
 			t.Errorf("%s: written as %q, want not written", raw, got)
+		}
+	}
+}
+
+// A plan that installs or uninstalls a plugin is refused, in one line, when
+// claude is older than the first version with `plugin install --json`; a
+// current or unknown version runs, and a plan without install runs anyway.
+func TestPluginClausesNeedClaudeVersion(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	log := fakeClaude(t)
+	seedFlatPlaybook(t, "k")
+	old := claudeVersion
+	t.Cleanup(func() { claudeVersion = old })
+
+	claudeVersion = func() string { return "2.1.245" }
+	_, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander")
+	if err == nil || !strings.Contains(err.Error(), "need Claude Code 2.1.268 or newer") || !strings.Contains(err.Error(), "this claude is 2.1.245") {
+		t.Fatalf("an old claude: %v", err)
+	}
+	if got := runs(t, log); len(got) != 0 {
+		t.Fatalf("commands ran before the refusal: %v", got)
+	}
+	// No install or uninstall in the plan: the version does not matter.
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook"); err != nil {
+		t.Fatalf("marketplace only: %v", err)
+	}
+	claudeVersion = func() string { return "2.1.99" } // numbers, not strings: 99 < 268
+	if err := checkClaudeForPlugins([]pluginStep{{args: []string{"install", "p@m"}}}); err == nil {
+		t.Error("2.1.99 was let through")
+	}
+	for out, want := range map[string]string{"2.1.283 (Claude Code)": "2.1.283", "Claude Code 2.1.268": "2.1.268",
+		"v2.1.99\n": "2.1.99", "claude: not a version": ""} {
+		if got := parseClaudeVersion(out); got != want {
+			t.Errorf("parseClaudeVersion(%q) = %q, want %q", out, got, want)
+		}
+	}
+	for _, v := range []string{"2.1.268", "2.1.283", ""} {
+		claudeVersion = func() string { return v }
+		if err := checkClaudeForPlugins([]pluginStep{{args: []string{"install", "p@m"}}}); err != nil {
+			t.Errorf("version %q: %v", v, err)
 		}
 	}
 }

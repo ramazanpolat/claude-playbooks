@@ -86,6 +86,9 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		if steps, pl, err = planPlugins(w, st.Clauses); err != nil {
 			return err
 		}
+		if err := checkClaudeForPlugins(steps); err != nil {
+			return err
+		}
 		lines = append(lines, pl...)
 	}
 	mcpChange := false
