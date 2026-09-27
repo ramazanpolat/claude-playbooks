@@ -171,4 +171,23 @@ release:
       or `.check` command that CI runs: README prose does not count).
 - [ ] **AGENTS.md** (this file) is current: install, verify, update, deploy.
 
+**Stability** (from v3.24.0, the first stable release; the rules are in
+[docs/reference/cli-grammar.md](docs/reference/cli-grammar.md), "Stability"):
+
+- [ ] **The version matches the change.**
+  - A breaking change to the stable surface (grammar, visible commands,
+    file formats, `--json` shapes, codes) goes only in a new major.
+  - An addition goes in a minor.
+  - A fix goes in a patch; if it changes a result, the notes say so.
+- [ ] **Deprecations** warn on stderr, off a terminal too, for at least one
+      minor release before the major that removes them.
+- [ ] **The upgrade from the previous release passes:** the CI `upgrade`
+      job, on ubuntu and macOS, green on the commit to be tagged
+      (`examples/upgrade.sh`).
+- [ ] **The nightly regression is green** (arena phase 2). A stable tag
+      needs 7 consecutive green nights.
+- [ ] **No open security issue and no known data-loss bug.** Check
+      `docs/known-issues/`.
+- [ ] **Every review finding** on the release's PRs is fixed or answered.
+
 If any is missing, build it first; never tag without it.

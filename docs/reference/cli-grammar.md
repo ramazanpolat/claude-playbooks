@@ -1,8 +1,9 @@
 # CLI grammar
 
-Status: **implemented, v3.22.0.** Decided with the pilot on 2026-09-25/27.
-Everything on this page is built; a section specified before it is built is
-marked **planned**.
+Status: **implemented, v3.23.1; the stable surface from v3.24.0** (see
+"Stability"). Decided with the pilot on 2026-09-25/27. Everything on this
+page is built; a section specified before it is built is marked
+**planned**.
 
 ## Why
 
@@ -721,6 +722,45 @@ the pilot names (that one is v4.0.0).
   no migration. An older cpb reading a multi-line file refuses it rather than
   guess, so downgrading after `ALTER DEFAULTS` with two sets needs a
   one-line edit.
+
+## Stability (from v3.24.0)
+
+v3.24.0 is cpb's first **stable** release. From it on, the surface below
+changes only by these rules (the stabilization week, decided by the pilot on
+2026-09-27):
+
+- **Breaking changes only in a new major version.** A statement or clause
+  that stops parsing, a clause whose effect changes, a `--json` field that
+  changes meaning or goes away, a file-format change an older cpb cannot
+  read: each waits for the next major.
+- **Additions are minor releases:** a new clause, a new object, a new
+  optional `--json` field, a new warning code, a new `SELECT` column. A
+  script that reads what it knows keeps working. A new clause's words are **not**
+  reserved, as with `PILOT`, `PROFILE`, `ISOLATED` and `LOGIN`: a newly
+  reserved word would refuse a name that works today.
+- **Deprecations warn and keep working for at least one minor release**
+  before the major that removes them, on stderr and off a terminal too.
+- **Fixes are patch releases.** A fix may change a result that was wrong,
+  for example the security fixes in v3.22.1 and v3.23.1. The release notes
+  say so.
+
+**The stable surface:**
+
+| Part | What |
+|---|---|
+| The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
+| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
+| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`; the `settings.json` keys cpb writes (see "Where each clause writes") |
+| `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json` |
+| Codes | the `APPLY --json` warning codes, and the exit codes of `APPLY` (0 planned, 1 refused, 2 usage) |
+
+**Not stable:**
+- the human form of every output: tables, labels, wording, the order of
+  lines;
+- the text of error and warning messages (the codes are stable);
+- the hidden pre-grammar commands, which are **deprecated** (see
+  "Pre-grammar commands") and removed in v4.0.0;
+- cpb's other internal files, and anything under `gentar/`.
 
 ## Output
 
