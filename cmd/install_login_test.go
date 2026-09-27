@@ -301,3 +301,55 @@ func TestLinkIsolatedSubdirKeepsLogin(t *testing.T) {
 		t.Fatalf("the machine store changed: %s", data)
 	}
 }
+
+// A linked directory whose .credentials.json is a link to a foreign store
+// (another account's, newer than the machine's): LINK and a launch leave the
+// machine store and the foreign file byte-identical, and the link is
+// re-pointed at the shared store (LinkCredentials never follows a link to
+// copy it: a link that is not the shared store is removed and re-linked).
+// The ordinary link to the shared store stays as it is (root's review of
+// #117).
+func TestLinkedForeignCredentialsLinkIsNeverCopied(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	store := seedMachineLogin(t)
+	stubClaude(t)
+	home, _ := os.UserHomeDir()
+	foreign := filepath.Join(home, "other-account.json")
+	if err := os.WriteFile(foreign, []byte(sourceLogin), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, target string }{{"foreign", foreign}, {"shared", store}} {
+		dir := filepath.Join(home, c.name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte("name = \""+c.name+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(c.target, filepath.Join(dir, ".credentials.json")); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK "+c.name+" NO ALIAS LINK '"+dir+"'") })
+		if err != nil {
+			t.Fatal(err)
+		}
+		captureStderr(t, func() { err = runRun(nil, []string{c.name, "--version"}) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if data, _ := os.ReadFile(store); string(data) != machineLogin {
+			t.Fatalf("%s: the machine store changed: %s", c.name, data)
+		}
+		if data, _ := os.ReadFile(foreign); string(data) != sourceLogin {
+			t.Fatalf("%s: the foreign store changed", c.name)
+		}
+		if target, err := os.Readlink(filepath.Join(dir, ".credentials.json")); err != nil || target != store {
+			t.Fatalf("%s: .credentials.json -> %q (%v), want the shared store", c.name, target, err)
+		}
+		if aside, _ := filepath.Glob(filepath.Join(dir, ".credentials.json.cpb-ignored-*")); len(aside) != 0 {
+			t.Fatalf("%s: a link was set aside: %v", c.name, aside)
+		}
+	}
+}
