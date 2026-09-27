@@ -285,3 +285,24 @@ func TestApplyJSONFetch(t *testing.T) {
 		t.Fatalf("fetch: %v", a)
 	}
 }
+
+// A command line that does not parse still answers in JSON, exit 2; a
+// local FROM source is local by its form, and absolute.
+func TestApplyJSONParseErrorAndLocalFetch(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	rep, _, code := applyJSON(t, "--dry-run", "--json")
+	if code != 2 || rep["ok"] != false || rep["error"] == nil || rep["schema"] != float64(1) {
+		t.Fatalf("parse error: code %d, %v", code, rep)
+	}
+	missing := filepath.Join(t.TempDir(), "not-yet")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS localpb FROM "+missing+" NO ALIAS;\n")
+	rep, out, code := applyJSON(t, f, "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("code %d\n%s", code, out)
+	}
+	a := stmts(rep)[0]["actions"].([]any)[0].(map[string]any)
+	if a["type"] != "fetch" || a["source"] != missing || a["network"] != false {
+		t.Fatalf("local fetch: %v", a)
+	}
+}

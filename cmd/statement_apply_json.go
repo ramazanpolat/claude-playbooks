@@ -163,9 +163,10 @@ func stepActions(configDir string, s pluginStep, refOf func(string) string) []pl
 // fetchAction is CREATE PLAYBOOK … FROM: the source a real run installs
 // into path (to). A local directory is copied; anything else is fetched.
 func fetchAction(source, branch, subdir, to string) planAction {
-	local := false
-	if info, err := os.Stat(expandHomeDir(source)); err == nil && info.IsDir() {
-		local = true
+	// A local directory by its form, whether or not it exists yet.
+	local := strings.HasPrefix(source, "/") || strings.HasPrefix(source, "~/") ||
+		strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../")
+	if local {
 		source = expandHomeDir(source)
 		if abs, err := filepath.Abs(source); err == nil {
 			source = abs
@@ -247,8 +248,7 @@ func usage(err error) error { return &applyFailure{code: 2, err: err} }
 // runApplyJSON runs APPLY with its human output sent to stderr, and prints
 // the plan as JSON on stdout, refusals included.
 func runApplyJSON(st *grammar.Stmt) error {
-	rep := &applyReport{Schema: applySchema, CPBVersion: Version, Files: []string{},
-		Warnings: []applyWarning{}, Statements: []applyStmtJSON{}}
+	rep := &applyReport{Files: []string{}, Warnings: []applyWarning{}, Statements: []applyStmtJSON{}}
 	code := 0
 	var err error
 	if !st.DryRun {
@@ -275,6 +275,21 @@ func runApplyJSON(st *grammar.Stmt) error {
 			}
 		}
 	}
+	return printApplyReport(rep, code)
+}
+
+// printApplyReport prints the report and ends with its exit code.
+func printApplyReport(rep *applyReport, code int) error {
+	rep.Schema, rep.CPBVersion = applySchema, Version
+	if rep.Files == nil {
+		rep.Files = []string{}
+	}
+	if rep.Warnings == nil {
+		rep.Warnings = []applyWarning{}
+	}
+	if rep.Statements == nil {
+		rep.Statements = []applyStmtJSON{}
+	}
 	rep.OK = code == 0
 	rep.Summary.Warnings = len(rep.Warnings)
 	for _, s := range rep.Statements {
@@ -282,13 +297,31 @@ func runApplyJSON(st *grammar.Stmt) error {
 			rep.Summary.Warnings++
 		}
 	}
-	data, merr := json.MarshalIndent(rep, "", "  ")
-	if merr != nil {
-		return merr
+	data, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil { // cannot happen with these types; still one JSON object
+		data = []byte(`{"schema": 1, "ok": false, "error": {"file": null, "line": null, "message": "internal: cannot encode the report"}}`)
+		code = 2
 	}
 	fmt.Println(string(data))
 	if code != 0 {
 		return &commandExitError{code: code}
 	}
 	return nil
+}
+
+// applyJSONArgs reports a command line that is APPLY … --json.
+func applyJSONArgs(args []string) bool {
+	words := args
+	if len(args) == 1 {
+		words = strings.Fields(args[0])
+	}
+	if len(words) == 0 || !strings.EqualFold(words[0], "APPLY") {
+		return false
+	}
+	for _, w := range words[1:] {
+		if w == "--json" {
+			return true
+		}
+	}
+	return false
 }

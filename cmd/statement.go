@@ -82,6 +82,11 @@ func runStatement(args []string) error {
 		st, err = grammar.ParseArgs(args)
 	}
 	if err != nil {
+		// APPLY … --json answers in JSON even when the command line itself
+		// does not parse.
+		if applyJSONArgs(args) {
+			return printApplyReport(&applyReport{Error: &applyErrorJSON{Message: err.Error()}}, 2)
+		}
 		return err
 	}
 	if st.Verb == grammar.Apply {
