@@ -1,6 +1,9 @@
 package grammar
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // String renders the statement in canonical form: keywords in capitals, one
 // line, words quoted playbook-file style where they need it. Parsing the result
@@ -152,7 +155,15 @@ func (c *Clause) words(varWord bool) []string {
 			w = append(w, quote(r))
 		}
 		return w
-	case SetStatusline, SetModel:
+	case SetStatusline:
+		w := []string{"SET", "STATUSLINE", quote(c.Arg)}
+		if c.Refresh > 0 {
+			w = append(w, "REFRESH", strconv.Itoa(c.Refresh))
+		}
+		return w
+	case SetStatuslineRefresh:
+		return []string{"SET", "STATUSLINE", "REFRESH", strconv.Itoa(c.Refresh)}
+	case SetModel:
 		return append(strings.Fields(string(c.Kind)), quote(c.Arg))
 	case DropSkill:
 		return []string{"DROP", "SKILL", quoteWord(c.Names[0])}

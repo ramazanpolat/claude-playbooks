@@ -16,7 +16,9 @@ write:
   removes it from either.
 - `SET STATUSLINE '<command>'` sets `statusLine` to that command, keeping any
   other field of an existing one (such as `padding`). `UNSET STATUSLINE`
-  removes it.
+  removes it. `REFRESH 10` also re-renders it every 10 seconds while the
+  session is idle, which Claude Code does not do without it. `SET STATUSLINE
+  REFRESH <n>` and `UNSET STATUSLINE REFRESH` change only the interval.
 - `SET MODEL '<model>'` is the playbook's default model and the weakest
   choice: `ANTHROPIC_MODEL` from an env set, `--model` at launch and `/model`
   in a session all win over it. `EXPLAIN PLAYBOOK` says which one decides.

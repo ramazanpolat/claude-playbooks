@@ -90,6 +90,10 @@ const (
 	DropSkill Kind = "DROP SKILL" // DROP SKILL n
 
 	// The model picker (v3.22.0): settings.json modelPicker.
+	// The status line's refresh (v3.23.0): statusLine.refreshInterval.
+	SetStatuslineRefresh   Kind = "SET STATUSLINE REFRESH"   // SET STATUSLINE REFRESH <n>
+	UnsetStatuslineRefresh Kind = "UNSET STATUSLINE REFRESH" // UNSET STATUSLINE REFRESH
+
 	AddModel         Kind = "ADD MODEL"          // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
 	DropModel        Kind = "DROP MODEL"         // DROP MODEL '<id>'
 	SetModelPicker   Kind = "SET MODEL PICKER"   // SET MODEL PICKER ONLY | APPEND
@@ -184,6 +188,9 @@ type Clause struct {
 	MCP   *MCP       // ADD MCP SERVER
 	Skill *Skill     // ADD SKILL
 	Row   *PickerRow // ADD MODEL
+	// Refresh: SET STATUSLINE … REFRESH <n> and SET STATUSLINE REFRESH <n>,
+	// whole seconds (0: not given).
+	Refresh int
 
 	Pos Pos
 }

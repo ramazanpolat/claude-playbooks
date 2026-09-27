@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
@@ -32,7 +33,7 @@ func init() {
 		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
-		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES",
+		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
 	} {
 		keywords[w] = true
 	}
@@ -793,8 +794,22 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		case "AGENT":
 			return c, p.agent(c)
 		case "STATUSLINE":
+			if p.kw("REFRESH") != "" {
+				c.Kind = SetStatuslineRefresh
+				n, err := p.refreshSeconds()
+				c.Refresh = n
+				return c, err
+			}
 			c.Kind = SetStatusline
-			return c, p.oneWord(c, "SET STATUSLINE", "'<command>'", false)
+			if err := p.oneWord(c, "SET STATUSLINE", "'<command>'", false); err != nil {
+				return c, err
+			}
+			if p.kw("REFRESH") != "" {
+				n, err := p.refreshSeconds()
+				c.Refresh = n
+				return c, err
+			}
+			return c, nil
 		case "MODEL":
 			if p.kw("PICKER") != "" {
 				c.Kind = SetModelPicker
@@ -838,6 +853,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, nil
 		case "STATUSLINE":
 			c.Kind = UnsetStatusline
+			if p.kw("REFRESH") != "" {
+				c.Kind = UnsetStatuslineRefresh
+			}
 			return c, nil
 		case "MODEL":
 			c.Kind = UnsetModel
@@ -1122,6 +1140,7 @@ func validate(s *Stmt) *Error {
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPicker: true,
+		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true,
 	}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
@@ -1157,7 +1176,9 @@ func validate(s *Stmt) *Error {
 	}
 	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
 		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
-		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker}}
+		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
+		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
+		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]
@@ -1505,6 +1526,20 @@ func (p *parser) toolRules(what string) ([]string, *Error) {
 		}
 		return nil
 	})
+}
+
+// refreshSeconds reads the <n> of REFRESH: a whole number of seconds, at
+// least 1, with no unit.
+func (p *parser) refreshSeconds() (int, *Error) {
+	t, err := p.take("REFRESH", "<seconds>")
+	if err != nil {
+		return 0, err
+	}
+	n, cerr := strconv.Atoi(t.Text)
+	if cerr != nil || n < 1 || strings.TrimLeft(t.Text, "0123456789") != "" {
+		return 0, errAt(t.Pos, "REFRESH takes a whole number of seconds, at least 1, with no unit: REFRESH 10")
+	}
+	return n, nil
 }
 
 // pickerModel reads the rest of ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION

@@ -61,8 +61,10 @@ type playbookJSON struct {
 	Tools        toolsJSON         `json:"tools"`
 	Skills       []skillJSON       `json:"skills"`
 	Statusline   *string           `json:"statusline"`
-	Model        *string           `json:"model"`
-	ModelPicker  *pickerJSON       `json:"model_picker"`
+	// StatuslineRefresh is statusLine.refreshInterval, whole seconds.
+	StatuslineRefresh *int        `json:"statusline_refresh"`
+	Model             *string     `json:"model"`
+	ModelPicker       *pickerJSON `json:"model_picker"`
 }
 
 type envJSON struct {
@@ -201,6 +203,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		}
 		v.Tools, v.Statusline, v.Model = settingsExtras(sf.Root)
 		v.ModelPicker = readPicker(sf.Root)
+		v.StatuslineRefresh = statuslineRefresh(sf.Root)
 	}
 	root := pb.RootPath
 	if root == "" {
@@ -328,7 +331,7 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		rows = append(rows, [2]string{"Tools", toolsLine(v.Tools)})
 	}
 	if v.Statusline != nil {
-		rows = append(rows, [2]string{"Status line", *v.Statusline})
+		rows = append(rows, [2]string{"Status line", statuslineLine(v)})
 	}
 	if v.Model != nil {
 		rows = append(rows, [2]string{"Model", *v.Model})
@@ -702,4 +705,18 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	if v.ModelPicker != nil {
 		fmt.Printf("Model picker: %s\n", pickerLine(v.ModelPicker))
 	}
+	if v.Statusline != nil {
+		fmt.Printf("Status line: %s\n", statuslineLine(v))
+	}
+}
+
+// statuslineLine is the status line command, and its refresh when set.
+func statuslineLine(v playbookJSON) string {
+	if v.Statusline == nil {
+		return ""
+	}
+	if v.StatuslineRefresh != nil {
+		return fmt.Sprintf("%s (refreshes every %d s)", *v.Statusline, *v.StatuslineRefresh)
+	}
+	return *v.Statusline
 }

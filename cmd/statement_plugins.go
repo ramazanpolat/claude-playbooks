@@ -31,7 +31,9 @@ const (
 	keyAgent        = "agent"
 	keyModel        = "model"
 	keyStatusline   = "statusLine"
-	keyPermissions  = "permissions"
+	// keyRefreshInterval is statusLine.refreshInterval, in whole seconds.
+	keyRefreshInterval = "refreshInterval"
+	keyPermissions     = "permissions"
 )
 
 type marketplaceJSON struct {
@@ -52,6 +54,7 @@ func pluginClauses(clauses []grammar.Clause) bool {
 			grammar.DropPlugin, grammar.SetAgent, grammar.UnsetAgent,
 			grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool,
 			grammar.SetStatusline, grammar.UnsetStatusline, grammar.SetModel, grammar.UnsetModel,
+			grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh,
 			grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
 			return true
 		}
@@ -520,16 +523,55 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 				return nil, false, err
 			}
 			var typ, cmd string
+			var refresh int
 			_, _ = sl.Get("type", &typ)
 			_, _ = sl.Get("command", &cmd)
-			if typ == "command" && cmd == c.Arg {
+			_, _ = sl.Get(keyRefreshInterval, &refresh)
+			// Without REFRESH, an existing refreshInterval is kept, as
+			// padding and every other field are.
+			if typ == "command" && cmd == c.Arg && (c.Refresh == 0 || refresh == c.Refresh) {
 				continue
 			}
 			_ = sl.Set("type", "command")
 			_ = sl.Set("command", c.Arg)
+			line := "statusline " + c.Arg
+			if c.Refresh > 0 {
+				_ = sl.Set(keyRefreshInterval, c.Refresh)
+				line += fmt.Sprintf(" (refreshes every %d s)", c.Refresh)
+			}
 			f.Root.SetObject(keyStatusline, sl)
 			changed = true
-			lines = append(lines, "statusline "+c.Arg)
+			lines = append(lines, line)
+		case grammar.SetStatuslineRefresh:
+			sl, err := f.Root.Object(keyStatusline)
+			if err != nil {
+				return nil, false, err
+			}
+			var typ, cmd string
+			var refresh int
+			_, _ = sl.Get("type", &typ)
+			_, _ = sl.Get("command", &cmd)
+			_, _ = sl.Get(keyRefreshInterval, &refresh)
+			if typ != "command" || cmd == "" {
+				return nil, false, fmt.Errorf("SET STATUSLINE REFRESH needs a status line: SET STATUSLINE '<cmd>' REFRESH %d", c.Refresh)
+			}
+			if refresh == c.Refresh {
+				continue
+			}
+			_ = sl.Set(keyRefreshInterval, c.Refresh)
+			f.Root.SetObject(keyStatusline, sl)
+			changed = true
+			lines = append(lines, fmt.Sprintf("statusline refreshes every %d s", c.Refresh))
+		case grammar.UnsetStatuslineRefresh:
+			sl, err := f.Root.Object(keyStatusline)
+			if err != nil {
+				return nil, false, err
+			}
+			if sl.Delete(keyRefreshInterval) {
+				f.Root.SetObject(keyStatusline, sl)
+				changed = true
+				lines = append(lines, "unset     statusline refresh")
+			}
 		case grammar.UnsetStatusline:
 			unset(keyStatusline, "statusline")
 		case grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
@@ -730,7 +772,11 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.DenyTool, Names: tools.Deny})
 	}
 	if statusline != nil {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetStatusline, Arg: *statusline})
+		c := grammar.Clause{Kind: grammar.SetStatusline, Arg: *statusline}
+		if r := statuslineRefresh(root); r != nil {
+			c.Refresh = *r
+		}
+		alter.Clauses = append(alter.Clauses, c)
 	}
 	if model != nil && *model != "" && !strings.ContainsAny(*model, " \t\r\n") {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetModel, Arg: *model})
@@ -784,4 +830,18 @@ func settingsExtras(root *settings.Object) (toolsJSON, *string, *string) {
 		model = &m
 	}
 	return t, statusline, model
+}
+
+// statuslineRefresh is statusLine.refreshInterval when it is a whole number
+// of seconds, at least 1, as REFRESH writes it; nil otherwise.
+func statuslineRefresh(root *settings.Object) *int {
+	sl, err := root.Object(keyStatusline)
+	if err != nil {
+		return nil
+	}
+	var n int
+	if ok, err := sl.Get(keyRefreshInterval, &n); !ok || err != nil || n < 1 {
+		return nil
+	}
+	return &n
 }
