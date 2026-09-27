@@ -181,7 +181,7 @@ devbox needs none of this: it enables flakes itself.
 **Claude Code from Nix.** cpb itself does not need Claude Code, but the
 playbooks it launches do, and the plugin clauses (`ADD PLUGIN`, `DROP
 PLUGIN`) need Claude Code **2.1.268 or newer**: they run `claude plugin
-install --json`. nixpkgs has carried older claude-code (2.1.245 at the time
+install --json` and `claude plugin uninstall --json`. nixpkgs has carried older claude-code (2.1.245 at the time
 of writing). On an older claude, a statement that installs or uninstalls a
 plugin is refused in one line naming both versions, before anything runs.
 Install Claude Code from https://claude.ai/download, or pin a newer one.
