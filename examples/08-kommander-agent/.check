@@ -4,6 +4,7 @@ s = json.load(open(sys.argv[1]))
 assert s["agent"] == "kommander", s
 assert "Bash(kommander-helper *)" in s["permissions"]["allow"], s
 assert s["statusLine"]["command"].endswith("/hooks/statusline.sh"), s
+assert s["statusLine"]["refreshInterval"] == 10, s
 PY
 # The same layers under another name, by TO.
 cpb APPLY chaos.cpb TO kommander-lab --yes | grep -q '1 created'

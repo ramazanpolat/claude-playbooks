@@ -11,4 +11,4 @@ ALTER PLAYBOOK
   ADD PLUGIN kommander@kommander
   SET AGENT 'kommander'
   ALLOW TOOL 'Bash(kommander-helper *)'
-  SET STATUSLINE 'bash ~/path/to/kommander-playbook/hooks/statusline.sh';
+  SET STATUSLINE 'bash ~/path/to/kommander-playbook/hooks/statusline.sh' REFRESH 10;

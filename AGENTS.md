@@ -19,6 +19,13 @@ preparing a release, read [Before any release](#before-any-release) first.
   `APPLY … --yes`, `APPLY … TO '<dir>'`, deleting anything under
   `~/.claude-playbooks/`, and any login (`/login`, `claude setup-token`):
   those need a person.
+- **A playbook for a non-Anthropic route, or a throwaway,** is created
+  `CREATE PLAYBOOK <name> NO PILOT PROFILE ISOLATED LOGIN`. Without `NO PILOT
+  PROFILE`, its CLAUDE.md sends the human's `~/.pilot-profile/` to that
+  provider with every request. Without `ISOLATED LOGIN`, a `/login` in it
+  writes through to the machine's login. A `pilot_profile_third_party_endpoint`
+  warning means an existing playbook still imports the profile: report it to
+  the human, never edit its CLAUDE.md yourself.
 - **Do not edit** an installed playbook's files by hand; change state
   through `cpb` statements. Do not touch `~/.claude` (the machine's own
   Claude Code config) unless the human asks; then use
