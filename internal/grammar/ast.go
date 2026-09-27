@@ -147,7 +147,7 @@ type Stmt struct {
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
 	Yes         bool // DROP PLAYBOOK ... --yes, APPLY ... --yes
-	JSON        bool // SHOW ... --json, EXPLAIN ... --json
+	JSON        bool // SHOW ... --json, EXPLAIN ... --json, APPLY ... --dry-run --json
 
 	Pos Pos
 }

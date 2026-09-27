@@ -60,6 +60,10 @@ func Execute() {
 	// as flags and subcommands (docs/cli-grammar.md).
 	if stmt, ok := statementArgs(os.Args[1:]); ok {
 		if err := runStatement(stmt); err != nil {
+			// APPLY --json has printed its report and exits with its class.
+			if code, ok := exitCode(err); ok {
+				os.Exit(code)
+			}
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

@@ -82,6 +82,11 @@ func runStatement(args []string) error {
 		st, err = grammar.ParseArgs(args)
 	}
 	if err != nil {
+		// APPLY … --json answers in JSON even when the command line itself
+		// does not parse.
+		if applyJSONArgs(args) {
+			return printApplyReport(&applyReport{Error: &applyErrorJSON{Message: err.Error()}}, 2)
+		}
 		return err
 	}
 	if st.Verb == grammar.Apply {
@@ -111,8 +116,13 @@ type stmtRun struct {
 	yes     bool      // APPLY --yes: confirms the file's DROP PLAYBOOKs
 	dry     *dryState // in a dry run: what earlier statements would have written
 	outcome string
-	note    string      // a dry run's detail, e.g. what a drop would delete
-	warning string      // reported, never an error: e.g. a source that drifted
+	note    string // a dry run's detail, e.g. what a drop would delete
+	warning string // reported, never an error: e.g. a source that drifted
+	// warningCode is the warning's stable code, for APPLY --json.
+	warningCode string
+	// actions: in a dry run, what a real run would do beyond the
+	// playbook's own files (APPLY --json).
+	actions []planAction
 	helper  helperState // in a dry run: the helper earlier statements would set
 	// backedUp marks the files of plain config directories a run already
 	// backed up (TO '<dir>'): each is backed up once, before its first write.
@@ -126,6 +136,15 @@ func (r *stmtRun) checkRefs(clauses []grammar.Clause) error {
 }
 
 // say prints a statement's report; a dry run prints only APPLY's summary.
+// lockRegistry takes the registry lock for a statement that writes. A
+// dry run only reads, and creates nothing, not even the lock file.
+func (r *stmtRun) lockRegistry() (func(), error) {
+	if r.dryRun {
+		return func() {}, nil
+	}
+	return lockRegistry()
+}
+
 func (r *stmtRun) say(head string, lines []string) {
 	if !r.dryRun {
 		report(head, lines)
@@ -157,7 +176,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
 
-	unlock, err := lockRegistry()
+	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err
 	}
@@ -279,7 +298,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 
-	unlock, err := lockRegistry()
+	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err
 	}
@@ -381,7 +400,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envprofile.Dir(playbooksDir)
 
-	unlock, err := lockRegistry()
+	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err
 	}
@@ -571,8 +590,16 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
 		}
 		var cmds []string
+		dir := r.configDir(st.Name, pb)
+		refOf := func(v string) string {
+			if m.Env != nil {
+				return m.Env.Refs[v]
+			}
+			return ""
+		}
 		for _, s := range steps {
 			cmds = append(cmds, s.command())
+			r.actions = append(r.actions, stepActions(dir, s, refOf)...)
 		}
 		if skills != nil {
 			r.recordSkills(st.Name, afterSkills, skills)

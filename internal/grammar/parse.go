@@ -660,11 +660,13 @@ func (p *parser) apply(s *Stmt) *Error {
 	// One or more files, run in the order given; --yes is the second
 	// confirmation a file with DROP PLAYBOOK needs.
 	for !p.atEnd() {
-		switch p.kw("--dry-run", "--yes", "TO") {
+		switch p.kw("--dry-run", "--yes", "--json", "TO") {
 		case "--dry-run":
 			s.DryRun = true
 		case "--yes":
 			s.Yes = true
+		case "--json":
+			s.JSON = true
 		case "TO":
 			if s.Target != "" {
 				return errAt(p.toks[p.i-1].Pos, "TO appears twice")
@@ -687,7 +689,7 @@ func (p *parser) apply(s *Stmt) *Error {
 		}
 	}
 	p.note("<file>")
-	p.kw("--dry-run", "--yes")
+	p.kw("--dry-run", "--yes", "--json")
 	if len(s.Files) == 0 {
 		return p.fail("APPLY needs <file>")
 	}

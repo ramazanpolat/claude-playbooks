@@ -8,6 +8,7 @@ cpb APPLY playbook.cpb --dry-run          # creates frontend and backend, applie
 cpb APPLY playbook.cpb
 cpb APPLY recipe.cpb TO frontend          # one playbook (created bare if missing)
 cpb APPLY recipe.cpb TO '~/.claude' --dry-run   # a plain Claude Code config directory
+cpb APPLY recipe.cpb TO frontend --dry-run --json   # the plan as JSON, for a program
 ```
 
 - **`USE PLAYBOOK <name>;`** in a file sets the target for the name-less
