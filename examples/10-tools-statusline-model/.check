@@ -3,10 +3,15 @@ import json, sys
 s = json.load(open(sys.argv[1]))
 assert s["permissions"]["allow"] == ["Bash(git diff *)", "Bash(go test *)"], s
 assert s["permissions"]["deny"] == ["Read(~/.ssh/**)"], s
-assert s["statusLine"] == {"type": "command", "command": "echo reviewer"}, s
+assert s["statusLine"] == {"type": "command", "command": "echo reviewer", "refreshInterval": 10}, s
 assert s["model"] == "claude-opus-5-5", s
 PY
 cpb EXPLAIN PLAYBOOK reviewer | grep -q 'Tools: allow'
+# The interval alone: set, then unset, and the command stays.
+cpb "ALTER PLAYBOOK reviewer SET STATUSLINE REFRESH 30"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s == {"type": "command", "command": "echo reviewer", "refreshInterval": 30}, s' "$HOME/.claude-playbooks/reviewer/settings.json"
+cpb "ALTER PLAYBOOK reviewer UNSET STATUSLINE REFRESH"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s == {"type": "command", "command": "echo reviewer"}, s' "$HOME/.claude-playbooks/reviewer/settings.json"
 cpb "ALTER PLAYBOOK reviewer UNSET TOOL 'Read(~/.ssh/**)' UNSET STATUSLINE UNSET MODEL"
 python3 - "$HOME/.claude-playbooks/reviewer/settings.json" <<'PY'
 import json, sys

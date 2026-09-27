@@ -6,5 +6,5 @@ CREATE PLAYBOOK IF NOT EXISTS reviewer NO ALIAS;
 ALTER PLAYBOOK reviewer
   ALLOW TOOL 'Bash(git diff *)' 'Bash(go test *)'
   DENY TOOL 'Read(~/.ssh/**)'
-  SET STATUSLINE 'echo reviewer'
+  SET STATUSLINE 'echo reviewer' REFRESH 10
   SET MODEL 'claude-opus-5-5';

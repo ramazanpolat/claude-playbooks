@@ -116,7 +116,8 @@ pb-clause  := set-clause
             | ALLOW TOOL '<rule>' ...      settings.json permissions.allow
             | DENY TOOL '<rule>' ...       settings.json permissions.deny
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
-            | SET STATUSLINE '<command>' | UNSET STATUSLINE
+            | SET STATUSLINE '<command>' [REFRESH <n>] | UNSET STATUSLINE
+            | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH   v3.23.0
             | SET MODEL '<model>' | UNSET MODEL
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
             | DROP MODEL '<id>'
@@ -1255,6 +1256,28 @@ Built (v3.21.0).
 - `SET STATUSLINE '<command>'` writes `statusLine = {"type": "command",
   "command": "<command>"}`, keeping any other field of an existing
   `statusLine` (such as `padding`); `UNSET STATUSLINE` removes it.
+- **REFRESH** (v3.23.0) sets `statusLine.refreshInterval`, in whole seconds:
+  - `SET STATUSLINE '<command>' REFRESH <n>` sets both the command and the
+    interval.
+  - `SET STATUSLINE REFRESH <n>` sets only the interval, and is refused when
+    there is no command status line ("SET STATUSLINE REFRESH needs a status
+    line"), since an interval alone means nothing to Claude Code.
+  - `UNSET STATUSLINE REFRESH` removes only the interval; `UNSET STATUSLINE`
+    still removes the whole status line.
+  - `<n>` is a whole number, at least 1, with no unit (`10`, not `10s`).
+  - **`SET STATUSLINE '<command>'` without REFRESH keeps an existing
+    `refreshInterval`**, as it keeps `padding`. `SHOW CREATE` writes it back
+    as `SET STATUSLINE '<command>' REFRESH <n>`, so it round-trips.
+  - Why it matters: without `refreshInterval`, Claude Code (verified on
+    2.1.283) does not re-render the status line while a session is idle.
+    Anything that rides on renders stops: Kommander's database-lease
+    heartbeat lets a lease die after 30 s idle (agent-kommander#2), and the
+    statusmux host needs it too.
+  - `SHOW PLAYBOOK --json` gains `"statusline_refresh": <n> | null`, and
+    `statusline` keeps its meaning. `SELECT`'s `PLAYBOOKS` has a
+    `statusline_refresh` column. `SHOW` and `EXPLAIN` print `Status line:
+    <command> (refreshes every <n> s)`. It is valid on a plain config
+    directory too.
 - `SET MODEL '<model>'` writes `model`; `UNSET MODEL` removes it. It is the
   playbook's default model and the lowest-priority choice: `ANTHROPIC_MODEL`
   from an env set or `SET VAR`, a launch's `--model`, and `/model` in a
