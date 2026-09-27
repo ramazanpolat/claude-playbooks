@@ -173,6 +173,7 @@ pb-clause  := set-clause
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
             | SET STATUSLINE '<command>' [REFRESH <n>] | UNSET STATUSLINE
             | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH   v3.23.0
+            | SET STATUSLINE PREVIOUS      v3.25.0, the status line cpb replaced last
             | SET ISOLATED LOGIN | UNSET ISOLATED LOGIN   v3.23.0, see "Isolated login"
             | SET MODEL '<model>' | UNSET MODEL
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
@@ -750,7 +751,7 @@ changes only by these rules (the stabilization week, decided by the pilot on
 |---|---|
 | The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
 | The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
-| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`; the `settings.json` keys cpb writes (see "Where each clause writes") |
+| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
 | `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json` |
 | Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
 
@@ -1431,6 +1432,27 @@ Built (v3.21.0).
     `statusline_refresh` column. `SHOW` and `EXPLAIN` print `Status line:
     <command> (refreshes every <n> s)`. It is valid on a plain config
     directory too.
+- **History and `SET STATUSLINE PREVIOUS`** (v3.25.0). Every time a
+  statement replaces the status line's command, or removes the status line,
+  cpb keeps the whole `statusLine` object it replaced (`padding`,
+  `refreshInterval` and all).
+  - `SET STATUSLINE PREVIOUS` puts the newest one back and keeps the current
+    one in its place, so a second `PREVIOUS` returns to where you were.
+  - A `REFRESH`-only change is not history.
+  - With nothing recorded, `PREVIOUS` is refused: "no earlier status line is
+    recorded".
+  - The history is cpb's own state:
+    `<playbooks root>/.state/statusline-history.json` (mode 0600), keyed by
+    the config directory. At most 10 entries are kept per directory. A
+    change made outside cpb (statusmux's `wire`, `/statusline`, a hand edit)
+    is recorded the next time a cpb statement replaces it.
+  - `SHOW PLAYBOOK --json` has `statusline_history`: `[{"command",
+    "refresh", "replaced_at"}]`, newest first. `SELECT`'s `PLAYBOOKS` has
+    the same column. `EXPLAIN` prints `Status line history: N earlier (SET
+    STATUSLINE PREVIOUS restores <command>)`.
+  - `SHOW CREATE` never writes it, since it is state and not configuration.
+  - It is valid on a plain config directory, and it is refused together with
+    another status line clause in one statement.
 - **A host holds the slot.** A status line host, such as statusmux (SPC/1),
   owns the one `statusLine` slot and composes the bar from panels. Its
   observers, a lease heartbeat for example, run only while it holds the

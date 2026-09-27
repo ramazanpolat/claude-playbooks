@@ -38,7 +38,7 @@ session at launch. A header's reference resolves to the whole value
 ```
 ALLOW TOOL '<rule>' ...     DENY TOOL '<rule>' ...     UNSET TOOL '<rule>' ...
 SET STATUSLINE '<command>' [REFRESH <n>]   UNSET STATUSLINE
-SET STATUSLINE REFRESH <n>   UNSET STATUSLINE REFRESH
+SET STATUSLINE REFRESH <n>   UNSET STATUSLINE REFRESH   SET STATUSLINE PREVIOUS
 SET MODEL '<model>'         UNSET MODEL
 ```
 

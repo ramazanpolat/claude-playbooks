@@ -803,6 +803,10 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		case "AGENT":
 			return c, p.agent(c)
 		case "STATUSLINE":
+			if p.kw("PREVIOUS") != "" {
+				c.Kind = SetStatuslinePrevious
+				return c, nil
+			}
 			if p.kw("REFRESH") != "" {
 				c.Kind = SetStatuslineRefresh
 				n, err := p.refreshSeconds()
@@ -1172,7 +1176,7 @@ func validate(s *Stmt) *Error {
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPicker: true,
-		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true,
+		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true, SetStatuslinePrevious: true,
 	}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
@@ -1211,7 +1215,9 @@ func validate(s *Stmt) *Error {
 		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
 		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
-		{SetIsolatedLogin, UnsetIsolatedLogin}}
+		{SetIsolatedLogin, UnsetIsolatedLogin},
+		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
+		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]
