@@ -7,26 +7,21 @@ set -eu
 cpb=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 here=$(cd "$(dirname "$0")" && pwd)
 chmod 755 "$here/.ci/claude" "$here/.ci/with-secret"
-export FAKE_MARKETS=""
 fail=0
+ran=0
 for dir in "$here"/[0-9][0-9]-*/; do
+  [ -d "$dir" ] || { echo "no examples in $here"; exit 1; }
   name=$(basename "$dir")
-  entry=playbook.cpb
-  [ -f "$dir/.entry" ] && entry=$(cat "$dir/.entry")
   home=$(mktemp -d)
-  bin="$home/bin"
-  mkdir -p "$bin" && ln -s "$cpb" "$bin/cpb"
-  (
-    export HOME="$home" PATH="$here/.ci:$bin:$PATH" CPB_SECRET_HELPER=
-    cd "$dir"
-    [ -f .setup ] && sh .setup
-    cpb APPLY "$entry" --dry-run > "$home/dry.out"
-    cpb APPLY "$entry" --yes > "$home/apply.out"
-    cpb APPLY "$entry" --yes > "$home/again.out"
-    grep -q " 0 created, 0 changed, " "$home/again.out"
-    # .check: what the README shows beyond APPLY (a query, a second target).
-    if [ -f .check ]; then sh -e .check; fi
-  ) > "$home/log" 2>&1 && echo "ok    $name" || { echo "FAIL  $name"; sed 's/^/      /' "$home/log" "$home"/*.out 2>/dev/null | tail -30; fail=1; }
+  mkdir -p "$home/bin" && ln -s "$cpb" "$home/bin/cpb"
+  # Each example runs in its own `sh -e` (examples/.ci/check-one.sh), so the
+  # first failing command fails it.
+  if sh -e "$here/.ci/check-one.sh" "$dir" "$home" "$here/.ci" > "$home/log" 2>&1; then
+    echo "ok    $name"; ran=$((ran + 1))
+  else
+    echo "FAIL  $name"; sed 's/^/      /' "$home/log" "$home"/*.out 2>/dev/null | tail -30; fail=1
+  fi
   rm -rf "$home"
 done
+[ "$ran" -gt 0 ] || [ "$fail" -ne 0 ] || { echo "no example ran"; exit 1; }
 exit $fail
