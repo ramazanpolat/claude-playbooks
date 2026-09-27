@@ -465,6 +465,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			if steps, pluginLines, err = planPlugins(w, st.Clauses); err != nil {
 				return err
 			}
+			if err := checkClaudeForPlugins(steps); err != nil {
+				return err
+			}
 		}
 		if cfg == "" {
 			sf = &settings.File{Root: settings.NewObject()}

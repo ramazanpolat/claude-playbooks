@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -68,6 +69,60 @@ func plansPluginCommands(clauses []grammar.Clause) bool {
 		}
 	}
 	return false
+}
+
+// minClaudePluginJSON is the first Claude Code with `claude plugin install
+// --json` and `uninstall --json`, which the plugin clauses run (changelog
+// 2.1.268). An older claude fails them with a raw usage error, so a plan
+// that installs or uninstalls is refused first, in one line.
+const minClaudePluginJSON = "2.1.268"
+
+var claudeVersionRe = regexp.MustCompile(`^\s*v?(\d+\.\d+\.\d+)`)
+
+// claudeVersion is the version `claude --version` reports, "" when it
+// cannot be told (no claude, a stub, an unexpected answer).
+var claudeVersion = func() string {
+	path, err := exec.LookPath("claude")
+	if err != nil {
+		return ""
+	}
+	if v, ok := claudeVersions[path]; ok {
+		return v
+	}
+	c := exec.Command(path, "--version")
+	c.Dir = os.TempDir()
+	out, err := c.Output()
+	v := ""
+	if m := claudeVersionRe.FindStringSubmatch(string(out)); err == nil && m != nil {
+		v = m[1]
+	}
+	claudeVersions[path] = v
+	return v
+}
+
+var claudeVersions = map[string]string{}
+
+// checkClaudeForPlugins refuses a plan that installs or uninstalls a plugin
+// with a claude too old to run it. An unknown version is let through: the
+// command itself then says what is wrong.
+func checkClaudeForPlugins(steps []pluginStep) error {
+	needs := false
+	for _, s := range steps {
+		if !s.mcp && s.skill == nil && len(s.args) > 0 && (s.args[0] == "install" || s.args[0] == "uninstall") {
+			needs = true
+		}
+	}
+	if !needs {
+		return nil
+	}
+	v := claudeVersion()
+	if v == "" {
+		return nil
+	}
+	if slices.Compare(versionTuple(v), versionTuple(minClaudePluginJSON)) < 0 {
+		return fmt.Errorf("the plugin clauses need Claude Code %s or newer (they run `claude plugin install --json`); this claude is %s: update Claude Code", minClaudePluginJSON, v)
+	}
+	return nil
 }
 
 // claudePlugin runs `claude plugin <args>` against one playbook: its config
