@@ -751,16 +751,20 @@ changes only by these rules (the stabilization week, decided by the pilot on
 | The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
 | The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
 | File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`; the `settings.json` keys cpb writes (see "Where each clause writes") |
-| `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json` |
-| Codes | the `APPLY --json` warning codes, and the exit codes of `APPLY` (0 planned, 1 refused, 2 usage) |
+| `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json` |
+| Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
 
 **Not stable:**
 - the human form of every output: tables, labels, wording, the order of
   lines;
-- the text of error and warning messages (the codes are stable);
-- the hidden pre-grammar commands, which are **deprecated** (see
-  "Pre-grammar commands") and removed in v4.0.0;
+- the text of error and warning messages. Only the warning codes above are
+  stable; errors carry no code;
 - cpb's other internal files, and anything under `gentar/`.
+
+**Deprecated:** the hidden pre-grammar commands (see "Pre-grammar
+commands"). They are neither stable nor free to change. They keep working
+**unchanged** through 3.x (behaviour, flags, and stdout), apart from the
+deprecation line on stderr, and v4.0.0 removes them.
 
 ## Output
 

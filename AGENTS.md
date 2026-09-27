@@ -188,6 +188,8 @@ release:
       needs 7 consecutive green nights.
 - [ ] **No open security issue and no known data-loss bug.** Check
       `docs/known-issues/`.
-- [ ] **Every review finding** on the release's PRs is fixed or answered.
+- [ ] **Every review finding** on the release's PRs is fixed or answered
+      **on the PR itself**, as a fix commit or a reply naming the finding,
+      so the PR's page shows it.
 
 If any is missing, build it first; never tag without it.
