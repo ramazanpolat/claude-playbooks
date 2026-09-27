@@ -248,10 +248,24 @@ func doInstall(o installOpts, args []string) error {
 		os.RemoveAll(stage)
 		return err
 	}
+	configStage := stage
 	if m != nil && m.Subdir != "" {
-		if _, err := manifest.ResolveSubdir(stage, "subdir", m.Subdir); err != nil {
+		if configStage, err = manifest.ResolveSubdir(stage, "subdir", m.Subdir); err != nil {
 			os.RemoveAll(stage)
 			return err
+		}
+	}
+	// A source never carries a login: its .credentials.json and the account
+	// state of its .claude.json stay out of the install, at its root and in
+	// its config directory (docs/known-issues/shared-launch-copies-own-login-
+	// over-machine-login.md).
+	for _, dir := range []string{stage, configStage} {
+		if err := stripSourceLogin(dir, source); err != nil {
+			os.RemoveAll(stage)
+			return err
+		}
+		if configStage == stage {
+			break
 		}
 	}
 	if err := os.Rename(stage, dest); err != nil {
@@ -589,6 +603,22 @@ func overlayDir(src, dst string) error {
 		return err
 	}
 	return copyDirWithinRoot(root, dst, root, map[string]bool{root: true}, true)
+}
+
+// stripSourceLogin removes a staged source's login and says so on stderr,
+// naming the files and keys, never their values.
+func stripSourceLogin(dir, source string) error {
+	creds, keys, err := auth.StripSourceLogin(dir)
+	if err != nil {
+		return fmt.Errorf("cannot leave %s's login out of the install: %w", redactURLCredentials(source), err)
+	}
+	if creds {
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s: a playbook source never carries a login\n", redactURLCredentials(source), auth.CredentialsFileName)
+	}
+	if len(keys) > 0 {
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName, strings.Join(keys, ", "))
+	}
+	return nil
 }
 
 func copyDir(src, dst string) error {

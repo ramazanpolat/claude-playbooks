@@ -157,6 +157,22 @@ Two limits keep every statement whole-or-nothing (decided 2026-09-26):
   interactively. `SANDBOX` does not apply to `LINK`, whose manifest belongs
   to the target.
 
+**A source never carries a login** (v3.22.1, a security fix).
+- `CREATE PLAYBOOK … FROM` and `install` leave a source's
+  `.credentials.json` out of the install, whether it is a file or a link.
+  They also leave out the account state in its `.claude.json`: `oauthAccount`,
+  `userID`, the onboarding and install markers, and the cached feature flags.
+  Each prints one stderr line naming the source and the keys, never a value.
+  Before this, the first sync copied a shipped login over the machine's
+  `~/.claude/.credentials.json`, so installing a source could switch the
+  pilot's account to the source's.
+- `LINK` deletes nothing in the pilot's directory. It renames a
+  `.credentials.json` there to `.credentials.json.cpb-ignored-<stamp>`, and
+  backs up `.claude.json` to `.claude.json.cpb-backup-<stamp>` before
+  removing the same keys. A directory with `isolate_auth = true` keeps both.
+- `update` already kept the install's own files.
+- See `docs/known-issues/shared-launch-copies-own-login-over-machine-login.md`.
+
 The lifecycle statements (`CREATE`/`DROP PLAYBOOK`, `RENAME TO`, `ALIAS`,
 `NO ALIAS`) run the same code as the hidden `install`, `create`, `link`,
 `delete`, `rename` and `alias` commands, with the statement's options in
