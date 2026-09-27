@@ -87,6 +87,10 @@ cpb DROP PLAYBOOK scratch --yes
 - **Queries:** `cpb "SELECT name, envs FROM PLAYBOOKS"`; anything beyond
   columns runs in ClickHouse's `clickhouse local`, over the same redacted
   `--json` rows.
+- **Plans for programs:** `cpb APPLY <files> --dry-run --json` prints what
+  a run would do, per statement, as one JSON object (schema 1): verdicts,
+  the exact `claude` commands, deletes with their size, references never
+  values.
 
 Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
 `cpb run <name>`, `cpb start <dir>`, `cpb update`, `cpb auth status`, and

@@ -31,6 +31,7 @@ preparing a release, read [Before any release](#before-any-release) first.
 | macOS or Linux | `uname -s` | `Darwin` or `Linux` |
 | curl | `command -v curl` | a path, exit 0 |
 | Claude Code, to launch playbooks | `command -v claude` | a path, exit 0 (install it from https://claude.ai/download if missing; `cpb` itself installs without it) |
+| Claude Code 2.1.268+, for the plugin clauses | `claude --version` | `2.1.268` or newer (`ADD PLUGIN` / `DROP PLUGIN` refuse an older claude in one line; nixpkgs has shipped older ones). The model picker is read from 2.1.242, `BEHAVES AS` from 2.1.257 |
 
 ## Install
 
@@ -66,6 +67,7 @@ When the human hands you a `playbook.cpb` (or a stack of them joined by
 
 ```sh
 cpb APPLY playbook.cpb --dry-run   # exit 0; one line per statement, nothing written
+cpb APPLY playbook.cpb --dry-run --json   # the same plan as one JSON object (schema 1): parse this, not the lines
 cpb APPLY playbook.cpb             # exit 0; ends "Applied …: N created, N changed, …"
 cpb APPLY playbook.cpb             # verify: "0 created, 0 changed" (the file holds)
 cpb EXPLAIN PLAYBOOK <name> --json # verify: the variables, plugins, agent, MCP servers, tools and model a launch gets
