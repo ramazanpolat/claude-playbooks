@@ -417,6 +417,83 @@ hand-written, which is exactly when a second confirmation is worth it.
 `DROP ENV` and the `DROP ENV` clause only detach or delete an env set file
 and need no `--yes`.
 
+### APPLY --dry-run --json
+
+Built for v3.22.0. The schema was confirmed 2026-09-27 with root and with
+cockpit, its first consumer. `cpb APPLY <file> … [TO <target>] --dry-run
+--json` prints the plan as **one JSON object on stdout**, in every case,
+refusals included. It follows the `--json` rule: fields may be added, and
+none changes meaning within a major version. `schema` is bumped only on a
+meaning change, and so only with a major version; a consumer refuses a
+schema it does not know. **Verdicts, action types and warning codes are
+closed sets** within a major version.
+
+`--json` needs `--dry-run`: the JSON form is a plan, and a real `APPLY
+--json` is not in this release. The human lines of the dry run go to
+stderr.
+
+A dry run **creates nothing**: not the store (`CLAUDE_PLAYBOOKS_DIR`),
+nothing under it, and no lock file. A store that does not exist yet is
+planned as empty.
+
+```
+{
+  "schema": 1,
+  "cpb_version": "v3.22.0",
+  "files": ["/abs/main.cpb", "/abs/base.cpb"],
+  "target": {"kind": "playbook", "name": "fresh"},
+  "ok": true,
+  "error": null,
+  "warnings": [{"code": "use_playbook_overridden", "file": "/abs/main.cpb", "line": 2,
+                "message": "USE PLAYBOOK other is ignored: TO fresh sets the target"}],
+  "statements": [
+    {"file": "/abs/main.cpb", "line": 3, "statement": "ALTER PLAYBOOK fresh",
+     "verb": "ALTER", "object": "PLAYBOOK", "target": {"kind": "playbook", "name": "fresh"},
+     "recipe": true, "implicit": false, "verdict": "changed", "reason": null, "warning": null,
+     "actions": [
+       {"type": "command", "argv": ["claude", "plugin", "marketplace", "add", "/abs/mkt", "--scope", "user"],
+        "env": {"CLAUDE_CONFIG_DIR": "/abs/.claude-playbooks/fresh"}, "network": false}
+     ]}
+  ],
+  "summary": {"created": 0, "changed": 1, "unchanged": 0, "dropped": 0, "refused": 0, "warnings": 1}
+}
+```
+
+- **`files`**: the files run, resolved (symlinks followed), in load order, included files too.
+- **`target`**: `TO`'s target, or `null` without `TO`.
+- **`statements[]`**: one per statement run, in order.
+  - `file` is the resolved path of the file the statement is in (an included file's own path), and `line` is in that file.
+  - `target` is resolved on every statement: `{"kind": "playbook", "name"}`, `{"kind": "dir", "path"}` (TO a plain config directory), `{"kind": "env", "name"}` or `{"kind": "defaults"}`.
+  - `recipe` is true when TO or USE PLAYBOOK supplied the name.
+  - `implicit` is true for the bare `CREATE PLAYBOOK` a missing target gets; its `file` and `line` are the recipe statement's.
+  - `warning` is `null` or a warning object (below).
+- **Verdicts:** `created`, `changed`, `unchanged`, `dropped`, `refused`.
+- **Actions**: what a real run would do beyond the playbook's own manifest and env files, which the verdict covers.
+  - Paths are absolute. A `./` source is resolved against its file.
+  - `network` is true on an action that fetches.
+
+  | `type` | Fields | |
+  |---|---|---|
+  | `command` | `argv`, `env`, `refs` (MCP) | a `claude plugin …` or `claude mcp …` run. `env` holds only non-secret variables (`CLAUDE_CONFIG_DIR`). An MCP config carries `${CPB_MCP_…}` placeholders only, and `refs` maps each to its reference. `network` is true for `marketplace add` from git or GitHub, and for `plugin install`. |
+  | `skill` | `op` (`link` or `copy`), `name`, `path`, `source` | a skill put in place. `network` is true for a copy from a remote git source. |
+  | `fetch` | `source`, `branch`, `subdir`, `to` | `CREATE PLAYBOOK … FROM`: what a real run installs. `network` is false for a local directory. |
+  | `backup` | `path`, `to` | TO a plain directory: a file backed up before its first write. |
+  | `write` | `path` | TO a plain directory: its `settings.json`. |
+  | `delete` | `what` (`playbook` or `skill`), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
+
+- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`) and `source_drift` (an existing playbook's recorded source differs). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
+- **No secret value** appears anywhere: references stay references, and a literal credential a file sets is not in the plan.
+
+**Exit codes:**
+
+- `0`: every statement was planned.
+- `1`: the files are refused.
+  - A statement the dry run refuses ends the list with `"verdict": "refused"` and its `reason`, and later statements are absent.
+  - A refusal before any statement runs (a parse error, a missing reference, a refused clause on a plain directory) leaves `statements` empty, with `error: {"file", "line", "message"}`.
+- `2`: a usage or internal error: `--json` without `--dry-run`, a missing file, a `TO` that cannot be resolved, an unreadable registry. `error.file` and `error.line` are `null` when no file is at fault.
+
+`ok` is true exactly when the exit code is 0.
+
 ## Examples
 
 ```

@@ -65,7 +65,7 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	dir := st.Dir
 	key := dirMark + dir
-	unlock, err := lockRegistry()
+	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err
 	}
@@ -171,12 +171,16 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		var what []string
 		for _, b := range backups {
 			what = append(what, b.what())
+			r.actions = append(r.actions, planAction{Type: "backup", Path: b.src, To: b.dst})
 		}
+		noRefs := func(string) string { return "" } // a plain directory takes no reference
 		for _, s := range steps {
 			what = append(what, s.command())
+			r.actions = append(r.actions, stepActions(dir, s, noRefs)...)
 		}
 		if settingsChange {
 			what = append(what, "write "+filepath.Join(dir, settings.FileName))
+			r.actions = append(r.actions, planAction{Type: "write", Path: filepath.Join(dir, settings.FileName)})
 		}
 		if skills != nil {
 			r.recordSkills(key, after, skills)

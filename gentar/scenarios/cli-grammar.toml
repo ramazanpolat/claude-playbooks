@@ -209,3 +209,10 @@ contains = "select-ok"
 # cover it.)
 command = '''export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; U="https://git.example/mkt.git"; claude-playbook CREATE PLAYBOOK grp NO ALIAS >/dev/null && claude-playbook "ALTER PLAYBOOK grp ADD MARKETPLACE gitmkt FROM '$U#v1'" >/dev/null && [ "$(grep -c "/grp|plugin marketplace add $U#v1 --scope user" "$L")" = 1 ] && claude-playbook "ALTER PLAYBOOK grp ADD MARKETPLACE gitmkt FROM '$U#v1'" | grep -q unchanged && [ "$(grep -c "/grp|plugin marketplace add" "$L")" = 1 ] && if claude-playbook "ALTER PLAYBOOK grp ADD MARKETPLACE gitmkt FROM '$U#v2'" > "$HOME/gr.out" 2>&1; then echo ref-change-accepted; else grep -q "already declared from another source" "$HOME/gr.out" && [ "$(grep -c "/grp|plugin marketplace add" "$L")" = 1 ] && echo git-ref-ok; fi'''
 contains = "git-ref-ok"
+
+[[verify.commands]]
+# APPLY --dry-run --json (v3.22.0): one JSON object with schema 1, a DROP's
+# delete with its path, exit 0 planned / 1 refused / 2 usage, and the dry
+# run leaves the store's tree exactly as it was.
+command = '''D="$HOME/jsonplan"; P="$HOME/.claude-playbooks"; mkdir -p "$D" && claude-playbook CREATE PLAYBOOK jpb NO ALIAS >/dev/null && printf x > "$P/jpb/data.txt" && printf "DROP PLAYBOOK jpb;\nCREATE OR REPLACE ENV jenv SET J=1;\n" > "$D/p.cpb" && B=$(find "$P" | sort | cksum) && claude-playbook APPLY "$D/p.cpb" --dry-run --json > "$D/p.json" && [ "$(find "$P" | sort | cksum)" = "$B" ] && J=$(tr -d ' \n' < "$D/p.json") && printf "%s" "$J" | grep -qF '"schema":1' && printf "%s" "$J" | grep -qF '"ok":true' && printf "%s" "$J" | grep -qF '"verdict":"dropped"' && printf "%s" "$J" | grep -qF "\"type\":\"delete\",\"what\":\"playbook\",\"path\":\"$P/jpb\"" && { claude-playbook APPLY "$D/p.cpb" --json > "$D/u.json"; [ $? = 2 ]; } && grep -q '"ok": false' "$D/u.json" && printf "ALTER PLAYBOOK ghost SET VAR A=1;\n" > "$D/r.cpb" && { claude-playbook APPLY "$D/r.cpb" --dry-run --json > "$D/r.json"; [ $? = 1 ]; } && grep -q '"verdict": "refused"' "$D/r.json" && test -f "$P/jpb/data.txt" && echo apply-json-ok'''
+contains = "apply-json-ok"

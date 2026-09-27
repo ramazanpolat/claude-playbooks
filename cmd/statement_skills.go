@@ -40,6 +40,7 @@ type skillOp struct {
 	record func() error // records it once done; set by the caller
 	name   string
 	rec    *manifest.SkillRecord
+	old    *manifest.SkillRecord // an add that replaces a recorded skill: what it replaces
 	clause int
 }
 
@@ -175,7 +176,7 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 			if already {
 				continue
 			}
-			op := skillOp{name: name, rec: want, clause: ci, line: "skill     " + name + " (" + want.Mode + " of " + want.Source + ")"}
+			op := skillOp{name: name, rec: want, old: old, clause: ci, line: "skill     " + name + " (" + want.Mode + " of " + want.Source + ")"}
 			if want.Mode == "link" {
 				op.what = "link skills/" + name + " to " + want.Source
 			} else {

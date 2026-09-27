@@ -456,7 +456,7 @@ func TestExpect(t *testing.T) {
 		{w("ALTER DEFAULTS SET"), []string{"SECRET"}},
 		{w("ALTER DEFAULTS SET SECRET HELPER"), []string{"'<command>'"}},
 		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "--json"}},
-		{w("APPLY f"), []string{"<file>", "--dry-run", "--yes"}},
+		{w("APPLY f"), []string{"<file>", "--dry-run", "--yes", "--json"}},
 		{w("CREATE PLAYBOOK x BRANCH main"), createPlaybookStarters}, // FROM may still follow
 		{w("DROP PLAYBOOK k"), []string{"--yes"}},
 		{w("SHOW CREATE ALL"), []string{"--skip-secrets"}},

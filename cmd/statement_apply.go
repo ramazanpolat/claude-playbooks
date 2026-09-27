@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -20,26 +22,52 @@ import (
 // statement SHOW CREATE writes is safe to repeat, so running the fixed
 // files again is the recovery.
 func runApply(st *grammar.Stmt) error {
-	l := &applyLoader{seen: map[string]bool{}, seenFor: map[string]bool{}, total: map[string]int{}}
+	if st.JSON {
+		return runApplyJSON(st)
+	}
+	return applyRun(st, nil)
+}
+
+// applyRun runs APPLY. rep, when set, collects the --json plan; errors are
+// classed for it (applyFailure), their text unchanged.
+func applyRun(st *grammar.Stmt, rep *applyReport) error {
+	l := &applyLoader{seen: map[string]bool{}, seenFor: map[string]bool{}, total: map[string]int{}, pathOf: map[string]string{}}
 	if st.Target != "" {
 		name, err := resolveTarget(st.Target)
 		if err != nil {
-			return fmt.Errorf("TO %s: %w\nnothing was written", st.Target, err)
+			return usage(fmt.Errorf("TO %s: %w\nnothing was written", st.Target, err))
 		}
 		l.to, l.toShown = name, st.Target
+		if rep != nil {
+			rep.Target = &targetJSON{Kind: "playbook", Name: name}
+			if strings.HasPrefix(name, dirMark) {
+				rep.Target = &targetJSON{Kind: "dir", Path: strings.TrimPrefix(name, dirMark)}
+			}
+		}
 	}
 	for _, path := range st.Files {
 		l.root(path)
 	}
+	if rep != nil {
+		rep.Files = append(rep.Files, l.paths...)
+	}
 	if len(l.errs) > 0 {
-		return fmt.Errorf("%w\nnothing was written", errors.Join(l.errs...))
+		err := fmt.Errorf("%w\nnothing was written", errors.Join(l.errs...))
+		if l.usageErr {
+			return usage(err)
+		}
+		file, line := l.locate(l.errs[0].Error())
+		return refused(file, line, err)
 	}
 	for _, w := range l.warnings {
-		fmt.Fprintln(os.Stderr, "Warning: "+w)
+		fmt.Fprintln(os.Stderr, "Warning: "+w.String())
+	}
+	if rep != nil {
+		rep.Warnings = append(rep.Warnings, l.warnings...)
 	}
 	stmts, err := l.withTargetsCreated()
 	if err != nil {
-		return err
+		return usage(err)
 	}
 	// A plain config directory is not a playbook: applying to one is
 	// confirmed on a terminal, or by --yes, before anything runs.
@@ -86,7 +114,7 @@ func runApply(st *grammar.Stmt) error {
 			// A plain directory: its refusals are checked here, before any
 			// write; it takes no reference to check.
 			if err := validateDirClauses(s); err != nil {
-				return fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err)
+				return refused(x.path, s.Pos.Line, fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err))
 			}
 			continue
 		}
@@ -120,12 +148,12 @@ func runApply(st *grammar.Stmt) error {
 					}
 				}
 				if err := checkRefsWith(helper, refs); err != nil {
-					return fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err)
+					return refused(x.path, s.Pos.Line, fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err))
 				}
 			}
 			if c.Kind == grammar.SetRef {
 				if err := checkRefsWith(helper, []grammar.Clause{c}); err != nil {
-					return fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err)
+					return refused(x.path, s.Pos.Line, fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err))
 				}
 			}
 		}
@@ -139,15 +167,26 @@ func runApply(st *grammar.Stmt) error {
 	done := map[string]int{} // statements applied per file
 	for _, x := range stmts {
 		s := x.s
-		r.outcome, r.note, r.warning = "", "", ""
+		r.outcome, r.note, r.warning, r.warningCode, r.actions = "", "", "", "", nil
 		where := fmt.Sprintf("%s:%d", x.file, s.Pos.Line)
 		head := stmtHead(s)
 		if !st.DryRun {
 			fmt.Printf("-- %s: %s\n", where, head)
 		}
+		entry := func(verdict string) applyStmtJSON {
+			return applyStmtJSON{File: x.path, Line: s.Pos.Line, Statement: head, Verb: string(s.Verb), Object: string(s.Object),
+				Target: stmtTarget(s), Recipe: x.recipe, Implicit: x.implicit, Verdict: verdict, Actions: nonNilActions(r.actions)}
+		}
 		if err := execStatement(r, s); err != nil {
 			if st.DryRun {
-				return fmt.Errorf("%s (%s) would fail: %w\nthe dry run stops here; nothing was written", where, head, err)
+				if rep != nil {
+					e := entry(verdictRefused)
+					reason := err.Error()
+					e.Reason, e.Actions = &reason, []planAction{}
+					rep.Statements = append(rep.Statements, e)
+					rep.Summary.Refused++
+				}
+				return refused(x.path, s.Pos.Line, fmt.Errorf("%s (%s) would fail: %w\nthe dry run stops here; nothing was written", where, head, err))
 			}
 			applied := make([]string, 0, len(l.files))
 			for _, f := range l.files {
@@ -158,6 +197,23 @@ func runApply(st *grammar.Stmt) error {
 		}
 		done[x.file]++
 		counts[r.outcome]++
+		if rep != nil {
+			e := entry(r.outcome)
+			if r.warning != "" {
+				e.Warning = &applyWarning{Code: r.warningCode, File: x.path, Line: s.Pos.Line, Message: r.warning, shown: x.file}
+			}
+			rep.Statements = append(rep.Statements, e)
+			switch r.outcome {
+			case outCreated:
+				rep.Summary.Created++
+			case outChanged:
+				rep.Summary.Changed++
+			case outUnchanged:
+				rep.Summary.Unchanged++
+			case outDropped:
+				rep.Summary.Dropped++
+			}
+		}
 		if r.warning != "" {
 			counts["warning"]++
 			fmt.Fprintf(os.Stderr, "Warning: %s: %s\n", where, r.warning)
@@ -189,9 +245,11 @@ func runApply(st *grammar.Stmt) error {
 // located is one statement to run and the file it came from. recipe marks
 // a name-less ALTER PLAYBOOK, named here with its target.
 type located struct {
-	file   string
-	s      *grammar.Stmt
-	recipe bool
+	file     string // as the human output names it
+	path     string // resolved, for --json
+	s        *grammar.Stmt
+	recipe   bool
+	implicit bool // the bare CREATE a missing target gets
 }
 
 // applyLoader reads the files APPLY runs and expands their INCLUDEs
@@ -209,8 +267,28 @@ type applyLoader struct {
 	seenFor  map[string]bool
 	to       string // APPLY … TO: the target of every name-less statement (dirMark+path for a directory)
 	toShown  string // TO as written, for messages
-	warnings []string
+	warnings []applyWarning
 	errs     []error
+	paths    []string          // the files' resolved paths, in load order, for --json
+	pathOf   map[string]string // a file as reports name it -> its resolved path
+	usageErr bool              // an error in the command line (a missing file), not in a file
+}
+
+var errAtLine = regexp.MustCompile(`^(.+?):(?:(\d+):| line (\d+),)`)
+
+// locate finds the file and line an error message starts with, the file
+// resolved.
+func (l *applyLoader) locate(msg string) (string, int) {
+	m := errAtLine.FindStringSubmatch(msg)
+	if m == nil {
+		return "", 0
+	}
+	n := m[2] + m[3]
+	line, _ := strconv.Atoi(n)
+	if p, ok := l.pathOf[m[1]]; ok {
+		return p, line
+	}
+	return m[1], line
 }
 
 // root loads a file named on the command line. It may be a pipe (a file
@@ -219,10 +297,12 @@ func (l *applyLoader) root(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
 		l.errs = append(l.errs, err)
+		l.usageErr = true
 		return
 	}
 	if info.IsDir() {
 		l.errs = append(l.errs, fmt.Errorf("%s is a directory, not a playbook file", path))
+		l.usageErr = true
 		return
 	}
 	id, base := path, ""
@@ -282,15 +362,22 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink, target stri
 		l.errs = append(l.errs, fmt.Errorf("%s: %w", name, err))
 		return
 	}
+	resolved := id
+	if base == "" { // a pipe has no path but its name
+		resolved = name
+	}
+	l.pathOf[name] = resolved
 	if first {
 		l.files = append(l.files, name)
+		l.paths = append(l.paths, resolved)
 	}
 	chain = append(chain, chainLink{id, name})
 	cur := target // this file's target: inherited, changed by USE PLAYBOOK
 	for _, s := range stmts {
 		if s.Verb == grammar.Use {
 			if l.to != "" {
-				l.warnings = append(l.warnings, fmt.Sprintf("%s:%d: USE PLAYBOOK %s is ignored: TO %s sets the target", name, s.Pos.Line, s.Name, l.toShown))
+				l.warnings = append(l.warnings, applyWarning{Code: warnUsePlaybookOverridden, File: resolved, Line: s.Pos.Line,
+					Message: fmt.Sprintf("USE PLAYBOOK %s is ignored: TO %s sets the target", s.Name, l.toShown), shown: name})
 				continue
 			}
 			cur = s.Name
@@ -336,9 +423,9 @@ func (l *applyLoader) load(name, id, base string, chain []chainLink, target stri
 				if strings.HasPrefix(cur, dirMark) {
 					named.Name, named.Dir = "", strings.TrimPrefix(cur, dirMark)
 				}
-				l.out = append(l.out, located{file: name, s: &named, recipe: true})
+				l.out = append(l.out, located{file: name, path: resolved, s: &named, recipe: true})
 			} else {
-				l.out = append(l.out, located{file: name, s: s})
+				l.out = append(l.out, located{file: name, path: resolved, s: s})
 			}
 			l.total[name]++
 			continue
@@ -410,7 +497,7 @@ func (l *applyLoader) withTargetsCreated() ([]located, error) {
 				return nil, fmt.Errorf("%s: target %s: %w\nnothing was written", x.file, x.s.Name, err)
 			}
 			if pb == nil {
-				out = append(out, located{file: x.file, s: &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook,
+				out = append(out, located{file: x.file, path: x.path, implicit: true, s: &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook,
 					Name: x.s.Name, IfNotExists: true, Pos: x.s.Pos}})
 				l.total[x.file]++
 			}

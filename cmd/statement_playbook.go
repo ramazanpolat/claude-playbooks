@@ -84,6 +84,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 					have = "no recorded source"
 				}
 				r.warning = fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want)
+				r.warningCode = warnSourceDrift
 			}
 		}
 		return nil
@@ -100,6 +101,10 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.recordPlaybook(st.Name, true)
 		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
 		r.outcome = outCreated
+		if o.from != "" {
+			r.actions = append(r.actions, fetchAction(o.from, o.branch, o.subdir,
+				filepath.Join(config.ResolvePlaybooksDir(), st.Name)))
+		}
 		return nil
 	}
 	r.outcome = outCreated
@@ -154,6 +159,7 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if r.dryRun {
 		// What a drop deletes is shown before anything is confirmed.
 		r.note = "deletes " + pb.RootPath
+		r.actions = append(r.actions, deleteAction("playbook", pb.RootPath))
 		r.recordPlaybook(st.Name, false)
 		return nil
 	}

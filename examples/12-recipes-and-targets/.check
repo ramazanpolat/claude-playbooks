@@ -8,3 +8,7 @@ cpb APPLY recipe.cpb TO "$cfg" --yes
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"]=="claude-sonnet-5" and s["theme"]=="dark", s' "$cfg/settings.json"
 ls "$cfg"/settings.json.cpb-backup-* >/dev/null
 rm -rf "$cfg"
+# The same plan for a program: one JSON object, schema 1, a target on every statement.
+cpb APPLY recipe.cpb TO frontend --dry-run --json > plan.json
+grep -q '"schema": 1' plan.json && grep -q '"verdict": "unchanged"' plan.json && grep -q '"name": "frontend"' plan.json
+rm -f plan.json
