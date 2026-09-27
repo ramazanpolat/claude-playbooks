@@ -38,7 +38,7 @@ session.
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT` (this key never takes a reference: cpb reads it itself) | that token wins over the file; its own login removed |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolate_auth = true` in its `.playbook`. `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would copy over the machine's |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolate_auth = true` in its `.playbook`. `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
 [env profile](environment.md#env-profiles-define-once-attach-to-many) shared by
@@ -65,6 +65,38 @@ profile may set its own). The same holds for a token you export in the shell
 yourself: only the token read from the token file gets the global descriptors.
 This is a middle ground between sharing the token and `isolate_auth` (the
 playbook shares nothing).
+
+## Only the machine's own account is shared (v3.23.1)
+
+Claude Code writes its plaintext login store by renaming a new file over
+`.credentials.json`. So a refresh or a `/login` inside a shared playbook
+replaces cpb's link with a file of its own. At the next sync, cpb decides
+what to do with that file by account:
+
+- **The same account as the machine's** (the `accountUuid` in the
+  playbook's `.claude.json` equals the one in `~/.claude.json`): the newer
+  login is copied over the machine's store and the link comes back. This is
+  an ordinary refresh.
+- **Another account, or one cpb cannot confirm:** the file is kept as
+  `.credentials.json.cpb-own-<stamp>`. Its account state leaves the
+  playbook's `.claude.json`, with a backup. The link comes back, and one line
+  says so. The machine's login is never replaced by another account's.
+  - To keep that account in that playbook, run `cpb ALTER PLAYBOOK <name>
+    SET ISOLATED LOGIN` and move the file back.
+
+cpb also takes account state for a shared playbook only from the machine's
+own `~/.claude/.claude.json` or `~/.claude.json`, never from another
+playbook's.
+
+**On macOS** Claude Code keeps each config directory's login in the Keychain
+(`Claude Code-credentials-<hash of the directory>`), with the file as a
+fallback:
+- A shared playbook uses the machine's login through the link only until its
+  first refresh or `/login`. From then on it reads its own Keychain item.
+- cpb never copies a Keychain item, so this path cannot move a login onto
+  the machine.
+- The file rules above apply when Claude Code falls back to the file. On
+  Linux the file is the only store.
 
 ## A source never carries a login (v3.22.1)
 

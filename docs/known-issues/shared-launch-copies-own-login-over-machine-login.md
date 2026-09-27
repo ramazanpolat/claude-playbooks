@@ -1,10 +1,39 @@
 # A shared launch copies a playbook's own login over the machine's login
 
-**Status:** path 1 (install) **fixed in v3.22.1**; the rest is open, with
-fix 2 as the design item. Found 2026-09-27 while building `ISOLATED LOGIN`
-for v3.23.0. Two paths are reproduced below with made-up stores. The first
-was the serious one: a playbook **source** that shipped a `.credentials.json`
-replaced the pilot's machine login when it was installed.
+**Status:** fixed. Path 1 (install) was fixed in v3.22.1, and the rest in
+v3.23.1 by a same-account check. Found on 2026-09-27 while building `ISOLATED
+LOGIN` for v3.23.0.
+
+## Fixed in v3.23.1: only the machine's own account is copied
+
+- **When a shared sync (`LinkCredentials`) finds a regular
+  `.credentials.json` with a grant,** it compares the `accountUuid` in the
+  playbook's `.claude.json` with the machine's own, from
+  `~/.claude/.claude.json` or `~/.claude.json`.
+  - **Equal:** the newer login is copied, as before. This is the heal for a
+    refresh, which Claude Code writes by rename, replacing the link.
+  - **Different, or unknown on either side:** the file is kept as
+    `.credentials.json.cpb-own-<stamp>`. The account keys leave the playbook's
+    `.claude.json`, with a backup. The link comes back, and one warning names
+    neither account nor any value.
+  - **No machine store at all:** unchanged. The sync leaves the playbook's
+    own login where it is.
+- **`findAccountState` reads only the machine's own state.** It no longer
+  walks other playbooks, so an isolated playbook's identity is never seeded
+  into a shared one.
+- **This covers path 2 and every case under "Also affected".**
+- **Tests:**
+  - `internal/auth/same_account_test.go`: different, unknown on each side,
+    same, and no machine store;
+  - the flipped identity-walk test;
+  - `cmd/shared_sync_test.go`: path 2 end to end.
+
+  Against v3.23.0 they fail with the machine store overwritten. The arena
+  check `shared-sync-same-account-ok` runs path 2 and the heal on the real
+  binary.
+- **On macOS** the per-directory Keychain item is the primary store, so this
+  file path runs only when Claude Code falls back to the file. See
+  `docs/guides/authentication.md`.
 
 ## Fixed in v3.22.1: a source never carries a login
 
@@ -126,7 +155,7 @@ grant.
    `.credentials.json` or its account state: skipped in the copy, as
    `update` already does, with one line each. It is a skip, not a refusal of
    the whole source. That closes path 1, the security-relevant one.
-2. **`LinkCredentials` never overwrites the machine's store with a different
+2. **Built in v3.23.1** (above). **`LinkCredentials` never overwrites the machine's store with a different
    account.**
    - Copy only when the file's grant is the *same* account as the machine's.
      Otherwise keep the file aside as

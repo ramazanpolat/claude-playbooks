@@ -199,6 +199,9 @@ func TestSyncCredentialsHealsSymlinkAndSyncsNewer(t *testing.T) {
 	if err := os.WriteFile(localCreds, localContent, 0600); err != nil {
 		t.Fatal(err)
 	}
+	// The same account on both sides: a refresh inside the playbook, which
+	// is the heal (v3.23.1 copies only the machine's own account).
+	sameAccountState(t, home, target, "account-1", "account-1")
 
 	if err := SyncCredentials(target); err != nil {
 		t.Fatal(err)
@@ -291,7 +294,10 @@ func TestEnsureGlobalCredentialsRefreshesFromKeychain(t *testing.T) {
 	}
 }
 
-func TestSyncCredentialsCopiesAccountMetadata(t *testing.T) {
+// Another playbook's account state is never a source (v3.23.1): an isolated
+// playbook may be a second account, and seeding its identity into a shared
+// playbook is the cross-account bug. Only the machine's own state is.
+func TestSyncCredentialsNeverTakesAnotherPlaybooksIdentity(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".claude")
@@ -327,8 +333,8 @@ func TestSyncCredentialsCopiesAccountMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(data, []byte(`"oauthAccount"`)) {
-		t.Fatalf("target state did not get oauthAccount: %s", string(data))
+	if bytes.Contains(data, []byte(`"oauthAccount"`)) || bytes.Contains(data, []byte(`account-1`)) {
+		t.Fatalf("target state took another playbook's identity: %s", string(data))
 	}
 	if !bytes.Contains(data, []byte(`"firstStartTime"`)) {
 		t.Fatalf("target state did not preserve existing keys: %s", string(data))
@@ -432,19 +438,14 @@ func TestSyncCredentialsPrefersFullyOnboardedMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The machine's two sources (v3.23.1: other playbooks are none): the
+	// fully onboarded record wins over the one listed first.
 	playbooksDir := filepath.Join(home, ".claude-playbooks")
-	partial := filepath.Join(playbooksDir, "a-partial")
-	full := filepath.Join(playbooksDir, "z-full")
-	for _, dir := range []string{partial, full} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(partial, StateFileName), []byte(`{"oauthAccount":{"accountUuid":"partial"}}`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(globalDir, StateFileName), []byte(`{"oauthAccount":{"accountUuid":"partial"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	fullState := `{"userID":"user-1","oauthAccount":{"accountUuid":"full","workspaceRole":"owner"},"hasCompletedOnboarding":true,"lastOnboardingVersion":"2.1.138","installMethod":"native"}`
-	if err := os.WriteFile(filepath.Join(full, StateFileName), []byte(fullState), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, StateFileName), []byte(fullState), 0600); err != nil {
 		t.Fatal(err)
 	}
 

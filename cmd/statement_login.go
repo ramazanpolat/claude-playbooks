@@ -47,7 +47,7 @@ func (r *stmtRun) planIsolatedLogin(name string, m *manifest.Manifest, cfg strin
 				return before, nil, fmt.Errorf("UNSET ISOLATED LOGIN: PLAYBOOK %s always runs in a sandbox, which shares no login with the machine", name)
 			}
 			if before && cfg != "" && auth.OwnLoginGrant(cfg) {
-				return before, nil, fmt.Errorf("UNSET ISOLATED LOGIN: PLAYBOOK %s has a login of its own (%s), which a shared launch would copy over the machine's login in ~/.claude; run /logout in it first", name, auth.CredentialsFileName)
+				return before, nil, fmt.Errorf("UNSET ISOLATED LOGIN: PLAYBOOK %s has a login of its own (%s): a shared launch would set it aside (another account's) or copy it over the machine's login in ~/.claude (the same account's); run /logout in it first", name, auth.CredentialsFileName)
 			}
 			after = false
 		}
