@@ -702,19 +702,40 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
 - **Built in, always:** exactly `SELECT <col>[, <col> …] FROM <table>`: plain
   column names, spelled exactly (ClickHouse identifiers are case-sensitive:
   `name`, not `NAME`), no `*`, no functions, no `WHERE`. It is a strict subset
-  of ClickHouse SQL, so a query means the same on both paths. The output is a
-  table as `SHOW` prints one; `--json` prints the selected fields.
+  of ClickHouse SQL, so a query means the same on both paths. The output is
+  described under "What a terminal and a pipe get"; `--json` prints the
+  selected fields.
 - **Anything else goes to ClickHouse** when it is installed: `clickhouse` or
   `ch` on `PATH`, or the command `CPB_CLICKHOUSE` names. cpb pipes the
   table's rows to `clickhouse local --input-format JSONEachRow --structure
   '<typed columns>' -q "<query>"`, with `FROM <table>` rewritten to read
   stdin (`FROM table`; for `PLAYBOOKS`, a subquery over it that adds
   `version_tuple`). The `FROM` is found as ClickHouse reads the query, so
-  `'FROM VARS'` in a string or a comment is not a table. The output is
-  ClickHouse's own: a table on a terminal, TSV in a pipe, or the query's
-  `FORMAT`. One statement per query: text after a `;` is refused. Without ClickHouse the query is refused in one line: "this
+  `'FROM VARS'` in a string or a comment is not a table. One statement per query: text after a `;` is refused. Without ClickHouse the query is refused in one line: "this
   query needs ClickHouse (clickhouse local); install it, or pick columns
   only". One table per query.
+- **What a terminal and a pipe get** (v3.22.0; the pilot found raw TSV on a
+  terminal unreadable):
+  - **On a terminal, with no `FORMAT` in the query,** cpb renders the result
+    itself, the same way on both paths. For ClickHouse it asks
+    `clickhouse local` for `JSONCompact` and reads the names and values
+    from that.
+    - Up to 6 columns print as a table.
+    - More print one block per row (`Row 1`, then `NAME:  value` lines), so
+      a wide result such as `SELECT *` does not wrap.
+    - Headers are the column names in capitals, as `SHOW` prints them.
+    - An object, or an array of objects, prints as compact JSON, `/`
+      unescaped. Other arrays print as `a, b`.
+    - `NULL`, an empty array and an empty object print as `-`, as in `SHOW`.
+  - **In a pipe,** the built-in form prints its table, and a ClickHouse query
+    prints `clickhouse local`'s own default, TSV, exactly as before, so
+    scripts keep working.
+  - **A `FORMAT` in the query always wins,** on a terminal too
+    (`… FORMAT PrettyCompact`, `… FORMAT JSONEachRow`), and cpb adds no
+    `--output-format`. A `FORMAT` inside a string or a comment is not the
+    query's.
+  - `EXPLAIN SELECT` shows the command as it would run in the terminal it
+    is typed in.
 - **Only what `--json` already shows is handed over:** the rows are exactly
   the `SHOW … --json` objects (a credential redacted, a reference shown as the
   reference), one per line, and nothing else. A test pins those bytes.
@@ -745,6 +766,23 @@ built-in form, the query computes it for ClickHouse. A `VARS` row is one entry o
 (`DEFAULTS` sets, the playbook's sets, its own block), `effective` when it is
 the one a launch uses. The manual form, piping `SHOW … --json` yourself, is in
 [Query with SQL](../guides/query-with-sql.md).
+
+### DESCRIBE
+
+v3.22.0 (the pilot: `cpb DESCRIBE playbooks` said "unknown command").
+`DESCRIBE [TABLE] <table>`, or `DESC`, lists a `SELECT` table's columns and
+their types: the typed structure `clickhouse local` reads the rows with,
+plus the computed `version_tuple`. A table name is case-insensitive, as in
+`SELECT`.
+
+```
+cpb DESCRIBE playbooks          # NAME / TYPE, one row per column
+cpb "DESC TABLE vars --json"    # [{"name": "playbook", "type": "String"}, …]
+```
+
+An unknown table is refused, naming the four; `DESCRIBE` with no table is
+refused too. It reads no playbook: the columns are the same on every
+machine.
 
 ## INCLUDE
 

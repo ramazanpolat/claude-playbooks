@@ -486,6 +486,8 @@ func TestIsStatement(t *testing.T) {
 		"show envs":                 true,
 		"explain playbook k":        true,
 		"apply playbook.cpb":        true,
+		"DESCRIBE playbooks":        true,
+		"desc vars":                 true,
 		"env k set A=1":             false,
 		"install https://x":         false,
 		"list":                      false,

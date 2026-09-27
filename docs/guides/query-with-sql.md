@@ -9,6 +9,11 @@ cpb "SELECT name, envs FROM PLAYBOOKS"                                  # built 
 cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook"  # through clickhouse-local
 ```
 
+`cpb DESCRIBE playbooks` lists a table's columns and types. On a terminal
+`SELECT` prints a table, or one block per row for more than 6 columns,
+with objects as JSON. In a pipe it prints TSV, and a `FORMAT` in the query
+always wins.
+
 This guide is the manual form underneath it, for what `SELECT` does not do:
 joining two reads, or feeding ClickHouse settings of your own. Every read has
 a stable `--json` form, and ClickHouse's `clickhouse local` (`ch local`) runs

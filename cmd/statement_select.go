@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
@@ -195,6 +197,7 @@ type selectPlan struct {
 	table   string
 	columns []string // built in
 	query   string   // for ClickHouse, with FROM <table> rewritten to read stdin
+	format  bool     // the query has its own FORMAT clause
 }
 
 // sqlFrom is one FROM <table> the scan found: the span to rewrite.
@@ -207,7 +210,7 @@ type sqlFrom struct {
 // literals, quoted identifiers and comments, and returns every FROM that
 // names one of the tables, and whether code follows a semicolon (a second
 // statement).
-func scanSQL(q string) (froms []sqlFrom, second bool) {
+func scanSQL(q string) (froms []sqlFrom, second, format bool) {
 	isWord := func(c byte) bool {
 		return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 	}
@@ -263,6 +266,9 @@ func scanSQL(q string) (froms []sqlFrom, second bool) {
 			if semicolon {
 				second = true
 			}
+			if strings.EqualFold(q[i:j], "FORMAT") && (i == 0 || !isWord(q[i-1])) {
+				format = true
+			}
 			if strings.EqualFold(q[i:j], "FROM") && (i == 0 || !isWord(q[i-1])) {
 				k := j
 				for k < len(q) && (q[k] == ' ' || q[k] == '\t' || q[k] == '\r' || q[k] == '\n') {
@@ -286,7 +292,7 @@ func scanSQL(q string) (froms []sqlFrom, second bool) {
 			i++
 		}
 	}
-	return froms, second
+	return froms, second, format
 }
 
 func planSelect(q string) (*selectPlan, error) {
@@ -314,7 +320,7 @@ func planSelect(q string) (*selectPlan, error) {
 		}
 		return &selectPlan{table: table, columns: cols}, nil
 	}
-	froms, second := scanSQL(q)
+	froms, second, format := scanSQL(q)
 	if second {
 		return nil, errors.New("one statement at a time: remove what follows the semicolon")
 	}
@@ -329,7 +335,7 @@ func planSelect(q string) (*selectPlan, error) {
 	if f.table == "PLAYBOOKS" {
 		source = "FROM (SELECT *, " + versionTupleSQL + " AS version_tuple FROM table)"
 	}
-	return &selectPlan{table: f.table, query: q[:f.start] + source + q[f.end:]}, nil
+	return &selectPlan{table: f.table, query: q[:f.start] + source + q[f.end:], format: format}, nil
 }
 
 // clickhouseBinary finds clickhouse-local: CPB_CLICKHOUSE, else
@@ -346,10 +352,28 @@ func clickhouseBinary() (string, error) {
 	return "", errors.New("this query needs ClickHouse (clickhouse local); install it, or pick columns only: SELECT <col>, … FROM <table>")
 }
 
+// selectTTY reports whether stdout is a terminal; a var, so the choice of
+// output is testable (as terminalWidth is).
+var selectTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+
+// wideColumns: a result with more columns than this is printed one block
+// per row on a terminal, so nothing wraps.
+const wideColumns = 6
+
+// rendered reports whether cpb renders the result itself: on a terminal,
+// when the query names no FORMAT of its own. A pipe gets clickhouse-local's
+// default (TSV), and a FORMAT in the query always wins.
+func (p *selectPlan) rendered() bool { return !p.format && selectTTY() }
+
+// clickhouseArgs is the clickhouse-local command line. When cpb renders the
+// result, it asks for JSONCompact (names, types, and the values as JSON)
+// and prints it as the built-in form does.
 func (p *selectPlan) clickhouseArgs() []string {
-	// No --output-format: it would override the query's own FORMAT, and
-	// clickhouse-local already prints a table to a terminal and TSV to a pipe.
-	return []string{"local", "--input-format", "JSONEachRow", "--structure", selectTables[p.table].structure, "-q", p.query}
+	args := []string{"local", "--input-format", "JSONEachRow", "--structure", selectTables[p.table].structure}
+	if p.rendered() {
+		args = append(args, "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0")
+	}
+	return append(args, "-q", p.query)
 }
 
 // runSelect runs a SELECT, or with explain says how it would run.
@@ -392,10 +416,76 @@ func runSelect(q string, explain, asJSON bool) error {
 	}
 	c := exec.Command(bin, p.clickhouseArgs()...)
 	c.Stdin, c.Stdout, c.Stderr = &in, os.Stdout, os.Stderr
+	if !p.rendered() {
+		if err := c.Run(); err != nil {
+			return fmt.Errorf("clickhouse local: %w", err)
+		}
+		return nil
+	}
+	var out bytes.Buffer
+	c.Stdout = &out
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("clickhouse local: %w", err)
 	}
+	var res struct {
+		Meta []struct {
+			Name string `json:"name"`
+		} `json:"meta"`
+		Data [][]any `json:"data"`
+	}
+	dec := json.NewDecoder(&out)
+	dec.UseNumber()
+	if err := dec.Decode(&res); err != nil {
+		return fmt.Errorf("clickhouse local: unexpected output: %w", err)
+	}
+	cols := make([]string, len(res.Meta))
+	for i, m := range res.Meta {
+		cols[i] = m.Name
+	}
+	renderRows(os.Stdout, cols, res.Data, len(cols) > wideColumns)
 	return nil
+}
+
+// renderRows prints a result for a person: a table, or, when vertical, one
+// block per row (label: value), so a wide result does not wrap. Headers are
+// the column names in capitals, as SHOW prints them.
+func renderRows(w io.Writer, cols []string, rows [][]any, vertical bool) {
+	header := make([]string, len(cols))
+	width := 0
+	for i, c := range cols {
+		header[i] = strings.ToUpper(c)
+		width = max(width, len(header[i]))
+	}
+	if !vertical {
+		t := newTable(header...)
+		for _, r := range rows {
+			cells := make([]string, len(cols))
+			for i := range cols {
+				if i < len(r) {
+					cells[i] = cellText(r[i])
+				}
+			}
+			t.add(cells...)
+		}
+		t.render(w)
+		return
+	}
+	for n, r := range rows {
+		if n > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "Row %d\n", n+1)
+		for i, h := range header {
+			v := ""
+			if i < len(r) {
+				v = cellText(r[i])
+			}
+			fmt.Fprintf(w, "  %-*s  %s\n", width+1, h+":", v)
+		}
+	}
+	if len(rows) == 0 {
+		fmt.Fprintln(w, "(no rows)")
+	}
 }
 
 func printSelect(table string, cols []string, objs []any, asJSON bool) error {
@@ -422,19 +512,15 @@ func printSelect(table string, cols []string, objs []any, asJSON bool) error {
 		}
 		return printJSON(out)
 	}
-	header := make([]string, len(cols))
-	for i, c := range cols {
-		header[i] = strings.ToUpper(c)
-	}
-	t := newTable(header...)
+	data := make([][]any, 0, len(rows))
 	for _, r := range rows {
-		cells := make([]string, len(cols))
+		row := make([]any, len(cols))
 		for i, c := range cols {
-			cells[i] = cellText(r[c])
+			row[i] = r[c]
 		}
-		t.add(cells...)
+		data = append(data, row)
 	}
-	t.render(os.Stdout)
+	renderRows(os.Stdout, cols, data, len(cols) > wideColumns && selectTTY())
 	return nil
 }
 
@@ -444,29 +530,42 @@ func cellText(v any) string {
 		return "-"
 	case string:
 		return x
+	case json.Number:
+		return x.String()
 	case []any:
+		if len(x) == 0 {
+			return "-"
+		}
+		for _, e := range x {
+			switch e.(type) {
+			case map[string]any, []any:
+				return jsonText(x) // an array of objects reads as JSON
+			}
+		}
 		parts := make([]string, 0, len(x))
 		for _, e := range x {
 			parts = append(parts, cellText(e))
 		}
-		if len(parts) == 0 {
-			return "-"
-		}
 		return strings.Join(parts, ", ")
 	case map[string]any:
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
+		if len(x) == 0 {
+			return "-" // ClickHouse's JSON type reads a null object as {}
 		}
-		sort.Strings(keys)
-		parts := make([]string, 0, len(keys))
-		for _, k := range keys {
-			parts = append(parts, k+"="+cellText(x[k]))
-		}
-		return strings.Join(parts, " ")
+		return jsonText(x)
 	default:
 		return fmt.Sprint(x)
 	}
+}
+
+// jsonText is v as compact JSON, '/' and '<' unescaped, for reading.
+func jsonText(v any) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if enc.Encode(v) != nil {
+		return fmt.Sprint(v)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // shellCommand quotes a command for display.
@@ -510,4 +609,97 @@ func selectArgs(args []string) (query string, explain, asJSON bool, ok bool) {
 		return text, false, asJSON, true
 	}
 	return "", false, false, false
+}
+
+// DESCRIBE [TABLE] <table> (DESC too) lists a SELECT table's columns and
+// their types: the typed structure clickhouse-local reads the rows with,
+// plus the computed version_tuple.
+
+// describeArgs recognises DESCRIBE / DESC, word by word or as one quoted
+// argument, with an optional --json. ok with an empty table is a DESCRIBE
+// that names none, refused by runDescribe.
+func describeArgs(args []string) (table string, asJSON, ok bool) {
+	words := args
+	if len(args) == 1 {
+		words = strings.Fields(strings.TrimSpace(args[0]))
+	}
+	if len(words) > 0 && words[len(words)-1] == "--json" {
+		asJSON, words = true, words[:len(words)-1]
+	}
+	if len(words) == 0 {
+		return "", false, false
+	}
+	switch strings.ToUpper(words[0]) {
+	case "DESCRIBE", "DESC":
+	default:
+		return "", false, false
+	}
+	words = words[1:]
+	if len(words) > 0 && strings.EqualFold(words[0], "TABLE") {
+		words = words[1:]
+	}
+	if len(words) == 1 {
+		table = strings.TrimSuffix(words[0], ";")
+	} else if len(words) == 2 && words[1] == ";" {
+		table = words[0]
+	}
+	return table, asJSON, true
+}
+
+type columnJSON struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+func describeTable(name string) ([]columnJSON, error) {
+	t, ok := selectTables[strings.ToUpper(name)]
+	if !ok {
+		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, DEFAULTS)", name)
+	}
+	types := map[string]string{"version_tuple": "Array(UInt32)"} // computed, not in the structure
+	depth, start := 0, 0
+	parts := []string{}
+	for i, c := range t.structure {
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, t.structure[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, t.structure[start:])
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		n, typ, _ := strings.Cut(part, " ")
+		types[strings.Trim(n, "`")] = strings.TrimSpace(typ)
+	}
+	out := make([]columnJSON, 0, len(t.columns))
+	for _, c := range t.columns {
+		out = append(out, columnJSON{Name: c, Type: types[c]})
+	}
+	return out, nil
+}
+
+func runDescribe(table string, asJSON bool) error {
+	if table == "" {
+		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS or DEFAULTS")
+	}
+	cols, err := describeTable(table)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(cols)
+	}
+	data := make([][]any, 0, len(cols))
+	for _, c := range cols {
+		data = append(data, []any{c.Name, c.Type})
+	}
+	renderRows(os.Stdout, []string{"name", "type"}, data, false)
+	return nil
 }

@@ -56,7 +56,7 @@ func IsStatement(args []string) bool {
 		return true
 	}
 	switch strings.ToUpper(args[0]) {
-	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT": // INCLUDE and USE, to be refused with their reason
+	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT", "DESCRIBE", "DESC": // INCLUDE and USE, to be refused with their reason
 		return true
 	case "CREATE":
 		if len(args) < 2 {

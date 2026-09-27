@@ -10,9 +10,13 @@ cpb "SELECT playbook, key, effective FROM VARS" --json
 cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"   # clickhouse-local
 cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [3, 12] ORDER BY version_tuple"
 cpb EXPLAIN SELECT count() FROM VARS                  # which engine, and the exact command
+cpb DESCRIBE playbooks                                # the columns and their types
 ```
 
-Quote the statement: the shell would expand `*` and split `(`.
+Quote the statement: the shell would expand `*` and split `(`. On a
+terminal the result is a table, or one block per row for more than 6
+columns (`SELECT *`), with objects as JSON. In a pipe it is TSV, as
+before; a `FORMAT` in the query always wins.
 
 - **Built in:** exactly `SELECT <col>[, <col> …] FROM <table>`, columns spelled
   as the table has them. It needs nothing installed and prints a table, or the
