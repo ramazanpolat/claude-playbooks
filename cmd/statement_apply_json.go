@@ -164,7 +164,8 @@ func stepActions(configDir string, s pluginStep, refOf func(string) string) []pl
 // into path (to). A local directory is copied; anything else is fetched.
 func fetchAction(source, branch, subdir, to string) planAction {
 	// A local directory by its form, whether or not it exists yet.
-	local := strings.HasPrefix(source, "/") || strings.HasPrefix(source, "~/") ||
+	local := source == "." || source == ".." || source == "~" ||
+		strings.HasPrefix(source, "/") || strings.HasPrefix(source, "~/") ||
 		strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../")
 	if local {
 		source = expandHomeDir(source)
@@ -176,6 +177,11 @@ func fetchAction(source, branch, subdir, to string) planAction {
 }
 
 func expandHomeDir(p string) string {
+	if p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
 	if strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, p[2:])
