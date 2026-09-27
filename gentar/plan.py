@@ -188,6 +188,40 @@ def _dedup(names):
     return out
 
 
+JUDGED = re.compile(r"^\s*(\[driver\.turns\.judge\]|judge\s*=)", re.MULTILINE)
+FIXTURES = HERE / "judge-fixtures"
+MIN_FIXTURES = 3
+
+
+def judged_suites():
+    """Suites with a judged (semantic) turn: they send screens to a judge,
+    so they never run in phase 1 and need fixtures (AGENTS.md decision 7)."""
+    out = {}
+    for f in sorted(SCENARIOS.glob("*.toml")):
+        try:
+            data = tomllib.loads(f.read_text())
+        except tomllib.TOMLDecodeError:
+            continue
+        driver = data.get("driver") or {}
+        turns = driver.get("turns") or []
+        idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
+        goal = bool(driver.get("goal"))
+        soft = bool((data.get("verify") or {}).get("judge"))
+        if idx or goal or soft:
+            name = (data.get("scenario") or {}).get("name", f.stem)
+            out[name] = {"turns": idx, "goal": goal,
+                         "data": (data.get("scenario") or {}).get("data", ""), "file": f.name}
+    return out
+
+
+def _no_judged(names):
+    """Phase 1 never runs a judged suite — drop it, and say so."""
+    judged = judged_suites()
+    kept = [n for n in names if n not in judged]
+    dropped = [n for n in names if n in judged]
+    return kept, (f"; judged suite(s) {', '.join(dropped)} left for phase 2" if dropped else "")
+
+
 def plan(env, policy):
     """What this event runs. Pure: env in, plan out."""
     event = env.get("GITHUB_EVENT_NAME", "")
@@ -217,8 +251,8 @@ def plan(env, policy):
                 return {**res, "reason": "fork PR: never on the self-hosted runner"}
             picked = _declared(env.get("PR_BODY"))
             if picked:
-                return targeted([_suite(f, "GENTAR_FLOOR") for f in floor] + picked,
-                                "no policy.toml: PR narrowed by its gentar: line")
+                names, note = _no_judged([_suite(f, "GENTAR_FLOOR") for f in floor] + picked)
+                return targeted(names, "no policy.toml: PR narrowed by its gentar: line" + note)
             return {**res, "bench": "phase2", "reason": "no policy.toml: PR runs every suite"}
         if event == "workflow_dispatch" and dispatch:
             return targeted(dispatch, "no policy.toml: dispatch names suites")
@@ -245,12 +279,13 @@ def plan(env, policy):
         if p1["bench"] == "off":
             return {**res, "reason": "phase 1: bench-free checks only "
                                      "([phase1] bench = \"off\")"}
-        return targeted(list(p1["floor"]) + _declared(env.get("PR_BODY")),
-                        "phase 1: floor + the suites this PR declares")
+        names, note = _no_judged(list(p1["floor"]) + _declared(env.get("PR_BODY")))
+        return targeted(names, "phase 1: floor + the suites this PR declares" + note)
 
     if event == "push" and ref == f"refs/heads/{default}":
         res["checks"] = p1["checks"]
-        return targeted(list(p1["floor"]), f"phase 1 on {default}: checks + floor")
+        names, note = _no_judged(list(p1["floor"]))
+        return targeted(names, f"phase 1 on {default}: checks + floor" + note)
 
     if tag is not None:
         if tag == "arena":
@@ -342,7 +377,33 @@ def lint(policy, engine_root):
                     f"{mine}: differs from the pinned kit's copy. Re-copy it; "
                     f"adaptations belong in hooks.py / policy.toml / repo vars "
                     f"(or list it in [check] allow_drift, and own the difference)")
-    # 3. the PR invariant rests on the kit's workflow; say so when it cannot.
+    # 3. judged suites: synthetic data declared, phase 2 only, fixtures to
+    #    measure them with (bin/judge-eval in the engine).
+    judged = judged_suites()
+    floor = set((policy or {}).get("phase1", {}).get("floor", []))
+    for name, j in sorted(judged.items()):
+        if j["data"] != "synthetic":
+            problems.append(f"{j['file']}: judged turns need [scenario] data = \"synthetic\" "
+                            f"(the engine refuses the run otherwise)")
+        if name in floor:
+            problems.append(f"policy.toml: [phase1] floor has {name}, which has judged turns — "
+                            f"judged suites run in phase 2 only")
+        if j.get("goal"):
+            gdir = FIXTURES / name / "goal"
+            picks = {d.name: len(list(d.glob("*.txt"))) for d in gdir.glob("*") if d.is_dir()}
+            if sum(picks.values()) < MIN_FIXTURES or "done" not in picks or len(picks) < 2:
+                problems.append(
+                    f"{j['file']}: its goal pilot needs {MIN_FIXTURES}+ fixture screens under "
+                    f"gentar/judge-fixtures/{name}/goal/<expected action>/, covering 2+ actions "
+                    f"including done (has {sum(picks.values())} over {sorted(picks) or 'none'})")
+        for i in j["turns"]:
+            for label in ("yes", "no"):
+                have = len(list((FIXTURES / name / str(i) / label).glob("*.txt")))
+                if have < MIN_FIXTURES:
+                    problems.append(
+                        f"{j['file']}: judged turn {i} has {have} {label} fixture(s) under "
+                        f"gentar/judge-fixtures/{name}/{i}/{label}/ — needs {MIN_FIXTURES}+")
+    # 4. the PR invariant rests on the kit's workflow; say so when it cannot.
     wf = ".github/workflows/gentar-arena.yml"
     if wf in allowed:
         print(f"note: {wf} is allowed to drift, so 'no pull_request job reaches "
