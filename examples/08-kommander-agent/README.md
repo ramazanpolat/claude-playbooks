@@ -50,7 +50,10 @@ Applying a layer applies everything under it. Applying again changes nothing.
 - `ALLOW TOOL 'Bash(kommander-helper *)'` lets the agent run its helper
   without asking; plugins cannot grant permissions, so the playbook does.
 - `SET STATUSLINE` points the playbook's status line at the checkout's
-  `hooks/statusline.sh`; plugins cannot set one either.
+  `hooks/statusline.sh`; plugins cannot set one either. `REFRESH 10` makes
+  Claude Code re-render it every 10 seconds while the session is idle.
+  Kommander's lease heartbeat rides on those renders, and without the
+  interval an idle session stops rendering.
 - The chaos plugin's SessionStart hook adds its line of context on top. It
   does not set an agent, so Kommander stays the main thread.
 - `EXPLAIN PLAYBOOK kommander-agent` shows both plugins and where the agent

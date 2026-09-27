@@ -14,7 +14,7 @@ ALTER PLAYBOOK
   ADD PLUGIN kommander@kommander
   SET AGENT 'kommander'
   ALLOW TOOL 'Bash(kommander-helper *)'
-  SET STATUSLINE 'bash ~/path/to/kommander-playbook/hooks/statusline.sh';
+  SET STATUSLINE 'bash ~/path/to/kommander-playbook/hooks/statusline.sh' REFRESH 10;
 ```
 
 ```bash
@@ -79,9 +79,15 @@ cpb DROP PLAYBOOK scratch --yes
   Code's own `claude plugin` commands for that playbook only; `SET AGENT` pins
   the main-thread agent in the playbook's `settings.json`.
 - **The rest of the agent:** `ADD MCP SERVER` (a credential only by
-  reference), `ALLOW` / `DENY TOOL`, `SET STATUSLINE`, `SET MODEL`, the
+  reference), `ALLOW` / `DENY TOOL`, `SET STATUSLINE … REFRESH <n>` (it
+  keeps re-rendering while idle), `SET MODEL`, the
   `/model` picker (`ADD MODEL … SET MODEL PICKER ONLY`), and `ADD SKILL`
   from a directory or a git repository.
+- **Other model routes and accounts:** `CREATE PLAYBOOK … NO PILOT PROFILE`
+  leaves the `~/.pilot-profile/` imports out of a playbook routed away from
+  Anthropic, and cpb warns when a playbook that has them is routed there.
+  `ISOLATED LOGIN` gives a playbook a login of its own, sharing nothing with
+  `~/.claude`.
 - **Recipes:** an `ALTER PLAYBOOK` with no name applies to whatever
   `APPLY … TO <playbook>`, `TO '~/.claude'` or a `USE PLAYBOOK` line names.
 - **Queries:** `cpb "SELECT name, envs FROM PLAYBOOKS"`; anything beyond
