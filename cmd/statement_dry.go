@@ -47,6 +47,10 @@ type dryState struct {
 	// always as earlier statements would leave them.
 	isolated  map[string]bool
 	sandboxed map[string]bool
+
+	// slHistory, per config directory key: the status line history as
+	// earlier statements would leave it.
+	slHistory map[string][]slEntry
 }
 
 func newDryState() *dryState {
@@ -64,6 +68,7 @@ func newDryState() *dryState {
 		pilotProfile: map[string]bool{},
 		isolated:     map[string]bool{},
 		sandboxed:    map[string]bool{},
+		slHistory:    map[string][]slEntry{},
 	}
 }
 

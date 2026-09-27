@@ -102,8 +102,11 @@ const (
 
 	// The model picker (v3.22.0): settings.json modelPicker.
 	// The status line's refresh (v3.23.0): statusLine.refreshInterval.
-	SetStatuslineRefresh   Kind = "SET STATUSLINE REFRESH"   // SET STATUSLINE REFRESH <n>
-	UnsetStatuslineRefresh Kind = "UNSET STATUSLINE REFRESH" // UNSET STATUSLINE REFRESH
+	SetStatuslineRefresh   Kind = "SET STATUSLINE REFRESH" // SET STATUSLINE REFRESH <n>
+	UnsetStatuslineRefresh Kind = "UNSET STATUSLINE REFRESH"
+	// SetStatuslinePrevious: SET STATUSLINE PREVIOUS, the status line cpb
+	// replaced last, from its history.
+	SetStatuslinePrevious Kind = "SET STATUSLINE PREVIOUS" // UNSET STATUSLINE REFRESH
 
 	AddModel         Kind = "ADD MODEL"          // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
 	DropModel        Kind = "DROP MODEL"         // DROP MODEL '<id>'

@@ -310,3 +310,12 @@ contains = "statusline-host-kept-ok"
 # stdout is exactly what the command prints on its own.
 command = '''claude-playbook CREATE PLAYBOOK hdp NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook list > "$HOME/hd.out" 2> "$HOME/hd.err" && grep -qF 'Deprecated: `claude-playbook list` is removed in v4.0.0; the grammar form is: ' "$HOME/hd.err" && [ "$(wc -l < "$HOME/hd.err" | tr -d ' ')" = 1 ] && ! grep -q Deprecated "$HOME/hd.out" && grep -q hdp "$HOME/hd.out" && claude-playbook env hdp > /dev/null 2> "$HOME/hd2.err" && grep -qF 'Deprecated: `claude-playbook env` is removed in v4.0.0' "$HOME/hd2.err" && echo hidden-deprecated-ok'''
 contains = "hidden-deprecated-ok"
+
+[[verify.commands]]
+# The status line history (v3.25.0), on a throwaway playbook: PREVIOUS with
+# no history is refused; SET a, SET b, PREVIOUS restores a with its padding
+# and interval, PREVIOUS again restores b; SHOW --json lists the history;
+# the history is cpb's own state (0600), never in the playbook; SHOW CREATE
+# does not write it.
+command = '''P="$HOME/.claude-playbooks/slh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK slh NO ALIAS NO PILOT PROFILE >/dev/null && if claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" > "$HOME/slh.err" 2>&1; then echo previous-accepted; elif ! grep -q "no earlier status line is recorded" "$HOME/slh.err"; then echo previous-wrong; else printf '{"statusLine":{"type":"command","command":"echo a","padding":2,"refreshInterval":7}}\n' > "$S" && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE 'echo b' REFRESH 3" >/dev/null && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echoa"' && c | grep -qF '"padding":2' && c | grep -qF '"refreshInterval":7' && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echob"' && claude-playbook SHOW PLAYBOOK slh --json | tr -d ' \n' | grep -qF '"statusline_history":[{"command":"echoa","refresh":7,' && H="$HOME/.claude-playbooks/.state/statusline-history.json" && [ "$(stat -c %a "$H" 2>/dev/null || stat -f %Lp "$H")" = 600 ] && ! ls -a "$P" | grep -q history && ! claude-playbook SHOW CREATE PLAYBOOK slh | grep -q PREVIOUS && echo statusline-history-ok; fi'''
+contains = "statusline-history-ok"

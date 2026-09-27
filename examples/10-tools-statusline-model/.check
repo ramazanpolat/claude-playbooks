@@ -11,6 +11,10 @@ cpb EXPLAIN PLAYBOOK reviewer | grep -q 'Tools: allow'
 cpb "ALTER PLAYBOOK reviewer SET STATUSLINE REFRESH 30"
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s == {"type": "command", "command": "echo reviewer", "refreshInterval": 30}, s' "$HOME/.claude-playbooks/reviewer/settings.json"
 cpb "ALTER PLAYBOOK reviewer UNSET STATUSLINE REFRESH"
+# Another status line, then back: PREVIOUS restores the one it replaced.
+cpb "ALTER PLAYBOOK reviewer SET STATUSLINE 'echo other'"
+cpb "ALTER PLAYBOOK reviewer SET STATUSLINE PREVIOUS"
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s["command"] == "echo reviewer", s' "$HOME/.claude-playbooks/reviewer/settings.json"
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s == {"type": "command", "command": "echo reviewer"}, s' "$HOME/.claude-playbooks/reviewer/settings.json"
 cpb "ALTER PLAYBOOK reviewer UNSET TOOL 'Read(~/.ssh/**)' UNSET STATUSLINE UNSET MODEL"
 python3 - "$HOME/.claude-playbooks/reviewer/settings.json" <<'PY'

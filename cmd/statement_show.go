@@ -65,9 +65,12 @@ type playbookJSON struct {
 	Skills       []skillJSON       `json:"skills"`
 	Statusline   *string           `json:"statusline"`
 	// StatuslineRefresh is statusLine.refreshInterval, whole seconds.
-	StatuslineRefresh *int        `json:"statusline_refresh"`
-	Model             *string     `json:"model"`
-	ModelPicker       *pickerJSON `json:"model_picker"`
+	StatuslineRefresh *int `json:"statusline_refresh"`
+	// StatuslineHistory is what SET STATUSLINE PREVIOUS can go back to,
+	// newest first (v3.25.0).
+	StatuslineHistory []slHistoryJSON `json:"statusline_history"`
+	Model             *string         `json:"model"`
+	ModelPicker       *pickerJSON     `json:"model_picker"`
 }
 
 type envJSON struct {
@@ -208,6 +211,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.ModelPicker = readPicker(sf.Root)
 		v.StatuslineRefresh = statuslineRefresh(sf.Root)
 	}
+	v.StatuslineHistory = describeSLHistory(pb.Path)
 	root := pb.RootPath
 	if root == "" {
 		root = pb.Path
@@ -715,6 +719,9 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	}
 	if v.Statusline != nil {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
+	}
+	if n := len(v.StatuslineHistory); n > 0 {
+		fmt.Printf("Status line history: %d earlier (SET STATUSLINE PREVIOUS restores %s)\n", n, v.StatuslineHistory[0].Command)
 	}
 	if v.IsolatedLogin {
 		fmt.Println("Login: isolated: no link to ~/.claude's login and no machine token; /login once in it")

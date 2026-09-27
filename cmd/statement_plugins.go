@@ -54,7 +54,7 @@ func pluginClauses(clauses []grammar.Clause) bool {
 			grammar.DropPlugin, grammar.SetAgent, grammar.UnsetAgent,
 			grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool,
 			grammar.SetStatusline, grammar.UnsetStatusline, grammar.SetModel, grammar.UnsetModel,
-			grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh,
+			grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh, grammar.SetStatuslinePrevious,
 			grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
 			return true
 		}
