@@ -58,7 +58,7 @@ plugins, plus a launcher command that opens Claude Code bound to it. Your
 `cpb <VERB> <OBJECT> <name> <clause> ...`, read and written like SQL DDL:
 
 ```bash
-cpb CREATE PLAYBOOK scratch                        # a fresh playbook and its `scratch` command
+cpb CREATE PLAYBOOK scratch NO PILOT PROFILE       # a fresh playbook and its `scratch` command (routed below: no ~/.pilot-profile imports)
 cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
 cpb ALTER PLAYBOOK scratch USE ENV router SET VAR MAX_THINKING_TOKENS=8000
 cpb ALTER DEFAULTS USE ENV router                  # env sets under every playbook, in order

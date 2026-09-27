@@ -38,6 +38,10 @@ type dryState struct {
 	// or removed (false).
 	skillRecords map[string]map[string]*manifest.SkillRecord
 	skillKnown   map[string]map[string]bool
+
+	// pilotProfile, per playbook created earlier: whether the CLAUDE.md its
+	// CREATE would write imports ~/.pilot-profile/.
+	pilotProfile map[string]bool
 }
 
 func newDryState() *dryState {
@@ -52,6 +56,7 @@ func newDryState() *dryState {
 		mcpRecords:   map[string]map[string]*manifest.MCPRecord{},
 		skillRecords: map[string]map[string]*manifest.SkillRecord{},
 		skillKnown:   map[string]map[string]bool{},
+		pilotProfile: map[string]bool{},
 	}
 }
 
@@ -104,6 +109,7 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.mcpRecords, name)
 		delete(r.dry.skillRecords, name)
 		delete(r.dry.skillKnown, name)
+		delete(r.dry.pilotProfile, name)
 	}
 }
 
@@ -122,6 +128,7 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	mr, mrok := r.dry.mcpRecords[from]
 	sr, srok := r.dry.skillRecords[from]
 	sk, skok := r.dry.skillKnown[from]
+	pp, ppok := r.dry.pilotProfile[from]
 	r.recordPlaybook(from, false)
 	r.recordPlaybook(to, true)
 	if wok {
@@ -138,6 +145,9 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	if skok {
 		r.dry.skillKnown[to] = sk
+	}
+	if ppok {
+		r.dry.pilotProfile[to] = pp
 	}
 	if aok {
 		r.dry.settings[to] = a

@@ -1,0 +1,9 @@
+-- A playbook for a non-Anthropic model route. cpb's CLAUDE.md imports the
+-- pilot profile (~/.pilot-profile/), and Claude Code sends what CLAUDE.md
+-- imports with every request, so a routed playbook is created without it.
+CREATE OR REPLACE ENV router
+  DESCRIBE 'A model router: requests leave Anthropic'
+  SET ANTHROPIC_BASE_URL=http://localhost:20128/v1 ANTHROPIC_MODEL=glm-5.3;
+
+CREATE PLAYBOOK IF NOT EXISTS routed NO ALIAS NO PILOT PROFILE;
+ALTER PLAYBOOK routed USE ENV router;

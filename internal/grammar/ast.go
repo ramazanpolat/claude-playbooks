@@ -59,6 +59,10 @@ const (
 	Link     Kind = "LINK"      // CREATE PLAYBOOK ... LINK <dir>
 	Sandbox  Kind = "SANDBOX"   // CREATE PLAYBOOK ... SANDBOX
 
+	// NoPilotProfile: CREATE PLAYBOOK ... NO PILOT PROFILE, a template
+	// CLAUDE.md without the ~/.pilot-profile/ imports.
+	NoPilotProfile Kind = "NO PILOT PROFILE"
+
 	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
 	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
 
