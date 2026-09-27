@@ -532,6 +532,18 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 			if typ == "command" && cmd == c.Arg && (c.Refresh == 0 || refresh == c.Refresh) {
 				continue
 			}
+			// A host (statusmux) holds the slot: the command stays, the
+			// statement reports it (statuslineHeld), and only an interval
+			// applies, which the host needs.
+			if typ == "command" && isHostCommand(cmd) && cmd != c.Arg {
+				if c.Refresh > 0 && refresh != c.Refresh {
+					_ = sl.Set(keyRefreshInterval, c.Refresh)
+					f.Root.SetObject(keyStatusline, sl)
+					changed = true
+					lines = append(lines, fmt.Sprintf("statusline refresh %d s (the command stays: a host holds the slot)", c.Refresh))
+				}
+				continue
+			}
 			_ = sl.Set("type", "command")
 			_ = sl.Set("command", c.Arg)
 			line := "statusline " + c.Arg

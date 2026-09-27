@@ -605,7 +605,7 @@ planned as empty.
   | `write` | `path` | TO a plain directory: its `settings.json`. |
   | `delete` | `what` (`playbook` or `skill`), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
 
-- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs) and, from v3.23.0, `pilot_profile_third_party_endpoint` (a playbook importing `~/.pilot-profile/` now has a non-Anthropic `ANTHROPIC_BASE_URL`; see "The pilot profile and non-Anthropic routes"). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
+- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs) from v3.23.0 `pilot_profile_third_party_endpoint` (a playbook importing `~/.pilot-profile/` now has a non-Anthropic `ANTHROPIC_BASE_URL`; see "The pilot profile and non-Anthropic routes"), and `statusline_held_by_host` (a `SET STATUSLINE` left a host's status line as it is; see the status line clauses). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
 - **No secret value** appears anywhere: references stay references, and a literal credential a file sets is not in the plan.
 
 **Exit codes:**
@@ -1384,6 +1384,23 @@ Built (v3.21.0).
     `statusline_refresh` column. `SHOW` and `EXPLAIN` print `Status line:
     <command> (refreshes every <n> s)`. It is valid on a plain config
     directory too.
+- **A host holds the slot.** A status line host, such as statusmux (SPC/1),
+  owns the one `statusLine` slot and composes the bar from panels. Its
+  observers, a lease heartbeat for example, run only while it holds the
+  slot. So when the current command is a host's, `SET STATUSLINE
+  '<another command>'` leaves the slot as it is.
+  - The clause reports unchanged. One warning line says so, and `APPLY
+    --json` gives it the code `statusline_held_by_host`.
+  - A recipe re-applied after the pilot wired a host therefore no longer
+    unwires it.
+  - `REFRESH` on a host-held slot still applies, since the host needs the
+    interval.
+  - `UNSET STATUSLINE` is the explicit way to take the slot back; then `SET
+    STATUSLINE` applies.
+  - A command counts as a host's when its first word, after `env`, `exec`
+    and `VAR=value` words, is a program named `statusmux` and its second word
+    is `render`. That is the shape statusmux documents for cpb.
+  - cpb reads nothing of statusmux's own and never calls it.
 - `SET MODEL '<model>'` writes `model`; `UNSET MODEL` removes it. It is the
   playbook's default model and the lowest-priority choice: `ANTHROPIC_MODEL`
   from an env set or `SET VAR`, a launch's `--model`, and `/model` in a

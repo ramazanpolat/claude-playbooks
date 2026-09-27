@@ -61,6 +61,8 @@ type applyWarning struct {
 const (
 	warnUsePlaybookOverridden = "use_playbook_overridden"
 	warnSourceDrift           = "source_drift"
+	// SET STATUSLINE left a host's (statusmux's) status line as it is.
+	warnStatuslineHeldByHost = "statusline_held_by_host"
 	// A playbook importing ~/.pilot-profile/ now has a non-Anthropic
 	// ANTHROPIC_BASE_URL (v3.23.0).
 	warnPilotProfileThirdParty = "pilot_profile_third_party_endpoint"

@@ -494,6 +494,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 				}
 			}
 		}
+		if held := statuslineHeld(sf.Root, st.Clauses, "PLAYBOOK "+st.Name); held != "" {
+			r.warning, r.warningCode = held, warnStatuslineHeldByHost
+		}
 		if agentLines, agentChange, err = applySettings(sf, st.Clauses); err != nil {
 			return err
 		}
