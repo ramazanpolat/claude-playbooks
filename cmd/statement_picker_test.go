@@ -145,13 +145,16 @@ func TestModelPickerShowCreateUnwritableRows(t *testing.T) {
 	hand := `{"modelPicker": {"options": [
 	  {"model": "ok", "label": "Fine"},
 	  {"model": "spaced", "behavesAs": "claude sonnet"},
-	  {"model": "lines", "label": "two\nlines"}]}}`
+	  {"model": "lines", "label": "two\nlines"},
+	  {"model": "desc", "description": "a\nb"},
+	  {"model": "empty", "behavesAs": ""}]}}`
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(hand), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
 	if !strings.Contains(created, "ADD MODEL 'ok' LABEL 'Fine'") || strings.Contains(created, "ADD MODEL 'spaced'") || strings.Contains(created, "ADD MODEL 'lines'") ||
-		!strings.Contains(created, "-- model picker row spaced: its behavesAs (not one word)") || !strings.Contains(created, "-- model picker row lines: its label (more than one line)") {
+		!strings.Contains(created, "-- model picker row spaced: its behavesAs (not one word)") || !strings.Contains(created, "-- model picker row lines: its label (more than one line)") ||
+		!strings.Contains(created, "-- model picker row desc: its description (more than one line)") || !strings.Contains(created, "-- model picker row empty: its behavesAs (not one word)") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	f := writePlaybookFile(t, created)
