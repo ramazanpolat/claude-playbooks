@@ -25,9 +25,17 @@ cpb auth status --json > "$home/old-auth.json"
 cpb SHOW PLAYBOOKS --json > "$home/playbooks.json"
 pbs=$(python3 -c 'import json,sys; [print(p["name"]) for p in json.load(open(sys.argv[1]))]' "$home/playbooks.json")
 echo "$pbs" | grep -c . > "$home/count" || true
+# The list is checked against the registry on disk, so an empty or short
+# list cannot make the per-playbook checks below pass vacuously.
+ondisk=$(ls "$home/.claude-playbooks" 2>/dev/null | sort | tr '\n' ' ')
+listed=$(echo "$pbs" | sort | tr '\n' ' ' | sed 's/^ *//')
+if [ "$(echo $ondisk)" != "$(echo $listed)" ]; then echo "SHOW PLAYBOOKS lists [$listed], the registry holds [$ondisk]"; exit 1; fi
 for pb in $pbs; do cpb EXPLAIN PLAYBOOK "$pb" --json > "$home/old-explain-$pb.json"; done
 
 use "$new"
+cpb SHOW PLAYBOOKS --json > "$home/new-playbooks.json"
+newpbs=$(python3 -c 'import json,sys; [print(p["name"]) for p in json.load(open(sys.argv[1]))]' "$home/new-playbooks.json")
+if [ "$(echo $newpbs)" != "$(echo $pbs)" ]; then echo "the new binary lists [$newpbs], the old one [$pbs]"; exit 1; fi
 cpb SHOW CREATE ALL > "$home/new.cpb"
 if ! cmp -s "$home/old.cpb" "$home/new.cpb"; then echo "SHOW CREATE ALL differs:"; diff "$home/old.cpb" "$home/new.cpb" | head -20; exit 1; fi
 cpb APPLY "$entry" --yes > "$home/new-apply.out"
