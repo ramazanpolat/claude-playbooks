@@ -33,19 +33,28 @@ func SourceStateKeys() []string {
 
 // StripSourceLogin removes, from a staged copy of a source (never the source
 // itself), its .credentials.json, whatever it is, and SourceStateKeys from
-// its .claude.json. It reports what it removed, by name only.
-func StripSourceLogin(dir string) (credentials bool, keys []string, err error) {
+// its .claude.json. A .claude.json that is a link (the copy keeps a link
+// that leaves the source) is removed, never written through: it could
+// point at the pilot's own state. It reports what it removed, by name only.
+func StripSourceLogin(dir string) (credentials, stateLink bool, keys []string, err error) {
 	creds := filepath.Join(dir, CredentialsFileName)
 	if _, lerr := os.Lstat(creds); lerr == nil {
 		if err := os.Remove(creds); err != nil {
-			return false, nil, err
+			return false, false, nil, err
 		}
 		credentials = true
 	} else if !os.IsNotExist(lerr) {
-		return false, nil, lerr
+		return false, false, nil, lerr
 	}
-	keys, err = removeStateKeys(filepath.Join(dir, StateFileName), "")
-	return credentials, keys, err
+	state := filepath.Join(dir, StateFileName)
+	if info, lerr := os.Lstat(state); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(state); err != nil {
+			return credentials, false, nil, err
+		}
+		return credentials, true, nil, nil
+	}
+	keys, err = removeStateKeys(state, "")
+	return credentials, false, keys, err
 }
 
 // SetAsideSourceLogin is StripSourceLogin for a directory linked in place,
@@ -79,15 +88,19 @@ func SetAsideSourceLogin(dir string, now time.Time) (credsTo string, keys []stri
 
 // removeStateKeys removes SourceStateKeys from the .claude.json at path,
 // first copying it to backup when backup is set, and returns the keys it
-// removed. An absent or empty file is nothing to do; invalid JSON is an
-// error (a state file cpb cannot read is not guessed at).
+// removed. An absent or empty file is nothing to do, and so is anything but
+// a regular file: a link is never written through. Invalid JSON is an error
+// (a state file cpb cannot read is not guessed at).
 func removeStateKeys(path, backup string) ([]string, error) {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

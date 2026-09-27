@@ -608,12 +608,15 @@ func overlayDir(src, dst string) error {
 // stripSourceLogin removes a staged source's login and says so on stderr,
 // naming the files and keys, never their values.
 func stripSourceLogin(dir, source string) error {
-	creds, keys, err := auth.StripSourceLogin(dir)
+	creds, stateLink, keys, err := auth.StripSourceLogin(dir)
 	if err != nil {
 		return fmt.Errorf("cannot leave %s's login out of the install: %w", redactURLCredentials(source), err)
 	}
 	if creds {
 		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s: a playbook source never carries a login\n", redactURLCredentials(source), auth.CredentialsFileName)
+	}
+	if stateLink {
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s, a link out of the source: a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName)
 	}
 	if len(keys) > 0 {
 		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName, strings.Join(keys, ", "))

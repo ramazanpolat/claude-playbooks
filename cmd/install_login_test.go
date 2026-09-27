@@ -230,3 +230,74 @@ func TestLinkSetsAsideCarriedLogin(t *testing.T) {
 		t.Fatalf("the machine store changed: %s", data)
 	}
 }
+
+// A source's .claude.json that links out of the source (to the pilot's own
+// state, say) is dropped, never written through: the file it points at is
+// unchanged and the install keeps no link to it (agy review, v3.22.1).
+func TestInstallDropsLinkedStateFile(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedMachineLogin(t)
+	home, _ := os.UserHomeDir()
+	pilotState := filepath.Join(home, ".claude.json")
+	if err := os.WriteFile(pilotState, []byte(sourceState), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(home, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(pilotState, filepath.Join(src, ".claude.json")); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK w NO ALIAS FROM '"+src+"'") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(pilotState); string(data) != sourceState {
+		t.Fatalf("the file the link pointed at changed:\n%s", data)
+	}
+	installed := filepath.Join(config.ResolvePlaybooksDir(), "w", ".claude.json")
+	if info, err := os.Lstat(installed); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("the install kept the link")
+	}
+	// Nothing of the linked file's content reached the install (the account
+	// keys a shared sync writes are the machine's, by design).
+	if data, _ := os.ReadFile(installed); strings.Contains(string(data), `"theme"`) {
+		t.Fatalf("the linked file's content reached the install:\n%s", data)
+	}
+	if !strings.Contains(stderr, ".claude.json, a link out of the source") {
+		t.Fatalf("stderr:\n%s", stderr)
+	}
+}
+
+// LINK of an isolated directory with a config subdirectory keeps the login
+// in the subdirectory: the root's .playbook decides (agy review, v3.22.1).
+func TestLinkIsolatedSubdirKeepsLogin(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	store := seedMachineLogin(t)
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, "iso-sub")
+	writeSource(t, filepath.Join(dir, "config"))
+	// The root's .playbook governs: no nested one (a nested manifest is the
+	// nearest, for this check as for a launch).
+	if err := os.Remove(filepath.Join(dir, "config", ".playbook")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte("name = \"iso-sub\"\nisolate_auth = true\nsubdir = \"config\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK iso-sub NO ALIAS LINK '"+dir+"'") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "config", ".credentials.json")); string(data) != sourceLogin {
+		t.Fatal("an isolated directory's login in its subdirectory was set aside")
+	}
+	if data, _ := os.ReadFile(store); string(data) != machineLogin {
+		t.Fatalf("the machine store changed: %s", data)
+	}
+}
