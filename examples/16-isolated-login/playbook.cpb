@@ -1,0 +1,7 @@
+-- A second account on this machine: the playbook shares no login with
+-- ~/.claude, so a /login in it stays in it.
+CREATE PLAYBOOK IF NOT EXISTS other-account NO ALIAS ISOLATED LOGIN;
+
+-- An existing playbook can be isolated too.
+CREATE PLAYBOOK IF NOT EXISTS scratch NO ALIAS;
+ALTER PLAYBOOK scratch SET ISOLATED LOGIN;

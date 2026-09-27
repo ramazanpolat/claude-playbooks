@@ -52,6 +52,9 @@ type installOpts struct {
 	alias   string
 	noAlias bool
 	sandbox bool
+	// isolatedLogin: isolate_auth = true without a sandbox (CREATE
+	// PLAYBOOK … FROM … ISOLATED LOGIN).
+	isolatedLogin bool
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
@@ -211,6 +214,10 @@ func doInstall(o installOpts, args []string) error {
 	if o.sandbox {
 		mPre.IsolateAuth = true
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
+		needsManifestWrite = true
+	}
+	if o.isolatedLogin {
+		mPre.IsolateAuth = true
 		needsManifestWrite = true
 	}
 	sourceSubdir := subdir

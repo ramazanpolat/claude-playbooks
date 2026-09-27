@@ -183,7 +183,7 @@ var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIBE"}
 	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALIAS", "NO", "ALLOW", "DENY"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "ALIAS", "NO", "SANDBOX"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "ALIAS", "NO", "SANDBOX", "ISOLATED"}
 )
 
 var (
@@ -793,7 +793,13 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
 	case "SET":
-		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL") {
+		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED") {
+		case "ISOLATED":
+			if p.kw("LOGIN") == "" {
+				return nil, p.fail("expected LOGIN after SET ISOLATED")
+			}
+			c.Kind = SetIsolatedLogin
+			return c, nil
 		case "AGENT":
 			return c, p.agent(c)
 		case "STATUSLINE":
@@ -827,7 +833,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Kind = SetModel
 			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE or MODEL")
+			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL or ISOLATED LOGIN")
 		}
 		return c, p.set(c)
 	case "ALLOW", "DENY":
@@ -850,7 +856,13 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL") {
+		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "ISOLATED") {
+		case "ISOLATED":
+			if p.kw("LOGIN") == "" {
+				return nil, p.fail("expected LOGIN after UNSET ISOLATED")
+			}
+			c.Kind = UnsetIsolatedLogin
+			return c, nil
 		case "AGENT":
 			c.Kind = UnsetAgent
 			return c, nil
@@ -872,7 +884,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Names = rules
 			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE or MODEL")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL or ISOLATED LOGIN")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -1017,6 +1029,12 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
+	case "ISOLATED":
+		if p.kw("LOGIN") == "" {
+			return nil, p.fail("expected LOGIN after ISOLATED")
+		}
+		c.Kind = IsolatedLogin
+		return c, nil
 	}
 	return nil, nil
 }
@@ -1150,6 +1168,7 @@ func validate(s *Stmt) *Error {
 	once := map[Kind]bool{
 		Describe: true, UseEnv: true, RenameTo: true,
 		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true, NoPilotProfile: true,
+		IsolatedLogin: true, SetIsolatedLogin: true, UnsetIsolatedLogin: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPicker: true,
@@ -1191,7 +1210,8 @@ func validate(s *Stmt) *Error {
 		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
 		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
-		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh}}
+		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
+		{SetIsolatedLogin, UnsetIsolatedLogin}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]
@@ -1202,6 +1222,9 @@ func validate(s *Stmt) *Error {
 	if s.Verb == Create && s.Object == Playbook {
 		_, from := seen[From]
 		_, link := seen[Link]
+		if pos, ok := seen[IsolatedLogin]; ok && link {
+			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolate_auth there")
+		}
 		if pos, ok := seen[NoPilotProfile]; ok && (from || link) {
 			return errAt(pos, "NO PILOT PROFILE shapes the CLAUDE.md a new playbook gets from cpb's template; with FROM or LINK the CLAUDE.md is the source's own: edit it there")
 		}

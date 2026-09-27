@@ -18,6 +18,7 @@ var (
 	createNoAlias        bool
 	createSandbox        bool
 	createNoPilotProfile bool
+	createIsolatedLogin  bool
 )
 
 var createCmd = &cobra.Command{
@@ -33,6 +34,7 @@ func init() {
 	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip launcher command creation")
 	createCmd.Flags().BoolVar(&createSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
 	createCmd.Flags().BoolVar(&createNoPilotProfile, "no-pilot-profile", false, "write CLAUDE.md without the ~/.pilot-profile/ imports")
+	createCmd.Flags().BoolVar(&createIsolatedLogin, "isolated-login", false, "share no login with ~/.claude (isolate_auth = true): /login once in the playbook")
 }
 
 // createOpts carries create's options: its flags for the command, the statement's
@@ -42,10 +44,11 @@ type createOpts struct {
 	noAlias        bool
 	sandbox        bool
 	noPilotProfile bool // CLAUDE.md without the pilot-profile imports
+	isolatedLogin  bool // isolate_auth = true without a sandbox
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
-	return doCreate(createOpts{alias: createAlias, noAlias: createNoAlias, sandbox: createSandbox, noPilotProfile: createNoPilotProfile}, args)
+	return doCreate(createOpts{alias: createAlias, noAlias: createNoAlias, sandbox: createSandbox, noPilotProfile: createNoPilotProfile, isolatedLogin: createIsolatedLogin}, args)
 }
 
 func doCreate(o createOpts, args []string) error {
@@ -108,10 +111,14 @@ func doCreate(o createOpts, args []string) error {
 	// An always-sandboxed playbook authenticates on its own: the machine
 	// login cannot follow it into the sandbox. Written before the
 	// credential sync so the sync already sees the isolation.
-	if o.sandbox {
-		if err := manifest.Write(dest, &manifest.Manifest{Name: name, IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}}); err != nil {
+	if o.sandbox || o.isolatedLogin {
+		m := &manifest.Manifest{Name: name, IsolateAuth: true}
+		if o.sandbox {
+			m.Sandbox = &manifest.Sandbox{Always: true}
+		}
+		if err := manifest.Write(dest, m); err != nil {
 			os.RemoveAll(dest)
-			return fmt.Errorf("cannot record the sandbox setting in the manifest: %w", err)
+			return fmt.Errorf("cannot record the sandbox or login setting in the manifest: %w", err)
 		}
 	}
 
@@ -126,6 +133,8 @@ func doCreate(o createOpts, args []string) error {
 	fmt.Printf("Created playbook %q at %s\n", name, dest)
 	if o.sandbox {
 		fmt.Printf("Always sandboxed (%s); authentication isolated: run /login once inside the sandbox.\n", defaultSandboxBackend)
+	} else if o.isolatedLogin {
+		fmt.Println("Login isolated: it shares no login with ~/.claude; run /login once in it.")
 	}
 
 	if o.noAlias {

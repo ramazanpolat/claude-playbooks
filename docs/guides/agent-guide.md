@@ -156,7 +156,7 @@ At every launch cpb decides whether a long-lived token is active for that playbo
 |---|---|
 | this playbook keeps its own `/login` while others use the token | `ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` |
 | this playbook uses a specific token | none for an agent: stop and ask the human to set it. This key never takes a reference, so it would sit in the manifest as plain text, and the value would pass through your command line |
-| a different account entirely, or `ANTHROPIC_BASE_URL` to another backend | none yet: ask the human (it is `isolate_auth`, which no statement sets) |
+| a different account entirely, or a throwaway whose `/login` must not reach the machine's login | `ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); the `/login` itself is the human's. Never `UNSET ISOLATED LOGIN` to "fix" a login: it is refused while the playbook holds one of its own, and the refusal is right |
 | this playbook talks to a proxy | `CREATE ENV <p> SET ANTHROPIC_BASE_URL=…`, then `ALTER PLAYBOOK <name> ADD ENV <p>`. Create a playbook meant for a non-Anthropic route with `CREATE PLAYBOOK <name> NO PILOT PROFILE`, so the pilot's profile never reaches that provider. A `pilot_profile_third_party_endpoint` warning means an existing playbook still imports it: report it to the human rather than editing their `CLAUDE.md` |
 
 An agent cannot complete an interactive `/login`. If a headless run exits with an authentication error, report it and stop; do not retry in a loop, and do not edit `.credentials.json`.

@@ -266,20 +266,30 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			}
 		}
 	}
-	if env.Empty() {
+	// An isolated login travels as SET ISOLATED LOGIN; SANDBOX already
+	// implies it, and a linked playbook's manifest is the target's.
+	isolated := v.IsolatedLogin && !v.Sandbox && v.Linked == nil
+	if env.Empty() && !isolated {
 		return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
 	}
 	if v.Linked != nil {
 		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName, withheld: withheldSource}, nil
 	}
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
-	if len(env.Profiles) > 0 {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Profiles})
+	var comments []string
+	if !env.Empty() {
+		if len(env.Profiles) > 0 {
+			alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Profiles})
+		}
+		var clauses []grammar.Clause
+		clauses, comments = varClauses(env.Set, env.Refs, env.Unset, func(k string) string {
+			return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
+		})
+		alter.Clauses = append(alter.Clauses, clauses...)
 	}
-	clauses, comments := varClauses(env.Set, env.Refs, env.Unset, func(k string) string {
-		return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
-	})
-	alter.Clauses = append(alter.Clauses, clauses...)
+	if isolated {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetIsolatedLogin})
+	}
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}

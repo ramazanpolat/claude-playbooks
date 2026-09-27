@@ -63,6 +63,13 @@ const (
 	// CLAUDE.md without the ~/.pilot-profile/ imports.
 	NoPilotProfile Kind = "NO PILOT PROFILE"
 
+	// Isolated login (manifest isolate_auth): the playbook shares no login
+	// with ~/.claude. CREATE PLAYBOOK ... ISOLATED LOGIN, or ALTER PLAYBOOK
+	// ... SET | UNSET ISOLATED LOGIN.
+	IsolatedLogin      Kind = "ISOLATED LOGIN"
+	SetIsolatedLogin   Kind = "SET ISOLATED LOGIN"
+	UnsetIsolatedLogin Kind = "UNSET ISOLATED LOGIN"
+
 	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
 	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
 

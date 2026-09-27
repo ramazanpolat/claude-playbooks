@@ -38,7 +38,7 @@ session.
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT` (this key never takes a reference: cpb reads it itself) | that token wins over the file; its own login removed |
-| One playbook is a different account, sharing nothing | `isolate_auth = true` in its `.playbook`, or `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` | detached; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolate_auth = true` in its `.playbook`. `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would copy over the machine's |
 
 The unset and set forms can come from an
 [env profile](environment.md#env-profiles-define-once-attach-to-many) shared by

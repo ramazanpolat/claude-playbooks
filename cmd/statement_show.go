@@ -53,6 +53,9 @@ type playbookJSON struct {
 	Envs     []string    `json:"envs"`
 	Vars     []varJSON   `json:"vars"`
 	Sandbox  bool        `json:"sandbox"`
+	// IsolatedLogin is isolate_auth: no login shared with ~/.claude (a
+	// sandboxed playbook is always isolated).
+	IsolatedLogin bool `json:"isolated_login"`
 
 	Marketplaces []marketplaceJSON `json:"marketplaces"`
 	Plugins      []pluginJSON      `json:"plugins"`
@@ -228,6 +231,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
 	}
 	v.Sandbox = m.Sandbox != nil && m.Sandbox.Always
+	v.IsolatedLogin = m.IsolateAuth
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Profiles)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Unset)
@@ -324,6 +328,9 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		{"Env sets", listOrNone(v.Envs)},
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
 		{"Sandbox", sandbox},
+	}
+	if v.IsolatedLogin {
+		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
 	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.
@@ -707,6 +714,9 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	}
 	if v.Statusline != nil {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
+	}
+	if v.IsolatedLogin {
+		fmt.Println("Login: isolated: no link to ~/.claude's login and no machine token; /login once in it")
 	}
 }
 
