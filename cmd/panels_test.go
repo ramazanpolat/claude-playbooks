@@ -156,6 +156,14 @@ func TestPanelFromStatusline(t *testing.T) {
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK k ADD PANEL local.bar FROM STATUSLINE"); err == nil || !strings.Contains(err.Error(), "the host itself") {
 		t.Fatalf("host: %v", err)
 	}
+	write(`sh "${HOME}/bar.sh"`)
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k ADD PANEL local.bar FROM STATUSLINE"); err == nil || !strings.Contains(err.Error(), "${HOME} inside quotes") {
+		t.Fatalf("a quoted host variable adopted: %v", err)
+	}
+	write(`curl -H "Authorization: Bearer sk-live-0000000000000000" x`)
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k ADD PANEL local.bar FROM STATUSLINE"); err == nil || !strings.Contains(err.Error(), "looks like a credential") {
+		t.Fatalf("a credential adopted: %v", err)
+	}
 	write("bash ~/bar.sh")
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK k ADD PANEL local.bar FROM STATUSLINE ROW 2"); err != nil {
 		t.Fatal(err)

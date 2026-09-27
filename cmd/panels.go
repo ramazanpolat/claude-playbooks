@@ -198,6 +198,14 @@ func (r *stmtRun) planPanels(key, cfg string, root *settings.Object, clauses []g
 			case isHostCommand(cmd):
 				return nil, nil, fmt.Errorf("ADD PANEL %s FROM STATUSLINE: the status line is the host itself (%s), not a bar to adopt", name, cmd)
 			}
+			// The adopted command meets the same rules as a typed EXEC, so
+			// the manifest is valid SPC/1 and SHOW CREATE re-parses.
+			if v := grammar.QuotedPanelVariable(cmd); v != "" {
+				return nil, nil, fmt.Errorf("ADD PANEL %s FROM STATUSLINE: the status line puts ${%s} inside quotes of its own, which SPC/1 forbids (hosts quote it themselves); write the panel with EXEC and ${%s} bare", name, v, v)
+			}
+			if what := grammar.CredentialInText(cmd); what != "" && !pn.Plaintext {
+				return nil, nil, fmt.Errorf("ADD PANEL %s FROM STATUSLINE: the status line command carries what looks like a credential (%s): a panel manifest ships with the playbook; add AS PLAINTEXT to store it knowingly", name, what)
+			}
 			pn.Source, pn.FromStatusline = cmd, false
 		}
 		if !ours {
