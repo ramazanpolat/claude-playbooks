@@ -1,9 +1,12 @@
 package grammar
 
 import (
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // Panels (v3.25.0): an ADD PANEL writes one SPC/1 manifest
@@ -182,6 +185,20 @@ func (p *parser) panelOptions(pn *Panel) *Error {
 	if pn.Type == "observe" && pn.Every == nil {
 		return p.fail("OBSERVE needs EVERY <ms>: how often the host may start it")
 	}
+	// A manifest ships with the playbook: a credential in it is never stored
+	// by accident. There is no reference here (the host runs the command, and
+	// nothing resolves one), so it is AS PLAINTEXT or out of the command.
+	if p.kw("AS") != "" {
+		if p.kw("PLAINTEXT") == "" {
+			return p.fail("expected PLAINTEXT after AS")
+		}
+		pn.Plaintext = true
+	}
+	if what := CredentialInText(pn.Source); what != "" && pn.Type != "records" && !pn.Plaintext {
+		return p.fail("the panel's " + map[string]string{"exec": "command", "observe": "command", "template": "text"}[pn.Type] +
+			" carries what looks like a credential (" + what + "): a panel manifest ships with the playbook. Read it at run time " +
+			"(from a file or the environment), or add AS PLAINTEXT to store the literal knowingly")
+	}
 	return nil
 }
 
@@ -233,5 +250,69 @@ func panelWords(c *Clause) []string {
 	num("STALE", pn.Stale)
 	num("WIDTH", pn.Width)
 	num("EVERY", pn.Every)
+	if pn.Plaintext {
+		w = append(w, "AS", "PLAINTEXT")
+	}
 	return w
+}
+
+// CredentialInText finds a credential-looking literal in a panel's command
+// or template text, with SET VAR's detector applied to what has a key: a
+// KEY=value or --flag=value word, a --flag value pair, a quoted
+// "Header: value" (an MCP credential header), or a URL carrying a password.
+// It returns what it found, by name only ("" when nothing).
+func CredentialInText(text string) string {
+	words := shellWords(text)
+	secret := func(name, value string) bool {
+		name = strings.ToUpper(strings.ReplaceAll(strings.TrimLeft(name, "-"), "-", "_"))
+		return name != "" && manifest.LooksLikeSecretKey(name) && value != "" && !manifest.PlainSetting(value)
+	}
+	for i, w := range words {
+		if name, value, ok := strings.Cut(w, "="); ok && secret(name, value) {
+			return strings.TrimLeft(name, "-")
+		}
+		if strings.HasPrefix(w, "-") && !strings.Contains(w, "=") && i+1 < len(words) && !strings.HasPrefix(words[i+1], "-") && secret(w, words[i+1]) {
+			return strings.TrimLeft(w, "-")
+		}
+		if name, value, ok := strings.Cut(w, ":"); ok && !strings.ContainsAny(name, " /") && CredentialHeader(name) && strings.TrimSpace(value) != "" {
+			return name + " header"
+		}
+		if u, err := url.Parse(w); err == nil && u.User != nil {
+			if _, has := u.User.Password(); has {
+				return "a URL with a password"
+			}
+		}
+	}
+	return ""
+}
+
+// shellWords splits text the way a shell would into words, quotes removed;
+// a quoted "Name: value" stays one word.
+func shellWords(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote byte
+	in := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case quote != 0 && ch == quote:
+			quote = 0
+		case quote == 0 && (ch == '\'' || ch == '"'):
+			quote, in = ch, true
+		case quote == 0 && (ch == ' ' || ch == '\t' || ch == '\n'):
+			if in {
+				out = append(out, cur.String())
+				cur.Reset()
+				in = false
+			}
+		default:
+			cur.WriteByte(ch)
+			in = true
+		}
+	}
+	if in {
+		out = append(out, cur.String())
+	}
+	return out
 }

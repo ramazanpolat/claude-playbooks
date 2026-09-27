@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,12 +24,31 @@ import (
 // file (statusline.toml, which SPC/1 section 6 reserves for the pilot), and
 // never a plugin's or a project's panels. A manifest cpb wrote starts with
 // panelMarker; one without it is the pilot's, and cpb neither overwrites nor
-// removes it.
+// removes it. The marker carries a hash of the rest of the file, so a
+// manifest cpb wrote and the pilot then edited is the pilot's too.
 
 const (
 	panelsDirName = "statusline.d"
-	panelMarker   = "# Written by cpb (ADD PANEL). DROP PANEL removes it; without this line cpb leaves the file to you."
+	panelMarker   = "# Written by cpb (ADD PANEL) sha256="
+	panelMarkEnd  = ". DROP PANEL removes it; once you edit it, cpb leaves it to you."
 )
+
+// panelOwner says whose a manifest is: cpb's while its marker's hash still
+// matches the rest of the file, the pilot's otherwise (edited is true when
+// cpb wrote it and it was changed since).
+func panelOwner(data []byte) (cpb, edited bool) {
+	first, rest, _ := bytes.Cut(data, []byte("\n"))
+	line := string(first)
+	if !strings.HasPrefix(line, panelMarker) {
+		return false, false
+	}
+	hash, _, _ := strings.Cut(strings.TrimPrefix(line, panelMarker), ".")
+	sum := sha256.Sum256(rest)
+	if hash == hex.EncodeToString(sum[:]) {
+		return true, false
+	}
+	return false, true
+}
 
 // panelManifest is an SPC/1 manifest as cpb writes it, fields in SPC/1's
 // order.
@@ -68,12 +89,12 @@ func panelBytes(pn *grammar.Panel) ([]byte, error) {
 	case "records":
 		m.Path = pn.Source
 	}
-	var b bytes.Buffer
-	b.WriteString(panelMarker + "\n")
-	if err := toml.NewEncoder(&b).Encode(m); err != nil {
+	var body bytes.Buffer
+	if err := toml.NewEncoder(&body).Encode(m); err != nil {
 		return nil, err
 	}
-	return b.Bytes(), nil
+	sum := sha256.Sum256(body.Bytes())
+	return append([]byte(panelMarker+hex.EncodeToString(sum[:])+panelMarkEnd+"\n"), body.Bytes()...), nil
 }
 
 // panelFromManifest reads a cpb-written manifest back into the clause that
@@ -146,13 +167,20 @@ func (r *stmtRun) planPanels(key, cfg string, root *settings.Object, clauses []g
 		if err != nil {
 			return nil, nil, err
 		}
-		ours := cur == nil || strings.HasPrefix(string(cur), panelMarker)
+		ours, edited := cur == nil, false
+		if cur != nil {
+			ours, edited = panelOwner(cur)
+		}
+		file := filepath.Join(panelsDirName, pn.NS, pn.ID+".toml")
+		if edited {
+			return nil, nil, fmt.Errorf("%s PANEL %s: %s was edited after cpb wrote it, so it is yours now; cpb leaves it (remove it by hand to let cpb write it again)", map[grammar.Kind]string{grammar.AddPanel: "ADD", grammar.DropPanel: "DROP"}[c.Kind], name, file)
+		}
 		if c.Kind == grammar.DropPanel {
 			if cur == nil {
 				continue
 			}
 			if !ours {
-				return nil, nil, fmt.Errorf("DROP PANEL %s: %s was not written by cpb; remove it by hand if you mean to", name, filepath.Join(panelsDirName, pn.NS, pn.ID+".toml"))
+				return nil, nil, fmt.Errorf("DROP PANEL %s: %s was not written by cpb; remove it by hand if you mean to", name, file)
 			}
 			ops = append(ops, panelOp{path: path})
 			lines = append(lines, "panel     - "+name)
@@ -173,7 +201,7 @@ func (r *stmtRun) planPanels(key, cfg string, root *settings.Object, clauses []g
 			pn.Source, pn.FromStatusline = cmd, false
 		}
 		if !ours {
-			return nil, nil, fmt.Errorf("ADD PANEL %s: %s exists and was not written by cpb; cpb leaves it to you", name, filepath.Join(panelsDirName, pn.NS, pn.ID+".toml"))
+			return nil, nil, fmt.Errorf("ADD PANEL %s: %s exists and was not written by cpb; cpb leaves it to you", name, file)
 		}
 		data, err := panelBytes(&pn)
 		if err != nil {
@@ -273,8 +301,9 @@ func readPanel(file, ns, source string) (panelJSON, bool) {
 	if _, err := toml.Decode(string(data), &m); err != nil || m.ID == "" || m.Type == "" {
 		return panelJSON{}, false
 	}
+	cpb, _ := panelOwner(data)
 	return panelJSON{Panel: ns + "." + m.ID, Type: m.Type, Source: source,
-		Cpb: strings.HasPrefix(string(data), panelMarker), Row: m.Row, Priority: m.Priority, Align: m.Align}, true
+		Cpb: cpb, Row: m.Row, Priority: m.Priority, Align: m.Align}, true
 }
 
 type pluginPanelDir struct{ key, ns, dir string }
@@ -346,21 +375,32 @@ func panelNamespace(s string) string {
 
 // panelCreateClauses are the ADD PANEL clauses that rebuild the panels cpb
 // wrote in a config directory (SHOW CREATE); the pilot's own and plugins'
-// are not cpb's to write.
-func panelCreateClauses(cfg string) []grammar.Clause {
+// are not cpb's to write. A panel carrying a credential-looking literal is
+// withheld, as a comment: SHOW CREATE never prints one.
+func panelCreateClauses(cfg string) ([]grammar.Clause, []string) {
 	var out []grammar.Clause
+	var comments []string
 	files, _ := filepath.Glob(filepath.Join(cfg, panelsDirName, "*", "*.toml"))
 	sort.Strings(files)
 	for _, f := range files {
 		data, err := os.ReadFile(f)
-		if err != nil || !strings.HasPrefix(string(data), panelMarker) {
+		if err != nil {
 			continue
 		}
-		if pn, err := panelFromManifest(filepath.Base(filepath.Dir(f)), data); err == nil && pn.ID != "" {
-			out = append(out, grammar.Clause{Kind: grammar.AddPanel, Panel: pn})
+		if cpb, _ := panelOwner(data); !cpb {
+			continue
 		}
+		pn, err := panelFromManifest(filepath.Base(filepath.Dir(f)), data)
+		if err != nil || pn.ID == "" {
+			continue
+		}
+		if pn.Type != "records" && grammar.CredentialInText(pn.Source) != "" {
+			comments = append(comments, "-- withheld: panel "+pn.NS+"."+pn.ID+" carries a credential-looking literal (AS PLAINTEXT); write its ADD PANEL again by hand")
+			continue
+		}
+		out = append(out, grammar.Clause{Kind: grammar.AddPanel, Panel: pn})
 	}
-	return out
+	return out, comments
 }
 
 // hasPanelClauses reports whether a statement adds or drops a panel.

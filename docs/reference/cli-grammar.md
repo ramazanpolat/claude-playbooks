@@ -1516,9 +1516,22 @@ DROP PANEL <ns>.<id>
   `${CLAUDE_PLUGIN_ROOT}` are expanded by the host, which quotes each value
   itself. So a command that puts one inside quotes of its own is refused
   (`sh ${PANEL_DIR}/x.sh`, never `sh "${PANEL_DIR}/x.sh"`).
-- **Ownership.** A manifest cpb writes starts with a `# Written by cpb`
-  line. A manifest without that line is yours: `ADD PANEL` over it and
-  `DROP PANEL` of it are refused, and cpb never changes it.
+- **Ownership.** A manifest cpb writes starts with a `# Written by cpb
+  (ADD PANEL) sha256=<hash>` line, the hash of the rest of the file.
+  - cpb overwrites or drops a manifest only while it still matches that
+    hash.
+  - A manifest without the line is yours, and so is one cpb wrote and you
+    edited since, marker kept or not. `ADD PANEL` over it and `DROP PANEL`
+    of it are refused, naming the file, and cpb never changes it.
+- **Credentials.** A panel manifest ships with the playbook, so a
+  credential-looking literal in an `EXEC` or `OBSERVE` command or `TEMPLATE`
+  text is refused unless `AS PLAINTEXT` is given (at the end of the clause).
+  - The detector is `SET VAR`'s, applied to what has a name: a `KEY=value`
+    or `--flag=value` word, a `--flag value` pair, a quoted
+    `"Authorization: …"`-style header, or a URL carrying a password.
+  - There is no reference here, since the host runs the command and nothing
+    resolves one. Read a secret at run time, from a file or the environment.
+  - `SHOW CREATE` never prints such a panel: it is withheld as a comment.
 - **Repeats and removal.** A repeated `ADD PANEL` with the same options is
   unchanged. `DROP PANEL` of an absent panel is unchanged. An emptied
   namespace directory is removed.

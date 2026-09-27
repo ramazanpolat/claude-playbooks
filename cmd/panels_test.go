@@ -16,8 +16,8 @@ func readManifest(t *testing.T, path string) map[string]any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(data), panelMarker+"\n") {
-		t.Fatalf("%s does not start with cpb's marker:\n%s", path, data)
+	if cpb, _ := panelOwner(data); !cpb {
+		t.Fatalf("%s does not carry cpb's marker with a matching hash:\n%s", path, data)
 	}
 	m := map[string]any{}
 	if _, err := toml.Decode(string(data), &m); err != nil {
@@ -249,4 +249,73 @@ func TestPanelsDryRunAndDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	readManifest(t, filepath.Join(cfg, panelsDirName, "local", "clock.toml"))
+}
+
+// A manifest cpb wrote and the pilot then edited (marker kept) is the
+// pilot's: ADD over it and DROP of it are refused, naming the file, and it
+// is byte-identical after; it is listed as not cpb's and SHOW CREATE leaves
+// it out.
+func TestPanelsEditedManifestIsThePilots(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "k")
+	mustStmt(t, "ALTER PLAYBOOK k ADD PANEL local.clock TEMPLATE x")
+	path := filepath.Join(root, panelsDirName, "local", "clock.toml")
+	data, _ := os.ReadFile(path)
+	edited := strings.Replace(string(data), `text = "x"`, `text = "mine"`, 1)
+	if edited == string(data) {
+		t.Fatalf("the edit did not apply:\n%s", data)
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"ALTER PLAYBOOK k ADD PANEL local.clock TEMPLATE y", "ALTER PLAYBOOK k DROP PANEL local.clock"} {
+		if _, err := quotedStmt(t, line); err == nil || !strings.Contains(err.Error(), "was edited after cpb wrote it") || !strings.Contains(err.Error(), "statusline.d/local/clock.toml") {
+			t.Fatalf("%s: %v", line, err)
+		}
+	}
+	if got, _ := os.ReadFile(path); string(got) != edited {
+		t.Fatal("the edited manifest changed")
+	}
+	if created := mustStmt(t, "SHOW CREATE PLAYBOOK k"); strings.Contains(created, "local.clock") {
+		t.Fatalf("SHOW CREATE wrote an edited panel:\n%s", created)
+	}
+}
+
+// A credential-looking literal in a command or template is refused unless
+// AS PLAINTEXT; SHOW CREATE withholds such a panel as a comment.
+func TestPanelCredentials(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "k")
+	for _, line := range []string{
+		`ALTER PLAYBOOK k ADD PANEL local.x EXEC 'curl -H "Authorization: Bearer sk-live-0000000000000000" https://x'`,
+		`ALTER PLAYBOOK k ADD PANEL local.x EXEC 'API_TOKEN=abcdef0123456789 sh x.sh'`,
+		`ALTER PLAYBOOK k ADD PANEL local.x EXEC 'tool --api-key abcdef0123456789'`,
+		`ALTER PLAYBOOK k ADD PANEL local.x OBSERVE 'curl https://u:hunter2@x.example/beat' EVERY 10000`,
+		`ALTER PLAYBOOK k ADD PANEL local.x TEMPLATE 'password=abcdef0123456789'`,
+	} {
+		if _, err := quotedStmt(t, line); err == nil || !strings.Contains(err.Error(), "looks like a credential") {
+			t.Errorf("%s: %v", line, err)
+		}
+	}
+	for _, line := range []string{
+		"ALTER PLAYBOOK k ADD PANEL local.ok EXEC 'date +%H:%M'",
+		"ALTER PLAYBOOK k ADD PANEL local.ok2 EXEC 'curl -H \"Accept: text/plain\" https://x.example'",
+		"ALTER PLAYBOOK k ADD PANEL local.ok3 EXEC 'MAX_THINKING_TOKENS=8000 sh x.sh'",
+	} {
+		if _, err := quotedStmt(t, line); err != nil {
+			t.Errorf("a plain command was refused: %s: %v", line, err)
+		}
+	}
+	if _, err := quotedStmt(t, `ALTER PLAYBOOK k ADD PANEL local.x EXEC 'curl -H "Authorization: Bearer sk-live-0000000000000000" https://x' AS PLAINTEXT`); err != nil {
+		t.Fatalf("AS PLAINTEXT: %v", err)
+	}
+	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
+	if strings.Contains(created, "sk-live") || !strings.Contains(created, "-- withheld: panel local.x") {
+		t.Fatalf("SHOW CREATE:\n%s", created)
+	}
+	if !strings.Contains(created, "ADD PANEL local.ok EXEC 'date +%H:%M'") {
+		t.Fatalf("SHOW CREATE lost a plain panel:\n%s", created)
+	}
 }

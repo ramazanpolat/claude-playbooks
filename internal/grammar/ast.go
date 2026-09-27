@@ -234,6 +234,8 @@ type Panel struct {
 	TTL, Width     *int // exec
 	Stale          *int // ms, exec and records
 	Every          *int // ms, observe
+	// Plaintext: AS PLAINTEXT, a credential-looking literal stored knowingly.
+	Plaintext bool
 }
 
 // Var is one variable of a SET clause: a literal Value, or a secret
