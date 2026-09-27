@@ -33,6 +33,10 @@ release_gate = true    # gentar/release-gate.sh refuses a v* release whose
                        # commit has no green `arena / phase2` job
 max_age_days = 0       # >0: that phase 2 must also be this recent
 
-# [check]
+[check]
+docs = true            # the docs standard, checked by --check (missing, not
+                       # quality): README.md short (what / why / how),
+                       # docs/tutorials/ + docs/guides/, examples/*/README.md,
+                       # AGENTS.md, relative links resolve.
 # allow_drift = []     # kit files you have deliberately changed; --check
                        # then notes the difference instead of failing

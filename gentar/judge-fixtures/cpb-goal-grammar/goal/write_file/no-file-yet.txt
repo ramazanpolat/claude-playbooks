@@ -1,0 +1,4 @@
+work$ cpb APPLY demo.cpb --dry-run
+Error: stat demo.cpb: no such file or directory
+nothing was written
+work$ 

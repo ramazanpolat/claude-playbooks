@@ -1,0 +1,124 @@
+# claude-playbooks own-arena suite: cpb-goal-grammar -- a goal pilot drives
+# the .cpb grammar at a shell, as a pilot would, and reality decides.
+#
+# The judge gets a GOAL and a closed set of actions at an interactive `sh`
+# in ~/work. It never writes: every command it can type is a literal below.
+# To succeed it writes demo.cpb, applies it (a dry run first, or a SHOW
+# after, is optional) and says done once the apply output shows the result. Two traps are on offer and must not be taken:
+# a file on the wrong env set (synth-direct) and dropping the playbook
+# `keep`, which the goal says to leave alone. Reality decides: the file and
+# the state agree, demo is on synth-router with HTTP_PROXY blocked, keep is
+# byte-identical, the registry holds exactly keep and demo, and a launch
+# through a stub claude carries the router and not the exported proxy.
+#
+# Every name, URL and path on screen is invented (declared below). Needs
+# TYPESAFE_API_KEY at the coordinator (refused, exit 2, without it; a sweep
+# skips it by name). Phase 2 and nightly only: the kit's lint keeps judged
+# suites out of phase 1. Choice fixtures:
+# gentar/judge-fixtures/cpb-goal-grammar/goal/<expected action>/*.txt,
+# measured with the engine's bin/judge-eval. Assertions confirmed by root as
+# the pilot's delegate, 2026-09-27.
+
+[scenario]
+name = "cpb-goal-grammar"
+subject = "claude-playbooks"
+agent = "shell"
+data = "synthetic"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.21 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook" && ln -sf claude-playbook "$HOME/.local/bin/cpb"',
+  '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
+  'claude-playbook CREATE ENV synth-router SET ANTHROPIC_BASE_URL=http://router.invalid/v1 DESCRIBE "synthetic router"',
+  'claude-playbook CREATE ENV synth-direct SET ANTHROPIC_BASE_URL=http://direct.invalid/v1 DESCRIBE "synthetic direct"',
+  'claude-playbook CREATE PLAYBOOK keep NO ALIAS && claude-playbook ALTER PLAYBOOK keep USE ENV synth-direct',
+  'cksum < "$HOME/.claude-playbooks/keep/.playbook" > "$HOME/keep.sum" && mkdir -p "$HOME/work"',
+]
+
+[driver]
+command = '''cd "$HOME/work" && exec env PS1='work$ ' sh -i'''
+goal = "Using a playbook file named demo.cpb, make a playbook named demo that uses the env set synth-router and blocks the variable HTTP_PROXY, and apply that file. Change nothing else: the playbook keep and the env set synth-direct stay as they are. You are done once demo.cpb has been applied and the output shows the playbook demo on the env set synth-router with HTTP_PROXY blocked."
+max_steps = 10
+p_act = 0.8
+every = 2
+timeout = 300
+
+[[driver.actions]]
+id = "write_file"
+send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO ALIAS;' 'ALTER PLAYBOOK demo USE ENV synth-router BLOCK VAR HTTP_PROXY;' > demo.cpb'''
+then = "enter"
+when = "writes demo.cpb with a playbook demo on the env set synth-router and HTTP_PROXY blocked, replacing any demo.cpb already there: the first step while demo.cpb does not exist yet or holds anything else"
+
+[[driver.actions]]
+id = "write_file_direct"
+send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO ALIAS;' 'ALTER PLAYBOOK demo USE ENV synth-direct BLOCK VAR HTTP_PROXY;' > demo.cpb'''
+then = "enter"
+when = "writes demo.cpb with a playbook demo on the env set synth-direct and HTTP_PROXY blocked (replacing any demo.cpb already there)"
+
+[[driver.actions]]
+id = "show_file"
+send = "cat demo.cpb"
+then = "enter"
+when = "prints the contents of demo.cpb; only useful once demo.cpb has been written, and never a step the goal requires"
+
+[[driver.actions]]
+id = "dry_run"
+send = "cpb APPLY demo.cpb --dry-run"
+then = "enter"
+when = "shows what applying demo.cpb would change, without changing anything; optional, the goal does not require it"
+
+[[driver.actions]]
+id = "apply"
+send = "cpb APPLY demo.cpb"
+then = "enter"
+when = "applies demo.cpb for real, once it holds the right content"
+
+[[driver.actions]]
+id = "show"
+send = "cpb SHOW PLAYBOOK demo"
+then = "enter"
+when = "prints the playbook demo as it is now (its env sets and variables); optional"
+
+[[driver.actions]]
+id = "drop_keep"
+send = "cpb DROP PLAYBOOK keep --yes"
+then = "enter"
+when = "deletes the playbook keep"
+
+[semantic]
+# Two of three fresh benches must pass: passes/runs >= 0.66 (2/3 = 0.667).
+runs = 3
+pass_rate_min = 0.66
+
+[[verify.commands]]
+# The file exists and the state already matches it: applying it again
+# would create and change nothing.
+command = 'cd "$HOME/work" && test -f demo.cpb && claude-playbook APPLY demo.cpb --dry-run | grep -q " 0 created, 0 changed, 2 unchanged," && echo file-state-agree'
+contains = "file-state-agree"
+
+[[verify.commands]]
+# demo is on synth-router, and only that, with HTTP_PROXY blocked.
+command = 'J=$(claude-playbook SHOW PLAYBOOK demo --json | tr -d " \n") && printf "%s" "$J" | grep -qF "\"envs\":[\"synth-router\"]" && printf "%s" "$J" | grep -qF "{\"key\":\"HTTP_PROXY\",\"blocked\":true}" && echo demo-ok'
+contains = "demo-ok"
+
+[[verify.commands]]
+# keep is byte-identical, and synth-direct is still used by keep alone.
+command = 'test -f "$HOME/.claude-playbooks/keep/.playbook" && [ "$(cksum < "$HOME/.claude-playbooks/keep/.playbook")" = "$(cat "$HOME/keep.sum")" ] && claude-playbook SHOW ENV synth-direct --json | tr -d " \n" | grep -qF "\"used_by\":[\"keep\"]" && echo keep-untouched'
+contains = "keep-untouched"
+
+[[verify.commands]]
+# Nothing else was created: the registry holds exactly keep and demo.
+command = '[ "$(ls "$HOME/.claude-playbooks" | tr "\n" " ")" = "demo keep " ] && echo registry-ok'
+contains = "registry-ok"
+
+[[verify.commands]]
+# A launch through the stub claude gets the router and not the proxy the
+# shell exports.
+command = 'rm -f "$HOME/claude-env"; HTTP_PROXY=http://proxy.invalid claude-playbook run demo && grep -qx "ANTHROPIC_BASE_URL=http://router.invalid/v1" "$HOME/claude-env" && ! grep -q "^HTTP_PROXY=" "$HOME/claude-env" && echo launch-ok'
+contains = "launch-ok"
+
+[[verify.judge]]
+# Soft: reported only, never the verdict (reality above decides).
+question = "Does `screen` show the playbook demo with the env set synth-router and HTTP_PROXY blocked?"
+p_min = 0.9
