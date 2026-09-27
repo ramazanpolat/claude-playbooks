@@ -61,6 +61,9 @@ type applyWarning struct {
 const (
 	warnUsePlaybookOverridden = "use_playbook_overridden"
 	warnSourceDrift           = "source_drift"
+	// A playbook importing ~/.pilot-profile/ now has a non-Anthropic
+	// ANTHROPIC_BASE_URL (v3.23.0).
+	warnPilotProfileThirdParty = "pilot_profile_third_party_endpoint"
 )
 
 func (w applyWarning) String() string { return fmt.Sprintf("%s:%d: %s", w.shown, w.Line, w.Message) }

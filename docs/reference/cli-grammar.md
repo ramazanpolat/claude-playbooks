@@ -58,7 +58,55 @@ tools' profiles.
 components stay standalone and loosely coupled). A playbook takes the pilot
 profile through its own `CLAUDE.md` imports, and choosing a pilot for a
 playbook is pilot-profile's own command, run by the pilot. No statement
-here reads, writes or calls anything of pilot-profile's.
+here reads, writes or calls anything of pilot-profile's. Two things touch
+the playbook's own `CLAUDE.md` lines that import `~/.pilot-profile/`
+(v3.23.0, below): `NO PILOT PROFILE` leaves them out of a new playbook, and
+a warning says when a playbook that has them is routed away from Anthropic.
+
+### The pilot profile and non-Anthropic routes (v3.23.0)
+
+The `CLAUDE.md` that `CREATE PLAYBOOK` writes ends with four
+`@~/.pilot-profile/…` imports, which are inert when there is no profile.
+When there is one, Claude Code sends it with every request. That includes
+the pilot's name, emails, host index and secret reference names. For a
+playbook routed to another provider (a router, EVREN, GLM, DeepSeek), that
+is a data-governance leak. It happened once, on 2026-09-27.
+
+- **`CREATE PLAYBOOK <name> … NO PILOT PROFILE`** writes the same
+  `CLAUDE.md` without the "Pilot profile" section. The hidden command takes
+  `create <name> --no-pilot-profile`.
+  - It applies at create time only. After create, `CLAUDE.md` is the pilot's
+    file and no statement edits it, so there is no `ALTER` form. To take the
+    imports out later, delete the lines.
+  - It is refused with `FROM` or `LINK`, whose `CLAUDE.md` is the source's
+    own.
+  - `SHOW CREATE` does not write it, just as it writes nothing else of
+    `CLAUDE.md`.
+  - `PILOT` and `PROFILE` are read only after `NO`, so they are not
+    reserved words: a playbook can still be called `pilot`.
+- **The warning.** Take a playbook whose `CLAUDE.md` has an `@` import under
+  `~/.pilot-profile/`, whether written with `~` or with the home directory.
+  A statement that gives it a non-Anthropic `ANTHROPIC_BASE_URL` gets one
+  warning line on stderr. In `APPLY --json`, it also gets the stable code
+  `pilot_profile_third_party_endpoint`.
+  - The URL counted is what a launch would get from `DEFAULTS`, the
+    playbook's env sets and its own block. A host of `anthropic.com` or
+    `*.anthropic.com` is Anthropic's; any other host is not, `localhost`
+    included, since a local router forwards elsewhere.
+  - Any statement that makes this so is warned: `ALTER PLAYBOOK` (`USE ENV`,
+    `ADD ENV`, `SET VAR`, `UNSET VAR`, …), `ALTER ENV` / `CREATE OR REPLACE
+    ENV` on a set the playbook uses, `ALTER DEFAULTS`, and `CREATE PLAYBOOK`
+    under such `DEFAULTS`.
+  - It is only that statement. A later one that leaves the playbook as it
+    was is not warned again, and neither is a move from one non-Anthropic
+    host to another.
+  - The message names the playbooks and their hosts, never a URL, a path or
+    a value. It is never a refusal: where the profile may go is the pilot's
+    decision.
+  - A base URL given by reference is not resolved for a warning, so it is not
+    judged. Neither is a playbook created `FROM` a source in a dry run,
+    because its `CLAUDE.md` is not known before the fetch.
+  - A dry run warns from the state its earlier statements would leave.
 
 ## Grammar
 
@@ -71,7 +119,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX]
+            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX] [NO PILOT PROFILE]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -141,7 +189,8 @@ read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
 and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
 and `BRANCH` / `SUBDIR` only with `FROM`; `ALIAS` and `NO ALIAS` exclude each
-other. The clauses of `origin` and `launcher` may come in any order.
+other; `NO PILOT PROFILE` takes neither `FROM` nor `LINK`. The clauses of
+`origin`, `launcher`, `SANDBOX` and `NO PILOT PROFILE` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal, as `delete` does;
 `--yes` skips it.
 
@@ -501,7 +550,7 @@ planned as empty.
   | `write` | `path` | TO a plain directory: its `settings.json`. |
   | `delete` | `what` (`playbook` or `skill`), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
 
-- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`) and `source_drift` (an existing playbook's recorded source differs). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
+- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs) and, from v3.23.0, `pilot_profile_third_party_endpoint` (a playbook importing `~/.pilot-profile/` now has a non-Anthropic `ANTHROPIC_BASE_URL`; see "The pilot profile and non-Anthropic routes"). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
 - **No secret value** appears anywhere: references stay references, and a literal credential a file sets is not in the plan.
 
 **Exit codes:**
@@ -583,7 +632,7 @@ the pilot names (that one is v4.0.0).
 
 | Hidden | Grammar |
 |---|---|
-| `create <n> [--alias a \| --no-alias] [--sandbox]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX]` |
+| `create <n> [--alias a \| --no-alias] [--sandbox] [--no-pilot-profile]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX] [NO PILOT PROFILE]` |
 | `link <target> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK n LINK <target> [ALIAS a \| NO ALIAS]` (`n` defaults to the target's basename) |
 | `delete <n> [--yes]` | `DROP PLAYBOOK <n> [--yes]` |
 | `rename <a> <b> [--alias x \| --no-alias]` | `ALTER PLAYBOOK <a> RENAME TO <b> [ALIAS x \| NO ALIAS]` |

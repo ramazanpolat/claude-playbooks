@@ -155,6 +155,16 @@ func (r *stmtRun) say(head string, lines []string) {
 }
 
 func execStatement(r *stmtRun, st *grammar.Stmt) error {
+	names := r.exposureCandidates(st)
+	before := r.profileExposure(names)
+	err := execStatementOnly(r, st)
+	if err == nil && names != nil {
+		r.warnExposure(before, r.profileExposure(names))
+	}
+	return err
+}
+
+func execStatementOnly(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case st.Dir != "":
 		return dirStatement(r, st)

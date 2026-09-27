@@ -26,6 +26,14 @@ cpb ALTER PLAYBOOK scratch USE ENV router
 cpb EXPLAIN PLAYBOOK scratch
 ```
 
+cpb prints a warning at the `USE ENV`. The `CLAUDE.md` that `CREATE PLAYBOOK`
+wrote imports the pilot profile (`~/.pilot-profile/`, when you have one), and
+Claude Code sends it with every request, which now go to the router. If that
+is not what you want, delete the "Pilot profile" lines from
+`~/.claude-playbooks/scratch/CLAUDE.md`. A playbook made for a route is
+better created without them: `cpb CREATE PLAYBOOK <name> NO PILOT PROFILE`
+([example 15](../../examples/15-third-party-route/)).
+
 `EXPLAIN` lists every variable a launch of `scratch` sets and the layer that
 decided it. The playbook's own `SET VAR` wins over its env sets, a later set
 wins over an earlier one, and `ALTER DEFAULTS USE ENV …` puts sets under every

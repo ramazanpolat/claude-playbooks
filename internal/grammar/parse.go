@@ -34,6 +34,9 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
+		// PILOT and PROFILE are read only after NO (NO PILOT PROFILE), where
+		// no name can stand, so they stay free to name things: the grammar
+		// has no PILOT object.
 	} {
 		keywords[w] = true
 	}
@@ -889,6 +892,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Arg = name
 		return c, err
 	case "NO":
+		if p.at("PILOT") {
+			return nil, p.fail("NO PILOT PROFILE applies to CREATE PLAYBOOK only: after create, CLAUDE.md is yours to edit")
+		}
 		if p.kw("ALIAS") == "" {
 			return nil, p.fail("expected ALIAS after NO")
 		}
@@ -996,11 +1002,18 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		c.Arg = name
 		return c, err
 	case "NO":
-		if p.kw("ALIAS") == "" {
-			return nil, p.fail("expected ALIAS after NO")
+		switch p.kw("ALIAS", "PILOT") {
+		case "ALIAS":
+			c.Kind = NoAlias
+			return c, nil
+		case "PILOT":
+			if p.kw("PROFILE") == "" {
+				return nil, p.fail("expected PROFILE after NO PILOT")
+			}
+			c.Kind = NoPilotProfile
+			return c, nil
 		}
-		c.Kind = NoAlias
-		return c, nil
+		return nil, p.fail("expected ALIAS or PILOT PROFILE after NO")
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
@@ -1136,7 +1149,7 @@ func validate(s *Stmt) *Error {
 	envs := map[string]bool{}
 	once := map[Kind]bool{
 		Describe: true, UseEnv: true, RenameTo: true,
-		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
+		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true, NoPilotProfile: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPicker: true,
@@ -1189,6 +1202,9 @@ func validate(s *Stmt) *Error {
 	if s.Verb == Create && s.Object == Playbook {
 		_, from := seen[From]
 		_, link := seen[Link]
+		if pos, ok := seen[NoPilotProfile]; ok && (from || link) {
+			return errAt(pos, "NO PILOT PROFILE shapes the CLAUDE.md a new playbook gets from cpb's template; with FROM or LINK the CLAUDE.md is the source's own: edit it there")
+		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {
 				e := errAt(pos, string(k)+" needs FROM <source>")

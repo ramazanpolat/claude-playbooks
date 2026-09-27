@@ -1,0 +1,16 @@
+p="$HOME/.claude-playbooks"
+# The routed playbook's CLAUDE.md has no pilot-profile imports.
+if grep -q 'pilot-profile' "$p/routed/CLAUDE.md"; then echo "routed imports the profile"; exit 1; fi
+# A playbook made with the default CLAUDE.md has them ...
+cpb "CREATE PLAYBOOK plain NO ALIAS"
+grep -q '^@~/.pilot-profile/PROFILE.md$' "$p/plain/CLAUDE.md"
+# ... so routing it warns, naming the playbook and the host only ...
+cpb "ALTER PLAYBOOK plain USE ENV router" 2> "$HOME/warn.err"
+grep -q 'PLAYBOOK plain (localhost) imports ~/.pilot-profile/' "$HOME/warn.err"
+if grep -q '20128' "$HOME/warn.err"; then echo "the warning carries the URL"; exit 1; fi
+# ... once: the same statement again changes nothing and says nothing.
+cpb "ALTER PLAYBOOK plain USE ENV router" 2> "$HOME/again.err"
+if [ -s "$HOME/again.err" ]; then cat "$HOME/again.err"; exit 1; fi
+# In a plan, the warning has a stable code.
+printf 'CREATE PLAYBOOK plain2 NO ALIAS;\nALTER PLAYBOOK plain2 USE ENV router;\n' > "$HOME/plan.cpb"
+cpb APPLY "$HOME/plan.cpb" --dry-run --json | grep -q '"code": "pilot_profile_third_party_endpoint"'
