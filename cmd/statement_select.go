@@ -210,6 +210,13 @@ type sqlFrom struct {
 // literals, quoted identifiers and comments, and returns every FROM that
 // names one of the tables, and whether code follows a semicolon (a second
 // statement).
+// sqlClauseWords are words that can follow a column named format, so a
+// FORMAT before one of them is not the query's FORMAT clause.
+var sqlClauseWords = map[string]bool{"FROM": true, "WHERE": true, "AS": true, "AND": true, "OR": true,
+	"ORDER": true, "GROUP": true, "BY": true, "LIMIT": true, "HAVING": true, "UNION": true, "SETTINGS": true,
+	"ASC": true, "DESC": true, "JOIN": true, "ON": true, "IN": true, "IS": true, "NOT": true, "LIKE": true,
+	"ILIKE": true, "BETWEEN": true, "OFFSET": true, "WITH": true, "INTO": true}
+
 func scanSQL(q string) (froms []sqlFrom, second, format bool) {
 	isWord := func(c byte) bool {
 		return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
@@ -246,6 +253,7 @@ func scanSQL(q string) (froms []sqlFrom, second, format bool) {
 		return i
 	}
 	semicolon := false
+	prevWord := ""
 	for i := 0; i < len(q); {
 		if j := skip(i); j != i {
 			i = j
@@ -266,9 +274,31 @@ func scanSQL(q string) (froms []sqlFrom, second, format bool) {
 			if semicolon {
 				second = true
 			}
-			if strings.EqualFold(q[i:j], "FORMAT") && (i == 0 || !isWord(q[i-1])) {
-				format = true
+			// The query's own FORMAT clause is FORMAT followed by a format
+			// name: not an alias (AS format), a function (format(…)), or a
+			// column (format, format = …, format FROM …).
+			if strings.EqualFold(q[i:j], "FORMAT") && !strings.EqualFold(prevWord, "AS") {
+				k := j
+				for k < len(q) {
+					if n := skip(k); n != k {
+						k = n
+						continue
+					}
+					if q[k] == ' ' || q[k] == '\t' || q[k] == '\r' || q[k] == '\n' {
+						k++
+						continue
+					}
+					break
+				}
+				e := k
+				for e < len(q) && isWord(q[e]) {
+					e++
+				}
+				if e > k && !sqlClauseWords[strings.ToUpper(q[k:e])] {
+					format = true
+				}
 			}
+			prevWord = q[i:j]
 			if strings.EqualFold(q[i:j], "FROM") && (i == 0 || !isWord(q[i-1])) {
 				k := j
 				for k < len(q) && (q[k] == ' ' || q[k] == '\t' || q[k] == '\r' || q[k] == '\n') {

@@ -202,8 +202,24 @@ func TestSelectOutputChoice(t *testing.T) {
 	if a := args(true, "SELECT count() FROM PLAYBOOKS format TSV"); strings.Contains(a, "--output-format") {
 		t.Errorf("the query's FORMAT lost: %s", a)
 	}
-	if a := args(true, "SELECT 'FORMAT' AS f FROM PLAYBOOKS -- FORMAT TSV"); !strings.Contains(a, "JSONCompact") {
-		t.Errorf("a FORMAT in a string or comment is not the query's: %s", a)
+	for _, q := range []string{
+		"SELECT 'FORMAT' AS f FROM PLAYBOOKS -- FORMAT TSV",    // a string and a comment
+		"SELECT launcher AS format FROM PLAYBOOKS",             // an alias
+		"SELECT format('{}', name) FROM PLAYBOOKS",             // a function
+		"SELECT name AS format FROM PLAYBOOKS ORDER BY format", // a column, last
+		"SELECT name FROM PLAYBOOKS WHERE name = 'format'",
+	} {
+		if a := args(true, q); !strings.Contains(a, "JSONCompact") {
+			t.Errorf("not the query's FORMAT clause: %s\n%s", q, a)
+		}
+	}
+	for _, q := range []string{
+		"SELECT name FROM PLAYBOOKS FORMAT Vertical",
+		"SELECT name FROM PLAYBOOKS ORDER BY name FORMAT JSONEachRow SETTINGS max_threads = 1",
+	} {
+		if a := args(true, q); strings.Contains(a, "--output-format") {
+			t.Errorf("the query's FORMAT lost: %s\n%s", q, a)
+		}
 	}
 }
 
@@ -218,18 +234,22 @@ func TestSelectRendersForATerminal(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "clickhouse")
 	write := func(doc string) {
-		if err := os.WriteFile(stub, []byte("#!/bin/sh\ncat >/dev/null\ncat <<'EOF'\n"+doc+"\nEOF\n"), 0o755); err != nil {
+		script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + dir + "/args\"\ncat >/dev/null\ncat <<'EOF'\n" + doc + "\nEOF\n"
+		if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("CPB_CLICKHOUSE", stub)
 	write(`{"meta":[{"name":"name","type":"String"},{"name":"vars","type":"Array(JSON)"},{"name":"version","type":"Nullable(String)"}],` +
-		`"data":[["alpha",[{"key":"K","ref":"https://x.example/y"}],null]],"rows":1}`)
+		`"data":[["alpha",[{"key":"K","ref":"https:\/\/x.example\/y"}],null]],"rows":1}`)
 	var err error
 	out := captureStdout(t, func() { err = runStatement([]string{"SELECT name, vars, version FROM PLAYBOOKS WHERE 1"}) })
 	if err != nil || !strings.Contains(out, "NAME") || !strings.Contains(out, `[{"key":"K","ref":"https://x.example/y"}]`) ||
 		strings.Contains(out, `\/`) || strings.Contains(out, `\N`) || !strings.Contains(out, " -") {
 		t.Fatalf("narrow:\n%s %v", out, err)
+	}
+	if a, _ := os.ReadFile(filepath.Join(dir, "args")); !strings.Contains(string(a), "--output-format\nJSONCompact\n--output_format_json_escape_forward_slashes=0\n") {
+		t.Fatalf("args:\n%s", a)
 	}
 	// The boundary: six columns are a table, seven go vertical.
 	write(`{"meta":[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"},{"name":"e"},{"name":"f"}],"data":[["1","2","3","4","5",{}]],"rows":1}`)
