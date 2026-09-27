@@ -19,6 +19,7 @@
 # plain config directory (backup, refusals, state outside the directory),
 # SELECT (built in, and through a stub clickhouse-local: the real one runs
 # in GitHub CI's select-clickhouse job), and a git marketplace's #ref.
+# v3.22.0: APPLY --dry-run --json (26 assertions in all: 25 commands, 1 file).
 
 [scenario]
 name = "cli-grammar"
@@ -212,7 +213,9 @@ contains = "git-ref-ok"
 
 [[verify.commands]]
 # APPLY --dry-run --json (v3.22.0): one JSON object with schema 1, a DROP's
-# delete with its path, exit 0 planned / 1 refused / 2 usage, and the dry
-# run leaves the store's tree exactly as it was.
-command = '''D="$HOME/jsonplan"; P="$HOME/.claude-playbooks"; mkdir -p "$D" && claude-playbook CREATE PLAYBOOK jpb NO ALIAS >/dev/null && printf x > "$P/jpb/data.txt" && printf "DROP PLAYBOOK jpb;\nCREATE OR REPLACE ENV jenv SET J=1;\n" > "$D/p.cpb" && B=$(find "$P" | sort | cksum) && claude-playbook APPLY "$D/p.cpb" --dry-run --json > "$D/p.json" && [ "$(find "$P" | sort | cksum)" = "$B" ] && J=$(tr -d ' \n' < "$D/p.json") && printf "%s" "$J" | grep -qF '"schema":1' && printf "%s" "$J" | grep -qF '"ok":true' && printf "%s" "$J" | grep -qF '"verdict":"dropped"' && printf "%s" "$J" | grep -qF "\"type\":\"delete\",\"what\":\"playbook\",\"path\":\"$P/jpb\"" && { claude-playbook APPLY "$D/p.cpb" --json > "$D/u.json"; [ $? = 2 ]; } && grep -q '"ok": false' "$D/u.json" && printf "ALTER PLAYBOOK ghost SET VAR A=1;\n" > "$D/r.cpb" && { claude-playbook APPLY "$D/r.cpb" --dry-run --json > "$D/r.json"; [ $? = 1 ]; } && grep -q '"verdict": "refused"' "$D/r.json" && test -f "$P/jpb/data.txt" && echo apply-json-ok'''
+# delete with its path, exit 0 planned / 1 refused / 2 usage, the dry run
+# leaves the store's tree exactly as it was, and a secret reference shows as
+# the reference (an MCP header's refs) while the helper's resolved value never
+# appears.
+command = '''D="$HOME/jsonplan"; P="$HOME/.claude-playbooks"; mkdir -p "$D" && claude-playbook CREATE PLAYBOOK jpb NO ALIAS >/dev/null && printf x > "$P/jpb/data.txt" && printf "DROP PLAYBOOK jpb;\nCREATE OR REPLACE ENV jenv SET J=1;\n" > "$D/p.cpb" && B=$(find "$P" | sort | cksum) && claude-playbook APPLY "$D/p.cpb" --dry-run --json > "$D/p.json" && [ "$(find "$P" | sort | cksum)" = "$B" ] && J=$(tr -d ' \n' < "$D/p.json") && printf "%s" "$J" | grep -qF '"schema":1' && printf "%s" "$J" | grep -qF '"ok":true' && printf "%s" "$J" | grep -qF '"verdict":"dropped"' && printf "%s" "$J" | grep -qF "\"type\":\"delete\",\"what\":\"playbook\",\"path\":\"$P/jpb\"" && { claude-playbook APPLY "$D/p.cpb" --json > "$D/u.json"; [ $? = 2 ]; } && grep -q '"ok": false' "$D/u.json" && printf "ALTER PLAYBOOK ghost SET VAR A=1;\n" > "$D/r.cpb" && { claude-playbook APPLY "$D/r.cpb" --dry-run --json > "$D/r.json"; [ $? = 1 ]; } && grep -q '"verdict": "refused"' "$D/r.json" && test -f "$P/jpb/data.txt" && claude-playbook CREATE PLAYBOOK jref NO ALIAS >/dev/null && printf "ALTER PLAYBOOK jref SET VAR K FROM 'keychain:ok/x' ADD MCP SERVER s URL 'https://mcp.example/mcp' HEADER 'Authorization' FROM 'keychain:ok/x';\n" > "$D/ref.cpb" && claude-playbook APPLY "$D/ref.cpb" --dry-run --json > "$D/ref.json" && tr -d ' \n' < "$D/ref.json" | grep -Eq '"refs":\{"CPB_MCP_S_H_AUTHORIZATION_[0-9a-fA-F]{8}":"keychain:ok/x"\}' && ! grep -q "resolved:" "$D/ref.json" && echo apply-json-ok'''
 contains = "apply-json-ok"
