@@ -261,8 +261,8 @@ the playbook's says *how you work*, the project's *what you are working on*.
 
 `create <name>`, `link`, `delete` (and `uninstall`, `unlink`), `rename`,
 `alias`, `dealias`, `list` and `info` still work with all their flags,
-hidden from help; on a terminal each prints one stderr line naming its
-statement. The statement for each:
+hidden from help and deprecated: each use prints one stderr line naming
+its statement, and they are removed in v4.0.0. The statement for each:
 
 | Older | Statement |
 |---|---|

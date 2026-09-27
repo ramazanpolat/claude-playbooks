@@ -248,7 +248,7 @@ are written `0600`; a file's mode is never loosened by a rewrite.
 
 ## Older commands
 
-`env` and `env-profile` still work, with their flags, and write the same files. They are hidden from help, and on a terminal each prints one stderr line naming its statement.
+`env` and `env-profile` still work, with their flags, and write the same files. They are hidden from help and deprecated: each use prints one stderr line naming its statement, and they are removed in v4.0.0. stdout is unchanged.
 The statement for each:
 
 | Older | Statement |

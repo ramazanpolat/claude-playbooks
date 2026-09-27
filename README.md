@@ -101,7 +101,8 @@ cpb DROP PLAYBOOK scratch --yes
 Kept as commands: `cpb install <url>` (= `CREATE PLAYBOOK … FROM`),
 `cpb run <name>`, `cpb start <dir>`, `cpb update`, `cpb auth status`, and
 `--sandbox` on any launch. The older `env`, `env-profile`, `list`, `info`,
-`alias`, `rename`, `link` and `delete` commands still work, hidden from help.
+`alias`, `rename`, `link` and `delete` commands still work, hidden from help
+and deprecated: each use warns on stderr, and v4.0.0 removes them.
 
 ## Learn it
 

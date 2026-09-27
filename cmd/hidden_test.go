@@ -48,7 +48,10 @@ func TestPreGrammarCommandsAreHidden(t *testing.T) {
 
 // A hidden command's output is unchanged: with stderr not a terminal (a
 // script, a test) the hint is never printed, and stdout never carries it.
-func TestHiddenCommandPrintsNoHintOffTerminal(t *testing.T) {
+// Off a terminal too, a hidden command warns on stderr that it is
+// deprecated (removed in v4.0.0), with the grammar form; stdout is
+// byte-identical to the command's own output without the warning.
+func TestHiddenCommandWarnsOnStderrOnly(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "p")
@@ -72,11 +75,20 @@ func TestHiddenCommandPrintsNoHintOffTerminal(t *testing.T) {
 	w.Close()
 	var stderr bytes.Buffer
 	_, _ = stderr.ReadFrom(r)
-	if strings.Contains(stdout+stderr.String(), "hidden command") {
-		t.Fatalf("a hint was printed off a terminal:\nstdout: %s\nstderr: %s", stdout, stderr.String())
+	if !strings.Contains(stderr.String(), "Deprecated: `claude-playbook list` is removed in v4.0.0; the grammar form is: ") || strings.Count(stderr.String(), "\n") != 1 {
+		t.Fatalf("stderr is not the one deprecation line:\n%s", stderr.String())
 	}
-	if !strings.Contains(stdout, "p") {
-		t.Fatalf("list output changed:\n%s", stdout)
+	if strings.Contains(stdout, "Deprecated") {
+		t.Fatalf("the warning reached stdout:\n%s", stdout)
+	}
+	// Without the warning: the command's own run, not through the hook.
+	direct := captureStdout(t, func() {
+		if err := listCmd.RunE(listCmd, nil); err != nil {
+			t.Errorf("list: %v", err)
+		}
+	})
+	if stdout != direct {
+		t.Fatalf("stdout differs with the warning:\nwith:    %q\nwithout: %q", stdout, direct)
 	}
 }
 

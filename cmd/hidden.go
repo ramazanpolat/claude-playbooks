@@ -15,9 +15,12 @@ import (
 // rename, alias, dealias, list, info) are a hidden fallback
 // (docs/reference/cli-grammar.md, "Pre-grammar commands: a hidden
 // fallback"): hidden from help and completion, on their own code paths, and
-// unchanged. The one addition is a hint on stderr, only when stderr is a
-// terminal, naming the statement that does the same. Nothing reaches
-// stdout, so scripts see no change.
+// unchanged. The one addition is a deprecation line on stderr, naming the
+// statement that does the same and the release that removes the command
+// (v4.0.0). It is printed whether or not stderr is a terminal, so scripts
+// are warned too, as the stability rules require: a deprecation warns for at
+// least one minor release before the removal. Nothing reaches stdout, so a
+// script's parsing sees no change.
 
 func init() {
 	// Statements never reach cobra, so its help names them itself.
@@ -33,8 +36,8 @@ State is changed and read with statements:
 
 The grammar: https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/reference/cli-grammar.md`
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
-		if cmd.Hidden && isTerminal(os.Stderr) {
-			fmt.Fprintf(os.Stderr, "(hidden command; the grammar form is: %s)\n", grammarForm(cmd, args))
+		if cmd.Hidden {
+			fmt.Fprintf(os.Stderr, "Deprecated: `%s` is removed in v4.0.0; the grammar form is: %s\n", cmd.CommandPath(), grammarForm(cmd, args))
 		}
 	}
 }
