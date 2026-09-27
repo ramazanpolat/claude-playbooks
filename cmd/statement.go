@@ -541,6 +541,15 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
+	// ISOLATED LOGIN: isolate_auth, in the same manifest write.
+	wasIsolated := r.isolated(st.Name, m)
+	nowIsolated, loginLines, err := r.planIsolatedLogin(st.Name, m, r.configDir(st.Name, pb), st.Clauses)
+	if err != nil {
+		return err
+	}
+	loginChange := nowIsolated != wasIsolated
+	m.IsolateAuth = nowIsolated
+	lines = append(lines, loginLines...)
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
 	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
@@ -587,7 +596,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
@@ -595,6 +604,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	r.outcome = outChanged
 	if r.dryRun {
 		r.recordPlaybookEnv(st.Name, m.Env)
+		if loginChange && r.dry != nil {
+			r.dry.isolated[st.Name] = nowIsolated
+		}
 		if mcp != nil {
 			finishMCP()
 			r.recordPlaybookEnv(st.Name, m.Env)
@@ -625,9 +637,17 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return nil
 	}
-	if envChange || mcpRecordChange {
+	if envChange || mcpRecordChange || loginChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
+		}
+	}
+	// Isolated now, not at the next launch: the link to the shared store
+	// goes at once, so auth status agrees with the manifest. Sharing again
+	// is left to the next launch, which links the store as it always does.
+	if loginChange && nowIsolated {
+		if err := auth.SyncCredentials(pb.Path); err != nil {
+			r.warning = fmt.Sprintf("PLAYBOOK %s: isolate_auth is recorded, but the link to the shared login could not be removed now (%v); the next launch removes it", st.Name, err)
 		}
 	}
 	if skills != nil {

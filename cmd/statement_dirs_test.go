@@ -79,6 +79,7 @@ func TestPlainDirectoryRefusals(t *testing.T) {
 		"ALTER PLAYBOOK SET VAR K FROM 'keychain:x';": "secret reference",
 		"ALTER PLAYBOOK USE ENV e;":                   "env sets are layered by the launcher",
 		"ALTER PLAYBOOK BLOCK VAR K;":                 "launcher's job",
+		"ALTER PLAYBOOK SET ISOLATED LOGIN;":          "isolate_auth is recorded in a playbook's manifest",
 		"ALTER PLAYBOOK ADD MCP SERVER s URL 'https://x.example/mcp' HEADER 'Authorization' FROM 'keychain:x';": "only cpb's launcher resolves",
 	} {
 		f := writeCpb(t, dir, "r.cpb", text+"\n")

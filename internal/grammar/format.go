@@ -228,7 +228,7 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case RenameTo, Alias, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	default: // NoAlias, Sandbox, NoPilotProfile, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
+	default: // NoAlias, Sandbox, NoPilotProfile, IsolatedLogin, SetIsolatedLogin, UnsetIsolatedLogin, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

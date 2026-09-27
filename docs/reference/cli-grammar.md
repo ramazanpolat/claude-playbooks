@@ -125,7 +125,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX] [NO PILOT PROFILE]
+            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX] [ISOLATED LOGIN] [NO PILOT PROFILE]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -172,6 +172,7 @@ pb-clause  := set-clause
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
             | SET STATUSLINE '<command>' [REFRESH <n>] | UNSET STATUSLINE
             | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH   v3.23.0
+            | SET ISOLATED LOGIN | UNSET ISOLATED LOGIN   v3.23.0, see "Isolated login"
             | SET MODEL '<model>' | UNSET MODEL
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
             | DROP MODEL '<id>'
@@ -195,8 +196,9 @@ read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
 and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
 and `BRANCH` / `SUBDIR` only with `FROM`; `ALIAS` and `NO ALIAS` exclude each
-other; `NO PILOT PROFILE` takes neither `FROM` nor `LINK`. The clauses of
-`origin`, `launcher`, `SANDBOX` and `NO PILOT PROFILE` may come in any order.
+other; `NO PILOT PROFILE` takes neither `FROM` nor `LINK`, and `SANDBOX` and
+`ISOLATED LOGIN` do not take `LINK`. The clauses of `origin`, `launcher`,
+`SANDBOX`, `ISOLATED LOGIN` and `NO PILOT PROFILE` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal, as `delete` does;
 `--yes` skips it.
 
@@ -315,6 +317,51 @@ Secret helper: my-keychain-helper (from CPB_SECRET_HELPER)
 The last line names the helper that resolves this playbook's references and
 where it came from (`setting` or `CPB_SECRET_HELPER`), or reads
 `Secret helper: (none)`.
+
+## Isolated login (v3.23.0)
+
+A playbook normally shares the machine's login: its `.credentials.json` is a
+link to `~/.claude/.credentials.json`, and `/login` in any playbook logs in
+all of them. An **isolated login** shares nothing. There is no link, no
+machine-wide token, and no account record carried over from a shared past,
+so the playbook is logged in only if it runs `/login` itself. It is the
+manifest's `isolate_auth = true` (see the authentication guide). Before
+v3.23.0 only `SANDBOX` or a hand edit set it.
+
+```
+CREATE PLAYBOOK <name> … ISOLATED LOGIN      create --isolated-login
+ALTER PLAYBOOK <name> SET ISOLATED LOGIN
+ALTER PLAYBOOK <name> UNSET ISOLATED LOGIN
+```
+
+- **Use it** for a second account, or for a throwaway or a third-party route
+  where a `/login` must not land in the machine's shared store. In a shared
+  playbook, `/login` writes through the link.
+- **`SET ISOLATED LOGIN`** records `isolate_auth = true` and removes the link
+  to the shared store at once, so `cpb auth status` reports `isolated`
+  straight away. A `.credentials.json` that is a file, the playbook's own
+  login, is kept.
+- **`UNSET ISOLATED LOGIN`** removes it. The next launch links the shared
+  store again. It is refused in two cases, each with its reason:
+  - The playbook always runs in a sandbox. `SANDBOX` implies an isolated
+    login.
+  - The playbook holds a login of its own: a `.credentials.json` file
+    carrying an account grant. A shared launch keeps the newer store, so it
+    would copy that login over the machine's login in `~/.claude` and switch
+    every shared playbook to that account. Run `/logout` in it first.
+- **Not "own login".** `cpb auth status` already reports `own-login` for
+  something else: a playbook that blocks the machine token and uses the
+  shared stored login. An isolated playbook is reported as `isolated`.
+- **Refusals.** It does not apply to `LINK`, where the manifest is the
+  target's, or to a plain config directory, which has no manifest.
+- **Reads.** `SHOW` prints `Login: isolated (shares nothing with ~/.claude)`,
+  and `EXPLAIN` prints a `Login:` line. `SHOW PLAYBOOK --json` has
+  `isolated_login` (a bool, true for a sandboxed playbook too), and `SELECT`'s
+  `PLAYBOOKS` has an `isolated_login` column. `SHOW CREATE` writes `SET
+  ISOLATED LOGIN` for an isolated playbook that is not sandboxed, and applying
+  it again changes nothing.
+- `ISOLATED` and `LOGIN` are read only in these positions, so they are not
+  reserved words.
 
 ## Secrets (optional)
 
@@ -638,7 +685,7 @@ the pilot names (that one is v4.0.0).
 
 | Hidden | Grammar |
 |---|---|
-| `create <n> [--alias a \| --no-alias] [--sandbox] [--no-pilot-profile]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX] [NO PILOT PROFILE]` |
+| `create <n> [--alias a \| --no-alias] [--sandbox] [--isolated-login] [--no-pilot-profile]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX] [ISOLATED LOGIN] [NO PILOT PROFILE]` |
 | `link <target> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK n LINK <target> [ALIAS a \| NO ALIAS]` (`n` defaults to the target's basename) |
 | `delete <n> [--yes]` | `DROP PLAYBOOK <n> [--yes]` |
 | `rename <a> <b> [--alias x \| --no-alias]` | `ALTER PLAYBOOK <a> RENAME TO <b> [ALIAS x \| NO ALIAS]` |
@@ -1193,6 +1240,8 @@ Refused, each with its reason:
   layered by the launcher.
 - `RENAME TO`, `ALIAS`, `NO ALIAS`, `SANDBOX`: the directory is not in the
   registry and has no launcher.
+- `SET / UNSET ISOLATED LOGIN`: `isolate_auth` is recorded in a playbook's
+  manifest, which the directory does not have.
 
 **Safety.** Before its first write to a directory in a run, cpb copies that
 directory's `settings.json` to `settings.json.cpb-backup-<YYYY-MM-DD-HH_MM_SS>`

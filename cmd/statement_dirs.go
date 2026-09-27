@@ -37,6 +37,9 @@ var dirRefusals = map[grammar.Kind]string{
 	grammar.RenameTo: "the directory is not in the registry",
 	grammar.Alias:    "the directory has no launcher",
 	grammar.NoAlias:  "the directory has no launcher",
+
+	grammar.SetIsolatedLogin:   "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetIsolatedLogin: "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
 }
 
 // validateDirClauses refuses, with its reason, a clause that cannot apply

@@ -42,6 +42,11 @@ type dryState struct {
 	// pilotProfile, per playbook created earlier: whether the CLAUDE.md its
 	// CREATE would write imports ~/.pilot-profile/.
 	pilotProfile map[string]bool
+
+	// isolated and sandboxed, per playbook: isolate_auth and [sandbox]
+	// always as earlier statements would leave them.
+	isolated  map[string]bool
+	sandboxed map[string]bool
 }
 
 func newDryState() *dryState {
@@ -57,6 +62,8 @@ func newDryState() *dryState {
 		skillRecords: map[string]map[string]*manifest.SkillRecord{},
 		skillKnown:   map[string]map[string]bool{},
 		pilotProfile: map[string]bool{},
+		isolated:     map[string]bool{},
+		sandboxed:    map[string]bool{},
 	}
 }
 
@@ -110,6 +117,8 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.skillRecords, name)
 		delete(r.dry.skillKnown, name)
 		delete(r.dry.pilotProfile, name)
+		delete(r.dry.isolated, name)
+		delete(r.dry.sandboxed, name)
 	}
 }
 
@@ -129,6 +138,20 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	sr, srok := r.dry.skillRecords[from]
 	sk, skok := r.dry.skillKnown[from]
 	pp, ppok := r.dry.pilotProfile[from]
+	iso, isook := r.dry.isolated[from]
+	sbx, sbxok := r.dry.sandboxed[from]
+	// A playbook on disk carries its login setting under its new name: the
+	// directory it keeps says what it is.
+	if cfg != "" && !(isook && sbxok) {
+		if m, _ := manifest.Nearest(cfg); m != nil {
+			if !isook {
+				iso, isook = m.IsolateAuth, true
+			}
+			if !sbxok {
+				sbx, sbxok = m.Sandbox != nil && m.Sandbox.Always, true
+			}
+		}
+	}
 	r.recordPlaybook(from, false)
 	r.recordPlaybook(to, true)
 	if wok {
@@ -148,6 +171,12 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	if ppok {
 		r.dry.pilotProfile[to] = pp
+	}
+	if isook {
+		r.dry.isolated[to] = iso
+	}
+	if sbxok {
+		r.dry.sandboxed[to] = sbx
 	}
 	if aok {
 		r.dry.settings[to] = a
