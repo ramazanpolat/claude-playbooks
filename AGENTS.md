@@ -31,7 +31,8 @@ preparing a release, read [Before any release](#before-any-release) first.
 | macOS or Linux | `uname -s` | `Darwin` or `Linux` |
 | curl | `command -v curl` | a path, exit 0 |
 | Claude Code, to launch playbooks | `command -v claude` | a path, exit 0 (install it from https://claude.ai/download if missing; `cpb` itself installs without it) |
-| Claude Code 2.1.268+, for the plugin clauses | `claude --version` | `2.1.268` or newer (`ADD PLUGIN` / `DROP PLUGIN` refuse an older claude in one line; nixpkgs has shipped older ones). The model picker is read from 2.1.242, `BEHAVES AS` from 2.1.257 |
+| Claude Code 2.1.268+, for the plugin clauses | `claude --version` | `2.1.268` or newer (`ADD PLUGIN` / `DROP PLUGIN` refuse an older claude in one line; nixpkgs has shipped older ones) |
+| Claude Code 2.1.242+, for the model picker to show | `claude --version` | `2.1.242` or newer reads `modelPicker`, 2.1.257+ its `behavesAs` (the `BEHAVES AS` part of `ADD MODEL`). cpb writes the key either way |
 
 ## Install
 
