@@ -49,6 +49,7 @@ func TestModelPickerErrors(t *testing.T) {
 		"ALTER PLAYBOOK k ADD MODEL 'a' LABEL 'x' LABEL 'y'":        "LABEL appears twice",
 		"ALTER PLAYBOOK k SET MODEL PICKER":                         "SET MODEL PICKER takes ONLY",
 		"ALTER PLAYBOOK k ADD MODEL 'a' UNSET MODEL PICKER":         "cannot be combined",
+		"ALTER PLAYBOOK k DROP MODEL 'a' UNSET MODEL PICKER":        "cannot be combined",
 		"ALTER PLAYBOOK k ADD MODEL 'a' DROP MODEL 'a'":             "model a appears twice",
 		"ALTER PLAYBOOK k SET MODEL PICKER ONLY UNSET MODEL PICKER": "cannot be combined",
 		"ALTER PLAYBOOK k ADD MODEL 'a b'":                          "needs '<id>'",

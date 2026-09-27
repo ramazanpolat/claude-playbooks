@@ -1157,7 +1157,7 @@ func validate(s *Stmt) *Error {
 	}
 	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
 		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
-		{AddModel, UnsetModelPicker}}
+		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker}}
 	for _, pr := range pairs {
 		_, a := seen[pr[0]]
 		_, b := seen[pr[1]]

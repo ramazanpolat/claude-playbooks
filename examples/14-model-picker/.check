@@ -6,6 +6,7 @@ assert list(s) == ["modelPicker"], s          # only the key the clauses give
 mp = s["modelPicker"]
 assert mp["replaceBuiltInOptions"] is True, mp
 assert [o["model"] for o in mp["options"]] == ["glm-5.3", "glm-5.3-flash"], mp
+assert mp["options"][0] == {"model": "glm-5.3", "label": "GLM 5.3", "description": "via the router"}, mp
 assert mp["options"][1] == {"model": "glm-5.3-flash", "label": "GLM 5.3 Flash", "behavesAs": "claude-sonnet-5"}, mp
 PY
 cpb EXPLAIN PLAYBOOK router-agent | grep -q 'Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)'
