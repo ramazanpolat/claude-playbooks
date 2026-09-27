@@ -66,6 +66,17 @@ yourself: only the token read from the token file gets the global descriptors.
 This is a middle ground between sharing the token and `isolate_auth` (the
 playbook shares nothing).
 
+## A source never carries a login (v3.22.1)
+
+A playbook you install brings no login with it. `install` and
+`CREATE PLAYBOOK … FROM` leave a source's `.credentials.json`, and the
+account keys of its `.claude.json`, out of the install, and say so in one
+line each. `LINK` sets them aside in place rather than deleting anything.
+Before v3.22.1, a shipped `.credentials.json` was copied over your machine's
+login at the first sync: installing someone's playbook could switch every
+shared playbook to their account.
+(`docs/known-issues/shared-launch-copies-own-login-over-machine-login.md`)
+
 ## Routing a playbook to another backend
 
 A playbook whose `settings.json` or env block points `ANTHROPIC_BASE_URL` at a

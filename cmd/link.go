@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -202,6 +203,20 @@ func doLink(o linkOpts, args []string) (retErr error) {
 		if err := writeAliasManifest(abs, name, o.alias); err != nil {
 			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", o.alias, abs, err)
 		}
+	}
+
+	// A linked directory is the pilot's own, so nothing in it is deleted: a
+	// login it carries is set aside before the sync, which would otherwise
+	// copy it over the machine's login (an isolated directory keeps its own).
+	credsTo, keys, backup, err := auth.SetAsideSourceLogin(configTarget, time.Now())
+	if err != nil {
+		return fmt.Errorf("cannot set aside the login %s carries: %w", target, err)
+	}
+	if credsTo != "" {
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s: a playbook source never carries a login (moved to %s)\n", target, auth.CredentialsFileName, filepath.Base(credsTo))
+	}
+	if len(keys) > 0 {
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login (backup: %s)\n", target, auth.StateFileName, strings.Join(keys, ", "), filepath.Base(backup))
 	}
 
 	if err := auth.SyncCredentials(configTarget); err != nil {
