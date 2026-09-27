@@ -317,6 +317,16 @@ func TestPluginClausesNeedClaudeVersion(t *testing.T) {
 	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook"); err != nil {
 		t.Fatalf("marketplace only: %v", err)
 	}
+	claudeVersion = func() string { return "2.1.99" } // numbers, not strings: 99 < 268
+	if err := checkClaudeForPlugins([]pluginStep{{args: []string{"install", "p@m"}}}); err == nil {
+		t.Error("2.1.99 was let through")
+	}
+	for out, want := range map[string]string{"2.1.283 (Claude Code)": "2.1.283", "Claude Code 2.1.268": "2.1.268",
+		"v2.1.99\n": "2.1.99", "claude: not a version": ""} {
+		if got := parseClaudeVersion(out); got != want {
+			t.Errorf("parseClaudeVersion(%q) = %q, want %q", out, got, want)
+		}
+	}
 	for _, v := range []string{"2.1.268", "2.1.283", ""} {
 		claudeVersion = func() string { return v }
 		if err := checkClaudeForPlugins([]pluginStep{{args: []string{"install", "p@m"}}}); err != nil {

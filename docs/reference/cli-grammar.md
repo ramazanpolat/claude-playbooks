@@ -886,7 +886,9 @@ name is removed again, and the statement fails naming both.
 (the changelog's 2.1.268; nixpkgs carried 2.1.245 at the time). A
 statement whose plan installs or uninstalls a plugin reads `claude
 --version` first and, on an older claude, is refused in one line before
-anything runs: `the plugin clauses need Claude Code 2.1.268 or newer (they
+any command that changes anything runs (the state reads, `plugin list
+--json` and `marketplace list --json`, come first; they are older than
+2.1.268): `the plugin clauses need Claude Code 2.1.268 or newer (they
 run claude plugin install --json); this claude is 2.1.245: update Claude
 Code`. A dry run says the same. A version that cannot be read is let
 through, and the command then reports what is wrong.

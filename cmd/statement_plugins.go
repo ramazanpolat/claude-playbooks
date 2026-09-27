@@ -77,7 +77,16 @@ func plansPluginCommands(clauses []grammar.Clause) bool {
 // that installs or uninstalls is refused first, in one line.
 const minClaudePluginJSON = "2.1.268"
 
-var claudeVersionRe = regexp.MustCompile(`^\s*v?(\d+\.\d+\.\d+)`)
+var claudeVersionRe = regexp.MustCompile(`(\d+\.\d+\.\d+)`)
+
+// parseClaudeVersion finds the version in `claude --version`'s answer
+// ("2.1.283 (Claude Code)", or a "Claude Code 2.1.283" form), "" if none.
+func parseClaudeVersion(out string) string {
+	if m := claudeVersionRe.FindStringSubmatch(out); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // claudeVersion is the version `claude --version` reports, "" when it
 // cannot be told (no claude, a stub, an unexpected answer).
@@ -93,8 +102,8 @@ var claudeVersion = func() string {
 	c.Dir = os.TempDir()
 	out, err := c.Output()
 	v := ""
-	if m := claudeVersionRe.FindStringSubmatch(string(out)); err == nil && m != nil {
-		v = m[1]
+	if err == nil {
+		v = parseClaudeVersion(string(out))
 	}
 	claudeVersions[path] = v
 	return v
