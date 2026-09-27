@@ -277,6 +277,16 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
             log.append(f"  step {i} EXIT {r.returncode}\n    {step[:160]}\n    {(r.stderr or r.stdout).strip()[:300]}")
 
     unreplayed: list[str] = []
+    # LOCAL DRIFT (policy.toml [check] allow_drift; queued to gentar, drop at
+    # the tag that carries it): a goal pilot needs the judge and the real
+    # driver. Its shell waits for a pilot, so drive() would block on it, and
+    # its verify has nothing driven to check. Not started, reported
+    # UNVERIFIED, as pick and abort turns are.
+    if getattr(sc, "goal", ""):
+        print(f"{path.name}: {'FAILURE' if fails else 'UNVERIFIED'} (goal pilot: needs the judge and the real driver)")
+        for line in log:
+            print(line)
+        return fails or (0 if os.environ.get("GENTAR_DRYRUN_UNVERIFIED") == "ok" else 1)
     if sc.driver_command:
         fails += drive(sc, env, workspace, log, unreplayed)
 

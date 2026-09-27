@@ -33,6 +33,10 @@ release_gate = true    # gentar/release-gate.sh refuses a v* release whose
                        # commit has no green `arena / phase2` job
 max_age_days = 0       # >0: that phase 2 must also be this recent
 
-# [check]
-# allow_drift = []     # kit files you have deliberately changed; --check
-                       # then notes the difference instead of failing
+[check]
+allow_drift = ["gentar/dryrun.py"]
+# kit files deliberately changed; --check notes the difference instead of
+# failing. gentar/dryrun.py: the v0.8.0 kit's dry-run starts a goal pilot's
+# driver and blocks on its interactive shell, so run_one reports a goal
+# pilot UNVERIFIED without starting it (gentar/test_dryrun_goal.py pins
+# that). Queued to gentar; drop this at the gentar tag that carries the fix.

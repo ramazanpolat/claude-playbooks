@@ -94,6 +94,17 @@ jobs:
       - name: Every clause has a reference entry and an example
         run: examples/coverage.sh
 
+  # Pins the local drift in the kit's gentar/dryrun.py (policy.toml
+  # [check] allow_drift): a goal pilot is reported UNVERIFIED in the
+  # dry-run, never started. Remove this job with the drift, at the gentar
+  # tag that carries the fix.
+  gentar-dryrun-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: goal pilot dry-run (UNVERIFIED, driver not started)
+        run: python3 gentar/test_dryrun_goal.py
+
   # SELECT beyond the built-in form runs through a real clickhouse-local:
   # the rows cpb pipes in and the query it rewrites are checked end to end.
   select-clickhouse:
