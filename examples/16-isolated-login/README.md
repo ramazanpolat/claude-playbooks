@@ -19,8 +19,9 @@ only if you run `/login` in it.
   shared login at once.
 - `UNSET ISOLATED LOGIN` shares the machine's login again from the next
   launch. It is refused while the playbook holds a login of its own, because
-  a shared launch would copy that login over the machine's and switch every
-  shared playbook to that account. Run `/logout` in it first. It is also
+  a shared launch would take it out of use: another account's login is set
+  aside (v3.23.1), and the same account's is copied over the machine's. Run
+  `/logout` in it first. It is also
   refused on a `SANDBOX` playbook, which is always isolated.
 - Use it for a second account, and for a throwaway or a third-party route
   whose `/login` must not land in the machine's shared login. With a

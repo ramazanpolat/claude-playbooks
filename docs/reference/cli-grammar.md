@@ -346,9 +346,11 @@ ALTER PLAYBOOK <name> UNSET ISOLATED LOGIN
   - The playbook always runs in a sandbox. `SANDBOX` implies an isolated
     login.
   - The playbook holds a login of its own: a `.credentials.json` file
-    carrying an account grant. A shared launch keeps the newer store, so it
-    would copy that login over the machine's login in `~/.claude` and switch
-    every shared playbook to that account. Run `/logout` in it first.
+    carrying an account grant. A shared launch would take it out of use.
+    Since v3.23.1 another account's login is set aside, and before that it
+    was copied over the machine's login in `~/.claude`. The same account's
+    login is copied over the machine's, since it is newer. Run `/logout` in
+    it first.
 - **Not "own login".** `cpb auth status` already reports `own-login` for
   something else: a playbook that blocks the machine token and uses the
   shared stored login. An isolated playbook is reported as `isolated`.

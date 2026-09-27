@@ -170,18 +170,32 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 				// -- and copying that over the global store would erase the
 				// account's credentials while looking like a routine sync.
 				if usable && storeHasOAuthGrant(targetCreds) {
-					// Share and sync: copy to global if the target (playbook's local file) is newer.
+					// Claude Code writes its plaintext store by rename, so a
+					// refresh or /login in a shared playbook leaves a file here.
+					// Only the machine's own account may be copied over the
+					// machine's store; any other login, or one that cannot be
+					// told apart, is set aside
+					// (docs/known-issues/shared-launch-copies-own-login-over-machine-login.md).
 					sourceInfo, err := os.Stat(sourceAbs)
-					if err == nil {
+					switch {
+					case os.IsNotExist(err):
+						// No machine login to replace: this one becomes it.
+						if err := copyFile(targetCreds, sourceAbs, 0600); err != nil {
+							return fmt.Errorf("failed to copy credentials to global: %w", err)
+						}
+					case err != nil:
+						return err
+					case sameAccount(targetDir):
 						if targetLinfo.ModTime().After(sourceInfo.ModTime()) {
 							if err := copyFile(targetCreds, sourceAbs, 0600); err != nil {
 								return fmt.Errorf("failed to copy newer credentials to global: %w", err)
 							}
 						}
-					} else if os.IsNotExist(err) {
-						if err := copyFile(targetCreds, sourceAbs, 0600); err != nil {
-							return fmt.Errorf("failed to copy credentials to global: %w", err)
+					default:
+						if err := setAsideOwnLogin(targetDir); err != nil {
+							return err
 						}
+						return os.Symlink(sourceAbs, targetCreds)
 					}
 				}
 				if err := os.Remove(targetCreds); err != nil {
@@ -324,17 +338,12 @@ func findAccountState(targetDir string) (map[string]any, error) {
 	}
 
 	targetState, _ := filepath.Abs(filepath.Join(targetDir, StateFileName))
+	// The machine's own state only. Other playbooks' state is never a
+	// source: an isolated one may be another account, and seeding its
+	// identity into a shared playbook is the cross-account bug this avoids.
 	candidates := []string{
 		filepath.Join(home, ".claude", StateFileName),
 		filepath.Join(home, StateFileName),
-	}
-
-	playbooksDir := os.Getenv("CLAUDE_PLAYBOOKS_DIR")
-	if playbooksDir == "" {
-		playbooksDir = filepath.Join(home, ".claude-playbooks")
-	}
-	if paths, err := discoverStateFiles(playbooksDir, targetState); err == nil {
-		candidates = append(candidates, paths...)
 	}
 
 	var fallback map[string]any
@@ -358,34 +367,6 @@ func findAccountState(targetDir string) (map[string]any, error) {
 	}
 
 	return fallback, nil
-}
-
-func discoverStateFiles(root, skipPath string) ([]string, error) {
-	var out []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "backups", "cache", "file-history", "node_modules", "projects", "session-env", "sessions", "telemetry":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != StateFileName {
-			return nil
-		}
-		abs, _ := filepath.Abs(path)
-		if abs != skipPath {
-			out = append(out, path)
-		}
-		return nil
-	})
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	return out, err
 }
 
 func readAccountState(path string) (map[string]any, error) {
