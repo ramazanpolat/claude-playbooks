@@ -1,6 +1,6 @@
 # CLI grammar
 
-Status: **implemented, v3.21.0.** Decided with the pilot on 2026-09-25/26.
+Status: **implemented, v3.22.0.** Decided with the pilot on 2026-09-25/27.
 Everything on this page is built; a section specified before it is built is
 marked **planned**.
 
