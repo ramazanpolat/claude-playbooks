@@ -140,6 +140,18 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	pp, ppok := r.dry.pilotProfile[from]
 	iso, isook := r.dry.isolated[from]
 	sbx, sbxok := r.dry.sandboxed[from]
+	// A playbook on disk carries its login setting under its new name: the
+	// directory it keeps says what it is.
+	if cfg != "" && !(isook && sbxok) {
+		if m, _ := manifest.Nearest(cfg); m != nil {
+			if !isook {
+				iso, isook = m.IsolateAuth, true
+			}
+			if !sbxok {
+				sbx, sbxok = m.Sandbox != nil && m.Sandbox.Always, true
+			}
+		}
+	}
 	r.recordPlaybook(from, false)
 	r.recordPlaybook(to, true)
 	if wok {

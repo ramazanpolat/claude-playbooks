@@ -231,7 +231,8 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
 	}
 	v.Sandbox = m.Sandbox != nil && m.Sandbox.Always
-	v.IsolatedLogin = m.IsolateAuth
+	// A sandbox never shares the machine's login, whatever the manifest says.
+	v.IsolatedLogin = m.IsolateAuth || v.Sandbox
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Profiles)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Unset)

@@ -157,3 +157,34 @@ func TestIsolatedLoginDryRun(t *testing.T) {
 		t.Fatalf("the dry run created e: %v", err)
 	}
 }
+
+// A sandboxed playbook reads as isolated even without isolate_auth; and a
+// dry run keeps a renamed playbook's login setting, refusing UNSET as the
+// real run does (agy review, v3.23.0).
+func TestIsolatedLoginSandboxAndRename(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "sb")
+	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("name = \"sb\"\n[sandbox]\nalways = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		IsolatedLogin bool `json:"isolated_login"`
+	}
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK sb --json")), &v); err != nil || !v.IsolatedLogin {
+		t.Fatalf("a sandboxed playbook: %v %+v", err, v)
+	}
+	f := writePlaybookFile(t, "ALTER PLAYBOOK sb RENAME TO sb2;\nALTER PLAYBOOK sb2 UNSET ISOLATED LOGIN;\n")
+	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
+		t.Fatalf("dry run after a rename: %v", err)
+	}
+	mustStmt(t, "CREATE PLAYBOOK own NO ALIAS ISOLATED LOGIN")
+	own := filepath.Join(config.ResolvePlaybooksDir(), "own", ".credentials.json")
+	if err := os.WriteFile(own, []byte(`{"claudeAiOauth":{"accessToken":"own"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f = writePlaybookFile(t, "ALTER PLAYBOOK own RENAME TO own2;\nALTER PLAYBOOK own2 UNSET ISOLATED LOGIN;\n")
+	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "has a login of its own") {
+		t.Fatalf("dry run after a rename, own login: %v", err)
+	}
+}
