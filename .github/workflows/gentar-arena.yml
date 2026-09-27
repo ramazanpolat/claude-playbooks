@@ -166,6 +166,10 @@ jobs:
       # forwards its whole trace to — ClickStack, say. Both or neither.
       # SECRETS, not variables: an internal address and an ingestion key.
       GENTAR_OTLP_EXPORT: ${{ secrets.GENTAR_OTLP_EXPORT }}
+      # Judge key for semantic (judged) turns — the arena coordinator's
+      # only, never forwarded to a bench. Unset = judged suites skipped by
+      # name in a sweep. A SECRET: it is an API key.
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
       GENTAR_OTLP_KEY: ${{ secrets.GENTAR_OTLP_KEY }}
     steps:
       - uses: actions/checkout@v4
