@@ -26,6 +26,10 @@ new=$(abs "$2")
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "${3:-$here}" && pwd)
 chmod 755 "$here/.ci/claude" "$here/.ci/with-secret"
+# Both binaries must run here at all, or every example would read as a skip.
+for b in "$old" "$new"; do
+  "$b" --version > /dev/null 2>&1 || { echo "cannot run $b:"; "$b" --version 2>&1 || true; exit 1; }
+done
 fail=0
 ran=0
 for dir in "$src"/[0-9][0-9]-*/; do

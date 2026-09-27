@@ -15,10 +15,11 @@ cp "$home/.claude.json" "$home/state.before"
 cd "$dir"
 use "$old"
 if [ -f .setup ]; then sh -e .setup; fi
-if ! cpb APPLY "$entry" --dry-run > "$home/old-dry.out" 2>&1; then
-  cat "$home/old-dry.out"
-  exit 3
-fi
+# Exit 1 is the old release refusing a statement it does not know: a skip.
+# Anything else (a crash, a signal) is a failure, never a skip.
+if cpb APPLY "$entry" --dry-run > "$home/old-dry.out" 2>&1; then dry=0; else dry=$?; fi
+if [ "$dry" -eq 1 ]; then cat "$home/old-dry.out"; exit 3; fi
+if [ "$dry" -ne 0 ]; then echo "the old binary failed (exit $dry), not a refusal:"; cat "$home/old-dry.out"; exit 1; fi
 cpb APPLY "$entry" --yes > "$home/old-apply.out"
 cpb SHOW CREATE ALL > "$home/old.cpb"
 cpb auth status --json > "$home/old-auth.json"
