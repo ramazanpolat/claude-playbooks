@@ -15,8 +15,8 @@ same way.
 What it is NOT: a bench. There is no sandbox, no template, no network policy,
 no real agent. It proves the shell and the assertions; the arena still proves
 the isolation. Suites declaring `credentials` are skipped -- they need a real
-agent and a real key. Suites whose [driver] uses `pick` or `abort` turns come
-back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
+agent and a real key. Suites whose [driver] uses `pick` or `abort` turns, a judged `expect`, or a
+goal pilot come back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
 picker that never matched or a danger gate that never fired must not read as
 a pass.
 
@@ -46,7 +46,7 @@ Needs a checkout of the engine for its scenario parser (no Docker, no
 bench): `gentar/run.sh --stage-engine` once, or GENTAR_ENGINE pointing
 at an existing one.
 """
-import os, pty, re, select, shlex, shutil, subprocess, sys, tempfile, time
+import os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -277,18 +277,30 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
             log.append(f"  step {i} EXIT {r.returncode}\n    {step[:160]}\n    {(r.stderr or r.stdout).strip()[:300]}")
 
     unreplayed: list[str] = []
-    # LOCAL DRIFT (policy.toml [check] allow_drift; queued to gentar, drop at
-    # the tag that carries it): a goal pilot needs the judge and the real
-    # driver. Its shell waits for a pilot, so drive() would block on it, and
-    # its verify has nothing driven to check. Not started, reported
-    # UNVERIFIED, as pick and abort turns are.
-    if getattr(sc, "goal", ""):
-        print(f"{path.name}: {'FAILURE' if fails else 'UNVERIFIED'} (goal pilot: needs the judge and the real driver)")
-        for line in log:
-            print(line)
-        return fails or (0 if os.environ.get("GENTAR_DRYRUN_UNVERIFIED") == "ok" else 1)
-    if sc.driver_command:
-        fails += drive(sc, env, workspace, log, unreplayed)
+    judged_turns = any(isinstance(t, dict) and "judge" in t for t in sc.turns)
+    if judged_turns and not getattr(sc, "goal", ""):
+        # A judged turn waits on a judge that only the arena has; the turns
+        # after it would drive a screen nobody confirmed. Not started, not
+        # verified — as for a goal pilot (Codex: an interactive driver
+        # still hung here).
+        unreplayed.append("judge")
+        fails += 1
+        log.append("  judged turns: need the judge in the arena — NOT verified here")
+        verify_files, verify_commands = [], []
+    elif getattr(sc, "goal", ""):
+        # A goal pilot is driven by the judge in the arena: here there is
+        # nothing to replay, and starting its command would block on an
+        # interactive program forever (claude-playbooks: `run.sh --check`
+        # hung). Its assertions describe the end of a drive that did not
+        # happen, so they are not run either. UNVERIFIED, not a pass.
+        unreplayed.append("goal")
+        fails += 1
+        log.append("  goal pilot: driven by the judge in the arena — NOT verified here")
+        verify_files, verify_commands = [], []
+    else:
+        verify_files, verify_commands = sc.files, sc.commands
+        if sc.driver_command:
+            fails += drive(sc, env, workspace, log, unreplayed)
 
     # File assertions go through the same shell as the steps, for the
     # same reason the engine runs them inside the bench: `test -e` and
@@ -296,7 +308,7 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
     # checking from the harness's own cwd would answer a different
     # question than the arena does. `~` is expanded to the scratch home
     # exactly as check_files expands it to the bench pilot's.
-    for f in sc.files:
+    for f in verify_files:
         p = f["path"].replace("~", home, 1) if f["path"].startswith("~") else f["path"]
         contains = f.get("contains")
         if contains is None:
@@ -313,7 +325,7 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
                 fails += 1
                 log.append(f"  file {f['path']} LACKS {contains!r} (or is missing)")
 
-    for i, c in enumerate(sc.commands):
+    for i, c in enumerate(verify_commands):
         r = sh(c["command"])
         ok = r.returncode == 0 and c.get("contains", "") in (r.stdout + r.stderr)
         if not ok:
@@ -384,6 +396,13 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
                 buf = ""   # consumed, so the next turn matches a fresh prompt
             if not ok:
                 log.append(f"  turn {i} answer /{t['prompt']}/: prompt never appeared")
+        elif kind == "expect" and "judge" in t:
+            # A judged expect asks a judge about the screen — only in the
+            # arena. It must not crash here (it has no `pattern`) and must
+            # not pass either: not verified.
+            ok = False
+            unreplayed.append("judge")
+            log.append(f"  turn {i}: judged expect needs the judge — NOT verified here")
         elif kind == "expect":
             ok = pump(t["pattern"], t.get("timeout", 60))
             if not ok:
@@ -402,13 +421,29 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
                        f"— NOT verified here (run it in the arena)")
         if not ok:
             fails += 1
+    # Drain what is left, but never wait forever: a driver still waiting for
+    # input nobody will send (an interactive program after an unreplayed
+    # turn) is ended, so the dry run — and `run.sh --check` — cannot hang.
+    end = time.time() + 10
     try:
-        while select.select([fd], [], [], 1.0)[0]:
+        while time.time() < end and select.select([fd], [], [], 1.0)[0]:
             if not os.read(fd, 4096):
                 break
     except OSError:
         pass
-    os.waitpid(pid, 0)
+    done, _ = os.waitpid(pid, os.WNOHANG)
+    if not done:
+        log.append("  driver still running after its turns — ended (not a verdict)")
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                break
+            time.sleep(0.5)
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                break
+        else:
+            os.waitpid(pid, 0)
     return fails
 
 

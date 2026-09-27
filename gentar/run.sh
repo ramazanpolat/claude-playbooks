@@ -341,6 +341,13 @@ EOF
 }
 
 # 0 when the suite has a judged turn (a semantic expect).
+# A pull request, whichever event carries it (pull_request_target too —
+# claude-playbooks: a repo on that trigger bypassed the guard).
+is_pr_event() {
+  case "${GITHUB_EVENT_NAME:-}" in pull_request|pull_request_target) return 0 ;; esac
+  return 1
+}
+
 judged() {
   # Deliberately broad: any non-comment line where `judge` or `goal` is a key
   # segment — bare, quoted or dotted, in a key or a table header
@@ -369,7 +376,7 @@ if [ "$SWEEP" = 1 ]; then
     s=$(basename "$f" .toml)
     if ! credentials_present "$f"; then
       echo "skipping $s — no credential group of it is fully set" >&2
-    elif [ "${GITHUB_EVENT_NAME:-}" = pull_request ] && judged "$f"; then
+    elif is_pr_event && judged "$f"; then
       echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
     elif ! judge_ready "$f"; then
       echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
@@ -385,7 +392,7 @@ fi
 # A judged suite sends screens to a judge and gates on probabilities: never
 # on a pull request, whatever picked it (a policy, no policy, a PR's own
 # `gentar:` line). Enforced here, where suites run, not only in plan.py.
-if [ "${GITHUB_EVENT_NAME:-}" = pull_request ]; then
+if is_pr_event; then
   for s in "$SCENARIO" "$@"; do
     if [ -f "$HERE/scenarios/$s.toml" ] && judged "$HERE/scenarios/$s.toml"; then
       echo "refusing $s — judged suites never run on a pull request (phase 2 only)" >&2
@@ -402,7 +409,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.8.0}
+REF=${GENTAR_REF:-v0.8.1}
 
 # --review: has this repo outgrown its suites?
 #
