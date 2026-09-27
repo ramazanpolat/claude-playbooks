@@ -661,10 +661,13 @@ the pilot names (that one is v4.0.0).
 
 - **Hidden:** `env`, `env-profile`, `create <name>`, `link`, `delete`,
   `rename`, `alias`, `dealias`, `list`, `info` are hidden from help and
-  completion and keep working with all their flags. Nothing is printed on
-  stdout; when stderr is a terminal, one line goes there:
-  `(hidden command; the grammar form is: cpb …)`, with the exact statement
-  for the given arguments where it can be derived. Scripts see no change.
+  completion and keep working with all their flags. They are **deprecated**
+  and are removed in v4.0.0, the first release after the stable v3.24.0.
+  Every use prints one line on stderr, on a terminal or not, so scripts are
+  warned too: ``Deprecated: `claude-playbook <command>` is removed in v4.0.0;
+  the grammar form is: cpb …``. It gives the exact statement for the given
+  arguments where one can be derived. Nothing is printed on stdout, so what a
+  script parses there is unchanged.
 - **Their own code paths.** They are **not** re-implemented on the new
   engine: a bug there must not take the fallback down with it. The two paths
   share the same files, so the old code must tolerate the grammar's two

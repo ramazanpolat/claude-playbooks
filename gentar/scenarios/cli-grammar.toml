@@ -303,3 +303,10 @@ contains = "shared-sync-same-account-ok"
 # slot back and SET then applies.
 command = '''P="$HOME/.claude-playbooks/shh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK shh NO ALIAS >/dev/null && printf '{"statusLine":{"type":"command","command":"statusmux render","refreshInterval":10}}\n' > "$S" && printf "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain';\n" > "$HOME/shh.cpb" && claude-playbook APPLY "$HOME/shh.cpb" --dry-run --json | tr -d ' \n' | grep -qF '"code":"statusline_held_by_host"' && claude-playbook APPLY "$HOME/shh.cpb" > "$HOME/shh.out" 2> "$HOME/shh.err" && grep -q " 0 changed, 1 unchanged" "$HOME/shh.out" && grep -q "held by a host" "$HOME/shh.err" && c | grep -qF '"command":"statusmuxrender"' && claude-playbook "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain' REFRESH 5" > /dev/null 2>&1 && c | grep -qF '"command":"statusmuxrender"' && c | grep -qF '"refreshInterval":5' && claude-playbook "ALTER PLAYBOOK shh UNSET STATUSLINE" > /dev/null && claude-playbook "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain'" > /dev/null 2>&1 && c | grep -qF '"command":"echoplain"' && echo statusline-host-kept-ok'''
 contains = "statusline-host-kept-ok"
+
+[[verify.commands]]
+# The hidden pre-grammar commands are deprecated: off a terminal too, each
+# use prints one stderr line (removed in v4.0.0, with the grammar form), and
+# stdout is exactly what the command prints on its own.
+command = '''claude-playbook CREATE PLAYBOOK hdp NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook list > "$HOME/hd.out" 2> "$HOME/hd.err" && grep -qF 'Deprecated: `claude-playbook list` is removed in v4.0.0; the grammar form is: ' "$HOME/hd.err" && [ "$(wc -l < "$HOME/hd.err" | tr -d ' ')" = 1 ] && ! grep -q Deprecated "$HOME/hd.out" && grep -q hdp "$HOME/hd.out" && claude-playbook env hdp > /dev/null 2> "$HOME/hd2.err" && grep -qF 'Deprecated: `claude-playbook env` is removed in v4.0.0' "$HOME/hd2.err" && echo hidden-deprecated-ok'''
+contains = "hidden-deprecated-ok"
