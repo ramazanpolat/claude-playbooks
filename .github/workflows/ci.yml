@@ -97,8 +97,8 @@ jobs:
   # The upgrade from the previous release: that release's binary applies
   # its own examples, then this build takes over the same state and must
   # read it identically (examples/upgrade.sh says what is compared). The
-  # previous release is the newest tag reachable from HEAD that is not on
-  # HEAD itself, so a release commit is checked against the one before it.
+  # previous release is the newest release tag reachable from HEAD^, so a
+  # release commit is checked against the one before it.
   upgrade:
     strategy:
       fail-fast: false
@@ -115,8 +115,10 @@ jobs:
       - name: Build this commit and the previous release
         run: |
           set -eu
-          here=$(git tag --points-at HEAD)
-          prev=$(git tag --merged HEAD --sort=-v:refname | grep '^v[0-9]' | grep -vxF -e "${here:-none}" | head -1)
+          # HEAD^ is main's previous commit on a release or main push, and
+          # the base branch's tip on a pull request's merge ref: its newest
+          # release tag is the previous release, whatever HEAD carries.
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^)
           echo "previous release: $prev"
           echo "PREV=$prev" >> "$GITHUB_ENV"
           git worktree add -q "$RUNNER_TEMP/prev" "$prev"
