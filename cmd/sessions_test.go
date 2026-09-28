@@ -429,3 +429,87 @@ func TestProcStartsReal(t *testing.T) {
 		t.Fatalf("not lstart's format: %q", v)
 	}
 }
+
+// A live pid whose session file records no start time is not known to be
+// the same process: listed, never resumed (Codex, #132).
+func TestNoProcStartIsNotConfirmedLive(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	a := filepath.Join(root, "alpha")
+	writeSessionFile(t, a, 201, sidLive, work, "interactive", "", time.Now())
+	writeTranscript(t, a, work, sidLive, "m", "", time.Now())
+	fakeProcs(t, map[int]string{201: liveStart})
+	log := resumeClaude(t)
+	chdirT(t, work)
+	if out := mustStmt(t, "SHOW SESSIONS --json"); !strings.Contains(out, sidLive) {
+		t.Fatalf("listed:\n%s", out)
+	}
+	var err error
+	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidLive}) })
+	if err == nil || !strings.Contains(err.Error(), "records no start time") || readSessLog(t, log) != "" {
+		t.Fatalf("resumed an unconfirmed session: %v", err)
+	}
+	if _, err := stmt(t, "RESUME"); err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("bare RESUME: %v", err)
+	}
+}
+
+// A registry that cannot be read fails the listing rather than leave its
+// plain directories out unnoticed (Codex, #132).
+func TestUnreadableDirRegistryFails(t *testing.T) {
+	root, _, _ := sessionFixture(t)
+	if err := os.MkdirAll(filepath.Join(root, ".state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".state", "dirs.toml"), []byte("[dirs\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stmt(t, "SHOW SESSIONS"); err == nil || !strings.Contains(err.Error(), "dirs.toml") {
+		t.Fatalf("malformed registry: %v", err)
+	}
+}
+
+// The working directory comes from the transcript's head when its tail is
+// one oversized record; with none at all, RESUME from elsewhere is refused
+// rather than run in the wrong folder (Codex, #132).
+func TestResumeCwdFromTheHead(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	fakeProcs(t, nil)
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	a := filepath.Join(root, "alpha")
+	dir := filepath.Join(a, "projects", encodeProjectDir(work))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	big := `{"type":"user","message":{"content":"` + strings.Repeat("x", transcriptTailBytes+1024) + `"}}`
+	head := fmt.Sprintf(`{"type":"user","cwd":%q}`, work)
+	if err := os.WriteFile(filepath.Join(dir, sidDead+".jsonl"), []byte(head+"\n"+big+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, sidOld+".jsonl"), []byte(big+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	log := resumeClaude(t)
+	elsewhere := t.TempDir()
+	chdirT(t, elsewhere)
+	var err error
+	msg := captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidDead}) })
+	if err != nil || !strings.HasPrefix(readSessLog(t, log), work+"|") {
+		t.Fatalf("%v %q\n%s", err, readSessLog(t, log), msg)
+	}
+	// RESUME moved into the session's folder; go back out.
+	chdirT(t, elsewhere)
+	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidOld}) })
+	if err == nil || !strings.Contains(err.Error(), "records no working directory") {
+		t.Fatalf("no cwd, elsewhere: %v", err)
+	}
+	// In its own folder, a transcript with no cwd still resumes there.
+	chdirT(t, work)
+	_ = os.Remove(log)
+	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidOld}) })
+	if err != nil || !strings.HasPrefix(readSessLog(t, log), work+"|") {
+		t.Fatalf("no cwd, here: %v %q", err, readSessLog(t, log))
+	}
+}

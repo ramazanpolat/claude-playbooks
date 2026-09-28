@@ -139,8 +139,12 @@ func (c resumeCandidate) json(cwd string) resumeJSON {
 // liveRefusal is the refusal for a session still live in another process.
 func liveRefusal(id string, s *liveSession) error {
 	if s.state == liveUnknown {
-		return fmt.Errorf("session %s may still be running (playbook %s, pid %d in another pid domain, %q): cpb cannot tell, so it does not resume it. Two processes on one session id corrupt it; close that one first, or pick another with RESUME --list",
-			id, s.dir.label, s.f.PID, s.f.PIDDomain)
+		why := fmt.Sprintf("pid %d in another pid domain, %q", s.f.PID, s.f.PIDDomain)
+		if s.f.PIDDomain == "" || s.f.PIDDomain == pidDomain {
+			why = fmt.Sprintf("pid %d is alive, and its session file records no start time to confirm it is the same process", s.f.PID)
+		}
+		return fmt.Errorf("session %s may still be running (playbook %s, %s): cpb cannot tell, so it does not resume it. Two processes on one session id corrupt it; close that one first, or pick another with RESUME --list",
+			id, s.dir.label, why)
 	}
 	return fmt.Errorf("session %s is still running (playbook %s, pid %d, since %s). Two processes on one session id corrupt it; close that one first, or pick another with RESUME --list",
 		id, s.dir.label, s.f.PID, formatAge(time.UnixMilli(s.f.StartedAt)))
@@ -254,7 +258,22 @@ func launchResume(c resumeCandidate, cwd string) error {
 		}
 	}
 	// Claude Code finds a session by the working directory it ran in.
-	if dir := readTranscriptTail(c.path).cwd; dir != "" && dir != cwd {
+	dir := transcriptCwd(c.path)
+	if dir == "" {
+		// Nothing says where it ran: the current directory is right only
+		// if the transcript sits under this directory's project.
+		here := false
+		for _, s := range cwdSpellings(cwd) {
+			if filepath.Base(filepath.Dir(c.path)) == encodeProjectDir(s) {
+				here = true
+			}
+		}
+		if !here {
+			return fmt.Errorf("session %s records no working directory cpb can read, and it did not run here; run RESUME in the folder it ran in", c.id)
+		}
+		dir = cwd
+	}
+	if dir != cwd {
 		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 			return fmt.Errorf("session %s ran in %s, which no longer exists", c.id, dir)
 		}

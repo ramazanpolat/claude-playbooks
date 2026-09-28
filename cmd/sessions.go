@@ -176,15 +176,19 @@ func sessionDirs(forName string) ([]sessionDir, error) {
 	for _, pb := range pbs {
 		dirs = append(dirs, playbookSessionDir(pb))
 	}
-	if st, err := readDirState(); err == nil {
-		var plain []string
-		for d := range st.Dirs {
-			plain = append(plain, d)
-		}
-		sort.Strings(plain)
-		for _, d := range plain {
-			dirs = append(dirs, sessionDir{label: d, path: d})
-		}
+	// A registry that cannot be read is an error, not an empty list: an
+	// answer without its plain directories would pass for a complete one.
+	st, err := readDirState()
+	if err != nil {
+		return nil, err
+	}
+	var plain []string
+	for d := range st.Dirs {
+		plain = append(plain, d)
+	}
+	sort.Strings(plain)
+	for _, d := range plain {
+		dirs = append(dirs, sessionDir{label: d, path: d})
 	}
 	return dirs, nil
 }
@@ -262,12 +266,20 @@ func readSessionFiles(dirs []sessionDir) []liveSession {
 			s.state = liveUnknown
 		default:
 			start, ok := starts[s.f.PID]
-			// A pid that is alive but started at another time is a reused
-			// pid: the session it recorded has ended.
-			if !ok || (s.f.ProcStart != "" && strings.Join(strings.Fields(s.f.ProcStart), " ") != start) {
+			switch {
+			case !ok:
 				continue
+			case s.f.ProcStart == "":
+				// No start time to compare: the pid may be reused, so the
+				// session is not known to be live, and not known to be over.
+				s.state = liveUnknown
+			case strings.Join(strings.Fields(s.f.ProcStart), " ") != start:
+				// Alive, but started at another time: a reused pid, and the
+				// session it recorded has ended.
+				continue
+			default:
+				s.state = live
 			}
-			s.state = live
 		}
 		out = append(out, s)
 	}
@@ -353,6 +365,31 @@ func readTranscriptTail(path string) transcriptTail {
 		}
 	}
 	return t
+}
+
+// transcriptCwd is the directory a transcript's session ran in: the last
+// cwd in its tail, else the first in its head (the tail may be one record
+// too large to hold). "" when neither has one.
+func transcriptCwd(path string) string {
+	if c := readTranscriptTail(path).cwd; c != "" {
+		return c
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(io.LimitReader(f, transcriptTailBytes))
+	sc.Buffer(make([]byte, 0, 64<<10), transcriptTailBytes+1)
+	var line struct {
+		Cwd string `json:"cwd"`
+	}
+	for sc.Scan() {
+		if json.Unmarshal(sc.Bytes(), &line) == nil && line.Cwd != "" {
+			return line.Cwd
+		}
+	}
+	return ""
 }
 
 func rfc3339(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z") }

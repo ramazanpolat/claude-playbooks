@@ -1645,11 +1645,14 @@ RESUME --list [FOR PLAYBOOK <name>] [--json]
 **Where it comes from.** Claude Code keeps a file for each of its live
 processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 - **Which dirs.** cpb reads those files in the config dirs it knows: every
-  playbook, and every plain directory in `.state/dirs.toml`.
+  playbook, and every plain directory in `.state/dirs.toml`. If that
+  registry cannot be read, the statement fails rather than answer without
+  its directories.
 - **Live.** A session is live when its pid is alive **and** the process
   started when the file says. On Linux that is `/proc/<pid>/stat`'s
   starttime; elsewhere, `ps`'s lstart read in UTC. So a pid that was reused
-  since does not count.
+  since does not count. A live pid whose file records no start time cannot
+  be confirmed: it is listed, and `RESUME` refuses it.
 - **Kinds.** Kinds other than `interactive` and `bg` are not listed; a
   daemon's spare workers write no file.
 - **Nothing else is read.** cpb reads no process's environment, runs no
@@ -1694,7 +1697,9 @@ path, as `cpb run <name>` and its launcher do. That covers env sets,
 variables, secret references, the login and the exit line.
 - **The working directory** becomes the one the session ran in, since that
   is where Claude Code looks it up. cpb says so when that differs from the
-  current directory.
+  current directory. That folder is read from the transcript's last `cwd`,
+  or its first when the tail holds none. A transcript that records no `cwd`
+  resumes only from its own project's folder.
 - **A plain directory's session** runs `claude --resume <id>` with
   `CLAUDE_CONFIG_DIR` set to that directory, and nothing else added.
 - **No id.** A bare `RESUME` takes the sessions of the current folder,
@@ -1707,8 +1712,9 @@ variables, secret references, the login and the exit line.
   than one config dir is refused until `FOR PLAYBOOK` names one.
 - **A live session is refused,** naming the playbook and the pid, and
   nothing is launched. Two processes on one session id corrupt it, which
-  is the `claude --continue` hazard. A session recorded in another pid
-  domain (a sandbox, another host) is refused too, since cpb cannot tell.
+  is the `claude --continue` hazard. A session cpb cannot confirm is
+  refused too: one recorded in another pid domain (a sandbox, another
+  host), or a live pid with no recorded start time.
   There is no `--force`.
 - **`RESUME --list`** lists the 10 newest sessions of the current folder,
   live ones marked with their pid (`SESSION PLAYBOOK ACTIVE MODEL LIVE
