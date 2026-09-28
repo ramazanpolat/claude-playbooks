@@ -42,16 +42,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check tag is on main
+      # A release comes from main, or from its own minor's release branch
+      # (v3.24.x from release/v3.24). Anything else FAILS, with the reason:
+      # it used to skip green, so a tag on the wrong commit published
+      # nothing and said nothing. The rule and its cases:
+      # .github/scripts/release-refs.sh and release-refs_test.sh.
+      - name: Check tag is on main or its release branch
         id: release_gate
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            echo "Tag ${{ github.ref_name }} points to $GITHUB_SHA, which is not on origin/main. Skipping release."
-          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main '+refs/heads/release/*:refs/remotes/origin/release/*'
+          where=$(.github/scripts/release-refs.sh gate "$TAG" "$GITHUB_SHA") || exit 1
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "Tag $TAG ($GITHUB_SHA) is on $where"
 
       # package.json's version is what `npx github:ramazanpolat/claude-playbooks`
       # runs (bin/npx-shim.sh reads npm_package_version), so a release whose

@@ -48,33 +48,28 @@ jobs:
           sh -n install.sh
           sh -n uninstall.sh
           sh -n bin/npx-shim.sh
+          sh -n .github/scripts/release-refs.sh
 
-      # package.json "version" must equal the latest release tag: the npx
-      # shim uses it to pick the release it fetches, so a stale value makes
-      # `npx github:ramazanpolat/claude-playbooks` serve an old binary.
-      # Run only on main — a PR can legitimately be ahead of the tag.
-      #
-      # --match 'v*' is load-bearing: this repo also carries non-release
-      # tags that trigger the arena workflow ('arena', 'arena-*'), and a
-      # bare `git describe` returns the nearest tag of ANY kind. Once such
-      # a tag sits closer to HEAD than the last release, an unmatched
-      # describe compares package.json against a trigger tag's name and
-      # every push to main fails.
-      - name: npx package version matches latest tag
+      # Which tag commits may be released, and what the npx check says as
+      # tags appear, on a throwaway repository (both OSes: BSD tools too).
+      - name: Release refs
+        run: sh .github/scripts/release-refs_test.sh
+
+      # package.json "version" is what the npx shim fetches, so on main it
+      # must name the newest RELEASE: the highest vX.Y.Z tag by version, rc
+      # tags and the arena's trigger tags ('arena', 'arena-*') excluded. Not
+      # `git describe` from HEAD: a release tagged on a release branch
+      # (v3.24.0 on release/v3.24) is not an ancestor of main, and describe
+      # would keep main's npx on the previous release forever. Ahead of the
+      # newest release with no such tag yet passes with a warning: the bump
+      # commit of a release about to be tagged. Main only (CI's push trigger
+      # is main): a release branch stays on its own minor once a newer one is
+      # released, which this check would call stale.
+      - name: npx package version matches the newest release
         if: github.event_name == 'push'
         run: |
-          latest=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
-          if [ -z "$latest" ]; then
-            echo "no tags yet; skipping"
-            exit 0
-          fi
           pkg=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)
-          if [ "v$pkg" != "$latest" ]; then
-            echo "package.json version ($pkg) != latest tag ($latest)." \
-              && echo "Bump package.json in the same commit as the release tag." \
-              && exit 1
-          fi
-          echo "package.json version ($pkg) matches latest tag ($latest)"
+          .github/scripts/release-refs.sh npx-check "$pkg"
 
   # Every example in examples/ is applied as its README says, on a real
   # build, in a throwaway HOME: dry run, apply, apply again with no change.
