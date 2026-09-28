@@ -201,7 +201,7 @@ contains = "dir-target-ok"
 # it. The real clickhouse-local is not assumed on the bench: GitHub CI's
 # select-clickhouse job runs it end to end, and a unit test pins stdin to
 # SHOW … --json byte for byte.
-command = '''H="$HOME/chstub"; mkdir -p "$H" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "$HOME/ch.args"' 'cat > "$HOME/ch.in"' 'echo stub-ok' > "$H/clickhouse" && chmod 755 "$H/clickhouse" && N=$(claude-playbook "SELECT name FROM PLAYBOOKS" | tail -n +3 | wc -l | tr -d ' ') && [ "$N" -ge 5 ] && claude-playbook "SELECT name, envs FROM PLAYBOOKS" | grep -q "^opb " && claude-playbook "SELECT name FROM PLAYBOOKS --json" | grep -qF '"name": "gpb"' && if claude-playbook "SELECT NAME FROM PLAYBOOKS" > "$HOME/sel.err" 2>&1; then echo case-accepted; elif ! grep -q "unknown column 'NAME'" "$HOME/sel.err"; then echo case-wrong-error; elif claude-playbook "SELECT count() FROM PLAYBOOKS; SELECT 1" >/dev/null 2>&1; then echo second-statement-accepted; else CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT name FROM PLAYBOOKS WHERE name != 'FROM VARS' ORDER BY name" | grep -qx stub-ok && [ "$(head -1 "$HOME/ch.args")" = local ] && grep -qx JSONEachRow "$HOME/ch.args" && grep -qx -- "--structure" "$HOME/ch.args" && tail -1 "$HOME/ch.args" | grep -qF "AS version_tuple FROM table) WHERE name != 'FROM VARS' ORDER BY name" && [ "$(wc -l < "$HOME/ch.in" | tr -d ' ')" = "$N" ] && [ "$(grep -c '^{"name":"' "$HOME/ch.in")" = "$N" ] && ! grep -q "sk-live" "$HOME/ch.in" && CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT key FROM VARS WHERE playbook = 'gpb'" | grep -qx stub-ok && grep -q '"key":"X_TOKEN"' "$HOME/ch.in" && ! grep -q "sk-live" "$HOME/ch.in" && echo select-ok; fi'''
+command = '''H="$HOME/chstub"; mkdir -p "$H" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "$HOME/ch.args"' 'cat > "$HOME/ch.in"' 'echo stub-ok' > "$H/clickhouse" && chmod 755 "$H/clickhouse" && N=$(claude-playbook "SELECT name FROM PLAYBOOKS" | tail -n +3 | wc -l | tr -d ' ') && [ "$N" -ge 5 ] && claude-playbook "SELECT name, envs FROM PLAYBOOKS" | grep -q "^opb " && claude-playbook "SELECT name FROM PLAYBOOKS --json" | grep -qF '"name": "gpb"' && if claude-playbook "SELECT NAME FROM PLAYBOOKS" > "$HOME/sel.err" 2>&1; then echo case-accepted; elif ! grep -q "unknown column 'NAME'" "$HOME/sel.err"; then echo case-wrong-error; elif claude-playbook "SELECT count() FROM PLAYBOOKS; SELECT 1" >/dev/null 2>&1; then echo second-statement-accepted; else CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT name FROM PLAYBOOKS WHERE name != 'FROM VARS' ORDER BY name" | grep -qx stub-ok && [ "$(head -1 "$HOME/ch.args")" = local ] && grep -qx JSONEachRow "$HOME/ch.args" && grep -qx -- "--structure" "$HOME/ch.args" && tail -1 "$HOME/ch.args" | grep -qF "AS version_tuple, pilot_profile FROM table) WHERE name != 'FROM VARS' ORDER BY name" && [ "$(wc -l < "$HOME/ch.in" | tr -d ' ')" = "$N" ] && [ "$(grep -c '^{"name":"' "$HOME/ch.in")" = "$N" ] && ! grep -q "sk-live" "$HOME/ch.in" && CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT key FROM VARS WHERE playbook = 'gpb'" | grep -qx stub-ok && grep -q '"key":"X_TOKEN"' "$HOME/ch.in" && ! grep -q "sk-live" "$HOME/ch.in" && echo select-ok; fi'''
 contains = "select-ok"
 
 [[verify.commands]]
@@ -402,3 +402,19 @@ D="$(claude-playbook DESCRIBE SESSIONS --json | tr -d ' \n')"
 [ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)"}]' || { echo tty-describe-wrong; exit 1; }
 echo sessions-tty-ok'''
 contains = "sessions-tty-ok"
+
+[[verify.commands]]
+# pilot_profile (v3.26.0) in SHOW PLAYBOOK --json and the PLAYBOOKS table:
+# imported for a plain CREATE, not_imported for NO PILOT PROFILE and for no
+# CLAUDE.md, unknown for a CLAUDE.md that cannot be read (a directory here,
+# whatever the uid); last in the object and the table; a human line.
+command = '''
+P="$HOME/.claude-playbooks"; f() { printf '%s\n' "$(claude-playbook SHOW PLAYBOOK "$1" --json | tr -d ' \n')" | sed -n 's/.*\("pilot_profile":"[a-z_]*"}\)$/\1/p'; }
+claude-playbook CREATE PLAYBOOK ppi NO ALIAS >/dev/null && claude-playbook CREATE PLAYBOOK ppn NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppg NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppu NO ALIAS >/dev/null || exit 1
+rm "$P/ppg/CLAUDE.md" && rm "$P/ppu/CLAUDE.md" && mkdir "$P/ppu/CLAUDE.md" || exit 1
+[ "$(f ppi)" = '"pilot_profile":"imported"}' ] && [ "$(f ppn)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppg)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppu)" = '"pilot_profile":"unknown"}' ] || { echo pp-show-wrong; exit 1; }
+claude-playbook "SELECT name, pilot_profile FROM PLAYBOOKS" --json | tr -d ' \n' | grep -qF '"name":"ppi","pilot_profile":"imported"' || { echo pp-select-wrong; exit 1; }
+claude-playbook DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -qF '{"name":"pilot_profile","type":"String"}]' || { echo pp-describe-wrong; exit 1; }
+claude-playbook SHOW PLAYBOOK ppn | grep -q '^Pilot profile: *not imported$' || { echo pp-human-wrong; exit 1; }
+echo pilot-profile-field-ok'''
+contains = "pilot-profile-field-ok"

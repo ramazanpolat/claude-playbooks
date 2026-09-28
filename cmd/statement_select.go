@@ -44,6 +44,11 @@ const versionPattern = `^v?([0-9]+([.][0-9]+)*)`
 
 var versionRe = regexp.MustCompile(versionPattern)
 
+// playbooksLateColumns are the PLAYBOOKS columns added after v3.24.0, the
+// stable release: clickhouse-local's SELECT * lists them after the computed
+// version_tuple, where they were appended.
+var playbooksLateColumns = []string{"pilot_profile"}
+
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
 	"arrayMap(x -> toUInt32(x), splitByChar('.', extract(ifNull(version, ''), '" + versionPattern + "'))))"
@@ -51,10 +56,10 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
 		columns: []string{"name", "version", "version_tuple", "path", "source", "linked", "launcher", "envs", "vars", "sandbox", "isolated_login",
-			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker"},
+			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "pilot_profile"},
 		structure: "name String, version Nullable(String), path String, source JSON, linked Nullable(String), " +
 			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox Bool, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
-			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON",
+			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, pilot_profile String",
 		rows: playbookRows,
 	},
 	"ENVS": {
@@ -396,7 +401,11 @@ func planSelect(q string) (*selectPlan, error) {
 	f := froms[0]
 	source := "FROM table"
 	if f.table == "PLAYBOOKS" {
-		source = "FROM (SELECT *, " + versionTupleSQL + " AS version_tuple FROM table)"
+		// On this path the computed version_tuple has always come after the
+		// structure's columns (SELECT *); a column added since (v3.26.0)
+		// goes after it, so every earlier position holds (Codex, #135).
+		late := strings.Join(playbooksLateColumns, ", ")
+		source = "FROM (SELECT * EXCEPT (" + late + "), " + versionTupleSQL + " AS version_tuple, " + late + " FROM table)"
 	}
 	return &selectPlan{table: f.table, query: q[:f.start] + source + q[f.end:], format: format}, nil
 }

@@ -824,6 +824,19 @@ created empty; `Launcher:` reads `(none)` without one.
 `source` is null for a playbook without one; `linked` is the target directory
 of a linked playbook, else null; `launcher` is null without one.
 
+**`pilot_profile`** (v3.26.0) is the object's last field, and the human form
+has a `Pilot profile:` line. It says whether the playbook's `CLAUDE.md`
+imports `~/.pilot-profile/`:
+- `"imported"`: an `@~/.pilot-profile/…` line, or one through the home
+  directory;
+- `"not_imported"`: none, including a playbook created `NO PILOT PROFILE`,
+  and one with no `CLAUDE.md`;
+- `"unknown"`: `CLAUDE.md` cannot be read. cpb never guesses.
+
+It is the same detector the `pilot_profile_third_party_endpoint` warning
+uses. cpb reads the import line only; it never reads the profile, and never
+runs a pilot-profile tool.
+
 **`SHOW PLAYBOOKS`** (also a bare `SHOW`, and `SHOW --json`): human form, one header line and then one line per
 playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 (`-` for none). `--json`: an array of the `SHOW PLAYBOOK` objects.
@@ -928,7 +941,7 @@ so `source.url` and `vars[1].key` work):
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` |
+| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`pilot_profile`, v3.26.0, is the last column) |
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
 | `PANELS` | status line panel, per playbook (v3.25.0) | `playbook panel type source cpb row priority align` |

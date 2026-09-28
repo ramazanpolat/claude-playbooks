@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -202,4 +203,32 @@ func (r *stmtRun) warnExposure(before, after map[string]string) {
 	} else {
 		r.warning, r.warningCode = msg, warnPilotProfileThirdParty
 	}
+}
+
+// SHOW PLAYBOOK's pilot_profile values (v3.26.0).
+const (
+	pilotImported    = "imported"
+	pilotNotImported = "not_imported"
+	pilotUnknown     = "unknown"
+)
+
+// pilotProfileState is whether the CLAUDE.md in dir imports the pilot
+// profile. No CLAUDE.md imports nothing; one that is there but cannot be
+// read (a directory, no permission, a dangling symlink) is unknown, never a
+// guess.
+func pilotProfileState(dir string) string {
+	p := filepath.Join(dir, "CLAUDE.md")
+	data, err := os.ReadFile(p)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if _, lerr := os.Lstat(p); lerr == nil {
+			return pilotUnknown // a symlink to nothing
+		}
+		return pilotNotImported
+	case err != nil:
+		return pilotUnknown
+	case importsProfile(data):
+		return pilotImported
+	}
+	return pilotNotImported
 }
