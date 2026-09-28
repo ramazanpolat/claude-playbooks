@@ -168,3 +168,6 @@ jobs:
           want 1 "SELECT countIf(redacted) FROM VARS FORMAT TSV"
           # alpha has no manifest version: an empty version_tuple.
           want beta "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [0, 1] ORDER BY name FORMAT TSV"
+          # SELECT *: version_tuple where it has always been on this path, the
+          # columns added since (pilot_profile, v3.26.0) after it.
+          want "version_tuple pilot_profile" "SELECT arrayStringConcat(arraySlice(groupArray(name), -2), ' ') FROM (DESCRIBE (SELECT * FROM PLAYBOOKS)) FORMAT TSV"

@@ -44,6 +44,11 @@ const versionPattern = `^v?([0-9]+([.][0-9]+)*)`
 
 var versionRe = regexp.MustCompile(versionPattern)
 
+// playbooksLateColumns are the PLAYBOOKS columns added after v3.24.0, the
+// stable release: clickhouse-local's SELECT * lists them after the computed
+// version_tuple, where they were appended.
+var playbooksLateColumns = []string{"pilot_profile"}
+
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
 	"arrayMap(x -> toUInt32(x), splitByChar('.', extract(ifNull(version, ''), '" + versionPattern + "'))))"
@@ -396,7 +401,11 @@ func planSelect(q string) (*selectPlan, error) {
 	f := froms[0]
 	source := "FROM table"
 	if f.table == "PLAYBOOKS" {
-		source = "FROM (SELECT *, " + versionTupleSQL + " AS version_tuple FROM table)"
+		// On this path the computed version_tuple has always come after the
+		// structure's columns (SELECT *); a column added since (v3.26.0)
+		// goes after it, so every earlier position holds (Codex, #135).
+		late := strings.Join(playbooksLateColumns, ", ")
+		source = "FROM (SELECT * EXCEPT (" + late + "), " + versionTupleSQL + " AS version_tuple, " + late + " FROM table)"
 	}
 	return &selectPlan{table: f.table, query: q[:f.start] + source + q[f.end:], format: format}, nil
 }
