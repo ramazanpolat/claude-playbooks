@@ -31,9 +31,18 @@ const (
 // fakeProcs makes the given pids alive with the given start times.
 func fakeProcs(t *testing.T, alive map[int]string) {
 	t.Helper()
+	info := map[int]procInfo{}
+	for p, s := range alive {
+		info[p] = procInfo{start: s}
+	}
+	fakeProcInfo(t, info)
+}
+
+func fakeProcInfo(t *testing.T, alive map[int]procInfo) {
+	t.Helper()
 	old := procStarts
-	procStarts = func(pids []int) map[int]string {
-		out := map[int]string{}
+	procStarts = func(pids []int) map[int]procInfo {
+		out := map[int]procInfo{}
 		for _, p := range pids {
 			if s, ok := alive[p]; ok {
 				out[p] = s
@@ -417,10 +426,10 @@ func TestProcStartsReal(t *testing.T) {
 		t.Skip("no ps")
 	}
 	got := procStarts([]int{os.Getpid(), 1 << 30})
-	if got[os.Getpid()] == "" || got[1<<30] != "" {
+	if _, dead := got[1<<30]; got[os.Getpid()].start == "" || dead {
 		t.Fatalf("%v", got)
 	}
-	v := got[os.Getpid()]
+	v := got[os.Getpid()].start
 	if runtime.GOOS == "linux" {
 		if _, err := strconv.ParseUint(v, 10, 64); err != nil {
 			t.Fatalf("not /proc/<pid>/stat's starttime: %q", v)
@@ -511,5 +520,51 @@ func TestResumeCwdFromTheHead(t *testing.T) {
 	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidOld}) })
 	if err != nil || !strings.HasPrefix(readSessLog(t, log), work+"|") {
 		t.Fatalf("no cwd, here: %v %q", err, readSessLog(t, log))
+	}
+}
+
+// tty (v3.26.0): the controlling terminal, last in the object and the table,
+// null for none.
+func TestSessionTTY(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "alpha", nil)
+	work, _ := filepath.EvalSymlinks(t.TempDir())
+	a := filepath.Join(root, "alpha")
+	writeSessionFile(t, a, 301, sidLive, work, "interactive", liveStart, time.Now())
+	writeSessionFile(t, a, 302, sidOld, work, "bg", liveStart, time.Now().Add(-time.Hour))
+	fakeProcInfo(t, map[int]procInfo{301: {start: liveStart, tty: "pts/4"}, 302: {start: liveStart}})
+	out := mustStmt(t, "SHOW SESSIONS --json")
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil || len(rows) != 2 {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if rows[0]["tty"] != "pts/4" || rows[1]["tty"] != nil {
+		t.Fatalf("tty: %v / %v", rows[0]["tty"], rows[1]["tty"])
+	}
+	if i := strings.Index(out, `"tty"`); i < strings.Index(out, `"resume"`) {
+		t.Fatal("tty is the last field")
+	}
+	cols, _ := describeTable("SESSIONS")
+	if last := cols[len(cols)-1]; last.Name != "tty" || last.Type != "Nullable(String)" {
+		t.Fatalf("last column: %+v", last)
+	}
+	if h := mustStmt(t, "SHOW SESSIONS"); !strings.Contains(h, "TTY") || !strings.Contains(h, "pts/4") {
+		t.Fatalf("human:\n%s", h)
+	}
+}
+
+func TestLinuxTTY(t *testing.T) {
+	for nr, want := range map[uint64]string{
+		0:                      "",
+		136<<8 | 4:             "pts/4",
+		137<<8 | 2:             "pts/258",
+		136<<8 | (1<<20 | 0x5): "pts/261", // minor 0x105: high minor bits above bit 20
+		4<<8 | 1:               "tty1",
+		4<<8 | 64:              "ttyS0",
+		188<<8 | 0:             "",
+	} {
+		if got := linuxTTY(nr); got != want {
+			t.Errorf("linuxTTY(%#x) = %q, want %q", nr, got, want)
+		}
 	}
 }

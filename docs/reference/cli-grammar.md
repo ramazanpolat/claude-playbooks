@@ -932,7 +932,7 @@ so `source.url` and `vars[1].key` work):
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
 | `PANELS` | status line panel, per playbook (v3.25.0) | `playbook panel type source cpb row priority align` |
-| `SESSIONS` | live Claude Code session (v3.25.0) | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume` |
+| `SESSIONS` | live Claude Code session (v3.25.0) | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty` (`tty` v3.26.0) |
 | `DEFAULTS` | (one row) | `envs secret_helper` |
 
 `version_tuple` is `Array(UInt32)`, the numbers of the version's leading
@@ -1664,7 +1664,7 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
   session.
 
 **`SHOW SESSIONS`** prints the live sessions, newest first: one line each
-(`PLAYBOOK PID KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
+(`PLAYBOOK PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
 - `FOR PLAYBOOK` limits it to one playbook, and an unknown name is refused.
 - **`cpb sessions`** is the documented lowercase shorthand for exactly
   `SHOW SESSIONS`, and takes `--json` too.
@@ -1684,6 +1684,7 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 | `model` | string or null | the transcript's last assistant message, read from its last 256 KiB |
 | `launcher` | string or null | the playbook's launcher |
 | `resume` | string | the command that resumes this session (see below) |
+| `tty` | string or null | v3.26.0: the process's controlling terminal (`pts/3`, `ttys012`), null for none (a `bg` session). It is read in the same pass as the start time: `/proc/<pid>/stat`'s tty_nr on Linux, `ps`'s tty elsewhere |
 
 A session's transcript is
 `<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`.

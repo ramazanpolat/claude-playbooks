@@ -79,6 +79,9 @@ type sessionJSON struct {
 	Model         *string `json:"model"`
 	Launcher      *string `json:"launcher"`
 	Resume        string  `json:"resume"`
+	// TTY is the process's controlling terminal (v3.26.0), last so every
+	// earlier field keeps its place.
+	TTY *string `json:"tty"`
 }
 
 // liveState is what cpb can tell about a session file's process.
@@ -90,42 +93,72 @@ const (
 	liveUnknown // another pid domain (a sandbox, another host): cpb cannot tell
 )
 
-// procStarts returns the start time of each pid that is alive, in the
-// form Claude Code writes as procStart on this platform: on Linux the
-// starttime field of /proc/<pid>/stat (clock ticks since boot, observed on
-// 2.1.233), elsewhere ps's lstart read in UTC with the C locale ("Mon Sep
-// 28 07:29:55 2026", observed on 2.1.282 and 2.1.283 on macOS). A pid
-// missing from the map is not alive. It is a variable so tests can fake
+// procInfo is what cpb reads about a live process: its start time, in the
+// form Claude Code writes as procStart on this platform, and its
+// controlling terminal ("" for none).
+type procInfo struct {
+	start, tty string
+}
+
+// procStarts returns procInfo for each pid that is alive: on Linux from
+// /proc/<pid>/stat (starttime, clock ticks since boot, observed as
+// procStart on 2.1.233; tty_nr), elsewhere from ps's lstart read in UTC with
+// the C locale ("Mon Sep 28 07:29:55 2026", observed on 2.1.282 and 2.1.283
+// on macOS) and its tty. A pid missing from the map is not alive. Nothing
+// else about a process is read. It is a variable so tests can fake
 // processes.
-var procStarts = func(pids []int) map[int]string {
+var procStarts = func(pids []int) map[int]procInfo {
 	if runtime.GOOS == "linux" {
 		return procStatStarts(pids)
 	}
 	return psStarts(pids)
 }
 
-func procStatStarts(pids []int) map[int]string {
-	out := map[int]string{}
+func procStatStarts(pids []int) map[int]procInfo {
+	out := map[int]procInfo{}
 	for _, pid := range pids {
 		b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 		if err != nil {
 			continue
 		}
 		// The command name (field 2) is in parentheses and may hold spaces;
-		// the fields after it start at field 3, so starttime (22) is the 20th.
+		// the fields after it start at field 3, so tty_nr (7) is the 5th and
+		// starttime (22) the 20th.
 		i := bytes.LastIndexByte(b, ')')
 		if i < 0 {
 			continue
 		}
-		if f := strings.Fields(string(b[i+1:])); len(f) > 19 {
-			out[pid] = f[19]
+		f := strings.Fields(string(b[i+1:]))
+		if len(f) <= 19 {
+			continue
 		}
+		nr, _ := strconv.ParseUint(f[4], 10, 32)
+		out[pid] = procInfo{start: f[19], tty: linuxTTY(nr)}
 	}
 	return out
 }
 
-func psStarts(pids []int) map[int]string {
-	out := map[int]string{}
+// linuxTTY names a tty_nr (a device number) as ps does, for the terminals
+// a session runs in: a pseudo-terminal (pts/N), a virtual console (ttyN) or
+// a serial line (ttySN). Anything else is "", as is no terminal.
+func linuxTTY(nr uint64) string {
+	major := (nr >> 8) & 0xfff
+	minor := (nr & 0xff) | ((nr >> 12) & 0xfff00)
+	switch {
+	case nr == 0:
+		return ""
+	case major >= 136 && major <= 143:
+		return "pts/" + strconv.FormatUint((major-136)*256+minor, 10)
+	case major == 4 && minor < 64:
+		return "tty" + strconv.FormatUint(minor, 10)
+	case major == 4:
+		return "ttyS" + strconv.FormatUint(minor-64, 10)
+	}
+	return ""
+}
+
+func psStarts(pids []int) map[int]procInfo {
+	out := map[int]procInfo{}
 	if len(pids) == 0 {
 		return out
 	}
@@ -136,19 +169,23 @@ func psStarts(pids []int) map[int]string {
 	// Every process, filtered here: `ps -p` with one pid macOS's ps rejects
 	// (out of range, from a malformed session file) prints nothing for the
 	// others either.
-	c := exec.Command("ps", "-A", "-o", "pid=,lstart=")
+	c := exec.Command("ps", "-A", "-o", "pid=,tty=,lstart=")
 	c.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
 	b, _ := c.Output()
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
-		if len(f) < 2 {
+		if len(f) < 3 {
 			continue
 		}
 		pid, err := strconv.Atoi(f[0])
 		if err != nil || !want[pid] {
 			continue
 		}
-		out[pid] = strings.Join(f[1:], " ")
+		tty := f[1]
+		if strings.Trim(tty, "?-") == "" {
+			tty = ""
+		}
+		out[pid] = procInfo{start: strings.Join(f[2:], " "), tty: tty}
 	}
 	return out
 }
@@ -227,6 +264,7 @@ type liveSession struct {
 	dir   sessionDir
 	f     sessionFile
 	state liveState
+	tty   string // the process's controlling terminal, "" for none
 }
 
 // readSessionFiles reads the session files of dirs. It only reads.
@@ -265,7 +303,9 @@ func readSessionFiles(dirs []sessionDir) []liveSession {
 		case s.f.PIDDomain != "" && s.f.PIDDomain != pidDomain:
 			s.state = liveUnknown
 		default:
-			start, ok := starts[s.f.PID]
+			info, ok := starts[s.f.PID]
+			start := info.start
+			s.tty = info.tty
 			switch {
 			case !ok:
 				continue
@@ -400,6 +440,7 @@ func (s liveSession) json() sessionJSON {
 		Cwd: s.f.Cwd, Kind: s.f.Kind, Status: optStr(s.f.Status), Name: optStr(s.f.Name),
 		ClaudeVersion: optStr(s.f.Version), StartedAt: rfc3339(time.UnixMilli(s.f.StartedAt)),
 		Launcher: optStr(s.dir.launcher), Resume: s.dir.resumeCommand(s.f.SessionID),
+		TTY: optStr(s.tty),
 	}
 	if p := transcriptPath(s.dir.path, s.f.Cwd, s.f.SessionID); p != "" {
 		if fi, err := os.Stat(p); err == nil {
@@ -472,9 +513,9 @@ func showSessions(st *grammar.Stmt) error {
 		fmt.Println("No live Claude Code sessions.")
 		return nil
 	}
-	t := newTable("PLAYBOOK", "PID", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(8)
+	t := newTable("PLAYBOOK", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(9)
 	for _, r := range rows {
-		t.add(r.Playbook, strconv.Itoa(r.PID), r.Kind, deref(r.Status, "-"), ageOf(&r.StartedAt),
+		t.add(r.Playbook, strconv.Itoa(r.PID), deref(r.TTY, "-"), r.Kind, deref(r.Status, "-"), ageOf(&r.StartedAt),
 			ageOf(r.LastActive), deref(r.Model, "-"), r.SessionID, r.Cwd)
 	}
 	t.render(os.Stdout)

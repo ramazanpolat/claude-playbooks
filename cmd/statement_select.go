@@ -74,10 +74,10 @@ var selectTables = map[string]selectTable{
 	},
 	"SESSIONS": {
 		columns: []string{"playbook", "pid", "session_id", "cwd", "kind", "status", "name", "claude_version",
-			"started_at", "last_active", "model", "launcher", "config_dir", "resume"},
+			"started_at", "last_active", "model", "launcher", "config_dir", "resume", "tty"},
 		structure: "playbook String, pid UInt32, session_id String, cwd String, kind String, status Nullable(String), name Nullable(String), " +
 			"claude_version Nullable(String), started_at DateTime64(3, 'UTC'), last_active Nullable(DateTime64(3, 'UTC')), model Nullable(String), " +
-			"launcher Nullable(String), config_dir String, resume String",
+			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String)",
 		rows: sessionRows,
 	},
 	"DEFAULTS": {
