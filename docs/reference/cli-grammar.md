@@ -756,7 +756,7 @@ changes only by these rules (the stabilization week, decided by the pilot on
 | Part | What |
 |---|---|
 | The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
-| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
+| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), `tui` (v3.26.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
 | File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
 | `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json`, `SHOW SESSIONS --json` and `RESUME --list --json` (v3.25.0) |
 | Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
@@ -1756,6 +1756,112 @@ Resume this playbook's session with: kd --resume 08c4811b-3867-4f18-b08f-de6d1e0
 
 No word is reserved: `SESSIONS`, `SESSION`, `RESUME` and `FOR` still name
 playbooks and env sets.
+
+## cpb tui (v3.26.0)
+
+`cpb tui` is a terminal UI over this grammar. v1 only reads: it browses,
+shows `SHOW CREATE`, copies statements, exports a `.cpb`, and resumes a
+session.
+
+**A front-end, not a second engine.**
+- **Reads.** Everything on screen is a statement's `--json` output. cpb
+  runs its own binary for each read, and the TUI parses that output and
+  nothing else.
+- **The statement behind each screen** is named on its last line, for
+  example `reads: cpb SHOW SESSIONS --json`, so anything seen can be
+  scripted.
+- **What it can do.** Only what the grammar can. v1 changes no state. Its
+  only writes are the `.cpb` file `e` exports and the resumed session
+  itself.
+
+**Views** (`1`–`5`):
+
+| View | Reads | Shows |
+|---|---|---|
+| Playbooks | `SHOW PLAYBOOKS --json`, `SHOW SESSIONS --json` | name, launcher, version, env sets, login kind (`shared`, `isolated`, `sandbox`), live-session count, model |
+| a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview (with `Pilot profile`), Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line (history, panels), Model (the picker), Sessions |
+| Sessions | `SHOW SESSIONS --json`; `R`: `RESUME --list --json` | pid, tty, kind, status, age, last active, model, folder; `R` switches to this folder's recent sessions, which `enter` resumes |
+| Env sets | `SHOW ENVS --json` | the env sets (env profiles): variables, `used_by`, default |
+| Defaults | `SHOW DEFAULTS --json` | the env sets under every playbook, the secret helper |
+| Log | none | what this session copied, exported and resumed |
+
+**Keys:** `↑↓`/`jk` move, `enter` opens, `esc` goes back, `/` filters,
+`r` re-reads, and `?` is help.
+- `c` shows `SHOW CREATE … --skip-secrets` of the selection.
+- `y` copies the statement behind the selection, with OSC 52, the
+  terminal's own clipboard (`tea.SetClipboard`): `SHOW PLAYBOOK <n>`, or `RESUME SESSION '<id>'
+  FOR PLAYBOOK <n>`, or the whole SHOW CREATE text.
+- `e` writes `<name>.cpb` in the current folder: the same SHOW CREATE text.
+  - If the file exists, the TUI asks first: `Replace <name>.cpb? Type y to
+    replace; any other key keeps it.` The question comes before the folder,
+    so a deep folder never hides it. Only a typed `y` replaces the file.
+  - Both writes are atomic. The content goes to a temporary file in the
+    same folder, then is linked to a new name, or renamed over an existing
+    one.
+  - So a failed write leaves the old file, and a symlink with that name is
+    replaced rather than written through.
+- `q` quits.
+
+**Secrets.** No value is displayed, since cpb's `--json` has already
+withheld it: a reference shows as `FROM '<ref>'`, a plaintext credential
+as `(redacted, plaintext)`. The TUI has no reveal key, and `SHOW CREATE`
+always runs with `--skip-secrets`.
+
+**Resume.** `enter` on a recent session that is not live runs `cpb RESUME
+SESSION '<id>' FOR PLAYBOOK <name>` in the foreground.
+- **The terminal is handed over.** The TUI gives the terminal to it and
+  takes no keys meanwhile. It comes back when the session ends, and cpb's
+  exit line prints in between.
+- **A live session** is not resumed. The TUI says which pid (and tty)
+  holds it. cpb would refuse it too.
+
+**Sessions refresh.** `SHOW SESSIONS` is re-read every 5 s, and only while
+a screen that shows sessions is up. Everything else is re-read on `r`.
+
+**The terminal.**
+- **Start.** `cpb tui` needs a terminal on stdin and stdout. Off one, it
+  exits 1 with `cpb tui needs a terminal; use cpb SHOW … --json for
+  scripts`.
+- **Given back as found.** It takes raw mode and the alternate screen, and
+  restores both however it ends (see below), and around a resumed session:
+  bubbletea's `ExecProcess` stops reading input before the session starts.
+- **Resize.** It redraws on SIGWINCH.
+- **Colour.** It uses no colour, only reverse video for the selection and
+  dim for hints, and none of that with `NO_COLOR` set.
+- **Width.** Below the full width, a table drops its least useful columns
+  first, so the name and the folder stay.
+- **No startup cost for other commands.** The TUI is a
+  [bubbletea v2](https://github.com/charmbracelet/bubbletea) program,
+  pinned exactly: `charm.land/bubbletea/v2` v2.0.10, `charm.land/bubbles/v2`
+  v2.1.1 and `charm.land/lipgloss/v2` v2.0.6. Linking them costs other
+  commands nothing, and two permanent tests keep it that way:
+  - **No terminal I/O at startup** (`TestNoTerminalQueryAtStartup` and the
+    arena check `tui-ok`). Under a pty that answers nothing, `SHOW
+    PLAYBOOKS`, `sessions`, a launcher-style `run` and bare `cpb` must write
+    no terminal query (`ESC]`, `ESC[6n`, `ESC[c`, `ESC[>`), and must not
+    stall. bubbletea v1 failed this: its package `init` queried the
+    terminal's background colour in every command and waited up to 5 s
+    for a reply.
+  - **No slow package initializer** (`TestNoSlowPackageInit`). Under
+    `GODEBUG=inittrace=1`, no package may take more than 5 ms to
+    initialize.
+  - **bubbles is held at v2.1.1 for that reason.** bubbles v2.2 and later
+    require go-runewidth v0.0.27, whose `init` precomputes a width table
+    for all 65,536 BMP runes: about 48 ms of CPU in **every** cpb process
+    and launcher. v2.1.1 resolves go-runewidth to v0.0.24, whose init
+    takes 0.2 ms. Bump bubbles only when its go-runewidth no longer does
+    that; the test fails otherwise.
+- **The terminal.** bubbletea restores raw mode and the alternate screen on
+  `q`, a panic, SIGINT and SIGTERM. SIGHUP, which bubbletea leaves to the
+  default action, is handled as a quit, so a closed terminal window also
+  restores it.
+
+**Bare `cpb`** on a terminal ends with one more line, `Browse and manage
+them: cpb tui`. Off a terminal, its output is exactly what it was.
+
+**v2** (not yet): the actions, each built as a statement, shown, run
+through `APPLY --dry-run --json` for its plan, then applied on
+confirmation.
 
 ## Completion
 

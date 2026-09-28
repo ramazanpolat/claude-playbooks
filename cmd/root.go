@@ -100,6 +100,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(sessionsCmd)
+	rootCmd.AddCommand(tuiCmd)
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
@@ -127,6 +128,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		fmt.Println("  claude-playbook create <name>")
 		fmt.Println()
 		fmt.Println("Run 'claude-playbook --help' for all commands.")
+		printTUIHint()
 		return nil
 	}
 
@@ -177,5 +179,17 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	fmt.Println()
 	fmt.Println("Run 'claude-playbook --help' for all commands.")
+	printTUIHint()
 	return nil
 }
+
+// printTUIHint is bare cpb's last line on a terminal (v3.26.0). Off a
+// terminal the output is exactly what it was.
+func printTUIHint() {
+	if rootTTY() {
+		fmt.Println("Browse and manage them: cpb tui")
+	}
+}
+
+// rootTTY is whether stdout is a terminal; a variable for tests.
+var rootTTY = func() bool { return isTerminal(os.Stdout) }

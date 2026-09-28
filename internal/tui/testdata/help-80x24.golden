@@ -1,0 +1,24 @@
+ cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
+────────────────────────────────────────────────────────────────────────────────
+
+  cpb tui: a view of what the cpb grammar reads. It changes nothing (v1).
+
+  1-5          Playbooks, Sessions, Env sets, Defaults, Log
+  ↑↓ j k       move          enter     open
+  / filter     r refresh     q quit    esc back
+  c            SHOW CREATE of the selection (--skip-secrets)
+  e            export it as <name>.cpb here (asks before replacing a file)
+  y            copy the statement behind the selection
+  R            Sessions: recent sessions in this folder; enter resumes one
+
+  Secret values are never shown: references appear as references,
+  plaintext credentials as (redacted). Every screen names the cpb
+  statement it reads, so anything here can be scripted.
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2 playbooks · 2 live sessions · read 0s ago
+ any key closes help
+reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json

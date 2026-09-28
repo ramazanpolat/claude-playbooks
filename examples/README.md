@@ -33,3 +33,4 @@ read it identically:
 | [16-isolated-login](16-isolated-login/) | a playbook that shares no login with `~/.claude` |
 | [17-statusline-panels](17-statusline-panels/) | a status line host and its panels (SPC/1) |
 | [18-sessions](18-sessions/) | live sessions, `RESUME`, and what cpb refuses to resume |
+| [19-tui](19-tui/) | what `cpb tui` shows, and the statements behind each screen |
