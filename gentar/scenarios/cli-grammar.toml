@@ -374,3 +374,31 @@ tty_() { if script --version >/dev/null 2>&1; then script -qec "$1" /dev/null; e
 cd "$HOME" && tty_ "claude-playbook run sesa" > "$HOME/ses.tty" 2>&1 && cat "$HOME/ses.tty" >> "$O" && grep -qF "Resume this playbook's session with: claude-playbook run sesa --resume $X1" "$HOME/ses.tty" && claude-playbook run sesa > "$HOME/ses.notty" 2>&1 && ! grep -q "Resume this" "$HOME/ses.notty" || { echo ses-exitline-wrong; exit 1; }
 ! grep -rq cpb-arena-canary "$O" "$HOME/ses.tty" "$HOME/ses.notty" "$HOME/ses.short" && [ "$(sha)" = "$B" ] && test -e "$P/sesa/sessions/$DP.json" && echo sessions-ok'''
 contains = "sessions-ok"
+
+[[verify.commands]]
+# A session's controlling terminal (v3.26.0): null for a process with none
+# (a background sleep in this shell), the terminal ps names for one run
+# under a pty (a sleep started inside script); SELECT reads it; DESCRIBE
+# lists tty last, the 14 columns before it unchanged.
+command = '''
+P="$HOME/.claude-playbooks/tty"; W="$HOME/ttyw"; mkdir -p "$W" && W="$(cd "$W" && pwd -P)"
+N1=77777777-aaaa-4aaa-8aaa-777777777771; T1=77777777-aaaa-4aaa-8aaa-777777777772
+claude-playbook CREATE PLAYBOOK tty NO ALIAS NO PILOT PROFILE >/dev/null || exit 1
+sleep 600 & NP=$!
+tty_() { if script --version >/dev/null 2>&1; then script -qec "$1" /dev/null; else script -q /dev/null sh -c "$1"; fi; }
+tty_ 'sleep 600 & echo $! > "$HOME/tty.pid"; sleep 3' > /dev/null 2>&1 &
+i=0; while [ ! -s "$HOME/tty.pid" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; TP=$(cat "$HOME/tty.pid")
+trap 'kill $NP $TP 2>/dev/null' EXIT
+pst() { if [ -r "/proc/$1/stat" ]; then sed 's/.*) //' "/proc/$1/stat" | awk '{print $20}'; else TZ=UTC LC_ALL=C ps -o lstart= -p "$1" | awk '{$1=$1; print}'; fi; }
+sf() { mkdir -p "$P/sessions"; printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":%s000,"procStart":"%s","kind":"interactive","status":"idle"}' "$1" "$2" "$W" "$(date +%s)" "$(pst $1)" > "$P/sessions/$1.json"; }
+sf "$NP" "$N1"; sf "$TP" "$T1"
+PT="$(ps -o tty= -p "$TP" | awk '{print $1}')"
+J="$(claude-playbook SHOW SESSIONS FOR PLAYBOOK tty --json | tr -d ' \n')"
+case "$PT" in ""|"?"|"??") echo tty-no-pty; exit 1;; esac
+obj() { printf %s "$J" | tr '}' '\n' | grep -F "\"session_id\":\"$1\""; }
+obj "$N1" | grep -qF '"tty":null' && obj "$T1" | grep -qF "\"tty\":\"$PT\"" || { echo tty-show-wrong; exit 1; }
+claude-playbook "SELECT session_id, tty FROM SESSIONS" --json | tr -d ' \n' | grep -qF "\"tty\":\"$PT\"" || { echo tty-select-wrong; exit 1; }
+D="$(claude-playbook DESCRIBE SESSIONS --json | tr -d ' \n')"
+[ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)"}]' || { echo tty-describe-wrong; exit 1; }
+echo sessions-tty-ok'''
+contains = "sessions-tty-ok"
