@@ -421,7 +421,8 @@ contains = "pilot-profile-field-ok"
 
 [[verify.commands]]
 # cpb tui v1 (v3.26.0), read-only, on the real binary under a pty (script,
-# 120x40): no cpb command queries the terminal or stalls at startup (the
+# 120x40; the scenario's earlier checks leave many playbooks, so each step
+# filters to its own first): no cpb command queries the terminal or stalls at startup (the
 # regression guard: SHOW, a launcher-style run, bare cpb); off a terminal
 # tui refuses; bare cpb's hint appears on a terminal only; it draws the
 # playbooks and a live session, exits 0 and leaves the alternate screen;
@@ -453,8 +454,8 @@ if claude-playbook tui < /dev/null > "$HOME/tui.off" 2>&1; then echo tui-offtty-
 claude-playbook > "$HOME/bare.off" 2>&1; ! grep -q "cpb tui" "$HOME/bare.off" || { echo tui-bare-hint-offtty; exit 1; }
 tty_ "stty cols 120 rows 40 2>/dev/null; claude-playbook" 2>&1 | tr -d '\r' > "$HOME/bare.tty"; [ "$(grep -v '^$' "$HOME/bare.tty" | tail -1)" = "Browse and manage them: cpb tui" ] || { echo tui-bare-hint-wrong; exit 1; }
 B="$(sum)"
-drive "$HOME/t1" q; grep -qF tuia "$HOME/t1.txt" && grep -qF '[?1049l' "$HOME/t1.txt" && { [ "$(cat "$HOME/t1.rc")" = 0 ] || ! script --version >/dev/null 2>&1; } || { echo tui-draw-wrong; exit 1; }
-drive "$HOME/t2" 2 _ q; grep -qF "$LP" "$HOME/t2.txt" || { echo tui-sessions-wrong; exit 1; }
+drive "$HOME/t1" '/tuia\r' _ q; grep -qF tuia "$HOME/t1.txt" && grep -qF '[?1049l' "$HOME/t1.txt" && { [ "$(cat "$HOME/t1.rc")" = 0 ] || ! script --version >/dev/null 2>&1; } || { echo tui-draw-wrong; exit 1; }
+drive "$HOME/t2" 2 _ '/tuia\r' _ q; grep -qF "$LP" "$HOME/t2.txt" || { echo tui-sessions-wrong; exit 1; }
 drive "$HOME/t3" '/tuia\r' _ '\r' _ 3 _ c _ y _ '\033' _ q; grep -qF "keychain:ok/arena-tui" "$HOME/t3.txt" && grep -qF "(redacted" "$HOME/t3.txt" && ! grep -rqF "$CAN" "$HOME/t1.txt" "$HOME/t2.txt" "$HOME/t3.txt" || { echo tui-secret-wrong; exit 1; }
 [ "$(sum)" = "$B" ] || { echo tui-wrote-something; exit 1; }
 drive "$HOME/t4" '/tuia\r' _ e _ q; claude-playbook SHOW CREATE PLAYBOOK tuia --skip-secrets > "$HOME/tuia.want" && cmp -s "$W/tuia.cpb" "$HOME/tuia.want" && [ "$(ls -A "$W")" = tuia.cpb ] || { echo tui-export-wrong; exit 1; }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,6 +29,21 @@ var sgrSeq = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 // width is a line's width on screen, escape sequences not counted.
 func width(s string) int { return lipgloss.Width(s) }
+
+// midTruncate cuts plain text to w columns from the middle, keeping both
+// ends: "~/DEV/…/deep/folder".
+func midTruncate(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w <= 1 {
+		return "…"
+	}
+	head := (w - 1) / 2
+	tail := w - 1 - head
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
+}
 
 // truncate cuts plain text to w columns, ending in … when it cuts.
 func truncate(s string, w int) string {
@@ -118,7 +134,13 @@ func (m Model) tabLine() string {
 func (m Model) status() string {
 	switch {
 	case m.confirm != nil:
-		return m.warn(" " + m.short(m.confirm.path) + " exists. Replace it? Type y to replace; any other key keeps it.")
+		// The question first, whole; the folder after it, shortened to what
+		// is left, so a deep folder or a narrow terminal never hides it.
+		q := " Replace " + filepath.Base(m.confirm.path) + "? Type y to replace; any other key keeps it."
+		if room := m.w - width(q) - 3; room >= 8 {
+			q += " (" + midTruncate(m.short(filepath.Dir(m.confirm.path)), room) + ")"
+		}
+		return m.warn(q)
 	case m.typing:
 		return " filter: " + m.filter + "▏"
 	case m.msg != "":

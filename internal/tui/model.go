@@ -297,7 +297,7 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 		c := m.confirm
 		m.confirm = nil
 		if s == "y" {
-			if err := os.WriteFile(c.path, c.data, 0o644); err != nil {
+			if err := replaceFile(c.path, c.data); err != nil {
 				m.msg = "export failed: " + err.Error()
 			} else {
 				m.msg = "exported " + m.short(c.path) + " (replaced)"
@@ -540,21 +540,13 @@ func (m Model) export(e exportMsg) (Model, Cmd) {
 		return m, nil
 	}
 	path := filepath.Join(m.o.Cwd, e.name+".cpb")
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	err := createFile(path, []byte(e.body))
 	if errors.Is(err, fs.ErrExist) {
 		m.confirm = &confirm{path: path, data: []byte(e.body)}
 		return m, nil
 	}
 	if err != nil {
 		m.msg = "export failed: " + err.Error()
-		return m, nil
-	}
-	_, werr := f.Write([]byte(e.body))
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		m.msg = "export failed: " + werr.Error()
 		return m, nil
 	}
 	m.msg = "exported " + m.short(path)
@@ -821,4 +813,68 @@ func (m Model) age(ts string) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// writeTemp writes data to a new file in path's folder and returns its
+// name: the half of an atomic write that can fail without touching path.
+func writeTemp(path string, data []byte) (string, error) {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return "", err
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(f.Name(), 0o644)
+	}
+	if werr != nil {
+		os.Remove(f.Name())
+		return "", werr
+	}
+	return f.Name(), nil
+}
+
+// createFile writes path only if nothing has that name, all at once: the
+// content goes to a temporary file, which is then linked to the name (a
+// link, unlike a rename, fails when the name exists). fs.ErrExist when it
+// does.
+func createFile(path string, data []byte) error {
+	tmp, err := writeTemp(path, data)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fs.ErrExist
+		}
+		// A filesystem without hard links: create the name exclusively.
+		f, ferr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if ferr != nil {
+			return ferr
+		}
+		_, werr := f.Write(data)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		return werr
+	}
+	return nil
+}
+
+// replaceFile replaces path's content all at once: a temporary file in the
+// same folder renamed over the name, so a failed write leaves the old file,
+// and a symlink named path is replaced, not written through.
+func replaceFile(path string, data []byte) error {
+	tmp, err := writeTemp(path, data)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }

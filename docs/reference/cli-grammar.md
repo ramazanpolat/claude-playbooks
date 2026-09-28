@@ -1792,7 +1792,14 @@ session.
   terminal's own clipboard (`tea.SetClipboard`): `SHOW PLAYBOOK <n>`, or `RESUME SESSION '<id>'
   FOR PLAYBOOK <n>`, or the whole SHOW CREATE text.
 - `e` writes `<name>.cpb` in the current folder: the same SHOW CREATE text.
-  If the file exists, the TUI asks, and only a typed `y` replaces it.
+  - If the file exists, the TUI asks first: `Replace <name>.cpb? Type y to
+    replace; any other key keeps it.` The question comes before the folder,
+    so a deep folder never hides it. Only a typed `y` replaces the file.
+  - Both writes are atomic. The content goes to a temporary file in the
+    same folder, then is linked to a new name, or renamed over an existing
+    one.
+  - So a failed write leaves the old file, and a symlink with that name is
+    replaced rather than written through.
 - `q` quits.
 
 **Secrets.** No value is displayed, since cpb's `--json` has already

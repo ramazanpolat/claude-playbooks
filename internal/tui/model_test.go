@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"flag"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -305,7 +306,7 @@ func TestExportNeverOverwritesWithoutY(t *testing.T) {
 		t.Fatal(err)
 	}
 	hs.keys("e")
-	if !strings.Contains(hs.view(), "exists. Replace it? Type y") {
+	if !strings.Contains(hs.view(), "Replace router.cpb? Type y to replace; any other key keeps it.") {
 		t.Fatalf("no prompt:\n%s", hs.view())
 	}
 	hs.keys("n")
@@ -440,5 +441,77 @@ func TestPasteIntoFilter(t *testing.T) {
 	hs.keys("enter")
 	if rows := hs.m.playbookRows(); len(rows) != 1 || rows[0].Name != "router" {
 		t.Fatalf("filtered: %v", rows)
+	}
+}
+
+// The replace question is whole on an 80-column screen even in a folder
+// deeper than the screen is wide: the question first, the folder shortened
+// after it (root's review of #138; macOS's long TempDir hid it).
+func TestExportPromptVisibleInDeepFolder(t *testing.T) {
+	deep := filepath.Join(t.TempDir(), strings.Repeat("a-very-deep-folder/", 8))
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "router.cpb"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hs := newHarnessIn(t, 80, 24, deep)
+	hs.keys("down", "e")
+	v := hs.view()
+	if !strings.Contains(v, "Replace router.cpb? Type y to replace; any other key keeps it.") {
+		t.Fatalf("the question is not whole:\n%s", v)
+	}
+	for _, l := range strings.Split(v, "\n") {
+		if width(l) > 80 {
+			t.Fatalf("a line is wider than the screen: %q", l)
+		}
+	}
+	hs.keys("y")
+	if b, _ := os.ReadFile(filepath.Join(deep, "router.cpb")); string(b) != fixtureCreate {
+		t.Fatalf("y did not replace: %q", b)
+	}
+}
+
+// Replacing is atomic and replaces the name: a symlink named router.cpb
+// becomes a regular file, and the file it pointed to is left as it was.
+func TestExportReplacesASymlinkNotItsTarget(t *testing.T) {
+	cwd := t.TempDir()
+	target := filepath.Join(t.TempDir(), "elsewhere.cpb")
+	if err := os.WriteFile(target, []byte("theirs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(cwd, "router.cpb")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	hs := newHarnessIn(t, 120, 40, cwd)
+	hs.keys("down", "e", "y")
+	fi, err := os.Lstat(link)
+	if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o644 {
+		t.Fatalf("router.cpb: %v %v", fi.Mode(), err)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "theirs\n" {
+		t.Fatalf("written through the symlink: %q", b)
+	}
+	ents, _ := os.ReadDir(cwd)
+	if len(ents) != 1 {
+		t.Fatalf("a temporary file was left: %v", ents)
+	}
+}
+
+// createFile never replaces: an existing name is fs.ErrExist, byte-identical.
+func TestCreateFileIsExclusive(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.cpb")
+	if err := createFile(p, []byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := createFile(p, []byte("two")); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("got %v", err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "one" {
+		t.Fatalf("replaced: %q", b)
+	}
+	if ents, _ := os.ReadDir(filepath.Dir(p)); len(ents) != 1 {
+		t.Fatalf("a temporary file was left: %v", ents)
 	}
 }
