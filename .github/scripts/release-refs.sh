@@ -17,9 +17,10 @@
 #       release that is about to be tagged.
 set -eu
 
-# minor_of v3.24.1 → v3.24; v3.24.0-rc1 → v3.24; anything else → "".
+# minor_of v3.24.1 → v3.24; v3.24.0-rc1 → v3.24; anything else ("-beta",
+# a bare "-", "-rc" with no number) → "".
 minor_of() {
-  printf '%s\n' "$1" | sed -n 's/^\(v[0-9][0-9]*\.[0-9][0-9]*\)\.[0-9][0-9]*\(-.*\)\{0,1\}$/\1/p'
+  printf '%s\n' "$1" | sed -n 's/^\(v[0-9][0-9]*\.[0-9][0-9]*\)\.[0-9][0-9]*\(-rc[0-9][0-9]*\)\{0,1\}$/\1/p'
 }
 
 # newer A B: exit 0 when version A is greater than version B (X.Y.Z).

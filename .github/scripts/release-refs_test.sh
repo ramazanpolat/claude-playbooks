@@ -46,6 +46,11 @@ want 1 -             sh "$refs" gate v3.25.0 "$r1"        # a minor with no bran
 want 1 -             sh "$refs" gate v3.24.0 "$f1"        # a random branch: refused
 want 1 -             sh "$refs" gate v3.24.0 "$q1"        # a different release branch: refused
 want 1 -             sh "$refs" gate arena "$m1"          # not a release tag: refused
+want 0 release/v3.24 sh "$refs" gate v3.24.0-rc12 "$r1"   # rcN, any number of digits
+want 1 -             sh "$refs" gate v3.24.0-beta "$r1"   # only -rcN is a prerelease: refused
+want 1 -             sh "$refs" gate v3.24.0- "$r1"       # a bare dash: refused
+want 1 -             sh "$refs" gate v3.24.0-rc "$r1"     # -rc with no number: refused
+want 1 -             sh "$refs" gate v3.24.0-rc1x "$r1"   # trailing junk: refused
 # a refusal says why, on stderr, as a GitHub error
 set +e; why=$(sh "$refs" gate v3.24.0 "$f1" 2>&1 >/dev/null); set -e
 case "$why" in *"::error::"*"neither origin/main nor origin/release/v3.24"*) echo "ok:   the refusal names both refs" ;; *) echo "FAIL: refusal: $why"; fail=1 ;; esac
