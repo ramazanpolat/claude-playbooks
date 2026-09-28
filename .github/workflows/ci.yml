@@ -30,6 +30,14 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
+      # The arena builds with golang:1.21, so go.mod's go directive must not
+      # rise above it (a `go get` of a newer dependency raises it silently),
+      # and no toolchain line may ask for a newer Go.
+      - name: go directive stays 1.21
+        run: |
+          grep -qx 'go 1.21' go.mod || { echo "go.mod's go directive is not 'go 1.21':"; grep -n '^go ' go.mod; exit 1; }
+          if grep -q '^toolchain ' go.mod; then echo "go.mod has a toolchain line:"; grep -n '^toolchain ' go.mod; exit 1; fi
+
       - name: gofmt
         run: |
           out=$(gofmt -l .)

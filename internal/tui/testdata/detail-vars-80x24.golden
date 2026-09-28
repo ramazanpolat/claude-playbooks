@@ -1,0 +1,24 @@
+ cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
+────────────────────────────────────────────────────────────────────────────────
+ router  (launcher k9 · ~/.claude-playbooks/router)
+  Overview  Env [Vars] Plugins  MCP  Skills  Status line  Model  Sessions 
+
+  effective at launch, from EXPLAIN
+  KEY                   VALUE / REF               LAYER
+  X                     1                         defaults base
+  ANTHROPIC_BASE_URL    http://tr0:20128/v1       env 9router
+  ANTHROPIC_AUTH_TOKEN  FROM 'keychain:pilot/9r'  env 9router
+  OPENAI_API_KEY        (redacted, plaintext)     playbook
+  MY_FLAG               1                         playbook
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2 playbooks · 2 live sessions · read 0s ago
+ ←→/1-9 tab  c SHOW CREATE  e export .cpb  y copy  r refresh  esc back  q quit
+reads: cpb EXPLAIN PLAYBOOK router --json

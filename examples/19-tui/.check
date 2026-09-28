@@ -1,0 +1,12 @@
+# cpb tui itself needs a terminal; CI has none, so this checks the refusal
+# and the statements behind each screen, which print what the TUI shows.
+if cpb tui < /dev/null > "$HOME/tui.out" 2>&1; then echo "cpb tui ran without a terminal"; exit 1; fi
+grep -q "needs a terminal" "$HOME/tui.out"
+# Bare cpb off a terminal: no hint line.
+if cpb | grep -q "cpb tui"; then echo "the hint appeared off a terminal"; exit 1; fi
+# The screens' reads.
+cpb SHOW PLAYBOOKS --json | python3 -c 'import json,sys; p={x["name"]: x for x in json.load(sys.stdin)}; assert p["browsed"]["envs"] == ["proxy"], p'
+cpb EXPLAIN PLAYBOOK browsed --json | python3 -c 'import json,sys; v={x["key"]: x for x in json.load(sys.stdin)["vars"]}; assert v["ANTHROPIC_BASE_URL"]["layer"]["name"] == "proxy", v'
+cpb SHOW ENVS --json | python3 -c 'import json,sys; e={x["name"]: x for x in json.load(sys.stdin)}; assert e["proxy"]["used_by"] == ["browsed"], e'
+cpb SHOW SESSIONS --json | python3 -c 'import json,sys; assert json.load(sys.stdin) == []'
+cpb SHOW CREATE PLAYBOOK browsed --skip-secrets | grep -q "SET STATUSLINE 'echo browsed' REFRESH 10"

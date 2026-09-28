@@ -1,0 +1,24 @@
+ cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
+────────────────────────────────────────────────────────────────────────────────
+-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets
+CREATE PLAYBOOK IF NOT EXISTS router ALIAS k9;
+ALTER PLAYBOOK router USE ENV 9router SET VAR MY_FLAG=1;
+-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2 playbooks · 2 live sessions · read 0s ago
+ ↑↓ scroll  y copy  esc close
+reads: cpb SHOW PLAYBOOKS --json

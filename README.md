@@ -96,6 +96,10 @@ cpb DROP PLAYBOOK scratch --yes
 - **Sessions:** `cpb sessions` lists the live Claude Code sessions of every
   playbook, and `cpb RESUME` resumes the latest one in this folder through
   its playbook's launcher, refusing one still live elsewhere.
+- **A terminal UI:** `cpb tui` browses playbooks, sessions, env sets and
+  defaults, shows `SHOW CREATE`, copies statements, exports a `.cpb`, and
+  resumes a session. It reads only what the statements' `--json` prints,
+  and never shows a secret value.
 - **Plans for programs:** `cpb APPLY playbook.cpb --dry-run --json` prints
   what a run would do as a single JSON object (schema 1), with a verdict for
   each statement, the exact `claude` commands, deletes with their size, and
