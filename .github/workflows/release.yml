@@ -53,7 +53,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main '+refs/heads/release/*:refs/remotes/origin/release/*'
-          where=$(.github/scripts/release-refs.sh gate "$TAG" "$GITHUB_SHA")
+          where=$(.github/scripts/release-refs.sh gate "$TAG" "$GITHUB_SHA") || exit 1
           echo "release=true" >> "$GITHUB_OUTPUT"
           echo "Tag $TAG ($GITHUB_SHA) is on $where"
 
