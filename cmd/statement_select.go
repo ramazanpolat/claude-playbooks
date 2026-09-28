@@ -402,7 +402,7 @@ func planSelect(q string) (*selectPlan, error) {
 	source := "FROM table"
 	if f.table == "PLAYBOOKS" {
 		// On this path the computed version_tuple has always come after the
-		// structure's columns (SELECT *); a column added since (v3.26.0)
+		// structure's columns (SELECT *); a column added since (v3.25.0)
 		// goes after it, so every earlier position holds (Codex, #135).
 		late := strings.Join(playbooksLateColumns, ", ")
 		source = "FROM (SELECT * EXCEPT (" + late + "), " + versionTupleSQL + " AS version_tuple, " + late + " FROM table)"

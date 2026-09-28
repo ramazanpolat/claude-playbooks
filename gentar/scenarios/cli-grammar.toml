@@ -376,7 +376,7 @@ cd "$HOME" && tty_ "claude-playbook run sesa" > "$HOME/ses.tty" 2>&1 && cat "$HO
 contains = "sessions-ok"
 
 [[verify.commands]]
-# A session's controlling terminal (v3.26.0): null for a process with none
+# A session's controlling terminal (v3.25.0): null for a process with none
 # (a background sleep in this shell), the terminal ps names for one run
 # under a pty (a sleep started inside script); SELECT reads it; DESCRIBE
 # lists tty last, the 14 columns before it unchanged.
@@ -404,7 +404,7 @@ echo sessions-tty-ok'''
 contains = "sessions-tty-ok"
 
 [[verify.commands]]
-# pilot_profile (v3.26.0) in SHOW PLAYBOOK --json and the PLAYBOOKS table:
+# pilot_profile (v3.25.0) in SHOW PLAYBOOK --json and the PLAYBOOKS table:
 # imported for a plain CREATE, not_imported for NO PILOT PROFILE and for no
 # CLAUDE.md, unknown for a CLAUDE.md that cannot be read (a directory here,
 # whatever the uid); last in the object and the table; a human line.
@@ -420,7 +420,7 @@ echo pilot-profile-field-ok'''
 contains = "pilot-profile-field-ok"
 
 [[verify.commands]]
-# cpb tui v1 (v3.26.0), read-only, on the real binary under a pty (script,
+# cpb tui v1 (v3.25.0), read-only, on the real binary under a pty (script,
 # 120x40; the scenario's earlier checks leave many playbooks, so each step
 # filters to its own first): no cpb command queries the terminal or stalls at startup (the
 # regression guard: SHOW, a launcher-style run, bare cpb); off a terminal

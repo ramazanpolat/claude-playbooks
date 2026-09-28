@@ -523,7 +523,7 @@ func TestResumeCwdFromTheHead(t *testing.T) {
 	}
 }
 
-// tty (v3.26.0): the controlling terminal, last in the object and the table,
+// tty (v3.25.0): the controlling terminal, last in the object and the table,
 // null for none.
 func TestSessionTTY(t *testing.T) {
 	root := sandboxDefaultRoot(t)

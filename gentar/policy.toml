@@ -17,7 +17,7 @@ floor = ["cli-head-build", "docs-honesty", "playbook-lifecycle"]             # s
 setup = { go = "1.26" }     # toolchains dryrun's prepare() needs on the
                             # GitHub-hosted runner (go, node, python);
                             # anything else: gentar/phase1-setup.sh
-# Go 1.26, the version everything builds with since v3.26.0: go.mod's
+# Go 1.26, the version everything builds with since v3.25.0: go.mod's
 # `go 1.26.0`, CI's test legs and the bench's golang:1.26 build. (1.21, the
 # floor before, needed a newer Go on macOS: Go 1.21's linker emits binaries
 # current macOS will not load, "dyld: missing LC_UUID load command", #59.)
