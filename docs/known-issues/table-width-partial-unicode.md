@@ -49,9 +49,9 @@ release.
 
 Derive widths from real Unicode data instead of a hand-written list —
 `golang.org/x/text/width` (same `golang.org/x` family as the `x/term` already
-in use), or an equivalent implementation. Keep the `go` directive at 1.21 when
-adding it: the arena builds in `golang:1.21`, and `go get <pkg>@latest` bumps
-the directive silently.
+in use), or an equivalent implementation. Keep the `go` directive at 1.26 when
+adding it: the arena builds in `golang:1.26`, and `go get <pkg>@latest` bumps
+the directive silently (CI's directive check catches it).
 
 The existing tests in `cmd/table_test.go` —
 `TestDisplayWidthCountsCellsNotRunes`,

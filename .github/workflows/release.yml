@@ -72,9 +72,9 @@ jobs:
           fi
           echo "package.json version ($pkg) matches $TAG"
 
-      # Build with the same current Go the macOS CI leg uses. go.mod keeps
-      # the 1.21 language floor (the ubuntu CI leg proves it); the release
-      # artifacts should not be the one build path CI never exercises.
+      # Build with the Go both CI legs and the arena use (go.mod: go 1.26.0);
+      # the release artifacts should not be the one build path CI never
+      # exercises.
       - uses: actions/setup-go@v5
         if: steps.release_gate.outputs.release == 'true'
         with:

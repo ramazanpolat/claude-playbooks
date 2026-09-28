@@ -129,14 +129,14 @@ def load_policy(path=POLICY):
     for name in _strings(p1["floor"], "[phase1] floor"):
         _suite(name, "[phase1] floor")
     if not isinstance(p1["setup"], dict):
-        raise Refuse("[phase1] setup must be a table, e.g. { go = \"1.21\" }")
+        raise Refuse("[phase1] setup must be a table, e.g. { go = \"1.26\" }")
     for tool, ver in p1["setup"].items():
         if tool not in SETUP_TOOLS:
             raise Refuse(f"[phase1] setup: unknown tool {tool!r} "
                          f"(known: {', '.join(SETUP_TOOLS)}; anything else "
                          "goes in gentar/phase1-setup.sh)")
         if not isinstance(ver, str) or not re.fullmatch(r"[0-9][0-9A-Za-z.x*-]*", ver):
-            raise Refuse(f"[phase1] setup: {tool} version must be a string like \"1.21\"")
+            raise Refuse(f"[phase1] setup: {tool} version must be a string like \"1.26\"")
     oses = _strings(p1["os"], "[phase1] os")
     if not oses:
         raise Refuse("[phase1] os must name at least one runner")

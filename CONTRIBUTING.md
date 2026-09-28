@@ -2,10 +2,9 @@
 
 ## Development
 
-Go 1.21+ is the only toolchain you need on Linux; on macOS use a current
-Go — 1.21's linker emits binaries that recent macOS versions refuse to load
-(missing LC_UUID load command). Release artifacts are built with the same
-current Go the macOS CI leg uses, and the darwin-arm64 asset is executed on a
+Go 1.26+ is the only toolchain you need (go.mod: `go 1.26.0`; CI and the
+arena's `golang:1.26` build use 1.26, and CI fails if the directive rises
+above it). Release artifacts are built with the same Go, and the darwin-arm64 asset is executed on a
 macOS runner before anything is published, so the downloadable binaries never
 come from a build path nothing exercised. Go dependencies are managed
 in `go.mod` (cobra, toml).

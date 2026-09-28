@@ -242,7 +242,7 @@ cd claude-playbooks
 
 ## Build from source
 
-Requires [Go](https://go.dev/dl/) 1.21+:
+Requires [Go](https://go.dev/dl/) 1.26+:
 
 ```bash
 git clone https://github.com/ramazanpolat/claude-playbooks.git
