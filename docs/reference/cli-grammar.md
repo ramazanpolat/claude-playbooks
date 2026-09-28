@@ -193,8 +193,12 @@ mcp-part   := ENV <key>=<value> ...          literal values; a credential needs 
             | HEADER '<name>' FROM '<ref>'
 
 read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> ] [--json]
+            | SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name> [--json]
+
+session    := RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>]     the command line only
+            | RESUME --list [FOR PLAYBOOK <name>] [--json]
 ```
 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
@@ -752,9 +756,9 @@ changes only by these rules (the stabilization week, decided by the pilot on
 | Part | What |
 |---|---|
 | The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
-| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
+| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
 | File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
-| `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json` |
+| `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json`, `SHOW SESSIONS --json` and `RESUME --list --json` (v3.25.0) |
 | Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
 
 **Not stable:**
@@ -928,6 +932,7 @@ so `source.url` and `vars[1].key` work):
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
 | `PANELS` | status line panel, per playbook (v3.25.0) | `playbook panel type source cpb row priority align` |
+| `SESSIONS` | live Claude Code session (v3.25.0) | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume` |
 | `DEFAULTS` | (one row) | `envs secret_helper` |
 
 `version_tuple` is `Array(UInt32)`, the numbers of the version's leading
@@ -1624,6 +1629,113 @@ Claude Code has no CLI that installs an existing skill (`claude plugin init`
 scaffolds a new, empty skills-dir plugin under `skills/`), so cpb manages the
 directory. A skill that ships inside a
 plugin stays the plugin's: `ADD PLUGIN` brings it.
+
+## Sessions (v3.25.0)
+
+cpb lists the live Claude Code sessions of its playbooks and resumes a
+session through the playbook it belongs to.
+
+```
+SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]     also: cpb sessions [--json]
+SELECT … FROM SESSIONS
+RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>]
+RESUME --list [FOR PLAYBOOK <name>] [--json]
+```
+
+**Where it comes from.** Claude Code keeps a file for each of its live
+processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
+- **Which dirs.** cpb reads those files in the config dirs it knows: every
+  playbook, and every plain directory in `.state/dirs.toml`.
+- **Live.** A session is live when its pid is alive **and** the process
+  started when the file says. On Linux that is `/proc/<pid>/stat`'s
+  starttime; elsewhere, `ps`'s lstart read in UTC. So a pid that was reused
+  since does not count.
+- **Kinds.** Kinds other than `interactive` and `bg` are not listed; a
+  daemon's spare workers write no file.
+- **Nothing else is read.** cpb reads no process's environment, runs no
+  daemon, and never writes, deletes or renames anything under `sessions/`:
+  a stale file is Claude Code's business.
+- **The format is Claude Code's.** It is undocumented, observed on 2.1.233
+  (Linux) and 2.1.282–2.1.283 (macOS), and read defensively: a file that
+  does not decode is skipped, and a dir without `sessions/` has no live
+  session.
+
+**`SHOW SESSIONS`** prints the live sessions, newest first: one line each
+(`PLAYBOOK PID KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
+- `FOR PLAYBOOK` limits it to one playbook, and an unknown name is refused.
+- **`cpb sessions`** is the documented lowercase shorthand for exactly
+  `SHOW SESSIONS`, and takes `--json` too.
+- **`--json`** is an array of objects:
+
+| Field | Type | From |
+|---|---|---|
+| `playbook` | string | the playbook's name; a plain directory's path |
+| `config_dir` | string | the config dir |
+| `pid` | number | the session file |
+| `session_id` | string | the session file |
+| `cwd` | string | the session file |
+| `kind` | `"interactive"` or `"bg"` | the session file |
+| `status`, `name`, `claude_version` | string or null | the session file, passed through |
+| `started_at` | RFC 3339, UTC | the session file |
+| `last_active` | RFC 3339, UTC, or null | the transcript's modification time; null before the first message |
+| `model` | string or null | the transcript's last assistant message, read from its last 256 KiB |
+| `launcher` | string or null | the playbook's launcher |
+| `resume` | string | the command that resumes this session (see below) |
+
+A session's transcript is
+`<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`.
+If that path is missing, cpb looks under every project directory.
+
+**`SELECT … FROM SESSIONS`** has the same rows. ClickHouse reads
+`started_at` and `last_active` as `DateTime64(3, 'UTC')`.
+
+**`RESUME`** starts `claude --resume <id>` through the playbook's own launch
+path, as `cpb run <name>` and its launcher do. That covers env sets,
+variables, secret references, the login and the exit line.
+- **The working directory** becomes the one the session ran in, since that
+  is where Claude Code looks it up. cpb says so when that differs from the
+  current directory.
+- **A plain directory's session** runs `claude --resume <id>` with
+  `CLAUDE_CONFIG_DIR` set to that directory, and nothing else added.
+- **No id.** A bare `RESUME` takes the sessions of the current folder,
+  across all playbooks (or the one `FOR PLAYBOOK` names). It resumes the
+  newest that is **not** live, and says first what it picked:
+  ```
+  2 newer sessions are live (pids 7339, 47904); resuming 8ba14a71-… of kommander (last active 2 hours ago)
+  ```
+- **`SESSION '<id>'`** finds the id in any playbook. An id found in more
+  than one config dir is refused until `FOR PLAYBOOK` names one.
+- **A live session is refused,** naming the playbook and the pid, and
+  nothing is launched. Two processes on one session id corrupt it, which
+  is the `claude --continue` hazard. A session recorded in another pid
+  domain (a sandbox, another host) is refused too, since cpb cannot tell.
+  There is no `--force`.
+- **`RESUME --list`** lists the 10 newest sessions of the current folder,
+  live ones marked with their pid (`SESSION PLAYBOOK ACTIVE MODEL LIVE
+  TITLE`). With `--json`, each row has `playbook config_dir session_id cwd
+  last_active model title launcher live pid resume`.
+- **The command line only.** `RESUME` launches a session, so it has no
+  place in a playbook file.
+- **Not yet: sandboxed playbooks.** Their sessions live inside the sandbox;
+  `RESUME` refuses a playbook that runs in one, and `SHOW SESSIONS` lists
+  only what the host's config dirs hold.
+
+**The exit line.** After `claude` exits under `cpb run` or a launcher, cpb
+prints one line on stderr:
+```
+Resume this playbook's session with: kd --resume 08c4811b-3867-4f18-b08f-de6d1e07395f
+```
+- **When.** Only when stderr is a terminal, the launch was local, and
+  claude was interactive (no `-p` / `--print`).
+- **Which session.** The id is the newest transcript written during the
+  launch that no other live process holds.
+- **Why.** Claude Code's own `claude --resume` line still prints. It would
+  open the session under `~/.claude`, not the playbook's config dir, which
+  is why this line exists.
+- The exit code is claude's.
+
+No word is reserved: `SESSIONS`, `SESSION`, `RESUME` and `FOR` still name
+playbooks and env sets.
 
 ## Completion
 

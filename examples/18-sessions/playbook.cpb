@@ -1,0 +1,3 @@
+-- A playbook to hold sessions. SHOW SESSIONS and RESUME read and launch;
+-- they have no place in a playbook file, so this one only creates it.
+CREATE PLAYBOOK IF NOT EXISTS worker NO ALIAS;

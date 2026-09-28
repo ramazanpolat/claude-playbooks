@@ -179,6 +179,8 @@ func readStatement(st *grammar.Stmt) error {
 		}
 		printPlaybooks(all)
 		return nil
+	case st.Object == grammar.Sessions:
+		return showSessions(st)
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
 		return showEnvs(playbooksDir, dir, st)
 	case st.Object == grammar.Defaults:

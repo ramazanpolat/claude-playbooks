@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -232,5 +233,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
-	return preserveExitCode(c.Run())
+	since := time.Now()
+	err = preserveExitCode(c.Run())
+	// The exit line names the command that resumes this session in this
+	// playbook; a caller-supplied config dir is not the playbook's, so
+	// that launch gets none.
+	if !override {
+		printResumeLine(playbookSessionDir(pb), claudeArgs, since)
+	}
+	return err
 }
