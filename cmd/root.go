@@ -99,6 +99,7 @@ func init() {
 	rootCmd.AddCommand(selfUninstallCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(sessionsCmd)
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {

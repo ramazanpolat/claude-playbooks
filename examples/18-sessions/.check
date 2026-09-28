@@ -1,0 +1,45 @@
+# Claude Code keeps <config dir>/sessions/<pid>.json for each live session.
+# Here a sleep stands in for claude, with a session file shaped like Claude
+# Code's; procStart is the process's start time, as Claude Code records it.
+p="$HOME/.claude-playbooks/worker"
+work="$HOME/project"
+mkdir -p "$work" "$p/sessions"
+work=$(cd "$work" && pwd -P)
+enc=$(printf %s "$work" | sed 's/[^A-Za-z0-9]/-/g')
+live=0e5c1a2b-0000-4000-8000-000000000001
+old=0e5c1a2b-0000-4000-8000-000000000002
+sleep 300 &
+pid=$!
+trap 'kill $pid 2>/dev/null' EXIT
+if [ -r "/proc/$pid/stat" ]; then
+  start=$(sed 's/.*) //' "/proc/$pid/stat" | awk '{print $20}')
+else
+  start=$(TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" | awk '{$1=$1; print}')
+fi
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":%s000,"procStart":"%s","kind":"interactive","status":"idle","version":"2.1.283"}\n' \
+  "$pid" "$live" "$work" "$(date +%s)" "$start" > "$p/sessions/$pid.json"
+cp "$p/sessions/$pid.json" "$HOME/session.before"
+# Two transcripts in the project: the live session's and an older one.
+mkdir -p "$p/projects/$enc"
+printf '{"type":"assistant","cwd":"%s","message":{"model":"claude-opus-5-5"}}\n' "$work" > "$p/projects/$enc/$live.jsonl"
+printf '{"type":"assistant","cwd":"%s","message":{"model":"claude-sonnet-5"}}\n' "$work" > "$p/projects/$enc/$old.jsonl"
+touch -t 202601010000 "$p/projects/$enc/$old.jsonl"
+
+# The live session, with its transcript's model; the shorthand is the same.
+cpb SHOW SESSIONS --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert [(x["playbook"], x["model"]) for x in r] == [("worker", "claude-opus-5-5")], r'
+cpb SHOW SESSIONS --json > "$HOME/show.json"
+cpb sessions --json | cmp -s - "$HOME/show.json"
+cpb "SELECT session_id FROM SESSIONS" | grep -q "$live"
+
+cd "$work"
+# The live one is refused, and nothing is launched.
+if cpb RESUME SESSION "$live" 2> "$HOME/live.err"; then echo "resumed a live session"; exit 1; fi
+grep -q "still running (playbook worker, pid $pid" "$HOME/live.err"
+test ! -e "$p/.fake-claude/launch-env"
+# RESUME --list shows both; a bare RESUME takes the newest one not live.
+cpb RESUME --list | grep -q "pid $pid"
+cpb RESUME 2> "$HOME/pick.err"
+grep -q "1 newer session is live (pid $pid); resuming $old of worker" "$HOME/pick.err"
+test -e "$p/.fake-claude/launch-env"
+# cpb never touches Claude Code's session files.
+cmp -s "$p/sessions/$pid.json" "$HOME/session.before"

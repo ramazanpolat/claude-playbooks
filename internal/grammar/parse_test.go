@@ -440,7 +440,7 @@ func TestExpect(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{nil, []string{"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY"}},
+		{nil, []string{"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "RESUME"}},
 		{w("CREATE"), []string{"OR", "PLAYBOOK", "ENV"}},
 		{w("CREATE PLAYBOOK"), []string{"IF", "<playbook>"}},
 		{w("ALTER"), []string{"PLAYBOOK", "ENV", "DEFAULTS"}},
@@ -455,7 +455,9 @@ func TestExpect(t *testing.T) {
 		{w("ALTER DEFAULTS"), defaultsStarters},
 		{w("ALTER DEFAULTS SET"), []string{"SECRET"}},
 		{w("ALTER DEFAULTS SET SECRET HELPER"), []string{"'<command>'"}},
-		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "--json"}},
+		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "SESSIONS", "--json"}},
+		{w("SHOW SESSIONS"), []string{"FOR", "--json"}},
+		{w("RESUME"), []string{"SESSION", "FOR", "--list", "--json"}},
 		{w("APPLY f"), []string{"<file>", "--dry-run", "--yes", "--json"}},
 		{w("CREATE PLAYBOOK x BRANCH main"), createPlaybookStarters}, // FROM may still follow
 		{w("DROP PLAYBOOK k"), []string{"--yes"}},

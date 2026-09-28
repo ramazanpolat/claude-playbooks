@@ -93,6 +93,9 @@ cpb DROP PLAYBOOK scratch --yes
 - **Queries:** `cpb "SELECT name, envs FROM PLAYBOOKS"`; anything beyond
   columns runs in ClickHouse's `clickhouse local`, over the same redacted
   `--json` rows.
+- **Sessions:** `cpb sessions` lists the live Claude Code sessions of every
+  playbook, and `cpb RESUME` resumes the latest one in this folder through
+  its playbook's launcher, refusing one still live elsewhere.
 - **Plans for programs:** `cpb APPLY playbook.cpb --dry-run --json` prints
   what a run would do as a single JSON object (schema 1), with a verdict for
   each statement, the exact `claude` commands, deletes with their size, and

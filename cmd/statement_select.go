@@ -72,6 +72,14 @@ var selectTables = map[string]selectTable{
 		structure: "playbook String, panel String, type String, source String, cpb Bool, row Nullable(UInt32), priority Nullable(UInt32), align String",
 		rows:      panelRows,
 	},
+	"SESSIONS": {
+		columns: []string{"playbook", "pid", "session_id", "cwd", "kind", "status", "name", "claude_version",
+			"started_at", "last_active", "model", "launcher", "config_dir", "resume"},
+		structure: "playbook String, pid UInt32, session_id String, cwd String, kind String, status Nullable(String), name Nullable(String), " +
+			"claude_version Nullable(String), started_at DateTime64(3, 'UTC'), last_active Nullable(DateTime64(3, 'UTC')), model Nullable(String), " +
+			"launcher Nullable(String), config_dir String, resume String",
+		rows: sessionRows,
+	},
 	"DEFAULTS": {
 		columns:   []string{"envs", "secret_helper"},
 		structure: "envs Array(String), secret_helper JSON",
@@ -355,7 +363,7 @@ func planSelect(q string) (*selectPlan, error) {
 		table := strings.ToUpper(m[2])
 		t, ok := selectTables[table]
 		if !ok {
-			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, DEFAULTS)", m[2])
+			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS)", m[2])
 		}
 		var cols []string
 		for _, c := range strings.Split(m[1], ",") {
@@ -380,7 +388,7 @@ func planSelect(q string) (*selectPlan, error) {
 		return nil, errors.New("one statement at a time: remove what follows the semicolon")
 	}
 	if len(froms) == 0 {
-		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, PANELS, DEFAULTS")
+		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS")
 	}
 	if len(froms) > 1 {
 		return nil, errors.New("a query reads one table; join them in ClickHouse yourself: cpb SHOW … --json | clickhouse local …")
@@ -425,6 +433,11 @@ func (p *selectPlan) rendered() bool { return !p.format && selectTTY() }
 // and prints it as the built-in form does.
 func (p *selectPlan) clickhouseArgs() []string {
 	args := []string{"local", "--input-format", "JSONEachRow", "--structure", selectTables[p.table].structure}
+	// SESSIONS' times are RFC 3339, which ClickHouse's basic DateTime input
+	// does not read; only a table with a DateTime column asks for more.
+	if strings.Contains(selectTables[p.table].structure, "DateTime") {
+		args = append(args, "--date_time_input_format", "best_effort")
+	}
 	if p.rendered() {
 		args = append(args, "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0")
 	}
@@ -709,7 +722,7 @@ type columnJSON struct {
 func describeTable(name string) ([]columnJSON, error) {
 	t, ok := selectTables[strings.ToUpper(name)]
 	if !ok {
-		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, DEFAULTS)", name)
+		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS)", name)
 	}
 	types := map[string]string{"version_tuple": "Array(UInt32)"} // computed, not in the structure
 	depth, start := 0, 0
@@ -742,7 +755,7 @@ func describeTable(name string) ([]columnJSON, error) {
 
 func runDescribe(table string, asJSON bool) error {
 	if table == "" {
-		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, PANELS or DEFAULTS")
+		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS or DEFAULTS")
 	}
 	cols, err := describeTable(table)
 	if err != nil {

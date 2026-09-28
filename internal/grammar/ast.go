@@ -23,6 +23,10 @@ const (
 	Apply   Verb = "APPLY"
 	Include Verb = "INCLUDE" // playbook files only: INCLUDE '<path>'
 	Use     Verb = "USE"     // playbook files only: USE PLAYBOOK <name>
+	// Resume: the command line only. RESUME [SESSION '<id>'] [FOR PLAYBOOK
+	// <name>] resumes a Claude Code session through its playbook's launch
+	// path; RESUME --list lists the recent ones in the current folder.
+	Resume Verb = "RESUME"
 )
 
 // Object is what a statement acts on or reads.
@@ -34,7 +38,8 @@ const (
 	Defaults  Object = "DEFAULTS"
 	Playbooks Object = "PLAYBOOKS"
 	Envs      Object = "ENVS"
-	All       Object = "ALL" // SHOW CREATE ALL
+	All       Object = "ALL"      // SHOW CREATE ALL
+	Sessions  Object = "SESSIONS" // SHOW SESSIONS: the live Claude Code sessions of cpb's config dirs
 )
 
 // Kind names a clause. The values are the clause as written, so a test
@@ -182,9 +187,15 @@ type Stmt struct {
 	Dir    string
 	DryRun bool // APPLY <file> --dry-run
 
+	// For: SHOW SESSIONS … FOR PLAYBOOK <name>, RESUME … FOR PLAYBOOK <name>.
+	For string
+	// Session: RESUME SESSION '<id>'. List: RESUME --list.
+	Session string
+	List    bool
+
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
 	Yes         bool // DROP PLAYBOOK ... --yes, APPLY ... --yes
-	JSON        bool // SHOW ... --json, EXPLAIN ... --json, APPLY ... --dry-run --json
+	JSON        bool // SHOW ... --json, EXPLAIN ... --json, APPLY ... --dry-run --json, RESUME --list --json
 
 	Pos Pos
 }
