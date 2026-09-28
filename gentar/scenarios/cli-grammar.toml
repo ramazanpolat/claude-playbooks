@@ -418,3 +418,48 @@ claude-playbook DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -qF '{"name":"pil
 claude-playbook SHOW PLAYBOOK ppn | grep -q '^Pilot profile: *not imported$' || { echo pp-human-wrong; exit 1; }
 echo pilot-profile-field-ok'''
 contains = "pilot-profile-field-ok"
+
+[[verify.commands]]
+# cpb tui v1 (v3.26.0), read-only, on the real binary under a pty (script,
+# 120x40): no cpb command queries the terminal or stalls at startup (the
+# regression guard: SHOW, a launcher-style run, bare cpb); off a terminal
+# tui refuses; bare cpb's hint appears on a terminal only; it draws the
+# playbooks and a live session, exits 0 and leaves the alternate screen;
+# killed mid-draw by SIGTERM, SIGHUP or SIGINT it gives the terminal back
+# (stty: icanon and echo); a plaintext credential never appears, a
+# reference does; browsing (SHOW CREATE, copy) writes nothing; e exports
+# SHOW CREATE --skip-secrets as <name>.cpb and asks before replacing one (a
+# typed y); RESUME from recent sessions runs claude --resume <id> under the
+# playbook's config dir (tuir, with no secret reference, so the launch
+# needs no helper), then the TUI comes back.
+command = '''
+P="$HOME/.claude-playbooks"; W="$HOME/tuiw"; K="$HOME/tuifk"; mkdir -p "$W" "$K" && W="$(cd "$W" && pwd -P)" && E="$(printf %s "$W" | sed 's/[^A-Za-z0-9]/-/g')"
+DS=88888888-aaaa-4aaa-8aaa-888888888881; LS=88888888-aaaa-4aaa-8aaa-888888888882; CAN=sk-arena-canary-4b9e00000000000000000000
+printf '#!/bin/sh\nexit 0\n' > "$K/helper"; chmod +x "$K/helper"
+printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$CLAUDE_CONFIG_DIR" "$*" >> "$HOME/tuifk/log"\n' > "$K/claude"; chmod +x "$K/claude"
+claude-playbook CREATE PLAYBOOK tuia NO ALIAS NO PILOT PROFILE >/dev/null && CPB_SECRET_HELPER="$K/helper" claude-playbook "ALTER PLAYBOOK tuia SET VAR ARENA_API_KEY=$CAN AS PLAINTEXT SET VAR ARENA_REF FROM 'keychain:ok/arena-tui'" >/dev/null 2>&1 || { echo tui-setup-wrong; exit 1; }
+claude-playbook CREATE PLAYBOOK tuir NO ALIAS NO PILOT PROFILE >/dev/null || exit 1
+mkdir -p "$P/tuir/projects/$E" && printf '{"type":"assistant","cwd":"%s","message":{"model":"arena-tui-model"}}\n' "$W" > "$P/tuir/projects/$E/$DS.jsonl"
+sleep 600 & LP=$!; trap 'kill $LP 2>/dev/null' EXIT
+pst() { if [ -r "/proc/$1/stat" ]; then sed 's/.*) //' "/proc/$1/stat" | awk '{print $20}'; else TZ=UTC LC_ALL=C ps -o lstart= -p "$1" | awk '{$1=$1; print}'; fi; }
+mkdir -p "$P/tuia/sessions" && printf '{"pid":%s,"sessionId":"%s","cwd":"/tmp","startedAt":%s000,"procStart":"%s","kind":"interactive","status":"idle"}' "$LP" "$LS" "$(date +%s)" "$(pst $LP)" > "$P/tuia/sessions/$LP.json"
+tty_() { if script --version >/dev/null 2>&1; then script -qec "$1" /dev/null; else script -q /dev/null sh -c "$1"; fi; }
+drive() { o="$1"; shift; ( sleep 1.5; for k in "$@"; do if [ "$k" = _ ]; then sleep 1.5; else printf '%b' "$k"; fi; done; sleep 1.5 ) | tty_ "stty cols 120 rows 40 2>/dev/null; cd '$W' && PATH='$K':\"\$PATH\" claude-playbook tui" > "$o" 2>&1; echo $? > "$o.rc"; tr -d '\r' < "$o" | tr '\033' '~' > "$o.txt"; }
+sum() { find "$P" -type f | sort | xargs cksum | cksum; }
+ms() { s=$(date +%s); tty_ "$1" > "$2" 2>&1; echo $(( $(date +%s) - s )); }
+for c in "claude-playbook SHOW PLAYBOOKS" "PATH='$K':\"\$PATH\" claude-playbook run tuia --version" "claude-playbook"; do t=$(ms "$c" "$HOME/q.out"); if [ "$t" -gt 2 ] || tr '\033' '~' < "$HOME/q.out" | grep -Eq '~\]|~\[6n'; then echo "tui-startup-query: $c ($t s)"; exit 1; fi; done
+for g in TERM HUP INT; do tty_ "stty cols 120 rows 40 2>/dev/null; claude-playbook tui </dev/tty & p=\$!; sleep 1.5; kill -$g \$p; wait \$p; stty -a" 2>&1 | tr -d '\r' > "$HOME/stty.$g"; grep -Eq '(^|[ ;])icanon([ ;]|$)' "$HOME/stty.$g" && grep -Eq '(^|[ ;])echo([ ;]|$)' "$HOME/stty.$g" || { echo "tui-tty-not-restored-$g"; exit 1; }; done
+if claude-playbook tui < /dev/null > "$HOME/tui.off" 2>&1; then echo tui-offtty-ran; exit 1; fi; grep -q "needs a terminal" "$HOME/tui.off" || { echo tui-offtty-wrong; exit 1; }
+claude-playbook > "$HOME/bare.off" 2>&1; ! grep -q "cpb tui" "$HOME/bare.off" || { echo tui-bare-hint-offtty; exit 1; }
+tty_ "stty cols 120 rows 40 2>/dev/null; claude-playbook" 2>&1 | tr -d '\r' > "$HOME/bare.tty"; [ "$(grep -v '^$' "$HOME/bare.tty" | tail -1)" = "Browse and manage them: cpb tui" ] || { echo tui-bare-hint-wrong; exit 1; }
+B="$(sum)"
+drive "$HOME/t1" q; grep -qF tuia "$HOME/t1.txt" && grep -qF '[?1049l' "$HOME/t1.txt" && { [ "$(cat "$HOME/t1.rc")" = 0 ] || ! script --version >/dev/null 2>&1; } || { echo tui-draw-wrong; exit 1; }
+drive "$HOME/t2" 2 _ q; grep -qF "$LP" "$HOME/t2.txt" || { echo tui-sessions-wrong; exit 1; }
+drive "$HOME/t3" '/tuia\r' _ '\r' _ 3 _ c _ y _ '\033' _ q; grep -qF "keychain:ok/arena-tui" "$HOME/t3.txt" && grep -qF "(redacted" "$HOME/t3.txt" && ! grep -rqF "$CAN" "$HOME/t1.txt" "$HOME/t2.txt" "$HOME/t3.txt" || { echo tui-secret-wrong; exit 1; }
+[ "$(sum)" = "$B" ] || { echo tui-wrote-something; exit 1; }
+drive "$HOME/t4" '/tuia\r' _ e _ q; claude-playbook SHOW CREATE PLAYBOOK tuia --skip-secrets > "$HOME/tuia.want" && cmp -s "$W/tuia.cpb" "$HOME/tuia.want" && [ "$(ls -A "$W")" = tuia.cpb ] || { echo tui-export-wrong; exit 1; }
+printf 'mine\n' > "$W/tuia.cpb"; drive "$HOME/t5" '/tuia\r' _ e _ n _ q; [ "$(cat "$W/tuia.cpb")" = mine ] || { echo tui-export-overwrote; exit 1; }
+drive "$HOME/t6" '/tuia\r' _ e _ y _ q; cmp -s "$W/tuia.cpb" "$HOME/tuia.want" || { echo tui-export-y-wrong; exit 1; }
+rm -f "$K/log"; drive "$HOME/t7" 2 _ R _ '\r' _ _ q; [ "$(cat "$K/log" 2>/dev/null)" = "$P/tuir|--resume $DS" ] && { [ "$(cat "$HOME/t7.rc")" = 0 ] || ! script --version >/dev/null 2>&1; } || { echo tui-resume-wrong; exit 1; }
+echo tui-ok'''
+contains = "tui-ok"

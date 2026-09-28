@@ -1,0 +1,40 @@
+ cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log                                                ? help
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  NAME           LAUNCHER  VERSION  ENV SETS  LOGIN     SESSIONS  MODEL
+▸ kommander-dev  kd        v3.11.4  -         shared    1         claude-opus-5-5
+  router         k9        -        9router   isolated  1         glm-5.3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 2 playbooks · 2 live sessions · read 0s ago
+ enter open  s sessions  c SHOW CREATE  e export  y copy  / filter  q quit
+reads: cpb SHOW PLAYBOOKS --json
