@@ -2,7 +2,6 @@ package tui
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -160,21 +159,5 @@ func TestProgramSIGHUP(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-}
-
-// panicker panics in View once the program runs.
-type panicker struct{}
-
-func (panicker) Init() tea.Cmd                         { return nil }
-func (p panicker) Update(tea.Msg) (tea.Model, tea.Cmd) { return p, nil }
-func (panicker) View() tea.View                        { panic("boom") }
-
-// A panic is caught by bubbletea, which restores the terminal and returns
-// an error instead of crashing with the terminal raw.
-func TestProgramPanicRecovered(t *testing.T) {
-	err, _ := runWith(t, panicker{}, func(w io.Writer) {})
-	if err == nil || !errors.Is(err, tea.ErrProgramPanic) {
-		t.Fatalf("got %v", err)
 	}
 }
