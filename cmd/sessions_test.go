@@ -561,11 +561,26 @@ func TestLinuxTTY(t *testing.T) {
 		136<<8 | (1<<20 | 0x5): "pts/261", // devpts: major 136, minor 261 (0x105, its high bits at 20-31)
 		137<<8 | 5:             "pts/261", // the legacy Unix98 layout procps also names this way
 		4<<8 | 1:               "tty1",
+		136<<8 | 0x80000<<12:   "pts/524288", // bit 31 set: /proc prints it negative
 		4<<8 | 64:              "ttyS0",
 		188<<8 | 0:             "",
 	} {
 		if got := linuxTTY(nr); got != want {
 			t.Errorf("linuxTTY(%#x) = %q, want %q", nr, got, want)
 		}
+	}
+}
+
+// /proc/<pid>/stat prints tty_nr as a signed int; a large pts minor is
+// negative there, and still names its terminal (Codex, #134).
+func TestProcStatNegativeTTYNr(t *testing.T) {
+	u := uint32(136<<8 | 0x80000<<12)
+	nr := int32(u)
+	if nr >= 0 {
+		t.Fatal("the test value must set bit 31")
+	}
+	n, _ := strconv.ParseInt(strconv.Itoa(int(nr)), 10, 32)
+	if got := linuxTTY(uint64(uint32(int32(n)))); got != "pts/524288" {
+		t.Fatalf("got %q", got)
 	}
 }
