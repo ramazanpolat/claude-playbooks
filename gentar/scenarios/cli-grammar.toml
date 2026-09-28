@@ -409,7 +409,7 @@ contains = "sessions-tty-ok"
 # CLAUDE.md, unknown for a CLAUDE.md that cannot be read (a directory here,
 # whatever the uid); last in the object and the table; a human line.
 command = '''
-P="$HOME/.claude-playbooks"; f() { claude-playbook SHOW PLAYBOOK "$1" --json | tr -d ' \n' | grep -o '"pilot_profile":"[a-z_]*"}$'; }
+P="$HOME/.claude-playbooks"; f() { printf '%s\n' "$(claude-playbook SHOW PLAYBOOK "$1" --json | tr -d ' \n')" | sed -n 's/.*\("pilot_profile":"[a-z_]*"}\)$/\1/p'; }
 claude-playbook CREATE PLAYBOOK ppi NO ALIAS >/dev/null && claude-playbook CREATE PLAYBOOK ppn NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppg NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppu NO ALIAS >/dev/null || exit 1
 rm "$P/ppg/CLAUDE.md" && rm "$P/ppu/CLAUDE.md" && mkdir "$P/ppu/CLAUDE.md" || exit 1
 [ "$(f ppi)" = '"pilot_profile":"imported"}' ] && [ "$(f ppn)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppg)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppu)" = '"pilot_profile":"unknown"}' ] || { echo pp-show-wrong; exit 1; }

@@ -213,12 +213,17 @@ const (
 )
 
 // pilotProfileState is whether the CLAUDE.md in dir imports the pilot
-// profile. No CLAUDE.md imports nothing; one that cannot be read is
-// unknown, never a guess.
+// profile. No CLAUDE.md imports nothing; one that is there but cannot be
+// read (a directory, no permission, a dangling symlink) is unknown, never a
+// guess.
 func pilotProfileState(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	p := filepath.Join(dir, "CLAUDE.md")
+	data, err := os.ReadFile(p)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
+		if _, lerr := os.Lstat(p); lerr == nil {
+			return pilotUnknown // a symlink to nothing
+		}
 		return pilotNotImported
 	case err != nil:
 		return pilotUnknown

@@ -173,6 +173,14 @@ func TestPilotProfileField(t *testing.T) {
 	mustStmt(t, "CREATE PLAYBOOK without NO ALIAS NO PILOT PROFILE")
 	mustStmt(t, "CREATE PLAYBOOK gone NO ALIAS")
 	mustStmt(t, "CREATE PLAYBOOK odd NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK dangling NO ALIAS")
+	dl := filepath.Join(root, "dangling", "CLAUDE.md")
+	if err := os.Remove(dl); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "nowhere.md"), dl); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(filepath.Join(root, "gone", "CLAUDE.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -183,14 +191,15 @@ func TestPilotProfileField(t *testing.T) {
 	if err := os.Mkdir(odd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"with": "imported", "without": "not_imported", "gone": "not_imported", "odd": "unknown"} {
+	wants := map[string]string{"with": "imported", "without": "not_imported", "gone": "not_imported", "odd": "unknown", "dangling": "unknown"}
+	for name, want := range wants {
 		out := mustStmt(t, "SHOW PLAYBOOK "+name+" --json")
 		var v map[string]any
 		if err := json.Unmarshal([]byte(out), &v); err != nil || v["pilot_profile"] != want {
 			t.Errorf("%s: pilot_profile = %v, want %s (%v)", name, v["pilot_profile"], want, err)
 		}
-		if i := strings.Index(out, `"pilot_profile"`); i < strings.Index(out, `"model_picker"`) {
-			t.Errorf("%s: pilot_profile is not last", name)
+		if !strings.HasSuffix(strings.TrimSpace(out), `"pilot_profile": "`+want+`"`+"\n}") {
+			t.Errorf("%s: pilot_profile is not the last field:\n%s", name, out)
 		}
 	}
 	if h := mustStmt(t, "SHOW PLAYBOOK without"); !strings.Contains(h, "Pilot profile") || !strings.Contains(h, "not imported") {
@@ -203,7 +212,12 @@ func TestPilotProfileField(t *testing.T) {
 	var rows []map[string]any
 	var err error
 	js := captureStdout(t, func() { err = runStatement([]string{"SELECT name, pilot_profile FROM PLAYBOOKS", "--json"}) })
-	if err != nil || json.Unmarshal([]byte(js), &rows) != nil || len(rows) != 4 {
+	if err != nil || json.Unmarshal([]byte(js), &rows) != nil || len(rows) != len(wants) {
 		t.Fatalf("%v\n%s", err, js)
+	}
+	for _, r := range rows {
+		if r["pilot_profile"] != wants[r["name"].(string)] {
+			t.Errorf("SELECT %v: pilot_profile %v", r["name"], r["pilot_profile"])
+		}
 	}
 }
