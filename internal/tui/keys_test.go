@@ -46,6 +46,12 @@ func TestDecode(t *testing.T) {
 		// A rune split across reads waits for its other bytes.
 		{"\xe2\x9c", false, []string{}, "\xe2\x9c"},
 		{"x\x01y", false, []string{"x", "y"}, ""},
+		// A terminal's string replies (OSC ended by BEL or ST, DCS, APC)
+		// vanish whole: none of their bytes becomes a key (agy, round 1).
+		{"\x1b]11;rgb:0000/0000/0000\x07q", false, []string{"q"}, ""},
+		{"\x1b]52;c;cXE=\x1b\\q", false, []string{"q"}, ""},
+		{"\x1bP>|xterm\x1b\\j", false, []string{"j"}, ""},
+		{"\x1b]11;rgb:00", false, []string{}, "\x1b]11;rgb:00"},
 	} {
 		keys, rest := decode([]byte(tc.in), tc.final)
 		if got := names(keys); !reflect.DeepEqual(got, tc.want) || string(rest) != tc.rest {

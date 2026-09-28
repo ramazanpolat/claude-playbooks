@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,10 +30,7 @@ type screen interface {
 // Nothing touches the terminal before Run is called, so linking this
 // package costs other commands nothing.
 func Run(o Options) error {
-	if os.Getenv("NO_COLOR") != "" {
-		o.NoColor = true
-	}
-	return run(o, &ttyScreen{in: os.Stdin, out: os.Stdout}, os.Stdin, os.Stdin, os.Stdout, os.Stderr)
+	return run(fromEnv(o, os.Getenv), &ttyScreen{in: os.Stdin, out: os.Stdout}, os.Stdin, os.Stdin, os.Stdout, os.Stderr)
 }
 
 // errSignal is the loop's end on SIGINT, SIGTERM or SIGHUP.
@@ -113,6 +111,7 @@ func run(o Options, s screen, keys *os.File, stdin, stdout, stderr *os.File) (er
 				return err
 			}
 			drainInterrupts(sig)
+			dropKeys(msgs)
 			rd.resume()
 			msg = resumeDoneMsg{x.stmt, runErr}
 		}
@@ -120,6 +119,27 @@ func run(o Options, s screen, keys *os.File, stdin, stdout, stderr *os.File) (er
 		m, c = m.Update(msg)
 		start(c)
 		draw()
+	}
+}
+
+// dropKeys discards keys that were read after the handover began: they
+// were typed for the resumed session, not for the TUI. Other messages (a
+// read that finished meanwhile) are kept.
+func dropKeys(msgs chan Msg) {
+	var keep []Msg
+	for {
+		select {
+		case m := <-msgs:
+			if _, isKey := m.(KeyMsg); !isKey {
+				keep = append(keep, m)
+			}
+			continue
+		default:
+		}
+		break
+	}
+	for _, m := range keep {
+		msgs <- m
 	}
 }
 
@@ -175,47 +195,67 @@ func (t *ttyScreen) size() (int, int) {
 func (t *ttyScreen) write(s string) { _, _ = t.out.WriteString(s) }
 
 // reader turns input into KeyMsgs on out. It can be paused, which it
-// acknowledges only between reads, so while a resumed session runs it
-// takes none of that session's keys.
+// acknowledges only between reads, and a pause wakes its poll at once (a
+// self-pipe), so while a resumed session runs it takes none of that
+// session's keys. At the end of input it sends quitMsg: a terminal that is
+// gone cannot type q.
 type reader struct {
-	in              *os.File
-	out             chan<- Msg
-	pauseReq, ack   chan struct{}
-	resumeReq, done chan struct{}
+	in                *os.File
+	wakeR, wakeW      *os.File
+	out               chan<- Msg
+	pauseReq, ack     chan struct{}
+	resumeReq, done   chan struct{}
+	exited            chan struct{}
+	stopOnce, wakeOne sync.Once
 }
 
 func startReader(in *os.File, out chan<- Msg) *reader {
 	r := &reader{in: in, out: out, pauseReq: make(chan struct{}), ack: make(chan struct{}),
-		resumeReq: make(chan struct{}), done: make(chan struct{})}
+		resumeReq: make(chan struct{}), done: make(chan struct{}), exited: make(chan struct{})}
+	if pr, pw, err := os.Pipe(); err == nil {
+		r.wakeR, r.wakeW = pr, pw
+	}
 	go r.loop()
 	return r
 }
 
+func (r *reader) wake() {
+	if r.wakeW != nil {
+		_, _ = r.wakeW.Write([]byte{0})
+	}
+}
+
 func (r *reader) pause() {
+	r.wake()
 	select {
 	case r.pauseReq <- struct{}{}:
-		<-r.ack
-	case <-r.done:
+		select {
+		case <-r.ack:
+		case <-r.exited:
+		}
+	case <-r.exited:
 	}
 }
 
 func (r *reader) resume() {
 	select {
 	case r.resumeReq <- struct{}{}:
-	case <-r.done:
+	case <-r.exited:
 	}
 }
 
 func (r *reader) stop() {
-	select {
-	case <-r.done:
-	default:
-		close(r.done)
+	r.stopOnce.Do(func() { close(r.done) })
+	r.wake()
+	<-r.exited
+	if r.wakeR != nil {
+		r.wakeR.Close()
+		r.wakeW.Close()
 	}
 }
 
-func (r *reader) send(keys []KeyMsg) {
-	for _, k := range keys {
+func (r *reader) send(msgs ...Msg) {
+	for _, k := range msgs {
 		select {
 		case r.out <- k:
 		case <-r.done:
@@ -225,6 +265,7 @@ func (r *reader) send(keys []KeyMsg) {
 }
 
 func (r *reader) loop() {
+	defer close(r.exited)
 	fd := int(r.in.Fd())
 	buf := make([]byte, 256)
 	var pending []byte
@@ -247,27 +288,43 @@ func (r *reader) loop() {
 		if len(pending) > 0 {
 			timeout = escTimeoutMillis
 		}
-		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, timeout)
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		if r.wakeR != nil {
+			fds = append(fds, unix.PollFd{Fd: int32(r.wakeR.Fd()), Events: unix.POLLIN})
+		}
+		n, err := unix.Poll(fds, timeout)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
 			return
 		}
+		if len(fds) > 1 && fds[1].Revents != 0 {
+			// A pause or a stop: take the wake byte, not a key, and look again.
+			_, _ = r.wakeR.Read(make([]byte, 16))
+			continue
+		}
 		if n == 0 {
 			if len(pending) > 0 {
 				keys, _ := decode(pending, true)
 				pending = nil
-				r.send(keys)
+				r.sendKeys(keys)
 			}
 			continue
 		}
 		k, err := r.in.Read(buf)
 		if k == 0 && err != nil {
-			return // end of input: the loop keeps drawing until quit or a signal
+			r.send(quitMsg{})
+			return
 		}
 		keys, rest := decode(append(pending, buf[:k]...), false)
 		pending = rest
-		r.send(keys)
+		r.sendKeys(keys)
+	}
+}
+
+func (r *reader) sendKeys(keys []KeyMsg) {
+	for _, k := range keys {
+		r.send(k)
 	}
 }

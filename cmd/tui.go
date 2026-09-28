@@ -23,8 +23,11 @@ var tuiCmd = &cobra.Command{
 
 var errTUINeedsTerminal = errors.New("cpb tui needs a terminal; use cpb SHOW … --json for scripts")
 
+// tuiTTY is whether stdin and stdout are a terminal; a variable for tests.
+var tuiTTY = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) }
+
 func runTUI(cmd *cobra.Command, args []string) error {
-	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+	if !tuiTTY() {
 		return errTUINeedsTerminal
 	}
 	bin, err := os.Executable()

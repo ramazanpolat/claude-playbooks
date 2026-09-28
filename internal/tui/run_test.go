@@ -221,12 +221,41 @@ func TestNoColor(t *testing.T) {
 	if !strings.Contains(m.View(), "\x1b[7m▸ ") {
 		t.Fatal("no reverse video for the selection")
 	}
-	t.Setenv("NO_COLOR", "1")
-	o := Options{}
-	if os.Getenv("NO_COLOR") != "" {
-		o.NoColor = true
+	env := map[string]string{"NO_COLOR": "1"}
+	if !fromEnv(Options{}, func(k string) string { return env[k] }).NoColor {
+		t.Fatal("Run ignores NO_COLOR")
 	}
-	if !o.NoColor {
-		t.Fatal("NO_COLOR is honoured by Run")
+	if fromEnv(Options{}, func(string) string { return "" }).NoColor {
+		t.Fatal("no NO_COLOR, no NoColor")
+	}
+}
+
+// The end of input (a terminal that is gone) ends the loop, terminal
+// restored, rather than leave a TUI nobody can quit (agy, round 1).
+func TestLoopEOFQuits(t *testing.T) {
+	lr := startLoop(t, Options{})
+	eventually(t, "drawn", func() bool { _, _, out := lr.scr.state(); return strings.Contains(out, "router") })
+	lr.keys.Close()
+	if err := lr.wait(t); err != nil {
+		t.Fatal(err)
+	}
+	if on, _, _ := lr.scr.state(); on {
+		t.Fatal("EOF left the terminal raw")
+	}
+}
+
+// Keys read after the handover began were typed for the resumed session:
+// they are dropped, never run as TUI commands afterwards (agy, round 1).
+func TestDropKeysKeepsOtherMessages(t *testing.T) {
+	msgs := make(chan Msg, 8)
+	msgs <- KeyMsg{Rune: 'q'}
+	msgs <- sessionsMsg{}
+	msgs <- KeyMsg{Name: "enter"}
+	dropKeys(msgs)
+	if len(msgs) != 1 {
+		t.Fatalf("%d left", len(msgs))
+	}
+	if _, ok := (<-msgs).(sessionsMsg); !ok {
+		t.Fatal("a read result was dropped")
 	}
 }

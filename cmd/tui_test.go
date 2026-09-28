@@ -9,6 +9,9 @@ import (
 // Off a terminal, cpb tui refuses and names the scriptable form.
 func TestTUINeedsATerminal(t *testing.T) {
 	sandboxDefaultRoot(t)
+	old := tuiTTY
+	tuiTTY = func() bool { return false }
+	t.Cleanup(func() { tuiTTY = old })
 	if err := runTUI(nil, nil); !errors.Is(err, errTUINeedsTerminal) {
 		t.Fatalf("got %v", err)
 	}

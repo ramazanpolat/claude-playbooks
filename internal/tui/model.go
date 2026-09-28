@@ -159,6 +159,15 @@ type (
 	tickMsg time.Time
 )
 
+// fromEnv applies the environment to the options: NO_COLOR, set to
+// anything, turns attributes off.
+func fromEnv(o Options, getenv func(string) string) Options {
+	if getenv("NO_COLOR") != "" {
+		o.NoColor = true
+	}
+	return o
+}
+
 // New returns the model; Run starts it.
 func New(o Options) Model {
 	if o.Now == nil {
@@ -291,7 +300,7 @@ func (m Model) key(k KeyMsg) (Model, Cmd) {
 		// Only a typed y replaces the file; anything else leaves it.
 		c := m.confirm
 		m.confirm = nil
-		if s == "y" || s == "Y" {
+		if s == "y" {
 			if err := os.WriteFile(c.path, c.data, 0o644); err != nil {
 				m.msg = "export failed: " + err.Error()
 			} else {

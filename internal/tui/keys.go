@@ -99,6 +99,18 @@ func escape(b []byte) (KeyMsg, int, bool) {
 			}
 		}
 		return KeyMsg{}, 0, false
+	case ']', 'P', '_', '^', 'X':
+		// OSC, DCS, APC, PM, SOS (a terminal's reply to a query): a string
+		// ended by BEL or ST (ESC \\). Dropped whole.
+		for i := 2; i < len(b); i++ {
+			if b[i] == 0x07 {
+				return KeyMsg{}, i + 1, true
+			}
+			if b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\' {
+				return KeyMsg{}, i + 2, true
+			}
+		}
+		return KeyMsg{}, 0, false
 	case 'O': // SS3: one final byte
 		if len(b) < 3 {
 			return KeyMsg{}, 0, false

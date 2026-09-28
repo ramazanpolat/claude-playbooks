@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,13 +20,16 @@ var now = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 
 // fakeRunner answers cpb commands from canned outputs and records them.
 type fakeRunner struct {
+	mu    sync.Mutex
 	out   map[string]string
 	calls []string
 }
 
 func (f *fakeRunner) Run(args ...string) ([]byte, error) {
 	k := strings.Join(args, " ")
+	f.mu.Lock()
 	f.calls = append(f.calls, k)
+	f.mu.Unlock()
 	if v, ok := f.out[k]; ok {
 		if strings.HasPrefix(v, "ERR:") {
 			return nil, errors.New(strings.TrimPrefix(v, "ERR:"))
@@ -259,6 +263,10 @@ func TestExportNeverOverwritesWithoutY(t *testing.T) {
 	hs.keys("n")
 	if b, _ := os.ReadFile(p); string(b) != "mine\n" {
 		t.Fatalf("replaced without y: %q", b)
+	}
+	hs.keys("e", "Y")
+	if b, _ := os.ReadFile(p); string(b) != "mine\n" {
+		t.Fatalf("replaced on Y, not a typed y: %q", b)
 	}
 	hs.keys("e", "y")
 	if b, _ := os.ReadFile(p); string(b) != fixtureCreate {
