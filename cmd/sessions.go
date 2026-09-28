@@ -129,20 +129,23 @@ func psStarts(pids []int) map[int]string {
 	if len(pids) == 0 {
 		return out
 	}
-	list := make([]string, len(pids))
-	for i, p := range pids {
-		list[i] = strconv.Itoa(p)
+	want := map[int]bool{}
+	for _, p := range pids {
+		want[p] = true
 	}
-	c := exec.Command("ps", "-o", "pid=,lstart=", "-p", strings.Join(list, ","))
+	// Every process, filtered here: `ps -p` with one pid macOS's ps rejects
+	// (out of range, from a malformed session file) prints nothing for the
+	// others either.
+	c := exec.Command("ps", "-A", "-o", "pid=,lstart=")
 	c.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
-	b, _ := c.Output() // ps exits 1 when none of the pids is alive
+	b, _ := c.Output()
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
 			continue
 		}
 		pid, err := strconv.Atoi(f[0])
-		if err != nil {
+		if err != nil || !want[pid] {
 			continue
 		}
 		out[pid] = strings.Join(f[1:], " ")
