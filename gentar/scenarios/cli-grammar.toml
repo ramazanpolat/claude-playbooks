@@ -395,9 +395,10 @@ sf "$NP" "$N1"; sf "$TP" "$T1"
 PT="$(ps -o tty= -p "$TP" | awk '{print $1}')"
 J="$(claude-playbook SHOW SESSIONS FOR PLAYBOOK tty --json | tr -d ' \n')"
 case "$PT" in ""|"?"|"??") echo tty-no-pty; exit 1;; esac
-printf %s "$J" | grep -qF "\"session_id\":\"$N1\"" && printf %s "$J" | grep -Eq "\"session_id\":\"$N1\"[^}]*\"tty\":null}" && printf %s "$J" | grep -Eq "\"session_id\":\"$T1\"[^}]*\"tty\":\"$PT\"}" || { echo tty-show-wrong; exit 1; }
+obj() { printf %s "$J" | tr '}' '\n' | grep -F "\"session_id\":\"$1\""; }
+obj "$N1" | grep -qF '"tty":null' && obj "$T1" | grep -qF "\"tty\":\"$PT\"" || { echo tty-show-wrong; exit 1; }
 claude-playbook "SELECT session_id, tty FROM SESSIONS" --json | tr -d ' \n' | grep -qF "\"tty\":\"$PT\"" || { echo tty-select-wrong; exit 1; }
 D="$(claude-playbook DESCRIBE SESSIONS --json | tr -d ' \n')"
-[ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed 's/"name":"//; s/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)"}]' || { echo tty-describe-wrong; exit 1; }
+[ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)"}]' || { echo tty-describe-wrong; exit 1; }
 echo sessions-tty-ok'''
 contains = "sessions-tty-ok"

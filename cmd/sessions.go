@@ -169,23 +169,25 @@ func psStarts(pids []int) map[int]procInfo {
 	// Every process, filtered here: `ps -p` with one pid macOS's ps rejects
 	// (out of range, from a malformed session file) prints nothing for the
 	// others either.
-	c := exec.Command("ps", "-A", "-o", "pid=,tty=,lstart=")
+	// tty last: lstart in the C locale is always five words, so the
+	// columns cannot shift whatever the tty column holds.
+	c := exec.Command("ps", "-A", "-o", "pid=,lstart=,tty=")
 	c.Env = append(os.Environ(), "TZ=UTC", "LC_ALL=C")
 	b, _ := c.Output()
 	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
-		if len(f) < 3 {
+		if len(f) < 6 {
 			continue
 		}
 		pid, err := strconv.Atoi(f[0])
 		if err != nil || !want[pid] {
 			continue
 		}
-		tty := f[1]
-		if strings.Trim(tty, "?-") == "" {
-			tty = ""
+		tty := ""
+		if len(f) > 6 && strings.Trim(f[6], "?-") != "" {
+			tty = f[6]
 		}
-		out[pid] = procInfo{start: strings.Join(f[2:], " "), tty: tty}
+		out[pid] = procInfo{start: strings.Join(f[1:6], " "), tty: tty}
 	}
 	return out
 }

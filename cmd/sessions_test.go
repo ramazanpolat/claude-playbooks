@@ -541,8 +541,8 @@ func TestSessionTTY(t *testing.T) {
 	if rows[0]["tty"] != "pts/4" || rows[1]["tty"] != nil {
 		t.Fatalf("tty: %v / %v", rows[0]["tty"], rows[1]["tty"])
 	}
-	if i := strings.Index(out, `"tty"`); i < strings.Index(out, `"resume"`) {
-		t.Fatal("tty is the last field")
+	if !strings.Contains(out, "\"tty\": \"pts/4\"\n  }") || !strings.Contains(out, "\"tty\": null\n  }") {
+		t.Fatalf("tty is the last field of each object:\n%s", out)
 	}
 	cols, _ := describeTable("SESSIONS")
 	if last := cols[len(cols)-1]; last.Name != "tty" || last.Type != "Nullable(String)" {
@@ -558,7 +558,8 @@ func TestLinuxTTY(t *testing.T) {
 		0:                      "",
 		136<<8 | 4:             "pts/4",
 		137<<8 | 2:             "pts/258",
-		136<<8 | (1<<20 | 0x5): "pts/261", // minor 0x105: high minor bits above bit 20
+		136<<8 | (1<<20 | 0x5): "pts/261", // devpts: major 136, minor 261 (0x105, its high bits at 20-31)
+		137<<8 | 5:             "pts/261", // the legacy Unix98 layout procps also names this way
 		4<<8 | 1:               "tty1",
 		4<<8 | 64:              "ttyS0",
 		188<<8 | 0:             "",
