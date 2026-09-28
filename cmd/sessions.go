@@ -132,8 +132,10 @@ func procStatStarts(pids []int) map[int]procInfo {
 		if len(f) <= 19 {
 			continue
 		}
-		nr, _ := strconv.ParseUint(f[4], 10, 32)
-		out[pid] = procInfo{start: f[19], tty: linuxTTY(nr)}
+		// tty_nr is a signed %d: a pts minor of 0x80000 or more sets bit 31
+		// and prints negative (Codex, #134). Its bits are the device number.
+		n, _ := strconv.ParseInt(f[4], 10, 32)
+		out[pid] = procInfo{start: f[19], tty: linuxTTY(uint64(uint32(int32(n))))}
 	}
 	return out
 }
