@@ -193,3 +193,33 @@ release:
       `gh pr view <n> --comments` prints the reviews and the replies to check.
 
 If any is missing, build it first; never tag without it.
+
+### Releasing from a release branch
+
+A stable minor is released from its own branch, `release/vX.Y`, while main
+moves on. The release workflow publishes a tag only when its commit is on
+main or on `origin/release/vX.Y` for the tag's own minor. Any other tag fails
+the run, with the reason (`.github/scripts/release-refs.sh`). The order:
+
+1. **The fix lands on main first**, as a normal PR.
+2. **`git cherry-pick -x`** it to `release/vX.Y`, in a PR against that
+   branch. Only fixes go to a release branch, never features.
+3. **The release-prep commit on the branch**:
+   - `package.json` → X.Y.Z, which npx serves and release.yml requires to
+     equal the tag;
+   - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`);
+   - the reference's status line.
+4. **The nights.** Arena phase 2 runs on the branch head. A stable tag needs
+   7 consecutive green nights on exactly that head, and a new commit on the
+   branch starts the count again.
+5. **Tag `vX.Y.Z` on that head.** The release gate also requires a green
+   `arena / phase2` on the tagged sha.
+6. **The main bump PR, opened at tag time.** Once vX.Y.Z is tagged, CI's
+   npx check fails every push to main until main's `package.json` says
+   X.Y.Z: it compares against the newest release, wherever it was tagged. The
+   same commit moves the pins in `installation.md`. Merge it right after the
+   release publishes.
+
+A release cut from main (a new minor) needs only steps 3 to 6, on main. Its
+bump commit before the tag passes the npx check with a warning: the version
+is ahead of the newest release, and not yet tagged.
