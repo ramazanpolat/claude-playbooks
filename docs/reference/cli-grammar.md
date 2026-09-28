@@ -1,6 +1,6 @@
 # CLI grammar
 
-Status: **implemented, v3.23.1; the stable surface from v3.24.0** (see
+Status: **implemented, v3.24.0, the stable surface** (see
 "Stability"). Decided with the pilot on 2026-09-25/27. Everything on this
 page is built; a section specified before it is built is marked
 **planned**.
