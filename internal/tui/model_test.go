@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -219,23 +220,56 @@ func TestGoldenScreens(t *testing.T) {
 	}
 }
 
-// Nothing secret reaches a screen: cpb has withheld values, and the TUI
-// shows a reference as a reference and a credential as redacted.
+// Nothing secret reaches a screen. cpb's --json withholds values; if a
+// value ever came with "redacted": true anyway, the TUI would still show
+// it redacted. A canary in every place a value could sit must appear on
+// no screen and no tab, at either size.
 func TestNoSecretOnAnyScreen(t *testing.T) {
-	hs := newHarness(t, 120, 40)
-	hs.keys("down", "enter", "3")
-	v := hs.view()
-	if !strings.Contains(v, "FROM 'keychain:pilot/9r'") || !strings.Contains(v, "(redacted, plaintext)") {
-		t.Fatalf("vars:\n%s", v)
+	const canary = "sk-tui-canary-000000000000"
+	leak := strings.Replace(fixturePlaybooks, `{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true}`,
+		`{"key":"OPENAI_API_KEY","value":"`+canary+`","redacted":true,"plaintext":true}`, 1)
+	leak = strings.Replace(leak, `{"key":"Authorization","ref":"keychain:pilot/sentry"}`,
+		`{"key":"Authorization","value":"`+canary+`","redacted":true}`, 1)
+	if strings.Count(leak, canary) != 2 {
+		t.Fatal("the canary was not planted")
 	}
-	var raw []map[string]any
-	_ = json.Unmarshal([]byte(fixturePlaybooks), &raw)
-	for _, p := range raw {
-		for _, x := range p["vars"].([]any) {
-			if _, has := x.(map[string]any)["value"]; has && x.(map[string]any)["redacted"] == true {
-				t.Fatal("the fixture must look like cpb: no value for a redacted var")
+	explain := strings.Replace(fixtureExplain, `{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true,`,
+		`{"key":"OPENAI_API_KEY","value":"`+canary+`","redacted":true,"plaintext":true,`, 1)
+	for _, size := range [][2]int{{80, 24}, {120, 40}} {
+		screens := [][]string{nil, {"2"}, {"2", "R"}, {"3"}, {"4"}, {"5"}, {"?"}, {"down", "c"}}
+		for tab := 1; tab <= len(detailTabs); tab++ {
+			screens = append(screens, []string{"down", "enter", strconv.Itoa(tab)})
+		}
+		for _, keys := range screens {
+			hs := newHarness(t, size[0], size[1])
+			hs.r.out["SHOW PLAYBOOKS --json"] = leak
+			hs.r.out["EXPLAIN PLAYBOOK router --json"] = explain
+			st, _ := loadState(hs.r)
+			hs.send(stateMsg{st: st})
+			hs.keys(keys...)
+			if v := hs.view(); strings.Contains(v, canary) {
+				t.Fatalf("%dx%d %v shows the canary:\n%s", size[0], size[1], keys, v)
 			}
 		}
+	}
+	hs := newHarness(t, 120, 40)
+	hs.keys("down", "enter", "3")
+	if v := hs.view(); !strings.Contains(v, "FROM 'keychain:pilot/9r'") || !strings.Contains(v, "(redacted, plaintext)") {
+		t.Fatalf("vars:\n%s", v)
+	}
+}
+
+// A terminal a few lines high, and a scroll left from a longer tab, draw
+// without a panic (agy, round 1 of the v2 PR).
+func TestTinyTerminal(t *testing.T) {
+	for h := 1; h <= 8; h++ {
+		hs := newHarness(t, 30, h)
+		hs.keys("2", "R", "3", "1", "down", "enter", "3")
+		for i := 0; i < 20; i++ {
+			hs.keys("j")
+		}
+		hs.keys("1")
+		_ = hs.view()
 	}
 }
 

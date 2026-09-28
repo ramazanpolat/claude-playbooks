@@ -232,7 +232,7 @@ func (m Model) table(headers []string, rows [][]string, flex, cursor, height int
 	}
 	out := []string{"  " + line(headers)}
 	start := 0
-	visible := height - 1
+	visible := max(1, height-1) // a tiny terminal still shows the cursor row
 	if cursor >= visible {
 		start = cursor - visible + 1
 	}
@@ -379,8 +379,8 @@ func (m Model) detailBody() []string {
 	}
 	out := []string{title, " " + strings.Join(tabs, ""), ""}
 	body := m.tabBody(p, detailTabs[d.tab])
-	if d.scroll < len(body) {
-		body = body[d.scroll:]
+	if s := min(d.scroll, max(0, len(body)-1)); s > 0 {
+		body = body[s:]
 	}
 	return append(out, body...)
 }
@@ -388,7 +388,7 @@ func (m Model) detailBody() []string {
 func kv(k, v string) string { return fmt.Sprintf("  %-15s %s", k, v) }
 
 func (m Model) tabBody(p Playbook, tab string) []string {
-	h := m.bodyHeight() - 3
+	h := max(2, m.bodyHeight()-3)
 	switch tab {
 	case "Overview":
 		src := "(none)"
