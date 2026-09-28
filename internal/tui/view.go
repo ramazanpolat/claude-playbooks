@@ -3,13 +3,12 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Styles are SGR attributes only (no colours), and none at all when
@@ -25,16 +24,15 @@ func (m Model) selected(s string) string { return m.sgr("7", s) }
 func (m Model) dim(s string) string      { return m.sgr("2", s) }
 func (m Model) warn(s string) string     { return m.sgr("1", s) }
 
-var sgrSeq = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
 // width is a line's width on screen, escape sequences not counted.
 func width(s string) int { return lipgloss.Width(s) }
 
-// midTruncate cuts plain text to w columns from the middle, keeping both
-// ends: "~/DEV/…/deep/folder".
+// midTruncate cuts text to w terminal cells from the middle, keeping both
+// ends: "~/DEV/…/deep/folder". Cells, not runes: a CJK character or an
+// emoji is two.
 func midTruncate(s string, w int) string {
-	r := []rune(s)
-	if len(r) <= w {
+	sw := ansi.StringWidth(s)
+	if sw <= w {
 		return s
 	}
 	if w <= 1 {
@@ -42,19 +40,19 @@ func midTruncate(s string, w int) string {
 	}
 	head := (w - 1) / 2
 	tail := w - 1 - head
-	return string(r[:head]) + "…" + string(r[len(r)-tail:])
+	return ansi.Truncate(s, head, "") + "…" + ansi.TruncateLeft(s, sw-tail, "")
 }
 
-// truncate cuts plain text to w columns, ending in … when it cuts.
+// truncate cuts text to w terminal cells, ending in … when it cuts; escape
+// sequences in it are kept and not counted.
 func truncate(s string, w int) string {
-	if utf8.RuneCountInString(s) <= w {
+	if ansi.StringWidth(s) <= w {
 		return s
 	}
 	if w <= 0 {
 		return ""
 	}
-	r := []rune(s)
-	return string(r[:w-1]) + "…"
+	return ansi.Truncate(s, w, "…")
 }
 
 // The screen: a tab line, a rule, the body, a rule, and three lines of
@@ -98,7 +96,7 @@ func (m Model) render() string {
 	for _, l := range body {
 		lines = append(lines, m.fit(l))
 	}
-	lines = append(lines, m.rule(), m.fit(m.status()), m.dim(m.fit(m.keys())), m.dim(m.fit("reads: cpb "+m.reads)))
+	lines = append(lines, m.rule(), m.fit(m.status()), m.dim(m.fit(m.keys())), m.dim(m.fit("reads: "+m.readsLine())))
 	return strings.Join(lines, "\n")
 }
 
@@ -110,7 +108,7 @@ func (m Model) fit(s string) string {
 	if width(s) <= m.w {
 		return s
 	}
-	return truncate(sgrSeq.ReplaceAllString(s, ""), m.w)
+	return truncate(s, m.w)
 }
 
 func (m Model) tabLine() string {
@@ -269,6 +267,48 @@ func (m Model) table(headers []string, rows [][]string, flex, cursor, height int
 	return out
 }
 
+// reads are the statements the screen shows the output of, as run; the
+// footer names them, so what is on screen can be reproduced.
+func (m Model) reads() []string {
+	if m.text != nil {
+		return []string{m.text.stmt}
+	}
+	if d := m.detail; d != nil {
+		pb := "SHOW PLAYBOOK " + d.pb + " --json"
+		switch detailTabs[d.tab] {
+		case "Overview", "Sessions":
+			return []string{pb, strings.Join(readSessions, " ")}
+		case "Env":
+			return []string{pb, strings.Join(readEnvs, " ")}
+		case "Vars":
+			return []string{pb, "EXPLAIN PLAYBOOK " + d.pb + " --json"}
+		}
+		return []string{pb}
+	}
+	switch m.view {
+	case vPlaybooks:
+		return []string{strings.Join(readPlaybooks, " "), strings.Join(readSessions, " ")}
+	case vSessions:
+		if m.recent {
+			return []string{strings.Join(readRecent, " ")}
+		}
+		return []string{strings.Join(readSessions, " ")}
+	case vEnvs:
+		return []string{strings.Join(readEnvs, " ")}
+	case vDefaults:
+		return []string{strings.Join(readDefaults, " ")}
+	}
+	return nil
+}
+
+func (m Model) readsLine() string {
+	r := m.reads()
+	if len(r) == 0 {
+		return "nothing (what this session copied, exported and resumed)"
+	}
+	return "cpb " + strings.Join(r, " · cpb ")
+}
+
 // kindShort is a session kind in the table: int for interactive.
 func kindShort(k string) string {
 	if k == "interactive" {
@@ -371,21 +411,15 @@ func (m Model) listBody() []string {
 	return nil
 }
 
-func (m Model) playbook(name string) (Playbook, bool) {
-	for _, p := range m.st.Playbooks {
-		if p.Name == name {
-			return p, true
-		}
-	}
-	return Playbook{}, false
-}
-
 func (m Model) detailBody() []string {
 	d := m.detail
-	p, ok := m.playbook(d.pb)
-	if !ok {
-		return []string{"", "  playbook " + d.pb + " is gone (r refreshes)"}
+	switch {
+	case d.dataErr != "":
+		return []string{"", "  cpb SHOW PLAYBOOK " + d.pb + " --json: " + d.dataErr}
+	case d.data == nil:
+		return []string{"", "  reading cpb SHOW PLAYBOOK " + d.pb + " --json…"}
 	}
+	p := *d.data
 	title := " " + p.Name + "  ("
 	if p.Launcher != nil {
 		title += "launcher " + *p.Launcher + " · "

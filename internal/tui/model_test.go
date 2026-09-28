@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"io/fs"
@@ -13,8 +14,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/*.golden")
@@ -71,7 +74,7 @@ const fixtureRecent = `[
 const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router ALIAS k9;\nALTER PLAYBOOK router USE ENV 9router SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
 
 func fixture() *fakeRunner {
-	return &fakeRunner{out: map[string]string{
+	f := &fakeRunner{out: map[string]string{
 		"SHOW PLAYBOOKS --json":                             fixturePlaybooks,
 		"SHOW SESSIONS --json":                              fixtureSessions,
 		"SHOW ENVS --json":                                  fixtureEnvs,
@@ -82,6 +85,24 @@ func fixture() *fakeRunner {
 		"SHOW CREATE ENV 9router --skip-secrets":            "CREATE ENV IF NOT EXISTS 9router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/9r';\n",
 		"SHOW CREATE PLAYBOOK kommander-dev --skip-secrets": "CREATE PLAYBOOK IF NOT EXISTS kommander-dev ALIAS kd;\n",
 	}}
+	singular(f, fixturePlaybooks)
+	return f
+}
+
+// singular answers SHOW PLAYBOOK <name> --json for each playbook of a
+// SHOW PLAYBOOKS --json answer, as cpb would.
+func singular(f *fakeRunner, all string) {
+	var raw []json.RawMessage
+	if err := json.Unmarshal([]byte(all), &raw); err != nil {
+		panic(err)
+	}
+	for _, r := range raw {
+		var p struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(r, &p)
+		f.out["SHOW PLAYBOOK "+p.Name+" --json"] = string(r)
+	}
 }
 
 type harness struct {
@@ -243,6 +264,7 @@ func TestNoSecretOnAnyScreen(t *testing.T) {
 		for _, keys := range screens {
 			hs := newHarness(t, size[0], size[1])
 			hs.r.out["SHOW PLAYBOOKS --json"] = leak
+			singular(hs.r, leak)
 			hs.r.out["EXPLAIN PLAYBOOK router --json"] = explain
 			st, _ := loadState(hs.r)
 			hs.send(stateMsg{st: st})
@@ -513,5 +535,89 @@ func TestCreateFileIsExclusive(t *testing.T) {
 	}
 	if ents, _ := os.ReadDir(filepath.Dir(p)); len(ents) != 1 {
 		t.Fatalf("a temporary file was left: %v", ents)
+	}
+}
+
+// Every footer names only reads that ran, so the screen can be reproduced
+// from what it says (Codex on #138: the detail named SHOW PLAYBOOK <n> but
+// never ran it).
+func TestFootersNameReadsThatRan(t *testing.T) {
+	screens := [][]string{nil, {"2"}, {"2", "R"}, {"3"}, {"4"}, {"down", "c"}}
+	for tab := 1; tab <= len(detailTabs); tab++ {
+		screens = append(screens, []string{"down", "enter", strconv.Itoa(tab)})
+	}
+	for _, keys := range screens {
+		hs := newHarness(t, 120, 40)
+		hs.keys(keys...)
+		v := hs.view()
+		lines := strings.Split(v, "\n")
+		foot := lines[len(lines)-1]
+		if !strings.HasPrefix(foot, "reads: cpb ") {
+			t.Fatalf("%v: footer %q", keys, foot)
+		}
+		ran := map[string]bool{}
+		hs.r.mu.Lock()
+		for _, c := range hs.r.calls {
+			ran[c] = true
+		}
+		hs.r.mu.Unlock()
+		for _, stmt := range strings.Split(strings.TrimPrefix(foot, "reads: cpb "), " · cpb ") {
+			if !ran[stmt] {
+				t.Errorf("%v: the footer names %q, which never ran (ran: %v)", keys, stmt, hs.r.calls)
+			}
+		}
+	}
+}
+
+// Backspace removes a whole character: a pasted "ğü" leaves valid UTF-8
+// after one backspace and nothing after two (Codex on #138).
+func TestBackspaceDeletesACharacter(t *testing.T) {
+	hs := newHarness(t, 120, 40)
+	hs.keys("/")
+	hs.send(tea.PasteMsg{Content: "ğü"})
+	hs.send(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if hs.m.filter != "ğ" || !utf8.ValidString(hs.m.filter) {
+		t.Fatalf("after one backspace: %q", hs.m.filter)
+	}
+	hs.send(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if hs.m.filter != "" {
+		t.Fatalf("after two: %q", hs.m.filter)
+	}
+}
+
+// CJK and emoji are two cells wide: truncation counts cells, so no line of
+// an 80x24 screen is wider than 80, and the replace prompt's folder is cut
+// to fit (Codex on #138).
+func TestWideCharactersFitTheScreen(t *testing.T) {
+	cjk := strings.NewReplacer("kommander-dev", "中文プレイブック名前がとても長い", "claude-opus-5-5", "模型名字🙂很长很长很长").Replace(fixturePlaybooks)
+	deep := filepath.Join(t.TempDir(), "项目", strings.Repeat("很长的文件夹名字", 6))
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "router.cpb"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, keys := range [][]string{nil, {"2"}, {"2", "R"}, {"3"}, {"e"}} {
+		hs := newHarnessIn(t, 80, 24, deep)
+		hs.r.out["SHOW PLAYBOOKS --json"] = cjk
+		singular(hs.r, cjk)
+		st, _ := loadState(hs.r)
+		hs.send(stateMsg{st: st})
+		hs.keys(keys...)
+		v := hs.view()
+		for _, l := range strings.Split(v, "\n") {
+			if w := ansi.StringWidth(l); w > 80 {
+				t.Fatalf("%v: a line %d cells wide: %q", keys, w, l)
+			}
+		}
+		if len(keys) == 0 {
+			golden(t, "cjk-80x24", v)
+			if !strings.Contains(v, "中文") {
+				t.Fatalf("the CJK name is not shown:\n%s", v)
+			}
+		}
+		if len(keys) == 1 && keys[0] == "e" && !strings.Contains(v, "Replace router.cpb? Type y to replace; any other key keeps it.") {
+			t.Fatalf("the question is not whole:\n%s", v)
+		}
 	}
 }

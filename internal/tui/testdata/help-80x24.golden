@@ -21,4 +21,4 @@
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
  any key closes help
-reads: cpb SHOW PLAYBOOKS --json
+reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json

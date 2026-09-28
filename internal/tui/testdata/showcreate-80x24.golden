@@ -21,4 +21,4 @@ ALTER PLAYBOOK router USE ENV 9router SET VAR MY_FLAG=1;
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
  ↑↓ scroll  y copy  esc close
-reads: cpb SHOW PLAYBOOKS --json
+reads: cpb SHOW CREATE PLAYBOOK router --skip-secrets

@@ -80,12 +80,13 @@ type Model struct {
 	typing   bool
 	log      []string
 	lastRead time.Time
-	reads    string // the statement behind what is on screen
 }
 
 type detail struct {
 	pb      string
 	tab     int
+	data    *Playbook // SHOW PLAYBOOK <pb> --json, run when the detail opens
+	dataErr string
 	explain *Explain
 	err     string
 	scroll  int
@@ -114,6 +115,11 @@ type (
 	recentMsg struct {
 		r   []Recent
 		err error
+	}
+	playbookMsg struct {
+		name string
+		p    Playbook
+		err  error
 	}
 	explainMsg struct {
 		name string
@@ -152,7 +158,7 @@ func New(o Options) Model {
 	if o.Poll == 0 {
 		o.Poll = 5 * time.Second
 	}
-	return Model{o: o, cursor: map[view]int{}, w: 80, h: 24, reads: strings.Join(readPlaybooks, " ")}
+	return Model{o: o, cursor: map[view]int{}, w: 80, h: 24}
 }
 
 func (m Model) Init() Cmd { return batch(m.loadAll(), m.tick()) }
@@ -235,6 +241,18 @@ func (m Model) update(msg Msg) (Model, Cmd) {
 		m.recents = msg.r
 		m.clampCursors()
 		return m, nil
+	case playbookMsg:
+		if m.detail != nil && m.detail.pb == msg.name {
+			d := *m.detail
+			if msg.err != nil {
+				d.dataErr = msg.err.Error()
+			} else {
+				p := msg.p
+				d.data, d.dataErr = &p, ""
+			}
+			m.detail = &d
+		}
+		return m, nil
 	case explainMsg:
 		if m.detail != nil && m.detail.pb == msg.name {
 			if msg.err != nil {
@@ -315,8 +333,9 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 				m.filter = ""
 			}
 		case "backspace":
-			if len(m.filter) > 0 {
-				m.filter = m.filter[:len(m.filter)-1]
+			// A whole character, not a byte: a pasted "ğ" is two bytes.
+			if r := []rune(m.filter); len(r) > 0 {
+				m.filter = string(r[:len(r)-1])
 			}
 		case "space":
 			m.filter += " "
@@ -355,7 +374,6 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 	case "1", "2", "3", "4", "5":
 		m.view = view(s[0] - '1')
 		m.filter, m.recent = "", false
-		m.reads = m.viewReads()
 		return m, nil
 	case "r":
 		m.msg = "refreshing…"
@@ -388,11 +406,9 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 		switch s {
 		case "enter":
 			m.detail = &detail{pb: pb.Name}
-			m.reads = "SHOW PLAYBOOK " + pb.Name + " --json"
-			return m, m.loadExplain(pb.Name)
+			return m, batch(m.loadPlaybook(pb.Name), m.loadExplain(pb.Name))
 		case "s":
 			m.view, m.filter, m.recent = vSessions, pb.Name, false
-			m.reads = m.viewReads()
 			return m, nil
 		case "c":
 			return m, m.showCreate("PLAYBOOK", pb.Name)
@@ -406,7 +422,6 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 		case "R":
 			m.recent = !m.recent
 			m.cursor[vSessions] = 0
-			m.reads = m.viewReads()
 			if m.recent {
 				return m, m.loadRecent()
 			}
@@ -446,7 +461,6 @@ func (m Model) detailKey(s string) (Model, Cmd) {
 	switch s {
 	case "esc", "backspace":
 		m.detail = nil
-		m.reads = m.viewReads()
 		return m, nil
 	case "q":
 		return m, quit
@@ -475,36 +489,23 @@ func (m Model) detailKey(s string) (Model, Cmd) {
 		return m.copy(stmt, "")
 	case "r":
 		m.detail = &d
-		return m, batch(m.loadAll(), m.loadExplain(d.pb))
+		return m, batch(m.loadAll(), m.loadPlaybook(d.pb), m.loadExplain(d.pb))
 	default:
 		if n, err := strconv.Atoi(s); err == nil && n >= 1 && n <= len(detailTabs) {
 			d.tab, d.scroll = n-1, 0
 		}
 	}
 	m.detail = &d
-	if detailTabs[d.tab] == "Vars" {
-		m.reads = "EXPLAIN PLAYBOOK " + d.pb + " --json"
-	} else {
-		m.reads = "SHOW PLAYBOOK " + d.pb + " --json"
-	}
 	return m, nil
 }
 
-func (m Model) viewReads() string {
-	switch m.view {
-	case vPlaybooks:
-		return strings.Join(readPlaybooks, " ")
-	case vSessions:
-		if m.recent {
-			return strings.Join(readRecent, " ")
-		}
-		return strings.Join(readSessions, " ")
-	case vEnvs:
-		return strings.Join(readEnvs, " ")
-	case vDefaults:
-		return strings.Join(readDefaults, " ")
+func (m Model) loadPlaybook(name string) Cmd {
+	r := m.o.Runner
+	return func() Msg {
+		var p Playbook
+		err := readJSON(r, &p, "SHOW", "PLAYBOOK", name, "--json")
+		return playbookMsg{name, p, err}
 	}
-	return "(what the TUI ran this session)"
 }
 
 func (m Model) loadExplain(name string) Cmd {
