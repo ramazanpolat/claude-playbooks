@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,5 +161,49 @@ func TestPilotProfileWarningDryRun(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(config.ResolvePlaybooksDir(), "h")); !os.IsNotExist(err) {
 		t.Fatalf("the dry run created h: %v", err)
+	}
+}
+
+// pilot_profile (v3.26.0): imported, not_imported (no import line, no
+// CLAUDE.md), unknown (CLAUDE.md unreadable); last in the object and the
+// PLAYBOOKS table.
+func TestPilotProfileField(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	mustStmt(t, "CREATE PLAYBOOK with NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK without NO ALIAS NO PILOT PROFILE")
+	mustStmt(t, "CREATE PLAYBOOK gone NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK odd NO ALIAS")
+	if err := os.Remove(filepath.Join(root, "gone", "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+	odd := filepath.Join(root, "odd", "CLAUDE.md")
+	if err := os.Remove(odd); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(odd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"with": "imported", "without": "not_imported", "gone": "not_imported", "odd": "unknown"} {
+		out := mustStmt(t, "SHOW PLAYBOOK "+name+" --json")
+		var v map[string]any
+		if err := json.Unmarshal([]byte(out), &v); err != nil || v["pilot_profile"] != want {
+			t.Errorf("%s: pilot_profile = %v, want %s (%v)", name, v["pilot_profile"], want, err)
+		}
+		if i := strings.Index(out, `"pilot_profile"`); i < strings.Index(out, `"model_picker"`) {
+			t.Errorf("%s: pilot_profile is not last", name)
+		}
+	}
+	if h := mustStmt(t, "SHOW PLAYBOOK without"); !strings.Contains(h, "Pilot profile") || !strings.Contains(h, "not imported") {
+		t.Fatalf("human:\n%s", h)
+	}
+	cols, _ := describeTable("PLAYBOOKS")
+	if last := cols[len(cols)-1]; last.Name != "pilot_profile" || last.Type != "String" {
+		t.Fatalf("last column: %+v", last)
+	}
+	var rows []map[string]any
+	var err error
+	js := captureStdout(t, func() { err = runStatement([]string{"SELECT name, pilot_profile FROM PLAYBOOKS", "--json"}) })
+	if err != nil || json.Unmarshal([]byte(js), &rows) != nil || len(rows) != 4 {
+		t.Fatalf("%v\n%s", err, js)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -93,11 +94,21 @@ func TestShowPlaybookHuman(t *testing.T) {
 	seedShowFixture(t)
 	out := mustStmt(t, "SHOW PLAYBOOK router")
 	noSecret(t, "SHOW PLAYBOOK", out)
+	// The labels are aligned to the widest one present, so only the label
+	// and its value are pinned: scripts matched `Version:` in `info`, and the
+	// label stays.
+	for _, re := range []string{
+		`(?m)^Version: +1\.2\.3$`,
+		`(?m)^Launcher: +rt$`,
+		`(?m)^Source: +https://example\.com/r\.git \(branch v1\)$`,
+		`(?m)^Env sets: +glm$`,
+		`(?m)^Pilot profile: +not imported$`,
+	} {
+		if !regexp.MustCompile(re).MatchString(out) {
+			t.Errorf("missing %s in:\n%s", re, out)
+		}
+	}
 	for _, want := range []string{
-		"Version:    1.2.3\n", // scripts matched `Version:` in `info`; the label stays
-		"Launcher:   rt\n",
-		"Source:     https://example.com/r.git (branch v1)\n",
-		"Env sets:   glm\n",
 		"HTTP_PROXY (blocked)",
 		"MAX_THINKING_TOKENS=8000",
 		"chars, plaintext)",

@@ -74,6 +74,11 @@ type playbookJSON struct {
 	Panels      []panelJSON `json:"panels"`
 	Model       *string     `json:"model"`
 	ModelPicker *pickerJSON `json:"model_picker"`
+	// PilotProfile is whether the playbook's CLAUDE.md imports
+	// ~/.pilot-profile/ (v3.26.0): "imported", "not_imported" (no import
+	// line, or no CLAUDE.md) or "unknown" (CLAUDE.md cannot be read). Last,
+	// so every earlier field keeps its place.
+	PilotProfile string `json:"pilot_profile"`
 }
 
 type envJSON struct {
@@ -205,7 +210,7 @@ func readStatement(st *grammar.Stmt) error {
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
 		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
-		Skills: describeSkills(pb.Manifest)}
+		Skills: describeSkills(pb.Manifest), PilotProfile: pilotProfileState(pb.Path)}
 	// What the playbook's settings.json declares; an unreadable file shows
 	// none rather than failing the whole SHOW.
 	if sf, err := settings.Load(pb.Path); err == nil {
@@ -343,6 +348,11 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	if v.IsolatedLogin {
 		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
 	}
+	rows = append(rows, [2]string{"Pilot profile", map[string]string{
+		pilotImported:    "imported (CLAUDE.md imports ~/.pilot-profile/)",
+		pilotNotImported: "not imported",
+		pilotUnknown:     "unknown (CLAUDE.md cannot be read)",
+	}[v.PilotProfile]})
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.
 	if len(v.Tools.Allow)+len(v.Tools.Deny) > 0 {

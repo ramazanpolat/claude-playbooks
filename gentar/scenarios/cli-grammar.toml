@@ -402,3 +402,19 @@ D="$(claude-playbook DESCRIBE SESSIONS --json | tr -d ' \n')"
 [ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)"}]' || { echo tty-describe-wrong; exit 1; }
 echo sessions-tty-ok'''
 contains = "sessions-tty-ok"
+
+[[verify.commands]]
+# pilot_profile (v3.26.0) in SHOW PLAYBOOK --json and the PLAYBOOKS table:
+# imported for a plain CREATE, not_imported for NO PILOT PROFILE and for no
+# CLAUDE.md, unknown for a CLAUDE.md that cannot be read (a directory here,
+# whatever the uid); last in the object and the table; a human line.
+command = '''
+P="$HOME/.claude-playbooks"; f() { claude-playbook SHOW PLAYBOOK "$1" --json | tr -d ' \n' | grep -o '"pilot_profile":"[a-z_]*"}$'; }
+claude-playbook CREATE PLAYBOOK ppi NO ALIAS >/dev/null && claude-playbook CREATE PLAYBOOK ppn NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppg NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppu NO ALIAS >/dev/null || exit 1
+rm "$P/ppg/CLAUDE.md" && rm "$P/ppu/CLAUDE.md" && mkdir "$P/ppu/CLAUDE.md" || exit 1
+[ "$(f ppi)" = '"pilot_profile":"imported"}' ] && [ "$(f ppn)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppg)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppu)" = '"pilot_profile":"unknown"}' ] || { echo pp-show-wrong; exit 1; }
+claude-playbook "SELECT name, pilot_profile FROM PLAYBOOKS" --json | tr -d ' \n' | grep -qF '"name":"ppi","pilot_profile":"imported"' || { echo pp-select-wrong; exit 1; }
+claude-playbook DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -qF '{"name":"pilot_profile","type":"String"}]' || { echo pp-describe-wrong; exit 1; }
+claude-playbook SHOW PLAYBOOK ppn | grep -q '^Pilot profile: *not imported$' || { echo pp-human-wrong; exit 1; }
+echo pilot-profile-field-ok'''
+contains = "pilot-profile-field-ok"
