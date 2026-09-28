@@ -11,13 +11,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu keeps the documented Go floor (go.mod: go 1.21).
+          # Both legs run the documented Go floor (go.mod: go 1.26.0), the
+          # version the arena builds with (golang:1.26).
           - os: ubuntu-latest
-            go-version: '1.21'
-          # macOS needs a current Go: 1.21's linker emits binaries without
-          # LC_UUID, which macOS 26's dyld refuses to load — the suite
-          # execs a freshly built binary and dies with "missing LC_UUID
-          # load command" / abort trap.
+            go-version: '1.26'
           - os: macos-latest
             go-version: '1.26'
     runs-on: ${{ matrix.os }}
@@ -29,6 +26,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+
+      # The arena builds with golang:1.26, so go.mod's go directive must not
+      # rise above 1.26 (a `go get` of a newer dependency raises it
+      # silently), and no toolchain line may ask for a newer Go.
+      - name: go directive stays at 1.26
+        run: |
+          grep -Eqx 'go 1\.26(\.[0-9]+)?' go.mod || { echo "go.mod's go directive is not 1.26.x:"; grep -n '^go ' go.mod; exit 1; }
+          if grep -q '^toolchain ' go.mod; then echo "go.mod has a toolchain line:"; grep -n '^toolchain ' go.mod; exit 1; fi
 
       - name: gofmt
         run: |
@@ -86,7 +91,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.26'
       - name: Build
         run: go build -o "$RUNNER_TEMP/cpb" .
       - name: Apply the examples
@@ -105,9 +110,8 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            go-version: '1.21'
-          # macOS needs a current Go for the same LC_UUID reason as the
-          # test job above; old releases build with it too.
+            go-version: '1.26'
+          # Old releases (go 1.21 directives) build with 1.26 too.
           - os: macos-latest
             go-version: '1.26'
     runs-on: ${{ matrix.os }}
@@ -141,7 +145,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.26'
       - name: Build
         run: go build -o "$RUNNER_TEMP/cpb" .
       - name: Install clickhouse-local

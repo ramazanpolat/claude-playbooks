@@ -36,6 +36,8 @@
           # build, and copy the hash the error reports.
           vendorHash = "sha256-FhX6eKtdxb7QaRdmYlFf1NfpxbasB5YQ1YNFRKwpof8=";
           subPackages = [ "." ];
+          # nixpkgs 26.05 builds with go_1_26 (buildGoModule = buildGo126Module),
+          # which go.mod's `go 1.26.0` requires.
           # One static binary with no runtime closure: which nixpkgs built it
           # then only matters at build time, never in a user's profile.
           env.CGO_ENABLED = 0;

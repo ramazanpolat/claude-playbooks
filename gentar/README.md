@@ -283,8 +283,8 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
 
 - **`gentar/policy.toml`**: no bench for PRs (`bench = "off"`: the repo is
   public, the runner persistent, and the pilot chose it); the main-push floor
-  is `cli-head-build`, `docs-honesty` and `playbook-lifecycle`; Go 1.21 for the
-  bench-free checks; phase 2 on dispatch, the `arena` tag or a `v*-rc*` tag; a
+  is `cli-head-build`, `docs-honesty` and `playbook-lifecycle`; Go 1.26 for the
+  bench-free checks (and `golang:1.26` for the bench's build); phase 2 on dispatch, the `arena` tag or a `v*-rc*` tag; a
   release gate.
 - **`gentar/hooks.py`**: `prepare()` builds `claude-playbook` the way the bench
   does; `SKIP_STEP_SUBSTR` skips the container build it replaces;

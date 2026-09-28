@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parent.parent
 # Steps whose substring appears here are skipped verbatim (prepare()
 # already did the equivalent locally). Example: ("docker build",).
 SKIP_STEP_SUBSTR = (
-    # Every suite begins by building claude-playbook in a golang:1.21
+    # Every suite begins by building claude-playbook in a golang:1.26
     # container from the staged checkout, then installing it to
     # ~/.local/bin. prepare() does both, with the local toolchain.
     'docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src',
