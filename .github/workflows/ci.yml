@@ -173,7 +173,7 @@ jobs:
           # alpha has no manifest version: an empty version_tuple.
           want beta "SELECT name FROM PLAYBOOKS WHERE version_tuple >= [0, 1] ORDER BY name FORMAT TSV"
           # SELECT *: version_tuple where it has always been on this path, the
-          # columns added since (pilot_profile, v3.26.0) after it.
+          # columns added since (pilot_profile, v3.25.0) after it.
           tail2="$("$cpb" "SELECT * FROM PLAYBOOKS LIMIT 1 FORMAT TSVWithNames" | head -1 | awk -F '\t' '{print $(NF-1), $NF}')"
           [ "$tail2" = "version_tuple pilot_profile" ] || { echo "FAIL: SELECT * column tail is '$tail2', want 'version_tuple pilot_profile'"; exit 1; }
           echo "ok: SELECT * column tail"

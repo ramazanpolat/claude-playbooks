@@ -183,7 +183,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// printTUIHint is bare cpb's last line on a terminal (v3.26.0). Off a
+// printTUIHint is bare cpb's last line on a terminal (v3.25.0). Off a
 // terminal the output is exactly what it was.
 func printTUIHint() {
 	if rootTTY() {

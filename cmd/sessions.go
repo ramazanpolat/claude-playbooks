@@ -79,7 +79,7 @@ type sessionJSON struct {
 	Model         *string `json:"model"`
 	Launcher      *string `json:"launcher"`
 	Resume        string  `json:"resume"`
-	// TTY is the process's controlling terminal (v3.26.0), last so every
+	// TTY is the process's controlling terminal (v3.25.0), last so every
 	// earlier field keeps its place.
 	TTY *string `json:"tty"`
 }

@@ -41,7 +41,7 @@ func underPTY(t *testing.T, env []string, line string) ([]byte, time.Duration) {
 // cursor-position request, then waits up to 5 s for replies) would stall
 // every command and every launcher on a terminal that does not answer, and
 // its late replies would land in the input of whatever runs next. This is
-// the permanent guard (v3.26.0).
+// the permanent guard (v3.25.0).
 func TestNoTerminalQueryAtStartup(t *testing.T) {
 	home := t.TempDir()
 	fake := t.TempDir()

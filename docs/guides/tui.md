@@ -119,4 +119,4 @@ reads: cpb SHOW SESSIONS --json
   the rest will each be shown as the statement it runs, planned with
   `APPLY --dry-run --json`, and confirmed.
 
-Reference: [cpb tui](../reference/cli-grammar.md#cpb-tui-v3260).
+Reference: [cpb tui](../reference/cli-grammar.md#cpb-tui-v3250).

@@ -75,7 +75,7 @@ type playbookJSON struct {
 	Model       *string     `json:"model"`
 	ModelPicker *pickerJSON `json:"model_picker"`
 	// PilotProfile is whether the playbook's CLAUDE.md imports
-	// ~/.pilot-profile/ (v3.26.0): "imported", "not_imported" (no import
+	// ~/.pilot-profile/ (v3.25.0): "imported", "not_imported" (no import
 	// line, or no CLAUDE.md) or "unknown" (CLAUDE.md cannot be read). Last,
 	// so every earlier field keeps its place.
 	PilotProfile string `json:"pilot_profile"`

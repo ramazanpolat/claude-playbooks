@@ -205,7 +205,7 @@ func (r *stmtRun) warnExposure(before, after map[string]string) {
 	}
 }
 
-// SHOW PLAYBOOK's pilot_profile values (v3.26.0).
+// SHOW PLAYBOOK's pilot_profile values (v3.25.0).
 const (
 	pilotImported    = "imported"
 	pilotNotImported = "not_imported"

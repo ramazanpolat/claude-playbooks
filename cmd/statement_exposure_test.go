@@ -164,7 +164,7 @@ func TestPilotProfileWarningDryRun(t *testing.T) {
 	}
 }
 
-// pilot_profile (v3.26.0): imported, not_imported (no import line, no
+// pilot_profile (v3.25.0): imported, not_imported (no import line, no
 // CLAUDE.md), unknown (CLAUDE.md unreadable); last in the object and the
 // PLAYBOOKS table.
 func TestPilotProfileField(t *testing.T) {

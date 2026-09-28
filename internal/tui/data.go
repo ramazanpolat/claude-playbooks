@@ -1,4 +1,4 @@
-// Package tui is `cpb tui`: a terminal UI over cpb's grammar (v3.26.0).
+// Package tui is `cpb tui`: a terminal UI over cpb's grammar (v3.25.0).
 //
 // It is a thin front-end. Every read is a cpb statement's --json output,
 // run as a subprocess of cpb itself (see Runner); the package imports
@@ -165,7 +165,7 @@ type Playbook struct {
 			Label *string `json:"label"`
 		} `json:"options"`
 	} `json:"model_picker"`
-	// PilotProfile is "imported", "not_imported" or "unknown" (v3.26.0);
+	// PilotProfile is "imported", "not_imported" or "unknown" (v3.25.0);
 	// "" from an older cpb.
 	PilotProfile string `json:"pilot_profile"`
 }
@@ -195,7 +195,7 @@ type Session struct {
 	Model      *string `json:"model"`
 	Launcher   *string `json:"launcher"`
 	Resume     string  `json:"resume"`
-	TTY        *string `json:"tty"` // v3.26.0; nil from an older cpb
+	TTY        *string `json:"tty"` // v3.25.0; nil from an older cpb
 }
 
 // Recent is one row of RESUME --list --json.

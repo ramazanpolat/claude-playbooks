@@ -756,7 +756,7 @@ changes only by these rules (the stabilization week, decided by the pilot on
 | Part | What |
 |---|---|
 | The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
-| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), `tui` (v3.26.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
+| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), `tui` (v3.25.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
 | File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
 | `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json`, `SHOW SESSIONS --json` and `RESUME --list --json` (v3.25.0) |
 | Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
@@ -824,7 +824,7 @@ created empty; `Launcher:` reads `(none)` without one.
 `source` is null for a playbook without one; `linked` is the target directory
 of a linked playbook, else null; `launcher` is null without one.
 
-**`pilot_profile`** (v3.26.0) is the object's last field, and the human form
+**`pilot_profile`** (v3.25.0) is the object's last field, and the human form
 has a `Pilot profile:` line. It says whether the playbook's `CLAUDE.md`
 imports `~/.pilot-profile/`:
 - `"imported"`: an `@~/.pilot-profile/…` line, or one through the home
@@ -941,11 +941,11 @@ so `source.url` and `vars[1].key` work):
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`pilot_profile`, v3.26.0, is the last column) |
+| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`pilot_profile`, v3.25.0, is the last column) |
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
 | `PANELS` | status line panel, per playbook (v3.25.0) | `playbook panel type source cpb row priority align` |
-| `SESSIONS` | live Claude Code session (v3.25.0) | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty` (`tty` v3.26.0) |
+| `SESSIONS` | live Claude Code session (v3.25.0) | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty` (`tty` v3.25.0) |
 | `DEFAULTS` | (one row) | `envs secret_helper` |
 
 `version_tuple` is `Array(UInt32)`, the numbers of the version's leading
@@ -1697,7 +1697,7 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 | `model` | string or null | the transcript's last assistant message, read from its last 256 KiB |
 | `launcher` | string or null | the playbook's launcher |
 | `resume` | string | the command that resumes this session (see below) |
-| `tty` | string or null | v3.26.0: the process's controlling terminal (`pts/3`, `ttys012`), null for none (a `bg` session). It is read in the same pass as the start time: `/proc/<pid>/stat`'s tty_nr on Linux, `ps`'s tty elsewhere |
+| `tty` | string or null | v3.25.0: the process's controlling terminal (`pts/3`, `ttys012`), null for none (a `bg` session). It is read in the same pass as the start time: `/proc/<pid>/stat`'s tty_nr on Linux, `ps`'s tty elsewhere |
 
 A session's transcript is
 `<config dir>/projects/<cwd, each character outside [A-Za-z0-9] as ->/<id>.jsonl`.
@@ -1757,7 +1757,7 @@ Resume this playbook's session with: kd --resume 08c4811b-3867-4f18-b08f-de6d1e0
 No word is reserved: `SESSIONS`, `SESSION`, `RESUME` and `FOR` still name
 playbooks and env sets.
 
-## cpb tui (v3.26.0)
+## cpb tui (v3.25.0)
 
 `cpb tui` is a terminal UI over this grammar. v1 only reads: it browses,
 shows `SHOW CREATE`, copies statements, exports a `.cpb`, and resumes a
