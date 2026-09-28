@@ -52,6 +52,9 @@ case "$why" in *"::error::"*"neither origin/main nor origin/release/v3.24"*) ech
 
 # npx-check, as tags appear (tags on any commit: git tag -l sees them all)
 want 0 -  sh "$refs" npx-check 3.23.1                     # no tags yet: skipped
+git tag v3.9.0 "$base"; git tag v3.10.0 "$base"           # text order would put v3.9.0 first
+want 0 -  sh "$refs" npx-check 3.10.0                     # the newest is v3.10.0, by number
+want 1 -  sh "$refs" npx-check 3.9.0                      # behind it: refused
 git tag v3.23.1 "$base"
 want 0 -  sh "$refs" npx-check 3.23.1                     # main today
 want 1 -  sh "$refs" npx-check 3.22.0                     # behind: refused
@@ -67,7 +70,5 @@ want 0 -  sh "$refs" npx-check 3.25.0
 want 1 -  sh "$refs" npx-check 3.24.0                     # behind the newest: refused
 git tag v3.24.1 "$r1"                                     # a patch after a newer minor
 want 0 -  sh "$refs" npx-check 3.25.0                     # the newest is still v3.25.0 (version sort, not date)
-git tag v3.10.0 "$base"
-want 0 -  sh "$refs" npx-check 3.25.0                     # v3.10 < v3.25 numerically, not as text
 
 exit $fail
