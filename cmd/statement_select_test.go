@@ -302,3 +302,82 @@ func TestDescribe(t *testing.T) {
 		t.Fatalf("no table: %v", err)
 	}
 }
+
+// jsonKeys returns each object's keys in the order the text has them.
+func jsonKeys(t *testing.T, js string) [][]string {
+	t.Helper()
+	var rows []json.RawMessage
+	if err := json.Unmarshal([]byte(js), &rows); err != nil {
+		t.Fatalf("not a JSON array: %v\n%s", err, js)
+	}
+	var out [][]string
+	for _, r := range rows {
+		dec := json.NewDecoder(bytes.NewReader(r))
+		if _, err := dec.Token(); err != nil { // {
+			t.Fatal(err)
+		}
+		var keys []string
+		for dec.More() {
+			k, err := dec.Token()
+			if err != nil {
+				t.Fatal(err)
+			}
+			keys = append(keys, k.(string))
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out = append(out, keys)
+	}
+	return out
+}
+
+// --json keys follow the query's column order on every table, as
+// clickhouse local's do; a map would sort them (#133).
+func TestSelectJSONKeyOrder(t *testing.T) {
+	selectFixture(t)
+	for table, st := range selectTables {
+		cols := make([]string, len(st.columns))
+		for i, c := range st.columns {
+			cols[len(cols)-1-i] = c
+		}
+		q := "SELECT " + strings.Join(cols, ", ") + " FROM " + table
+		var err error
+		js := captureStdout(t, func() { err = runStatement([]string{q, "--json"}) })
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		for i, keys := range jsonKeys(t, js) {
+			if !reflect.DeepEqual(keys, cols) {
+				t.Errorf("%s row %d keys %v, want %v", table, i, keys, cols)
+			}
+		}
+	}
+	var err error
+	js := captureStdout(t, func() { err = runStatement([]string{"SELECT version, name FROM PLAYBOOKS", "--json"}) })
+	if keys := jsonKeys(t, js); err != nil || len(keys) != 2 || !reflect.DeepEqual(keys[0], []string{"version", "name"}) {
+		t.Fatalf("SELECT version, name: %v %v\n%s", err, keys, js)
+	}
+}
+
+// A column named twice is one key, at its first position; text is not
+// HTML-escaped, as printJSON's is not.
+func TestOrderedRowJSON(t *testing.T) {
+	r := orderedRow{cols: []string{"b", "a", "b"}, vals: map[string]any{"a": "x<y&z", "b": []any{1.0, nil}}}
+	got, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, got); err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"b":[1,null],"a":"x\u003cy\u0026z"}`; buf.String() != want {
+		t.Fatalf("json.Marshal: %s, want %s", buf.String(), want)
+	}
+	out := captureStdout(t, func() { err = printJSON([]orderedRow{r}) })
+	if err != nil || !strings.Contains(out, `"a": "x<y&z"`) || strings.Index(out, `"b"`) > strings.Index(out, `"a"`) {
+		t.Fatalf("printJSON:\n%s", out)
+	}
+}
