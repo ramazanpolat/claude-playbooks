@@ -184,13 +184,23 @@ release:
 - [ ] **The upgrade from the previous release passes:** the CI `upgrade`
       job, on ubuntu and macOS, green on the commit to be tagged
       (`examples/upgrade.sh`).
-- [ ] **The nightly regression is green** (arena phase 2). A stable tag
-      needs 7 consecutive green nights.
+- [ ] **A full arena regression (phase 2) is green on the exact commit to be
+      tagged.** release.yml's gate refuses a tag without one, and
+      `gentar/policy.toml` `[phase2] max_age_days = 2` refuses one older
+      than two days. A re-run is allowed only for an infrastructure failure
+      (the judge unreachable, a provider refusing the key); a real red means
+      fix first, then a fresh pass. (The pilot's rule, 2026-09-29. It
+      replaces "7 consecutive green nights".)
 - [ ] **No open security issue and no known data-loss bug.** Check
       `docs/known-issues/`.
 - [ ] **Every review finding** on the release's PRs is fixed or answered
       **on the PR itself**, as a fix commit or a reply naming the finding.
       `gh pr view <n> --comments` prints the reviews and the replies to check.
+
+**Nightlies are drift monitors (report on red).** Every night
+`arena-nightly` runs phase 2 on main and on the latest release. A red on main
+is fixed like any bug; a red on a released version becomes a patch release.
+They gate nothing.
 
 If any is missing, build it first; never tag without it.
 
@@ -209,9 +219,11 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
      equal the tag;
    - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`);
    - the reference's status line.
-4. **The nights.** Arena phase 2 runs on the branch head. A stable tag needs
-   7 consecutive green nights on exactly that head, and a new commit on the
-   branch starts the count again.
+4. **A green full arena phase 2 on that head.** Check the VM 142 bench is
+   idle first, then dispatch `gentar-arena.yml` on the branch with no
+   scenario. The run's head sha must be the exact commit you will tag, which
+   is what the release gate checks. A new commit on the branch needs a new
+   pass, and a pass older than two days does not count.
 5. **Tag `vX.Y.Z` on that head.** The release gate also requires a green
    `arena / phase2` on the tagged sha.
 6. **The main bump PR, opened at tag time.** Once vX.Y.Z is tagged, CI's
@@ -220,6 +232,7 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
    same commit moves the pins in `installation.md`. Merge it right after the
    release publishes.
 
-A release cut from main (a new minor) needs only steps 3 to 6, on main. Its
-bump commit before the tag passes the npx check with a warning: the version
-is ahead of the newest release, and not yet tagged.
+A release cut from main (a new minor) needs only steps 3 to 5, on main: the
+release-prep commit, a green full phase 2 on it, and the tag on it. Its bump
+commit passes the npx check with a warning until the tag exists (the version
+is ahead of the newest release, and not yet tagged).

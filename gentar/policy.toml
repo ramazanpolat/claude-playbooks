@@ -30,7 +30,11 @@ os = ["ubuntu-latest", "macos-latest"]   # where the checks run. macOS = the
 on = ["dispatch", "arena", "rc"]   # manual dispatch · the `arena` tag · v*-rc* tags
 release_gate = true    # gentar/release-gate.sh refuses a v* release whose
                        # commit has no green `arena / phase2` job
-max_age_days = 0       # >0: that phase 2 must also be this recent
+max_age_days = 2       # that phase 2 must also be this recent: a pass older
+                       # than two days does not release (the bench image,
+                       # agent CLI or provider may have moved since). The
+                       # pilot's rule of 2026-09-29: a green full phase 2 on
+                       # the exact tag commit replaces the 7 green nights.
 
 [check]
 docs = true            # the docs standard, checked by --check (missing, not
