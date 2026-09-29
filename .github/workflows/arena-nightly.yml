@@ -6,11 +6,12 @@
 # dispatches that workflow on a branch; with no scenario, the dispatch is
 # phase 2.
 #
-# Which branch: NIGHTLY_REF below. A scheduled run always starts from the
-# default branch's copy of this file, so the target is set here, not in the
-# repository's settings. During a stable candidate's nights it names the
-# release branch (release/v3.24 until v3.24.0 is tagged); after the tag it
-# goes back to "" (the default branch). A manual dispatch can override it.
+# Nightlies are drift monitors, not release gates (the pilot's rule of
+# 2026-09-29: a release needs a green full phase 2 on its exact tag commit).
+# Every night this runs phase 2 on the default branch AND on the latest
+# published release, so drift in the bench image, the agent CLI or a
+# provider shows on both. A red on main is fixed like any bug; a red on the
+# release becomes a patch. A manual dispatch with `ref` runs that ref only.
 name: arena-nightly
 
 on:
@@ -19,15 +20,13 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "branch to run phase 2 on (empty: NIGHTLY_REF, else the default branch)"
+        description: "the one ref to run phase 2 on (empty: the default branch and the latest release)"
         required: false
         default: ""
 
 permissions:
   actions: write           # to dispatch gentar-arena.yml
-
-env:
-  NIGHTLY_REF: release/v3.24   # "" after v3.24.0 is tagged
+  contents: read           # to read the latest release
 
 jobs:
   dispatch:
@@ -40,6 +39,15 @@ jobs:
           # On a schedule, github.ref_name is the default branch.
           DEFAULT_REF: ${{ github.event.repository.default_branch || github.ref_name }}
         run: |
-          REF="${INPUT_REF:-${NIGHTLY_REF:-$DEFAULT_REF}}"
-          echo "phase 2 on $REF"
-          gh workflow run gentar-arena.yml --repo "$GITHUB_REPOSITORY" --ref "$REF"
+          if [ -n "$INPUT_REF" ]; then
+            refs=$INPUT_REF
+          else
+            # The latest published, non-prerelease release (GitHub's own
+            # notion); none yet means the default branch only.
+            latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)
+            refs="$DEFAULT_REF${latest:+ $latest}"
+          fi
+          for ref in $refs; do
+            echo "phase 2 on $ref"
+            gh workflow run gentar-arena.yml --repo "$GITHUB_REPOSITORY" --ref "$ref"
+          done
