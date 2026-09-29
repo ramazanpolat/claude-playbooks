@@ -247,6 +247,13 @@ command = '''claude-playbook DESCRIBE playbooks > "$HOME/desc.out" && grep -q '^
 contains = "describe-ok"
 
 [[verify.commands]]
+# SELECT --json key order (#133, v3.26.0): each row's keys come in the order
+# the query names the columns, as clickhouse local writes them, not sorted;
+# a column named twice is one key. Built-in path, no clickhouse.
+command = '''k() { grep -oE '^    "[a-z_]+":' | tr -d ' ":' | awk 'NR<=3' | tr '\n' ' '; }; [ "$(claude-playbook "SELECT version, name FROM PLAYBOOKS --json" | k)" = "version name version " ] && [ "$(claude-playbook "SELECT value, key, playbook FROM VARS --json" | k)" = "value key playbook " ] && [ "$(claude-playbook "SELECT name, name FROM PLAYBOOKS --json" | grep -c '"name":')" = "$(claude-playbook "SELECT name FROM PLAYBOOKS --json" | grep -c '"name":')" ] && echo select-order-ok'''
+contains = "select-order-ok"
+
+[[verify.commands]]
 # A source never carries a login (v3.22.1, security): with a made-up machine
 # store in this HOME, installing a directory source and a git source that
 # ship a newer .credentials.json and account state in .claude.json leaves

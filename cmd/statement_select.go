@@ -579,13 +579,9 @@ func printSelect(table string, cols []string, objs []any, asJSON bool) error {
 		rows = append(rows, row)
 	}
 	if asJSON {
-		out := make([]map[string]any, 0, len(rows))
+		out := make([]orderedRow, 0, len(rows))
 		for _, r := range rows {
-			o := map[string]any{}
-			for _, c := range cols {
-				o[c] = r[c]
-			}
-			out = append(out, o)
+			out = append(out, orderedRow{cols: cols, vals: r})
 		}
 		return printJSON(out)
 	}
@@ -599,6 +595,40 @@ func printSelect(table string, cols []string, objs []any, asJSON bool) error {
 	}
 	renderRows(os.Stdout, cols, data, len(cols) > wideColumns && selectTTY())
 	return nil
+}
+
+// orderedRow is one --json row with its keys in the query's column order,
+// as clickhouse local writes them (a map would sort them). A column named
+// twice is one key, at its first position.
+type orderedRow struct {
+	cols []string
+	vals map[string]any
+}
+
+func (r orderedRow) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // as printJSON: the encoder does not undo it
+	seen := make(map[string]bool, len(r.cols))
+	buf.WriteByte('{')
+	for _, c := range r.cols {
+		if seen[c] {
+			continue
+		}
+		if len(seen) > 0 {
+			buf.WriteByte(',')
+		}
+		seen[c] = true
+		if err := enc.Encode(c); err != nil {
+			return nil, err
+		}
+		buf.WriteByte(':')
+		if err := enc.Encode(r.vals[c]); err != nil {
+			return nil, err
+		}
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
 }
 
 func cellText(v any) string {
