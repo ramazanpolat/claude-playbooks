@@ -213,7 +213,7 @@ fallback_tag() {
   _new=$(latest_tag) || _new=""
   _major=${TAG#v}; _major=${_major%%.*}
   if ! printf '%s\n' "$_new" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "Error: claude-playbook ${TAG} is not published yet, and no published release was found to run instead." >&2
+    echo "Error: claude-playbook ${TAG} is not published yet, and no published vX.Y.Z release was found to run instead (latest: ${_new:-none})." >&2
     return 1
   fi
   _nmajor=${_new#v}; _nmajor=${_nmajor%%.*}

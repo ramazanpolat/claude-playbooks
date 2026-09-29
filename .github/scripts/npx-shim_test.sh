@@ -112,6 +112,7 @@ check "  and runs nothing" out_is ""
 latest v3.26.0-rc1
 run npm_package_version=3.26.0
 check "no fallback to an rc" [ $rc != 0 ]
+check "  it says why, naming the rc" err_has "(latest: v3.26.0-rc1)"
 check "  and runs nothing" out_is ""
 
 latest v3.26.0
@@ -122,7 +123,7 @@ check "  it says why" err_has "(v3.26.0) cannot stand in"
 rm -f "$store/latest"
 run npm_package_version=3.26.0
 check "no fallback when the latest release cannot be read" [ $rc != 0 ]
-check "  it says why" err_has "no published release was found"
+check "  it says why" err_has "was found to run instead (latest: none)"
 latest v3.25.0
 
 # An explicit CPB_VERSION is the user's pin: a missing one is an error.
