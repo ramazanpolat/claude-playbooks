@@ -221,8 +221,9 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
    - the reference's status line.
 4. **A green full arena phase 2 on that head.** Check the VM 142 bench is
    idle first, then dispatch `gentar-arena.yml` on the branch with no
-   scenario. A new commit on the branch needs a new pass, and a pass older
-   than two days does not count.
+   scenario. The run's head sha must be the exact commit you will tag, which
+   is what the release gate checks. A new commit on the branch needs a new
+   pass, and a pass older than two days does not count.
 5. **Tag `vX.Y.Z` on that head.** The release gate also requires a green
    `arena / phase2` on the tagged sha.
 6. **The main bump PR, opened at tag time.** Once vX.Y.Z is tagged, CI's

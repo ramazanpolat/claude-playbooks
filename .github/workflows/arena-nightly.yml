@@ -39,15 +39,29 @@ jobs:
           # On a schedule, github.ref_name is the default branch.
           DEFAULT_REF: ${{ github.event.repository.default_branch || github.ref_name }}
         run: |
+          lookup_failed=""
           if [ -n "$INPUT_REF" ]; then
             refs=$INPUT_REF
           else
             # The latest published, non-prerelease release (GitHub's own
-            # notion); none yet means the default branch only.
-            latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || true)
-            refs="$DEFAULT_REF${latest:+ $latest}"
+            # notion). Only "there is none yet" (HTTP 404) means the default
+            # branch alone. Any other failure (an outage, a rate limit, a
+            # permission) must not silently stop the release being watched:
+            # the default branch still runs, and then the job fails.
+            refs=$DEFAULT_REF
+            if latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err"); then
+              if [ -n "$latest" ] && [ "$latest" != null ]; then refs="$refs $latest"; fi
+            elif grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err"; then
+              echo "no published release yet: the default branch only"
+            else
+              lookup_failed=$(cat "$RUNNER_TEMP/latest.err")
+            fi
           fi
           for ref in $refs; do
             echo "phase 2 on $ref"
             gh workflow run gentar-arena.yml --repo "$GITHUB_REPOSITORY" --ref "$ref"
           done
+          if [ -n "$lookup_failed" ]; then
+            echo "::error::the latest release could not be read, so it was not monitored tonight: $lookup_failed"
+            exit 1
+          fi
