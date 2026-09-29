@@ -249,8 +249,9 @@ contains = "describe-ok"
 [[verify.commands]]
 # SELECT --json key order (#133, v3.26.0): each row's keys come in the order
 # the query names the columns, as clickhouse local writes them, not sorted;
-# a column named twice is one key. Built-in path, no clickhouse.
-command = '''k() { grep -oE '^    "[a-z_]+":' | tr -d ' ":' | awk 'NR<=3' | tr '\n' ' '; }; [ "$(claude-playbook "SELECT version, name FROM PLAYBOOKS --json" | k)" = "version name version " ] && [ "$(claude-playbook "SELECT value, key, playbook FROM VARS --json" | k)" = "value key playbook " ] && [ "$(claude-playbook "SELECT name, name FROM PLAYBOOKS --json" | grep -c '"name":')" = "$(claude-playbook "SELECT name FROM PLAYBOOKS --json" | grep -c '"name":')" ] && echo select-order-ok'''
+# in cpb a column named twice is one key, at its first position (version
+# before name, one version per row). Built-in path, no clickhouse.
+command = '''k() { grep -oE '^    "[a-z_]+":' | tr -d ' ":' | awk 'NR<=3' | tr '\n' ' '; }; [ "$(claude-playbook "SELECT version, name FROM PLAYBOOKS --json" | k)" = "version name version " ] && [ "$(claude-playbook "SELECT value, key, playbook FROM VARS --json" | k)" = "value key playbook " ] && claude-playbook "SELECT version, name, version FROM PLAYBOOKS --json" > "$HOME/dup.json" && [ "$(k < "$HOME/dup.json")" = "version name version " ] && [ "$(grep -c '^    "version":' "$HOME/dup.json")" = "$(grep -c '^    "name":' "$HOME/dup.json")" ] && echo select-order-ok'''
 contains = "select-order-ok"
 
 [[verify.commands]]

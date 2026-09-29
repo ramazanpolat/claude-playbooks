@@ -894,8 +894,8 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
   described under "What a terminal and a pipe get"; `--json` prints the
   selected fields, an array of one object per row. Each object's keys come in
   the order the query names the columns, as `clickhouse local` writes them
-  (v3.26.0; before, they were sorted), and a column named twice is one key,
-  at its first position. A nested object's keys are as `SHOW … --json`
+  (v3.26.0; before, they were sorted). A column named twice is one key, at
+  its first position; that rule is cpb's own. A nested object's keys are as `SHOW … --json`
   prints them.
 - **Anything else goes to ClickHouse** when it is installed: `clickhouse` or
   `ch` on `PATH`, or the command `CPB_CLICKHOUSE` names. cpb pipes the
