@@ -24,6 +24,12 @@
 #      `npx github:...#v3.9.1` runs that release, not latest. Bump
 #      package.json "version" together with the release tag.
 #   3. latest release from the GitHub API -- same as install.sh
+#
+# The package's version can name a release that is not published yet: the
+# release-prep commit is on main before its tag publishes. When that
+# release's binary is missing (HTTP 404), the shim runs the newest
+# published release instead and says so on stderr -- never an rc, never
+# another major. An explicit CPB_VERSION is never replaced.
 set -e
 
 REPO="${REPO:-ramazanpolat/claude-playbooks}"
@@ -97,15 +103,25 @@ if [ "${CPB_NPX_BOOTSTRAP:-}" != "0" ]; then
   fi
 fi
 
+# The newest published, non-prerelease release's tag (GitHub's own notion,
+# as install.sh uses), or nothing.
+latest_tag() {
+  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+    | grep '"tag_name"' | head -1 | cut -d'"' -f4
+}
+
 # Resolve which release tag to fetch.
 TAG=""
+TAG_FROM=""
 if [ -n "${CPB_VERSION:-}" ]; then
   TAG="$CPB_VERSION"
+  TAG_FROM=env
 elif [ -n "${npm_package_version:-}" ] && [ "$npm_package_version" != "0.0.0" ]; then
   TAG="v$npm_package_version"
+  TAG_FROM=package
 else
-  TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+  TAG=$(latest_tag) || TAG=""
+  TAG_FROM=latest
 fi
 if [ -z "$TAG" ]; then
   echo "Error: could not determine which release to fetch. Check your internet connection," >&2
@@ -115,21 +131,37 @@ fi
 
 if [ "${CPB_NPX_BOOTSTRAP:-}" = "0" ]; then
   MODE="ephemeral"
-  BIN_DIR="${CACHE_ROOT}/${TAG}"
 else
   MODE="bootstrap"
-  BIN_DIR="$INSTALL_DIR"
 fi
-BIN="${BIN_DIR}/claude-playbook"
+# BIN_DIR and BIN for $TAG: the per-tag cache in ephemeral mode.
+set_bin() {
+  if [ "$MODE" = "ephemeral" ]; then
+    BIN_DIR="${CACHE_ROOT}/${TAG}"
+  else
+    BIN_DIR="$INSTALL_DIR"
+  fi
+  BIN="${BIN_DIR}/claude-playbook"
+}
+set_bin
 
-if [ ! -x "$BIN" ]; then
+# Download $TAG's binary to $BIN, verified. Returns 4 when the release has
+# no such asset (HTTP 404), 1 on any other failure. Called from `||`, where
+# set -e does not apply, so every step checks its own result.
+TMP_FILE=""
+trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
+download() {
   echo "Fetching claude-playbook ${TAG} (${OS}/${ARCH}) to ${BIN_DIR}..." >&2
-  mkdir -p "$BIN_DIR"
+  mkdir -p "$BIN_DIR" || return 1
   # mktemp inside the target dir: the final mv stays on one filesystem.
-  TMP_FILE=$(mktemp "${BIN_DIR}/.claude-playbook.XXXXXX")
-  trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
+  TMP_FILE=$(mktemp "${BIN_DIR}/.claude-playbook.XXXXXX") || return 1
 
-  curl -fsSL "${DOWNLOAD_BASE_URL}/${TAG}/${ASSET}" -o "$TMP_FILE"
+  code=$(curl -sSL -o "$TMP_FILE" -w '%{http_code}' "${DOWNLOAD_BASE_URL}/${TAG}/${ASSET}") || code=""
+  case "$code" in
+    200) ;;
+    404) rm -f "$TMP_FILE"; TMP_FILE=""; return 4 ;;
+    *) echo "Error: could not download ${ASSET} ${TAG} (${code:-no response})" >&2; return 1 ;;
+  esac
 
   # Verify against the release's SHA256SUMS. Same policy as install.sh:
   # a genuine mismatch always aborts; every unverifiable case (no sums
@@ -169,10 +201,43 @@ if [ ! -x "$BIN" ]; then
     echo "Warning: no SHA256SUMS published for ${TAG}; skipping checksum verification" >&2
   fi
 
-  chmod +x "$TMP_FILE"
-  mv "$TMP_FILE" "$BIN"
+  chmod +x "$TMP_FILE" || return 1
+  mv "$TMP_FILE" "$BIN" || return 1
   TMP_FILE=""
   FETCHED=1
+}
+
+# A release named by the package but not published yet: the newest
+# published one, or nothing (and why, on stderr).
+fallback_tag() {
+  _new=$(latest_tag) || _new=""
+  _major=${TAG#v}; _major=${_major%%.*}
+  if ! printf '%s\n' "$_new" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Error: claude-playbook ${TAG} is not published yet, and no published release was found to run instead." >&2
+    return 1
+  fi
+  _nmajor=${_new#v}; _nmajor=${_nmajor%%.*}
+  if [ "$_new" = "$TAG" ] || [ "$_nmajor" != "$_major" ]; then
+    echo "Error: claude-playbook ${TAG} has no ${ASSET} yet, and the newest published release (${_new}) cannot stand in for it. Try again later, or pin one: CPB_VERSION=vX.Y.Z" >&2
+    return 1
+  fi
+  printf '%s' "$_new"
+}
+
+if [ ! -x "$BIN" ]; then
+  rc=0; download || rc=$?
+  if [ "$rc" = 4 ] && [ "$TAG_FROM" = package ]; then
+    NEW=$(fallback_tag) || exit 1
+    echo "cpb ${TAG} is not published yet; running ${NEW}" >&2
+    TAG=$NEW
+    set_bin
+    rc=0
+    if [ ! -x "$BIN" ]; then download || rc=$?; fi
+  fi
+  if [ "$rc" = 4 ]; then
+    echo "Error: claude-playbook ${TAG} has no ${ASSET} (HTTP 404). Check the version, or pin one: CPB_VERSION=vX.Y.Z" >&2
+  fi
+  [ "$rc" = 0 ] || exit 1
 fi
 
 if [ "$MODE" = "bootstrap" ]; then

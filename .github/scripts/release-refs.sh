@@ -65,7 +65,7 @@ npx-check)
     exit 0
   fi
   if newer "$pkg" "${latest#v}" && [ -z "$(git tag -l "v$pkg")" ]; then
-    echo "::warning::package.json version ($pkg) is ahead of the latest release ($latest) and v$pkg is not tagged yet: a release pending its tag. npx serves nothing until v$pkg is published."
+    echo "::warning::package.json version ($pkg) is ahead of the latest release ($latest) and v$pkg is not tagged yet: a release pending its tag. npx runs the newest published release, with a notice, until v$pkg is published."
     exit 0
   fi
   echo "::error::package.json version ($pkg) != the latest release ($latest). npx would serve the wrong binary: bump package.json to ${latest#v} (or to the release this commit prepares)." >&2

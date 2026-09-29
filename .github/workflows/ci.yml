@@ -60,6 +60,11 @@ jobs:
       - name: Release refs
         run: sh .github/scripts/release-refs_test.sh
 
+      # The npx shim's download path against a stub curl: the release it runs
+      # when the package's version is not published yet, and when it refuses.
+      - name: npx shim
+        run: sh .github/scripts/npx-shim_test.sh
+
       # package.json "version" is what the npx shim fetches, so on main it
       # must name the newest RELEASE: the highest vX.Y.Z tag by version, rc
       # tags and the arena's trigger tags ('arena', 'arena-*') excluded. Not

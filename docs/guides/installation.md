@@ -229,7 +229,20 @@ Knobs, for the cases where you do not want that:
 | `CPB_NPX_INSTALL_DIR=<dir>` | Override the bootstrap install dir |
 
 By default the shim fetches the release matching the package's own version,
-falling back to the latest GitHub release. Native Windows is not supported (use
+or the latest GitHub release when the package has none (`0.0.0`).
+
+Right after a release-prep commit lands on main, the package names a release
+that is not published yet. Until it is, the shim runs the newest published
+release instead and says so in one line on stderr:
+
+```
+cpb v3.26.0 is not published yet; running v3.25.0
+```
+
+It only does this when that release's binary is missing (HTTP 404). It never
+falls back to a prerelease (`-rcN`) or to another major version, and any other
+download failure is an error. A version you pin yourself with `CPB_VERSION` is
+never replaced: if it is missing, the shim stops. Native Windows is not supported (use
 WSL); the npm package refuses to install there.
 
 ## From a clone
