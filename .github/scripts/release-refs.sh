@@ -14,7 +14,9 @@
 #       prerelease such as v3.24.0-rc1 is not a release). Equal passes. Behind
 #       it fails: npx would keep serving the old binary. Ahead of it, with no
 #       tag of that version yet, passes with a warning: the bump commit of a
-#       release that is about to be tagged.
+#       release that is about to be tagged. The warning says what npx does
+#       meanwhile: runs the newest release within the same major, or nothing
+#       for a new major (bin/npx-shim.sh never falls back across one).
 set -eu
 
 # minor_of v3.24.1 → v3.24; v3.24.0-rc1 → v3.24; anything else ("-beta",
@@ -65,7 +67,13 @@ npx-check)
     exit 0
   fi
   if newer "$pkg" "${latest#v}" && [ -z "$(git tag -l "v$pkg")" ]; then
-    echo "::warning::package.json version ($pkg) is ahead of the latest release ($latest) and v$pkg is not tagged yet: a release pending its tag. npx serves nothing until v$pkg is published."
+    # The shim stands in the newest release only within one major.
+    if [ "${pkg%%.*}" = "$(printf '%s' "${latest#v}" | cut -d. -f1)" ]; then
+      npx="npx runs $latest, with a notice, until v$pkg is published."
+    else
+      npx="npx serves nothing until v$pkg is published: a new major, and the shim never falls back across one."
+    fi
+    echo "::warning::package.json version ($pkg) is ahead of the latest release ($latest) and v$pkg is not tagged yet: a release pending its tag. $npx"
     exit 0
   fi
   echo "::error::package.json version ($pkg) != the latest release ($latest). npx would serve the wrong binary: bump package.json to ${latest#v} (or to the release this commit prepares)." >&2
