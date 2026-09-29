@@ -70,6 +70,10 @@ git tag v3.24.0 "$r1"                                     # v3.24.0 tagged on re
 want 1 -  sh "$refs" npx-check 3.23.1                     # main still on 3.23.1: refused (npx stuck)
 want 0 -  sh "$refs" npx-check 3.24.0                     # main bumped to it
 want 0 -  sh "$refs" npx-check 3.25.0                     # v3.25.0's bump, before its tag
+# the warning says what npx does meanwhile: v3.24.0 within the major, nothing across one
+case "$(sh "$refs" npx-check 3.25.0)" in *"npx runs v3.24.0, with a notice"*) echo "ok:   the pending-tag warning names the stand-in" ;; *) echo "FAIL: pending-tag warning (same major)"; fail=1 ;; esac
+want 0 -  sh "$refs" npx-check 4.0.0                      # a new major's bump, before its tag
+case "$(sh "$refs" npx-check 4.0.0)" in *"npx serves nothing until v4.0.0"*"never falls back across one"*) echo "ok:   a new major's warning says npx serves nothing" ;; *) echo "FAIL: pending-tag warning (new major)"; fail=1 ;; esac
 git tag v3.25.0 "$m1"
 want 0 -  sh "$refs" npx-check 3.25.0
 want 1 -  sh "$refs" npx-check 3.24.0                     # behind the newest: refused
