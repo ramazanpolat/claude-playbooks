@@ -14,7 +14,7 @@ each isolated as far as you choose:
 | **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills. Your `~/.claude` never moves. | every playbook, always |
 | **Environment** | its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is. | `USE ENV`, `SET VAR`, `BLOCK VAR` |
 | **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `ISOLATED LOGIN` |
-| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config. By default a host-side proxy injects your API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SANDBOX`, or `--sandbox` on any launch |
+| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SANDBOX`, or `--sandbox` on any launch |
 
 You describe each playbook in a file, apply it anywhere, and get the same
 Claude Code every time.
@@ -60,16 +60,17 @@ sets, and which layer set it.
 
 ```bash
 cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
-cpb CREATE PLAYBOOK glm NO PILOT PROFILE
+cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN
 cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3
-cpb ALTER PLAYBOOK glm BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN   # removed even if your shell exports it
+cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY   # removed even if your shell exports it
 cpb EXPLAIN PLAYBOOK glm
 ```
 
-A new playbook imports your `~/.pilot-profile/` notes, if you keep one.
-`NO PILOT PROFILE` leaves them out, so a playbook routed away from Anthropic
-is not sent them, and cpb warns when a playbook that has them is routed
-elsewhere. [Environment →](docs/guides/environment.md)
+A playbook routed away from Anthropic should share nothing personal with that
+provider. `ISOLATED LOGIN` keeps your Anthropic login and account state out of
+it. A new playbook also imports your `~/.pilot-profile/` notes, if you keep
+one, and `NO PILOT PROFILE` leaves them out; cpb warns when a playbook that
+has them is routed elsewhere. [Environment →](docs/guides/environment.md)
 
 ### Keep two accounts apart, both running
 
@@ -86,16 +87,23 @@ directory and the playbook's own directory. Your home directory, `~/.claude`,
 your shell's environment and your other playbooks are not there.
 
 ```bash
-cpb run --sandbox sre                                          # this folder is the workdir
-cpb run --sandbox --sandbox-fresh --clone --workdir ~/untrusted-repo sre   # a private clone; your tree is untouched
-cpb run --sandbox --mount ~/shared-libs:ro sre                 # one more directory, read-only
-cpb run --sandbox-host me@buildbox sre                         # the same launch, sandboxed on another machine
+cpb run --sandbox work                                         # this folder is the workdir
+cpb run --sandbox --sandbox-fresh --clone --workdir ~/untrusted-repo work   # a private clone; your tree is untouched
+cpb run --sandbox --mount ~/shared-libs:ro work                # one more directory, read-only
+cpb run --sandbox-host me@buildbox work                        # the same launch, sandboxed on another machine
 ```
 
-- **API keys stay outside, by default.** A key from an env set reaches the
-  sandbox only as a placeholder. The host-side proxy puts the real key into
-  requests to that endpoint, and only that endpoint. `secrets = "env"` in the
-  playbook's `[sandbox]` block opts out and passes keys in as plain variables.
+- **API keys stay outside, by default.** A backend key from an env set
+  (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`) reaches the sandbox as a
+  placeholder, and the host-side proxy puts the real key into requests to
+  that endpoint only. Two cases put the real key inside: `secrets = "env"` in
+  the playbook's `[sandbox]` block, which opts out, and a key the proxy fails
+  to register, which cpb warns about on stderr. A Claude Code login token
+  (`CLAUDE_CODE_OAUTH_TOKEN`), when the launch uses one, goes in as well:
+  Claude Code needs it.
+- **Your machine's login never enters.** A mount that contains `~/.claude` is
+  refused. A playbook that shares your login gets one of its own inside the
+  sandbox instead: one `/login` there, kept in the sandbox.
 - **Network egress** follows your `sbx` policy. By default that allows model
   APIs, package managers and code hosts.
 - **Always on:** a playbook created with `SANDBOX` runs sandboxed on every
@@ -141,7 +149,8 @@ cpb APPLY machine.cpb                              # on the next machine
   or a git repository.
 - **Share it:** a recipe applies to any playbook, or to `~/.claude` itself
   (`TO '~/.claude'`). A playbook can also come from a git repository, pinned
-  to a branch or a tag: `cpb CREATE PLAYBOOK <name> FROM <url> BRANCH <ref>`.
+  to a branch or a tag (`cpb CREATE PLAYBOOK <name> FROM <url> BRANCH <ref>`),
+  or run in place from a folder you are developing (`LINK <dir>`).
 
 ### See everything that is running
 
@@ -164,11 +173,13 @@ so neither ever shows a secret value.
   [What is stable →](docs/reference/cli-grammar.md#stability-from-v3240)
 - **Tested on every change.** CI applies all 19 examples, and on Linux and
   macOS upgrades from the previous release and checks that the new build
-  reads the same state identically. Every release also passes a full arena
-  regression on a dedicated test machine.
-- **Another account's login never replaces yours.** A playbook's own login is
-  set aside rather than copied over `~/.claude`'s, and the upgrade test checks
-  that a made-up machine login is never touched.
+  reads the same state identically. Every release also passes a full
+  [arena](gentar/README.md) regression on a dedicated test machine, on the
+  exact commit it is tagged from.
+- **Another account's login never replaces yours.** When a playbook that
+  shares your login holds one of a different account, cpb sets it aside
+  instead of copying it over `~/.claude`'s. The upgrade test checks that a
+  made-up machine login is never touched.
 
 ## The grammar
 
