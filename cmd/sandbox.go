@@ -1102,16 +1102,17 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 		exists = false
 	}
-	if lifecycle != nil {
-		// From here the sandbox may be running (started for reuse, or
-		// created): every way out, a refusal before the attach included,
-		// stops it when no session is left in it.
-		defer lifecycle.finish(name)
-	}
 	if exists && lifecycle != nil {
+		// A reuse that refuses leaves the sandbox as it found it.
 		if err := lifecycle.reuse(name); err != nil {
 			return false, err
 		}
+	}
+	if lifecycle != nil {
+		// From here the sandbox may be running (started for reuse, or about
+		// to be created): every way out, a refusal before the attach
+		// included, stops it when no session is left in it.
+		defer lifecycle.finish(name)
 	}
 	if exists {
 		// Mounts are creation-time: a reused sandbox keeps the ones it was

@@ -320,9 +320,16 @@ func TestRunSandboxOpenshellReuseRotateRevoke(t *testing.T) {
 	}
 	// An explicit pin the sandbox's image does not carry refuses.
 	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}, Sandbox: &manifest.Sandbox{ClaudeVersion: "2.1.300"}})
+	os.Remove(log)
+	t.Setenv("OS_STUB_PGREP", "idle")
 	err = runRun(nil, []string{"--sandbox=openshell", "--workdir", work, "box"})
 	if err == nil || !strings.Contains(err.Error(), "this launch pins Claude Code 2.1.300") || !strings.Contains(err.Error(), "--sandbox-fresh") {
 		t.Fatalf("pin mismatch: %v", err)
+	}
+	// The refused reuse leaves the sandbox (another session's, perhaps)
+	// as it was: no probe, no stop.
+	if joined := strings.Join(stubLines(t, log), "\n"); strings.Contains(joined, "pgrep") || strings.Contains(joined, "sandbox stop") {
+		t.Fatalf("a refused reuse touched the sandbox:\n%s", joined)
 	}
 	// --sandbox-fresh removes the sandbox and cpb's providers and profiles.
 	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
