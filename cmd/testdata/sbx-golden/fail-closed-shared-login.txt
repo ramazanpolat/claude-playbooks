@@ -1,0 +1,13 @@
+== calls
+ls -q
+create --name cpb-failreg --no-share-skills claude <WORK> <ROOT>/failreg
+exec cpb-failreg bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox
+secret ls --sandbox cpb-failreg
+secret set-custom --host api.anthropic.com --env ANTHROPIC_API_KEY --value cpbcanaryvalue --placeholder cpb-failreg-ANTHROPIC_API_KEY --sandbox cpb-failreg
+== stderr
+Shared login stays on the host: playbook "failreg" authenticates on its own inside the sandbox (run /login once there; the login lives in the sandbox)
+Sandbox cpb-failreg created (sbx): workdir <WORK>, config <ROOT>/failreg
+== error
+ANTHROPIC_API_KEY could not be registered at the sandbox proxy for api.anthropic.com (exit status 1: stub failure: secret set-custom --host api.anthropic.com --env ANTHROPIC_API_KEY --value <redacted> --placeholder cpb-failreg-ANTHROPIC_API_KEY --sandbox cpb-failreg), so the launch stops: the key would otherwise enter the sandbox as a plain value. Retry, or set [sandbox] secrets = "env" to pass keys into the sandbox as plain variables
+== store
+<HOME>/.claude/.credentials.json

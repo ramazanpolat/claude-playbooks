@@ -1,0 +1,16 @@
+== calls
+ls -q
+create --name cpb-onhost --no-share-skills claude <WORK> <ROOT>/onhost
+exec cpb-onhost bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox
+policy allow network --sandbox cpb-onhost localhost
+policy allow network --sandbox cpb-onhost other.example
+policy allow network --sandbox cpb-onhost localhost
+secret ls --sandbox cpb-onhost
+secret set-custom --host localhost --env ANTHROPIC_AUTH_TOKEN --value lt --placeholder cpb-onhost-ANTHROPIC_AUTH_TOKEN --sandbox cpb-onhost
+exec -i -e ANTHROPIC_AUTH_TOKEN=cpb-onhost-ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1 -e CLAUDE_CONFIG_DIR=<ROOT>/onhost cpb-onhost bash -lc cd '<WORK>' && exec claude
+== stderr
+ANTHROPIC_BASE_URL names this machine: inside the sandbox it is http://host.docker.internal:20128/v1
+Sandbox cpb-onhost created (sbx): workdir <WORK>, config <ROOT>/onhost, network +localhost,other.example,localhost
+Secret ANTHROPIC_AUTH_TOKEN stays on the host: injected at the proxy for localhost, the sandbox sees a placeholder
+== error
+== store
