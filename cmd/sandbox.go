@@ -478,8 +478,9 @@ func baseURLHost(env []string) string {
 }
 
 // sandboxBackend is the seam every sandbox implementation fills: the six
-// operations a launch needs. Only sbx exists today; the seam keeps the
-// launch logic independent of its CLI.
+// operations a launch needs: sbx, and the experimental OpenShell backend
+// (sandbox_openshell.go). The seam keeps the launch logic independent of
+// their CLIs.
 type sandboxBackend interface {
 	// names lists the existing sandboxes.
 	names() ([]string, error)
@@ -539,6 +540,12 @@ func newSandboxBackend(kind string) (sandboxBackend, error) {
 			return nil, fmt.Errorf("'sbx' (Docker Sandboxes) not found; install it (macOS: brew trust docker/tap && brew install docker/tap/sbx) and run 'sbx login' once, or launch without --sandbox")
 		}
 		return sbxBackend{bin: bin}, nil
+	case "openshell":
+		bin, err := openshellPreflight()
+		if err != nil {
+			return nil, err
+		}
+		return &openshellBackend{bin: bin, claudeVersion: openshellClaudeVersion}, nil
 	}
 	return nil, fmt.Errorf("unknown sandbox backend %q (available: %s)", kind, strings.Join(manifest.SandboxBackends, ", "))
 }
@@ -1069,6 +1076,15 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 
+	// A backend with a lifecycle of its own (OpenShell) takes this
+	// launch's settings first; sbx has none.
+	lifecycle, _ := backend.(sandboxLifecycle)
+	if lifecycle != nil {
+		if err := lifecycle.prepare(sb, opts.clone, env); err != nil {
+			return false, err
+		}
+	}
+
 	name := t.name
 	names, err := backend.names()
 	if err != nil {
@@ -1085,6 +1101,18 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 			return false, fmt.Errorf("could not remove sandbox %s: %w", name, err)
 		}
 		exists = false
+	}
+	if exists && lifecycle != nil {
+		// A reuse that refuses leaves the sandbox as it found it.
+		if err := lifecycle.reuse(name); err != nil {
+			return false, err
+		}
+	}
+	if lifecycle != nil {
+		// From here the sandbox may be running (started for reuse, or about
+		// to be created): every way out, a refusal before the attach
+		// included, stops it when no session is left in it.
+		defer lifecycle.finish(name)
 	}
 	if exists {
 		// Mounts are creation-time: a reused sandbox keeps the ones it was
@@ -1137,7 +1165,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 				fmt.Fprintf(os.Stderr, "Warning: could not allow network %q for sandbox %s: %v\n", h, name, err)
 			}
 		}
-		if sb.ClaudeVersion != "" {
+		if sb.ClaudeVersion != "" && (lifecycle == nil || !lifecycle.imageCarriesClaude()) {
 			install := "set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s " + shell.QuoteArg(sb.ClaudeVersion)
 			if err := backend.shell(name, install); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not pin Claude Code %s inside sandbox %s: %v (the image's own version runs)\n", sb.ClaudeVersion, name, err)
@@ -1251,8 +1279,16 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 	// no longer carries would still inject that key for anyone inside who
 	// sends the (predictable) placeholder, so they are revoked (sbx cannot
 	// delete them and neutralizes them instead).
+	// A backend that injects its placeholders itself (OpenShell) would hand
+	// a key the pilot removed to the next session, so for it a mapping that
+	// cannot be listed or revoked stops the launch; sbx warns.
+	lifecycle, _ := backend.(sandboxLifecycle)
+	strict := lifecycle != nil && lifecycle.revokeFailsClosed()
 	registered, err := backend.secrets(sandbox)
 	if err != nil {
+		if strict {
+			return nil, fmt.Errorf("could not list the secrets registered for sandbox %s (%v), so the launch stops: a key removed from the environment may still be injected. Retry, or recreate the sandbox with --sandbox-fresh", sandbox, err)
+		}
 		fmt.Fprintf(os.Stderr, "Warning: could not list the sandbox's secrets (%v); a key registered by an earlier launch may still be mapped\n", err)
 	}
 	for _, key := range secretEnvVars {
@@ -1264,6 +1300,9 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 		}
 		if value == "" {
 			done, err := backend.revoke(sandbox, host, key, registered)
+			if err != nil && strict {
+				return nil, fmt.Errorf("%s is no longer in the environment but its mapping in sandbox %s could not be revoked (%v), so the launch stops: it would still be injected. Retry, or recreate the sandbox with --sandbox-fresh", key, sandbox, err)
+			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
 			} else if done {

@@ -735,7 +735,7 @@ func WritePrivate(path string, data []byte, perm os.FileMode) error {
 var claudeVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
 // SandboxBackends lists the sandbox implementations claude-playbook drives.
-var SandboxBackends = []string{"sbx"}
+var SandboxBackends = []string{"sbx", "openshell"}
 
 // KnownSandboxBackend reports whether name is one of SandboxBackends.
 func KnownSandboxBackend(name string) bool {

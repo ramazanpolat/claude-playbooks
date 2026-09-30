@@ -148,6 +148,37 @@ fallback: [docs/guides/installation.md](docs/guides/installation.md), "Uninstall
   the command, the output, `cpb --version` and `uname -a`. Never include a
   secret value; redact tokens before posting.
 
+## The OpenShell sandbox backend (maintainers)
+
+`--sandbox=openshell` is experimental and runs only on a Linux host with
+OpenShell 0.1.x (see [the sandbox guide](docs/guides/sandbox.md#openshell-backend-experimental-linux)).
+CI cannot run it. Two things keep it honest:
+
+- **Unit tests** (`cmd/sandbox_openshell_test.go`) put fake `openshell`,
+  `docker`, `systemctl` and `loginctl` first on PATH and check every call. They
+  also check that a key's value reaches `openshell` only in its environment. A
+  change to the backend seam must also leave `TestSbxCallLogGolden`
+  (`cmd/testdata/sbx-golden/`) passing unchanged: that test pins the whole
+  sbx launch.
+- **The end-to-end run** (`tests/openshell-e2e.sh <claude-playbook binary>`) runs
+  on a disposable Linux host with OpenShell, such as the `testbed` VM, never on
+  a workstation. It uses dummy keys, restarts the gateway twice and restores it.
+  It must end `0 failed`, including the Claude Code TUI under the generated
+  policy.
+
+**Bumping the Claude Code the image carries** (`openshellClaudeVersion` in
+`cmd/sandbox_openshell.go`):
+
+1. Change the constant, build the binary, and run `tests/openshell-e2e.sh` on
+   the testbed host. Every step must pass, including the TUI.
+2. Only then commit the new pin.
+3. Say it in the release notes: "OpenShell sandboxes: Claude Code A → B.
+   Existing sandboxes keep A until `--sandbox-fresh`."
+
+The same run is required before accepting a new OpenShell minor, and before
+changing the recipe (`cmd/openshell/Dockerfile`, whose base image is pinned by
+digest).
+
 ## Before any release
 
 No release without its docs. The pilot's rule (2026-09-26), verbatim:
