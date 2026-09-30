@@ -263,7 +263,7 @@ command = '''S="$HOME/sbxstub"; W="$HOME/sbxwork"; mkdir -p "$S" "$W" && printf 
 contains = "sandbox-secret-refuse-ok"
 
 [[verify.commands]]
-# The experimental OpenShell backend (v3.26.0) refuses before it touches
+# The experimental OpenShell backend (v3.27.0) refuses before it touches
 # anything when OpenShell is missing or unsupported, and an unknown backend's
 # message lists it. No OpenShell on the bench; a stub reports an old version.
 # On macOS (phase-1 runs there too) the first refusal is that it is Linux-only.

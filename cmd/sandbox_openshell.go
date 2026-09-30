@@ -192,7 +192,10 @@ func (b *openshellBackend) run(env []string, args ...string) (string, error) {
 		time.Sleep(openshellRetryDelay)
 	}
 	if err != nil {
-		return string(out), fmt.Errorf("openshell %s: %w: %s", args[0]+" "+args[1], err, strings.TrimSpace(string(out)))
+		// The subcommand names the call ("sandbox create"); every caller
+		// passes at least two arguments, guarded all the same.
+		sub := strings.Join(args[:min(2, len(args))], " ")
+		return string(out), fmt.Errorf("openshell %s: %w: %s", sub, err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
 }

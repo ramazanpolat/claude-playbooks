@@ -31,4 +31,4 @@ Without OpenShell (on macOS, or on a host without it), the launch refuses
 before it touches anything and says what is missing. That refusal is what CI
 checks here.
 
-Reference: SPEC-v4.md, "OpenShell backend (experimental, v3.26.0)".
+Reference: SPEC-v4.md, "OpenShell backend (experimental, v3.27.0)".
