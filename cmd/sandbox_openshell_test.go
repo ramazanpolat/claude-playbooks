@@ -358,7 +358,21 @@ func TestRunSandboxOpenshellRefusals(t *testing.T) {
 			t.Fatalf("attached, or the value on an argument list: %q", c)
 		}
 	}
+	// The sandbox the refused launch created is stopped all the same.
+	if c := stubLines(t, log); c[len(c)-1] != "sandbox stop cpb-box" {
+		t.Fatalf("a launch refused before the attach left the sandbox running:\n%s", strings.Join(c, "\n"))
+	}
+	// A registered mapping that cannot be listed stops the launch: the
+	// backend would go on injecting a key the pilot removed.
+	t.Setenv("OS_STUB_FAIL", "sandbox provider list")
+	if err := runRun(nil, []string{"--sandbox=openshell", "--workdir", work, "box"}); err == nil || !strings.Contains(err.Error(), "could not list the secrets registered for sandbox cpb-box") {
+		t.Fatalf("unlisted secrets: %v", err)
+	}
 	t.Setenv("OS_STUB_FAIL", "")
+	// A mount at one of the sandbox's own system paths is refused.
+	if err := runRun(nil, []string{"--sandbox=openshell", "--mount", "/usr:ro", "--workdir", work, "box"}); err == nil || !strings.Contains(err.Error(), "cannot mount /usr: it is one of the sandbox's own system paths") {
+		t.Fatalf("baseline mount: %v", err)
+	}
 	// --clone and share_skills are sbx's.
 	if err := runRun(nil, []string{"--sandbox=openshell", "--clone", "--workdir", work, "box"}); err == nil || !strings.Contains(err.Error(), "--clone is sbx-only for now") {
 		t.Fatalf("--clone: %v", err)

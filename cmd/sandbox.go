@@ -1102,6 +1102,12 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 		exists = false
 	}
+	if lifecycle != nil {
+		// From here the sandbox may be running (started for reuse, or
+		// created): every way out, a refusal before the attach included,
+		// stops it when no session is left in it.
+		defer lifecycle.finish(name)
+	}
 	if exists && lifecycle != nil {
 		if err := lifecycle.reuse(name); err != nil {
 			return false, err
@@ -1192,9 +1198,6 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	}
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	runErr := backend.attach(name, env, tty, command)
-	if lifecycle != nil {
-		lifecycle.finish(name)
-	}
 	return true, preserveExitCode(runErr)
 }
 
@@ -1275,8 +1278,16 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 	// no longer carries would still inject that key for anyone inside who
 	// sends the (predictable) placeholder, so they are revoked (sbx cannot
 	// delete them and neutralizes them instead).
+	// A backend that injects its placeholders itself (OpenShell) would hand
+	// a key the pilot removed to the next session, so for it a mapping that
+	// cannot be listed or revoked stops the launch; sbx warns.
+	lifecycle, _ := backend.(sandboxLifecycle)
+	strict := lifecycle != nil && lifecycle.revokeFailsClosed()
 	registered, err := backend.secrets(sandbox)
 	if err != nil {
+		if strict {
+			return nil, fmt.Errorf("could not list the secrets registered for sandbox %s (%v), so the launch stops: a key removed from the environment may still be injected. Retry, or recreate the sandbox with --sandbox-fresh", sandbox, err)
+		}
 		fmt.Fprintf(os.Stderr, "Warning: could not list the sandbox's secrets (%v); a key registered by an earlier launch may still be mapped\n", err)
 	}
 	for _, key := range secretEnvVars {
@@ -1288,6 +1299,9 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 		}
 		if value == "" {
 			done, err := backend.revoke(sandbox, host, key, registered)
+			if err != nil && strict {
+				return nil, fmt.Errorf("%s is no longer in the environment but its mapping in sandbox %s could not be revoked (%v), so the launch stops: it would still be injected. Retry, or recreate the sandbox with --sandbox-fresh", key, sandbox, err)
+			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
 			} else if done {

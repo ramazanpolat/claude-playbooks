@@ -75,6 +75,9 @@ type sandboxLifecycle interface {
 	prepare(sb manifest.Sandbox, clone bool, env []string) error
 	reuse(name string) error
 	imageCarriesClaude() bool
+	// revokeFailsClosed: a mapping that cannot be listed or revoked stops
+	// the launch (the backend injects placeholders by itself).
+	revokeFailsClosed() bool
 	finish(name string)
 }
 
@@ -243,6 +246,17 @@ func (b *openshellBackend) prepare(sb manifest.Sandbox, clone bool, env []string
 
 func (b *openshellBackend) imageCarriesClaude() bool { return true }
 
+func (b *openshellBackend) revokeFailsClosed() bool { return true }
+
+// openshellBaseline is the set of system paths every policy lists.
+func openshellBaseline() map[string]bool {
+	base := map[string]bool{}
+	for _, p := range append(append([]string{}, openshellBaselineRO...), openshellBaselineRW...) {
+		base[p] = true
+	}
+	return base
+}
+
 // imageLabel names the image a sandbox runs: the Claude Code version and
 // the recipe's hash (a changed recipe is a different image).
 func (b *openshellBackend) imageLabel() string {
@@ -326,10 +340,7 @@ func (b *openshellBackend) mounts(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	base := map[string]bool{}
-	for _, p := range append(append([]string{}, openshellBaselineRO...), openshellBaselineRW...) {
-		base[p] = true
-	}
+	base := openshellBaseline()
 	var mounts []string
 	for _, p := range s.Policy.Filesystem.ReadWrite {
 		if !base[p] {
@@ -424,6 +435,14 @@ func writeTemp(pattern, content string) (string, error) {
 }
 
 func (b *openshellBackend) create(name string, clone, shareSkills bool, mounts []string) error {
+	// A mount at a system path would be indistinguishable from the policy's
+	// own entry for it, so a reuse could never find it again.
+	base := openshellBaseline()
+	for _, m := range mounts {
+		if p, _ := strings.CutSuffix(m, ":ro"); base[p] {
+			return fmt.Errorf("the openshell backend cannot mount %s: it is one of the sandbox's own system paths. Use a directory below it", p)
+		}
+	}
 	tag, err := b.ensureImage()
 	if err != nil {
 		return err
