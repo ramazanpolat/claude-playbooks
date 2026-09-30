@@ -1,0 +1,1 @@
+{"jobs":[{"conclusion":"success","name":"plan","status":"completed"},{"conclusion":"skipped","name":"arena / ${{ needs.plan.outputs.bench }}","status":"completed"},{"conclusion":"skipped","name":"checks","status":"completed"}]}
