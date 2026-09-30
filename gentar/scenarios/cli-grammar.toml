@@ -255,6 +255,14 @@ command = '''k() { grep -oE '^    "[a-z_]+":' | tr -d ' ":' | awk 'NR<=3' | tr '
 contains = "select-order-ok"
 
 [[verify.commands]]
+# A sandboxed launch whose key cannot be registered at the proxy refuses
+# (#148, v3.26.0): it names the key and the host, never the value (the stub
+# sbx echoes its argv, value included, in its error), and attaches nothing.
+# A stub sbx on PATH; no real sandbox.
+command = '''S="$HOME/sbxstub"; W="$HOME/sbxwork"; mkdir -p "$S" "$W" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/sbx.log"' 'if [ "$1" = ls ] && [ "$2" = --json ]; then printf "{\"sandboxes\":[]}"; exit 0; fi' 'if [ "$1" = secret ] && [ "$2" = ls ]; then exit 0; fi' 'if [ "$1" = secret ]; then echo "stub failure: $*" >&2; exit 1; fi' 'exit 0' > "$S/sbx" && chmod 755 "$S/sbx" && claude-playbook CREATE ENV canary148 SET ANTHROPIC_API_KEY=cpbcanary148value AS PLAINTEXT >/dev/null && claude-playbook CREATE PLAYBOOK failreg NO ALIAS NO PILOT PROFILE ISOLATED LOGIN >/dev/null && claude-playbook ALTER PLAYBOOK failreg USE ENV canary148 >/dev/null && rm -f "$HOME/sbx.log" && if PATH="$S:$PATH" claude-playbook run --sandbox --workdir "$W" failreg > "$HOME/fr.out" 2>&1; then echo failreg-launched; elif grep -q cpbcanary148value "$HOME/fr.out"; then echo failreg-leaked; elif ! grep -q "ANTHROPIC_API_KEY could not be registered at the sandbox proxy for api.anthropic.com" "$HOME/fr.out"; then echo failreg-wrong-message; elif grep -q "^exec -i" "$HOME/sbx.log"; then echo failreg-attached; else echo sandbox-secret-refuse-ok; fi'''
+contains = "sandbox-secret-refuse-ok"
+
+[[verify.commands]]
 # A source never carries a login (v3.22.1, security): with a made-up machine
 # store in this HOME, installing a directory source and a git source that
 # ship a newer .credentials.json and account state in .claude.json leaves

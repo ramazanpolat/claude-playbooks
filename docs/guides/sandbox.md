@@ -61,7 +61,21 @@ the way out, and only for that host. Rotate the key in the profile and the next
 launch updates it; remove it and the next launch revokes the mapping. A router on
 this machine works too: a base URL at `localhost` is rewritten to the sandbox's
 name for the host, and the policy and secret are registered the way the proxy
-matches them. The shared `sbx` skills store stays out as well. `--sbx` is a
+matches them.
+
+When a key does go in:
+
+- **`[sandbox] secrets = "env"`** passes keys in as plain variables. It is the
+  only way to do that, and a choice you make in the manifest.
+- **A Claude Code login token** (`CLAUDE_CODE_OAUTH_TOKEN`), when the launch
+  uses one, goes in: Claude Code checks its shape locally, so a placeholder
+  would not work.
+- **Never because a registration failed.** If `cpb` cannot register a key with
+  the proxy, the launch stops and names the key and the host (never the
+  value). Retry, or choose `secrets = "env"`. Before v3.26.0 it warned and
+  passed the key in.
+
+The shared `sbx` skills store stays out as well. `--sbx` is a
 synonym for `--sandbox`; `--sandbox=BACKEND` picks the backend, of which there is
 one today, `sbx`.
 

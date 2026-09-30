@@ -24,7 +24,7 @@ func stubSbx(t *testing.T, existing ...string) string {
 		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
 		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.claude-playbook-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
 		"if [ \"$1\" = secret ] && [ \"$2\" = ls ]; then printf 'CUSTOM SECRETS\\nSCOPE TARGETS ENV PLACEHOLDER SECRET\\n%s\\n' \"$SBX_STUB_SECRETS\"; exit 0; fi\n" +
-		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo 'stub failure' >&2; exit 1; fi\nexit 0\n"
+		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo \"stub failure: $*\" >&2; exit 1; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "sbx"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -874,15 +874,48 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	t.Setenv("SBX_STUB_LS", "")
 	t.Setenv("SBX_STUB_LSJSON", "")
 	t.Setenv("SBX_STUB_SECRETS", "")
-	// A failed registration falls back to the plain value, loudly.
-	t.Setenv("SBX_STUB_FAIL", "secret")
-	os.Remove(log)
-	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
+	// A failed registration refuses the launch (#148): the key never enters
+	// the sandbox as a plain value, and its value is in no message, even
+	// when the backend's own error echoes it (the stub echoes its argv).
+	const canary = "cpbcanary148value"
+	if err := runEnvProfile(nil, []string{"canary", "set", "ANTHROPIC_API_KEY=" + canary}); err != nil {
 		t.Fatal(err)
 	}
+	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"canary"}}})
+	t.Setenv("SBX_STUB_FAIL", "secret")
+	os.Remove(log)
+	var runErr error
+	stderr := captureStderr(t, func() { runErr = runRun(nil, []string{"--sandbox", "--workdir", work, "failreg"}) })
+	if runErr == nil {
+		t.Fatal("a failed registration must refuse the launch")
+	}
+	for _, want := range []string{"ANTHROPIC_API_KEY could not be registered at the sandbox proxy for api.anthropic.com", "<redacted>", `secrets = "env"`} {
+		if !strings.Contains(runErr.Error(), want) {
+			t.Fatalf("refusal %q lacks %q", runErr, want)
+		}
+	}
+	if strings.Contains(runErr.Error(), canary) || strings.Contains(stderr, canary) {
+		t.Fatalf("the key's value leaked:\nerr: %v\nstderr: %s", runErr, stderr)
+	}
 	calls = sbxCalls(t, log)
-	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY=k ") {
-		t.Fatalf("fallback after a failed registration: %q", calls)
+	for _, c := range calls {
+		if strings.HasPrefix(c, "exec -i") || strings.HasPrefix(c, "run ") {
+			t.Fatalf("attached after a failed registration: %q", calls)
+		}
+		if strings.Contains(c, canary) && !strings.HasPrefix(c, "secret set-custom") {
+			t.Fatalf("the key reached a call other than its registration: %q", c)
+		}
+	}
+	// secrets = "env" is the only way a key goes in plainly: it registers
+	// nothing, so the same backend failure cannot arise.
+	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"canary"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
+	os.Remove(log)
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "failreg"}); err != nil {
+		t.Fatalf("secrets = \"env\" with a failing backend secret step: %v", err)
+	}
+	calls = sbxCalls(t, log)
+	if strings.Contains(strings.Join(calls, "\n"), "secret set-custom") || !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_API_KEY="+canary+" ") {
+		t.Fatalf("secrets = \"env\": %q", calls)
 	}
 }
 
@@ -1079,5 +1112,42 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	if _, err := os.Stat(sbxLog); err == nil {
 		t.Fatal("sbx was called locally for a remote start")
+	}
+}
+
+// A sandboxed launch refused after the store was pointed at the sandbox
+// login gives the host its shared link back, as the end of a session does:
+// a key the proxy cannot register (#148) and a sandbox that cannot be
+// created, both before any attach.
+func TestRunSandboxRefusalRestoresSharedLogin(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	globalStore := filepath.Join(home, ".claude", ".credentials.json")
+	if err := os.WriteFile(globalStore, []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"keyed", "set", "ANTHROPIC_API_KEY=cpbcanary148restore"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "box", &manifest.Manifest{Env: &manifest.Env{Profiles: []string{"keyed"}}})
+	store := filepath.Join(root, "box", ".credentials.json")
+	log := stubSbx(t)
+	for _, fail := range []string{"secret", "create"} {
+		t.Setenv("SBX_STUB_FAIL", fail)
+		os.Remove(log)
+		if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"}); err == nil {
+			t.Fatalf("%s failure: the launch went ahead", fail)
+		}
+		for _, c := range sbxCalls(t, log) {
+			if strings.HasPrefix(c, "exec -i") {
+				t.Fatalf("%s failure: attached anyway: %q", fail, c)
+			}
+		}
+		if target, err := os.Readlink(store); err != nil || target != globalStore {
+			t.Fatalf("%s failure: store after the refusal points at %q (%v), want the shared %s", fail, target, err, globalStore)
+		}
 	}
 }

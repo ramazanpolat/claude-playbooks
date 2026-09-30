@@ -936,6 +936,22 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	if err != nil {
 		return false, err
 	}
+	if loginPath != "" {
+		// The store now points at the sandbox login. Every way out of this
+		// launch gives the host its shared link back: the session ending,
+		// and any refusal before the attach (a mount check, a failed
+		// create, a key the proxy could not register), which would
+		// otherwise leave the link dangling until the next host launch.
+		// The sync replaces a link that is not the shared one and copies
+		// nothing; the sandbox login stays inside for the next launch. A
+		// launch that never returns (crash, kill) leaves it dangling, which
+		// every host command tolerates and the next host launch repairs.
+		defer func() {
+			if err := auth.SyncCredentials(t.configPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not restore the shared login link after the sandboxed launch: %v\n", err)
+			}
+		}()
+	}
 	env = rewriteHostEndpoint(env, backend)
 
 	var sb manifest.Sandbox
@@ -1093,7 +1109,11 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		fmt.Fprintf(os.Stderr, "Sandbox %s reused (--sandbox-fresh recreates it): workdir %s\n", name, workdir)
 	}
 
-	env = injectSecrets(backend, name, env, sb.Secrets)
+	injected, err := injectSecrets(backend, name, env, sb.Secrets)
+	if err != nil {
+		return false, err
+	}
+	env = injected
 
 	// Attach: the environment and claude's arguments travel as exec
 	// arguments, never through a file inside the sandbox.
@@ -1112,18 +1132,6 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	}
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	runErr := backend.attach(name, env, tty, command)
-	if loginPath != "" {
-		// The session is over: give the host its shared link back, so the
-		// store dangles only while a sandboxed session is live. The sync
-		// replaces a link that is not the shared one and copies nothing;
-		// the sandbox login stays inside the sandbox for the next launch.
-		// A launch that never returns here (crash, kill) leaves the link
-		// dangling, which every host command tolerates and the next host
-		// launch repairs.
-		if err := auth.SyncCredentials(t.configPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not restore the shared login link after the sandbox session: %v\n", err)
-		}
-	}
 	return true, preserveExitCode(runErr)
 }
 
@@ -1184,12 +1192,14 @@ func secretPlaceholder(sandbox, env string) string {
 // injectSecrets registers each API key the environment carries as a
 // proxy-injected secret for the endpoint host and replaces its value with
 // the placeholder, so the key never enters the sandbox. mode "env" passes
-// the values as they are. A registration that fails falls back to the
-// plain value with a warning naming the variable: a silent fallback would
-// leave the pilot believing the key stayed outside.
-func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode string) []string {
+// the values as they are, and is the only way a key enters as a plain
+// value: a registration that fails refuses the launch (#148). Falling back
+// to the plain value would hand the key to the sandbox the pilot was told
+// never holds it. The refusal names the variable and the host, never the
+// value, which is scrubbed from the backend's own error too.
+func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode string) ([]string, error) {
 	if mode == "env" {
-		return env
+		return env, nil
 	}
 	host := baseURLHost(env)
 	if host == "" {
@@ -1224,13 +1234,12 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 		}
 		placeholder := secretPlaceholder(sandbox, key)
 		if err := backend.secret(sandbox, host, key, value, placeholder); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: %s could not be injected at the proxy (%v); it enters the sandbox as a plain value. [sandbox] secrets = \"env\" silences this\n", key, err)
-			continue
+			return nil, fmt.Errorf("%s could not be registered at the sandbox proxy for %s (%s), so the launch stops: the key would otherwise enter the sandbox as a plain value. Retry, or set [sandbox] secrets = \"env\" to pass keys into the sandbox as plain variables", key, host, strings.ReplaceAll(err.Error(), value, "<redacted>"))
 		}
 		env = setEnv(env, key, placeholder)
 		fmt.Fprintf(os.Stderr, "Secret %s stays on the host: injected at the proxy for %s, the sandbox sees a placeholder\n", key, host)
 	}
-	return env
+	return env, nil
 }
 
 func describeExtras(extraMounts, hosts []string, version string) string {
