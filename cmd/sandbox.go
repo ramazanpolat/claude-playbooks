@@ -478,8 +478,9 @@ func baseURLHost(env []string) string {
 }
 
 // sandboxBackend is the seam every sandbox implementation fills: the six
-// operations a launch needs. Only sbx exists today; the seam keeps the
-// launch logic independent of its CLI.
+// operations a launch needs: sbx, and the experimental OpenShell backend
+// (sandbox_openshell.go). The seam keeps the launch logic independent of
+// their CLIs.
 type sandboxBackend interface {
 	// names lists the existing sandboxes.
 	names() ([]string, error)
@@ -539,6 +540,12 @@ func newSandboxBackend(kind string) (sandboxBackend, error) {
 			return nil, fmt.Errorf("'sbx' (Docker Sandboxes) not found; install it (macOS: brew trust docker/tap && brew install docker/tap/sbx) and run 'sbx login' once, or launch without --sandbox")
 		}
 		return sbxBackend{bin: bin}, nil
+	case "openshell":
+		bin, err := openshellPreflight()
+		if err != nil {
+			return nil, err
+		}
+		return &openshellBackend{bin: bin, claudeVersion: openshellClaudeVersion}, nil
 	}
 	return nil, fmt.Errorf("unknown sandbox backend %q (available: %s)", kind, strings.Join(manifest.SandboxBackends, ", "))
 }
@@ -1069,6 +1076,15 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 
+	// A backend with a lifecycle of its own (OpenShell) takes this
+	// launch's settings first; sbx has none.
+	lifecycle, _ := backend.(sandboxLifecycle)
+	if lifecycle != nil {
+		if err := lifecycle.prepare(sb, opts.clone, env); err != nil {
+			return false, err
+		}
+	}
+
 	name := t.name
 	names, err := backend.names()
 	if err != nil {
@@ -1085,6 +1101,11 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 			return false, fmt.Errorf("could not remove sandbox %s: %w", name, err)
 		}
 		exists = false
+	}
+	if exists && lifecycle != nil {
+		if err := lifecycle.reuse(name); err != nil {
+			return false, err
+		}
 	}
 	if exists {
 		// Mounts are creation-time: a reused sandbox keeps the ones it was
@@ -1137,7 +1158,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 				fmt.Fprintf(os.Stderr, "Warning: could not allow network %q for sandbox %s: %v\n", h, name, err)
 			}
 		}
-		if sb.ClaudeVersion != "" {
+		if sb.ClaudeVersion != "" && (lifecycle == nil || !lifecycle.imageCarriesClaude()) {
 			install := "set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s " + shell.QuoteArg(sb.ClaudeVersion)
 			if err := backend.shell(name, install); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not pin Claude Code %s inside sandbox %s: %v (the image's own version runs)\n", sb.ClaudeVersion, name, err)
@@ -1171,6 +1192,9 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	}
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	runErr := backend.attach(name, env, tty, command)
+	if lifecycle != nil {
+		lifecycle.finish(name)
+	}
 	return true, preserveExitCode(runErr)
 }
 
