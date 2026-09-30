@@ -79,7 +79,11 @@ API=$!
 cleanup() {
   kill "$API" 2>/dev/null; tmux -L cpbe2e kill-server 2>/dev/null
   [ -f "$E/gateway.toml.bak" ] && cp "$E/gateway.toml.bak" "$GW" && systemctl --user restart openshell-gateway && gateway_up
-  O sandbox delete "$SB" >/dev/null; O provider delete "$ID" >/dev/null; O profile delete --global "$ID" >/dev/null
+  O sandbox delete "$SB" >/dev/null
+  # The sandbox's deletion is asynchronous; a provider attached to it cannot
+  # be deleted until it is gone.
+  for _ in $(seq 15); do O provider get "$ID" >/dev/null || break; O provider delete "$ID" >/dev/null && break; sleep 2; done
+  O profile delete --global "$ID" >/dev/null
   rm -rf "$E"
 }
 trap cleanup EXIT
@@ -151,7 +155,7 @@ O profile list | grep -q "$ID" && bad "profile deleted" || ok "profile deleted"
 
 echo "== 6 refusals"
 mkdir -p "$E/shim"; printf '#!/bin/sh\n[ "$1" = --version ] && { echo "openshell 0.1.1"; exit 0; }\nexec %s "$@"\n' "$(command -v openshell)" > "$E/shim/openshell"; chmod +x "$E/shim/openshell"
-PATH="$E/shim:$PATH" L 6a -p hi; has 6a "OpenShell 0.1.1 is not supported" && ok "an unsupported OpenShell refuses" || bad "version refusal" "$(tail -1 "$E/out.6a")"
+( PATH="$E/shim:$PATH"; L 6a -p hi ); has 6a "OpenShell 0.1.1 is not supported" && ok "an unsupported OpenShell refuses" || bad "version refusal" "$(tail -1 "$E/out.6a")"
 systemctl --user stop openshell-gateway; L 6b -p hi
 has 6b "the OpenShell gateway is not running" && ok "a stopped gateway refuses" || bad "gateway refusal" "$(tail -1 "$E/out.6b")"
 systemctl --user start openshell-gateway; gateway_up || bad "gateway back up"
@@ -160,14 +164,15 @@ systemctl --user start openshell-gateway; gateway_up || bad "gateway back up"
 # there is one to remove).
 claude-playbook env-profile r set ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-3 >/dev/null
 L 6c -p hi; O provider list | grep -q "$ID" || bad "provider back for the removal check"
-cp "$GW" "$E/gateway.toml.bak"; sed -i 's/^enable_bind_mounts *= *true/enable_bind_mounts = false/' "$GW"
+cp "$GW" "$E/gateway.toml.bak"; sed -i 's/^\([[:space:]]*\)enable_bind_mounts[[:space:]]*=[[:space:]]*true/\1enable_bind_mounts = false/' "$GW"
+grep -q 'enable_bind_mounts = false' "$GW" || bad "host mounts switched off for the check" "no enable_bind_mounts = true in $GW"
 systemctl --user restart openshell-gateway; gateway_up
 L 6d --sandbox-fresh -p hi
 has 6d "must allow host mounts" && ok "host mounts off refuses and names the fix" || bad "bind-mount refusal"
 echo "   create error was: $(grep -A4 -F 'openshell sandbox create' "$E/out.6d" | tr '\n' ' ' | cut -c1-700)"
 O provider list | grep -q "$ID" && bad "--sandbox-fresh deleted cpb's provider" || ok "--sandbox-fresh deleted cpb's provider"
 O profile list | grep -q "$ID" && bad "--sandbox-fresh deleted cpb's profile" || ok "--sandbox-fresh deleted cpb's profile"
-cp "$E/gateway.toml.bak" "$GW" && rm "$E/gateway.toml.bak"; systemctl --user restart openshell-gateway; gateway_up
+cp "$E/gateway.toml.bak" "$GW" && systemctl --user restart openshell-gateway && gateway_up && rm "$E/gateway.toml.bak"
 
 echo "== $pass passed, $fail failed"
 [ "$fail" = 0 ]

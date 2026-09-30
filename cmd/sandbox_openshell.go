@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -594,17 +595,19 @@ func (b *openshellBackend) secret(name, host, env, value string) (string, error)
 	if !attached[id] {
 		// A rule of cpb's own for the endpoint (a sandbox created before
 		// the key was set) would keep the provider's rule from installing.
-		if s, err := b.get(name); err == nil {
-			endpoint := host + ":" + strconv.Itoa(port)
-			for rule, r := range s.Policy.Network {
-				if strings.HasPrefix(rule, "_provider_") {
-					continue
-				}
-				for _, ep := range r.Endpoints {
-					if ep.Host+":"+strconv.Itoa(ep.Port) == endpoint {
-						if _, err := b.run(nil, "policy", "update", name, "--remove-endpoint", endpoint, "--wait"); err != nil {
-							return "", err
-						}
+		s, err := b.get(name)
+		if err != nil {
+			return "", err
+		}
+		endpoint := host + ":" + strconv.Itoa(port)
+		for rule, r := range s.Policy.Network {
+			if strings.HasPrefix(rule, "_provider_") {
+				continue
+			}
+			for _, ep := range r.Endpoints {
+				if ep.Host+":"+strconv.Itoa(ep.Port) == endpoint {
+					if _, err := b.run(nil, "policy", "update", name, "--remove-endpoint", endpoint, "--wait"); err != nil {
+						return "", err
 					}
 				}
 			}
@@ -670,7 +673,11 @@ func (b *openshellBackend) revoke(name, host, env string, registered map[string]
 
 // revokeID detaches the provider and deletes it with its profile.
 func (b *openshellBackend) revokeID(name, id string) error {
-	if attached, err := b.attached(name); err == nil && attached[id] {
+	attached, err := b.attached(name)
+	if err != nil {
+		return err
+	}
+	if attached[id] {
 		if _, err := b.run(nil, "sandbox", "provider", "detach", name, id, "--wait", "--timeout", "60"); err != nil {
 			return err
 		}
@@ -688,11 +695,19 @@ func (b *openshellBackend) revokeID(name, id string) error {
 	return nil
 }
 
+// allowNetwork takes a host or host:port ([v6]:port for an IPv6 address);
+// a host on this machine is spelled as the sandbox reaches it.
 func (b *openshellBackend) allowNetwork(name, host string) error {
-	endpoint := host
-	if !strings.Contains(host, ":") {
-		endpoint = host + ":" + strconv.Itoa(b.endpointPort(host))
+	h, port := host, 0
+	if hh, p, err := net.SplitHostPort(host); err == nil {
+		h = hh
+		port, _ = strconv.Atoi(p)
 	}
+	h = b.policyHost(h)
+	if port == 0 {
+		port = b.endpointPort(h)
+	}
+	endpoint := net.JoinHostPort(h, strconv.Itoa(port))
 	if endpoint == b.keyEndpoint {
 		return nil // the key's provider brings the rule
 	}

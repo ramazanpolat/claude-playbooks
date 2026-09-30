@@ -186,7 +186,7 @@ func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=real-token", "MODEL=glm"}); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"api.example.com"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"api.example.com", "127.0.0.1:8000", "::1"}}})
 	work := t.TempDir()
 	log := stubOpenshell(t)
 	var err error
@@ -205,6 +205,10 @@ func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 		`--driver-config-json {"docker":{"mounts":[{"type":"bind","source":"`+cwork+`","target":"`+cwork+`","read_only":false},{"type":"bind","source":"`+pbDir+`","target":"`+pbDir+`","read_only":false}]}} --label cpb-image=`+label,
 		"sandbox exec -n cpb-box --no-tty -- bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox",
 		"policy update cpb-box --binary /** --add-endpoint api.example.com:443 --wait",
+		// A host on this machine, with a port or as an IPv6 address, is
+		// spelled as the sandbox reaches it.
+		"policy update cpb-box --binary /** --add-endpoint host.openshell.internal:8000 --wait",
+		"policy update cpb-box --binary /** --add-endpoint host.openshell.internal:443 --wait",
 		"sandbox provider list cpb-box -o json",
 		"profile export cpb-box-anthropic-auth-token -o json",
 		"profile import -f ",
