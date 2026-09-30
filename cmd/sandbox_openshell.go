@@ -84,6 +84,11 @@ type openshellBackend struct {
 	pinned        bool
 	baseHost      string
 	basePort      int
+	// keyEndpoint is the host:port a provider covers for this launch's
+	// keys ("" when there are none). OpenShell cannot install a provider's
+	// rule next to another rule for the same endpoint (the provider stays
+	// pending with snapshot_mismatch), so cpb adds no rule of its own there.
+	keyEndpoint string
 }
 
 // openshellPreflight checks what every openshell launch needs, before any
@@ -219,6 +224,13 @@ func (b *openshellBackend) prepare(sb manifest.Sandbox, clone bool, env []string
 	if u, err := user.Current(); err == nil {
 		who = u.Username
 	}
+	if sb.Secrets != "env" && (envHas(env, "ANTHROPIC_AUTH_TOKEN") || envHas(env, "ANTHROPIC_API_KEY")) {
+		host := b.baseHost
+		if host == "" {
+			host = "api.anthropic.com"
+		}
+		b.keyEndpoint = host + ":" + strconv.Itoa(b.endpointPort(host))
+	}
 	if who == "" {
 		who = strconv.Itoa(sandboxUID())
 	}
@@ -284,6 +296,12 @@ type openshellSandbox struct {
 			ReadOnly  []string `json:"read_only"`
 			ReadWrite []string `json:"read_write"`
 		} `json:"filesystem_policy"`
+		Network map[string]struct {
+			Endpoints []struct {
+				Host string `json:"host"`
+				Port int    `json:"port"`
+			} `json:"endpoints"`
+		} `json:"network_policies"`
 	} `json:"policy"`
 }
 
@@ -328,8 +346,9 @@ func (b *openshellBackend) mounts(name string) ([]string, error) {
 // openshellPolicy is the sandbox policy a create writes: the baseline
 // paths, the mounts (":ro" read-only), the host user as the workload's
 // identity (files on the mounts stay theirs), Landlock required, and the
-// hosts Claude Code reaches, for the claude binary only.
-func openshellPolicy(mounts []string, uid, gid int) string {
+// hosts Claude Code reaches, for the claude binary only, except exclude
+// (host:port), which a provider covers.
+func openshellPolicy(mounts []string, uid, gid int, exclude string) string {
 	ro := append([]string{}, openshellBaselineRO...)
 	rw := append([]string{}, openshellBaselineRW...)
 	for _, m := range mounts {
@@ -352,7 +371,9 @@ func openshellPolicy(mounts []string, uid, gid int) string {
 	fmt.Fprintf(&b, "process:\n  run_as_user: \"%d\"\n  run_as_group: \"%d\"\n", uid, gid)
 	b.WriteString("network_policies:\n  cpb_claude:\n    endpoints:\n")
 	for _, h := range openshellClaudeHosts {
-		b.WriteString("      - {host: " + h + ", port: 443, protocol: rest, access: read-write, enforcement: enforce}\n")
+		if h+":443" != exclude {
+			b.WriteString("      - {host: " + h + ", port: 443, protocol: rest, access: read-write, enforcement: enforce}\n")
+		}
 	}
 	b.WriteString("    binaries:\n      - path: " + openshellClaudePath + "\n")
 	return b.String()
@@ -406,7 +427,7 @@ func (b *openshellBackend) create(name string, clone, shareSkills bool, mounts [
 	if err != nil {
 		return err
 	}
-	policy, err := writeTemp("cpb-openshell-policy-*.yaml", openshellPolicy(mounts, sandboxUID(), sandboxGID()))
+	policy, err := writeTemp("cpb-openshell-policy-*.yaml", openshellPolicy(mounts, sandboxUID(), sandboxGID(), b.keyEndpoint))
 	if err != nil {
 		return err
 	}
@@ -569,6 +590,23 @@ func (b *openshellBackend) secret(name, host, env, value string) (string, error)
 		return "", err
 	}
 	if !attached[id] {
+		// A rule of cpb's own for the endpoint (a sandbox created before
+		// the key was set) would keep the provider's rule from installing.
+		if s, err := b.get(name); err == nil {
+			endpoint := host + ":" + strconv.Itoa(port)
+			for rule, r := range s.Policy.Network {
+				if strings.HasPrefix(rule, "_provider_") {
+					continue
+				}
+				for _, ep := range r.Endpoints {
+					if ep.Host+":"+strconv.Itoa(ep.Port) == endpoint {
+						if _, err := b.run(nil, "policy", "update", name, "--remove-endpoint", endpoint, "--wait"); err != nil {
+							return "", err
+						}
+					}
+				}
+			}
+		}
 		if _, err := b.run(nil, "sandbox", "provider", "attach", name, id, "--wait", "--timeout", "60"); err != nil {
 			return "", err
 		}
@@ -618,7 +656,14 @@ func (b *openshellBackend) revoke(name, host, env string, registered map[string]
 	if id == "" {
 		return false, nil
 	}
-	return true, b.revokeID(name, id)
+	if err := b.revokeID(name, id); err != nil {
+		return true, err
+	}
+	// With no key left for it, the endpoint needs a rule of its own again.
+	if b.keyEndpoint == "" {
+		return true, b.allowNetwork(name, host)
+	}
+	return true, nil
 }
 
 // revokeID detaches the provider and deletes it with its profile.
@@ -645,6 +690,9 @@ func (b *openshellBackend) allowNetwork(name, host string) error {
 	endpoint := host
 	if !strings.Contains(host, ":") {
 		endpoint = host + ":" + strconv.Itoa(b.endpointPort(host))
+	}
+	if endpoint == b.keyEndpoint {
+		return nil // the key's provider brings the rule
 	}
 	_, err := b.run(nil, "policy", "update", name, "--binary", "/**", "--add-endpoint", endpoint, "--wait")
 	return err

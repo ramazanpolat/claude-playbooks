@@ -90,7 +90,7 @@ func inOrder(t *testing.T, lines []string, frags ...string) {
 }
 
 func TestOpenshellPolicyAndMounts(t *testing.T) {
-	got := openshellPolicy([]string{"/w", "/p b:ro"}, 1500, 1501)
+	got := openshellPolicy([]string{"/w", "/p b:ro"}, 1500, 1501, "")
 	want := `version: 1
 filesystem_policy:
   include_workdir: true
@@ -125,6 +125,11 @@ network_policies:
 `
 	if got != want {
 		t.Fatalf("policy:\n%s\nwant:\n%s", got, want)
+	}
+	// The endpoint a key's provider covers is left out (a second rule for
+	// it would keep the provider's from installing).
+	if p := openshellPolicy(nil, 1, 1, "api.anthropic.com:443"); strings.Contains(p, "api.anthropic.com") || !strings.Contains(p, "platform.claude.com") {
+		t.Fatalf("excluded endpoint:\n%s", p)
 	}
 	if got, want := openshellMounts([]string{"/w", "/p b:ro"}), `{"docker":{"mounts":[{"type":"bind","source":"/w","target":"/w","read_only":false},{"type":"bind","source":"/p b","target":"/p b","read_only":true}]}}`; got != want {
 		t.Fatalf("mounts: %s", got)
@@ -200,7 +205,6 @@ func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 		`--driver-config-json {"docker":{"mounts":[{"type":"bind","source":"`+cwork+`","target":"`+cwork+`","read_only":false},{"type":"bind","source":"`+pbDir+`","target":"`+pbDir+`","read_only":false}]}} --label cpb-image=`+label,
 		"sandbox exec -n cpb-box --no-tty -- bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox",
 		"policy update cpb-box --binary /** --add-endpoint api.example.com:443 --wait",
-		"policy update cpb-box --binary /** --add-endpoint router.local:9 --wait",
 		"sandbox provider list cpb-box -o json",
 		"profile export cpb-box-anthropic-auth-token -o json",
 		"profile import -f ",
@@ -211,6 +215,10 @@ func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 		"sandbox stop cpb-box",
 	)
 	joined := strings.Join(calls, "\n")
+	// The key's provider brings the endpoint's rule; cpb adds none there.
+	if strings.Contains(joined, "--add-endpoint router.local:9") {
+		t.Fatalf("a rule of cpb's own for the key's endpoint:\n%s", joined)
+	}
 	if strings.Contains(joined, "real-token") || strings.Contains(joined, "claude.ai/install.sh") {
 		t.Fatalf("the key reached an argument list, or the in-sandbox pin ran:\n%s", joined)
 	}
@@ -287,7 +295,7 @@ func TestRunSandboxOpenshellReuseRotateRevoke(t *testing.T) {
 		"sandbox exec -n cpb-box --no-tty --env ",
 	)
 	joined := strings.Join(calls, "\n")
-	for _, never := range []string{"sandbox create", "profile import", "provider create", "sandbox provider attach", "docker build"} {
+	for _, never := range []string{"sandbox create", "profile import", "provider create", "sandbox provider attach", "docker build", "--add-endpoint"} {
 		if strings.Contains(joined, never) {
 			t.Fatalf("reuse ran %q:\n%s", never, joined)
 		}
@@ -362,4 +370,39 @@ func TestRunSandboxOpenshellRefusals(t *testing.T) {
 	if err != nil || !strings.Contains(stderr, "Warning: linger is off for") {
 		t.Fatalf("linger: %v\n%s", err, stderr)
 	}
+}
+
+func TestRunSandboxOpenshellEndpointRules(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=tok"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
+	work := t.TempDir()
+	log := stubOpenshell(t)
+	label := (&openshellBackend{claudeVersion: openshellClaudeVersion}).imageLabel()
+	pol := func(net string) string {
+		return `{"phase":"Ready","labels":{"cpb-image":"` + label + `"},"policy":{"filesystem_policy":{"read_write":["` + canon(t, work) + `","` + canon(t, filepath.Join(root, "box")) + `"]},"network_policies":{` + net + `}}}`
+	}
+	// A sandbox created before the key was set has cpb's own rule for the
+	// endpoint: it is removed before the provider is attached.
+	t.Setenv("OS_STUB_LS", "cpb-box")
+	t.Setenv("OS_STUB_GET", pol(`"allow_router_local_9":{"endpoints":[{"host":"router.local","port":9}]},"_provider_x":{"endpoints":[{"host":"other","port":1}]}`))
+	if err := runRun(nil, []string{"--sandbox=openshell", "--workdir", work, "box"}); err != nil {
+		t.Fatal(err)
+	}
+	inOrder(t, stubLines(t, log), "provider create --name cpb-box-anthropic-auth-token", "policy update cpb-box --remove-endpoint router.local:9 --wait", "sandbox provider attach cpb-box cpb-box-anthropic-auth-token")
+	// The key gone and none left: the endpoint gets a rule of its own again.
+	if err := runEnvProfile(nil, []string{"router", "unset", "ANTHROPIC_AUTH_TOKEN"}); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(log)
+	t.Setenv("OS_STUB_GET", pol(""))
+	t.Setenv("OS_STUB_ATTACHED", "cpb-box-anthropic-auth-token")
+	t.Setenv("OS_STUB_PROVIDERS", "cpb-box-anthropic-auth-token")
+	t.Setenv("OS_STUB_PROFILES", "cpb-box-anthropic-auth-token")
+	if err := runRun(nil, []string{"--sandbox=openshell", "--workdir", work, "box"}); err != nil {
+		t.Fatal(err)
+	}
+	inOrder(t, stubLines(t, log), "sandbox provider detach cpb-box cpb-box-anthropic-auth-token", "profile delete --global cpb-box-anthropic-auth-token", "policy update cpb-box --binary /** --add-endpoint router.local:9 --wait")
 }
