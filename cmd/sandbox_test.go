@@ -1114,3 +1114,40 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 		t.Fatal("sbx was called locally for a remote start")
 	}
 }
+
+// A sandboxed launch refused after the store was pointed at the sandbox
+// login gives the host its shared link back, as the end of a session does:
+// a key the proxy cannot register (#148) and a sandbox that cannot be
+// created, both before any attach.
+func TestRunSandboxRefusalRestoresSharedLogin(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	globalStore := filepath.Join(home, ".claude", ".credentials.json")
+	if err := os.WriteFile(globalStore, []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runEnvProfile(nil, []string{"keyed", "set", "ANTHROPIC_API_KEY=cpbcanary148restore"}); err != nil {
+		t.Fatal(err)
+	}
+	writePlaybook(t, root, "box", &manifest.Manifest{Env: &manifest.Env{Profiles: []string{"keyed"}}})
+	store := filepath.Join(root, "box", ".credentials.json")
+	log := stubSbx(t)
+	for _, fail := range []string{"secret", "create"} {
+		t.Setenv("SBX_STUB_FAIL", fail)
+		os.Remove(log)
+		if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"}); err == nil {
+			t.Fatalf("%s failure: the launch went ahead", fail)
+		}
+		for _, c := range sbxCalls(t, log) {
+			if strings.HasPrefix(c, "exec -i") {
+				t.Fatalf("%s failure: attached anyway: %q", fail, c)
+			}
+		}
+		if target, err := os.Readlink(store); err != nil || target != globalStore {
+			t.Fatalf("%s failure: store after the refusal points at %q (%v), want the shared %s", fail, target, err, globalStore)
+		}
+	}
+}

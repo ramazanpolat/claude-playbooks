@@ -936,6 +936,22 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	if err != nil {
 		return false, err
 	}
+	if loginPath != "" {
+		// The store now points at the sandbox login. Every way out of this
+		// launch gives the host its shared link back: the session ending,
+		// and any refusal before the attach (a mount check, a failed
+		// create, a key the proxy could not register), which would
+		// otherwise leave the link dangling until the next host launch.
+		// The sync replaces a link that is not the shared one and copies
+		// nothing; the sandbox login stays inside for the next launch. A
+		// launch that never returns (crash, kill) leaves it dangling, which
+		// every host command tolerates and the next host launch repairs.
+		defer func() {
+			if err := auth.SyncCredentials(t.configPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not restore the shared login link after the sandboxed launch: %v\n", err)
+			}
+		}()
+	}
 	env = rewriteHostEndpoint(env, backend)
 
 	var sb manifest.Sandbox
@@ -1116,18 +1132,6 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	}
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	runErr := backend.attach(name, env, tty, command)
-	if loginPath != "" {
-		// The session is over: give the host its shared link back, so the
-		// store dangles only while a sandboxed session is live. The sync
-		// replaces a link that is not the shared one and copies nothing;
-		// the sandbox login stays inside the sandbox for the next launch.
-		// A launch that never returns here (crash, kill) leaves the link
-		// dangling, which every host command tolerates and the next host
-		// launch repairs.
-		if err := auth.SyncCredentials(t.configPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not restore the shared login link after the sandbox session: %v\n", err)
-		}
-	}
 	return true, preserveExitCode(runErr)
 }
 
