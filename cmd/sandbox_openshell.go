@@ -434,7 +434,9 @@ func (b *openshellBackend) create(name string, clone, shareSkills bool, mounts [
 	defer os.Remove(policy)
 	out, err := b.run(nil, "sandbox", "create", "--name", name, "--from", tag, "--detach", "--policy", policy,
 		"--driver-config-json", openshellMounts(mounts), "--label", "cpb-image="+b.imageLabel())
-	if err != nil && strings.Contains(strings.ToLower(out), "bind") {
+	// OpenShell 0.1.2 says "docker bind mounts require enable_bind_mounts = true
+	// in [openshell.drivers.docker]".
+	if err != nil && strings.Contains(strings.ToLower(out), "bind mount") {
 		return fmt.Errorf("%w\nthe OpenShell gateway must allow host mounts: in ~/.config/openshell/gateway.toml set [openshell.drivers.docker] allow_driver_config = true and enable_bind_mounts = true, and [openshell.drivers.docker.resource_admission] enabled = false, then restart the gateway (docs/guides/sandbox.md, \"OpenShell backend\")", err)
 	}
 	return err
