@@ -53,6 +53,7 @@ jobs:
           sh -n install.sh
           sh -n uninstall.sh
           sh -n bin/npx-shim.sh
+          sh -n .github/scripts/arena-nightly.sh
           sh -n .github/scripts/release-refs.sh
 
       # Which tag commits may be released, and what the npx check says as
@@ -64,6 +65,11 @@ jobs:
       # when the package's version is not published yet, and when it refuses.
       - name: npx shim
         run: sh .github/scripts/npx-shim_test.sh
+
+      # What the nightly runs phase 2 on, and its verdict on a dispatched
+      # run (a skipped or absent arena / phase2 fails), against real runs.
+      - name: arena-nightly
+        run: sh .github/scripts/arena-nightly_test.sh
 
       # package.json "version" is what the npx shim fetches, so on main it
       # must name the newest RELEASE: the highest vX.Y.Z tag by version, rc
