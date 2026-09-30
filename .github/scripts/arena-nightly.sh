@@ -37,7 +37,7 @@ verdict)
   fi
   # The arena job: a skipped one never gets its name evaluated
   # ("arena / ${{ needs.plan.outputs.bench }}"), so match the prefix.
-  arena=$(printf '%s' "$jobs" | jq -r '[.jobs[] | select(.name | startswith("arena / "))][0] // empty | "\(.name)\t\(.status)\t\(.conclusion // "")"')
+  arena=$(printf '%s' "$jobs" | jq -r '[.jobs[] | select((.name // "") | startswith("arena / "))][0] // empty | "\(.name)\t\(.status)\t\(.conclusion // "")"')
   name=$(printf '%s' "$arena" | cut -f1)
   status=$(printf '%s' "$arena" | cut -f2)
   conclusion=$(printf '%s' "$arena" | cut -f3)
@@ -79,7 +79,7 @@ check)
   planjob=$(printf '%s' "$jobs" | jq -r '[.jobs[] | select(.name == "plan")][0].databaseId // empty')
   reason=""
   if [ -n "$planjob" ]; then
-    reason=$(gh run view --job "$planjob" --log 2>/dev/null | grep -a -m 1 'reason=' | sed 's/.*reason=//' || true)
+    reason=$(gh run view --job "$planjob" --log 2>/dev/null | sed -n '/reason=/{s/.*reason=//;p;q;}' || true)
   fi
   printf '%s' "$jobs" | sh "$0" verdict "$ref" "$reason"
   ;;

@@ -14,6 +14,8 @@ got=$(printf 'main\nrelease/v3.9\nrelease/v3.24\nrelease/v3.10\nclaude/x\nreleas
 [ "$got" = release/v3.24 ] && ok "newest release branch by version: $got" || bad "newest release branch: '$got'"
 got=$(printf 'release/v3.9\nrelease/v3.10\n' | sh "$s" newest-release-branch)
 [ "$got" = release/v3.10 ] && ok "v3.10 is newer than v3.9" || bad "v3.10 vs v3.9: '$got'"
+got=$(printf 'release/v9.0\nrelease/v10.0\n' | sh "$s" newest-release-branch)
+[ "$got" = release/v10.0 ] && ok "v10.0 is newer than v9.0 (the major sorts by number)" || bad "v10.0 vs v9.0: '$got'"
 got=$(printf 'main\nclaude/x\n' | sh "$s" newest-release-branch)
 [ -z "$got" ] && ok "no release branch: nothing" || bad "no release branch: '$got'"
 
@@ -38,6 +40,14 @@ t=$(mktemp); trap 'rm -f "$t"' EXIT
 printf '{"jobs":[{"name":"plan","status":"completed","conclusion":"success"},{"name":"arena / phase2","status":"in_progress","conclusion":""}]}' > "$t"
 v "$t" main
 [ $rc = 0 ] && ok "a running phase 2 passes" || bad "running phase 2: rc $rc"
+# an evaluated `arena / phase2` job that was skipped
+printf '{"jobs":[{"name":"plan","status":"completed","conclusion":"success"},{"name":"arena / phase2","status":"completed","conclusion":"skipped"}]}' > "$t"
+v "$t" release/v3.24
+[ $rc = 1 ] && ok "a skipped arena / phase2 fails" || bad "skipped arena / phase2: rc $rc"
+# a job with no name does not break the verdict
+printf '{"jobs":[{"name":"plan","status":"completed","conclusion":"success"},{"name":null,"status":"completed","conclusion":"success"},{"name":"arena / phase2","status":"completed","conclusion":"success"}]}' > "$t"
+v "$t" main
+[ $rc = 0 ] && ok "a nameless job is ignored" || bad "nameless job: rc $rc, $out"
 # no arena job at all
 printf '{"jobs":[{"name":"plan","status":"completed","conclusion":"failure"},{"name":"checks","status":"completed","conclusion":"skipped"}]}' > "$t"
 v "$t" release/v3.24

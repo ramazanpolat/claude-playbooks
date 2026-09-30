@@ -59,23 +59,32 @@ jobs:
             refs=$DEFAULT_REF
             if names=$(gh api "repos/$GITHUB_REPOSITORY/branches?per_page=100" --paginate --jq '.[].name' 2>"$RUNNER_TEMP/branches.err"); then
               stable=$(printf '%s\n' "$names" | sh .github/scripts/arena-nightly.sh newest-release-branch)
-              if [ -n "$stable" ]; then refs="$refs $stable"; else echo "no release/v* branch: the default branch only"; fi
+              if [ -n "$stable" ]; then refs="$refs $stable"; else echo "::warning::no release/v* branch: phase 2 on the default branch only"; fi
             else
               problems="the release branches could not be listed, so the stable line was not monitored tonight: $(cat "$RUNNER_TEMP/branches.err")"
             fi
           fi
-          start=$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)
+          # Each ref's newest gentar-arena run before its dispatch: run ids
+          # only grow, so the run this dispatch creates is the first
+          # workflow_dispatch run above it. Not a time window, which could
+          # pick an older dispatch or miss the new one on a skewed clock.
+          last=""
           for ref in $refs; do
+            before=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow gentar-arena.yml --branch "$ref" -L 1 --json databaseId --jq '.[0].databaseId // 0')
+            last="$last $ref=$before"
             echo "phase 2 on $ref"
             gh workflow run gentar-arena.yml --repo "$GITHUB_REPOSITORY" --ref "$ref"
           done
           failed=0
           for ref in $refs; do
+            before=$(printf '%s\n' $last | sed -n "s|^$ref=||p")
             id=""
             for i in $(seq 1 30); do
-              id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow gentar-arena.yml --branch "$ref" --event workflow_dispatch \
-                --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"$start\")] | sort_by(.createdAt) | .[0].databaseId // empty")
-              [ -n "$id" ] && break
+              id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow gentar-arena.yml --branch "$ref" --event workflow_dispatch -L 20 \
+                --json databaseId --jq "[.[] | select(.databaseId > $before)] | sort_by(.databaseId) | .[0].databaseId // empty")
+              if [ -n "$id" ]; then
+                break
+              fi
               sleep 10
             done
             if [ -z "$id" ]; then
