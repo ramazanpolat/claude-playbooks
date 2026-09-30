@@ -164,7 +164,7 @@ cp "$GW" "$E/gateway.toml.bak"; sed -i 's/^enable_bind_mounts *= *true/enable_bi
 systemctl --user restart openshell-gateway; gateway_up
 L 6d --sandbox-fresh -p hi
 has 6d "must allow host mounts" && ok "host mounts off refuses and names the fix" || bad "bind-mount refusal"
-echo "   create error was: $(grep -m1 -F 'openshell sandbox create' "$E/out.6d" | cut -c1-300)"
+echo "   create error was: $(grep -A4 -F 'openshell sandbox create' "$E/out.6d" | tr '\n' ' ' | cut -c1-700)"
 O provider list | grep -q "$ID" && bad "--sandbox-fresh deleted cpb's provider" || ok "--sandbox-fresh deleted cpb's provider"
 O profile list | grep -q "$ID" && bad "--sandbox-fresh deleted cpb's profile" || ok "--sandbox-fresh deleted cpb's profile"
 cp "$E/gateway.toml.bak" "$GW" && rm "$E/gateway.toml.bak"; systemctl --user restart openshell-gateway; gateway_up

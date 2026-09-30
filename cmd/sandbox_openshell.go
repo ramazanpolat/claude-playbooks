@@ -743,8 +743,18 @@ func (b *openshellBackend) remove(name string) error {
 	for _, key := range secretEnvVars {
 		id := openshellSecretID(name, key)
 		if _, err := b.run(nil, "provider", "get", id); err == nil {
-			if _, err := b.run(nil, "provider", "delete", id); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not delete provider %s: %v\n", id, err)
+			// The sandbox's deletion is asynchronous, and a provider still
+			// attached to it cannot be deleted yet: retry for a while.
+			for attempt := 1; ; attempt++ {
+				_, err := b.run(nil, "provider", "delete", id)
+				if err == nil {
+					break
+				}
+				if attempt == 10 {
+					fmt.Fprintf(os.Stderr, "Warning: could not delete provider %s: %v\n", id, err)
+					break
+				}
+				time.Sleep(openshellRetryDelay)
 			}
 		}
 		if _, err := b.run(nil, "profile", "export", id, "-o", "json"); err == nil {
