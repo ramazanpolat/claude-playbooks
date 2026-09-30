@@ -76,8 +76,9 @@ When a key does go in:
   passed the key in.
 
 The shared `sbx` skills store stays out as well. `--sbx` is a
-synonym for `--sandbox`; `--sandbox=BACKEND` picks the backend, of which there is
-one today, `sbx`.
+synonym for `--sandbox`; `--sandbox=BACKEND` picks the backend: `sbx`, the
+default, or the experimental `openshell` on Linux
+([below](#openshell-backend-experimental-linux)).
 
 ## Lifetime and environment
 
@@ -114,3 +115,108 @@ and `cpb update` keeps yours.
 `claude_version` matters for a playbook routed to a third-party backend that
 rejects a newer Claude Code's tool schemas: the sandbox keeps running the last
 version that works while the host moves on.
+
+## OpenShell backend (experimental, Linux)
+
+`--sandbox=openshell` runs the session in [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell)
+instead of `sbx`: a container confined by Landlock and seccomp, with no network
+unless a rule allows it. It is for a Linux host with Docker Engine. On macOS use
+`sbx`, or `--sandbox-host` to a Linux machine. It is experimental: OpenShell is
+young (0.1.0 shipped on 2026-09-25), and `cpb` supports 0.1.2 up to any later 0.1.x.
+
+```bash
+cpb run --sandbox=openshell sre                          # this folder is the workdir
+cpb run --sandbox=openshell --mount ~/shared-libs:ro sre # one more directory, read-only
+cpb run --sandbox=openshell --sandbox-fresh sre          # throw the sandbox away first
+```
+
+### One-time host setup
+
+Run these once on the host, in order:
+
+```bash
+# 1. Telemetry off, before the gateway ever starts (OpenShell has no install-time switch).
+mkdir -p ~/.config/openshell
+echo OPENSHELL_TELEMETRY_ENABLED=false > ~/.config/openshell/gateway.env
+
+# 2. The gateway uses Docker, and lets sandboxes mount host directories.
+cat > ~/.config/openshell/gateway.toml <<'EOF'
+version = 2
+[openshell.gateway]
+compute_driver = "docker"
+[openshell.drivers.docker]
+allow_driver_config = true
+enable_bind_mounts = true
+[openshell.drivers.docker.resource_admission]
+enabled = false
+EOF
+
+# 3. Install OpenShell (Docker Engine 28+ must be installed already).
+curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh | OPENSHELL_VERSION=v0.1.2 sh
+openshell status                      # Connected. On a cold host the installer may
+                                      # report a timeout although the install worked.
+
+# 4. Keep the gateway running after you log out.
+sudo loginctl enable-linger "$USER"
+```
+
+Step 2 applies to the whole gateway, so every sandbox on it can ask for host
+mounts, not only `cpb`'s. OpenShell's docs warn that host mounts can bypass its
+workspace isolation. `cpb` keeps each sandbox to the paths it mounted by listing
+exactly those paths in the sandbox's filesystem policy.
+
+Before touching anything, every launch checks the requirements: Linux, the
+`openshell` CLI and its version, Docker Engine 28 or newer, a gateway that
+answers, and not running as root. A failure refuses the launch with one line that
+names the fix. A gateway that is starting gets up to 45 s. Linger off is only a
+warning.
+
+### How it differs from sbx
+
+| | `sbx` | `openshell` |
+|---|---|---|
+| Network | your sbx policy (balanced by default) | nothing by default; `cpb` allows Claude Code's own hosts for the `claude` binary, the endpoint host, and `allow_net` |
+| Files | the mounts | the mounts, and only the paths the sandbox's policy lists (Landlock, required) |
+| Secrets | a placeholder the proxy swaps | the same, bound to one endpoint: sent anywhere else, the proxy refuses it (`403 credential_endpoint_mismatch`) |
+| Between launches | kept running | **stopped** when the last session in it ends, started by the next launch (about 5 s) |
+| Image | sbx's | built by `cpb` on first use, with Claude Code pinned |
+| `--clone`, `share_skills` | yes | not yet: the launch refuses |
+| macOS | yes | no |
+
+The sandbox is stopped between launches because an idle OpenShell sandbox costs
+about a third of a CPU core. A stopped one costs nothing and keeps its state,
+including a `/login` made inside it.
+
+### The image
+
+`cpb` builds the image once per Claude Code version, on the gateway host, from a
+recipe built into the `cpb` binary. The first build takes several minutes. The base image is pinned by digest, and
+Claude Code is pinned to the version `cpb` was tested with (2.1.285), or to
+`[sandbox] claude_version`. The version is fixed per sandbox:
+
+- **You set `claude_version` to one the sandbox does not carry:** the launch
+  refuses, and `--sandbox-fresh` rebuilds it.
+- **A newer `cpb` moves the default:** the old sandbox keeps running, and `cpb`
+  tells you `--sandbox-fresh` moves it.
+
+Claude Code's self-updater is off inside, since the image is the pin. Old images
+stay until you remove them (`docker image prune`, or
+`docker image rm cpb-openshell/claude:<tag>`).
+
+### Secrets
+
+Each key (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) becomes an OpenShell
+provider named `cpb-<playbook>-<key>`, bound to the endpoint's host and port.
+`cpb` hands the value to `openshell` in its environment, never on a command line.
+Inside the sandbox, the variable holds OpenShell's own placeholder:
+
+- **Rotation:** change the key in its env set, and the next launch updates it in place.
+- **Revoke:** remove it, and the next launch detaches and deletes the provider.
+- **`--sandbox-fresh`:** deletes them with the sandbox.
+- **Failure:** a key that cannot be registered stops the launch, as with `sbx`.
+
+### Removing it
+
+Remove the sandboxes first (`openshell sandbox delete --all`, and
+`openshell provider list` shows any `cpb-…` providers left), then follow
+OpenShell's own uninstall steps, and remove `~/.config/openshell` too.

@@ -1,0 +1,10 @@
+-- A playbook to run in the experimental OpenShell sandbox backend. The
+-- backend is chosen per launch (cpb run --sandbox=openshell box); this file
+-- creates the playbook and routes it to a model router on this machine,
+-- which the sandbox reaches as host.openshell.internal.
+CREATE OR REPLACE ENV router
+  DESCRIBE 'A model router on this machine'
+  SET ANTHROPIC_BASE_URL=http://localhost:20128/v1;
+
+CREATE PLAYBOOK IF NOT EXISTS box NO ALIAS NO PILOT PROFILE;
+ALTER PLAYBOOK box USE ENV router;

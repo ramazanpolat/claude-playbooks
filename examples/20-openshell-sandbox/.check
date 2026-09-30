@@ -1,0 +1,4 @@
+# CI has no OpenShell: the launch refuses before it touches anything, naming
+# what it needs (on macOS, that the backend is Linux-only).
+if cpb run --sandbox=openshell box -p hi > "$HOME/openshell.out" 2>&1; then echo "launched without OpenShell"; exit 1; fi
+grep -Eq "runs on Linux with Docker Engine|'openshell' \(NVIDIA OpenShell 0.1.x\) not found" "$HOME/openshell.out"
