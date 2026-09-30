@@ -1295,6 +1295,9 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 			}
 			continue
 		}
+		// value is non-empty here (an empty one took the revoke branch
+		// above and continued), so the scrub below cannot splice <redacted>
+		// between every character of the error.
 		inside, err := backend.secret(sandbox, host, key, value)
 		if err != nil {
 			return nil, fmt.Errorf("%s could not be registered at the sandbox proxy for %s (%s), so the launch stops: the key would otherwise enter the sandbox as a plain value. Retry, or set [sandbox] secrets = \"env\" to pass keys into the sandbox as plain variables", key, host, strings.ReplaceAll(err.Error(), value, "<redacted>"))
