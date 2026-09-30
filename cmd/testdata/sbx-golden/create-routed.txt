@@ -1,0 +1,17 @@
+== calls
+ls -q
+create --name cpb-box --no-share-skills claude <WORK> <ROOT>/box <TMP>/extra:ro
+exec cpb-box bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox
+policy allow network --sandbox cpb-box api.example.com
+policy allow network --sandbox cpb-box router.local
+exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'
+secret ls --sandbox cpb-box
+secret set-custom --host router.local --env ANTHROPIC_AUTH_TOKEN --value real-token --placeholder cpb-box-ANTHROPIC_AUTH_TOKEN --sandbox cpb-box
+secret set-custom --host router.local --env ANTHROPIC_API_KEY --value real-key --placeholder cpb-box-ANTHROPIC_API_KEY --sandbox cpb-box
+exec -i -e ANTHROPIC_API_KEY=cpb-box-ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN=cpb-box-ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL=http://router.local:9/v1 -e CLAUDE_CONFIG_DIR=<ROOT>/box -e EXTRA=1 -e MODEL=glm cpb-box bash -lc cd '<WORK>' && exec claude '-p' 'it'\''s'
+== stderr
+Sandbox cpb-box created (sbx): workdir <WORK>, config <ROOT>/box, mounts <TMP>/extra:ro, network +api.example.com,router.local, claude 2.1.263
+Secret ANTHROPIC_AUTH_TOKEN stays on the host: injected at the proxy for router.local, the sandbox sees a placeholder
+Secret ANTHROPIC_API_KEY stays on the host: injected at the proxy for router.local, the sandbox sees a placeholder
+== error
+== store

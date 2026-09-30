@@ -418,6 +418,17 @@ func setEnv(env []string, key, value string) []string {
 	return append(env, key+"="+value)
 }
 
+// unsetEnv returns env without key, in a new slice.
+func unsetEnv(env []string, key string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); k != key {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // expandHome resolves a leading "~" against the home directory.
 func expandHome(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
@@ -480,10 +491,17 @@ type sandboxBackend interface {
 	// shareSkills mounts the backend's shared skills store as well.
 	create(name string, clone, shareSkills bool, mounts []string) error
 	// secret registers value as a proxy-injected secret for requests from
-	// the sandbox to host: inside, env holds placeholder; the proxy swaps
-	// the real value into request headers on the way out. Registering the
-	// same placeholder again updates the value.
-	secret(name, host, env, value, placeholder string) error
+	// the sandbox to host (the proxy swaps the real value into requests on
+	// the way out) and returns what the sandbox's environment carries for
+	// env: a placeholder the launch sets, or "" when the backend puts its
+	// own placeholder into the process environment, in which case the
+	// launch leaves env out of the attach environment. Registering again
+	// updates the value.
+	secret(name, host, env, value string) (inside string, err error)
+	// revoke neutralizes the mapping an earlier launch registered for env,
+	// which the environment no longer carries; registered is what secrets
+	// returned. done reports whether there was one to revoke.
+	revoke(name, host, env string, registered map[string]string) (done bool, err error)
 	// allowNetwork widens the sandbox's egress policy by one host.
 	allowNetwork(name, host string) error
 	// shell runs a login-shell command inside, non-interactively.
@@ -491,7 +509,7 @@ type sandboxBackend interface {
 	// shellOutput runs a login-shell command inside and returns its stdout.
 	shellOutput(name, command string) (string, error)
 	// secrets lists the custom secrets registered for the sandbox, env
-	// variable to placeholder.
+	// variable to the backend's record of it (sbx: the placeholder).
 	secrets(name string) (map[string]string, error)
 	// attach runs a login-shell command inside with env set, wired to this
 	// process's stdio; tty asks for a pty.
@@ -602,7 +620,28 @@ func (b sbxBackend) create(name string, clone, shareSkills bool, mounts []string
 	return b.run(args...)
 }
 
-func (b sbxBackend) secret(name, host, env, value, placeholder string) error {
+// secret registers value under the placeholder cpb chooses for sbx, which
+// the launch then sets inside.
+func (b sbxBackend) secret(name, host, env, value string) (string, error) {
+	placeholder := secretPlaceholder(name, env)
+	if err := b.setCustom(name, host, env, value, placeholder); err != nil {
+		return "", err
+	}
+	return placeholder, nil
+}
+
+// revoke: sbx 0.38.0 cannot delete a custom secret, so a mapping cpb
+// registered (its placeholder is listed for env) is neutralized by
+// registering the placeholder as its own value.
+func (b sbxBackend) revoke(name, host, env string, registered map[string]string) (bool, error) {
+	placeholder := secretPlaceholder(name, env)
+	if registered[env] != placeholder {
+		return false, nil
+	}
+	return true, b.setCustom(name, host, env, placeholder, placeholder)
+}
+
+func (b sbxBackend) setCustom(name, host, env, value, placeholder string) error {
 	// The value travels on sbx's argument list (sbx 0.38.0 has no stdin
 	// form), visible to a local process listing for the moment of the
 	// call; it already sits in a 0600 profile file. Output is discarded:
@@ -1182,7 +1221,7 @@ func sandboxMarker(shareSkills bool) string {
 // placeholder would not pass.
 var secretEnvVars = []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
 
-// secretPlaceholder is the value the sandbox sees for env: stable per
+// secretPlaceholder is the value an sbx sandbox sees for env: stable per
 // sandbox and variable, so re-registering it updates the secret in place
 // (rotation) and nothing has to be parsed from the backend.
 func secretPlaceholder(sandbox, env string) string {
@@ -1191,12 +1230,14 @@ func secretPlaceholder(sandbox, env string) string {
 
 // injectSecrets registers each API key the environment carries as a
 // proxy-injected secret for the endpoint host and replaces its value with
-// the placeholder, so the key never enters the sandbox. mode "env" passes
-// the values as they are, and is the only way a key enters as a plain
-// value: a registration that fails refuses the launch (#148). Falling back
-// to the plain value would hand the key to the sandbox the pilot was told
-// never holds it. The refusal names the variable and the host, never the
-// value, which is scrubbed from the backend's own error too.
+// what the backend says the sandbox sees (a placeholder, or nothing when
+// the backend supplies its own), so the key never enters the sandbox.
+// mode "env" passes the values as they are, and is the only way a key
+// enters as a plain value: a registration that fails refuses the launch
+// (#148). Falling back to the plain value would hand the key to the
+// sandbox the pilot was told never holds it. The refusal names the
+// variable and the host, never the value, which is scrubbed from the
+// backend's own error too.
 func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode string) ([]string, error) {
 	if mode == "env" {
 		return env, nil
@@ -1208,8 +1249,8 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 	host = backend.policyHost(host)
 	// Mappings registered by an earlier launch for a key the environment
 	// no longer carries would still inject that key for anyone inside who
-	// sends the (predictable) placeholder: sbx cannot delete them, so they
-	// are neutralized by re-registering the placeholder as its own value.
+	// sends the (predictable) placeholder, so they are revoked (sbx cannot
+	// delete them and neutralizes them instead).
 	registered, err := backend.secrets(sandbox)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not list the sandbox's secrets (%v); a key registered by an earlier launch may still be mapped\n", err)
@@ -1222,21 +1263,23 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 			}
 		}
 		if value == "" {
-			placeholder := secretPlaceholder(sandbox, key)
-			if registered[key] == placeholder {
-				if err := backend.secret(sandbox, host, key, placeholder, placeholder); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
-				} else {
-					fmt.Fprintf(os.Stderr, "Secret %s revoked at the proxy: it is no longer in the environment\n", key)
-				}
+			done, err := backend.revoke(sandbox, host, key, registered)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
+			} else if done {
+				fmt.Fprintf(os.Stderr, "Secret %s revoked at the proxy: it is no longer in the environment\n", key)
 			}
 			continue
 		}
-		placeholder := secretPlaceholder(sandbox, key)
-		if err := backend.secret(sandbox, host, key, value, placeholder); err != nil {
+		inside, err := backend.secret(sandbox, host, key, value)
+		if err != nil {
 			return nil, fmt.Errorf("%s could not be registered at the sandbox proxy for %s (%s), so the launch stops: the key would otherwise enter the sandbox as a plain value. Retry, or set [sandbox] secrets = \"env\" to pass keys into the sandbox as plain variables", key, host, strings.ReplaceAll(err.Error(), value, "<redacted>"))
 		}
-		env = setEnv(env, key, placeholder)
+		if inside == "" {
+			env = unsetEnv(env, key)
+		} else {
+			env = setEnv(env, key, inside)
+		}
 		fmt.Fprintf(os.Stderr, "Secret %s stays on the host: injected at the proxy for %s, the sandbox sees a placeholder\n", key, host)
 	}
 	return env, nil
