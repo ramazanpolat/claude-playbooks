@@ -198,9 +198,14 @@ release:
       `gh pr view <n> --comments` prints the reviews and the replies to check.
 
 **Nightlies are drift monitors (report on red).** Every night
-`arena-nightly` runs phase 2 on main and on the latest release. A red on main
-is fixed like any bug; a red on a released version becomes a patch release.
-They gate nothing.
+`arena-nightly` runs phase 2 on main and on the newest `release/v*` branch,
+the stable line. Not on a release tag: the kit's plan never gives a `v*` tag
+the bench, so a tag dispatch would be skipped and read as green (v3.25.0 on
+2026-09-30). A release cut from main is close enough to main that main's run
+covers its drift. `arena-nightly` fails when a dispatched run's `arena /
+phase2` job is skipped or absent, naming the ref and plan's reason. A red on
+main is fixed like any bug; a red on the release branch becomes a patch
+release. They gate nothing.
 
 If any is missing, build it first; never tag without it.
 

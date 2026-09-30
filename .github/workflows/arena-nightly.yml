@@ -8,10 +8,19 @@
 #
 # Nightlies are drift monitors, not release gates (the pilot's rule of
 # 2026-09-29: a release needs a green full phase 2 on its exact tag commit).
-# Every night this runs phase 2 on the default branch AND on the latest
-# published release, so drift in the bench image, the agent CLI or a
-# provider shows on both. A red on main is fixed like any bug; a red on the
-# release becomes a patch. A manual dispatch with `ref` runs that ref only.
+# Every night this runs phase 2 on the default branch AND on the newest
+# stable line, the newest `release/v*` branch, so drift in the bench image,
+# the agent CLI or a provider shows on both. Not on a release tag: the
+# kit's plan never gives a `v*` tag the bench (a release is gated by
+# release-gate.sh instead), so a tag dispatch is skipped and would read as
+# green; that happened to v3.25.0 on 2026-09-30. A release cut from main
+# (v3.25.0, v3.26.0) is close enough to main that main's run covers its
+# drift. A red on main is fixed like any bug; a red on the release branch
+# becomes a patch. A manual dispatch with `ref` runs that ref only.
+#
+# Each dispatched run is then checked: if its `arena / phase2` job is
+# skipped or absent, this job fails and names the ref and plan's reason
+# (.github/scripts/arena-nightly.sh), so a skip never reads as green.
 name: arena-nightly
 
 on:
@@ -20,48 +29,65 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "the one ref to run phase 2 on (empty: the default branch and the latest release)"
+        description: "the one ref to run phase 2 on (empty: the default branch and the newest release/v* branch)"
         required: false
         default: ""
 
 permissions:
   actions: write           # to dispatch gentar-arena.yml
-  contents: read           # to read the latest release
+  contents: read           # to check out and list the release branches
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: dispatch phase 2
+      - uses: actions/checkout@v4
+      - name: dispatch phase 2, and check each run really runs it
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_REF: ${{ inputs.ref }}
           # On a schedule, github.ref_name is the default branch.
           DEFAULT_REF: ${{ github.event.repository.default_branch || github.ref_name }}
         run: |
-          lookup_failed=""
+          problems=""
           if [ -n "$INPUT_REF" ]; then
             refs=$INPUT_REF
           else
-            # The latest published, non-prerelease release (GitHub's own
-            # notion). Only "there is none yet" (HTTP 404) means the default
-            # branch alone. Any other failure (an outage, a rate limit, a
-            # permission) must not silently stop the release being watched:
-            # the default branch still runs, and then the job fails.
+            # The newest release/vX.Y branch, by version. A failed lookup
+            # must not silently drop the stable line: the default branch
+            # still runs, and then the job fails.
             refs=$DEFAULT_REF
-            if latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err"); then
-              if [ -n "$latest" ] && [ "$latest" != null ]; then refs="$refs $latest"; fi
-            elif grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err"; then
-              echo "no published release yet: the default branch only"
+            if names=$(gh api "repos/$GITHUB_REPOSITORY/branches?per_page=100" --paginate --jq '.[].name' 2>"$RUNNER_TEMP/branches.err"); then
+              stable=$(printf '%s\n' "$names" | sh .github/scripts/arena-nightly.sh newest-release-branch)
+              if [ -n "$stable" ]; then refs="$refs $stable"; else echo "no release/v* branch: the default branch only"; fi
             else
-              lookup_failed=$(cat "$RUNNER_TEMP/latest.err")
+              problems="the release branches could not be listed, so the stable line was not monitored tonight: $(cat "$RUNNER_TEMP/branches.err")"
             fi
           fi
+          start=$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)
           for ref in $refs; do
             echo "phase 2 on $ref"
             gh workflow run gentar-arena.yml --repo "$GITHUB_REPOSITORY" --ref "$ref"
           done
-          if [ -n "$lookup_failed" ]; then
-            echo "::error::the latest release could not be read, so it was not monitored tonight: $lookup_failed"
-            exit 1
+          failed=0
+          for ref in $refs; do
+            id=""
+            for i in $(seq 1 30); do
+              id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow gentar-arena.yml --branch "$ref" --event workflow_dispatch \
+                --json databaseId,createdAt --jq "[.[] | select(.createdAt >= \"$start\")] | sort_by(.createdAt) | .[0].databaseId // empty")
+              [ -n "$id" ] && break
+              sleep 10
+            done
+            if [ -z "$id" ]; then
+              echo "::error::no phase 2 run appeared for $ref after its dispatch"
+              failed=1
+              continue
+            fi
+            echo "phase 2 on $ref: run $id"
+            GH_REPO=$GITHUB_REPOSITORY sh .github/scripts/arena-nightly.sh check "$id" "$ref" || failed=1
+          done
+          if [ -n "$problems" ]; then
+            echo "::error::$problems"
+            failed=1
           fi
+          exit $failed
