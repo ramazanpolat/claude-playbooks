@@ -14,7 +14,7 @@ each isolated as far as you choose:
 | **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills. Your `~/.claude` never moves. | every playbook, always |
 | **Environment** | its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is. | `USE ENV`, `SET VAR`, `BLOCK VAR` |
 | **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `ISOLATED LOGIN` |
-| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your API keys stay outside it. | `SANDBOX`, or `--sandbox` on any launch |
+| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config. By default a host-side proxy injects your API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SANDBOX`, or `--sandbox` on any launch |
 
 You describe each playbook in a file, apply it anywhere, and get the same
 Claude Code every time.
@@ -92,9 +92,10 @@ cpb run --sandbox --mount ~/shared-libs:ro sre                 # one more direct
 cpb run --sandbox-host me@buildbox sre                         # the same launch, sandboxed on another machine
 ```
 
-- **API keys stay outside.** A key from an env set reaches the sandbox only
-  as a placeholder. The host-side proxy puts the real key into requests to
-  that endpoint, and only that endpoint.
+- **API keys stay outside, by default.** A key from an env set reaches the
+  sandbox only as a placeholder. The host-side proxy puts the real key into
+  requests to that endpoint, and only that endpoint. `secrets = "env"` in the
+  playbook's `[sandbox]` block opts out and passes keys in as plain variables.
 - **Network egress** follows your `sbx` policy. By default that allows model
   APIs, package managers and code hosts.
 - **Always on:** a playbook created with `SANDBOX` runs sandboxed on every
