@@ -1,0 +1,15 @@
+-- title: Another model backend
+-- description: A playbook for a model backend behind your router (GLM here): its own login, the API key blocked, a /model list of its own.
+-- min-cpb: 3.24.0
+-- needs: your router's key, attached with an env set (it is not stored in this file)
+-- create-with: NO PILOT PROFILE
+
+ALTER PLAYBOOK
+  ADD MCP SERVER context7 COMMAND 'npx' ARGS '-y' '@upstash/context7-mcp'
+  SET VAR ANTHROPIC_BASE_URL=http://localhost:4000/v1
+  SET VAR ANTHROPIC_MODEL=glm-5.3
+  BLOCK VAR ANTHROPIC_API_KEY
+  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3'
+  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
+  SET MODEL PICKER ONLY
+  SET ISOLATED LOGIN;

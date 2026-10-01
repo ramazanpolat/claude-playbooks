@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes the brand-logo sprite into site/index.html.
+"""Writes the brand logos into the shared sprite (site-tools/sprite.html).
 
 The logos on the cards are the tools' own marks, drawn from Simple Icons
 (https://simpleicons.org, CC0 1.0), pinned to one release and inlined as SVG
@@ -7,7 +7,7 @@ The logos on the cards are the tools' own marks, drawn from Simple Icons
 changes (it needs the network once); site-tools/check-sprites.py, which CI
 runs, fails if the page uses a symbol the sprite lacks.
 
-  brand-icons.py [--page site/index.html]
+  brand-icons.py [--sprite site-tools/sprite.html]   then: sync-sprite.py --write
 
 The marks are trademarks of their owners and appear only to identify the tools
 a playbook works with; the page says so and does not claim any endorsement.
@@ -47,17 +47,17 @@ def fetch(slug):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--page", default=str(REPO / "site" / "index.html"))
+    ap.add_argument("--sprite", default=str(REPO / "site-tools" / "sprite.html"))
     a = ap.parse_args()
-    page = Path(a.page).read_text(encoding="utf-8")
+    page = Path(a.sprite).read_text(encoding="utf-8")
     m = BLOCK.search(page)
     if not m:
-        sys.exit("no <!-- brand-sprite:start --> ... <!-- brand-sprite:end --> block in the page")
+        sys.exit("no <!-- brand-sprite:start --> ... <!-- brand-sprite:end --> block in the sprite")
     syms = [f'<symbol id="b-{slug}" viewBox="0 0 24 24"><title>{label}</title><path d="{fetch(slug)}"/></symbol>'
             for slug, label in ICONS.items()]
     body = f"\n<!-- Simple Icons {VERSION}, CC0 1.0; marks belong to their owners -->\n" + "\n".join(syms) + "\n"
     Path(a.page).write_text(page[: m.start(2, encoding="utf-8")] + body + page[m.end(2):])
-    print(f"wrote {len(syms)} brand symbols into {a.page}")
+    print(f"wrote {len(syms)} brand symbols into {a.sprite}")
 
 
 if __name__ == "__main__":

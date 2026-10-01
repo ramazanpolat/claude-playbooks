@@ -1,0 +1,19 @@
+-- title: Daily driver
+-- description: The everyday setup: GitHub and Linear, the document skills, Opus, and a guard against force pushes.
+-- min-cpb: 3.24.0
+-- needs: a secret helper for keychain:github-mcp
+
+ALTER PLAYBOOK
+  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
+  ADD PLUGIN commit-commands@claude-code-plugins
+  ADD PLUGIN feature-dev@claude-code-plugins
+  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
+  ADD MCP SERVER linear URL 'https://mcp.linear.app/mcp'
+  ADD SKILL pdf FROM 'github:anthropics/skills' SUBDIR 'skills/pdf'
+  ADD SKILL docx FROM 'github:anthropics/skills' SUBDIR 'skills/docx'
+  ADD SKILL xlsx FROM 'github:anthropics/skills' SUBDIR 'skills/xlsx'
+  ADD SKILL pptx FROM 'github:anthropics/skills' SUBDIR 'skills/pptx'
+  ALLOW TOOL 'Bash(gh pr *)'
+  DENY TOOL 'Bash(git push --force *)'
+  SET MODEL 'claude-opus-5-5'
+  SET VAR MAX_THINKING_TOKENS=8000;

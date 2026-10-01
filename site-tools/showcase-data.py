@@ -25,6 +25,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sitelib import Run as _Run  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 CI = REPO / "examples" / ".ci"
@@ -59,73 +62,10 @@ def sections(text):
     return out
 
 
-class Run:
+class Run(_Run):
     def __init__(self, cpb):
-        self.home = Path(tempfile.mkdtemp(prefix="showcase-"))
-        self.homes = {str(self.home), str(self.home.resolve())}
-        (self.home / "bin").mkdir()
-        os.symlink(Path(cpb).resolve(), self.home / "bin" / "cpb")
-        for stand_in in ("claude", "with-secret"):
-            os.chmod(CI / stand_in, 0o755)
-        text = RECIPE.read_text(encoding="utf-8")
-        for name in sorted(set(re.findall(r"FROM '~/skills/([^']+)'", text))):
-            d = self.home / "skills" / name
-            d.mkdir(parents=True)
-            (d / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
-        # github: skill sources are served from a local mirror (git's insteadOf),
-        # so the run needs no network; cpb copies the skill exactly as it would.
-        repos = {}
-        for _name, repo, sub in re.findall(r"ADD SKILL (\S+) FROM 'github:([^']+)' SUBDIR '([^']+)'", text):
-            repos.setdefault(repo, set()).add(sub)
-        git_env = {"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_COUNT": str(len(repos))}
-        for n, (repo, subs) in enumerate(sorted(repos.items())):
-            m = self.home / "mirror" / repo.replace("/", "-")
-            for sub in sorted(subs):
-                (m / sub).mkdir(parents=True)
-                (m / sub / "SKILL.md").write_text(f"# {sub.split('/')[-1]}\n", encoding="utf-8")
-            for cmd in (["init", "-q", "-b", "main"], ["add", "."],
-                        ["-c", "user.email=site@example.invalid", "-c", "user.name=site", "commit", "-qm", "mirror"]):
-                subprocess.run(["git", *cmd], cwd=m, check=True, capture_output=True)
-            git_env[f"GIT_CONFIG_KEY_{n}"] = f"url.file://{m}.insteadOf"
-            git_env[f"GIT_CONFIG_VALUE_{n}"] = f"https://github.com/{repo}"
-        markets = " ".join(
-            f"{repo}={name}"
-            for name, repo in re.findall(r"ADD MARKETPLACE (\S+) FROM 'github:([^']+)'", text)
-        )
-        self.env = dict(
-            os.environ,
-            HOME=str(self.home),
-            PATH=f"{CI}:{self.home / 'bin'}:{os.environ['PATH']}",
-            CPB_SECRET_HELPER=str(CI / "with-secret"),
-            FAKE_MARKETS=markets,
-            **git_env,
-        )
+        super().__init__(cpb, [RECIPE.read_text(encoding="utf-8")])
         shutil.copy(RECIPE, self.home / "showcase.cpb")
-
-    def norm(self, s):
-        for h in sorted(self.homes, key=len, reverse=True):
-            s = s.replace(h, "~")
-        return s
-
-    def cpb(self, *args, merge=False):
-        p = subprocess.run(
-            ["cpb", *args], cwd=self.home, env=self.env, encoding="utf-8",
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT if merge else subprocess.PIPE,
-        )
-        if p.returncode != 0:
-            sys.exit(f"cpb {' '.join(args)} failed ({p.returncode}):\n{p.stdout}\n{p.stderr or ''}")
-        return p.stdout
-
-    def raw(self, *args, env=None):
-        p = subprocess.run(["cpb", *args], cwd=self.home, env=env or self.env, encoding="utf-8",
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        return p.returncode, p.stdout
-
-    def json(self, *args):
-        return json.loads(self.cpb(*args))
-
-    def close(self):
-        shutil.rmtree(self.home, ignore_errors=True)
 
 
 def ephemeral(r, sec):

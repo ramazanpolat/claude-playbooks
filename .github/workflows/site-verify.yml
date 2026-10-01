@@ -4,7 +4,9 @@ name: Site snippets
 # grammar: builds this commit's cpb, re-runs every command the tour shows and
 # applies the home page's showcase recipe in a throwaway HOME, checks each
 # card's claims against what cpb says, and diffs the `cpb tui` blocks against
-# the real test goldens. See site-tools/verify-snippets.sh.
+# the real test goldens. It also applies every template in site/p/ and a large
+# set of the customizer's option combinations with this build. See
+# site-tools/verify-snippets.sh.
 
 on:
   push:
@@ -33,6 +35,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       - name: Build
         run: go build -o "$RUNNER_TEMP/cpb" .
