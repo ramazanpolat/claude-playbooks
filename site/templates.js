@@ -358,7 +358,9 @@
     if (r.needs.length) notes.push("Needs a secret helper for " + r.needs.map(function (x) { return "<code>" + esc(x) + "</code>"; }).join(", ") + ". Store each secret yourself, then apply.");
     if (sel.sandbox) notes.push("Sandboxed launches need <code>sbx</code> (Docker Sandboxes).");
     if (sel.model.kind === "router") notes.push("Attach your router's key with an env set; it is never written to this file.");
-    var play = FLAGS.play ? '<h4>Or from a URL</h4><ol class="cmds">' + C.playCommands(sel).map(function (c) { return '<li><span class="pr">$</span><code>' + esc(c) + '</code><button class="copy" type="button" data-copy="' + esc(c) + '">copy</button></li>'; }).join("") + "</ol>" : "";
+    /* a URL names the stock template, so offer it only while the output is that template */
+    var stock = r.text === canonical[sel.template];
+    var play = FLAGS.play && stock ? '<h4>Or from a URL</h4><ol class="cmds">' + C.playCommands(sel).map(function (c) { return '<li><span class="pr">$</span><code>' + esc(c) + '</code><button class="copy" type="button" data-copy="' + esc(c) + '">copy</button></li>'; }).join("") + "</ol>" : "";
     return "<h4>Use it</h4><ol class=\"cmds\">" + cmds + "</ol>" + play + (notes.length ? '<ul class="notes">' + notes.map(function (n) { return "<li>" + n + "</li>"; }).join("") + "</ul>" : "");
   }
 
