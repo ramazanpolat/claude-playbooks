@@ -1,0 +1,43 @@
+name: Pages
+
+# Deploys site/ to GitHub Pages on a push to main that touches it.
+#
+# Skipped (not failed) until the repo variable PAGES_ENABLED is set to
+# "true". Publishing is the pilot's call, and going live is two steps on
+# their word, both on the GitHub side: enable Pages (Settings > Pages >
+# Build and deployment > Source: GitHub Actions) and set the repo variable
+# PAGES_ENABLED=true (Settings > Secrets and variables > Actions >
+# Variables). Nothing here needs to change for that. Without the variable
+# set, every push to main touching site/ shows this job skipped, never red.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.PAGES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

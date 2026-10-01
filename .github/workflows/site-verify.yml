@@ -1,0 +1,45 @@
+name: Site snippets
+
+# Keeps site/index.html from drifting from the grammar: builds this commit's
+# cpb and re-runs every command the page shows, in a throwaway HOME, plus
+# diffs the `cpb tui` blocks against the real test goldens. See
+# site/verify-snippets.sh.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "README.md"
+      - "docs/**"
+      - "examples/**"
+      - "internal/tui/testdata/**"
+  pull_request:
+    paths:
+      - "site/**"
+      - "README.md"
+      - "docs/**"
+      - "examples/**"
+      - "internal/tui/testdata/**"
+
+jobs:
+  verify-snippets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Build
+        run: go build -o "$RUNNER_TEMP/cpb" .
+
+      - name: Install clickhouse-local
+        run: |
+          cd "$RUNNER_TEMP" && curl -fsSL https://clickhouse.com/ | sh
+          "$RUNNER_TEMP/clickhouse" local --version
+
+      - name: Verify the site's snippets against this build
+        env:
+          CPB_CLICKHOUSE: ${{ runner.temp }}/clickhouse
+        run: site/verify-snippets.sh "$RUNNER_TEMP/cpb"
