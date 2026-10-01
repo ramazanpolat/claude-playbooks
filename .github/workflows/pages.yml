@@ -1,0 +1,40 @@
+name: Pages
+
+# Deploys site/ to GitHub Pages on a push to main that touches it.
+#
+# Inert until GitHub Pages is enabled for this repository (Settings > Pages >
+# Build and deployment > Source: GitHub Actions). Until then this job fails
+# at the deploy step with a permissions/not-enabled error — nothing is
+# published, and nothing needs to be reverted here to turn it on later:
+# enabling Pages is the only step left. Publishing is the pilot's call.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
