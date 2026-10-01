@@ -161,7 +161,7 @@ Deleted playbook "scratch".</span></code></pre>
         <div class="term-title">real run, v3.27.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1</span>
+      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1</span>
 <span class="out">Created ENV router
   set       ANTHROPIC_BASE_URL</span>
 <span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN</span>
@@ -184,11 +184,11 @@ Login isolated: it shares no login with ~/.claude; run /login once in it.</span>
 <span class="out">Altered PLAYBOOK glm
   picker    only</span>
 <span class="cmd"><span class="prompt">$ </span>cpb EXPLAIN PLAYBOOK glm</span>
-<span class="out">VARIABLE            VALUE                      FROM
---------            -----                      ----
-ANTHROPIC_API_KEY   (blocked)                  PLAYBOOK glm
-ANTHROPIC_BASE_URL  http://localhost:20128/v1  ENV router
-ANTHROPIC_MODEL     glm-5.3                    PLAYBOOK glm
+<span class="out">VARIABLE            VALUE                     FROM
+--------            -----                     ----
+ANTHROPIC_API_KEY   (blocked)                 PLAYBOOK glm
+ANTHROPIC_BASE_URL  http://localhost:4000/v1  ENV router
+ANTHROPIC_MODEL     glm-5.3                   PLAYBOOK glm
 
 Secret helper: (none)
 Plugins: (none)
@@ -350,7 +350,7 @@ ALTER PLAYBOOK researcher
     <div class="term" data-verify="examples/18-sessions, examples/13-select">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
+        <div class="term-title">real run, v3.27.0, with example 18's stand-in session</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb sessions</span>
