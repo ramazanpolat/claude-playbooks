@@ -14,13 +14,14 @@ case "$*" in
       entry="{\"name\":\"$name\",\"source\":\"directory\",\"path\":\"$src\"}"
     else
       # FAKE_MARKETS maps a source to the name it declares: "owner/repo=name ..."
-      name=$(printf '%s\n' $FAKE_MARKETS | sed -n "s|^$src=||p" | head -1)
+      name=$(printf '%s\n' $FAKE_MARKETS | sed -n "s|^${src%%#*}=||p" | head -1)
       case "$src" in
         https://*|git@*)
           # As Claude Code records a git source: url and #ref apart.
           url="${src%%#*}"; ref=""
           case "$src" in *#*) ref=",\"ref\":\"${src#*#}\"" ;; esac
           entry="{\"name\":\"$name\",\"source\":\"git\",\"url\":\"$url\"$ref}" ;;
+        *#*) entry="{\"name\":\"$name\",\"source\":\"github\",\"repo\":\"${src%%#*}\",\"ref\":\"${src#*#}\"}" ;;
         *) entry="{\"name\":\"$name\",\"source\":\"github\",\"repo\":\"$src\"}" ;;
       esac
     fi

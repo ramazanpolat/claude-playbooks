@@ -120,3 +120,51 @@ func TestExpectPlugins(t *testing.T) {
 		}
 	}
 }
+
+// 'github:<owner>/<repo>' takes a branch or tag as #<ref> or @<ref>
+// (v3.27.0); a ref that looks like a commit is refused, since Claude Code
+// clones a marketplace by branch or tag only. No ref stays as it was.
+func TestGitHubSourceRef(t *testing.T) {
+	for src, want := range map[string][2]string{
+		"github:a/b":             {"a/b", ""},
+		"github:a/b#v1.2.0":      {"a/b", "v1.2.0"},
+		"github:a/b@v1.2.0":      {"a/b", "v1.2.0"},
+		"github:a/b#main":        {"a/b", "main"},
+		"github:a/b@feature/x-y": {"a/b", "feature/x-y"},
+		"github:a.b/c_d#release": {"a.b/c_d", "release"},
+		"github:a/b#deadbe":      {"a/b", "deadbe"}, // six hex characters: a name, not a SHA
+	} {
+		repo, ref, err := GitHubSource(src)
+		if err != nil || repo != want[0] || ref != want[1] {
+			t.Errorf("%s: %q %q %v, want %q %q", src, repo, ref, err, want[0], want[1])
+		}
+		if kind, err := MarketplaceSource(src); err != nil || kind != SourceGitHub {
+			t.Errorf("MarketplaceSource(%s): %q %v", src, kind, err)
+		}
+	}
+	for src, want := range map[string]string{
+		"github:a/b#0123abc": "a commit cannot be pinned",
+		"github:a/b@0123456789abcdef0123456789abcdef01234567": "a commit cannot be pinned",
+		"github:a/b#DEADBEEF": "a commit cannot be pinned",
+		"github:a/b#":         "optionally with '#<branch or tag>'",
+		"github:a/b@":         "optionally with '#<branch or tag>'",
+		"github:a/b#-flag":    "optionally with '#<branch or tag>'",
+		"github:a/b#x..y":     "optionally with '#<branch or tag>'",
+		"github:a/b#x/":       "optionally with '#<branch or tag>'",
+		"github:a/b#x y":      "optionally with '#<branch or tag>'",
+		"github:a#v1":         "'github:<owner>/<repo>'",
+		"github:a/b#v1#v2":    "optionally with '#<branch or tag>'",
+	} {
+		if _, err := MarketplaceSource(src); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", src, err, want)
+		}
+	}
+	// Parsed as a clause, the ref is part of the source as written.
+	st, err := ParseArgs([]string{"ALTER", "PLAYBOOK", "k", "ADD", "MARKETPLACE", "m", "FROM", "github:a/b#v1"})
+	if err != nil || len(st.Clauses) != 1 || st.Clauses[0].Arg != "github:a/b#v1" {
+		t.Fatalf("parse: %+v %v", st, err)
+	}
+	if _, err := ParseArgs([]string{"ALTER", "PLAYBOOK", "k", "ADD", "MARKETPLACE", "m", "FROM", "github:a/b#0123abc"}); err == nil || !strings.Contains(err.Error(), "a commit cannot be pinned") {
+		t.Fatalf("a SHA must be refused at parse time: %v", err)
+	}
+}

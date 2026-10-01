@@ -167,7 +167,7 @@ type cliMarketplace struct {
 	Source string `json:"source"`
 	Repo   string `json:"repo"`
 	URL    string `json:"url"`
-	Ref    string `json:"ref"` // a git source's #ref, which Claude Code keeps apart from url
+	Ref    string `json:"ref"` // a git or github source's #ref, which Claude Code keeps apart from url or repo
 	Path   string `json:"path"`
 }
 
@@ -437,8 +437,17 @@ func marketplaceArg(src string) (string, cliMarketplace, error) {
 	}
 	switch kind {
 	case grammar.SourceGitHub:
-		repo := strings.TrimPrefix(src, "github:")
-		return repo, cliMarketplace{Source: kind, Repo: repo}, nil
+		// Claude Code takes owner/repo#ref and records repo and ref apart,
+		// as for a git URL; '@' is spelled '#' for it.
+		repo, ref, err := grammar.GitHubSource(src)
+		if err != nil {
+			return "", cliMarketplace{}, err
+		}
+		arg := repo
+		if ref != "" {
+			arg += "#" + ref
+		}
+		return arg, cliMarketplace{Source: kind, Repo: repo, Ref: ref}, nil
 	case grammar.SourceGit:
 		// Claude Code takes url#ref and records url and ref apart; compare
 		// the same way, or an unchanged source reads as another one.
@@ -698,10 +707,11 @@ func sourceString(raw json.RawMessage) (string, bool) {
 	}
 	field := map[string]string{grammar.SourceGitHub: "repo", grammar.SourceGit: "url", grammar.SourceDirectory: "path"}[kind]
 	keys := o.Keys()
-	// A git source may carry its #ref apart from the url, as Claude Code
-	// records it; it is written back as url#ref.
+	// A git or github source may carry its #ref apart from the url or
+	// repo, as Claude Code records it; it is written back as url#ref, or
+	// github:repo#ref.
 	var ref string
-	if kind == grammar.SourceGit && slices.Contains(keys, "ref") {
+	if (kind == grammar.SourceGit || kind == grammar.SourceGitHub) && slices.Contains(keys, "ref") {
 		if ok, err := o.Get("ref", &ref); !ok || err != nil || ref == "" {
 			return "", false
 		}
@@ -724,7 +734,13 @@ func sourceString(raw json.RawMessage) (string, bool) {
 		}
 	}
 	if kind == grammar.SourceGitHub {
+		if strings.ContainsAny(v, "#@") {
+			return "", false
+		}
 		v = "github:" + v
+		if ref != "" {
+			v += "#" + ref
+		}
 	}
 	if _, err := grammar.MarketplaceSource(v); err != nil {
 		return "", false

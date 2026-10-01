@@ -35,7 +35,12 @@ case "$*" in
       printf '[{"name":"%s","source":"git","url":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$u" > "$st/mkts"
     fi ;;
   "plugin marketplace add "*)
-    printf '[{"name":"%s","source":"github","repo":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$4" > "$st/mkts" ;;
+    # owner/repo#ref: repo and ref apart, as Claude Code records them.
+    repo="${4%%#*}"
+    case "$4" in
+      *#*) printf '[{"name":"%s","source":"github","repo":"%s","ref":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$repo" "${4#*#}" > "$st/mkts" ;;
+      *) printf '[{"name":"%s","source":"github","repo":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$repo" > "$st/mkts" ;;
+    esac ;;
   "plugin marketplace remove "*) echo '[]' > "$st/mkts" ;;
   "plugin install needs@"*)
     echo '{"command":"install","outcome":"failed","message":"confirm","shownCommand":{"command":"curl https://x | sh","sha256":"abc123"}}'
@@ -277,6 +282,7 @@ func TestSourceStringGitRef(t *testing.T) {
 		`{"source":"git","url":"https://example.com/k.git","ref":"v1"}`: "https://example.com/k.git#v1",
 		`{"source":"git","url":"https://example.com/k.git"}`:            "https://example.com/k.git",
 		`{"source":"github","repo":"a/b"}`:                              "github:a/b",
+		`{"source":"github","repo":"a/b","ref":"v1"}`:                   "github:a/b#v1",
 	} {
 		if got, ok := sourceString(json.RawMessage(raw)); !ok || got != want {
 			t.Errorf("%s: %q %v, want %q", raw, got, ok, want)
@@ -284,7 +290,9 @@ func TestSourceStringGitRef(t *testing.T) {
 	}
 	for _, raw := range []string{
 		`{"source":"git","url":"https://example.com/k.git","ref":""}`,
-		`{"source":"github","repo":"a/b","ref":"v1"}`,
+		`{"source":"github","repo":"a/b#x"}`,
+		`{"source":"github","repo":"a/b","ref":"0123abc"}`,
+		`{"source":"github","repo":"a/b","ref":""}`,
 		`{"source":"git","url":"https://example.com/k.git#x","ref":"v1"}`,
 		`{"source":"git","url":"https://example.com/k.git#x"}`,
 	} {
@@ -332,5 +340,59 @@ func TestPluginClausesNeedClaudeVersion(t *testing.T) {
 		if err := checkClaudeForPlugins([]pluginStep{{args: []string{"install", "p@m"}}}); err != nil {
 			t.Errorf("version %q: %v", v, err)
 		}
+	}
+}
+
+// 'github:<owner>/<repo>#<ref>' (or @<ref>) passes owner/repo#ref to
+// claude, compares repo and ref as Claude Code records them, and SHOW
+// CREATE writes it back so that APPLY changes nothing (v3.27.0). A ref that
+// looks like a commit is refused before anything runs.
+func TestPluginGitHubRef(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	log := fakeClaude(t)
+	root := seedFlatPlaybook(t, "k")
+	t.Setenv("FAKE_MKT_NAME", "m")
+
+	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE m FROM github:a/b#v1.2.0")
+	if got := runs(t, log); len(got) != 1 || !strings.HasSuffix(got[0], "|plugin marketplace add a/b#v1.2.0 --scope user") {
+		t.Fatalf("add with a tag ran:\n%s", strings.Join(got, "\n"))
+	}
+	// The same source, as # or @: unchanged, nothing runs.
+	for _, src := range []string{"github:a/b#v1.2.0", "github:a/b@v1.2.0"} {
+		if out := mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE m FROM "+src); !strings.Contains(out, "unchanged") || len(runs(t, log)) != 1 {
+			t.Fatalf("%s again: %s", src, out)
+		}
+	}
+	// Another ref, or none, is another source.
+	for _, src := range []string{"github:a/b#v2", "github:a/b"} {
+		if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE m FROM "+src); err == nil || !strings.Contains(err.Error(), "already declared from another source") {
+			t.Errorf("%s: %v", src, err)
+		}
+	}
+	// A commit is refused before anything runs.
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE n FROM github:a/b#0123abcd"); err == nil || !strings.Contains(err.Error(), "Claude Code clones marketplaces by branch or tag; a commit cannot be pinned") {
+		t.Fatalf("a SHA ref: %v", err)
+	}
+	if n := len(runs(t, log)); n != 1 {
+		t.Fatalf("a refused SHA ran a command (%d)", n)
+	}
+
+	// SHOW CREATE writes the ref back (from settings.json, as Claude Code
+	// records it), and APPLY of that output changes nothing.
+	settingsJSON := `{"extraKnownMarketplaces":{"m":{"source":{"source":"github","repo":"a/b","ref":"v1.2.0"}}}}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(settingsJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
+	if !strings.Contains(created, "ADD MARKETPLACE m FROM 'github:a/b#v1.2.0'") {
+		t.Fatalf("SHOW CREATE lost the ref:\n%s", created)
+	}
+	path := writePlaybookFile(t, created)
+	if out := mustStmt(t, "APPLY "+path+" --yes"); !strings.Contains(out, " 0 created, 0 changed,") {
+		t.Fatalf("APPLY of SHOW CREATE changed something:\n%s", out)
+	}
+	if n := len(runs(t, log)); n != 1 {
+		t.Fatalf("the round trip ran a command (%d)", n)
 	}
 }

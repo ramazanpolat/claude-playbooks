@@ -1435,17 +1435,50 @@ const (
 	SourceDirectory = "directory"
 )
 
-var githubRepo = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+var (
+	githubRepo = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	// A branch or tag name, as a marketplace ref: no leading '-' (it would
+	// read as a flag), no '..', no trailing '/'.
+	githubRef = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_./+-]*$`)
+	// What a commit looks like: Claude Code clones a marketplace by branch
+	// or tag only, so a SHA would be written and then fail at session start.
+	commitSHA = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+)
+
+// GitHubSource splits 'github:<owner>/<repo>' with an optional
+// '#<ref>' or '@<ref>' (a branch or tag; v3.27.0) into the repository and
+// the ref, "" when there is none. A ref that looks like a commit SHA is
+// refused: Claude Code cannot pin a marketplace to one.
+func GitHubSource(src string) (repo, ref string, err error) {
+	rest, ok := strings.CutPrefix(src, "github:")
+	if !ok {
+		return "", "", errors.New("not a github source")
+	}
+	repo = rest
+	if i := strings.IndexAny(rest, "#@"); i >= 0 {
+		repo, ref = rest[:i], rest[i+1:]
+		if ref == "" || !githubRef.MatchString(ref) || strings.Contains(ref, "..") || strings.HasSuffix(ref, "/") {
+			return "", "", errors.New("a github source is 'github:<owner>/<repo>', optionally with '#<branch or tag>'")
+		}
+		if commitSHA.MatchString(ref) {
+			return "", "", errors.New("Claude Code clones marketplaces by branch or tag; a commit cannot be pinned: use a tag at that commit")
+		}
+	}
+	if !githubRepo.MatchString(repo) {
+		return "", "", errors.New("a github source is 'github:<owner>/<repo>', optionally with '#<branch or tag>'")
+	}
+	return repo, ref, nil
+}
 
 // MarketplaceSource classifies an ADD MARKETPLACE source by its shape only:
-// 'github:<owner>/<repo>', a git URL (https://… or git@…), or a directory
+// 'github:<owner>/<repo>' (with an optional #<ref> or @<ref>), a git URL (https://… or git@…), or a directory
 // ('/abs/path' or '~/path'). Anything else is refused. The error never
 // quotes the source: a URL may carry a token.
 func MarketplaceSource(src string) (string, error) {
 	switch {
 	case strings.HasPrefix(src, "github:"):
-		if !githubRepo.MatchString(strings.TrimPrefix(src, "github:")) {
-			return "", errors.New("a github source is 'github:<owner>/<repo>'")
+		if _, _, err := GitHubSource(src); err != nil {
+			return "", err
 		}
 		return SourceGitHub, nil
 	case strings.HasPrefix(src, "https://"):
@@ -1462,7 +1495,7 @@ func MarketplaceSource(src string) (string, error) {
 	case strings.HasPrefix(src, "/"), strings.HasPrefix(src, "~/"), RelativeSource(src):
 		return SourceDirectory, nil
 	}
-	return "", errors.New("unsupported marketplace source: use 'github:<owner>/<repo>', a git URL (https://… or git@…), or a directory ('/abs/path', '~/path', or in a playbook file './path')")
+	return "", errors.New("unsupported marketplace source: use 'github:<owner>/<repo>[#<ref>]', a git URL (https://… or git@…), or a directory ('/abs/path', '~/path', or in a playbook file './path')")
 }
 
 // RelativeSource reports a directory source written relative to its

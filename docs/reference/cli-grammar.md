@@ -1087,6 +1087,7 @@ a terminal, so Claude Code never prompts.
 | `FROM` | passed as | recorded by Claude Code as |
 |---|---|---|
 | `'github:<owner>/<repo>'` | `<owner>/<repo>` | `{"source": "github", "repo": "<owner>/<repo>"}` |
+| `'github:<owner>/<repo>#<ref>'` or `@<ref>`, a branch or tag (v3.27.0) | `<owner>/<repo>#<ref>` | `{"source": "github", "repo": "<owner>/<repo>", "ref": "<ref>"}`: repo and ref apart |
 | `'https://…'`, `'git@…'` (a git URL) | the URL | `{"source": "git", "url": "…"}` |
 | a git URL with `#<ref>` (`'https://…/repo.git#v1.2.0'`) | the URL with its ref | `{"source": "git", "url": "…", "ref": "<ref>"}`: url and ref apart |
 | `'/abs/path'` or `'~/path'`, a local directory | the absolute path (`~/` expanded) | `{"source": "directory", "path": "/abs/path"}` |
@@ -1101,8 +1102,14 @@ other relative path is refused, and so is a URL carrying credentials. This is ho
 before it is published. `--sparse` is not in the first cut. A git URL's
 `#<ref>` is compared as Claude Code records it, url and ref apart (v3.21.1):
 applying the same `url#ref` again changes nothing, another ref or none is
-another source, and `SHOW CREATE` writes it back as `url#ref`. The
-`github:` form takes no ref.
+another source, and `SHOW CREATE` writes it back as `url#ref`. A `github:`
+source's ref works the same way (v3.27.0): `#` and `@` spell one source,
+`SHOW CREATE` writes it back with `#`, and `github:<owner>/<repo>` without a
+ref is unchanged. **A commit cannot be pinned:** Claude Code clones a
+marketplace by branch or tag only, so a `github:` ref of 7 to 40 hex
+characters is refused ("Claude Code clones marketplaces by branch or tag; a
+commit cannot be pinned"), rather than written and broken at session start.
+Tag the commit instead.
 A marketplace name follows the env-set name rule; a plugin id is
 `<plugin>@<marketplace>`.
 
