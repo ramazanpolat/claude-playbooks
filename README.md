@@ -141,7 +141,7 @@ cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"    # state as tables; add ClickH
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top, as recipes |
-| [Examples 01-19](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions and the TUI, all applied in CI |
+| [Examples 01-20](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions and the TUI, all applied in CI |
 | [Guides](docs/README.md) · [CLI grammar](docs/reference/cli-grammar.md) | how-tos for every area · `cpb <VERB> <OBJECT> <name> <clause> ...`, every statement and output format |
 | [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |
 
