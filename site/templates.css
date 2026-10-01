@@ -84,7 +84,7 @@ input[type="text"], select {
   width: 100%; min-width: 0; background: var(--bg-2); color: var(--fg); border: 1px solid var(--line-strong); border-radius: 8px;
   padding: 0.5rem 0.65rem; font-family: var(--font-mono); font-size: 0.84rem; line-height: 1.4;
 }
-input[type="text"]::placeholder { color: var(--fg-faint); opacity: 0.8; }
+input[type="text"]::placeholder { color: var(--fg-faint); opacity: 1; }
 input[type="text"]:hover, select:hover { border-color: var(--brand); }
 input[aria-invalid="true"] { border-color: var(--no); }
 .err { margin: 0; font-size: 0.8rem; color: var(--no); line-height: 1.4; }

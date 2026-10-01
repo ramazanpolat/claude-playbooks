@@ -253,7 +253,7 @@
     return (m.picker || []).map(function (e, i) {
       return '<div class="pkrow"><input type="text" data-pid="' + i + '" value="' + esc(e.id) + '" placeholder="model-id" aria-label="Model id" spellcheck="false">' +
         '<input type="text" data-plabel="' + i + '" value="' + esc(e.label || "") + '" placeholder="label" aria-label="Label" spellcheck="false">' +
-        '<input type="text" data-pbeh="' + i + '" value="' + esc(e.behavesAs || "") + '" placeholder="behaves as (optional)" aria-label="Behaves as" spellcheck="false">' +
+        '<input type="text" data-pbeh="' + i + '" value="' + esc(e.behavesAs || "") + '" placeholder="behaves as" aria-label="Behaves as (optional)" spellcheck="false">' +
         '<button type="button" data-act="rm-pk" data-i="' + i + '" aria-label="Remove entry">×</button></div>';
     }).join("");
   }

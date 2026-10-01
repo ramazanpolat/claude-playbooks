@@ -10,5 +10,7 @@
       '<span class="plogo c' + t.color + '" aria-hidden="true"><svg><use href="#' + t.glyph + '"/></svg></span>' +
       "<span><b>" + esc(t.title) + "</b><small>" + esc(t.tagline) + "</small></span></a>";
   }).join("");
+  html += '<a class="tmini own" href="templates.html#customize"><span class="plogo plus" aria-hidden="true">+</span>' +
+    "<span><b>Your own</b><small>Switch things on and off.</small></span></a>";
   row.insertAdjacentHTML("afterbegin", html);
 })();
