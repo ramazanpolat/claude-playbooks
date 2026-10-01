@@ -1878,6 +1878,146 @@ them: cpb tui`. Off a terminal, its output is exactly what it was.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
+## cpb play (v3.28.0, in progress)
+
+`cpb play <ref>` tries someone else's playbook: it fetches a recipe once,
+checks it, shows exactly what it would do, and (in a later part of v3.28.0)
+runs it as a throwaway playbook that is removed on exit. **This part builds
+the fetch, the check and the plan:** `--check`, `--dry-run`, `--json` and
+`--sha256`. Running a played recipe, the sandbox default, `--keep` and the
+typed confirmations arrive before v3.28.0 ships. The design (approved by
+root on 2026-10-01) is in the task's `design-cpb-play-2026-10-01-21_58.md`.
+
+```
+cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals and risks
+cpb play <ref> --dry-run [--json] [--sha256 <hex>]    the plan against a throwaway playbook
+cpb play <dir> --check                                 a template directory, as the website's CI runs it
+```
+
+**`<ref>`:**
+
+| Form | Fetched from | Pinned |
+|---|---|---|
+| a template name (`[a-z0-9][a-z0-9-]*`), e.g. `reviewer` | `https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/<this cpb's tag>/site/p/<name>.cpb`; a dev build reads `main`, and says so | by the release |
+| `https://…` | that URL | only by `--sha256` |
+| `github:<owner>/<repo>/<path>.cpb@<ref>` | `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>.cpb`. The `@<ref>` is required. A branch is allowed and flagged ("not a release tag: this may change"); a tag or a commit is pinned. | a tag or commit |
+| `./x.cpb`, `/abs/x.cpb`, `~/x.cpb` | a local file, with every check | |
+
+**The fetch:**
+- https only, and at most 3 redirects, each https.
+- No credentials in a URL, no cookies, the system proxy.
+- 10 s to connect and 30 s in all.
+- At most 64 KiB, as UTF-8 text with no NUL byte.
+- `User-Agent: cpb/<version> (play)`.
+
+The recipe is read **once**. Its sha256 is shown, and everything after uses
+those bytes. `--sha256 <hex>` refuses any other recipe before anything is
+shown.
+
+**What a played recipe may hold.** A played recipe is name-less `ALTER
+PLAYBOOK` statements: a recipe. These clauses are allowed:
+- `ADD MARKETPLACE`, `ADD PLUGIN`, `SET AGENT`;
+- `ADD MCP SERVER`;
+- `ALLOW TOOL`, `DENY TOOL`;
+- `SET STATUSLINE`, `ADD PANEL`;
+- `SET MODEL`, `ADD MODEL`, `SET MODEL PICKER`;
+- `ADD SKILL` from a git source;
+- `SET VAR` (not a credential), `SET VAR … FROM '<ref>'`, `BLOCK VAR`;
+- `SET ISOLATED LOGIN`.
+
+Refused, each with its line and reason:
+- **anything outside the one playbook `play` makes:** `INCLUDE`, `USE
+  PLAYBOOK`, an env set or `DEFAULTS` statement, a named or created playbook;
+- **`USE ENV` and `ADD ENV`:** they would attach your env sets, and your
+  keys;
+- **a credential-looking literal, even `AS PLAINTEXT`:** a shared recipe
+  carries no secret, only a reference;
+- **a local directory source** for a marketplace or a skill, and a skill from
+  `http://` or `file://`;
+- **`UNSET ISOLATED LOGIN`, `RENAME TO`, `ALIAS`, `NO ALIAS`:** play decides
+  these;
+- **`DROP …` and `UNSET …`:** nothing to undo on a new playbook.
+
+**Risks.** The preview marks each risky clause with a code. The codes are a
+closed set: `runs_program`, `third_party_code`, `sends_data`,
+`acts_without_asking`, `fetches_code`, `endpoint_change`, `tls_or_proxy`,
+`telemetry_export`, `uses_secret`, `no_sandbox`.
+
+Three kinds need a **typed confirmation** before a recipe runs (`!!` in the
+preview, `confirm` in JSON):
+- **the model endpoint** (`ANTHROPIC_BASE_URL` and the Bedrock and Vertex
+  base URLs, unless the host is Anthropic's; `CLAUDE_CODE_USE_BEDROCK`,
+  `CLAUDE_CODE_USE_VERTEX`): the host is typed;
+- **a proxy** (`HTTP(S)_PROXY`, `ALL_PROXY`, any case): its host is typed;
+  **a TLS change** (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
+  `NODE_TLS_REJECT_UNAUTHORIZED`): the word `TLS` is typed;
+- **each secret reference**: the reference is typed, and the preview shows
+  where its value goes, the destination host included.
+
+Any other `*_URL`, `*_HOST`, `*_ENDPOINT` or `*_BASE_URL` is flagged
+`sends_data`, not typed.
+
+A recipe that moves the model endpoint is planned with `ISOLATED LOGIN` and
+a `BLOCK VAR` of your credentials: `ANTHROPIC_API_KEY`,
+`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`,
+`GOOGLE_APPLICATION_CREDENTIALS`, and every credential-looking variable the
+shell exports, by name.
+
+**A wide `ALLOW TOOL`** is flagged `acts_without_asking`, erring toward
+flagging:
+- `*`;
+- `Bash`, `Bash(*)`;
+- an interpreter or network tool with a wildcard, or alone: `sh`, `bash`,
+  `zsh`, `fish`, `dash`, `python`, `python3`, `node`, `deno`, `bun`, `ruby`,
+  `perl`, `php`, `lua`, `curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `ncat`,
+  `eval`, `exec`, `sudo`, `su`, `env`, `xargs`, `rm`, `docker`, `kubectl`,
+  `npx`, `uvx`, `pip`, `npm`;
+- `git push`;
+- `Write`, `Edit`, `MultiEdit`, `NotebookEdit` or `Read` on everything,
+  `/**`, `~/**` or `/*`;
+- `WebFetch` with no domain.
+
+An exact command line such as `Bash(npm test)` is narrow.
+
+**The plan.** `--dry-run` plans the exact bytes against a **throwaway
+store**, a fresh temp directory with only your secret helper setting copied.
+So your `DEFAULTS` and env sets never layer into a played recipe, and
+nothing is written to your store. The plan is `APPLY`'s, for two files:
+- a setup file: `CREATE PLAYBOOK IF NOT EXISTS play-<name>-<6 hex> NO ALIAS
+  NO PILOT PROFILE`, with `ISOLATED LOGIN` and the `BLOCK VAR` above when
+  the endpoint moves;
+- the recipe.
+
+**`--json`** prints the `APPLY --dry-run --json` object with a `"play"`
+block added. It is a new top-level field, absent from `APPLY`'s own report:
+
+```
+"play": {"ref", "kind", "url", "path", "sha256", "bytes", "pinned", "note",
+         "header": {"title", "description", "needs", "create_with", "min_cpb"},
+         "playbook", "endpoint", "refused": [{"line", "what", "reason"}],
+         "risks": [{"code", "line", "clause", "detail", "confirm"}]}
+```
+
+`--check --json` is the same object with no statements.
+
+**The header.** A recipe may open with `-- key: value` lines, one per line,
+then a blank line. This is the template convention agreed with the website
+on 2026-10-01. The keys:
+- `title`, `description` and `needs`, shown in the preview;
+- `create-with`: advisory create-time flags. `SANDBOX` will make the play
+  sandboxed;
+- `min-cpb`, as `X.Y.Z`: an older cpb refuses ("this recipe needs cpb X.Y.Z
+  or later").
+
+**A template directory.** `cpb play <dir> --check` checks every
+`<name>.cpb`. Each needs a `title` and a `description`, no unknown header
+key, and a valid `min-cpb`. It also checks that `index.txt` lists exactly
+those names, sorted, one per line.
+
+**Exit codes:** 0 when checked or planned; 1 when refused (a check, the
+header, or `--sha256`); 2 on a usage error.
+
 ## Completion
 
 Every slot has a closed set, so TAB completes verbs, then objects, then
