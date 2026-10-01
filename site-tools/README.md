@@ -6,9 +6,12 @@ files are not served.
 
 ## The site
 
-- `site/index.html` is the home page: a shelf of five playbook "notebooks",
-  one per `CLAUDE_CONFIG_DIR`, with the four isolation layers and the recipe
-  demo. Its cards are drawn from a JSON block in the page (`showcase-data`).
+- `site/index.html` is the home page: a slot-machine headline (`slot.js`), a
+  shelf of playbook "notebooks" and one ephemeral "ghost" one, each with its
+  own `CLAUDE_CONFIG_DIR` (`home.js`), the four isolation layers, a map of the
+  runtimes the agents run in and what they reach (`runtimes.js`), and the
+  recipe demo. Its cards are drawn from a JSON block in the page
+  (`showcase-data`).
 - `site/tour.html` is the tour: every command with the output it really
   printed.
 
@@ -40,7 +43,16 @@ TUI goldens.
   (`SHOW PLAYBOOK --json`, `EXPLAIN PLAYBOOK --json`, the `APPLY --dry-run
   --json` plan, the files cpb wrote), and either checks the page's JSON block
   against it (`--check`, what CI does) or rewrites the block (`--write`).
-  So a card can only say what cpb said.
+  So a card can only say what cpb said. It also runs `cpb start <dir>
+  --delete` for real (with a `claude` that records its session) to check the
+  ephemeral notebook, and checks every launch command in `runtimes.json`
+  against this cpb: its flags in `run --help` / `start --help`, and its
+  sandbox backends (`sbx`, `openshell`) from the error for an unknown one.
+- **The logos.** `brand-icons.py` writes the tools' marks (Simple Icons, CC0,
+  pinned to one release) into the page's inline sprite; the marks for the
+  playbooks and runtimes are hand-drawn in the same sprite. `check-sprites.py`
+  fails if the page, its scripts or the data ask for a mark the sprite lacks,
+  including a mark for each playbook in the showcase.
 
 To change the cards, edit `showcase.cpb` and regenerate:
 

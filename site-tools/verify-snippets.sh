@@ -3,8 +3,11 @@
 #   - site/tour.html: re-runs the commands it shows and asserts the lines a
 #     reader relies on (not a byte diff: PIDs, timestamps and temp paths vary),
 #     and diffs its `cpb tui` blocks against the real goldens;
-#   - site/index.html: applies site-tools/showcase.cpb and checks that every
-#     card's data is exactly what cpb reports (site-tools/showcase-data.py).
+#   - site/index.html: applies site-tools/showcase.cpb, runs a throwaway
+#     `cpb start --delete`, checks the launch commands in runtimes.json against
+#     this cpb's flags and backends, and checks that every card's data is
+#     exactly what cpb reports (site-tools/showcase-data.py); check-sprites.py
+#     checks the logos the page asks for exist.
 # If a statement stops parsing or an output changes shape, this fails loudly
 # instead of letting the site drift from the grammar.
 #
@@ -100,6 +103,11 @@ echo "== home: every card is what cpb reports for showcase.cpb =="
 # Its own HOME and stand-ins; the data comes from SHOW/EXPLAIN --json, the
 # APPLY --dry-run --json plan and the files cpb wrote.
 if ! python3 "$here/showcase-data.py" --cpb "$cpb" --check; then
+  fail=1
+fi
+
+echo "== home: every logo the page asks for is in its sprite =="
+if ! python3 "$here/check-sprites.py"; then
   fail=1
 fi
 
