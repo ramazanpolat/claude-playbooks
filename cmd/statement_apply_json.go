@@ -66,6 +66,9 @@ const (
 	// A playbook importing ~/.pilot-profile/ now has a non-Anthropic
 	// ANTHROPIC_BASE_URL (v3.23.0).
 	warnPilotProfileThirdParty = "pilot_profile_third_party_endpoint"
+	// An ADD MARKETPLACE git source whose #ref looks like a commit, which
+	// Claude Code cannot clone (v3.27.0).
+	warnMarketplaceRefNotCloneable = "marketplace_ref_not_cloneable"
 )
 
 func (w applyWarning) String() string { return fmt.Sprintf("%s:%d: %s", w.shown, w.Line, w.Message) }

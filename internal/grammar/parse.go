@@ -1445,6 +1445,10 @@ var (
 	commitSHA = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 )
 
+// LooksLikeCommit reports a ref of 7 to 40 hex characters: a commit SHA,
+// which Claude Code cannot clone a marketplace at.
+func LooksLikeCommit(ref string) bool { return commitSHA.MatchString(ref) }
+
 // GitHubSource splits 'github:<owner>/<repo>' with an optional
 // '#<ref>' or '@<ref>' (a branch or tag; v3.27.0) into the repository and
 // the ref, "" when there is none. A ref that looks like a commit SHA is
@@ -1460,7 +1464,7 @@ func GitHubSource(src string) (repo, ref string, err error) {
 		if ref == "" || !githubRef.MatchString(ref) || strings.Contains(ref, "..") || strings.HasSuffix(ref, "/") {
 			return "", "", errors.New("a github source is 'github:<owner>/<repo>', optionally with '#<branch or tag>'")
 		}
-		if commitSHA.MatchString(ref) {
+		if LooksLikeCommit(ref) {
 			return "", "", errors.New("Claude Code clones marketplaces by branch or tag; a commit cannot be pinned: use a tag at that commit")
 		}
 	}

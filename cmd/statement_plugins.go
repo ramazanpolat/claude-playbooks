@@ -873,3 +873,31 @@ func statuslineRefresh(root *settings.Object) *int {
 	}
 	return &n
 }
+
+// warnMarketplaceRef warns about an ADD MARKETPLACE git source (https:// or
+// git@) whose #ref looks like a commit (v3.27.0). Claude Code clones a
+// marketplace by branch or tag only, so the source is written and then
+// fails to clone. The github: form refuses such a ref; a git source took
+// one before v3.27.0, so it is warned about rather than refused, which the
+// stability rules allow in a minor release. The message names the
+// marketplace and the ref, never the URL.
+func (r *stmtRun) warnMarketplaceRef(clauses []grammar.Clause) {
+	for _, c := range clauses {
+		if c.Kind != grammar.AddMarketplace || len(c.Names) == 0 {
+			continue
+		}
+		if kind, err := grammar.MarketplaceSource(c.Arg); err != nil || kind != grammar.SourceGit {
+			continue
+		}
+		_, ref, _ := strings.Cut(c.Arg, "#")
+		if !grammar.LooksLikeCommit(ref) {
+			continue
+		}
+		msg := "MARKETPLACE " + c.Names[0] + " #" + ref + ": Claude Code clones marketplaces by branch or tag; this ref looks like a commit and will not clone: use a tag at that commit"
+		if r.warning != "" {
+			r.warning += "; " + msg
+		} else {
+			r.warning, r.warningCode = msg, warnMarketplaceRefNotCloneable
+		}
+	}
+}

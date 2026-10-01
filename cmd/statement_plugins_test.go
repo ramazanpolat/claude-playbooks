@@ -396,3 +396,44 @@ func TestPluginGitHubRef(t *testing.T) {
 		t.Fatalf("the round trip ran a command (%d)", n)
 	}
 }
+
+// A git source whose #ref looks like a commit is accepted, as before
+// v3.27.0, and warned about (marketplace_ref_not_cloneable): Claude Code
+// clones a marketplace by branch or tag, so it would not clone. The warning
+// names the marketplace and the ref, never the URL; a tag is not warned
+// about.
+func TestMarketplaceGitRefLooksLikeCommit(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	fakeClaude(t)
+	seedFlatPlaybook(t, "k")
+	t.Setenv("FAKE_MKT_NAME", "gitmkt")
+	const url = "https://git.example/secret-path/m.git"
+
+	recipe := writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE gitmkt FROM '"+url+"#0123abcd';\n")
+	rep, _, code := applyJSON(t, recipe, "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("dry run exit %d: %v", code, rep)
+	}
+	w, _ := stmts(rep)[0]["warning"].(map[string]any)
+	if w == nil || w["code"] != "marketplace_ref_not_cloneable" {
+		t.Fatalf("dry run warning: %v", stmts(rep)[0]["warning"])
+	}
+	msg, _ := w["message"].(string)
+	if !strings.Contains(msg, "MARKETPLACE gitmkt #0123abcd: Claude Code clones marketplaces by branch or tag; this ref looks like a commit and will not clone: use a tag at that commit") || strings.Contains(msg, "secret-path") {
+		t.Fatalf("warning message: %q", msg)
+	}
+	// The statement still runs, as before, and warns on stderr.
+	var err error
+	stderr := captureStderr(t, func() { _, err = stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE gitmkt FROM "+url+"#0123abcd") })
+	if err != nil || !strings.Contains(stderr, "marketplaces by branch or tag; this ref looks like a commit") {
+		t.Fatalf("a commit ref on a git source: %v\n%s", err, stderr)
+	}
+	// A tag, or no ref, is not warned about.
+	for _, src := range []string{url + "#v1.2.0", url} {
+		rep, _, _ := applyJSON(t, writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE gitmkt FROM '"+src+"';\n"), "--dry-run", "--json")
+		if w := stmts(rep)[0]["warning"]; w != nil {
+			t.Errorf("%s: warned %v", src, w)
+		}
+	}
+}

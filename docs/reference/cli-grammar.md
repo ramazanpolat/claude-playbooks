@@ -613,7 +613,7 @@ planned as empty.
   | `write` | `path` | TO a plain directory: its `settings.json`. |
   | `delete` | `what` (`playbook`, `skill`, or `panel` from v3.25.0), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
 
-- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs) from v3.23.0 `pilot_profile_third_party_endpoint` (a playbook importing `~/.pilot-profile/` now has a non-Anthropic `ANTHROPIC_BASE_URL`; see "The pilot profile and non-Anthropic routes"), and `statusline_held_by_host` (a `SET STATUSLINE` left a host's status line as it is; see the status line clauses). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
+- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs) from v3.23.0 `pilot_profile_third_party_endpoint` (a playbook importing `~/.pilot-profile/` now has a non-Anthropic `ANTHROPIC_BASE_URL`; see "The pilot profile and non-Anthropic routes"), `statusline_held_by_host` (a `SET STATUSLINE` left a host's status line as it is; see the status line clauses), and from v3.27.0 `marketplace_ref_not_cloneable` (an `ADD MARKETPLACE` git source whose `#<ref>` looks like a commit, 7 to 40 hex characters, which Claude Code will not clone; see "Plugins and the agent"). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
 - **No secret value** appears anywhere: references stay references, and a literal credential a file sets is not in the plan.
 
 **Exit codes:**
@@ -759,7 +759,7 @@ changes only by these rules (the stabilization week, decided by the pilot on
 | The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), `tui` (v3.25.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
 | File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
 | `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json`, `SHOW SESSIONS --json` and `RESUME --list --json` (v3.25.0) |
-| Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
+| Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`, `marketplace_ref_not_cloneable` from v3.27.0); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
 
 **Not stable:**
 - the human form of every output: tables, labels, wording, the order of
@@ -1109,7 +1109,11 @@ ref is unchanged. **A commit cannot be pinned:** Claude Code clones a
 marketplace by branch or tag only, so a `github:` ref of 7 to 40 hex
 characters is refused ("Claude Code clones marketplaces by branch or tag; a
 commit cannot be pinned"), rather than written and broken at session start.
-Tag the commit instead.
+Tag the commit instead. A git URL's `#<ref>` that looks like a commit is
+still accepted, as before v3.27.0, and warned about
+(`marketplace_ref_not_cloneable`): "Claude Code clones marketplaces by branch
+or tag; this ref looks like a commit and will not clone: use a tag at that
+commit". The warning names the marketplace and the ref, never the URL.
 A marketplace name follows the env-set name rule; a plugin id is
 `<plugin>@<marketplace>`.
 
