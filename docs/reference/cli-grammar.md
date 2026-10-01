@@ -1923,7 +1923,7 @@ PLAYBOOK` statements: a recipe. These clauses are allowed:
 - `SET MODEL`, `ADD MODEL`, `SET MODEL PICKER`;
 - `ADD SKILL` from a git source;
 - `SET VAR` (not a credential), `SET VAR … FROM '<ref>'`, `BLOCK VAR`;
-- `SET ISOLATED LOGIN`.
+- `SET ISOLATED LOGIN`, `NO ALIAS`.
 
 Refused, each with its line and reason:
 - **anything outside the one playbook `play` makes:** `INCLUDE`, `USE
@@ -1931,7 +1931,10 @@ Refused, each with its line and reason:
 - **`USE ENV` and `ADD ENV`:** they would attach your env sets, and your
   keys;
 - **a credential-looking literal, even `AS PLAINTEXT`:** a shared recipe
-  carries no secret, only a reference;
+  carries no secret, only a reference. This is the grammar's own rule, so a
+  value that cannot be a secret passes: empty, an integer, `true` or
+  `false` (`MAX_THINKING_TOKENS=8000`);
+- **an MCP server URL carrying credentials** (`https://user:token@…`);
 - **a local directory source** for a marketplace or a skill, and a skill from
   `http://` or `file://`;
 - **`UNSET ISOLATED LOGIN`, `RENAME TO`, `ALIAS`, `NO ALIAS`:** play decides
@@ -1946,8 +1949,8 @@ closed set: `runs_program`, `third_party_code`, `sends_data`,
 Three kinds need a **typed confirmation** before a recipe runs (`!!` in the
 preview, `confirm` in JSON):
 - **the model endpoint** (`ANTHROPIC_BASE_URL` and the Bedrock and Vertex
-  base URLs, unless the host is Anthropic's; `CLAUDE_CODE_USE_BEDROCK`,
-  `CLAUDE_CODE_USE_VERTEX`): the host is typed;
+  base URLs, unless the host is Anthropic's over https;
+  `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`): the host is typed;
 - **a proxy** (`HTTP(S)_PROXY`, `ALL_PROXY`, any case): its host is typed;
   **a TLS change** (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
   `NODE_TLS_REJECT_UNAUTHORIZED`): the word `TLS` is typed;
@@ -1968,15 +1971,17 @@ shell exports, by name.
 flagging:
 - `*`;
 - `Bash`, `Bash(*)`;
-- an interpreter or network tool with a wildcard, or alone: `sh`, `bash`,
+- an interpreter or launcher with a wildcard, or alone: `sh`, `bash`,
   `zsh`, `fish`, `dash`, `python`, `python3`, `node`, `deno`, `bun`, `ruby`,
-  `perl`, `php`, `lua`, `curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `ncat`,
-  `eval`, `exec`, `sudo`, `su`, `env`, `xargs`, `rm`, `docker`, `kubectl`,
-  `npx`, `uvx`, `pip`, `npm`;
+  `perl`, `php`, `lua`, `eval`, `exec`, `sudo`, `su`, `env`, `xargs`,
+  `npx`, `uvx`. A path counts too (`/bin/sh *`);
+- a tool alone or with a bare wildcard: `curl`, `wget`, `ssh`, `scp`,
+  `rsync`, `nc`, `ncat`, `rm`, `docker`, `kubectl`, `pip`, `npm`
+  (`Bash(kubectl *)`). With a subcommand it is narrow (`Bash(kubectl get *)`);
 - `git push`;
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit` or `Read` on everything,
-  `/**`, `~/**` or `/*`;
-- `WebFetch` with no domain.
+  `/**`, `~/**`, `/*`, `~/*`, `/` or `~`;
+- `WebFetch` with no domain, or `domain:*`.
 
 An exact command line such as `Bash(npm test)` is narrow.
 

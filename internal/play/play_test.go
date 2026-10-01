@@ -119,11 +119,16 @@ func TestFetch(t *testing.T) {
 			t.Errorf("%s: %v, want %q", path, err, want)
 		}
 	}
-	short, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
-	defer cancel()
-	if _, err := Fetch(short, c, srv.URL+"/slow", "x"); err == nil {
-		t.Error("a server that holds the connection must time out")
+	// The client's own timeout, with no deadline from the caller: as
+	// cpb play fetches (context.Background()).
+	if NewClient().Timeout != totalTimeout || totalTimeout != 30*time.Second {
+		t.Fatalf("the client's timeout is %v", NewClient().Timeout)
 	}
+	c.Timeout = 300 * time.Millisecond
+	if _, err := Fetch(ctx, c, srv.URL+"/slow", "x"); err == nil || !strings.Contains(err.Error(), "Timeout") {
+		t.Errorf("a server that holds the connection must time out: %v", err)
+	}
+	c.Timeout = totalTimeout
 	if _, err := Fetch(ctx, c, "http://example.com/x.cpb", "x"); err == nil || !strings.Contains(err.Error(), "https only") {
 		t.Errorf("http: %v", err)
 	}
@@ -160,28 +165,29 @@ func TestHeader(t *testing.T) {
 // What a played recipe may hold, and what it may not, with the line.
 func TestCheckRefusals(t *testing.T) {
 	for src, want := range map[string]string{
-		"INCLUDE 'base.cpb';":                                   "INCLUDE",
-		"USE PLAYBOOK x;\nALTER PLAYBOOK SET MODEL 'm';":        "USE PLAYBOOK",
-		"CREATE ENV e SET A=1;":                                 "env sets or DEFAULTS",
-		"ALTER DEFAULTS SET SECRET HELPER 'h';":                 "env sets or DEFAULTS",
-		"ALTER PLAYBOOK named SET MODEL 'm';":                   "write it as a recipe",
-		"CREATE PLAYBOOK p;":                                    "write it as a recipe",
-		"DROP PLAYBOOK p;":                                      "write it as a recipe",
-		"ALTER PLAYBOOK USE ENV work;":                          "your env sets, and your keys",
-		"ALTER PLAYBOOK ADD ENV work;":                          "your env sets, and your keys",
-		"ALTER PLAYBOOK UNSET ISOLATED LOGIN;":                  "play's decision",
-		"ALTER PLAYBOOK RENAME TO x;":                           "play's decision",
-		"ALTER PLAYBOOK DROP PLUGIN p@m;":                       "nothing to undo",
-		"ALTER PLAYBOOK UNSET MODEL;":                           "nothing to undo",
-		"ALTER PLAYBOOK ADD MARKETPLACE m FROM '/opt/mkt';":     "points into your filesystem",
-		"ALTER PLAYBOOK ADD MARKETPLACE m FROM './mkt';":        "points into your filesystem",
-		"ALTER PLAYBOOK ADD SKILL s FROM '~/skills/s';":         "points into your filesystem",
-		"ALTER PLAYBOOK ADD SKILL s FROM file:///tmp/repo;":     "https, git@ or github: only",
-		"ALTER PLAYBOOK SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;": "even AS PLAINTEXT",
-		"ALTER PLAYBOOK SET VAR API_KEY=abc AS PLAINTEXT;":      "even AS PLAINTEXT",
-		"ALTER PLAYBOOK SET STATUSLINE PREVIOUS;":               "not in a played recipe",
-		"ALTER PLAYBOOK SET MODEL":                              "the file",
-		"":                                                      "no statements",
+		"INCLUDE 'base.cpb';":                                                      "INCLUDE",
+		"USE PLAYBOOK x;\nALTER PLAYBOOK SET MODEL 'm';":                           "USE PLAYBOOK",
+		"CREATE ENV e SET A=1;":                                                    "env sets or DEFAULTS",
+		"ALTER DEFAULTS SET SECRET HELPER 'h';":                                    "env sets or DEFAULTS",
+		"ALTER PLAYBOOK named SET MODEL 'm';":                                      "write it as a recipe",
+		"CREATE PLAYBOOK p;":                                                       "write it as a recipe",
+		"DROP PLAYBOOK p;":                                                         "write it as a recipe",
+		"ALTER PLAYBOOK USE ENV work;":                                             "your env sets, and your keys",
+		"ALTER PLAYBOOK ADD ENV work;":                                             "your env sets, and your keys",
+		"ALTER PLAYBOOK UNSET ISOLATED LOGIN;":                                     "play's decision",
+		"ALTER PLAYBOOK RENAME TO x;":                                              "play's decision",
+		"ALTER PLAYBOOK DROP PLUGIN p@m;":                                          "nothing to undo",
+		"ALTER PLAYBOOK UNSET MODEL;":                                              "nothing to undo",
+		"ALTER PLAYBOOK ADD MARKETPLACE m FROM '/opt/mkt';":                        "points into your filesystem",
+		"ALTER PLAYBOOK ADD MARKETPLACE m FROM './mkt';":                           "points into your filesystem",
+		"ALTER PLAYBOOK ADD SKILL s FROM '~/skills/s';":                            "points into your filesystem",
+		"ALTER PLAYBOOK ADD SKILL s FROM file:///tmp/repo;":                        "https, git@ or github: only",
+		"ALTER PLAYBOOK SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;":                    "even AS PLAINTEXT",
+		"ALTER PLAYBOOK SET VAR API_KEY=abc AS PLAINTEXT;":                         "even AS PLAINTEXT",
+		"ALTER PLAYBOOK SET STATUSLINE PREVIOUS;":                                  "not in a played recipe",
+		"ALTER PLAYBOOK ADD MCP SERVER s URL 'https://u:tok@mcp.example.com/sse';": "URL carrying credentials",
+		"ALTER PLAYBOOK SET MODEL":                                                 "the file",
+		"":                                                                         "no statements",
 	} {
 		r := Check([]byte(src))
 		found := false
@@ -195,7 +201,10 @@ func TestCheckRefusals(t *testing.T) {
 		}
 	}
 	// A clean recipe is refused nothing.
-	ok := "-- title: ok\n\nALTER PLAYBOOK\n  SET MODEL 'claude-opus-5-5'\n  SET AGENT 'reviewer'\n  DENY TOOL 'Bash(git push *)'\n  ALLOW TOOL 'Bash(gh pr view *)'\n  SET ISOLATED LOGIN\n  BLOCK VAR AWS_PROFILE\n  SET VAR EDITOR=vi;\n"
+	// MAX_THINKING_TOKENS=8000 is not a secret (the grammar's own rule: an
+	// integer, a boolean or empty cannot be one); found on the website's
+	// daily-driver template.
+	ok := "-- title: ok\n\nALTER PLAYBOOK\n  SET MODEL 'claude-opus-5-5'\n  SET AGENT 'reviewer'\n  DENY TOOL 'Bash(git push *)'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(kubectl get *)'\n  SET ISOLATED LOGIN\n  BLOCK VAR AWS_PROFILE\n  SET VAR EDITOR=vi MAX_THINKING_TOKENS=8000 DISABLE_AUTH=true;\n"
 	if r := Check([]byte(ok)); len(r.Refused) != 0 || len(r.Risks) != 0 {
 		t.Fatalf("a clean recipe: refused %+v, risks %+v", r.Refused, r.Risks)
 	}
@@ -273,7 +282,10 @@ func TestCheckTypedOnlyForEndpoint(t *testing.T) {
 	if typed != 1 || riskCodes(r)[RiskSendsData] != 2 || r.Endpoint != "router.example.net" {
 		t.Fatalf("typed %d, risks %+v, endpoint %q", typed, r.Risks, r.Endpoint)
 	}
-	// Anthropic's own host is no change.
+	// Anthropic's own host is no change, over https; plain http is.
+	if r := Check([]byte("ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=http://api.anthropic.com;\n")); len(r.Risks) != 1 || r.Risks[0].Confirm != "api.anthropic.com" {
+		t.Fatalf("anthropic over http: %+v", r.Risks)
+	}
 	if r := Check([]byte("ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=https://api.anthropic.com;\n")); len(r.Risks) != 0 || r.Endpoint != "" {
 		t.Fatalf("anthropic: %+v", r.Risks)
 	}
@@ -292,10 +304,20 @@ func TestWideAllow(t *testing.T) {
 	for rule, wide := range map[string]bool{
 		"Bash": true, "Bash(*)": true, "Bash(sh -c *)": true, "Bash(python3 *)": true, "Bash(curl:*)": true,
 		"Bash(git push *)": true, "Write": true, "Edit(/**)": true, "Read(~/**)": true, "WebFetch": true, "*": true,
-		"Bash(gh pr view *)": false, "Bash(npm test)": false, "Edit(src/**)": false, "WebFetch(domain:docs.anthropic.com)": false, "Read(./docs/**)": false,
+		"Bash(gh pr view *)": false, "Bash(npm test)": false, "Bash(kubectl get *)": false, "Bash(kubectl *)": true, "Bash(/bin/sh *)": true, "Bash(/usr/bin/python3 *)": true, "WebFetch(domain:*)": true, "Read(~/*)": true, "Bash(kubectl:*)": true, "Bash(curl https://api.example.com/*)": false, "Bash(python3 -m pytest *)": true, "Edit(src/**)": false, "WebFetch(domain:docs.anthropic.com)": false, "Read(./docs/**)": false,
 	} {
 		if got := wideAllow(rule) != ""; got != wide {
 			t.Errorf("%s: wide %v, want %v", rule, got, wide)
 		}
+	}
+}
+
+// NO ALIAS is harmless in a recipe (play makes no launcher anyway).
+func TestCheckNoAlias(t *testing.T) {
+	if r := Check([]byte("ALTER PLAYBOOK NO ALIAS SET MODEL 'm';\n")); len(r.Refused) != 0 {
+		t.Fatalf("NO ALIAS: %+v", r.Refused)
+	}
+	if r := Check([]byte("ALTER PLAYBOOK ALIAS x;\n")); len(r.Refused) != 1 {
+		t.Fatalf("ALIAS: %+v", r.Refused)
 	}
 }

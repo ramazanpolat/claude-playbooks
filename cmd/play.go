@@ -315,7 +315,9 @@ func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block 
 		return &commandExitError{code: 1}
 	}
 	return withThrowawayStore(func(dir string) error {
-		setup := filepath.Join(dir, "play-setup.cpb")
+		// "_" cannot start a recipe's file name (baseName keeps [a-z0-9-]),
+		// so the two never collide.
+		setup := filepath.Join(dir, "_play-setup.cpb")
 		recipe := filepath.Join(dir, src.Name+".cpb")
 		if err := os.WriteFile(setup, []byte(playSetup(name, res)), 0o600); err != nil {
 			return err

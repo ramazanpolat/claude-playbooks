@@ -147,3 +147,16 @@ func TestPlayCheckDir(t *testing.T) {
 		t.Fatalf("exit %v", err)
 	}
 }
+
+// A recipe named play-setup cannot overwrite play's own setup file.
+func TestPlaySetupFileName(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	p := writeRecipe(t, t.TempDir(), "play-setup.cpb", routerRecipe)
+	playFlags(t, false, true, true, "")
+	var err error
+	out := captureStdout(t, func() { err = runPlay(playCmd, []string{p}) })
+	if err != nil || !strings.Contains(out, `"statement": "CREATE PLAYBOOK play-play-setup-`) {
+		t.Fatalf("a recipe named play-setup: %v\n%s", err, out)
+	}
+}

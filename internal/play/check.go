@@ -3,6 +3,7 @@ package play
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 
@@ -111,7 +112,6 @@ var refusedClauses = map[grammar.Kind]string{
 	grammar.UnsetIsolatedLogin: "the login is play's decision, not the recipe's",
 	grammar.RenameTo:           "the name is play's decision, not the recipe's",
 	grammar.Alias:              "the launcher is play's decision, not the recipe's",
-	grammar.NoAlias:            "the launcher is play's decision, not the recipe's",
 }
 
 func (r *Result) clause(c grammar.Clause) {
@@ -123,7 +123,11 @@ func (r *Result) clause(c grammar.Clause) {
 	switch c.Kind {
 	case grammar.AddMarketplace:
 		src, err := grammar.MarketplaceSource(c.Arg)
-		if err == nil && src == grammar.SourceDirectory {
+		switch {
+		case err != nil:
+			r.refuse(line, kind+" "+c.Names[0], err.Error())
+			return
+		case src == grammar.SourceDirectory:
 			r.refuse(line, kind+" "+c.Names[0], "a local directory source points into your filesystem")
 			return
 		}
@@ -131,7 +135,7 @@ func (r *Result) clause(c grammar.Clause) {
 	case grammar.AddPlugin:
 		r.risk(line, RiskThirdPartyCode, kind+" "+c.Names[0], "a plugin can carry hooks (shell commands run on events) and commands", "")
 	case grammar.SetAgent, grammar.SetModel, grammar.AddModel, grammar.SetModelPicker,
-		grammar.DenyTool, grammar.SetStatuslineRefresh, grammar.BlockVar, grammar.SetIsolatedLogin:
+		grammar.DenyTool, grammar.SetStatuslineRefresh, grammar.BlockVar, grammar.SetIsolatedLogin, grammar.NoAlias:
 		// configuration only
 	case grammar.AllowTool:
 		for _, rule := range c.Names {
@@ -193,6 +197,10 @@ func (r *Result) mcp(c grammar.Clause) {
 		return
 	}
 	dest := "the command '" + m.Command + "'"
+	if u, err := url.Parse(m.URL); m.URL != "" && (err != nil || u.User != nil) {
+		r.refuse(line, name, "an MCP server URL carrying credentials is refused: use a HEADER with a reference, FROM '<ref>'")
+		return
+	}
 	if m.URL != "" {
 		dest = hostOf(m.URL)
 		r.risk(line, RiskSendsData, name, "tool calls and their content go to "+dest, "")
@@ -202,7 +210,7 @@ func (r *Result) mcp(c grammar.Clause) {
 	for _, v := range m.Env {
 		if v.Ref != "" {
 			r.risk(line, RiskUsesSecret, name+" ENV "+v.Key, "your secret "+v.Ref+" → MCP server "+c.Names[0]+", env "+v.Key+", to "+dest, v.Ref)
-		} else if manifest.LooksLikeSecretKey(v.Key) {
+		} else if manifest.LooksLikeSecretKey(v.Key) && !manifest.PlainSetting(v.Value) {
 			r.refuse(line, name+" ENV "+v.Key, "a shared recipe carries no secret: use a reference, FROM '<ref>'")
 		}
 	}
@@ -231,11 +239,15 @@ var (
 func (r *Result) setVar(line int, v grammar.Var) {
 	key, clause := v.Key, "SET VAR "+v.Key
 	switch {
-	case manifest.LooksLikeSecretKey(key):
+	case manifest.LooksLikeSecretKey(key) && !manifest.PlainSetting(v.Value):
+		// The grammar's own rule: a value that cannot be a secret (empty,
+		// an integer, true/false) passes, so MAX_THINKING_TOKENS=8000 does.
 		r.refuse(line, clause, "a shared recipe carries no secret, even AS PLAINTEXT: use a reference, FROM '<ref>'")
 	case endpointVars[key]:
 		host := hostOf(v.Value)
-		if anthropic(host) {
+		// Anthropic's own host is no move, over https only: plain http
+		// would send the conversation and the credential unencrypted.
+		if anthropic(host) && strings.HasPrefix(strings.TrimSpace(v.Value), "https://") {
 			return
 		}
 		r.risk(line, RiskEndpointChange, clause+"="+v.Value,
@@ -280,13 +292,19 @@ func anthropic(host string) bool {
 	return host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com")
 }
 
-// Interpreters and tools whose Bash rule lets the agent do anything.
-var wideCommands = map[string]bool{
+// Interpreters and launchers: any rule with a wildcard after them runs
+// anything.
+var wideInterpreters = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "fish": true, "dash": true, "python": true, "python3": true,
 	"node": true, "deno": true, "bun": true, "ruby": true, "perl": true, "php": true, "lua": true,
+	"eval": true, "exec": true, "sudo": true, "su": true, "env": true, "xargs": true, "npx": true, "uvx": true,
+}
+
+// Tools that are wide on their own or with a bare wildcard ("kubectl *"),
+// and narrow with a subcommand ("kubectl get *").
+var wideTools = map[string]bool{
 	"curl": true, "wget": true, "ssh": true, "scp": true, "rsync": true, "nc": true, "ncat": true,
-	"eval": true, "exec": true, "sudo": true, "su": true, "env": true, "xargs": true, "rm": true,
-	"docker": true, "kubectl": true, "npx": true, "uvx": true, "pip": true, "npm": true,
+	"rm": true, "docker": true, "kubectl": true, "pip": true, "npm": true,
 }
 
 // wideAllow says what an ALLOW TOOL rule lets the agent do without asking,
@@ -305,17 +323,25 @@ func wideAllow(rule string) string {
 		if everything {
 			return "any shell command"
 		}
-		// An interpreter is wide with a wildcard, or alone; an exact
-		// command line (Bash(npm test)) is narrow.
-		first := strings.Fields(strings.TrimSuffix(strings.TrimSuffix(arg, ":*"), "*"))
-		if len(first) > 0 && wideCommands[first[0]] && (strings.Contains(arg, "*") || len(first) == 1) {
-			return "any '" + first[0] + "' command"
+		// An interpreter is wide with a wildcard, or alone; a tool is wide
+		// alone or with a bare wildcard, narrow with a subcommand
+		// (kubectl get *); an exact command line (npm test) is narrow.
+		words := strings.Fields(strings.TrimSuffix(strings.TrimSuffix(arg, ":*"), "*"))
+		if len(words) > 0 {
+			// By path too: /bin/sh, /usr/bin/python3.
+			words[0] = path.Base(words[0])
+			switch {
+			case wideInterpreters[words[0]] && (strings.Contains(arg, "*") || len(words) == 1):
+				return "any '" + words[0] + "' command"
+			case wideTools[words[0]] && len(words) == 1:
+				return "any '" + words[0] + "' command"
+			}
 		}
 		if strings.HasPrefix(arg, "git push") {
 			return "git push"
 		}
 	case "Write", "Edit", "MultiEdit", "NotebookEdit", "Read":
-		if everything || arg == "/**" || arg == "~/**" || arg == "//**" || arg == "/*" {
+		if everything || arg == "/**" || arg == "~/**" || arg == "//**" || arg == "/*" || arg == "~/*" || arg == "~" || arg == "/" {
 			verb := strings.ToLower(tool)
 			if tool == "Read" {
 				return "read any file, your keys and tokens included"
@@ -323,7 +349,7 @@ func wideAllow(rule string) string {
 			return verb + " any file"
 		}
 	case "WebFetch":
-		if everything {
+		if everything || strings.HasPrefix(arg, "domain:*") {
 			return "fetch any URL"
 		}
 	}
