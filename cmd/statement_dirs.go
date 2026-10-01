@@ -122,6 +122,7 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	if held := statuslineHeld(sf.Root, st.Clauses, st.Dir); held != "" {
 		r.warning, r.warningCode = held, warnStatuslineHeldByHost
 	}
+	r.warnMarketplaceRef(st.Clauses)
 	slKey, _ := filepath.Abs(dir)
 	slp, err := r.planSLHistory(slKey, dir, st.Clauses)
 	if err != nil {

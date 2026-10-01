@@ -501,6 +501,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if held := statuslineHeld(sf.Root, st.Clauses, "PLAYBOOK "+st.Name); held != "" {
 			r.warning, r.warningCode = held, warnStatuslineHeldByHost
 		}
+		r.warnMarketplaceRef(st.Clauses)
 		slKey := cfg
 		if slKey == "" { // created earlier in this dry run: no history yet
 			slKey = "dry:" + st.Name

@@ -167,7 +167,7 @@ type cliMarketplace struct {
 	Source string `json:"source"`
 	Repo   string `json:"repo"`
 	URL    string `json:"url"`
-	Ref    string `json:"ref"` // a git source's #ref, which Claude Code keeps apart from url
+	Ref    string `json:"ref"` // a git or github source's #ref, which Claude Code keeps apart from url or repo
 	Path   string `json:"path"`
 }
 
@@ -437,8 +437,17 @@ func marketplaceArg(src string) (string, cliMarketplace, error) {
 	}
 	switch kind {
 	case grammar.SourceGitHub:
-		repo := strings.TrimPrefix(src, "github:")
-		return repo, cliMarketplace{Source: kind, Repo: repo}, nil
+		// Claude Code takes owner/repo#ref and records repo and ref apart,
+		// as for a git URL; '@' is spelled '#' for it.
+		repo, ref, err := grammar.GitHubSource(src)
+		if err != nil {
+			return "", cliMarketplace{}, err
+		}
+		arg := repo
+		if ref != "" {
+			arg += "#" + ref
+		}
+		return arg, cliMarketplace{Source: kind, Repo: repo, Ref: ref}, nil
 	case grammar.SourceGit:
 		// Claude Code takes url#ref and records url and ref apart; compare
 		// the same way, or an unchanged source reads as another one.
@@ -698,10 +707,11 @@ func sourceString(raw json.RawMessage) (string, bool) {
 	}
 	field := map[string]string{grammar.SourceGitHub: "repo", grammar.SourceGit: "url", grammar.SourceDirectory: "path"}[kind]
 	keys := o.Keys()
-	// A git source may carry its #ref apart from the url, as Claude Code
-	// records it; it is written back as url#ref.
+	// A git or github source may carry its #ref apart from the url or
+	// repo, as Claude Code records it; it is written back as url#ref, or
+	// github:repo#ref.
 	var ref string
-	if kind == grammar.SourceGit && slices.Contains(keys, "ref") {
+	if (kind == grammar.SourceGit || kind == grammar.SourceGitHub) && slices.Contains(keys, "ref") {
 		if ok, err := o.Get("ref", &ref); !ok || err != nil || ref == "" {
 			return "", false
 		}
@@ -724,7 +734,13 @@ func sourceString(raw json.RawMessage) (string, bool) {
 		}
 	}
 	if kind == grammar.SourceGitHub {
+		if strings.ContainsAny(v, "#@") {
+			return "", false
+		}
 		v = "github:" + v
+		if ref != "" {
+			v += "#" + ref
+		}
 	}
 	if _, err := grammar.MarketplaceSource(v); err != nil {
 		return "", false
@@ -856,4 +872,32 @@ func statuslineRefresh(root *settings.Object) *int {
 		return nil
 	}
 	return &n
+}
+
+// warnMarketplaceRef warns about an ADD MARKETPLACE git source (https:// or
+// git@) whose #ref looks like a commit (v3.27.0). Claude Code clones a
+// marketplace by branch or tag only, so the source is written and then
+// fails to clone. The github: form refuses such a ref; a git source took
+// one before v3.27.0, so it is warned about rather than refused, which the
+// stability rules allow in a minor release. The message names the
+// marketplace and the ref, never the URL.
+func (r *stmtRun) warnMarketplaceRef(clauses []grammar.Clause) {
+	for _, c := range clauses {
+		if c.Kind != grammar.AddMarketplace || len(c.Names) == 0 {
+			continue
+		}
+		if kind, err := grammar.MarketplaceSource(c.Arg); err != nil || kind != grammar.SourceGit {
+			continue
+		}
+		_, ref, _ := strings.Cut(c.Arg, "#")
+		if !grammar.LooksLikeCommit(ref) {
+			continue
+		}
+		msg := "MARKETPLACE " + c.Names[0] + " #" + ref + ": Claude Code clones marketplaces by branch or tag; this ref looks like a commit and will not clone: use a tag at that commit"
+		if r.warning != "" {
+			r.warning += "; " + msg
+		} else {
+			r.warning, r.warningCode = msg, warnMarketplaceRefNotCloneable
+		}
+	}
 }

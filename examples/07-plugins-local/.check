@@ -4,3 +4,12 @@ cpb ALTER PLAYBOOK greeter UNSET AGENT
 python3 -c 'import json,sys; assert "agent" not in json.load(open(sys.argv[1]))' "$s"
 cpb ALTER PLAYBOOK greeter DROP PLUGIN greet@hello DROP MARKETPLACE hello
 cpb SHOW PLAYBOOK greeter --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["plugins"]==[] and p["marketplaces"]==[], p'
+# A published marketplace pinned to a tag (v3.27.0): owner/repo#ref reaches
+# claude, the @ spelling is the same source, and a commit is refused.
+export FAKE_MARKETS="acme/plugins=acme"
+cpb "ALTER PLAYBOOK greeter ADD MARKETPLACE acme FROM 'github:acme/plugins#v1.2.0'"
+grep -q '"repo":"acme/plugins","ref":"v1.2.0"' "$HOME/.claude-playbooks/greeter/.fake-claude/markets.json"
+cpb "ALTER PLAYBOOK greeter ADD MARKETPLACE acme FROM 'github:acme/plugins@v1.2.0'" | grep -q unchanged
+if cpb "ALTER PLAYBOOK greeter ADD MARKETPLACE sha FROM 'github:acme/plugins#0123abcd'" 2>"$HOME/sha.err"; then exit 1; fi
+grep -q "a commit cannot be pinned" "$HOME/sha.err"
+cpb ALTER PLAYBOOK greeter DROP MARKETPLACE acme

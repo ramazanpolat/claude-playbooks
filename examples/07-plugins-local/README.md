@@ -11,7 +11,10 @@ cpb run greeter -p "hi"            # "Hello from greeter. …"
 commands with the playbook as `CLAUDE_CONFIG_DIR`, so the plugin is installed
 for this playbook only. cpb reads the state first: applying again runs
 nothing. `'./hello-marketplace'` resolves against this file's directory. A
-marketplace can also come from `'github:<owner>/<repo>'` or a git URL.
+marketplace can also come from `'github:<owner>/<repo>'`, pinned to a branch
+or tag as `'github:<owner>/<repo>#v1.2.0'` (or `@v1.2.0`), or from a git URL
+with an optional `#<ref>`. Claude Code clones a marketplace by branch or tag,
+so a commit SHA is refused: tag the commit instead.
 `SET AGENT` pins the main-thread agent; `UNSET AGENT` removes the pin. A plugin that runs a command its
 marketplace declares is never accepted for you: the statement fails and shows
 the command to review and confirm by hand.
