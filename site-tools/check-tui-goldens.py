@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Checks that the `cpb tui` blocks in index.html still match the real TUI
+"""Checks that the `cpb tui` blocks in the tour page still match the real TUI
 test goldens (internal/tui/testdata/*.golden), so the site can't quietly
 drift from what `cpb tui` actually renders.
 
-Usage: check-tui-goldens.py <index.html> <testdata dir>
+Usage: check-tui-goldens.py <tour.html> <testdata dir>
 """
 import html
 import re
@@ -41,7 +41,7 @@ def main():
     )
     matches = pattern.findall(page)
     if not matches:
-        print("FAIL  no tui-block data-verify=\"internal/tui/testdata/...\" blocks found in index.html", file=sys.stderr)
+        print("FAIL  no tui-block data-verify=\"internal/tui/testdata/...\" blocks found in the page", file=sys.stderr)
         return 1
 
     fail = False

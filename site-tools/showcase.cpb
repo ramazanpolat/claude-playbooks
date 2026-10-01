@@ -1,0 +1,57 @@
+-- showcase.cpb: the five playbooks behind the cards on the home page.
+-- Five playbooks, five CLAUDE_CONFIG_DIRs, each with its own skills, plugins,
+-- MCP servers, tool rules, model and login. The two keychain references need
+-- a secret helper (ALTER DEFAULTS SET SECRET HELPER '<command>', or
+-- CPB_SECRET_HELPER); the skills are directories of your own under ~/skills.
+-- A section starts at its "-- <name>:" line; site-tools/showcase-data.py reads
+-- this file, applies it for real, and writes what cpb reports into the page.
+
+-- work: your daily driver. It shares your login.
+CREATE PLAYBOOK IF NOT EXISTS work;
+ALTER PLAYBOOK work
+  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
+  ADD PLUGIN commit-commands@claude-code-plugins
+  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
+  ADD SKILL release-notes FROM '~/skills/release-notes'
+  ADD SKILL sql-review FROM '~/skills/sql-review'
+  ALLOW TOOL 'Bash(gh pr *)'
+  DENY TOOL 'Bash(git push --force *)'
+  SET MODEL 'claude-opus-5-5'
+  SET VAR MAX_THINKING_TOKENS=8000;
+
+-- side: a second account, running beside the first.
+CREATE PLAYBOOK IF NOT EXISTS side ISOLATED LOGIN;
+ALTER PLAYBOOK side
+  ADD MCP SERVER notes COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
+  ADD SKILL blog-voice FROM '~/skills/blog-voice'
+  SET MODEL 'claude-sonnet-5-5'
+  SET VAR DISABLE_TELEMETRY=1;
+
+-- sre: every launch inside a microVM.
+CREATE PLAYBOOK IF NOT EXISTS sre SANDBOX;
+ALTER PLAYBOOK sre
+  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
+  ADD SKILL runbook FROM '~/skills/runbook'
+  ALLOW TOOL 'Bash(kubectl get *)'
+  DENY TOOL 'Bash(kubectl delete *)';
+
+-- glm: another model backend, behind a router. It shares nothing.
+CREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1;
+CREATE PLAYBOOK IF NOT EXISTS glm NO PILOT PROFILE ISOLATED LOGIN;
+ALTER PLAYBOOK glm
+  USE ENV router
+  SET VAR ANTHROPIC_MODEL=glm-5.3
+  BLOCK VAR ANTHROPIC_API_KEY
+  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'
+  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
+  SET MODEL PICKER ONLY;
+
+-- reviewer: reads code, never writes it.
+CREATE PLAYBOOK IF NOT EXISTS reviewer;
+ALTER PLAYBOOK reviewer
+  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
+  ADD PLUGIN code-review@claude-code-plugins
+  ADD PLUGIN pr-review-toolkit@claude-code-plugins
+  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(git diff *)'
+  DENY TOOL 'Edit' 'Write'
+  SET MODEL 'claude-sonnet-5-5';

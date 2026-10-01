@@ -1,13 +1,14 @@
 #!/bin/sh
-# Re-runs the commands site/index.html shows, against a real cpb build, in a
-# throwaway HOME, and checks the TUI blocks against the real goldens.
+# Keeps the site honest against a real cpb build, in throwaway HOMEs:
+#   - site/tour.html: re-runs the commands it shows and asserts the lines a
+#     reader relies on (not a byte diff: PIDs, timestamps and temp paths vary),
+#     and diffs its `cpb tui` blocks against the real goldens;
+#   - site/index.html: applies site-tools/showcase.cpb and checks that every
+#     card's data is exactly what cpb reports (site-tools/showcase-data.py).
+# If a statement stops parsing or an output changes shape, this fails loudly
+# instead of letting the site drift from the grammar.
 #
-# It does not byte-diff command output against the page (PIDs, timestamps and
-# temp paths vary run to run); it asserts the substrings a reader relies on
-# are still there. If a statement stops parsing or a shape changes, this
-# fails loudly instead of letting the site drift from the grammar.
-#
-# Usage: site/verify-snippets.sh <path to the cpb binary>
+# Usage: site-tools/verify-snippets.sh <path to the cpb binary>
 set -eu
 cpb_bin=$1
 cpb=$(cd "$(dirname "$cpb_bin")" && pwd)/$(basename "$cpb_bin")
@@ -90,8 +91,15 @@ out=$(cpb sessions); check "sessions: no live sessions in a fresh HOME" "No live
 echo "== install =="
 out=$(cpb --version); check "install: version banner" "claude-playbook version"
 
-echo "== tui: the page's screens match the real goldens =="
-if ! python3 "$here/check-tui-goldens.py" "$here/index.html" "$repo/internal/tui/testdata"; then
+echo "== tui: the tour's screens match the real goldens =="
+if ! python3 "$here/check-tui-goldens.py" "$repo/site/tour.html" "$repo/internal/tui/testdata"; then
+  fail=1
+fi
+
+echo "== home: every card is what cpb reports for showcase.cpb =="
+# Its own HOME and stand-ins; the data comes from SHOW/EXPLAIN --json, the
+# APPLY --dry-run --json plan and the files cpb wrote.
+if ! python3 "$here/showcase-data.py" --cpb "$cpb" --check; then
   fail=1
 fi
 
