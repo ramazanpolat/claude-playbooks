@@ -269,6 +269,10 @@ func TestResumeTarget(t *testing.T) {
 		{[]string{"--resume=" + sidLive}, sidLive, false},
 		{[]string{"--resume"}, "", false},                  // Claude's picker
 		{[]string{"--resume", "release notes"}, "", false}, // a search term
+		{[]string{"--resume", "auth"}, "", false},          // one word is a search term too
+		{[]string{"--resume=auth"}, "", false},
+		{[]string{"--resume", sidLive, "--resume"}, "", false}, // the last --resume wins: the picker
+		{[]string{"-r", sidOld, "--resume=" + sidLive}, sidLive, false},
 		{[]string{"-c"}, "", true},
 		{[]string{"--continue", "--model", "opus"}, "", true},
 		{[]string{"--resume", sidLive, "--fork-session"}, "", false},

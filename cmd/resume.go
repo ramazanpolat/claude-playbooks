@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,10 +18,15 @@ import (
 // Claude Code finds a session by the folder it ran in, so a --resume <id>
 // recorded in another folder is refused with the cd that resumes it.
 
+// claudeSessionID is a session id as Claude Code makes one: a UUID. A
+// --resume value of any other shape is a search term for its picker.
+var claudeSessionID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 // resumeTarget is what claudeArgs ask claude to resume: the id of
 // -r/--resume <id> or --resume=<id>, and whether -c/--continue is set. A
 // --resume with no id, or a search term, opens Claude's picker, and
-// --fork-session starts a new id, so neither has a target.
+// --fork-session starts a new id, so neither has a target. The last
+// --resume is the one claude takes.
 func resumeTarget(claudeArgs []string) (id string, cont bool) {
 	fork := false
 scan:
@@ -29,12 +35,14 @@ scan:
 		case a == "--":
 			break scan
 		case a == "-r" || a == "--resume":
-			if i+1 < len(claudeArgs) && grammar.ValidSessionID(claudeArgs[i+1]) {
+			id = ""
+			if i+1 < len(claudeArgs) && claudeSessionID.MatchString(claudeArgs[i+1]) {
 				id = claudeArgs[i+1]
 				i++
 			}
 		case strings.HasPrefix(a, "--resume="):
-			if v := strings.TrimPrefix(a, "--resume="); grammar.ValidSessionID(v) {
+			id = ""
+			if v := strings.TrimPrefix(a, "--resume="); claudeSessionID.MatchString(v) {
 				id = v
 			}
 		case a == "-c" || a == "--continue":

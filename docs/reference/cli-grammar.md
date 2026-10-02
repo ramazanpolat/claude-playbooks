@@ -1498,14 +1498,16 @@ claude starts, cpb checks:
 - **`--continue`** (`-c`) is refused when the newest transcript of this
   folder, in this playbook, belongs to a live session.
 - **Not checked.** `--fork-session` beside either flag starts a new id.
-  `--resume` with no id, or with a search term, opens Claude Code's picker.
+  `--resume` with no id, or with a search term (a value that is not a
+  UUID), opens Claude Code's picker; of several `--resume`, the last counts.
   An id cpb finds no transcript of is left to claude, which says so.
 - **Sandboxed launches** hand the flags to the claude inside the sandbox.
   Its sessions live there, out of cpb's sight, so the launch prints a note
   instead of checking, and `SHOW SESSIONS` lists only what the host's
   config dirs hold.
 - **A plain directory's session** resumes with `CLAUDE_CONFIG_DIR='<dir>'
-  claude --resume <id>`, the command `SHOW SESSIONS` prints for it.
+  claude --resume <id>` from its folder. `SHOW SESSIONS` prints it with the
+  `cd` in front, as for a playbook.
 
 **The exit line.** After `claude` exits under `cpb run` or a launcher, cpb
 prints one line on stderr:
