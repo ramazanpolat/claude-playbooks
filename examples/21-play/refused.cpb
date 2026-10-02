@@ -1,0 +1,6 @@
+-- title: Too much
+-- description: What a shared recipe may not hold.
+
+ALTER PLAYBOOK
+  USE ENV work
+  SET VAR GITHUB_TOKEN=ghp_example AS PLAINTEXT;

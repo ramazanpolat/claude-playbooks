@@ -36,6 +36,13 @@ func TestResolve(t *testing.T) {
 	if got, _ := Resolve("./x/My Recipe.cpb", "v3.28.0"); got == nil || got.Kind != KindLocal || got.Name != "my-recipe" || !filepath.IsAbs(got.Path) {
 		t.Errorf("local: %+v", got)
 	}
+	// A bare x.cpb or dir/x.cpb is a path too: a template name has no dot
+	// or slash, and every other form a scheme.
+	for _, ref := range []string{"reviewer.cpb", "recipes/reviewer.cpb", "recipes/reviewer"} {
+		if got, err := Resolve(ref, "v3.28.0"); err != nil || got.Kind != KindLocal || got.Name != "reviewer" || !filepath.IsAbs(got.Path) {
+			t.Errorf("%s: %+v %v", ref, got, err)
+		}
+	}
 	for ref, want := range map[string]string{
 		"":                                "play what?",
 		"http://example.com/x.cpb":        "https only",
@@ -48,7 +55,6 @@ func TestResolve(t *testing.T) {
 		"github:acme/agents/rev.cpb@-x":   "github:<owner>/<repo>/<path>.cpb",
 		"github:acme/agents/rev.cpb@a..b": "github:<owner>/<repo>/<path>.cpb",
 		"Reviewer":                        "is not a template name",
-		"reviewer.cpb":                    "is not a template name",
 	} {
 		if _, err := Resolve(ref, "v3.28.0"); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", ref, err, want)
@@ -321,5 +327,25 @@ func TestCheckNoAlias(t *testing.T) {
 	}
 	if r := Check([]byte("ALTER PLAYBOOK ALIAS x;\n")); len(r.Refused) != 1 {
 		t.Fatalf("ALIAS: %+v", r.Refused)
+	}
+}
+
+// After a template miss: close names from the index, nothing for a name
+// close to none.
+func TestSuggest(t *testing.T) {
+	idx := []byte("code-reviewer\nglm-router\nsre-sandbox\nwriter\n")
+	for name, want := range map[string]string{
+		"reviewer":    "code-reviewer",
+		"code-review": "code-reviewer",
+		"writr":       "writer",
+		"sre":         "sre-sandbox",
+		"kubernetes":  "",
+	} {
+		if got := strings.Join(Suggest(idx, name), ","); got != want {
+			t.Errorf("%s: %q, want %q", name, got, want)
+		}
+	}
+	if got := IndexURL("https://raw.githubusercontent.com/o/r/v3.28.0/site/p/x.cpb"); got != "https://raw.githubusercontent.com/o/r/v3.28.0/site/p/index.txt" {
+		t.Errorf("index URL: %s", got)
 	}
 }

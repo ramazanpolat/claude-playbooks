@@ -487,12 +487,12 @@ func lineDiff(a, b []string) []string {
 		switch {
 		case i < n && j < m && a[i] == b[j]:
 			i, j = i+1, j+1
-		case j < m && (i == n || lcs[i][j+1] >= lcs[i+1][j]):
-			out = append(out, "+ "+b[j])
-			j++
-		default:
+		case i < n && (j == m || lcs[i+1][j] >= lcs[i][j+1]):
 			out = append(out, "- "+a[i])
 			i++
+		default:
+			out = append(out, "+ "+b[j])
+			j++
 		}
 	}
 	return out

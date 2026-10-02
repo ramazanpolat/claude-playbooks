@@ -287,12 +287,22 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 		if guard.isCancelled() {
 			return errPlayCancelled
 		}
-		// Apply the same bytes for real, in the throwaway store.
+		// Apply the same bytes for real, in the throwaway store. Its report
+		// repeats the plan just shown, and names a playbook about to be
+		// removed ("Run with: …"), so it is kept, and shown only on failure.
+		logf, err := os.Create(filepath.Join(dir, "apply.log"))
+		if err != nil {
+			return err
+		}
 		stdout := os.Stdout
-		os.Stdout = os.Stderr
+		os.Stdout = logf
 		err = applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, Yes: true}, nil)
 		os.Stdout = stdout
+		logf.Close()
 		if err != nil {
+			if b, rerr := os.ReadFile(logf.Name()); rerr == nil {
+				os.Stderr.Write(b)
+			}
 			return err
 		}
 		pbDir := filepath.Join(config.ResolvePlaybooksDir(), name)
