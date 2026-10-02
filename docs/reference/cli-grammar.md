@@ -111,7 +111,7 @@ pb-clause  := set-clause
             | SET STATUSLINE PREVIOUS      v3.25.0, the status line cpb replaced last
             | SET ISOLATED LOGIN | UNSET ISOLATED LOGIN   v3.23.0, see "Isolated login"
             | SET SANDBOX | UNSET SANDBOX  every launch sandboxed (the login isolated too) | not; see "Sandbox"
-            | SET SANDBOX <key>=<value> ...   the [sandbox] table's own keys: SET SANDBOX backend=openshell
+            | SET SANDBOX <key>=<value> ...   the [sandbox] table's own keys: SET SANDBOX backend=sbx
             | UNSET SANDBOX <key> ...      forget a setting: UNSET SANDBOX host
             | SET MODEL '<model>' | UNSET MODEL
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
@@ -305,7 +305,7 @@ A playbook's `[sandbox]` table says how its launches are sandboxed.
 ```
 ALTER PLAYBOOK sre SET SANDBOX               -- every launch sandboxed (always = true); the login isolated too
 ALTER PLAYBOOK sre UNSET SANDBOX             -- always = false; the login stays isolated
-ALTER PLAYBOOK sre SET SANDBOX backend=openshell host=me@buildbox mounts=~/libs:ro,~/data
+ALTER PLAYBOOK sre SET SANDBOX backend=sbx host=me@buildbox mounts=~/libs:ro,~/data
 ALTER PLAYBOOK sre UNSET SANDBOX host mounts
 ```
 
@@ -316,7 +316,7 @@ ALTER PLAYBOOK sre UNSET SANDBOX host mounts
   form spelled out. Bare `UNSET SANDBOX` is `always = false` and leaves the
   login isolated (`UNSET ISOLATED LOGIN` shares it again). `UNSET SANDBOX
   <key> …` forgets settings.
-- **The keys** are the table's own: `always`; `backend` (`sbx`, `openshell`);
+- **The keys** are the table's own: `always`; `backend` (`sbx`);
   `host` (`user@host`: the launch runs there, over ssh); `workdir`; `mounts`
   (comma-separated, `:ro` for read-only); `allow_net` (comma-separated
   hosts); `secrets` (`proxy`, `env`); `claude_version`; `share_skills`
@@ -1637,7 +1637,7 @@ available. `--keep` keeps it as a playbook of your own instead. The guide is
 
 ```
 cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env <set>]...
-               [--sandbox[=sbx|openshell] | --no-sandbox] [--sha256 <hex>] [-- <claude arguments>]
+               [--sandbox[=sbx] | --no-sandbox] [--sha256 <hex>] [-- <claude arguments>]
                                                        preview, confirm, run, remove
 cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals and risks
 cpb play <ref> --dry-run [--json] [--sha256 <hex>]    the plan against a throwaway playbook
@@ -1797,14 +1797,13 @@ those names, sorted, one per line.
    `claude`), and removes everything afterwards.
 
 **The sandbox.** A play runs sandboxed by default:
-- **the backend:** `sbx` where it is installed, otherwise OpenShell where its
-  preflight passes (Linux). `--sandbox=<backend>` picks one, and refuses if
-  it is not available;
+- **the backend:** `sbx` where it is installed. `--sandbox=sbx` names it, and
+  refuses if it is not available;
 - **`--no-sandbox`** runs it on this machine. The preview says "Sandbox off
   (--no-sandbox): this agent runs on your machine, as you.", and the plan
   carries the `no_sandbox` risk;
-- **no backend here:** the preview says "No sandbox available here (sbx, or
-  OpenShell on Linux): this agent will run on your machine, as you.", with
+- **no backend here:** the preview says "No sandbox available here (sbx):
+  this agent will run on your machine, as you.", with
   the same risk;
 - **`create-with: SANDBOX`** is refused where no backend is available,
   unless `--no-sandbox` (and then the preview names the override);

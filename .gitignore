@@ -55,7 +55,7 @@ id_ed25519
 # highest-value thing in the tree to keep out of git.
 #
 # Anchored to the repo root, which is where Claude Code actually writes, so
-# these can never collide with a test fixture of the same name under tests/.
+# these can never match a directory of the same name deeper in the tree.
 /projects/
 /file-history/
 /shell-snapshots/

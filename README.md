@@ -74,7 +74,7 @@ new playbook's `CLAUDE.md` imports nothing. [Environment →](docs/guides/enviro
 
 With `--sandbox`, Claude Code runs in a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/)
 that sees your working directory and the playbook's own directory, and not
-your home, `~/.claude`, your shell's environment or your other playbooks. On Linux, `--sandbox=openshell` uses [NVIDIA OpenShell](docs/guides/sandbox.md#openshell-backend-linux) instead.
+your home, `~/.claude`, your shell's environment or your other playbooks.
 
 ```bash
 cpb run --sandbox work                                         # this folder is the workdir
@@ -127,7 +127,7 @@ cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"   # state as tables; add 
 
 ## Built to be relied on
 
-- **Tested on every change:** CI applies all 21 examples and, on Linux and
+- **Tested on every change:** CI applies all 20 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
   same. Each release passes a full [arena](gentar/README.md) regression on the exact commit it is tagged from.
 - **Another account's login never replaces yours:** cpb sets it aside rather
@@ -139,7 +139,7 @@ cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"   # state as tables; add 
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | base -> an agent -> a team layer, as recipes |
-| [Examples 01-21](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI and `cpb play`, all applied in CI |
+| [Examples 01-20](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI and `cpb play`, all applied in CI |
 | [Guides](docs/README.md) · [CLI grammar](docs/reference/cli-grammar.md) | how-tos for every area · `cpb <VERB> <OBJECT> <name> <clause> ...`, every statement and output format |
 | [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |
 
