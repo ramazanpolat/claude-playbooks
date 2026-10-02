@@ -1,8 +1,8 @@
--- showcase.cpb: the five playbooks behind the cards on the home page.
+-- showcase.cpb: the playbooks behind the cards on the home page.
 -- Five playbooks, five CLAUDE_CONFIG_DIRs, each with its own skills, plugins,
--- MCP servers, tool rules, model and login. The two keychain references need
--- a secret helper (ALTER DEFAULTS SET SECRET HELPER '<command>', or
--- CPB_SECRET_HELPER); the skills are directories of your own under ~/skills.
+-- MCP servers, tool rules, model and login. The keychain references need a
+-- secret helper (ALTER DEFAULTS SET SECRET HELPER '<command>', or
+-- CPB_SECRET_HELPER); the runbook skill is a directory of your own.
 -- A section starts at its "-- <name>:" line; site-tools/showcase-data.py reads
 -- this file, applies it for real, and writes what cpb reports into the page.
 
@@ -11,9 +11,13 @@ CREATE PLAYBOOK IF NOT EXISTS work;
 ALTER PLAYBOOK work
   ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
   ADD PLUGIN commit-commands@claude-code-plugins
+  ADD PLUGIN feature-dev@claude-code-plugins
   ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
-  ADD SKILL release-notes FROM '~/skills/release-notes'
-  ADD SKILL sql-review FROM '~/skills/sql-review'
+  ADD MCP SERVER linear URL 'https://mcp.linear.app/mcp'
+  ADD SKILL pdf FROM 'github:anthropics/skills' SUBDIR 'skills/pdf'
+  ADD SKILL docx FROM 'github:anthropics/skills' SUBDIR 'skills/docx'
+  ADD SKILL xlsx FROM 'github:anthropics/skills' SUBDIR 'skills/xlsx'
+  ADD SKILL pptx FROM 'github:anthropics/skills' SUBDIR 'skills/pptx'
   ALLOW TOOL 'Bash(gh pr *)'
   DENY TOOL 'Bash(git push --force *)'
   SET MODEL 'claude-opus-5-5'
@@ -22,8 +26,12 @@ ALTER PLAYBOOK work
 -- side: a second account, running beside the first.
 CREATE PLAYBOOK IF NOT EXISTS side ISOLATED LOGIN;
 ALTER PLAYBOOK side
-  ADD MCP SERVER notes COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
-  ADD SKILL blog-voice FROM '~/skills/blog-voice'
+  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
+  ADD PLUGIN frontend-design@claude-code-plugins
+  ADD MCP SERVER notion URL 'https://mcp.notion.com/mcp'
+  ADD MCP SERVER playwright COMMAND 'npx' ARGS '@playwright/mcp@latest'
+  ADD SKILL canvas-design FROM 'github:anthropics/skills' SUBDIR 'skills/canvas-design'
+  ADD SKILL algorithmic-art FROM 'github:anthropics/skills' SUBDIR 'skills/algorithmic-art'
   SET MODEL 'claude-sonnet-5-5'
   SET VAR DISABLE_TELEMETRY=1;
 
@@ -31,7 +39,9 @@ ALTER PLAYBOOK side
 CREATE PLAYBOOK IF NOT EXISTS sre SANDBOX;
 ALTER PLAYBOOK sre
   ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
+  ADD MCP SERVER cloudflare-docs URL 'https://docs.mcp.cloudflare.com/mcp'
   ADD SKILL runbook FROM '~/skills/runbook'
+  ADD SKILL doc-coauthoring FROM 'github:anthropics/skills' SUBDIR 'skills/doc-coauthoring'
   ALLOW TOOL 'Bash(kubectl get *)'
   DENY TOOL 'Bash(kubectl delete *)';
 
@@ -42,6 +52,7 @@ ALTER PLAYBOOK glm
   USE ENV router
   SET VAR ANTHROPIC_MODEL=glm-5.3
   BLOCK VAR ANTHROPIC_API_KEY
+  ADD MCP SERVER context7 COMMAND 'npx' ARGS '-y' '@upstash/context7-mcp'
   ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'
   ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
   SET MODEL PICKER ONLY;
@@ -52,6 +63,11 @@ ALTER PLAYBOOK reviewer
   ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
   ADD PLUGIN code-review@claude-code-plugins
   ADD PLUGIN pr-review-toolkit@claude-code-plugins
+  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
   ALLOW TOOL 'Bash(gh pr view *)' 'Bash(git diff *)'
   DENY TOOL 'Edit' 'Write'
   SET MODEL 'claude-sonnet-5-5';
+
+-- ephemeral spike: a throwaway session in a throwaway folder.
+--   cpb start /tmp/spike --delete
+-- Not a playbook: nothing to create, nothing registered, nothing left behind.
