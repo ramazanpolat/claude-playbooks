@@ -10,7 +10,7 @@ A directory under `~/.claude-playbooks/` that Claude Code treats as its whole co
 
 ## Read state from --json, never from the human form
 
-Never assume a playbook exists or a name is free. The registry is the filesystem, read fresh on every call. Every `SHOW` and `EXPLAIN` has a `--json` form that is the contract: fields may be added, an existing field never changes meaning within a major version. The human form may change between releases; do not grep it.
+Never assume a playbook exists or a name is free. The registry is the filesystem, read fresh on every call. Every `SHOW` and `EXPLAIN` has a `--json` form, which is what to parse; the release notes name every change to it. The human form may change between releases; do not grep it.
 
 ```bash
 cpb SHOW PLAYBOOKS --json            # an array of playbook objects (a bare `cpb SHOW --json` is the same)

@@ -24,7 +24,7 @@ record of why they are the rules. Newest last.
 | 2026-09-26 | `SET AGENT` pins the main-thread agent in the playbook's user-scope settings (verified with nine `claude -p` runs) | Plugins and the agent |
 | 2026-09-26 | A playbook file can be a recipe: a name-less `ALTER PLAYBOOK`, whose target is chosen by `USE PLAYBOOK` or `APPLY … TO` | Targets |
 | 2026-09-26 | A playbook file describes an agent completely: MCP servers, tools, status line and model, skills | An agent's configuration |
-| 2026-09-27 | `APPLY --dry-run --json` prints the plan as one JSON object on stdout, refusals included, and only adds fields within a major version | APPLY --dry-run --json |
+| 2026-09-27 | `APPLY --dry-run --json` prints the plan as one JSON object on stdout, refusals included, with `schema: 1` | APPLY --dry-run --json |
 | 2026-09-27 | The `/model` picker is a playbook's `modelPicker` setting (`ADD MODEL`, `SET MODEL PICKER`) | Model picker |
 | 2026-10-01 | A recipe may open with `-- key: value` header lines (`title`, `description`, `needs`, `create-with`), the template convention the site's templates use | cpb play |
 | 2026-10-02 | cpb names no other tool: the default `CLAUDE.md` imports nothing, and the clause, field and warning about imports, the status line host rule and panels leave cpb; `SET STATUSLINE … IF UNSET` offers a status line without imposing one | Objects, Status line and model |

@@ -7,17 +7,17 @@ Set TypingSpeed 40ms
 Set Shell bash
 Set Padding 24
 Hide
-Type "docker run -it --rm --hostname mac cpb-demo" Enter
-Sleep 2s
+Type "su - you" Enter
+Sleep 1s
 Type "clear" Enter
 Show
 Type "# each playbook = a fully isolated Claude Code instance" Sleep 800ms Enter
 Sleep 400ms
-Type "cpb create writer" Sleep 300ms Enter
+Type "cpb CREATE PLAYBOOK writer" Sleep 300ms Enter
 Sleep 1.4s
-Type "cpb create sre --alias ops" Sleep 300ms Enter
+Type "cpb CREATE PLAYBOOK sre LAUNCHER ops" Sleep 300ms Enter
 Sleep 1.4s
-Type "cpb list" Sleep 300ms Enter
+Type "cpb SHOW PLAYBOOKS" Sleep 300ms Enter
 Sleep 1.8s
 Type "# just type its name: that playbook opens its OWN Claude" Sleep 800ms Enter
 Sleep 300ms

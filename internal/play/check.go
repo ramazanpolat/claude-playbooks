@@ -11,7 +11,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// Risk codes: a closed set within a major version.
+// Risk codes.
 const (
 	RiskRunsProgram       = "runs_program"
 	RiskThirdPartyCode    = "third_party_code"
