@@ -167,7 +167,7 @@ An agent cannot complete an interactive `/login`. If a headless run exits with a
 - Do not put secrets into a playbook you intend to publish. Env blocks and env sets are install-local by design: `update` ignores a source-shipped block and `CREATE PLAYBOOK … FROM` drops it with a note.
 - A raw `claude` launch bypasses authentication preparation and environment layers. For the playbook's semantics, launch through `run`, `start`, or the launcher.
 - Registry mutations are serialized by a lock; launches take no lock and read the manifest at launch time.
-- The self-update is `cpb self-update`; `--check` reports without installing.
+- The self-update is `cpb self-update`: the newest release of its major version, never a new major on its own (`--major` allows one). `--check` reports without installing.
 - A source's migrate step (`[update] migrate`) never runs unattended by surprise: off a terminal, `update` refuses until you pass `--yes`, and `--dry-run` shows the step and its sha256.
 
 ## Reading errors

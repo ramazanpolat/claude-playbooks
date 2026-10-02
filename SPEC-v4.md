@@ -667,34 +667,37 @@ When a long-lived token file exists, a trailing line names it and notes that its
 
 ### `claude-playbook self-update`
 
-Updates the running `claude-playbook` binary in place to the latest GitHub release.
+Updates the running `claude-playbook` binary in place to the newest GitHub release **of its own major version**. A new major version is never installed on its own.
 
 ```bash
-claude-playbook self-update            # download + install the latest release
-claude-playbook self-update --check    # report the latest version without installing
-claude-playbook self-update --force    # reinstall even if already on the latest
+claude-playbook self-update            # the newest release of this major version
+claude-playbook self-update --check    # report the newest of this major and the newest overall; install nothing
+claude-playbook self-update --major    # allow a new major version (read its release notes first)
+claude-playbook self-update --force    # reinstall even if already on the newest
 ```
 
-It resolves the latest release tag from the GitHub API, downloads the asset for
-the running OS/architecture (`claude-playbook-<goos>-<goarch>`), verifies it by
-running `--version` against the downloaded file, and then atomically replaces
-the current executable (it stages a temp file in the executable's own directory
-and `rename`s it into place, so the swap is atomic and never a partial write).
-Symlinks are resolved first, so invoking through the `cpb` symlink updates the
-real binary and leaves the link intact.
+**Which release.** It reads the repository's release list from the GitHub API (`/repos/<repo>/releases?per_page=100`, following the `Link` header's `rel="next"`, at most 10 pages), never `/releases/latest`, which names a single release that may be of a higher major version.
+- **Only releases count:** a release that is a draft or a pre-release is skipped, and so is any tag that is not exactly `vMAJOR.MINOR.PATCH` (`v4.0.0-rc1` is never installed, flagged or not).
+- **By number, not by date:** the highest release in the running version's major is installed. A hotfix to an older major published after a newer one is still found.
+- **The running version's major** comes from its own version, `vMAJOR.MINOR.PATCH` with an optional pre-release suffix: `v4.0.0-rc2` is major 4, and moves to `v4.0.0` once that is released.
+- **A higher major** is named in one line, and nothing more happens: ``v5.0.0 is available, a new major version: run `cpb self-update --major` (read its release notes first)``. `--major` installs the highest release of any major.
+- **Never a downgrade:** a running version newer than every release of its major (a build of an unreleased version) stays, `--force` included.
+- **A build that is not a release** (version `dev`) has no major version. It refuses without `--major`, saying so; `--check` says so and installs nothing.
+- **Fails closed:** if the list cannot be fetched or read (a rate limit, the network, malformed JSON, a `next` link outside the API base, more than 10 pages), it says why, exits non-zero and installs nothing. There is no fallback to `/releases/latest`.
+
+It then downloads the asset for the running OS/architecture (`claude-playbook-<goos>-<goarch>`), checks it against the release's `SHA256SUMS`, verifies it by running `--version` against the downloaded file, and atomically replaces the current executable (it stages a temp file in the executable's own directory and `rename`s it into place, so the swap is atomic and never a partial write). Symlinks are resolved first, so invoking through the `cpb` symlink updates the real binary and leaves the link intact.
 
 ```
-Current version: v1.2.0
-Latest version:  v1.3.0
-Downloading claude-playbook-darwin-arm64 v1.3.0 (darwin/arm64)...
-Updated to v1.3.0 at /Users/you/.local/bin/claude-playbook.
+Current version: v4.1.0
+Newest v4 release: v4.3.1
+Newest release:  v5.0.0
+v5.0.0 is available, a new major version: run `cpb self-update --major` (read its release notes first)
+Downloading claude-playbook-darwin-arm64 v4.3.1 (darwin/arm64)...
+Checksum verified (sha256).
+Updated to v4.3.1 at /Users/you/.local/bin/claude-playbook.
 ```
 
-If already on the latest version, it prints `Already up to date.` and exits
-(pass `--force` to reinstall anyway). If the install directory is not writable
-(e.g. a root-owned `/usr/local/bin`), it reports that elevated privileges are
-needed. `GITHUB_TOKEN`, when set, is used for the GitHub API request to avoid
-rate limits.
+If already on the newest release, it prints `Already up to date.` and exits (pass `--force` to reinstall it). If the install directory is not writable (e.g. a root-owned `/usr/local/bin`), it reports that elevated privileges are needed. `GITHUB_TOKEN`, when set, is used for the GitHub API requests to avoid rate limits; it is sent only to the API base.
 
 **A Nix-managed binary is never replaced.** When the resolved executable lies in
 `/nix/store/` (installed through devbox, `nix profile` or the flake), the store

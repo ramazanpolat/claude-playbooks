@@ -266,14 +266,22 @@ mv claude-playbook /usr/local/bin/
 
 ## Updating the tool
 
-`self-update` updates the `claude-playbook` binary to the latest GitHub
-release:
+`self-update` updates the `claude-playbook` binary to the newest GitHub
+release of its major version:
 
 ```bash
-cpb self-update            # download + install the latest release
-cpb self-update --check    # report the latest version without installing
-cpb self-update --force    # reinstall even if already on the latest
+cpb self-update            # the newest release of this major version
+cpb self-update --check    # the newest of this major and the newest overall; installs nothing
+cpb self-update --major    # allow a new major version (read its release notes first)
+cpb self-update --force    # reinstall even if already on the newest
 ```
+
+- **A new major version is never installed on its own.** When one is out,
+  `self-update` says so in one line and stays on your major version:
+  ``v5.0.0 is available, a new major version: run `cpb self-update --major` (read its release notes first)``.
+- **Pre-releases are never installed**, and neither is an older version.
+- **If the release list cannot be read** (a rate limit, no network), it says
+  why and installs nothing. Set `GITHUB_TOKEN` to raise GitHub's rate limit.
 
 It downloads the release asset for your OS/architecture, verifies it, and
 atomically replaces the running binary (resolving the `cpb` symlink so the real
