@@ -51,8 +51,8 @@ func TestSetSandboxForms(t *testing.T) {
 		t.Errorf("bare SET SANDBOX does not say it isolates the login:\n%s", out)
 	}
 
-	if out := mustStmt(t, "EXPLAIN PLAYBOOK p"); !strings.Contains(out, "every launch runs in a sandbox, with an isolated login") || !strings.Contains(out, "UNSET SANDBOX keeps the login isolated") {
-		t.Errorf("EXPLAIN of a sandboxed playbook:\n%s", out)
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK p"); !strings.Contains(out, "every launch runs in a sandbox, with an isolated login") || !strings.Contains(out, "UNSET SANDBOX keeps the login isolated") || strings.Contains(out, "Login:") {
+		t.Errorf("EXPLAIN of a sandboxed playbook: the Sandbox line says the login, and no Login line repeats it:\n%s", out)
 	}
 
 	mustStmt(t, "ALTER PLAYBOOK p UNSET SANDBOX")
