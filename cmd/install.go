@@ -118,15 +118,7 @@ func doInstall(o installOpts, args []string) error {
 		return err
 	}
 
-	// Read the optional manifest from staging to check if we need to cherry-pick a subdir.
 	copySrc := work
-	hasManifestSubdir := mPre != nil && mPre.Subdir != ""
-	if hasManifestSubdir {
-		copySrc, err = manifest.ResolveSubdir(work, "subdir", mPre.Subdir)
-		if err != nil {
-			return err
-		}
-	}
 
 	// Stage 3: assemble the install in a dot-prefixed directory beside its
 	// destination -- discovery skips dot entries, so nothing can launch it
@@ -172,11 +164,6 @@ func doInstall(o installOpts, args []string) error {
 		needsManifestWrite = true
 	}
 	sourceSubdir := subdir
-	if hasManifestSubdir {
-		sourceSubdir = path.Join(sourceSubdir, mPre.Subdir)
-		mPre.Subdir = ""
-		needsManifestWrite = true
-	}
 	if isGit {
 		mPre.Source = &manifest.Source{
 			Repository: source,
@@ -199,53 +186,31 @@ func doInstall(o installOpts, args []string) error {
 		}
 	}
 
-	// Read the optional .playbook of the assembled install. A missing
+	// Check the optional .playbook of the assembled install. A missing
 	// manifest is fine: the installed directory is a valid flat playbook.
-	m, err := manifest.Read(stage)
-	if err != nil {
+	if _, err := manifest.Read(stage); err != nil {
 		os.RemoveAll(stage)
 		return err
 	}
-	configStage := stage
-	if m != nil && m.Subdir != "" {
-		if configStage, err = manifest.ResolveSubdir(stage, "subdir", m.Subdir); err != nil {
-			os.RemoveAll(stage)
-			return err
-		}
-	}
 	// A source never carries a login: its .credentials.json and the account
-	// state of its .claude.json stay out of the install, at its root and in
-	// its config directory (CHANGELOG.md, v3.22.1).
-	for _, dir := range []string{stage, configStage} {
-		if err := stripSourceLogin(dir, source); err != nil {
-			os.RemoveAll(stage)
-			return err
-		}
-		if configStage == stage {
-			break
-		}
+	// state of its .claude.json stay out of the install (CHANGELOG.md,
+	// v3.22.1).
+	if err := stripSourceLogin(stage, source); err != nil {
+		os.RemoveAll(stage)
+		return err
 	}
 	if err := os.Rename(stage, dest); err != nil {
 		os.RemoveAll(stage)
 		return fmt.Errorf("failed to activate %s: %w", dest, err)
 	}
-	configDest := dest
-	if m != nil && m.Subdir != "" {
-		configDest, err = manifest.ResolveSubdir(dest, "subdir", m.Subdir)
-		if err != nil {
-			os.RemoveAll(dest)
-			return err
-		}
-	}
-
-	if err := auth.SyncCredentials(configDest); err != nil {
+	if err := auth.SyncCredentials(dest); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	fmt.Printf("Installed %q at %s\n", targetName, dest)
 
 	// CLAUDE.md warning.
-	warnIfNoClaudeMD(configDest, targetName)
+	warnIfNoClaudeMD(dest, targetName)
 
 	// Alias handling.
 	if o.noLauncher {
@@ -264,7 +229,7 @@ func doInstall(o installOpts, args []string) error {
 			}
 		}
 
-		installLauncher(launcherName, targetName, configDest)
+		installLauncher(launcherName, targetName, dest)
 	}
 
 	return nil

@@ -77,13 +77,6 @@ func doLink(o linkOpts, args []string) error {
 	}
 	configTarget := abs
 	configDest := dest
-	if m != nil && m.Subdir != "" {
-		configTarget, err = manifest.ResolveSubdir(abs, "subdir", m.Subdir)
-		if err != nil {
-			return err
-		}
-		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
-	}
 
 	// Preflight launcher names BEFORE the symlink joins the registry (the
 	// link name registers even under --no-alias, and the target manifest's

@@ -144,11 +144,6 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%q is linked; native update is disabled to avoid replacing its external source", name)
 	}
-	rootAbs, _ := filepath.Abs(root)
-	pathAbs, _ := filepath.Abs(pb.Path)
-	if rootAbs != pathAbs {
-		return fmt.Errorf("%q uses manifest subdir %q; native update requires a flat playbook", name, pb.Manifest.Subdir)
-	}
 
 	// Validate the preserve list before touching anything: a manifest that
 	// names an escaping path must fail loudly, not halfway through the swap.
@@ -266,7 +261,6 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		updated.Skills = liveManifest.Skills
 	}
 	updated.Name = filepath.Base(root)
-	updated.Subdir = ""
 	if err := manifest.Write(work, updated); err != nil {
 		return fmt.Errorf("failed to prepare updated manifest: %w", err)
 	}

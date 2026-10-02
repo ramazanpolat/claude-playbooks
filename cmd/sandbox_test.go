@@ -679,20 +679,6 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"}); err != nil {
 		t.Fatalf("key on the mount with secrets = env: %v", err)
 	}
-	// A subdir install keeps its [env] in the root's manifest, above the
-	// config directory: still on the mount, still refused.
-	writePlaybook(t, root, "subpb", &manifest.Manifest{IsolatedLogin: true, Subdir: "config", Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_AUTH_TOKEN": "root-disk"}}})
-	if err := os.MkdirAll(filepath.Join(root, "subpb", "config"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	os.Remove(log)
-	err = runRun(nil, []string{"--sandbox", "--workdir", work, "subpb"})
-	if err == nil || !strings.Contains(err.Error(), filepath.Join(root, "subpb", ".playbook")) {
-		t.Fatalf("key in the root manifest of a subdir install: %v", err)
-	}
-	if _, statErr := os.Stat(log); statErr == nil {
-		t.Fatal("sbx was called with a key on the mount (subdir)")
-	}
 	// A start directory under the working directory inherits the manifest
 	// above it, which the working-directory mount carries: refused.
 	project := filepath.Join(t.TempDir(), "project")

@@ -3,6 +3,7 @@ package playbook
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -73,35 +74,6 @@ func TestDiscoverFlatNoNesting(t *testing.T) {
 	}
 }
 
-// TestDiscoverManifestSubdir verifies a manifest 'subdir' points Path at the
-// nested config directory while RootPath stays at the install root.
-func TestDiscoverManifestSubdir(t *testing.T) {
-	root := t.TempDir()
-	install := filepath.Join(root, "sre")
-	configDir := filepath.Join(install, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(install, ".playbook"),
-		[]byte("version = \"1.0.0\"\nsubdir = \"config\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	pb, err := Find(root, "sre")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pb == nil {
-		t.Fatal("expected to find sre")
-	}
-	if pb.Path != configDir {
-		t.Fatalf("path = %q, want %q", pb.Path, configDir)
-	}
-	if pb.RootPath != install {
-		t.Fatalf("rootPath = %q, want %q", pb.RootPath, install)
-	}
-}
-
 func TestDiscoverReturnsInvalidManifestError(t *testing.T) {
 	root := t.TempDir()
 	playbookDir := filepath.Join(root, "broken")
@@ -116,7 +88,9 @@ func TestDiscoverReturnsInvalidManifestError(t *testing.T) {
 	}
 }
 
-func TestDiscoverReturnsMissingSubdirError(t *testing.T) {
+// A top-level subdir is not a v4 key: discovery refuses the manifest and
+// names it.
+func TestDiscoverRefusesATopLevelSubdir(t *testing.T) {
 	root := t.TempDir()
 	playbookDir := filepath.Join(root, "missing")
 	if err := os.Mkdir(playbookDir, 0755); err != nil {
@@ -125,7 +99,7 @@ func TestDiscoverReturnsMissingSubdirError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(playbookDir, ".playbook"), []byte("subdir = \"config\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Discover(root); err == nil {
-		t.Fatal("expected missing manifest subdir to fail discovery")
+	if _, err := Discover(root); err == nil || !strings.Contains(err.Error(), `unknown key "subdir"`) {
+		t.Fatalf("discovery over a top-level subdir: %v", err)
 	}
 }

@@ -272,36 +272,6 @@ func TestInstallDropsLinkedStateFile(t *testing.T) {
 	}
 }
 
-// LINK of an isolated directory with a config subdirectory keeps the login
-// in the subdirectory: the root's .playbook decides (agy review, v3.22.1).
-func TestLinkIsolatedSubdirKeepsLogin(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	store := seedMachineLogin(t)
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, "iso-sub")
-	writeSource(t, filepath.Join(dir, "config"))
-	// The root's .playbook governs: no nested one (a nested manifest is the
-	// nearest, for this check as for a launch).
-	if err := os.Remove(filepath.Join(dir, "config", ".playbook")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte("name = \"iso-sub\"\nisolated_login = true\nsubdir = \"config\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var err error
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK iso-sub NO LAUNCHER LINK '"+dir+"'") })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if data, _ := os.ReadFile(filepath.Join(dir, "config", ".credentials.json")); string(data) != sourceLogin {
-		t.Fatal("an isolated directory's login in its subdirectory was set aside")
-	}
-	if data, _ := os.ReadFile(store); string(data) != machineLogin {
-		t.Fatalf("the machine store changed: %s", data)
-	}
-}
-
 // A linked directory whose .credentials.json is a link to a foreign store
 // (another account's, newer than the machine's): LINK and a launch leave the
 // machine store and the foreign file byte-identical, and the link is

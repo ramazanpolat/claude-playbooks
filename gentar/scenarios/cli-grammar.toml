@@ -120,9 +120,8 @@ command = 'M="$HOME/.claude-playbooks/gpb/.playbook"; cpb ALTER PLAYBOOK gpb SET
 contains = "set-var-refs-ok"
 
 [[verify.commands]]
-# DROP ENV is refused while a playbook, DEFAULTS, or a nested (subdir
-# layout) manifest the launch reads still uses the set.
-command = 'P="$HOME/.claude-playbooks"; cpb CREATE ENV nest >/dev/null && mkdir -p "$P/npb/config" && printf "version = \"0.1.0\"\nname = \"npb\"\nsubdir = \"config\"\n" > "$P/npb/.playbook" && printf "version = \"0.1.0\"\nname = \"npb\"\n\n[env]\nsets = [\"nest\"]\n" > "$P/npb/config/.playbook" && for e in o1 d1 nest; do if cpb DROP ENV $e >/dev/null 2>&1; then echo "dropped-in-use-$e"; exit 1; fi; done && test -e "$P/.env-sets/o1.toml" && test -e "$P/.env-sets/d1.toml" && test -e "$P/.env-sets/nest.toml" && cpb DROP ENV IF EXISTS never-was >/dev/null && echo drop-env-guard-ok'
+# DROP ENV is refused while a playbook or DEFAULTS still uses the set.
+command = 'P="$HOME/.claude-playbooks"; for e in o1 d1; do if cpb DROP ENV $e >/dev/null 2>&1; then echo "dropped-in-use-$e"; exit 1; fi; done && test -e "$P/.env-sets/o1.toml" && test -e "$P/.env-sets/d1.toml" && cpb DROP ENV IF EXISTS never-was >/dev/null && echo drop-env-guard-ok'
 contains = "drop-env-guard-ok"
 
 [[verify.commands]]

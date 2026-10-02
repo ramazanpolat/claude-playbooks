@@ -268,9 +268,9 @@ func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
 	}
 }
 
-// A broken manifest in a subdir does not switch the install root's
-// isolation off: the token must still be stripped.
-func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
+// A broken manifest nearer the config directory does not switch the install
+// root's isolation off: the token must still be stripped.
+func TestIsolationSurvivesABrokenNearerManifest(t *testing.T) {
 	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-INHERITED")
 	t.Setenv("HOME", t.TempDir())
@@ -280,7 +280,7 @@ func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("name = \"pb\"\nisolated_login = true\nsubdir = \"playbook\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("name = \"pb\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(sub, ".playbook"), []byte("= [\n"), 0o644); err != nil {
@@ -289,7 +289,7 @@ func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
 
 	env, err := PrepareLaunchEnv(sub)
 	if _, present := envValue(t, env, OAuthTokenEnv); present {
-		t.Fatalf("broken subdir manifest switched isolation off: %v", env)
+		t.Fatalf("a broken nearer manifest switched isolation off: %v", env)
 	}
 	if err == nil {
 		t.Fatal("the broken manifest went unreported")
