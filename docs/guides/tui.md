@@ -62,8 +62,6 @@ reads: cpb SHOW PLAYBOOK router --json · cpb EXPLAIN PLAYBOOK router --json
 - **A reference is shown as the reference.** A plaintext credential shows
   as `(redacted, plaintext)`. No screen ever holds a secret value, since
   cpb has withheld it before the TUI reads it.
-- **Overview** says whether the playbook's `CLAUDE.md` imports your pilot
-  profile.
 
 ## Sessions
 

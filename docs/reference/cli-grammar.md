@@ -493,8 +493,7 @@ and need no `--yes`.
 
 ### APPLY --dry-run --json
 
-Built for v3.22.0. The schema was confirmed 2026-09-27 with root and with
-cockpit, its first consumer. `cpb APPLY <file> … [TO <target>] --dry-run
+Built for v3.22.0. `cpb APPLY <file> … [TO <target>] --dry-run
 --json` prints the plan as **one JSON object on stdout**, in every case,
 refusals included. It follows the `--json` rule: fields may be added, and
 none changes meaning within a major version. `schema` is bumped only on a

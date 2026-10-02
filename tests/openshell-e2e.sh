@@ -88,7 +88,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-claude-playbook CREATE PLAYBOOK e2e NO ALIAS NO PILOT PROFILE >/dev/null
+claude-playbook CREATE PLAYBOOK e2e NO ALIAS >/dev/null
 P=$HOME/.claude-playbooks/e2e
 claude-playbook env-profile r set ANTHROPIC_BASE_URL=http://localhost:18080 ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-1 >/dev/null
 claude-playbook env e2e use r >/dev/null
