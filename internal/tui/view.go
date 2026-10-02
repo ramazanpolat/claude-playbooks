@@ -171,10 +171,7 @@ func (m Model) keys() string {
 	case vPlaybooks:
 		return " enter open  s sessions  c SHOW CREATE  e export  y copy  / filter  q quit"
 	case vSessions:
-		if m.recent {
-			return " enter RESUME  R live sessions  y copy statement  / filter  r refresh  q quit"
-		}
-		return " R recent here (to resume)  y copy RESUME  / filter  r refresh  q quit"
+		return " y copy resume  / filter  r refresh  q quit  past sessions: <launcher> --resume"
 	case vEnvs:
 		return " enter/c SHOW CREATE  e export .cpb  y copy  / filter  q quit"
 	}
@@ -191,7 +188,9 @@ var helpLines = []string{
 	"  c            SHOW CREATE of the selection (--skip-secrets)",
 	"  e            export it as <name>.cpb here (asks before replacing a file)",
 	"  y            copy the statement behind the selection",
-	"  R            Sessions: recent sessions in this folder; enter resumes one",
+	"  Sessions     live ones only; y copies the command that resumes one once",
+	"               it ends. Past sessions: <launcher> --resume (or cpb run",
+	"               <playbook> --resume) opens Claude Code's picker",
 	"",
 	"  Secret values are never shown: references appear as references,",
 	"  plaintext credentials as (redacted). Every screen names the cpb",
@@ -289,9 +288,6 @@ func (m Model) reads() []string {
 	case vPlaybooks:
 		return []string{strings.Join(readPlaybooks, " "), strings.Join(readSessions, " ")}
 	case vSessions:
-		if m.recent {
-			return []string{strings.Join(readRecent, " ")}
-		}
 		return []string{strings.Join(readSessions, " ")}
 	case vEnvs:
 		return []string{strings.Join(readEnvs, " ")}
@@ -304,7 +300,7 @@ func (m Model) reads() []string {
 func (m Model) readsLine() string {
 	r := m.reads()
 	if len(r) == 0 {
-		return "nothing (what this session copied, exported and resumed)"
+		return "nothing (what this session copied and exported)"
 	}
 	return "cpb " + strings.Join(r, " · cpb ")
 }
@@ -338,27 +334,13 @@ func (m Model) listBody() []string {
 		}
 		return m.table([]string{"NAME", "LAUNCHER", "VERSION", "ENV SETS", "LOGIN", "SESSIONS", "MODEL"}, rows, 3, m.cursor[vPlaybooks], h, 2, 6, 1)
 	case vSessions:
-		if m.recent {
-			rows := [][]string{}
-			for _, r := range m.recentRows() {
-				live := "-"
-				if r.Live && r.PID != nil {
-					live = "pid " + strconv.Itoa(*r.PID)
-				}
-				rows = append(rows, []string{shortID(r.SessionID), r.Playbook, m.age(r.LastActive), orDash(deref(r.Model)), live, orDash(deref(r.Title))})
-			}
-			if len(rows) == 0 {
-				return []string{"", "  No Claude Code session was found in " + m.short(m.o.Cwd) + "."}
-			}
-			return m.table([]string{"SESSION", "PLAYBOOK", "ACTIVE", "MODEL", "LIVE", "TITLE (recent, in " + m.short(m.o.Cwd) + ")"}, rows, 5, m.cursor[vSessions], h, 3)
-		}
 		rows := [][]string{}
 		for _, s := range m.sessionRows() {
 			rows = append(rows, []string{s.Playbook, strconv.Itoa(s.PID), orDash(deref(s.TTY)), kindShort(s.Kind), orDash(deref(s.Status)),
 				m.age(s.StartedAt), m.age(deref(s.LastActive)), orDash(deref(s.Model)), m.short(s.Cwd)})
 		}
 		if len(rows) == 0 {
-			return []string{"", "  No live Claude Code sessions. R lists the recent ones in this folder."}
+			return []string{"", "  No live Claude Code sessions. Past sessions: <launcher> --resume."}
 		}
 		return m.table([]string{"PLAYBOOK", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "CWD"}, rows, 8, m.cursor[vSessions], h, 4, 3, 6, 7)
 	case vEnvs:
@@ -400,7 +382,7 @@ func (m Model) listBody() []string {
 		return []string{"", "  Env sets under every playbook:  " + envs, "  Secret helper:                  " + helper}
 	case vLog:
 		if len(m.log) == 0 {
-			return []string{"", "  Nothing yet: copies, exports and resumes of this session appear here."}
+			return []string{"", "  Nothing yet: copies and exports of this session appear here."}
 		}
 		out := []string{""}
 		for _, l := range m.log {

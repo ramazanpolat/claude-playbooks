@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"os"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -43,7 +42,6 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	home, _ := os.UserHomeDir()
 	return tui.Run(tui.Options{
 		Runner: r,
-		Resume: func(args ...string) *exec.Cmd { return r.Command(args...) },
 		Home:   home,
 		Cwd:    cwd,
 	})

@@ -1,8 +1,9 @@
 # Resume a session
 
 Every playbook is its own Claude Code config dir, so `claude --resume` in a
-plain shell looks in the wrong place: `~/.claude`. cpb knows which playbook
-a session belongs to and resumes it there.
+plain shell looks in the wrong place: `~/.claude`. Resume through the
+playbook instead. Its launcher, or `cpb run <name>`, hands `--resume` to
+Claude Code under the playbook's own config dir.
 
 ## See what is running
 
@@ -27,28 +28,27 @@ The list comes from files Claude Code keeps itself, one per live process
 
 ## Resume
 
-In the project folder:
+In the folder the session ran in:
 
 ```
-$ cpb RESUME
-1 newer session is live (pid 47904); resuming d0a04774-d6ed-49f7-bb32-3c57962348fa of work (last active 4 days ago)
+kd --resume                                        # Claude Code's picker: this playbook's sessions here
+kd --resume 08c4811b-3867-4f18-b08f-de6d1e07395f   # one session
+kd --continue                                      # the newest session here
 ```
 
-- **A bare `RESUME`** takes the newest session of this folder that is not
-  running, across all playbooks. It says what it took, and which newer ones
-  it skipped because they are live.
-- **`RESUME --list`** shows the ten newest sessions, with their titles.
-  Resume one of them with `RESUME SESSION '<id>'`.
-- **From anywhere.** `RESUME SESSION '<id>'` works from any folder. cpb
-  moves to the folder the session ran in.
-- **The same launch as the launcher.** The launch is the playbook's own, as
-  its launcher or `cpb run <name>` would do it: env sets, variables, secret
-  references, the login.
+- **Without a launcher**, `cpb run <name> --resume …` does the same.
+- **The same launch as always.** The launch is the playbook's own: env sets,
+  variables, secret references, the login.
+- **From another folder.** Claude Code finds a session by the folder it ran
+  in. The `resume` field of `SHOW SESSIONS --json` is the whole command:
+  `cd '<folder>' && kd --resume <id>`. A `--resume <id>` typed in another
+  folder is refused with that command.
 
 **A live session is refused.** If the session is still open in another
-terminal, `RESUME` says so with its pid and launches nothing. Two processes
-on one session id corrupt it. Close the other one first, or pick another
-session.
+terminal, cpb says so with its pid and launches nothing. For `--continue`,
+that is the newest session in this folder. Two processes on one session id
+corrupt it. Close the other one first, or pick another session in the
+picker. `--fork-session` starts a new id, so it is never refused.
 
 ## The line after a session
 
@@ -64,8 +64,9 @@ cpb's: it opens the session in the playbook, where the transcript lives.
 
 ## Limits
 
-- **Sandboxed playbooks** (`--sandbox`, `[sandbox] always`) keep their
-  sessions inside the sandbox. `RESUME` refuses them for now.
+- **Sandboxed playbooks** (`--sandbox`, `SET SANDBOX`) keep their sessions
+  inside the sandbox. `--resume` and `--continue` go to the claude in there.
+  cpb cannot see those sessions, so it does not check them, and says so.
 - **The format.** The session files are Claude Code's, and undocumented.
   cpb reads them defensively. If a Claude Code version stops writing them,
   `SHOW SESSIONS` shows nothing rather than guessing.

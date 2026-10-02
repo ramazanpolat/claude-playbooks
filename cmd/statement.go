@@ -95,9 +95,6 @@ func runStatement(args []string) error {
 	if st.Verb == grammar.Apply {
 		return runApply(st)
 	}
-	if st.Verb == grammar.Resume {
-		return runResume(st)
-	}
 	r := &stmtRun{}
 	err = execStatement(r, st)
 	if r.warning != "" {

@@ -1,7 +1,7 @@
 # The terminal UI
 
 `cpb tui` shows your playbooks, their sessions, env sets and defaults on
-one screen, and resumes a session in the right playbook. It is a view of
+one screen, with the command that resumes each session. It is a view of
 the grammar: every screen is a `cpb … --json` statement, named on its last
 line. v1 only reads.
 
@@ -74,25 +74,24 @@ reads: cpb SHOW PLAYBOOK router --json · cpb EXPLAIN PLAYBOOK router --json
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
- R recent here (to resume)  y copy RESUME  / filter  r refresh  q quit
+ y copy resume  / filter  r refresh  q quit  past sessions: <launcher> --resume
 reads: cpb SHOW SESSIONS --json
 ```
 
 - **Where each one is running:** the pid, the terminal (TTY), how long it
   has run, when it last did something, its model and its folder.
 - **The list refreshes** every 5 seconds while it is on screen.
-- **`R` switches to the recent sessions of the current folder**, live or
-  not. `enter` on one that is not running resumes it: the TUI hands the
-  terminal to `cpb RESUME SESSION '<id>' FOR PLAYBOOK <name>`, and comes
-  back when you leave Claude.
-- **A running session** is not resumed. The TUI names the pid that holds
-  it, since two processes on one session corrupt it.
+- **`y` copies the command that resumes a session** once it ends, from any
+  folder: `cd '<folder>' && <launcher> --resume <id>`. A running session is
+  not resumed, since two processes on one session corrupt it.
+- **Past sessions** are in Claude Code's own picker: `<launcher> --resume`
+  in the folder they ran in.
 
 ## Take it with you
 
 | Key | What |
 |---|---|
-| `y` | copy the statement behind the selection (`SHOW PLAYBOOK router`, `RESUME SESSION '…' FOR PLAYBOOK …`) |
+| `y` | copy the statement behind the selection (`SHOW PLAYBOOK router`), or a session's resume command |
 | `c` | show the selection's `SHOW CREATE`, without secrets; `y` there copies the text |
 | `e` | write that text as `<name>.cpb` in this folder, a recipe `cpb APPLY` re-applies; an existing file is replaced only after a typed `y` |
 
