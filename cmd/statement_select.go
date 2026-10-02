@@ -15,7 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -135,8 +135,8 @@ func playbookRows() ([]any, error) {
 
 func envRows() ([]any, error) {
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
-	profiles, err := envprofile.List(dir)
+	dir := envset.Dir(playbooksDir)
+	profiles, err := envset.List(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func envRows() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defaults, _ := envprofile.Defaults(dir)
+	defaults, _ := envset.Defaults(dir)
 	rows := []any{}
 	for _, p := range profiles {
 		rows = append(rows, envJSON{Name: p.Name, Description: p.Description,
@@ -158,7 +158,7 @@ func envRows() ([]any, error) {
 // shows for every layer, with effective marking the entry a launch uses.
 func varRows() ([]any, error) {
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 	pbs, err := playbook.Discover(playbooksDir)
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ func varRows() ([]any, error) {
 		if governing != nil {
 			env = governing.Env
 		}
-		origins, err := envprofile.ExplainAll(dir, env)
+		origins, err := envset.ExplainAll(dir, env)
 		if err != nil {
 			continue // EXPLAIN reports a broken layer; the table leaves it out
 		}
@@ -191,8 +191,8 @@ func varRows() ([]any, error) {
 }
 
 func defaultsRows() ([]any, error) {
-	dir := envprofile.Dir(config.ResolvePlaybooksDir())
-	names, err := envprofile.Defaults(dir)
+	dir := envset.Dir(config.ResolvePlaybooksDir())
+	names, err := envset.Defaults(dir)
 	if err != nil {
 		return nil, err
 	}

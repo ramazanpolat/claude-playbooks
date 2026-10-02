@@ -37,7 +37,7 @@ type Playbook struct {
 // every one of those an encoding problem -- an apostrophe alone was a command
 // injection into the user's shell config. Rejecting the name at the front door
 // removes the whole class instead of escaping it at each site, and matches the
-// charset already required of launcher command names.
+// charset already required of launcher launcher names.
 //
 // Deliberately applied to names being CREATED (create/rename/link/install), not
 // to names being looked up: delete and the discovery paths keep using

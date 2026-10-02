@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -216,7 +216,7 @@ func readStatement(st *grammar.Stmt) error {
 		return showCreate(st)
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 	switch {
 	case st.Verb == grammar.Explain:
 		return explainPlaybook(playbooksDir, dir, st)
@@ -254,7 +254,7 @@ func readStatement(st *grammar.Stmt) error {
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
 		return showEnvs(playbooksDir, dir, st)
 	case st.Object == grammar.Defaults:
-		names, err := envprofile.Defaults(dir)
+		names, err := envset.Defaults(dir)
 		if err != nil {
 			return fmt.Errorf("DEFAULTS cannot be read: %w", err)
 		}
@@ -520,19 +520,19 @@ func printPlaybooks(all []playbookJSON) {
 }
 
 func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
-	var profiles []*envprofile.Profile
+	var profiles []*envset.Set
 	if st.Object == grammar.Env {
-		p, err := envprofile.Read(dir, st.Name)
+		p, err := envset.Read(dir, st.Name)
 		if err != nil {
 			return err
 		}
 		if p == nil {
 			return fmt.Errorf("no env set %q", st.Name)
 		}
-		profiles = []*envprofile.Profile{p}
+		profiles = []*envset.Set{p}
 	} else {
 		var err error
-		if profiles, err = envprofile.List(dir); err != nil {
+		if profiles, err = envset.List(dir); err != nil {
 			return err
 		}
 	}
@@ -540,7 +540,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
-	defaults, derr := envprofile.Defaults(dir)
+	defaults, derr := envset.Defaults(dir)
 	all := make([]envJSON, 0, len(profiles))
 	for _, p := range profiles {
 		all = append(all, envJSON{
@@ -601,7 +601,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if governing != nil {
 		block = governing.Env
 	}
-	origins, err := envprofile.Explain(dir, block)
+	origins, err := envset.Explain(dir, block)
 	if err != nil {
 		return fmt.Errorf("the launch of %q would be refused: %w", st.Name, err)
 	}
@@ -645,11 +645,11 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		shown = strings.TrimPrefix(strings.TrimPrefix(shown, "="), " ")
 		from := v.Layer.Kind
 		switch v.Layer.Kind {
-		case envprofile.LayerEnv:
+		case envset.LayerEnv:
 			from += " " + v.Layer.Name
-		case envprofile.LayerDefaults:
+		case envset.LayerDefaults:
 			from += " (ENV " + v.Layer.Name + ")"
-		case envprofile.LayerPlaybook:
+		case envset.LayerPlaybook:
 			from += " " + pb.Name
 		}
 		t.add(v.Key, shown, from)
@@ -681,7 +681,7 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 
 // helperInEffect is the configured secret helper for --json, nil if none.
 func helperInEffect(dir string) (*helperJSON, error) {
-	h, err := envprofile.SecretHelper(dir)
+	h, err := envset.SecretHelper(dir)
 	if err != nil || h == nil {
 		return nil, err
 	}
@@ -919,7 +919,7 @@ func profileUsers(playbooksDir string) (map[string][]string, error) {
 // case-insensitive filesystem). No defaults match nothing.
 func isRegistryDefault(dir string, defaults []string, name string) bool {
 	for _, d := range defaults {
-		if d == name || envprofile.SameProfile(dir, d, name) {
+		if d == name || envset.SameProfile(dir, d, name) {
 			return true
 		}
 	}

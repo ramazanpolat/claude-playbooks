@@ -27,7 +27,7 @@ func init() {
 		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "DEFAULTS", "ALL",
 		"SET", "VAR", "FROM", "BLOCK", "UNSET", "DESCRIBE",
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
-		"RENAME", "TO", "ALIAS", "NO",
+		"RENAME", "TO", "LAUNCHER", "NO",
 		"BRANCH", "SUBDIR", "LINK", "SANDBOX",
 		"SECRET", "HELPER", "AS", "PLAINTEXT",
 		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
@@ -168,10 +168,10 @@ func Expect(args []string) []string {
 // Clause starters per context. A list (of keys, env sets) runs until the
 // next unquoted starter, so these are also the words that end a list.
 var (
-	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIBE"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALIAS", "NO", "ALLOW", "DENY"}
+	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "ALIAS", "NO", "SANDBOX", "ISOLATED"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "ISOLATED"}
 )
 
 var (
@@ -334,7 +334,7 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	}
 	// The invalid name is never quoted back: whatever landed in a name slot
 	// may be a value, a reference or a pasted token.
-	if obj == Env && manifest.ValidateProfileName(t.Text) != nil {
+	if obj == Env && manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid env set name: use letters, digits, dots, dashes and underscores")
 	}
 	if obj == Playbook && isNew && !playbook.NewNamePattern.MatchString(t.Text) {
@@ -346,7 +346,7 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 func (p *parser) launcher() (string, *Error) {
 	if p.atEnd() {
 		p.note("<launcher>")
-		return "", p.fail("ALIAS needs <launcher>")
+		return "", p.fail("LAUNCHER needs <name>")
 	}
 	t := p.toks[p.i]
 	if IsKeyword(t.Text) {
@@ -772,11 +772,11 @@ func (p *parser) envClause() (*Clause, *Error) {
 		keys, err := p.keys("UNSET")
 		c.Keys = keys
 		return c, err
-	case "DESCRIBE":
-		c.Kind = Describe
+	case "DESCRIPTION":
+		c.Kind = Description
 		if p.atEnd() {
 			p.note("'<text>'")
-			return nil, p.fail("DESCRIBE needs '<text>'")
+			return nil, p.fail("DESCRIPTION needs '<text>'")
 		}
 		c.Arg = p.toks[p.i].Text
 		p.i++
@@ -953,16 +953,16 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		name, err := p.name(Playbook, true)
 		c.Arg = name
 		return c, err
-	case "ALIAS":
-		c.Kind = Alias
+	case "LAUNCHER":
+		c.Kind = Launcher
 		name, err := p.launcher()
 		c.Arg = name
 		return c, err
 	case "NO":
-		if p.kw("ALIAS") == "" {
-			return nil, p.fail("expected ALIAS after NO")
+		if p.kw("LAUNCHER") == "" {
+			return nil, p.fail("expected LAUNCHER after NO")
 		}
-		c.Kind = NoAlias
+		c.Kind = NoLauncher
 		return c, nil
 	}
 	return nil, nil
@@ -1060,16 +1060,16 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		t, err := p.take(w, ph)
 		c.Arg = t.Text
 		return c, err
-	case "ALIAS":
-		c.Kind = Alias
+	case "LAUNCHER":
+		c.Kind = Launcher
 		name, err := p.launcher()
 		c.Arg = name
 		return c, err
 	case "NO":
-		if p.kw("ALIAS") == "" {
-			return nil, p.fail("expected ALIAS after NO")
+		if p.kw("LAUNCHER") == "" {
+			return nil, p.fail("expected LAUNCHER after NO")
 		}
-		c.Kind = NoAlias
+		c.Kind = NoLauncher
 		return c, nil
 	case "SANDBOX":
 		c.Kind = Sandbox
@@ -1240,8 +1240,8 @@ func validate(s *Stmt) *Error {
 	keys := map[string]bool{}
 	envs := map[string]bool{}
 	once := map[Kind]bool{
-		Describe: true, UseEnv: true, RenameTo: true,
-		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
+		Description: true, UseEnv: true, RenameTo: true,
+		Launcher: true, NoLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 		IsolatedLogin: true, SetIsolatedLogin: true, UnsetIsolatedLogin: true,
 		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
@@ -1288,7 +1288,7 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
 		}
 	}
-	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
+	pairs := [][2]Kind{{Launcher, NoLauncher}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
 		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
 		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
@@ -1340,7 +1340,7 @@ func (p *parser) marketplace(c *Clause, verb string) *Error {
 		return p.fail(verb + " MARKETPLACE needs <marketplace>")
 	}
 	t := p.toks[p.i]
-	if manifest.ValidateProfileName(t.Text) != nil {
+	if manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid marketplace name: use letters, digits, dots, dashes and underscores")
 	}
 	p.i++
@@ -1407,7 +1407,7 @@ func ValidAgent(a string) bool { return agentPattern.MatchString(a) }
 // PluginID splits a plugin id, <plugin>@<marketplace>.
 func PluginID(id string) (plugin, marketplace string, ok bool) {
 	plugin, marketplace, ok = strings.Cut(id, "@")
-	if !ok || manifest.ValidateProfileName(plugin) != nil || manifest.ValidateProfileName(marketplace) != nil {
+	if !ok || manifest.ValidateSetName(plugin) != nil || manifest.ValidateSetName(marketplace) != nil {
 		return "", "", false
 	}
 	return plugin, marketplace, true
@@ -1504,7 +1504,7 @@ func CredentialHeader(name string) bool {
 }
 
 // mcpServer reads the rest of ADD MCP SERVER n <target> [<part> ...] or
-// DROP MCP SERVER n. A credential in ENV or HEADER takes a reference:
+// DROP MCP SERVER n. A credential in VAR or HEADER takes a reference:
 // AS PLAINTEXT is not accepted here, because the literal would be written
 // into Claude Code's config.
 func (p *parser) mcpServer(c *Clause, verb string) *Error {
@@ -1520,7 +1520,7 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		return p.fail(verb + " MCP SERVER needs <server>")
 	}
 	t := p.toks[p.i]
-	if manifest.ValidateProfileName(t.Text) != nil {
+	if manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid MCP server name: use letters, digits, dots, dashes and underscores")
 	}
 	p.i++
@@ -1572,10 +1572,10 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		}
 	}
 	for {
-		switch p.kw("ENV", "HEADER") {
-		case "ENV":
+		switch p.kw("VAR", "HEADER") {
+		case "VAR":
 			if m.URL != "" {
-				return errAt(p.toks[p.i-1].Pos, "ENV applies to a COMMAND server; a remote server (URL) takes HEADER")
+				return errAt(p.toks[p.i-1].Pos, "VAR applies to a COMMAND server; a remote server (URL) takes HEADER")
 			}
 			if err := p.mcpEnv(m); err != nil {
 				return err
@@ -1596,24 +1596,24 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 
 // mcpPartOrStarter reports whether the next word ends an ARGS list.
 func (p *parser) mcpPartOrStarter() bool {
-	return p.at("ENV") || p.at("HEADER") || p.isStarter()
+	return p.at("VAR") || p.at("HEADER") || p.isStarter()
 }
 
 func (p *parser) mcpEnv(m *MCP) *Error {
 	if p.atEnd() || p.mcpPartOrStarter() {
 		p.note("<key>=<value>", "<key>")
-		return p.fail("ENV needs <key>=<value> or <key> FROM '<ref>'")
+		return p.fail("VAR needs <key>=<value> or <key> FROM '<ref>'")
 	}
 	t := p.toks[p.i]
 	k, v, isKV := strings.Cut(t.Text, "=")
 	if !isKV {
 		if !keyPattern.MatchString(t.Text) {
-			return errAt(t.Pos, "ENV needs <key>=<value> or <key> FROM '<ref>'")
+			return errAt(t.Pos, "VAR needs <key>=<value> or <key> FROM '<ref>'")
 		}
 		p.i++
 		p.quiet = true
 		if p.kw("FROM") == "" {
-			return p.fail("expected FROM after the key: ENV <key>=<value>, or ENV <key> FROM '<ref>'")
+			return p.fail("expected FROM after the key: VAR <key>=<value>, or VAR <key> FROM '<ref>'")
 		}
 		r, err := p.take("FROM", "'<ref>'")
 		if err != nil {
@@ -1635,7 +1635,7 @@ func (p *parser) mcpEnv(m *MCP) *Error {
 			return errAt(t.Pos, "invalid variable name before '='")
 		}
 		if manifest.LooksLikeSecretKey(k) && !manifest.PlainSetting(v) {
-			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential: on an MCP server it takes a reference, ENV %s FROM '<ref>' (a literal would be written into Claude Code's config)", k, k))
+			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential: on an MCP server it takes a reference, VAR %s FROM '<ref>' (a literal would be written into Claude Code's config)", k, k))
 		}
 		m.Env = append(m.Env, Var{Key: k, Value: v})
 		p.i++
@@ -1803,7 +1803,7 @@ func (p *parser) skill(c *Clause, verb string) *Error {
 		return p.fail(verb + " SKILL needs <skill>")
 	}
 	t := p.toks[p.i]
-	if manifest.ValidateProfileName(t.Text) != nil {
+	if manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid skill name: use letters, digits, dots, dashes and underscores")
 	}
 	p.i++

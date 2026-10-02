@@ -41,15 +41,15 @@ command = 'cpb SHOW PLAYBOOK lifecycle-pb'
 contains = "lifecycle-pb"
 
 [[verify.commands]]
-command = 'cpb ALTER PLAYBOOK lifecycle-pb ALIAS lcpb && test -x "$HOME/.local/bin/lcpb" && echo aliased'
+command = 'cpb ALTER PLAYBOOK lifecycle-pb LAUNCHER lcpb && test -x "$HOME/.local/bin/lcpb" && echo aliased'
 
 [[verify.commands]]
-command = 'cpb ALTER PLAYBOOK lifecycle-pb NO ALIAS && test ! -e "$HOME/.local/bin/lcpb" && echo dealiased'
+command = 'cpb ALTER PLAYBOOK lifecycle-pb NO LAUNCHER && test ! -e "$HOME/.local/bin/lcpb" && echo dealiased'
 
 [[verify.commands]]
 # Re-alias, so the DROP below has BOTH a name launcher and an alias
 # launcher to retire -- the rule covers the manifest alias too.
-command = 'cpb ALTER PLAYBOOK lifecycle-pb ALIAS lcpb && test -x "$HOME/.local/bin/lcpb" && echo re-aliased'
+command = 'cpb ALTER PLAYBOOK lifecycle-pb LAUNCHER lcpb && test -x "$HOME/.local/bin/lcpb" && echo re-aliased'
 
 [[verify.commands]]
 # The registry entry moves AND the launchers follow: the old name's

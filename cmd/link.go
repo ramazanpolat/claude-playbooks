@@ -15,13 +15,13 @@ import (
 // linkOpts carries CREATE PLAYBOOK … LINK's clauses. No state is shared
 // between two calls.
 type linkOpts struct {
-	name    string
-	alias   string
-	noAlias bool
+	name       string
+	launcher   string
+	noLauncher bool
 }
 
 func doLink(o linkOpts, args []string) error {
-	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
+	if err := checkLauncherConflict(o.launcher, o.noLauncher); err != nil {
 		return err
 	}
 
@@ -85,10 +85,10 @@ func doLink(o linkOpts, args []string) error {
 		configDest = filepath.Join(dest, filepath.FromSlash(m.Subdir))
 	}
 
-	// Preflight command names BEFORE the symlink joins the registry (the
+	// Preflight launcher names BEFORE the symlink joins the registry (the
 	// link name registers even under --no-alias, and the target manifest's
 	// alias registers without any flag).
-	effectiveAlias := o.alias
+	effectiveAlias := o.launcher
 	if effectiveAlias == "" && m != nil {
 		effectiveAlias = m.Launcher
 	}
@@ -96,7 +96,7 @@ func doLink(o linkOpts, args []string) error {
 	// falling back to the link name — an unwritable name (reserved link
 	// name, invalid manifest alias) must fail before dest joins the
 	// registry, not as a post-link warning.
-	launcherName, err := resolveLauncherName(o.noAlias, effectiveAlias, name, "link")
+	launcherName, err := resolveLauncherName(o.noLauncher, effectiveAlias, name, "link")
 	if err != nil {
 		return err
 	}
@@ -109,8 +109,8 @@ func doLink(o linkOpts, args []string) error {
 	// through it. Any differing alias mutation — changing one, or adding
 	// one where none existed — could break or reroute those registrations,
 	// so it is refused.
-	if o.alias != "" && m != nil && m.Launcher != o.alias {
-		return fmt.Errorf("target's %s is shared state (alias %q); ALIAS %s would change it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Launcher, o.alias, manifest.FileName)
+	if o.launcher != "" && m != nil && m.Launcher != o.launcher {
+		return fmt.Errorf("target's %s is shared state (launcher %q); LAUNCHER %s would change it for every registration of this target. Use the manifest's launcher or edit the target's %s directly", manifest.FileName, m.Launcher, o.launcher, manifest.FileName)
 	}
 
 	// A linked directory is the pilot's own, so nothing in it is deleted: a
@@ -136,7 +136,7 @@ func doLink(o linkOpts, args []string) error {
 	}
 	fmt.Printf("Linked %s -> %s\n", dest, abs)
 
-	if o.noAlias {
+	if o.noLauncher {
 		fmt.Printf("\nRun with:\n  cpb run %s\n", name)
 		return nil
 	}

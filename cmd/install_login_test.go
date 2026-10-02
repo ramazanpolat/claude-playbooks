@@ -109,7 +109,7 @@ func TestInstallNeverCarriesLogin(t *testing.T) {
 	src := filepath.Join(home, "src")
 	writeSource(t, src)
 	var err error
-	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK x NO ALIAS FROM '"+src+"'") })
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK x NO LAUNCHER FROM '"+src+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestInstallNeverCarriesLogin(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK y NO ALIAS FROM 'file://"+repo+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK y NO LAUNCHER FROM 'file://"+repo+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestInstallDropsShippedCredentialsLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK z NO ALIAS FROM '"+src+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK z NO LAUNCHER FROM '"+src+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestLinkSetsAsideCarriedLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK l NO ALIAS LINK '"+dir+"'") })
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK l NO LAUNCHER LINK '"+dir+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestLinkSetsAsideCarriedLogin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(iso, ".playbook"), []byte("name = \"iso\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK li NO ALIAS LINK '"+iso+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK li NO LAUNCHER LINK '"+iso+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestInstallDropsLinkedStateFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK w NO ALIAS FROM '"+src+"'") })
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK w NO LAUNCHER FROM '"+src+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestLinkIsolatedSubdirKeepsLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK iso-sub NO ALIAS LINK '"+dir+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK iso-sub NO LAUNCHER LINK '"+dir+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestLinkedForeignCredentialsLinkIsNeverCopied(t *testing.T) {
 			t.Fatal(err)
 		}
 		var err error
-		captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK "+c.name+" NO ALIAS LINK '"+dir+"'") })
+		captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK "+c.name+" NO LAUNCHER LINK '"+dir+"'") })
 		if err != nil {
 			t.Fatal(err)
 		}

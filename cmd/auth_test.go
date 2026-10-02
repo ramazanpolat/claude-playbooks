@@ -61,7 +61,7 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(errOut, "launch refused: env profile \"ghost\" not found") {
+	if !strings.Contains(errOut, "launch refused: env set \"ghost\" not found") {
 		t.Fatalf("error row note:\n%s", errOut)
 	}
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -197,8 +197,8 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 }
 
 // PrepareLaunchEnvWith is PrepareLaunchEnv with one-off layers applied on top
-// of the playbook's own block, in order: the launch flags (--env-profile,
-// --env, --unset, --env-file). Each layer may name profiles, which are
+// of the playbook's own block, in order: the launch flags (--env-set,
+// --env, --block, --env-file). Each layer may name profiles, which are
 // resolved from the same root as the manifest's. The flattened result drives
 // the token decision exactly as the manifest block alone would, so a one-off
 // unset of CLAUDE_CODE_OAUTH_TOKEN takes the stored-credentials path for
@@ -215,7 +215,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	}
 
 	// The block is resolved with its profiles flattened in. Any profile
-	// resolution failure satisfies errors.Is(err, envprofile.ErrProfile);
+	// resolution failure satisfies errors.Is(err, envset.ErrProfile);
 	// callers that launch treat it as fatal (see cmd/run.go), everything
 	// else stays advisory.
 	menv, merr, perr := effectiveBlock(configDir, layers)
@@ -340,7 +340,7 @@ func bindOwnEnv(env []string, configDir string) []string {
 // EffectiveBlock is the flattened [env] block a launch of configDir applies:
 // the registry default profile, the governing manifest's block with its
 // profiles expanded, then the one-off layers in order. The error satisfies
-// errors.Is(err, envprofile.ErrProfile) when a profile cannot be resolved,
+// errors.Is(err, envset.ErrProfile) when a profile cannot be resolved,
 // the same condition on which a launch is refused. A manifest that cannot
 // be read is not an error here: the launch treats it as declaring nothing.
 func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, error) {
@@ -353,13 +353,13 @@ func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, er
 func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.Env, merr, perr error) {
 	// The registry default profile is the bottom layer of every playbook,
 	// manifest or not.
-	profilesDir := envprofile.Dir(config.ResolvePlaybooksDir())
+	profilesDir := envset.Dir(config.ResolvePlaybooksDir())
 	m, merr := manifest.Nearest(configDir)
 	var block *manifest.Env
 	if m != nil {
 		block = m.Env
 	}
-	menv, perr = envprofile.ExpandWithDefault(profilesDir, block)
+	menv, perr = envset.ExpandWithDefault(profilesDir, block)
 	if perr != nil {
 		return nil, merr, perr
 	}
@@ -367,7 +367,7 @@ func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.En
 		flat := make([]*manifest.Env, 0, len(layers)+1)
 		flat = append(flat, menv)
 		for _, layer := range layers {
-			expanded, perr := envprofile.Expand(profilesDir, layer)
+			expanded, perr := envset.Expand(profilesDir, layer)
 			if perr != nil {
 				return nil, merr, perr
 			}

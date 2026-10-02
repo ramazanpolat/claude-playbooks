@@ -363,7 +363,7 @@ func (m Model) listBody() []string {
 			rows = append(rows, []string{e.Name, vars, orDash(strings.Join(e.UsedBy, ", ")), def, e.Description})
 		}
 		if len(rows) == 0 {
-			return []string{"", "  No env sets (env profiles). Create one: cpb CREATE ENV <name> SET …"}
+			return []string{"", "  No env sets. Create one: cpb CREATE ENV <name> SET …"}
 		}
 		return m.table([]string{"NAME", "VARS", "USED BY", "DEFAULT", "DESCRIPTION"}, rows, 4, m.cursor[vEnvs], h, 3)
 	case vDefaults:

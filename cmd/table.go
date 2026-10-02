@@ -12,8 +12,8 @@ import (
 
 // Aligned column output, in one place.
 //
-// Five commands grew their own `%-*s` pairs (list, alias, env-profile, the
-// no-arg overview, update --all), and one of them -- env-profile -- never grew
+// Five commands grew their own `%-*s` pairs (list, alias, env-set, the
+// no-arg overview, update --all), and one of them -- env-set -- never grew
 // one at all: it concatenated four kinds of data into a sentence with nested
 // parentheses. Sharing the renderer is what makes width-awareness affordable;
 // implementing it five times is what kept it from happening.

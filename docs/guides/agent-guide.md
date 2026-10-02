@@ -48,13 +48,13 @@ The exit code is `claude`'s. Put the playbook name **before** any `claude` flag;
 One-off environment for a single launch, nothing written to disk. Launch flags are recognised only as a leading run, before the name or immediately after it:
 
 ```bash
-cpb run --env-profile work <name> -p "..."               # an existing env set, this launch only
+cpb run --env-set work <name> -p "..."               # an existing env set, this launch only
 cpb run <name> --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
-cpb run --unset CLAUDE_CODE_OAUTH_TOKEN <name> -p "..."  # use the stored login for this run
+cpb run --block CLAUDE_CODE_OAUTH_TOKEN <name> -p "..."  # use the stored login for this run
 cpb run --env-file ./job.env <name> -p "..."             # KEY=VALUE lines; validated like a manifest
 ```
 
-A missing or broken `--env-profile` refuses the launch. `--env` after a `claude` argument is forwarded to `claude`, not applied.
+A missing or broken `--env-set` refuses the launch. `--env` after a `claude` argument is forwarded to `claude`, not applied.
 
 For a throwaway config directory that is not a registered playbook:
 
@@ -67,10 +67,10 @@ cpb start /tmp/scratch-$$ -p "..." --delete    # directory created, then removed
 Statements never prompt, with two exceptions: `DROP PLAYBOOK`, and `APPLY … TO '<dir>'` to a config directory that is not a playbook, ask on a terminal, so pass `--yes`.
 
 ```bash
-cpb CREATE PLAYBOOK IF NOT EXISTS <name> NO ALIAS            # no launcher; run via `run <name>`
-cpb CREATE PLAYBOOK <name> ALIAS <cmd>
-cpb CREATE PLAYBOOK <name> FROM <git-url> BRANCH <ref> SUBDIR <path> NO ALIAS
-cpb CREATE PLAYBOOK <name> LINK <dir> NO ALIAS              # the target needs a .playbook first
+cpb CREATE PLAYBOOK IF NOT EXISTS <name> NO LAUNCHER            # no launcher; run via `run <name>`
+cpb CREATE PLAYBOOK <name> LAUNCHER <cmd>
+cpb CREATE PLAYBOOK <name> FROM <git-url> BRANCH <ref> SUBDIR <path> NO LAUNCHER
+cpb CREATE PLAYBOOK <name> LINK <dir> NO LAUNCHER              # the target needs a .playbook first
 cpb ALTER PLAYBOOK <name> RENAME TO <new>
 cpb DROP PLAYBOOK IF EXISTS <name> --yes
 cpb update <name> --yes                                     # from [source]; settings.json, data/, [env] survive; --yes runs a declared migrate step
@@ -110,7 +110,7 @@ Point the whole registry at a scratch root to test without touching the user's i
 
 ```bash
 export CPB_PLAYBOOKS_DIR=/tmp/pb-$$              # or --playbooks-dir before the verb
-cpb CREATE PLAYBOOK demo NO ALIAS
+cpb CREATE PLAYBOOK demo NO LAUNCHER
 cpb run demo --version
 rm -rf /tmp/pb-$$
 ```
@@ -125,7 +125,7 @@ Before a statement, only `--playbooks-dir` and `--launcher-dir` are accepted. `r
 cpb run --sandbox --workdir "$REPO" demo -p "run the tests"      # sandbox cpb-demo, created on first use
 cpb run --sandbox --sandbox-fresh --clone --workdir "$REPO" demo -p "..."   # new sandbox on a private clone
 cpb run --sandbox --mount /data:ro demo                          # extra read-only mount
-cpb CREATE PLAYBOOK demo SANDBOX NO ALIAS                        # [sandbox] always = true + isolated_login = true
+cpb CREATE PLAYBOOK demo SANDBOX NO LAUNCHER                        # [sandbox] always = true + isolated_login = true
 cpb run --no-sandbox demo -p "..."                               # host launch; stderr says the manifest was overridden
 ```
 
@@ -176,7 +176,7 @@ Errors go to stderr with exit 1, and name the thing that is wrong without echoin
 
 ```text
 unknown playbook "x". `cpb SHOW PLAYBOOKS` lists them
-command name "x" already addresses playbook "y". Pick another name or alias
+launcher name "x" already addresses playbook "y". Pick another name
 no env set "x": create it with CREATE ENV x
 env set "x" is used by a, b: detach it first with ALTER PLAYBOOK <playbook> DROP ENV x
 ANTHROPIC_AUTH_TOKEN looks like a credential: use SET ANTHROPIC_AUTH_TOKEN FROM '<ref>' (needs a secret helper), or add AS PLAINTEXT to store the literal knowingly

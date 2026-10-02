@@ -12,7 +12,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -86,9 +86,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("Runs Claude Code with the named playbook.")
 		fmt.Println("Launch flags add one-off environment layers on top of the playbook's [env]")
 		fmt.Println("block, in order, for this launch only; they go before the name or right after it.")
-		fmt.Println("  --env-profile NAME   layer an existing env profile")
+		fmt.Println("  --env-set NAME   layer an existing env set")
 		fmt.Println("  --env KEY=VALUE      set one variable")
-		fmt.Println("  --unset KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")
+		fmt.Println("  --block KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
 		fmt.Println("Sandbox flags run the playbook inside a sandbox (backend sbx, Docker Sandboxes):")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use)")
@@ -238,7 +238,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
 	eff, perr := auth.EffectiveBlock(configDir, layers)
-	if errors.Is(perr, envprofile.ErrProfile) {
+	if errors.Is(perr, envset.ErrSet) {
 		return perr
 	}
 	// Secret references exec the launch through the helper; with none
@@ -263,7 +263,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configDir, layers)
-	if errors.Is(syncErr, envprofile.ErrProfile) {
+	if errors.Is(syncErr, envset.ErrSet) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
 		// wrong credentials -- refuse, do not warn.

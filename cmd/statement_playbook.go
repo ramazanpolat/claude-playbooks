@@ -20,7 +20,7 @@ import (
 func lifecycle(st *grammar.Stmt) bool {
 	for _, c := range st.Clauses {
 		switch c.Kind {
-		case grammar.RenameTo, grammar.Alias, grammar.NoAlias:
+		case grammar.RenameTo, grammar.Launcher, grammar.NoLauncher:
 			return true
 		}
 	}
@@ -44,9 +44,9 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			o.subdir = c.Arg
 		case grammar.Link:
 			o.link = c.Arg
-		case grammar.Alias:
+		case grammar.Launcher:
 			o.alias = c.Arg
-		case grammar.NoAlias:
+		case grammar.NoLauncher:
 			o.noAlias = true
 		case grammar.Sandbox:
 			o.sandbox = true
@@ -116,15 +116,15 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case o.from != "":
 		return doInstall(installOpts{name: st.Name, branch: o.branch, subdir: o.subdir,
-			alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{o.from})
+			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{o.from})
 
 	case o.link != "":
 		if o.sandbox {
 			return fmt.Errorf("SANDBOX does not apply to LINK: a linked playbook's manifest belongs to the target; set [sandbox] there")
 		}
-		return doLink(linkOpts{name: st.Name, alias: o.alias, noAlias: o.noAlias}, []string{o.link})
+		return doLink(linkOpts{name: st.Name, launcher: o.alias, noLauncher: o.noAlias}, []string{o.link})
 	}
-	return doCreate(createOpts{alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{st.Name})
+	return doCreate(createOpts{launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{st.Name})
 }
 
 func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
@@ -162,7 +162,7 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	return doDelete(deleteOpts{yes: st.Yes || r.yes}, []string{st.Name})
 }
 
-// alterPlaybookLifecycle carries out RENAME TO, ALIAS and NO ALIAS. They
+// alterPlaybookLifecycle carries out RENAME TO, LAUNCHER and NO LAUNCHER. They
 // are not combined with environment clauses: a rename after an environment
 // write could not be undone as one step, so the statement would not apply
 // whole or not at all.
@@ -173,12 +173,12 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		switch c.Kind {
 		case grammar.RenameTo:
 			rename = c.Arg
-		case grammar.Alias:
+		case grammar.Launcher:
 			alias = c.Arg
-		case grammar.NoAlias:
+		case grammar.NoLauncher:
 			noAlias = true
 		default:
-			return fmt.Errorf("RENAME TO, ALIAS and NO ALIAS cannot be combined with %s in one statement: use two statements", c.Kind)
+			return fmt.Errorf("RENAME TO, LAUNCHER and NO LAUNCHER cannot be combined with %s in one statement: use two statements", c.Kind)
 		}
 	}
 	r.outcome = outChanged
@@ -206,23 +206,23 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		return nil
 	}
 	if rename != "" {
-		return doRename(renameOpts{alias: alias, noAlias: noAlias}, []string{st.Name, rename})
+		return doRename(renameOpts{launcher: alias, noLauncher: noAlias}, []string{st.Name, rename})
 	}
 	pb, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name)
 	if err != nil {
 		return err
 	}
 	if noAlias {
-		// A playbook has one launcher: its alias, or its name. NO ALIAS
+		// A playbook has one launcher: its alias, or its name. NO LAUNCHER
 		// removes whichever it is (the hidden dealias clears an alias only).
 		if pb.Alias() != "" {
-			if err := doAlias(aliasOpts{remove: true}, []string{st.Name}); err != nil {
+			if err := doLauncher(launcherOpts{remove: true}, []string{st.Name}); err != nil {
 				return err
 			}
 		}
 		return retireNameLauncher(st.Name)
 	}
-	// ALIAS <its own name> makes the name the launcher: the alias it
+	// LAUNCHER <its own name> makes the name the launcher: the alias it
 	// replaces is cleared and its launcher retired first (the hidden
 	// command's same spelling only repairs the name launcher).
 	if alias == st.Name && pb.Alias() != "" {
@@ -230,16 +230,16 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		// launcher leaves the playbook with the launcher it has.
 		owner, err := commandNameOwner(st.Name, st.Name)
 		if err != nil {
-			return fmt.Errorf("cannot verify command name %q: %w", st.Name, err)
+			return fmt.Errorf("cannot verify launcher name %q: %w", st.Name, err)
 		}
 		if owner != nil {
-			return fmt.Errorf("command name %q already addresses playbook %q; alias %q kept", st.Name, owner.Name, pb.Alias())
+			return fmt.Errorf("launcher name %q already addresses playbook %q; launcher %q kept", st.Name, owner.Name, pb.Alias())
 		}
-		if err := doAlias(aliasOpts{remove: true}, []string{st.Name}); err != nil {
+		if err := doLauncher(launcherOpts{remove: true}, []string{st.Name}); err != nil {
 			return err
 		}
 	}
-	return doAlias(aliasOpts{}, []string{st.Name, alias})
+	return doLauncher(launcherOpts{}, []string{st.Name, alias})
 }
 
 // retireNameLauncher removes the launcher named after a playbook, when cpb

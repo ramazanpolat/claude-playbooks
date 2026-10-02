@@ -18,7 +18,7 @@ ALTER PLAYBOOK reviewer
 ## MCP servers
 
 ```
-ADD MCP SERVER <name> COMMAND '<cmd>' [ARGS '<arg>' ...] [ENV K=V | ENV K FROM '<ref>' ...]
+ADD MCP SERVER <name> COMMAND '<cmd>' [ARGS '<arg>' ...] [VAR K=V | VAR K FROM '<ref>' ...]
 ADD MCP SERVER <name> URL '<url>' [TRANSPORT SSE] [HEADER '<name>' '<value>' | HEADER '<name>' FROM '<ref>' ...]
 DROP MCP SERVER <name>
 ```

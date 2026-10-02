@@ -26,7 +26,7 @@ func TestApplyIncludeStacksFiles(t *testing.T) {
 	if err := os.Symlink("base.cpb", filepath.Join(dir, "base-link.cpb")); err != nil {
 		t.Fatal(err)
 	}
-	writeCpb(t, dir, "kommander.cpb", "INCLUDE 'base.cpb';\nCREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;\n")
+	writeCpb(t, dir, "kommander.cpb", "INCLUDE 'base.cpb';\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
 	top := writeCpb(t, dir, "chaos.cpb", "INCLUDE 'kommander.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK work USE ENV glm;\n")
 
 	out, err := apply(t, top)
@@ -74,7 +74,7 @@ func TestApplyRelativeMarketplaceSource(t *testing.T) {
 	sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	fakeClaude(t)
-	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK k NO LAUNCHER")
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(dir, "stub", ".claude-plugin"), 0o755); err != nil {
 		t.Fatal(err)

@@ -14,14 +14,14 @@ import (
 // createOpts carries CREATE PLAYBOOK's clauses. No state is shared between
 // two calls.
 type createOpts struct {
-	alias         string
-	noAlias       bool
+	launcher      string
+	noLauncher    bool
 	sandbox       bool
 	isolatedLogin bool // isolated_login = true without a sandbox
 }
 
 func doCreate(o createOpts, args []string) error {
-	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
+	if err := checkLauncherConflict(o.launcher, o.noLauncher); err != nil {
 		return err
 	}
 
@@ -47,17 +47,17 @@ func doCreate(o createOpts, args []string) error {
 	// itself) must be writable, or creation would succeed without its
 	// advertised command. --no-alias opts out of a launcher entirely and
 	// skips this.
-	launcherName, err := resolveLauncherName(o.noAlias, o.alias, name, "create the playbook")
+	launcherName, err := resolveLauncherName(o.noLauncher, o.launcher, name, "create the playbook")
 	if err != nil {
 		return err
 	}
 
-	// Preflight command names BEFORE the directory exists: once created it
+	// Preflight launcher names BEFORE the directory exists: once created it
 	// joins the registry, and dispatch resolves directory names ahead of
 	// aliases, so a clash would silently re-route an existing command.
 	// Serialize preflight-through-registration: without the registry lock,
 	// two concurrent creates can both pass the ownership check and register
-	// duplicate owners for one command name.
+	// duplicate owners for one launcher name.
 	unlock, err := lockRegistry()
 	if err != nil {
 		return err
@@ -106,10 +106,10 @@ func doCreate(o createOpts, args []string) error {
 		fmt.Println("Login isolated: it shares no login with ~/.claude; run /login once in it.")
 	}
 
-	if o.noAlias {
+	if o.noLauncher {
 		fmt.Printf("\nRun with:\n  cpb run %s\n", name)
 	} else {
-		// A custom command name must be resolvable at invocation time: record
+		// A custom launcher name must be resolvable at invocation time: record
 		// it as the manifest alias so multicall dispatch finds the playbook.
 		if launcherName != name {
 			if err := writeAliasManifest(dest, name, launcherName); err != nil {
@@ -117,7 +117,7 @@ func doCreate(o createOpts, args []string) error {
 				// dest already joined the registry, so leaving it would block a
 				// retry under the same name — roll it back, as install does.
 				os.RemoveAll(dest)
-				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", launcherName, err)
+				return fmt.Errorf("cannot record launcher %q in manifest (required for the command to resolve): %w", launcherName, err)
 			}
 		}
 

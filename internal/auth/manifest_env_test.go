@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -180,7 +180,7 @@ func TestManifestProfilesApplyAtLaunch(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
+	if err := envset.Write(envset.Dir(root), &envset.Set{
 		Name:  "account",
 		Set:   map[string]string{"ANTHROPIC_BASE_URL": "http://profile/v1", "MODEL": "profile"},
 		Block: []string{OAuthTokenEnv},
@@ -228,9 +228,9 @@ func TestMissingProfileIsReportedTyped(t *testing.T) {
 	writeManifest(t, configDir, "[env]\nsets = [\"ghost\"]\n")
 
 	_, err := PrepareLaunchEnv(configDir)
-	var missing *envprofile.MissingError
+	var missing *envset.MissingError
 	if !errors.As(err, &missing) || missing.Name != "ghost" {
-		t.Fatalf("err = %v, want *envprofile.MissingError", err)
+		t.Fatalf("err = %v, want *envset.MissingError", err)
 	}
 }
 
@@ -310,10 +310,10 @@ func TestProfileErrorStopsBeforeAuthMutation(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := os.MkdirAll(envprofile.Dir(root), 0o755); err != nil {
+	if err := os.MkdirAll(envset.Dir(root), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(envprofile.Dir(root), "broken.toml"), []byte("= [\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(envset.Dir(root), "broken.toml"), []byte("= [\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -325,7 +325,7 @@ func TestProfileErrorStopsBeforeAuthMutation(t *testing.T) {
 	store := writeStore(t, configDir, `{`+grantJSON+`}`)
 
 	env, err := PrepareLaunchEnv(configDir)
-	if !errors.Is(err, envprofile.ErrProfile) {
+	if !errors.Is(err, envset.ErrSet) {
 		t.Fatalf("err = %v, want ErrProfile", err)
 	}
 	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
@@ -350,7 +350,7 @@ func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
+	if err := envset.Write(envset.Dir(root), &envset.Set{
 		Name: "work", Set: map[string]string{"MODEL": "profile", "FROM_PROFILE": "yes"}, Block: []string{OAuthTokenEnv},
 	}); err != nil {
 		t.Fatal(err)
@@ -392,7 +392,7 @@ func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
 
 	// A one-off profile that does not exist refuses, before any mutation.
 	_, err = PrepareLaunchEnvWith(configDir, []*manifest.Env{{Sets: []string{"ghost"}}})
-	if !errors.Is(err, envprofile.ErrProfile) {
+	if !errors.Is(err, envset.ErrSet) {
 		t.Fatalf("missing one-off profile: err = %v", err)
 	}
 }
@@ -485,10 +485,10 @@ func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{Name: "base", Set: map[string]string{"FROM_DEFAULT": "yes", "MODEL": "default"}, Block: []string{OAuthTokenEnv}}); err != nil {
+	if err := envset.Write(envset.Dir(root), &envset.Set{Name: "base", Set: map[string]string{"FROM_DEFAULT": "yes", "MODEL": "default"}, Block: []string{OAuthTokenEnv}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := envprofile.WriteDefaults(envprofile.Dir(root), []string{"base"}); err != nil {
+	if err := envset.WriteDefaults(envset.Dir(root), []string{"base"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -581,7 +581,7 @@ func TestConfigDirOverrideConsumedAfterEveryLayer(t *testing.T) {
 		configDir := t.TempDir()
 		layers := append(leaky(), &manifest.Env{Sets: []string{"ghost"}})
 		env, err := PrepareLaunchEnvWith(configDir, layers)
-		if !errors.Is(err, envprofile.ErrProfile) {
+		if !errors.Is(err, envset.ErrSet) {
 			t.Fatalf("want a profile refusal, got %v", err)
 		}
 		assertConsumed(t, env, configDir)

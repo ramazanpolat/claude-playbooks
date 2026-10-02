@@ -23,8 +23,8 @@ steps = [
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   # The target, with an alias so the retirement rule has two launchers to
   # remove, and a bystander that must survive untouched.
-  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK doomed ALIAS dmd',
-  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK keeper NO ALIAS',
+  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK doomed LAUNCHER dmd',
+  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK keeper NO LAUNCHER',
   # Content, so the "Contents: N files" line the prompt is preceded by is
   # non-trivial and the directory is worth confirming about.
   '''printf '%s\n' 'notes' > "$HOME/.claude-playbooks/doomed/NOTES.md"''',

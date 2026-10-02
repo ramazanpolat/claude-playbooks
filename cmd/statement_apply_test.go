@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -30,10 +30,10 @@ func apply(t *testing.T, path string, flags ...string) (string, error) {
 
 const scratchPlaybook = `-- a machine from nothing
 CREATE OR REPLACE ENV glm
-  DESCRIBE 'GLM via the router'
+  DESCRIPTION 'GLM via the router'
   SET BASE=http://buildbox:8080/v1 MODEL=glm-5.3;
 ALTER DEFAULTS USE ENV glm;
-CREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;
+CREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;
 ALTER PLAYBOOK work
   USE ENV glm
   SET VAR MAX_THINKING_TOKENS=8000
@@ -68,7 +68,7 @@ func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 	if strings.Join(e.Sets, ",") != "glm" || e.Set["MAX_THINKING_TOKENS"] != "8000" || strings.Join(e.Block, ",") != "HTTP_PROXY" {
 		t.Fatalf("applied block: %#v", e)
 	}
-	if d, _ := envprofile.Defaults(envprofile.Dir(root)); strings.Join(d, ",") != "glm" {
+	if d, _ := envset.Defaults(envset.Dir(root)); strings.Join(d, ",") != "glm" {
 		t.Fatalf("DEFAULTS: %q", d)
 	}
 
@@ -93,7 +93,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 
 	dump := mustStmt(t, "SHOW CREATE ALL")
 	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm\n  SET SECRET HELPER '" + helper + "';",
-		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  ALIAS s;",
+		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  LAUNCHER s;",
 		"SET VAR API_TOKEN FROM 'keychain:ok/work'"} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("SHOW CREATE ALL missing %q:\n%s", want, dump)
@@ -117,8 +117,8 @@ func snapshot(t *testing.T, root string) string {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		if base := filepath.Base(p); base == manifest.FileName || strings.HasSuffix(base, envprofile.FileExt) ||
-			base == envprofile.DefaultMarker || base == envprofile.SecretHelperFile {
+		if base := filepath.Base(p); base == manifest.FileName || strings.HasSuffix(base, envset.FileExt) ||
+			base == envset.DefaultMarker || base == envset.SecretHelperFile {
 			data, _ := os.ReadFile(p)
 			b.WriteString(p + "\n" + string(data) + "\n")
 		}
@@ -240,7 +240,7 @@ func TestApplySeveralFiles(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	base := writePlaybookFile(t, "CREATE OR REPLACE ENV base SET A=1;\n")
-	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;\n")
+	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
 	broken := writePlaybookFile(t, "CREATE ENV other;\nALTER ENV other FOO;\n")
 
 	// A later file that does not parse: nothing from the first is written.
@@ -258,7 +258,7 @@ func TestApplySeveralFiles(t *testing.T) {
 	if out, err := apply(t, base, machine); err != nil {
 		t.Fatalf("apply across files: %v\n%s", err, out)
 	}
-	if d, _ := envprofile.Defaults(envprofile.Dir(root)); strings.Join(d, ",") != "base" {
+	if d, _ := envset.Defaults(envset.Dir(root)); strings.Join(d, ",") != "base" {
 		t.Fatalf("DEFAULTS: %q", d)
 	}
 
@@ -356,7 +356,7 @@ func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 }
 
 // SHOW CREATE never prints a source URL's credentials, and keeps the
-// default launcher (named after the playbook) instead of writing NO ALIAS.
+// default launcher (named after the playbook) instead of writing NO LAUNCHER.
 func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
@@ -368,12 +368,12 @@ func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	}
 
 	mustStmt(t, "CREATE PLAYBOOK named")
-	mustStmt(t, "CREATE PLAYBOOK bare NO ALIAS")
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "NO ALIAS") {
-		t.Errorf("the default launcher became NO ALIAS:\n%s", out)
+	mustStmt(t, "CREATE PLAYBOOK bare NO LAUNCHER")
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "NO LAUNCHER") {
+		t.Errorf("the default launcher became NO LAUNCHER:\n%s", out)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "NO ALIAS") {
-		t.Errorf("a playbook with no launcher lost NO ALIAS:\n%s", out)
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "NO LAUNCHER") {
+		t.Errorf("a playbook with no launcher lost NO LAUNCHER:\n%s", out)
 	}
 }
 

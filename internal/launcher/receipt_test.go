@@ -89,7 +89,7 @@ func TestRemoveReceiptCleansStateDir(t *testing.T) {
 func TestReceiptRefusesSeparators(t *testing.T) {
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	if err := ValidateName("a\tb"); err == nil {
-		t.Fatal("tab accepted in a command name")
+		t.Fatal("tab accepted in a launcher name")
 	}
 	if err := record("/l/tab\tpath"); err == nil {
 		t.Fatal("path with a tab recorded")
@@ -202,12 +202,12 @@ func TestReceiptMatchesCaseVariantDirectory(t *testing.T) {
 	}
 }
 
-// Whitespace never enters a command name, and a receipt line keeps a path
+// Whitespace never enters a launcher name, and a receipt line keeps a path
 // exactly (leading indentation aside).
 func TestNamesRejectWhitespaceAndLinesKeepPaths(t *testing.T) {
 	for _, bad := range []string{"demo ", " demo", "de mo"} {
 		if err := ValidateName(bad); err == nil {
-			t.Fatalf("whitespace accepted in command name %q", bad)
+			t.Fatalf("whitespace accepted in launcher name %q", bad)
 		}
 	}
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))

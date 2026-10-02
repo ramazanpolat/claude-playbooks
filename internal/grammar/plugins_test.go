@@ -89,7 +89,7 @@ func TestParseInclude(t *testing.T) {
 }
 
 func TestQuotedKeywordIsANewName(t *testing.T) {
-	stmts, err := ParseFile(`CREATE ENV 'include'; CREATE PLAYBOOK IF NOT EXISTS 'agent' NO ALIAS;`)
+	stmts, err := ParseFile(`CREATE ENV 'include'; CREATE PLAYBOOK IF NOT EXISTS 'agent' NO LAUNCHER;`)
 	if err != nil {
 		t.Fatal(err)
 	}

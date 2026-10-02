@@ -178,8 +178,8 @@ jobs:
             if [ "$got" != "$1" ]; then echo "FAIL: $2"; echo "  want: $1"; echo "  got:  $got"; exit 1; fi
             echo "ok: $2"
           }
-          "$cpb" CREATE PLAYBOOK alpha NO ALIAS
-          "$cpb" CREATE PLAYBOOK beta NO ALIAS
+          "$cpb" CREATE PLAYBOOK alpha NO LAUNCHER
+          "$cpb" CREATE PLAYBOOK beta NO LAUNCHER
           "$cpb" ALTER PLAYBOOK beta SET VAR MODEL=glm X_TOKEN=sk-live-0123456789 AS PLAINTEXT >/dev/null
           "$cpb" "SELECT name, version FROM PLAYBOOKS"
           want 2 "SELECT count() FROM PLAYBOOKS FORMAT TSV"

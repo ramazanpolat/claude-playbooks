@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -32,11 +32,11 @@ type createBlock struct {
 
 func showCreate(st *grammar.Stmt) error {
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 	var blocks []createBlock
 	switch st.Object {
 	case grammar.Env:
-		p, err := envprofile.Read(dir, st.Name)
+		p, err := envset.Read(dir, st.Name)
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func showCreate(st *grammar.Stmt) error {
 		}
 		blocks = append(blocks, b)
 	default: // ALL: env sets, DEFAULTS, playbooks, so each statement finds what it names
-		profiles, err := envprofile.List(dir)
+		profiles, err := envset.List(dir)
 		if err != nil {
 			return err
 		}
@@ -140,10 +140,10 @@ func varClauses(set, refs map[string]string, unset []string, fix func(key string
 	return clauses, comments
 }
 
-func createEnvBlock(p *envprofile.Profile) createBlock {
+func createEnvBlock(p *envset.Set) createBlock {
 	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Env, Name: p.Name, OrReplace: true}
 	if p.Description != "" {
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Describe, Arg: p.Description})
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Description, Arg: p.Description})
 	}
 	clauses, comments := varClauses(p.Set, p.Refs, p.Block, func(k string) string {
 		return fmt.Sprintf("ALTER ENV %s SET %s FROM '<ref>'", p.Name, k)
@@ -153,7 +153,7 @@ func createEnvBlock(p *envprofile.Profile) createBlock {
 }
 
 func createDefaultsBlock(dir string) (createBlock, error) {
-	names, err := envprofile.Defaults(dir)
+	names, err := envset.Defaults(dir)
 	if err != nil {
 		return createBlock{}, fmt.Errorf("DEFAULTS cannot be read: %w", err)
 	}
@@ -162,7 +162,7 @@ func createDefaultsBlock(dir string) (createBlock, error) {
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: names})
 	}
 	// Only the stored setting: CPB_SECRET_HELPER belongs to one process.
-	if data, err := os.ReadFile(filepath.Join(dir, envprofile.SecretHelperFile)); err == nil {
+	if data, err := os.ReadFile(filepath.Join(dir, envset.SecretHelperFile)); err == nil {
 		if cmd := strings.TrimSpace(string(data)); cmd != "" {
 			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetHelper, Arg: cmd})
 		}
@@ -191,12 +191,12 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	}
 	switch {
 	case v.Launcher != nil:
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Alias, Arg: *v.Launcher})
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: *v.Launcher})
 	case hasNameLauncher(pb.Name):
 		// The default launcher, named after the playbook: no clause
 		// creates it again.
 	default:
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoAlias})
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoLauncher})
 	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole

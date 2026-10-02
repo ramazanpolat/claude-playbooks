@@ -43,22 +43,22 @@ const (
 type Kind string
 
 const (
-	SetVar   Kind = "SET"       // SET [VAR] K=V ...
-	SetRef   Kind = "SET FROM"  // SET [VAR] K FROM '<ref>'
-	BlockVar Kind = "BLOCK"     // BLOCK [VAR] K ...
-	UnsetVar Kind = "UNSET"     // UNSET [VAR] K ...
-	Describe Kind = "DESCRIBE"  // DESCRIBE '<text>'
-	UseEnv   Kind = "USE ENV"   // USE ENV a b ...
-	AddEnv   Kind = "ADD ENV"   // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
-	DropEnv  Kind = "DROP ENV"  // DROP ENV a b ...
-	RenameTo Kind = "RENAME TO" // RENAME TO n
-	Alias    Kind = "ALIAS"     // ALIAS launcher
-	NoAlias  Kind = "NO ALIAS"  // NO ALIAS
-	From     Kind = "FROM"      // CREATE PLAYBOOK ... FROM <source>
-	Branch   Kind = "BRANCH"    // CREATE PLAYBOOK ... BRANCH <ref>
-	Subdir   Kind = "SUBDIR"    // CREATE PLAYBOOK ... SUBDIR <dir>
-	Link     Kind = "LINK"      // CREATE PLAYBOOK ... LINK <dir>
-	Sandbox  Kind = "SANDBOX"   // CREATE PLAYBOOK ... SANDBOX
+	SetVar      Kind = "SET"         // SET [VAR] K=V ...
+	SetRef      Kind = "SET FROM"    // SET [VAR] K FROM '<ref>'
+	BlockVar    Kind = "BLOCK"       // BLOCK [VAR] K ...
+	UnsetVar    Kind = "UNSET"       // UNSET [VAR] K ...
+	Description Kind = "DESCRIPTION" // DESCRIPTION '<text>'
+	UseEnv      Kind = "USE ENV"     // USE ENV a b ...
+	AddEnv      Kind = "ADD ENV"     // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
+	DropEnv     Kind = "DROP ENV"    // DROP ENV a b ...
+	RenameTo    Kind = "RENAME TO"   // RENAME TO n
+	Launcher    Kind = "LAUNCHER"    // LAUNCHER <name>
+	NoLauncher  Kind = "NO LAUNCHER" // NO LAUNCHER
+	From        Kind = "FROM"        // CREATE PLAYBOOK ... FROM <source>
+	Branch      Kind = "BRANCH"      // CREATE PLAYBOOK ... BRANCH <ref>
+	Subdir      Kind = "SUBDIR"      // CREATE PLAYBOOK ... SUBDIR <dir>
+	Link        Kind = "LINK"        // CREATE PLAYBOOK ... LINK <dir>
+	Sandbox     Kind = "SANDBOX"     // CREATE PLAYBOOK ... SANDBOX
 
 	// Isolated login (manifest isolated_login): the playbook shares no login
 	// with ~/.claude. CREATE PLAYBOOK ... ISOLATED LOGIN, or ALTER PLAYBOOK
@@ -90,7 +90,7 @@ const (
 	UnsetAgent      Kind = "UNSET AGENT"      // UNSET AGENT
 
 	// MCP servers (ALTER PLAYBOOK only): claude mcp add-json / remove.
-	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, ENV …, HEADER …
+	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, VAR …, HEADER …
 	DropMCP Kind = "DROP MCP SERVER" // DROP MCP SERVER n
 
 	// Tool permissions, status line and model (ALTER PLAYBOOK only): keys
@@ -203,7 +203,7 @@ type Clause struct {
 	Vars   []Var    // SET: one per K=V; SET FROM: exactly one, with Ref
 	Keys   []string // BLOCK, UNSET
 	Names  []string // USE ENV, DROP ENV; ADD ENV, the MARKETPLACE and PLUGIN clauses: exactly one
-	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER, SET AGENT, ADD MARKETPLACE's source
+	Arg    string   // RENAME TO, LAUNCHER, DESCRIPTION, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER, SET AGENT, ADD MARKETPLACE's source
 	Where  Where    // ADD ENV
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
 

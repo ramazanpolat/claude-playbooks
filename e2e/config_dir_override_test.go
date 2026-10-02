@@ -508,7 +508,7 @@ func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
 		dumpEnv + "=" + filepath.Join(work, "envdump"),
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
 	}
-	install := exec.Command(binPath, "--playbooks-dir", root, "CREATE", "PLAYBOOK", "pb", "FROM", src, "NO", "ALIAS")
+	install := exec.Command(binPath, "--playbooks-dir", root, "CREATE", "PLAYBOOK", "pb", "FROM", src, "NO", "LAUNCHER")
 	install.Env = base
 	if out, err := install.CombinedOutput(); err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
@@ -592,7 +592,7 @@ func TestInputErrorsPrecedeTheAgentLookup(t *testing.T) {
 		{"reserved key", []string{"run", "--env", overrideEnv + "=/x", "pb"}, "managed by cpb"},
 		{"--env-file missing", []string{"run", "--env-file", filepath.Join(home, "nope.env"), "pb"}, "--env-file"},
 		{"--env-file malformed", []string{"run", "--env-file", badFile, "pb"}, "--env-file"},
-		{"profile does not resolve", []string{"run", "--env-profile", "ghost", "pb"}, "env profile"},
+		{"profile does not resolve", []string{"run", "--env-set", "ghost", "pb"}, "env set"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			out := run(c.args...)
@@ -615,8 +615,8 @@ func TestInputErrorsPrecedeTheAgentLookup(t *testing.T) {
 
 	// start shares the shape, and shares the fix.
 	t.Run("start validates first too", func(t *testing.T) {
-		out := run("start", filepath.Join(home, "adhoc"), "--env-profile", "ghost")
-		if !strings.Contains(out, "env profile") || strings.Contains(out, "command not found") {
+		out := run("start", filepath.Join(home, "adhoc"), "--env-set", "ghost")
+		if !strings.Contains(out, "env set") || strings.Contains(out, "command not found") {
 			t.Errorf("start reported the agent instead of the input error:\n%s", out)
 		}
 	})

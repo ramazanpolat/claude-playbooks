@@ -1,7 +1,7 @@
 -- A playbook with a plugin and an agent, from a marketplace that lives
 -- beside this file. Claude Code installs and loads the plugin; cpb runs
 -- `claude plugin …` for the playbook and pins the agent in its settings.json.
-CREATE PLAYBOOK IF NOT EXISTS greeter NO ALIAS;
+CREATE PLAYBOOK IF NOT EXISTS greeter NO LAUNCHER;
 
 ALTER PLAYBOOK greeter
   ADD MARKETPLACE hello FROM './hello-marketplace'

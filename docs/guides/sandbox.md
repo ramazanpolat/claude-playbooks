@@ -54,7 +54,7 @@ lives on that host.
 
 ## Secrets
 
-API keys from your env profiles never enter the sandbox either (profiles are the
+API keys from your env sets never enter the sandbox either (profiles are the
 place for them: a key set directly on the playbook lives in its `.playbook`,
 which is on the mount, and a sandboxed launch refuses that). `cpb` registers them
 with `sbx` as proxy-injected secrets for the endpoint host and hands the sandbox a

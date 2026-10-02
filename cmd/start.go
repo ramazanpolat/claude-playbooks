@@ -11,7 +11,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -80,9 +80,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println("Wrapper flags go before the path or immediately after it; the first other")
 		fmt.Println("argument (or --) ends them and everything from there on is claude's.")
 		fmt.Println("  --delete             delete the directory when the session ends")
-		fmt.Println("  --env-profile NAME   layer an existing env profile, this launch only")
+		fmt.Println("  --env-set NAME   layer an existing env set, this launch only")
 		fmt.Println("  --env KEY=VALUE      set one variable")
-		fmt.Println("  --unset KEY          remove one variable")
+		fmt.Println("  --block KEY          remove one variable")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
 		fmt.Println("Sandbox flags run the session inside a sandbox (backend sbx, Docker Sandboxes):")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpbstart-<dir> (created on first use)")
@@ -227,7 +227,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
 	eff, perr := auth.EffectiveBlock(absPath, layers)
-	if errors.Is(perr, envprofile.ErrProfile) {
+	if errors.Is(perr, envset.ErrSet) {
 		return perr
 	}
 	// See cmd/run.go: references exec through the helper, or refuse here.
@@ -241,7 +241,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
-	if errors.Is(syncErr, envprofile.ErrProfile) {
+	if errors.Is(syncErr, envset.ErrSet) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
 		// wrong credentials -- refuse, do not warn.

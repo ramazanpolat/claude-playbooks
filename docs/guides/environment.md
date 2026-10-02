@@ -19,7 +19,7 @@ your shell's environment
   + DEFAULTS: each env set in the list, in order        (ALTER DEFAULTS USE ENV …)
   + each env set the playbook uses, in order             (ALTER PLAYBOOK p USE ENV …)
   + the playbook's own SET VAR, minus its BLOCK VAR      (in its .playbook)
-  + one-off launch flags (--env-profile, --env, --unset, --env-file)
+  + one-off launch flags (--env-set, --env, --block, --env-file)
   + CLAUDE_CONFIG_DIR, bound by the tool, cannot be overridden
   = what claude sees
 ```
@@ -62,14 +62,14 @@ cpb ALTER PLAYBOOK work UNSET VAR ANTHROPIC_MODEL   # forget the entry; the laye
 `UNSET VAR` forgets the playbook's own entry, whether it was a `SET`, a
 reference or a `BLOCK`. Inside `ALTER PLAYBOOK` the word `VAR` is required.
 
-## Env profiles: define once, attach to many
+## Env sets: define once, attach to many
 
 When several playbooks want the same variables, put them in an **env set**
-(called an env profile before v3.20.0): a named file under
+(called an env set before v3.20.0): a named file under
 `~/.claude-playbooks/.env-sets/`, attached to playbooks by name.
 
 ```bash
-cpb CREATE ENV glm DESCRIBE 'GLM through the local router' \
+cpb CREATE ENV glm DESCRIPTION 'GLM through the local router' \
     SET ANTHROPIC_BASE_URL=http://proxy:1/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.3 \
     BLOCK CLAUDE_CODE_OAUTH_TOKEN
 ```
@@ -186,12 +186,12 @@ Launch flags go before the playbook name, or right after it, and stop at the
 first argument that is not one of them; everything after that is `claude`'s:
 
 ```bash
-cpb run --env-profile router work                        # an existing env set, this launch only
+cpb run --env-set router work                        # an existing env set, this launch only
 cpb run work --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
-cpb run --unset CLAUDE_CODE_OAUTH_TOKEN work             # this launch uses the stored login
+cpb run --block CLAUDE_CODE_OAUTH_TOKEN work             # this launch uses the stored login
 cpb run --env-file ./work-account.env work               # KEY=VALUE lines, dotenv style
-cpb start --env-profile glm /tmp/scratch
-work --env-profile router -p "..."                       # launchers take them too, at the start
+cpb start --env-set glm /tmp/scratch
+work --env-set router -p "..."                       # launchers take them too, at the start
 ```
 
 They apply on top of the playbook's own layer, in command-line order, and obey

@@ -16,7 +16,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
@@ -210,20 +210,20 @@ func pidAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-// copyEnvSets copies the --env sets from the user's store into the
+// copyEnvSets copies the --env-set sets from the user's store into the
 // throwaway one, so the played playbook can USE them; it returns the keys
 // they set, which the credential BLOCK must leave alone.
 func copyEnvSets(userStore, store string) (map[string]bool, error) {
 	keys := map[string]bool{}
 	for _, name := range playEnvSets {
-		p, err := envprofile.Read(envprofile.Dir(userStore), name)
+		p, err := envset.Read(envset.Dir(userStore), name)
 		if err != nil {
 			return nil, err
 		}
 		if p == nil {
 			return nil, fmt.Errorf("--env %s: no such env set (SHOW ENVS)", name)
 		}
-		if err := envprofile.Write(envprofile.Dir(store), p); err != nil {
+		if err := envset.Write(envset.Dir(store), p); err != nil {
 			return nil, err
 		}
 		e := p.Env()
@@ -443,7 +443,7 @@ func writePlayFiles(dir string, src *play.Source, rec *play.Recipe, setupText st
 	return setup, recipe, nil
 }
 
-// playSetupFor is playSetup with the --env sets attached and their keys
+// playSetupFor is playSetup with the --env-set sets attached and their keys
 // left out of the credential BLOCK.
 func playSetupFor(name string, res *play.Result, envSets []string, keep map[string]bool) string {
 	text := playSetupKeeping(name, res, keep)

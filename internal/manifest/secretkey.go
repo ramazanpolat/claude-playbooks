@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// What marks a key as credential-looking. No env profile field carries a
-// real per-field secret marker (internal/envprofile.Profile.Set is a plain
+// What marks a key as credential-looking. No env set field carries a
+// real per-field secret marker (internal/envset.Profile.Set is a plain
 // map[string]string), so this heuristic is what there is to go on. Missing a
 // credential leaks it; over-matching costs one --reveal, so each rule is as
 // wide as it can be without swallowing an obvious non-secret:

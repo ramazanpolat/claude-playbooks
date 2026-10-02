@@ -236,7 +236,7 @@ only says what each suite is for.
 | `cli-completion` | real TAB through the generated bash script: names offered, prefix filtered, first argument only, and registered for `cpb` |
 | `cli-play` | `cpb play` (v4.0.0): `--check` refusals and the one typed confirmation, `--dry-run --json` against a throwaway store (the user's DEFAULTS never layer in, nothing left behind), `--sha256`, the template-directory check, and a played session removed on ^C, a closed terminal and `kill <cpb>` |
 | `docs-honesty` | the surface README and `docs/` document exists in the shipped binary and checkout |
-| `playbook-lifecycle` | CREATE, ALIAS / NO ALIAS, RENAME TO, DROP, each stage checked against the filesystem |
+| `playbook-lifecycle` | CREATE, LAUNCHER / NO LAUNCHER, RENAME TO, DROP, each stage checked against the filesystem |
 | `playbook-install-local` | `install` from a local directory |
 | `playbook-link` | CREATE PLAYBOOK … LINK develop-in-place, and a DROP that must not follow the symlink |
 | `playbook-update` | native `update` onto a newer source |

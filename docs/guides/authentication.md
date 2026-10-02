@@ -9,7 +9,7 @@ the tool touches credentials.
 
 ```text
 token active for this playbook?
-  = the playbook's [env] (or a profile it uses) sets CLAUDE_CODE_OAUTH_TOKEN
+  = the playbook's [env] (or an env set it uses) sets CLAUDE_CODE_OAUTH_TOKEN
     or the shell exports CLAUDE_CODE_OAUTH_TOKEN
     or ~/.config/claude-code/oauth-token is non-empty
   and the playbook's [env] does not unset it
@@ -41,7 +41,7 @@ session.
 | One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
-[env profile](environment.md#env-profiles-define-once-attach-to-many) shared by
+[env set](environment.md#env-sets-define-once-attach-to-many) shared by
 several playbooks.
 
 ## The token middle ground
@@ -53,15 +53,15 @@ transient 401 cannot swap the working token for a dead one. That is right for
 most playbooks and wrong for one that must use a different account or a proxy
 that does not want the token.
 
-Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a
-profile, does more than drop the variable: the token is treated as inactive for
+Blocking `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through an
+env set, does more than drop the variable: the token is treated as inactive for
 that playbook, so the launch takes the stored-credentials path. No token is
 injected, the playbook's own login is left alone, and the shared credentials are
 synced. `/login` once there and it sticks, while every other playbook keeps using
 the token. Setting the variable instead supplies a per-playbook token that wins
 over the machine-global file; such a launch counts as another account, so the
 plan descriptors read from your global login are not injected into it (the
-profile may set its own). The same holds for a token you export in the shell
+env set may set its own). The same holds for a token you export in the shell
 yourself: only the token read from the token file gets the global descriptors.
 This is a middle ground between sharing the token and `isolated_login` (the
 playbook shares nothing).

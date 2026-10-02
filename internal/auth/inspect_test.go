@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
 
 func inspectFixture(t *testing.T) (root, configDir string) {
@@ -72,7 +72,7 @@ func TestInspectModes(t *testing.T) {
 	})
 	t.Run("own token via profile", func(t *testing.T) {
 		root, dir := inspectFixture(t)
-		if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{Name: "acct", Set: map[string]string{OAuthTokenEnv: "sk-ant-oat01-OWN"}}); err != nil {
+		if err := envset.Write(envset.Dir(root), &envset.Set{Name: "acct", Set: map[string]string{OAuthTokenEnv: "sk-ant-oat01-OWN"}}); err != nil {
 			t.Fatal(err)
 		}
 		writeManifest(t, dir, "[env]\nsets = [\"acct\"]\n")
@@ -155,10 +155,10 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // the offending text may be a credential.
 func TestInspectSanitizesProfileErrors(t *testing.T) {
 	root, dir := inspectFixture(t)
-	if err := os.MkdirAll(envprofile.Dir(root), 0o755); err != nil {
+	if err := os.MkdirAll(envset.Dir(root), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(envprofile.Dir(root), "bad.toml"), []byte("[set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(envset.Dir(root), "bad.toml"), []byte("[set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeManifest(t, dir, "[env]\nsets = [\"bad\"]\n")

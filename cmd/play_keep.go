@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
@@ -85,14 +85,14 @@ func keepSandboxNote(sandboxed bool, res *play.Result) string {
 // defaultsKeys is the user's DEFAULTS env sets and the keys they carry: a
 // kept playbook lives in the user's store, so they layer into it.
 func defaultsKeys(store string) ([]string, map[string]bool, error) {
-	dir := envprofile.Dir(store)
-	names, err := envprofile.Defaults(dir)
+	dir := envset.Dir(store)
+	names, err := envset.Defaults(dir)
 	if err != nil {
 		return nil, nil, err
 	}
 	keys := map[string]bool{}
 	for _, n := range names {
-		p, err := envprofile.Read(dir, n)
+		p, err := envset.Read(dir, n)
 		if err != nil || p == nil {
 			continue
 		}
@@ -107,12 +107,12 @@ func defaultsKeys(store string) ([]string, map[string]bool, error) {
 	return names, keys, nil
 }
 
-// envSetKeys checks the --env sets exist in the user's store and returns
+// envSetKeys checks the --env-set sets exist in the user's store and returns
 // the keys they set, which the credential BLOCK leaves alone.
 func envSetKeys(store string, sets []string) (map[string]bool, error) {
 	keys := map[string]bool{}
 	for _, name := range sets {
-		p, err := envprofile.Read(envprofile.Dir(store), name)
+		p, err := envset.Read(envset.Dir(store), name)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +133,7 @@ func envSetKeys(store string, sets []string) (map[string]bool, error) {
 // keepBlocked is the BLOCK VAR list of a kept playbook whose endpoint
 // moves: play's credential list, and every key the DEFAULTS sets would
 // layer in (they do not follow the recipe to another host), minus the keys
-// of the --env sets the user attached and the ones the recipe sets itself.
+// of the --env-set sets the user attached and the ones the recipe sets itself.
 func keepBlocked(defaults, keep, own map[string]bool) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -159,7 +159,7 @@ func keepBlocked(defaults, keep, own map[string]bool) []string {
 
 // keepSetup is what --keep writes before the recipe: the playbook, with a
 // launcher; a login of its own and the credentials blocked when the
-// endpoint moves; and the --env sets.
+// endpoint moves; and the --env-set sets.
 func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK %s", name)
@@ -403,7 +403,7 @@ func clauseUndo(c grammar.Clause) []undoItem {
 	case grammar.SetStatuslineRefresh:
 		return []u{{"refresh", one(c), grammar.Clause{Kind: grammar.UnsetStatuslineRefresh}}}
 	}
-	// SET ISOLATED LOGIN and NO ALIAS: a login is never unset by an update,
+	// SET ISOLATED LOGIN and NO LAUNCHER: a login is never unset by an update,
 	// and the launcher is play's.
 	return nil
 }

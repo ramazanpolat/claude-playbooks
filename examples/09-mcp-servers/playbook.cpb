@@ -4,7 +4,7 @@
 -- and the secret helper resolves it into the session at launch.
 ALTER DEFAULTS SET SECRET HELPER 'cpb-secret-file';
 
-CREATE PLAYBOOK IF NOT EXISTS researcher NO ALIAS;
+CREATE PLAYBOOK IF NOT EXISTS researcher NO LAUNCHER;
 
 ALTER PLAYBOOK researcher
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'

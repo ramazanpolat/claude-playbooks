@@ -19,7 +19,7 @@ import (
 
 // ErrTaken is returned by Write when the target name exists in the launcher
 // directory but is not a symlink to this binary.
-var ErrTaken = errors.New("command name taken by a file this tool did not generate")
+var ErrTaken = errors.New("launcher name taken by a file this tool did not generate")
 
 // ReservedNames are argv[0] values that always mean the CLI itself and may
 // never name a launcher.
@@ -258,13 +258,13 @@ func isOurs(path, binPath string) bool {
 // callers can reject an impossible --alias before mutating anything.
 func ValidateName(cmdName string) error {
 	if !singleSegment(cmdName) || strings.ContainsAny(cmdName, " \t\n\r") {
-		return fmt.Errorf("invalid command name %q", cmdName)
+		return fmt.Errorf("invalid launcher name %q", cmdName)
 	}
 	// Reserved under any spelling: a case-insensitive filesystem would fold
 	// "CPB" onto the CLI's own cpb symlink.
 	for reserved := range ReservedNames {
 		if strings.EqualFold(cmdName, reserved) {
-			return fmt.Errorf("command name %q is reserved for the CLI itself", cmdName)
+			return fmt.Errorf("launcher name %q is reserved for the CLI itself", cmdName)
 		}
 	}
 	return nil

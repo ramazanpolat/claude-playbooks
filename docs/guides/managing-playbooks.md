@@ -24,8 +24,8 @@ symlink to the `cpb` binary on your PATH. It works immediately, in
 every shell, with no rc-file edit.
 
 ```bash
-cpb CREATE PLAYBOOK backend ALIAS be          # the launcher is `be`
-cpb CREATE PLAYBOOK scratch NO ALIAS          # no launcher
+cpb CREATE PLAYBOOK backend LAUNCHER be          # the launcher is `be`
+cpb CREATE PLAYBOOK scratch NO LAUNCHER          # no launcher
 cpb CREATE PLAYBOOK boxed SANDBOX             # always sandboxed, with its own login
 cpb CREATE PLAYBOOK IF NOT EXISTS experiment  # a no-op when it exists
 ```
@@ -61,14 +61,14 @@ name one.
 
 ```bash
 cpb CREATE PLAYBOOK awesome FROM https://github.com/ramazanpolat/awesome-claude-playbooks BRANCH v2.0.0
-cpb CREATE PLAYBOOK team-tools FROM https://github.com/user/awesome BRANCH main ALIAS tt
+cpb CREATE PLAYBOOK team-tools FROM https://github.com/user/awesome BRANCH main LAUNCHER tt
 cpb CREATE PLAYBOOK mine FROM ~/dev/my-playbook        # a local directory, copied
 ```
 
 ### Install one playbook from a larger repo
 
 ```bash
-cpb CREATE PLAYBOOK dba FROM https://github.com/user/awesome SUBDIR playbooks/dba ALIAS ap-dba
+cpb CREATE PLAYBOOK dba FROM https://github.com/user/awesome SUBDIR playbooks/dba LAUNCHER ap-dba
 cpb CREATE PLAYBOOK dba FROM https://github.com/user/awesome/tree/main/playbooks/dba   # the same, as a GitHub tree URL
 ```
 
@@ -83,7 +83,7 @@ changes are live:
 
 ```bash
 cpb CREATE PLAYBOOK dev LINK ~/dev/my-playbook
-cpb CREATE PLAYBOOK dev LINK ~/dev/my-playbook NO ALIAS
+cpb CREATE PLAYBOOK dev LINK ~/dev/my-playbook NO LAUNCHER
 ```
 
 A statement never prompts, so the target needs a `.playbook` first (at least
@@ -107,12 +107,12 @@ resolves against the live registry (directory name first, then the manifest's
 `launcher`) at invocation time, so the launcher carries no state that can go stale.
 Launchers work from any shell, in scripts and in cron.
 
-A playbook has one launcher: its alias, or its name.
+A playbook has one launcher: the name `LAUNCHER` gave it, or its own name.
 
 ```bash
-cpb ALTER PLAYBOOK experiment ALIAS exp          # set or replace it
-cpb ALTER PLAYBOOK experiment ALIAS experiment   # back to the name
-cpb ALTER PLAYBOOK experiment NO ALIAS           # none
+cpb ALTER PLAYBOOK experiment LAUNCHER exp          # set or replace it
+cpb ALTER PLAYBOOK experiment LAUNCHER experiment   # back to the name
+cpb ALTER PLAYBOOK experiment NO LAUNCHER           # none
 ```
 
 Dropping a playbook removes the launchers named for it. It never removes a
@@ -137,12 +137,12 @@ goes to `claude` untouched.
 
 ```bash
 cpb ALTER PLAYBOOK experiment RENAME TO lab
-cpb ALTER PLAYBOOK lab RENAME TO experiment ALIAS exp
+cpb ALTER PLAYBOOK lab RENAME TO experiment LAUNCHER exp
 cpb DROP PLAYBOOK experiment              # asks for confirmation on a terminal
 cpb DROP PLAYBOOK IF EXISTS awesome --yes
 ```
 
-`RENAME TO`, `ALIAS` and `NO ALIAS` are not combined with environment clauses in
+`RENAME TO`, `LAUNCHER` and `NO LAUNCHER` are not combined with environment clauses in
 one statement: use two, so each applies whole or not at all.
 
 ## Plugins and the agent

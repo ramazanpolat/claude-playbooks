@@ -1,4 +1,4 @@
-package envprofile
+package envset
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 
 func TestExplainNamesTheDecidingLayer(t *testing.T) {
 	dir := Dir(t.TempDir())
-	for _, p := range []*Profile{
+	for _, p := range []*Set{
 		{Name: "d1", Set: map[string]string{"A": "d1", "B": "d1", "C": "d1"}},
 		{Name: "d2", Set: map[string]string{"B": "d2"}, Block: []string{"PROXY"}},
 		{Name: "glm", Set: map[string]string{"C": "glm", "PROXY": "back"}, Block: []string{"A"}},
@@ -63,7 +63,7 @@ func TestExplainNamesTheDecidingLayer(t *testing.T) {
 
 func TestExplainRefusesLikeTheLaunch(t *testing.T) {
 	dir := Dir(t.TempDir())
-	if _, err := Explain(dir, &manifest.Env{Sets: []string{"ghost"}}); !errors.Is(err, ErrProfile) {
+	if _, err := Explain(dir, &manifest.Env{Sets: []string{"ghost"}}); !errors.Is(err, ErrSet) {
 		t.Fatalf("missing profile: %v", err)
 	}
 	if got, err := Explain(dir, nil); err != nil || len(got) != 0 {
@@ -73,7 +73,7 @@ func TestExplainRefusesLikeTheLaunch(t *testing.T) {
 
 func TestExplainAndExpandCarryReferences(t *testing.T) {
 	dir := Dir(t.TempDir())
-	if err := Write(dir, &Profile{Name: "r", Set: map[string]string{"URL": "http://x"}, Refs: map[string]string{"TOKEN": "keychain:r"}}); err != nil {
+	if err := Write(dir, &Set{Name: "r", Set: map[string]string{"URL": "http://x"}, Refs: map[string]string{"TOKEN": "keychain:r"}}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := Read(dir, "r")

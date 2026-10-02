@@ -29,7 +29,7 @@ agent = "shell"
 steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
-  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK alpha NO ALIAS && "$HOME/.local/bin/cpb" CREATE PLAYBOOK beta NO ALIAS',
+  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK alpha NO LAUNCHER && "$HOME/.local/bin/cpb" CREATE PLAYBOOK beta NO LAUNCHER',
   # The pinned bash-completion releases (see the header).
   '''for v in 2.11 1.3; do curl -fsSL -o "$HOME/bash-completion-$v" "https://raw.githubusercontent.com/scop/bash-completion/$v/bash_completion" || exit 1; done''',
   # tab.sh BIN WORD...: what bash offers after `BIN WORD...<TAB>`, one per

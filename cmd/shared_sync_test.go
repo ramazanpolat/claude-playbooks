@@ -28,7 +28,7 @@ func TestOneIsolatedLaunchNeverSwapsTheMachineLogin(t *testing.T) {
 	auth.Notice = func(m string) { notices = append(notices, m) }
 	t.Cleanup(func() { auth.Notice = old })
 
-	mustStmt(t, "CREATE PLAYBOOK z NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK z NO LAUNCHER")
 	pb := filepath.Join(config.ResolvePlaybooksDir(), "z")
 	t.Setenv(auth.IsolateAuthEnv, "true")
 	var err error

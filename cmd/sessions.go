@@ -119,7 +119,7 @@ func procStatStarts(pids []int) map[int]procInfo {
 		if err != nil {
 			continue
 		}
-		// The command name (field 2) is in parentheses and may hold spaces;
+		// The launcher name (field 2) is in parentheses and may hold spaces;
 		// the fields after it start at field 3, so tty_nr (7) is the 5th and
 		// starttime (22) the 20th.
 		i := bytes.LastIndexByte(b, ')')

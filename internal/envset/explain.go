@@ -1,4 +1,4 @@
-package envprofile
+package envset
 
 import (
 	"sort"

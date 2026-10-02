@@ -141,7 +141,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 
 	// A playbook neither played nor created FROM a source has nothing to
 	// update.
-	mustStmt(t, "CREATE PLAYBOOK plain NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK plain NO LAUNCHER")
 	if err := runUpdate(updateCmd, []string{"plain"}); err == nil || !strings.Contains(err.Error(), "nothing to update from") {
 		t.Fatalf("update of an unplayed playbook: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 
 // A kept playbook lives in the user's store, so DEFAULTS layer into it. When
 // the recipe moves the endpoint, their keys are blocked there (named in the
-// preview), the login is its own, and an --env set's keys are not blocked.
+// preview), the login is its own, and an --env-set set's keys are not blocked.
 func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)

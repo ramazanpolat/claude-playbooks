@@ -320,13 +320,13 @@ func TestWideAllow(t *testing.T) {
 	}
 }
 
-// NO ALIAS is harmless in a recipe (play makes no launcher anyway).
+// NO LAUNCHER is harmless in a recipe (play makes no launcher anyway).
 func TestCheckNoAlias(t *testing.T) {
-	if r := Check([]byte("ALTER PLAYBOOK NO ALIAS SET MODEL 'm';\n")); len(r.Refused) != 0 {
-		t.Fatalf("NO ALIAS: %+v", r.Refused)
+	if r := Check([]byte("ALTER PLAYBOOK NO LAUNCHER SET MODEL 'm';\n")); len(r.Refused) != 0 {
+		t.Fatalf("NO LAUNCHER: %+v", r.Refused)
 	}
-	if r := Check([]byte("ALTER PLAYBOOK ALIAS x;\n")); len(r.Refused) != 1 {
-		t.Fatalf("ALIAS: %+v", r.Refused)
+	if r := Check([]byte("ALTER PLAYBOOK LAUNCHER x;\n")); len(r.Refused) != 1 {
+		t.Fatalf("LAUNCHER: %+v", r.Refused)
 	}
 }
 
