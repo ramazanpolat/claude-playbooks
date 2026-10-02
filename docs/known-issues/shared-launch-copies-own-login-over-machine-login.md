@@ -90,7 +90,7 @@ playbook moves to that account from its next launch.
 ## Reproduced (a Linux VM, throwaway `HOME`, made-up stores, cpb at 9642295)
 
 Each run starts with `~/.claude/.credentials.json` =
-`{"claudeAiOauth":{"accessToken":"PILOT-ACCOUNT"}}` and an mtime one hour
+`{"claudeAiOauth":{"accessToken":"MACHINE-ACCOUNT"}}` and an mtime one hour
 ago.
 
 1. **Installing a source that ships `.credentials.json`.** This is a local
@@ -101,7 +101,7 @@ ago.
    the file and gives it a fresh mtime. `install` then calls
    `SyncCredentials`, which sees a newer file and copies it over the
    machine's. The source's age does not matter.
-   - For a published playbook, this means **installing it can swap the
+   - For a published playbook, this means **installing it can swap
      pilot's Claude account for the publisher's**, silently. Everything the
      pilot then does in any shared playbook runs as that account, with its
      history and data on that account's side.

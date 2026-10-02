@@ -129,8 +129,8 @@ func doCreate(o createOpts, args []string) error {
 
 // defaultClaudeMD is written into a freshly created playbook so that the
 // Claude Code session opened inside it knows what a playbook is. It imports
-// nothing: the playbook sees only its own config dir until the user adds
-// instructions of their own. Users are expected to replace it.
+// nothing: the playbook sees only its own config dir until the pilot adds
+// instructions of their own. The pilot is expected to replace it.
 const defaultClaudeMD = "# Playbook: %[1]s\n\n" +
 	"This Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n" +
 	"`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n" +

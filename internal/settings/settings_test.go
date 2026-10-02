@@ -25,7 +25,7 @@ func TestEditKeepsOrderAndOtherKeys(t *testing.T) {
 	}
 	plugins.Delete("a@m")
 	f.Root.SetObject("enabledPlugins", plugins)
-	if err := f.Root.Set("agent", "kommander"); err != nil {
+	if err := f.Root.Set("agent", "toolkit"); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Write(); err != nil {
@@ -35,7 +35,7 @@ func TestEditKeepsOrderAndOtherKeys(t *testing.T) {
 	want := "{\n    \"permissions\": {\n        \"allow\": [\n            \"Bash(ls:*)\"\n        ]\n    },\n" +
 		"    \"enabledPlugins\": {\n        \"b@m\": false,\n        \"c@m\": true\n    },\n" +
 		"    \"statusLine\": {\n        \"type\": \"command\",\n        \"command\": \"x <y> & z\"\n    },\n" +
-		"    \"agent\": \"kommander\"\n}\n"
+		"    \"agent\": \"toolkit\"\n}\n"
 	if string(got) != want {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}

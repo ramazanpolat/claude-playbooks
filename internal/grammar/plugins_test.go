@@ -8,21 +8,21 @@ import (
 
 func TestParsePluginClauses(t *testing.T) {
 	st, err := ParseArgs([]string{"ALTER", "PLAYBOOK", "k",
-		"ADD", "MARKETPLACE", "kommander", "FROM", "github:ramazanpolat/kommander-playbook",
-		"ADD", "PLUGIN", "kommander@kommander",
-		"SET", "AGENT", "kommander:kommander",
-		"ADD", "ENV", "kommander", // an env set may share a marketplace's name
-		"DROP", "PLUGIN", "old@kommander",
+		"ADD", "MARKETPLACE", "toolkit", "FROM", "github:example/toolkit",
+		"ADD", "PLUGIN", "toolkit@toolkit",
+		"SET", "AGENT", "toolkit:toolkit",
+		"ADD", "ENV", "toolkit", // an env set may share a marketplace's name
+		"DROP", "PLUGIN", "old@toolkit",
 		"DROP", "MARKETPLACE", "old"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []Clause{
-		{Kind: AddMarketplace, Names: []string{"kommander"}, Arg: "github:ramazanpolat/kommander-playbook"},
-		{Kind: AddPlugin, Names: []string{"kommander@kommander"}},
-		{Kind: SetAgent, Arg: "kommander:kommander"},
-		{Kind: AddEnv, Names: []string{"kommander"}, Where: Last},
-		{Kind: DropPlugin, Names: []string{"old@kommander"}},
+		{Kind: AddMarketplace, Names: []string{"toolkit"}, Arg: "github:example/toolkit"},
+		{Kind: AddPlugin, Names: []string{"toolkit@toolkit"}},
+		{Kind: SetAgent, Arg: "toolkit:toolkit"},
+		{Kind: AddEnv, Names: []string{"toolkit"}, Where: Last},
+		{Kind: DropPlugin, Names: []string{"old@toolkit"}},
 		{Kind: DropMarketplace, Names: []string{"old"}},
 	}
 	if got := strip(st).Clauses; !reflect.DeepEqual(got, want) {

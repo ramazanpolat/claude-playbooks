@@ -338,18 +338,18 @@ func TestInstallRewritesManifestNameToInstallName(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	src := testPlaybookSource(t, "kommander")
+	src := testPlaybookSource(t, "toolkit")
 
-	if err := doInstall(installOpts{name: "kommander-dev", noLauncher: true}, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "toolkit-dev", noLauncher: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 
-	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "kommander-dev"))
+	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "toolkit-dev"))
 	if err != nil || m == nil {
 		t.Fatalf("installed manifest: m=%#v err=%v", m, err)
 	}
-	if m.Name != "kommander-dev" {
-		t.Fatalf("manifest name = %q, want \"kommander-dev\"", m.Name)
+	if m.Name != "toolkit-dev" {
+		t.Fatalf("manifest name = %q, want \"toolkit-dev\"", m.Name)
 	}
 }
 

@@ -317,7 +317,7 @@ func playBlockedVars() []string {
 func playSetup(name string, res *play.Result) string { return playSetupKeeping(name, res, nil) }
 
 // playSetupKeeping is playSetup with keep's keys left out of the credential
-// BLOCK: the ones an --env-set set the user attached provides.
+// BLOCK: the ones an --env-set set the pilot attached provides.
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO LAUNCHER", name)

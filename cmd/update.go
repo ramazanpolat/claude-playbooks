@@ -607,7 +607,8 @@ func (m migration) verify(root string) error {
 // playbook directory could swap the script. That writer is the same user,
 // already able to change anything the playbook runs, so the window is
 // accepted: running a private copy instead would break a script that finds
-// its sibling files through its own path, as kommander's apply.sh does.
+// its sibling files through its own path (a migrations/apply.sh that runs
+// the numbered steps beside it, say).
 func (m migration) run(w io.Writer, name, root string) error {
 	if m.rel == "" {
 		return nil

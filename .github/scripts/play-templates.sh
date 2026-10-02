@@ -1,5 +1,5 @@
 #!/bin/sh
-# Every template name the docs tell users to play must exist in this tree.
+# Every template name the docs say to play must exist in this tree.
 # Run in the site's tree (.github/scripts/site-tree.sh: the pinned ref's docs
 # and cpb, this checkout's site/), by templates-verify.yml.
 # `cpb play <name>` reads site/p/<name>.cpb at the release's own tag, so a

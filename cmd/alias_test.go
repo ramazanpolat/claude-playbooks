@@ -145,7 +145,7 @@ func TestAliasRejectsReservedAndOwnName(t *testing.T) {
 	}
 }
 
-// The dead end from the kommander-dev handoff: create --alias, drop the
+// A dead end found in use: create --alias, drop the
 // alias, and the playbook has no command — with no way to get one back,
 // because "alias <name> <name>" used to refuse.
 func TestAliasNameRepairsNameLauncher(t *testing.T) {

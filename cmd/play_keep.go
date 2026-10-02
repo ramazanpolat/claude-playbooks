@@ -107,7 +107,7 @@ func defaultsKeys(store string) ([]string, map[string]bool, error) {
 	return names, keys, nil
 }
 
-// envSetKeys checks the --env-set sets exist in the user's store and returns
+// envSetKeys checks the --env-set sets exist in the pilot's store and returns
 // the keys they set, which the credential BLOCK leaves alone.
 func envSetKeys(store string, sets []string) (map[string]bool, error) {
 	keys := map[string]bool{}
@@ -133,7 +133,7 @@ func envSetKeys(store string, sets []string) (map[string]bool, error) {
 // keepBlocked is the BLOCK VAR list of a kept playbook whose endpoint
 // moves: play's credential list, and every key the DEFAULTS sets would
 // layer in (they do not follow the recipe to another host), minus the keys
-// of the --env-set sets the user attached and the ones the recipe sets itself.
+// of the --env-set sets the pilot attached and the ones the recipe sets itself.
 func keepBlocked(defaults, keep, own map[string]bool) []string {
 	seen := map[string]bool{}
 	var out []string
