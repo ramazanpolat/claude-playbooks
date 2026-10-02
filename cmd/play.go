@@ -20,7 +20,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
 )
 
-// cpb play <ref> (v3.28.0): try someone else's playbook. This slice fetches
+// cpb play <ref> (v4.0.0): try someone else's playbook. This slice fetches
 // and checks the recipe (--check) and plans it against a throwaway store
 // (--dry-run, --json); running it arrives with the next slice. Design:
 // task claude-playbooks-cli, design-cpb-play-2026-10-01-21_58.md.
@@ -150,6 +150,9 @@ func fetchRecipe(ref string) (*play.Source, *play.Recipe, error) {
 		rec, err = play.Fetch(context.Background(), play.NewClient(), src.URL, "cpb/"+Version+" (play)")
 	}
 	if err != nil {
+		if src.Kind == play.KindTemplate && errors.Is(err, play.ErrNotFound) {
+			return src, nil, templateMiss(src)
+		}
 		return src, nil, err
 	}
 	if playSHA256 != "" && !strings.EqualFold(playSHA256, rec.SHA256) {
@@ -504,4 +507,18 @@ func playCheckDir(dir string) error {
 		return &commandExitError{code: 1}
 	}
 	return nil
+}
+
+// templateMiss is the error for a template name that is not there: the
+// index is fetched, only now, to suggest close names.
+func templateMiss(src *play.Source) error {
+	msg := fmt.Sprintf("no template named %s (%s)", src.Name, src.URL)
+	idx, err := play.Fetch(context.Background(), play.NewClient(), play.IndexURL(src.URL), "cpb/"+Version+" (play)")
+	if err != nil {
+		return errors.New(msg)
+	}
+	if s := play.Suggest(idx.Bytes, src.Name); len(s) > 0 {
+		return fmt.Errorf("%s: did you mean %s?", msg, strings.Join(s, ", "))
+	}
+	return fmt.Errorf("%s; the templates: %s", msg, strings.Join(strings.Fields(string(idx.Bytes)), ", "))
 }

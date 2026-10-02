@@ -1,0 +1,5 @@
+-- The same recipe applied as your own, by hand: what you do once you trust it.
+-- cpb play is for the step before that (see the README).
+CREATE PLAYBOOK IF NOT EXISTS reviewer-by-hand NO ALIAS;
+USE PLAYBOOK reviewer-by-hand;
+INCLUDE 'reviewer.cpb';

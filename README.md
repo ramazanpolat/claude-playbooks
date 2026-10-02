@@ -50,6 +50,10 @@ cpb DROP PLAYBOOK scratch --yes                    # gone; ~/.claude was never t
 cpb start /tmp/spike --delete                      # or a throwaway session in a throwaway folder
 ```
 
+### Try someone's playbook safely
+
+`cpb play frontend-craft` (a template, a URL, `github:…@tag` or a file) shows exactly what the recipe would do and asks first. A changed model endpoint, proxy or secret must be typed to confirm, the session runs in a sandbox where one is available, and it is removed when it ends; `--keep` keeps it as yours. [Try someone else's playbook →](docs/guides/play.md)
+
 ### Route one playbook to another model
 
 An env set is a named group of variables, attached to one playbook or to all
@@ -64,8 +68,7 @@ cpb EXPLAIN PLAYBOOK glm
 ```
 
 `ISOLATED LOGIN` keeps your Anthropic login away from that provider, and a
-new playbook's `CLAUDE.md` imports nothing. [Environment →](docs/guides/environment.md) ·
-[two accounts side by side →](docs/guides/authentication.md)
+new playbook's `CLAUDE.md` imports nothing. [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
 
@@ -82,8 +85,7 @@ cpb run --sandbox-host me@buildbox work                        # the same launch
 
 By default your backend API keys stay on the host: the sandbox sees a
 placeholder that a host-side proxy swaps for the real key, for that endpoint
-only ([when a key does go in](docs/guides/sandbox.md#secrets)). A `SANDBOX`
-playbook is sandboxed on every launch. Needs `sbx`. [Sandbox →](docs/guides/sandbox.md)
+only ([when a key does go in](docs/guides/sandbox.md#secrets)). A `SANDBOX` playbook is sandboxed on every launch. Needs `sbx`. [Sandbox →](docs/guides/sandbox.md)
 
 ### Put the whole setup in a file
 
@@ -112,8 +114,7 @@ cpb APPLY machine.cpb                              # on the next machine
 Secrets are references, resolved at launch by your helper; `SHOW CREATE` never
 prints a value. A recipe covers the whole agent (plugins, MCP servers, tools,
 status line, model and `/model` picker, skills) and applies to any
-playbook or to `~/.claude`. A playbook can also come from git (`FROM <url>
-BRANCH <ref>`) or run in place from a folder (`LINK <dir>`).
+playbook or to `~/.claude`. A playbook can also come from git (`FROM <url> BRANCH <ref>`) or run in place from a folder (`LINK <dir>`).
 
 ### See everything that is running
 
@@ -126,10 +127,9 @@ cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"    # state as tables; add ClickH
 
 ## Built to be relied on
 
-- **Tested on every change:** CI applies all 19 examples and, on Linux and
+- **Tested on every change:** CI applies all 21 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
-  same. Each release passes a full [arena](gentar/README.md) regression on the
-  exact commit it is tagged from.
+  same. Each release passes a full [arena](gentar/README.md) regression on the exact commit it is tagged from.
 - **Another account's login never replaces yours:** cpb sets it aside rather
   than copying it over `~/.claude`'s.
 
@@ -139,7 +139,7 @@ cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"    # state as tables; add ClickH
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top, as recipes |
-| [Examples 01-20](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions and the TUI, all applied in CI |
+| [Examples 01-21](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI and `cpb play`, all applied in CI |
 | [Guides](docs/README.md) · [CLI grammar](docs/reference/cli-grammar.md) | how-tos for every area · `cpb <VERB> <OBJECT> <name> <clause> ...`, every statement and output format |
 | [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |
 

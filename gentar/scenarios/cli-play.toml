@@ -1,9 +1,13 @@
-# claude-playbooks own-arena suite: cpb play (v3.28.0), slice 1. A played
+# claude-playbooks own-arena suite: cpb play (v4.0.0), slice 1. A played
 # recipe is fetched once, checked against what it may hold, and planned
 # against a throwaway store: --check, --dry-run --json, --sha256, and the
 # template-directory check the website's CI runs. Slice 2 runs it and
 # cleans up on every way out; slice 3 runs it in a sandbox by default;
-# slice 4 keeps it (--keep) and updates it (--update). Local recipes only; the
+# slice 4 keeps it (--keep) and updates it (--update); slice 5 fetches over
+# https from a local server (gentar/fixtures/play-https.py, a self-signed
+# certificate cpb trusts through SSL_CERT_FILE, which Go reads on Linux
+# only: on macOS those two steps say they did not run) and resolves a
+# template name. Local recipes only; the
 # https fetch limits are unit-tested here and join this scenario with the
 # local TLS server in a later slice.
 
@@ -18,6 +22,7 @@ steps = [
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
   '''F="$HOME/playfx"; mkdir -p "$F/tpl" && printf '%s\n' "ALTER PLAYBOOK" "  USE ENV work" "  SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;" "ALTER DEFAULTS SET SECRET HELPER 'x';" > "$F/bad.cpb" && printf '%s\n' "-- title: Router" "-- description: GLM through a router." "" "ALTER PLAYBOOK" "  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1" "  SET MODEL 'glm-5.3';" > "$F/router.cpb" && cp "$F/router.cpb" "$F/tpl/router.cpb" && printf '%s\n' "-- title: Reviewer" "-- description: Reads code." "-- min-cpb: 3.28.0" "" "ALTER PLAYBOOK SET MODEL 'opus';" > "$F/tpl/code-reviewer.cpb" && printf '%s\n' code-reviewer router > "$F/tpl/index.txt"''',
   'claude-playbook CREATE ENV mine SET ANTHROPIC_BASE_URL=https://mine.example && claude-playbook ALTER DEFAULTS USE ENV mine',
+  '''mkdir -p "$HOME/tls" && openssl req -x509 -newkey rsa:2048 -nodes -keyout "$HOME/tls/key.pem" -out "$HOME/tls/cert.pem" -days 2 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 2>/dev/null''',
   '''mkdir -p "$HOME/stubsbx" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/sbx.log"' 'if [ "$1" = ls ] && [ "$2" = --json ]; then printf "%s" "{\"sandboxes\":[]}"; exit 0; fi' 'if [ "$1" = exec ]; then case "$*" in *"cat ~/.claude-playbook-sandbox"*) printf "%s" skills=private;; esac; fi' 'exit 0' > "$HOME/stubsbx/sbx" && chmod 755 "$HOME/stubsbx/sbx" && printf '%s\n' "ALTER PLAYBOOK SET VAR GH FROM 'keychain:pilot/gh';" > "$HOME/playfx/refs.cpb"''',
   '''F="$HOME/playfx"; printf '%s\n' "-- title: Plain" "-- description: A model." "" "ALTER PLAYBOOK SET MODEL 'claude-opus-5-5';" > "$F/plain.cpb" && mkdir -p "$HOME/sleepclaude" && printf '%s\n' '#!/bin/sh' 'echo "$CLAUDE_CONFIG_DIR" > "$HOME/play-cfg"' 'sleep 30' > "$HOME/sleepclaude/claude" && chmod 755 "$HOME/sleepclaude/claude"''',
 ]
@@ -83,3 +88,28 @@ contains = "play-sandbox-ok"
 # diff and refuses without a yes (nothing changes), then applies with one.
 command = '''F="$HOME/playfx"; cp "$F/plain.cpb" "$F/keepme.cpb"; rm -f "$HOME/play-cfg"; if ! PATH="$HOME/sleepclaude:$PATH" claude-playbook play --keep --yes "$F/keepme.cpb" > "$HOME/k1.out" 2>&1; then echo keep-failed; elif [ -e "$HOME/play-cfg" ]; then echo keep-ran-a-session; elif ! claude-playbook SHOW PLAYBOOK keepme --json > "$HOME/k1.json" || ! python3 -c "import json,sys,os; v=json.load(open(sys.argv[1])); p=v['play']; assert len(p['sha256'])==64 and p['ref'].endswith('keepme.cpb') and 'pilot_profile' not in v, v; assert open(os.path.join(v['path'],'.play/recipe.cpb')).read()==open(sys.argv[2]).read(); assert not [l for l in open(os.path.join(v['path'],'CLAUDE.md')) if l.startswith('@')]" "$HOME/k1.json" "$F/keepme.cpb"; then echo keep-record-wrong; elif ! claude-playbook play --update keepme 2>&1 | grep -q "keepme is unchanged"; then echo update-not-unchanged; else printf '%s\n' "-- title: Plain" "-- description: A model." "" "ALTER PLAYBOOK SET MODEL 'claude-sonnet-5';" > "$F/keepme.cpb"; if claude-playbook play --update keepme < /dev/null > "$HOME/k3.out" 2>&1; then echo update-without-yes; elif ! grep -q "+ ALTER PLAYBOOK SET MODEL 'claude-sonnet-5';" "$HOME/k3.out" || ! claude-playbook SHOW PLAYBOOK keepme --json | grep -q '"model": "claude-opus-5-5"'; then echo update-diff-wrong; elif claude-playbook play --update keepme --yes > "$HOME/k4.out" 2>&1 && claude-playbook SHOW PLAYBOOK keepme --json | grep -q '"model": "claude-sonnet-5"'; then echo play-keep-ok; else echo update-failed; fi; fi'''
 contains = "play-keep-ok"
+
+[[verify.commands]]
+# Slice 5, the fetch's limits over real https: the recipe itself is
+# fetched; over 64 KiB, a redirect to http, more than 3 redirects, a
+# connection held past 30 s, a URL with credentials, plain http and a
+# github: ref without @<ref> are each refused, with the reason.
+command = '''if [ "$(uname -s)" != Linux ]; then echo "play-fetch-limits-ok (not run here: Go reads SSL_CERT_FILE on Linux only; the bench and the Ubuntu checks run it)"; exit 0; fi; T="$HOME/tls"; rm -f "$T/port" "$T/port.tmp" "$T/requests.log"; python3 "$WORKSPACE_DIR/gentar/fixtures/play-https.py" "$T" & srv=$!; trap 'kill $srv 2>/dev/null; wait $srv 2>/dev/null' EXIT; i=0; while [ ! -s "$T/port" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; [ -s "$T/port" ] || { echo "the https fixture did not start"; exit 1; }; B="https://127.0.0.1:$(cat "$T/port")"; export SSL_CERT_FILE="$T/cert.pem"; unset HTTPS_PROXY https_proxy ALL_PROXY all_proxy; r() { if claude-playbook play --check "$1" > "$HOME/f.out" 2>&1; then echo "accepted: $1"; elif ! grep -qi -- "$2" "$HOME/f.out"; then echo "wrong: $1: $(head -c 300 "$HOME/f.out")"; fi; }; res=$(claude-playbook play --check "$B/ok.cpb" > /dev/null 2>&1 || echo "ok refused"; claude-playbook play --check "$B/chain/3" > /dev/null 2>&1 || echo "3 redirects refused"; r "$B/big.cpb" "larger than 64 KiB"; r "$B/to-http" "https only"; r "$B/chain/4" "more than 3 redirects"; r "$B/slow.cpb" "timeout"; r "https://u:p@127.0.0.1:1/x.cpb" "carrying credentials"; r "http://127.0.0.1:1/x.cpb" "https only"; r "github:acme/agents/x.cpb" "pin it"); if [ -n "$res" ]; then echo "$res"; else echo play-fetch-limits-ok; fi'''
+contains = "play-fetch-limits-ok"
+
+[[verify.commands]]
+# Slice 5, one fetch: the server serves version 1 to the first request and
+# version 2 after. --keep previews, confirms and applies with exactly one
+# request, so the kept bytes are the previewed ones (version 1); --update
+# fetches again and shows version 2's diff, refusing without a yes; and a
+# wrong --sha256 refuses before anything is shown.
+command = '''if [ "$(uname -s)" != Linux ]; then echo "play-pin-ok (not run here: Go reads SSL_CERT_FILE on Linux only; the bench and the Ubuntu checks run it)"; exit 0; fi; T="$HOME/tls"; rm -f "$T/port" "$T/port.tmp" "$T/requests.log"; python3 "$WORKSPACE_DIR/gentar/fixtures/play-https.py" "$T" & srv=$!; trap 'kill $srv 2>/dev/null; wait $srv 2>/dev/null' EXIT; i=0; while [ ! -s "$T/port" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; [ -s "$T/port" ] || { echo "the https fixture did not start"; exit 1; }; B="https://127.0.0.1:$(cat "$T/port")"; export SSL_CERT_FILE="$T/cert.pem"; unset HTTPS_PROXY https_proxy ALL_PROXY all_proxy; if ! claude-playbook play --keep --yes --as pinned "$B/mutate.cpb" > "$HOME/pin.out" 2>&1; then echo "keep failed: $(tail -3 "$HOME/pin.out")"; elif [ "$(grep -c '^/mutate.cpb$' "$T/requests.log")" != 1 ]; then echo "fetched $(grep -c '^/mutate.cpb$' "$T/requests.log") times"; elif ! claude-playbook SHOW PLAYBOOK pinned --json | grep -q '"model": "claude-opus-5-5"'; then echo not-the-previewed-bytes; elif claude-playbook play --update pinned < /dev/null > "$HOME/pin2.out" 2>&1; then echo update-without-yes; elif ! grep -q "+ ALTER PLAYBOOK SET MODEL 'claude-sonnet-5';" "$HOME/pin2.out"; then echo "update diff: $(head -c 300 "$HOME/pin2.out")"; elif claude-playbook play --check --sha256 00 "$B/ok.cpb" > "$HOME/pin3.out" 2>&1 || ! grep -q "refused before anything was shown" "$HOME/pin3.out" || grep -q "Recipe:" "$HOME/pin3.out"; then echo sha-wrong; else echo play-pin-ok; fi'''
+contains = "play-pin-ok"
+
+[[verify.commands]]
+# Slice 5, a template name resolves to this cpb's own tag in the project's
+# site/p/ (main for a dev build), without the network: the fetch goes to a
+# proxy that is not there (the run must fail there), and the error names
+# the URL.
+command = '''if HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 NO_PROXY= no_proxy= claude-playbook play --check reviewer > "$HOME/t.out" 2>&1; then echo fetched-through-a-dead-proxy; exit 1; fi; grep -q "127.0.0.1:9" "$HOME/t.out" || { echo "not through the proxy: $(head -c 300 "$HOME/t.out")"; exit 1; }; python3 -c "import re,sys; t=open(sys.argv[1]).read(); m=re.search(r'https://raw\\.githubusercontent\\.com/ramazanpolat/claude-playbooks/([^/]+)/site/p/reviewer\\.cpb', t); assert m and (m.group(1)=='main' or re.fullmatch(r'v[0-9]+[.][0-9]+[.][0-9]+(-rc[0-9]+)?', m.group(1))), t" "$HOME/t.out" && echo play-template-ok'''
+contains = "play-template-ok"
