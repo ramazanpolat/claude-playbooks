@@ -222,13 +222,13 @@ func doRename(o renameOpts, args []string) error {
 			if _, werr := launcher.Write(ldir, o.launcher); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", o.launcher, werr)
 			} else {
-				fmt.Printf("Command %q now runs %q\n", o.launcher, newName)
+				fmt.Printf("Launcher %q now runs %q\n", o.launcher, newName)
 			}
 		default:
 			if _, werr := launcher.Write(ldir, newName); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", newName, werr)
 			} else {
-				fmt.Printf("Command %q now runs %q\n", newName, newName)
+				fmt.Printf("Launcher %q now runs %q\n", newName, newName)
 			}
 		}
 	}

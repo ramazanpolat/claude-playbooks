@@ -171,7 +171,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		if command != "" {
 			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, command)
 		} else {
-			fmt.Printf("  %-*s  %-*s  (no command registered)\n", maxLen, pb.Name, cmdColW, runStr)
+			fmt.Printf("  %-*s  %-*s  (no launcher)\n", maxLen, pb.Name, cmdColW, runStr)
 		}
 	}
 

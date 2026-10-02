@@ -81,7 +81,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 			if _, _, foreign := launcher.Lookup(ldir, name); !foreign {
 				if _, err := os.Lstat(filepath.Join(ldir, name)); err != nil {
-					fmt.Printf("Playbook %q now has no command. Restore one with: cpb ALTER PLAYBOOK %s LAUNCHER %s\n", name, name, name)
+					fmt.Printf("Playbook %q now has no launcher. Restore one with: cpb ALTER PLAYBOOK %s LAUNCHER %s\n", name, name, name)
 				}
 			}
 		}
@@ -129,7 +129,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		if werr != nil {
 			return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
 		}
-		fmt.Printf("Command:  %s  (launcher at %s)\n", newAlias, lpath)
+		fmt.Printf("Launcher: %s  (at %s)\n", newAlias, lpath)
 		warnIfShadowedOrUnreachable(newAlias, lpath, pb.Path)
 		return nil
 	}
@@ -161,7 +161,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		if werr != nil {
 			return fmt.Errorf("could not write launcher %q: %w", newAlias, werr)
 		}
-		fmt.Printf("Command:  %s  (launcher at %s)\n", newAlias, lpath)
+		fmt.Printf("Launcher: %s  (at %s)\n", newAlias, lpath)
 		warnIfShadowedOrUnreachable(newAlias, lpath, pb.Path)
 		return nil
 	}
@@ -192,7 +192,7 @@ func doLauncher(o launcherOpts, args []string) error {
 	}
 	if err := writeAliasManifest(pb.RootPath, pb.Name, newAlias); err != nil {
 		restoreManifest()
-		return fmt.Errorf("cannot record launcher %q in manifest (required for the command to resolve): %w", newAlias, err)
+		return fmt.Errorf("cannot record launcher %q in manifest (required for the launcher to resolve): %w", newAlias, err)
 	}
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; launcher %q recorded in the manifest only.\n", newAlias)
@@ -232,7 +232,7 @@ func doLauncher(o launcherOpts, args []string) error {
 			return fmt.Errorf("could not retire old launcher %q (launcher unchanged): %w", old, err)
 		}
 	}
-	fmt.Printf("Command:  %s  (launcher at %s)\n", newAlias, lpath)
+	fmt.Printf("Launcher: %s  (at %s)\n", newAlias, lpath)
 	warnIfShadowedOrUnreachable(newAlias, lpath, pb.Path)
 	return nil
 }
@@ -253,7 +253,7 @@ func retireAliasLauncher(old, exceptName string) error {
 		return fmt.Errorf("cannot verify ownership of %q: %w", old, err)
 	}
 	if owner != nil {
-		fmt.Printf("Kept command %q (still addresses playbook %q)\n", old, owner.Name)
+		fmt.Printf("Kept launcher %q (still addresses playbook %q)\n", old, owner.Name)
 		return nil
 	}
 	dir, err := config.ResolveLauncherDir()
@@ -265,7 +265,7 @@ func retireAliasLauncher(old, exceptName string) error {
 		return err
 	}
 	if ok {
-		fmt.Printf("Removed command %q\n", old)
+		fmt.Printf("Removed launcher %q\n", old)
 	}
 	return nil
 }

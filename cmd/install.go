@@ -261,7 +261,7 @@ func doInstall(o installOpts, args []string) error {
 				// retry under the same name — roll it back like the other
 				// post-copy error paths.
 				os.RemoveAll(dest)
-				return fmt.Errorf("cannot record launcher %q in manifest (required for the command to resolve): %w", o.launcher, err)
+				return fmt.Errorf("cannot record launcher %q in manifest (required for the launcher to resolve): %w", o.launcher, err)
 			}
 		}
 

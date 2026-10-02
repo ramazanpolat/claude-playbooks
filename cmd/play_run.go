@@ -221,7 +221,7 @@ func copyEnvSets(userStore, store string) (map[string]bool, error) {
 			return nil, err
 		}
 		if p == nil {
-			return nil, fmt.Errorf("--env %s: no such env set (SHOW ENVS)", name)
+			return nil, fmt.Errorf("--env-set %s: no such env set (SHOW ENVS)", name)
 		}
 		if err := envset.Write(envset.Dir(store), p); err != nil {
 			return nil, err

@@ -1636,7 +1636,7 @@ available. `--keep` keeps it as a playbook of your own instead. The guide is
 [Try someone else's playbook](../guides/play.md).
 
 ```
-cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env <set>]...
+cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env-set <set>]...
                [--sandbox[=sbx] | --no-sandbox] [--sha256 <hex>] [-- <claude arguments>]
                                                        preview, confirm, run, remove
 cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals and risks
@@ -1822,7 +1822,7 @@ must be typed: each model-endpoint or proxy host needs `--trust-endpoint
 `--trust-secret <ref>`. A missing one refuses, naming the flags. Without
 `--yes`, a run off a terminal is refused.
 
-**`--env <set>`** copies one of your env sets into the throwaway store and
+**`--env-set <set>`** copies one of your env sets into the throwaway store and
 attaches it (`USE ENV`, in the order given). It is how a key reaches a moved
 endpoint: the keys it sets are left out of the credential `BLOCK`, and
 nothing else of yours follows.
@@ -1855,7 +1855,7 @@ runs no session:
   is refused;
 - your `DEFAULTS` apply to it like to any playbook, and the preview names
   them. When the endpoint moves, every key they carry is blocked in it ("will
-  NOT follow it to <host>"), except those of an `--env` set (attached with
+  NOT follow it to <host>"), except those of an `--env-set` set (attached with
   `USE ENV`) and those the recipe sets itself;
 - the exact bytes are kept as `<playbook>/.play/recipe.cpb`, and the
   manifest gains:

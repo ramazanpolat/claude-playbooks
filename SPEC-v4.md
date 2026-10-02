@@ -88,7 +88,7 @@ Since v2.13.0, per-playbook commands are **launchers** — symlinks to the `cpb`
 - **Default root only.** Launcher mutations happen only when operating on the default playbooks root (`~/.claude-playbooks`). A symlink carries no root identity, so managing links on behalf of a custom `--playbooks-dir` root would corrupt the default registry's commands; under a custom root the tool prints a note and the `cpb --playbooks-dir <root> run <name>` form instead.
 - **Reserved name.** `cpb` always means the CLI itself; it never dispatches and may never name a launcher.
 - **Collisions and locking.** The registry is the ownership authority: a command name that already addresses another playbook (by directory name or manifest alias) is a hard error before any mutation. Preflight-through-registration is serialized across concurrent processes by a flock in the user cache dir (`<cache>/cpb/registry.lock`).
-- **Retirement rule.** `DROP PLAYBOOK` and `RENAME TO` remove a launcher named for the playbook going away (its name, its manifest alias, or a name a rename leaves behind), receipt line included, printing `Removed command "x"`, unless another playbook still claims the name: by spelling in the registry, or by directory-entry identity on a case-insensitive filesystem (`cpb CREATE PLAYBOOK one LAUNCHER Foo` and `cpb CREATE PLAYBOOK two LAUNCHER foo` share one entry). A claimed launcher is kept outright (`Kept command "x" (still addresses playbook "y")`); when the registry cannot be scanned the launcher is kept with a warning, since ownership could not be verified. The rule rests on the launcher gate: the tool only ever writes launchers for the default registry root, so a name nobody in that registry claims serves nothing the tool made. A hand-made link named for the playbook goes with it; it would only fail loudly as stale afterwards.
+- **Retirement rule.** `DROP PLAYBOOK` and `RENAME TO` remove a launcher named for the playbook going away (its name, its manifest alias, or a name a rename leaves behind), receipt line included, printing `Removed launcher "x"`, unless another playbook still claims the name: by spelling in the registry, or by directory-entry identity on a case-insensitive filesystem (`cpb CREATE PLAYBOOK one LAUNCHER Foo` and `cpb CREATE PLAYBOOK two LAUNCHER foo` share one entry). A claimed launcher is kept outright (`Kept launcher "x" (still addresses playbook "y")`); when the registry cannot be scanned the launcher is kept with a warning, since ownership could not be verified. The rule rests on the launcher gate: the tool only ever writes launchers for the default registry root, so a name nobody in that registry claims serves nothing the tool made. A hand-made link named for the playbook goes with it; it would only fail loudly as stale afterwards.
 - **Stale launchers fail loudly.** Invoking a launcher whose name no longer resolves errors with `unknown playbook "<name>" — this launcher no longer matches any playbook` and exit code 1, never a silent fall-through to the CLI overview.
 - **Foreign files are never touched.** A file occupying a launcher name that is not a symlink to this binary is left alone; attempting to write over it degrades to a warning with manual instructions.
 
@@ -246,7 +246,7 @@ run against a local fixture server; they carry no compatibility promise.
 
 ### `cpb` (no arguments)
 
-Prints a one-line description and lists all discovered playbooks with how to run each. The parenthetical shows the playbook's registered command (its launcher, by directory name or manifest alias); a playbook with none shows `(no command registered)`.
+Prints a one-line description and lists all discovered playbooks with how to run each. The parenthetical shows the playbook's registered command (its launcher, by directory name or manifest alias); a playbook with none shows `(no launcher)`.
 
 ```
 cpb (Claude PlayBooks) -- manage isolated Claude Code instances
@@ -257,7 +257,7 @@ Available playbooks:
 
   experiment    cpb run experiment    (or: experiment)
   sre           cpb run sre           (or: sre)
-  dba           cpb run dba           (no command registered)
+  dba           cpb run dba           (no launcher)
 
 Run 'cpb --help' for all commands.
 ```
@@ -489,7 +489,7 @@ One launcher is registered, named by `LAUNCHER`, or the source manifest's `launc
 ```
 Cloning https://github.com/user/repo (branch main) (subdir playbooks/sre)...
 Installed "sre" at ~/.claude-playbooks/sre
-Command:  sre  (launcher at /Users/you/.local/bin/sre)
+Launcher: sre  (at /Users/you/.local/bin/sre)
 
 Run it now:
   sre

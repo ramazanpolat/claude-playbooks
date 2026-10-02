@@ -117,7 +117,7 @@ func doCreate(o createOpts, args []string) error {
 				// dest already joined the registry, so leaving it would block a
 				// retry under the same name — roll it back, as install does.
 				os.RemoveAll(dest)
-				return fmt.Errorf("cannot record launcher %q in manifest (required for the command to resolve): %w", launcherName, err)
+				return fmt.Errorf("cannot record launcher %q in manifest (required for the launcher to resolve): %w", launcherName, err)
 			}
 		}
 
@@ -136,7 +136,7 @@ const defaultClaudeMD = "# Playbook: %[1]s\n\n" +
 	"`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n" +
 	"## Useful cpb statements\n\n" +
 	"```\n" +
-	"cpb SHOW PLAYBOOKS                      # every playbook and its command\n" +
+	"cpb SHOW PLAYBOOKS                      # every playbook and its launcher\n" +
 	"cpb SHOW PLAYBOOK %[1]s\n" +
 	"cpb ALTER PLAYBOOK %[1]s RENAME TO <name>\n" +
 	"cpb DROP PLAYBOOK %[1]s\n" +

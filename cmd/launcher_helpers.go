@@ -45,7 +45,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Register a different launcher with: cpb ALTER PLAYBOOK %s LAUNCHER <name> — rename the playbook (and its command) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
+		fmt.Fprintf(os.Stderr, "Register a different launcher with: cpb ALTER PLAYBOOK %s LAUNCHER <name> — rename the playbook (and its launcher) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
 		manual()
 		return
 	}
@@ -55,7 +55,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 		return
 	}
 
-	fmt.Printf("Command:  %s  (launcher at %s)\n", cmdName, path)
+	fmt.Printf("Launcher: %s  (at %s)\n", cmdName, path)
 	warnIfShadowedOrUnreachable(cmdName, path, configDir)
 	fmt.Printf("\nRun it now:\n  %s\n", shell.QuoteArg(cmdName))
 }

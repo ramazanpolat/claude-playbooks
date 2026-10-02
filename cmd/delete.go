@@ -64,7 +64,7 @@ func doDelete(o deleteOpts, args []string) error {
 						continue // the CLI's own reserved symlink is not this playbook's launcher
 					}
 					if _, exists, foreign := launcher.Lookup(ldir, n); exists && !foreign {
-						fmt.Printf("Command:  %s (%s)\n", n, launcherFate(ldir, n, pb.Name).prompt)
+						fmt.Printf("Launcher: %s (%s)\n", n, launcherFate(ldir, n, pb.Name).prompt)
 					}
 				}
 			}
@@ -135,9 +135,9 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 		fate := launcherFate(dir, n, playbookName)
 		switch fate.action {
 		case fateClaimed:
-			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, fate.owner)
+			fmt.Printf("Kept launcher %q (still addresses playbook %q)\n", n, fate.owner)
 		case fateUnknown:
-			fmt.Fprintf(os.Stderr, "Warning: kept command %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
+			fmt.Fprintf(os.Stderr, "Warning: kept launcher %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
 		default:
 			removed, rerr := launcher.Remove(dir, n)
 			if rerr != nil {
@@ -145,7 +145,7 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 				continue
 			}
 			if removed {
-				fmt.Printf("Removed command %q\n", n)
+				fmt.Printf("Removed launcher %q\n", n)
 			}
 		}
 	}

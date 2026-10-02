@@ -260,7 +260,7 @@ func TestDeleteRemovesUnclaimedLauncher(t *testing.T) {
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "victim"); exists {
 		t.Fatal("unclaimed launcher survived the delete of its playbook")
 	}
-	if !strings.Contains(out, `Removed command "victim"`) {
+	if !strings.Contains(out, `Removed launcher "victim"`) {
 		t.Fatalf("removal not reported:\n%s", out)
 	}
 	if got := launcher.Recorded(); len(got) != 0 {
@@ -273,7 +273,7 @@ func TestDeleteRemovesUnclaimedLauncher(t *testing.T) {
 func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "victim", nil)
-	// "other" claims the launcher name "victim" via its manifest alias —
+	// "other" claims the launcher name "victim" via its manifest launcher —
 	// the registry, not the symlink, owns command-name ownership.
 	writePlaybook(t, root, "other", &manifest.Manifest{Launcher: "victim"})
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
@@ -803,7 +803,7 @@ func TestDeleteRemovesNameAliasAndHandMadeLaunchers(t *testing.T) {
 		if _, exists, _ := launcher.Lookup(config.LauncherDir, n); exists {
 			t.Fatalf("launcher %q survived the delete of its playbook", n)
 		}
-		if !strings.Contains(out, `Removed command "`+n+`"`) {
+		if !strings.Contains(out, `Removed launcher "`+n+`"`) {
 			t.Fatalf("removal not reported for %q:\n%s", n, out)
 		}
 	}
@@ -825,7 +825,7 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(out, "Command:  own (launcher will be removed)") {
+	if !strings.Contains(out, "Launcher: own (launcher will be removed)") {
 		t.Fatalf("prompt does not predict the removal:\n%s", out)
 	}
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "own"); !exists {
@@ -873,7 +873,7 @@ func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(out, `Removed command "oa"`) {
+	if !strings.Contains(out, `Removed launcher "oa"`) {
 		t.Fatalf("renamed playbook's alias launcher kept:\n%s", out)
 	}
 }
@@ -958,7 +958,7 @@ func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if strings.Contains(out, "Command:  cpb") {
+	if strings.Contains(out, "Launcher: cpb") {
 		t.Fatalf("reserved symlink presented as the playbook's launcher:\n%s", out)
 	}
 	out = captureStdout(t, func() {
@@ -966,7 +966,7 @@ func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if strings.Contains(out, `Removed command "cpb"`) {
+	if strings.Contains(out, `Removed launcher "cpb"`) {
 		t.Fatalf("removal of the reserved symlink reported:\n%s", out)
 	}
 	if _, err := os.Lstat(cli); err != nil {

@@ -117,7 +117,7 @@ func envSetKeys(store string, sets []string) (map[string]bool, error) {
 			return nil, err
 		}
 		if p == nil {
-			return nil, fmt.Errorf("--env %s: no such env set (SHOW ENVS)", name)
+			return nil, fmt.Errorf("--env-set %s: no such env set (SHOW ENVS)", name)
 		}
 		e := p.Env()
 		for k := range e.Set {
@@ -190,7 +190,7 @@ func printDefaultsNote(names []string, res *play.Result) {
 		return
 	}
 	fmt.Printf("\nYour DEFAULTS (%s) will NOT follow it to %s: their keys are blocked in this playbook.\n"+
-		"Attach a set it may use with --env <set>.\n", strings.Join(names, ", "), res.Endpoint)
+		"Attach a set it may use with --env-set <set>.\n", strings.Join(names, ", "), res.Endpoint)
 }
 
 // playStage writes statement files into a private temp directory and

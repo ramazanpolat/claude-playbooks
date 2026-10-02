@@ -506,7 +506,7 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Command name "x" belongs to bbb via its manifest alias.
+	// Command name "x" belongs to bbb via its manifest launcher.
 	if err := manifest.Write(filepath.Join(config.PlaybooksDir, "bbb"),
 		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Launcher: "x"}); err != nil {
 		t.Fatal(err)
