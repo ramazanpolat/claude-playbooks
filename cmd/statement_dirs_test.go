@@ -17,7 +17,7 @@ func TestApplyToPlainDirectory(t *testing.T) {
 	}
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	skill := makeSkill(t, filepath.Join(dir, "notes"))
-	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(kommander-helper *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
+	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(toolkit-helper *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
 
 	// Not a terminal and no --yes: refused before anything is written.
 	if _, err := apply(t, recipe, "TO", cfg); err == nil || !strings.Contains(err.Error(), "--yes") {
@@ -41,7 +41,7 @@ func TestApplyToPlainDirectory(t *testing.T) {
 		Permissions map[string][]string `json:"permissions"`
 	}
 	data, _ := os.ReadFile(filepath.Join(cfg, "settings.json"))
-	if json.Unmarshal(data, &s) != nil || s.Theme != "dark" || s.Model != "claude-opus-5-5" || s.Env["FOO"] != "bar" || s.Permissions["allow"][0] != "Bash(kommander-helper *)" {
+	if json.Unmarshal(data, &s) != nil || s.Theme != "dark" || s.Model != "claude-opus-5-5" || s.Env["FOO"] != "bar" || s.Permissions["allow"][0] != "Bash(toolkit-helper *)" {
 		t.Fatalf("settings: %s", data)
 	}
 	backups, _ := filepath.Glob(filepath.Join(cfg, "settings.json.cpb-backup-*"))

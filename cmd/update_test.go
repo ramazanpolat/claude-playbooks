@@ -92,7 +92,7 @@ func TestNativeUpdateRestoresInstallName(t *testing.T) {
 	if err := manifest.Write(source, &manifest.Manifest{Name: "upstream"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.Write(installed, &manifest.Manifest{Name: "kommander", Source: &manifest.Source{Repository: source}}); err != nil {
+	if err := manifest.Write(installed, &manifest.Manifest{Name: "toolkit", Source: &manifest.Source{Repository: source}}); err != nil {
 		t.Fatal(err)
 	}
 

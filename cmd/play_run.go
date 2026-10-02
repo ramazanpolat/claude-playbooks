@@ -210,7 +210,7 @@ func pidAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-// copyEnvSets copies the --env-set sets from the user's store into the
+// copyEnvSets copies the --env-set sets from the pilot's store into the
 // throwaway one, so the played playbook can USE them; it returns the keys
 // they set, which the credential BLOCK must leave alone.
 func copyEnvSets(userStore, store string) (map[string]bool, error) {

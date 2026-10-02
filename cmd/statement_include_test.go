@@ -26,8 +26,8 @@ func TestApplyIncludeStacksFiles(t *testing.T) {
 	if err := os.Symlink("base.cpb", filepath.Join(dir, "base-link.cpb")); err != nil {
 		t.Fatal(err)
 	}
-	writeCpb(t, dir, "kommander.cpb", "INCLUDE 'base.cpb';\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
-	top := writeCpb(t, dir, "chaos.cpb", "INCLUDE 'kommander.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK work USE ENV glm;\n")
+	writeCpb(t, dir, "toolkit.cpb", "INCLUDE 'base.cpb';\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
+	top := writeCpb(t, dir, "top.cpb", "INCLUDE 'toolkit.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK work USE ENV glm;\n")
 
 	out, err := apply(t, top)
 	if err != nil {

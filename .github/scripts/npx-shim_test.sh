@@ -126,7 +126,7 @@ check "no fallback when the latest release cannot be read" [ $rc != 0 ]
 check "  it says why" err_has "was found to run instead (latest: none)"
 latest v3.25.0
 
-# An explicit CPB_NPX_VERSION is the user's pin: a missing one is an error.
+# An explicit CPB_NPX_VERSION is the pilot's pin: a missing one is an error.
 run CPB_NPX_VERSION=v3.26.0
 check "a missing CPB_NPX_VERSION is not replaced" [ $rc != 0 ]
 check "  it names the 404" err_has "v3.26.0 has no $asset (HTTP 404)"

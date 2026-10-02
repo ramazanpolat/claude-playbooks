@@ -82,7 +82,7 @@ command = '''F="$HOME/playfx"; export PATH="$HOME/stubsbx:$PATH"; rm -f "$HOME/s
 contains = "play-sandbox-ok"
 
 [[verify.commands]]
-# Slice 4: --keep builds a playbook in the user's store, whose CLAUDE.md
+# Slice 4: --keep builds a playbook in the pilot's store, whose CLAUDE.md
 # imports nothing, with the [play] record and the exact bytes, and runs no session;
 # cpb update with the same bytes is unchanged; with new bytes it shows the
 # diff and refuses without a yes (nothing changes), then applies with one.

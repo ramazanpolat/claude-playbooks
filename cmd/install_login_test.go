@@ -32,7 +32,7 @@ func captureStderr(t *testing.T, f func()) string {
 }
 
 const (
-	machineLogin = `{"claudeAiOauth":{"accessToken":"PILOT-ACCOUNT"}}`
+	machineLogin = `{"claudeAiOauth":{"accessToken":"MACHINE-ACCOUNT"}}`
 	sourceLogin  = `{"claudeAiOauth":{"accessToken":"OTHER-ACCOUNT"}}`
 	sourceState  = `{"oauthAccount":{"emailAddress":"other@example.com"},"userID":"other-id","cachedGrowthBookFeatures":{"f":true},"theme":"dark"}`
 )

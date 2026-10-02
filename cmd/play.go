@@ -111,7 +111,7 @@ type playJSON struct {
 	Risks    []play.Risk    `json:"risks"`
 	// Sandbox: where it would run (slice 3); null in --check.
 	Sandbox *playSandbox `json:"sandbox"`
-	// Keep: --keep's plan, against the user's own store (slice 4).
+	// Keep: --keep's plan, against the pilot's own store (slice 4).
 	Keep bool `json:"keep,omitempty"`
 	// Update: cpb update <name>'s, against the kept playbook (slice 4).
 	Update *playUpdateJSON `json:"update,omitempty"`
@@ -317,7 +317,7 @@ func playBlockedVars() []string {
 func playSetup(name string, res *play.Result) string { return playSetupKeeping(name, res, nil) }
 
 // playSetupKeeping is playSetup with keep's keys left out of the credential
-// BLOCK: the ones an --env-set set the user attached provides.
+// BLOCK: the ones an --env-set set the pilot attached provides.
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO LAUNCHER", name)
@@ -340,7 +340,7 @@ func playSetupKeeping(name string, res *play.Result, keep map[string]bool) strin
 }
 
 // withThrowawayStore runs fn with a fresh, empty playbooks store, so the
-// user's DEFAULTS and env sets cannot layer into a played recipe. Only the
+// pilot's DEFAULTS and env sets cannot layer into a played recipe. Only the
 // secret helper setting is copied, so references can be checked.
 func withThrowawayStore(fn func(dir string) error) error {
 	userStore := config.ResolvePlaybooksDir()

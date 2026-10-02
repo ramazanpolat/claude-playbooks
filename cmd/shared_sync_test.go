@@ -20,7 +20,7 @@ func TestOneIsolatedLaunchNeverSwapsTheMachineLogin(t *testing.T) {
 	store := seedMachineLogin(t)
 	stubClaude(t)
 	home, _ := os.UserHomeDir()
-	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"hasCompletedOnboarding":true,"oauthAccount":{"accountUuid":"pilot-acct"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"hasCompletedOnboarding":true,"oauthAccount":{"accountUuid":"machine-acct"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var notices []string

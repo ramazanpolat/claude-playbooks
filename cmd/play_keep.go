@@ -18,7 +18,7 @@ import (
 )
 
 // cpb play --keep (slice 4): a played recipe kept as a playbook in the
-// user's own store, with a [play] record, and updated only when asked
+// pilot's own store, with a [play] record, and updated only when asked
 // (cpb update <name>).
 
 var (
@@ -82,8 +82,8 @@ func keepSandboxNote(sandboxed bool, res *play.Result) string {
 	return "Not sandboxed: it will run on your machine, as you, unless you launch it with --sandbox."
 }
 
-// defaultsKeys is the user's DEFAULTS env sets and the keys they carry: a
-// kept playbook lives in the user's store, so they layer into it.
+// defaultsKeys is the pilot's DEFAULTS env sets and the keys they carry: a
+// kept playbook lives in the pilot's store, so they layer into it.
 func defaultsKeys(store string) ([]string, map[string]bool, error) {
 	dir := envset.Dir(store)
 	names, err := envset.Defaults(dir)
@@ -107,7 +107,7 @@ func defaultsKeys(store string) ([]string, map[string]bool, error) {
 	return names, keys, nil
 }
 
-// envSetKeys checks the --env-set sets exist in the user's store and returns
+// envSetKeys checks the --env-set sets exist in the pilot's store and returns
 // the keys they set, which the credential BLOCK leaves alone.
 func envSetKeys(store string, sets []string) (map[string]bool, error) {
 	keys := map[string]bool{}
@@ -133,7 +133,7 @@ func envSetKeys(store string, sets []string) (map[string]bool, error) {
 // keepBlocked is the BLOCK VAR list of a kept playbook whose endpoint
 // moves: play's credential list, and every key the DEFAULTS sets would
 // layer in (they do not follow the recipe to another host), minus the keys
-// of the --env-set sets the user attached and the ones the recipe sets itself.
+// of the --env-set sets the pilot attached and the ones the recipe sets itself.
 func keepBlocked(defaults, keep, own map[string]bool) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -246,7 +246,7 @@ func writePlayRecord(pbDir string, src *play.Source, rec *play.Recipe, backend s
 	return manifest.Write(pbDir, m)
 }
 
-// playKeepRun: the preview against the user's own store, the
+// playKeepRun: the preview against the pilot's own store, the
 // confirmations, then the playbook built and recorded. No session.
 func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *playJSON) error {
 	name := playKeepName(src)
@@ -328,7 +328,7 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 }
 
 // dropHalfKept removes a playbook --keep created when applying the recipe
-// failed part-way: it did not exist before, so nothing of the user's goes.
+// failed part-way: it did not exist before, so nothing of the pilot's goes.
 func dropHalfKept(name string) {
 	files, done, err := playStage([2]string{"_play-drop.cpb", fmt.Sprintf("DROP PLAYBOOK IF EXISTS %s;\n", name)})
 	if err != nil {

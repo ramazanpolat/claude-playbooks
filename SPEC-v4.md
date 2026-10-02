@@ -75,7 +75,7 @@ A playbook's **name** is simply its directory name under the playbooks root:
 
 Names are used wherever a playbook is referenced: `run`, `auth status`, `update`, and every statement that names a playbook. Env set names are a separate namespace (`CREATE ENV`).
 
-The charset is enforced for names being **created** (`CREATE PLAYBOOK`, with `FROM`, `LINK` or neither, and `ALTER PLAYBOOK … RENAME TO`): a name must match `^[A-Za-z0-9_][A-Za-z0-9_-]*$` — letters, digits, underscores and dashes, starting with an alphanumeric or underscore. A playbook name is interpolated into a launcher command name, a `run <name>` argument, and commands printed for the user to paste, so shell metacharacters are rejected at the front door rather than escaped at each site. Names must not start with `.` (to avoid hidden directories) and must not contain `/` or `\` (names are single directory segments, never paths). Lookup paths (`DROP PLAYBOOK`, discovery) only require a single path segment, so an existing playbook with an odd name can still be listed, run and removed.
+The charset is enforced for names being **created** (`CREATE PLAYBOOK`, with `FROM`, `LINK` or neither, and `ALTER PLAYBOOK … RENAME TO`): a name must match `^[A-Za-z0-9_][A-Za-z0-9_-]*$` — letters, digits, underscores and dashes, starting with an alphanumeric or underscore. A playbook name is interpolated into a launcher command name, a `run <name>` argument, and commands printed for the pilot to paste, so shell metacharacters are rejected at the front door rather than escaped at each site. Names must not start with `.` (to avoid hidden directories) and must not contain `/` or `\` (names are single directory segments, never paths). Lookup paths (`DROP PLAYBOOK`, discovery) only require a single path segment, so an existing playbook with an odd name can still be listed, run and removed.
 
 ---
 
@@ -527,8 +527,8 @@ password, and guessing "directory" is the assumption that leaks.
 rule above can see it: `DATABASE_URL`, `REDIS_URL`, `AMQP_URL` and
 `MONGODB_URI` name nothing secret while carrying a password. Only the URL's
 userinfo is masked, not the whole value -- the scheme, host and database stay
-legible, because a wholly masked `DATABASE_URL` would train you to read the
-file instead, which is how a feature like this stops being used.
+legible, because a wholly masked `DATABASE_URL` would train the pilot to read
+the file instead, which is how a feature like this stops being used.
 
 **Both userinfo fields are masked**, because a colon says only that there are
 two fields, never which one holds the secret:
@@ -760,10 +760,10 @@ cpb self-uninstall --binary-only # remove binary/launchers/completions, keep pla
 **Steps:**
 1. For each discovered playbook (unless `--keep-data` or `--binary-only`): remove its directory.
 2. Unless `--keep-data` or `--binary-only`, remove the playbooks root directory.
-3. Unless `--keep-binary`, sweep **all** launcher symlinks pointing at the binary — every one of them would dangle once the binary is gone, whichever registry root it served. The sweep unions two sources: a resolution scan of the standard launcher directories (the resolved launcher dir plus the `~/.local/bin` fallback), and the launcher receipt file (`~/.local/state/cpb/launchers`, one absolute launcher path per line; the two tab-separated fields v3.10.1 appended are still read by their path and dropped when a line is rewritten) in which every launcher the tool creates is recorded — covering custom `--launcher-dir` locations the scan cannot know about. Every candidate is verified to still be a symlink resolving to this binary (or dangling); a link the user renamed or repointed resolves elsewhere and is left alone. The reserved name `cpb` is owned by the binary-removal step. Once the launchers are gone, the receipt is removed too. With `--keep-binary`, no launchers are touched: a same-named command may be serving another registry root, and a removed default-root playbook's launcher fails loudly as stale rather than being silently deleted.
+3. Unless `--keep-binary`, sweep **all** launcher symlinks pointing at the binary — every one of them would dangle once the binary is gone, whichever registry root it served. The sweep unions two sources: a resolution scan of the standard launcher directories (the resolved launcher dir plus the `~/.local/bin` fallback), and the launcher receipt file (`~/.local/state/cpb/launchers`, one absolute launcher path per line; the two tab-separated fields v3.10.1 appended are still read by their path and dropped when a line is rewritten) in which every launcher the tool creates is recorded — covering custom `--launcher-dir` locations the scan cannot know about. Every candidate is verified to still be a symlink resolving to this binary (or dangling); a link the pilot renamed or repointed resolves elsewhere and is left alone. The reserved name `cpb` is owned by the binary-removal step. Once the launchers are gone, the receipt is removed too. With `--keep-binary`, no launchers are touched: a same-named command may be serving another registry root, and a removed default-root playbook's launcher fails loudly as stale rather than being silently deleted.
 4. Unless `--keep-binary`, remove any `source <(cpb completion bash|zsh)` lines from `~/.bashrc` and `~/.zshrc` — after the binary is gone they would error on every new shell.
 5. Unless `--keep-binary`, remove the running binary. If removal is denied by permissions, print the `sudo rm <path>` command to run manually rather than failing.
-6. Print a summary of what was removed. When completion lines were removed from rc files, remind the user that already-open shells still hold the stale completion functions until reloaded. In `--binary-only` mode, state explicitly that the playbooks directory was not touched.
+6. Print a summary of what was removed. When completion lines were removed from rc files, remind the pilot that already-open shells still hold the stale completion functions until reloaded. In `--binary-only` mode, state explicitly that the playbooks directory was not touched.
 
 **Flags:**
 

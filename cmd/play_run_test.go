@@ -88,7 +88,7 @@ func TestPlayRun(t *testing.T) {
 		t.Fatalf("left behind: %v %v", err, playStores(t))
 	}
 	if out := mustStmt(t, "SHOW PLAYBOOKS --json"); strings.Contains(out, "play-plain-") {
-		t.Fatalf("a playbook in the user's store: %s", out)
+		t.Fatalf("a playbook in the pilot's store: %s", out)
 	}
 
 	// A moved endpoint: --yes alone refuses and names the flag.
@@ -102,7 +102,7 @@ func TestPlayRun(t *testing.T) {
 		t.Fatal("launched without the endpoint confirmed")
 	}
 
-	// Confirmed: the key a user attaches with --env-set follows; the shell's
+	// Confirmed: the key the pilot attaches with --env-set follows; the shell's
 	// own credentials do not.
 	t.Setenv("ANTHROPIC_API_KEY", "shell-key-must-not-follow")
 	t.Setenv("MY_SECRET_TOKEN", "shell-secret-must-not-follow")

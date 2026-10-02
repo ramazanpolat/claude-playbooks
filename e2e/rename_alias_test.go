@@ -59,7 +59,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 	cpb("CREATE", "PLAYBOOK", "oldpb", "LAUNCHER", "ab")
 	cpb("ALTER", "PLAYBOOK", "oldpb", "RENAME", "TO", "newpb")
 
-	// Executing the launcher is what happens when the user types `ab`.
+	// Executing the launcher is what happens when the pilot types `ab`.
 	script := filepath.Join(launcherDir, "ab")
 	cmd := exec.Command(script)
 	cmd.Env = baseEnv

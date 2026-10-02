@@ -1,5 +1,5 @@
-// Package shell edits the user's shell rc files in the one narrow way this
-// tool still touches them: removing the exact completion lines a user (or a
+// Package shell edits the pilot's shell rc files in the one narrow way this
+// tool still touches them: removing the exact completion lines a pilot (or a
 // pre-3.x installer) added. Playbook commands are launcher symlinks and
 // manifest aliases — nothing here writes command definitions into rc files.
 //
@@ -16,7 +16,7 @@ import (
 )
 
 // QuoteArg renders s as a single shell word. Use it for any value
-// interpolated into a command the user is told to run.
+// interpolated into a command the pilot is told to run.
 func QuoteArg(s string) string { return shellQuote(s) }
 
 func shellQuote(s string) string {

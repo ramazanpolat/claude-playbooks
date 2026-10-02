@@ -18,7 +18,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(orig), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(kommander-helper*) DENY TOOL Read(*) SET STATUSLINE ~/bin/status.sh SET MODEL claude-opus-5-5"
+	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(toolkit-helper*) DENY TOOL Read(*) SET STATUSLINE ~/bin/status.sh SET MODEL claude-opus-5-5"
 	mustStmt(t, stmtText)
 	var s struct {
 		Permissions map[string][]string `json:"permissions"`
@@ -30,7 +30,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(s.Permissions["allow"], ",") != "Bash(kommander-helper*)" || strings.Join(s.Permissions["deny"], ",") != "Read(*)" ||
+	if strings.Join(s.Permissions["allow"], ",") != "Bash(toolkit-helper*)" || strings.Join(s.Permissions["deny"], ",") != "Read(*)" ||
 		strings.Join(s.Permissions["ask"], ",") != "Bash(git push*)" {
 		t.Fatalf("permissions: %v (a rule moves between lists; ask is kept)", s.Permissions)
 	}
@@ -41,7 +41,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 		t.Fatalf("a repeat changed something:\n%s", out)
 	}
 	create := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	for _, want := range []string{"ALLOW TOOL 'Bash(kommander-helper*)'", "DENY TOOL 'Read(*)'", "SET STATUSLINE '~/bin/status.sh'", "SET MODEL 'claude-opus-5-5'"} {
+	for _, want := range []string{"ALLOW TOOL 'Bash(toolkit-helper*)'", "DENY TOOL 'Read(*)'", "SET STATUSLINE '~/bin/status.sh'", "SET MODEL 'claude-opus-5-5'"} {
 		if !strings.Contains(create, want) {
 			t.Errorf("SHOW CREATE missing %q:\n%s", want, create)
 		}
@@ -49,7 +49,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	// ANTHROPIC_MODEL from a layer wins over the settings model, and EXPLAIN says so.
 	mustStmt(t, "ALTER PLAYBOOK k SET VAR ANTHROPIC_MODEL=glm-5.3")
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Model: glm-5.3 (ANTHROPIC_MODEL); the settings model claude-opus-5-5 is overridden") ||
-		!strings.Contains(out, "Tools: allow Bash(kommander-helper*); deny Read(*)") {
+		!strings.Contains(out, "Tools: allow Bash(toolkit-helper*); deny Read(*)") {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
 	mustStmt(t, "ALTER PLAYBOOK k UNSET TOOL Read(*) UNSET STATUSLINE UNSET MODEL")

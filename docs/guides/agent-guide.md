@@ -106,7 +106,7 @@ cpb APPLY recipe.cpb TO ~/.claude --yes         # backs up settings.json (and .c
 
 ## Sandbox with --playbooks-dir
 
-Point the whole registry at a scratch root to test without touching the user's installs. Launchers are not managed for a non-default root, which is what you want in a sandbox.
+Point the whole registry at a scratch root to test without touching the pilot's installs. Launchers are not managed for a non-default root, which is what you want in a sandbox.
 
 ```bash
 export CPB_PLAYBOOKS_DIR=/tmp/pb-$$              # or --playbooks-dir before the verb

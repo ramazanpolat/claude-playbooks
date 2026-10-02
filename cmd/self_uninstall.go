@@ -347,7 +347,7 @@ func launcherRemovalPlan(pbs []*playbook.Playbook) []launcher.Entry {
 // receiptLaunchers returns recorded launcher paths that still verify as
 // ours: a symlink resolving to this binary, or a dangling one (we wrote
 // it; a live command resolving elsewhere is never removed on the
-// receipt's say-so). Paths the user renamed or deleted by hand no longer
+// receipt's say-so). Paths the pilot renamed or deleted by hand no longer
 // match anything and are skipped.
 func receiptLaunchers() []launcher.Entry {
 	bin, berr := launcher.BinPath()

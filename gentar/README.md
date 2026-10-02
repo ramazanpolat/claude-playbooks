@@ -234,7 +234,7 @@ only says what each suite is for.
 | `cli-release-install` | the README's documented install path works against a published release |
 | `cli-self-update` | `update` with no name replaces the binary with the real latest release through `cpb`, refuses a checksum mismatch, and is a no-op when current |
 | `cli-completion` | real TAB through the generated bash script: names offered, prefix filtered, first argument only, and registered for `cpb` |
-| `cli-play` | `cpb play` (v4.0.0): `--check` refusals and the one typed confirmation, `--dry-run --json` against a throwaway store (the user's DEFAULTS never layer in, nothing left behind), `--sha256`, the template-directory check, and a played session removed on ^C, a closed terminal and `kill <cpb>` |
+| `cli-play` | `cpb play` (v4.0.0): `--check` refusals and the one typed confirmation, `--dry-run --json` against a throwaway store (the pilot's DEFAULTS never layer in, nothing left behind), `--sha256`, the template-directory check, and a played session removed on ^C, a closed terminal and `kill <cpb>` |
 | `docs-honesty` | the surface README and `docs/` document exists in the shipped binary and checkout |
 | `playbook-lifecycle` | CREATE, LAUNCHER / NO LAUNCHER, RENAME TO, DROP, each stage checked against the filesystem |
 | `playbook-install-local` | `install` from a local directory |
@@ -327,7 +327,7 @@ points it at an existing checkout instead.
 
 The layout mirrors a bench: your checkout is staged into `WORKSPACE_DIR`,
 which sits *under* `HOME` rather than being it, and steps run with the
-workspace as cwd. So a `~/…` assertion asks about the user's home, never
+workspace as cwd. So a `~/…` assertion asks about the pilot's home, never
 about a file that shipped in your repo.
 
 It is not a substitute for the arena. There is no sandbox, no template and no

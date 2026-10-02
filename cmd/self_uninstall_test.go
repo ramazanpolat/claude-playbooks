@@ -154,7 +154,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A recorded path the user has since repointed at another executable:
+	// A recorded path the pilot has since repointed at another executable:
 	// live foreign command, must never be removed on the receipt's say-so.
 	foreign := filepath.Join(customDir, "foreign-cmd")
 	otherBin := filepath.Join(customDir, "other-tool")
@@ -171,7 +171,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A recorded path the user deleted by hand: skipped, not an error.
+	// A recorded path the pilot deleted by hand: skipped, not an error.
 	if _, err := launcher.Write(customDir, "hand-deleted"); err != nil {
 		t.Fatal(err)
 	}

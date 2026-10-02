@@ -50,7 +50,7 @@ func TestQuarantineRemovesGrant(t *testing.T) {
 }
 
 // MCP server logins live in the same file and have nothing to do with account
-// auth. Removing the whole file would silently sign the user out of every MCP
+// auth. Removing the whole file would silently sign the pilot out of every MCP
 // server they had connected.
 func TestQuarantinePreservesSiblingKeys(t *testing.T) {
 	dir := t.TempDir()
@@ -221,7 +221,7 @@ func TestQuarantineDegradesGracefully(t *testing.T) {
 			t.Fatal("malformed store: want an advisory error, got nil")
 		}
 		// Unreadable is not the same as disposable: it must still be there for
-		// the user to inspect.
+		// the pilot to inspect.
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("malformed store was deleted: %v", err)
 		}

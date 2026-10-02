@@ -3,7 +3,7 @@
 # follow the symlink.
 #
 # Its whole risk is aliasing: the registry entry is a symlink to a directory
-# you own and are editing, so every operation that removes or replaces must
+# the pilot owns and is editing, so every operation that removes or replaces must
 # stop at the link. A regression here destroys work that exists nowhere else.
 
 [scenario]
@@ -40,7 +40,7 @@ contains = "live"
 
 [[verify.commands]]
 # A linked playbook refuses native update: replacing entries would rewrite
-# your own working tree.
+# the pilot's own working tree.
 command = 'cpb update linked 2>&1 | grep -F linked'
 contains = "linked"
 

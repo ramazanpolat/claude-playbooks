@@ -272,7 +272,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if syncErr != nil {
 		// Neutral wording: PrepareLaunchEnv may have been syncing credentials,
 		// account metadata, or detaching for an isolated playbook. Naming
-		// credentials specifically sent users after credential files and symlinks
+		// credentials specifically sent pilots after credential files and symlinks
 		// for failures in paths where credential syncing was deliberately skipped.
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}

@@ -129,7 +129,8 @@ cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"   # state as tables; add 
 
 - **Tested on every change:** CI applies all 21 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
-  same. Each release passes a full [arena](gentar/README.md) regression on the exact commit it is tagged from.
+  same. A full arena regression runs on the exact commit each release is
+  tagged from.
 - **Another account's login never replaces yours:** cpb sets it aside rather
   than copying it over `~/.claude`'s.
 

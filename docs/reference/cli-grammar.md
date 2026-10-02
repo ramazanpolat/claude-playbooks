@@ -401,7 +401,7 @@ redact: `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `*_KEY`, …) is
 refused, naming the key and never the value, and pointing at
 `SET K FROM '<ref>'`. A value that cannot be a secret is let through: empty,
 an integer, or `true`/`false`, so `SET VAR MAX_THINKING_TOKENS=8000` works.
-**`AS PLAINTEXT` stores one knowingly**, for a user
+**`AS PLAINTEXT` stores one knowingly**, for a pilot
 without a secret helper: `SET VAR ANTHROPIC_AUTH_TOKEN=… AS PLAINTEXT`. It
 applies to every literal in its `SET` clause and never to a reference. It
 keeps cpb usable standalone, and it is loud where it matters: `EXPLAIN` marks

@@ -90,7 +90,7 @@ playbook moves to that account from its next launch.
 ## Reproduced (a Linux VM, throwaway `HOME`, made-up stores, cpb at 9642295)
 
 Each run starts with `~/.claude/.credentials.json` =
-`{"claudeAiOauth":{"accessToken":"PILOT-ACCOUNT"}}` and an mtime one hour
+`{"claudeAiOauth":{"accessToken":"MACHINE-ACCOUNT"}}` and an mtime one hour
 ago.
 
 1. **Installing a source that ships `.credentials.json`.** This is a local

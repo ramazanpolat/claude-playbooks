@@ -363,7 +363,7 @@ func TestSelfUpdateCheckOnlyNixManagedHintsDevbox(t *testing.T) {
 
 // Refused even when already current, and before any network: an up-to-date
 // store binary must not answer "Already up to date." as if it could update
-// itself (found by the cockpit journey against the flake).
+// itself (found by an end-to-end run against the flake).
 func TestSelfUpdateRefusesNixManagedBeforeLookup(t *testing.T) {
 	exe := newExecutable(t)
 	srv := httptest.NewServer(http.NotFoundHandler())
