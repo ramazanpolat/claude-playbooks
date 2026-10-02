@@ -121,7 +121,7 @@ binaries built after it was tagged. The version stamped in is `v` + the
 `package.json` version, which `release.yml` requires to equal the tag, so a
 **tag** is the ref to pin; a commit between releases reports the previous
 release's version. `vendorHash` must be recomputed whenever `go.mod`/`go.sum`
-change. The flake's `nixpkgs` input affects only the build, never a pilot's
+change. The flake's `nixpkgs` input affects only the build, never a user's
 profile. `.github/workflows/nix.yml` builds it on Linux and macOS and adds it to
 a fresh devbox project by a real `git+https:` reference pinned to the commit.
 
