@@ -35,12 +35,12 @@ anything you have built can be shared as one `.cpb` file.
 
 ## Reading the preview
 
-The recipe below is [example 20](../../examples/20-play/)'s `reviewer.cpb`.
+The recipe below is [example 21](../../examples/21-play/)'s `reviewer.cpb`.
 
 ```
 $ cpb play --check ./reviewer.cpb
 Recipe:  ./reviewer.cpb
-From:    /home/you/claude-playbooks/examples/20-play/reviewer.cpb
+From:    /home/you/claude-playbooks/examples/21-play/reviewer.cpb
 sha256:  c684ff05c8b3235559504c4a54ec0939a2706a5ccb0b0c6a83304fb7ba0bc81e (195 bytes)
 Title:   Code reviewer
 About:   Reads code, never writes it.
@@ -228,4 +228,4 @@ of templates the way the site's CI does: every template, the header, and an
 - [Sandboxed sessions](sandbox.md): the sandbox backends.
 - [Environment overrides](environment.md): env sets, which `--env` attaches.
 - [CLI grammar](../reference/cli-grammar.md#cpb-play): the full reference.
-- [Example 20](../../examples/20-play/): a recipe checked, planned and kept in CI.
+- [Example 21](../../examples/21-play/): a recipe checked, planned and kept in CI.
