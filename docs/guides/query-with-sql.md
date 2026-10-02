@@ -11,8 +11,9 @@ cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook"  # throug
 
 `cpb DESCRIBE playbooks` lists a table's columns and types. On a terminal
 `SELECT` prints a table, or one block per row for more than 6 columns,
-with objects as JSON. In a pipe it prints TSV, and a `FORMAT` in the query
-always wins.
+with objects as JSON. In a pipe it prints TSV with a header row, and
+`--json` prints JSON rows, whichever engine runs the query; a `FORMAT` in
+the query always wins.
 
 This guide is the manual form underneath it, for what `SELECT` does not do:
 joining two reads, or feeding ClickHouse settings of your own. Every read has

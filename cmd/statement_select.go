@@ -407,14 +407,14 @@ var selectTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 // per row on a terminal, so nothing wraps.
 const wideColumns = 6
 
-// rendered reports whether cpb renders the result itself: on a terminal,
-// when the query names no FORMAT of its own. A pipe gets clickhouse-local's
-// default (TSV), and a FORMAT in the query always wins.
-func (p *selectPlan) rendered() bool { return !p.format && selectTTY() }
+// rendered reports whether cpb prints the result itself, which it does
+// unless the query names a FORMAT of its own: then clickhouse local writes
+// it, and a FORMAT in the query always wins.
+func (p *selectPlan) rendered() bool { return !p.format }
 
-// clickhouseArgs is the clickhouse-local command line. When cpb renders the
-// result, it asks for JSONCompact (names, types, and the values as JSON)
-// and prints it as the built-in form does.
+// clickhouseArgs is the clickhouse-local command line. When cpb prints the
+// result, it asks for JSONCompact (names, types, and the values as JSON,
+// 64-bit integers as numbers) and prints it as the built-in form does.
 func (p *selectPlan) clickhouseArgs() []string {
 	args := []string{"local", "--input-format", "JSONEachRow", "--structure", selectTables[p.table].structure}
 	// SESSIONS' times are RFC 3339, which ClickHouse's basic DateTime input
@@ -423,7 +423,7 @@ func (p *selectPlan) clickhouseArgs() []string {
 		args = append(args, "--date_time_input_format", "best_effort")
 	}
 	if p.rendered() {
-		args = append(args, "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0")
+		args = append(args, "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0", "--output_format_json_quote_64bit_integers=0")
 	}
 	return append(args, "-q", p.query)
 }
@@ -452,6 +452,9 @@ func runSelect(q string, explain, asJSON bool) error {
 	}
 	if p.query == "" {
 		return printSelect(p.table, p.columns, rows, asJSON)
+	}
+	if asJSON && p.format {
+		return fmt.Errorf("--json and a FORMAT in the query cannot be combined: drop one (the query's FORMAT is written as clickhouse local writes it)")
 	}
 	bin, err := clickhouseBinary()
 	if err != nil {
@@ -494,8 +497,50 @@ func runSelect(q string, explain, asJSON bool) error {
 	for i, m := range res.Meta {
 		cols[i] = m.Name
 	}
-	renderRows(os.Stdout, cols, res.Data, len(cols) > wideColumns)
+	return emitResult(cols, res.Data, asJSON)
+}
+
+// emitResult prints a result as both engines print it: --json, an array of
+// one object per row with the keys in the query's column order; on a
+// terminal, rendered (renderRows); in a pipe, TSV with a header row of the
+// column names, each cell as the terminal shows it, with a tab, a line break
+// or a backslash in it escaped as \t, \n and \\.
+func emitResult(cols []string, rows [][]any, asJSON bool) error {
+	if asJSON {
+		out := make([]orderedRow, 0, len(rows))
+		for _, r := range rows {
+			vals := make(map[string]any, len(cols))
+			for i, c := range cols {
+				if _, seen := vals[c]; !seen && i < len(r) {
+					vals[c] = r[i]
+				}
+			}
+			out = append(out, orderedRow{cols: cols, vals: vals})
+		}
+		return printJSON(out)
+	}
+	if selectTTY() {
+		renderRows(os.Stdout, cols, rows, len(cols) > wideColumns)
+		return nil
+	}
+	writeTSV(os.Stdout, cols, rows)
 	return nil
+}
+
+var tsvEscape = strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\n", "\\n", "\r", "\\r")
+
+// writeTSV prints a header row of the column names, then one line per row.
+func writeTSV(w io.Writer, cols []string, rows [][]any) {
+	fmt.Fprintln(w, strings.Join(cols, "\t"))
+	for _, r := range rows {
+		cells := make([]string, len(cols))
+		for i := range cols {
+			if i < len(r) {
+				cells[i] = tsvEscape.Replace(cellText(r[i]))
+			}
+		}
+		fmt.Fprintln(w, strings.Join(cells, "\t"))
+	}
 }
 
 // renderRows prints a result for a person: a table, or, when vertical, one
@@ -553,13 +598,6 @@ func printSelect(table string, cols []string, objs []any, asJSON bool) error {
 		}
 		rows = append(rows, row)
 	}
-	if asJSON {
-		out := make([]orderedRow, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, orderedRow{cols: cols, vals: r})
-		}
-		return printJSON(out)
-	}
 	data := make([][]any, 0, len(rows))
 	for _, r := range rows {
 		row := make([]any, len(cols))
@@ -568,8 +606,7 @@ func printSelect(table string, cols []string, objs []any, asJSON bool) error {
 		}
 		data = append(data, row)
 	}
-	renderRows(os.Stdout, cols, data, len(cols) > wideColumns && selectTTY())
-	return nil
+	return emitResult(cols, data, asJSON)
 }
 
 // orderedRow is one --json row with its keys in the query's column order,
