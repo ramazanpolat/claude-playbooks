@@ -31,7 +31,7 @@ command = 'test -x "$HOME/.local/bin/fixture-pb" && echo launcher-ok'
 contains = "launcher-ok"
 
 [[verify.commands]]
-command = 'claude-playbook list | grep -F fixture-pb'
+command = 'claude-playbook SHOW PLAYBOOKS | grep -F fixture-pb'
 contains = "fixture-pb"
 
 [[verify.commands]]
@@ -39,7 +39,6 @@ command = 'diff -r "$HOME/fixture-src" "$HOME/.claude-playbooks/fixture-pb" >/de
 contains = "faithful"
 
 [[verify.commands]]
-# -y: headless delete; the kept launcher is removed explicitly after,
-# exactly as the product's own removal hint suggests.
-command = 'claude-playbook delete fixture-pb -y && rm -f "$HOME/.local/bin/fixture-pb" && test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo clean'
+# --yes: a headless DROP; the launcher named for the playbook goes with it.
+command = 'claude-playbook DROP PLAYBOOK fixture-pb --yes && test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo clean'
 contains = "clean"

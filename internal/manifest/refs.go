@@ -14,7 +14,7 @@ import (
 // joins this list rather than getting a special case. Refused at every
 // layer: a playbook's own block and every env set.
 var RefRefusedKeys = map[string]string{
-	"CLAUDE_CODE_OAUTH_TOKEN": "cpb's authentication needs this token's value; keep it with `claude-playbook auth`, or as a literal (AS PLAINTEXT)",
+	"CLAUDE_CODE_OAUTH_TOKEN": "cpb's authentication needs this token's value: set it as a literal (AS PLAINTEXT)",
 }
 
 // refPattern is the shape every secret reference shares: a scheme, a colon,

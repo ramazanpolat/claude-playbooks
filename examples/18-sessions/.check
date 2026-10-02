@@ -25,10 +25,8 @@ printf '{"type":"assistant","cwd":"%s","message":{"model":"claude-opus-5-5"}}\n'
 printf '{"type":"assistant","cwd":"%s","message":{"model":"claude-sonnet-5"}}\n' "$work" > "$p/projects/$enc/$old.jsonl"
 touch -t 202601010000 "$p/projects/$enc/$old.jsonl"
 
-# The live session, with its transcript's model; the shorthand is the same.
+# The live session, with its transcript's model.
 cpb SHOW SESSIONS --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert [(x["playbook"], x["model"]) for x in r] == [("worker", "claude-opus-5-5")], r'
-cpb SHOW SESSIONS --json > "$HOME/show.json"
-cpb sessions --json | cmp -s - "$HOME/show.json"
 cpb "SELECT session_id FROM SESSIONS" | grep -q "$live"
 
 cd "$work"

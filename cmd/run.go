@@ -128,7 +128,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if pb == nil {
-		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
+		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", name)
 	}
 
 	var sbm *manifest.Sandbox

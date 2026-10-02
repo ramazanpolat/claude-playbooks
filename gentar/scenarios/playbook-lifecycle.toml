@@ -5,18 +5,13 @@
 # commands; files can only see the post-steps state).
 #
 # Product semantics under test (observed, not assumed):
-#   - rename REMOVES the launcher the old name owned, and registers one for
-#     the new name
-#   - delete REMOVES every launcher named for the playbook, its manifest
-#     alias included, unless another playbook still claims the name
-#   - delete requires -y headless: a bare delete reads the confirmation from
-#     stdin, gets EOF, and cancels. The interactive path is a pilot suite's
-#     job (pilot-interactive-delete), not a shell oracle's.
-#
-# Those first two lines said the opposite until 2026-09-19 -- they described
-# behaviour from before the launcher retirement rule landed, and nothing in
-# the suite asserted either way, so the comment drifted unchallenged while
-# the rule itself went untested. Both are now asserted below.
+#   - RENAME TO REMOVES the launcher the old name owned, and registers one
+#     for the new name
+#   - DROP PLAYBOOK REMOVES every launcher named for the playbook, its
+#     manifest alias included, unless another playbook still claims the name
+#   - DROP PLAYBOOK needs --yes headless: without it the confirmation is read
+#     from stdin, gets EOF, and cancels. The interactive path is a pilot
+#     suite's job (pilot-interactive-delete), not a shell oracle's.
 
 [scenario]
 name = "playbook-lifecycle"
@@ -35,43 +30,43 @@ steps = [
 path = "~/.local/bin/claude-playbook"
 
 [[verify.commands]]
-command = 'claude-playbook create lifecycle-pb && test -f "$HOME/.claude-playbooks/lifecycle-pb/CLAUDE.md" && echo created'
+command = 'claude-playbook CREATE PLAYBOOK lifecycle-pb && test -f "$HOME/.claude-playbooks/lifecycle-pb/CLAUDE.md" && echo created'
 
 [[verify.commands]]
-command = 'claude-playbook list | grep -F lifecycle-pb'
+command = 'claude-playbook SHOW PLAYBOOKS | grep -F lifecycle-pb'
 contains = "lifecycle-pb"
 
 [[verify.commands]]
-command = 'claude-playbook info lifecycle-pb'
+command = 'claude-playbook SHOW PLAYBOOK lifecycle-pb'
 contains = "lifecycle-pb"
 
 [[verify.commands]]
-command = 'claude-playbook alias lifecycle-pb lcpb && test -x "$HOME/.local/bin/lcpb" && echo aliased'
+command = 'claude-playbook ALTER PLAYBOOK lifecycle-pb ALIAS lcpb && test -x "$HOME/.local/bin/lcpb" && echo aliased'
 
 [[verify.commands]]
-command = 'claude-playbook dealias lifecycle-pb && test ! -e "$HOME/.local/bin/lcpb" && echo dealiased'
+command = 'claude-playbook ALTER PLAYBOOK lifecycle-pb NO ALIAS && test ! -e "$HOME/.local/bin/lcpb" && echo dealiased'
 
 [[verify.commands]]
-# Re-alias, so the delete below has BOTH a name launcher and an alias
+# Re-alias, so the DROP below has BOTH a name launcher and an alias
 # launcher to retire -- the rule covers the manifest alias too.
-command = 'claude-playbook alias lifecycle-pb lcpb && test -x "$HOME/.local/bin/lcpb" && echo re-aliased'
+command = 'claude-playbook ALTER PLAYBOOK lifecycle-pb ALIAS lcpb && test -x "$HOME/.local/bin/lcpb" && echo re-aliased'
 
 [[verify.commands]]
 # The registry entry moves AND the launchers follow: the old name's
 # launcher is retired, the new name gets one. A launcher named by the
 # manifest alias is untouched by a rename -- the alias did not change.
-command = 'claude-playbook rename lifecycle-pb lifecycle-pb2 && test -d "$HOME/.claude-playbooks/lifecycle-pb2" && test ! -d "$HOME/.claude-playbooks/lifecycle-pb" && test ! -e "$HOME/.local/bin/lifecycle-pb" && test -x "$HOME/.local/bin/lifecycle-pb2" && test -x "$HOME/.local/bin/lcpb" && echo renamed'
+command = 'claude-playbook ALTER PLAYBOOK lifecycle-pb RENAME TO lifecycle-pb2 && test -d "$HOME/.claude-playbooks/lifecycle-pb2" && test ! -d "$HOME/.claude-playbooks/lifecycle-pb" && test ! -e "$HOME/.local/bin/lifecycle-pb" && test -x "$HOME/.local/bin/lifecycle-pb2" && test -x "$HOME/.local/bin/lcpb" && echo renamed'
 
 [[verify.commands]]
-command = 'claude-playbook list | grep -F lifecycle-pb2'
+command = 'claude-playbook SHOW PLAYBOOKS | grep -F lifecycle-pb2'
 contains = "lifecycle-pb2"
 
 [[verify.commands]]
-# -y: headless runs cannot answer the confirmation prompt (a bare delete
-# reads it from stdin, gets EOF, and cancels). Both launchers go with the
-# playbook -- the one named for it and the one named by its alias.
-command = 'claude-playbook delete lifecycle-pb2 -y && test ! -e "$HOME/.claude-playbooks/lifecycle-pb2" && test ! -e "$HOME/.local/bin/lifecycle-pb2" && test ! -e "$HOME/.local/bin/lcpb" && echo deleted'
+# --yes: headless runs cannot answer the confirmation prompt (without it
+# DROP PLAYBOOK reads stdin, gets EOF, and cancels). Both launchers go with
+# the playbook -- the one named for it and the one named by its alias.
+command = 'claude-playbook DROP PLAYBOOK lifecycle-pb2 --yes && test ! -e "$HOME/.claude-playbooks/lifecycle-pb2" && test ! -e "$HOME/.local/bin/lifecycle-pb2" && test ! -e "$HOME/.local/bin/lcpb" && echo deleted'
 
 [[verify.commands]]
-command = '! claude-playbook list | grep -F lifecycle-pb2 && echo unlisted'
+command = '! claude-playbook SHOW PLAYBOOKS | grep -F lifecycle-pb2 && echo unlisted'
 contains = "unlisted"

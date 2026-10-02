@@ -14,7 +14,7 @@ agent = "shell"
 steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
-  'claude-playbook create auth-pb --no-alias',
+  'claude-playbook CREATE PLAYBOOK auth-pb NO ALIAS',
   'sleep 1 && touch "$HOME/before-status"',
 ]
 
@@ -42,7 +42,7 @@ contains = "unknown-ok"
 # playbook that shares nothing, whose own login is the only one it has.
 # `auth status` must report it as isolated rather than as a shared login,
 # because that report is what a pilot checks before a headless run.
-command = '''claude-playbook create solo --no-alias && printf '%s\n' 'name = "solo"' 'isolate_auth = true' > "$HOME/.claude-playbooks/solo/.playbook" && claude-playbook auth status solo'''
+command = '''claude-playbook CREATE PLAYBOOK solo NO ALIAS && printf '%s\n' 'name = "solo"' 'isolate_auth = true' > "$HOME/.claude-playbooks/solo/.playbook" && claude-playbook auth status solo'''
 contains = "isolated"
 
 [[verify.commands]]

@@ -380,3 +380,23 @@ func printResumeLine(d sessionDir, claudeArgs []string, since time.Time) {
 		fmt.Fprintf(os.Stderr, "Resume this playbook's session with: %s\n", d.resumeCommand(id))
 	}
 }
+
+// formatAge is a time as an age ("3 hours ago").
+func formatAge(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%d hours ago", int(d.Hours()))
+	case d < 48*time.Hour:
+		return "yesterday"
+	default:
+		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+	}
+}

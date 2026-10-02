@@ -175,7 +175,7 @@ An agent cannot complete an interactive `/login`. If a headless run exits with a
 Errors go to stderr with exit 1, and name the thing that is wrong without echoing a value. A statement's error starts with its position: `word N` on the command line, `line N, col M` in a file, and `APPLY` adds the file name:
 
 ```text
-unknown playbook "x". Run 'claude-playbook list' to see available playbooks
+unknown playbook "x". `cpb SHOW PLAYBOOKS` lists them
 command name "x" already addresses playbook "y". Pick another name or alias
 no env set "x": create it with CREATE ENV x
 env set "x" is used by a, b: detach it first with ALTER PLAYBOOK <playbook> DROP ENV x
@@ -183,7 +183,3 @@ ANTHROPIC_AUTH_TOKEN looks like a credential: use SET ANTHROPIC_AUTH_TOKEN FROM 
 ```
 
 A launch that was refused prints the reason and never starts `claude`; a preparation *warning* (`Warning: failed to prepare authentication state: ...`) still launches.
-
-## Older commands
-
-`env`, `env-profile`, `create <name>`, `link`, `delete`, `rename`, `alias`, `dealias`, `list` and `info` still work and write the same files; scripts that use them keep working in v3.20.0. They are hidden from help and completion, and deprecated. Every use prints one stderr line, `Deprecated: … is removed in v4.0.0; the grammar form is: …`, and never anything new on stdout. Move them to the statements, and parsing to `SHOW … --json` or `EXPLAIN … --json`, before v4.0.0 removes them. The mapping is in the [CLI grammar](../reference/cli-grammar.md#pre-grammar-commands-a-hidden-fallback).

@@ -3,7 +3,7 @@
 Variables set or blocked for every launch of one playbook and no other, so one
 playbook talks to a proxy or keeps its own login while the rest of your shell
 does not. The statements below are the [CLI grammar](../reference/cli-grammar.md)
-(v3.20.0); the older `env` / `env-profile` commands still work, see the end.
+(v3.20.0).
 
 A fresh playbook has no overrides. Launching it runs `claude` with your shell's
 environment plus `CLAUDE_CONFIG_DIR`, exactly as before.
@@ -244,19 +244,3 @@ block with a note; nothing ships env sets and `update` never touches their
 directory. A shared playbook repository cannot redirect your API endpoint or
 strip your authentication by publishing a manifest. Manifests holding values
 are written `0600`; a file's mode is never loosened by a rewrite.
-
-## Older commands
-
-`env` and `env-profile` still work, with their flags, and write the same files. They are hidden from help and deprecated: each use prints one stderr line naming its statement, and they are removed in v4.0.0. stdout is unchanged.
-The statement for each:
-
-| Older | Statement |
-|---|---|
-| `env <n> set K=V` / `unset K` / `clear K` | `ALTER PLAYBOOK <n> SET VAR K=V` / `BLOCK VAR K` / `UNSET VAR K` |
-| `env <n> use P` / `unuse P` | `ALTER PLAYBOOK <n> ADD ENV P` / `DROP ENV P` |
-| `env <n>` | `EXPLAIN PLAYBOOK <n>` |
-| `env-profile P set K=V` / `unset K` / `clear K` | `ALTER ENV P SET K=V` / `BLOCK K` / `UNSET K` (`CREATE ENV` when new) |
-| `env-profile P describe TEXT` | `ALTER ENV P DESCRIBE 'TEXT'` |
-| `env-profile P default` / `undefault` | `ALTER DEFAULTS USE ENV P` / `DROP ENV P` |
-| `env-profile P delete` | `DROP ENV P` |
-| `env-profile [--values]` | `SHOW ENVS` |

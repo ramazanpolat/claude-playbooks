@@ -295,9 +295,9 @@ func sanitizeProfileError(err error) string {
 	}
 	var resolve *envprofile.ResolveError
 	if errors.As(err, &resolve) {
-		return "env profile " + strconv.Quote(resolve.Name) + " cannot be read or is invalid (content not shown; run: claude-playbook env-profile " + resolve.Name + ")"
+		return "env profile " + strconv.Quote(resolve.Name) + " cannot be read or is invalid (content not shown; run: cpb SHOW ENV " + resolve.Name + ")"
 	}
-	return "env profile cannot be resolved (details withheld; see claude-playbook env-profile)"
+	return "env profile cannot be resolved (details withheld; see cpb SHOW ENVS)"
 }
 
 func trimSpace(b []byte) []byte {

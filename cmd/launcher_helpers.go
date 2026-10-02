@@ -45,7 +45,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Register a different command name with: claude-playbook alias %s <name> — rename the playbook (and its command) with: claude-playbook rename %s <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
+		fmt.Fprintf(os.Stderr, "Register a different command name with: cpb ALTER PLAYBOOK %s ALIAS <name> — rename the playbook (and its command) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
 		manual()
 		return
 	}
@@ -106,7 +106,7 @@ func resolveLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string
 		name = fallbackName
 	}
 	if err := launcher.ValidateName(name); err != nil {
-		return "", fmt.Errorf("%w (pass --no-alias to %s without a launcher)", err, verb)
+		return "", fmt.Errorf("%w (add NO ALIAS to %s without a launcher)", err, verb)
 	}
 	return name, nil
 }

@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -524,20 +522,4 @@ func showSessions(st *grammar.Stmt) error {
 	}
 	t.render(os.Stdout)
 	return nil
-}
-
-// sessionsCmd is `cpb sessions`: the documented lowercase shorthand for
-// exactly SHOW SESSIONS [--json].
-var sessionsCmd = &cobra.Command{
-	Use:   "sessions",
-	Short: "List the live Claude Code sessions of your playbooks (SHOW SESSIONS)",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		asJSON, _ := cmd.Flags().GetBool("json")
-		return showSessions(&grammar.Stmt{Verb: grammar.Show, Object: grammar.Sessions, JSON: asJSON})
-	},
-}
-
-func init() {
-	sessionsCmd.Flags().Bool("json", false, "print the sessions as JSON, as SHOW SESSIONS --json")
 }

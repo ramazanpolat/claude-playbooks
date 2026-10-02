@@ -56,7 +56,7 @@ func TestNoTerminalQueryAtStartup(t *testing.T) {
 	}
 	for _, line := range []string{
 		binPath + " SHOW PLAYBOOKS",
-		binPath + " sessions",
+		binPath + " SHOW SESSIONS",
 		binPath + " run pty --version", // what a launcher runs
 		binPath,                        // bare cpb, on a terminal
 	} {

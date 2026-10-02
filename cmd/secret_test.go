@@ -217,25 +217,20 @@ func TestShowAndExplainReferences(t *testing.T) {
 	}
 }
 
-// The hidden env command keeps its own code path: it preserves references
-// for other keys, and a literal it sets replaces a reference for the same
-// key, so the manifest stays valid.
-func TestHiddenEnvCommandAndReferences(t *testing.T) {
+// SET VAR of one key keeps the references for other keys, and a literal
+// replaces a reference for the same key, so the manifest stays valid.
+func TestSetVarAndReferences(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	helper, _ := fakeHelper(t)
 	root := seedFlatPlaybook(t, "router")
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
 	mustStmt(t, "ALTER PLAYBOOK router SET VAR A_TOKEN FROM keychain:ok/a SET VAR B_TOKEN FROM keychain:ok/b")
-	if err := runEnv(nil, []string{"router", "set", "OTHER=1"}); err != nil {
-		t.Fatal(err)
-	}
+	mustStmt(t, "ALTER PLAYBOOK router SET VAR OTHER=1")
 	if e := readEnv(t, root); e.Refs["A_TOKEN"] != "keychain:ok/a" || e.Refs["B_TOKEN"] != "keychain:ok/b" {
-		t.Fatalf("the hidden env command dropped references: %#v", e)
+		t.Fatalf("SET VAR dropped references: %#v", e)
 	}
-	if err := runEnv(nil, []string{"router", "set", "A_TOKEN=literal"}); err != nil {
-		t.Fatal(err)
-	}
+	mustStmt(t, "ALTER PLAYBOOK router SET VAR A_TOKEN=literal AS PLAINTEXT")
 	if e := readEnv(t, root); e.Set["A_TOKEN"] != "literal" || e.Refs["A_TOKEN"] != "" || e.Refs["B_TOKEN"] == "" {
 		t.Fatalf("set over a reference: %#v", e)
 	}

@@ -427,12 +427,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	case known && !exists:
 		return fmt.Errorf("unknown playbook %q (dropped earlier in the file)", st.Name)
 	case pb == nil && !(known && exists):
-		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", st.Name)
+		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", st.Name)
 	}
 	var m *manifest.Manifest
 	if pb != nil {
 		// A linked playbook's manifest is shared with every registration of
-		// the target directory: same refusal as the pre-grammar env command.
+		// the target directory, so its environment is not changed here.
 		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
 			if pluginClauses(st.Clauses) || mcpClauses(st.Clauses) || skillClauses(st.Clauses) {
 				return fmt.Errorf("cannot change the plugins or MCP servers of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
@@ -889,4 +889,15 @@ func envEqual(a, b *manifest.Env) bool {
 	slices.Sort(ua)
 	slices.Sort(ub)
 	return slices.Equal(a.Profiles, b.Profiles) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
+}
+
+// dropString is list without s.
+func dropString(list []string, s string) []string {
+	out := list[:0:0]
+	for _, v := range list {
+		if v != s {
+			out = append(out, v)
+		}
+	}
+	return out
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -82,88 +83,7 @@ func writePlaybook(t *testing.T, root, name string, m *manifest.Manifest) {
 	}
 }
 
-// listRow returns the data row for a playbook from `list` output.
-func listRow(t *testing.T, out, name string) string {
-	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, name+"  ") {
-			return line
-		}
-	}
-	t.Fatalf("no row for %q in list output:\n%s", name, out)
-	return ""
-}
-
 // --- list ---
-
-func TestListEmptyRootPrintsHint(t *testing.T) {
-	config.PlaybooksDir = sandboxRoot(t, "playbooks")
-
-	out := captureStdout(t, func() {
-		if err := runList(nil, nil); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, "No playbooks found") {
-		t.Fatalf("empty root should print the getting-started hint, got:\n%s", out)
-	}
-}
-
-func TestListPrefixFiltersByName(t *testing.T) {
-	config.PlaybooksDir = sandboxRoot(t, "playbooks")
-	for _, name := range []string{"alpha", "alphabet", "beta"} {
-		writePlaybook(t, config.PlaybooksDir, name, nil)
-	}
-
-	out := captureStdout(t, func() {
-		if err := runList(nil, []string{"alph"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	listRow(t, out, "alpha")
-	listRow(t, out, "alphabet")
-	if strings.Contains(out, "beta") {
-		t.Fatalf("prefix filter did not exclude non-matching playbook:\n%s", out)
-	}
-	if !strings.Contains(out, "NAME") || !strings.Contains(out, "COMMAND") {
-		t.Fatalf("header row missing from list output:\n%s", out)
-	}
-}
-
-func TestListCommandColumnShowsOnlyExistingLaunchers(t *testing.T) {
-	root := sandboxDefaultRoot(t)
-	// withcmd advertises alias "wc"; only its launcher exists. nocmd has no
-	// launcher at all. The reserved cpb launcher must never surface as a
-	// playbook command — written by hand here because launcher.Write
-	// (rightly) refuses reserved names.
-	writePlaybook(t, root, "withcmd", &manifest.Manifest{Alias: "wc"})
-	writePlaybook(t, root, "nocmd", nil)
-	if _, err := launcher.Write(config.LauncherDir, "wc"); err != nil {
-		t.Fatal(err)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(exe, filepath.Join(config.LauncherDir, "cpb")); err != nil {
-		t.Fatal(err)
-	}
-
-	out := captureStdout(t, func() {
-		if err := runList(nil, nil); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if row := listRow(t, out, "withcmd"); !strings.Contains(row, " wc ") {
-		t.Fatalf("withcmd row should show its launcher command wc, got %q", row)
-	}
-	if row := listRow(t, out, "nocmd"); !strings.Contains(row, " - ") {
-		t.Fatalf("nocmd row should show '-' (launcher missing), got %q", row)
-	}
-	if strings.Contains(out, " cpb ") {
-		t.Fatalf("reserved name cpb advertised as a playbook command:\n%s", out)
-	}
-}
 
 func TestFormatAge(t *testing.T) {
 	now := time.Now()
@@ -188,7 +108,7 @@ func TestFormatAge(t *testing.T) {
 
 // --- info ---
 
-func TestInfoRendersManifestFields(t *testing.T) {
+func TestShowPlaybookManifestFields(t *testing.T) {
 	config.PlaybooksDir = sandboxRoot(t, "playbooks")
 	writePlaybook(t, config.PlaybooksDir, "rich", &manifest.Manifest{
 		Version:     "1.2.3",
@@ -197,99 +117,40 @@ func TestInfoRendersManifestFields(t *testing.T) {
 		Homepage:    "https://example.com",
 		Author:      "Tester",
 	})
-	rich := filepath.Join(config.PlaybooksDir, "rich")
-	if err := os.MkdirAll(filepath.Join(rich, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(rich, "sub", "f.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writePlaybook(t, config.PlaybooksDir, "plain", nil)
 
-	out := captureStdout(t, func() {
-		if err := runInfo(nil, []string{"rich"}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	out := mustStmt(t, "SHOW PLAYBOOK rich")
 	for _, want := range []string{
-		"Name:        rich",
-		"Version:     1.2.3",
-		"Path:        " + rich,
-		"Type:        directory",
-		"Alias:       ri",
-		"Size:        3 files, 1 directories", // CLAUDE.md, .playbook, sub/f.txt; dir: sub
-		"Last used:   just now",
-		"Description: A rich playbook",
-		"Homepage:    https://example.com",
-		"Author:      Tester",
-		"Update from: (no [source] metadata; cannot update)",
+		"Version:      1.2.3",
+		"Description:  A rich playbook",
+		"Homepage:     https://example.com",
+		"Author:       Tester",
+		"Launcher:     ri",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("info output missing %q, got:\n%s", want, out)
+			t.Errorf("SHOW PLAYBOOK missing %q, got:\n%s", want, out)
 		}
 	}
-}
-
-func TestInfoShowsSourceAndMigrationRunner(t *testing.T) {
-	config.PlaybooksDir = sandboxRoot(t, "playbooks")
-	writePlaybook(t, config.PlaybooksDir, "upd", &manifest.Manifest{
-		Source: &manifest.Source{Repository: "https://example.com/playbooks"},
-	})
-	migrations := filepath.Join(config.PlaybooksDir, "upd", "migrations")
-	if err := os.MkdirAll(migrations, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(migrations, "apply.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
+	if out := mustStmt(t, "SHOW PLAYBOOK plain"); strings.Contains(out, "Description") || strings.Contains(out, "Homepage") || strings.Contains(out, "Author") {
+		t.Errorf("a playbook with no such fields shows them:\n%s", out)
 	}
 
-	out := captureStdout(t, func() {
-		if err := runInfo(nil, []string{"upd"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, "Update from: https://example.com/playbooks") {
-		t.Fatalf("update source not reported, got:\n%s", out)
-	}
-	if !strings.Contains(out, "Migrations:  migrations/apply.sh") {
-		t.Fatalf("migration runner not reported, got:\n%s", out)
-	}
-}
-
-func TestInfoShowsSymlinkTypeForLinkedPlaybook(t *testing.T) {
-	sandbox := sandboxRoot(t, "playbooks")
-	target := filepath.Join(sandbox, "target")
-	if err := os.MkdirAll(target, 0o755); err != nil {
+	var v map[string]any
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK rich --json")), &v); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(target, "CLAUDE.md"), []byte("# external\n"), 0o644); err != nil {
+	if v["description"] != "A rich playbook" || v["homepage"] != "https://example.com" || v["author"] != "Tester" {
+		t.Errorf("--json fields = %v, %v, %v", v["description"], v["homepage"], v["author"])
+	}
+	used, _ := v["last_used"].(string)
+	if ts, err := time.Parse(time.RFC3339, used); err != nil || time.Since(ts) > time.Hour {
+		t.Errorf("last_used = %q (%v)", used, err)
+	}
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK plain --json")), &v); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(config.PlaybooksDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
-		t.Fatal(err)
-	}
-
-	out := captureStdout(t, func() {
-		if err := runInfo(nil, []string{"linked"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, "Type:        symlink → "+target) {
-		t.Fatalf("linked playbook should show its symlink target, got:\n%s", out)
-	}
-}
-
-func TestInfoUnknownPlaybookErrors(t *testing.T) {
-	config.PlaybooksDir = sandboxRoot(t, "playbooks")
-
-	err := runInfo(nil, []string{"ghost"})
-	if err == nil {
-		t.Fatal("expected an error for an unknown playbook")
-	}
-	if !strings.Contains(err.Error(), "unknown playbook") {
-		t.Fatalf("error = %v", err)
+	if v["description"] != nil || v["homepage"] != nil || v["author"] != nil {
+		t.Errorf("plain --json fields = %v, %v, %v; want null", v["description"], v["homepage"], v["author"])
 	}
 }
 
@@ -298,10 +159,9 @@ func TestInfoUnknownPlaybookErrors(t *testing.T) {
 func TestDeleteYesRemovesPlaybookDirectory(t *testing.T) {
 	sandboxDefaultRoot(t)
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
-	deleteYes = true
 
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"victim"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"victim"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -315,9 +175,8 @@ func TestDeleteYesRemovesPlaybookDirectory(t *testing.T) {
 
 func TestDeleteUnknownNameErrors(t *testing.T) {
 	sandboxDefaultRoot(t)
-	deleteYes = true
 
-	err := runDelete(nil, []string{"ghost"})
+	err := doDelete(deleteOpts{yes: true}, []string{"ghost"})
 	if err == nil {
 		t.Fatal("expected an error for an unknown playbook")
 	}
@@ -329,11 +188,10 @@ func TestDeleteUnknownNameErrors(t *testing.T) {
 func TestDeleteDeclinedKeepsPlaybook(t *testing.T) {
 	sandboxDefaultRoot(t)
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
-	deleteYes = false
 	feedStdin(t, "n\n")
 
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"victim"}); err != nil {
+		if err := doDelete(deleteOpts{}, []string{"victim"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -362,9 +220,8 @@ func TestDeleteLinkedPlaybookRemovesSymlinkOnly(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 
-	if err := runDelete(nil, []string{"linked"}); err != nil {
+	if err := doDelete(deleteOpts{yes: true}, []string{"linked"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(config.PlaybooksDir, "linked")); !os.IsNotExist(err) {
@@ -385,10 +242,9 @@ func TestDeleteRemovesUnclaimedLauncher(t *testing.T) {
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"victim"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"victim"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -414,10 +270,9 @@ func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"victim"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"victim"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -432,47 +287,35 @@ func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 // A directory that exists at the expected path but is not discoverable
 // (dot-named, so discovery skips it) goes through the orphan path: removed
 // with an explicit message rather than reported as unknown.
-func TestDeleteOrphanRemovesNonDiscoverableDirectory(t *testing.T) {
+func TestDropRefusesANonPlaybookDirectory(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	orphan := filepath.Join(config.PlaybooksDir, ".hidden")
 	if err := os.MkdirAll(orphan, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(orphan, "f.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
+	if err := doDelete(deleteOpts{yes: true}, []string{".hidden"}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("err = %v, want not found", err)
 	}
-	deleteYes = true
-
-	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{".hidden"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
-		t.Fatalf("orphan directory still present, err=%v", err)
-	}
-	if !strings.Contains(out, `Deleted ".hidden".`) {
-		t.Fatalf("orphan deletion not confirmed in output, got:\n%s", out)
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("a directory that is not a playbook was touched: %v", err)
 	}
 }
 
-// The env profile store is dot-named, so discovery skips it and a delete by
-// name would fall through to the orphan path; it must be refused by name and
-// by file identity (a case variant on a case-insensitive filesystem).
+// The env profile store is dot-named, so discovery skips it; a delete by
+// name must be refused by name and by file identity (a case variant on a case-insensitive filesystem).
 func TestDeleteRefusesEnvProfileStore(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	store := envprofile.Dir(config.PlaybooksDir)
 	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 	for _, name := range []string{envprofile.DirName, strings.ToUpper(envprofile.DirName)} {
 		if name != envprofile.DirName {
 			if _, err := os.Stat(filepath.Join(config.PlaybooksDir, name)); err != nil {
 				continue // case-sensitive filesystem: the variant is simply not found
 			}
 		}
-		err := runDelete(nil, []string{name})
+		err := doDelete(deleteOpts{yes: true}, []string{name})
 		if err == nil || !strings.Contains(err.Error(), "env profile store") {
 			t.Fatalf("delete %q: %v", name, err)
 		}
@@ -492,21 +335,18 @@ func TestDeleteStoreSymlinkShapes(t *testing.T) {
 	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 
-	// 1. link -> store: the link is removed, the store survives.
+	// 1. link -> store: a link is not the store (removing it never descends
+	// into its target), so the guard lets it through.
 	link := filepath.Join(root, ".oldlink")
 	if err := os.Symlink(store, link); err != nil {
 		t.Fatal(err)
 	}
-	if err := runDelete(nil, []string{".oldlink"}); err != nil {
-		t.Fatalf("deleting a symlink to the store: %v", err)
+	if err := refuseRegistryOwned(root, ".oldlink", link); err != nil {
+		t.Fatalf("a symlink to the store: %v", err)
 	}
-	if _, err := os.Lstat(link); !os.IsNotExist(err) {
-		t.Fatal("link not removed")
-	}
-	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
-		t.Fatalf("store damaged by deleting a link to it: %v %v", p, err)
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
 	}
 
 	// 2. store -> inside a leftover directory: deleting the leftover is refused.
@@ -521,7 +361,7 @@ func TestDeleteStoreSymlinkShapes(t *testing.T) {
 	if err := os.Symlink(inner, store); err != nil {
 		t.Fatal(err)
 	}
-	err := runDelete(nil, []string{".leftover"})
+	err := doDelete(deleteOpts{yes: true}, []string{".leftover"})
 	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
 		t.Fatalf("deleting the directory the store lives in: %v", err)
 	}
@@ -529,7 +369,7 @@ func TestDeleteStoreSymlinkShapes(t *testing.T) {
 		t.Fatalf("store damaged: %v %v", p, err)
 	}
 	// The message names the canonical store, whatever spelling was typed.
-	if err := runDelete(nil, []string{envprofile.DirName}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+	if err := doDelete(deleteOpts{yes: true}, []string{envprofile.DirName}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
 		t.Fatalf("message: %v", err)
 	}
 }
@@ -549,7 +389,6 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 	if err := os.Symlink(inner, store); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 	caseInsensitive := false
 	if _, err := os.Stat(filepath.Join(root, ".LEFTOVER")); err == nil {
 		caseInsensitive = true
@@ -557,14 +396,14 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 
 	// The store's registry SYMLINK addressed by a case variant: refused, link intact.
 	if caseInsensitive {
-		if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+		if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
 			t.Fatalf("case variant of the store link must get the store message, not the intermediate-link one: %v", err)
 		}
 		if _, err := os.Lstat(store); err != nil {
 			t.Fatal("store link removed")
 		}
 		// The directory the store resolves into, addressed by a case variant.
-		if err := runDelete(nil, []string{".LEFTOVER"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		if err := doDelete(deleteOpts{yes: true}, []string{".LEFTOVER"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
 			t.Fatalf("case variant of the containing directory: %v", err)
 		}
 	}
@@ -609,8 +448,7 @@ func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
 	if err := os.Symlink(filepath.Join(".holder", "bridge"), store); err != nil { // relative target
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{".holder"}); err == nil || !strings.Contains(err.Error(), "or a path it resolves through") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".holder"}); err == nil || !strings.Contains(err.Error(), "or a path it resolves through") {
 		t.Fatalf("directory holding an intermediate link: %v", err)
 	}
 	if err := refuseRegistryOwned(root, "bridge", bridge); err == nil || !strings.Contains(err.Error(), "resolves through") {
@@ -620,11 +458,8 @@ func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
 	if err := os.Symlink(final, unrelated); err != nil {
 		t.Fatal(err)
 	}
-	if err := runDelete(nil, []string{".unrelated"}); err != nil {
-		t.Fatalf("unrelated link to the same target must be deletable: %v", err)
-	}
-	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
-		t.Fatalf("store damaged: %v %v", p, err)
+	if err := refuseRegistryOwned(root, ".unrelated", unrelated); err != nil {
+		t.Fatalf("an unrelated link to the same target is not the store: %v", err)
 	}
 }
 
@@ -645,11 +480,10 @@ func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
 	if err := os.Symlink(filepath.Join(".bridge", "profiles"), store); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{".bridge"}); err == nil || !strings.Contains(err.Error(), "resolves through") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".bridge"}); err == nil || !strings.Contains(err.Error(), "resolves through") {
 		t.Fatalf("parent-component link: %v", err)
 	}
-	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
 		t.Fatalf("directory holding the parent-component target: %v", err)
 	}
 	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
@@ -671,7 +505,7 @@ func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := runDelete(nil, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Fatalf("looped store: %v", err)
 	}
 	if _, err := os.Stat(other); err != nil {
@@ -696,11 +530,10 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	if err := os.Symlink(".leftover"+string(filepath.Separator)+".."+string(filepath.Separator)+".profiles", store); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "is a directory the registry's env profile store resolves through") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "is a directory the registry's env profile store resolves through") {
 		t.Fatalf("traversed directory: %v", err)
 	}
-	if err := runDelete(nil, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+	if err := doDelete(deleteOpts{yes: true}, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
 		t.Fatalf("physical directory under another name: %v", err)
 	}
 
@@ -714,12 +547,12 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".ENV-PROFILES")); err == nil || os.IsNotExist(err) {
 		// case-insensitive: Lstat of the variant is the link itself
 		if fi, err := os.Lstat(filepath.Join(root, ".ENV-PROFILES")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			if err := runDelete(nil, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+			if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
 				t.Fatalf("dangling store link by case variant: %v", err)
 			}
 		}
 	}
-	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Fatalf("delete with a dangling store: %v", err)
 	}
 	if _, err := os.Lstat(store); err != nil {
@@ -755,8 +588,7 @@ func TestDeleteStoreGuardDefersToTheKernel(t *testing.T) {
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".other"}); err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Fatalf("chain the kernel refuses: %v", err)
 	}
 	if _, err := os.Stat(other); err != nil {
@@ -863,8 +695,7 @@ func TestDeleteStoreGuardBindMount(t *testing.T) {
 	if err := os.Symlink(filepath.Join(data, "profiles"), envprofile.Dir(root)); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
 		t.Fatalf("bind-mounted store inside the target: %v", err)
 	}
 }
@@ -884,9 +715,8 @@ func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
 	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 	for _, name := range []string{"glm.toml", envprofile.DefaultMarker} {
-		if err := runDelete(nil, []string{name}); err == nil || !strings.Contains(err.Error(), "is an entry of the registry's env profile store") {
+		if err := doDelete(deleteOpts{yes: true}, []string{name}); err == nil || !strings.Contains(err.Error(), "is an entry of the registry's env profile store") {
 			t.Fatalf("delete %q: %v", name, err)
 		}
 	}
@@ -897,7 +727,7 @@ func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
 		t.Fatalf("default damaged: %q %v", d, err)
 	}
 	seedFlatPlaybook(t, "beside")
-	if err := runDelete(nil, []string{"beside"}); err != nil {
+	if err := doDelete(deleteOpts{yes: true}, []string{"beside"}); err != nil {
 		t.Fatalf("a playbook beside the store entries must stay deletable: %v", err)
 	}
 }
@@ -920,8 +750,7 @@ func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".stray"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{"linked"}); err != nil {
+	if err := doDelete(deleteOpts{yes: true}, []string{"linked"}); err != nil {
 		t.Fatalf("unlinking a linked playbook beside the store entries: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "linked")); !os.IsNotExist(err) {
@@ -930,10 +759,10 @@ func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
 	if _, err := os.Stat(external); err != nil {
 		t.Fatal("link target removed")
 	}
-	if err := runDelete(nil, []string{".stray"}); err != nil {
-		t.Fatalf("a stray file beside the store entries: %v", err)
+	if err := refuseRegistryOwned(root, ".stray", filepath.Join(root, ".stray")); err != nil {
+		t.Fatalf("a stray file beside the store entries is not the store: %v", err)
 	}
-	if err := runDelete(nil, []string{"glm.toml"}); err == nil {
+	if err := doDelete(deleteOpts{yes: true}, []string{"glm.toml"}); err == nil {
 		t.Fatal("a profile file was deletable")
 	}
 }
@@ -956,9 +785,8 @@ func TestDeleteRemovesNameAliasAndHandMadeLaunchers(t *testing.T) {
 	if err := os.Symlink(exe, filepath.Join(config.LauncherDir, "mine")); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"mine"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"mine"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -982,10 +810,9 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 	if _, err := launcher.Write(config.LauncherDir, "own"); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = false
 	feedStdin(t, "n\n")
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"own"}); err != nil {
+		if err := doDelete(deleteOpts{}, []string{"own"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -1008,8 +835,7 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(broken, manifest.FileName), []byte("name = [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	_ = runDelete(nil, []string{"victim"}) // may refuse on the broken sibling; the launcher must survive either way
+	_ = doDelete(deleteOpts{yes: true}, []string{"victim"}) // may refuse on the broken sibling; the launcher must survive either way
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "victim"); !exists {
 		t.Fatal("launcher removed although ownership could not be verified")
 	}
@@ -1027,16 +853,14 @@ func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 	if _, err := launcher.Write(config.LauncherDir, "oa"); err != nil {
 		t.Fatal(err)
 	}
-	renameAlias, renameNoAlias = "", false
-	if err := runRename(nil, []string{"old", "new"}); err != nil {
+	if err := doRename(renameOpts{}, []string{"old", "new"}); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "oa"); !exists {
 		t.Fatal("alias launcher lost across the rename")
 	}
-	deleteYes = true
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"new"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"new"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -1055,8 +879,7 @@ func TestRenameAliasEqualToOldNameAndPrompt(t *testing.T) {
 	if _, err := launcher.Write(config.LauncherDir, "old"); err != nil {
 		t.Fatal(err)
 	}
-	renameAlias, renameNoAlias = "", false
-	if err := runRename(nil, []string{"old", "new"}); err != nil {
+	if err := doRename(renameOpts{}, []string{"old", "new"}); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "old"); exists {
@@ -1065,10 +888,9 @@ func TestRenameAliasEqualToOldNameAndPrompt(t *testing.T) {
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "new"); !exists {
 		t.Fatal("no launcher for the new name")
 	}
-	deleteYes = false
 	feedStdin(t, "n\n")
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"new"}); err != nil {
+		if err := doDelete(deleteOpts{}, []string{"new"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -1094,9 +916,8 @@ func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
 	if _, err := launcher.Write(config.LauncherDir, "foo"); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"two"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"two"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -1122,19 +943,17 @@ func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	writePlaybook(t, root, "cpb", nil)
-	deleteYes = false
 	feedStdin(t, "n\n")
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"cpb"}); err != nil {
+		if err := doDelete(deleteOpts{}, []string{"cpb"}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	if strings.Contains(out, "Command:  cpb") {
 		t.Fatalf("reserved symlink presented as the playbook's launcher:\n%s", out)
 	}
-	deleteYes = true
 	out = captureStdout(t, func() {
-		if err := runDelete(nil, []string{"cpb"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"cpb"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -1163,9 +982,8 @@ func TestDeleteSparesReservedLauncherUnderCaseVariant(t *testing.T) {
 		t.Skip("case-sensitive filesystem: CPB is a distinct entry")
 	}
 	writePlaybook(t, root, "CPB", nil)
-	deleteYes = true
 	out := captureStdout(t, func() {
-		if err := runDelete(nil, []string{"CPB"}); err != nil {
+		if err := doDelete(deleteOpts{yes: true}, []string{"CPB"}); err != nil {
 			t.Fatal(err)
 		}
 	})

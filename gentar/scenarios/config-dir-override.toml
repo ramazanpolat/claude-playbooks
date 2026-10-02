@@ -35,7 +35,7 @@ steps = [
 path = "~/.local/bin/claude-playbook"
 
 [[verify.commands]]
-command = 'claude-playbook create ovr --no-alias && echo created'
+command = 'claude-playbook CREATE PLAYBOOK ovr NO ALIAS && echo created'
 contains = "created"
 
 [[verify.commands]]

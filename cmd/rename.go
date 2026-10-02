@@ -6,43 +6,17 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
-	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
-var (
-	renameAlias   string
-	renameNoAlias bool
-)
-
-var renameCmd = &cobra.Command{
-	Hidden:            true, // pre-grammar fallback: docs/reference/cli-grammar.md
-	Use:               "rename <old-name> <new-name>",
-	Short:             "Rename a top-level playbook",
-	Args:              cobra.ExactArgs(2),
-	ValidArgsFunction: autocompletePlaybookNames,
-	RunE:              runRename,
-}
-
-func init() {
-	renameCmd.Flags().StringVar(&renameAlias, "alias", "", "new launcher command name for the renamed playbook")
-	renameCmd.Flags().BoolVar(&renameNoAlias, "no-alias", false, "drop the launcher command and manifest alias")
-}
-
-// renameOpts carries rename's options: its flags for the command, the statement's
-// clauses for the grammar. No state is shared between two calls.
+// renameOpts carries ALTER PLAYBOOK … RENAME TO's clauses. No state is
+// shared between two calls.
 type renameOpts struct {
 	alias   string
 	noAlias bool
-}
-
-func runRename(cmd *cobra.Command, args []string) error {
-	return doRename(renameOpts{alias: renameAlias, noAlias: renameNoAlias}, args)
 }
 
 func doRename(o renameOpts, args []string) error {
@@ -261,16 +235,4 @@ func doRename(o renameOpts, args []string) error {
 
 	fmt.Printf("Renamed %q → %q\n", oldName, newName)
 	return nil
-}
-
-// configOverrideArgs renders the --playbooks-dir override in effect, so a
-// suggested command reproduces this invocation's configuration. Without it, a
-// suggestion made under `--playbooks-dir ./pb` would search the default
-// directory and fail.
-func configOverrideArgs() string {
-	var b strings.Builder
-	if config.PlaybooksDir != "" {
-		b.WriteString(" --playbooks-dir " + shell.QuoteArg(config.PlaybooksDir))
-	}
-	return b.String()
 }

@@ -384,8 +384,8 @@ func TestOverrideCannotBeReintroducedByEnvLayers(t *testing.T) {
 		}
 	})
 
-	t.Run("env profile", func(t *testing.T) {
-		out := runFailing(t, root, nil, []string{"env-profile", "leaky", "set", overrideEnv + "=/leak"})
+	t.Run("env set", func(t *testing.T) {
+		out := runFailing(t, root, nil, []string{"CREATE", "ENV", "leaky", "SET", overrideEnv + "=/leak"})
 		if !strings.Contains(out, "managed by claude-playbook") {
 			t.Errorf("a profile setting %s was not refused:\n%s", overrideEnv, out)
 		}

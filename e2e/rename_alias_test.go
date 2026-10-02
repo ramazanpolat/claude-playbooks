@@ -56,8 +56,8 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 		return string(out)
 	}
 
-	cpb("create", "before", "--alias", "ab")
-	cpb("rename", "before", "after")
+	cpb("CREATE", "PLAYBOOK", "oldpb", "ALIAS", "ab")
+	cpb("ALTER", "PLAYBOOK", "oldpb", "RENAME", "TO", "newpb")
 
 	// Executing the launcher is what happens when the user types `ab`.
 	script := filepath.Join(launcherDir, "ab")
@@ -83,7 +83,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDir := "CLAUDE_CONFIG_DIR=" + filepath.Join(root, "after")
+	wantDir := "CLAUDE_CONFIG_DIR=" + filepath.Join(root, "newpb")
 	if !strings.Contains(string(data), wantDir) {
 		t.Fatalf("launcher used the wrong config dir; wanted %s", wantDir)
 	}

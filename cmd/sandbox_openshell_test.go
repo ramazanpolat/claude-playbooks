@@ -183,7 +183,7 @@ func TestOpenshellPreflightRefusals(t *testing.T) {
 
 func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=real-token", "MODEL=glm"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=real-token MODEL=glm AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
 	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"api.example.com", "127.0.0.1:8000", "::1"}}})
@@ -266,7 +266,7 @@ func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 
 func TestRunSandboxOpenshellReuseRotateRevoke(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=new-token"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=new-token AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
 	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
@@ -343,7 +343,7 @@ func TestRunSandboxOpenshellReuseRotateRevoke(t *testing.T) {
 
 func TestRunSandboxOpenshellRefusals(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	if err := runEnvProfile(nil, []string{"canary", "set", "ANTHROPIC_API_KEY=cpbcanaryopenshell"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV canary SET ANTHROPIC_API_KEY=cpbcanaryopenshell AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
 	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"canary"}}})
@@ -399,7 +399,7 @@ func TestRunSandboxOpenshellRefusals(t *testing.T) {
 
 func TestRunSandboxOpenshellEndpointRules(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=tok"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=tok AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
 	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
@@ -418,7 +418,7 @@ func TestRunSandboxOpenshellEndpointRules(t *testing.T) {
 	}
 	inOrder(t, stubLines(t, log), "provider create --name cpb-box-anthropic-auth-token", "policy update cpb-box --remove-endpoint router.local:9 --wait", "sandbox provider attach cpb-box cpb-box-anthropic-auth-token")
 	// The key gone and none left: the endpoint gets a rule of its own again.
-	if err := runEnvProfile(nil, []string{"router", "unset", "ANTHROPIC_AUTH_TOKEN"}); err != nil {
+	if err := stmtErr(t, "ALTER ENV router UNSET ANTHROPIC_AUTH_TOKEN"); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(log)

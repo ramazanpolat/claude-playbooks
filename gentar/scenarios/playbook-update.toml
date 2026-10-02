@@ -83,21 +83,14 @@ command = 'ls -d "$HOME/.claude-playbooks/".pb.bak.* >/dev/null 2>&1 && echo bac
 contains = "backed-up"
 
 [[verify.commands]]
-command = 'claude-playbook info pb'
+command = 'claude-playbook SHOW PLAYBOOK pb'
 contains = "2.0.0"
 
 [[verify.commands]]
 # A playbook with no [source] cannot update natively, and says so rather than
-# failing obscurely. (This used to be asserted through `update --all`, which
-# was withdrawn in v3.15.0; the single-playbook form carries the same message.)
+# failing obscurely.
 command = '''mkdir -p "$HOME/.claude-playbooks/orphan" && printf '%s\n' '# orphan' > "$HOME/.claude-playbooks/orphan/CLAUDE.md" && claude-playbook update orphan 2>&1 || true'''
 contains = "no [source] metadata"
-
-[[verify.commands]]
-# --all is withdrawn but still parsed, so a script carrying it from v3.14.0
-# gets an explanation instead of having "--all" taken for a playbook name.
-command = 'claude-playbook update --all 2>&1 || true'
-contains = "not available in this version"
 
 [[verify.commands]]
 # And backups do not accumulate: still the one from the single update.

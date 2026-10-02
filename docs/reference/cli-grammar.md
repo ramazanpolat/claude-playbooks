@@ -5,21 +5,9 @@ Everything on this
 page is built; a section specified before it is built is marked
 **planned**.
 
-## Why
-
-The state-changing commands grew one at a time and read inconsistently:
-
-- two top-level commands for one idea (`env`, `env-profile`);
-- name before verb (`env work use glm`), so the words don't say
-  whether you are acting on a playbook or on a profile;
-- `env-profile x default` means *every playbook*, the opposite of what
-  "a default for this playbook" suggests;
-- `unset` and `clear` look like synonyms and are not.
-
-The fix is one regular grammar, read and written like DDL: you
-*command* cpb.
-
 ## Shape
+
+One regular grammar, read and written like DDL: you *command* cpb.
 
 ```
 cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
@@ -151,8 +139,7 @@ and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LI
 and `BRANCH` / `SUBDIR` only with `FROM`; `ALIAS` and `NO ALIAS` exclude each
 other; `SANDBOX` and `ISOLATED LOGIN` do not take `LINK`. The clauses of
 `origin`, `launcher`, `SANDBOX` and `ISOLATED LOGIN` may come in any order.
-`DROP PLAYBOOK` asks for confirmation on a terminal, as `delete` does;
-`--yes` skips it.
+`DROP PLAYBOOK` asks for confirmation on a terminal; `--yes` skips it.
 
 Two limits keep every statement whole-or-nothing:
 
@@ -161,11 +148,8 @@ Two limits keep every statement whole-or-nothing:
   could not be undone as one step. `RENAME TO <name> ALIAS <launcher>` is
   one statement; the environment change is a second.
 - `CREATE PLAYBOOK … LINK <dir>` needs the target to have a `.playbook`: a
-  statement never prompts, and the hidden `link` command asks for the
-  metadata when it is missing. The error names both ways out: add a
-  `.playbook` to the target, or run `claude-playbook link <dir>`
-  interactively. `SANDBOX` does not apply to `LINK`, whose manifest belongs
-  to the target.
+  statement never prompts for one. `SANDBOX` does not apply to `LINK`,
+  whose manifest belongs to the target.
 
 **A source never carries a login** (v3.22.1, a security fix).
 - `CREATE PLAYBOOK … FROM` and `install` leave a source's
@@ -182,11 +166,6 @@ Two limits keep every statement whole-or-nothing:
   removing the same keys. A directory with `isolate_auth = true` keeps both.
 - `update` already kept the install's own files.
 - See `docs/known-issues/shared-launch-copies-own-login-over-machine-login.md`.
-
-The lifecycle statements (`CREATE`/`DROP PLAYBOOK`, `RENAME TO`, `ALIAS`,
-`NO ALIAS`) run the same code as the hidden `install`, `create`, `link`,
-`delete`, `rename` and `alias` commands, with the statement's options in
-place of flags; that code is not changed by them.
 
 Inside `ALTER ENV` the word `VAR` is optional (`SET FOO=1`): the object
 already says it. Inside `ALTER PLAYBOOK` it is required (`SET VAR FOO=1`),
@@ -232,7 +211,7 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
 | `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-profiles/.default`, one set name per line, in order |
 | `ALTER DEFAULTS SET / UNSET SECRET HELPER` | `<root>/.env-profiles/.secret-helper`, one line: the command |
-| `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher, as `create`/`install`/`link`/`delete`/`rename`/`alias` do today |
+| `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
 | `ALTER PLAYBOOK … SET / UNSET AGENT` | the playbook's `settings.json`, `agent` |
 | `ALTER PLAYBOOK … ADD / DROP MCP SERVER` | nothing directly: runs `claude mcp add-json / remove --scope user` for the playbook; a reference also writes the playbook's `[env.refs]` (see "An agent's configuration") |
@@ -376,8 +355,8 @@ disambiguates.
   (`manifest.RefRefusedKeys`); a future key cpb reads joins it.
 
 **The grammar refuses a credential-looking literal**: a
-`SET [VAR] K=V` whose key looks like a credential (the rule `env` already
-uses to redact: `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `*_KEY`, …) is
+`SET [VAR] K=V` whose key looks like a credential (the rule SHOW uses to
+redact: `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `*_KEY`, …) is
 refused, naming the key and never the value, and pointing at
 `SET K FROM '<ref>'`. A value that cannot be a secret is let through: empty,
 an integer, or `true`/`false`, so `SET VAR MAX_THINKING_TOKENS=8000` works.
@@ -388,8 +367,7 @@ keeps cpb usable standalone, and it is loud where it matters: `EXPLAIN` marks
 such an entry `(plaintext)`, and `SHOW CREATE` never carries the value (see
 playbook files). Files that already hold such literals keep working unchanged.
 
-All output redacts credential-looking literals, as `env` does today; there is
-no `--reveal` in the new grammar.
+All output redacts credential-looking literals; no form prints the value.
 
 ## playbook.cpb: SHOW CREATE and APPLY
 
@@ -601,75 +579,6 @@ cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook"
 Every clause has a runnable example under [`examples/`](../../examples/),
 applied in CI.
 
-## Pre-grammar commands: a hidden fallback
-
-The grammar release is **v3.20.0**
-and breaks nothing. The pre-grammar state-changing commands stay working as a
-fallback, in case the new code is buggy, and v4.0.0 removes them.
-
-- **Hidden:** `env`, `env-profile`, `create <name>`, `link`, `delete`,
-  `rename`, `alias`, `dealias`, `list`, `info` are hidden from help and
-  completion and keep working with all their flags. They are **deprecated**
-  and are removed in v4.0.0.
-  Every use prints one line on stderr, on a terminal or not, so scripts are
-  warned too: ``Deprecated: `claude-playbook <command>` is removed in v4.0.0;
-  the grammar form is: cpb …``. It gives the exact statement for the given
-  arguments where one can be derived. Nothing is printed on stdout, so what a
-  script parses there is unchanged.
-- **Their own code paths.** They are **not** re-implemented on the new
-  engine: a bug there must not take the fallback down with it. The two paths
-  share the same files, so the old code must tolerate the grammar's two
-  format additions: rewriting a manifest preserves `[env.refs]`, and reading
-  `.env-profiles/.default` accepts a multi-line list (`env-profile P default`
-  still replaces it with `P`). Tests pin both on the old paths.
-- **Visible and unchanged:** the action commands `run`, `start`, `update`,
-  `auth`, `completion`, `self-uninstall`, and `install <source>`, the one
-  shortcut: clone, install and create the launcher in one step, taking the
-  name and launcher from the source's manifest (sugar for `CREATE PLAYBOOK
-  <name> FROM <source> ALIAS <launcher>`). `SHOW CREATE` always writes the
-  long form.
-- **`create` routing:** if the word after `create` is an object keyword
-  (`PLAYBOOK`, `ENV`, or `OR`), the grammar applies; otherwise the hidden
-  `create`. That is one more reason keywords are not valid names.
-- `AS PLAINTEXT` stays regardless: the hidden commands are a fallback, not
-  the plain-text route.
-
-**Migration** (the table the stderr hints and the docs draw on):
-
-| Hidden | Grammar |
-|---|---|
-| `create <n> [--alias a \| --no-alias] [--sandbox] [--isolated-login]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX] [ISOLATED LOGIN]` |
-| `link <target> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK n LINK <target> [ALIAS a \| NO ALIAS]` (`n` defaults to the target's basename) |
-| `delete <n> [--yes]` | `DROP PLAYBOOK <n> [--yes]` |
-| `rename <a> <b> [--alias x \| --no-alias]` | `ALTER PLAYBOOK <a> RENAME TO <b> [ALIAS x \| NO ALIAS]` |
-| `alias <n> <a>` | `ALTER PLAYBOOK <n> ALIAS <a>` |
-| `alias <n> --remove`, `dealias <n>` | `ALTER PLAYBOOK <n> NO ALIAS` |
-| `list [prefix]`, `alias` | `SHOW PLAYBOOKS` (the prefix filter is gone) |
-| `info <n> [--reveal]` | `SHOW PLAYBOOK <n>` (no `--reveal` in the grammar) |
-| `env <n> set K=V ...` | `ALTER PLAYBOOK <n> SET VAR K=V ...` |
-| `env <n> unset K ...` | `ALTER PLAYBOOK <n> BLOCK VAR K ...` |
-| `env <n> clear K ...` | `ALTER PLAYBOOK <n> UNSET VAR K ...` |
-| `env <n> use P Q` / `unuse P Q` | `ALTER PLAYBOOK <n> ADD ENV P ADD ENV Q` (one `ADD ENV` per set; an attached set moves to the end) / `DROP ENV P Q` |
-| `env <n> [--reveal]` | `EXPLAIN PLAYBOOK <n>` |
-| `env-profile P set K=V ...` | `ALTER ENV P SET K=V ...` (`CREATE ENV` when new) |
-| `env-profile P unset K ...` / `clear K ...` | `ALTER ENV P BLOCK K ...` / `UNSET K ...` |
-| `env-profile P describe TEXT` | `ALTER ENV P DESCRIBE 'TEXT'` |
-| `env-profile P default` / `undefault` | `ALTER DEFAULTS USE ENV P` (replaces the list, as `default` replaced the single default) / `ALTER DEFAULTS DROP ENV P` |
-| `env-profile P delete` | `DROP ENV P` |
-| `env-profile [--values] [--reveal]` | `SHOW ENVS` |
-
-## Compatibility
-
-- Nothing breaks in v3.20.0: the pre-grammar commands keep working, hidden.
-  Scripts should move to `SHOW … --json` (below) before the removal release.
-- The manifest (`.playbook` `[env]`) and `.env-profiles/*.toml` formats gain
-  one table, `refs`; everything else is unchanged.
-- `.env-profiles/.default` changes from one name to one name per line. A
-  single-name file is read as a one-element list, so existing machines need
-  no migration. An older cpb reading a multi-line file refuses it rather than
-  guess, so downgrading after `ALTER DEFAULTS` with two sets needs a
-  one-line edit.
-
 ## Output
 
 Every `SHOW` and `EXPLAIN` has two forms. The **human form** is for reading;
@@ -687,7 +596,7 @@ A variable, wherever it appears, is one JSON object with exactly one of:
 ```
 
 **`SHOW PLAYBOOK <name>`**, human form (one `Label:` per line; labels
-aligned; `Version:` keeps today's `info` spelling):
+aligned):
 
 ```
 Name:       work
@@ -703,13 +612,16 @@ Sandbox:    no
 ```
 
 `Source:` reads `(linked) <dir>` for a linked playbook and `(none)` for one
-created empty; `Launcher:` reads `(none)` without one.
+created empty; `Launcher:` reads `(none)` without one. `Description:`,
+`Homepage:` and `Author:` follow `Version:` when the manifest has them.
 
 `--json`, one object:
 
 ```
 {"name": "work", "version": "1.2.0",
+ "description": null, "homepage": null, "author": null,
  "path": "/Users/me/.claude-playbooks/work",
+ "last_used": "2026-10-02T09:41:12.000Z",
  "source": {"url": "https://github.com/example/work-playbook", "branch": "v1.2.0", "subdir": null},
  "linked": null,
  "launcher": "w",
@@ -718,8 +630,11 @@ created empty; `Launcher:` reads `(none)` without one.
  "sandbox": false}
 ```
 
-`source` is null for a playbook without one; `linked` is the target directory
-of a linked playbook, else null; `launcher` is null without one.
+`description`, `homepage` and `author` are the manifest's, null when it has
+none; `last_used` is when the playbook's config directory last changed
+(RFC 3339, UTC). `source` is null for a playbook without one; `linked` is the
+target directory of a linked playbook, else null; `launcher` is null without
+one.
 
 **`play`** (v4.0.0) is the object's last field. It is the `[play]` record of a
 playbook `cpb play --keep` built, and `null` for every other:
@@ -1464,7 +1379,7 @@ cpb lists the live Claude Code sessions of its playbooks and resumes a
 session through the playbook it belongs to.
 
 ```
-SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]     also: cpb sessions [--json]
+SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
 SELECT … FROM SESSIONS
 RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>]
 RESUME --list [FOR PLAYBOOK <name>] [--json]
@@ -1494,8 +1409,6 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 **`SHOW SESSIONS`** prints the live sessions, newest first: one line each
 (`PLAYBOOK PID TTY KIND STATUS AGE ACTIVE MODEL SESSION CWD`).
 - `FOR PLAYBOOK` limits it to one playbook, and an unknown name is refused.
-- **`cpb sessions`** is the documented lowercase shorthand for exactly
-  `SHOW SESSIONS`, and takes `--json` too.
 - **`--json`** is an array of objects:
 
 | Field | Type | From |
@@ -1652,7 +1565,7 @@ a screen that shows sessions is up. Everything else is re-read on `r`.
   commands nothing, and two permanent tests keep it that way:
   - **No terminal I/O at startup** (`TestNoTerminalQueryAtStartup` and the
     arena check `tui-ok`). Under a pty that answers nothing, `SHOW
-    PLAYBOOKS`, `sessions`, a launcher-style `run` and bare `cpb` must write
+    PLAYBOOKS`, `SHOW SESSIONS`, a launcher-style `run` and bare `cpb` must write
     no terminal query (`ESC]`, `ESC[6n`, `ESC[c`, `ESC[>`), and must not
     stall. bubbletea v1 failed this: its package `init` queried the
     terminal's background colour in every command and waited up to 5 s

@@ -37,7 +37,7 @@ func TestAliasSetBootstrapsManifestAndLauncher(t *testing.T) {
 	aliasTestHome(t)
 	root := seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,10 +58,10 @@ func TestAliasReplaceRetiresOldLauncher(t *testing.T) {
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runAlias(nil, []string{"deploy", "dep"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "dep"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,12 +78,10 @@ func TestAliasRemoveClearsManifestAndLauncher(t *testing.T) {
 	aliasTestHome(t)
 	root := seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err != nil {
 		t.Fatal(err)
 	}
-	aliasRemove = true
-	err := runAlias(nil, []string{"deploy"})
-	aliasRemove = false
+	err := doAlias(aliasOpts{remove: true}, []string{"deploy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,13 +104,13 @@ func TestAliasRejectsCollisionWithOtherPlaybook(t *testing.T) {
 	seedFlatPlaybook(t, "one")
 	seedFlatPlaybook(t, "two")
 
-	if err := runAlias(nil, []string{"one", "two"}); err == nil {
+	if err := doAlias(aliasOpts{}, []string{"one", "two"}); err == nil {
 		t.Fatal("alias equal to another playbook's name must be refused")
 	}
-	if err := runAlias(nil, []string{"one", "x"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"one", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runAlias(nil, []string{"two", "x"}); err == nil {
+	if err := doAlias(aliasOpts{}, []string{"two", "x"}); err == nil {
 		t.Fatal("alias already owned by another playbook must be refused")
 	}
 }
@@ -128,7 +126,7 @@ func TestAliasRefusedOnLinkedPlaybook(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runAlias(nil, []string{"linked", "l"}); err == nil {
+	if err := doAlias(aliasOpts{}, []string{"linked", "l"}); err == nil {
 		t.Fatal("alias mutation on a linked playbook's shared manifest must be refused")
 	}
 }
@@ -138,11 +136,11 @@ func TestAliasRejectsReservedAndOwnName(t *testing.T) {
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "cpb"}); err == nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "cpb"}); err == nil {
 		t.Fatal("reserved name must be refused")
 	}
 	// The own-name case is no longer an error: it repairs the name launcher.
-	if err := runAlias(nil, []string{"deploy", "deploy"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "deploy"}); err != nil {
 		t.Fatalf("own-name repair must not fail: %v", err)
 	}
 }
@@ -155,12 +153,10 @@ func TestAliasNameRepairsNameLauncher(t *testing.T) {
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err != nil {
 		t.Fatal(err)
 	}
-	aliasRemove = true
-	err := runAlias(nil, []string{"deploy"})
-	aliasRemove = false
+	err := doAlias(aliasOpts{remove: true}, []string{"deploy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +165,7 @@ func TestAliasNameRepairsNameLauncher(t *testing.T) {
 	}
 
 	// The repair spelling: name-as-alias ensures the name launcher exists.
-	if err := runAlias(nil, []string{"deploy", "deploy"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "deploy"}); err != nil {
 		t.Fatalf("name repair failed: %v", err)
 	}
 	if e, exists, foreign := launcher.Lookup(config.LauncherDir, "deploy"); !exists || foreign {
@@ -181,7 +177,7 @@ func TestAliasNameRepairsNameLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runAlias(nil, []string{"deploy", "deploy"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "deploy"}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "deploy", manifest.FileName))
@@ -210,7 +206,7 @@ func TestAliasNameRepairRespectsOwnership(t *testing.T) {
 	if err := manifest.Write(filepath.Join(config.ResolvePlaybooksDir(), "other"), &manifest.Manifest{Name: "other", Alias: "deploy"}); err != nil {
 		t.Fatal(err)
 	}
-	err := runAlias(nil, []string{"deploy", "deploy"})
+	err := doAlias(aliasOpts{}, []string{"deploy", "deploy"})
 	if err == nil || !strings.Contains(err.Error(), "other") {
 		t.Fatalf("expected ownership refusal naming the other playbook, got: %v", err)
 	}
@@ -230,7 +226,7 @@ func TestAliasNameRepairForeignFileAndLinked(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ldir, "deploy"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := runAlias(nil, []string{"deploy", "deploy"}); err == nil || !strings.Contains(err.Error(), "did not generate") {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "deploy"}); err == nil || !strings.Contains(err.Error(), "did not generate") {
 		t.Fatalf("expected foreign-file refusal, got: %v", err)
 	}
 	if err := os.Remove(filepath.Join(ldir, "deploy")); err != nil {
@@ -244,7 +240,7 @@ func TestAliasNameRepairForeignFileAndLinked(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(config.ResolvePlaybooksDir(), "linked")); err != nil {
 		t.Fatal(err)
 	}
-	if err := runAlias(nil, []string{"linked", "linked"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"linked", "linked"}); err != nil {
 		t.Fatalf("linked registration must repair its own name launcher: %v", err)
 	}
 	if e, exists, foreign := launcher.Lookup(ldir, "linked"); !exists || foreign {
@@ -268,7 +264,7 @@ func TestAliasUnchangedOnLinkedPlaybookDoesNotRewriteSharedManifest(t *testing.T
 
 	// Same alias: allowed (ensures the launcher), but the shared manifest
 	// must remain byte-identical.
-	if err := runAlias(nil, []string{"linked", "x"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"linked", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(external, manifest.FileName))
@@ -285,7 +281,7 @@ func TestAliasForeignFilePreflightLeavesStateUntouched(t *testing.T) {
 	aliasTestHome(t)
 	root := seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err != nil {
 		t.Fatal(err)
 	}
 	// A foreign file squats on the requested replacement name.
@@ -293,7 +289,7 @@ func TestAliasForeignFilePreflightLeavesStateUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runAlias(nil, []string{"deploy", "taken"}); err == nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "taken"}); err == nil {
 		t.Fatal("foreign file on the new name must fail the alias change")
 	}
 	// Nothing mutated: manifest still says d, old launcher still present.
@@ -311,7 +307,7 @@ func TestAliasLauncherWriteFailureRollsBackManifest(t *testing.T) {
 	aliasTestHome(t)
 	root := seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(filepath.Join(root, manifest.FileName))
@@ -327,7 +323,7 @@ func TestAliasLauncherWriteFailureRollsBackManifest(t *testing.T) {
 	}
 	config.LauncherDir = filepath.Join(ro, "sub")
 
-	err = runAlias(nil, []string{"deploy", "d2"})
+	err = doAlias(aliasOpts{}, []string{"deploy", "d2"})
 	if err == nil {
 		t.Fatal("launcher write failure must fail the alias change")
 	}
@@ -345,7 +341,7 @@ func TestAliasRepairUnchangedFailsWhenLauncherUnwritable(t *testing.T) {
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "deploy")
 
-	if err := runAlias(nil, []string{"deploy", "d"}); err != nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err != nil {
 		t.Fatal(err)
 	}
 	ro := filepath.Join(t.TempDir(), "ro")
@@ -356,7 +352,7 @@ func TestAliasRepairUnchangedFailsWhenLauncherUnwritable(t *testing.T) {
 
 	// Re-setting the SAME alias is a repair; an unwritable launcher dir
 	// must surface as an error, not a warning behind exit 0.
-	if err := runAlias(nil, []string{"deploy", "d"}); err == nil {
+	if err := doAlias(aliasOpts{}, []string{"deploy", "d"}); err == nil {
 		t.Fatal("unwritable launcher dir must fail the unchanged-alias repair")
 	}
 }

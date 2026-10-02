@@ -478,8 +478,8 @@ func TestExpect(t *testing.T) {
 func TestIsStatement(t *testing.T) {
 	for args, want := range map[string]bool{
 		"":                          false,
-		"create kommander-x":        false, // the hidden pre-grammar command
-		"create":                    false,
+		"create work":               true, // refused by the parser: CREATE needs PLAYBOOK or ENV
+		"create":                    true,
 		"create playbook x":         true,
 		"CREATE ENV e":              true,
 		"create or replace env e":   true,

@@ -43,10 +43,9 @@ func init() {
 func IsKeyword(word string) bool { return keywords[strings.ToUpper(word)] }
 
 // IsStatement reports whether a command line is a grammar statement rather
-// than a pre-grammar command (kept hidden, on its own code path, as a
-// fallback). Only "create" is both: "cpb create x" is the hidden command,
-// "cpb create playbook x" is the grammar, told apart by whether an object
-// keyword (or OR, of CREATE OR REPLACE) follows.
+// than one of the lowercase commands (run, start, update, ...): its first
+// word is a statement verb, in any case, or the whole statement is one
+// quoted argument.
 func IsStatement(args []string) bool {
 	if len(args) == 0 {
 		return false
@@ -57,16 +56,8 @@ func IsStatement(args []string) bool {
 		return true
 	}
 	switch strings.ToUpper(args[0]) {
-	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT", "DESCRIBE", "DESC", "RESUME": // INCLUDE and USE, to be refused with their reason
+	case "CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT", "DESCRIBE", "DESC", "RESUME": // INCLUDE and USE, to be refused with their reason
 		return true
-	case "CREATE":
-		if len(args) < 2 {
-			return false
-		}
-		switch strings.ToUpper(args[1]) {
-		case "PLAYBOOK", "ENV", "OR":
-			return true
-		}
 	}
 	return false
 }
@@ -582,7 +573,7 @@ func (p *parser) drop(s *Stmt) *Error {
 		return err
 	}
 	s.Name = name
-	// DROP PLAYBOOK confirms on a terminal, as `delete` does.
+	// DROP PLAYBOOK confirms on a terminal; --yes skips the question.
 	if s.Object == Playbook && p.kw("--yes") != "" {
 		s.Yes = true
 	}

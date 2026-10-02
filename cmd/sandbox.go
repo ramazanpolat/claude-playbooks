@@ -897,7 +897,7 @@ func checkMountedManifests(configPath string, mounts []string) error {
 			if m != nil && m.Env != nil {
 				for _, key := range secretEnvVars {
 					if m.Env.Set[key] != "" {
-						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
+						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env set, which lives outside the mount (cpb CREATE ENV <set> SET %s=... AS PLAINTEXT; cpb ALTER PLAYBOOK <playbook> USE ENV <set> UNSET VAR %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
 					}
 				}
 			}

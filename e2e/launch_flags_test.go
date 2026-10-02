@@ -109,7 +109,7 @@ func TestLauncherPassesLaunchFlags(t *testing.T) {
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
 		tokenFileEnv + "=" + filepath.Join(work, "absent"),
 	}
-	create := exec.Command(binPath, "--launcher-dir", launcherDir, "create", "router")
+	create := exec.Command(binPath, "--launcher-dir", launcherDir, "CREATE", "PLAYBOOK", "router")
 	create.Env = baseEnv
 	if out, err := create.CombinedOutput(); err != nil {
 		t.Fatalf("create: %v\n%s", err, out)
