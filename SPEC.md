@@ -1055,8 +1055,14 @@ none; `last_used` is when the playbook's config directory last changed
 (RFC 3339, UTC); `migrate` is the declared migrate step (`[update] migrate`)
 that `cpb update` runs, null without one, and the human form has a
 `Migrate:` line for it. `source` is null for a playbook without one; `linked` is the
-target directory of a linked playbook, else null; `launcher` is null without
-one.
+target directory of a linked playbook, else null. `launcher` is the command
+that runs the playbook, the one you type: the `LAUNCHER` its manifest
+records, or its name when the default launcher `CREATE PLAYBOOK` writes is
+in place. It is null under `NO LAUNCHER`. The default launcher's only record
+is the link itself, so it is null too when that link was removed, and under
+a custom playbooks root, where cpb writes no launchers; a recorded
+`LAUNCHER` is reported wherever it is. `version` is the manifest's, null when it has none: cpb never
+writes a version nobody gave.
 
 **`play`** is the object's last field. It is the `[play]` record of a
 playbook `cpb play --keep` built, and `null` for every other:
@@ -1333,7 +1339,7 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 | `started_at` | RFC 3339, UTC | the session file |
 | `last_active` | RFC 3339, UTC, or null | the transcript's modification time; null before the first message |
 | `model` | string or null | the transcript's last assistant message, read from its last 256 KiB |
-| `launcher` | string or null | the playbook's launcher |
+| `launcher` | string or null | the playbook's launcher, as SHOW PLAYBOOK reports it (null for a plain directory) |
 | `resume` | string | `cd '<cwd>' && <launcher> --resume <id>`: the command that resumes this session from any folder once it ends (see below) |
 | `tty` | string or null | the process's controlling terminal (`pts/3`, `ttys012`), null for none (a `bg` session). It is read in the same pass as the start time: `/proc/<pid>/stat`'s tty_nr on Linux, `ps`'s tty elsewhere |
 

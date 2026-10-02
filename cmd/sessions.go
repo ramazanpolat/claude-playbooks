@@ -233,11 +233,7 @@ func sessionDirs(forName string) ([]sessionDir, error) {
 }
 
 func playbookSessionDir(pb *playbook.Playbook) sessionDir {
-	d := sessionDir{label: pb.Name, path: pb.Path, pb: pb}
-	if pb.Manifest != nil {
-		d.launcher = pb.Manifest.Launcher
-	}
-	return d
+	return sessionDir{label: pb.Name, path: pb.Path, pb: pb, launcher: effectiveLauncher(pb)}
 }
 
 // pickCommand is the command that opens Claude Code's session picker in d:

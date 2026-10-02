@@ -13,6 +13,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 const (
@@ -310,5 +311,102 @@ func TestExplainFollowsAncestorManifestForManifestFreePlaybook(t *testing.T) {
 	mustStmt(t, "ALTER PLAYBOOK bare SET VAR OWN=1")
 	if got := explainKeys(t, "bare"); !reflect.DeepEqual(got, []string{"OWN"}) {
 		t.Fatalf("EXPLAIN once the playbook has its own manifest: %v", got)
+	}
+}
+
+// SHOW reports the command a pilot types: the playbook's recorded LAUNCHER,
+// or its name when the default launcher is in place, and null under NO
+// LAUNCHER and wherever the default launcher is not in place (removed, or a
+// custom root). cpb writes no version nobody gave, and a session's resume
+// command uses the same launcher.
+func TestShowPlaybookLauncherIsTheCommand(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	mustStmt(t, "CREATE PLAYBOOK writer")
+	mustStmt(t, "CREATE PLAYBOOK sre LAUNCHER ops")
+	mustStmt(t, "CREATE PLAYBOOK quiet NO LAUNCHER")
+	var rows []struct {
+		Name     string  `json:"name"`
+		Launcher *string `json:"launcher"`
+		Version  *string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOKS --json")), &rows); err != nil || len(rows) != 3 {
+		t.Fatalf("SHOW PLAYBOOKS --json: %v %+v", err, rows)
+	}
+	want := map[string]string{"writer": "writer", "sre": "ops", "quiet": ""}
+	for _, r := range rows {
+		if want[r.Name] == "" {
+			if r.Launcher != nil {
+				t.Errorf("%s: launcher %q, want null", r.Name, *r.Launcher)
+			}
+		} else if r.Launcher == nil || *r.Launcher != want[r.Name] {
+			t.Errorf("%s: launcher %v, want %q", r.Name, r.Launcher, want[r.Name])
+		}
+		if r.Version != nil {
+			t.Errorf("%s: version %q, but nobody gave one", r.Name, *r.Version)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "sre", manifest.FileName))
+	if err != nil || strings.Contains(string(data), "version") {
+		t.Fatalf("the manifest that records the launcher: %v\n%s", err, data)
+	}
+	if out := mustStmt(t, "SHOW PLAYBOOK writer"); !regexp.MustCompile(`(?m)^Launcher:\s+writer$`).MatchString(out) {
+		t.Errorf("SHOW PLAYBOOK writer:\n%s", out)
+	}
+	resume := func(name string) string {
+		t.Helper()
+		pb, err := playbook.Find(config.ResolvePlaybooksDir(), name)
+		if err != nil || pb == nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return playbookSessionDir(pb).resumeCommand("abc")
+	}
+	for name, want := range map[string]string{"writer": "writer --resume abc", "sre": "ops --resume abc", "quiet": "cpb run quiet --resume abc"} {
+		if got := resume(name); got != want {
+			t.Errorf("%s: resume command %q, want %q", name, got, want)
+		}
+	}
+	launcherOf := func(name string) *string {
+		t.Helper()
+		var v struct {
+			Launcher *string `json:"launcher"`
+		}
+		if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK "+name+" --json")), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v.Launcher
+	}
+	// The default launcher's only record is the link: removed by hand, it is
+	// not a command any more. A recorded LAUNCHER stays reported, as SHOW
+	// CREATE writes it back.
+	if err := os.Remove(filepath.Join(config.LauncherDir, "writer")); err != nil {
+		t.Fatal(err)
+	}
+	if l := launcherOf("writer"); l != nil {
+		t.Errorf("writer after its launcher was removed: launcher %q, want null", *l)
+	}
+	if got := resume("writer"); got != "cpb run writer --resume abc" {
+		t.Errorf("writer after its launcher was removed: resume %q", got)
+	}
+	if err := os.Remove(filepath.Join(config.LauncherDir, "ops")); err != nil {
+		t.Fatal(err)
+	}
+	if l := launcherOf("sre"); l == nil || *l != "ops" {
+		t.Errorf("sre's recorded launcher: %v, want ops", l)
+	}
+	// Under a custom playbooks root cpb writes no launchers: no default one
+	// is in place; a recorded LAUNCHER is still the playbook's.
+	other := filepath.Join(t.TempDir(), "pb")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config.PlaybooksDir = other
+	mustStmt(t, "CREATE PLAYBOOK near")
+	mustStmt(t, "CREATE PLAYBOOK far LAUNCHER faraway")
+	if l := launcherOf("near"); l != nil {
+		t.Errorf("a playbook under a custom root: launcher %q, want null", *l)
+	}
+	if l := launcherOf("far"); l == nil || *l != "faraway" {
+		t.Errorf("a recorded launcher under a custom root: %v, want faraway", l)
 	}
 }

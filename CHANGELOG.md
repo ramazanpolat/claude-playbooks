@@ -147,6 +147,12 @@ The APPLY JSON schema stays 1.
 - **SHOW PLAYBOOK** has `description`, `homepage`, `author`, `last_used` and
   `migrate` (#172, #173).
 - **Every hint and error names a statement**, never a removed command (#172).
+- **SHOW's `launcher` is the command you type**: the playbook's recorded
+  `LAUNCHER`, or its name when the default launcher is in place; null under
+  `NO LAUNCHER` (and when the default launcher is not in place). v3 reported
+  only an alternate name. SHOW SESSIONS' resume line
+  uses it. cpb no longer writes `version = "0.1.0"` into a manifest it
+  creates.
 
 ### Added
 

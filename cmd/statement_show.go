@@ -211,6 +211,21 @@ func printLaunchPlugins(plugins []string, agent *agentJSON) {
 	}
 }
 
+// effectiveLauncher is the command that runs pb, the one a pilot types: the
+// launcher its manifest records (LAUNCHER), else the launcher named after
+// the playbook when it is in place (CREATE PLAYBOOK writes it unless told
+// NO LAUNCHER; its only record is the link itself), "" for none. A recorded
+// launcher is reported as recorded, as SHOW CREATE writes it back.
+func effectiveLauncher(pb *playbook.Playbook) string {
+	if pb.Manifest != nil && pb.Manifest.Launcher != "" {
+		return pb.Manifest.Launcher
+	}
+	if hasNameLauncher(pb.Name) {
+		return pb.Name
+	}
+	return ""
+}
+
 func readStatement(st *grammar.Stmt) error {
 	if st.Verb == grammar.Show && st.ShowCreate {
 		return showCreate(st)
@@ -303,14 +318,12 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 			v.Linked = &target
 		}
 	}
+	v.Launcher = optStr(effectiveLauncher(pb))
 	m := pb.Manifest
 	if m == nil {
 		return v
 	}
 	v.Version, v.Description, v.Homepage, v.Author = optStr(m.Version), optStr(m.Description), optStr(m.Homepage), optStr(m.Author)
-	if m.Launcher != "" {
-		v.Launcher = strPtr(m.Launcher)
-	}
 	if m.Source != nil && m.Source.Repository != "" {
 		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
 	}
