@@ -1,0 +1,15 @@
+-- title: Front-end craft
+-- description: For front-end work: the design plugin and skills, Playwright for the browser, Context7 for library docs.
+-- min-cpb: 3.24.0
+
+ALTER PLAYBOOK
+  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
+  ADD PLUGIN frontend-design@claude-code-plugins
+  ADD MCP SERVER playwright COMMAND 'npx' ARGS '@playwright/mcp@latest'
+  ADD MCP SERVER context7 COMMAND 'npx' ARGS '-y' '@upstash/context7-mcp'
+  ADD SKILL frontend-design FROM 'github:anthropics/skills' SUBDIR 'skills/frontend-design'
+  ADD SKILL web-artifacts-builder FROM 'github:anthropics/skills' SUBDIR 'skills/web-artifacts-builder'
+  ADD SKILL webapp-testing FROM 'github:anthropics/skills' SUBDIR 'skills/webapp-testing'
+  ADD SKILL theme-factory FROM 'github:anthropics/skills' SUBDIR 'skills/theme-factory'
+  ALLOW TOOL 'Bash(npm test *)'
+  SET MODEL 'claude-sonnet-5-5';

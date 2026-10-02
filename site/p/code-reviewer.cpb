@@ -1,0 +1,13 @@
+-- title: Code reviewer
+-- description: Reads code and never writes it: the review plugins, GitHub, and Edit and Write denied.
+-- min-cpb: 3.24.0
+-- needs: a secret helper for keychain:github-mcp
+
+ALTER PLAYBOOK
+  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
+  ADD PLUGIN code-review@claude-code-plugins
+  ADD PLUGIN pr-review-toolkit@claude-code-plugins
+  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
+  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(git diff *)'
+  DENY TOOL 'Edit' 'Write'
+  SET MODEL 'claude-sonnet-5-5';
