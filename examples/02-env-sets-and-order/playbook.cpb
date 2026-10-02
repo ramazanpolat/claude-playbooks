@@ -7,9 +7,7 @@ CREATE OR REPLACE ENV router
 CREATE OR REPLACE ENV thinking
   SET MAX_THINKING_TOKENS=8000;
 
--- Routed to a model router: its CLAUDE.md leaves out the ~/.pilot-profile/
--- imports, which would otherwise go to the router with every request.
-CREATE PLAYBOOK IF NOT EXISTS work NO ALIAS NO PILOT PROFILE;
+CREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;
 
 ALTER PLAYBOOK work
   USE ENV router thinking

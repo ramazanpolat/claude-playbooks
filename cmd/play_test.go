@@ -28,18 +28,18 @@ func writeRecipe(t *testing.T, dir, name, text string) string {
 
 const routerRecipe = "-- title: Router\n-- description: GLM through a router.\n\nALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1\n  SET MODEL 'glm-5.3';\n"
 
-// The playbook play writes first: never the pilot profile, no launcher;
+// The playbook play writes first: no launcher;
 // and when the endpoint moves, a login of its own and the credentials a
 // launch would inherit blocked, by name (a shell secret's name included,
 // never its value).
 func TestPlaySetup(t *testing.T) {
 	t.Setenv("MY_SECRET_TOKEN", "do-not-print")
 	plain := playSetup("play-x-000000", play.Check([]byte("ALTER PLAYBOOK SET MODEL 'm';\n")))
-	if plain != "CREATE PLAYBOOK IF NOT EXISTS play-x-000000 NO ALIAS NO PILOT PROFILE;\n" {
+	if plain != "CREATE PLAYBOOK IF NOT EXISTS play-x-000000 NO ALIAS;\n" {
 		t.Fatalf("plain: %q", plain)
 	}
 	moved := playSetup("play-x-000000", play.Check([]byte(routerRecipe)))
-	for _, want := range []string{"NO ALIAS NO PILOT PROFILE ISOLATED LOGIN;", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
+	for _, want := range []string{"NO ALIAS ISOLATED LOGIN;", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
 		if !strings.Contains(moved, want) {
 			t.Errorf("endpoint moved: %q lacks %q", moved, want)
 		}

@@ -178,7 +178,7 @@ select { appearance: auto; }
 /* ---------- the output ---------- */
 .cz-out { position: sticky; top: 4.6rem; min-width: 0; }
 .out-card {
-  --no-t: #f4a58f; --warn-t: #f0c987;
+  --no-t: #f4a58f;
   display: flex; flex-direction: column; gap: 0.7rem; max-height: calc(100vh - 6rem); min-height: 22rem;
   background: var(--term); color: #cfe9dc; border: 1px solid var(--line-strong); border-radius: 14px; padding: 0.9rem; box-shadow: var(--shadow);
 }
@@ -193,9 +193,6 @@ select { appearance: auto; }
 .out-card .copy { color: #a9c3b5; }
 .out-card .copy.done { color: #55d6a0; }
 .out-card .code.big { flex: 1 1 auto; min-height: 9rem; max-height: none; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; background: rgba(0, 0, 0, 0.35); }
-.out-warn { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.8rem; line-height: 1.45; color: var(--warn-t); border: 1px dashed var(--warn-t); border-radius: 8px; padding: 0.45rem 0.65rem; }
-.out-warn .lg { margin: 0.1rem 0 0; color: var(--warn-t); }
-.out-warn .lg svg { fill: none; stroke: currentColor; }
 .out-err { flex: 1; font-size: 0.88rem; line-height: 1.5; color: var(--no-t); border: 1px dashed var(--no-t); border-radius: 10px; padding: 0.7rem 0.9rem; overflow: auto; }
 .out-err p { margin: 0 0 0.4rem; }
 .out-err ul { margin: 0; padding-left: 1.1rem; }

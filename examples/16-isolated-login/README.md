@@ -24,8 +24,7 @@ only if you run `/login` in it.
   `/logout` in it first. It is also
   refused on a `SANDBOX` playbook, which is always isolated.
 - Use it for a second account, and for a throwaway or a third-party route
-  whose `/login` must not land in the machine's shared login. With a
-  non-Anthropic route, also create it with `NO PILOT PROFILE`
+  whose `/login` must not land in the machine's shared login
   ([example 15](../15-third-party-route/)).
 
 It is `isolate_auth = true` in the playbook's `.playbook`

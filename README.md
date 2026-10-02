@@ -57,14 +57,14 @@ of them (`DEFAULTS`). `EXPLAIN` shows what a launch sets, and which layer set it
 
 ```bash
 cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
-cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN
+cpb CREATE PLAYBOOK glm ISOLATED LOGIN
 cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3
 cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY   # removed even if your shell exports it
 cpb EXPLAIN PLAYBOOK glm
 ```
 
-`ISOLATED LOGIN` keeps your Anthropic login away from that provider, and `NO
-PILOT PROFILE` your `~/.pilot-profile/` notes. [Environment →](docs/guides/environment.md) ·
+`ISOLATED LOGIN` keeps your Anthropic login away from that provider, and a
+new playbook's `CLAUDE.md` imports nothing. [Environment →](docs/guides/environment.md) ·
 [two accounts side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
@@ -111,7 +111,7 @@ cpb APPLY machine.cpb                              # on the next machine
 
 Secrets are references, resolved at launch by your helper; `SHOW CREATE` never
 prints a value. A recipe covers the whole agent (plugins, MCP servers, tools,
-status line and panels, model and `/model` picker, skills) and applies to any
+status line, model and `/model` picker, skills) and applies to any
 playbook or to `~/.claude`. A playbook can also come from git (`FROM <url>
 BRANCH <ref>`) or run in place from a folder (`LINK <dir>`).
 

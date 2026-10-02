@@ -6,29 +6,19 @@ cpb APPLY playbook.cpb
 cpb EXPLAIN PLAYBOOK routed   # ANTHROPIC_BASE_URL from router
 ```
 
-The `CLAUDE.md` that `CREATE PLAYBOOK` writes ends with four
-`@~/.pilot-profile/…` imports. Without a profile they do nothing. With one,
-Claude Code sends the profile with every request: the pilot's name, emails,
-host index and secret reference names. For a playbook routed to another
-provider (a local router, EVREN, GLM, DeepSeek), those requests leave
-Anthropic, so the profile would go with them.
+With `ANTHROPIC_BASE_URL` pointing at a router (a local proxy, or another
+provider), every request the playbook makes goes there, with whatever its
+`CLAUDE.md` holds. Three things keep it to what you meant to send:
 
-- `CREATE PLAYBOOK routed … NO PILOT PROFILE` writes the same `CLAUDE.md`
-  without those imports. The hidden command takes `--no-pilot-profile`. It
-  applies at create time only: after that, `CLAUDE.md` is yours, and taking
-  the imports out of an existing playbook means deleting the lines.
-- When a statement routes a playbook that *does* import the profile away
-  from Anthropic, cpb warns once, naming the playbook and the host:
+- The `CLAUDE.md` that `CREATE PLAYBOOK` writes imports nothing. Anything you
+  add to it, `@` imports included, goes to the router with every request.
+- `ISOLATED LOGIN` gives the playbook a login of its own, so a `/login` in it
+  never lands in the machine's shared login
+  ([example 16](../16-isolated-login/)).
+- `BLOCK VAR ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN` keeps the Anthropic
+  credentials your shell may export out of its launches. The router's own key
+  belongs in the env set, by reference ([example 04](../04-secret-references/)).
 
-  ```
-  $ cpb ALTER PLAYBOOK plain USE ENV router
-  Warning: PLAYBOOK plain (localhost) imports ~/.pilot-profile/ and now sends requests to a non-Anthropic ANTHROPIC_BASE_URL, …
-  ```
+`localhost` is a route like any other: a local router forwards elsewhere.
 
-  The same holds for an env set changed under it, `ALTER DEFAULTS`, and a
-  playbook created under such `DEFAULTS`. `APPLY --json` gives the warning the
-  code `pilot_profile_third_party_endpoint`. It is a warning, never a refusal.
-  `localhost` counts as non-Anthropic, since a local router forwards
-  elsewhere.
-
-Reference: [The pilot profile and non-Anthropic routes](../../docs/reference/cli-grammar.md#the-pilot-profile-and-non-anthropic-routes-v3230).
+Reference: [Objects](../../docs/reference/cli-grammar.md#objects) and [Layers at launch](../../docs/reference/cli-grammar.md#layers-at-launch).

@@ -87,9 +87,8 @@ ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.3"
 
 Inside `CREATE ENV` / `ALTER ENV` the word `VAR` is optional. Attach the set;
 the playbook's manifest records only its name. A playbook meant for such a
-route is best created with `CREATE PLAYBOOK router NO PILOT PROFILE`: otherwise
-its `CLAUDE.md` imports `~/.pilot-profile/`, and cpb warns when the route makes
-that profile leave Anthropic ([example 15](../../examples/15-third-party-route/)).
+route sends its `CLAUDE.md` there with every request; the one cpb writes
+imports nothing ([example 15](../../examples/15-third-party-route/)).
 
 ```bash
 cpb ALTER PLAYBOOK router USE ENV glm                 # the whole list, in order

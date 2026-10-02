@@ -34,9 +34,6 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
-		// PILOT and PROFILE are read only after NO (NO PILOT PROFILE), where
-		// no name can stand, so they stay free to name things: the grammar
-		// has no PILOT object.
 	} {
 		keywords[w] = true
 	}
@@ -855,9 +852,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	case "USE":
 		return c, p.envList(c, w)
 	case "ADD", "DROP":
-		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL", "PANEL") {
-		case "PANEL":
-			return c, p.panel(c, w)
+		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL") {
 		case "ENV":
 			if w == "ADD" {
 				return c, p.addEnvRest(c)
@@ -874,7 +869,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		case "MODEL":
 			return c, p.pickerModel(c, w)
 		}
-		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL, MODEL or PANEL")
+		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
 	case "SET":
 		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED") {
 		case "ISOLATED":
@@ -903,7 +898,15 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			if p.kw("REFRESH") != "" {
 				n, err := p.refreshSeconds()
 				c.Refresh = n
-				return c, err
+				if err != nil {
+					return c, err
+				}
+			}
+			if p.kw("IF") != "" {
+				if p.kw("UNSET") == "" {
+					return c, p.fail("expected UNSET after IF: SET STATUSLINE '<command>' IF UNSET")
+				}
+				c.IfUnset = true
 			}
 			return c, nil
 		case "MODEL":
@@ -991,9 +994,6 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Arg = name
 		return c, err
 	case "NO":
-		if p.at("PILOT") {
-			return nil, p.fail("NO PILOT PROFILE applies to CREATE PLAYBOOK only: after create, CLAUDE.md is yours to edit")
-		}
 		if p.kw("ALIAS") == "" {
 			return nil, p.fail("expected ALIAS after NO")
 		}
@@ -1101,18 +1101,11 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		c.Arg = name
 		return c, err
 	case "NO":
-		switch p.kw("ALIAS", "PILOT") {
-		case "ALIAS":
-			c.Kind = NoAlias
-			return c, nil
-		case "PILOT":
-			if p.kw("PROFILE") == "" {
-				return nil, p.fail("expected PROFILE after NO PILOT")
-			}
-			c.Kind = NoPilotProfile
-			return c, nil
+		if p.kw("ALIAS") == "" {
+			return nil, p.fail("expected ALIAS after NO")
 		}
-		return nil, p.fail("expected ALIAS or PILOT PROFILE after NO")
+		c.Kind = NoAlias
+		return c, nil
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
@@ -1254,7 +1247,7 @@ func validate(s *Stmt) *Error {
 	envs := map[string]bool{}
 	once := map[Kind]bool{
 		Describe: true, UseEnv: true, RenameTo: true,
-		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true, NoPilotProfile: true,
+		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 		IsolatedLogin: true, SetIsolatedLogin: true, UnsetIsolatedLogin: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
@@ -1292,13 +1285,6 @@ func validate(s *Stmt) *Error {
 		if c.Kind == AddEnv && c.Anchor == c.Names[0] {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
 		}
-		if c.Panel != nil {
-			id := "panel " + c.Panel.NS + "." + c.Panel.ID
-			if envs[id] {
-				return errAt(c.Pos, id+" appears twice")
-			}
-			envs[id] = true
-		}
 	}
 	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
 		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
@@ -1320,9 +1306,6 @@ func validate(s *Stmt) *Error {
 		_, link := seen[Link]
 		if pos, ok := seen[IsolatedLogin]; ok && link {
 			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolate_auth there")
-		}
-		if pos, ok := seen[NoPilotProfile]; ok && (from || link) {
-			return errAt(pos, "NO PILOT PROFILE shapes the CLAUDE.md a new playbook gets from cpb's template; with FROM or LINK the CLAUDE.md is the source's own: edit it there")
 		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {

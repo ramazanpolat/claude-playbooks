@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
 
 func TestToolsStatuslineModel(t *testing.T) {
@@ -80,5 +82,66 @@ func TestExplainModelByReference(t *testing.T) {
 	mustStmt(t, "ALTER PLAYBOOK k SET MODEL claude-opus-5-5 SET VAR ANTHROPIC_MODEL FROM keychain:ok/model")
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Model: (by reference) (ANTHROPIC_MODEL); the settings model claude-opus-5-5 is overridden") {
 		t.Fatalf("EXPLAIN:\n%s", out)
+	}
+}
+
+// SET STATUSLINE always applies, whatever the current command is; IF UNSET
+// applies only where none is set yet.
+func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "k")
+	read := func() map[string]any {
+		var s struct {
+			StatusLine map[string]any `json:"statusLine"`
+		}
+		data, _ := os.ReadFile(filepath.Join(root, "settings.json"))
+		_ = json.Unmarshal(data, &s)
+		return s.StatusLine
+	}
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"statusLine": {"type": "command", "command": "statusmux render", "refreshInterval": 5}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE mine IF UNSET"); !strings.Contains(out, "unchanged") || read()["command"] != "statusmux render" {
+		t.Fatalf("IF UNSET over a set status line:\n%s\n%v", out, read())
+	}
+	mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE mine")
+	if sl := read(); sl["command"] != "mine" || sl["refreshInterval"] != float64(5) {
+		t.Fatalf("SET STATUSLINE did not apply: %v", sl)
+	}
+	mustStmt(t, "ALTER PLAYBOOK k UNSET STATUSLINE")
+	mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE fresh REFRESH 3 IF UNSET")
+	if sl := read(); sl["command"] != "fresh" || sl["refreshInterval"] != float64(3) {
+		t.Fatalf("IF UNSET on an empty slot: %v", sl)
+	}
+	if out := mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE fresh REFRESH 3 IF UNSET"); !strings.Contains(out, "unchanged") {
+		t.Fatalf("a repeat changed something:\n%s", out)
+	}
+	if create := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(create, "SET STATUSLINE 'fresh' REFRESH 3") || strings.Contains(create, "IF UNSET") {
+		t.Fatalf("SHOW CREATE writes the state, not the condition:\n%s", create)
+	}
+}
+
+// The CLAUDE.md a new playbook gets imports nothing and names statements.
+func TestDefaultClaudeMDPlain(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	mustStmt(t, "CREATE PLAYBOOK fresh NO ALIAS")
+	data, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "fresh", "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "@") {
+			t.Errorf("an import line: %q", line)
+		}
+	}
+	for _, bad := range []string{"claude-playbook ", "pilot"} {
+		if strings.Contains(string(data), bad) {
+			t.Errorf("CLAUDE.md names %q:\n%s", bad, data)
+		}
+	}
+	if !strings.Contains(string(data), "cpb SHOW PLAYBOOK fresh") || !strings.Contains(string(data), "cpb (Claude PlayBooks)") {
+		t.Fatalf("CLAUDE.md:\n%s", data)
 	}
 }

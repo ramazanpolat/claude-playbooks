@@ -159,11 +159,11 @@ func keepBlocked(defaults, keep, own map[string]bool) []string {
 }
 
 // keepSetup is what --keep writes before the recipe: the playbook, with a
-// launcher and never the pilot profile; a login of its own and the
-// credentials blocked when the endpoint moves; and the --env sets.
+// launcher; a login of its own and the credentials blocked when the
+// endpoint moves; and the --env sets.
 func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE PLAYBOOK %s NO PILOT PROFILE", name)
+	fmt.Fprintf(&b, "CREATE PLAYBOOK %s", name)
 	if res.Endpoint != "" {
 		b.WriteString(" ISOLATED LOGIN")
 	}
@@ -393,9 +393,6 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		return []u{{"skill:" + c.Names[0], one(c), grammar.Clause{Kind: grammar.DropSkill, Names: c.Names[:1]}}}
 	case grammar.AddModel:
 		return []u{{"model:" + c.Row.Model, one(c), grammar.Clause{Kind: grammar.DropModel, Names: []string{c.Row.Model}}}}
-	case grammar.AddPanel:
-		id := c.Panel.NS + "." + c.Panel.ID
-		return []u{{"panel:" + id, one(c), grammar.Clause{Kind: grammar.DropPanel, Panel: &grammar.Panel{NS: c.Panel.NS, ID: c.Panel.ID}}}}
 	case grammar.SetAgent:
 		return []u{{"agent", one(c), grammar.Clause{Kind: grammar.UnsetAgent}}}
 	case grammar.SetModel:

@@ -31,8 +31,8 @@ var playCmd = &cobra.Command{
 
 <ref> is a template name (reviewer), an https URL, github:<owner>/<repo>/<path>.cpb@<ref>,
 or a local file (./x.cpb). A played recipe changes nothing on your machine but
-the playbook play makes: no env sets, no DEFAULTS, no plaintext secrets, and
-never your pilot profile.
+the playbook play makes: no env sets, no DEFAULTS and no plaintext secrets, and
+its CLAUDE.md imports nothing.
 
 It runs in a sandbox where one is available (sbx, or OpenShell on Linux), and
 says so when none is; --no-sandbox runs it on this machine, as you. A recipe
@@ -324,15 +324,15 @@ func playBlockedVars() []string {
 }
 
 // playSetup is the statement play writes before the recipe: the throwaway
-// playbook itself, never with the pilot profile, and, when the endpoint
-// moves, with a login of its own and the credentials blocked.
+// playbook itself and, when the endpoint moves, a login of its own with the
+// credentials blocked.
 func playSetup(name string, res *play.Result) string { return playSetupKeeping(name, res, nil) }
 
 // playSetupKeeping is playSetup with keep's keys left out of the credential
 // BLOCK: the ones an --env set the user attached provides.
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO ALIAS NO PILOT PROFILE", name)
+	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO ALIAS", name)
 	if res.Endpoint != "" {
 		b.WriteString(" ISOLATED LOGIN")
 	}

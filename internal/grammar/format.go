@@ -160,6 +160,9 @@ func (c *Clause) words(varWord bool) []string {
 		if c.Refresh > 0 {
 			w = append(w, "REFRESH", strconv.Itoa(c.Refresh))
 		}
+		if c.IfUnset {
+			w = append(w, "IF", "UNSET")
+		}
 		return w
 	case SetStatuslineRefresh:
 		return []string{"SET", "STATUSLINE", "REFRESH", strconv.Itoa(c.Refresh)}
@@ -228,9 +231,7 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case RenameTo, Alias, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	case AddPanel, DropPanel:
-		return panelWords(c)
-	default: // SetStatuslinePrevious, NoAlias, Sandbox, NoPilotProfile, IsolatedLogin, SetIsolatedLogin, UnsetIsolatedLogin, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
+	default: // SetStatuslinePrevious, NoAlias, Sandbox, IsolatedLogin, SetIsolatedLogin, UnsetIsolatedLogin, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

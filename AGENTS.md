@@ -20,12 +20,11 @@ preparing a release, read [Before any release](#before-any-release) first.
   `~/.claude-playbooks/`, and any login (`/login`, `claude setup-token`):
   those need a person.
 - **A playbook for a non-Anthropic route, or a throwaway,** is created
-  `CREATE PLAYBOOK <name> NO PILOT PROFILE ISOLATED LOGIN`. Without `NO PILOT
-  PROFILE`, its CLAUDE.md sends the human's `~/.pilot-profile/` to that
-  provider with every request. Without `ISOLATED LOGIN`, a `/login` in it
-  writes through to the machine's login. A `pilot_profile_third_party_endpoint`
-  warning means an existing playbook still imports the profile: report it to
-  the human, never edit its CLAUDE.md yourself.
+  `CREATE PLAYBOOK <name> ISOLATED LOGIN`. Without `ISOLATED LOGIN`, a
+  `/login` in it writes through to the machine's login. Its CLAUDE.md goes to
+  that provider with every request: never add imports to it, and if an
+  existing playbook's CLAUDE.md imports files, report it to the human rather
+  than editing it yourself.
 - **Do not edit** an installed playbook's files by hand; change state
   through `cpb` statements. Do not touch `~/.claude` (the machine's own
   Claude Code config) unless the human asks; then use
@@ -208,7 +207,9 @@ release:
       clause, a command, a flag, a file format, a `--json` shape or a code.
 - [ ] **The upgrade from the previous release passes:** the CI `upgrade`
       job, on ubuntu and macOS, green on the commit to be tagged
-      (`examples/upgrade.sh`).
+      (`examples/upgrade.sh`). It compares with the newest release of
+      `package.json`'s major, and has nothing to compare with before a
+      major's first release.
 - [ ] **A full arena regression (phase 2) is green on the exact commit to be
       tagged.** release.yml's gate refuses a tag without one, and
       `gentar/policy.toml` `[phase2] max_age_days = 2` refuses one older
@@ -223,14 +224,12 @@ release:
       `gh pr view <n> --comments` prints the reviews and the replies to check.
 
 **Nightlies are drift monitors (report on red).** Every night
-`arena-nightly` runs phase 2 on main and on the newest `release/v*` branch,
-the release line. Not on a release tag: the kit's plan never gives a `v*` tag
-the bench, so a tag dispatch would be skipped and read as green (v3.25.0 on
-2026-09-30). A release cut from main is close enough to main that main's run
-covers its drift. `arena-nightly` fails when a dispatched run's `arena /
-phase2` job is skipped or absent, naming the ref and plan's reason. A red on
-main is fixed like any bug; a red on the release branch becomes a patch
-release. They gate nothing.
+`arena-nightly` runs phase 2 on main; a dispatch with `ref` runs another ref.
+Not on a release tag: the kit's plan never gives a `v*` tag the bench, so a
+tag dispatch would be skipped and read as green (v3.25.0 on 2026-09-30).
+`arena-nightly` fails when a dispatched run's `arena / phase2` job is skipped
+or absent, naming the ref and plan's reason. A red is fixed like any bug.
+They gate nothing.
 
 If any is missing, build it first; never tag without it.
 

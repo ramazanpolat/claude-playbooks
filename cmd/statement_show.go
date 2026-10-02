@@ -69,18 +69,10 @@ type playbookJSON struct {
 	// StatuslineHistory is what SET STATUSLINE PREVIOUS can go back to,
 	// newest first (v3.25.0).
 	StatuslineHistory []slHistoryJSON `json:"statusline_history"`
-	// Panels are the SPC/1 panels of the config directory and its enabled
-	// plugins (v3.25.0).
-	Panels      []panelJSON `json:"panels"`
-	Model       *string     `json:"model"`
-	ModelPicker *pickerJSON `json:"model_picker"`
-	// PilotProfile is whether the playbook's CLAUDE.md imports
-	// ~/.pilot-profile/ (v3.25.0): "imported", "not_imported" (no import
-	// line, or no CLAUDE.md) or "unknown" (CLAUDE.md cannot be read). Last,
-	// so every earlier field keeps its place.
-	PilotProfile string `json:"pilot_profile"`
+	Model             *string         `json:"model"`
+	ModelPicker       *pickerJSON     `json:"model_picker"`
 	// Play is the [play] record of a playbook `cpb play --keep` built, null
-	// for every other (v3.28.0). Last, as above.
+	// for every other. Last.
 	Play *playRecordJSON `json:"play"`
 }
 
@@ -220,7 +212,7 @@ func readStatement(st *grammar.Stmt) error {
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
 		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
-		Skills: describeSkills(pb.Manifest), PilotProfile: pilotProfileState(pb.Path)}
+		Skills: describeSkills(pb.Manifest)}
 	if pb.Manifest != nil && pb.Manifest.Play != nil {
 		p := pb.Manifest.Play
 		v.Play = &playRecordJSON{Ref: p.Ref, URL: p.URL, SHA256: p.SHA256, Played: p.Played}
@@ -236,7 +228,6 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.StatuslineRefresh = statuslineRefresh(sf.Root)
 	}
 	v.StatuslineHistory = describeSLHistory(pb.Path)
-	v.Panels = describePanels(pb.Path)
 	root := pb.RootPath
 	if root == "" {
 		root = pb.Path
@@ -362,11 +353,6 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	if v.IsolatedLogin {
 		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
 	}
-	rows = append(rows, [2]string{"Pilot profile", map[string]string{
-		pilotImported:    "imported (CLAUDE.md imports ~/.pilot-profile/)",
-		pilotNotImported: "not imported",
-		pilotUnknown:     "unknown (CLAUDE.md cannot be read)",
-	}[v.PilotProfile]})
 	if v.Play != nil {
 		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb play --update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.Played, v.Name)})
 	}
@@ -752,17 +738,6 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	}
 	if v.Statusline != nil {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
-	}
-	if n := len(v.Panels); n > 0 {
-		ids := make([]string, n)
-		for i, p := range v.Panels {
-			ids[i] = p.Panel
-		}
-		line := fmt.Sprintf("Panels: %d (%s)", n, strings.Join(ids, ", "))
-		if v.Statusline == nil || !isHostCommand(*v.Statusline) {
-			line += "; the status line is not a host, so they do not render"
-		}
-		fmt.Println(line)
 	}
 	if n := len(v.StatuslineHistory); n > 0 {
 		fmt.Printf("Status line history: %d earlier (SET STATUSLINE PREVIOUS restores %s)\n", n, v.StatuslineHistory[0].Command)

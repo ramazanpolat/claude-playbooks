@@ -117,7 +117,7 @@
     <div class="term" data-verify="examples/01-first-playbook">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
+        <div class="term-title">real run, v4 (pre-release)</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK scratch</span>
@@ -127,20 +127,19 @@ Command:  scratch  (launcher at /home/you/bin/scratch)
 Run it now:
   'scratch'</span>
 <span class="cmd"><span class="prompt">$ </span>cpb SHOW PLAYBOOK scratch</span>
-<span class="out">Name:           scratch
-Version:        (none)
-Path:           /home/you/.claude-playbooks/scratch
-Source:         (none)
-Launcher:       (none)
-Env sets:       (none)
-Variables:      (none)
-Sandbox:        no
-Pilot profile:  imported (CLAUDE.md imports ~/.pilot-profile/)</span>
+<span class="out">Name:       scratch
+Version:    (none)
+Path:       /home/you/.claude-playbooks/scratch
+Source:     (none)
+Launcher:   (none)
+Env sets:   (none)
+Variables:  (none)
+Sandbox:    no</span>
 <span class="cmd"><span class="prompt">$ </span>cpb DROP PLAYBOOK scratch --yes</span>
 <span class="out">Removed command "scratch"
 Deleted playbook "scratch".</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME</span>
       </div>
     </div>
     <p>A throwaway session in a throwaway folder works the same way:
@@ -159,13 +158,13 @@ Deleted playbook "scratch".</span></code></pre>
     <div class="term" data-verify="README.md:59-64, examples/14-model-picker">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
+        <div class="term-title">real run, v4 (pre-release)</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1</span>
 <span class="out">Created ENV router
   set       ANTHROPIC_BASE_URL</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN</span>
+<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm ISOLATED LOGIN</span>
 <span class="out">Created playbook "glm" at /home/you/.claude-playbooks/glm
 Login isolated: it shares no login with ~/.claude; run /login once in it.</span>
 <span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3</span>
@@ -198,14 +197,11 @@ Model: glm-5.3 (ANTHROPIC_MODEL); a launch's --model and /model still win
 Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)
 Login: isolated: no link to ~/.claude's login and no machine token; /login once in it</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME</span>
       </div>
     </div>
     <p><code class="inline">ISOLATED LOGIN</code> keeps your Anthropic login away from that
-      provider, and <code class="inline">NO PILOT PROFILE</code> keeps a local profile import
-      (such as <code class="inline">~/.pilot-profile/</code>) out of the playbook's
-      <code class="inline">CLAUDE.md</code> &mdash; cpb warns once if a playbook that already
-      imports one is later routed to a non-Anthropic host.</p>
+      provider.</p>
   </section>
 
   <section id="sandbox">
@@ -423,7 +419,6 @@ reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json</code></pre>
   Version         -
   Source          (none)
   Login           isolated
-  Pilot profile   not imported
   Env sets        9router
   Tools           -
   Live sessions   1 · newest 2d ago in ~/DEV/claude-playbooks

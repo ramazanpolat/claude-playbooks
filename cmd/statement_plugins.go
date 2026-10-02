@@ -527,6 +527,11 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 		case grammar.UnsetModel:
 			unset(keyModel, "model")
 		case grammar.SetStatusline:
+			// IF UNSET applies only where no status line is set yet: a
+			// recipe that offers a bar leaves the one you chose alone.
+			if c.IfUnset && f.Root.Has(keyStatusline) {
+				continue
+			}
 			sl, err := f.Root.Object(keyStatusline)
 			if err != nil {
 				return nil, false, err
@@ -539,18 +544,6 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 			// Without REFRESH, an existing refreshInterval is kept, as
 			// padding and every other field are.
 			if typ == "command" && cmd == c.Arg && (c.Refresh == 0 || refresh == c.Refresh) {
-				continue
-			}
-			// A host (statusmux) holds the slot: the command stays, the
-			// statement reports it (statuslineHeld), and only an interval
-			// applies, which the host needs.
-			if typ == "command" && isHostCommand(cmd) && cmd != c.Arg {
-				if c.Refresh > 0 && refresh != c.Refresh {
-					_ = sl.Set(keyRefreshInterval, c.Refresh)
-					f.Root.SetObject(keyStatusline, sl)
-					changed = true
-					lines = append(lines, fmt.Sprintf("statusline refresh %d s (the command stays: a host holds the slot)", c.Refresh))
-				}
 				continue
 			}
 			_ = sl.Set("type", "command")
