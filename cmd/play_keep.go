@@ -48,7 +48,7 @@ func keepSandbox(res *play.Result) (sandboxed bool, backend string, err error) {
 		return false, "", errors.New("--sandbox and --no-sandbox together: pick one")
 	}
 	if playSandboxFlag != "" && playSandboxFlag != "auto" && !manifest.KnownSandboxBackend(playSandboxFlag) {
-		return false, "", fmt.Errorf("--sandbox=%s: not a sandbox backend (sbx, openshell)", playSandboxFlag)
+		return false, "", fmt.Errorf("--sandbox=%s: not a sandbox backend (available: %s)", playSandboxFlag, strings.Join(manifest.SandboxBackends, ", "))
 	}
 	sandboxed = playSandboxFlag != "" || (res.Header.WantsSandbox() && !playNoSandbox)
 	if sandboxed {

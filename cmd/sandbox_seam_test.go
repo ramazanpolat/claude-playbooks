@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-// seamBackend is a sandboxBackend that injects its own placeholder (secret
-// returns inside) and can delete a mapping (revoke), the shape OpenShell
-// has; it records the secret and revoke calls.
+// seamBackend is a sandboxBackend whose secret returns a placeholder of its
+// own choosing (inside) and that can delete a mapping (revoke): the seam's
+// contract, not sbx's particular behaviour. It records the secret and
+// revoke calls.
 type seamBackend struct {
 	inside     string
 	fail       bool

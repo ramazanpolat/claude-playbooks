@@ -74,7 +74,7 @@ new playbook's `CLAUDE.md` imports nothing. [Environment →](docs/guides/enviro
 
 With `--sandbox`, Claude Code runs in a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/)
 that sees your working directory and the playbook's own directory, and not
-your home, `~/.claude`, your shell's environment or your other playbooks. On Linux, `--sandbox=openshell` uses [NVIDIA OpenShell](docs/guides/sandbox.md#openshell-backend-linux) instead.
+your home, `~/.claude`, your shell's environment or your other playbooks.
 
 ```bash
 cpb run --sandbox work                                         # this folder is the workdir

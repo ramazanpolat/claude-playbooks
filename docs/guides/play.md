@@ -98,17 +98,16 @@ typed too, and the prompt says the secret is read on this machine, as you.
 
 ## Sandboxed by default
 
-The session runs in a sandbox where one is available: Docker Sandboxes
-(`sbx`), or OpenShell on Linux. The preview says which. Where none is, it says
-so instead:
+The session runs in a Docker Sandbox (`sbx`) where one is installed, and the
+preview says so. Where none is, it says that instead:
 
 ```
-No sandbox available here (sbx, or OpenShell on Linux): this agent will run on your machine, as you.
+No sandbox available here (sbx): this agent will run on your machine, as you.
 ```
 
 - `--no-sandbox` runs it on your machine on purpose, and the preview says
   that too.
-- `--sandbox=sbx` or `--sandbox=openshell` picks a backend.
+- `--sandbox=sbx` names the backend, and refuses where sbx is not installed.
 - A recipe whose header asks for a sandbox (`-- create-with: SANDBOX`) is
   refused where none is available, unless you pass `--no-sandbox`.
 - A recipe that reads a secret reference runs only on your machine for now:

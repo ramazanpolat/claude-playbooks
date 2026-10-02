@@ -25,7 +25,6 @@
   var ZONE = {
     host: { sym: "g-host", text: "Claude Code runs as you, with this playbook's own config directory, environment and login. Every other layer is yours to add." },
     sbx: { sym: "b-docker", text: "A Docker Sandboxes microVM with its own kernel, filesystem and network. It sees your working directory, the playbook's directory and any mount you add. API keys stay on the host: a host-side proxy injects them." },
-    openshell: { sym: "g-shell", text: "Linux with Docker. A container confined by Landlock and seccomp, with no network unless a rule allows it. Keys are bound to one endpoint." },
     remote: { sym: "g-remote", text: "The same sandboxed launch, run on another machine over ssh. Its sandbox, its login and its keys live on that machine." },
     throwaway: { sym: "g-ghost", text: "An ad-hoc session whose config directory is a throwaway folder. The folder is deleted when the session ends, and the sandbox with it if you used one." }
   };

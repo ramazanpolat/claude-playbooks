@@ -81,7 +81,7 @@ func TestPlayRun(t *testing.T) {
 	if err != nil || args != "-p hi" || !strings.Contains(env["CLAUDE_CONFIG_DIR"], "cpb-play-") || !strings.Contains(env["CLAUDE_CONFIG_DIR"], "/play-plain-") {
 		t.Fatalf("--yes: %v, args %q, config %q\n%s", err, args, env["CLAUDE_CONFIG_DIR"], out)
 	}
-	if !strings.Contains(out, "No sandbox available here (sbx, or OpenShell on Linux): this agent will run on your machine, as you.") || strings.Contains(stderr, "Resume this playbook's session") {
+	if !strings.Contains(out, "No sandbox available here (sbx): this agent will run on your machine, as you.") || strings.Contains(stderr, "Resume this playbook's session") {
 		t.Fatalf("the preview, or a resume line for a removed playbook:\n%s\n%s", out, stderr)
 	}
 	if _, err := os.Stat(env["CLAUDE_CONFIG_DIR"]); !os.IsNotExist(err) || len(playStores(t)) != 0 {
@@ -259,10 +259,9 @@ func TestChoosePlaySandbox(t *testing.T) {
 		backend   string
 		note, err string
 	}{
-		{"sbx first", []string{"sbx", "openshell"}, "", false, plain, "sbx", "Sandboxed (sbx)", ""},
-		{"openshell when no sbx", []string{"openshell"}, "", false, plain, "openshell", "Sandboxed (openshell)", ""},
-		{"picked", []string{"sbx", "openshell"}, "openshell", false, plain, "openshell", "Sandboxed (openshell)", ""},
-		{"picked, missing", []string{"sbx"}, "openshell", false, plain, "", "", "--sandbox=openshell"},
+		{"sbx when installed", []string{"sbx"}, "", false, plain, "sbx", "Sandboxed (sbx)", ""},
+		{"picked", []string{"sbx"}, "sbx", false, plain, "sbx", "Sandboxed (sbx)", ""},
+		{"picked, missing", nil, "sbx", false, plain, "", "", "--sandbox=sbx"},
 		{"none", nil, "", false, plain, "", "No sandbox available here", ""},
 		{"--no-sandbox", []string{"sbx"}, "", true, plain, "", "Sandbox off (--no-sandbox)", ""},
 		{"both flags", []string{"sbx"}, "sbx", true, plain, "", "", "together"},
