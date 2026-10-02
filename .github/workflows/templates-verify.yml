@@ -15,9 +15,7 @@ on:
     paths:
       - "site/p/**"
       - "site/cpb-ref"
-      - "site-tools/check-template-files.py"
-      - "site-tools/sitelib.py"
-      - "site-tools/stand-in-secret-helper"
+      - "site-tools/**"
       - ".github/scripts/site-tree.sh"
       - ".github/scripts/play-templates.sh"
       - ".github/workflows/templates-verify.yml"
@@ -25,9 +23,7 @@ on:
     paths:
       - "site/p/**"
       - "site/cpb-ref"
-      - "site-tools/check-template-files.py"
-      - "site-tools/sitelib.py"
-      - "site-tools/stand-in-secret-helper"
+      - "site-tools/**"
       - ".github/scripts/site-tree.sh"
       - ".github/scripts/play-templates.sh"
       - ".github/workflows/templates-verify.yml"

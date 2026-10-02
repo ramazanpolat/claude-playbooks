@@ -16,7 +16,9 @@ played='cpb play [a-z0-9][a-z0-9-]*([ `]|$)'
 # template (a release before play's) are fine, a pattern that finds none is not.
 [ "$(printf 'see `cpb play code-reviewer` and\n' | grep -oE "$played" | tr -d '`' | awk '{print $3}')" = code-reviewer ] \
   || { echo "FAIL: the template-name pattern no longer finds a name"; exit 1; }
-names=$(for f in README.md docs/guides/*.md docs/reference/*.md examples/*/README.md; do tr '\n' ' ' < "$f"; echo; done \
+# A glob that matches nothing stays literal in sh: skip it, or set -e ends the
+# loop there and the files after it go unread.
+names=$(for f in README.md docs/guides/*.md docs/reference/*.md examples/*/README.md; do [ -f "$f" ] || continue; tr '\n' ' ' < "$f"; echo; done \
   | grep -oE "$played" | tr -d '`' | awk '{print $3}' | sort -u || true)
 [ -n "$names" ] || echo "no template is played in these docs"
 fail=0
