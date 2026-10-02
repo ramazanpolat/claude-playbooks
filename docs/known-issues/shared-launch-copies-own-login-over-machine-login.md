@@ -101,7 +101,7 @@ ago.
    the file and gives it a fresh mtime. `install` then calls
    `SyncCredentials`, which sees a newer file and copies it over the
    machine's. The source's age does not matter.
-   - For a published playbook, this means **installing it can swap
+   - For a published playbook, this means **installing it can swap the
      pilot's Claude account for the publisher's**, silently. Everything the
      pilot then does in any shared playbook runs as that account, with its
      history and data on that account's side.

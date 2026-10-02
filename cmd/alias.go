@@ -237,7 +237,7 @@ func doLauncher(o launcherOpts, args []string) error {
 	return nil
 }
 
-// retireAliasLauncher removes the launcher for an alias the user explicitly
+// retireAliasLauncher removes the launcher for an alias the pilot explicitly
 // unregistered, under the same retirement rule delete and rename apply:
 // claim-aware, so a name that now addresses another playbook keeps its
 // launcher, and launcher.Remove only ever deletes a symlink resolving to

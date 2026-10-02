@@ -162,7 +162,7 @@ func ResolvePlaybooksDir() string {
 	return filepath.Join(home, ".claude-playbooks")
 }
 
-// invokedBinDir returns the directory of the command as the user reached it:
+// invokedBinDir returns the directory of the command as the pilot reached it:
 // the literal argv[0] directory, or its PATH entry — deliberately without
 // resolving the final symlink. Empty when argv[0] cannot be located.
 func invokedBinDir() string {

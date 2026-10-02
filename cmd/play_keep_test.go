@@ -46,7 +46,7 @@ func playbookVars(t *testing.T, name string) map[string]string {
 const keepV1 = "-- title: Keeper\n-- description: Kept.\n\nALTER PLAYBOOK\n  SET VAR FOO=1 EDITOR=vim\n  SET MODEL 'claude-opus-5-5';\n"
 const keepV2 = "-- title: Keeper\n-- description: Kept, v2.\n\nALTER PLAYBOOK\n  SET VAR BAR=2 EDITOR=vim\n  SET MODEL 'claude-sonnet-5';\n"
 
-// --keep: the preview and the yes, then a playbook in the user's store with
+// --keep: the preview and the yes, then a playbook in the pilot's store with
 // a launcher, the exact bytes and the [play]
 // record; no session. --update: the same bytes change nothing; new ones
 // need the yes again, show the diff, and undo what the old recipe set.
@@ -147,7 +147,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 	}
 }
 
-// A kept playbook lives in the user's store, so DEFAULTS layer into it. When
+// A kept playbook lives in the pilot's store, so DEFAULTS layer into it. When
 // the recipe moves the endpoint, their keys are blocked there (named in the
 // preview), the login is its own, and an --env-set set's keys are not blocked.
 func TestPlayKeepEndpointAndDefaults(t *testing.T) {
@@ -192,7 +192,7 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	}
 }
 
-// --keep --dry-run --json plans against the user's store and writes
+// --keep --dry-run --json plans against the pilot's store and writes
 // nothing; create-with: SANDBOX keeps it sandboxed; usage errors.
 func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	resetCommandTestState(t)

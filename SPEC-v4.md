@@ -121,7 +121,7 @@ binaries built after it was tagged. The version stamped in is `v` + the
 `package.json` version, which `release.yml` requires to equal the tag, so a
 **tag** is the ref to pin; a commit between releases reports the previous
 release's version. `vendorHash` must be recomputed whenever `go.mod`/`go.sum`
-change. The flake's `nixpkgs` input affects only the build, never a user's
+change. The flake's `nixpkgs` input affects only the build, never a pilot's
 profile. `.github/workflows/nix.yml` builds it on Linux and macOS and adds it to
 a fresh devbox project by a real `git+https:` reference pinned to the commit.
 
@@ -763,7 +763,7 @@ cpb self-uninstall --binary-only # remove binary/launchers/completions, keep pla
 3. Unless `--keep-binary`, sweep **all** launcher symlinks pointing at the binary — every one of them would dangle once the binary is gone, whichever registry root it served. The sweep unions two sources: a resolution scan of the standard launcher directories (the resolved launcher dir plus the `~/.local/bin` fallback), and the launcher receipt file (`~/.local/state/cpb/launchers`, one absolute launcher path per line; the two tab-separated fields v3.10.1 appended are still read by their path and dropped when a line is rewritten) in which every launcher the tool creates is recorded — covering custom `--launcher-dir` locations the scan cannot know about. Every candidate is verified to still be a symlink resolving to this binary (or dangling); a link the pilot renamed or repointed resolves elsewhere and is left alone. The reserved name `cpb` is owned by the binary-removal step. Once the launchers are gone, the receipt is removed too. With `--keep-binary`, no launchers are touched: a same-named command may be serving another registry root, and a removed default-root playbook's launcher fails loudly as stale rather than being silently deleted.
 4. Unless `--keep-binary`, remove any `source <(cpb completion bash|zsh)` lines from `~/.bashrc` and `~/.zshrc` — after the binary is gone they would error on every new shell.
 5. Unless `--keep-binary`, remove the running binary. If removal is denied by permissions, print the `sudo rm <path>` command to run manually rather than failing.
-6. Print a summary of what was removed. When completion lines were removed from rc files, remind the user that already-open shells still hold the stale completion functions until reloaded. In `--binary-only` mode, state explicitly that the playbooks directory was not touched.
+6. Print a summary of what was removed. When completion lines were removed from rc files, remind the pilot that already-open shells still hold the stale completion functions until reloaded. In `--binary-only` mode, state explicitly that the playbooks directory was not touched.
 
 **Flags:**
 

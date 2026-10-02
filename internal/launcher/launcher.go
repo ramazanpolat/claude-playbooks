@@ -29,7 +29,7 @@ var ReservedNames = map[string]bool{
 
 // Entry describes one launcher symlink found in the launcher directory.
 type Entry struct {
-	CmdName string // link name = the command the user types
+	CmdName string // link name = the command the pilot types
 	Path    string // absolute path of the symlink
 	Target  string // what the link points to
 }
@@ -243,7 +243,7 @@ func IsReservedEntry(dir, cmdName string) bool {
 
 // isOurs reports whether path is a symlink resolving to this binary. A
 // dangling link is never ours: claiming it by its target's basename would
-// let cleanup delete a user's own `foo -> /old/tool/cpb`, and the binary is
+// let cleanup delete a pilot's own `foo -> /old/tool/cpb`, and the binary is
 // always alive while this code runs, so genuine launchers always resolve.
 func isOurs(path, binPath string) bool {
 	info, err := os.Lstat(path)

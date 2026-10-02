@@ -14,7 +14,7 @@ import (
 // (custom --launcher-dir installs), but every entry is verified against
 // the live filesystem before anything is removed, and launchers created
 // before the receipt existed are still found by the resolution scan. An
-// entry whose path the user renamed or deleted by hand simply no longer
+// entry whose path the pilot renamed or deleted by hand simply no longer
 // matches anything and is skipped. v3.10.1 appended two tab-separated
 // fields (registry root and playbook) to each line; those lines are still
 // read, by their path, and rewritten path-only when touched.

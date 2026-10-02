@@ -76,7 +76,7 @@ func TestPlayCheckAndDryRun(t *testing.T) {
 	}
 
 	// --dry-run --json: APPLY's plan with the play block, against a
-	// throwaway store: the user's DEFAULTS never layer in.
+	// throwaway store: the pilot's DEFAULTS never layer in.
 	mustStmt(t, "CREATE ENV mine SET ANTHROPIC_BASE_URL=https://mine.example")
 	mustStmt(t, "ALTER DEFAULTS USE ENV mine")
 	playFlags(t, false, true, true, "")
@@ -99,9 +99,9 @@ func TestPlayCheckAndDryRun(t *testing.T) {
 		t.Fatalf("dry run report: %s", out)
 	}
 	if strings.Contains(out, "mine.example") {
-		t.Fatalf("the user's DEFAULTS layered into a played recipe:\n%s", out)
+		t.Fatalf("the pilot's DEFAULTS layered into a played recipe:\n%s", out)
 	}
-	// The user's store is untouched: no playbook was created there.
+	// The pilot's store is untouched: no playbook was created there.
 	if out := mustStmt(t, "SHOW PLAYBOOKS --json"); strings.Contains(out, "play-router-") {
 		t.Fatalf("a dry run left a playbook: %s", out)
 	}

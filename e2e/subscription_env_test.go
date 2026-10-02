@@ -88,7 +88,7 @@ func TestSubscriptionDescriptorsAbsentWithoutToken(t *testing.T) {
 	}
 }
 
-// An explicit export is a deliberate act by the user and outranks what this
+// An explicit export is a deliberate act by the pilot and outranks what this
 // process infers from disk -- notably for a Team seat, whose real
 // subscriptionType the picker does not accept, and which #79597 documents as
 // needing a manual override.

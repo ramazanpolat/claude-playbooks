@@ -111,7 +111,7 @@ type playJSON struct {
 	Risks    []play.Risk    `json:"risks"`
 	// Sandbox: where it would run (slice 3); null in --check.
 	Sandbox *playSandbox `json:"sandbox"`
-	// Keep: --keep's plan, against the user's own store (slice 4).
+	// Keep: --keep's plan, against the pilot's own store (slice 4).
 	Keep bool `json:"keep,omitempty"`
 	// Update: cpb update <name>'s, against the kept playbook (slice 4).
 	Update *playUpdateJSON `json:"update,omitempty"`
@@ -340,7 +340,7 @@ func playSetupKeeping(name string, res *play.Result, keep map[string]bool) strin
 }
 
 // withThrowawayStore runs fn with a fresh, empty playbooks store, so the
-// user's DEFAULTS and env sets cannot layer into a played recipe. Only the
+// pilot's DEFAULTS and env sets cannot layer into a played recipe. Only the
 // secret helper setting is copied, so references can be checked.
 func withThrowawayStore(fn func(dir string) error) error {
 	userStore := config.ResolvePlaybooksDir()
