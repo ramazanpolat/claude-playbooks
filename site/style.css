@@ -319,6 +319,7 @@ section > p.section-lede {
   margin: 0;
   padding: 1rem 1.1rem;
   overflow-x: auto;
+  tab-size: 12; /* cpb's SELECT prints tab-separated rows; this lines the columns up */
   font-family: var(--font-mono);
   font-size: 0.86rem;
   line-height: 1.55;

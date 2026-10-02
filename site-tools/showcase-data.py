@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Builds the home page's card data from real cpb output, or checks it.
 
-Applies showcase.cpb in a throwaway HOME (examples/.ci supplies stand-ins for
-`claude` and the secret helper, so nothing needs a network or a login), then
+Applies showcase.cpb in a throwaway HOME (a `claude` stand-in from examples/.ci and
+`stand-in-secret-helper` from this directory, so nothing needs a network or a login), then
 reads what cpb itself reports: SHOW PLAYBOOK --json, EXPLAIN PLAYBOOK --json,
 the APPLY --dry-run --json plan (plugins, which Claude Code would install),
 and the files cpb wrote into each playbook's CLAUDE_CONFIG_DIR. The result is
@@ -180,7 +180,7 @@ def build(cpb):
             show = r.json("SHOW", "PLAYBOOK", name, "--json")
             explain = r.json("EXPLAIN", "PLAYBOOK", name, "--json")
             d = Path(show["path"])
-            login = "sandbox" if show["sandbox"] else "isolated" if show["isolated_login"] else "shared"
+            login = "sandbox" if show["sandbox"]["always"] else "isolated" if show["isolated_login"] else "shared"
 
             env = []
             for v in explain["vars"]:
@@ -191,7 +191,7 @@ def build(cpb):
                     if k in v:
                         item[k] = v[k]
                 lay = v["layer"]
-                item["from"] = "PLAYBOOK" if lay["kind"] == "PLAYBOOK" else f"ENV {lay['name']}"
+                item["from"] = "PLAYBOOK" if lay["kind"].upper() == "PLAYBOOK" else f"ENV {lay['name']}"
                 env.append(item)
 
             mcp = []
@@ -235,7 +235,6 @@ def build(cpb):
                 "path": r.norm(show["path"]),
                 "launcher": name if (r.home / "bin" / name).exists() else None,
                 "login": login,
-                "pilot_profile": show["pilot_profile"],
                 "model": (explain["model"] or {}).get("name"),
                 "model_picker": show["model_picker"],
                 "skills": [

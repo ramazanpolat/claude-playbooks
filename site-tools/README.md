@@ -41,11 +41,19 @@ TUI goldens.
 - **The tour.** It re-runs the commands `tour.html` shows and checks the
   lines a reader relies on. `check-tui-goldens.py` diffs its `cpb tui` blocks
   against `internal/tui/testdata/*.golden`, the real screens. Those blocks
-  show the fixtures' own names (`kommander-dev`, `k9`, `9router`), so change
+  show the fixtures' own names (`alpha`, `rt`, `proxy`), so change
   them in the goldens, never on the page alone.
+- **The pasted outputs.** `tour-transcript.sh` runs every command the tour shows,
+  in the page's order, in homes of its own (the `claude` stand-in, the
+  stand-in secret helper, example 18's session setup), and prints each with the
+  output cpb really gave. `tour-outputs.py` compares the page's command/output
+  pairs with that (a process id or an age like `0s` is masked), and with
+  `--write` puts the real output on the page: that is how a site pass refreshes
+  the tour. A command the transcript lacks (a launcher run, `curl | sh`) is not
+  checked, and without `clickhouse` the `WHERE` example is left out.
 - **The home page.** `showcase.cpb` is the recipe behind the five cards.
-  `showcase-data.py` applies it in a throwaway home (the `claude` and secret
-  helper stand-ins in `examples/.ci` keep it offline), reads what cpb reports
+  `showcase-data.py` applies it in a throwaway home (the `claude` stand-in in
+  `examples/.ci` and `stand-in-secret-helper` here keep it offline), reads what cpb reports
   (`SHOW PLAYBOOK --json`, `EXPLAIN PLAYBOOK --json`, the `APPLY --dry-run
   --json` plan, the files cpb wrote), and either checks the page's JSON block
   against it (`--check`, what CI does) or rewrites the block (`--write`).
@@ -53,7 +61,7 @@ TUI goldens.
   --delete` for real (with a `claude` that records its session) to check the
   ephemeral notebook, and checks every launch command in `runtimes.json`
   against this cpb: its flags in `run --help` / `start --help`, and its
-  sandbox backends (`sbx`, `openshell`) from the error for an unknown one.
+  sandbox backend (`sbx`) from the error for an unknown one.
 - **The logos.** `brand-icons.py` writes the tools' marks (Simple Icons, CC0,
   pinned to one release) into the page's inline sprite; the marks for the
   playbooks and runtimes are hand-drawn in the same sprite. `check-sprites.py`
@@ -70,7 +78,9 @@ TUI goldens.
   the `.cpb` text they render. The page loads it, and so does CI under Node, so
   what a visitor copies is what was tested. `templates-cases.js --write`
   regenerates `site/p/*.cpb` from it. `test-customizer.js` unit-tests the logic.
-  `check-templates.py` checks that `site/p/` is what the code renders, and plans
+  `check-keywords.py` keeps the customizer's list of reserved playbook names
+  equal to cpb's own (read from `internal/grammar/parse.go`) and asks a real cpb
+  to refuse each one. `check-templates.py` checks that `site/p/` is what the code renders, and plans
   (`APPLY --dry-run --json`) every template's defaults, an "everything on"
   selection and a reproducible set of random ones, each as a playbook file and
   as a recipe, requiring `ok` from cpb for all of them; the defaults and the

@@ -66,15 +66,23 @@ ok("unknown things are refused", function () {
   refused(sel({ skills: ["nope"] }), /Unknown skill/);
   refused(sel({ plugins: ["nope"] }), /Unknown plugin/);
 });
+ok("a keyword cannot name a playbook, a word that only looks like one can", function () {
+  for (const w of ["launcher", "model", "url", "describe", "description"]) {
+    refused(sel({ name: w }), /keyword/);
+  }
+  for (const w of ["alias", "isolated", "login", "select"]) {
+    assert.ok(core.render(sel({ name: w })).ok, w);
+  }
+});
 ok("sandbox implies an isolated login; flags go where cpb takes them", function () {
-  const s = sel({ sandbox: true, isolated: true, noProfile: true, mode: "file" });
+  const s = sel({ sandbox: true, isolated: true, mode: "file" });
   const f = core.render(s);
-  assert.ok(f.text.includes("CREATE PLAYBOOK IF NOT EXISTS work SANDBOX NO PILOT PROFILE;"), f.text);
+  assert.ok(f.text.includes("CREATE PLAYBOOK IF NOT EXISTS work SANDBOX;"), f.text);
   assert.ok(!/ISOLATED LOGIN/.test(f.text));
   const r = core.render(Object.assign(core.clone(s), { mode: "recipe" }));
   assert.ok(!/CREATE PLAYBOOK/.test(r.text) && !/ISOLATED LOGIN/.test(r.text));
-  assert.deepStrictEqual(r.commands[0], "cpb CREATE PLAYBOOK work SANDBOX NO PILOT PROFILE");
-  assert.ok(r.text.includes("-- create-with: SANDBOX\n") && !/create-with:.*NO PILOT PROFILE/.test(r.text));
+  assert.deepStrictEqual(r.commands[0], "cpb CREATE PLAYBOOK work SANDBOX");
+  assert.ok(r.text.includes("-- create-with: SANDBOX\n"));
   const i = core.render(sel({ isolated: true, mode: "recipe" }));
   assert.ok(i.text.includes("SET ISOLATED LOGIN;"));
 });
@@ -87,11 +95,6 @@ ok("output order does not depend on the order things were switched on", function
   const a = core.render(sel({ mcp: ["linear", "github"], skills: ["xlsx", "pdf"] }));
   const b = core.render(sel({ mcp: ["github", "linear"], skills: ["pdf", "xlsx"] }));
   assert.strictEqual(a.text, b.text);
-});
-ok("the router warning", function () {
-  const r = core.defaultSelection("router-glm"); r.noProfile = false;
-  assert.strictEqual(core.render(r).warnings.length, 1);
-  r.noProfile = true; assert.strictEqual(core.render(r).warnings.length, 0);
 });
 ok("random selections are reproducible and always valid", function () {
   for (let i = 0; i < 300; i++) {
