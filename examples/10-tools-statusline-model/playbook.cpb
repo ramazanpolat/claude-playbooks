@@ -1,7 +1,7 @@
 -- Claude Code settings with no CLI of their own: tool permissions, the
 -- status line and the default model, written into the playbook's
 -- settings.json. Every other key in that file is kept.
-CREATE PLAYBOOK IF NOT EXISTS reviewer NO ALIAS;
+CREATE PLAYBOOK IF NOT EXISTS reviewer NO LAUNCHER;
 
 ALTER PLAYBOOK reviewer
   ALLOW TOOL 'Bash(git diff *)' 'Bash(go test *)'

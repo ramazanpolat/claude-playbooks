@@ -754,7 +754,7 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 	written := map[string]bool{}
 	for _, m := range mps {
 		src, ok := sourceString(m.Source)
-		if !ok || manifest.ValidateProfileName(m.Name) != nil {
+		if !ok || manifest.ValidateSetName(m.Name) != nil {
 			comments = append(comments, fmt.Sprintf("-- MARKETPLACE %s has a source the grammar does not write; not written", m.Name))
 			continue
 		}

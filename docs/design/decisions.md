@@ -7,8 +7,8 @@ record of why they are the rules. Newest last.
 | Date | Decision | Where it lives |
 |---|---|---|
 | 2026-09-25 | Secrets are references, never values: `SET … FROM '<ref>'`, resolved only at launch; the reference's scheme disambiguates it from a value | Secrets |
-| 2026-09-25/27 | One regular grammar, read and written like DDL, replaces the `env` / `env-profile` / `create` … commands | Shape, Grammar |
-| 2026-09-26 | A statement is whole or nothing: lifecycle clauses (`RENAME TO`, `ALIAS`) are not combined with environment clauses | Grammar |
+| 2026-09-25/27 | One regular grammar, read and written like DDL, replaces the `env` / `env-set` / `create` … commands | Shape, Grammar |
+| 2026-09-26 | A statement is whole or nothing: lifecycle clauses (`RENAME TO`, `LAUNCHER`) are not combined with environment clauses | Grammar |
 | 2026-09-26 | cpb defines a secret helper interface (`--check`, then exec) and never names or discovers a helper | Secrets |
 | 2026-09-26 | Keys cpb reads itself (`CLAUDE_CODE_OAUTH_TOKEN`) never take a reference | Secrets |
 | 2026-09-26 | A credential-looking literal is refused; `AS PLAINTEXT` stores one knowingly | Secrets |

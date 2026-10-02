@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -97,7 +97,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	// secret reference must resolve, against the helper the files will have
 	// set by then (a file may set the helper and use it in one run).
 	var helper helperState
-	envDir := envprofile.Dir(config.ResolvePlaybooksDir())
+	envDir := envset.Dir(config.ResolvePlaybooksDir())
 	// Whether each env set exists at that point of the files: an earlier
 	// CREATE makes it, an earlier DROP removes it, and the disk says the rest.
 	envExists := map[string]bool{}
@@ -105,7 +105,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		if e, ok := envExists[name]; ok {
 			return e
 		}
-		p, _ := envprofile.Read(envDir, name)
+		p, _ := envset.Read(envDir, name)
 		return p != nil
 	}
 	for _, x := range stmts {

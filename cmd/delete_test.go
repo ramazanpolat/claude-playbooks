@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -260,7 +260,7 @@ func TestDeleteRemovesUnclaimedLauncher(t *testing.T) {
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "victim"); exists {
 		t.Fatal("unclaimed launcher survived the delete of its playbook")
 	}
-	if !strings.Contains(out, `Removed command "victim"`) {
+	if !strings.Contains(out, `Removed launcher "victim"`) {
 		t.Fatalf("removal not reported:\n%s", out)
 	}
 	if got := launcher.Recorded(); len(got) != 0 {
@@ -273,7 +273,7 @@ func TestDeleteRemovesUnclaimedLauncher(t *testing.T) {
 func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "victim", nil)
-	// "other" claims the command name "victim" via its manifest alias —
+	// "other" claims the launcher name "victim" via its manifest launcher —
 	// the registry, not the symlink, owns command-name ownership.
 	writePlaybook(t, root, "other", &manifest.Manifest{Launcher: "victim"})
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
@@ -310,26 +310,26 @@ func TestDropRefusesANonPlaybookDirectory(t *testing.T) {
 	}
 }
 
-// The env profile store is dot-named, so discovery skips it; a delete by
+// The env set store is dot-named, so discovery skips it; a delete by
 // name must be refused by name and by file identity (a case variant on a case-insensitive filesystem).
 func TestDeleteRefusesEnvProfileStore(t *testing.T) {
 	sandboxRoot(t, "playbooks")
-	store := envprofile.Dir(config.PlaybooksDir)
-	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	store := envset.Dir(config.PlaybooksDir)
+	if err := envset.Write(store, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{envprofile.DirName, strings.ToUpper(envprofile.DirName)} {
-		if name != envprofile.DirName {
+	for _, name := range []string{envset.DirName, strings.ToUpper(envset.DirName)} {
+		if name != envset.DirName {
 			if _, err := os.Stat(filepath.Join(config.PlaybooksDir, name)); err != nil {
 				continue // case-sensitive filesystem: the variant is simply not found
 			}
 		}
 		err := doDelete(deleteOpts{yes: true}, []string{name})
-		if err == nil || !strings.Contains(err.Error(), "env profile store") {
+		if err == nil || !strings.Contains(err.Error(), "env set store") {
 			t.Fatalf("delete %q: %v", name, err)
 		}
 	}
-	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+	if p, err := envset.Read(store, "glm"); err != nil || p == nil {
 		t.Fatalf("profile store damaged: %v %v", p, err)
 	}
 }
@@ -340,8 +340,8 @@ func TestDeleteRefusesEnvProfileStore(t *testing.T) {
 func TestDeleteStoreSymlinkShapes(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	store := envprofile.Dir(root)
-	if err := envprofile.Write(store, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	store := envset.Dir(root)
+	if err := envset.Write(store, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -364,21 +364,21 @@ func TestDeleteStoreSymlinkShapes(t *testing.T) {
 	}
 	leftover := filepath.Join(root, ".leftover")
 	inner := filepath.Join(leftover, "profiles")
-	if err := envprofile.Write(inner, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(inner, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(inner, store); err != nil {
 		t.Fatal(err)
 	}
 	err := doDelete(deleteOpts{yes: true}, []string{".leftover"})
-	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+	if err == nil || !strings.Contains(err.Error(), "contains the registry's env set store") {
 		t.Fatalf("deleting the directory the store lives in: %v", err)
 	}
-	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+	if p, err := envset.Read(store, "glm"); err != nil || p == nil {
 		t.Fatalf("store damaged: %v %v", p, err)
 	}
 	// The message names the canonical store, whatever spelling was typed.
-	if err := doDelete(deleteOpts{yes: true}, []string{envprofile.DirName}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
+	if err := doDelete(deleteOpts{yes: true}, []string{envset.DirName}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env set store`) {
 		t.Fatalf("message: %v", err)
 	}
 }
@@ -389,10 +389,10 @@ func TestDeleteStoreSymlinkShapes(t *testing.T) {
 func TestDeleteStoreGuardByIdentity(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	store := envprofile.Dir(root)
+	store := envset.Dir(root)
 	leftover := filepath.Join(root, ".leftover")
 	inner := filepath.Join(leftover, "profiles")
-	if err := envprofile.Write(inner, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(inner, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(inner, store); err != nil {
@@ -405,14 +405,14 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 
 	// The store's registry SYMLINK addressed by a case variant: refused, link intact.
 	if caseInsensitive {
-		if err := doDelete(deleteOpts{yes: true}, []string{".ENV-SETS"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
+		if err := doDelete(deleteOpts{yes: true}, []string{".ENV-SETS"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env set store`) {
 			t.Fatalf("case variant of the store link must get the store message, not the intermediate-link one: %v", err)
 		}
 		if _, err := os.Lstat(store); err != nil {
 			t.Fatal("store link removed")
 		}
 		// The directory the store resolves into, addressed by a case variant.
-		if err := doDelete(deleteOpts{yes: true}, []string{".LEFTOVER"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+		if err := doDelete(deleteOpts{yes: true}, []string{".LEFTOVER"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env set store") {
 			t.Fatalf("case variant of the containing directory: %v", err)
 		}
 	}
@@ -428,10 +428,10 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
 	rel := filepath.Base(root)
-	if err := refuseRegistryOwned(rel, ".leftover", filepath.Join(rel, ".leftover")); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+	if err := refuseRegistryOwned(rel, ".leftover", filepath.Join(rel, ".leftover")); err == nil || !strings.Contains(err.Error(), "contains the registry's env set store") {
 		t.Fatalf("relative playbooks root: %v", err)
 	}
-	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+	if p, err := envset.Read(store, "glm"); err != nil || p == nil {
 		t.Fatalf("store damaged: %v %v", p, err)
 	}
 }
@@ -441,10 +441,10 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	store := envprofile.Dir(root)
+	store := envset.Dir(root)
 	holder := filepath.Join(root, ".holder")
 	final := filepath.Join(t.TempDir(), "profiles")
-	if err := envprofile.Write(final, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(final, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(holder, 0o755); err != nil {
@@ -477,9 +477,9 @@ func TestDeleteStoreGuardCoversTheResolutionChain(t *testing.T) {
 func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	store := envprofile.Dir(root)
+	store := envset.Dir(root)
 	leftover := filepath.Join(root, ".leftover")
-	if err := envprofile.Write(filepath.Join(leftover, "sub", "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(filepath.Join(leftover, "sub", "profiles"), &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	bridge := filepath.Join(root, ".bridge")
@@ -492,10 +492,10 @@ func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
 	if err := doDelete(deleteOpts{yes: true}, []string{".bridge"}); err == nil || !strings.Contains(err.Error(), "resolves through") {
 		t.Fatalf("parent-component link: %v", err)
 	}
-	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env set store") {
 		t.Fatalf("directory holding the parent-component target: %v", err)
 	}
-	if p, err := envprofile.Read(store, "glm"); err != nil || p == nil {
+	if p, err := envset.Read(store, "glm"); err != nil || p == nil {
 		t.Fatalf("store damaged: %v %v", p, err)
 	}
 
@@ -528,21 +528,21 @@ func TestDeleteStoreGuardResolvesParentComponents(t *testing.T) {
 func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	store := envprofile.Dir(root)
+	store := envset.Dir(root)
 	if err := os.MkdirAll(filepath.Join(root, ".leftover"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := envprofile.Write(filepath.Join(root, ".profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(filepath.Join(root, ".profiles"), &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	// Built by hand: filepath.Join would clean the ".." away.
 	if err := os.Symlink(".leftover"+string(filepath.Separator)+".."+string(filepath.Separator)+".profiles", store); err != nil {
 		t.Fatal(err)
 	}
-	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "is a directory the registry's env profile store resolves through") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "is a directory the registry's env set store resolves through") {
 		t.Fatalf("traversed directory: %v", err)
 	}
-	if err := doDelete(deleteOpts{yes: true}, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
+	if err := doDelete(deleteOpts{yes: true}, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env set store`) {
 		t.Fatalf("physical directory under another name: %v", err)
 	}
 
@@ -556,7 +556,7 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".ENV-SETS")); err == nil || os.IsNotExist(err) {
 		// case-insensitive: Lstat of the variant is the link itself
 		if fi, err := os.Lstat(filepath.Join(root, ".ENV-SETS")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			if err := doDelete(deleteOpts{yes: true}, []string{".ENV-SETS"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
+			if err := doDelete(deleteOpts{yes: true}, []string{".ENV-SETS"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env set store`) {
 				t.Fatalf("dangling store link by case variant: %v", err)
 			}
 		}
@@ -574,9 +574,9 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 func TestDeleteStoreGuardDefersToTheKernel(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	store := envprofile.Dir(root)
+	store := envset.Dir(root)
 	final := filepath.Join(root, ".final")
-	if err := envprofile.Write(final, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(final, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	prev := final
@@ -625,10 +625,10 @@ func TestDeleteStoreGuardRelativeRootFromPhysicalCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The real store lives in /x/b, symlinked into a leftover there.
-	if err := envprofile.Write(filepath.Join(b, "foo", "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(filepath.Join(b, "foo", "profiles"), &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(b, "foo", "profiles"), envprofile.Dir(b)); err != nil {
+	if err := os.Symlink(filepath.Join(b, "foo", "profiles"), envset.Dir(b)); err != nil {
 		t.Fatal(err)
 	}
 	wd, err := os.Getwd()
@@ -644,7 +644,7 @@ func TestDeleteStoreGuardRelativeRootFromPhysicalCwd(t *testing.T) {
 		t.Skipf("Getwd does not honour $PWD here (%s); the logical/physical split cannot be exercised", got)
 	}
 	err = refuseRegistryOwned("..", "foo", filepath.Join("..", "foo"))
-	if err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+	if err == nil || !strings.Contains(err.Error(), "contains the registry's env set store") {
 		t.Fatalf("relative root under a symlinked cwd: %v", err)
 	}
 }
@@ -690,7 +690,7 @@ func TestDeleteStoreGuardBindMount(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
 	data := t.TempDir()
-	if err := envprofile.Write(filepath.Join(data, "profiles"), &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(filepath.Join(data, "profiles"), &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
 	mounted := filepath.Join(root, ".leftover", "mounted")
@@ -701,10 +701,10 @@ func TestDeleteStoreGuardBindMount(t *testing.T) {
 		t.Skipf("mount --bind: %v %s", err, out)
 	}
 	t.Cleanup(func() { _ = exec.Command("umount", mounted).Run() })
-	if err := os.Symlink(filepath.Join(data, "profiles"), envprofile.Dir(root)); err != nil {
+	if err := os.Symlink(filepath.Join(data, "profiles"), envset.Dir(root)); err != nil {
 		t.Fatal(err)
 	}
-	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env profile store") {
+	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "contains the registry's env set store") {
 		t.Fatalf("bind-mounted store inside the target: %v", err)
 	}
 }
@@ -715,24 +715,24 @@ func TestDeleteStoreGuardBindMount(t *testing.T) {
 func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	if err := envprofile.Write(root, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(root, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := envprofile.WriteDefaults(root, []string{"glm"}); err != nil {
+	if err := envset.WriteDefaults(root, []string{"glm"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
+	if err := os.Symlink(".", envset.Dir(root)); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"glm.toml", envprofile.DefaultMarker} {
-		if err := doDelete(deleteOpts{yes: true}, []string{name}); err == nil || !strings.Contains(err.Error(), "is an entry of the registry's env profile store") {
+	for _, name := range []string{"glm.toml", envset.DefaultMarker} {
+		if err := doDelete(deleteOpts{yes: true}, []string{name}); err == nil || !strings.Contains(err.Error(), "is an entry of the registry's env set store") {
 			t.Fatalf("delete %q: %v", name, err)
 		}
 	}
-	if p, err := envprofile.Read(root, "glm"); err != nil || p == nil {
+	if p, err := envset.Read(root, "glm"); err != nil || p == nil {
 		t.Fatalf("profile damaged: %v %v", p, err)
 	}
-	if d, err := envprofile.Defaults(root); err != nil || strings.Join(d, ",") != "glm" {
+	if d, err := envset.Defaults(root); err != nil || strings.Join(d, ",") != "glm" {
 		t.Fatalf("default damaged: %q %v", d, err)
 	}
 	seedFlatPlaybook(t, "beside")
@@ -746,10 +746,10 @@ func TestDeleteStoreEntriesWhenStoreIsTheRoot(t *testing.T) {
 func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	root := config.PlaybooksDir
-	if err := envprofile.Write(root, &envprofile.Profile{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
+	if err := envset.Write(root, &envset.Set{Name: "glm", Set: map[string]string{"A": "1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(".", envprofile.Dir(root)); err != nil {
+	if err := os.Symlink(".", envset.Dir(root)); err != nil {
 		t.Fatal(err)
 	}
 	external := t.TempDir()
@@ -803,7 +803,7 @@ func TestDeleteRemovesNameAliasAndHandMadeLaunchers(t *testing.T) {
 		if _, exists, _ := launcher.Lookup(config.LauncherDir, n); exists {
 			t.Fatalf("launcher %q survived the delete of its playbook", n)
 		}
-		if !strings.Contains(out, `Removed command "`+n+`"`) {
+		if !strings.Contains(out, `Removed launcher "`+n+`"`) {
 			t.Fatalf("removal not reported for %q:\n%s", n, out)
 		}
 	}
@@ -825,7 +825,7 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(out, "Command:  own (launcher will be removed)") {
+	if !strings.Contains(out, "Launcher: own (launcher will be removed)") {
 		t.Fatalf("prompt does not predict the removal:\n%s", out)
 	}
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "own"); !exists {
@@ -873,7 +873,7 @@ func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(out, `Removed command "oa"`) {
+	if !strings.Contains(out, `Removed launcher "oa"`) {
 		t.Fatalf("renamed playbook's alias launcher kept:\n%s", out)
 	}
 }
@@ -958,7 +958,7 @@ func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if strings.Contains(out, "Command:  cpb") {
+	if strings.Contains(out, "Launcher: cpb") {
 		t.Fatalf("reserved symlink presented as the playbook's launcher:\n%s", out)
 	}
 	out = captureStdout(t, func() {
@@ -966,7 +966,7 @@ func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if strings.Contains(out, `Removed command "cpb"`) {
+	if strings.Contains(out, `Removed launcher "cpb"`) {
 		t.Fatalf("removal of the reserved symlink reported:\n%s", out)
 	}
 	if _, err := os.Lstat(cli); err != nil {

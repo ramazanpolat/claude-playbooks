@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -32,8 +32,8 @@ var errNoHelper = errors.New("no secret helper configured (ALTER DEFAULTS SET SE
 var lookHelper = exec.LookPath
 
 // resolveHelper returns the helper in effect and the executable to run.
-func resolveHelper() (*envprofile.Helper, string, error) {
-	h, err := envprofile.SecretHelper(envprofile.Dir(config.ResolvePlaybooksDir()))
+func resolveHelper() (*envset.Helper, string, error) {
+	h, err := envset.SecretHelper(envset.Dir(config.ResolvePlaybooksDir()))
 	if err != nil {
 		return nil, "", err
 	}
@@ -56,25 +56,25 @@ func resolveHelper() (*envprofile.Helper, string, error) {
 // before the file ran. Unset means "whatever is configured now".
 type helperState struct {
 	set bool
-	h   *envprofile.Helper // nil after UNSET SECRET HELPER
+	h   *envset.Helper // nil after UNSET SECRET HELPER
 }
 
 // after returns the state once c has run. CPB_SECRET_HELPER still wins over
 // any setting, as it does at launch.
 func (s helperState) after(c grammar.Clause) helperState {
-	if v, ok := os.LookupEnv(envprofile.SecretHelperEnv); ok && v != "" {
+	if v, ok := os.LookupEnv(envset.SecretHelperEnv); ok && v != "" {
 		return s
 	}
 	switch c.Kind {
 	case grammar.SetHelper:
-		return helperState{set: true, h: &envprofile.Helper{Command: c.Arg, From: "setting"}}
+		return helperState{set: true, h: &envset.Helper{Command: c.Arg, From: "setting"}}
 	case grammar.UnsetHelper:
 		return helperState{set: true}
 	}
 	return s
 }
 
-func (s helperState) resolve() (*envprofile.Helper, string, error) {
+func (s helperState) resolve() (*envset.Helper, string, error) {
 	if !s.set {
 		return resolveHelper()
 	}

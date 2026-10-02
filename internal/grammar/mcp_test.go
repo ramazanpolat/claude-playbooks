@@ -8,7 +8,7 @@ import (
 
 func TestParseMCPServers(t *testing.T) {
 	stmts, err := ParseFile(`ALTER PLAYBOOK k
-  ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'server-fs' '/srv' ENV LOG_LEVEL=debug ENV API_TOKEN FROM 'keychain:fs'
+  ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'server-fs' '/srv' VAR LOG_LEVEL=debug VAR API_TOKEN FROM 'keychain:fs'
   ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry' HEADER 'X-Team' 'core'
   ADD MCP SERVER old URL 'https://old.example.com/sse' TRANSPORT SSE
   DROP MCP SERVER gone;`)
@@ -35,8 +35,8 @@ func TestParseMCPServers(t *testing.T) {
 
 func TestParseMCPRefusals(t *testing.T) {
 	for src, want := range map[string]string{
-		`ALTER PLAYBOOK k ADD MCP SERVER s COMMAND 'x' ENV API_TOKEN=sk-live-1234567890;`:                "takes a reference",
-		`ALTER PLAYBOOK k ADD MCP SERVER s COMMAND 'x' ENV API_TOKEN=sk-live-1234567890 AS PLAINTEXT;`:   "takes a reference",
+		`ALTER PLAYBOOK k ADD MCP SERVER s COMMAND 'x' VAR API_TOKEN=sk-live-1234567890;`:                "takes a reference",
+		`ALTER PLAYBOOK k ADD MCP SERVER s COMMAND 'x' VAR API_TOKEN=sk-live-1234567890 AS PLAINTEXT;`:   "takes a reference",
 		`ALTER PLAYBOOK k ADD MCP SERVER s URL 'https://x.example' HEADER 'Authorization' 'Bearer abc';`: "carries a credential",
 		`ALTER PLAYBOOK k ADD MCP SERVER s COMMAND 'x' HEADER 'X-A' 'b';`:                                "HEADER applies to a remote server",
 		`ALTER PLAYBOOK k ADD MCP SERVER s URL 'https://u:p@x.example';`:                                 "carrying credentials",

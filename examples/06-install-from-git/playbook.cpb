@@ -1,8 +1,8 @@
 -- Someone else's playbook, from a Git repository, pinned to a tag. SUBDIR
--- picks one playbook out of a repository that ships several; ALIAS gives
+-- picks one playbook out of a repository that ships several; LAUNCHER gives
 -- it a short launcher command.
 CREATE PLAYBOOK IF NOT EXISTS dba
   FROM https://github.com/ramazanpolat/awesome-claude-playbooks
   BRANCH v2.0.0
   SUBDIR playbooks/dba
-  ALIAS dba;
+  LAUNCHER dba;

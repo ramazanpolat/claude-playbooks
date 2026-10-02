@@ -1,4 +1,4 @@
-// Package envprofile reads and writes shared env sets: named set/block
+// Package envset reads and writes shared env sets: named set/block
 // layers stored as TOML files under <playbooks root>/.env-sets/ and
 // referenced from playbook manifests by name. A set is the reusable half
 // of a playbook's [env] table -- "the proxy and model pins for provider X" --
@@ -12,7 +12,7 @@
 //
 //	[set]
 //	ANTHROPIC_BASE_URL = "http://router:1/v1"
-package envprofile
+package envset
 
 import (
 	"errors"
@@ -37,8 +37,8 @@ func Dir(playbooksDir string) string {
 	return filepath.Join(playbooksDir, DirName)
 }
 
-// Profile is one named env layer.
-type Profile struct {
+// Set is one named env layer.
+type Set struct {
 	Name        string            `toml:"-"`
 	Description string            `toml:"description,omitempty"`
 	Set         map[string]string `toml:"set,omitempty"`
@@ -47,21 +47,21 @@ type Profile struct {
 }
 
 // Env returns the profile as a manifest env layer.
-func (p *Profile) Env() *manifest.Env {
+func (p *Set) Env() *manifest.Env {
 	return &manifest.Env{Set: p.Set, Refs: p.Refs, Block: p.Block}
 }
 
 // Empty reports whether the profile declares no variables.
-func (p *Profile) Empty() bool {
+func (p *Set) Empty() bool {
 	return p == nil || (len(p.Set) == 0 && len(p.Refs) == 0 && len(p.Block) == 0)
 }
 
-// ErrProfile is matched (errors.Is) by every error Expand returns, whether
+// ErrSet is matched (errors.Is) by every error Expand returns, whether
 // the profile is missing, unreadable, malformed, or invalid. Launch paths
 // treat all of them as fatal: running with a silently dropped layer could
 // send traffic to the wrong endpoint with the wrong credentials, and a
 // broken profile is no safer than an absent one.
-var ErrProfile = errors.New("env profile cannot be resolved")
+var ErrSet = errors.New("env set cannot be resolved")
 
 // MissingError reports a manifest referencing a profile that does not exist.
 type MissingError struct {
@@ -70,10 +70,10 @@ type MissingError struct {
 }
 
 func (e *MissingError) Error() string {
-	return fmt.Sprintf("env profile %q not found in %s (create it with: cpb CREATE ENV %s SET KEY=VALUE)", e.Name, e.Dir, e.Name)
+	return fmt.Sprintf("env set %q not found in %s (create it with: cpb CREATE ENV %s SET KEY=VALUE)", e.Name, e.Dir, e.Name)
 }
 
-func (e *MissingError) Is(target error) bool { return target == ErrProfile }
+func (e *MissingError) Is(target error) bool { return target == ErrSet }
 
 // ResolveError wraps a read or validation failure of a referenced profile.
 type ResolveError struct {
@@ -81,17 +81,17 @@ type ResolveError struct {
 	Err  error
 }
 
-func (e *ResolveError) Error() string        { return fmt.Sprintf("env profile %q: %v", e.Name, e.Err) }
+func (e *ResolveError) Error() string        { return fmt.Sprintf("env set %q: %v", e.Name, e.Err) }
 func (e *ResolveError) Unwrap() error        { return e.Err }
-func (e *ResolveError) Is(target error) bool { return target == ErrProfile }
+func (e *ResolveError) Is(target error) bool { return target == ErrSet }
 
 func path(dir, name string) string {
 	return filepath.Join(dir, name+FileExt)
 }
 
 // Read parses one profile. Returns (nil, nil) when it does not exist.
-func Read(dir, name string) (*Profile, error) {
-	if err := manifest.ValidateProfileName(name); err != nil {
+func Read(dir, name string) (*Set, error) {
+	if err := manifest.ValidateSetName(name); err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(path(dir, name))
@@ -101,7 +101,7 @@ func Read(dir, name string) (*Profile, error) {
 		}
 		return nil, err
 	}
-	var p Profile
+	var p Set
 	if err := tomlfile.Decode(path(dir, name), data, &p); err != nil {
 		if errors.As(err, new(*tomlfile.UnknownKeyError)) {
 			return nil, err
@@ -115,7 +115,7 @@ func Read(dir, name string) (*Profile, error) {
 	return &p, nil
 }
 
-func validate(p *Profile, at string) error {
+func validate(p *Set, at string) error {
 	for key, value := range p.Set {
 		if err := manifest.ValidateEnvKey(key); err != nil {
 			return fmt.Errorf("invalid env set at %s: set: %w", at, err)
@@ -133,15 +133,15 @@ func validate(p *Profile, at string) error {
 		}
 	}
 	if err := manifest.ValidateRefs(p.Refs, p.Set, p.Block); err != nil {
-		return fmt.Errorf("invalid env profile at %s: refs: %w", at, err)
+		return fmt.Errorf("invalid env set at %s: refs: %w", at, err)
 	}
 	return nil
 }
 
 // Write serializes a profile, creating the directory on first use. Keys are
 // emitted sorted so a rewrite never reorders the file arbitrarily.
-func Write(dir string, p *Profile) error {
-	if err := manifest.ValidateProfileName(p.Name); err != nil {
+func Write(dir string, p *Set) error {
+	if err := manifest.ValidateSetName(p.Name); err != nil {
 		return err
 	}
 	at := path(dir, p.Name)
@@ -191,7 +191,7 @@ func Write(dir string, p *Profile) error {
 // Delete removes a profile file. Removing one that does not exist is not an
 // error; the caller decides what a missing profile means.
 func Delete(dir, name string) error {
-	if err := manifest.ValidateProfileName(name); err != nil {
+	if err := manifest.ValidateSetName(name); err != nil {
 		return err
 	}
 	err := os.Remove(path(dir, name))
@@ -204,7 +204,7 @@ func Delete(dir, name string) error {
 // List returns every profile in dir, sorted by name. A directory that does
 // not exist lists nothing. An unparsable file is an error: listing must not
 // hide the profile a launch is about to fail on.
-func List(dir string) ([]*Profile, error) {
+func List(dir string) ([]*Set, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -212,7 +212,7 @@ func List(dir string) ([]*Profile, error) {
 		}
 		return nil, err
 	}
-	var out []*Profile
+	var out []*Set
 	for _, e := range entries {
 		name, ok := strings.CutSuffix(e.Name(), FileExt)
 		if !ok || e.IsDir() {
@@ -260,7 +260,7 @@ func Defaults(dir string) ([]string, error) {
 		if name == "" {
 			continue
 		}
-		if err := manifest.ValidateProfileName(name); err != nil {
+		if err := manifest.ValidateSetName(name); err != nil {
 			return nil, fmt.Errorf("%s: %w", marker, err)
 		}
 		for _, seen := range names {

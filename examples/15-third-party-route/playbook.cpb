@@ -3,10 +3,10 @@
 -- imports nothing. The playbook keeps its own login, and the Anthropic
 -- credentials a shell may export are blocked in it.
 CREATE OR REPLACE ENV router
-  DESCRIBE 'A model router: requests leave Anthropic'
+  DESCRIPTION 'A model router: requests leave Anthropic'
   SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3;
 
-CREATE PLAYBOOK IF NOT EXISTS routed NO ALIAS ISOLATED LOGIN;
+CREATE PLAYBOOK IF NOT EXISTS routed NO LAUNCHER ISOLATED LOGIN;
 ALTER PLAYBOOK routed
   USE ENV router
   BLOCK VAR ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;

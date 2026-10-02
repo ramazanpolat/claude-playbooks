@@ -102,7 +102,7 @@ func TestPlayRun(t *testing.T) {
 		t.Fatal("launched without the endpoint confirmed")
 	}
 
-	// Confirmed: the key a user attaches with --env follows; the shell's
+	// Confirmed: the key a user attaches with --env-set follows; the shell's
 	// own credentials do not.
 	t.Setenv("ANTHROPIC_API_KEY", "shell-key-must-not-follow")
 	t.Setenv("MY_SECRET_TOKEN", "shell-secret-must-not-follow")

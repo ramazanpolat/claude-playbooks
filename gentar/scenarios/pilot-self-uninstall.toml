@@ -35,9 +35,9 @@ steps = [
   # having never existed -- which is exactly what an earlier draft of this
   # suite did.
   '"$HOME/.local/bin/cpb" CREATE PLAYBOOK keeper-one',
-  '"$HOME/.local/bin/cpb" ALTER PLAYBOOK keeper-one ALIAS k1',
+  '"$HOME/.local/bin/cpb" ALTER PLAYBOOK keeper-one LAUNCHER k1',
   # And one deliberately WITHOUT a launcher: it must still survive --keep-data.
-  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK keeper-two NO ALIAS',
+  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK keeper-two NO LAUNCHER',
   # A file that is NOT ours, in the same directory the sweep walks. It must
   # survive: the sweep removes symlinks resolving to THIS binary, nothing else.
   '''printf '%s\n' '#!/bin/sh' 'echo not ours' > "$HOME/.local/bin/bystander"''',

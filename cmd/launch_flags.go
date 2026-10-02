@@ -11,9 +11,9 @@ import (
 // top of the playbook's own [env] block in command-line order and never
 // written anywhere.
 //
-//	--env-profile NAME   layer an existing env profile
+//	--env-set NAME   layer an existing env set
 //	--env KEY=VALUE      set one variable
-//	--unset KEY          remove one variable
+//	--block KEY          remove one variable
 //	--env-file PATH      layer a dotenv-style file (KEY=VALUE lines)
 //
 // They are recognised only as a LEADING run of arguments: for `run`, before
@@ -22,12 +22,12 @@ import (
 // one of these ends the scan and everything from there on belongs to claude,
 // so a claude flag can never be mistaken for ours and vice versa. Each flag
 // takes its value as the next argument or after "=".
-const launchFlagsUsage = "[--env-profile NAME] [--env KEY=VALUE] [--unset KEY] [--env-file PATH]"
+const launchFlagsUsage = "[--env-set NAME] [--env KEY=VALUE] [--block KEY] [--env-file PATH]"
 
 // runFlagsUsage adds the sandbox family, which only run accepts.
 const runFlagsUsage = launchFlagsUsage + " [--sandbox[=BACKEND] | --no-sandbox] [--sandbox-host USER@HOST] [--sandbox-fresh] [--clone] [--workdir PATH] [--mount PATH[:ro]]"
 
-var launchFlagNames = map[string]bool{"--env-profile": true, "--env": true, "--unset": true, "--env-file": true}
+var launchFlagNames = map[string]bool{"--env-set": true, "--env": true, "--block": true, "--env-file": true}
 
 // takeLaunchFlags consumes leading launch flags from args and returns the
 // remaining arguments and the layers they describe, in order. Validation is
@@ -77,8 +77,8 @@ func takeLaunchFlagsWith(args []string, bools map[string]*bool) (rest []string, 
 
 func launchLayer(flag, value string) (*manifest.Env, error) {
 	switch flag {
-	case "--env-profile":
-		if err := manifest.ValidateProfileName(value); err != nil {
+	case "--env-set":
+		if err := manifest.ValidateSetName(value); err != nil {
 			return nil, err
 		}
 		return &manifest.Env{Sets: []string{value}}, nil
@@ -94,9 +94,9 @@ func launchLayer(flag, value string) (*manifest.Env, error) {
 			return nil, err
 		}
 		return &manifest.Env{Set: map[string]string{key: val}}, nil
-	case "--unset":
+	case "--block":
 		if strings.Contains(value, "=") {
-			return nil, fmt.Errorf("--unset expects a variable name, got %q", value)
+			return nil, fmt.Errorf("--block expects a variable name, got %q", value)
 		}
 		if err := manifest.ValidateEnvKey(value); err != nil {
 			return nil, err

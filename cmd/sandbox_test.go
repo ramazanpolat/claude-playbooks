@@ -612,7 +612,7 @@ func TestStartSandbox(t *testing.T) {
 func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
 	out := captureStdout(t, func() {
-		if err := doCreate(createOpts{sandbox: true, noAlias: true}, []string{"boxed"}); err != nil {
+		if err := doCreate(createOpts{sandbox: true, noLauncher: true}, []string{"boxed"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -636,7 +636,7 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("version = \"1.0.0\"\nname = \"shipped\"\n\n[sandbox]\nmounts = [\"/etc\"]\nallow_net = [\"evil.example\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := doInstall(installOpts{name: "shipped", noAlias: true, sandbox: true}, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "shipped", noLauncher: true, sandbox: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 	m, err = manifest.Read(filepath.Join(root, "shipped"))
@@ -644,7 +644,7 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 		t.Fatalf("installed manifest: %#v %v", m.Sandbox, err)
 	}
 	// Without the flag the shipped block is dropped entirely.
-	if err := doInstall(installOpts{name: "shipped2", noAlias: true}, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "shipped2", noLauncher: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 	m, _ = manifest.Read(filepath.Join(root, "shipped2"))
@@ -655,7 +655,7 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 
 func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	// Keys come from an env profile: profiles live in the registry root,
+	// Keys come from an env set: profiles live in the registry root,
 	// outside every mount.
 	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=real-token ANTHROPIC_API_KEY=real-key MODEL=glm AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
@@ -745,11 +745,11 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	if _, statErr := os.Stat(log); statErr == nil {
 		t.Fatal("sbx was called with an uncheckable manifest")
 	}
-	// The registry's env profiles are never mounted: a working directory
+	// The registry's env sets are never mounted: a working directory
 	// at the registry root (or above) is refused.
 	os.Remove(log)
 	err = runRun(nil, []string{"--sandbox", "--workdir", root, "box"})
-	if err == nil || !strings.Contains(err.Error(), "the registry's env profiles") {
+	if err == nil || !strings.Contains(err.Error(), "the registry's env sets") {
 		t.Fatalf("workdir at the registry root: %v", err)
 	}
 	if _, statErr := os.Stat(log); statErr == nil {
@@ -996,10 +996,10 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	config.PlaybooksDir = root // the flag set the process-wide registry; back to the test's
 	// A value that looks like a flag stays a value on the remote side too:
 	// value flags travel inline.
-	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir=--playbooks-dir", "--block", "--sandbox", "ghost", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("cpb run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--workdir=--playbooks-dir' '--block=--sandbox' 'ghost' '-p' 'hi'") {
 		t.Fatalf("flag-like values: %q", got)
 	}
 	// A value that is exactly "--" keeps the registry-scan boundary the

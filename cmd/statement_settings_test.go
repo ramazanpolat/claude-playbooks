@@ -134,7 +134,7 @@ func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
 func TestDefaultClaudeMDPlain(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK fresh NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK fresh NO LAUNCHER")
 	data, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "fresh", "CLAUDE.md"))
 	if err != nil {
 		t.Fatal(err)

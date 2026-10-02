@@ -155,7 +155,7 @@ func TestInstallNameIsTheStatementsNotTheManifests(t *testing.T) {
 	source := testPlaybookSource(t, "../escape")
 	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
 
-	if err := doInstall(installOpts{name: "pb", noAlias: true}, []string{source}); err != nil {
+	if err := doInstall(installOpts{name: "pb", noLauncher: true}, []string{source}); err != nil {
 		t.Fatal(err)
 	}
 	if m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "pb")); err != nil || m == nil || m.Name != "pb" {
@@ -178,7 +178,7 @@ func TestInstallRejectsEscapingSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	if err := doInstall(installOpts{subdir: "../sibling", noAlias: true}, []string{source}); err == nil {
+	if err := doInstall(installOpts{subdir: "../sibling", noLauncher: true}, []string{source}); err == nil {
 		t.Fatal("expected escaping --subdir to be rejected")
 	}
 	entries, err := os.ReadDir(config.PlaybooksDir)
@@ -239,7 +239,7 @@ func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 		}
 	}
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	if err := doInstall(installOpts{name: "custom-update", noAlias: true}, []string{"file://" + repo}); err != nil {
+	if err := doInstall(installOpts{name: "custom-update", noLauncher: true}, []string{"file://" + repo}); err != nil {
 		t.Fatal(err)
 	}
 	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "custom-update"))
@@ -340,7 +340,7 @@ func TestInstallRewritesManifestNameToInstallName(t *testing.T) {
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
 	src := testPlaybookSource(t, "kommander")
 
-	if err := doInstall(installOpts{name: "kommander-dev", noAlias: true}, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "kommander-dev", noLauncher: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -506,7 +506,7 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Command name "x" belongs to bbb via its manifest alias.
+	// Command name "x" belongs to bbb via its manifest launcher.
 	if err := manifest.Write(filepath.Join(config.PlaybooksDir, "bbb"),
 		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Launcher: "x"}); err != nil {
 		t.Fatal(err)
@@ -515,7 +515,7 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := doRename(renameOpts{alias: "x"}, []string{"aaa", "ccc"})
+	err := doRename(renameOpts{launcher: "x"}, []string{"aaa", "ccc"})
 	if err == nil {
 		t.Fatal("expected collision error")
 	}

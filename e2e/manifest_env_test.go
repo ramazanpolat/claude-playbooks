@@ -161,7 +161,7 @@ func TestMissingProfileRefusesLaunch(t *testing.T) {
 		env:  []string{tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")},
 		args: []string{"run", "router"},
 	})
-	if !strings.Contains(out, `env profile "ghost" not found`) {
+	if !strings.Contains(out, `env set "ghost" not found`) {
 		t.Fatalf("refusal did not name the profile:\n%s", out)
 	}
 }
@@ -181,11 +181,11 @@ func TestBrokenProfileRefusesLaunch(t *testing.T) {
 	noToken := tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")
 
 	out := launchFails(t, root, launch{env: []string{noToken}, args: []string{"run", "router"}})
-	if !strings.Contains(out, `env profile "broken"`) {
+	if !strings.Contains(out, `env set "broken"`) {
 		t.Fatalf("run refusal did not name the profile:\n%s", out)
 	}
 	out = launchFails(t, root, launch{env: []string{noToken}, args: []string{"start", cfg}})
-	if !strings.Contains(out, `env profile "broken"`) {
+	if !strings.Contains(out, `env set "broken"`) {
 		t.Fatalf("start refusal did not name the profile:\n%s", out)
 	}
 }
@@ -245,7 +245,7 @@ func TestRegistryDefaultProfileReachesChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := launchFails(t, root, launch{env: []string{noToken}, args: []string{"run", "plain"}})
-	if !strings.Contains(out, `env profile "ghost" not found`) {
+	if !strings.Contains(out, `env set "ghost" not found`) {
 		t.Fatalf("missing default did not refuse:\n%s", out)
 	}
 }

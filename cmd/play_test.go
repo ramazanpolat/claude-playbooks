@@ -35,11 +35,11 @@ const routerRecipe = "-- title: Router\n-- description: GLM through a router.\n\
 func TestPlaySetup(t *testing.T) {
 	t.Setenv("MY_SECRET_TOKEN", "do-not-print")
 	plain := playSetup("play-x-000000", play.Check([]byte("ALTER PLAYBOOK SET MODEL 'm';\n")))
-	if plain != "CREATE PLAYBOOK IF NOT EXISTS play-x-000000 NO ALIAS;\n" {
+	if plain != "CREATE PLAYBOOK IF NOT EXISTS play-x-000000 NO LAUNCHER;\n" {
 		t.Fatalf("plain: %q", plain)
 	}
 	moved := playSetup("play-x-000000", play.Check([]byte(routerRecipe)))
-	for _, want := range []string{"NO ALIAS ISOLATED LOGIN;", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
+	for _, want := range []string{"NO LAUNCHER ISOLATED LOGIN;", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
 		if !strings.Contains(moved, want) {
 			t.Errorf("endpoint moved: %q lacks %q", moved, want)
 		}

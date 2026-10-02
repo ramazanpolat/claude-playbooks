@@ -223,15 +223,15 @@ func detachSharedCredentials(targetDir string) error {
 	return nil
 }
 
-// IsolateAuthEnv forces the isolation path for a launch when set to "true".
-const IsolateAuthEnv = "CPB_ISOLATED_LOGIN"
+// IsolatedLoginEnv forces the isolation path for a launch when set to "true".
+const IsolatedLoginEnv = "CPB_ISOLATED_LOGIN"
 
 // IsAuthIsolated reports whether launches of targetDir run with isolated
 // authentication (manifest isolated_login, or the override variable).
 func IsAuthIsolated(targetDir string) bool { return isAuthIsolated(targetDir) }
 
 func isAuthIsolated(targetDir string) bool {
-	if os.Getenv(IsolateAuthEnv) == "true" {
+	if os.Getenv(IsolatedLoginEnv) == "true" {
 		return true
 	}
 	// A read error on the way up is not a reason to drop isolation: the

@@ -144,7 +144,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	// Launcher commands take display precedence over manifest aliases: a
 	// launcher-only playbook has a working command and must not be shown as
-	// "(no alias set)".
+	// "(no launcher)".
 	// Gate before resolving: ResolveLauncherDir probes directory writability
 	// by creating a temp file, which a custom-root invocation must not do.
 	launcherNames := map[string]bool{}
@@ -171,7 +171,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		if command != "" {
 			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, command)
 		} else {
-			fmt.Printf("  %-*s  %-*s  (no command registered)\n", maxLen, pb.Name, cmdColW, runStr)
+			fmt.Printf("  %-*s  %-*s  (no launcher)\n", maxLen, pb.Name, cmdColW, runStr)
 		}
 	}
 

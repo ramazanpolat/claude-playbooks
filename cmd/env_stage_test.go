@@ -28,7 +28,7 @@ func TestLocalSourceStagesOutsideItselfWhenTmpdirIsInside(t *testing.T) {
 	}
 	t.Setenv("TMPDIR", filepath.Join(source, "tmp"))
 
-	if err := doInstall(installOpts{name: "pb", noAlias: true}, []string{source}); err != nil {
+	if err := doInstall(installOpts{name: "pb", noLauncher: true}, []string{source}); err != nil {
 		t.Fatal(err)
 	}
 	installed := filepath.Join(config.PlaybooksDir, "pb")
@@ -79,7 +79,7 @@ func TestStagingRefusalCreatesNothingInsideSource(t *testing.T) {
 	t.Setenv("HOME", filepath.Join(source, "home"))            // darwin cache dir; does not exist
 	before, _ := os.ReadDir(source)
 
-	err := doInstall(installOpts{name: "pb", noAlias: true}, []string{source})
+	err := doInstall(installOpts{name: "pb", noLauncher: true}, []string{source})
 	if err == nil || !strings.Contains(err.Error(), "cannot stage") {
 		t.Fatalf("install with every candidate inside the source: err = %v", err)
 	}
@@ -109,7 +109,7 @@ func TestRelativeTmpdirInsideSourceIsRejected(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(wd) })
 	t.Setenv("TMPDIR", ".tmp")
 
-	if err := doInstall(installOpts{name: "pb", noAlias: true}, []string{source}); err != nil {
+	if err := doInstall(installOpts{name: "pb", noLauncher: true}, []string{source}); err != nil {
 		t.Fatal(err)
 	}
 	if entries, _ := os.ReadDir(filepath.Join(source, ".tmp")); len(entries) != 0 {
@@ -132,7 +132,7 @@ func TestSubdirInstallNeverStagesInsideSourceRoot(t *testing.T) {
 	}
 	t.Setenv("TMPDIR", filepath.Join(source, "tmp")) // sibling of the subdir, does not exist
 
-	if err := doInstall(installOpts{name: "pb", subdir: "playbook", noAlias: true}, []string{source}); err != nil {
+	if err := doInstall(installOpts{name: "pb", subdir: "playbook", noLauncher: true}, []string{source}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(source, "tmp")); err == nil {

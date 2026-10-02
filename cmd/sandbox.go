@@ -18,7 +18,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
@@ -306,7 +306,7 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	}
 	for _, t := range tokens {
 		if t.flag == "--env-file" {
-			return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env profile on that host, or --env KEY=VALUE", host)
+			return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env set on that host, or --env KEY=VALUE", host)
 		}
 	}
 	var f []string
@@ -798,7 +798,7 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
-	if errors.Is(syncErr, envprofile.ErrProfile) {
+	if errors.Is(syncErr, envset.ErrSet) {
 		return nil, "", syncErr
 	}
 	if syncErr != nil {
@@ -953,10 +953,10 @@ func machineLoginInside(mount string) string {
 			return "the machine's long-lived token file " + resolved
 		}
 	}
-	// The registry's env profiles are its secret store (proxy injection
+	// The registry's env sets are its secret store (proxy injection
 	// keeps their keys out of the sandbox only while the files stay out).
-	if profiles, err := filepath.EvalSymlinks(envprofile.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
-		return "the registry's env profiles " + profiles
+	if profiles, err := filepath.EvalSymlinks(envset.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
+		return "the registry's env sets " + profiles
 	}
 	return ""
 }
@@ -1064,7 +1064,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	// on the way up is checked while its directory lies under one of this
 	// launch's mounts (a subdir install keeps its [env] in the root's; a
 	// start directory under the working directory inherits from above
-	// it). Env profiles live in the registry root, outside every mount,
+	// it). Env sets live in the registry root, outside every mount,
 	// so that is where a secret belongs; refused before the sandbox
 	// exists.
 	if sb.Secrets != "env" {

@@ -90,7 +90,7 @@ credential variables are blocked. Attach a key for that host yourself, by name.
   Google ones, and any variable whose name looks like a secret) is blocked in
   it. Your key for Anthropic never reaches someone else's host.
 - If the host does need a key, give it one of your env sets by name:
-  `--env routerkey`. Its keys are the only ones that follow.
+  `--env-set routerkey`. Its keys are the only ones that follow.
 
 A proxy (`HTTPS_PROXY`) and a change to which certificates are trusted are
 typed the same way. A secret reference (`SET VAR GH FROM 'keychain:…'`) is
@@ -124,7 +124,7 @@ Without a terminal, `cpb play` never prompts:
 ```
 cpb play ./reviewer.cpb --dry-run --json          # the plan, as APPLY --dry-run --json, plus a "play" block
 cpb play ./reviewer.cpb --yes                     # the yes
-cpb play ./router.cpb --yes --trust-endpoint router.example.net --env routerkey
+cpb play ./router.cpb --yes --trust-endpoint router.example.net --env-set routerkey
 cpb play ./tools.cpb --yes --trust-secret keychain:gh --no-sandbox
 cpb play https://example.com/x.cpb --sha256 c684ff05…   # refuse any other bytes, before anything is shown
 ```
@@ -161,7 +161,7 @@ Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with c
 - It lives in your store, so your `DEFAULTS` apply to it like to any
   playbook, and the preview names them. When the recipe moves the endpoint,
   their keys are blocked in it ("will NOT follow it to …") unless you attach
-  a set with `--env`.
+  a set with `--env-set`.
 - A recipe that asks for a sandbox is kept as a `SANDBOX` playbook
   (`--no-sandbox` overrides that).
 - The exact bytes are kept in the playbook (`.play/recipe.cpb`) and the
@@ -226,6 +226,6 @@ of templates the way the site's CI does: every template, the header, and an
 ## See also
 
 - [Sandboxed sessions](sandbox.md): the sandbox backends.
-- [Environment overrides](environment.md): env sets, which `--env` attaches.
+- [Environment overrides](environment.md): env sets, which `--env-set` attaches.
 - [CLI grammar](../reference/cli-grammar.md#cpb-play): the full reference.
 - [Example 21](../../examples/21-play/): a recipe checked, planned and kept in CI.

@@ -30,14 +30,14 @@ import (
 
 // dirRefusals names why each refused clause cannot apply to a directory.
 var dirRefusals = map[grammar.Kind]string{
-	grammar.SetRef:   "a secret reference is resolved by cpb's launcher, which never runs for this directory",
-	grammar.BlockVar: "removing a variable at launch is the launcher's job",
-	grammar.UseEnv:   "env sets are layered by the launcher",
-	grammar.AddEnv:   "env sets are layered by the launcher",
-	grammar.DropEnv:  "env sets are layered by the launcher",
-	grammar.RenameTo: "the directory is not in the registry",
-	grammar.Alias:    "the directory has no launcher",
-	grammar.NoAlias:  "the directory has no launcher",
+	grammar.SetRef:     "a secret reference is resolved by cpb's launcher, which never runs for this directory",
+	grammar.BlockVar:   "removing a variable at launch is the launcher's job",
+	grammar.UseEnv:     "env sets are layered by the launcher",
+	grammar.AddEnv:     "env sets are layered by the launcher",
+	grammar.DropEnv:    "env sets are layered by the launcher",
+	grammar.RenameTo:   "the directory is not in the registry",
+	grammar.Launcher:   "the directory has no launcher",
+	grammar.NoLauncher: "the directory has no launcher",
 
 	grammar.SetIsolatedLogin:   "isolated_login is recorded in a playbook's manifest, which the directory does not have",
 	grammar.UnsetIsolatedLogin: "isolated_login is recorded in a playbook's manifest, which the directory does not have",
@@ -412,7 +412,7 @@ func readDirState() (*dirStateFile, error) {
 			continue
 		}
 		for n, rec := range e.Skills {
-			if manifest.ValidateProfileName(n) != nil || rec == nil || (rec.Mode != "link" && rec.Mode != "copy") {
+			if manifest.ValidateSetName(n) != nil || rec == nil || (rec.Mode != "link" && rec.Mode != "copy") {
 				return nil, fmt.Errorf("%s: an invalid skill record %q for %s", dirStatePath(), n, d)
 			}
 		}

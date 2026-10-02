@@ -36,7 +36,7 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 | Object | What it is | Lives at |
 |---|---|---|
 | `PLAYBOOK` | an installed playbook: dir, launcher, source, attached ENVs, own variables | `<root>/<name>/` |
-| `ENV` | an **env set**: a named, reusable set of variables (formerly "env profile") | `<root>/.env-sets/<name>.toml` |
+| `ENV` | an **env set**: a named, reusable set of variables (formerly "env set") | `<root>/.env-sets/<name>.toml` |
 | `DEFAULTS` | the machine-wide layer under every playbook: an ordered list of env sets; a singleton, no name | `<root>/.env-sets/.defaults` |
 
 Two words keep the variables apart: **`ENV` is a named set**, **`VAR` is one
@@ -68,14 +68,14 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
 
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
             | LINK <dir>                                    develop in place
-launcher   := ALIAS <launcher> | NO ALIAS                   default: the name
+launcher   := LAUNCHER <launcher> | NO LAUNCHER                   default: the name
 
 env-clause := SET [VAR] <key>=<value> ... [AS PLAINTEXT]
                                            literal values; AS PLAINTEXT: see Secrets
             | SET [VAR] <key> FROM '<ref>' secret by reference; resolved at launch
             | BLOCK [VAR] <key> ...        removed at launch even if the shell exports it
             | UNSET [VAR] <key> ...        forgotten; the layer below applies again
-            | DESCRIBE '<text>'
+            | DESCRIPTION '<text>'
 
 set-clause := USE ENV <env> ...            replace the attached list with exactly these, in order
             | ADD ENV <env> [FIRST | LAST | BEFORE <env> | AFTER <env>]
@@ -93,8 +93,8 @@ pb-clause  := set-clause
             | BLOCK VAR <key> ...
             | UNSET VAR <key> ...          forget the playbook's own entry (set, ref or block)
             | RENAME TO <name>
-            | ALIAS <launcher>             set or replace the launcher (one per playbook)
-            | NO ALIAS                     remove the launcher
+            | LAUNCHER <launcher>             set or replace the launcher (one per playbook)
+            | NO LAUNCHER                     remove the launcher
             | ADD MARKETPLACE <name> FROM '<source>'   see "Plugins and the agent"
             | DROP MARKETPLACE <name>
             | ADD PLUGIN <plugin>@<marketplace>
@@ -123,8 +123,8 @@ pb-clause  := set-clause
 
 mcp-target := COMMAND '<command>' [ARGS '<arg>' ...]    a stdio server
             | URL '<url>' [TRANSPORT SSE]               a remote server (HTTP unless SSE)
-mcp-part   := ENV <key>=<value> ...          literal values; a credential needs FROM
-            | ENV <key> FROM '<ref>'
+mcp-part   := VAR <key>=<value> ...          literal values; a credential needs FROM
+            | VAR <key> FROM '<ref>'
             | HEADER '<name>' '<value>'
             | HEADER '<name>' FROM '<ref>'
 
@@ -136,16 +136,16 @@ read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> 
 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
 and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
-and `BRANCH` / `SUBDIR` only with `FROM`; `ALIAS` and `NO ALIAS` exclude each
+and `BRANCH` / `SUBDIR` only with `FROM`; `LAUNCHER` and `NO LAUNCHER` exclude each
 other; `SANDBOX` and `ISOLATED LOGIN` do not take `LINK`. The clauses of
 `origin`, `launcher`, `SANDBOX` and `ISOLATED LOGIN` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal; `--yes` skips it.
 
 Two limits keep every statement whole-or-nothing:
 
-- `RENAME TO`, `ALIAS` and `NO ALIAS` are not combined with environment or
+- `RENAME TO`, `LAUNCHER` and `NO LAUNCHER` are not combined with environment or
   variable clauses in one statement: a rename after an environment write
-  could not be undone as one step. `RENAME TO <name> ALIAS <launcher>` is
+  could not be undone as one step. `RENAME TO <name> LAUNCHER <launcher>` is
   one statement; the environment change is a second.
 - `CREATE PLAYBOOK … LINK <dir>` needs the target to have a `.playbook`: a
   statement never prompts for one. `SANDBOX` does not apply to `LINK`,
@@ -211,7 +211,7 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
 | `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-sets/.defaults`, one set name per line, in order |
 | `ALTER DEFAULTS SET / UNSET SECRET HELPER` | `<root>/.env-sets/.secret-helper`, one line: the command |
-| `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher |
+| `CREATE / DROP PLAYBOOK`, `RENAME TO`, `LAUNCHER`, `NO LAUNCHER` | the playbook dir, the registry and the launcher |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
 | `ALTER PLAYBOOK … SET / UNSET AGENT` | the playbook's `settings.json`, `agent` |
 | `ALTER PLAYBOOK … ADD / DROP MCP SERVER` | nothing directly: runs `claude mcp add-json / remove --scope user` for the playbook; a reference also writes the playbook's `[env.refs]` (see "An agent's configuration") |
@@ -427,7 +427,7 @@ devbox project, and moving a setup to another machine is one command.
 -- playbook.cpb, from: cpb SHOW CREATE ALL > playbook.cpb
 
 CREATE OR REPLACE ENV router
-  DESCRIBE 'GLM via a local router'
+  DESCRIPTION 'GLM via a local router'
   SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
   SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token';
 
@@ -437,7 +437,7 @@ CREATE OR REPLACE ENV claude-default
 ALTER DEFAULTS USE ENV claude-default;
 
 CREATE PLAYBOOK IF NOT EXISTS work
-  FROM https://github.com/example/work-playbook BRANCH v1.2.0 ALIAS w;
+  FROM https://github.com/example/work-playbook BRANCH v1.2.0 LAUNCHER w;
 
 ALTER PLAYBOOK work
   USE ENV router
@@ -598,8 +598,8 @@ cpb ALTER PLAYBOOK work DROP ENV deepseek-flash
 cpb ALTER PLAYBOOK work BLOCK VAR HTTP_PROXY
 cpb ALTER DEFAULTS USE ENV claude-default corp-proxy
 cpb ALTER DEFAULTS SET SECRET HELPER 'my-keychain-helper'
-cpb CREATE PLAYBOOK scratch FROM https://github.com/example/work-playbook ALIAS sc
-cpb ALTER PLAYBOOK scratch ALIAS scr
+cpb CREATE PLAYBOOK scratch FROM https://github.com/example/work-playbook LAUNCHER sc
+cpb ALTER PLAYBOOK scratch LAUNCHER scr
 cpb ALTER PLAYBOOK scratch RENAME TO lab
 cpb DROP PLAYBOOK lab
 cpb SHOW ENVS
@@ -889,7 +889,7 @@ for example a reviewer agent from a plugin, on a bare playbook:
 
 ```
 -- base.cpb
-CREATE PLAYBOOK IF NOT EXISTS reviewer NO ALIAS;
+CREATE PLAYBOOK IF NOT EXISTS reviewer NO LAUNCHER;
 ALTER PLAYBOOK reviewer USE ENV router;
 
 -- agent.cpb
@@ -1162,13 +1162,13 @@ nothing of cpb runs at that directory's launches:
 
 Refused, each with its reason:
 
-- `SET VAR K FROM '<ref>'`, and `ENV` / `HEADER … FROM` on an MCP server: a
+- `SET VAR K FROM '<ref>'`, and `VAR` / `HEADER … FROM` on an MCP server: a
   reference is resolved by cpb's launcher, which never runs for that
   directory.
 - `BLOCK VAR`: removing a variable at launch is the launcher's job.
 - `USE / ADD / DROP ENV`, and `ALTER DEFAULTS`: env sets and `DEFAULTS` are
   layered by the launcher.
-- `RENAME TO`, `ALIAS`, `NO ALIAS`, `SANDBOX`: the directory is not in the
+- `RENAME TO`, `LAUNCHER`, `NO LAUNCHER`, `SANDBOX`: the directory is not in the
   registry and has no launcher.
 - `SET / UNSET ISOLATED LOGIN`: `isolated_login` is recorded in a playbook's
   manifest, which the directory does not have.
@@ -1232,7 +1232,7 @@ and, for a remote server, its request headers (`HEADER`). `DROP MCP SERVER
   `.claude.json`. cpb reads them from there to decide what already holds;
   `claude mcp list` is not used, because it connects to every server to
   check its health.
-- **Secrets never enter Claude's config.** `ENV K FROM '<ref>'` and
+- **Secrets never enter Claude's config.** `VAR K FROM '<ref>'` and
   `HEADER '<name>' FROM '<ref>'` store the reference in the playbook's own
   layer (`[env.refs]`) under a derived variable and write only `${<variable>}`
   into the server's config. The variable is
@@ -1548,7 +1548,7 @@ shows `SHOW CREATE`, copies statements and commands, and exports a `.cpb`.
 | Playbooks | `SHOW PLAYBOOKS --json`, `SHOW SESSIONS --json` | name, launcher, version, env sets, login kind (`shared`, `isolated`, `sandbox`), live-session count, model |
 | a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview, Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line (history), Model (the picker), Sessions |
 | Sessions | `SHOW SESSIONS --json` | pid, tty, kind, status, age, last active, model, folder; the footer says where past sessions are, `past sessions: <launcher> --resume` |
-| Env sets | `SHOW ENVS --json` | the env sets (env profiles): variables, `used_by`, default |
+| Env sets | `SHOW ENVS --json` | the env sets: variables, `used_by`, default |
 | Defaults | `SHOW DEFAULTS --json` | the env sets under every playbook, the secret helper |
 | Log | none | what this session copied and exported |
 
@@ -1636,7 +1636,7 @@ available. `--keep` keeps it as a playbook of your own instead. The guide is
 [Try someone else's playbook](../guides/play.md).
 
 ```
-cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env <set>]...
+cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env-set <set>]...
                [--sandbox[=sbx] | --no-sandbox] [--sha256 <hex>] [-- <claude arguments>]
                                                        preview, confirm, run, remove
 cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals and risks
@@ -1680,7 +1680,7 @@ PLAYBOOK` statements: a recipe. These clauses are allowed:
 - `SET MODEL`, `ADD MODEL`, `SET MODEL PICKER`;
 - `ADD SKILL` from a git source;
 - `SET VAR` (not a credential), `SET VAR … FROM '<ref>'`, `BLOCK VAR`;
-- `SET ISOLATED LOGIN`, `NO ALIAS`.
+- `SET ISOLATED LOGIN`, `NO LAUNCHER`.
 
 Refused, each with its line and reason:
 - **anything outside the one playbook `play` makes:** `INCLUDE`, `USE
@@ -1694,7 +1694,7 @@ Refused, each with its line and reason:
 - **an MCP server URL carrying credentials** (`https://user:token@…`);
 - **a local directory source** for a marketplace or a skill, and a skill from
   `http://` or `file://`;
-- **`UNSET ISOLATED LOGIN`, `RENAME TO`, `ALIAS`, `NO ALIAS`:** play decides
+- **`UNSET ISOLATED LOGIN`, `RENAME TO`, `LAUNCHER`, `NO LAUNCHER`:** play decides
   these;
 - **`DROP …` and `UNSET …`:** nothing to undo on a new playbook.
 
@@ -1747,7 +1747,7 @@ store**, a fresh temp directory with only your secret helper setting copied.
 So your `DEFAULTS` and env sets never layer into a played recipe, and
 nothing is written to your store. The plan is `APPLY`'s, for two files:
 - a setup file: `CREATE PLAYBOOK IF NOT EXISTS play-<name>-<6 hex> NO
-  ALIAS`, with `ISOLATED LOGIN` and the `BLOCK VAR` above when
+  LAUNCHER`, with `ISOLATED LOGIN` and the `BLOCK VAR` above when
   the endpoint moves;
 - the recipe.
 
@@ -1822,7 +1822,7 @@ must be typed: each model-endpoint or proxy host needs `--trust-endpoint
 `--trust-secret <ref>`. A missing one refuses, naming the flags. Without
 `--yes`, a run off a terminal is refused.
 
-**`--env <set>`** copies one of your env sets into the throwaway store and
+**`--env-set <set>`** copies one of your env sets into the throwaway store and
 attaches it (`USE ENV`, in the order given). It is how a key reaches a moved
 endpoint: the keys it sets are left out of the credential `BLOCK`, and
 nothing else of yours follows.
@@ -1855,7 +1855,7 @@ runs no session:
   is refused;
 - your `DEFAULTS` apply to it like to any playbook, and the preview names
   them. When the endpoint moves, every key they carry is blocked in it ("will
-  NOT follow it to <host>"), except those of an `--env` set (attached with
+  NOT follow it to <host>"), except those of an `--env-set` set (attached with
   `USE ENV`) and those the recipe sets itself;
 - the exact bytes are kept as `<playbook>/.play/recipe.cpb`, and the
   manifest gains:

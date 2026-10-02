@@ -21,7 +21,7 @@ Pages are grouped by what you came for:
 | [Installation](guides/installation.md) | install script, devbox/Nix, npx, source builds, updating, uninstalling |
 | [Managing playbooks](guides/managing-playbooks.md) | create, install, link, launch, rename, update, delete |
 | [Authentication](guides/authentication.md) | shared logins, long-lived tokens, isolated accounts |
-| [Environment overrides](guides/environment.md) | per-playbook variables and shared env profiles |
+| [Environment overrides](guides/environment.md) | per-playbook variables and shared env sets |
 | [Sandboxed sessions](guides/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
 | [Try someone else's playbook](guides/play.md) | `cpb play`: preview, confirm, run in a throwaway playbook, keep, update |
 | [Query with SQL](guides/query-with-sql.md) | `cpb SELECT …`, and `cpb SHOW … --json` piped into `ch local` |

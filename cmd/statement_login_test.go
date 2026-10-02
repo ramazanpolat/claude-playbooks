@@ -37,7 +37,7 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mustStmt(t, "CREATE PLAYBOOK a NO ALIAS ISOLATED LOGIN")
+	mustStmt(t, "CREATE PLAYBOOK a NO LAUNCHER ISOLATED LOGIN")
 	if !isolateAuthOf(t, "a") {
 		t.Fatal("CREATE … ISOLATED LOGIN did not record isolated_login")
 	}
@@ -121,7 +121,7 @@ func TestIsolatedLogin(t *testing.T) {
 
 	// A sandboxed playbook is isolated by SANDBOX: UNSET is refused and
 	// SHOW CREATE does not repeat it.
-	mustStmt(t, "CREATE PLAYBOOK s NO ALIAS SANDBOX")
+	mustStmt(t, "CREATE PLAYBOOK s NO LAUNCHER SANDBOX")
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK s UNSET ISOLATED LOGIN"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("UNSET on a sandboxed playbook: %v", err)
 	}
@@ -146,11 +146,11 @@ func TestIsolatedLogin(t *testing.T) {
 func TestIsolatedLoginDryRun(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	f := writePlaybookFile(t, "CREATE PLAYBOOK d NO ALIAS SANDBOX;\nALTER PLAYBOOK d UNSET ISOLATED LOGIN;\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK d NO LAUNCHER SANDBOX;\nALTER PLAYBOOK d UNSET ISOLATED LOGIN;\n")
 	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("dry run, UNSET on a sandboxed playbook: %v", err)
 	}
-	f = writePlaybookFile(t, "CREATE PLAYBOOK e NO ALIAS;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\n")
+	f = writePlaybookFile(t, "CREATE PLAYBOOK e NO LAUNCHER;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\n")
 	out, err := apply(t, f, "--dry-run")
 	if err != nil || !strings.Contains(out, "1 created, 1 changed, 1 unchanged") {
 		t.Fatalf("dry run:\n%v\n%s", err, out)
@@ -180,7 +180,7 @@ func TestIsolatedLoginSandboxAndRename(t *testing.T) {
 	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("dry run after a rename: %v", err)
 	}
-	mustStmt(t, "CREATE PLAYBOOK own NO ALIAS ISOLATED LOGIN")
+	mustStmt(t, "CREATE PLAYBOOK own NO LAUNCHER ISOLATED LOGIN")
 	own := filepath.Join(config.ResolvePlaybooksDir(), "own", ".credentials.json")
 	if err := os.WriteFile(own, []byte(`{"claudeAiOauth":{"accessToken":"own"}}`), 0o600); err != nil {
 		t.Fatal(err)

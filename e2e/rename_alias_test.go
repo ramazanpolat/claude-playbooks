@@ -56,7 +56,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 		return string(out)
 	}
 
-	cpb("CREATE", "PLAYBOOK", "oldpb", "ALIAS", "ab")
+	cpb("CREATE", "PLAYBOOK", "oldpb", "LAUNCHER", "ab")
 	cpb("ALTER", "PLAYBOOK", "oldpb", "RENAME", "TO", "newpb")
 
 	// Executing the launcher is what happens when the user types `ab`.

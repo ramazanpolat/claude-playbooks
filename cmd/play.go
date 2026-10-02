@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
@@ -84,7 +84,7 @@ func init() {
 	playCmd.Flags().BoolVar(&playYes, "yes", false, "answer the yes, for scripts; never confirms an endpoint, a proxy, TLS or a secret")
 	playCmd.Flags().StringArrayVar(&playTrustEndpoint, "trust-endpoint", nil, "without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
 	playCmd.Flags().StringArrayVar(&playTrustSecret, "trust-secret", nil, "without a terminal: confirm a secret reference; repeatable")
-	playCmd.Flags().StringArrayVar(&playEnvSets, "env", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
+	playCmd.Flags().StringArrayVar(&playEnvSets, "env-set", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
 	playCmd.Flags().StringVar(&playSandboxFlag, "sandbox", "", "run sandboxed (the default where sbx is available); =sbx names the backend")
 	playCmd.Flags().Lookup("sandbox").NoOptDefVal = "auto"
 	playCmd.Flags().BoolVar(&playNoSandbox, "no-sandbox", false, "run on this machine, as you; the preview says so")
@@ -317,10 +317,10 @@ func playBlockedVars() []string {
 func playSetup(name string, res *play.Result) string { return playSetupKeeping(name, res, nil) }
 
 // playSetupKeeping is playSetup with keep's keys left out of the credential
-// BLOCK: the ones an --env set the user attached provides.
+// BLOCK: the ones an --env-set set the user attached provides.
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO ALIAS", name)
+	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO LAUNCHER", name)
 	if res.Endpoint != "" {
 		b.WriteString(" ISOLATED LOGIN")
 	}
@@ -353,11 +353,11 @@ func withThrowawayStore(fn func(dir string) error) error {
 		return err
 	}
 	store := filepath.Join(tmp, "store")
-	if err := os.MkdirAll(envprofile.Dir(store), 0o700); err != nil {
+	if err := os.MkdirAll(envset.Dir(store), 0o700); err != nil {
 		return err
 	}
-	if h, err := envprofile.SecretHelper(envprofile.Dir(userStore)); err == nil && h != nil {
-		if err := envprofile.SetSecretHelper(envprofile.Dir(store), h.Command); err != nil {
+	if h, err := envset.SecretHelper(envset.Dir(userStore)); err == nil && h != nil {
+		if err := envset.SetSecretHelper(envset.Dir(store), h.Command); err != nil {
 			return err
 		}
 	}

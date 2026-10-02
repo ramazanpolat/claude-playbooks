@@ -21,7 +21,7 @@ Say you reach a model through a local router. Put its variables in an env set,
 a named group that any playbook can use:
 
 ```bash
-cpb CREATE ENV router DESCRIBE 'my model router' SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
+cpb CREATE ENV router DESCRIPTION 'my model router' SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
 cpb ALTER PLAYBOOK scratch USE ENV router
 cpb EXPLAIN PLAYBOOK scratch
 ```

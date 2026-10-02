@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -72,7 +72,7 @@ func TestApplyTargetDiscoveryError(t *testing.T) {
 	if _, err := apply(t, recipe, "TO", "fresh"); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 		t.Fatalf("discovery error: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(envprofile.Dir(root), "e.toml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(envset.Dir(root), "e.toml")); !os.IsNotExist(err) {
 		t.Fatal("a statement ran before the registry error")
 	}
 }

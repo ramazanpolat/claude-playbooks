@@ -25,7 +25,7 @@ cpb APPLY recipe.cpb TO frontend --dry-run --json   # the plan as JSON, for a pr
   `settings.json` (and `.claude.json` before an MCP change) once per run, as
   `<file>.cpb-backup-<timestamp>`, and asks before it writes; `--yes`
   answers for a script. Launcher-only clauses (env sets, references,
-  `BLOCK VAR`, aliases) are refused there, each with its reason.
+  `BLOCK VAR`, `LAUNCHER`) are refused there, each with its reason.
 
 A file with name-less statements and no target is refused before anything
 is written.

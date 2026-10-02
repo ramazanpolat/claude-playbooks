@@ -15,7 +15,7 @@ func TestTakeLaunchFlagsLeadingRunOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	rest, layers, err := takeLaunchFlags([]string{
-		"--env-profile", "glm", "--env=K=V", "--unset", "TOKEN", "--env-file", envFile,
+		"--env-set", "glm", "--env=K=V", "--block", "TOKEN", "--env-file", envFile,
 		"router", "-p", "hi", "--env", "NOT_OURS=1",
 	})
 	if err != nil {
@@ -43,9 +43,9 @@ func TestTakeLaunchFlagsRejects(t *testing.T) {
 		{"--env", "NOEQUALS"},
 		{"--env", "CLAUDE_CONFIG_DIR=/x"},
 		{"--env", "BAD-KEY=1"},
-		{"--unset", "K=V"},
-		{"--unset", "CLAUDE_CONFIG_DIR"},
-		{"--env-profile", "bad name"},
+		{"--block", "K=V"},
+		{"--block", "CLAUDE_CONFIG_DIR"},
+		{"--env-set", "bad name"},
 		{"--env-file", filepath.Join(t.TempDir(), "absent.env")},
 	} {
 		if _, _, err := takeLaunchFlags(args); err == nil {

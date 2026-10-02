@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -33,7 +33,7 @@ func seedShowFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustStmt(t, "CREATE ENV base SET FROM_BASE=1 MODEL=base")
-	mustStmt(t, "CREATE ENV glm SET MODEL=glm DESCRIBE router")
+	mustStmt(t, "CREATE ENV glm SET MODEL=glm DESCRIPTION router")
 	mustStmt(t, "ALTER DEFAULTS USE ENV base")
 	mustStmt(t, "ALTER PLAYBOOK router USE ENV glm BLOCK VAR HTTP_PROXY")
 	mustStmt(t, "ALTER PLAYBOOK router SET VAR API_KEY="+showSecret+" PROXY_URL=https://u:"+showURLSecret+"@proxy AS PLAINTEXT")
@@ -245,7 +245,7 @@ func TestExplainPlaybook(t *testing.T) {
 
 func writeBroken(t *testing.T, name string) error {
 	t.Helper()
-	return os.WriteFile(filepath.Join(envprofile.Dir(config.ResolvePlaybooksDir()), name+".toml"), []byte("= [\n"), 0o600)
+	return os.WriteFile(filepath.Join(envset.Dir(config.ResolvePlaybooksDir()), name+".toml"), []byte("= [\n"), 0o600)
 }
 
 // explainKeys is the sorted keys EXPLAIN PLAYBOOK says a launch of name gets.

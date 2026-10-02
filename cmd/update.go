@@ -212,7 +212,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 
 	// Staging ran unlocked (it may fetch from the network); the overlay must
 	// not. Take the registry lock and RE-READ the live manifest: a concurrent
-	// ALTER PLAYBOOK … ALIAS (or other manifest mutation) that landed while the source was
+	// ALTER PLAYBOOK … LAUNCHER (or other manifest mutation) that landed while the source was
 	// staging would otherwise be resurrected from the stale pre-staging
 	// snapshot, leaving launchers and manifest disagreeing.
 	lockedUnlock, lerr := lockRegistry()

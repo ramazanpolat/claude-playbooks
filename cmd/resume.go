@@ -233,10 +233,29 @@ func printMode(claudeArgs []string) bool {
 	return false
 }
 
-// sessionSince is the session a launch that started at since left in
-// configDir: the newest transcript written since then that no other live
-// process holds. "" when there is none (the session never got a message).
-func sessionSince(configDir string, since time.Time) string {
+// transcriptStamps maps each transcript in configDir to its modification
+// time: what a launch is compared with afterwards.
+func transcriptStamps(configDir string) map[string]time.Time {
+	m, _ := filepath.Glob(filepath.Join(configDir, "projects", "*", "*.jsonl"))
+	out := make(map[string]time.Time, len(m))
+	for _, p := range m {
+		if fi, err := os.Stat(p); err == nil {
+			out[p] = fi.ModTime()
+		}
+	}
+	return out
+}
+
+// sessionSince is the session a launch left in configDir: the newest
+// transcript that is new, or changed, since before (transcriptStamps,
+// taken just before the launch), and that no other live process holds. ""
+// when there is none (the session never got a message).
+//
+// The files are compared with themselves, never with the clock: a file's
+// time comes from the kernel's coarser clock, which runs some milliseconds
+// behind time.Now, so a transcript a launch wrote can read as written
+// before the launch began (across a second boundary, now and then).
+func sessionSince(configDir string, before map[string]time.Time) string {
 	m, _ := filepath.Glob(filepath.Join(configDir, "projects", "*", "*.jsonl"))
 	held := map[string]bool{}
 	for _, s := range readSessionFiles([]sessionDir{{path: configDir}}) {
@@ -250,7 +269,10 @@ func sessionSince(configDir string, since time.Time) string {
 			continue
 		}
 		fi, err := os.Stat(p)
-		if err != nil || !fi.Mode().IsRegular() || fi.ModTime().Before(since.Truncate(time.Second)) {
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		if t, seen := before[p]; seen && t.Equal(fi.ModTime()) {
 			continue
 		}
 		if best == "" || fi.ModTime().After(bestT) {
@@ -260,13 +282,14 @@ func sessionSince(configDir string, since time.Time) string {
 	return best
 }
 
-// printResumeLine prints the exit line for a local launch of d that started
-// at since, when stderr is a terminal and claude was interactive.
-func printResumeLine(d sessionDir, claudeArgs []string, since time.Time) {
-	if !stderrTTY() || printMode(claudeArgs) {
-		return
-	}
-	if id := sessionSince(d.path, since); id != "" {
+// wantsResumeLine is whether a launch prints the exit line: stderr is a
+// terminal and claude is interactive.
+func wantsResumeLine(claudeArgs []string) bool { return stderrTTY() && !printMode(claudeArgs) }
+
+// printResumeLine prints the exit line for a local launch of d, before
+// being the transcripts it found when the launch began.
+func printResumeLine(d sessionDir, before map[string]time.Time) {
+	if id := sessionSince(d.path, before); id != "" {
 		fmt.Fprintf(os.Stderr, "Resume this playbook's session with: %s\n", d.resumeCommand(id))
 	}
 }

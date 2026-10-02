@@ -202,7 +202,7 @@ func TestPluginDryRunCarriesState(t *testing.T) {
 	sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	log := fakeClaude(t)
-	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK k NO LAUNCHER")
 	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander")
 	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET AGENT 'x';\nALTER PLAYBOOK k UNSET AGENT;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN kommander@kommander;\n")
 	out, err := apply(t, path, "--dry-run")

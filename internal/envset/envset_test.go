@@ -1,4 +1,4 @@
-package envprofile
+package envset
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 
 func TestWriteReadRoundTrip(t *testing.T) {
 	dir := Dir(t.TempDir())
-	in := &Profile{Name: "glm", Description: "GLM via router",
+	in := &Set{Name: "glm", Description: "GLM via router",
 		Set: map[string]string{"B": "2", "A": "1"}, Block: []string{"Z"}}
 	if err := Write(dir, in); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestListSortsAndSkipsNonProfiles(t *testing.T) {
 		t.Fatalf("List(missing dir) = %v, %v", got, err)
 	}
 	for _, name := range []string{"zeta", "alpha"} {
-		if err := Write(dir, &Profile{Name: name, Set: map[string]string{"K": name}}); err != nil {
+		if err := Write(dir, &Set{Name: name, Set: map[string]string{"K": name}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -83,10 +83,10 @@ func TestListSortsAndSkipsNonProfiles(t *testing.T) {
 
 func TestExpandLayersProfilesUnderPlaybookEntries(t *testing.T) {
 	dir := Dir(t.TempDir())
-	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"URL": "base", "MODEL": "base", "KEEP": "base"}, Block: []string{"TOKEN", "GONE"}}); err != nil {
+	if err := Write(dir, &Set{Name: "base", Set: map[string]string{"URL": "base", "MODEL": "base", "KEEP": "base"}, Block: []string{"TOKEN", "GONE"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, &Profile{Name: "over", Set: map[string]string{"MODEL": "over", "TOKEN": "re-set"}, Block: []string{"URL"}}); err != nil {
+	if err := Write(dir, &Set{Name: "over", Set: map[string]string{"MODEL": "over", "TOKEN": "re-set"}, Block: []string{"URL"}}); err != nil {
 		t.Fatal(err)
 	}
 	e := &manifest.Env{Sets: []string{"base", "over"}, Set: map[string]string{"URL": "own"}, Block: []string{"MODEL"}}
@@ -141,7 +141,7 @@ func TestExpandErrorsAllMatchErrProfile(t *testing.T) {
 	}
 	for _, name := range []string{"absent", "broken", "invalid"} {
 		_, err := Expand(dir, &manifest.Env{Sets: []string{name}})
-		if !errors.Is(err, ErrProfile) {
+		if !errors.Is(err, ErrSet) {
 			t.Errorf("%s: err = %v, want errors.Is ErrProfile", name, err)
 		}
 	}
@@ -162,7 +162,7 @@ func TestWriteTightensExistingProfile(t *testing.T) {
 	if err := os.WriteFile(at, []byte("[set]\nA = \"1\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, &Profile{Name: "p", Set: map[string]string{"API_KEY": "secret"}}); err != nil {
+	if err := Write(dir, &Set{Name: "p", Set: map[string]string{"API_KEY": "secret"}}); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(at); info.Mode().Perm() != 0o600 {
@@ -189,13 +189,13 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 	if names, err := Defaults(dir); names != nil || err != nil {
 		t.Fatalf("Defaults(no marker) = %q, %v", names, err)
 	}
-	if err := WriteDefaults(dir, []string{"ghost"}); !errors.Is(err, ErrProfile) {
+	if err := WriteDefaults(dir, []string{"ghost"}); !errors.Is(err, ErrSet) {
 		t.Fatalf("WriteDefaults of a missing profile: %v", err)
 	}
-	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"A": "default", "B": "default"}, Block: []string{"TOKEN"}}); err != nil {
+	if err := Write(dir, &Set{Name: "base", Set: map[string]string{"A": "default", "B": "default"}, Block: []string{"TOKEN"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, &Profile{Name: "pb", Set: map[string]string{"B": "profile"}}); err != nil {
+	if err := Write(dir, &Set{Name: "pb", Set: map[string]string{"B": "profile"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteDefaults(dir, []string{"base"}); err != nil {
@@ -237,7 +237,7 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, DefaultMarker), []byte("gone\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ExpandWithDefault(dir, nil); !errors.Is(err, ErrProfile) {
+	if _, err := ExpandWithDefault(dir, nil); !errors.Is(err, ErrSet) {
 		t.Fatalf("missing default: %v", err)
 	}
 }
@@ -247,7 +247,7 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 func TestRegistryDefaultsLayerInOrder(t *testing.T) {
 	dir := Dir(t.TempDir())
 	for name, v := range map[string]string{"a": "from-a", "b": "from-b"} {
-		if err := Write(dir, &Profile{Name: name, Set: map[string]string{"X": v, "ONLY_" + strings.ToUpper(name): "1"}}); err != nil {
+		if err := Write(dir, &Set{Name: name, Set: map[string]string{"X": v, "ONLY_" + strings.ToUpper(name): "1"}}); err != nil {
 			t.Fatal(err)
 		}
 	}

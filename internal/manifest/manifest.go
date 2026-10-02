@@ -72,10 +72,10 @@ type Env struct {
 
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-// ValidateProfileName reports whether name can name an env profile file.
-func ValidateProfileName(name string) error {
+// ValidateSetName reports whether name can name an env set file.
+func ValidateSetName(name string) error {
 	if !profileNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid profile name %q: use letters, digits, dots, dashes, underscores", name)
+		return fmt.Errorf("invalid env set name %q: use letters, digits, dots, dashes, underscores", name)
 	}
 	return nil
 }
@@ -417,7 +417,7 @@ func (m *Manifest) validate(path string) error {
 	// arguments: a name from a hand-written or source-shipped manifest is
 	// held to the same rule the grammar applies, never trusted.
 	for name, r := range m.Skills {
-		if ValidateProfileName(name) != nil {
+		if ValidateSetName(name) != nil {
 			return fmt.Errorf("invalid %s at %s: [skills] entry %q is not a valid skill name", FileName, path, name)
 		}
 		if r != nil && r.Mode != "link" && r.Mode != "copy" {
@@ -425,7 +425,7 @@ func (m *Manifest) validate(path string) error {
 		}
 	}
 	for name := range m.MCP {
-		if ValidateProfileName(name) != nil {
+		if ValidateSetName(name) != nil {
 			return fmt.Errorf("invalid %s at %s: [mcp] entry %q is not a valid MCP server name", FileName, path, name)
 		}
 	}
@@ -454,7 +454,7 @@ func (m *Manifest) validate(path string) error {
 	}
 	if m.Env != nil {
 		for _, name := range m.Env.Sets {
-			if err := ValidateProfileName(name); err != nil {
+			if err := ValidateSetName(name); err != nil {
 				return fmt.Errorf("invalid .playbook at %s: env.sets: %w", path, err)
 			}
 		}
@@ -709,7 +709,7 @@ func Write(dir string, m *Manifest) error {
 		fmt.Fprintf(&b, "played_at = %s\n", QuoteTOML(m.Play.PlayedAt))
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
-	// carrying any is written private, like an env profile. Existing files
+	// carrying any is written private, like an env set. Existing files
 	// are only ever tightened, never loosened.
 	// An existing file keeps its mode exactly (as an in-place rewrite would
 	// have), and is tightened to owner-only when values are present. It is

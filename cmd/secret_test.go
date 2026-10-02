@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -41,7 +41,7 @@ exec "$@"
 		t.Fatal(err)
 	}
 	t.Setenv("HELPER_LOG", log)
-	t.Setenv(envprofile.SecretHelperEnv, "")
+	t.Setenv(envset.SecretHelperEnv, "")
 	return path, log
 }
 
@@ -54,7 +54,7 @@ func readLog(t *testing.T, path string) string {
 func TestSetFromNeedsAHelper(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	t.Setenv(envprofile.SecretHelperEnv, "")
+	t.Setenv(envset.SecretHelperEnv, "")
 	mustStmt(t, "CREATE ENV e")
 	if _, err := stmt(t, "ALTER ENV e SET TOKEN FROM keychain:ok/x"); err == nil || !strings.Contains(err.Error(), "no secret helper configured") {
 		t.Fatalf("SET FROM without a helper: %v", err)
@@ -116,7 +116,7 @@ func TestOAuthTokenReferenceRefusedAtEveryLayer(t *testing.T) {
 	}
 	// A hand-written reference is refused when the file is read or written,
 	// so no launch runs with it.
-	if err := envprofile.Write(envprofile.Dir(filepath.Dir(root)), &envprofile.Profile{Name: "x",
+	if err := envset.Write(envset.Dir(filepath.Dir(root)), &envset.Set{Name: "x",
 		Refs: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:ok/x"}}); err == nil {
 		t.Error("an env set file took a reference for the OAuth token")
 	}
@@ -163,7 +163,7 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 	}
 
 	// CPB_SECRET_HELPER alone is enough.
-	t.Setenv(envprofile.SecretHelperEnv, helper)
+	t.Setenv(envset.SecretHelperEnv, helper)
 	if err := runRun(nil, []string{"router", "--version"}); err != nil {
 		t.Fatalf("launch with CPB_SECRET_HELPER: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestShowAndExplainReferences(t *testing.T) {
 	if !strings.Contains(human, "<from keychain:ok/x>") || !strings.Contains(human, "Secret helper: "+helper+" (from setting)") {
 		t.Fatalf("EXPLAIN:\n%s", human)
 	}
-	t.Setenv(envprofile.SecretHelperEnv, "other-helper")
+	t.Setenv(envset.SecretHelperEnv, "other-helper")
 	if out := mustStmt(t, "SHOW DEFAULTS"); !strings.Contains(out, "other-helper (from CPB_SECRET_HELPER)") {
 		t.Fatalf("SHOW DEFAULTS with the override:\n%s", out)
 	}
@@ -250,7 +250,7 @@ func TestCheckHelperEnvAndIfNotExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HELPER_LOG", log)
-	t.Setenv(envprofile.SecretHelperEnv, "")
+	t.Setenv(envset.SecretHelperEnv, "")
 	t.Setenv("TOKEN", "stale-shell-value")
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
 

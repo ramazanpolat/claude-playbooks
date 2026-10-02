@@ -15,12 +15,12 @@ import (
 // renameOpts carries ALTER PLAYBOOK … RENAME TO's clauses. No state is
 // shared between two calls.
 type renameOpts struct {
-	alias   string
-	noAlias bool
+	launcher   string
+	noLauncher bool
 }
 
 func doRename(o renameOpts, args []string) error {
-	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
+	if err := checkLauncherConflict(o.launcher, o.noLauncher); err != nil {
 		return err
 	}
 	oldName := args[0]
@@ -72,28 +72,28 @@ func doRename(o renameOpts, args []string) error {
 	// renamed to C with stale launcher state. Registry ownership applies to
 	// every name that will address this playbook; the foreign-file check
 	// applies only to the launcher name that will actually be written.
-	for _, cand := range []string{o.alias, newName} {
+	for _, cand := range []string{o.launcher, newName} {
 		if cand == "" {
 			continue
 		}
 		if owner, oerr := commandNameOwner(cand, oldName); oerr != nil {
-			return fmt.Errorf("cannot verify command name %q: %w", cand, oerr)
+			return fmt.Errorf("cannot verify launcher name %q: %w", cand, oerr)
 		} else if owner != nil {
-			return fmt.Errorf("command name %q already addresses playbook %q", cand, owner.Name)
+			return fmt.Errorf("launcher name %q already addresses playbook %q", cand, owner.Name)
 		}
 	}
 	// Rename promises a replacement command: the effective launcher name
 	// (explicit --alias or the new name) must be writable before any
 	// mutation — the late launcher.Write warning would leave a renamed
 	// playbook without its replacement command. --no-alias is the opt-out.
-	writeName, werr := resolveLauncherName(o.noAlias, o.alias, newName, "rename")
+	writeName, werr := resolveLauncherName(o.noLauncher, o.launcher, newName, "rename")
 	if werr != nil {
 		return werr
 	}
 	if writeName != "" && launcherOpsAllowed() {
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 			if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
-				return fmt.Errorf("command name %q is taken by a file cpb did not generate", writeName)
+				return fmt.Errorf("launcher name %q is taken by a file cpb did not generate", writeName)
 			}
 		}
 	}
@@ -108,17 +108,17 @@ func doRename(o renameOpts, args []string) error {
 	// registrations (collisions are only preflighted in the selected
 	// root), so every differing alias mutation is refused.
 	if linkedOld {
-		if o.noAlias && oldManifestAlias != "" {
-			return fmt.Errorf("cannot clear alias %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", oldManifestAlias, manifest.FileName)
+		if o.noLauncher && oldManifestAlias != "" {
+			return fmt.Errorf("cannot clear launcher %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", oldManifestAlias, manifest.FileName)
 		}
-		if o.alias != "" && o.alias != oldManifestAlias {
-			return fmt.Errorf("cannot set alias %q on a linked target's shared %s (current alias %q). Edit the target's manifest directly if you really mean it", o.alias, manifest.FileName, oldManifestAlias)
+		if o.launcher != "" && o.launcher != oldManifestAlias {
+			return fmt.Errorf("cannot set launcher %q on a linked target's shared %s (current launcher %q). Edit the target's manifest directly if you really mean it", o.launcher, manifest.FileName, oldManifestAlias)
 		}
 	}
 	// A manifest alias that merely mirrors the old directory name (link's
 	// default) follows the rename for local playbooks: leaving it would
 	// keep the old name registered while its launcher goes away.
-	aliasFollows := !linkedOld && o.alias == "" && !o.noAlias && oldManifestAlias == oldName
+	aliasFollows := !linkedOld && o.launcher == "" && !o.noLauncher && oldManifestAlias == oldName
 
 	// Persist a requested alias change BEFORE the directory rename and the
 	// shell-alias rewrites: failing afterwards would leave the playbook
@@ -126,7 +126,7 @@ func doRename(o renameOpts, args []string) error {
 	// reporting an unknown playbook. The manifest sits at the pre-rename
 	// location (through the symlink for linked playbooks).
 	restoreManifest := func() {}
-	if o.alias != "" || o.noAlias || aliasFollows {
+	if o.launcher != "" || o.noLauncher || aliasFollows {
 		oldManifestDir := oldRoot
 		if linkedOld {
 			if resolved, rerr := filepath.EvalSymlinks(oldRoot); rerr == nil {
@@ -135,16 +135,16 @@ func doRename(o renameOpts, args []string) error {
 		}
 		m, merr := manifest.Read(oldManifestDir)
 		if merr != nil {
-			return fmt.Errorf("cannot update alias: reading manifest failed: %w", merr)
+			return fmt.Errorf("cannot update launcher: reading manifest failed: %w", merr)
 		}
 		if m == nil {
 			m = &manifest.Manifest{}
 		}
 		switch {
-		case o.noAlias && m.Launcher != "":
+		case o.noLauncher && m.Launcher != "":
 			m.Launcher = ""
-		case o.alias != "" && m.Launcher != o.alias:
-			m.Launcher = o.alias
+		case o.launcher != "" && m.Launcher != o.launcher:
+			m.Launcher = o.launcher
 		case aliasFollows:
 			m.Launcher = newName
 		default:
@@ -156,14 +156,14 @@ func doRename(o renameOpts, args []string) error {
 			// reports that nothing happened.
 			restore, cerr := captureManifestRestore(oldManifestDir)
 			if cerr != nil {
-				return fmt.Errorf("cannot update alias: %w", cerr)
+				return fmt.Errorf("cannot update launcher: %w", cerr)
 			}
 			if werr := manifest.Write(oldManifestDir, m); werr != nil {
 				// A failing write may have truncated or partially
 				// overwritten the file in place — restore the captured
 				// bytes so the error really does leave nothing changed.
 				restore()
-				return fmt.Errorf("cannot persist alias change (nothing renamed): %w", werr)
+				return fmt.Errorf("cannot persist launcher change (nothing renamed): %w", werr)
 			}
 			restoreManifest = restore
 		}
@@ -205,30 +205,30 @@ func doRename(o renameOpts, args []string) error {
 		// whose manifest alias equals it — keeps its launcher.
 		removeUnclaimedLaunchers([]string{oldName}, oldName)
 		switch {
-		case o.noAlias:
+		case o.noLauncher:
 			// An alias-named link resolves through the manifest, which was
 			// cleared — retire it too (unless someone else claims it), or
 			// --no-alias leaves a working command behind.
 			if oldManifestAlias != "" {
 				removeUnclaimedLaunchers([]string{oldManifestAlias}, oldName)
 			}
-		case o.alias != "":
+		case o.launcher != "":
 			// The previous alias no longer resolves through this playbook
 			// once the manifest changes — retire its link too, unless
 			// another playbook claims it.
-			if oldManifestAlias != "" && oldManifestAlias != o.alias {
+			if oldManifestAlias != "" && oldManifestAlias != o.launcher {
 				removeUnclaimedLaunchers([]string{oldManifestAlias}, oldName)
 			}
-			if _, werr := launcher.Write(ldir, o.alias); werr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", o.alias, werr)
+			if _, werr := launcher.Write(ldir, o.launcher); werr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", o.launcher, werr)
 			} else {
-				fmt.Printf("Command %q now runs %q\n", o.alias, newName)
+				fmt.Printf("Launcher %q now runs %q\n", o.launcher, newName)
 			}
 		default:
 			if _, werr := launcher.Write(ldir, newName); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", newName, werr)
 			} else {
-				fmt.Printf("Command %q now runs %q\n", newName, newName)
+				fmt.Printf("Launcher %q now runs %q\n", newName, newName)
 			}
 		}
 	}

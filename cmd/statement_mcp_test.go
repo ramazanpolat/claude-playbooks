@@ -69,7 +69,7 @@ func TestMCPServerLifecycle(t *testing.T) {
 	root := seedFlatPlaybook(t, "k")
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
 
-	add := "ALTER PLAYBOOK k ADD MCP SERVER files COMMAND npx ARGS -y server-fs ENV LOG_LEVEL=debug ENV API_TOKEN FROM keychain:ok/fs"
+	add := "ALTER PLAYBOOK k ADD MCP SERVER files COMMAND npx ARGS -y server-fs VAR LOG_LEVEL=debug VAR API_TOKEN FROM keychain:ok/fs"
 	mustStmt(t, add)
 	cfg := mcpConfigOf(t, root, "files")
 	env, _ := cfg["env"].(map[string]any)
@@ -98,12 +98,12 @@ func TestMCPServerLifecycle(t *testing.T) {
 	}
 	create := mustStmt(t, "SHOW CREATE PLAYBOOK k")
 	if !strings.Contains(create, "ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'server-fs'") ||
-		!strings.Contains(create, "ENV API_TOKEN FROM 'keychain:ok/fs'") || strings.Contains(create, "SET VAR CPB_MCP_") {
+		!strings.Contains(create, "VAR API_TOKEN FROM 'keychain:ok/fs'") || strings.Contains(create, "SET VAR CPB_MCP_") {
 		t.Fatalf("SHOW CREATE:\n%s", create)
 	}
 
 	// A changed declaration is removed and added again.
-	mustStmt(t, "ALTER PLAYBOOK k ADD MCP SERVER files COMMAND npx ARGS -y server-fs /srv ENV LOG_LEVEL=debug ENV API_TOKEN FROM keychain:ok/fs")
+	mustStmt(t, "ALTER PLAYBOOK k ADD MCP SERVER files COMMAND npx ARGS -y server-fs /srv VAR LOG_LEVEL=debug VAR API_TOKEN FROM keychain:ok/fs")
 	if got := strings.Join((*calls)[1:], ","); got != "remove files,add-json files" {
 		t.Fatalf("replacement ran %s", got)
 	}
@@ -170,11 +170,11 @@ func TestMCPApplyPreflightAndOrder(t *testing.T) {
 	}
 
 	// A failed replacement keeps the old server's reference.
-	mustStmt(t, "ALTER PLAYBOOK k ADD MCP SERVER s COMMAND x ENV TOKEN FROM keychain:ok/a")
+	mustStmt(t, "ALTER PLAYBOOK k ADD MCP SERVER s COMMAND x VAR TOKEN FROM keychain:ok/a")
 	v := mcpVar("s", "E", "TOKEN")
 	old := claudeMCP
 	claudeMCP = func(dir string, args ...string) ([]byte, error) { return nil, errString("boom") }
-	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MCP SERVER s COMMAND x ENV OTHER FROM keychain:ok/b"); err == nil {
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MCP SERVER s COMMAND x VAR OTHER FROM keychain:ok/b"); err == nil {
 		t.Fatal("the failing command was not reported")
 	}
 	claudeMCP = old

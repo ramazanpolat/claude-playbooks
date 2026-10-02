@@ -35,7 +35,7 @@ steps = [
 path = "~/.local/bin/cpb"
 
 [[verify.commands]]
-command = 'cpb CREATE PLAYBOOK ovr NO ALIAS && echo created'
+command = 'cpb CREATE PLAYBOOK ovr NO LAUNCHER && echo created'
 contains = "created"
 
 [[verify.commands]]

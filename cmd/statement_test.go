@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -36,9 +36,9 @@ func mustStmt(t *testing.T, line string) string {
 	return out
 }
 
-func readProfile(t *testing.T, name string) *envprofile.Profile {
+func readProfile(t *testing.T, name string) *envset.Set {
 	t.Helper()
-	p, err := envprofile.Read(envprofile.Dir(config.ResolvePlaybooksDir()), name)
+	p, err := envset.Read(envset.Dir(config.ResolvePlaybooksDir()), name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,10 +71,10 @@ func TestStatementEnvLifecycle(t *testing.T) {
 		t.Fatal("IF NOT EXISTS changed an existing set")
 	}
 
-	mustStmt(t, "ALTER ENV glm BLOCK MODEL DESCRIBE router")
+	mustStmt(t, "ALTER ENV glm BLOCK MODEL DESCRIPTION router")
 	p = readProfile(t, "glm")
 	if _, ok := p.Set["MODEL"]; ok || !reflect.DeepEqual(p.Block, []string{"MODEL"}) || p.Description != "router" {
-		t.Fatalf("after BLOCK and DESCRIBE: %#v", p)
+		t.Fatalf("after BLOCK and DESCRIPTION: %#v", p)
 	}
 	mustStmt(t, "ALTER ENV glm UNSET MODEL")
 	if p = readProfile(t, "glm"); len(p.Block) != 0 {
@@ -256,12 +256,12 @@ func TestStatementRefusedOnLinkedPlaybook(t *testing.T) {
 func TestStatementDefaults(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	dir := envset.Dir(config.ResolvePlaybooksDir())
 	for _, n := range []string{"a", "b", "c"} {
 		mustStmt(t, "CREATE ENV "+n)
 	}
 	defaults := func() string {
-		d, err := envprofile.Defaults(dir)
+		d, err := envset.Defaults(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -281,12 +281,12 @@ func TestStatementDefaults(t *testing.T) {
 		t.Fatalf("DROP a: %q", got)
 	}
 	mustStmt(t, "ALTER DEFAULTS DROP ENV c b")
-	if _, err := os.Stat(filepath.Join(dir, envprofile.DefaultMarker)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, envset.DefaultMarker)); !os.IsNotExist(err) {
 		t.Fatalf("an empty DEFAULTS must remove the marker: %v", err)
 	}
 
 	// A broken marker refuses an edit, but USE ENV replaces it outright.
-	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("not a name!\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, envset.DefaultMarker), []byte("not a name!\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := stmt(t, "ALTER DEFAULTS ADD ENV a"); err == nil || !strings.Contains(err.Error(), "USE ENV") {
@@ -342,7 +342,7 @@ func TestStatementArgs(t *testing.T) {
 func words(s string) []string { return strings.Fields(s) }
 
 // In a subdir layout the launch reads the nested manifest; a set it names
-// must not be dropped, by the statement or by the hidden env-profile.
+// must not be dropped, by the statement or by the hidden env-set.
 func TestDropEnvSeesTheGoverningManifest(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)

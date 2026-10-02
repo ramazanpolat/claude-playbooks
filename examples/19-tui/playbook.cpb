@@ -1,5 +1,5 @@
 -- What cpb tui browses: a playbook with an env set, variables (one by
 -- reference, never shown as a value), and a status line.
-CREATE ENV IF NOT EXISTS proxy DESCRIBE 'an LLM proxy' SET ANTHROPIC_BASE_URL=http://127.0.0.1:8080/v1;
-CREATE PLAYBOOK IF NOT EXISTS browsed NO ALIAS;
+CREATE ENV IF NOT EXISTS proxy DESCRIPTION 'an LLM proxy' SET ANTHROPIC_BASE_URL=http://127.0.0.1:8080/v1;
+CREATE PLAYBOOK IF NOT EXISTS browsed NO LAUNCHER;
 ALTER PLAYBOOK browsed ADD ENV proxy SET VAR MAX_THINKING_TOKENS=8000 SET STATUSLINE 'echo browsed' REFRESH 10;

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -134,14 +134,14 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		var menv *manifest.Env
 		if m, _ := manifest.Nearest(configDir); m != nil {
 			var err error
-			menv, err = envprofile.ExpandWithDefault(envprofile.Dir(config.ResolvePlaybooksDir()), m.Env)
+			menv, err = envset.ExpandWithDefault(envset.Dir(config.ResolvePlaybooksDir()), m.Env)
 			if err != nil {
 				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
 			}
 		} else {
 			// No manifest: the registry default still applies.
 			var err error
-			menv, err = envprofile.ExpandWithDefault(envprofile.Dir(config.ResolvePlaybooksDir()), nil)
+			menv, err = envset.ExpandWithDefault(envset.Dir(config.ResolvePlaybooksDir()), nil)
 			if err != nil {
 				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
 			}
@@ -289,15 +289,15 @@ func (r Report) NeedsAttention() string {
 // any file content: the TOML parser quotes the offending text, which in a
 // profile may be a credential value.
 func sanitizeProfileError(err error) string {
-	var missing *envprofile.MissingError
+	var missing *envset.MissingError
 	if errors.As(err, &missing) {
 		return missing.Error() // names the profile and the directory only
 	}
-	var resolve *envprofile.ResolveError
+	var resolve *envset.ResolveError
 	if errors.As(err, &resolve) {
-		return "env profile " + strconv.Quote(resolve.Name) + " cannot be read or is invalid (content not shown; run: cpb SHOW ENV " + resolve.Name + ")"
+		return "env set " + strconv.Quote(resolve.Name) + " cannot be read or is invalid (content not shown; run: cpb SHOW ENV " + resolve.Name + ")"
 	}
-	return "env profile cannot be resolved (details withheld; see cpb SHOW ENVS)"
+	return "env set cannot be resolved (details withheld; see cpb SHOW ENVS)"
 }
 
 func trimSpace(b []byte) []byte {

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -56,7 +56,7 @@ func doDelete(o deleteOpts, args []string) error {
 		if deletePath != pb.Path {
 			fmt.Printf("Config:   %s\n", pb.Path)
 		}
-		fmt.Printf("Alias:    %s\n", aliasInfo)
+		fmt.Printf("Launcher: %s\n", aliasInfo)
 		if launcherOpsAllowed() {
 			if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 				for _, n := range launcherNamesFor(pb) {
@@ -64,7 +64,7 @@ func doDelete(o deleteOpts, args []string) error {
 						continue // the CLI's own reserved symlink is not this playbook's launcher
 					}
 					if _, exists, foreign := launcher.Lookup(ldir, n); exists && !foreign {
-						fmt.Printf("Command:  %s (%s)\n", n, launcherFate(ldir, n, pb.Name).prompt)
+						fmt.Printf("Launcher: %s (%s)\n", n, launcherFate(ldir, n, pb.Name).prompt)
 					}
 				}
 			}
@@ -135,9 +135,9 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 		fate := launcherFate(dir, n, playbookName)
 		switch fate.action {
 		case fateClaimed:
-			fmt.Printf("Kept command %q (still addresses playbook %q)\n", n, fate.owner)
+			fmt.Printf("Kept launcher %q (still addresses playbook %q)\n", n, fate.owner)
 		case fateUnknown:
-			fmt.Fprintf(os.Stderr, "Warning: kept command %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
+			fmt.Fprintf(os.Stderr, "Warning: kept launcher %q: cannot verify whether another playbook claims it: %v\n", n, fate.err)
 		default:
 			removed, rerr := launcher.Remove(dir, n)
 			if rerr != nil {
@@ -145,14 +145,14 @@ func removeUnclaimedLaunchers(names []string, playbookName string) {
 				continue
 			}
 			if removed {
-				fmt.Printf("Removed command %q\n", n)
+				fmt.Printf("Removed launcher %q\n", n)
 			}
 		}
 	}
 }
 
 // launcherClaimedByIdentity reports the name of another playbook whose own
-// command name resolves to the same directory entry as dir/n, "" when
+// launcher name resolves to the same directory entry as dir/n, "" when
 // none. Same-spelled names are the registry's business (commandNameOwner);
 // this catches the spellings a case-insensitive filesystem folds together.
 func launcherClaimedByIdentity(dir, n, exceptName string) (string, error) {
@@ -260,7 +260,7 @@ func countContents(dir string) (files, dirs int) {
 }
 
 // refuseRegistryOwned rejects a delete whose removal would take the
-// registry's own env profile store with it. Discovery skips dot-prefixed
+// registry's own env set store with it. Discovery skips dot-prefixed
 // entries, so the store's name would otherwise fall through to the orphan
 // path and remove every profile and the default marker in one confirmation.
 //
@@ -287,14 +287,14 @@ func countContents(dir string) (files, dirs int) {
 // removed, since the store may appear, move, or be linked while the prompt
 // is open.
 func refuseRegistryOwned(playbooksDir, name, path string) error {
-	store := envprofile.Dir(playbooksDir)
+	store := envset.Dir(playbooksDir)
 	refuse := func() error {
-		return fmt.Errorf("%q is the registry's env profile store, not a playbook; drop one with `cpb DROP ENV <name>`", envprofile.DirName)
+		return fmt.Errorf("%q is the registry's env set store, not a playbook; drop one with `cpb DROP ENV <name>`", envset.DirName)
 	}
 	cannotVerify := func(err error) error {
-		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env profile store intact (%s: %v); nothing removed", name, store, err)
+		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env set store intact (%s: %v); nothing removed", name, store, err)
 	}
-	if name == envprofile.DirName {
+	if name == envset.DirName {
 		return refuse()
 	}
 	a, err := os.Lstat(path)
@@ -334,7 +334,7 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	}
 	for _, link := range links {
 		if li, err := os.Lstat(link); err == nil && os.SameFile(li, a) {
-			return fmt.Errorf("%q is a link the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, link, store)
+			return fmt.Errorf("%q is a link the registry's env set store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, link, store)
 		}
 	}
 	if !a.IsDir() {
@@ -345,9 +345,9 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 		// its reference and default checks. Only entries the store itself
 		// would read count: a linked playbook or a stray file beside them
 		// is not the store's, and stays deletable.
-		if name == envprofile.DefaultMarker || strings.HasSuffix(name, envprofile.FileExt) {
+		if name == envset.DefaultMarker || strings.HasSuffix(name, envset.FileExt) {
 			if parent, err := os.Stat(filepath.Dir(path)); err == nil && os.SameFile(parent, physicalInfo) {
-				return fmt.Errorf("%q is an entry of the registry's env profile store (%s resolves to the directory holding it); drop one with `cpb DROP ENV <name>`", name, store)
+				return fmt.Errorf("%q is an entry of the registry's env set store (%s resolves to the directory holding it); drop one with `cpb DROP ENV <name>`", name, store)
 			}
 		}
 		return nil
@@ -360,7 +360,7 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	for _, elem := range elements {
 		for dir := filepath.Dir(elem); ; dir = filepath.Dir(dir) {
 			if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
-				return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or drop them with `cpb DROP ENV <name>` first", name, store, elem)
+				return fmt.Errorf("%q contains the registry's env set store or a path it resolves through (%s -> %s); move the store out or drop them with `cpb DROP ENV <name>` first", name, store, elem)
 			}
 			if filepath.Dir(dir) == dir {
 				break
@@ -369,7 +369,7 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	}
 	for _, dir := range traversed {
 		if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
-			return fmt.Errorf("%q is a directory the registry's env profile store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, dir, store)
+			return fmt.Errorf("%q is a directory the registry's env set store resolves through (%s -> %s); the store would become unreachable. Repoint %s first", name, store, dir, store)
 		}
 	}
 	// Finally the subtree itself: a protected element can sit INSIDE the
@@ -390,7 +390,7 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 		return cannotVerify(err)
 	}
 	if hit >= 0 {
-		return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or drop them with `cpb DROP ENV <name>` first", name, store, protectedPath[hit])
+		return fmt.Errorf("%q contains the registry's env set store or a path it resolves through (%s -> %s); move the store out or drop them with `cpb DROP ENV <name>` first", name, store, protectedPath[hit])
 	}
 	return nil
 }

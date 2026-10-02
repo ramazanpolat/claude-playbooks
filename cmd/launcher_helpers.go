@@ -27,11 +27,11 @@ func installLauncher(cmdName, playbookName, configDir string) {
 		return
 	}
 
-	// The registry is the ownership authority: refuse a command name that
+	// The registry is the ownership authority: refuse a launcher name that
 	// already addresses another playbook, or the shared name would resolve
 	// to whichever playbook wins the registry scan.
 	if owner, oerr := commandNameOwner(cmdName, playbookName); oerr == nil && owner != nil {
-		fmt.Fprintf(os.Stderr, "Warning: command name %q already addresses playbook %q; no launcher written\n", cmdName, owner.Name)
+		fmt.Fprintf(os.Stderr, "Warning: launcher name %q already addresses playbook %q; no launcher written\n", cmdName, owner.Name)
 		manual()
 		return
 	}
@@ -45,7 +45,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Register a different command name with: cpb ALTER PLAYBOOK %s ALIAS <name> — rename the playbook (and its command) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
+		fmt.Fprintf(os.Stderr, "Register a different launcher with: cpb ALTER PLAYBOOK %s LAUNCHER <name> — rename the playbook (and its launcher) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
 		manual()
 		return
 	}
@@ -55,7 +55,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 		return
 	}
 
-	fmt.Printf("Command:  %s  (launcher at %s)\n", cmdName, path)
+	fmt.Printf("Launcher: %s  (at %s)\n", cmdName, path)
 	warnIfShadowedOrUnreachable(cmdName, path, configDir)
 	fmt.Printf("\nRun it now:\n  %s\n", shell.QuoteArg(cmdName))
 }
@@ -79,11 +79,11 @@ func defaultPlaybooksRoot() string {
 	return filepath.Join(home, ".claude-playbooks")
 }
 
-// checkAliasFlagConflict guards every registering command's --alias and
-// --no-alias: set together, the requested command name would be ambiguous.
-func checkAliasFlagConflict(alias string, noAlias bool) error {
-	if noAlias && alias != "" {
-		return fmt.Errorf("--no-alias and --alias cannot be used together")
+// checkLauncherConflict guards every registering statement's LAUNCHER and
+// NO LAUNCHER: given together, the launcher it asks for would be ambiguous.
+func checkLauncherConflict(launcher string, noLauncher bool) error {
+	if noLauncher && launcher != "" {
+		return fmt.Errorf("NO LAUNCHER and LAUNCHER cannot be used together")
 	}
 	return nil
 }
@@ -106,7 +106,7 @@ func resolveLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string
 		name = fallbackName
 	}
 	if err := launcher.ValidateName(name); err != nil {
-		return "", fmt.Errorf("%w (add NO ALIAS to %s without a launcher)", err, verb)
+		return "", fmt.Errorf("%w (add NO LAUNCHER to %s without a launcher)", err, verb)
 	}
 	return name, nil
 }

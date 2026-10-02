@@ -30,9 +30,9 @@ steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
-  'cpb CREATE ENV synth-router SET ANTHROPIC_BASE_URL=http://router.invalid/v1 DESCRIBE "synthetic router"',
-  'cpb CREATE ENV synth-direct SET ANTHROPIC_BASE_URL=http://direct.invalid/v1 DESCRIBE "synthetic direct"',
-  'cpb CREATE PLAYBOOK keep NO ALIAS && cpb ALTER PLAYBOOK keep USE ENV synth-direct',
+  'cpb CREATE ENV synth-router SET ANTHROPIC_BASE_URL=http://router.invalid/v1 DESCRIPTION "synthetic router"',
+  'cpb CREATE ENV synth-direct SET ANTHROPIC_BASE_URL=http://direct.invalid/v1 DESCRIPTION "synthetic direct"',
+  'cpb CREATE PLAYBOOK keep NO LAUNCHER && cpb ALTER PLAYBOOK keep USE ENV synth-direct',
   'cksum < "$HOME/.claude-playbooks/keep/.playbook" > "$HOME/keep.sum" && mkdir -p "$HOME/work"',
 ]
 
@@ -46,13 +46,13 @@ timeout = 300
 
 [[driver.actions]]
 id = "write_file"
-send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO ALIAS;' 'ALTER PLAYBOOK demo USE ENV synth-router BLOCK VAR HTTP_PROXY;' > demo.cpb'''
+send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO LAUNCHER;' 'ALTER PLAYBOOK demo USE ENV synth-router BLOCK VAR HTTP_PROXY;' > demo.cpb'''
 then = "enter"
 when = "writes demo.cpb with a playbook demo on the env set synth-router and HTTP_PROXY blocked, replacing any demo.cpb already there: the first step while demo.cpb does not exist yet or holds anything else"
 
 [[driver.actions]]
 id = "write_file_direct"
-send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO ALIAS;' 'ALTER PLAYBOOK demo USE ENV synth-direct BLOCK VAR HTTP_PROXY;' > demo.cpb'''
+send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO LAUNCHER;' 'ALTER PLAYBOOK demo USE ENV synth-direct BLOCK VAR HTTP_PROXY;' > demo.cpb'''
 then = "enter"
 when = "writes demo.cpb with a playbook demo on the env set synth-direct and HTTP_PROXY blocked (replacing any demo.cpb already there)"
 

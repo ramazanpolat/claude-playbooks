@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -15,9 +15,9 @@ import (
 // disk: a file is judged against the state its own earlier statements
 // produce, as it would run.
 type dryState struct {
-	profiles    map[string]*envprofile.Profile // env sets written; nil: dropped
-	playbooks   map[string]bool                // true: created or renamed to; false: dropped or renamed from
-	pbEnvs      map[string]*manifest.Env       // a playbook's env block after earlier statements; nil: empty
+	profiles    map[string]*envset.Set   // env sets written; nil: dropped
+	playbooks   map[string]bool          // true: created or renamed to; false: dropped or renamed from
+	pbEnvs      map[string]*manifest.Env // a playbook's env block after earlier statements; nil: empty
 	defaults    []string
 	hasDefaults bool
 
@@ -51,7 +51,7 @@ type dryState struct {
 
 func newDryState() *dryState {
 	return &dryState{
-		profiles:     map[string]*envprofile.Profile{},
+		profiles:     map[string]*envset.Set{},
 		playbooks:    map[string]bool{},
 		pbEnvs:       map[string]*manifest.Env{},
 		worlds:       map[string]*pluginWorld{},
@@ -68,7 +68,7 @@ func newDryState() *dryState {
 }
 
 // profile reads an env set as the run sees it: nil when it does not exist.
-func (r *stmtRun) profile(dir, name string) (*envprofile.Profile, error) {
+func (r *stmtRun) profile(dir, name string) (*envset.Set, error) {
 	if r.dry != nil {
 		if p, ok := r.dry.profiles[name]; ok {
 			if p == nil {
@@ -77,11 +77,11 @@ func (r *stmtRun) profile(dir, name string) (*envprofile.Profile, error) {
 			return cloneProfile(p), nil
 		}
 	}
-	return envprofile.Read(dir, name)
+	return envset.Read(dir, name)
 }
 
 // recordProfile keeps a dry run's write of an env set; p nil records a drop.
-func (r *stmtRun) recordProfile(name string, p *envprofile.Profile) {
+func (r *stmtRun) recordProfile(name string, p *envset.Set) {
 	if r.dry == nil {
 		return
 	}
@@ -215,7 +215,7 @@ func (r *stmtRun) defaultsList(dir string) ([]string, error) {
 	if r.dry != nil && r.dry.hasDefaults {
 		return slices.Clone(r.dry.defaults), nil
 	}
-	return envprofile.Defaults(dir)
+	return envset.Defaults(dir)
 }
 
 func (r *stmtRun) recordDefaults(names []string) {

@@ -47,7 +47,7 @@ contains = "delete-guarded"
 [[verify.commands]]
 # One-off launch flags before and after the name, layered over the
 # manifest, and nothing written back to it.
-command = 'rm -f "$HOME/claude-env"; cp "$HOME/.claude-playbooks/env-pb/.playbook" "$HOME/manifest-before"; cpb run --env ONE_OFF=yes env-pb --unset FROM_MANIFEST && grep -x ONE_OFF=yes "$HOME/claude-env" >/dev/null && ! grep -q "^FROM_MANIFEST=" "$HOME/claude-env" && cmp -s "$HOME/manifest-before" "$HOME/.claude-playbooks/env-pb/.playbook" && echo flags-ok'
+command = 'rm -f "$HOME/claude-env"; cp "$HOME/.claude-playbooks/env-pb/.playbook" "$HOME/manifest-before"; cpb run --env ONE_OFF=yes env-pb --block FROM_MANIFEST && grep -x ONE_OFF=yes "$HOME/claude-env" >/dev/null && ! grep -q "^FROM_MANIFEST=" "$HOME/claude-env" && cmp -s "$HOME/manifest-before" "$HOME/.claude-playbooks/env-pb/.playbook" && echo flags-ok'
 contains = "flags-ok"
 
 [[verify.commands]]

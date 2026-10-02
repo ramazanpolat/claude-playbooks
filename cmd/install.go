@@ -19,19 +19,19 @@ import (
 // installOpts carries CREATE PLAYBOOK … FROM's clauses. No state is shared
 // between two calls.
 type installOpts struct {
-	name    string
-	subdir  string
-	branch  string
-	alias   string
-	noAlias bool
-	sandbox bool
+	name       string
+	subdir     string
+	branch     string
+	launcher   string
+	noLauncher bool
+	sandbox    bool
 	// isolatedLogin: isolated_login = true without a sandbox (CREATE
 	// PLAYBOOK … FROM … ISOLATED LOGIN).
 	isolatedLogin bool
 }
 
 func doInstall(o installOpts, args []string) error {
-	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
+	if err := checkLauncherConflict(o.launcher, o.noLauncher); err != nil {
 		return err
 	}
 
@@ -96,12 +96,12 @@ func doInstall(o installOpts, args []string) error {
 	}
 	defer unlock()
 
-	// Preflight command names BEFORE the directory joins the registry:
+	// Preflight launcher names BEFORE the directory joins the registry:
 	// dispatch resolves directory names ahead of aliases, so a clash would
 	// silently re-route an existing command. The target name joins the
 	// registry even under --no-alias, and an imported manifest's alias
 	// registers without any flag.
-	effectiveAlias := o.alias
+	effectiveAlias := o.launcher
 	if effectiveAlias == "" && mPre != nil {
 		effectiveAlias = mPre.Launcher
 	}
@@ -110,7 +110,7 @@ func doInstall(o installOpts, args []string) error {
 	// the source is copied into the registry, not as a post-copy warning.
 	// The installed manifest normalizes its name to targetName, so this
 	// resolved name is still the command to write after the copy.
-	launcherName, err := resolveLauncherName(o.noAlias, effectiveAlias, targetName, "create the playbook")
+	launcherName, err := resolveLauncherName(o.noLauncher, effectiveAlias, targetName, "create the playbook")
 	if err != nil {
 		return err
 	}
@@ -249,19 +249,19 @@ func doInstall(o installOpts, args []string) error {
 	warnIfNoClaudeMD(configDest, targetName)
 
 	// Alias handling.
-	if o.noAlias {
+	if o.noLauncher {
 		fmt.Printf("\nRun with:\n  cpb run %s\n", targetName)
 	} else {
-		// A custom command name must be resolvable at invocation time: record
+		// A custom launcher name must be resolvable at invocation time: record
 		// it as the manifest alias so multicall dispatch finds the playbook.
-		if o.alias != "" {
-			if err := writeAliasManifest(dest, targetName, o.alias); err != nil {
+		if o.launcher != "" {
+			if err := writeAliasManifest(dest, targetName, o.launcher); err != nil {
 				// Without the manifest entry the alias can never resolve; and
 				// dest already joined the registry, so leaving it would block a
 				// retry under the same name — roll it back like the other
 				// post-copy error paths.
 				os.RemoveAll(dest)
-				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", o.alias, err)
+				return fmt.Errorf("cannot record launcher %q in manifest (required for the launcher to resolve): %w", o.launcher, err)
 			}
 		}
 
