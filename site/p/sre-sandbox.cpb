@@ -1,6 +1,6 @@
 -- title: SRE in a sandbox
 -- description: For operations work in a microVM: the Cloudflare docs, runbooks with doc-coauthoring, and read-only kubectl.
--- min-cpb: 3.24.0
+-- min-cpb: 4.0.0
 -- create-with: SANDBOX
 
 ALTER PLAYBOOK

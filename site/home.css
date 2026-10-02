@@ -537,7 +537,6 @@ footer a:hover { color: var(--fg); text-decoration: underline; }
 .zone.hot { border-color: var(--brand); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent); }
 .z-sbx { border-width: 2px; box-shadow: inset 0 0 0 4px var(--surface), inset 0 0 0 5.5px var(--line-strong); }
 .z-sbx.hot { box-shadow: inset 0 0 0 4px var(--surface), inset 0 0 0 5.5px var(--brand), 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent); }
-.z-openshell { background-image: repeating-linear-gradient(135deg, transparent 0 9px, color-mix(in srgb, var(--fg) 5%, transparent) 9px 10px); }
 .z-remote { box-shadow: 9px 9px 0 -1px var(--surface-2), 9px 9px 0 0 var(--line-strong); margin-right: 9px; margin-bottom: 9px; }
 .z-remote.hot { box-shadow: 9px 9px 0 -1px var(--surface-2), 9px 9px 0 0 var(--brand), 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent); }
 .z-throwaway { border-style: dashed; background: color-mix(in srgb, var(--surface) 70%, transparent); }
@@ -546,7 +545,6 @@ footer a:hover { color: var(--fg); text-decoration: underline; }
 .zhead .zi { width: 1.5rem; height: 1.5rem; margin: 0; }
 .zhead .zi svg { width: 1.3rem; height: 1.3rem; }
 .ztag { margin-left: auto; font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-dim); border: 1px solid var(--line-strong); border-radius: 999px; padding: 0.05rem 0.5rem; }
-.z-openshell .ztag { color: var(--no); border-color: color-mix(in srgb, var(--no) 50%, transparent); }
 .zbody { display: grid; gap: 0.55rem; padding-top: 0.3rem; }
 .gate { position: absolute; right: -1.05rem; top: 50%; transform: translateY(-50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 0.1rem; width: 2.1rem; padding: 0.3rem 0 0.2rem; background: var(--bg); border: 1.5px solid var(--line-strong); border-radius: 999px; color: var(--fg-dim); }
 .gate .lg { margin: 0; width: 1.1rem; height: 1.1rem; }

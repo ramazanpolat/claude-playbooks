@@ -1,6 +1,6 @@
 -- title: Code reviewer
 -- description: Reads code and never writes it: the review plugins, GitHub, and Edit and Write denied.
--- min-cpb: 3.24.0
+-- min-cpb: 4.0.0
 -- needs: a secret helper for keychain:github-mcp
 
 ALTER PLAYBOOK

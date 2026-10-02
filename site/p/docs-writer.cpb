@@ -1,6 +1,6 @@
 -- title: Documents and writing
 -- description: For documents and writing: Word, PDF, spreadsheets and slides, co-authoring, and Notion.
--- min-cpb: 3.24.0
+-- min-cpb: 4.0.0
 
 ALTER PLAYBOOK
   ADD MCP SERVER notion URL 'https://mcp.notion.com/mcp'
