@@ -98,8 +98,7 @@ func TestInstallDropsSourceEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	installNoAlias = true
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "pb", noAlias: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 	if e := readEnv(t, filepath.Join(config.PlaybooksDir, "pb")); !e.Empty() {
@@ -128,8 +127,7 @@ func TestLocalSourceIsNeverMutated(t *testing.T) {
 	}
 	before, _ := os.ReadFile(filepath.Join(source, manifest.FileName))
 
-	installNoAlias = true
-	if err := runInstall(nil, []string{source}); err != nil {
+	if err := doInstall(installOpts{name: "pb", noAlias: true}, []string{source}); err != nil {
 		t.Fatal(err)
 	}
 	installed := filepath.Join(config.PlaybooksDir, "pb")

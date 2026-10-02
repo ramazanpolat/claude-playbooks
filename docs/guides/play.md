@@ -154,7 +154,7 @@ Not sandboxed: it will run on your machine, as you, unless you launch it with --
 
 Keep this playbook as reviewer? [y/N] y
 ...
-Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with cpb play --update reviewer.
+Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with cpb update reviewer.
 ```
 
 - Same preview, same confirmations; no session runs.
@@ -170,19 +170,19 @@ Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with c
   it:
 
   ```
-  Played from:    /home/you/reviewer.cpb (sha256 c684ff05c8b3, 2026-10-02-02_26; cpb play --update reviewer)
+  Played from:    /home/you/reviewer.cpb (sha256 c684ff05c8b3, 2026-10-02-02_26; cpb update reviewer)
   ```
 
 ## Updating a kept one
 
-Nothing updates on its own. `cpb play --update <name>` fetches the recorded
-ref again:
+Nothing updates on its own. `cpb update <name>` fetches the recorded ref
+again:
 
 - The same bytes: `reviewer is unchanged`, and nothing happens.
 - New bytes: the diff, the full preview and every confirmation again.
 
 ```
-$ cpb play --update reviewer
+$ cpb update reviewer
 ...
 Changes from sha256 c684ff05c8b3 to eeb1d16d98d7:
   -   ALLOW TOOL 'Read' 'Grep' 'Glob'
@@ -196,7 +196,9 @@ Update reviewer to these bytes? [y/N]
 What the old recipe set and the new one no longer does is removed (a variable,
 a tool rule, a plugin and then its marketplace); the login is never reset.
 A pinned ref (a tag) that now serves different bytes is called out: "the tag
-moved". `cpb update` never touches a played playbook.
+moved". `--dry-run` previews it, and `--dry-run --json` gives the plan;
+without a terminal, `--yes`, `--trust-endpoint` and `--trust-secret` answer the
+confirmations, as for `cpb play`.
 
 ## Templates
 

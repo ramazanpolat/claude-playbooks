@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // defaultUpdateRepo is the GitHub repo self-update pulls releases from. It
@@ -49,7 +51,26 @@ func isNixStorePath(p string) bool {
 }
 
 // runSelfUpdate builds a selfUpdateConfig from the real runtime/env and runs it.
-// This is the entry point wired into `claude-playbook update` (no name).
+var (
+	selfUpdateCheck bool
+	selfUpdateForce bool
+)
+
+var selfUpdateCmd = &cobra.Command{
+	Use:   "self-update",
+	Short: "Update cpb itself to the latest release",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSelfUpdate(selfUpdateForce, selfUpdateCheck)
+	},
+}
+
+func init() {
+	selfUpdateCmd.Flags().BoolVar(&selfUpdateCheck, "check", false, "report the latest version without installing it")
+	selfUpdateCmd.Flags().BoolVarP(&selfUpdateForce, "force", "f", false, "reinstall even if already on the latest version")
+}
+
+// runSelfUpdate is `cpb self-update`.
 func runSelfUpdate(force, checkOnly bool) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -121,7 +142,7 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 			if cfg.nixManaged {
 				fmt.Fprintln(w, nixUpdateHint)
 			} else {
-				fmt.Fprintln(w, "Run 'claude-playbook update' to install it.")
+				fmt.Fprintln(w, "Run 'cpb self-update' to install it.")
 			}
 		}
 		return nil

@@ -114,7 +114,7 @@ one a `devbox run` command. A `devbox.json` like this:
 then:
 
 ```bash
-devbox run -- cpb install <git-url-or-local-dir> --name myplaybook
+devbox run -- cpb CREATE PLAYBOOK myplaybook FROM <git-url-or-local-dir>
 devbox run myplaybook         # launch; arguments go to claude
 ```
 
@@ -167,8 +167,8 @@ devbox needs none of this: it enables flakes itself.
   host, a full devbox project install took 188 s with the flake against 73 s
   with a downloaded release binary, so the build adds about two minutes there.
   Later installs of the same ref are instant.
-- **Update through devbox**, not with `cpb update`: the binary lives in the
-  read-only Nix store, and `cpb update` refuses to touch it. **Replace** the
+- **Update through devbox**, not with `cpb self-update`: the binary lives in
+  the read-only Nix store, and `cpb self-update` refuses to touch it. **Replace** the
   entry -- a `devbox add` with a different tag does not replace the old one, it
   adds a second claude-playbook package beside it. Either change the tag in
   `devbox.json` and run `devbox install`, or remove the old reference first:
@@ -266,20 +266,20 @@ mv claude-playbook /usr/local/bin/
 
 ## Updating the tool
 
-With **no** playbook name, `update` self-updates the `claude-playbook` binary to
-the latest GitHub release:
+`self-update` updates the `claude-playbook` binary to the latest GitHub
+release:
 
 ```bash
-cpb update            # download + install the latest release
-cpb update --check    # report the latest version without installing
-cpb update --force    # reinstall even if already on the latest
+cpb self-update            # download + install the latest release
+cpb self-update --check    # report the latest version without installing
+cpb self-update --force    # reinstall even if already on the latest
 ```
 
 It downloads the release asset for your OS/architecture, verifies it, and
 atomically replaces the running binary (resolving the `cpb` symlink so the real
 binary is updated). If the install directory needs elevated privileges to write,
-it says so. A binary installed through devbox or Nix is never replaced: `update`
-refuses and tells you to change the tag in devbox instead (see
+it says so. A binary installed through devbox or Nix is never replaced:
+`self-update` refuses and tells you to change the tag in devbox instead (see
 [With devbox or Nix](#with-devbox-or-nix)).
 
 To update a *playbook* rather than the tool, see

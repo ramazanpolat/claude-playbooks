@@ -622,6 +622,7 @@ created empty; `Launcher:` reads `(none)` without one. `Description:`,
  "description": null, "homepage": null, "author": null,
  "path": "/Users/me/.claude-playbooks/work",
  "last_used": "2026-10-02T09:41:12.000Z",
+ "migrate": null,
  "source": {"url": "https://github.com/example/work-playbook", "branch": "v1.2.0", "subdir": null},
  "linked": null,
  "launcher": "w",
@@ -632,13 +633,15 @@ created empty; `Launcher:` reads `(none)` without one. `Description:`,
 
 `description`, `homepage` and `author` are the manifest's, null when it has
 none; `last_used` is when the playbook's config directory last changed
-(RFC 3339, UTC). `source` is null for a playbook without one; `linked` is the
+(RFC 3339, UTC); `migrate` is the declared migrate step (`[update] migrate`)
+that `cpb update` runs, null without one, and the human form has a
+`Migrate:` line for it. `source` is null for a playbook without one; `linked` is the
 target directory of a linked playbook, else null; `launcher` is null without
 one.
 
 **`play`** (v4.0.0) is the object's last field. It is the `[play]` record of a
 playbook `cpb play --keep` built, and `null` for every other:
-`{"ref", "url", "sha256", "played"}`. `ref` is what `cpb play --update`
+`{"ref", "url", "sha256", "played"}`. `ref` is what `cpb update <name>`
 fetches again (a template name, a URL, a `github:` ref, or a local file's
 absolute path); `url` is empty for a local file; `played` is
 `YYYY-MM-DD-HH_MM`. The human form has a `Played from:` line.
@@ -1345,7 +1348,7 @@ How depends on the source, and that is deliberate:
   cpb clones it and copies the skill directory (the repository root, or
   `SUBDIR`) into `skills/<name>`. A published skill is a pinned artifact: the
   copy survives the source moving or disappearing, and `cpb update` refreshes
-  it from the recorded source (`cpb update <playbook>`; a bare `cpb update`
+  it from the recorded source (`cpb update <playbook>`; `cpb self-update`
   updates cpb itself).
 
 The source is recorded in the manifest, `[skills.<name>]` (`source`, `branch`,
@@ -1607,7 +1610,7 @@ cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals 
 cpb play <ref> --dry-run [--json] [--sha256 <hex>]    the plan against a throwaway playbook
 cpb play <ref> --keep [--as <name>] [--dry-run [--json]] [the run's confirmation flags]
                                                        keep it as a playbook in your store; no session
-cpb play --update <name> [--dry-run [--json]] [--yes] [--trust-…] [--env <set>]...
+cpb update <name> [--dry-run [--json]] [--yes] [--trust-…] [--sha256 <hex>]
                                                        fetch a kept playbook's recipe again
 cpb play <dir> --check                                 a template directory, as the website's CI runs it
 ```
@@ -1729,7 +1732,7 @@ block added. It is a new top-level field, absent from `APPLY`'s own report:
 
 `--check --json` is the same object with no statements, and `sandbox`
 `null`. `sandbox.backend` is `""` when the play runs on this machine. `keep`
-and `update` are present only for `--keep` and `--update`.
+and `update` are present only for `--keep` and `cpb update`.
 
 **The header.** A recipe may open with `-- key: value` lines, one per line,
 then a blank line. The keys:
@@ -1827,7 +1830,7 @@ runs no session:
 
   ```toml
   [play]
-  ref = "github:acme/agents/reviewer.cpb@v1.2.0"   # what --update resolves again; a local file's absolute path
+  ref = "github:acme/agents/reviewer.cpb@v1.2.0"   # what cpb update resolves again; a local file's absolute path
   url = "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb"   # absent for a local file
   sha256 = "3f1a…c9"
   played = "2026-10-01-21_58"
@@ -1836,7 +1839,7 @@ runs no session:
   `SHOW PLAYBOOK --json` shows it as `play` (see Output);
 - if applying fails part-way, the playbook it created is dropped.
 
-**`--update <name>`** fetches the recorded ref again:
+**`cpb update <name>`** fetches a kept playbook's recorded ref again:
 - the same sha256: "`<name>` is unchanged", and nothing runs;
 - new bytes: the line diff from the kept bytes, a note when a pinned ref now
   serves other bytes ("the tag moved"), the plan, and every confirmation
@@ -1846,8 +1849,8 @@ runs no session:
   the agent, model, picker and status line; plugins before their
   marketplace; a login is never unset), the new bytes are applied, and the
   record is updated;
-- a playbook without a `[play]` record has nothing to update. `cpb update`
-  never touches a played playbook's recipe.
+- a playbook with neither a `[play]` nor a `[source]` record has nothing to
+  update.
 
 **Exit codes:** 0 when checked, planned, kept, updated or unchanged; 1 when
 refused (a check, the header, `--sha256`, or a confirmation); 2 on a usage

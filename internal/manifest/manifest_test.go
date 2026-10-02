@@ -76,6 +76,26 @@ func TestPreserveRoundTrips(t *testing.T) {
 	}
 }
 
+func TestMigrateRoundTripsAndValidates(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(dir, &Manifest{Update: &Update{Migrate: "migrations/apply.sh"}}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Read(dir)
+	if err != nil || m == nil || m.Update == nil || m.Update.Migrate != "migrations/apply.sh" || len(m.Update.Preserve) != 0 {
+		t.Fatalf("m=%#v err=%v", m, err)
+	}
+	for _, bad := range []string{"../outside.sh", "/abs/apply.sh"} {
+		content := "version = \"0.1.0\"\n[update]\nmigrate = " + `"` + bad + `"` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, FileName), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Read(dir); err == nil {
+			t.Errorf("update.migrate %q was accepted", bad)
+		}
+	}
+}
+
 func TestEnvRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	in := &Manifest{

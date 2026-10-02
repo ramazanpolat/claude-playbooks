@@ -7,10 +7,15 @@
 # of this suite, because a regression there is silent until a pilot loses
 # their settings.
 #
-# A local directory is the source, so no network and no git host. `install`
-# records [source] only for GIT sources, so the manifest is written by hand
-# -- exactly what a pilot converting a local install to an updatable one
-# has to do.
+# A local directory is the source, so no network and no git host.
+# CREATE PLAYBOOK … FROM records [source] only for GIT sources, so the
+# manifest is written by hand -- exactly what converting a local install to
+# an updatable one takes.
+#
+# The new source declares a migrate step ([update] migrate): --dry-run shows
+# it, a run without --yes off a terminal is refused and changes nothing, and
+# with --yes it runs after the registry lock is released -- the script runs
+# a writing cpb statement, which would wait forever on a held lock.
 #
 # Quoting: TOML LITERAL strings ('...' / '''...''') throughout. A basic
 # string ("...") processes backslash escapes before the shell sees them,
@@ -31,7 +36,7 @@ steps = [
   '''printf '%s\n' '# upstream v1' > "$HOME/src/CLAUDE.md"''',
   '''printf '%s\n' 'name = "pb"' 'version = "1.0.0"' > "$HOME/src/.playbook"''',
   # Single-quoted lines, so $1/$2/$3 land in the FILE instead of expanding here.
-  '''printf '%s\n' '#!/bin/sh' 'echo "$1 -> $2" > "$3/migrated"' > "$HOME/src/migrations/apply.sh"''',
+  '''printf '%s\n' '#!/bin/sh' 'echo "$1 -> $2" > "$3/migrated"' 'claude-playbook ALTER PLAYBOOK pb SET VAR MIGRATED=yes' > "$HOME/src/migrations/apply.sh"''',
   'chmod 755 "$HOME/src/migrations/apply.sh"',
 ]
 
@@ -39,8 +44,8 @@ steps = [
 path = "~/.local/bin/claude-playbook"
 
 [[verify.commands]]
-# Install, then make it updatable: a local install records no [source].
-command = '''claude-playbook install "$HOME/src" --name pb --no-alias && printf '%s\n' 'name = "pb"' 'version = "1.0.0"' '' '[source]' "repository = \"$HOME/src\"" > "$HOME/.claude-playbooks/pb/.playbook" && echo installed'''
+# Create it, then make it updatable: a local source records no [source].
+command = '''claude-playbook CREATE PLAYBOOK pb FROM "$HOME/src" NO ALIAS && printf '%s\n' 'name = "pb"' 'version = "1.0.0"' '' '[source]' "repository = \"$HOME/src\"" > "$HOME/.claude-playbooks/pb/.playbook" && echo installed'''
 
 [[verify.commands]]
 # A local file the source knows nothing about, and one it DOES ship. Both
@@ -48,20 +53,31 @@ command = '''claude-playbook install "$HOME/src" --name pb --no-alias && printf 
 command = '''printf '%s\n' '{"pilot":true}' > "$HOME/.claude-playbooks/pb/settings.json" && printf '%s\n' mine > "$HOME/.claude-playbooks/pb/.claude.json" && echo seeded'''
 
 [[verify.commands]]
-command = '''printf '%s\n' '# upstream v2' > "$HOME/src/CLAUDE.md" && printf '%s\n' 'name = "pb"' 'version = "2.0.0"' > "$HOME/src/.playbook" && echo bumped'''
+command = '''printf '%s\n' '# upstream v2' > "$HOME/src/CLAUDE.md" && printf '%s\n' 'name = "pb"' 'version = "2.0.0"' '' '[update]' 'migrate = "migrations/apply.sh"' > "$HOME/src/.playbook" && echo bumped'''
 
 [[verify.commands]]
-# --check reports the move...
-command = 'claude-playbook update pb --check'
-contains = "2.0.0"
+# --dry-run reports the move...
+command = 'claude-playbook update pb --dry-run'
+contains = "available: 2.0.0"
+
+[[verify.commands]]
+# ...and the declared step, with its sha256...
+command = 'claude-playbook update pb --dry-run'
+contains = "migrate:   migrations/apply.sh (sha256 "
 
 [[verify.commands]]
 # ...and installs nothing.
-command = 'grep -F "upstream v1" "$HOME/.claude-playbooks/pb/CLAUDE.md" && echo check-installed-nothing'
-contains = "check-installed-nothing"
+command = 'grep -F "upstream v1" "$HOME/.claude-playbooks/pb/CLAUDE.md" && test ! -e "$HOME/.claude-playbooks/pb/migrated" && echo dry-run-installed-nothing'
+contains = "dry-run-installed-nothing"
 
 [[verify.commands]]
-command = 'claude-playbook update pb && grep -F "upstream v2" "$HOME/.claude-playbooks/pb/CLAUDE.md" && echo updated'
+# Off a terminal the step needs --yes: without it the update is refused
+# and nothing changes.
+command = '''out=$(claude-playbook update pb 2>&1 </dev/null); printf '%s' "$out" | grep -qF "pass --yes" && grep -F "upstream v1" "$HOME/.claude-playbooks/pb/CLAUDE.md" >/dev/null && echo consent-required'''
+contains = "consent-required"
+
+[[verify.commands]]
+command = 'claude-playbook update pb --yes && grep -F "upstream v2" "$HOME/.claude-playbooks/pb/CLAUDE.md" && echo updated'
 contains = "updated"
 
 [[verify.commands]]
@@ -73,9 +89,14 @@ command = 'grep -F mine "$HOME/.claude-playbooks/pb/.claude.json" && echo state-
 contains = "state-preserved"
 
 [[verify.commands]]
-# The migration ran, and was handed the version pair.
+# The migrate step ran, and was handed the version pair.
 command = 'grep -F "1.0.0 -> 2.0.0" "$HOME/.claude-playbooks/pb/migrated" && echo migration-ran'
 contains = "migration-ran"
+
+[[verify.commands]]
+# It ran outside the registry lock: its own writing statement went through.
+command = '''grep -F 'MIGRATED = "yes"' "$HOME/.claude-playbooks/pb/.playbook" && echo ran-outside-the-lock'''
+contains = "ran-outside-the-lock"
 
 [[verify.commands]]
 # Replaced entries are backed up beside the install, not destroyed.
@@ -90,7 +111,7 @@ contains = "2.0.0"
 # A playbook with no [source] cannot update natively, and says so rather than
 # failing obscurely.
 command = '''mkdir -p "$HOME/.claude-playbooks/orphan" && printf '%s\n' '# orphan' > "$HOME/.claude-playbooks/orphan/CLAUDE.md" && claude-playbook update orphan 2>&1 || true'''
-contains = "no [source] metadata"
+contains = "nothing to update from"
 
 [[verify.commands]]
 # And backups do not accumulate: still the one from the single update.

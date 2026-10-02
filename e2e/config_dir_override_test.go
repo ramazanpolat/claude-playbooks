@@ -478,8 +478,8 @@ func TestAuthProbeDoesNotLeakOverride(t *testing.T) {
 }
 
 // REGRESSION (review finding): the migration runner built its environment
-// straight from os.Environ(), so an exported override survived into
-// migrations/apply.sh -- and into anything that script launched.
+// straight from os.Environ(), so an exported override survived into the
+// migrate step -- and into anything that script launched.
 func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
 	root := t.TempDir()
 	src := t.TempDir()
@@ -488,7 +488,7 @@ func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "CLAUDE.md"), []byte("# pb\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("name = \"pb\"\nversion = \"2.0.0\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("name = \"pb\"\nversion = \"2.0.0\"\n\n[update]\nmigrate = \"migrations/apply.sh\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(src, "migrations"), 0o755); err != nil {
@@ -508,7 +508,7 @@ func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
 		dumpEnv + "=" + filepath.Join(work, "envdump"),
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
 	}
-	install := exec.Command(binPath, "--playbooks-dir", root, "install", src, "--name", "pb", "--no-alias")
+	install := exec.Command(binPath, "--playbooks-dir", root, "CREATE", "PLAYBOOK", "pb", "FROM", src, "NO", "ALIAS")
 	install.Env = base
 	if out, err := install.CombinedOutput(); err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
@@ -518,7 +518,7 @@ func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	update := exec.Command(binPath, "--playbooks-dir", root, "update", "pb")
+	update := exec.Command(binPath, "--playbooks-dir", root, "update", "pb", "--yes")
 	update.Env = append(append([]string{}, base...), overrideEnv+"=/records/a")
 	if out, err := update.CombinedOutput(); err != nil {
 		t.Fatalf("update: %v\n%s", err, out)

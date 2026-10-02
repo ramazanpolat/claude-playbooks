@@ -104,7 +104,7 @@ func playConfirm(res *play.Result, interactive bool) error {
 }
 
 // playConfirmAsk is playConfirm with the yes question given (--keep and
-// --update ask their own).
+// cpb update ask their own).
 func playConfirmAsk(res *play.Result, interactive bool, question string) error {
 	typed := playConfirmations(res)
 	if !interactive {

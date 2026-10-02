@@ -135,9 +135,8 @@ func TestInstallRejectsPathNameFlag(t *testing.T) {
 	resetCommandTestState(t)
 	source := testPlaybookSource(t, "safe")
 	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
-	installName = "../escape"
 
-	err := runInstall(nil, []string{source})
+	err := doInstall(installOpts{name: "../escape"}, []string{source})
 	if err == nil {
 		t.Fatal("expected install to reject path-like --name")
 	}
@@ -149,17 +148,21 @@ func TestInstallRejectsPathNameFlag(t *testing.T) {
 	}
 }
 
-func TestInstallRejectsPathManifestName(t *testing.T) {
+// The statement's name chooses where a playbook goes; the source manifest's
+// name, path-like or not, never does.
+func TestInstallNameIsTheStatementsNotTheManifests(t *testing.T) {
 	resetCommandTestState(t)
 	source := testPlaybookSource(t, "../escape")
 	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
 
-	err := runInstall(nil, []string{source})
-	if err == nil {
-		t.Fatal("expected install to reject path-like manifest name")
+	if err := doInstall(installOpts{name: "pb", noAlias: true}, []string{source}); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "top-level playbook name") {
-		t.Fatalf("error = %v", err)
+	if m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "pb")); err != nil || m == nil || m.Name != "pb" {
+		t.Fatalf("not installed under the statement's name: %#v %v", m, err)
+	}
+	if _, err := os.Stat(filepath.Join(config.PlaybooksDir, "..", "escape")); !os.IsNotExist(err) {
+		t.Fatalf("the manifest's name chose a path: %v", err)
 	}
 }
 
@@ -175,9 +178,7 @@ func TestInstallRejectsEscapingSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	installSubdir = "../sibling"
-	installNoAlias = true
-	if err := runInstall(nil, []string{source}); err == nil {
+	if err := doInstall(installOpts{subdir: "../sibling", noAlias: true}, []string{source}); err == nil {
 		t.Fatal("expected escaping --subdir to be rejected")
 	}
 	entries, err := os.ReadDir(config.PlaybooksDir)
@@ -238,8 +239,7 @@ func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 		}
 	}
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	installNoAlias = true
-	if err := runInstall(nil, []string{"file://" + repo}); err != nil {
+	if err := doInstall(installOpts{name: "custom-update", noAlias: true}, []string{"file://" + repo}); err != nil {
 		t.Fatal(err)
 	}
 	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "custom-update"))
@@ -340,9 +340,7 @@ func TestInstallRewritesManifestNameToInstallName(t *testing.T) {
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
 	src := testPlaybookSource(t, "kommander")
 
-	installName = "kommander-dev"
-	installNoAlias = true
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "kommander-dev", noAlias: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -431,12 +429,6 @@ func resetCommandTestState(t *testing.T) {
 	t.Setenv("CPB_SECRET_HELPER", "")
 	config.PlaybooksDir = ""
 	config.LauncherDir = t.TempDir()
-	installName = ""
-	installSubdir = ""
-	installBranch = ""
-	installAlias = ""
-	installNoAlias = false
-	installSandbox = false
 	selfUninstallYes = false
 	selfUninstallKeepData = false
 	selfUninstallKeepBinary = false
@@ -445,12 +437,6 @@ func resetCommandTestState(t *testing.T) {
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
 		config.LauncherDir = ""
-		installName = ""
-		installSubdir = ""
-		installBranch = ""
-		installAlias = ""
-		installNoAlias = false
-		installSandbox = false
 		selfUninstallYes = false
 		selfUninstallKeepData = false
 		selfUninstallKeepBinary = false
@@ -487,7 +473,7 @@ func TestInstallFlattensSubdirFromManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "flatpb"}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 

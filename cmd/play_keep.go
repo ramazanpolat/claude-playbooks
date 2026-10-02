@@ -17,18 +17,17 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// cpb play --keep and --update (slice 4): a played recipe kept as a
-// playbook in the user's own store, with a [play] record, and updated only
-// when asked.
+// cpb play --keep (slice 4): a played recipe kept as a playbook in the
+// user's own store, with a [play] record, and updated only when asked
+// (cpb update <name>).
 
 var (
-	playKeep   bool
-	playAs     string
-	playUpdate string
+	playKeep bool
+	playAs   string
 )
 
 // playRecipeFile is where a kept playbook holds the exact bytes it was
-// built from: --update diffs against them and undoes what they added.
+// built from: an update diffs against them and undoes what they added.
 const playRecipeFile = ".play/recipe.cpb"
 
 // playKeepName is the kept playbook's name: --as, or the template's or
@@ -235,7 +234,7 @@ func writePlayRecord(pbDir string, src *play.Source, rec *play.Recipe, backend s
 	}
 	ref := src.Ref
 	if src.Kind == play.KindLocal {
-		ref = src.Path // absolute: --update resolves it from anywhere
+		ref = src.Path // absolute: an update resolves it from anywhere
 	}
 	m.Play = &manifest.Play{Ref: ref, URL: rec.URL, SHA256: rec.SHA256, Played: time.Now().Format("2006-01-02-15_04")}
 	if backend != "" {
@@ -271,7 +270,7 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 	} else if pb != nil {
 		hint := "keep it under another name with --as <name>"
 		if pb.Manifest != nil && pb.Manifest.Play != nil {
-			hint += ", or update it with cpb play --update " + name
+			hint += ", or update it with cpb update " + name
 		}
 		return fmt.Errorf("a playbook named %s exists: %s; nothing was written", name, hint)
 	}
@@ -324,7 +323,7 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 	if err := writePlayRecord(pb.RootPath, src, rec, backend); err != nil {
 		return fmt.Errorf("kept %s, but could not record where it came from: %v", name, err)
 	}
-	fmt.Printf("\nKept as %s: run it with `%s` (or cpb run %s). Update it with cpb play --update %s.\n", name, name, name, name)
+	fmt.Printf("\nKept as %s: run it with `%s` (or cpb run %s). Update it with cpb update %s.\n", name, name, name, name)
 	return nil
 }
 
@@ -344,7 +343,7 @@ func dropHalfKept(name string) {
 	os.Stdout = stdout
 }
 
-// undoItem is one thing a recipe clause sets: key names it, so --update
+// undoItem is one thing a recipe clause sets: key names it, so an update
 // can tell what the new recipe no longer sets; sig is the clause as
 // written, so it can tell what changed; undo removes it.
 type undoItem struct {
@@ -626,7 +625,7 @@ func playUpdateRun(name string) error {
 	return nil
 }
 
-// playUpdateJSON is the play block's "update" in --update --dry-run --json.
+// playUpdateJSON is the play block's "update" in cpb update <name> --dry-run --json.
 type playUpdateJSON struct {
 	FromSHA256 string `json:"from_sha256"`
 	Unchanged  bool   `json:"unchanged"`

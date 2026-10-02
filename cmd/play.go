@@ -25,7 +25,7 @@ import (
 // (--dry-run, --json); running it arrives with the next slice. Design:
 // task claude-playbooks-cli, design-cpb-play-2026-10-01-21_58.md.
 var playCmd = &cobra.Command{
-	Use:   "play <ref> | play --update <name>",
+	Use:   "play <ref>",
 	Short: "Try someone else's playbook: preview it, confirm, run it in a throwaway playbook",
 	Long: `play fetches a recipe once, checks it, and shows exactly what it would do.
 
@@ -44,20 +44,9 @@ available it is refused unless you pass --no-sandbox.
 --keep keeps it instead, as a playbook in your store (--as names it), with a
 launcher and a [play] record of where it came from; no session runs. Your
 DEFAULTS apply to it like to any playbook, and the preview names them.
-cpb play --update <name> fetches the recorded ref again: the same bytes
-change nothing; others show the diff and the full preview again.`,
+cpb update <name> fetches a kept playbook's recorded ref again: the same
+bytes change nothing; others show the diff and the full preview again.`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if playUpdate != "" {
-			switch {
-			case len(args) > 0:
-				return errors.New("--update <name> takes no <ref>: it fetches the one the playbook recorded")
-			case playKeep || playAs != "" || playCheck:
-				return errors.New("--update cannot be combined with --keep, --as or --check")
-			case cmd.Flags().Changed("sandbox") || playNoSandbox:
-				return errors.New("--update keeps the playbook's sandbox setting: ALTER it, or keep the recipe again")
-			}
-			return nil
-		}
 		if playAs != "" && !playKeep {
 			return errors.New("--as names a kept playbook: add --keep")
 		}
@@ -101,7 +90,6 @@ func init() {
 	playCmd.Flags().BoolVar(&playNoSandbox, "no-sandbox", false, "run on this machine, as you; the preview says so")
 	playCmd.Flags().BoolVar(&playKeep, "keep", false, "keep it as a playbook in your store, with a [play] record, instead of running it")
 	playCmd.Flags().StringVar(&playAs, "as", "", "with --keep: the kept playbook's name (default: the recipe's)")
-	playCmd.Flags().StringVar(&playUpdate, "update", "", "fetch a kept playbook's recorded recipe again, and update it after the preview")
 	rootCmd.AddCommand(playCmd)
 }
 
@@ -125,7 +113,7 @@ type playJSON struct {
 	Sandbox *playSandbox `json:"sandbox"`
 	// Keep: --keep's plan, against the user's own store (slice 4).
 	Keep bool `json:"keep,omitempty"`
-	// Update: --update's, against the kept playbook (slice 4).
+	// Update: cpb update <name>'s, against the kept playbook (slice 4).
 	Update *playUpdateJSON `json:"update,omitempty"`
 }
 
@@ -169,7 +157,7 @@ func checkRecipe(rec *play.Recipe) *play.Result {
 	}
 	if res.Header.TooOld(Version) {
 		res.Refused = append(res.Refused, play.Refusal{Line: 0, What: "the header",
-			Reason: fmt.Sprintf("this recipe needs cpb %s or later; this is %s (cpb update)", res.Header.MinCPB, Version)})
+			Reason: fmt.Sprintf("this recipe needs cpb %s or later; this is %s (cpb self-update)", res.Header.MinCPB, Version)})
 	}
 	return res
 }
@@ -177,9 +165,6 @@ func checkRecipe(rec *play.Recipe) *play.Result {
 func runPlay(cmd *cobra.Command, args []string) error {
 	if playJSONF && !playDryRun && !playCheck {
 		return errors.New("--json needs --dry-run or --check")
-	}
-	if playUpdate != "" {
-		return playUpdateRun(playUpdate)
 	}
 	ref := args[0]
 	var claudeArgs []string

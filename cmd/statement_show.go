@@ -54,11 +54,14 @@ type playbookJSON struct {
 	// (RFC3339, UTC).
 	LastUsed *string     `json:"last_used"`
 	Source   *sourceJSON `json:"source"`
-	Linked   *string     `json:"linked"`
-	Launcher *string     `json:"launcher"`
-	Envs     []string    `json:"envs"`
-	Vars     []varJSON   `json:"vars"`
-	Sandbox  bool        `json:"sandbox"`
+	// Migrate is the declared migrate step ([update] migrate) that
+	// cpb update runs after the new files are in place.
+	Migrate  *string   `json:"migrate"`
+	Linked   *string   `json:"linked"`
+	Launcher *string   `json:"launcher"`
+	Envs     []string  `json:"envs"`
+	Vars     []varJSON `json:"vars"`
+	Sandbox  bool      `json:"sandbox"`
 	// IsolatedLogin is isolate_auth: no login shared with ~/.claude (a
 	// sandboxed playbook is always isolated).
 	IsolatedLogin bool `json:"isolated_login"`
@@ -257,6 +260,9 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	if m.Source != nil && m.Source.Repository != "" {
 		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
 	}
+	if m.Update != nil {
+		v.Migrate = optStr(m.Update.Migrate)
+	}
 	v.Sandbox = m.Sandbox != nil && m.Sandbox.Always
 	// A sandbox never shares the machine's login, whatever the manifest says.
 	v.IsolatedLogin = m.IsolateAuth || v.Sandbox
@@ -363,6 +369,11 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	rows = append(rows, [][2]string{
 		{"Path", v.Path},
 		{"Source", source},
+	}...)
+	if v.Migrate != nil {
+		rows = append(rows, [2]string{"Migrate", *v.Migrate + " (run by cpb update)"})
+	}
+	rows = append(rows, [][2]string{
 		{"Launcher", deref(v.Launcher, "(none)")},
 		{"Env sets", listOrNone(v.Envs)},
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
@@ -372,7 +383,7 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
 	}
 	if v.Play != nil {
-		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb play --update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.Played, v.Name)})
+		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.Played, v.Name)})
 	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.

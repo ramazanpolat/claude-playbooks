@@ -205,8 +205,7 @@ func TestLocalInstallTakesSourceRootMode(t *testing.T) {
 	if err := os.Chmod(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	installNoAlias = true
-	if err := runInstall(nil, []string{source}); err != nil {
+	if err := doInstall(installOpts{name: "src", noAlias: true}, []string{source}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(filepath.Join(config.PlaybooksDir, "src"))

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,74 +39,90 @@ var defaultPreserved = []string{
 	".claude.json",
 }
 
+var (
+	updateDryRun        bool
+	updateYes           bool
+	updateJSON          bool
+	updateSHA256        string
+	updateTrustEndpoint []string
+	updateTrustSecret   []string
+)
+
 var updateCmd = &cobra.Command{
-	Use:                "update [name]",
-	Short:              "Self-update the tool, or update a playbook from its source",
-	DisableFlagParsing: true,
-	ValidArgsFunction:  autocompletePlaybookNames,
-	RunE:               runUpdate,
+	Use:   "update <name>",
+	Short: "Update a playbook from its source, or a played one from its recipe",
+	Long: `Update a playbook from where it came from.
+
+A playbook created FROM a source ([source] in its .playbook) is fetched
+again and overlaid. Local files (settings.json and anything under
+[update] preserve) survive. When the source declares a migrate step
+([update] migrate), it is shown with its sha256 and runs after the new
+files are in place: on a terminal you are asked, otherwise --yes runs it.
+
+A playbook kept by cpb play ([play]) fetches its recorded recipe again:
+the same bytes change nothing; others show the diff and the full preview,
+and need your confirmation (--trust-endpoint and --trust-secret without a
+terminal).
+
+cpb self-update updates cpb itself.`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 1 {
+			return errors.New("update takes one playbook name: cpb update <name> (cpb self-update updates cpb itself)")
+		}
+		return nil
+	},
+	ValidArgsFunction: autocompletePlaybookNames,
+	RunE:              runUpdate,
 }
 
+func init() {
+	updateCmd.Flags().BoolVar(&updateDryRun, "dry-run", false, "show what the update would do, migrate step included, and change nothing")
+	updateCmd.Flags().BoolVar(&updateYes, "yes", false, "answer the yes without a terminal: run the migrate step; for a played playbook, never confirms an endpoint, a proxy, TLS or a secret")
+	updateCmd.Flags().BoolVar(&updateJSON, "json", false, "played playbook, with --dry-run: the plan as JSON")
+	updateCmd.Flags().StringVar(&updateSHA256, "sha256", "", "played playbook: refuse any recipe whose sha256 is not this")
+	updateCmd.Flags().StringArrayVar(&updateTrustEndpoint, "trust-endpoint", nil, "played playbook, without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
+	updateCmd.Flags().StringArrayVar(&updateTrustSecret, "trust-secret", nil, "played playbook, without a terminal: confirm a secret reference; repeatable")
+}
+
+// updateOpts carries update's flags into the [source] path.
+type updateOpts struct {
+	dryRun bool
+	yes    bool
+}
+
+// updateAsks is whether the migrate step can be asked about: a terminal on
+// both ends. A variable for tests.
+var updateAsks = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) }
+
 func runUpdate(cmd *cobra.Command, args []string) error {
-	rest, err := takePlaybooksDirArg(args)
+	name := args[0]
+	pb, err := playbook.Require(config.ResolvePlaybooksDir(), name)
 	if err != nil {
 		return err
 	}
-	// --force is self-update only. --check means the same thing on both paths
-	// (report, do not install), so it is also accepted after a playbook name.
-	var force, checkOnly bool
-consume:
-	for len(rest) > 0 {
-		switch rest[0] {
-		case "--force", "-f":
-			force = true
-			rest = rest[1:]
-		case "--check":
-			checkOnly = true
-			rest = rest[1:]
-		default:
-			break consume
+	played := pb.Manifest != nil && pb.Manifest.Play != nil
+	if !played {
+		for _, f := range []string{"json", "sha256", "trust-endpoint", "trust-secret"} {
+			if cmd.Flags().Changed(f) {
+				return fmt.Errorf("--%s applies to a playbook kept by cpb play; %s updates from its [source]", f, name)
+			}
 		}
+		return runPlaybookUpdate(os.Stdout, name, updateOpts{dryRun: updateDryRun, yes: updateYes})
 	}
-	if restRequestsHelp(rest) {
-		printUpdateHelp()
-		return nil
+	if updateJSON && !updateDryRun {
+		return errors.New("--json goes with --dry-run")
 	}
-
-	if len(rest) == 0 {
-		return runSelfUpdate(force, checkOnly)
-	}
-
-	name := rest[0]
-	for _, arg := range rest[1:] {
-		switch arg {
-		case "--check":
-			checkOnly = true
-		case "--help", "-h":
-			printUpdateHelp()
-			return nil
-		default:
-			return fmt.Errorf("unexpected argument %q; `update <name>` accepts only --check", arg)
-		}
-	}
-	err = runPlaybookUpdate(os.Stdout, name, checkOnly)
-	return err
+	// The played path reads play's own options, for this call only.
+	playDryRun, playJSONF, playYes, playSHA256 = updateDryRun, updateJSON, updateYes, updateSHA256
+	playTrustEndpoint, playTrustSecret, playEnvSets = updateTrustEndpoint, updateTrustSecret, nil
+	defer func() {
+		playDryRun, playJSONF, playYes, playSHA256 = false, false, false, ""
+		playTrustEndpoint, playTrustSecret, playEnvSets = nil, nil, nil
+	}()
+	return playUpdateRun(name)
 }
 
-func printUpdateHelp() {
-	fmt.Println("Usage: claude-playbook update [name]")
-	fmt.Println()
-	fmt.Println("Without <name>: self-update the claude-playbook binary to the latest release.")
-	fmt.Println("  --check    report the latest version without installing it")
-	fmt.Println("  --force    reinstall even if already on the latest version")
-	fmt.Println()
-	fmt.Println("With <name>: update that playbook from its [source] metadata. Local files")
-	fmt.Println("(settings.json and anything under [update] preserve) survive, and the")
-	fmt.Println("playbook's migrations/apply.sh runs afterward.")
-	fmt.Println("  --check    report the available version without installing it")
-}
-
-func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
+func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 
 	pb, err := playbook.Require(playbooksDir, name)
@@ -111,7 +130,7 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 		return err
 	}
 	if pb.Manifest == nil || pb.Manifest.Source == nil || pb.Manifest.Source.Repository == "" {
-		return fmt.Errorf("%q has no [source] metadata in .playbook; nothing to update from", name)
+		return fmt.Errorf("%q has no [source] or [play] record in .playbook; nothing to update from", name)
 	}
 
 	root := pb.RootPath
@@ -158,15 +177,37 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 	}
 
 	upToDate := fromVersion != "" && fromVersion == toVersion
+	step, err := migrateStep(work, stagedManifest, fromVersion, toVersion)
+	if err != nil {
+		return err
+	}
 
-	if checkOnly {
+	if o.dryRun {
 		fmt.Fprintf(w, "%s\n", name)
 		fmt.Fprintf(w, "  installed: %s\n", displayVersion(fromVersion))
 		fmt.Fprintf(w, "  available: %s\n", displayVersion(toVersion))
 		if upToDate {
 			fmt.Fprintln(w, "  up to date")
 		}
+		fmt.Fprintf(w, "  migrate:   %s\n", step.describe())
+		fmt.Fprintln(w, "Nothing was changed (--dry-run).")
 		return nil
+	}
+	// A declared migrate step is agreed to before anything changes, even one
+	// that will not run (a version unknown on one side): declined, the
+	// update does not happen at all, so the files never run ahead of it.
+	if step.rel != "" {
+		switch {
+		case o.yes:
+		case updateAsks():
+			fmt.Fprintf(w, "%s declares a migrate step: %s\n", name, step.describe())
+			if !confirm(fmt.Sprintf("Update %s and run it? [y/N] ", name)) {
+				fmt.Fprintln(w, "Cancelled; nothing was changed.")
+				return nil
+			}
+		default:
+			return fmt.Errorf("%s declares a migrate step (%s); pass --yes to run it, or --dry-run to see the update; nothing was changed", name, step.describe())
+		}
 	}
 
 	// Staging ran unlocked (it may fetch from the network); the overlay must
@@ -174,10 +215,14 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 	// ALTER PLAYBOOK … ALIAS (or other manifest mutation) that landed while the source was
 	// staging would otherwise be resurrected from the stale pre-staging
 	// snapshot, leaving launchers and manifest disagreeing.
-	unlock, lerr := lockRegistry()
+	lockedUnlock, lerr := lockRegistry()
 	if lerr != nil {
 		return lerr
 	}
+	// The migrate step runs after the lock is released (it may run cpb
+	// statements, which take it); every earlier return releases it here.
+	var once sync.Once
+	unlock := func() { once.Do(lockedUnlock) }
 	defer unlock()
 	liveManifest, err := manifest.Read(root)
 	if err != nil {
@@ -262,8 +307,14 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 		}
 	}
 
-	if err := runMigrations(w, name, root, fromVersion, toVersion); err != nil {
-		return fmt.Errorf("%q is at code version %s but migrations failed: %w", name, displayVersion(toVersion), err)
+	// The installed step is checked while the lock is still held, so no
+	// other cpb process can change it between the check and the release.
+	if err := step.verify(root); err != nil {
+		return fmt.Errorf("%q is at code version %s, but its migrate step was not run: %w", name, displayVersion(toVersion), err)
+	}
+	unlock()
+	if err := step.run(w, name, root); err != nil {
+		return fmt.Errorf("%q is at code version %s, but its migrate step failed: %w", name, displayVersion(toVersion), err)
 	}
 	return nil
 }
@@ -475,31 +526,93 @@ func preservePaths(root string, m *manifest.Manifest) ([]string, error) {
 	return collapsed, nil
 }
 
-// runMigrations hands off to the playbook's own migration runner. Migrations
-// are data transforms the CLI cannot know the shape of; the convention is
-// migrations/apply.sh <from-version> <to-version> <install-dir>, invoked after
-// the new code is in place. Runners are expected to be idempotent -- the CLI
-// re-invokes on every update and does not track which ones have run.
-func runMigrations(w io.Writer, name, root, from, to string) error {
-	script := filepath.Join(root, "migrations", "apply.sh")
-	info, err := os.Stat(script)
-	if err != nil {
-		return nil // no runner: this playbook has no migrations
-	}
-	if info.IsDir() {
-		return nil
-	}
-	if info.Mode()&0111 == 0 {
-		fmt.Fprintf(os.Stderr, "Warning: %s is not executable; skipping migrations\n", script)
-		return nil
-	}
-	if from == "" || to == "" {
-		fmt.Fprintln(os.Stderr, "Warning: .playbook carries no version on one side of the update; skipping migrations")
-		return nil
-	}
+// migration is a source's declared migrate step ([update] migrate), as an
+// update previews and runs it.
+type migration struct {
+	rel      string // the declared path, relative to the playbook root; "" for none
+	sha256   string // of the staged script, previewed and checked again before it runs
+	from, to string
+	skip     bool // declared, but a version is unknown on one side
+}
 
-	fmt.Fprintf(w, "Running migrations %s -> %s...\n", from, to)
-	c := exec.Command(script, from, to, root)
+// migrateStep reads the staged source's declared step, and only the source's:
+// the installed copy's [update] never counts (a rewrite by an older cpb may
+// have dropped it, and the step belongs to the version being installed). A
+// declared step must resolve inside the staged tree to an executable file.
+func migrateStep(work string, staged *manifest.Manifest, from, to string) (migration, error) {
+	if staged == nil || staged.Update == nil || staged.Update.Migrate == "" {
+		return migration{}, nil
+	}
+	m := migration{rel: staged.Update.Migrate, from: from, to: to, skip: from == "" || to == ""}
+	sum, err := migrateScriptSum(work, m.rel)
+	if err != nil {
+		return migration{}, fmt.Errorf("the source's migrate step: %w", err)
+	}
+	m.sha256 = sum
+	return m, nil
+}
+
+// migrateScriptSum resolves rel inside root (symlinks may not leave it) to an
+// executable regular file and hashes it.
+func migrateScriptSum(root, rel string) (string, error) {
+	p, err := manifest.ResolvePath(root, "update.migrate", rel)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+		return "", fmt.Errorf("update.migrate %q is not an executable file", rel)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
+}
+
+func (m migration) describe() string {
+	switch {
+	case m.rel == "":
+		return "none"
+	case m.skip:
+		return fmt.Sprintf("%s (sha256 %s), not run: the version is unknown on one side", m.rel, shortSHA(m.sha256))
+	default:
+		return fmt.Sprintf("%s (sha256 %s), run as %s %s %s <install dir>", m.rel, shortSHA(m.sha256), m.rel, m.from, m.to)
+	}
+}
+
+// verify checks the installed step: still inside the playbook, and the same
+// bytes that were previewed and agreed to.
+func (m migration) verify(root string) error {
+	if m.rel == "" || m.skip {
+		return nil
+	}
+	sum, err := migrateScriptSum(root, m.rel)
+	if err != nil {
+		return err
+	}
+	if sum != m.sha256 {
+		return fmt.Errorf("%s changed between the preview and the run (sha256 %s, previewed %s)", m.rel, shortSHA(sum), shortSHA(m.sha256))
+	}
+	return nil
+}
+
+// run runs the verified step from the installed playbook, as <script>
+// <from> <to> <install dir>, in the install dir.
+func (m migration) run(w io.Writer, name, root string) error {
+	if m.rel == "" {
+		return nil
+	}
+	if m.skip {
+		fmt.Fprintf(os.Stderr, "Warning: %s's migrate step %s was not run: the version is unknown on one side\n", name, m.rel)
+		return nil
+	}
+	fmt.Fprintf(w, "Running the migrate step %s %s -> %s...\n", m.rel, m.from, m.to)
+	c := exec.Command(filepath.Join(root, filepath.FromSlash(m.rel)), m.from, m.to, root)
 	c.Dir = root
 	c.Env = append(config.WithoutConfigDirOverride(os.Environ()),
 		"CLAUDE_CONFIG_DIR="+root,

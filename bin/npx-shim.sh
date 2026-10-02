@@ -7,8 +7,7 @@
 # Behavior:
 #   1. claude-playbook/cpb already on PATH -> exec it. The installed binary
 #      is the source of truth; npx just routes to it. No download, no
-#      version games: update the installed one with `cpb update` (no
-#      playbook name).
+#      version games: update the installed one with `cpb self-update`.
 #   2. Not installed (first run) -> bootstrap: download the release binary,
 #      verify against the release's SHA256SUMS, install to ~/.local/bin
 #      (user-owned only -- never /usr/local/bin, never sudo), create the
