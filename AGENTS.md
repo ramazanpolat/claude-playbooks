@@ -202,8 +202,7 @@ release:
       or `.check` command that CI runs: README prose does not count).
 - [ ] **AGENTS.md** (this file) is current: install, verify, update, deploy.
 
-**Versions.** Nothing in cpb is stable before v4.0.0 (see
-[docs/reference/cli-grammar.md](docs/reference/cli-grammar.md), "Stability"):
+**And for the release as a whole:**
 
 - [ ] **The release notes name every change of a result:** a statement, a
       clause, a command, a flag, a file format, a `--json` shape or a code.

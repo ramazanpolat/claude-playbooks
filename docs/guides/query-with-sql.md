@@ -74,10 +74,9 @@ cpb SHOW PLAYBOOKS --json | ch local --input-format JSONEachRow -q "SELECT * FRO
 
 ## What to parse
 
-The `--json` objects are the form for scripts
-([reference, Output](../reference/cli-grammar.md#output)). Until v4.0.0
-their fields may change in any release, and the release notes say so. Parse
-them, never the human form.
+The `--json` objects are for scripts
+([reference, Output](../reference/cli-grammar.md#output)); the release notes
+name every change to them. Parse them, never the human form.
 
 `cpb SELECT …` does this for you ([reference](../reference/cli-grammar.md#select-v3210)):
 columns alone are answered by cpb itself, and any other query is piped to

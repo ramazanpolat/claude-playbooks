@@ -1,6 +1,6 @@
 # CLI grammar
 
-Status: **implemented, v3.27.0; not stable yet** (see "Stability").
+Status: **implemented, v3.27.0.**
 Decided with the pilot on 2026-09-25/27. Everything on this
 page is built; a section specified before it is built is marked
 **planned**.
@@ -730,23 +730,12 @@ the pilot names (that one is v4.0.0).
   guess, so downgrading after `ALTER DEFAULTS` with two sets needs a
   one-line edit.
 
-## Stability
-
-Nothing in cpb is stable yet. Until v4.0.0, any release may change a
-statement, a clause, a command, a flag, a file format, a `--json` shape or a
-code. Its release notes say what changed. v4.0.0 is the first release that
-will declare a stable surface.
-
-**Deprecated:** the hidden pre-grammar commands (see "Pre-grammar
-commands"). They keep working through 3.x, apart from the deprecation line
-on stderr, and v4.0.0 removes them.
-
 ## Output
 
 Every `SHOW` and `EXPLAIN` has two forms. The **human form** is for reading;
-its layout may change between releases. The **`--json` form** is the form
-for scripts. Until v4.0.0 its fields may change in any release, and the
-release notes say so. Nothing should grep the human form.
+its layout may change between releases. The **`--json` form** is for
+scripts; the release notes name every change to it. Nothing should grep the
+human form.
 
 A variable, wherever it appears, is one JSON object with exactly one of:
 
