@@ -157,14 +157,16 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 	if len(calls) != 5 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.Contains(calls[2], ".cpb-sandbox") || calls[3] != "secret ls --sandbox cpb-box" || !strings.HasPrefix(calls[4], "exec -i ") {
 		t.Fatalf("reuse should list, read the marker, list secrets and attach: %q", calls)
 	}
-	// A sandbox without the marker (created by an earlier release, with
-	// the shared skills store mounted) or with other creation settings is
-	// refused until recreated.
-	for _, marker := range []string{"none", "skills=shared"} {
+	// A sandbox without the marker (cpb cannot prove it made it) or with
+	// other creation settings is refused until recreated.
+	for marker, want := range map[string]string{
+		"none":          "a sandbox named cpb-box exists but has no cpb marker: remove it (sbx rm -f cpb-box) or launch with --sandbox-fresh",
+		"skills=shared": "share_skills changed. Recreate it with --sandbox-fresh",
+	} {
 		os.Remove(log)
 		t.Setenv("SBX_STUB_MARKER", marker)
 		err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"})
-		if err == nil || !strings.Contains(err.Error(), "--sandbox-fresh") {
+		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("marker %q: %v", marker, err)
 		}
 		if strings.Contains(strings.Join(sbxCalls(t, log), "\n"), "exec -i") {

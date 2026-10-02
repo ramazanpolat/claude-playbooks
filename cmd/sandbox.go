@@ -1113,13 +1113,16 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	if exists {
 		// Creation-time choices this launch cannot see from outside: the
 		// marker cpb wrote inside at creation says what they were. A
-		// sandbox without one predates the marker (v3.12.0 and earlier,
-		// created with sbx's shared skills store mounted) and must be
-		// recreated; one whose choices differ from the manifest too.
+		// sandbox without one is never attached to, since cpb cannot prove
+		// it made it; one whose choices differ from the manifest must be
+		// recreated.
 		marker, err := backend.shellOutput(name, "cat ~/"+sandboxMarkerFile+" 2>/dev/null")
 		want := sandboxMarker(sb.ShareSkills)
-		if err != nil || strings.TrimSpace(marker) != want {
-			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): an earlier cpb, or a changed share_skills. Recreate it with --sandbox-fresh", name, strings.TrimSpace(marker), want)
+		switch got := strings.TrimSpace(marker); {
+		case err != nil || got == "":
+			return false, fmt.Errorf("a sandbox named %s exists but has no cpb marker: remove it (sbx rm -f %s) or launch with --sandbox-fresh", name, name)
+		case got != want:
+			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): share_skills changed. Recreate it with --sandbox-fresh", name, got, want)
 		}
 	}
 	if !exists {
