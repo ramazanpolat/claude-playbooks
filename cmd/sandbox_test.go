@@ -671,7 +671,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// any sbx call, unless secrets = "env" accepts the exposure.
 	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}})
 	err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"})
-	if err == nil || !strings.Contains(err.Error(), "which the sandbox mounts") || !strings.Contains(err.Error(), "cpb CREATE ENV <set> SET ANTHROPIC_API_KEY=") {
+	if err == nil || !strings.Contains(err.Error(), "which the sandbox mounts") || !strings.Contains(err.Error(), "cpb CREATE ENV <set> SET ANTHROPIC_API_KEY=") || !strings.Contains(err.Error(), "ADD ENV <set>") {
 		t.Fatalf("key on the mount: %v", err)
 	}
 	if _, statErr := os.Stat(log); statErr == nil {

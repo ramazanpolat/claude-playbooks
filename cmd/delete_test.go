@@ -284,9 +284,9 @@ func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 	}
 }
 
-// A directory that exists at the expected path but is not discoverable
-// (dot-named, so discovery skips it) goes through the orphan path: removed
-// with an explicit message rather than reported as unknown.
+// A directory that exists at the expected path but is not a discoverable
+// playbook (dot-named, so discovery skips it) is refused as not found, and
+// left alone.
 func TestDropRefusesANonPlaybookDirectory(t *testing.T) {
 	sandboxRoot(t, "playbooks")
 	orphan := filepath.Join(config.PlaybooksDir, ".hidden")
