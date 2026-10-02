@@ -212,9 +212,10 @@ func printLaunchPlugins(plugins []string, agent *agentJSON) {
 }
 
 // effectiveLauncher is the command that runs pb, the one a pilot types: the
-// manifest's launcher, else the launcher named after the playbook when cpb
-// manages one (CREATE PLAYBOOK writes it unless told NO LAUNCHER), "" for
-// none.
+// launcher its manifest records (LAUNCHER), else the launcher named after
+// the playbook when it is in place (CREATE PLAYBOOK writes it unless told
+// NO LAUNCHER; its only record is the link itself), "" for none. A recorded
+// launcher is reported as recorded, as SHOW CREATE writes it back.
 func effectiveLauncher(pb *playbook.Playbook) string {
 	if pb.Manifest != nil && pb.Manifest.Launcher != "" {
 		return pb.Manifest.Launcher

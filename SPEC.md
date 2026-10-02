@@ -1056,10 +1056,12 @@ none; `last_used` is when the playbook's config directory last changed
 that `cpb update` runs, null without one, and the human form has a
 `Migrate:` line for it. `source` is null for a playbook without one; `linked` is the
 target directory of a linked playbook, else null. `launcher` is the command
-that runs the playbook, the one you type: its `LAUNCHER`, or its name when
-the default launcher `CREATE PLAYBOOK` writes is in place. It is null under
-`NO LAUNCHER`, and under a custom playbooks root, where cpb manages no
-launchers. `version` is the manifest's, null when it has none: cpb never
+that runs the playbook, the one you type: the `LAUNCHER` its manifest
+records, or its name when the default launcher `CREATE PLAYBOOK` writes is
+in place. It is null under `NO LAUNCHER`. The default launcher's only record
+is the link itself, so it is null too when that link was removed, and under
+a custom playbooks root, where cpb writes no launchers; a recorded
+`LAUNCHER` is reported wherever it is. `version` is the manifest's, null when it has none: cpb never
 writes a version nobody gave.
 
 **`play`** is the object's last field. It is the `[play]` record of a
