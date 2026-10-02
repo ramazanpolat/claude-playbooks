@@ -528,8 +528,7 @@ func ResolvePath(root, field, value string) (string, error) {
 	return candidate, nil
 }
 
-// Write serializes a manifest to the .playbook file inside dir. Used by `link`
-// after collecting metadata interactively.
+// Write serializes a manifest to the .playbook file inside dir.
 func Write(dir string, m *Manifest) error {
 	path := filepath.Join(dir, FileName)
 	if err := m.validate(path); err != nil {

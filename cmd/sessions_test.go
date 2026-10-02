@@ -160,15 +160,6 @@ func TestShowSessionsListsOnlyLiveOnes(t *testing.T) {
 	if la, _ := r["last_active"].(string); la == "" || !strings.HasSuffix(la, "Z") {
 		t.Errorf("last_active = %v", r["last_active"])
 	}
-	// The shorthand is exactly the statement.
-	short := captureStdout(t, func() {
-		rootCmd.SetArgs([]string{"sessions", "--json"})
-		err = rootCmd.Execute()
-	})
-	rootCmd.SetArgs(nil)
-	if err != nil || short != out {
-		t.Fatalf("cpb sessions --json differs (%v):\n%s\nvs\n%s", err, short, out)
-	}
 	human := mustStmt(t, "SHOW SESSIONS")
 	if !strings.Contains(human, "PLAYBOOK") || !strings.Contains(human, sidLive) || strings.Contains(human, sidDead) {
 		t.Fatalf("human form:\n%s", human)
@@ -215,9 +206,9 @@ func TestSelectFromSessions(t *testing.T) {
 		t.Fatalf("types: %v", types)
 	}
 	sp := &selectPlan{table: "SESSIONS", query: "SELECT 1"}
-	pp := &selectPlan{table: "PLAYBOOKS", query: "SELECT 1"}
+	ep := &selectPlan{table: "ENVS", query: "SELECT 1"}
 	if !strings.Contains(strings.Join(sp.clickhouseArgs(), " "), "--date_time_input_format best_effort") ||
-		strings.Contains(strings.Join(pp.clickhouseArgs(), " "), "date_time_input_format") {
+		strings.Contains(strings.Join(ep.clickhouseArgs(), " "), "date_time_input_format") {
 		t.Fatal("best_effort only for a table with DateTime columns")
 	}
 }

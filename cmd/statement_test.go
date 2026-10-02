@@ -20,6 +20,13 @@ func stmt(t *testing.T, line string) (string, error) {
 	return out, err
 }
 
+// stmtErr runs one statement for its error only.
+func stmtErr(t *testing.T, line string) error {
+	t.Helper()
+	_, err := stmt(t, line)
+	return err
+}
+
 func mustStmt(t *testing.T, line string) string {
 	t.Helper()
 	out, err := stmt(t, line)
@@ -314,8 +321,8 @@ func TestStatementArgs(t *testing.T) {
 		{words("--playbooks-dir=/y --launcher-dir /l SHOW ENVS"), words("SHOW ENVS"), true, "/y"},
 		{words("ALTER PLAYBOOK k SET VAR OPTS=-v"), words("ALTER PLAYBOOK k SET VAR OPTS=-v"), true, ""},
 		{words("create playbook x"), words("create playbook x"), true, ""},
-		{words("create x --alias y"), nil, false, ""}, // the hidden pre-grammar create
-		{words("--playbooks-dir /z list"), nil, false, ""},
+		{words("create x --alias y"), words("create x --alias y"), true, ""}, // a statement, refused by the parser
+		{words("--playbooks-dir /z run x"), nil, false, ""},
 		{words("env k set A=1"), nil, false, ""},
 		{words("--playbooks-dir"), nil, false, ""},
 		{nil, nil, false, ""},
@@ -354,29 +361,7 @@ func TestDropEnvSeesTheGoverningManifest(t *testing.T) {
 	if _, err := stmt(t, "DROP ENV inner"); err == nil || !strings.Contains(err.Error(), "used by nested") {
 		t.Fatalf("DROP ENV of a set the governing manifest uses: %v", err)
 	}
-	if err := runEnvProfile(nil, []string{"inner", "delete"}); err == nil || !strings.Contains(err.Error(), "nested") {
-		t.Fatalf("hidden env-profile delete of a set the governing manifest uses: %v", err)
-	}
 	if readProfile(t, "inner") == nil {
 		t.Fatal("the set was deleted")
-	}
-}
-
-// The hidden env-profile keeps its singleton wording byte for byte.
-func TestHiddenDeleteOfTheSingleDefaultKeepsItsWording(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	mustStmt(t, "CREATE ENV base")
-	mustStmt(t, "ALTER DEFAULTS USE ENV base")
-	err := runEnvProfile(nil, []string{"base", "delete"})
-	want := `env profile "base" is the registry default; clear it first with 'claude-playbook env-profile base undefault'`
-	if err == nil || err.Error() != want {
-		t.Fatalf("got %v\nwant %s", err, want)
-	}
-	mustStmt(t, "CREATE ENV other")
-	err = runEnvProfile(nil, []string{"other", "undefault"})
-	want = `the registry default is "base", not "other"`
-	if err == nil || err.Error() != want {
-		t.Fatalf("undefault of a non-default: got %v\nwant %s", err, want)
 	}
 }

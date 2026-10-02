@@ -16,7 +16,7 @@ record of why they are the rules. Newest last.
 | 2026-09-26 | `APPLY` takes several files, validates every statement first, and writes nothing on any refusal | playbook.cpb |
 | 2026-09-26 | Source drift is a warning, never an error | playbook.cpb |
 | 2026-09-26 | A file never consents to `DROP PLAYBOOK`: `APPLY` needs `--yes` for it | playbook.cpb |
-| 2026-09-26 | The grammar ships in v3.20.0 beside the pre-grammar commands, which v4.0.0 removes | Pre-grammar commands |
+| 2026-09-26 | The grammar ships in v3.20.0 beside the pre-grammar commands, which v4.0.0 removes | — |
 | 2026-09-26 | `SELECT` queries SHOW's state as tables, built in for simple queries and through `clickhouse local` for full SQL (a first design was withdrawn the same day) | SELECT |
 | 2026-09-26 | `INCLUDE` stacks playbook files; a relative path resolves against the including file, and only on this machine | INCLUDE |
 | 2026-09-26 | Plugin clauses act through Claude Code's own CLI (`claude plugin …`), not by writing `settings.json` (an earlier cut did) | Plugins and the agent |

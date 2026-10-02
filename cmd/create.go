@@ -6,46 +6,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-var (
-	createAlias         string
-	createNoAlias       bool
-	createSandbox       bool
-	createIsolatedLogin bool
-)
-
-var createCmd = &cobra.Command{
-	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
-	Use:    "create <name>",
-	Short:  "Create a new top-level playbook",
-	Args:   cobra.ExactArgs(1),
-	RunE:   runCreate,
-}
-
-func init() {
-	createCmd.Flags().StringVar(&createAlias, "alias", "", "launcher command name (default: <name>)")
-	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip launcher command creation")
-	createCmd.Flags().BoolVar(&createSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
-	createCmd.Flags().BoolVar(&createIsolatedLogin, "isolated-login", false, "share no login with ~/.claude (isolate_auth = true): /login once in the playbook")
-}
-
-// createOpts carries create's options: its flags for the command, the statement's
-// clauses for the grammar. No state is shared between two calls.
+// createOpts carries CREATE PLAYBOOK's clauses. No state is shared between
+// two calls.
 type createOpts struct {
 	alias         string
 	noAlias       bool
 	sandbox       bool
 	isolatedLogin bool // isolate_auth = true without a sandbox
-}
-
-func runCreate(cmd *cobra.Command, args []string) error {
-	return doCreate(createOpts{alias: createAlias, noAlias: createNoAlias, sandbox: createSandbox, isolatedLogin: createIsolatedLogin}, args)
 }
 
 func doCreate(o createOpts, args []string) error {

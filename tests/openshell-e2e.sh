@@ -90,8 +90,8 @@ trap cleanup EXIT
 
 claude-playbook CREATE PLAYBOOK e2e NO ALIAS >/dev/null
 P=$HOME/.claude-playbooks/e2e
-claude-playbook env-profile r set ANTHROPIC_BASE_URL=http://localhost:18080 ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-1 >/dev/null
-claude-playbook env e2e use r >/dev/null
+claude-playbook CREATE ENV r SET ANTHROPIC_BASE_URL=http://localhost:18080 ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-1 AS PLAINTEXT >/dev/null
+claude-playbook ALTER PLAYBOOK e2e USE ENV r >/dev/null
 # Test fixture: a second host the sandbox may reach (with no credential).
 printf '\n[sandbox]\nallow_net = ["host.openshell.internal:18081"]\n' >> "$P/.playbook"
 L() { n=$1; shift; timeout 900 claude-playbook run --sandbox=openshell --workdir "$W" --mount "$RO:ro" e2e "$@" </dev/null >"$E/out.$n" 2>&1; echo $? >"$E/rc.$n"; }
@@ -120,7 +120,7 @@ got 18081 dummy-e2e-token && bad "nothing reached the other host with the key" |
 O sandbox stop "$SB" >/dev/null
 
 echo "== 3 rotation: a new token in the profile, the stopped sandbox started"
-claude-playbook env-profile r set ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-2 >/dev/null
+claude-playbook ALTER ENV r SET ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-2 AS PLAINTEXT >/dev/null
 L 3 -p "say hi"
 has 3 "Starting sandbox $SB" && ok "stopped sandbox started on reuse" || bad "started on reuse"
 [ "$(cat "$E/rc.3")" = 0 ] && got 18080 "Bearer dummy-e2e-token-2" && ok "rotated token injected" || bad "rotation"
@@ -147,7 +147,7 @@ $T capture-pane -p -t tui | grep -q "Sandbox $SB stopped" && ok "stopped after t
 $T kill-server 2>/dev/null
 
 echo "== 5 revoke: the token gone from the profile"
-claude-playbook env-profile r unset ANTHROPIC_AUTH_TOKEN >/dev/null
+claude-playbook ALTER ENV r UNSET ANTHROPIC_AUTH_TOKEN >/dev/null
 L 5 -p "say hi"
 has 5 "Secret ANTHROPIC_AUTH_TOKEN revoked at the proxy" && ok "revoked" || bad "revoked"
 O provider list | grep -q "$ID" && bad "provider deleted" || ok "provider deleted"
@@ -162,7 +162,7 @@ systemctl --user start openshell-gateway; gateway_up || bad "gateway back up"
 # Host mounts off: the create fails and names the fix. --sandbox-fresh first
 # removes the sandbox and cpb's providers and profiles (token set again, so
 # there is one to remove).
-claude-playbook env-profile r set ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-3 >/dev/null
+claude-playbook ALTER ENV r SET ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-3 AS PLAINTEXT >/dev/null
 L 6c -p hi; O provider list | grep -q "$ID" || bad "provider back for the removal check"
 cp "$GW" "$E/gateway.toml.bak"; sed -i 's/^\([[:space:]]*\)enable_bind_mounts[[:space:]]*=[[:space:]]*true/\1enable_bind_mounts = false/' "$GW"
 grep -q 'enable_bind_mounts = false' "$GW" || bad "host mounts switched off for the check" "no enable_bind_mounts = true in $GW"

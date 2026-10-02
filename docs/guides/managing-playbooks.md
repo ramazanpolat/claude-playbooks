@@ -3,7 +3,7 @@
 Creating, installing, linking, launching, renaming, updating and deleting them,
 and keeping a whole setup in one playbook file. The statements below are the
 [CLI grammar](../reference/cli-grammar.md) (v3.20.0); keywords are
-case-insensitive. The older commands still work, see the end.
+case-insensitive.
 
 cpb reuses your existing Claude Code authentication for new playbooks, so a new
 playbook normally opens Claude Code directly instead of asking you to log in
@@ -256,22 +256,3 @@ export PATH="$HOME/.claude-playbooks/experiment/bin:$PATH"   # in ~/.zshrc
 A playbook's `CLAUDE.md` is loaded as standing instructions at the start of every
 session in it. It is separate from a project's `CLAUDE.md`, and both are loaded:
 the playbook's says *how you work*, the project's *what you are working on*.
-
-## Older commands
-
-`create <name>`, `link`, `delete` (and `uninstall`, `unlink`), `rename`,
-`alias`, `dealias`, `list` and `info` still work with all their flags,
-hidden from help and deprecated: each use prints one stderr line naming
-its statement, and they are removed in v4.0.0. The statement for each:
-
-| Older | Statement |
-|---|---|
-| `create <n> [--alias a \| --no-alias] [--sandbox]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX]` |
-| `link <dir> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK <n> LINK <dir> [ALIAS a \| NO ALIAS]` |
-| `delete <n> [-y]` | `DROP PLAYBOOK <n> [--yes]` |
-| `rename <a> <b> [--alias x \| --no-alias]` | `ALTER PLAYBOOK <a> RENAME TO <b> [ALIAS x \| NO ALIAS]` |
-| `alias <n> <a>` / `alias <n> --remove`, `dealias <n>` | `ALTER PLAYBOOK <n> ALIAS <a>` / `NO ALIAS` |
-| `list [prefix]` / `info <n>` | `SHOW PLAYBOOKS` / `SHOW PLAYBOOK <n>` |
-
-`dealias` clears an alias only; `NO ALIAS` removes the playbook's launcher,
-whichever it is.

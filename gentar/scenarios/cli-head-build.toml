@@ -36,7 +36,7 @@ path = "~/.local/bin/claude-playbook"
 command = 'V=$(cat "$WORKSPACE_DIR/.gentar-version" 2>/dev/null || git -C "$WORKSPACE_DIR" describe --tags --always --dirty 2>/dev/null || echo dev); [ "$V" != dev ] || { echo "version detection failed"; exit 1; }; claude-playbook --version | grep -F "$V"'
 
 [[verify.commands]]
-command = "claude-playbook list"
+command = "claude-playbook SHOW PLAYBOOKS"
 
 [[verify.commands]]
 command = "claude-playbook --help >/dev/null && echo help-ok"

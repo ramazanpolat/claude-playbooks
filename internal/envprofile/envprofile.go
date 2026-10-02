@@ -71,7 +71,7 @@ type MissingError struct {
 }
 
 func (e *MissingError) Error() string {
-	return fmt.Sprintf("env profile %q not found in %s (create it with: claude-playbook env-profile %s set KEY=VALUE)", e.Name, e.Dir, e.Name)
+	return fmt.Sprintf("env profile %q not found in %s (create it with: cpb CREATE ENV %s SET KEY=VALUE)", e.Name, e.Dir, e.Name)
 }
 
 func (e *MissingError) Is(target error) bool { return target == ErrProfile }

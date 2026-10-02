@@ -1,9 +1,7 @@
 # claude-playbooks own-arena suite 17: shell completion, end to end.
 #
-# Nine commands complete playbook names (autocompletePlaybookNames); six of
-# them (alias, dealias, delete, env, info, rename) are hidden since v3.20.0,
-# and the bash script (cobra's per-command script) has no entry for a hidden
-# command, so in bash only run, update and auth complete names. And
+# Three commands complete playbook names (autocompletePlaybookNames): run,
+# update and auth. And
 # `completion` names the generated script after the binary it was invoked
 # as, so `cpb completion bash` must register for `cpb`. Until this suite,
 # completion only ran incidentally, inside pilot-self-uninstall, and nothing
@@ -31,7 +29,7 @@ agent = "shell"
 steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
-  '"$HOME/.local/bin/claude-playbook" create alpha --no-alias && "$HOME/.local/bin/claude-playbook" create beta --no-alias',
+  '"$HOME/.local/bin/claude-playbook" CREATE PLAYBOOK alpha NO ALIAS && "$HOME/.local/bin/claude-playbook" CREATE PLAYBOOK beta NO ALIAS',
   # The pinned bash-completion releases (see the header).
   '''for v in 2.11 1.3; do curl -fsSL -o "$HOME/bash-completion-$v" "https://raw.githubusercontent.com/scop/bash-completion/$v/bash_completion" || exit 1; done''',
   # cpb as a real install makes it: a relative symlink beside the binary.
@@ -69,9 +67,9 @@ command = '''o=$("$HOME/tab.sh" claude-playbook run "") && echo "$o" | grep -qx 
 contains = "tab-both"
 
 [[verify.commands]]
-# TAB on a prefix offers only the match -- the shell side filters. A hidden
-# command (delete, since v3.20.0) completes nothing in bash.
-command = '''o=$("$HOME/tab.sh" claude-playbook update al) && [ "$o" = alpha ] && h=$("$HOME/tab.sh" claude-playbook delete al) && [ -z "$h" ] && echo tab-prefix'''
+# TAB on a prefix offers only the match -- the shell side filters. A word
+# that is no command completes nothing in bash.
+command = '''o=$("$HOME/tab.sh" claude-playbook update al) && [ "$o" = alpha ] && h=$("$HOME/tab.sh" claude-playbook nosuch al) && [ -z "$h" ] && echo tab-prefix'''
 contains = "tab-prefix"
 
 [[verify.commands]]

@@ -51,7 +51,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	// --force is self-update only. --check means the same thing on both paths
 	// (report, do not install), so it is also accepted after a playbook name.
-	var force, checkOnly, all bool
+	var force, checkOnly bool
 consume:
 	for len(rest) > 0 {
 		switch rest[0] {
@@ -61,9 +61,6 @@ consume:
 		case "--check":
 			checkOnly = true
 			rest = rest[1:]
-		case "--all":
-			all = true
-			rest = rest[1:]
 		default:
 			break consume
 		}
@@ -71,13 +68,6 @@ consume:
 	if restRequestsHelp(rest) {
 		printUpdateHelp()
 		return nil
-	}
-
-	if all {
-		// --all shipped in v3.14.0 and was withdrawn; it is still parsed so a
-		// script carrying it gets this sentence rather than having "--all"
-		// taken for a playbook name.
-		return errors.New("--all is not available in this version; update playbooks one at a time (`claude-playbook update <name>`)")
 	}
 
 	if len(rest) == 0 {
@@ -181,7 +171,7 @@ func runPlaybookUpdate(w io.Writer, name string, checkOnly bool) error {
 
 	// Staging ran unlocked (it may fetch from the network); the overlay must
 	// not. Take the registry lock and RE-READ the live manifest: a concurrent
-	// `alias` (or other manifest mutation) that landed while the source was
+	// ALTER PLAYBOOK … ALIAS (or other manifest mutation) that landed while the source was
 	// staging would otherwise be resurrected from the stale pre-staging
 	// snapshot, leaving launchers and manifest disagreeing.
 	unlock, lerr := lockRegistry()

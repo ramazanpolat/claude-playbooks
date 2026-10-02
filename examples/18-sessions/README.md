@@ -1,7 +1,7 @@
 # 18 — sessions
 
 ```
-cpb sessions                        # = cpb SHOW SESSIONS: the live sessions of every playbook
+cpb SHOW SESSIONS                   # the live sessions of every playbook
 cpb SHOW SESSIONS FOR PLAYBOOK worker --json
 cpb "SELECT playbook, pid, model FROM SESSIONS"
 cpb RESUME --list                   # this folder's recent sessions, live ones marked

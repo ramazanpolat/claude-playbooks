@@ -85,7 +85,7 @@ func Require(playbooksDir, name string) (*Playbook, error) {
 		return nil, err
 	}
 	if pb == nil {
-		return nil, fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
+		return nil, fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", name)
 	}
 	return pb, nil
 }

@@ -10,11 +10,10 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// The playbook lifecycle statements run the code the pre-grammar commands
-// run (install, create, link, delete, rename, alias) through each command's
-// options struct: the cobra handler fills it from flags, a statement from
-// its clauses. No package state is shared, so statements in one APPLY
-// cannot leak options into each other.
+// Each playbook lifecycle statement fills an options struct from its
+// clauses (createOpts, installOpts, linkOpts, deleteOpts, renameOpts,
+// aliasOpts) and runs the matching doX. No package state is shared, so
+// statements in one APPLY cannot leak options into each other.
 
 // lifecycle reports whether an ALTER PLAYBOOK renames or changes the
 // launcher rather than the environment.
@@ -123,15 +122,6 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if o.sandbox {
 			return fmt.Errorf("SANDBOX does not apply to LINK: a linked playbook's manifest belongs to the target; set [sandbox] there")
 		}
-		// `link` asks for metadata when the target has no manifest; a
-		// statement never prompts, so the manifest must already be there.
-		abs, err := filepath.Abs(o.link)
-		if err != nil {
-			return err
-		}
-		if !manifest.Exists(abs) {
-			return fmt.Errorf("LINK %s: the directory has no %s, and a statement does not prompt for one: add a %s to the target, or run `claude-playbook link %s` interactively", o.link, manifest.FileName, manifest.FileName, o.link)
-		}
 		return doLink(linkOpts{name: st.Name, alias: o.alias, noAlias: o.noAlias}, []string{o.link})
 	}
 	return doCreate(createOpts{alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{st.Name})
@@ -159,7 +149,7 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 			r.say("No playbook "+st.Name+"; nothing to drop", nil)
 			return nil
 		}
-		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", st.Name)
+		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", st.Name)
 	}
 	r.outcome = outDropped
 	if r.dryRun {

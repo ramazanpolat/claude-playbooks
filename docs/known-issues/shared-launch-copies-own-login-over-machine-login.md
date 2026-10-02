@@ -49,7 +49,7 @@ LOGIN` for v3.23.0.
     never carries a login`.
   - The source itself is not touched, and the rest of the source installs as
     before.
-- **`CREATE PLAYBOOK … LINK <dir>` (and `link`)** develops in place, so it
+- **`CREATE PLAYBOOK … LINK <dir>`** develops in place, so it
   deletes nothing of the pilot's.
   - A regular `.credentials.json` there is renamed to
     `.credentials.json.cpb-ignored-<YYYY-MM-DD-HH_MM_SS>` before the first
@@ -71,7 +71,7 @@ design pass.
 ## The mechanism
 
 `auth.LinkCredentials` (`internal/auth/auth.go`) runs on every shared-mode
-sync. That covers `create`, `install`, `link`, and every launch that is not
+sync. That covers `CREATE PLAYBOOK`, `install`, `LINK`, and every launch that is not
 token-mode or isolated. It turns the playbook's `.credentials.json` into a
 symlink to `~/.claude/.credentials.json`. When it finds a **regular file**
 there instead, one that parses and carries an account grant
@@ -149,7 +149,7 @@ removed while its file still holds a grant.
 
 ## Suggested fix
 
-1. **Built in v3.22.1** (above). `install` / `link` never take a source's
+1. **Built in v3.22.1** (above). `install` and `LINK` never take a source's
    `.credentials.json` or its account state: skipped in the copy, as
    `update` already does, with one line each. It is a skip, not a refusal of
    the whole source. That closes path 1, the security-relevant one.

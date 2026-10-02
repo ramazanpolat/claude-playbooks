@@ -36,10 +36,10 @@ steps = [
   # both. Asserted below before the uninstall, so "removed" cannot pass by
   # having never existed -- which is exactly what an earlier draft of this
   # suite did.
-  '"$HOME/.local/bin/claude-playbook" create keeper-one',
-  '"$HOME/.local/bin/claude-playbook" alias keeper-one k1',
+  '"$HOME/.local/bin/claude-playbook" CREATE PLAYBOOK keeper-one',
+  '"$HOME/.local/bin/claude-playbook" ALTER PLAYBOOK keeper-one ALIAS k1',
   # And one deliberately WITHOUT a launcher: it must still survive --keep-data.
-  '"$HOME/.local/bin/claude-playbook" create keeper-two --no-alias',
+  '"$HOME/.local/bin/claude-playbook" CREATE PLAYBOOK keeper-two NO ALIAS',
   # A file that is NOT ours, in the same directory the sweep walks. It must
   # survive: the sweep removes symlinks resolving to THIS binary, nothing else.
   '''printf '%s\n' '#!/bin/sh' 'echo not ours' > "$HOME/.local/bin/bystander"''',

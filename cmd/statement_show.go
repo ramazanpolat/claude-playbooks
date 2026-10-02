@@ -44,9 +44,15 @@ type sourceJSON struct {
 }
 
 type playbookJSON struct {
-	Name     string      `json:"name"`
-	Version  *string     `json:"version"`
-	Path     string      `json:"path"`
+	Name        string  `json:"name"`
+	Version     *string `json:"version"`
+	Description *string `json:"description"`
+	Homepage    *string `json:"homepage"`
+	Author      *string `json:"author"`
+	Path        string  `json:"path"`
+	// LastUsed is when the playbook's config directory last changed
+	// (RFC3339, UTC).
+	LastUsed *string     `json:"last_used"`
 	Source   *sourceJSON `json:"source"`
 	Linked   *string     `json:"linked"`
 	Launcher *string     `json:"launcher"`
@@ -228,6 +234,9 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.StatuslineRefresh = statuslineRefresh(sf.Root)
 	}
 	v.StatuslineHistory = describeSLHistory(pb.Path)
+	if !pb.LastUsed.IsZero() {
+		v.LastUsed = strPtr(rfc3339(pb.LastUsed))
+	}
 	root := pb.RootPath
 	if root == "" {
 		root = pb.Path
@@ -241,9 +250,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	if m == nil {
 		return v
 	}
-	if m.Version != "" {
-		v.Version = strPtr(m.Version)
-	}
+	v.Version, v.Description, v.Homepage, v.Author = optStr(m.Version), optStr(m.Description), optStr(m.Homepage), optStr(m.Author)
 	if m.Alias != "" {
 		v.Launcher = strPtr(m.Alias)
 	}
@@ -308,7 +315,7 @@ func humanVar(v varJSON, value string) string {
 	case v.Ref != nil:
 		return v.Key + " <from " + *v.Ref + ">"
 	case v.Redacted:
-		shown := displayEnvValue(v.Key, value, false)
+		shown := displayEnvValue(v.Key, value)
 		if strings.HasSuffix(shown, " chars)") || strings.HasSuffix(shown, " chars>") {
 			return v.Key + "=" + shown[:len(shown)-1] + ", plaintext" + shown[len(shown)-1:]
 		}
@@ -343,13 +350,24 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	rows := [][2]string{
 		{"Name", v.Name},
 		{"Version", deref(v.Version, "(none)")},
+	}
+	// The manifest's own words, when it has them.
+	for _, r := range []struct {
+		label string
+		value *string
+	}{{"Description", v.Description}, {"Homepage", v.Homepage}, {"Author", v.Author}} {
+		if r.value != nil {
+			rows = append(rows, [2]string{r.label, *r.value})
+		}
+	}
+	rows = append(rows, [][2]string{
 		{"Path", v.Path},
 		{"Source", source},
 		{"Launcher", deref(v.Launcher, "(none)")},
 		{"Env sets", listOrNone(v.Envs)},
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
 		{"Sandbox", sandbox},
-	}
+	}...)
 	if v.IsolatedLogin {
 		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
 	}
@@ -764,4 +782,63 @@ func shortSHA(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// governingManifest returns the manifest a launch of pb consults, resolved
+// exactly as the launch resolves it: the nearest valid manifest walking up
+// from the config directory (manifest.NearestPath, the lookup behind
+// PrepareLaunchEnv and auth status). Usually that is the playbook's own root
+// manifest, and the returned directory is "". It is the directory of the
+// governing manifest when that is some other file: a legacy `subdir` layout
+// whose subdirectory carries a manifest of its own, or a manifest-free
+// playbook under an ancestor directory that has one.
+func governingManifest(pb *playbook.Playbook) (*manifest.Manifest, string) {
+	m, dir, _ := manifest.NearestPath(pb.Path)
+	if m == nil || dir == pb.RootPath {
+		return m, ""
+	}
+	return m, dir
+}
+
+// profileUsers maps each env set to the sorted playbooks that use it.
+func profileUsers(playbooksDir string) (map[string][]string, error) {
+	pbs, err := playbook.Discover(playbooksDir)
+	if err != nil {
+		return nil, err
+	}
+	users := map[string][]string{}
+	for _, pb := range pbs {
+		// A launch reads the governing manifest, which in a subdir layout
+		// can be a nested one; the root manifest is what ALTER PLAYBOOK edits. Both
+		// count, so a set either one names is never deleted from under it.
+		named := map[string]bool{}
+		governing, _ := governingManifest(pb)
+		for _, m := range []*manifest.Manifest{pb.Manifest, governing} {
+			if m == nil || m.Env == nil {
+				continue
+			}
+			for _, name := range m.Env.Profiles {
+				if !named[name] {
+					named[name] = true
+					users[name] = append(users[name], pb.Name)
+				}
+			}
+		}
+	}
+	for name := range users {
+		sort.Strings(users[name])
+	}
+	return users, nil
+}
+
+// isRegistryDefault reports whether name is one of the registry defaults,
+// by spelling or by file identity (one file, two spellings, on a
+// case-insensitive filesystem). No defaults match nothing.
+func isRegistryDefault(dir string, defaults []string, name string) bool {
+	for _, d := range defaults {
+		if d == name || envprofile.SameProfile(dir, d, name) {
+			return true
+		}
+	}
+	return false
 }

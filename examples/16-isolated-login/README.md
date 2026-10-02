@@ -13,8 +13,7 @@ logs in all of them. An **isolated login** shares nothing: no link, no
 machine-wide token, no leftover account record. The playbook is logged in
 only if you run `/login` in it.
 
-- `CREATE PLAYBOOK … ISOLATED LOGIN` (the hidden command:
-  `create --isolated-login`) makes a new one isolated. `ALTER PLAYBOOK …
+- `CREATE PLAYBOOK … ISOLATED LOGIN` makes a new one isolated. `ALTER PLAYBOOK …
   SET ISOLATED LOGIN` isolates an existing one and removes its link to the
   shared login at once.
 - `UNSET ISOLATED LOGIN` shares the machine's login again from the next

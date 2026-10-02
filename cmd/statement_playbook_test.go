@@ -24,10 +24,6 @@ func TestStatementCreateAndDropPlaybook(t *testing.T) {
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "fr"); !exists {
 		t.Fatal("launcher fr not written")
 	}
-	// The flags a statement set do not leak into the next command.
-	if createAlias != "" || createSandbox || createNoAlias {
-		t.Fatalf("create flags leaked: %q %v %v", createAlias, createSandbox, createNoAlias)
-	}
 	if _, err := stmt(t, "CREATE PLAYBOOK fresh"); err == nil {
 		t.Fatal("CREATE over an existing playbook succeeded")
 	}
@@ -41,9 +37,6 @@ func TestStatementCreateAndDropPlaybook(t *testing.T) {
 	mustStmt(t, "DROP PLAYBOOK fresh --yes")
 	if _, err := os.Stat(filepath.Join(root, "fresh")); !os.IsNotExist(err) {
 		t.Fatalf("DROP PLAYBOOK left the playbook: %v", err)
-	}
-	if deleteYes {
-		t.Fatal("--yes leaked into the delete command's flag")
 	}
 }
 
@@ -74,7 +67,7 @@ func TestStatementCreatePlaybookLink(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	bare := t.TempDir()
-	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare); err == nil || !strings.Contains(err.Error(), "claude-playbook link") {
+	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare); err == nil || !strings.Contains(err.Error(), "add one to the target first") {
 		t.Fatalf("LINK without a manifest must name the way out: %v", err)
 	}
 	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare+" SANDBOX"); err == nil || !strings.Contains(err.Error(), "SANDBOX does not apply to LINK") {
@@ -99,9 +92,6 @@ func TestStatementRenameAndAlias(t *testing.T) {
 	if err != nil || m == nil || m.Alias != "nw" {
 		t.Fatalf("after RENAME TO … ALIAS: %#v %v", m, err)
 	}
-	if renameAlias != "" || renameNoAlias {
-		t.Fatal("rename flags leaked")
-	}
 	mustStmt(t, "ALTER PLAYBOOK new ALIAS n2")
 	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Alias != "n2" {
 		t.Fatalf("ALIAS: %q", m.Alias)
@@ -109,9 +99,6 @@ func TestStatementRenameAndAlias(t *testing.T) {
 	mustStmt(t, "ALTER PLAYBOOK new NO ALIAS")
 	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Alias != "" {
 		t.Fatalf("NO ALIAS: %q", m.Alias)
-	}
-	if aliasRemove {
-		t.Fatal("NO ALIAS leaked into the alias command's flag")
 	}
 
 	// A rename and an environment change are two statements.

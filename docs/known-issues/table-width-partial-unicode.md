@@ -1,8 +1,8 @@
 # Known issue: table column widths use partial Unicode data
 
 **Status:** known limitation, shipped deliberately in v3.15.0. Follow-up: https://github.com/ramazanpolat/claude-playbooks/issues/51
-**Affects:** the aligned tables (`claude-playbook env-profile` and other tabular
-output), only when stdout is a terminal.
+**Affects:** the aligned tables (`SHOW ENVS` and other tabular output), only
+when stdout is a terminal.
 **Severity:** cosmetic. No data is lost or hidden.
 
 ## What happens

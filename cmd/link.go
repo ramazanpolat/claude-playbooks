@@ -1,54 +1,26 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-var (
-	linkName    string
-	linkAlias   string
-	linkNoAlias bool
-)
-
-var linkCmd = &cobra.Command{
-	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
-	Use:    "link <target>",
-	Short:  "Symlink an external directory into the playbooks root",
-	Args:   cobra.ExactArgs(1),
-	RunE:   runLink,
-}
-
-func init() {
-	linkCmd.Flags().StringVar(&linkName, "name", "", "name under the playbooks root (default: target's basename)")
-	linkCmd.Flags().StringVar(&linkAlias, "alias", "", "launcher command name (default: link name)")
-	linkCmd.Flags().BoolVar(&linkNoAlias, "no-alias", false, "skip launcher command creation")
-}
-
-// linkOpts carries link's options: its flags for the command, the statement's
-// clauses for the grammar. No state is shared between two calls.
+// linkOpts carries CREATE PLAYBOOK … LINK's clauses. No state is shared
+// between two calls.
 type linkOpts struct {
 	name    string
 	alias   string
 	noAlias bool
 }
 
-func runLink(cmd *cobra.Command, args []string) error {
-	return doLink(linkOpts{name: linkName, alias: linkAlias, noAlias: linkNoAlias}, args)
-}
-
-func doLink(o linkOpts, args []string) (retErr error) {
+func doLink(o linkOpts, args []string) error {
 	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
 		return err
 	}
@@ -76,9 +48,6 @@ func doLink(o linkOpts, args []string) (retErr error) {
 	}
 
 	name := o.name
-	if name == "" {
-		name = filepath.Base(abs)
-	}
 	if strings.Contains(name, "/") {
 		return fmt.Errorf("link name may not contain '/'")
 	}
@@ -88,70 +57,19 @@ func doLink(o linkOpts, args []string) (retErr error) {
 
 	dest := filepath.Join(playbooksDir, name)
 	if _, err := os.Lstat(dest); err == nil {
-		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", name, dest)
+		return fmt.Errorf("%q already exists at %s; choose another name", name, dest)
 	}
 
-	// The launcher name (explicit --alias or the link name) must be writable
-	// BEFORE the interactive prompt: failing after it would waste the
-	// user's metadata entry on a link that can never get its command.
-	if _, verr := resolveLauncherName(o.noAlias, o.alias, name, "link"); verr != nil {
-		return verr
-	}
-
-	// Prompt for manifest metadata BEFORE taking the machine-user-global
-	// lock: holding it across human think time would block every concurrent
-	// command (same rule as delete's confirmation).
-	var prompted *manifest.Manifest
-	if !manifest.Exists(abs) {
-		aliasDefault := name
-		if o.alias != "" {
-			aliasDefault = o.alias
-		}
-		var perr error
-		prompted, perr = promptForManifest(abs, name, aliasDefault)
-		if perr != nil {
-			return perr
-		}
-		// An interactively entered alias becomes the manifest alias and the
-		// launcher name — a reserved or path-like value would leave the
-		// link registered with its advertised command unusable.
-		if prompted.Alias != "" {
-			if verr := launcher.ValidateName(prompted.Alias); verr != nil {
-				return fmt.Errorf("prompted alias rejected: %w", verr)
-			}
-		}
-	}
-
-	// Serialize registration (see lockRegistry), then RE-CHECK the shared
-	// manifest under the lock: a concurrent link may have initialized it
-	// while the prompt was open — its manifest wins and ours is discarded,
-	// falling through to the shared-state policy below.
+	// Serialize registration (see lockRegistry). LINK registers a
+	// directory that already describes itself, so the target's manifest
+	// must be there, checked under the lock.
 	unlock, err := lockRegistry()
 	if err != nil {
 		return err
 	}
 	defer unlock()
-
-	// A manifest created by THIS invocation is not shared state yet: alias
-	// overrides may apply to it freely, and it must not survive a failed
-	// link as litter.
-	createdManifest := false
 	if !manifest.Exists(abs) {
-		if prompted == nil {
-			return fmt.Errorf("target's %s disappeared while preparing the link; re-run", manifest.FileName)
-		}
-		if err := manifest.Write(abs, prompted); err != nil {
-			return fmt.Errorf("failed to write .playbook to %s: %w", abs, err)
-		}
-		createdManifest = true
-		defer func() {
-			if retErr != nil {
-				os.Remove(filepath.Join(abs, manifest.FileName))
-			}
-		}()
-		fmt.Printf("Wrote %s\n", filepath.Join(abs, manifest.FileName))
-	} else if prompted != nil {
-		fmt.Fprintf(os.Stderr, "Note: target's %s was initialized concurrently; using it and discarding the prompted metadata.\n", manifest.FileName)
+		return fmt.Errorf("LINK %s: the directory has no %s; add one to the target first", target, manifest.FileName)
 	}
 	m, err := manifest.Read(abs)
 	if err != nil {
@@ -186,23 +104,13 @@ func doLink(o linkOpts, args []string) (retErr error) {
 		return err
 	}
 
-	// A PRE-EXISTING target manifest is SHARED state: the same external
-	// directory may already be linked from other registry roots whose
-	// launchers resolve through it. Any differing alias mutation — changing
-	// one, or adding one where none existed — could break or reroute those
-	// registrations, so refuse unless this invocation created the manifest.
-	if o.alias != "" && !createdManifest && m != nil && m.Alias != o.alias {
-		return fmt.Errorf("target's %s is shared state (alias %q); --alias %q would mutate it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Alias, o.alias, manifest.FileName)
-	}
-
-	// For a manifest created by this invocation, the --alias flag wins over
-	// whatever was typed at the prompt. Persist BEFORE the symlink joins
-	// the registry: failing afterwards would leave the playbook registered
-	// with an unresolvable advertised command.
-	if o.alias != "" && createdManifest {
-		if err := writeAliasManifest(abs, name, o.alias); err != nil {
-			return fmt.Errorf("cannot record alias %q in %s (required for the command to resolve): %w", o.alias, abs, err)
-		}
+	// The target manifest is SHARED state: the same external directory may
+	// already be linked from other registry roots whose launchers resolve
+	// through it. Any differing alias mutation — changing one, or adding
+	// one where none existed — could break or reroute those registrations,
+	// so it is refused.
+	if o.alias != "" && m != nil && m.Alias != o.alias {
+		return fmt.Errorf("target's %s is shared state (alias %q); ALIAS %s would change it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Alias, o.alias, manifest.FileName)
 	}
 
 	// A linked directory is the pilot's own, so nothing in it is deleted: a
@@ -239,48 +147,4 @@ func doLink(o linkOpts, args []string) (retErr error) {
 	// changed since.
 	installLauncher(launcherName, name, configDest)
 	return nil
-}
-
-func promptForManifest(targetDir, defaultName, defaultAlias string) (*manifest.Manifest, error) {
-	if !isTTY(os.Stdin) {
-		return nil, fmt.Errorf("target has no .playbook and stdin is not a TTY; cannot prompt for metadata. Add a .playbook to the target first")
-	}
-
-	fmt.Printf("Target %s has no .playbook file.\n", targetDir)
-	fmt.Println("This will write a .playbook into the target directory.")
-	fmt.Println()
-
-	reader := bufio.NewReader(os.Stdin)
-	name := promptDefault(reader, "Playbook name", defaultName)
-	alias := promptDefault(reader, "Alias name", defaultAlias)
-	desc := promptDefault(reader, "Description", "")
-
-	return &manifest.Manifest{
-		Version:     "0.1.0",
-		Name:        name,
-		Alias:       alias,
-		Description: desc,
-	}, nil
-}
-
-func isTTY(f *os.File) bool {
-	fi, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
-
-func promptDefault(r *bufio.Reader, label, def string) string {
-	if def != "" {
-		fmt.Printf("%s [%s]: ", label, def)
-	} else {
-		fmt.Printf("%s []: ", label)
-	}
-	line, _ := r.ReadString('\n')
-	line = strings.TrimRight(line, "\r\n")
-	if line == "" {
-		return def
-	}
-	return line
 }

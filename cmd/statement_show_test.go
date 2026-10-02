@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -244,4 +246,69 @@ func TestExplainPlaybook(t *testing.T) {
 func writeBroken(t *testing.T, name string) error {
 	t.Helper()
 	return os.WriteFile(filepath.Join(envprofile.Dir(config.ResolvePlaybooksDir()), name+".toml"), []byte("= [\n"), 0o600)
+}
+
+// explainKeys is the sorted keys EXPLAIN PLAYBOOK says a launch of name gets.
+func explainKeys(t *testing.T, name string) []string {
+	t.Helper()
+	var v explainJSON
+	if err := json.Unmarshal([]byte(mustStmt(t, "EXPLAIN PLAYBOOK "+name+" --json")), &v); err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{}
+	for _, x := range v.Vars {
+		keys = append(keys, x.Key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// A legacy `subdir` playbook whose subdirectory carries its own manifest is
+// governed by that manifest at launch (manifest.NearestPath): EXPLAIN shows
+// that block under the registry default, never the root block the launch
+// ignores.
+func TestExplainFollowsNearestManifestForSubdir(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "legacy")
+	if err := os.MkdirAll(filepath.Join(root, "cfg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, manifest.FileName), []byte("name = \"legacy\"\nsubdir = \"cfg\"\n\n[env.set]\nROOT = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cfg", manifest.FileName), []byte("name = \"legacy\"\n\n[env.set]\nNESTED = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustStmt(t, "CREATE ENV base SET FROM_DEFAULT=yes")
+	mustStmt(t, "ALTER DEFAULTS USE ENV base")
+	if got := explainKeys(t, "legacy"); !reflect.DeepEqual(got, []string{"FROM_DEFAULT", "NESTED"}) {
+		t.Fatalf("EXPLAIN with a nested manifest: %v", got)
+	}
+	// Without the nested manifest, the root block governs.
+	if err := os.Remove(filepath.Join(root, "cfg", manifest.FileName)); err != nil {
+		t.Fatal(err)
+	}
+	if got := explainKeys(t, "legacy"); !reflect.DeepEqual(got, []string{"FROM_DEFAULT", "ROOT"}) {
+		t.Fatalf("EXPLAIN without a nested manifest: %v", got)
+	}
+}
+
+// A manifest-free playbook is governed at launch by the nearest ancestor
+// manifest, when one exists; once it has its own, that one governs.
+func TestExplainFollowsAncestorManifestForManifestFreePlaybook(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "bare")
+	root := config.ResolvePlaybooksDir()
+	if err := os.WriteFile(filepath.Join(root, manifest.FileName), []byte("name = \"root\"\n\n[env.set]\nANCESTOR = \"1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := explainKeys(t, "bare"); !reflect.DeepEqual(got, []string{"ANCESTOR"}) {
+		t.Fatalf("EXPLAIN of a manifest-free playbook: %v", got)
+	}
+	mustStmt(t, "ALTER PLAYBOOK bare SET VAR OWN=1")
+	if got := explainKeys(t, "bare"); !reflect.DeepEqual(got, []string{"OWN"}) {
+		t.Fatalf("EXPLAIN once the playbook has its own manifest: %v", got)
+	}
 }

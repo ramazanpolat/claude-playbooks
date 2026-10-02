@@ -198,8 +198,7 @@ func TestDeleteRejectsParentSegment(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("keep"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{".."}); err == nil {
+	if err := doDelete(deleteOpts{yes: true}, []string{".."}); err == nil {
 		t.Fatal("expected parent segment to be rejected")
 	}
 	if _, err := os.Stat(sentinel); err != nil {
@@ -274,8 +273,7 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\nalias = \"linkedalias\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	linkName = "linked"
-	if err := runLink(nil, []string{target}); err != nil {
+	if err := doLink(linkOpts{name: "linked"}, []string{target}); err != nil {
 		t.Fatal(err)
 	}
 	pb, err := playbook.Require(config.PlaybooksDir, "linked")
@@ -313,7 +311,7 @@ func TestRenameMovesRootForSubdirManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, "CLAUDE.md"), []byte("# Config\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runRename(nil, []string{"old", "new"}); err != nil {
+	if err := doRename(renameOpts{}, []string{"old", "new"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -374,7 +372,7 @@ func TestRenameLinkedPlaybookKeepsExternalManifest(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	if err := runRename(nil, []string{"linked", "moved"}); err != nil {
+	if err := doRename(renameOpts{}, []string{"linked", "moved"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -439,22 +437,11 @@ func resetCommandTestState(t *testing.T) {
 	installAlias = ""
 	installNoAlias = false
 	installSandbox = false
-	createSandbox = false
-	createAlias = ""
-	createNoAlias = false
-	aliasRemove = false
-	renameAlias = ""
-	renameNoAlias = false
 	selfUninstallYes = false
 	selfUninstallKeepData = false
 	selfUninstallKeepBinary = false
 	selfUninstallDryRun = false
 	selfUninstallBinaryOnly = false
-	deleteYes = false
-	linkName = ""
-	linkAlias = ""
-	linkNoAlias = false
-	revealSecrets = false
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
 		config.LauncherDir = ""
@@ -464,21 +451,11 @@ func resetCommandTestState(t *testing.T) {
 		installAlias = ""
 		installNoAlias = false
 		installSandbox = false
-		createSandbox = false
-		createAlias = ""
-		createNoAlias = false
-		aliasRemove = false
-		renameAlias = ""
-		renameNoAlias = false
 		selfUninstallYes = false
 		selfUninstallKeepData = false
 		selfUninstallKeepBinary = false
 		selfUninstallDryRun = false
 		selfUninstallBinaryOnly = false
-		deleteYes = false
-		linkName = ""
-		linkAlias = ""
-		linkNoAlias = false
 	})
 }
 
@@ -552,8 +529,7 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	renameAlias = "x"
-	err := runRename(nil, []string{"aaa", "ccc"})
+	err := doRename(renameOpts{alias: "x"}, []string{"aaa", "ccc"})
 	if err == nil {
 		t.Fatal("expected collision error")
 	}

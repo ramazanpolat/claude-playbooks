@@ -7,38 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-var deleteYes bool
-
-var deleteCmd = &cobra.Command{
-	Hidden:            true, // pre-grammar fallback: docs/reference/cli-grammar.md
-	Use:               "delete <name>",
-	Aliases:           []string{"uninstall", "unlink"},
-	Short:             "Delete a playbook",
-	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: autocompletePlaybookNames,
-	RunE:              runDelete,
-}
-
-func init() {
-	deleteCmd.Flags().BoolVarP(&deleteYes, "yes", "y", false, "skip confirmation prompt")
-}
-
-// deleteOpts carries delete's options: its flags for the command, the statement's
-// clauses for the grammar. No state is shared between two calls.
+// deleteOpts carries DROP PLAYBOOK's options. No state is shared between
+// two calls.
 type deleteOpts struct {
 	yes bool
-}
-
-func runDelete(cmd *cobra.Command, args []string) error {
-	return doDelete(deleteOpts{yes: deleteYes}, args)
 }
 
 func doDelete(o deleteOpts, args []string) error {
@@ -60,13 +38,7 @@ func doDelete(o deleteOpts, args []string) error {
 		return err
 	}
 	if pb == nil {
-		// Allow cleanup of dangling state when the directory is already gone:
-		// only proceed if a directory exists at the expected path.
-		path := filepath.Join(playbooksDir, name)
-		if _, err := os.Lstat(path); os.IsNotExist(err) {
-			return fmt.Errorf("%q not found under %s", name, playbooksDir)
-		}
-		return deleteOrphan(playbooksDir, name, path, o.yes)
+		return fmt.Errorf("%q not found under %s", name, playbooksDir)
 	}
 
 	if !o.yes {
@@ -134,41 +106,6 @@ func doDelete(o deleteOpts, args []string) error {
 	}
 	removeUnclaimedLaunchers(names, pb.Name)
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
-	return nil
-}
-
-// deleteOrphan handles a directory that exists at the expected path but is
-// not a discoverable playbook (e.g. a dotfile-named entry). Cleans up any
-// aliases pointing into it and removes the directory.
-func deleteOrphan(playbooksDir, name, path string, yes bool) error {
-	if !yes {
-		fmt.Printf("Directory %q exists at %s but is not a discoverable playbook.\n", name, path)
-		if !confirm("Permanently delete the directory and any aliases pointing into it? [y/N] ") {
-			fmt.Println("Cancelled.")
-			return nil
-		}
-	}
-	// Lock only after the prompt (see runDelete), then re-verify the
-	// directory is still present and still not a discoverable playbook.
-	unlock, err := lockRegistry()
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if _, err := os.Lstat(path); os.IsNotExist(err) {
-		return fmt.Errorf("%q disappeared while waiting for confirmation; nothing removed", name)
-	}
-	if pb, _ := playbook.Find(playbooksDir, name); pb != nil {
-		return fmt.Errorf("%q became a discoverable playbook while waiting for confirmation; re-run delete", name)
-	}
-	if err := refuseRegistryOwned(playbooksDir, name, path); err != nil {
-		return err
-	}
-	if err := removeAny(path); err != nil {
-		return fmt.Errorf("failed to delete %s: %w", path, err)
-	}
-	removeUnclaimedLaunchers([]string{name}, name)
-	fmt.Printf("Deleted %q.\n", name)
 	return nil
 }
 
@@ -352,7 +289,7 @@ func countContents(dir string) (files, dirs int) {
 func refuseRegistryOwned(playbooksDir, name, path string) error {
 	store := envprofile.Dir(playbooksDir)
 	refuse := func() error {
-		return fmt.Errorf("%q is the registry's env profile store, not a playbook; remove a profile with 'claude-playbook env-profile <name> delete'", envprofile.DirName)
+		return fmt.Errorf("%q is the registry's env profile store, not a playbook; drop one with `cpb DROP ENV <name>`", envprofile.DirName)
 	}
 	cannotVerify := func(err error) error {
 		return fmt.Errorf("cannot verify that deleting %q leaves the registry's env profile store intact (%s: %v); nothing removed", name, store, err)
@@ -404,13 +341,13 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 		// A symlink or a file: removal never descends. The entry may still
 		// be the store's own, a profile file or the default marker, when
 		// the store resolves to the directory holding it (`.env-profiles
-		// -> .`); those are `env-profile <name> delete`'s business, with
+		// -> .`); those are `DROP ENV`'s business, with
 		// its reference and default checks. Only entries the store itself
 		// would read count: a linked playbook or a stray file beside them
 		// is not the store's, and stays deletable.
 		if name == envprofile.DefaultMarker || strings.HasSuffix(name, envprofile.FileExt) {
 			if parent, err := os.Stat(filepath.Dir(path)); err == nil && os.SameFile(parent, physicalInfo) {
-				return fmt.Errorf("%q is an entry of the registry's env profile store (%s resolves to the directory holding it); remove a profile with 'claude-playbook env-profile <name> delete'", name, store)
+				return fmt.Errorf("%q is an entry of the registry's env profile store (%s resolves to the directory holding it); drop one with `cpb DROP ENV <name>`", name, store)
 			}
 		}
 		return nil
@@ -423,7 +360,7 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	for _, elem := range elements {
 		for dir := filepath.Dir(elem); ; dir = filepath.Dir(dir) {
 			if di, err := os.Stat(dir); err == nil && os.SameFile(di, a) {
-				return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, elem)
+				return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or drop them with `cpb DROP ENV <name>` first", name, store, elem)
 			}
 			if filepath.Dir(dir) == dir {
 				break
@@ -453,7 +390,7 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 		return cannotVerify(err)
 	}
 	if hit >= 0 {
-		return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or remove profiles with 'claude-playbook env-profile <name> delete' first", name, store, protectedPath[hit])
+		return fmt.Errorf("%q contains the registry's env profile store or a path it resolves through (%s -> %s); move the store out or drop them with `cpb DROP ENV <name>` first", name, store, protectedPath[hit])
 	}
 	return nil
 }

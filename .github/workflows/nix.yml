@@ -81,7 +81,7 @@ jobs:
           out=$(devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook install "$P/fix" --name fx --alias fxcmd 2>&1)
           echo "$out"
           echo "$out" | grep -q 'launchers are managed only for the default playbooks root'
-          devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook info fx | grep -q "^Path: *$P/pb/fx"
+          devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook SHOW PLAYBOOK fx | grep -q "^Path: *$P/pb/fx"
           [ "$before" = "$(ls -A "$HOME/.local/bin" | sort)" ]
           [ ! -e "$HOME/.local/bin/fxcmd" ] && [ ! -e "$P/.devbox/nix/profile/default/bin/fxcmd" ]
 

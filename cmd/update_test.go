@@ -358,25 +358,3 @@ func updateOnePlaybook(name string, checkOnly bool) error {
 	err := runPlaybookUpdate(io.Discard, name, checkOnly)
 	return err
 }
-
-// --all shipped in v3.14.0 and was withdrawn in v3.15.0. It stays in the flag
-// parser deliberately: without the case, "--all" falls through to the default
-// branch and is taken for a playbook name, so a script carrying the flag from
-// v3.14.0 would get "playbook --all not found" instead of a real explanation.
-// This pins the explanation, not the removal.
-func TestUpdateAllIsWithdrawnWithAnExplanation(t *testing.T) {
-	resetCommandTestState(t)
-	err := runUpdate(nil, []string{"--all"})
-	if err == nil {
-		t.Fatal("expected --all to be rejected")
-	}
-	for _, want := range []string{"--all", "not available", "one at a time"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error should mention %q, got: %v", want, err)
-		}
-	}
-	// The failure must not be the flag being read as a playbook name.
-	if strings.Contains(err.Error(), "not found") {
-		t.Fatalf("--all was taken for a playbook name: %v", err)
-	}
-}

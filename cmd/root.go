@@ -16,8 +16,20 @@ import (
 var Version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:           "claude-playbook",
-	Short:         "Manage isolated Claude Code instances",
+	Use:   "claude-playbook",
+	Short: "Manage isolated Claude Code instances",
+	// Statements never reach cobra, so its help names them itself.
+	Long: `Manage isolated Claude Code instances.
+
+State is changed and read with statements:
+
+  cpb CREATE | ALTER | DROP   PLAYBOOK | ENV | DEFAULTS  <name> <clause> ...
+  cpb SHOW [PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name>] [--json]
+  cpb SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL }
+  cpb EXPLAIN PLAYBOOK <name> [--json]
+  cpb APPLY <file> [<file> ...] [--dry-run] [--yes]
+
+The grammar: https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/reference/cli-grammar.md`,
 	Version:       Version,
 	SilenceErrors: true,
 	SilenceUsage:  true,
@@ -82,24 +94,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&config.PlaybooksDir, "playbooks-dir", "", "playbooks directory (default: ~/.claude-playbooks)")
 	rootCmd.PersistentFlags().StringVar(&config.LauncherDir, "launcher-dir", "", "directory for launcher commands (default: directory of this binary)")
 
-	rootCmd.AddCommand(listCmd)
-	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(installCmd)
-	rootCmd.AddCommand(linkCmd)
-	rootCmd.AddCommand(infoCmd)
-	rootCmd.AddCommand(renameCmd)
-	rootCmd.AddCommand(aliasCmd)
-	rootCmd.AddCommand(dealiasCmd)
-	rootCmd.AddCommand(envCmd)
-	rootCmd.AddCommand(envProfileCmd)
 	rootCmd.AddCommand(authCmd)
-	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(selfUninstallCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(completionCmd)
-	rootCmd.AddCommand(sessionsCmd)
 	rootCmd.AddCommand(tuiCmd)
 }
 
@@ -125,7 +126,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		fmt.Println("  claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/dba")
 		fmt.Println()
 		fmt.Println("  # Create your own from scratch:")
-		fmt.Println("  claude-playbook create <name>")
+		fmt.Println("  cpb CREATE PLAYBOOK <name>")
 		fmt.Println()
 		fmt.Println("Run 'claude-playbook --help' for all commands.")
 		printTUIHint()
@@ -144,9 +145,9 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 	cmdColW := maxLen + len("claude-playbook run ")
 
-	// Launcher commands take display precedence over manifest aliases,
-	// exactly as in `list` — a launcher-only playbook has a working command
-	// and must not be shown as "(no alias set)".
+	// Launcher commands take display precedence over manifest aliases: a
+	// launcher-only playbook has a working command and must not be shown as
+	// "(no alias set)".
 	// Gate before resolving: ResolveLauncherDir probes directory writability
 	// by creating a temp file, which a custom-root invocation must not do.
 	launcherNames := map[string]bool{}

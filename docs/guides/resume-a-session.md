@@ -7,13 +7,12 @@ a session belongs to and resumes it there.
 ## See what is running
 
 ```
-$ cpb sessions
+$ cpb SHOW SESSIONS
 PLAYBOOK       PID    KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
 work           47904  interactive  busy    9h   54s     claude-opus-5-5  08c4811b-3867-4f18-b08f-de6d1e07395f  /Users/me/DEV/app
 review         26218  interactive  idle    39m  35m     claude-opus-5-5  8ba14a71-15a8-45b9-bc3e-9db6c209f318  /Users/me/other-app
 ```
 
-`cpb sessions` is short for `cpb SHOW SESSIONS`.
 - `--json` gives every field, `resume` included: the exact command that
   resumes that session.
 - `SHOW SESSIONS FOR PLAYBOOK <name>` shows one playbook.
@@ -69,6 +68,6 @@ cpb's: it opens the session in the playbook, where the transcript lives.
   sessions inside the sandbox. `RESUME` refuses them for now.
 - **The format.** The session files are Claude Code's, and undocumented.
   cpb reads them defensively. If a Claude Code version stops writing them,
-  `cpb sessions` shows nothing rather than guessing.
+  `SHOW SESSIONS` shows nothing rather than guessing.
 
 Reference: [Sessions](../reference/cli-grammar.md#sessions-v3250).
