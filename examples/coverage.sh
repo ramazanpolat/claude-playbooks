@@ -18,8 +18,11 @@ fail=0
 for k in $(printf '%s\n' "$kinds" | tr ' ' '_'); do
   k=$(printf '%s' "$k" | tr '_' ' ')
   case "$k" in
-    # The one kind whose keywords are split by an operand: SET [VAR] K FROM.
+    # The kinds whose value is not their keywords: SET [VAR] K FROM is split
+    # by an operand, and the [sandbox] forms take the table's own keys.
     "SET FROM") re='(^|[^A-Z])SET[[:space:]]+(VAR[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]+FROM([^A-Z]|$)' ;;
+    "SET SANDBOX <key>=<value>") re='(^|[^A-Z])SET[[:space:]]+SANDBOX[[:space:]]+[a-z_]+=' ;;
+    "UNSET SANDBOX <key>") re='(^|[^A-Z])UNSET[[:space:]]+SANDBOX[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
     *) re="(^|[^A-Z])$(printf '%s' "$k" | sed 's/ /[[:space:]]+/g')([^A-Z]|$)" ;;
   esac
   grep -Eq "$re" docs/reference/cli-grammar.md || { echo "no reference entry: $k"; fail=1; }

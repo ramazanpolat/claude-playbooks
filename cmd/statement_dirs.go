@@ -40,6 +40,10 @@ var dirRefusals = map[grammar.Kind]string{
 
 	grammar.SetIsolatedLogin:   "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
 	grammar.UnsetIsolatedLogin: "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetSandbox:         "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetSandboxKeys:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetSandboxKeys:   "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 }
 
 // validateDirClauses refuses, with its reason, a clause that cannot apply

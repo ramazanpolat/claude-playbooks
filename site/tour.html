@@ -227,9 +227,13 @@ Login: isolated: no link to ~/.claude's login and no machine token; /login once 
     <p>By default your backend API keys stay on the host: the sandbox sees a placeholder
       that a host-side proxy swaps for the real key, for that endpoint only. If a key can't
       be registered with the proxy, the launch refuses rather than fall back to sending it in
-      plain (v3.26.0); <code class="inline">[sandbox] secrets = "env"</code> is the only way
-      to pass one in as a variable instead. A <code class="inline">SANDBOX</code> playbook is
-      sandboxed on every launch.</p>
+      plain (v3.26.0); <code class="inline">ALTER PLAYBOOK work SET SANDBOX secrets=env</code>
+      is the only way to pass one in as a variable instead. A <code class="inline">SANDBOX</code>
+      playbook is sandboxed on every launch: <code class="inline">ALTER PLAYBOOK work SET SANDBOX</code>
+      makes an existing playbook one, and <code class="inline">UNSET SANDBOX</code> turns it off.
+      The sandbox settings (<code class="inline">backend</code>, <code class="inline">host</code>,
+      <code class="inline">mounts</code>, <code class="inline">allow_net</code> and the rest) are set one by one
+      the same way: <code class="inline">SET SANDBOX host=me@buildbox</code>.</p>
     <p>On Linux with Docker, <code class="inline">--sandbox=openshell</code> runs the session
       in <a href="https://github.com/NVIDIA/OpenShell" target="_blank" rel="noopener">NVIDIA OpenShell</a>
       instead of <code class="inline">sbx</code> &mdash; <strong>Linux with Docker
@@ -354,13 +358,13 @@ ALTER PLAYBOOK researcher
 <span class="out">PLAYBOOK  PID     TTY  KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
 --------  ---     ---  ----         ------  ---  ------  -----            -------                               ---
 worker    312146  -    interactive  idle    0s   0s      claude-opus-5-5  0e5c1a2b-0000-4000-8000-000000000001  /home/you/project</span>
-<span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"</span>
-<span class="out">NAME        ENVS    SANDBOX
-----        ----    -------
-glm         router  false
+<span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"</span>
+<span class="out">NAME        ENVS    ISOLATED_LOGIN
+----        ----    --------------
+glm         router  true
 researcher  -       false
 reviewer    -       false
-side        -       false
+side        -       true
 sre         -       true
 work        -       false</span>
 <span class="cmd"><span class="prompt">$ </span>cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"</span>

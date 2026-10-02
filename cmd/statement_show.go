@@ -61,7 +61,8 @@ type playbookJSON struct {
 	Launcher *string   `json:"launcher"`
 	Envs     []string  `json:"envs"`
 	Vars     []varJSON `json:"vars"`
-	Sandbox  bool      `json:"sandbox"`
+	// Sandbox is the [sandbox] table, key for key.
+	Sandbox sandboxJSON `json:"sandbox"`
 	// IsolatedLogin is isolate_auth: no login shared with ~/.claude (a
 	// sandboxed playbook is always isolated).
 	IsolatedLogin bool `json:"isolated_login"`
@@ -83,6 +84,59 @@ type playbookJSON struct {
 	// Play is the [play] record of a playbook `cpb play --keep` built, null
 	// for every other. Last.
 	Play *playRecordJSON `json:"play"`
+}
+
+// sandboxJSON is a playbook's [sandbox] table: always, then each setting,
+// null or empty when unset.
+type sandboxJSON struct {
+	Always        bool     `json:"always"`
+	Backend       *string  `json:"backend"`
+	Host          *string  `json:"host"`
+	Workdir       *string  `json:"workdir"`
+	Mounts        []string `json:"mounts"`
+	AllowNet      []string `json:"allow_net"`
+	Secrets       *string  `json:"secrets"`
+	ClaudeVersion *string  `json:"claude_version"`
+	ShareSkills   bool     `json:"share_skills"`
+}
+
+// settings is every set key but always, as <key>=<value>, in the [sandbox]
+// table's order: what SET SANDBOX writes.
+func (v sandboxJSON) settings() []string {
+	var out []string
+	add := func(k string, s *string) {
+		if s != nil {
+			out = append(out, k+"="+*s)
+		}
+	}
+	list := func(k string, l []string) {
+		if len(l) > 0 {
+			out = append(out, k+"="+strings.Join(l, ","))
+		}
+	}
+	add("backend", v.Backend)
+	add("host", v.Host)
+	add("workdir", v.Workdir)
+	list("mounts", v.Mounts)
+	list("allow_net", v.AllowNet)
+	add("secrets", v.Secrets)
+	add("claude_version", v.ClaudeVersion)
+	if v.ShareSkills {
+		out = append(out, "share_skills=true")
+	}
+	return out
+}
+
+func describeSandbox(s *manifest.Sandbox) sandboxJSON {
+	v := sandboxJSON{Mounts: []string{}, AllowNet: []string{}}
+	if s == nil {
+		return v
+	}
+	v.Always, v.ShareSkills = s.Always, s.ShareSkills
+	v.Backend, v.Host, v.Workdir = optStr(s.Backend), optStr(s.Host), optStr(s.Workdir)
+	v.Secrets, v.ClaudeVersion = optStr(s.Secrets), optStr(s.ClaudeVersion)
+	v.Mounts, v.AllowNet = nonNil(s.Mounts), nonNil(s.AllowNet)
+	return v
 }
 
 type playRecordJSON struct {
@@ -219,7 +273,7 @@ func readStatement(st *grammar.Stmt) error {
 }
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
-	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
+	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{}, Sandbox: describeSandbox(nil),
 		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
 		Skills: describeSkills(pb.Manifest)}
 	if pb.Manifest != nil && pb.Manifest.Play != nil {
@@ -263,9 +317,9 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	if m.Update != nil {
 		v.Migrate = optStr(m.Update.Migrate)
 	}
-	v.Sandbox = m.Sandbox != nil && m.Sandbox.Always
+	v.Sandbox = describeSandbox(m.Sandbox)
 	// A sandbox never shares the machine's login, whatever the manifest says.
-	v.IsolatedLogin = m.IsolateAuth || v.Sandbox
+	v.IsolatedLogin = m.IsolateAuth || v.Sandbox.Always
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Profiles)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Unset)
@@ -350,8 +404,11 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		}
 	}
 	sandbox := "no"
-	if v.Sandbox {
+	if v.Sandbox.Always {
 		sandbox = "yes"
+	}
+	if s := v.Sandbox.settings(); len(s) > 0 {
+		sandbox += " (" + strings.Join(s, ", ") + ")"
 	}
 	rows := [][2]string{
 		{"Name", v.Name},
@@ -576,6 +633,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
 		fmt.Printf("\nSecret helper: %s\n", humanHelper(helper))
+		printLaunchSandbox(pb)
 		printLaunchPlugins(plugins, agent)
 		printMCPNames(mcpNames(pb))
 		printToolsAndModel(pb, vars)
@@ -601,10 +659,24 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if refs > 0 && helper == nil {
 		fmt.Println("This launch uses secret references and no helper is configured: it would be refused.")
 	}
+	printLaunchSandbox(pb)
 	printLaunchPlugins(plugins, agent)
 	printMCPNames(mcpNames(pb))
 	printToolsAndModel(pb, vars)
 	return nil
+}
+
+// printLaunchSandbox says where a launch runs and what its login is, when
+// that is not the default (on this machine, the login shared with
+// ~/.claude).
+func printLaunchSandbox(pb *playbook.Playbook) {
+	v := describePlaybook(pb)
+	switch {
+	case v.Sandbox.Always:
+		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, UNSET ISOLATED LOGIN shares it again")
+	case v.IsolatedLogin:
+		fmt.Println("Login: isolated, shares nothing with ~/.claude (UNSET ISOLATED LOGIN shares it again)")
+	}
 }
 
 // helperInEffect is the configured secret helper for --json, nil if none.

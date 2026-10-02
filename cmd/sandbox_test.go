@@ -457,8 +457,8 @@ func TestRunSandboxAlwaysAndOverride(t *testing.T) {
 			t.Errorf("%q reached sbx", args)
 		}
 	}
-	// --sbx and --sandbox=sbx are the same switch.
-	for _, flag := range []string{"--sbx", "--sandbox=sbx"} {
+	// --sandbox and --sandbox=sbx are the same switch.
+	for _, flag := range []string{"--sandbox", "--sandbox=sbx"} {
 		os.Remove(sbxLog)
 		if err := runRun(nil, []string{flag, "--workdir", work, "plain"}); err != nil {
 			t.Fatalf("%s: %v", flag, err)
@@ -944,9 +944,9 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if _, err := os.Stat(sbxLog); err == nil {
 		t.Fatal("sbx was called locally for a remote launch")
 	}
-	// Flags after the name, the = form, --sbx, a backend, fresh and clone
-	// all forward in canonical order; -- ends the wrapper scan.
-	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-fresh", "--clone", "--sandbox-host=me@buildbox", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
+	// Flags after the name, the = form, a backend, fresh and clone all
+	// forward in canonical order; -- ends the wrapper scan.
+	if err := runRun(nil, []string{"ghost", "--sandbox", "--sandbox-fresh", "--clone", "--sandbox-host=me@buildbox", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); got != remote("claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {

@@ -1,4 +1,14 @@
-# CI has no OpenShell: the launch refuses before it touches anything, naming
-# what it needs (on macOS, that the backend is Linux-only).
-if cpb run --sandbox=openshell box -p hi > "$HOME/openshell.out" 2>&1; then echo "launched without OpenShell"; exit 1; fi
+# CI has no OpenShell: a launch, sandboxed by the playbook itself, refuses
+# before it touches anything, naming what it needs (on macOS, that the
+# backend is Linux-only).
+if cpb run box -p hi > "$HOME/openshell.out" 2>&1; then echo "launched without OpenShell"; exit 1; fi
 grep -Eq "runs on Linux with Docker Engine|'openshell' \(NVIDIA OpenShell 0.1.x\) not found" "$HOME/openshell.out"
+# The [sandbox] table is the playbook's, and SHOW CREATE writes it back.
+cpb SHOW CREATE PLAYBOOK box > "$HOME/box.cpb"
+grep -q "SET SANDBOX backend=openshell allow_net=api.github.com" "$HOME/box.cpb"
+cpb SHOW PLAYBOOK box --json | python3 -c 'import json,sys; v=json.load(sys.stdin); s=v["sandbox"]; assert s["always"] is True and s["backend"] == "openshell" and v["isolated_login"] is True, v'
+# UNSET SANDBOX turns always off and leaves the login isolated; UNSET SANDBOX
+# <key> forgets one setting.
+cpb ALTER PLAYBOOK box UNSET SANDBOX UNSET SANDBOX allow_net > /dev/null
+cpb SHOW PLAYBOOK box --json | python3 -c 'import json,sys; v=json.load(sys.stdin); s=v["sandbox"]; assert s["always"] is False and s["backend"] == "openshell" and s["allow_net"] == [] and v["isolated_login"] is True, v'
+rm -f "$HOME/openshell.out" "$HOME/box.cpb"

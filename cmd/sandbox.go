@@ -48,7 +48,7 @@ const defaultSandboxBackend = "sbx"
 
 // sandboxOpts are the --sandbox family of run/start flags.
 type sandboxOpts struct {
-	enabled  bool   // --sandbox, --sbx, --sandbox=BACKEND
+	enabled  bool   // --sandbox, --sandbox=BACKEND
 	disabled bool   // --no-sandbox
 	backend  string // --sandbox=BACKEND
 	fresh    bool
@@ -196,7 +196,7 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 // adds command-specific boolean flags (start's --delete).
 func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (rest []string, tokens []launchToken, err error) {
 	bools := map[string]*bool{
-		"--sandbox": &opts.enabled, "--sbx": &opts.enabled, "--no-sandbox": &opts.disabled,
+		"--sandbox": &opts.enabled, "--no-sandbox": &opts.disabled,
 		"--sandbox-fresh": &opts.fresh, "--clone": &opts.clone,
 	}
 	for k, v := range extra {

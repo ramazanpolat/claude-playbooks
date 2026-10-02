@@ -51,6 +51,10 @@ echo "== hero: the four-line quick start =="
 out=$(cpb CREATE PLAYBOOK work); check "hero: CREATE PLAYBOOK work" 'Created playbook "work"'
 out=$(cpb CREATE PLAYBOOK side ISOLATED LOGIN); check "hero: ISOLATED LOGIN" 'Login isolated'
 out=$(cpb CREATE PLAYBOOK sre SANDBOX); check "hero: SANDBOX" 'Always sandboxed'
+out=$(cpb ALTER PLAYBOOK work SET SANDBOX secrets=env); check "sandbox: SET SANDBOX key" "sandbox   secrets=env"
+out=$(cpb SHOW PLAYBOOK work); check "sandbox: SHOW lists the key" "Sandbox:    no (secrets=env)"
+out=$(cpb ALTER PLAYBOOK work SET SANDBOX host=me@buildbox); check "sandbox: SET SANDBOX host" "sandbox   host=me@buildbox"
+out=$(cpb ALTER PLAYBOOK work UNSET SANDBOX host); check "sandbox: UNSET SANDBOX host" "Altered PLAYBOOK work"
 
 echo "== try it: scratch playbook =="
 out=$(cpb CREATE PLAYBOOK scratch); check "scratch: created" 'Created playbook "scratch"'
@@ -88,7 +92,7 @@ out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL https://mcp.sentry
 out=$(cpb EXPLAIN PLAYBOOK researcher); check "mcp: EXPLAIN shows the placeholder var" "CPB_MCP_SENTRY_H_AUTHORIZATION_"
 
 echo "== sessions + SELECT =="
-out=$(cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"); check "select: built-in table" "glm         router  false"
+out=$(cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"); check "select: built-in table" "glm         router  true"
 if command -v clickhouse >/dev/null 2>&1 || command -v ch >/dev/null 2>&1; then
   out=$(cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"); check "select: WHERE via clickhouse" "ANTHROPIC_BASE_URL"
 else
