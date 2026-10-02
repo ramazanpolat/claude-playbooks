@@ -8,55 +8,55 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
 
-  --bg: #0b0e14;
-  --bg-raised: #11151d;
-  --bg-term: #080a0f;
-  --fg: #e8e6e1;
-  --fg-dim: #9aa0ac;
-  --fg-faint: #5c6370;
-  --border: #242b38;
-  --accent: #7ee0c3;
-  --accent-strong: #9ff0d8;
-  --prompt: #7ee0c3;
-  --keyword: #e0b355;
-  --link: #8ab4f8;
-  --danger: #e37c7c;
+  --bg: #06110d;
+  --bg-raised: #0f2119;
+  --bg-term: #050c09;
+  --fg: #e9f4ee;
+  --fg-dim: #a9c3b5;
+  --fg-faint: #85a494;
+  --border: #21402f;
+  --accent: #41d6a2;
+  --accent-strong: #7fe3bd;
+  --prompt: #41d6a2;
+  --keyword: #f0bd60;
+  --link: #93acf0;
+  --danger: #f08d73;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 :root[data-theme="light"] {
-  --bg: #fbfaf7;
-  --bg-raised: #f1efe9;
-  --bg-term: #16181d;
-  --fg: #1b1d22;
-  --fg-dim: #4c525e;
-  --fg-faint: #767d8a;
-  --border: #ddd8cc;
-  --accent: #0f7a5c;
-  --accent-strong: #0a5e46;
-  --prompt: #d8c073;
-  --keyword: #a9671a;
-  --link: #1757b0;
-  --danger: #b1352f;
-  --shadow: 0 8px 24px rgba(27, 29, 34, 0.08);
+  --bg: #f1f7f2;
+  --bg-raised: #eef5f0;
+  --bg-term: #0b1511;
+  --fg: #0d2118;
+  --fg-dim: #3b5646;
+  --fg-faint: #52705f;
+  --border: #cddfd3;
+  --accent: #0a6e4e;
+  --accent-strong: #075a40;
+  --prompt: #5fe0b4;
+  --keyword: #8a5a0d;
+  --link: #2a54b8;
+  --danger: #b04a31;
+  --shadow: 0 8px 24px rgba(13, 60, 40, 0.1);
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #fbfaf7;
-    --bg-raised: #f1efe9;
-    --bg-term: #16181d;
-    --fg: #1b1d22;
-    --fg-dim: #4c525e;
-    --fg-faint: #767d8a;
-    --border: #ddd8cc;
-    --accent: #0f7a5c;
-    --accent-strong: #0a5e46;
-    --prompt: #d8c073;
-    --keyword: #a9671a;
-    --link: #1757b0;
-    --danger: #b1352f;
-    --shadow: 0 8px 24px rgba(27, 29, 34, 0.08);
+    --bg: #f1f7f2;
+    --bg-raised: #eef5f0;
+    --bg-term: #0b1511;
+    --fg: #0d2118;
+    --fg-dim: #3b5646;
+    --fg-faint: #52705f;
+    --border: #cddfd3;
+    --accent: #0a6e4e;
+    --accent-strong: #075a40;
+    --prompt: #5fe0b4;
+    --keyword: #8a5a0d;
+    --link: #2a54b8;
+    --danger: #b04a31;
+    --shadow: 0 8px 24px rgba(13, 60, 40, 0.1);
   }
 }
 
@@ -300,14 +300,14 @@ section > p.section-lede {
 .term-title {
   font-family: var(--font-mono);
   font-size: 0.76rem;
-  color: #8a8f99;
+  color: #85a494;
 }
 .copy-btn {
   font-family: var(--font-mono);
   font-size: 0.74rem;
   background: transparent;
-  color: #9aa0ac;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #a9c3b5;
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 5px;
   padding: 0.22rem 0.55rem;
   cursor: pointer;
@@ -322,12 +322,12 @@ section > p.section-lede {
   font-family: var(--font-mono);
   font-size: 0.86rem;
   line-height: 1.55;
-  color: #d6dae3;
+  color: #d3e6dc;
 }
 .term .cmd { color: #f2f3f5; }
 .term .cmd .prompt { color: var(--prompt); }
-.term .out { color: #9099a8; }
-.term .comment { color: #666e7d; font-style: italic; }
+.term .out { color: #a9c3b5; }
+.term .comment { color: #85a494; font-style: italic; }
 
 .verified-tag {
   display: inline-flex;
@@ -335,7 +335,7 @@ section > p.section-lede {
   gap: 0.35rem;
   font-family: var(--font-mono);
   font-size: 0.72rem;
-  color: var(--accent);
+  color: #5fe0b4;
   margin-top: 0.5rem;
 }
 .verified-tag::before { content: "✓"; }
@@ -348,7 +348,7 @@ section > p.section-lede {
   white-space: pre;
 }
 
-/* ---------- built-to-be-relied-on ---------- */
+/* ---------- how it is tested ---------- */
 
 .reliability-grid {
   display: grid;
@@ -409,13 +409,13 @@ footer a:hover { color: var(--fg); text-decoration: underline; }
   left: -9999px;
   top: 0;
   background: var(--accent);
-  color: #06120d;
+  color: var(--bg);
   padding: 0.5rem 1rem;
   z-index: 100;
 }
 .skip-link:focus { left: 1rem; top: 1rem; }
 
-::selection { background: var(--accent); color: #06120d; }
+::selection { background: var(--accent); color: var(--bg); }
 
 code.inline {
   font-family: var(--font-mono);

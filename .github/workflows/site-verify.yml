@@ -1,15 +1,17 @@
 name: Site snippets
 
-# Keeps site/index.html from drifting from the grammar: builds this commit's
-# cpb and re-runs every command the page shows, in a throwaway HOME, plus
-# diffs the `cpb tui` blocks against the real test goldens. See
-# site/verify-snippets.sh.
+# Keeps the site (site/index.html, site/tour.html) from drifting from the
+# grammar: builds this commit's cpb, re-runs every command the tour shows and
+# applies the home page's showcase recipe in a throwaway HOME, checks each
+# card's claims against what cpb says, and diffs the `cpb tui` blocks against
+# the real test goldens. See site-tools/verify-snippets.sh.
 
 on:
   push:
     branches: [main]
     paths:
       - "site/**"
+      - "site-tools/**"
       - "README.md"
       - "docs/**"
       - "examples/**"
@@ -17,6 +19,7 @@ on:
   pull_request:
     paths:
       - "site/**"
+      - "site-tools/**"
       - "README.md"
       - "docs/**"
       - "examples/**"
@@ -42,4 +45,4 @@ jobs:
       - name: Verify the site's snippets against this build
         env:
           CPB_CLICKHOUSE: ${{ runner.temp }}/clickhouse
-        run: site/verify-snippets.sh "$RUNNER_TEMP/cpb"
+        run: site-tools/verify-snippets.sh "$RUNNER_TEMP/cpb"

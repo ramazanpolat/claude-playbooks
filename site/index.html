@@ -4,35 +4,54 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cpb — run more than one Claude Code</title>
-<meta name="description" content="cpb (claude-playbooks) gives you as many isolated Claude Code setups as you need: config, environment, login and process, each described in a file you can apply anywhere.">
+<meta name="description" content="cpb (claude-playbooks) gives every project, account or model backend its own Claude Code: its own config directory, environment, login and, if you want, microVM. Described in a file you can apply anywhere.">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="home.css">
+<script>
+  try { var t = localStorage.getItem("cpb-theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) { /* storage blocked: system default */ }
+</script>
 </head>
 <body>
-<a class="skip-link" href="#main">Skip to content</a>
+<a class="skip" href="#main">Skip to content</a>
 
-<header class="site-header">
-  <div class="nav-row">
-    <a class="brand" href="#top">cpb<span>_</span></a>
-    <nav class="site-nav" aria-label="Sections">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-folder" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></g></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l5 5v13H7V3z"/><path d="M14 3v5h5"/></g></symbol>
+    <symbol id="i-skill" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4z"/><path d="M5 17a3 3 0 0 1 3-3h10"/></g></symbol>
+    <symbol id="i-plugin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4a2 2 0 1 1 4 0v2h3a1 1 0 0 1 1 1v3h-2a2 2 0 1 0 0 4h2v3a1 1 0 0 1-1 1h-3v-2a2 2 0 1 0-4 0v2H7a1 1 0 0 1-1-1v-3h2a2 2 0 1 0 0-4H6V7a1 1 0 0 1 1-1h3V4z"/></g></symbol>
+    <symbol id="i-mcp" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></g></symbol>
+    <symbol id="i-tools" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></g></symbol>
+    <symbol id="i-env" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></g></symbol>
+    <symbol id="i-model" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></g></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></g></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></g></symbol>
+    <symbol id="i-notebook" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v18M12 8h4M12 12h4"/></g></symbol>
+  </defs>
+</svg>
+
+<div class="atmos" aria-hidden="true"><div class="blob a"></div><div class="blob b"></div></div>
+
+<header class="top">
+  <div class="row">
+    <a class="brand" href="#top" aria-label="cpb, back to the top">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="8" width="20" height="21" rx="3" fill="#93acf0"/><rect x="6" y="5" width="20" height="21" rx="3" fill="#f0bd60"/><rect x="9" y="2" width="20" height="21" rx="3" fill="#41d6a2"/><path d="M14 9h10M14 13h7" stroke="#04100b" stroke-width="2" stroke-linecap="round"/></svg>
+      cpb<span class="us">_</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#playbooks">Playbooks</a>
       <a href="#layers">Isolation</a>
-      <a href="#try">Try it</a>
-      <a href="#routing">Routing</a>
-      <a href="#sandbox">Sandbox</a>
       <a href="#recipes">Recipes</a>
-      <a href="#mcp">MCP &amp; secrets</a>
-      <a href="#sessions">Sessions</a>
-      <a href="#tui">TUI</a>
-      <a href="#reliable">Reliability</a>
+      <a href="#tour">Tour</a>
       <a href="#install">Install</a>
     </nav>
-    <div class="header-actions">
-      <a class="gh-link" href="https://github.com/ramazanpolat/claude-playbooks" target="_blank" rel="noopener">GitHub</a>
-      <button class="theme-toggle" type="button" aria-label="Toggle theme">&#9728;</button>
+    <div class="acts">
+      <a class="pill-link" href="https://github.com/ramazanpolat/claude-playbooks" target="_blank" rel="noopener">GitHub</a>
+      <button class="theme" type="button" aria-label="Toggle theme">&#9728;</button>
     </div>
   </div>
 </header>
@@ -41,449 +60,146 @@
 <div class="wrap">
 
   <section class="hero" id="top">
-    <a class="ci-badge" href="https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml" target="_blank" rel="noopener">
-      <img src="https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml/badge.svg" alt="CI status">
-    </a>
-    <h1>If Claude Code is where you work, <span class="k">cpb</span> is how you run more than one of it.</h1>
-    <p class="lede">
-      One <code class="inline">~/.claude</code> holds one setup: one set of settings and hooks,
-      one memory, one login, one environment, all with full access to your machine.
-      <code class="inline">cpb</code> gives you as many Claude Codes as you need, each behind
-      its own command, each isolated as far as you choose, and each described in a file you
-      can apply anywhere.
-    </p>
-
-    <div class="term" data-verify="README.md:21-24">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">quick start</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK work</span>                           <span class="comment"># a playbook, and a `work` command that opens it</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK side ISOLATED LOGIN</span>            <span class="comment"># a second account, running beside the first</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK sre SANDBOX</span>                    <span class="comment"># every launch inside a microVM</span>
-<span class="cmd"><span class="prompt">$ </span>work</span>                                               <span class="comment"># Claude Code, bound to that playbook</span></code></pre>
-      <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
+    <div class="hero-l">
+      <span class="eyebrow"><span class="dot"></span>claude-playbooks &middot; isolated Claude Code instances</span>
+      <h1>Run more than one Claude&nbsp;Code, <em>isolated as far as you choose.</em></h1>
+    </div>
+    <div class="hero-r">
+      <p class="lede">
+        <b>cpb</b> gives every project, account or model backend its own <code class="inl">CLAUDE_CONFIG_DIR</code>:
+        its own memory, hooks, skills, plugins and MCP servers, and, when you want it, its own environment,
+        login and microVM. Each one is described in a file you can apply anywhere.
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="tour.html">Take the tour <span aria-hidden="true">&rarr;</span></a>
+        <a class="btn" href="#install">Install <span aria-hidden="true">&darr;</span></a>
       </div>
     </div>
   </section>
 
-  <section id="layers">
-    <p class="eyebrow">Four layers</p>
-    <h2>Isolation, as far as you choose</h2>
-    <p class="section-lede">
-      Each playbook gets its own config, and can go further: its own environment,
-      its own login, or its own process boundary. You decide per playbook.
+  <section class="shelf" id="playbooks" aria-labelledby="shelf-h">
+    <div class="shelf-head">
+      <h2 id="shelf-h">Five playbooks, five <b>CLAUDE_CONFIG_DIR</b>s. Each notebook is its own Claude Code.</h2>
+      <span class="hint">
+        <svg class="ptr" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l14 7-6 2-2 6L5 3z" fill="currentColor"/></svg>
+        hover a tab, or press <kbd>&uarr;</kbd><kbd>&darr;</kbd>
+      </span>
+    </div>
+    <div class="stage" id="stage">
+      <div class="stage-glow" aria-hidden="true"></div>
+      <div class="books"></div>
+      <div class="tabs" role="tablist" aria-label="Playbooks" aria-orientation="vertical"></div>
+      <noscript><div class="noscript">The playbook cards need JavaScript. <a href="tour.html">The tour</a> has every command and its output as plain text.</div></noscript>
+    </div>
+    <p class="demo-foot">
+      Everything on these cards is what cpb itself reported after applying
+      <a href="https://github.com/ramazanpolat/claude-playbooks/blob/main/site-tools/showcase.cpb"><code class="inl">showcase.cpb</code></a>:
+      the directory, the files it wrote, the plugins, MCP servers and skills it set up.
     </p>
+  </section>
+
+  <section class="block reveal" id="layers">
+    <div class="sh">
+      <p class="eyebrow2">Four layers</p>
+      <h2>Isolation, as far as you choose</h2>
+      <p>Every playbook has its own config home. Go further per playbook: its own environment, its own login, its own process. The dots show which of the five above use each layer.</p>
+    </div>
     <div class="layer-grid">
-      <div class="layer-card">
+      <div class="lcard">
+        <svg class="ic" aria-hidden="true"><use href="#i-notebook"/></svg>
         <h3>Config home</h3>
-        <p>Its own <code class="inline">CLAUDE.md</code>, <code class="inline">settings.json</code>,
-           hooks, memory, history, sessions, plugins, MCP servers and skills.
-           Your <code class="inline">~/.claude</code> never moves.</p>
-        <code class="kw">every playbook, always</code>
+        <p>Its own <code class="inl">CLAUDE.md</code>, settings, hooks, memory, history, sessions, plugins, MCP servers and skills. Your <code class="inl">~/.claude</code> never moves.</p>
+        <div class="kw"><code>every playbook, always</code></div>
+        <div class="used"><span class="lab">used by</span><div class="dots" data-used="config"></div></div>
       </div>
-      <div class="layer-card">
+      <div class="lcard">
+        <svg class="ic" aria-hidden="true"><use href="#i-env"/></svg>
         <h3>Environment</h3>
-        <p>Its own variables, set or blocked at launch: another model backend,
-           another token, another proxy. Your shell stays as it is.</p>
-        <code class="kw">USE ENV · SET VAR · BLOCK VAR</code>
+        <p>Its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is.</p>
+        <div class="kw"><code>USE ENV</code><code>SET VAR</code><code>BLOCK VAR</code></div>
+        <div class="used"><span class="lab">used by</span><div class="dots" data-used="env"></div></div>
       </div>
-      <div class="layer-card">
+      <div class="lcard">
+        <svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>
         <h3>Login</h3>
-        <p>Its own Anthropic account, sharing nothing with <code class="inline">~/.claude</code>.</p>
-        <code class="kw">ISOLATED LOGIN</code>
+        <p>Its own Anthropic account, sharing nothing with <code class="inl">~/.claude</code>. Run two accounts side by side.</p>
+        <div class="kw"><code>ISOLATED LOGIN</code></div>
+        <div class="used"><span class="lab">used by</span><div class="dots" data-used="login"></div></div>
       </div>
-      <div class="layer-card">
+      <div class="lcard">
+        <svg class="ic" aria-hidden="true"><use href="#i-cube"/></svg>
         <h3>Process</h3>
-        <p>A microVM with its own kernel, filesystem and network. It sees only your
-           working directory and its own config; your machine's login never enters it.
-           By default a host-side proxy injects backend API keys, so the sandbox
-           never holds them.</p>
-        <code class="kw">SANDBOX · --sandbox</code>
+        <p>A microVM with its own kernel, filesystem and network. It sees only your working directory and its own config. Keys stay on the host by default.</p>
+        <div class="kw"><code>SANDBOX</code><code>--sandbox</code></div>
+        <div class="used"><span class="lab">used by</span><div class="dots" data-used="process"></div></div>
       </div>
     </div>
   </section>
 
-  <section id="try">
-    <p class="eyebrow">Try it</p>
-    <h2>Try things without touching your daily setup</h2>
-    <p class="section-lede">
-      A scratch playbook, used and dropped. <code class="inline">~/.claude</code> is
-      never touched.
-    </p>
-    <div class="term" data-verify="examples/01-first-playbook">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
-        <button class="copy-btn" type="button">copy</button>
+  <section class="block reveal" id="recipes">
+    <div class="sh">
+      <p class="eyebrow2">Recipes</p>
+      <h2>Describe it once. Apply it anywhere.</h2>
+      <p>A <code>.cpb</code> file is a recipe. <code>APPLY</code> checks all of it before it writes anything, <code>--dry-run</code> shows each change, and applying it twice changes nothing. <code>SHOW CREATE ALL</code> exports a whole machine as statements.</p>
+    </div>
+    <div class="demo" id="demo">
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>real output, from site-tools/showcase.cpb</span></div>
+        <div class="out" id="term-out" aria-label="Terminal output of cpb APPLY"></div>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK scratch</span>
-<span class="out">Created playbook "scratch" at /home/you/.claude-playbooks/scratch
-Command:  scratch  (launcher at /home/you/bin/scratch)
-
-Run it now:
-  'scratch'</span>
-<span class="cmd"><span class="prompt">$ </span>cpb SHOW PLAYBOOK scratch</span>
-<span class="out">Name:           scratch
-Version:        (none)
-Path:           /home/you/.claude-playbooks/scratch
-Source:         (none)
-Launcher:       (none)
-Env sets:       (none)
-Variables:      (none)
-Sandbox:        no
-Pilot profile:  imported (CLAUDE.md imports ~/.pilot-profile/)</span>
-<span class="cmd"><span class="prompt">$ </span>cpb DROP PLAYBOOK scratch --yes</span>
-<span class="out">Removed command "scratch"
-Deleted playbook "scratch".</span></code></pre>
-      <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
+      <div class="shelf-tree">
+        <div class="t">~/.claude-playbooks/</div>
+        <div id="folders" style="display:grid;gap:.5rem"></div>
+        <div class="badge-ok" id="again-badge">applied twice, changed nothing</div>
       </div>
     </div>
-    <p>A throwaway session in a throwaway folder works the same way:
-      <code class="inline">cpb start /tmp/x --delete</code>.</p>
   </section>
 
-  <section id="routing">
-    <p class="eyebrow">Environment &amp; models</p>
-    <h2>Route one playbook to another model</h2>
-    <p class="section-lede">
-      An env set is a named group of variables, attached to one playbook or to all of
-      them (<code class="inline">DEFAULTS</code>). <code class="inline">EXPLAIN</code> shows
-      what a launch sets and which layer set it &mdash; and a custom <code class="inline">/model</code>
-      list travels with the playbook too.
-    </p>
-    <div class="term" data-verify="README.md:59-64, examples/14-model-picker">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1</span>
-<span class="out">Created ENV router
-  set       ANTHROPIC_BASE_URL</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN</span>
-<span class="out">Created playbook "glm" at /home/you/.claude-playbooks/glm
-Login isolated: it shares no login with ~/.claude; run /login once in it.</span>
-<span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3</span>
-<span class="out">Altered PLAYBOOK glm
-  env sets  router
-  set       ANTHROPIC_MODEL</span>
-<span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY</span>
-<span class="out">Altered PLAYBOOK glm
-  blocked   ANTHROPIC_API_KEY</span>
-<span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'</span>
-<span class="out">Altered PLAYBOOK glm
-  model     glm-5.3</span>
-<span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'</span>
-<span class="out">Altered PLAYBOOK glm
-  model     glm-5.3-flash</span>
-<span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm SET MODEL PICKER ONLY</span>
-<span class="out">Altered PLAYBOOK glm
-  picker    only</span>
-<span class="cmd"><span class="prompt">$ </span>cpb EXPLAIN PLAYBOOK glm</span>
-<span class="out">VARIABLE            VALUE                     FROM
---------            -----                     ----
-ANTHROPIC_API_KEY   (blocked)                 PLAYBOOK glm
-ANTHROPIC_BASE_URL  http://localhost:4000/v1  ENV router
-ANTHROPIC_MODEL     glm-5.3                   PLAYBOOK glm
-
-Secret helper: (none)
-Plugins: (none)
-Agent: (none)
-Model: glm-5.3 (ANTHROPIC_MODEL); a launch's --model and /model still win
-Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)
-Login: isolated: no link to ~/.claude's login and no machine token; /login once in it</span></code></pre>
-      <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
-      </div>
+  <section class="block reveal" id="tour">
+    <div class="sh">
+      <p class="eyebrow2">The tour</p>
+      <h2>Every command, with the output it really printed</h2>
+      <p>The tour runs each snippet on a throwaway home against a real build, and CI re-checks them on every change.</p>
     </div>
-    <p><code class="inline">ISOLATED LOGIN</code> keeps your Anthropic login away from that
-      provider, and <code class="inline">NO PILOT PROFILE</code> keeps a local profile import
-      (such as <code class="inline">~/.pilot-profile/</code>) out of the playbook's
-      <code class="inline">CLAUDE.md</code> &mdash; cpb warns once if a playbook that already
-      imports one is later routed to a non-Anthropic host.</p>
+    <div class="tour-grid">
+      <a class="tcard" href="tour.html#try"><b>Try things safely <span aria-hidden="true">&rarr;</span></b><small>A scratch playbook, used and dropped. Your <code class="inl">~/.claude</code> is never touched.</small></a>
+      <a class="tcard" href="tour.html#routing"><b>Routing &amp; models <span aria-hidden="true">&rarr;</span></b><small>Env sets, <code class="inl">BLOCK VAR</code> and a custom <code class="inl">/model</code> list.</small></a>
+      <a class="tcard" href="tour.html#sandbox"><b>Sandbox <span aria-hidden="true">&rarr;</span></b><small>Let an agent loose without letting it near your machine.</small></a>
+      <a class="tcard" href="tour.html#recipes"><b>The grammar <span aria-hidden="true">&rarr;</span></b><small><code class="inl">APPLY --dry-run</code>, <code class="inl">SHOW CREATE</code> and recipe files.</small></a>
+      <a class="tcard" href="tour.html#mcp"><b>MCP &amp; secrets <span aria-hidden="true">&rarr;</span></b><small>Credentials by reference, never by value.</small></a>
+      <a class="tcard" href="tour.html#tui"><b>Sessions, SQL &amp; the TUI <span aria-hidden="true">&rarr;</span></b><small>Everything that is running, as tables, and <code class="inl">cpb tui</code>.</small></a>
+    </div>
   </section>
 
-  <section id="sandbox">
-    <p class="eyebrow">Process isolation</p>
-    <h2>Let an agent loose without letting it near your machine</h2>
-    <p class="section-lede">
-      With <code class="inline">--sandbox</code>, Claude Code runs in a microVM that sees
-      your working directory and the playbook's own directory &mdash; not your home,
-      <code class="inline">~/.claude</code>, your shell's environment, or your other
-      playbooks.
-    </p>
-    <div class="term" data-verify="README.md:77-81, docs/guides/sandbox.md:11-18">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">sbx (Docker Sandboxes)</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb run --sandbox work</span>                                         <span class="comment"># this folder is the workdir</span>
-<span class="cmd"><span class="prompt">$ </span>cpb run --sandbox --sandbox-fresh --clone --workdir ~/untrusted-repo work</span>   <span class="comment"># a private clone; your tree is untouched</span>
-<span class="cmd"><span class="prompt">$ </span>cpb run --sandbox --mount ~/shared-libs:ro work</span>                <span class="comment"># one more directory, read-only</span>
-<span class="cmd"><span class="prompt">$ </span>cpb run --sandbox-host me@buildbox work</span>                        <span class="comment"># the same launch, sandboxed on another machine</span></code></pre>
+  <section class="block reveal" id="tested">
+    <div class="sh">
+      <p class="eyebrow2">Testing</p>
+      <h2>How it is tested</h2>
+      <p>Every change is tested the same way, on the exact commit a release tags.</p>
     </div>
-    <p>By default your backend API keys stay on the host: the sandbox sees a placeholder
-      that a host-side proxy swaps for the real key, for that endpoint only. If a key can't
-      be registered with the proxy, the launch refuses rather than fall back to sending it in
-      plain (v3.26.0); <code class="inline">[sandbox] secrets = "env"</code> is the only way
-      to pass one in as a variable instead. A <code class="inline">SANDBOX</code> playbook is
-      sandboxed on every launch.</p>
-    <p>On Linux with Docker, <code class="inline">--sandbox=openshell</code> runs the session
-      in <a href="https://github.com/NVIDIA/OpenShell" target="_blank" rel="noopener">NVIDIA OpenShell</a>
-      instead of <code class="inline">sbx</code> &mdash; <strong>experimental, Linux with Docker
-      only, opt-in</strong> (v3.27.0).</p>
+    <div class="stats">
+      <div class="stat"><span class="n">20 examples</span><span class="d">applied in CI on every change: dry run, apply, re-apply (a no-op), then each README's own checks.</span></div>
+      <div class="stat"><span class="n">upgrade-tested</span><span class="d">The previous release's binary applies its own examples; this build takes over the same state and must read it identically.</span></div>
+      <div class="stat"><span class="n">arena regression</span><span class="d">A full <a href="https://github.com/ramazanpolat/claude-playbooks/tree/main/gentar" target="_blank" rel="noopener">gentar</a> run on the exact commit each release is tagged from.</span></div>
+    </div>
+    <div class="badges">
+      <a href="https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml" target="_blank" rel="noopener"><img src="https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+    </div>
   </section>
 
-  <section id="recipes">
-    <p class="eyebrow">The DDL grammar</p>
-    <h2>Put the whole setup in a file</h2>
-    <p class="section-lede">
-      Every statement above can live in a <code class="inline">.cpb</code> file: a
-      <strong>recipe</strong>, since its <code class="inline">ALTER PLAYBOOK</code> names no
-      playbook. <code class="inline">APPLY</code> checks all of it before writing anything,
-      <code class="inline">--dry-run</code> shows every change, and applying twice changes
-      nothing.
-    </p>
-    <div class="term" data-verify="README.md:94-110 (adapted: a local MCP server and skill dir, so it runs without a private repo or network)">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">reviewer.cpb</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code>-- reviewer.cpb: a recipe (it names no playbook)
-ALTER PLAYBOOK
-  ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
-  ALLOW TOOL 'Bash(gh pr *)'  DENY TOOL 'Bash(git push *)'
-  ADD SKILL review FROM '/home/you/skills-src/review'
-  SET MODEL 'claude-opus-5-5';</code></pre>
+  <section class="block reveal" id="install">
+    <div class="sh">
+      <p class="eyebrow2">Get it</p>
+      <h2>Install</h2>
+      <p>Linux and macOS, amd64 and arm64 (no native Windows; WSL works). It installs <code>claude-playbook</code> and the shorter <code>cpb</code>.</p>
     </div>
-    <div class="term">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
-        <button class="copy-btn" type="button">copy</button>
+    <div class="cta">
+      <div class="install-pill">
+        <code><span class="pr">$ </span>curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh</code>
+        <button class="copy" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh">copy</button>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb APPLY reviewer.cpb TO reviewer --dry-run</span>
-<span class="out">reviewer.cpb:2       created   CREATE PLAYBOOK reviewer
-reviewer.cpb:2       changed   ALTER PLAYBOOK reviewer  (would run: claude mcp add-json files --scope user; link skills/review to /home/you/skills-src/review)
-Would apply reviewer.cpb: 1 created, 1 changed, 0 unchanged, 0 dropped</span>
-<span class="cmd"><span class="prompt">$ </span>cpb APPLY reviewer.cpb TO reviewer</span>
-<span class="out">Applied reviewer.cpb: 1 created, 1 changed, 0 unchanged, 0 dropped</span>
-<span class="cmd"><span class="prompt">$ </span>cpb SHOW CREATE PLAYBOOK reviewer --skip-secrets</span>
-<span class="out">CREATE PLAYBOOK IF NOT EXISTS reviewer;
-
-ALTER PLAYBOOK reviewer
-  ALLOW TOOL 'Bash(gh pr *)'
-  DENY TOOL 'Bash(git push *)'
-  SET MODEL 'claude-opus-5-5';
-
-ALTER PLAYBOOK reviewer
-  ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
-  ADD SKILL review FROM '/home/you/skills-src/review';</span></code></pre>
-      <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
-      </div>
+      <a class="btn" href="https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/guides/installation.md" target="_blank" rel="noopener">devbox, Nix, npx, source <span aria-hidden="true">&rarr;</span></a>
     </div>
-    <p>Secrets are references, resolved at launch by your helper; <code class="inline">SHOW CREATE</code>
-      never prints a value. A recipe applies to any playbook or to <code class="inline">~/.claude</code>
-      itself. <code class="inline">cpb SHOW CREATE ALL &gt; playbook.cpb</code> exports the whole
-      machine; <code class="inline">cpb APPLY playbook.cpb</code> rebuilds it on the next one.</p>
-  </section>
-
-  <section id="mcp">
-    <p class="eyebrow">Configuration</p>
-    <h2>MCP servers, with secrets by reference</h2>
-    <p class="section-lede">
-      <code class="inline">ADD MCP SERVER</code> builds the config and runs Claude Code's own
-      <code class="inline">claude mcp add-json</code> for the playbook. A credential must come
-      <code class="inline">FROM '&lt;ref&gt;'</code>: Claude's config gets only a placeholder,
-      and a configured secret helper resolves it into the session at launch.
-    </p>
-    <div class="term" data-verify="examples/09-mcp-servers">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth'</span>
-<span class="out">Altered PLAYBOOK researcher
-  MCP server sentry</span>
-<span class="cmd"><span class="prompt">$ </span>cpb EXPLAIN PLAYBOOK researcher</span>
-<span class="out">VARIABLE                                 VALUE                              FROM
---------                                 -----                              ----
-CPB_MCP_SENTRY_H_AUTHORIZATION_32770652  &lt;from keychain:pilot/sentry-auth&gt;  PLAYBOOK researcher
-
-Secret helper: (none)
-Plugins: (none)
-Agent: (none)
-MCP servers: files, sentry</span>
-<span class="cmd"><span class="prompt">$ </span>cpb SHOW CREATE PLAYBOOK researcher --skip-secrets</span>
-<span class="out">CREATE PLAYBOOK IF NOT EXISTS researcher
-  NO ALIAS;
-
-ALTER PLAYBOOK researcher
-  ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
-  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth';</span></code></pre>
-      <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
-      </div>
-    </div>
-    <p>The value never appears in a file, in argv, or in any <code class="inline">SHOW</code>/<code class="inline">EXPLAIN</code>
-      output. Claude's own config gets only <code class="inline">${CPB_MCP_SENTRY_H_AUTHORIZATION_&hellip;}</code>,
-      which the secret helper expands at launch.</p>
-  </section>
-
-  <section id="sessions">
-    <p class="eyebrow">Sessions &amp; SQL</p>
-    <h2>See everything that is running</h2>
-    <p class="section-lede">
-      <code class="inline">cpb sessions</code> lists every live Claude Code session, in every
-      playbook. <code class="inline">SELECT</code> queries the same state as tables &mdash;
-      built in for plain column lists, or through <code class="inline">clickhouse local</code>
-      for <code class="inline">WHERE</code>, <code class="inline">ORDER BY</code> and functions.
-    </p>
-    <div class="term" data-verify="examples/18-sessions, examples/13-select">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0, with example 18's stand-in session</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb sessions</span>
-<span class="out">PLAYBOOK  PID     TTY  KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
---------  ---     ---  ----         ------  ---  ------  -----            -------                               ---
-worker    246892  -    interactive  idle    0s   0s      claude-opus-5-5  0e5c1a2b-0000-4000-8000-000000000001  /home/you/project</span>
-<span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"</span>
-<span class="out">NAME        ENVS    SANDBOX
-----        ----    -------
-glm         router  false
-researcher  -       false
-reviewer    -       false
-side        -       false
-sre         -       true
-work        -       false</span>
-<span class="cmd"><span class="prompt">$ </span>cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"</span>
-<span class="out">PLAYBOOK    KEY
---------    ---
-glm         ANTHROPIC_API_KEY
-glm         ANTHROPIC_BASE_URL
-glm         ANTHROPIC_MODEL
-researcher  CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
-      <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
-      </div>
-    </div>
-    <p><code class="inline">cpb RESUME</code> starts this folder's latest session, in its own
-      playbook, and never resumes one that's already live &mdash; two processes on one session
-      id would corrupt it.</p>
-  </section>
-
-  <section id="tui">
-    <p class="eyebrow">cpb tui <small style="color:var(--fg-faint); font-family: var(--font-sans);">(v3.25.0)</small></p>
-    <h2>Browse playbooks, sessions and env sets on one screen</h2>
-    <p class="section-lede">
-      A read-only terminal UI over the grammar: every screen names the
-      <code class="inline">cpb … --json</code> statement it reads, on its last line. No
-      screen ever holds a secret value. The blocks below are the real screens, from cpb's own
-      test goldens.
-    </p>
-    <div class="term tui-block" data-verify="internal/tui/testdata/playbooks-80x24.golden">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">cpb tui &mdash; Playbooks (80&times;24)</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code> cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
-────────────────────────────────────────────────────────────────────────────────
-  NAME           LAUNCHER  ENV SETS  LOGIN     SESSIONS  MODEL
-▸ kommander-dev  kd        -         shared    1         claude-opus-5-5
-  router         k9        9router   isolated  1         glm-5.3
-
-────────────────────────────────────────────────────────────────────────────────
- 2 playbooks · 2 live sessions · read 0s ago
- enter open  s sessions  c SHOW CREATE  e export  y copy  / filter  q quit
-reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json</code></pre>
-    </div>
-    <div class="term tui-block" data-verify="internal/tui/testdata/detail-overview-80x24.golden">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">cpb tui &mdash; a playbook's Overview (80&times;24)</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code> cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
-────────────────────────────────────────────────────────────────────────────────
- router  (launcher k9 · ~/.claude-playbooks/router)
- [Overview] Env  Vars  Plugins  MCP  Skills  Status line  Model  Sessions
-
-  Version         -
-  Source          (none)
-  Login           isolated
-  Pilot profile   not imported
-  Env sets        9router
-  Tools           -
-  Live sessions   1 · newest 2d ago in ~/DEV/claude-playbooks
-
-────────────────────────────────────────────────────────────────────────────────
- 2 playbooks · 2 live sessions · read 0s ago
- ←→/1-9 tab  c SHOW CREATE  e export .cpb  y copy  r refresh  esc back  q quit
-reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
-    </div>
-    <p><code class="inline">cpb tui</code> in a terminal opens it; a script reads the same
-      state with the statement named on the screen's last line.</p>
-  </section>
-
-  <section id="reliable">
-    <p class="eyebrow">Built to be relied on</p>
-    <h2>Stable since v3.24.0</h2>
-    <p class="section-lede">
-      Breaking changes wait for a major version. Every change is tested the same way,
-      on the exact commit a release tags.
-    </p>
-    <div class="reliability-grid">
-      <div class="stat">
-        <span class="n">20 examples</span>
-        <span class="d">applied in CI on every change &mdash; dry run, apply, re-apply (no-op), then each README's own checks</span>
-      </div>
-      <div class="stat">
-        <span class="n">upgrade-tested</span>
-        <span class="d">the previous release's binary applies its own examples; this build takes over the same state and must read it identically</span>
-      </div>
-      <div class="stat">
-        <span class="n">arena regression</span>
-        <span class="d">a full <a href="https://github.com/ramazanpolat/claude-playbooks/tree/main/gentar" target="_blank" rel="noopener">gentar</a> run on the exact commit each release is tagged from</span>
-      </div>
-    </div>
-    <p style="margin-top:1.5rem">
-      <a class="ci-badge" href="https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml" target="_blank" rel="noopener">
-        <img src="https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml/badge.svg" alt="CI status">
-      </a>
-    </p>
-  </section>
-
-  <section id="install">
-    <p class="eyebrow">Get it</p>
-    <h2>Install</h2>
-    <div class="term" data-verify="README.md:32, docs/guides/installation.md:8, cpb --version run on testbed">
-      <div class="term-bar">
-        <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">install</div>
-        <button class="copy-btn" type="button">copy</button>
-      </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh</span>
-<span class="cmd"><span class="prompt">$ </span>cpb --version</span>
-<span class="out">claude-playbook version v3.27.0</span></code></pre>
-      <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed</span>
-      </div>
-    </div>
-    <p class="install-row">
-      Linux and macOS, amd64/arm64 (no native Windows &mdash; WSL works).
-      <a href="https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/guides/installation.md" target="_blank" rel="noopener">devbox, Nix, npx and source builds &rarr;</a>
-    </p>
   </section>
 
 </div>
@@ -493,6 +209,7 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
   <div class="wrap">
     <div>MIT License &middot; &copy; 2026 Ramazan Polat</div>
     <nav aria-label="Footer">
+      <a href="tour.html">Tour</a>
       <a href="https://github.com/ramazanpolat/claude-playbooks" target="_blank" rel="noopener">Repo</a>
       <a href="https://github.com/ramazanpolat/claude-playbooks/releases" target="_blank" rel="noopener">Releases</a>
       <a href="https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/README.md" target="_blank" rel="noopener">Docs</a>
@@ -501,6 +218,379 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
   </div>
 </footer>
 
-<script src="main.js"></script>
+<script type="application/json" id="showcase-data">
+{
+  "recipe": "site-tools/showcase.cpb",
+  "apply": {
+    "dry_run": [
+      "showcase.cpb:10      created   CREATE PLAYBOOK work",
+      "showcase.cpb:11      changed   ALTER PLAYBOOK work  (would run: claude plugin marketplace add anthropics/claude-code --scope user; claude plugin install commit-commands@claude-code-plugins --scope user --json; claude mcp add-json github --scope user; link skills/release-notes to ~/skills/release-notes; link skills/sql-review to ~/skills/sql-review)",
+      "showcase.cpb:23      created   CREATE PLAYBOOK side",
+      "showcase.cpb:24      changed   ALTER PLAYBOOK side  (would run: claude mcp add-json notes --scope user; link skills/blog-voice to ~/skills/blog-voice)",
+      "showcase.cpb:31      created   CREATE PLAYBOOK sre",
+      "showcase.cpb:32      changed   ALTER PLAYBOOK sre  (would run: claude mcp add-json sentry --scope user; link skills/runbook to ~/skills/runbook)",
+      "showcase.cpb:39      created   CREATE ENV router",
+      "showcase.cpb:40      created   CREATE PLAYBOOK glm",
+      "showcase.cpb:41      changed   ALTER PLAYBOOK glm",
+      "showcase.cpb:50      created   CREATE PLAYBOOK reviewer",
+      "showcase.cpb:51      changed   ALTER PLAYBOOK reviewer  (would run: claude plugin marketplace add anthropics/claude-code --scope user; claude plugin install code-review@claude-code-plugins --scope user --json; claude plugin install pr-review-toolkit@claude-code-plugins --scope user --json)",
+      "Would apply showcase.cpb: 6 created, 5 changed, 0 unchanged, 0 dropped"
+    ],
+    "applied": "Applied showcase.cpb: 6 created, 5 changed, 0 unchanged, 0 dropped",
+    "again": "Applied showcase.cpb: 0 created, 0 changed, 11 unchanged, 0 dropped"
+  },
+  "playbooks": [
+    {
+      "name": "work",
+      "tagline": "your daily driver. It shares your login.",
+      "path": "~/.claude-playbooks/work",
+      "launcher": "work",
+      "login": "shared",
+      "pilot_profile": "imported",
+      "model": "claude-opus-5-5",
+      "model_picker": null,
+      "skills": [
+        {
+          "name": "release-notes",
+          "source": "~/skills/release-notes"
+        },
+        {
+          "name": "sql-review",
+          "source": "~/skills/sql-review"
+        }
+      ],
+      "marketplaces": [
+        "anthropics/claude-code"
+      ],
+      "plugins": [
+        "commit-commands@claude-code-plugins"
+      ],
+      "mcp": [
+        {
+          "name": "github",
+          "transport": "http",
+          "url": "https://api.githubcopilot.com/mcp/"
+        }
+      ],
+      "tools": {
+        "allow": [
+          "Bash(gh pr *)"
+        ],
+        "deny": [
+          "Bash(git push --force *)"
+        ]
+      },
+      "env": [
+        {
+          "key": "MAX_THINKING_TOKENS",
+          "value": "8000",
+          "from": "PLAYBOOK"
+        }
+      ],
+      "files": [
+        {
+          "name": "CLAUDE.md",
+          "kind": "file"
+        },
+        {
+          "name": "settings.json",
+          "kind": "file"
+        },
+        {
+          "name": ".claude.json",
+          "kind": "file"
+        },
+        {
+          "name": ".playbook",
+          "kind": "file"
+        },
+        {
+          "name": "skills",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "release-notes",
+              "link": "~/skills/release-notes"
+            },
+            {
+              "name": "sql-review",
+              "link": "~/skills/sql-review"
+            }
+          ]
+        }
+      ],
+      "file_text": {
+        "CLAUDE.md": "# Playbook: work\n\nThis Claude Code session is running inside an **isolated playbook** — a self-contained Claude Code config directory managed by `claude-playbook`.\n\nYour `CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, custom agents, slash commands, and this `CLAUDE.md` are all scoped here. Nothing in this playbook affects the user's default `~/.claude` install or other playbooks.\n\nThis directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n## Useful `claude-playbook` commands\n\n```\nclaude-playbook list           # list playbooks and their commands\n",
+        "settings.json": "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(gh pr *)\"\n    ],\n    \"deny\": [\n      \"Bash(git push --force *)\"\n    ]\n  },\n  \"model\": \"claude-opus-5-5\"\n}\n",
+        ".claude.json": "{\n  \"mcpServers\": {\n    \"github\": {\n      \"type\": \"http\",\n      \"url\": \"https://api.githubcopilot.com/mcp/\",\n      \"headers\": {\n        \"Authorization\": \"${CPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039}\"\n      }\n    }\n  }\n}",
+        ".playbook": "version = \"0.1.0\"\nname = \"work\"\n\n[env]\n\n[env.set]\nMAX_THINKING_TOKENS = \"8000\"\n\n[env.refs]\nCPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039 = \"keychain:github-mcp\"\n\n[mcp.\"github\"]\nvars = [\"CPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039\"]\n\n[skills.\"release-notes\"]\nsource = \"~/skills/release-notes\"\nmode = \"link\"\n\n[skills.\"sql-review\"]\nsource = \"~/skills/sql-review\"\nmode = \"link\"\n"
+      },
+      "recipe": "-- work: your daily driver. It shares your login.\nCREATE PLAYBOOK IF NOT EXISTS work;\nALTER PLAYBOOK work\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN commit-commands@claude-code-plugins\n  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'\n  ADD SKILL release-notes FROM '~/skills/release-notes'\n  ADD SKILL sql-review FROM '~/skills/sql-review'\n  ALLOW TOOL 'Bash(gh pr *)'\n  DENY TOOL 'Bash(git push --force *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR MAX_THINKING_TOKENS=8000;\n"
+    },
+    {
+      "name": "side",
+      "tagline": "a second account, running beside the first.",
+      "path": "~/.claude-playbooks/side",
+      "launcher": "side",
+      "login": "isolated",
+      "pilot_profile": "imported",
+      "model": "claude-sonnet-5-5",
+      "model_picker": null,
+      "skills": [
+        {
+          "name": "blog-voice",
+          "source": "~/skills/blog-voice"
+        }
+      ],
+      "marketplaces": [],
+      "plugins": [],
+      "mcp": [
+        {
+          "name": "notes",
+          "transport": "stdio",
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/srv/notes"
+          ]
+        }
+      ],
+      "tools": {
+        "allow": [],
+        "deny": []
+      },
+      "env": [
+        {
+          "key": "DISABLE_TELEMETRY",
+          "value": "1",
+          "from": "PLAYBOOK"
+        }
+      ],
+      "files": [
+        {
+          "name": "CLAUDE.md",
+          "kind": "file"
+        },
+        {
+          "name": "settings.json",
+          "kind": "file"
+        },
+        {
+          "name": ".claude.json",
+          "kind": "file"
+        },
+        {
+          "name": ".playbook",
+          "kind": "file"
+        },
+        {
+          "name": "skills",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "blog-voice",
+              "link": "~/skills/blog-voice"
+            }
+          ]
+        }
+      ],
+      "file_text": {
+        "CLAUDE.md": "# Playbook: side\n\nThis Claude Code session is running inside an **isolated playbook** — a self-contained Claude Code config directory managed by `claude-playbook`.\n\nYour `CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, custom agents, slash commands, and this `CLAUDE.md` are all scoped here. Nothing in this playbook affects the user's default `~/.claude` install or other playbooks.\n\nThis directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n## Useful `claude-playbook` commands\n\n```\nclaude-playbook list           # list playbooks and their commands\n",
+        "settings.json": "{\n  \"model\": \"claude-sonnet-5-5\"\n}\n",
+        ".claude.json": "{\n  \"mcpServers\": {\n    \"notes\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@modelcontextprotocol/server-filesystem\",\n        \"/srv/notes\"\n      ]\n    }\n  }\n}",
+        ".playbook": "version = \"0.1.0\"\nname = \"side\"\nisolate_auth = true\n\n[env]\n\n[env.set]\nDISABLE_TELEMETRY = \"1\"\n\n[skills.\"blog-voice\"]\nsource = \"~/skills/blog-voice\"\nmode = \"link\"\n"
+      },
+      "recipe": "-- side: a second account, running beside the first.\nCREATE PLAYBOOK IF NOT EXISTS side ISOLATED LOGIN;\nALTER PLAYBOOK side\n  ADD MCP SERVER notes COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'\n  ADD SKILL blog-voice FROM '~/skills/blog-voice'\n  SET MODEL 'claude-sonnet-5-5'\n  SET VAR DISABLE_TELEMETRY=1;\n"
+    },
+    {
+      "name": "sre",
+      "tagline": "every launch inside a microVM.",
+      "path": "~/.claude-playbooks/sre",
+      "launcher": "sre",
+      "login": "sandbox",
+      "pilot_profile": "imported",
+      "model": null,
+      "model_picker": null,
+      "skills": [
+        {
+          "name": "runbook",
+          "source": "~/skills/runbook"
+        }
+      ],
+      "marketplaces": [],
+      "plugins": [],
+      "mcp": [
+        {
+          "name": "sentry",
+          "transport": "http",
+          "url": "https://mcp.sentry.dev/mcp"
+        }
+      ],
+      "tools": {
+        "allow": [
+          "Bash(kubectl get *)"
+        ],
+        "deny": [
+          "Bash(kubectl delete *)"
+        ]
+      },
+      "env": [],
+      "files": [
+        {
+          "name": "CLAUDE.md",
+          "kind": "file"
+        },
+        {
+          "name": "settings.json",
+          "kind": "file"
+        },
+        {
+          "name": ".claude.json",
+          "kind": "file"
+        },
+        {
+          "name": ".playbook",
+          "kind": "file"
+        },
+        {
+          "name": "skills",
+          "kind": "dir",
+          "children": [
+            {
+              "name": "runbook",
+              "link": "~/skills/runbook"
+            }
+          ]
+        }
+      ],
+      "file_text": {
+        "CLAUDE.md": "# Playbook: sre\n\nThis Claude Code session is running inside an **isolated playbook** — a self-contained Claude Code config directory managed by `claude-playbook`.\n\nYour `CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, custom agents, slash commands, and this `CLAUDE.md` are all scoped here. Nothing in this playbook affects the user's default `~/.claude` install or other playbooks.\n\nThis directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n## Useful `claude-playbook` commands\n\n```\nclaude-playbook list           # list playbooks and their commands\n",
+        "settings.json": "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(kubectl get *)\"\n    ],\n    \"deny\": [\n      \"Bash(kubectl delete *)\"\n    ]\n  }\n}\n",
+        ".claude.json": "{\n  \"mcpServers\": {\n    \"sentry\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.sentry.dev/mcp\",\n      \"headers\": {\n        \"Authorization\": \"${CPB_MCP_SENTRY_H_AUTHORIZATION_32770652}\"\n      }\n    }\n  }\n}",
+        ".playbook": "version = \"0.1.0\"\nname = \"sre\"\nisolate_auth = true\n\n[env]\n\n[env.refs]\nCPB_MCP_SENTRY_H_AUTHORIZATION_32770652 = \"keychain:sentry-auth\"\n\n[sandbox]\nalways = true\n\n[mcp.\"sentry\"]\nvars = [\"CPB_MCP_SENTRY_H_AUTHORIZATION_32770652\"]\n\n[skills.\"runbook\"]\nsource = \"~/skills/runbook\"\nmode = \"link\"\n"
+      },
+      "recipe": "-- sre: every launch inside a microVM.\nCREATE PLAYBOOK IF NOT EXISTS sre SANDBOX;\nALTER PLAYBOOK sre\n  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'\n  ADD SKILL runbook FROM '~/skills/runbook'\n  ALLOW TOOL 'Bash(kubectl get *)'\n  DENY TOOL 'Bash(kubectl delete *)';\n"
+    },
+    {
+      "name": "glm",
+      "tagline": "another model backend, behind a router. It shares nothing.",
+      "path": "~/.claude-playbooks/glm",
+      "launcher": "glm",
+      "login": "isolated",
+      "pilot_profile": "not_imported",
+      "model": "glm-5.3",
+      "model_picker": {
+        "mode": "only",
+        "options": [
+          {
+            "model": "glm-5.3",
+            "label": "GLM 5.3",
+            "description": "via the router",
+            "behaves_as": null
+          },
+          {
+            "model": "glm-5.3-flash",
+            "label": "GLM 5.3 Flash",
+            "description": null,
+            "behaves_as": "claude-sonnet-5"
+          }
+        ]
+      },
+      "skills": [],
+      "marketplaces": [],
+      "plugins": [],
+      "mcp": [],
+      "tools": {
+        "allow": [],
+        "deny": []
+      },
+      "env": [
+        {
+          "key": "ANTHROPIC_API_KEY",
+          "blocked": true,
+          "from": "PLAYBOOK"
+        },
+        {
+          "key": "ANTHROPIC_BASE_URL",
+          "value": "http://localhost:4000/v1",
+          "from": "ENV router"
+        },
+        {
+          "key": "ANTHROPIC_MODEL",
+          "value": "glm-5.3",
+          "from": "PLAYBOOK"
+        }
+      ],
+      "files": [
+        {
+          "name": "CLAUDE.md",
+          "kind": "file"
+        },
+        {
+          "name": "settings.json",
+          "kind": "file"
+        },
+        {
+          "name": ".playbook",
+          "kind": "file"
+        }
+      ],
+      "file_text": {
+        "CLAUDE.md": "# Playbook: glm\n\nThis Claude Code session is running inside an **isolated playbook** — a self-contained Claude Code config directory managed by `claude-playbook`.\n\nYour `CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, custom agents, slash commands, and this `CLAUDE.md` are all scoped here. Nothing in this playbook affects the user's default `~/.claude` install or other playbooks.\n\nThis directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n## Useful `claude-playbook` commands\n\n```\nclaude-playbook list           # list playbooks and their commands\n",
+        "settings.json": "{\n  \"modelPicker\": {\n    \"options\": [\n      {\n        \"model\": \"glm-5.3\",\n        \"label\": \"GLM 5.3\",\n        \"description\": \"via the router\"\n      },\n      {\n        \"model\": \"glm-5.3-flash\",\n        \"label\": \"GLM 5.3 Flash\",\n        \"behavesAs\": \"claude-sonnet-5\"\n      }\n    ],\n    \"replaceBuiltInOptions\": true\n  }\n}\n",
+        ".playbook": "version = \"0.1.0\"\nname = \"glm\"\nisolate_auth = true\n\n[env]\nprofiles = [\"router\"]\nunset = [\"ANTHROPIC_API_KEY\"]\n\n[env.set]\nANTHROPIC_MODEL = \"glm-5.3\"\n"
+      },
+      "recipe": "-- glm: another model backend, behind a router. It shares nothing.\nCREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1;\nCREATE PLAYBOOK IF NOT EXISTS glm NO PILOT PROFILE ISOLATED LOGIN;\nALTER PLAYBOOK glm\n  USE ENV router\n  SET VAR ANTHROPIC_MODEL=glm-5.3\n  BLOCK VAR ANTHROPIC_API_KEY\n  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'\n  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'\n  SET MODEL PICKER ONLY;\n"
+    },
+    {
+      "name": "reviewer",
+      "tagline": "reads code, never writes it.",
+      "path": "~/.claude-playbooks/reviewer",
+      "launcher": "reviewer",
+      "login": "shared",
+      "pilot_profile": "imported",
+      "model": "claude-sonnet-5-5",
+      "model_picker": null,
+      "skills": [],
+      "marketplaces": [
+        "anthropics/claude-code"
+      ],
+      "plugins": [
+        "code-review@claude-code-plugins",
+        "pr-review-toolkit@claude-code-plugins"
+      ],
+      "mcp": [],
+      "tools": {
+        "allow": [
+          "Bash(gh pr view *)",
+          "Bash(git diff *)"
+        ],
+        "deny": [
+          "Edit",
+          "Write"
+        ]
+      },
+      "env": [],
+      "files": [
+        {
+          "name": "CLAUDE.md",
+          "kind": "file"
+        },
+        {
+          "name": "settings.json",
+          "kind": "file"
+        }
+      ],
+      "file_text": {
+        "CLAUDE.md": "# Playbook: reviewer\n\nThis Claude Code session is running inside an **isolated playbook** — a self-contained Claude Code config directory managed by `claude-playbook`.\n\nYour `CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, custom agents, slash commands, and this `CLAUDE.md` are all scoped here. Nothing in this playbook affects the user's default `~/.claude` install or other playbooks.\n\nThis directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n## Useful `claude-playbook` commands\n\n```\nclaude-playbook list           # list playbooks and their commands\n",
+        "settings.json": "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(gh pr view *)\",\n      \"Bash(git diff *)\"\n    ],\n    \"deny\": [\n      \"Edit\",\n      \"Write\"\n    ]\n  },\n  \"model\": \"claude-sonnet-5-5\"\n}\n"
+      },
+      "recipe": "-- reviewer: reads code, never writes it.\nCREATE PLAYBOOK IF NOT EXISTS reviewer;\nALTER PLAYBOOK reviewer\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN code-review@claude-code-plugins\n  ADD PLUGIN pr-review-toolkit@claude-code-plugins\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(git diff *)'\n  DENY TOOL 'Edit' 'Write'\n  SET MODEL 'claude-sonnet-5-5';\n"
+    }
+  ]
+}
+</script>
+<script src="home.js"></script>
 </body>
 </html>
