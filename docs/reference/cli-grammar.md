@@ -1913,7 +1913,7 @@ cpb play <dir> --check                                 a template directory, as 
 | a template name (`[a-z0-9][a-z0-9-]*`), e.g. `reviewer` | `https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/<this cpb's tag>/site/p/<name>.cpb`; a dev build reads `main`, and says so | by the release |
 | `https://…` | that URL | only by `--sha256` |
 | `github:<owner>/<repo>/<path>.cpb@<ref>` | `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>.cpb`. The `@<ref>` is required. A branch is allowed and flagged ("not a release tag: this may change"); a tag or a commit is pinned. | a tag or commit |
-| `./x.cpb`, `/abs/x.cpb`, `~/x.cpb`, and `x.cpb` or `dir/x.cpb` (a dot or a slash, no scheme) | a local file, with every check | |
+| `./x.cpb`, `/abs/x.cpb`, `~/x.cpb`, and, with no `:`, a name ending in `.cpb` or holding a `/` (`x.cpb`, `dir/x`) | a local file, with every check | |
 
 A template name that is not there fetches `index.txt` beside it, only then,
 and suggests close names.
