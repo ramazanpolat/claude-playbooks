@@ -41,7 +41,6 @@
     <symbol id="g-ghost" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 20.5V11a6.5 6.5 0 0 1 13 0v9.5l-2.2-1.9-2.1 1.9-2.2-1.9-2.2 1.9-2.1-1.9-2.2 1.9z"/><circle cx="9.7" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="14.3" cy="11" r="1" fill="currentColor" stroke="none"/></g></symbol>
     <symbol id="g-host" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="5" width="15" height="10" rx="1.8"/><path d="M2.5 19h19"/></g></symbol>
     <symbol id="g-vm" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M12 8l4.2 2.4v4.7L12 17.5l-4.2-2.4v-4.7L12 8z"/></g></symbol>
-    <symbol id="g-shell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9z"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/></g></symbol>
     <symbol id="g-remote" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="6.5" rx="2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2"/><path d="M7.5 7.25h.01M7.5 16.75h.01"/></g></symbol>
     <symbol id="g-router" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21"/></g></symbol>
     <symbol id="g-share" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2H9l2 2h7.5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/><path d="M8 13h8M13.5 10.5L16 13l-2.5 2.5"/></g></symbol>
@@ -193,7 +192,7 @@
     <div class="sh">
       <p class="eyebrow2">Runtimes</p>
       <h2 id="rt-h">Isolated by default. Connected on purpose.</h2>
-      <p>Run each agent where it belongs: on your machine, in a microVM, in an OpenShell container, on another machine, or in a throwaway folder. Nothing is shared unless you share it. Hover an agent to see what it reaches; where two agents reach the same thing, they can meet.</p>
+      <p>Run each agent where it belongs: on your machine, in a microVM, on another machine, or in a throwaway folder. Nothing is shared unless you share it. Hover an agent to see what it reaches; where two agents reach the same thing, they can meet.</p>
     </div>
     <div class="rt" id="rt">
       <svg class="rt-lines" aria-hidden="true"></svg>
@@ -203,7 +202,7 @@
     </div>
     <div class="rt-detail" id="rt-detail" aria-live="polite"></div>
     <p class="rt-note">cpb does not pass messages between agents. What it does is decide what each one can reach: a model backend, an MCP server, a folder. The places two agents have in common are the places they can meet, and nowhere else.
-      The sandbox details are in the <a href="https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/guides/sandbox.md" target="_blank" rel="noopener">sandbox guide</a>; OpenShell needs Linux with Docker.</p>
+      The sandbox details are in the <a href="https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/guides/sandbox.md" target="_blank" rel="noopener">sandbox guide</a>.</p>
   </section>
 
   <section class="block reveal" id="recipes">
@@ -806,13 +805,6 @@
         "backend": "sbx"
       },
       {
-        "id": "openshell",
-        "kind": "sandbox",
-        "label": "OpenShell container",
-        "tag": "openshell",
-        "backend": "openshell"
-      },
-      {
         "id": "remote",
         "kind": "remote",
         "label": "Another machine",
@@ -843,8 +835,8 @@
       },
       {
         "playbook": "glm",
-        "zone": "openshell",
-        "cmd": "cpb run --sandbox=openshell --mount ~/shared-libs:ro glm"
+        "zone": "sbx",
+        "cmd": "cpb run --sandbox --mount ~/shared-libs:ro glm"
       },
       {
         "playbook": "reviewer",
@@ -858,8 +850,7 @@
       }
     ],
     "backends": [
-      "sbx",
-      "openshell"
+      "sbx"
     ]
   }
 }

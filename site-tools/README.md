@@ -53,7 +53,7 @@ TUI goldens.
   --delete` for real (with a `claude` that records its session) to check the
   ephemeral notebook, and checks every launch command in `runtimes.json`
   against this cpb: its flags in `run --help` / `start --help`, and its
-  sandbox backends (`sbx`, `openshell`) from the error for an unknown one.
+  sandbox backend (`sbx`) from the error for an unknown one.
 - **The logos.** `brand-icons.py` writes the tools' marks (Simple Icons, CC0,
   pinned to one release) into the page's inline sprite; the marks for the
   playbooks and runtimes are hand-drawn in the same sprite. `check-sprites.py`
