@@ -1,0 +1,44 @@
+# claude-playbooks own-arena suite: cpb play (v3.28.0), slice 1. A played
+# recipe is fetched once, checked against what it may hold, and planned
+# against a throwaway store: --check, --dry-run --json, --sha256, and the
+# template-directory check the website's CI runs. Local recipes only; the
+# https fetch limits are unit-tested here and join this scenario with the
+# local TLS server in a later slice.
+
+[scenario]
+name = "cli-play"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''F="$HOME/playfx"; mkdir -p "$F/tpl" && printf '%s\n' "ALTER PLAYBOOK" "  USE ENV work" "  SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;" "ALTER DEFAULTS SET SECRET HELPER 'x';" > "$F/bad.cpb" && printf '%s\n' "-- title: Router" "-- description: GLM through a router." "" "ALTER PLAYBOOK" "  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1" "  SET MODEL 'glm-5.3';" > "$F/router.cpb" && cp "$F/router.cpb" "$F/tpl/router.cpb" && printf '%s\n' "-- title: Reviewer" "-- description: Reads code." "-- min-cpb: 3.28.0" "" "ALTER PLAYBOOK SET MODEL 'opus';" > "$F/tpl/code-reviewer.cpb" && printf '%s\n' code-reviewer router > "$F/tpl/index.txt"''',
+  'claude-playbook CREATE ENV mine SET ANTHROPIC_BASE_URL=https://mine.example && claude-playbook ALTER DEFAULTS USE ENV mine',
+]
+
+[[verify.commands]]
+# --check: what a played recipe may not hold is refused, with its line,
+# and exits 1; a recipe that moves the model endpoint asks for exactly one
+# typed confirmation (root, 2026-10-01: SENTRY_URL is flagged, not typed).
+command = '''F="$HOME/playfx"; if claude-playbook play --check "$F/bad.cpb" > "$HOME/bad.out" 2>&1; then echo bad-accepted; elif ! grep -q "line 2   USE ENV: it would attach your env sets" "$HOME/bad.out" || ! grep -q "line 3   SET VAR GITHUB_TOKEN: a shared recipe carries no secret, even AS PLAINTEXT" "$HOME/bad.out" || ! grep -q "line 4   ALTER DEFAULTS" "$HOME/bad.out"; then echo bad-wrong; else claude-playbook play --check "$F/router.cpb" > "$HOME/r.out" 2>&1 && [ "$(grep -c "you will type" "$HOME/r.out")" = 1 ] && grep -q "you will type: router.example.net" "$HOME/r.out" && grep -q "a tool may send data to sentry.example.com" "$HOME/r.out" && echo play-check-ok; fi'''
+contains = "play-check-ok"
+
+[[verify.commands]]
+# --dry-run --json: APPLY's plan with a "play" block, against a throwaway
+# store: the user's DEFAULTS (env set mine) never layer in, the endpoint
+# move isolates the login, nothing is left in the user's store or in /tmp.
+command = '''F="$HOME/playfx"; before=$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l); claude-playbook play --dry-run --json "$F/router.cpb" > "$HOME/r.json" 2> "$HOME/r.err" && python3 -c "import json,sys; r=json.load(open(sys.argv[1])); p=r['play']; assert r['ok'] and p['endpoint']=='router.example.net' and p['playbook'].startswith('play-router-') and len(r['statements'])==3 and p['header']['title']=='Router' and len(p['sha256'])==64, r" "$HOME/r.json" && ! grep -q "mine.example" "$HOME/r.json" "$HOME/r.err" && ! claude-playbook SHOW PLAYBOOKS --json | grep -q "play-router-" && [ "$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l)" = "$before" ] && echo play-dry-run-ok'''
+contains = "play-dry-run-ok"
+
+[[verify.commands]]
+# --sha256: any other recipe is refused before anything is shown.
+command = '''F="$HOME/playfx"; if claude-playbook play --check --sha256 00 "$F/router.cpb" > "$HOME/s.out" 2>&1; then echo sha-accepted; elif grep -q "refused before anything was shown or written" "$HOME/s.out" && ! grep -q "Recipe:" "$HOME/s.out"; then echo play-sha-ok; else echo sha-wrong; fi'''
+contains = "play-sha-ok"
+
+[[verify.commands]]
+# --check on a template directory, as the website's CI runs it: every
+# template, a title and description, and index.txt listing them sorted.
+command = '''F="$HOME/playfx/tpl"; claude-playbook play --check "$F" > "$HOME/d.out" 2>&1 && grep -q "ok   index.txt (2 template(s))" "$HOME/d.out" && printf '%s\n' router code-reviewer > "$F/index.txt" && if claude-playbook play --check "$F" > "$HOME/d2.out" 2>&1; then echo unsorted-accepted; else grep -q "FAIL index.txt" "$HOME/d2.out" && echo play-dir-ok; fi'''
+contains = "play-dir-ok"

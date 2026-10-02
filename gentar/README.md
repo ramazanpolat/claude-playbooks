@@ -234,6 +234,7 @@ only says what each suite is for.
 | `cli-release-install` | the README's documented install path works against a published release |
 | `cli-self-update` | `update` with no name replaces the binary with the real latest release through `cpb`, refuses a checksum mismatch, and is a no-op when current |
 | `cli-completion` | real TAB through the generated bash script: names offered, prefix filtered, first argument only, and registered for `cpb` |
+| `cli-play` | `cpb play` (v3.28.0, slice 1): `--check` refusals and the one typed confirmation, `--dry-run --json` against a throwaway store (the user's DEFAULTS never layer in, nothing left behind), `--sha256`, and the template-directory check |
 | `docs-honesty` | the surface README and `docs/` document exists in the shipped binary and checkout |
 | `playbook-lifecycle` | create / alias / rename / delete, each stage checked against the filesystem |
 | `playbook-install-local` | `install` from a local directory |
