@@ -154,7 +154,7 @@ func GlobalSubscription() Subscription {
 
 // envHas reports whether env already carries an entry for key. An explicitly
 // exported empty value (`FOO=`) counts as present: os.Getenv cannot tell that
-// apart from unset, but the operator who typed it meant something by it.
+// apart from unset, but the pilot who typed it meant something by it.
 func envHas(env []string, key string) bool {
 	prefix := key + "="
 	for _, kv := range env {
@@ -169,7 +169,7 @@ func envHas(env []string, key string) bool {
 // child, leaving any value already present untouched -- an explicit export is a
 // deliberate act and outranks what this process infers from disk. A Team seat
 // needs exactly that: its real subscriptionType is not a value the picker
-// accepts, so the operator must be able to override it.
+// accepts, so the pilot must be able to override it.
 //
 // env is scanned rather than os.Getenv consulted, because env -- not this
 // process's environment -- is what the child will actually receive, and the two

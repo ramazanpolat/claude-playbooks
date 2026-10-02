@@ -106,7 +106,7 @@ func TestExportedSubscriptionDescriptorWins(t *testing.T) {
 	})
 
 	if got := env[subTypeEnv]; got != "operator_override" {
-		t.Fatalf("%s = %q, want the operator's exported value", subTypeEnv, got)
+		t.Fatalf("%s = %q, want the pilot's exported value", subTypeEnv, got)
 	}
 	// The un-overridden descriptor is still filled in: one explicit value must
 	// not suppress the other.

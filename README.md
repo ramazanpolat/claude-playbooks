@@ -142,7 +142,7 @@ cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"   # state as tables; add 
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | base -> an agent -> a team layer, as recipes |
 | [Examples 01-21](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI and `cpb play`, all applied in CI |
 | [Guides](docs/README.md) · [SPEC.md](SPEC.md) | how-tos for every area · every statement, command, file and output format: the contract |
-| [Contributing](CONTRIBUTING.md) | development |
+| [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) | what changed in each release · development |
 
 ## License
 

@@ -34,7 +34,7 @@ var startCmd = &cobra.Command{
 // as a warning rather than a refusal: start's own path is valid and the
 // session runs.
 //
-// dirShown is the directory start will actually use, spelled as the operator
+// dirShown is the directory start will actually use, spelled as the pilot
 // will recognise it -- resolved locally, or as typed for a remote start.
 func noteStartIgnoresOverride(dirShown string) {
 	overrideDir, override, err := config.ResolveConfigDirOverride()
