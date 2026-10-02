@@ -25,7 +25,7 @@ type installOpts struct {
 	alias   string
 	noAlias bool
 	sandbox bool
-	// isolatedLogin: isolate_auth = true without a sandbox (CREATE
+	// isolatedLogin: isolated_login = true without a sandbox (CREATE
 	// PLAYBOOK … FROM … ISOLATED LOGIN).
 	isolatedLogin bool
 }
@@ -103,7 +103,7 @@ func doInstall(o installOpts, args []string) error {
 	// registers without any flag.
 	effectiveAlias := o.alias
 	if effectiveAlias == "" && mPre != nil {
-		effectiveAlias = mPre.Alias
+		effectiveAlias = mPre.Launcher
 	}
 	// The launcher that will actually be written uses the effective alias,
 	// falling back to the target name — an unwritable name must fail before
@@ -163,12 +163,12 @@ func doInstall(o installOpts, args []string) error {
 		needsManifestWrite = true
 	}
 	if o.sandbox {
-		mPre.IsolateAuth = true
+		mPre.IsolatedLogin = true
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
 		needsManifestWrite = true
 	}
 	if o.isolatedLogin {
-		mPre.IsolateAuth = true
+		mPre.IsolatedLogin = true
 		needsManifestWrite = true
 	}
 	sourceSubdir := subdir

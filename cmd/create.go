@@ -17,7 +17,7 @@ type createOpts struct {
 	alias         string
 	noAlias       bool
 	sandbox       bool
-	isolatedLogin bool // isolate_auth = true without a sandbox
+	isolatedLogin bool // isolated_login = true without a sandbox
 }
 
 func doCreate(o createOpts, args []string) error {
@@ -81,7 +81,7 @@ func doCreate(o createOpts, args []string) error {
 	// login cannot follow it into the sandbox. Written before the
 	// credential sync so the sync already sees the isolation.
 	if o.sandbox || o.isolatedLogin {
-		m := &manifest.Manifest{Name: name, IsolateAuth: true}
+		m := &manifest.Manifest{Name: name, IsolatedLogin: true}
 		if o.sandbox {
 			m.Sandbox = &manifest.Sandbox{Always: true}
 		}

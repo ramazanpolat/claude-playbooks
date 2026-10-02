@@ -18,7 +18,7 @@ func TestStatementCreateAndDropPlaybook(t *testing.T) {
 
 	mustStmt(t, "CREATE PLAYBOOK fresh ALIAS fr SANDBOX")
 	m, err := manifest.Read(filepath.Join(root, "fresh"))
-	if err != nil || m == nil || m.Alias != "fr" || m.Sandbox == nil || !m.Sandbox.Always {
+	if err != nil || m == nil || m.Launcher != "fr" || m.Sandbox == nil || !m.Sandbox.Always {
 		t.Fatalf("created manifest: %#v %v", m, err)
 	}
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "fr"); !exists {
@@ -44,7 +44,7 @@ func TestStatementCreatePlaybookFromSource(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	src := t.TempDir()
-	if err := manifest.Write(src, &manifest.Manifest{Version: "1.0.0", Name: "upstream", Alias: "up"}); err != nil {
+	if err := manifest.Write(src, &manifest.Manifest{Version: "1.0.0", Name: "upstream", Launcher: "up"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, "CLAUDE.md"), []byte("# upstream\n"), 0o644); err != nil {
@@ -86,16 +86,16 @@ func TestStatementRenameAndAlias(t *testing.T) {
 
 	mustStmt(t, "ALTER PLAYBOOK old RENAME TO new ALIAS nw")
 	m, err := manifest.Read(filepath.Join(root, "new"))
-	if err != nil || m == nil || m.Alias != "nw" {
+	if err != nil || m == nil || m.Launcher != "nw" {
 		t.Fatalf("after RENAME TO … ALIAS: %#v %v", m, err)
 	}
 	mustStmt(t, "ALTER PLAYBOOK new ALIAS n2")
-	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Alias != "n2" {
-		t.Fatalf("ALIAS: %q", m.Alias)
+	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Launcher != "n2" {
+		t.Fatalf("ALIAS: %q", m.Launcher)
 	}
 	mustStmt(t, "ALTER PLAYBOOK new NO ALIAS")
-	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Alias != "" {
-		t.Fatalf("NO ALIAS: %q", m.Alias)
+	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Launcher != "" {
+		t.Fatalf("NO ALIAS: %q", m.Launcher)
 	}
 
 	// A rename and an environment change are two statements.

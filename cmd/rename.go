@@ -59,7 +59,7 @@ func doRename(o renameOpts, args []string) error {
 	}
 	oldManifestAlias := ""
 	if pb.Manifest != nil {
-		oldManifestAlias = pb.Manifest.Alias
+		oldManifestAlias = pb.Manifest.Launcher
 	}
 	newPath := filepath.Join(playbooksDir, newName)
 
@@ -141,12 +141,12 @@ func doRename(o renameOpts, args []string) error {
 			m = &manifest.Manifest{}
 		}
 		switch {
-		case o.noAlias && m.Alias != "":
-			m.Alias = ""
-		case o.alias != "" && m.Alias != o.alias:
-			m.Alias = o.alias
+		case o.noAlias && m.Launcher != "":
+			m.Launcher = ""
+		case o.alias != "" && m.Launcher != o.alias:
+			m.Launcher = o.alias
 		case aliasFollows:
-			m.Alias = newName
+			m.Launcher = newName
 		default:
 			m = nil // nothing to persist
 		}

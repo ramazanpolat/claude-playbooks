@@ -73,11 +73,11 @@ func TestStatementEnvLifecycle(t *testing.T) {
 
 	mustStmt(t, "ALTER ENV glm BLOCK MODEL DESCRIBE router")
 	p = readProfile(t, "glm")
-	if _, ok := p.Set["MODEL"]; ok || !reflect.DeepEqual(p.Unset, []string{"MODEL"}) || p.Description != "router" {
+	if _, ok := p.Set["MODEL"]; ok || !reflect.DeepEqual(p.Block, []string{"MODEL"}) || p.Description != "router" {
 		t.Fatalf("after BLOCK and DESCRIBE: %#v", p)
 	}
 	mustStmt(t, "ALTER ENV glm UNSET MODEL")
-	if p = readProfile(t, "glm"); len(p.Unset) != 0 {
+	if p = readProfile(t, "glm"); len(p.Block) != 0 {
 		t.Fatalf("after UNSET: %#v", p)
 	}
 	mustStmt(t, "ALTER ENV glm SET MODEL=glm-5.3-flash")
@@ -159,7 +159,7 @@ func TestStatementPlaybookEnvList(t *testing.T) {
 		if e == nil {
 			return nil
 		}
-		return e.Profiles
+		return e.Sets
 	}
 
 	mustStmt(t, "ALTER PLAYBOOK router USE ENV a b")
@@ -218,12 +218,12 @@ func TestStatementPlaybookVars(t *testing.T) {
 
 	mustStmt(t, "ALTER PLAYBOOK router SET VAR MAX_THINKING_TOKENS=8000 MODEL=x BLOCK VAR HTTP_PROXY")
 	e := readEnv(t, root)
-	if e.Set["MAX_THINKING_TOKENS"] != "8000" || e.Set["MODEL"] != "x" || !reflect.DeepEqual(e.Unset, []string{"HTTP_PROXY"}) {
+	if e.Set["MAX_THINKING_TOKENS"] != "8000" || e.Set["MODEL"] != "x" || !reflect.DeepEqual(e.Block, []string{"HTTP_PROXY"}) {
 		t.Fatalf("after SET and BLOCK: %#v", e)
 	}
 	mustStmt(t, "ALTER PLAYBOOK router BLOCK VAR MODEL UNSET VAR HTTP_PROXY")
 	e = readEnv(t, root)
-	if _, ok := e.Set["MODEL"]; ok || !reflect.DeepEqual(e.Unset, []string{"MODEL"}) {
+	if _, ok := e.Set["MODEL"]; ok || !reflect.DeepEqual(e.Block, []string{"MODEL"}) {
 		t.Fatalf("BLOCK moves a key from set to unset; UNSET forgets: %#v", e)
 	}
 	out := mustStmt(t, "ALTER PLAYBOOK router BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN")
@@ -355,7 +355,7 @@ func TestDropEnvSeesTheGoverningManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustStmt(t, "CREATE ENV inner")
-	if err := manifest.Write(configDir, &manifest.Manifest{Name: "nested", Env: &manifest.Env{Profiles: []string{"inner"}}}); err != nil {
+	if err := manifest.Write(configDir, &manifest.Manifest{Name: "nested", Env: &manifest.Env{Sets: []string{"inner"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := stmt(t, "DROP ENV inner"); err == nil || !strings.Contains(err.Error(), "used by nested") {

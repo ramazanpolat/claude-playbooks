@@ -32,7 +32,7 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := seedFlatPlaybook(t, "own")
-	if err := manifest.Write(own, &manifest.Manifest{Name: "own", Env: &manifest.Env{Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"}}}); err != nil {
+	if err := manifest.Write(own, &manifest.Manifest{Name: "own", Env: &manifest.Env{Block: []string{"CLAUDE_CODE_OAUTH_TOKEN"}}}); err != nil {
 		t.Fatal(err)
 	}
 	_ = root
@@ -53,7 +53,7 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 	}
 	// An error row carries the documented note prefix.
 	broken := seedFlatPlaybook(t, "broken")
-	if err := manifest.Write(broken, &manifest.Manifest{Name: "broken", Env: &manifest.Env{Profiles: []string{"ghost"}}}); err != nil {
+	if err := manifest.Write(broken, &manifest.Manifest{Name: "broken", Env: &manifest.Env{Sets: []string{"ghost"}}}); err != nil {
 		t.Fatal(err)
 	}
 	errOut := captureStdout(t, func() {

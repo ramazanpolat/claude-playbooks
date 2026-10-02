@@ -7,9 +7,9 @@ import (
 
 func TestMergeEnvWithReferences(t *testing.T) {
 	got := MergeEnv(
-		&Env{Set: map[string]string{"A": "lit", "B": "lit"}, Unset: []string{"C"}},
+		&Env{Set: map[string]string{"A": "lit", "B": "lit"}, Block: []string{"C"}},
 		&Env{Refs: map[string]string{"A": "keychain:a", "C": "keychain:c"}},
-		&Env{Set: map[string]string{"C": "own"}, Unset: []string{"B"}},
+		&Env{Set: map[string]string{"C": "own"}, Block: []string{"B"}},
 	)
 	if got.Refs["A"] != "keychain:a" || got.Set["A"] != "" {
 		t.Errorf("a later ref overrides a literal: %#v", got)
@@ -17,11 +17,11 @@ func TestMergeEnvWithReferences(t *testing.T) {
 	if got.Set["C"] != "own" || got.Refs["C"] != "" {
 		t.Errorf("a later literal overrides a ref: %#v", got)
 	}
-	if !got.Unsets("B") {
+	if !got.Blocks("B") {
 		t.Errorf("unset: %#v", got)
 	}
-	blocked := MergeEnv(&Env{Refs: map[string]string{"X": "op://v/i/f"}}, &Env{Unset: []string{"X"}})
-	if len(blocked.Refs) != 0 || !blocked.Unsets("X") {
+	blocked := MergeEnv(&Env{Refs: map[string]string{"X": "op://v/i/f"}}, &Env{Block: []string{"X"}})
+	if len(blocked.Refs) != 0 || !blocked.Blocks("X") {
 		t.Errorf("an unset drops a ref: %#v", blocked)
 	}
 }

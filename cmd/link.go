@@ -90,7 +90,7 @@ func doLink(o linkOpts, args []string) error {
 	// alias registers without any flag).
 	effectiveAlias := o.alias
 	if effectiveAlias == "" && m != nil {
-		effectiveAlias = m.Alias
+		effectiveAlias = m.Launcher
 	}
 	// The launcher that will actually be written uses the effective alias,
 	// falling back to the link name — an unwritable name (reserved link
@@ -109,8 +109,8 @@ func doLink(o linkOpts, args []string) error {
 	// through it. Any differing alias mutation — changing one, or adding
 	// one where none existed — could break or reroute those registrations,
 	// so it is refused.
-	if o.alias != "" && m != nil && m.Alias != o.alias {
-		return fmt.Errorf("target's %s is shared state (alias %q); ALIAS %s would change it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Alias, o.alias, manifest.FileName)
+	if o.alias != "" && m != nil && m.Launcher != o.alias {
+		return fmt.Errorf("target's %s is shared state (alias %q); ALIAS %s would change it for every registration of this target. Use the manifest's alias or edit the target's %s directly", manifest.FileName, m.Launcher, o.alias, manifest.FileName)
 	}
 
 	// A linked directory is the pilot's own, so nothing in it is deleted: a

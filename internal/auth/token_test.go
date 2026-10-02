@@ -108,7 +108,7 @@ func tokenEntries(env []string) []string {
 }
 
 // An isolated playbook must never be launched under the global OAuth token: the
-// isolate_auth contract in SPEC-v4.md exists precisely so two accounts can run
+// isolated_login contract in SPEC-v4.md exists precisely so two accounts can run
 // side by side. Before the isolation check was hoisted above token discovery,
 // this test failed on both counts -- the token was injected and the shared
 // credentials symlink survived, because SyncCredentials (the only caller of

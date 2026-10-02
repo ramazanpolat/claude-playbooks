@@ -102,7 +102,7 @@ func TestEnvRoundTrips(t *testing.T) {
 		Name: "pb",
 		Env: &Env{
 			Set:   map[string]string{"ANTHROPIC_BASE_URL": "http://proxy:1/v1", "A_FLAG": "x=y"},
-			Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"},
+			Block: []string{"CLAUDE_CODE_OAUTH_TOKEN"},
 		},
 	}
 	if err := Write(dir, in); err != nil {
@@ -115,13 +115,13 @@ func TestEnvRoundTrips(t *testing.T) {
 	if out.Env.Set["ANTHROPIC_BASE_URL"] != "http://proxy:1/v1" || out.Env.Set["A_FLAG"] != "x=y" {
 		t.Fatalf("set did not round-trip: %#v", out.Env.Set)
 	}
-	if !out.Env.Unsets("CLAUDE_CODE_OAUTH_TOKEN") {
-		t.Fatalf("unset did not round-trip: %#v", out.Env.Unset)
+	if !out.Env.Blocks("CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatalf("unset did not round-trip: %#v", out.Env.Block)
 	}
 	// Serialization order is deterministic: [env] header, unset, then the
 	// [env.set] table with sorted keys.
 	data, _ := os.ReadFile(filepath.Join(dir, FileName))
-	want := "[env]\nunset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy:1/v1\"\nA_FLAG = \"x=y\"\n"
+	want := "[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy:1/v1\"\nA_FLAG = \"x=y\"\n"
 	if !strings.HasSuffix(string(data), want) {
 		t.Fatalf("serialized manifest:\n%s\nwant suffix:\n%s", data, want)
 	}
@@ -141,10 +141,10 @@ func TestEnvEmptyBlockIsNotWritten(t *testing.T) {
 func TestReadRejectsInvalidEnv(t *testing.T) {
 	cases := map[string]string{
 		"reserved set":   "[env.set]\nCLAUDE_CONFIG_DIR = \"/x\"\n",
-		"reserved unset": "[env]\nunset = [\"CLAUDE_CONFIG_DIR\"]\n",
-		"bad name":       "[env]\nunset = [\"NOT-A-NAME\"]\n",
+		"reserved unset": "[env]\nblock = [\"CLAUDE_CONFIG_DIR\"]\n",
+		"bad name":       "[env]\nblock = [\"NOT-A-NAME\"]\n",
 		"bad set name":   "[env.set]\n\"1BAD\" = \"v\"\n",
-		"set and unset":  "[env]\nunset = [\"FOO\"]\n[env.set]\nFOO = \"v\"\n",
+		"set and unset":  "[env]\nblock = [\"FOO\"]\n[env.set]\nFOO = \"v\"\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -194,7 +194,7 @@ func TestWriteKeepsEnvValuesPrivate(t *testing.T) {
 		t.Fatalf("manifest with env values mode = %v, want 0600", info.Mode().Perm())
 	}
 	// Clearing the values never loosens a file the pilot may have made private.
-	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Unset: []string{"K"}}}); err != nil {
+	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Block: []string{"K"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(filepath.Join(dir, FileName)); info.Mode().Perm() != 0o600 {
@@ -210,14 +210,14 @@ func TestNearestWalksPastBrokenManifest(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nisolate_auth = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(sub, FileName), []byte("= [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	m, err := Nearest(sub)
-	if m == nil || !m.IsolateAuth {
+	if m == nil || !m.IsolatedLogin {
 		t.Fatalf("Nearest stopped at the broken manifest: m=%#v", m)
 	}
 	if err == nil {
@@ -262,7 +262,7 @@ func TestWritePreservesPartialModes(t *testing.T) {
 	if err := os.WriteFile(at, []byte("name = \"pb\"\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, &Manifest{Name: "pb", Alias: "p"}); err != nil {
+	if err := Write(dir, &Manifest{Name: "pb", Launcher: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(at); info.Mode().Perm() != 0o640 {
@@ -355,7 +355,7 @@ func TestMCPRecordRoundTrip(t *testing.T) {
 func TestPlayRecordRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	in := &Manifest{Name: "reviewer", Play: &Play{Ref: "github:acme/agents/reviewer.cpb@v1.2.0",
-		URL: "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb", SHA256: "3f1a", Played: "2026-10-02-10_00"}}
+		URL: "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb", SHA256: "3f1a", PlayedAt: "2026-10-02-10_00"}}
 	if err := Write(dir, in); err != nil {
 		t.Fatal(err)
 	}

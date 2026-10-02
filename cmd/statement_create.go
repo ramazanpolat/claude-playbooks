@@ -145,7 +145,7 @@ func createEnvBlock(p *envprofile.Profile) createBlock {
 	if p.Description != "" {
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Describe, Arg: p.Description})
 	}
-	clauses, comments := varClauses(p.Set, p.Refs, p.Unset, func(k string) string {
+	clauses, comments := varClauses(p.Set, p.Refs, p.Block, func(k string) string {
 		return fmt.Sprintf("ALTER ENV %s SET %s FROM '<ref>'", p.Name, k)
 	})
 	st.Clauses = append(st.Clauses, clauses...)
@@ -285,11 +285,11 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
 	var comments []string
 	if !env.Empty() {
-		if len(env.Profiles) > 0 {
-			alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Profiles})
+		if len(env.Sets) > 0 {
+			alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Sets})
 		}
 		var clauses []grammar.Clause
-		clauses, comments = varClauses(env.Set, env.Refs, env.Unset, func(k string) string {
+		clauses, comments = varClauses(env.Set, env.Refs, env.Block, func(k string) string {
 			return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
 		})
 		alter.Clauses = append(alter.Clauses, clauses...)

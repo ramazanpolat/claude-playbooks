@@ -56,11 +56,11 @@ The human layout may change between releases; scripts read `--json`.
 ## Install a shared playbook repo
 
 `CREATE PLAYBOOK … FROM` clones or copies a source, installs it under the name
-you give and creates its launcher: the source manifest's `alias`, unless you
+you give and creates its launcher: the source manifest's `launcher`, unless you
 name one.
 
 ```bash
-cpb CREATE PLAYBOOK awesome FROM https://github.com/ramazanpolat/awesome-playbooks
+cpb CREATE PLAYBOOK awesome FROM https://github.com/ramazanpolat/awesome-claude-playbooks BRANCH v2.0.0
 cpb CREATE PLAYBOOK team-tools FROM https://github.com/user/awesome BRANCH main ALIAS tt
 cpb CREATE PLAYBOOK mine FROM ~/dev/my-playbook        # a local directory, copied
 ```
@@ -104,7 +104,7 @@ a symlink to the `claude-playbook` binary placed next to it (falling back to
 Invoked through the link, the binary sees the link's name in `argv[0]` and
 behaves as `cpb run <name>`, the multicall pattern of busybox and git. The name
 resolves against the live registry (directory name first, then the manifest's
-`alias`) at invocation time, so the launcher carries no state that can go stale.
+`launcher`) at invocation time, so the launcher carries no state that can go stale.
 Launchers work from any shell, in scripts and in cron.
 
 A playbook has one launcher: its alias, or its name.

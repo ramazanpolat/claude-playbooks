@@ -98,7 +98,7 @@ reads: cpb SHOW SESSIONS --json
 ## Env sets and defaults
 
 - **`3` lists the env sets.** They are also called env profiles, and are
-  stored in `~/.claude-playbooks/.env-profiles/`. The list shows their
+  stored in `~/.claude-playbooks/.env-sets/`. The list shows their
   variables, which playbooks use them, and which one is a default.
 - **`4` shows `DEFAULTS`:** the env sets layered under every playbook, and
   the secret helper.

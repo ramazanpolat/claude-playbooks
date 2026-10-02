@@ -18,7 +18,7 @@ import (
 type Mode string
 
 const (
-	ModeIsolated    Mode = "isolated"     // isolate_auth: own store, shares nothing
+	ModeIsolated    Mode = "isolated"     // isolated_login: own store, shares nothing
 	ModeToken       Mode = "token"        // machine-global long-lived token injected
 	ModeOwnToken    Mode = "own-token"    // a token the manifest or a profile sets
 	ModeOwnLogin    Mode = "own-login"    // token unset for this playbook: stored login
@@ -51,7 +51,7 @@ type Report struct {
 	Store     StoreKind `json:"store"`
 	// StoreTarget is the symlink target when Store is StoreSymlink.
 	StoreTarget string `json:"store_target,omitempty"`
-	// Isolated is true under isolate_auth, whatever the mode: an isolated
+	// Isolated is true under isolated_login, whatever the mode: an isolated
 	// playbook may still authenticate by an own token (own-token) or by its
 	// own stored login (isolated).
 	Isolated bool `json:"isolated"`
@@ -158,7 +158,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 				r.Mode = ModeOwnToken
 			case r.Isolated:
 				r.Mode = ModeIsolated
-			case menv.Unsets(OAuthTokenEnv):
+			case menv.Blocks(OAuthTokenEnv):
 				r.Mode = ModeOwnLogin
 			case setsToken:
 				// Set to an empty value: resolveToken treats that as

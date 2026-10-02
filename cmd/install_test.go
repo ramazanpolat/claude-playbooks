@@ -224,7 +224,7 @@ func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 	if err := os.Mkdir(repo, 0755); err != nil {
 		t.Fatal(err)
 	}
-	manifestData := "name = \"custom-update\"\nisolate_auth = true\n[update]\npreserve = [\"local.conf\"]\n"
+	manifestData := "name = \"custom-update\"\nisolated_login = true\n[update]\npreserve = [\"local.conf\"]\n"
 	if err := os.WriteFile(filepath.Join(repo, ".playbook"), []byte(manifestData), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	}
 	// The alias lives in the target's own manifest: a pre-existing shared
 	// manifest is never alias-mutated by link.
-	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\nalias = \"linkedalias\"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolated_login = true\nlauncher = \"linkedalias\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := doLink(linkOpts{name: "linked"}, []string{target}); err != nil {
@@ -291,7 +291,7 @@ func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 		t.Fatalf("launcher entries = %#v", entries)
 	}
 	// The alias must be resolvable at invocation time via the manifest.
-	if pb.Manifest == nil || pb.Manifest.Alias != "linkedalias" {
+	if pb.Manifest == nil || pb.Manifest.Launcher != "linkedalias" {
 		t.Fatalf("manifest alias not recorded: %#v", pb.Manifest)
 	}
 }
@@ -508,7 +508,7 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 	}
 	// Command name "x" belongs to bbb via its manifest alias.
 	if err := manifest.Write(filepath.Join(config.PlaybooksDir, "bbb"),
-		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Alias: "x"}); err != nil {
+		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Launcher: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := launcher.Write(config.LauncherDir, "x"); err != nil {

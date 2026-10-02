@@ -216,7 +216,7 @@ func TestLinkSetsAsideCarriedLogin(t *testing.T) {
 
 	iso := filepath.Join(home, "iso")
 	writeSource(t, iso)
-	if err := os.WriteFile(filepath.Join(iso, ".playbook"), []byte("name = \"iso\"\nisolate_auth = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(iso, ".playbook"), []byte("name = \"iso\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK li NO ALIAS LINK '"+iso+"'") })
@@ -286,7 +286,7 @@ func TestLinkIsolatedSubdirKeepsLogin(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "config", ".playbook")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte("name = \"iso-sub\"\nisolate_auth = true\nsubdir = \"config\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte("name = \"iso-sub\"\nisolated_login = true\nsubdir = \"config\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var err error

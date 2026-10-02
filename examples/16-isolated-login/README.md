@@ -26,6 +26,6 @@ only if you run `/login` in it.
   whose `/login` must not land in the machine's shared login
   ([example 15](../15-third-party-route/)).
 
-It is `isolate_auth = true` in the playbook's `.playbook`
+It is `isolated_login = true` in the playbook's `.playbook`
 ([authentication guide](../../docs/guides/authentication.md)).
 Reference: [Isolated login](../../docs/reference/cli-grammar.md#isolated-login-v3230).

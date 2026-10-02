@@ -14,7 +14,7 @@ import (
 
 func seedProfile(t *testing.T, root, name, body string) {
 	t.Helper()
-	dir := filepath.Join(root, ".env-profiles")
+	dir := filepath.Join(root, ".env-sets")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func seedProfile(t *testing.T, root, name, body string) {
 func TestLaunchFlagsBeforeAndAfterName(t *testing.T) {
 	root := t.TempDir()
 	playbookWithEnv(t, root, "router", "[env.set]\nMODEL = \"manifest\"\nKEEP = \"manifest\"\n")
-	seedProfile(t, root, "work", "unset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nFROM_PROFILE = \"yes\"\n")
+	seedProfile(t, root, "work", "block = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nFROM_PROFILE = \"yes\"\n")
 	envFile := filepath.Join(t.TempDir(), "extra.env")
 	if err := os.WriteFile(envFile, []byte("FROM_FILE=yes\n"), 0o600); err != nil {
 		t.Fatal(err)

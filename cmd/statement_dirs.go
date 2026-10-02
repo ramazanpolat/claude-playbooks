@@ -16,6 +16,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
+	"github.com/ramazanpolat/claude-playbooks/internal/tomlfile"
 )
 
 // A recipe applied TO a plain Claude Code config directory, such as
@@ -38,8 +39,8 @@ var dirRefusals = map[grammar.Kind]string{
 	grammar.Alias:    "the directory has no launcher",
 	grammar.NoAlias:  "the directory has no launcher",
 
-	grammar.SetIsolatedLogin:   "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetIsolatedLogin: "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetIsolatedLogin:   "isolated_login is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetIsolatedLogin: "isolated_login is recorded in a playbook's manifest, which the directory does not have",
 	grammar.SetSandbox:         "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.UnsetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.SetSandboxKeys:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
@@ -397,7 +398,10 @@ func readDirState() (*dirStateFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := toml.Decode(string(data), st); err != nil {
+	if err := tomlfile.Decode(dirStatePath(), data, st); err != nil {
+		if errors.As(err, new(*tomlfile.UnknownKeyError)) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("%s: %s", dirStatePath(), manifest.SanitizeTOMLError(err))
 	}
 	if st.Dirs == nil {

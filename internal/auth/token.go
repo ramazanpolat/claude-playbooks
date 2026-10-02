@@ -65,7 +65,7 @@ func TokenActive() (inject string, active bool) {
 // on top. The manifest is the per-install authority over the machine-global
 // token file:
 //
-//   - env.unset lists CLAUDE_CODE_OAUTH_TOKEN: the token is inactive here, no
+//   - env.block lists CLAUDE_CODE_OAUTH_TOKEN: the token is inactive here, no
 //     matter what the file or the shell says. The launch then takes the
 //     stored-credentials path. Stripping the variable alone would be the
 //     worst of both worlds -- the quarantine would still wipe the stored
@@ -75,7 +75,7 @@ func TokenActive() (inject string, active bool) {
 //     inactive, matching the file rule.
 //   - otherwise TokenActive decides.
 func resolveToken(menv *manifest.Env) (inject string, active bool) {
-	if menv.Unsets(OAuthTokenEnv) {
+	if menv.Blocks(OAuthTokenEnv) {
 		return "", false
 	}
 	if menv != nil {
@@ -104,13 +104,13 @@ func applyManifestEnv(environ []string, menv *manifest.Env) []string {
 	if menv.Empty() {
 		return environ
 	}
-	keys := make([]string, 0, len(menv.Set)+len(menv.Unset))
+	keys := make([]string, 0, len(menv.Set)+len(menv.Block))
 	for key := range menv.Set {
 		if key != OAuthTokenEnv {
 			keys = append(keys, key)
 		}
 	}
-	for _, key := range menv.Unset {
+	for _, key := range menv.Block {
 		if key != OAuthTokenEnv {
 			keys = append(keys, key)
 		}
@@ -155,7 +155,7 @@ func removeEnv(environ []string, keys ...string) []string {
 // with one install-local exception: a CLAUDE_CODE_OAUTH_TOKEN the manifest
 // itself sets is that playbook's own token and is honoured (see the branch).
 // isAuthIsolated is consulted only inside SyncCredentials, so any branch that
-// skips that call also silently skips the isolate_auth contract — which
+// skips that call also silently skips the isolated_login contract — which
 // SPEC-v4.md defines as "detach shared credentials and do not copy global
 // credentials or account metadata into this playbook". An isolated playbook
 // therefore takes the full SyncCredentials path (which detaches), syncs no

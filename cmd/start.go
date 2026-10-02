@@ -48,7 +48,7 @@ func noteStartIgnoresOverride(dirShown string) {
 
 func runStart(cmd *cobra.Command, args []string) error {
 	// start addresses a path, not a registry name, but the playbooks-dir
-	// value still names the root whose .env-profiles/ the path's manifest
+	// value still names the root whose .env-sets/ the path's manifest
 	// may reference, so it is applied to this process exactly as run does
 	// (and kept out of the args forwarded to claude).
 	original := args
@@ -145,7 +145,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// The directory's own manifest supplies [sandbox] (always and the
-	// defaults); an unreadable one is reported by the launch preparation.
+	// defaults); an unreadable one refuses the launch.
+	if err := refuseUnreadableManifest(absPath); err != nil {
+		return err
+	}
 	var sbm *manifest.Sandbox
 	if m, err := manifest.Read(absPath); err == nil && m != nil {
 		sbm = m.Sandbox

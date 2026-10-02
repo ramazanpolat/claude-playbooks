@@ -45,7 +45,7 @@ func TestAliasSetBootstrapsManifestAndLauncher(t *testing.T) {
 	if err != nil || m == nil {
 		t.Fatalf("manifest not created: m=%#v err=%v", m, err)
 	}
-	if m.Alias != "d" || m.Name != "deploy" {
+	if m.Launcher != "d" || m.Name != "deploy" {
 		t.Fatalf("manifest = %+v, want alias d for deploy", m)
 	}
 	if e, exists, foreign := launcher.Lookup(config.LauncherDir, "d"); !exists || foreign {
@@ -90,7 +90,7 @@ func TestAliasRemoveClearsManifestAndLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m != nil && m.Alias != "" {
+	if m != nil && m.Launcher != "" {
 		t.Fatalf("manifest alias survives --remove: %+v", m)
 	}
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "d"); exists {
@@ -188,7 +188,7 @@ func TestAliasNameRepairsNameLauncher(t *testing.T) {
 		t.Fatalf("manifest changed during name repair:\n%s\n%s", before, after)
 	}
 	m, err := manifest.Read(filepath.Join(config.ResolvePlaybooksDir(), "deploy"))
-	if err != nil || m == nil || m.Alias != "" {
+	if err != nil || m == nil || m.Launcher != "" {
 		t.Fatalf("name repair must not record an alias: %+v err=%v", m, err)
 	}
 }
@@ -203,7 +203,7 @@ func TestAliasNameRepairRespectsOwnership(t *testing.T) {
 
 	// The tool refuses to CREATE this collision, so reach it the only way it
 	// exists: a hand-edited manifest giving `other` the alias `deploy`.
-	if err := manifest.Write(filepath.Join(config.ResolvePlaybooksDir(), "other"), &manifest.Manifest{Name: "other", Alias: "deploy"}); err != nil {
+	if err := manifest.Write(filepath.Join(config.ResolvePlaybooksDir(), "other"), &manifest.Manifest{Name: "other", Launcher: "deploy"}); err != nil {
 		t.Fatal(err)
 	}
 	err := doAlias(aliasOpts{}, []string{"deploy", "deploy"})
@@ -252,9 +252,8 @@ func TestAliasUnchangedOnLinkedPlaybookDoesNotRewriteSharedManifest(t *testing.T
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	external := t.TempDir()
-	// Comments and unknown fields prove a rewrite: manifest.Write would
-	// drop both.
-	content := "# hand-authored comment\nversion = \"0.1.0\"\nname = \"ext\"\nalias = \"x\"\ncustom_field = \"kept\"\n"
+	// A comment proves a rewrite: manifest.Write would drop it.
+	content := "# hand-authored comment\nversion = \"0.1.0\"\nname = \"ext\"\nlauncher = \"x\"\n"
 	if err := os.WriteFile(filepath.Join(external, manifest.FileName), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +293,7 @@ func TestAliasForeignFilePreflightLeavesStateUntouched(t *testing.T) {
 	}
 	// Nothing mutated: manifest still says d, old launcher still present.
 	m, err := manifest.Read(root)
-	if err != nil || m == nil || m.Alias != "d" {
+	if err != nil || m == nil || m.Launcher != "d" {
 		t.Fatalf("manifest mutated despite preflight failure: %+v err=%v", m, err)
 	}
 	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "d"); !exists || foreign {

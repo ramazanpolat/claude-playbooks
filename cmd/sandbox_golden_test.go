@@ -32,7 +32,7 @@ func TestSbxCallLogGolden(t *testing.T) {
 			if err := os.MkdirAll(extra, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}},
+			writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}},
 				Sandbox: &manifest.Sandbox{Mounts: []string{extra + ":ro"}, AllowNet: []string{"api.example.com"}, ClaudeVersion: "2.1.263"}})
 			return "box", []string{"--env", "EXTRA=1", "-p", "it's"}
 		}},
@@ -40,7 +40,7 @@ func TestSbxCallLogGolden(t *testing.T) {
 			if err := stmtErr(t, "CREATE ENV local SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_AUTH_TOKEN=lt AS PLAINTEXT"); err != nil {
 				t.Fatal(err)
 			}
-			writePlaybook(t, root, "onhost", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"local"}},
+			writePlaybook(t, root, "onhost", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"local"}},
 				Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
 			return "onhost", nil
 		}},
@@ -48,14 +48,14 @@ func TestSbxCallLogGolden(t *testing.T) {
 			if err := stmtErr(t, "CREATE ENV rot SET ANTHROPIC_API_KEY=new-key AS PLAINTEXT"); err != nil {
 				t.Fatal(err)
 			}
-			writePlaybook(t, root, "rot", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"rot"}}})
+			writePlaybook(t, root, "rot", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"rot"}}})
 			t.Setenv("SBX_STUB_LS", "cpb-rot")
 			t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-rot","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "rot"))+`"]}]}`)
 			t.Setenv("SBX_STUB_SECRETS", "cpb-rot api.anthropic.com ANTHROPIC_API_KEY cpb-rot-ANTHROPIC_API_KEY old-***")
 			return "rot", nil
 		}},
 		{"revoke", func(t *testing.T, root, work string) (string, []string) {
-			writePlaybook(t, root, "revoke", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
+			writePlaybook(t, root, "revoke", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
 			t.Setenv("SBX_STUB_LS", "cpb-revoke")
 			t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]}`)
 			t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
@@ -75,7 +75,7 @@ func TestSbxCallLogGolden(t *testing.T) {
 			if err := stmtErr(t, "CREATE ENV canary SET ANTHROPIC_API_KEY=cpbcanaryvalue AS PLAINTEXT"); err != nil {
 				t.Fatal(err)
 			}
-			writePlaybook(t, root, "failreg", &manifest.Manifest{Env: &manifest.Env{Profiles: []string{"canary"}}})
+			writePlaybook(t, root, "failreg", &manifest.Manifest{Env: &manifest.Env{Sets: []string{"canary"}}})
 			t.Setenv("SBX_STUB_FAIL", "secret")
 			return "failreg", nil
 		}},

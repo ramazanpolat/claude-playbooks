@@ -31,7 +31,7 @@ profile works as it does on the host.
 To make a playbook sandboxed every time, say so once:
 
 ```bash
-cpb CREATE PLAYBOOK sre SANDBOX       # [sandbox] always = true, isolate_auth = true
+cpb CREATE PLAYBOOK sre SANDBOX       # [sandbox] always = true, isolated_login = true
 cpb CREATE PLAYBOOK ops FROM <src> SANDBOX   # the same, for one from a source
 cpb ALTER PLAYBOOK dev SET SANDBOX    # the same, for a playbook you have
 sre -p "run the tests"                # sandboxed, no flag needed

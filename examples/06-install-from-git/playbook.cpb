@@ -2,7 +2,7 @@
 -- picks one playbook out of a repository that ships several; ALIAS gives
 -- it a short launcher command.
 CREATE PLAYBOOK IF NOT EXISTS dba
-  FROM https://github.com/ramazanpolat/awesome-playbooks
-  BRANCH v1.0.0
+  FROM https://github.com/ramazanpolat/awesome-claude-playbooks
+  BRANCH v2.0.0
   SUBDIR playbooks/dba
   ALIAS dba;

@@ -35,7 +35,7 @@ func multicallPlaybook() (string, bool, error) {
 		}
 	}
 	for _, pb := range pbs {
-		if pb.Manifest != nil && pb.Manifest.Alias == base {
+		if pb.Manifest != nil && pb.Manifest.Launcher == base {
 			return pb.Name, true, nil
 		}
 	}
@@ -46,8 +46,8 @@ func multicallPlaybook() (string, bool, error) {
 // its directory name and, when set, its manifest alias.
 func launcherNamesFor(pb *playbook.Playbook) []string {
 	names := []string{pb.Name}
-	if pb.Manifest != nil && pb.Manifest.Alias != "" && pb.Manifest.Alias != pb.Name {
-		names = append(names, pb.Manifest.Alias)
+	if pb.Manifest != nil && pb.Manifest.Launcher != "" && pb.Manifest.Launcher != pb.Name {
+		names = append(names, pb.Manifest.Launcher)
 	}
 	return names
 }

@@ -112,7 +112,7 @@ func TestShowPlaybookManifestFields(t *testing.T) {
 	config.PlaybooksDir = sandboxRoot(t, "playbooks")
 	writePlaybook(t, config.PlaybooksDir, "rich", &manifest.Manifest{
 		Version:     "1.2.3",
-		Alias:       "ri",
+		Launcher:    "ri",
 		Description: "A rich playbook",
 		Homepage:    "https://example.com",
 		Author:      "Tester",
@@ -275,7 +275,7 @@ func TestDeleteKeepsLauncherStillAddressingAnotherPlaybook(t *testing.T) {
 	writePlaybook(t, root, "victim", nil)
 	// "other" claims the command name "victim" via its manifest alias —
 	// the registry, not the symlink, owns command-name ownership.
-	writePlaybook(t, root, "other", &manifest.Manifest{Alias: "victim"})
+	writePlaybook(t, root, "other", &manifest.Manifest{Launcher: "victim"})
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestDeleteStoreSymlinkShapes(t *testing.T) {
 		t.Fatalf("store damaged: %v %v", p, err)
 	}
 	// The message names the canonical store, whatever spelling was typed.
-	if err := doDelete(deleteOpts{yes: true}, []string{envprofile.DirName}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+	if err := doDelete(deleteOpts{yes: true}, []string{envprofile.DirName}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
 		t.Fatalf("message: %v", err)
 	}
 }
@@ -405,7 +405,7 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 
 	// The store's registry SYMLINK addressed by a case variant: refused, link intact.
 	if caseInsensitive {
-		if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+		if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
 			t.Fatalf("case variant of the store link must get the store message, not the intermediate-link one: %v", err)
 		}
 		if _, err := os.Lstat(store); err != nil {
@@ -542,7 +542,7 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	if err := doDelete(deleteOpts{yes: true}, []string{".leftover"}); err == nil || !strings.Contains(err.Error(), "is a directory the registry's env profile store resolves through") {
 		t.Fatalf("traversed directory: %v", err)
 	}
-	if err := doDelete(deleteOpts{yes: true}, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+	if err := doDelete(deleteOpts{yes: true}, []string{".profiles"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
 		t.Fatalf("physical directory under another name: %v", err)
 	}
 
@@ -556,7 +556,7 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".ENV-PROFILES")); err == nil || os.IsNotExist(err) {
 		// case-insensitive: Lstat of the variant is the link itself
 		if fi, err := os.Lstat(filepath.Join(root, ".ENV-PROFILES")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-profiles" is the registry's env profile store`) {
+			if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
 				t.Fatalf("dangling store link by case variant: %v", err)
 			}
 		}
@@ -607,7 +607,7 @@ func TestDeleteStoreGuardDefersToTheKernel(t *testing.T) {
 
 // A relative playbooks root resolves from the PHYSICAL working directory:
 // with `cd /x/a/link` (`link -> /x/b/sub`) and `--playbooks-dir ..`, the
-// store is /x/b/.env-profiles, not the /x/a/.env-profiles a lexical
+// store is /x/b/.env-sets, not the /x/a/.env-sets a lexical
 // filepath.Abs of the logical $PWD would name.
 func TestDeleteStoreGuardRelativeRootFromPhysicalCwd(t *testing.T) {
 	sandboxRoot(t, "playbooks")
@@ -782,7 +782,7 @@ func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
 func TestDeleteRemovesNameAliasAndHandMadeLaunchers(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	writePlaybook(t, root, "mine", &manifest.Manifest{Alias: "minecmd"})
+	writePlaybook(t, root, "mine", &manifest.Manifest{Launcher: "minecmd"})
 	if _, err := launcher.Write(config.LauncherDir, "minecmd"); err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +858,7 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	writePlaybook(t, root, "old", &manifest.Manifest{Alias: "oa"})
+	writePlaybook(t, root, "old", &manifest.Manifest{Launcher: "oa"})
 	if _, err := launcher.Write(config.LauncherDir, "oa"); err != nil {
 		t.Fatal(err)
 	}
@@ -884,7 +884,7 @@ func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 func TestRenameAliasEqualToOldNameAndPrompt(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	writePlaybook(t, root, "old", &manifest.Manifest{Alias: "old"})
+	writePlaybook(t, root, "old", &manifest.Manifest{Launcher: "old"})
 	if _, err := launcher.Write(config.LauncherDir, "old"); err != nil {
 		t.Fatal(err)
 	}
@@ -914,8 +914,8 @@ func TestRenameAliasEqualToOldNameAndPrompt(t *testing.T) {
 func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	writePlaybook(t, root, "one", &manifest.Manifest{Alias: "Foo"})
-	writePlaybook(t, root, "two", &manifest.Manifest{Alias: "foo"})
+	writePlaybook(t, root, "one", &manifest.Manifest{Launcher: "Foo"})
+	writePlaybook(t, root, "two", &manifest.Manifest{Launcher: "foo"})
 	if _, err := launcher.Write(config.LauncherDir, "Foo"); err != nil {
 		t.Fatal(err)
 	}

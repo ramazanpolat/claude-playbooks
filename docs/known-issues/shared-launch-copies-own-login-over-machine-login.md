@@ -56,7 +56,7 @@ LOGIN` for v3.23.0.
     sync.
   - `.claude.json` is copied to `.claude.json.cpb-backup-<…>` before the same
     keys leave it.
-  - A directory with `isolate_auth = true` keeps both: its login is its own.
+  - A directory with `isolated_login = true` keeps both: its login is its own.
 - **Tests** (`cmd/install_login_test.go`): repro 1 through a directory and
   through `file://` git, a shipped link, and LINK (set aside) next to an
   isolated LINK (kept). Each asserts the machine store is byte-for-byte
@@ -119,7 +119,7 @@ ago.
 
 ## Also affected, by the same mechanism (not run)
 
-- **Removing `isolate_auth` by hand** from a playbook that holds its own
+- **Removing `isolated_login` by hand** from a playbook that holds its own
   login. `UNSET ISOLATED LOGIN` refuses exactly this in v3.23.0, but a hand
   edit bypasses the check: cpb enforces its rules when its own commands
   write, and does not guard state edited by hand.

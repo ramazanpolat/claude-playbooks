@@ -39,7 +39,7 @@ type dryState struct {
 	skillRecords map[string]map[string]*manifest.SkillRecord
 	skillKnown   map[string]map[string]bool
 
-	// isolated and sandboxed, per playbook: isolate_auth and [sandbox]
+	// isolated and sandboxed, per playbook: isolated_login and [sandbox]
 	// always as earlier statements would leave them.
 	isolated  map[string]bool
 	sandboxed map[string]bool
@@ -143,7 +143,7 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	if cfg != "" && !(isook && sbxok) {
 		if m, _ := manifest.Nearest(cfg); m != nil {
 			if !isook {
-				iso, isook = m.IsolateAuth, true
+				iso, isook = m.IsolatedLogin, true
 			}
 			if !sbxok {
 				sbx, sbxok = m.Sandbox != nil && m.Sandbox.Always, true
@@ -247,7 +247,7 @@ func (r *stmtRun) envUsers(playbooksDir string) (map[string][]string, error) {
 		if e == nil {
 			continue
 		}
-		for _, set := range e.Profiles {
+		for _, set := range e.Sets {
 			if !slices.Contains(users[set], pb) {
 				users[set] = append(users[set], pb)
 			}

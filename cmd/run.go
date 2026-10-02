@@ -36,6 +36,17 @@ func errConfigDirOverrideSandbox() error {
 		config.ConfigDirOverrideEnv, config.ConfigDirOverrideEnv)
 }
 
+// refuseUnreadableManifest refuses a launch of dir while a manifest that
+// would govern it, or one on the way up, cannot be read. It may ask for an
+// isolated login or a sandbox, and launching as if it said nothing would
+// hand over the shared login, or run on the host.
+func refuseUnreadableManifest(dir string) error {
+	if _, _, err := manifest.NearestPath(dir); err != nil {
+		return fmt.Errorf("%w. cpb does not launch over a manifest it cannot read: it may ask for an isolated login or a sandbox", err)
+	}
+	return nil
+}
+
 // onLaunch, when set, is told the session's process once it starts: cpb
 // play forwards a SIGTERM or SIGHUP aimed at cpb to it, and names it in its
 // sweep marker. Start then Wait is what Run does.
@@ -208,6 +219,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	configDir := pb.Path
 	if override {
 		configDir = overrideDir
+	}
+	if err := refuseUnreadableManifest(configDir); err != nil {
+		return err
 	}
 
 	// The sixth way to get the flags wrong: a profile that does not resolve.

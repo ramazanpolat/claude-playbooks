@@ -67,7 +67,7 @@ func TestNativeUpdateKeepsLocalEnvAndIgnoresSourceEnv(t *testing.T) {
 	if err := manifest.Write(installed, &manifest.Manifest{
 		Name:   "pb",
 		Source: &manifest.Source{Repository: source},
-		Env:    &manifest.Env{Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"}},
+		Env:    &manifest.Env{Block: []string{"CLAUDE_CODE_OAUTH_TOKEN"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestNativeUpdateKeepsLocalEnvAndIgnoresSourceEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := readEnv(t, installed)
-	if !e.Unsets("CLAUDE_CODE_OAUTH_TOKEN") {
+	if !e.Blocks("CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Fatalf("install-local env block lost on update: %#v", e)
 	}
 	if _, adopted := e.Set["ANTHROPIC_BASE_URL"]; adopted {
@@ -146,7 +146,7 @@ func TestLocalSourceIsNeverMutated(t *testing.T) {
 	if err := manifest.Write(installed, &manifest.Manifest{
 		Name:   "pb",
 		Source: &manifest.Source{Repository: source},
-		Env:    &manifest.Env{Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"}},
+		Env:    &manifest.Env{Block: []string{"CLAUDE_CODE_OAUTH_TOKEN"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestLocalSourceIsNeverMutated(t *testing.T) {
 		t.Fatalf("update did not take the source content: %q", got)
 	}
 	e := readEnv(t, installed)
-	if !e.Unsets("CLAUDE_CODE_OAUTH_TOKEN") || len(e.Set) != 0 {
+	if !e.Blocks("CLAUDE_CODE_OAUTH_TOKEN") || len(e.Set) != 0 {
 		t.Fatalf("install-local env after update: %#v", e)
 	}
 }
@@ -187,7 +187,7 @@ func TestNativeUpdateKeepsPrivateManifestPrivate(t *testing.T) {
 	if err := manifest.Write(installed, &manifest.Manifest{
 		Name:   "pb",
 		Source: &manifest.Source{Repository: source},
-		Env:    &manifest.Env{Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"}},
+		Env:    &manifest.Env{Block: []string{"CLAUDE_CODE_OAUTH_TOKEN"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestNativeUpdateKeepsPrivateManifestPrivate(t *testing.T) {
 	if info, _ := os.Stat(live); info.Mode().Perm() != 0o600 {
 		t.Fatalf("update loosened the manifest to %v", info.Mode().Perm())
 	}
-	if m, _ := manifest.Read(installed); m.Version != "2" || !m.Env.Unsets("CLAUDE_CODE_OAUTH_TOKEN") {
+	if m, _ := manifest.Read(installed); m.Version != "2" || !m.Env.Blocks("CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Fatalf("update result: %+v env=%+v", m, m.Env)
 	}
 }
