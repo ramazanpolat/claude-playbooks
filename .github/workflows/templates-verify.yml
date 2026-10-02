@@ -1,32 +1,31 @@
 name: Site templates
 
-# site/p/ holds the template recipes `cpb play <name>` resolves (at the release
-# tag of the cpb that runs it). Builds this commit's cpb and checks them with
-# it: `cpb play --check site/p`, then every file planned, applied to a new
-# playbook in a throwaway HOME and applied again (a no-op). Runs on changes to
-# the templates and to the play code. See site-tools/check-template-files.py.
+# site/p/ holds the template recipes `cpb play <name>` resolves, at the release
+# tag of the cpb that runs it, so they are checked with the cpb the site
+# documents: the ref site/cpb-ref pins (.github/scripts/site-tree.sh builds
+# it, with that ref's docs and examples and this checkout's site/ over them).
+# `cpb play --check site/p`, then every file planned, applied to a new
+# playbook in a throwaway HOME and applied again (a no-op); and every
+# template name the docs play must be one of them
+# (.github/scripts/play-templates.sh). See site-tools/check-template-files.py.
 
 on:
   push:
     branches: [main]
     paths:
       - "site/p/**"
-      - "site-tools/check-template-files.py"
-      - "site-tools/sitelib.py"
-      - "site-tools/stand-in-secret-helper"
-      - "examples/.ci/**"
-      - "cmd/play*.go"
-      - "internal/play/**"
+      - "site/cpb-ref"
+      - "site-tools/**"
+      - ".github/scripts/site-tree.sh"
+      - ".github/scripts/play-templates.sh"
       - ".github/workflows/templates-verify.yml"
   pull_request:
     paths:
       - "site/p/**"
-      - "site-tools/check-template-files.py"
-      - "site-tools/sitelib.py"
-      - "site-tools/stand-in-secret-helper"
-      - "examples/.ci/**"
-      - "cmd/play*.go"
-      - "internal/play/**"
+      - "site/cpb-ref"
+      - "site-tools/**"
+      - ".github/scripts/site-tree.sh"
+      - ".github/scripts/play-templates.sh"
       - ".github/workflows/templates-verify.yml"
 
 jobs:
@@ -34,12 +33,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the pinned ref and its tags
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
 
-      - name: Build
-        run: go build -o "$RUNNER_TEMP/cpb" .
+      - name: The cpb the site documents, and its tree
+        run: .github/scripts/site-tree.sh "$RUNNER_TEMP/site"
 
-      - name: Check the templates against this build
-        run: python3 site-tools/check-template-files.py --cpb "$RUNNER_TEMP/cpb"
+      - name: Check the templates against it
+        run: |
+          cd "$RUNNER_TEMP/site"
+          python3 site-tools/check-template-files.py --cpb "$RUNNER_TEMP/site/cpb"
+
+      - name: Every template the docs play is in site/p
+        run: |
+          cd "$RUNNER_TEMP/site"
+          sh "$GITHUB_WORKSPACE/.github/scripts/play-templates.sh" "$RUNNER_TEMP/site/cpb"

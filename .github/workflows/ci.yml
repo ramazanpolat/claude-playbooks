@@ -104,8 +104,6 @@ jobs:
         run: examples/check.sh "$RUNNER_TEMP/cpb"
       - name: Every clause has a reference entry and an example
         run: examples/coverage.sh
-      - name: Every template the docs play is in site/p
-        run: .github/scripts/play-templates.sh "$RUNNER_TEMP/cpb"
 
   # The upgrade from the previous release: that release's binary applies
   # its own examples, then this build takes over the same state and must

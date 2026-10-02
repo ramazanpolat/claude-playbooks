@@ -1,13 +1,16 @@
 name: Site snippets
 
-# Keeps the site (site/index.html, site/tour.html) from drifting from the
-# grammar: builds this commit's cpb, re-runs every command the tour shows and
-# applies the home page's showcase recipe in a throwaway HOME, checks each
-# card's claims against what cpb says, and diffs the `cpb tui` blocks against
-# the real test goldens. It also plans and applies a large set of the
-# customizer's option combinations with this build. See
+# Keeps the site (site/index.html, site/tour.html) true to the cpb it
+# documents: the ref site/cpb-ref pins, never the change under review.
+# .github/scripts/site-tree.sh builds that cpb with that ref's README, docs,
+# examples and goldens, and this checkout's site/ and site-tools/ over them;
+# then every command the tour shows is re-run and the home page's showcase
+# recipe applied in a throwaway HOME, each card's claims checked against what
+# cpb says, the `cpb tui` blocks diffed against the goldens, and a large set of
+# the customizer's option combinations planned and applied. See
 # site-tools/verify-snippets.sh. The template files in site/p/ are checked by
-# templates-verify.yml.
+# templates-verify.yml. Only the site's own paths trigger it: a change to cpb
+# reaches the site in a site pass, which moves the pin.
 
 on:
   push:
@@ -15,28 +18,22 @@ on:
     paths:
       - "site/**"
       - "site-tools/**"
-      - "README.md"
-      - "docs/**"
-      - "examples/**"
-      - "cmd/**"
-      - "internal/**"
-      - "go.mod"
+      - ".github/scripts/site-tree.sh"
+      - ".github/workflows/site-verify.yml"
   pull_request:
     paths:
       - "site/**"
       - "site-tools/**"
-      - "README.md"
-      - "docs/**"
-      - "examples/**"
-      - "cmd/**"
-      - "internal/**"
-      - "go.mod"
+      - ".github/scripts/site-tree.sh"
+      - ".github/workflows/site-verify.yml"
 
 jobs:
   verify-snippets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the pinned ref and its tags
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
@@ -45,15 +42,17 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Build
-        run: go build -o "$RUNNER_TEMP/cpb" .
+      - name: The cpb the site documents, and its tree
+        run: .github/scripts/site-tree.sh "$RUNNER_TEMP/site"
 
       - name: Install clickhouse-local
         run: |
           cd "$RUNNER_TEMP" && curl -fsSL https://clickhouse.com/ | sh
           "$RUNNER_TEMP/clickhouse" local --version
 
-      - name: Verify the site's snippets against this build
+      - name: Verify the site's snippets against it
         env:
           CPB_CLICKHOUSE: ${{ runner.temp }}/clickhouse
-        run: site-tools/verify-snippets.sh "$RUNNER_TEMP/cpb"
+        run: |
+          cd "$RUNNER_TEMP/site"
+          site-tools/verify-snippets.sh "$RUNNER_TEMP/site/cpb"
