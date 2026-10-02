@@ -725,7 +725,7 @@ created empty; `Launcher:` reads `(none)` without one.
 `source` is null for a playbook without one; `linked` is the target directory
 of a linked playbook, else null; `launcher` is null without one.
 
-**`play`** (v3.28.0) is the object's last field. It is the `[play]` record of a
+**`play`** (v4.0.0) is the object's last field. It is the `[play]` record of a
 playbook `cpb play --keep` built, and `null` for every other:
 `{"ref", "url", "sha256", "played"}`. `ref` is what `cpb play --update`
 fetches again (a template name, a URL, a `github:` ref, or a local file's
@@ -840,7 +840,7 @@ so `source.url` and `vars[1].key` work):
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play`, v3.28.0, is the last column) |
+| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play`, v4.0.0, is the last column) |
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
 | `SESSIONS` | live Claude Code session (v3.25.0) | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty` (`tty` v3.25.0) |
@@ -1688,7 +1688,7 @@ them: cpb tui`. Off a terminal, its output is exactly what it was.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
-## cpb play (v3.28.0)
+## cpb play (v4.0.0)
 
 `cpb play <ref>` tries someone else's playbook: it fetches a recipe once,
 checks it, shows exactly what it would do, asks, and runs it as a throwaway

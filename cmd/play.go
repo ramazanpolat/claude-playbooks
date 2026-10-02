@@ -20,7 +20,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
 )
 
-// cpb play <ref> (v3.28.0): try someone else's playbook. This slice fetches
+// cpb play <ref> (v4.0.0): try someone else's playbook. This slice fetches
 // and checks the recipe (--check) and plans it against a throwaway store
 // (--dry-run, --json); running it arrives with the next slice. Design:
 // task claude-playbooks-cli, design-cpb-play-2026-10-01-21_58.md.

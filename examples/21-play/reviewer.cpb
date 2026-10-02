@@ -1,6 +1,6 @@
 -- title: Code reviewer
 -- description: Reads code, never writes it.
--- min-cpb: 3.28.0
+-- min-cpb: 4.0.0
 
 ALTER PLAYBOOK
   SET MODEL 'claude-opus-5-5'

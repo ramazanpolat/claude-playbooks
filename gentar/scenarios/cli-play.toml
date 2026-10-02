@@ -1,4 +1,4 @@
-# claude-playbooks own-arena suite: cpb play (v3.28.0), slice 1. A played
+# claude-playbooks own-arena suite: cpb play (v4.0.0), slice 1. A played
 # recipe is fetched once, checked against what it may hold, and planned
 # against a throwaway store: --check, --dry-run --json, --sha256, and the
 # template-directory check the website's CI runs. Slice 2 runs it and

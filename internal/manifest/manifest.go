@@ -274,7 +274,7 @@ type Manifest struct {
 	Skills map[string]*SkillRecord `toml:"skills,omitempty"`
 
 	// Play records where a kept played recipe came from, so `cpb play
-	// --update` can fetch it again (v3.28.0; docs/guides/play.md).
+	// --update` can fetch it again (v4.0.0; docs/guides/play.md).
 	Play *Play `toml:"play,omitempty"`
 }
 

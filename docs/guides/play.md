@@ -41,7 +41,7 @@ The recipe below is [example 21](../../examples/21-play/)'s `reviewer.cpb`.
 $ cpb play --check ./reviewer.cpb
 Recipe:  ./reviewer.cpb
 From:    /home/you/claude-playbooks/examples/21-play/reviewer.cpb
-sha256:  31fc13e26557885b1a41e58d6f08c75d88a1e01956c0038e18069ab1be6c0ad7 (196 bytes)
+sha256:  c684ff05c8b3235559504c4a54ec0939a2706a5ccb0b0c6a83304fb7ba0bc81e (195 bytes)
 Title:   Code reviewer
 About:   Reads code, never writes it.
 
@@ -126,8 +126,8 @@ Without a terminal, `cpb play` never prompts:
 cpb play ./reviewer.cpb --dry-run --json          # the plan, as APPLY --dry-run --json, plus a "play" block
 cpb play ./reviewer.cpb --yes                     # the yes
 cpb play ./router.cpb --yes --trust-endpoint router.example.net --env routerkey
-cpb play ./tools.cpb --yes --trust-secret keychain:pilot/gh --no-sandbox
-cpb play https://example.com/x.cpb --sha256 31fc13e2…   # refuse any other bytes, before anything is shown
+cpb play ./tools.cpb --yes --trust-secret keychain:gh --no-sandbox
+cpb play https://example.com/x.cpb --sha256 c684ff05…   # refuse any other bytes, before anything is shown
 ```
 
 `--yes` answers the yes and never a typed confirmation: those need
@@ -163,14 +163,14 @@ Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with c
   playbook, and the preview names them. When the recipe moves the endpoint,
   their keys are blocked in it ("will NOT follow it to …") unless you attach
   a set with `--env`.
-- It never imports your pilot profile. A recipe that asks for a sandbox is
-  kept as a `SANDBOX` playbook (`--no-sandbox` overrides that).
+- A recipe that asks for a sandbox is kept as a `SANDBOX` playbook
+  (`--no-sandbox` overrides that).
 - The exact bytes are kept in the playbook (`.play/recipe.cpb`) and the
   manifest records where they came from. `cpb SHOW PLAYBOOK reviewer` shows
   it:
 
   ```
-  Played from:    /home/you/reviewer.cpb (sha256 31fc13e26557, 2026-10-02-02_26; cpb play --update reviewer)
+  Played from:    /home/you/reviewer.cpb (sha256 c684ff05c8b3, 2026-10-02-02_26; cpb play --update reviewer)
   ```
 
 ## Updating a kept one
@@ -184,7 +184,7 @@ ref again:
 ```
 $ cpb play --update reviewer
 ...
-Changes from sha256 31fc13e26557 to c2c7a33403df:
+Changes from sha256 c684ff05c8b3 to eeb1d16d98d7:
   -   ALLOW TOOL 'Read' 'Grep' 'Glob'
   +   ALLOW TOOL 'Read' 'Grep' 'Glob' 'LS'
 
@@ -213,7 +213,7 @@ A template starts with a header:
 -- description: Reads code, never writes it.
 -- needs: a secret helper for keychain:github-mcp
 -- create-with: SANDBOX
--- min-cpb: 3.28.0
+-- min-cpb: 4.0.0
 ```
 
 `title` and `description` are shown in the preview; `needs` says what you must

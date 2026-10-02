@@ -1,5 +1,5 @@
 // Package play fetches and checks a recipe someone else wrote, for
-// `cpb play <ref>` (v3.28.0): where the ref points, a bounded fetch, the
+// `cpb play <ref>` (v4.0.0): where the ref points, a bounded fetch, the
 // recipe's header, and which statements a played recipe may hold and which
 // of them are risks to show before anything runs. It plans and writes
 // nothing: the cmd package does that, with these results.

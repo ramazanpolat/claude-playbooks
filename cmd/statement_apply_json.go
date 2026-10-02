@@ -31,7 +31,7 @@ type applyReport struct {
 	Warnings   []applyWarning  `json:"warnings"`
 	Statements []applyStmtJSON `json:"statements"`
 	Summary    applySummary    `json:"summary"`
-	// Play: cpb play's block (v3.28.0), absent from APPLY's own report.
+	// Play: cpb play's block (v4.0.0), absent from APPLY's own report.
 	Play *playJSON `json:"play,omitempty"`
 }
 
