@@ -1,4 +1,4 @@
-# 21: try someone else's playbook
+# 20: try someone else's playbook
 
 ```
 cpb play --check ./reviewer.cpb                  # what it holds, and what to look at

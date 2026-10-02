@@ -107,6 +107,7 @@ No sandbox available here (sbx): this agent will run on your machine, as you.
 
 - `--no-sandbox` runs it on your machine on purpose, and the preview says
   that too.
+- `--sandbox=sbx` names the backend, and refuses where sbx is not installed.
 - A recipe whose header asks for a sandbox (`-- create-with: SANDBOX`) is
   refused where none is available, unless you pass `--no-sandbox`.
 - A recipe that reads a secret reference runs only on your machine for now:
