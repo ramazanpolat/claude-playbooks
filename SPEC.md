@@ -682,7 +682,7 @@ before it is published. `--sparse` is not supported. A git URL's
 `#<ref>` is compared as Claude Code records it, url and ref apart:
 applying the same `url#ref` again changes nothing, another ref or none is
 another source, and `SHOW CREATE` writes it back as `url#ref`. A `github:` source's ref works the same way: `#` and `@` spell one source,
-`SHOW CREATE` writes it back with `#`, and `github:<owner>/<repo>` without a ref records no `ref`. **A commit cannot be pinned:** Claude Code clones a
+`SHOW CREATE` writes it back with `#`, and writes a `github:<owner>/<repo>` without a ref back as it is. **A commit cannot be pinned:** Claude Code clones a
 marketplace by branch or tag only, so a `github:` ref of 7 to 40 hex
 characters is refused ("Claude Code clones marketplaces by branch or tag; a
 commit cannot be pinned"), rather than written and broken at session start.

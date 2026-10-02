@@ -38,7 +38,7 @@ inside the product. [SPEC.md](SPEC.md) describes v4 as it is.
   (#173). `update --all` and `update --check` are gone; `update <name>
   --dry-run` replaces the check.
 - **`RESUME`** (#175): resume with `cpb run <playbook> --resume <id>` or
-  `<launcher> --resume <id>`; `SHOW SESSIONS` prints the exact command. The
+  `<launcher> --resume <id>`; `SHOW SESSIONS` prints that command for each session, with a `cd` into its folder first. The
   TUI's recent-sessions view and its `R` key are gone with it.
 - **The `claude-playbook` executable name** (#178): there is one executable,
   `cpb`, and no `claude-playbook` link or reserved launcher name.
@@ -76,7 +76,7 @@ Environment variables (#178). The old names are not read.
 | `CLAUDE_PLAYBOOKS_ISOLATE_AUTH` | `CPB_ISOLATED_LOGIN` |
 | `CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE` | `CPB_OAUTH_TOKEN_FILE` |
 | `CLAUDE_CONFIG_DIR_OVERRIDE` | `CPB_CONFIG_DIR` |
-| `CLAUDE_PLAYBOOK_UPDATE_REPO`, `_API_BASE`, `_DOWNLOAD_BASE` | `CPB_UPDATE_REPO`, `CPB_UPDATE_API_BASE`, `CPB_UPDATE_DOWNLOAD_BASE` |
+| `CLAUDE_PLAYBOOK_UPDATE_REPO`, `CLAUDE_PLAYBOOK_UPDATE_API_BASE`, `CLAUDE_PLAYBOOK_UPDATE_DOWNLOAD_BASE` | `CPB_UPDATE_REPO`, `CPB_UPDATE_API_BASE`, `CPB_UPDATE_DOWNLOAD_BASE` |
 | `CLAUDE_PLAYBOOK_TARGET`, `CLAUDE_PLAYBOOK_PATH` (for a migration) | `CPB_PLAYBOOK_NAME`, `CPB_PLAYBOOK_DIR` |
 | `install.sh` `VERSION`, `INSTALL_DIR`, `DEFAULT_INSTALL_DIR`, `INSTALL_URL`, `REPO`, `ASSET_PREFIX`, `DOWNLOAD_BASE_URL` | `CPB_INSTALL_VERSION`, `CPB_INSTALL_DIR`, `CPB_INSTALL_DEFAULT_DIR`, `CPB_INSTALL_URL`, `CPB_INSTALL_REPO`, `CPB_INSTALL_ASSET_PREFIX`, `CPB_INSTALL_DOWNLOAD_BASE` |
 | npx shim `CPB_VERSION` | `CPB_NPX_VERSION` |
@@ -102,7 +102,7 @@ Grammar words and flags (#180):
 | v3 | v4 |
 |---|---|
 | `ALIAS <name>`, `NO ALIAS` | `LAUNCHER <name>`, `NO LAUNCHER` |
-| `CREATE` / `ALTER ENV … DESCRIBE '<text>'` | `DESCRIPTION '<text>'` (`DESCRIBE` stays the SELECT statement) |
+| `CREATE` / `ALTER ENV … DESCRIBE '<text>'` | `DESCRIPTION '<text>'` (`DESCRIBE` stays the statement that lists a SELECT table's columns) |
 | `ADD MCP SERVER … ENV K=V`, `ENV K FROM '<ref>'` | `VAR K=V`, `VAR K FROM '<ref>'` |
 | `--env-profile NAME` | `--env-set NAME` |
 | `--unset KEY` | `--block KEY` |
@@ -163,7 +163,7 @@ The APPLY JSON schema stays 1.
 - **Examples** 08 (an agent stacked from playbook files), 17 (`SET STATUSLINE
   … IF UNSET`), 20 (an `sbx` sandbox) and 21 (`cpb play`); 15 is rebuilt as a
   routed playbook with its own login (#169, #170, #171, #179).
-- **[SPEC.md](SPEC.md)**, one specification by statement (#185).
+- **[SPEC.md](SPEC.md)**, one specification by statement, replacing `SPEC-v4.md` and `docs/reference/cli-grammar.md` (#185).
 
 ### Not in this release
 
