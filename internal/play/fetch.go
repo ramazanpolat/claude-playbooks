@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -59,6 +61,9 @@ func NewClient() *http.Client {
 	}
 }
 
+// ErrNotFound is a 404: for a template name, the caller suggests others.
+var ErrNotFound = errors.New("not found")
+
 // Fetch reads the recipe at rawURL once, within the limits.
 func Fetch(ctx context.Context, client *http.Client, rawURL, userAgent string) (*Recipe, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -77,7 +82,7 @@ func Fetch(ctx context.Context, client *http.Client, rawURL, userAgent string) (
 	final := resp.Request.URL.String()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return nil, fmt.Errorf("not found: %s", final)
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, final)
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("%s: HTTP %d", final, resp.StatusCode)
 	}
@@ -125,4 +130,58 @@ func newRecipe(b []byte, url, path string) (*Recipe, error) {
 	}
 	sum := sha256.Sum256(b)
 	return &Recipe{Bytes: b, URL: url, Path: path, SHA256: hex.EncodeToString(sum[:])}, nil
+}
+
+// Suggest returns up to three names from a template index (one name per
+// line) close to name: a shared prefix or substring, or a small edit
+// distance; the closest first.
+func Suggest(index []byte, name string) []string {
+	type cand struct {
+		n string
+		d int
+	}
+	var cs []cand
+	for _, n := range strings.Fields(string(index)) {
+		if !templateName.MatchString(n) || n == name {
+			continue
+		}
+		d := editDistance(n, name)
+		if strings.Contains(n, name) || strings.Contains(name, n) {
+			d = 0
+		}
+		if d <= 3 {
+			cs = append(cs, cand{n, d})
+		}
+	}
+	sort.SliceStable(cs, func(i, j int) bool { return cs[i].d < cs[j].d })
+	var out []string
+	for i := 0; i < len(cs) && i < 3; i++ {
+		out = append(out, cs[i].n)
+	}
+	return out
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			c := 1
+			if a[i-1] == b[j-1] {
+				c = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+c)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
+
+// IndexURL is the template index next to a template's URL.
+func IndexURL(templateURL string) string {
+	return templateURL[:strings.LastIndex(templateURL, "/")+1] + "index.txt"
 }

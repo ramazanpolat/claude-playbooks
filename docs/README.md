@@ -23,6 +23,7 @@ Pages are grouped by what you came for:
 | [Authentication](guides/authentication.md) | shared logins, long-lived tokens, isolated accounts |
 | [Environment overrides](guides/environment.md) | per-playbook variables and shared env profiles |
 | [Sandboxed sessions](guides/sandbox.md) | running a playbook inside a Docker Sandbox microVM |
+| [Try someone else's playbook](guides/play.md) | `cpb play`: preview, confirm, run in a throwaway playbook, keep, update |
 | [Query with SQL](guides/query-with-sql.md) | `cpb SELECT …`, and `cpb SHOW … --json` piped into `ch local` |
 | [Configure an agent](guides/configure-an-agent.md) | MCP servers, tools, status line, model, skills; one recipe for many targets |
 | [The terminal UI](guides/tui.md) | `cpb tui`: browse playbooks, sessions and env sets; SHOW CREATE, copy, export, resume |

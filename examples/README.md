@@ -35,3 +35,4 @@ read it identically:
 | [18-sessions](18-sessions/) | live sessions, `RESUME`, and what cpb refuses to resume |
 | [19-tui](19-tui/) | what `cpb tui` shows, and the statements behind each screen |
 | [20-openshell-sandbox](20-openshell-sandbox/) | a playbook in an OpenShell sandbox (experimental, Linux) |
+| [21-play](21-play/) | `cpb play`: check, plan, run, keep and update someone else's recipe |

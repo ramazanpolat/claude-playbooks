@@ -1688,24 +1688,24 @@ them: cpb tui`. Off a terminal, its output is exactly what it was.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
-## cpb play (v3.28.0, in progress)
+## cpb play (v3.28.0)
 
 `cpb play <ref>` tries someone else's playbook: it fetches a recipe once,
 checks it, shows exactly what it would do, asks, and runs it as a throwaway
-playbook that is removed when the session ends. **Built so far:**
-- the fetch, the check and the plan: `--check`, `--dry-run`, `--json`,
-  `--sha256`;
-- running, with the typed confirmations, `--env` and clean-up on every way
-  out.
-
-The sandbox default and `--keep` arrive before v3.28.0 ships. The design (approved by
-root on 2026-10-01) is in the task's `design-cpb-play-2026-10-01-21_58.md`.
+playbook that is removed when the session ends; sandboxed where a sandbox is
+available. `--keep` keeps it as a playbook of your own instead. The guide is
+[Try someone else's playbook](../guides/play.md).
 
 ```
 cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env <set>]...
-               [--sha256 <hex>] [-- <claude arguments>]      preview, confirm, run, remove
+               [--sandbox[=sbx|openshell] | --no-sandbox] [--sha256 <hex>] [-- <claude arguments>]
+                                                       preview, confirm, run, remove
 cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals and risks
 cpb play <ref> --dry-run [--json] [--sha256 <hex>]    the plan against a throwaway playbook
+cpb play <ref> --keep [--as <name>] [--dry-run [--json]] [the run's confirmation flags]
+                                                       keep it as a playbook in your store; no session
+cpb play --update <name> [--dry-run [--json]] [--yes] [--trust-…] [--env <set>]...
+                                                       fetch a kept playbook's recipe again
 cpb play <dir> --check                                 a template directory, as the website's CI runs it
 ```
 
@@ -1716,7 +1716,10 @@ cpb play <dir> --check                                 a template directory, as 
 | a template name (`[a-z0-9][a-z0-9-]*`), e.g. `reviewer` | `https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/<this cpb's tag>/site/p/<name>.cpb`; a dev build reads `main`, and says so | by the release |
 | `https://…` | that URL | only by `--sha256` |
 | `github:<owner>/<repo>/<path>.cpb@<ref>` | `https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>.cpb`. The `@<ref>` is required. A branch is allowed and flagged ("not a release tag: this may change"); a tag or a commit is pinned. | a tag or commit |
-| `./x.cpb`, `/abs/x.cpb`, `~/x.cpb` | a local file, with every check | |
+| `./x.cpb`, `/abs/x.cpb`, `~/x.cpb`, and `x.cpb` or `dir/x.cpb` (a dot or a slash, no scheme) | a local file, with every check | |
+
+A template name that is not there fetches `index.txt` beside it, only then,
+and suggests close names.
 
 **The fetch:**
 - https only, and at most 3 redirects, each https.
@@ -1816,17 +1819,22 @@ block added. It is a new top-level field, absent from `APPLY`'s own report:
 "play": {"ref", "kind", "url", "path", "sha256", "bytes", "pinned", "note",
          "header": {"title", "description", "needs", "create_with", "min_cpb"},
          "playbook", "endpoint", "refused": [{"line", "what", "reason"}],
-         "risks": [{"code", "line", "clause", "detail", "confirm"}]}
+         "risks": [{"code", "line", "clause", "detail", "confirm"}],
+         "sandbox": {"backend", "note"},
+         "keep": true, "update": {"from_sha256", "unchanged", "tag_moved"}}
 ```
 
-`--check --json` is the same object with no statements.
+`--check --json` is the same object with no statements, and `sandbox`
+`null`. `sandbox.backend` is `""` when the play runs on this machine. `keep`
+and `update` are present only for `--keep` and `--update`.
 
 **The header.** A recipe may open with `-- key: value` lines, one per line,
 then a blank line. This is the template convention agreed with the website
 on 2026-10-01. The keys:
 - `title`, `description` and `needs`, shown in the preview;
-- `create-with`: advisory create-time flags. `SANDBOX` will make the play
-  sandboxed;
+- `create-with`: advisory create-time flags. `SANDBOX` makes the play
+  sandboxed: refused where no backend is available, unless `--no-sandbox`;
+  a kept playbook is created `SANDBOX`;
 - `min-cpb`, as `X.Y.Z`: an older cpb refuses ("this recipe needs cpb X.Y.Z
   or later").
 
@@ -1843,14 +1851,33 @@ those names, sorted, one per line.
 3. It asks for each typed confirmation in turn:
    - `Type the host this playbook will send your requests to (<host>):`;
    - `Type the proxy …`, or `Type TLS …`;
-   - `Type the secret this playbook may read (<ref>):`.
+   - `Type the secret this playbook may read, on this machine, as you (<ref>):`.
 
    An exact match goes on; anything else stops with nothing written.
-4. It applies the same bytes to the throwaway playbook, runs the session
-   (arguments after `--` go to `claude`), and removes everything afterwards.
+4. It applies the same bytes to the throwaway playbook (its report is shown
+   only if it fails), runs the session (arguments after `--` go to
+   `claude`), and removes everything afterwards.
 
-Until the sandbox default lands, the preview says "No sandbox yet: this
-agent runs on your machine, as you".
+**The sandbox.** A play runs sandboxed by default:
+- **the backend:** `sbx` where it is installed, otherwise OpenShell where its
+  preflight passes (Linux). `--sandbox=<backend>` picks one, and refuses if
+  it is not available;
+- **`--no-sandbox`** runs it on this machine. The preview says "Sandbox off
+  (--no-sandbox): this agent runs on your machine, as you.", and the plan
+  carries the `no_sandbox` risk;
+- **no backend here:** the preview says "No sandbox available here (sbx, or
+  OpenShell on Linux): this agent will run on your machine, as you.", with
+  the same risk;
+- **`create-with: SANDBOX`** is refused where no backend is available,
+  unless `--no-sandbox` (and then the preview names the override);
+- **a secret reference** cannot be resolved by a sandboxed launch yet, so a
+  recipe with one is refused where a sandbox is available, unless
+  `--no-sandbox`. With no backend at all it runs on this machine like any
+  recipe.
+
+The sandbox is created only after every confirmation, so a moved endpoint
+that is not confirmed never reaches a sandbox (whose proxy would inject a
+key for that host), and it is removed with the throwaway playbook.
 
 **Without a terminal**, `--yes` answers the yes. It **never** confirms what
 must be typed: each model-endpoint or proxy host needs `--trust-endpoint
@@ -1880,9 +1907,49 @@ nothing else of yours follows.
 The resume line a session usually ends with is not printed, because its
 playbook is gone.
 
-**Exit codes:** 0 when checked or planned; 1 when refused (a check, the
-header, `--sha256`, or a confirmation); 2 on a usage error. A session's
-own exit code passes through.
+**`--keep [--as <name>]`** shows the same preview and asks the same
+confirmations, then builds the recipe as a playbook in **your** store, and
+runs no session:
+- `CREATE PLAYBOOK <name> NO PILOT PROFILE`, with a launcher; `ISOLATED
+  LOGIN` when the endpoint moves; `SANDBOX` when the header asks for it or
+  `--sandbox` is given (`--no-sandbox` overrides the header). A recipe with a
+  secret reference cannot be kept sandboxed;
+- `<name>` is `--as`, or the template's or file's name. A name that exists
+  is refused;
+- your `DEFAULTS` apply to it like to any playbook, and the preview names
+  them. When the endpoint moves, every key they carry is blocked in it ("will
+  NOT follow it to <host>"), except those of an `--env` set (attached with
+  `USE ENV`) and those the recipe sets itself;
+- the exact bytes are kept as `<playbook>/.play/recipe.cpb`, and the
+  manifest gains:
+
+  ```toml
+  [play]
+  ref = "github:acme/agents/reviewer.cpb@v1.2.0"   # what --update resolves again; a local file's absolute path
+  url = "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb"   # absent for a local file
+  sha256 = "3f1a…c9"
+  played = "2026-10-01-21_58"
+  ```
+
+  `SHOW PLAYBOOK --json` shows it as `play` (see Output);
+- if applying fails part-way, the playbook it created is dropped.
+
+**`--update <name>`** fetches the recorded ref again:
+- the same sha256: "`<name>` is unchanged", and nothing runs;
+- new bytes: the line diff from the kept bytes, a note when a pinned ref now
+  serves other bytes ("the tag moved"), the plan, and every confirmation
+  again. Then one `ALTER PLAYBOOK` undoes what the old recipe set and the new
+  one no longer sets the same way (`UNSET VAR`, `UNSET TOOL`, `DROP PLUGIN`,
+  `DROP MCP SERVER`, `DROP SKILL`, `DROP PANEL`, `DROP MODEL`, the `UNSET`s of
+  the agent, model, picker and status line; plugins before their
+  marketplace; a login is never unset), the new bytes are applied, and the
+  record is updated;
+- a playbook without a `[play]` record has nothing to update. `cpb update`
+  never touches a played playbook's recipe.
+
+**Exit codes:** 0 when checked, planned, kept, updated or unchanged; 1 when
+refused (a check, the header, `--sha256`, or a confirmation); 2 on a usage
+error. A session's own exit code passes through.
 
 ## Completion
 

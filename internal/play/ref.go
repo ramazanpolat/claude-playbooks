@@ -61,7 +61,10 @@ func Resolve(ref, version string) (*Source, error) {
 	switch {
 	case ref == "":
 		return nil, errors.New("play what? a template name, an https URL, github:<owner>/<repo>/<path>.cpb@<ref>, or a local file")
-	case strings.HasPrefix(ref, "./"), strings.HasPrefix(ref, "../"), strings.HasPrefix(ref, "/"), strings.HasPrefix(ref, "~/"):
+	case strings.HasPrefix(ref, "./"), strings.HasPrefix(ref, "../"), strings.HasPrefix(ref, "/"), strings.HasPrefix(ref, "~/"),
+		// x.cpb or dir/x.cpb: a template name has no dot or slash, and
+		// every other form a scheme, so this can only be a path.
+		!strings.Contains(ref, ":") && (strings.HasSuffix(ref, ".cpb") || strings.Contains(ref, "/")):
 		path := ref
 		if strings.HasPrefix(path, "~/") {
 			home, err := os.UserHomeDir()

@@ -278,7 +278,7 @@ func TestUndoFor(t *testing.T) {
 
 func TestLineDiff(t *testing.T) {
 	got := strings.Join(lineDiff([]string{"a", "b", "c"}, []string{"a", "x", "c", "d"}), "|")
-	if got != "- b|+ x|+ d" && got != "+ x|- b|+ d" {
+	if got != "- b|+ x|+ d" { // what went, then what came
 		t.Fatalf("%q", got)
 	}
 }
