@@ -348,7 +348,7 @@ section > p.section-lede {
   white-space: pre;
 }
 
-/* ---------- built-to-be-relied-on ---------- */
+/* ---------- how it is tested ---------- */
 
 .reliability-grid {
   display: grid;
