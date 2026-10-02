@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
@@ -111,38 +110,6 @@ func TestProgramQuits(t *testing.T) {
 	}
 	if !strings.Contains(out, "router") {
 		t.Fatalf("never drew the playbooks:\n%q", out)
-	}
-}
-
-// RESUME goes through tea.ExecProcess, then the TUI is back and running.
-func TestProgramResume(t *testing.T) {
-	var mu sync.Mutex
-	var resumed [][]string
-	o := fixtureOptions()
-	o.Resume = func(args ...string) *exec.Cmd {
-		mu.Lock()
-		resumed = append(resumed, args)
-		mu.Unlock()
-		return exec.Command("true")
-	}
-	err, out := runWith(t, New(o), func(w io.Writer) {
-		for _, k := range []string{"2", "R", "\x1b[B", "\r"} {
-			time.Sleep(200 * time.Millisecond)
-			w.Write([]byte(k))
-		}
-		time.Sleep(500 * time.Millisecond)
-		w.Write([]byte("q"))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(resumed) != 1 || resumed[0][2] != "d0a04774-d6ed-49f7-bb32-3c57962348fa" {
-		t.Fatalf("resumed %v", resumed)
-	}
-	if !strings.Contains(out, "done") {
-		t.Fatal("the TUI did not report the resume")
 	}
 }
 

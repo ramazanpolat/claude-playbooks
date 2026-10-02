@@ -11,7 +11,7 @@ cpb tui
 |---|---|---|
 | `1` | Playbooks | `cpb SHOW PLAYBOOKS --json` (and `SHOW SESSIONS` for the session counts) |
 | `enter` | a playbook's tabs | `cpb SHOW PLAYBOOK browsed --json`; the Vars tab: `cpb EXPLAIN PLAYBOOK browsed --json` |
-| `2` | Sessions | `cpb SHOW SESSIONS --json`; `R`: `cpb RESUME --list --json` |
+| `2` | Sessions | `cpb SHOW SESSIONS --json` |
 | `3` | Env sets | `cpb SHOW ENVS --json` |
 | `4` | Defaults | `cpb SHOW DEFAULTS --json` |
 | `c` | the selection's text | `cpb SHOW CREATE PLAYBOOK browsed --skip-secrets` |
@@ -19,11 +19,12 @@ cpb tui
 - **Nothing new.** The TUI adds nothing the statements do not print. Each
   screen names its statement on its last line.
 - **Take what you see with you.**
-  - `y` copies the statement.
+  - `y` copies the statement, or on Sessions the command that resumes the
+    session once it ends.
   - `e` writes the SHOW CREATE text as `browsed.cpb` in this folder. It
     asks before replacing a file.
-- **Resume.** `enter` on a recent session (`R`) resumes it through its
-  playbook, exactly as `cpb RESUME` does.
+- **Past sessions** are in Claude Code's own picker, `<launcher> --resume`,
+  as the Sessions footer says.
 
 **v1 only reads.** Changing a playbook is still a statement, for example:
 

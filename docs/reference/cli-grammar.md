@@ -132,9 +132,6 @@ read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> 
             | SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
             | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name> [--json]
-
-session    := RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>]     the command line only
-            | RESUME --list [FOR PLAYBOOK <name>] [--json]
 ```
 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
@@ -1422,14 +1419,14 @@ plugin stays the plugin's: `ADD PLUGIN` brings it.
 
 ## Sessions (v3.25.0)
 
-cpb lists the live Claude Code sessions of its playbooks and resumes a
-session through the playbook it belongs to.
+cpb lists the live Claude Code sessions of its playbooks. A session is
+resumed through its playbook, with Claude Code's own `--resume` or
+`--continue` on the launcher or `cpb run <name>`, and cpb guards that
+launch.
 
 ```
 SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
 SELECT … FROM SESSIONS
-RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>]
-RESUME --list [FOR PLAYBOOK <name>] [--json]
 ```
 
 **Where it comes from.** Claude Code keeps a file for each of its live
@@ -1442,7 +1439,7 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
   started when the file says. On Linux that is `/proc/<pid>/stat`'s
   starttime; elsewhere, `ps`'s lstart read in UTC. So a pid that was reused
   since does not count. A live pid whose file records no start time cannot
-  be confirmed: it is listed, and `RESUME` refuses it.
+  be confirmed: it is listed, and a `--resume` of it is refused.
 - **Kinds.** Kinds other than `interactive` and `bg` are not listed; a
   daemon's spare workers write no file.
 - **Nothing else is read.** cpb reads no process's environment, runs no
@@ -1471,7 +1468,7 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 | `last_active` | RFC 3339, UTC, or null | the transcript's modification time; null before the first message |
 | `model` | string or null | the transcript's last assistant message, read from its last 256 KiB |
 | `launcher` | string or null | the playbook's launcher |
-| `resume` | string | the command that resumes this session (see below) |
+| `resume` | string | `cd '<cwd>' && <launcher> --resume <id>`: the command that resumes this session from any folder once it ends (see below) |
 | `tty` | string or null | v3.25.0: the process's controlling terminal (`pts/3`, `ttys012`), null for none (a `bg` session). It is read in the same pass as the start time: `/proc/<pid>/stat`'s tty_nr on Linux, `ps`'s tty elsewhere |
 
 A session's transcript is
@@ -1481,39 +1478,36 @@ If that path is missing, cpb looks under every project directory.
 **`SELECT … FROM SESSIONS`** has the same rows. ClickHouse reads
 `started_at` and `last_active` as `DateTime64(3, 'UTC')`.
 
-**`RESUME`** starts `claude --resume <id>` through the playbook's own launch
-path, as `cpb run <name>` and its launcher do. That covers env sets,
-variables, secret references, the login and the exit line.
-- **The working directory** becomes the one the session ran in, since that
-  is where Claude Code looks it up. cpb says so when that differs from the
-  current directory. That folder is read from the transcript's last `cwd`,
-  or its first when the tail holds none. A transcript that records no `cwd`
-  resumes only from its own project's folder.
-- **A plain directory's session** runs `claude --resume <id>` with
-  `CLAUDE_CONFIG_DIR` set to that directory, and nothing else added.
-- **No id.** A bare `RESUME` takes the sessions of the current folder,
-  across all playbooks (or the one `FOR PLAYBOOK` names). It resumes the
-  newest that is **not** live, and says first what it picked:
-  ```
-  2 newer sessions are live (pids 7339, 47904); resuming 8ba14a71-… of work (last active 2 hours ago)
-  ```
-- **`SESSION '<id>'`** finds the id in any playbook. An id found in more
-  than one config dir is refused until `FOR PLAYBOOK` names one.
-- **A live session is refused,** naming the playbook and the pid, and
-  nothing is launched. Two processes on one session id corrupt it, which
-  is the `claude --continue` hazard. A session cpb cannot confirm is
-  refused too: one recorded in another pid domain (a sandbox, another
-  host), or a live pid with no recorded start time.
-  There is no `--force`.
-- **`RESUME --list`** lists the 10 newest sessions of the current folder,
-  live ones marked with their pid (`SESSION PLAYBOOK ACTIVE MODEL LIVE
-  TITLE`). With `--json`, each row has `playbook config_dir session_id cwd
-  last_active model title launcher live pid resume`.
-- **The command line only.** `RESUME` launches a session, so it has no
-  place in a playbook file.
-- **Not yet: sandboxed playbooks.** Their sessions live inside the sandbox;
-  `RESUME` refuses a playbook that runs in one, and `SHOW SESSIONS` lists
-  only what the host's config dirs hold.
+**Resuming.** There is no resume statement. `<launcher> --resume <id>`,
+`--continue`, or `cpb run <name> --resume …` hand Claude Code's own flags to
+claude under the playbook's config dir, with everything a launch has: env
+sets, variables, secret references, the login and the exit line. Before
+claude starts, cpb checks:
+- **`--resume <id>`** (`-r <id>`, `--resume=<id>`) is refused when `<id>`
+  is live in any config dir cpb knows, naming the playbook and the pid, and
+  nothing is launched. Two processes on one session id corrupt it, which is
+  the `claude --continue` hazard. A session cpb cannot confirm is refused
+  too: one recorded in another pid domain (a sandbox, another host), or a
+  live pid with no recorded start time. There is no `--force`.
+- **The folder.** Claude Code looks a session up by the folder it ran in.
+  When `<id>`'s transcript sits under another folder's project directory,
+  the launch is refused with the command that resumes it, `cd '<folder>' &&
+  <launcher> --resume <id>`. The folder is the transcript's last `cwd`, or
+  its first when the tail holds none. A transcript that records neither is
+  left to claude.
+- **`--continue`** (`-c`) is refused when the newest transcript of this
+  folder, in this playbook, belongs to a live session.
+- **Not checked.** `--fork-session` beside either flag starts a new id.
+  `--resume` with no id, or with a search term (a value that is not a
+  UUID), opens Claude Code's picker; of several `--resume`, the last counts.
+  An id cpb finds no transcript of is left to claude, which says so.
+- **Sandboxed launches** hand the flags to the claude inside the sandbox.
+  Its sessions live there, out of cpb's sight, so the launch prints a note
+  instead of checking, and `SHOW SESSIONS` lists only what the host's
+  config dirs hold.
+- **A plain directory's session** resumes with `CLAUDE_CONFIG_DIR='<dir>'
+  claude --resume <id>` from its folder. `SHOW SESSIONS` prints it with the
+  `cd` in front, as for a playbook.
 
 **The exit line.** After `claude` exits under `cpb run` or a launcher, cpb
 prints one line on stderr:
@@ -1529,14 +1523,13 @@ Resume this playbook's session with: kd --resume 08c4811b-3867-4f18-b08f-de6d1e0
   is why this line exists.
 - The exit code is claude's.
 
-No word is reserved: `SESSIONS`, `SESSION`, `RESUME` and `FOR` still name
-playbooks and env sets.
+No word is reserved: `SESSIONS` and `FOR` still name playbooks and env
+sets.
 
 ## cpb tui (v3.25.0)
 
 `cpb tui` is a terminal UI over this grammar. v1 only reads: it browses,
-shows `SHOW CREATE`, copies statements, exports a `.cpb`, and resumes a
-session.
+shows `SHOW CREATE`, copies statements and commands, and exports a `.cpb`.
 
 **A front-end, not a second engine.**
 - **Reads.** Everything on screen is a statement's `--json` output. cpb
@@ -1546,8 +1539,7 @@ session.
   example `reads: cpb SHOW SESSIONS --json`, so anything seen can be
   scripted.
 - **What it can do.** Only what the grammar can. v1 changes no state. Its
-  only writes are the `.cpb` file `e` exports and the resumed session
-  itself.
+  only write is the `.cpb` file `e` exports.
 
 **Views** (`1`–`5`):
 
@@ -1555,17 +1547,18 @@ session.
 |---|---|---|
 | Playbooks | `SHOW PLAYBOOKS --json`, `SHOW SESSIONS --json` | name, launcher, version, env sets, login kind (`shared`, `isolated`, `sandbox`), live-session count, model |
 | a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview, Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line (history), Model (the picker), Sessions |
-| Sessions | `SHOW SESSIONS --json`; `R`: `RESUME --list --json` | pid, tty, kind, status, age, last active, model, folder; `R` switches to this folder's recent sessions, which `enter` resumes |
+| Sessions | `SHOW SESSIONS --json` | pid, tty, kind, status, age, last active, model, folder; the footer says where past sessions are, `past sessions: <launcher> --resume` |
 | Env sets | `SHOW ENVS --json` | the env sets (env profiles): variables, `used_by`, default |
 | Defaults | `SHOW DEFAULTS --json` | the env sets under every playbook, the secret helper |
-| Log | none | what this session copied, exported and resumed |
+| Log | none | what this session copied and exported |
 
 **Keys:** `↑↓`/`jk` move, `enter` opens, `esc` goes back, `/` filters,
 `r` re-reads, and `?` is help.
 - `c` shows `SHOW CREATE … --skip-secrets` of the selection.
 - `y` copies the statement behind the selection, with OSC 52, the
-  terminal's own clipboard (`tea.SetClipboard`): `SHOW PLAYBOOK <n>`, or `RESUME SESSION '<id>'
-  FOR PLAYBOOK <n>`, or the whole SHOW CREATE text.
+  terminal's own clipboard (`tea.SetClipboard`): `SHOW PLAYBOOK <n>`, a
+  session's `resume` command (`cd '<cwd>' && <launcher> --resume <id>`), or
+  the whole SHOW CREATE text.
 - `e` writes `<name>.cpb` in the current folder: the same SHOW CREATE text.
   - If the file exists, the TUI asks first: `Replace <name>.cpb? Type y to
     replace; any other key keeps it.` The question comes before the folder,
@@ -1582,13 +1575,9 @@ withheld it: a reference shows as `FROM '<ref>'`, a plaintext credential
 as `(redacted, plaintext)`. The TUI has no reveal key, and `SHOW CREATE`
 always runs with `--skip-secrets`.
 
-**Resume.** `enter` on a recent session that is not live runs `cpb RESUME
-SESSION '<id>' FOR PLAYBOOK <name>` in the foreground.
-- **The terminal is handed over.** The TUI gives the terminal to it and
-  takes no keys meanwhile. It comes back when the session ends, and cpb's
-  exit line prints in between.
-- **A live session** is not resumed. The TUI says which pid (and tty)
-  holds it. cpb would refuse it too.
+**No resume in the TUI.** Sessions shows the live ones, and a live
+session is not resumed. `y` copies the command that resumes one once it
+ends. Past sessions open in Claude Code's picker: `<launcher> --resume`.
 
 **Sessions refresh.** `SHOW SESSIONS` is re-read every 5 s, and only while
 a screen that shows sessions is up. Everything else is re-read on `r`.

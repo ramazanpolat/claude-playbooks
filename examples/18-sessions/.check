@@ -30,14 +30,23 @@ cpb SHOW SESSIONS --json | python3 -c 'import json,sys; r=json.load(sys.stdin); 
 cpb "SELECT session_id FROM SESSIONS" | grep -q "$live"
 
 cd "$work"
-# The live one is refused, and nothing is launched.
-if cpb RESUME SESSION "$live" 2> "$HOME/live.err"; then echo "resumed a live session"; exit 1; fi
+# A --resume of the live one is refused, and so is a --continue, whose
+# newest session here is the live one: nothing is launched.
+if cpb run worker --resume "$live" 2> "$HOME/live.err"; then echo "resumed a live session"; exit 1; fi
 grep -q "still running (playbook worker, pid $pid" "$HOME/live.err"
+if cpb run worker --continue 2> "$HOME/cont.err"; then echo "continued a live session"; exit 1; fi
+grep -q "newest session in this folder" "$HOME/cont.err"
 test ! -e "$p/.fake-claude/launch-env"
-# RESUME --list shows both; a bare RESUME takes the newest one not live.
-cpb RESUME --list | grep -q "pid $pid"
-cpb RESUME 2> "$HOME/pick.err"
-grep -q "1 newer session is live (pid $pid); resuming $old of worker" "$HOME/pick.err"
+# SHOW SESSIONS' resume field is the whole command, from any folder.
+want="cd '$work' && cpb run worker --resume $live"
+cpb SHOW SESSIONS --json | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r[0]["resume"] == sys.argv[1], r' "$want"
+# The old one, from another folder, is refused with the cd that resumes it;
+# in its own folder it launches.
+cd "$HOME"
+if cpb run worker --resume "$old" 2> "$HOME/away.err"; then echo "resumed from the wrong folder"; exit 1; fi
+grep -qF "cd '$work' && cpb run worker --resume $old" "$HOME/away.err"
+cd "$work"
+cpb run worker --resume "$old"
 test -e "$p/.fake-claude/launch-env"
 # cpb never touches Claude Code's session files.
 cmp -s "$p/sessions/$pid.json" "$HOME/session.before"

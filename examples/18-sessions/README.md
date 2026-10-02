@@ -4,9 +4,8 @@
 cpb SHOW SESSIONS                   # the live sessions of every playbook
 cpb SHOW SESSIONS FOR PLAYBOOK worker --json
 cpb "SELECT playbook, pid, model FROM SESSIONS"
-cpb RESUME --list                   # this folder's recent sessions, live ones marked
-cpb RESUME                          # the newest one here that is not live, through its playbook
-cpb RESUME SESSION '<id>'
+cpb run worker --continue           # the newest session here, through its playbook
+cpb run worker --resume '<id>'      # one session; a launcher takes the same flags
 ```
 
 Claude Code keeps a small file for each live session in the config dir it
@@ -18,13 +17,16 @@ It reads no process's environment, and never changes the files.
   - its age and when it was last active (its transcript's time);
   - the model it last answered with;
   - the command that resumes it.
-- **`RESUME`** starts `claude --resume <id>` the way the playbook's
-  launcher does: its env sets, variables, secret references and login. It
-  runs in the directory the session ran in.
-  - With no id, it takes the newest session in this folder that is not
-    live, and says so. A newer live session is named, not taken.
+- **Resuming** is Claude Code's own `--resume` and `--continue`, on the
+  launcher or `cpb run`, so the launch is the playbook's: its env sets,
+  variables, secret references and login.
   - **A live session is never resumed.** Two processes on one session id
-    corrupt it. RESUME names the pid, so you can close that one first.
+    corrupt it. cpb names the pid, so you can close that one first. For
+    `--continue`, that is the newest session in this folder.
+  - **The folder.** Claude Code finds a session by the folder it ran in.
+    From elsewhere, cpb refuses with the command that resumes it, which is
+    also the `resume` field of `SHOW SESSIONS --json`:
+    `cd '<folder>' && cpb run worker --resume <id>`.
 - **The exit line.** When `claude` exits under `cpb run` or a launcher, on a
   terminal, cpb prints `Resume this playbook's session with: <launcher>
   --resume <id>`. Claude Code's own `claude --resume` line would look under

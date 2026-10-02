@@ -56,7 +56,7 @@ func IsStatement(args []string) bool {
 		return true
 	}
 	switch strings.ToUpper(args[0]) {
-	case "CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT", "DESCRIBE", "DESC", "RESUME": // INCLUDE and USE, to be refused with their reason
+	case "CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT", "DESCRIBE", "DESC": // INCLUDE and USE, to be refused with their reason
 		return true
 	}
 	return false
@@ -406,13 +406,7 @@ func (p *parser) statement() (*Stmt, *Error) {
 	s := &Stmt{Pos: p.pos()}
 	var err *Error
 	verbs := []string{"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY"}
-	if !p.file {
-		verbs = append(verbs, "RESUME")
-	}
 	if p.file {
-		if p.at("RESUME") {
-			return nil, errAt(s.Pos, "RESUME appears only on the command line: it launches a session")
-		}
 		verbs = append(verbs, "INCLUDE", "USE")
 	} else if p.at("INCLUDE") {
 		return nil, errAt(s.Pos, "INCLUDE appears only in a playbook file; on the command line, APPLY <file> [<file> ...] runs several")
@@ -440,9 +434,6 @@ func (p *parser) statement() (*Stmt, *Error) {
 	case "APPLY":
 		s.Verb = Apply
 		err = p.apply(s)
-	case "RESUME":
-		s.Verb = Resume
-		err = p.resume(s)
 	case "INCLUDE":
 		s.Verb = Include
 		err = p.include(s)
@@ -638,7 +629,7 @@ func (p *parser) show(s *Stmt) *Error {
 	return nil
 }
 
-// forPlaybook reads an optional FOR PLAYBOOK <name> (SHOW SESSIONS, RESUME).
+// forPlaybook reads an optional FOR PLAYBOOK <name> (SHOW SESSIONS).
 func (p *parser) forPlaybook(s *Stmt) *Error {
 	if p.kw("FOR") == "" {
 		return nil
@@ -657,53 +648,13 @@ func (p *parser) forPlaybook(s *Stmt) *Error {
 	return nil
 }
 
-// sessionID is a Claude Code session id as RESUME SESSION takes it: one
-// safe word (a UUID, in practice), since it names a file under projects/.
+// sessionID is a Claude Code session id as cpb uses one: one safe word (a
+// UUID, in practice), since it names a file under projects/.
 var sessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 // ValidSessionID reports whether id is a session id cpb uses in a path or a
 // printed command; one read from Claude Code's files that is not is ignored.
 func ValidSessionID(id string) bool { return sessionID.MatchString(id) }
-
-// resume reads RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>] and
-// RESUME --list [FOR PLAYBOOK <name>] [--json], in any order.
-func (p *parser) resume(s *Stmt) *Error {
-	for !p.atEnd() {
-		switch p.kw("SESSION", "FOR", "--list", "--json") {
-		case "SESSION":
-			if s.Session != "" {
-				return errAt(p.toks[p.i-1].Pos, "SESSION appears twice")
-			}
-			t, err := p.take("SESSION", "'<id>'")
-			if err != nil {
-				return err
-			}
-			if !sessionID.MatchString(t.Text) {
-				return errAt(t.Pos, "SESSION takes a Claude Code session id (letters, digits, dashes)")
-			}
-			s.Session = t.Text
-		case "FOR":
-			p.i--
-			if err := p.forPlaybook(s); err != nil {
-				return err
-			}
-		case "--list":
-			s.List = true
-		case "--json":
-			s.JSON = true
-		default:
-			return p.unexpected()
-		}
-	}
-	p.kw("SESSION", "FOR", "--list", "--json")
-	switch {
-	case s.List && s.Session != "":
-		return errAt(s.Pos, "RESUME --list lists sessions; RESUME SESSION '<id>' resumes one: use one of them")
-	case s.JSON && !s.List:
-		return errAt(s.Pos, "RESUME has --json only with --list")
-	}
-	return nil
-}
 
 // jsonFlag reads the optional --json of SHOW and EXPLAIN: the stable,
 // scriptable form of their output.

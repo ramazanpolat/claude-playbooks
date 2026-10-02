@@ -348,13 +348,14 @@ contains = "statusline-history-ok"
 # Code-shaped session file is written (procStart = /proc/<pid>/stat's
 # starttime, as Claude Code writes it on Linux). SHOW SESSIONS lists it and
 # only it (not a dead pid, a reused pid or a spare), with its transcript's
-# model; FOR PLAYBOOK filters; SELECT
-# reads it; RESUME refuses the live one without launching; bare RESUME
-# resumes the newest session that is not live, in its folder, under its
-# playbook's config dir, and names the live one it skipped; RESUME --list
-# spans two playbooks; the exit line appears on a terminal only; the
-# canary is in no output; the session files are byte-identical and the
-# dead pid's file is still there.
+# model and its resume command (a cd into its folder first); FOR PLAYBOOK
+# filters; SELECT reads it; run --resume refuses the live one without
+# launching, and so does run --continue, whose newest session there is the
+# live one; run --resume of a dead one launches claude --resume <id> under
+# the playbook's config dir; from another folder it is refused with the cd
+# that resumes it; the exit line appears on a terminal only; the canary is
+# in no output; the session files are byte-identical and the dead pid's
+# file is still there.
 command = '''
 P="$HOME/.claude-playbooks"; W="$HOME/sesw"; O="$HOME/ses.out"; mkdir -p "$W" "$HOME/sesfk" && W="$(cd "$W" && pwd -P)" && E="$(printf %s "$W" | sed 's/[^A-Za-z0-9]/-/g')"
 L1=11111111-aaaa-4aaa-8aaa-111111111111; D1=22222222-aaaa-4aaa-8aaa-222222222222; D2=33333333-aaaa-4aaa-8aaa-333333333333; RU=44444444-aaaa-4aaa-8aaa-444444444444; SP=55555555-aaaa-4aaa-8aaa-555555555555; X1=66666666-aaaa-4aaa-8aaa-666666666666
@@ -371,13 +372,14 @@ sf "$P/sesa" "$LP" "$L1" "$ST" interactive; sf "$P/sesa" "$DP" "$D1" 1 interacti
 tr_ "$P/sesa" "$L1" arena-model-1 ""; tr_ "$P/sesa" "$D1" arena-model-2 202601010000; tr_ "$P/sesb" "$D2" arena-model-3 202501010000
 sha() { find "$P/sesa/sessions" "$P/sesb/sessions" -type f | sort | xargs cat | cksum; }; B="$(sha)"
 S="$(claude-playbook SHOW SESSIONS --json 2>>"$O")"; printf '%s' "$S" >> "$O"; J="$(printf %s "$S" | tr -d ' \n')"
-[ "$(printf %s "$J" | grep -o '"session_id"' | wc -l | tr -d ' ')" = 1 ] && printf %s "$J" | grep -qF "\"playbook\":\"sesa\",\"config_dir\":\"$P/sesa\",\"pid\":$LP,\"session_id\":\"$L1\"" && printf %s "$J" | grep -qF '"model":"arena-model-1","launcher":null,' && printf %s "$S" | grep -qF "\"resume\": \"claude-playbook run sesa --resume $L1\"" && printf %s "$J" | grep -qF '"last_active":"20' || { echo ses-show-wrong; exit 1; }
+[ "$(printf %s "$J" | grep -o '"session_id"' | wc -l | tr -d ' ')" = 1 ] && printf %s "$J" | grep -qF "\"playbook\":\"sesa\",\"config_dir\":\"$P/sesa\",\"pid\":$LP,\"session_id\":\"$L1\"" && printf %s "$J" | grep -qF '"model":"arena-model-1","launcher":null,' && printf %s "$S" | grep -qF "\"resume\": \"cd '$W' && claude-playbook run sesa --resume $L1\"" && printf %s "$J" | grep -qF '"last_active":"20' || { echo ses-show-wrong; exit 1; }
 claude-playbook SHOW SESSIONS FOR PLAYBOOK sesb --json 2>>"$O" | tr -d ' \n' | grep -qx '\[\]' && ! claude-playbook SHOW SESSIONS FOR PLAYBOOK nope >>"$O" 2>&1 || { echo ses-for-wrong; exit 1; }
 claude-playbook "SELECT session_id, pid FROM SESSIONS" --json 2>>"$O" | tee -a "$O" | tr -d ' \n' > "$HOME/ses.sel" && grep -qF "\"session_id\":\"$L1\"" "$HOME/ses.sel" && grep -qF "\"pid\":$LP" "$HOME/ses.sel" || { echo ses-select-wrong; exit 1; }
 PATH="$HOME/sesfk:$PATH"; export PATH
-cd "$W" && ! claude-playbook RESUME SESSION "$L1" >>"$O" 2>"$HOME/ses.live" && cat "$HOME/ses.live" >> "$O" && grep -q "still running (playbook sesa, pid $LP" "$HOME/ses.live" && ! test -e "$HOME/sesfk/log" || { echo ses-live-wrong; exit 1; }
-claude-playbook RESUME >>"$O" 2>"$HOME/ses.pick" && cat "$HOME/ses.pick" >> "$O" && grep -qF "1 newer session is live (pid $LP); resuming $D1 of sesa" "$HOME/ses.pick" && [ "$(cat "$HOME/sesfk/log")" = "$W|$P/sesa|--resume $D1" ] || { echo ses-resume-wrong; exit 1; }
-claude-playbook RESUME --list --json 2>>"$O" | tee -a "$O" | tr -d ' \n' > "$HOME/ses.list" && grep -qF "\"session_id\":\"$L1\"" "$HOME/ses.list" && grep -qF '"live":true' "$HOME/ses.list" && grep -qF "\"playbook\":\"sesb\",\"config_dir\":\"$P/sesb\",\"session_id\":\"$D2\"" "$HOME/ses.list" || { echo ses-list-wrong; exit 1; }
+cd "$W" && ! claude-playbook run sesa --resume "$L1" >>"$O" 2>"$HOME/ses.live" && cat "$HOME/ses.live" >> "$O" && grep -q "still running (playbook sesa, pid $LP" "$HOME/ses.live" && ! test -e "$HOME/sesfk/log" || { echo ses-live-wrong; exit 1; }
+! claude-playbook run sesa --continue >>"$O" 2>"$HOME/ses.cont" && cat "$HOME/ses.cont" >> "$O" && grep -qF "newest session in this folder" "$HOME/ses.cont" && ! test -e "$HOME/sesfk/log" || { echo ses-continue-wrong; exit 1; }
+claude-playbook run sesa --resume "$D1" >>"$O" 2>&1 && [ "$(cat "$HOME/sesfk/log")" = "$W|$P/sesa|--resume $D1" ] || { echo ses-resume-wrong; exit 1; }
+cd "$HOME" && ! claude-playbook run sesb --resume "$D2" >>"$O" 2>"$HOME/ses.away" && cat "$HOME/ses.away" >> "$O" && grep -qF "cd '$W' && claude-playbook run sesb --resume $D2" "$HOME/ses.away" && [ "$(wc -l < "$HOME/sesfk/log" | tr -d ' ')" = 1 ] || { echo ses-elsewhere-wrong; exit 1; }
 tty_() { if script --version >/dev/null 2>&1; then script -qec "$1" /dev/null; else script -q /dev/null sh -c "$1"; fi; }
 cd "$HOME" && tty_ "claude-playbook run sesa" > "$HOME/ses.tty" 2>&1 && cat "$HOME/ses.tty" >> "$O" && grep -qF "Resume this playbook's session with: claude-playbook run sesa --resume $X1" "$HOME/ses.tty" && claude-playbook run sesa > "$HOME/ses.notty" 2>&1 && ! grep -q "Resume this" "$HOME/ses.notty" || { echo ses-exitline-wrong; exit 1; }
 ! grep -rq cpb-arena-canary "$O" "$HOME/ses.tty" "$HOME/ses.notty" "$HOME/ses.short" && [ "$(sha)" = "$B" ] && test -e "$P/sesa/sessions/$DP.json" && echo sessions-ok'''
@@ -432,17 +434,14 @@ contains = "playbook-fields-ok"
 # (stty: icanon and echo); a plaintext credential never appears, a
 # reference does; browsing (SHOW CREATE, copy) writes nothing; e exports
 # SHOW CREATE --skip-secrets as <name>.cpb and asks before replacing one (a
-# typed y); RESUME from recent sessions runs claude --resume <id> under the
-# playbook's config dir (tuir, with no secret reference, so the launch
-# needs no helper), then the TUI comes back.
+# typed y); Sessions says where past sessions are, and R and enter there
+# launch nothing.
 command = '''
-P="$HOME/.claude-playbooks"; W="$HOME/tuiw"; K="$HOME/tuifk"; mkdir -p "$W" "$K" && W="$(cd "$W" && pwd -P)" && E="$(printf %s "$W" | sed 's/[^A-Za-z0-9]/-/g')"
-DS=88888888-aaaa-4aaa-8aaa-888888888881; LS=88888888-aaaa-4aaa-8aaa-888888888882; CAN=sk-arena-canary-4b9e00000000000000000000
+P="$HOME/.claude-playbooks"; W="$HOME/tuiw"; K="$HOME/tuifk"; mkdir -p "$W" "$K" && W="$(cd "$W" && pwd -P)"
+LS=88888888-aaaa-4aaa-8aaa-888888888882; CAN=sk-arena-canary-4b9e00000000000000000000
 printf '#!/bin/sh\nexit 0\n' > "$K/helper"; chmod +x "$K/helper"
 printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$CLAUDE_CONFIG_DIR" "$*" >> "$HOME/tuifk/log"\n' > "$K/claude"; chmod +x "$K/claude"
 claude-playbook CREATE PLAYBOOK tuia NO ALIAS >/dev/null && CPB_SECRET_HELPER="$K/helper" claude-playbook "ALTER PLAYBOOK tuia SET VAR ARENA_API_KEY=$CAN AS PLAINTEXT SET VAR ARENA_REF FROM 'keychain:ok/arena-tui'" >/dev/null 2>&1 || { echo tui-setup-wrong; exit 1; }
-claude-playbook CREATE PLAYBOOK tuir NO ALIAS >/dev/null || exit 1
-mkdir -p "$P/tuir/projects/$E" && printf '{"type":"assistant","cwd":"%s","message":{"model":"arena-tui-model"}}\n' "$W" > "$P/tuir/projects/$E/$DS.jsonl"
 sleep 600 & LP=$!; trap 'kill $LP 2>/dev/null' EXIT
 pst() { if [ -r "/proc/$1/stat" ]; then sed 's/.*) //' "/proc/$1/stat" | awk '{print $20}'; else TZ=UTC LC_ALL=C ps -o lstart= -p "$1" | awk '{$1=$1; print}'; fi; }
 mkdir -p "$P/tuia/sessions" && printf '{"pid":%s,"sessionId":"%s","cwd":"/tmp","startedAt":%s000,"procStart":"%s","kind":"interactive","status":"idle"}' "$LP" "$LS" "$(date +%s)" "$(pst $LP)" > "$P/tuia/sessions/$LP.json"
@@ -463,7 +462,7 @@ drive "$HOME/t3" '/tuia\r' _ '\r' _ 3 _ c _ y _ '\033' _ q; grep -qF "keychain:o
 drive "$HOME/t4" '/tuia\r' _ e _ q; claude-playbook SHOW CREATE PLAYBOOK tuia --skip-secrets > "$HOME/tuia.want" && cmp -s "$W/tuia.cpb" "$HOME/tuia.want" && [ "$(ls -A "$W")" = tuia.cpb ] || { echo tui-export-wrong; exit 1; }
 printf 'mine\n' > "$W/tuia.cpb"; drive "$HOME/t5" '/tuia\r' _ e _ n _ q; [ "$(cat "$W/tuia.cpb")" = mine ] || { echo tui-export-overwrote; exit 1; }
 drive "$HOME/t6" '/tuia\r' _ e _ y _ q; cmp -s "$W/tuia.cpb" "$HOME/tuia.want" || { echo tui-export-y-wrong; exit 1; }
-rm -f "$K/log"; drive "$HOME/t7" 2 _ R _ '\r' _ _ q; [ "$(cat "$K/log" 2>/dev/null)" = "$P/tuir|--resume $DS" ] && { [ "$(cat "$HOME/t7.rc")" = 0 ] || ! script --version >/dev/null 2>&1; } || { echo tui-resume-wrong; exit 1; }
+rm -f "$K/log"; drive "$HOME/t7" 2 _ R _ '\r' _ q; grep -qF "past sessions: <launcher> --resume" "$HOME/t7.txt" && ! test -e "$K/log" && { [ "$(cat "$HOME/t7.rc")" = 0 ] || ! script --version >/dev/null 2>&1; } || { echo tui-past-sessions-wrong; exit 1; }
 echo tui-ok'''
 contains = "tui-ok"
 

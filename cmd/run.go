@@ -143,6 +143,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if override {
 			return errConfigDirOverrideSandbox()
 		}
+		resumeNote(claudeArgs)
 		if host := sandboxHost(sbm, &sopts); host != "" {
 			return forwardToSandboxHost(host, "run", original, &sopts, tokens, nil, name, claudeArgs)
 		}
@@ -226,6 +227,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// A --resume or --continue of a session still live elsewhere is refused
+	// before anything is mutated (resume.go).
+	sd := playbookSessionDir(pb)
+	if override {
+		sd = sessionDir{label: configDir, path: configDir}
+	}
+	if err := guardResume(sd, claudeArgs); err != nil {
+		return err
+	}
+
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
@@ -256,7 +267,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// playbook; a caller-supplied config dir is not the playbook's, so
 	// that launch gets none.
 	if !override && !playSessionRunning {
-		printResumeLine(playbookSessionDir(pb), claudeArgs, since)
+		printResumeLine(sd, claudeArgs, since)
 	}
 	return err
 }

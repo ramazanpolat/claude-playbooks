@@ -378,9 +378,12 @@ researcher  CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
         <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
       </div>
     </div>
-    <p><code class="inline">cpb RESUME</code> starts this folder's latest session, in its own
-      playbook, and never resumes one that's already live &mdash; two processes on one session
-      id would corrupt it.</p>
+    <p><code class="inline">cpb run worker --continue</code> resumes the newest session in this folder,
+      and <code class="inline">--resume &lt;id&gt;</code> resumes one, through its playbook (a launcher
+      takes the same flags). cpb refuses a session that is still live &mdash; two processes on one
+      session id would corrupt it &mdash; and one typed in the wrong folder.
+      <code class="inline">SHOW SESSIONS</code> prints each session's resume command, <code class="inline">cd</code>
+      included.</p>
   </section>
 
   <section id="tui">

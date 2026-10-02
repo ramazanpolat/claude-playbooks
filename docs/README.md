@@ -27,7 +27,7 @@ Pages are grouped by what you came for:
 | [Query with SQL](guides/query-with-sql.md) | `cpb SELECT …`, and `cpb SHOW … --json` piped into `ch local` |
 | [Configure an agent](guides/configure-an-agent.md) | MCP servers, tools, status line, model, skills; one recipe for many targets |
 | [The terminal UI](guides/tui.md) | `cpb tui`: browse playbooks, sessions and env sets; SHOW CREATE, copy, export, resume |
-| [Resume a session](guides/resume-a-session.md) | `SHOW SESSIONS`, `RESUME`, and the resume line a launch prints |
+| [Resume a session](guides/resume-a-session.md) | `SHOW SESSIONS`, `--resume` through a launcher, and the resume line a launch prints |
 | [Agent guide](guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
 
 ## Reference
