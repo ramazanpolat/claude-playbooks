@@ -410,20 +410,28 @@ func TestDescribeMatchesSpec(t *testing.T) {
 		t.Fatal("SPEC.md has no DESCRIBE section")
 	}
 	section := text[start+1:]
-	if end := strings.Index(section[1:], "\n## "); end >= 0 {
-		section = section[:end+1]
+	for _, next := range []string{"\n## ", "\n### "} {
+		if end := strings.Index(section, next); end >= 0 {
+			section = section[:end]
+		}
 	}
 	spec := map[string][]columnJSON{}
 	table := ""
-	row := regexp.MustCompile("^\\| `([a-z_]+)` \\| `([^`]+)` \\| (.+) \\|$")
+	row := regexp.MustCompile("^\\| `([^`]+)` \\| `([^`]+)` \\| (.+) \\|$")
 	for _, line := range strings.Split(section, "\n") {
 		if strings.HasPrefix(line, "**`") && strings.HasSuffix(line, "`**") {
 			table = strings.TrimSuffix(strings.TrimPrefix(line, "**`"), "`**")
 			continue
 		}
-		if m := row.FindStringSubmatch(line); m != nil && table != "" {
-			spec[table] = append(spec[table], columnJSON{Name: m[1], Type: m[2], Comment: m[3]})
+		if !strings.HasPrefix(line, "|") || line == "| Column | Type | Comment |" || line == "|---|---|---|" {
+			continue
 		}
+		m := row.FindStringSubmatch(line)
+		if m == nil || table == "" {
+			t.Errorf("SPEC.md's DESCRIBE has a row this test cannot read: %q", line)
+			continue
+		}
+		spec[table] = append(spec[table], columnJSON{Name: m[1], Type: m[2], Comment: m[3]})
 	}
 	if len(spec) != len(selectTables) {
 		t.Fatalf("SPEC.md's DESCRIBE lists %d tables, the code has %d", len(spec), len(selectTables))

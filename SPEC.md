@@ -1319,7 +1319,7 @@ code to the same lines):
 | `source` | `JSON` | Where the playbook was installed from: url, branch, subdir; null for a playbook without one. |
 | `migrate` | `Nullable(String)` | The declared migrate step ([update] migrate) that cpb update runs; null without one. |
 | `linked` | `Nullable(String)` | The target directory of a linked playbook; null otherwise. |
-| `launcher` | `Nullable(String)` | The command that runs the playbook, the one you type; null under NO LAUNCHER. |
+| `launcher` | `Nullable(String)` | The command that runs the playbook, the one you type; null when no launcher is in place, as under NO LAUNCHER. |
 | `envs` | `Array(String)` | The env sets the playbook uses, in order. |
 | `vars` | `Array(JSON)` | The playbook's own variables, each a value, a reference, a redacted credential or a block. |
 | `sandbox` | `JSON` | The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills. |
@@ -1355,10 +1355,10 @@ code to the same lines):
 | `key` | `String` | The variable's name. |
 | `value` | `Nullable(String)` | The literal value; null for a reference, a redacted credential or a block. |
 | `ref` | `Nullable(String)` | The secret reference the value is read from at launch; null otherwise. |
-| `redacted` | `Bool` | True when the value is a credential-looking literal, never shown. |
-| `plaintext` | `Bool` | True when a credential-looking value is stored as a literal, not a reference. |
+| `redacted` | `Bool` | True when the value is withheld from output, as for a credential-looking literal. |
+| `plaintext` | `Bool` | True when a credential-looking value is stored as a literal rather than a reference. |
 | `blocked` | `Bool` | True when the layer blocks the variable (BLOCK). |
-| `layer` | `JSON` | Where the entry comes from: kind (defaults, env or playbook) and the env set's name. |
+| `layer` | `JSON` | Where the entry comes from: kind (defaults, env or playbook) and, for an env set, its name. |
 | `effective` | `Bool` | True for the entry a launch uses. |
 
 **`SESSIONS`**
