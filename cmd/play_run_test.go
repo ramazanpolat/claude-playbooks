@@ -234,7 +234,9 @@ func playSandboxFlags(t *testing.T, flag string, off bool) {
 // Where a play runs: a sandbox by default where a backend is available;
 // --no-sandbox said plainly; create-with: SANDBOX refused with none; a
 // recipe with secret references refused sandboxed (a sandboxed launch
-// cannot resolve them yet), never quietly run on the host.
+// cannot resolve them yet) rather than quietly moved to the host. With no
+// backend at all it runs on the host like any recipe, the preview says so,
+// and each reference is still typed to confirm it.
 func TestChoosePlaySandbox(t *testing.T) {
 	plain := play.Check([]byte(plainRecipe))
 	wants := play.Check([]byte("-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n"))

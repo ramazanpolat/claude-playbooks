@@ -37,8 +37,9 @@ never your pilot profile.
 It runs in a sandbox where one is available (sbx, or OpenShell on Linux), and
 says so when none is; --no-sandbox runs it on this machine, as you. A recipe
 whose header asks for a sandbox (-- create-with: SANDBOX) is refused where none
-is available. A recipe that reads a secret reference runs only with
---no-sandbox for now: a sandboxed session cannot resolve references yet.`,
+is available. A recipe that reads a secret reference cannot run sandboxed
+yet (a sandboxed session cannot resolve references): where a sandbox is
+available it is refused unless you pass --no-sandbox.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// <ref>, then claude's own arguments after --.
 		at := cmd.ArgsLenAtDash()
