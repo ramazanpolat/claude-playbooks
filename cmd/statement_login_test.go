@@ -72,8 +72,8 @@ func TestIsolatedLogin(t *testing.T) {
 	if out := mustStmt(t, "ALTER PLAYBOOK k SET ISOLATED LOGIN"); !strings.Contains(out, "unchanged") {
 		t.Fatalf("a repeat:\n%s", out)
 	}
-	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Login: isolated") {
-		t.Fatalf("EXPLAIN:\n%s", out)
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); strings.Count(out, "Login:") != 1 || !strings.Contains(out, "Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it") {
+		t.Fatalf("EXPLAIN: one Login line:\n%s", out)
 	}
 	if out := mustStmt(t, "SHOW PLAYBOOK k"); !strings.Contains(out, "isolated (shares nothing with ~/.claude)") {
 		t.Fatalf("SHOW:\n%s", out)

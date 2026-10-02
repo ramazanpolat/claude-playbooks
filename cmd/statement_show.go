@@ -689,7 +689,7 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 	case v.Sandbox.Always:
 		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, UNSET ISOLATED LOGIN shares it again")
 	case v.IsolatedLogin:
-		fmt.Println("Login: isolated, shares nothing with ~/.claude (UNSET ISOLATED LOGIN shares it again)")
+		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (UNSET ISOLATED LOGIN shares it again)")
 	}
 }
 
@@ -856,9 +856,6 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	}
 	if n := len(v.StatuslineHistory); n > 0 {
 		fmt.Printf("Status line history: %d earlier (SET STATUSLINE PREVIOUS restores %s)\n", n, v.StatuslineHistory[0].Command)
-	}
-	if v.IsolatedLogin {
-		fmt.Println("Login: isolated: no link to ~/.claude's login and no machine token; /login once in it")
 	}
 }
 
