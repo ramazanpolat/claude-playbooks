@@ -20,7 +20,7 @@ experiment
 This creates `~/.claude-playbooks/experiment`, drops in a starter `CLAUDE.md`
 that introduces the playbook concept to the session opened inside it, syncs
 Claude auth metadata, and registers a launcher command named `experiment`: a
-symlink to the `claude-playbook` binary on your PATH. It works immediately, in
+symlink to the `cpb` binary on your PATH. It works immediately, in
 every shell, with no rc-file edit.
 
 ```bash
@@ -94,11 +94,11 @@ Dropping a linked playbook removes only the symlink.
 ## Launcher commands
 
 `CREATE PLAYBOOK` registers each playbook as a **launcher command**:
-a symlink to the `claude-playbook` binary placed next to it (falling back to
+a symlink to the `cpb` binary placed next to it (falling back to
 `~/.local/bin` when that directory is not writable):
 
 ```text
-~/.local/bin/experiment -> /usr/local/bin/claude-playbook
+~/.local/bin/experiment -> /usr/local/bin/cpb
 ```
 
 Invoked through the link, the binary sees the link's name in `argv[0]` and
@@ -243,7 +243,7 @@ select their config through a top-level `subdir` cannot be updated this way.
 For tests or demos, keep playbooks away from your real files:
 
 ```bash
-CLAUDE_PLAYBOOKS_DIR=/tmp/playbooks cpb CREATE PLAYBOOK demo
+CPB_PLAYBOOKS_DIR=/tmp/playbooks cpb CREATE PLAYBOOK demo
 cpb --playbooks-dir /tmp/playbooks CREATE PLAYBOOK demo
 ```
 

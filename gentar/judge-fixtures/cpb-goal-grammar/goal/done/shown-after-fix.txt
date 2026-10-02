@@ -4,7 +4,7 @@ work$ cpb APPLY demo.cpb
 Created playbook "demo" at /home/pilot/.claude-playbooks/demo
 
 Run with:
-  claude-playbook run demo
+  cpb run demo
 -- demo.cpb:2: ALTER PLAYBOOK demo
 Altered PLAYBOOK demo
   env sets  synth-direct

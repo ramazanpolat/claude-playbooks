@@ -200,7 +200,7 @@ func TestShowPluginsAndAgent(t *testing.T) {
 // statement, across a rename.
 func TestPluginDryRunCarriesState(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	log := fakeClaude(t)
 	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
 	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander")

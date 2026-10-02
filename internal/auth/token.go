@@ -17,11 +17,11 @@ import (
 const OAuthTokenEnv = "CLAUDE_CODE_OAUTH_TOKEN"
 
 // oauthTokenFileEnv lets callers/tests override the token file location.
-const oauthTokenFileEnv = "CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE"
+const oauthTokenFileEnv = "CPB_OAUTH_TOKEN_FILE"
 
 // OAuthTokenFile returns the path of the long-lived OAuth token file.
 // Default: $HOME/.config/claude-code/oauth-token. Overridable via
-// CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE (primarily for tests).
+// CPB_OAUTH_TOKEN_FILE (primarily for tests).
 func OAuthTokenFile() string {
 	if p := os.Getenv(oauthTokenFileEnv); p != "" {
 		return p
@@ -316,9 +316,9 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 // of them.
 //
 // CLAUDE_CONFIG_DIR is bound to the directory this launch decided.
-// CLAUDE_CONFIG_DIR_OVERRIDE is consumed -- the request has been read, and the
+// CPB_CONFIG_DIR is consumed -- the request has been read, and the
 // child must not see it, or an agent inside the session running
-// `claude-playbook run other-playbook` would have that launch redirected into
+// `cpb run other-playbook` would have that launch redirected into
 // this one's directory: the wrong playbook writing into the wrong state.
 //
 // Both happen HERE rather than earlier because applyManifestEnv runs above and

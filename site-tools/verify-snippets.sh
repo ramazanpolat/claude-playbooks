@@ -101,7 +101,7 @@ fi
 out=$(cpb SHOW SESSIONS); check "sessions: no live sessions in a fresh HOME" "No live Claude Code sessions."
 
 echo "== install =="
-out=$(cpb --version); check "install: version banner" "claude-playbook version"
+out=$(cpb --version); check "install: version banner" "cpb version"
 
 echo "== tui: the tour's screens match the real goldens =="
 if ! python3 "$here/check-tui-goldens.py" "$repo/site/tour.html" "$repo/internal/tui/testdata"; then

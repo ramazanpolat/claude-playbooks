@@ -107,7 +107,7 @@ func doCreate(o createOpts, args []string) error {
 	}
 
 	if o.noAlias {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
+		fmt.Printf("\nRun with:\n  cpb run %s\n", name)
 	} else {
 		// A custom command name must be resolvable at invocation time: record
 		// it as the manifest alias so multicall dispatch finds the playbook.

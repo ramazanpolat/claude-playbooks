@@ -246,7 +246,7 @@ func TestDeleteLinkedPlaybookRemovesSymlinkOnly(t *testing.T) {
 // served by a name nobody in the registry claims.
 func TestDeleteRemovesUnclaimedLauncher(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, config.PlaybooksDir, "victim", nil)
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
@@ -781,7 +781,7 @@ func TestDeleteBesideStoreEntriesStaysPossible(t *testing.T) {
 // stale afterwards).
 func TestDeleteRemovesNameAliasAndHandMadeLaunchers(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "mine", &manifest.Manifest{Launcher: "minecmd"})
 	if _, err := launcher.Write(config.LauncherDir, "minecmd"); err != nil {
 		t.Fatal(err)
@@ -813,7 +813,7 @@ func TestDeleteRemovesNameAliasAndHandMadeLaunchers(t *testing.T) {
 // once for prompt and action, and a discovery failure keeps the launcher.
 func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 
 	writePlaybook(t, root, "own", nil)
 	if _, err := launcher.Write(config.LauncherDir, "own"); err != nil {
@@ -857,7 +857,7 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 // delete of the renamed playbook removes it.
 func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{Launcher: "oa"})
 	if _, err := launcher.Write(config.LauncherDir, "oa"); err != nil {
 		t.Fatal(err)
@@ -883,7 +883,7 @@ func TestRenameKeepsAliasLauncherAndDeleteRemovesIt(t *testing.T) {
 // prompt's Alias line promises nothing about launchers.
 func TestRenameAliasEqualToOldNameAndPrompt(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{Launcher: "old"})
 	if _, err := launcher.Write(config.LauncherDir, "old"); err != nil {
 		t.Fatal(err)
@@ -913,7 +913,7 @@ func TestRenameAliasEqualToOldNameAndPrompt(t *testing.T) {
 // other's command with it.
 func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "one", &manifest.Manifest{Launcher: "Foo"})
 	writePlaybook(t, root, "two", &manifest.Manifest{Launcher: "foo"})
 	if _, err := launcher.Write(config.LauncherDir, "Foo"); err != nil {
@@ -942,7 +942,7 @@ func TestDeleteKeepsCaseFoldedLauncherAnotherPlaybookClaims(t *testing.T) {
 // own symlink reported, or removed, as its launcher.
 func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	exe, err := launcher.BinPath()
 	if err != nil {
 		t.Fatal(err)
@@ -978,7 +978,7 @@ func TestDeleteNeverTouchesTheReservedCLILauncher(t *testing.T) {
 // not take the CLI's own symlink with it on a case-insensitive filesystem.
 func TestDeleteSparesReservedLauncherUnderCaseVariant(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	exe, err := launcher.BinPath()
 	if err != nil {
 		t.Fatal(err)

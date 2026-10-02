@@ -1,6 +1,6 @@
 # Installation
 
-Every way to get `claude-playbook` onto a machine, and every way to take it off
+Every way to get `cpb` onto a machine, and every way to take it off
 again.
 
 ## Install script (recommended)
@@ -17,19 +17,11 @@ and macOS, amd64/arm64 (no native Windows — WSL works).
 Verify:
 
 ```bash
-claude-playbook --version
-```
-
-The installer also creates a `cpb` symlink — a shorter name for the same binary:
-
-```bash
 cpb --version
 ```
 
-The docs use `cpb` throughout; `claude-playbook` works everywhere `cpb` appears.
-
-Want a different command name? Use a shell alias (`alias pb=claude-playbook`) or
-a hard link (`ln "$(command -v claude-playbook)" ~/.local/bin/pb` — works for
+Want a different command name? Use a shell alias (`alias pb=cpb`) or
+a hard link (`ln "$(command -v cpb)" ~/.local/bin/pb` — works for
 both install locations). Do not use a symlink: a symlink to the binary under any
 other name is treated as a playbook launcher and dispatched accordingly.
 
@@ -74,8 +66,8 @@ loads nothing and TAB fails:
   `~/.bash_profile` instead, but `self-uninstall` only cleans `~/.bashrc`.
 
 Keep each line byte for byte as shown: `self-uninstall` removes only exact
-matches of `source <(cpb completion bash)` and `source <(cpb completion zsh)`
-(and the same with `claude-playbook` in place of `cpb`). Any other form (an
+matches of `source <(cpb completion bash)` and `source <(cpb completion zsh)`.
+Any other form (an
 absolute path, extra spaces, `eval "$(...)"`) outlives the binary and errors in
 every new shell.
 
@@ -85,7 +77,7 @@ claude-playbooks is a Nix flake, so a [devbox](https://www.jetify.com/devbox)
 project pins it like any other package (v3.18.0 or later):
 
 ```bash
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#claude-playbook"
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#cpb"
 devbox run -- cpb --version
 ```
 
@@ -97,15 +89,15 @@ one a `devbox run` command. A `devbox.json` like this:
 ```json
 {
   "packages": [
-    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#claude-playbook",
+    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#cpb",
     "claude-code@latest"
   ],
   "env": {
-    "CLAUDE_PLAYBOOKS_DIR": "$DEVBOX_PROJECT_ROOT/.playbooks"
+    "CPB_PLAYBOOKS_DIR": "$DEVBOX_PROJECT_ROOT/.playbooks"
   },
   "shell": {
     "scripts": {
-      "myplaybook": "exec claude-playbook run myplaybook \"$@\""
+      "myplaybook": "exec cpb run myplaybook \"$@\""
     }
   }
 }
@@ -118,10 +110,10 @@ devbox run -- cpb CREATE PLAYBOOK myplaybook FROM <git-url-or-local-dir>
 devbox run myplaybook         # launch; arguments go to claude
 ```
 
-- **`CLAUDE_PLAYBOOKS_DIR`** puts installs in `.playbooks/` in the project, so
+- **`CPB_PLAYBOOKS_DIR`** puts installs in `.playbooks/` in the project, so
   nothing lands in `~/.claude-playbooks`. Add `.playbooks/` to `.gitignore`: it
   holds each playbook's own logins and history.
-- **The script is the launcher.** claude-playbook writes launcher commands only
+- **The script is the launcher.** cpb writes launcher commands only
   for its default folder, so a project-local playbook is launched with
   `devbox run <name>` (or `devbox run -- cpb run <name>`). The `"$@"` passes your
   arguments through to claude, and `exec` makes claude's exit code the command's.
@@ -137,8 +129,8 @@ enables them for one command, or set `experimental-features = nix-command flakes
 in `nix.conf`:
 
 ```bash
-nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#claude-playbook" -- --version
-nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#claude-playbook"
+nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#cpb" -- --version
+nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#cpb"
 ```
 
 (`nix profile add` is the current name; older Nix versions call it `nix profile install`.)
@@ -147,7 +139,7 @@ devbox needs none of this: it enables flakes itself.
 ### Notes
 
 - **Use the `git+https:` form shown here.** The shorter
-  `github:ramazanpolat/claude-playbooks/v3.27.0#claude-playbook` also works, but it
+  `github:ramazanpolat/claude-playbooks/v3.27.0#cpb` also works, but it
   is resolved through GitHub's API, which rate-limits unauthenticated callers per
   IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
   it only with a GitHub token configured for Nix (`access-tokens`) or on a
@@ -170,12 +162,12 @@ devbox needs none of this: it enables flakes itself.
 - **Update through devbox**, not with `cpb self-update`: the binary lives in
   the read-only Nix store, and `cpb self-update` refuses to touch it. **Replace** the
   entry -- a `devbox add` with a different tag does not replace the old one, it
-  adds a second claude-playbook package beside it. Either change the tag in
+  adds a second cpb package beside it. Either change the tag in
   `devbox.json` and run `devbox install`, or remove the old reference first:
 
   ```bash
-  devbox rm "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<old-tag>#claude-playbook"
-  devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<new-tag>#claude-playbook"
+  devbox rm "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<old-tag>#cpb"
+  devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<new-tag>#cpb"
   ```
 
 **Claude Code from Nix.** cpb itself does not need Claude Code, but the
@@ -213,9 +205,9 @@ so there is no URL form that works without this opt-in.
 
 The first run bootstraps a normal install: it downloads the release binary,
 verifies it against the release's `SHA256SUMS` (same policy as `install.sh`),
-installs to `~/.local/bin` only (never `/usr/local/bin`, no sudo), creates the
-`cpb` link, and says what it did. After that the tool is a plain install — `cpb`,
-`claude-playbook`, and every playbook launcher work directly, and later npx
+installs `cpb` to `~/.local/bin` only (never `/usr/local/bin`, no sudo), and says
+what it did. After that the tool is a plain install — `cpb` and every playbook
+launcher work directly, and later npx
 invocations simply run the installed binary. Uninstall is the usual
 `cpb self-uninstall`.
 
@@ -223,8 +215,8 @@ Knobs, for the cases where you do not want that:
 
 | Variable | Effect |
 |---|---|
-| `CPB_NPX_BOOTSTRAP=0` | Ephemeral mode: install nothing, delegate to nothing — download to `~/.claude-playbooks/bin/<tag>/` and run from there |
-| `CPB_VERSION=v3.9.1` | Fetch a specific release. With `CPB_NPX_BOOTSTRAP=0` it tests a pinned version beside an installed one |
+| `CPB_NPX_BOOTSTRAP=0` | Ephemeral mode: install nothing, delegate to nothing — download to `${XDG_CACHE_HOME:-~/.cache}/cpb/npx/<tag>/` and run from there |
+| `CPB_NPX_VERSION=v4.0.0` | Fetch a specific release. With `CPB_NPX_BOOTSTRAP=0` it tests a pinned version beside an installed one |
 | `CPB_NPX_CACHE=<dir>` | Override the ephemeral-mode cache dir |
 | `CPB_NPX_INSTALL_DIR=<dir>` | Override the bootstrap install dir |
 
@@ -236,12 +228,12 @@ that is not published yet. Until it is, the shim runs the newest published
 release instead and says so in one line on stderr:
 
 ```
-cpb v3.28.0 is not published yet; running v3.27.0
+cpb v4.0.1 is not published yet; running v4.0.0
 ```
 
 It only does this when that release's binary is missing (HTTP 404). It never
 falls back to a prerelease (`-rcN`) or to another major version, and any other
-download failure is an error. A version you pin yourself with `CPB_VERSION` is
+download failure is an error. A version you pin yourself with `CPB_NPX_VERSION` is
 never replaced: if it is missing, the shim stops. Native Windows is not supported (use
 WSL); the npm package refuses to install there.
 
@@ -261,12 +253,12 @@ Requires [Go](https://go.dev/dl/) 1.26+:
 git clone https://github.com/ramazanpolat/claude-playbooks.git
 cd claude-playbooks
 ./build.sh
-mv claude-playbook /usr/local/bin/
+mv cpb /usr/local/bin/
 ```
 
 ## Updating the tool
 
-`self-update` updates the `claude-playbook` binary to the newest GitHub
+`self-update` updates the `cpb` binary to the newest GitHub
 release of its major version:
 
 ```bash
@@ -310,7 +302,7 @@ Or run the local uninstaller from a clone:
 The script delegates to `cpb self-uninstall --binary-only`, so one implementation
 owns all cleanup: the binary, its `cpb` sibling, launcher symlinks, and any
 completion lines you added. Every launcher the tool creates is recorded in a
-registry (`~/.local/state/claude-playbook/launchers`), so launchers are removed
+registry (`~/.local/state/cpb/launchers`), so launchers are removed
 wherever they were created — including custom `--launcher-dir` locations — while
 a link you renamed or repointed yourself is left alone. Playbooks are untouched,
 and `~/.claude-playbooks` is never deleted.
@@ -338,9 +330,9 @@ If you can't run the binary:
 
 ```bash
 # 1. Remove launcher symlinks pointing at the binary
-#    (in the binary's directory and ~/.local/bin: ls -l | grep claude-playbook)
-# 2. Remove any `source <(claude-playbook completion ...)` lines from your
+#    (in the binary's directory and ~/.local/bin: ls -l | grep cpb)
+# 2. Remove any `source <(cpb completion ...)` lines from your
 #    shell config (~/.zshrc or ~/.bashrc)
 # 3. rm -rf ~/.claude-playbooks
-# 4. sudo rm /usr/local/bin/claude-playbook   # or wherever the binary lives
+# 4. sudo rm /usr/local/bin/cpb   # or wherever the binary lives
 ```

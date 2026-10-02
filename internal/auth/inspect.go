@@ -98,7 +98,7 @@ func (r Report) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// Inspect reports the authentication state of configDir as a claude-playbook
+// Inspect reports the authentication state of configDir as a cpb
 // launch would see it. Nothing is written, no credential is read into the
 // report beyond its expiry, and no process is spawned. now is injectable for
 // tests.
@@ -107,8 +107,8 @@ func Inspect(name, configDir string, now time.Time) Report {
 }
 
 // InspectGlobal is Inspect for ~/.claude, which is not launched by
-// claude-playbook: a raw `claude` there never reads the token FILE (a
-// claude-playbook convention), so only an exported CLAUDE_CODE_OAUTH_TOKEN
+// cpb: a raw `claude` there never reads the token FILE (a
+// cpb convention), so only an exported CLAUDE_CODE_OAUTH_TOKEN
 // counts as token mode.
 func InspectGlobal(configDir string, now time.Time) Report {
 	return inspect("~/.claude", configDir, now, true)
@@ -120,7 +120,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	if raw {
 		// ~/.claude is not a playbook: no manifest, no profiles, no
 		// isolation apply. Its mode is decided by the exported variable
-		// alone (the token FILE is a claude-playbook convention).
+		// alone (the token FILE is a cpb convention).
 		if os.Getenv(OAuthTokenEnv) != "" {
 			r.Mode = ModeToken
 		} else {

@@ -16,10 +16,10 @@ import (
 var Version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:   "claude-playbook",
-	Short: "Manage isolated Claude Code instances",
+	Use:   "cpb",
+	Short: "cpb (Claude PlayBooks): manage isolated Claude Code instances",
 	// Statements never reach cobra, so its help names them itself.
-	Long: `Manage isolated Claude Code instances.
+	Long: `cpb (Claude PlayBooks): manage isolated Claude Code instances.
 
 State is changed and read with statements:
 
@@ -65,7 +65,7 @@ func Execute() {
 			}
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook. (If this symlink is your own alias for the CLI, name it %q or %q, or use a hard link.)\n", base, "claude-playbook", "cpb")
+		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook. (If this symlink is your own alias for the CLI, name it %q, or use a hard link.)\n", base, "cpb")
 		os.Exit(1)
 	}
 	// A grammar statement never reaches cobra, which would read its words
@@ -112,7 +112,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Println("claude-playbook -- manage isolated Claude Code instances")
+	fmt.Println("cpb (Claude PlayBooks) -- manage isolated Claude Code instances")
 	fmt.Println()
 	fmt.Printf("Playbooks directory: %s\n", playbooksDir)
 
@@ -125,7 +125,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		fmt.Println("  # One from a Git repository or a directory (SUBDIR picks one out of a monorepo):")
 		fmt.Println("  cpb CREATE PLAYBOOK <name> FROM <git-url-or-dir>")
 		fmt.Println()
-		fmt.Println("Run 'claude-playbook --help' for all commands.")
+		fmt.Println("Run 'cpb --help' for all commands.")
 		printTUIHint()
 		return nil
 	}
@@ -140,7 +140,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			maxLen = l
 		}
 	}
-	cmdColW := maxLen + len("claude-playbook run ")
+	cmdColW := maxLen + len("cpb run ")
 
 	// Launcher commands take display precedence over manifest aliases: a
 	// launcher-only playbook has a working command and must not be shown as
@@ -160,7 +160,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		}
 	}
 	for _, pb := range pbs {
-		runStr := fmt.Sprintf("claude-playbook run %s", pb.Name)
+		runStr := fmt.Sprintf("cpb run %s", pb.Name)
 		command := ""
 		for _, n := range launcherNamesFor(pb) {
 			if launcherNames[n] {
@@ -176,7 +176,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Run 'claude-playbook --help' for all commands.")
+	fmt.Println("Run 'cpb --help' for all commands.")
 	printTUIHint()
 	return nil
 }

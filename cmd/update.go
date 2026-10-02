@@ -621,8 +621,8 @@ func (m migration) run(w io.Writer, name, root string) error {
 	c.Dir = root
 	c.Env = append(config.WithoutConfigDirOverride(os.Environ()),
 		"CLAUDE_CONFIG_DIR="+root,
-		"CLAUDE_PLAYBOOK_TARGET="+name,
-		"CLAUDE_PLAYBOOK_PATH="+root,
+		"CPB_PLAYBOOK_NAME="+name,
+		"CPB_PLAYBOOK_DIR="+root,
 	)
 	c.Stdin = os.Stdin
 	c.Stdout = w

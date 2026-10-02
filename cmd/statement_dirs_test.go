@@ -10,7 +10,7 @@ import (
 
 func TestApplyToPlainDirectory(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	cfg, _ := filepath.EvalSymlinks(t.TempDir()) // stands in for ~/.claude
 	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{"theme": "dark"}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ func TestPlainDirectoryRefusals(t *testing.T) {
 // cannot be written to cpb's state is taken away again.
 func TestPlainDirectoryBackupsAndSkillRecords(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	cfg, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)

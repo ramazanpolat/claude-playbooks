@@ -1,8 +1,8 @@
-# claude-playbook for agents
+# cpb for agents
 
-How an AI agent (Claude Code, Codex, OpenCode, a cron job, a CI step) drives `claude-playbook` without a human at the keyboard. It is the same CLI a person uses; the difference is which forms are safe unattended and what to read instead of guess.
+How an AI agent (Claude Code, Codex, OpenCode, a cron job, a CI step) drives `cpb` without a human at the keyboard. It is the same CLI a person uses; the difference is which forms are safe unattended and what to read instead of guess.
 
-The binary is `claude-playbook`, also on PATH as `cpb`. State changes go through the statement grammar (`cpb <VERB> <OBJECT> <name> <clause> …`), whose contract is [docs/reference/cli-grammar.md](../reference/cli-grammar.md); `SPEC-v4.md` is the contract for everything else. When this guide and a spec disagree, the spec wins.
+The binary is `cpb`. State changes go through the statement grammar (`cpb <VERB> <OBJECT> <name> <clause> …`), whose contract is [docs/reference/cli-grammar.md](../reference/cli-grammar.md); `SPEC-v4.md` is the contract for everything else. When this guide and a spec disagree, the spec wins.
 
 ## What a playbook is, in one sentence
 
@@ -109,7 +109,7 @@ cpb APPLY recipe.cpb TO ~/.claude --yes         # backs up settings.json (and .c
 Point the whole registry at a scratch root to test without touching the user's installs. Launchers are not managed for a non-default root, which is what you want in a sandbox.
 
 ```bash
-export CLAUDE_PLAYBOOKS_DIR=/tmp/pb-$$              # or --playbooks-dir before the verb
+export CPB_PLAYBOOKS_DIR=/tmp/pb-$$              # or --playbooks-dir before the verb
 cpb CREATE PLAYBOOK demo NO ALIAS
 cpb run demo --version
 rm -rf /tmp/pb-$$

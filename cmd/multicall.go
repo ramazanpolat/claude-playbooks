@@ -141,12 +141,12 @@ func invokedViaLauncher() bool {
 // registryLockPath is the machine-user-global lock file lockRegistry flocks.
 func registryLockPath() string {
 	if cache, cerr := os.UserCacheDir(); cerr == nil {
-		dir := filepath.Join(cache, "claude-playbook")
+		dir := filepath.Join(cache, "cpb")
 		if merr := os.MkdirAll(dir, 0o755); merr == nil {
 			return filepath.Join(dir, "registry.lock")
 		}
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("claude-playbook-registry-%d.lock", os.Getuid()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("cpb-registry-%d.lock", os.Getuid()))
 }
 
 func lockRegistry() (unlock func(), err error) {

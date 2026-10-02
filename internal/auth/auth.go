@@ -224,7 +224,7 @@ func detachSharedCredentials(targetDir string) error {
 }
 
 // IsolateAuthEnv forces the isolation path for a launch when set to "true".
-const IsolateAuthEnv = "CLAUDE_PLAYBOOKS_ISOLATE_AUTH"
+const IsolateAuthEnv = "CPB_ISOLATED_LOGIN"
 
 // IsAuthIsolated reports whether launches of targetDir run with isolated
 // authentication (manifest isolated_login, or the override variable).

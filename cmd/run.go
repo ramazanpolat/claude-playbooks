@@ -81,7 +81,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// A --help at the NAME position prints usage, whether or not launch
 	// flags preceded it; after the name it belongs to claude.
 	if restRequestsHelp(rest) {
-		fmt.Println("Usage: claude-playbook run " + runFlagsUsage + " <name> [claude-flags...]")
+		fmt.Println("Usage: cpb run " + runFlagsUsage + " <name> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Runs Claude Code with the named playbook.")
 		fmt.Println("Launch flags add one-off environment layers on top of the playbook's [env]")
@@ -93,7 +93,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("Sandbox flags run the playbook inside a sandbox (backend sbx, Docker Sandboxes):")
 		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use)")
 		fmt.Println("  --no-sandbox         launch on the host although the manifest says [sandbox] always = true")
-		fmt.Println("  --sandbox-host U@H   run the sandboxed launch on that machine over ssh (claude-playbook and the playbook installed there)")
+		fmt.Println("  --sandbox-host U@H   run the sandboxed launch on that machine over ssh (cpb and the playbook installed there)")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
 		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
@@ -103,7 +103,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(rest) == 0 {
-		return fmt.Errorf("playbook name required\nUsage: claude-playbook run " + runFlagsUsage + " <name> [claude-flags...]")
+		return fmt.Errorf("playbook name required\nUsage: cpb run " + runFlagsUsage + " <name> [claude-flags...]")
 	}
 	name := rest[0]
 	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts, nil)

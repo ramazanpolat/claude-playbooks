@@ -30,22 +30,22 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   'mkdir -p "$HOME/src/migrations"',
   '''printf '%s\n' '# upstream v1' > "$HOME/src/CLAUDE.md"''',
   '''printf '%s\n' 'name = "pb"' 'version = "1.0.0"' > "$HOME/src/.playbook"''',
   # Single-quoted lines, so $1/$2/$3 land in the FILE instead of expanding here.
-  '''printf '%s\n' '#!/bin/sh' 'echo "$1 -> $2" > "$3/migrated"' 'claude-playbook ALTER PLAYBOOK pb SET VAR MIGRATED=yes' > "$HOME/src/migrations/apply.sh"''',
+  '''printf '%s\n' '#!/bin/sh' 'echo "$1 -> $2" > "$3/migrated"' 'cpb ALTER PLAYBOOK pb SET VAR MIGRATED=yes' > "$HOME/src/migrations/apply.sh"''',
   'chmod 755 "$HOME/src/migrations/apply.sh"',
 ]
 
 [[verify.files]]
-path = "~/.local/bin/claude-playbook"
+path = "~/.local/bin/cpb"
 
 [[verify.commands]]
 # Create it, then make it updatable: a local source records no [source].
-command = '''claude-playbook CREATE PLAYBOOK pb FROM "$HOME/src" NO ALIAS && printf '%s\n' 'name = "pb"' 'version = "1.0.0"' '' '[source]' "repository = \"$HOME/src\"" > "$HOME/.claude-playbooks/pb/.playbook" && echo installed'''
+command = '''cpb CREATE PLAYBOOK pb FROM "$HOME/src" NO ALIAS && printf '%s\n' 'name = "pb"' 'version = "1.0.0"' '' '[source]' "repository = \"$HOME/src\"" > "$HOME/.claude-playbooks/pb/.playbook" && echo installed'''
 
 [[verify.commands]]
 # A local file the source knows nothing about, and one it DOES ship. Both
@@ -57,12 +57,12 @@ command = '''printf '%s\n' '# upstream v2' > "$HOME/src/CLAUDE.md" && printf '%s
 
 [[verify.commands]]
 # --dry-run reports the move...
-command = 'claude-playbook update pb --dry-run'
+command = 'cpb update pb --dry-run'
 contains = "available: 2.0.0"
 
 [[verify.commands]]
 # ...and the declared step, with its sha256...
-command = 'claude-playbook update pb --dry-run'
+command = 'cpb update pb --dry-run'
 contains = "migrate:   migrations/apply.sh (sha256 "
 
 [[verify.commands]]
@@ -73,11 +73,11 @@ contains = "dry-run-installed-nothing"
 [[verify.commands]]
 # Off a terminal the step needs --yes: without it the update is refused
 # and nothing changes.
-command = '''out=$(claude-playbook update pb 2>&1 </dev/null); printf '%s' "$out" | grep -qF "pass --yes" && grep -F "upstream v1" "$HOME/.claude-playbooks/pb/CLAUDE.md" >/dev/null && echo consent-required'''
+command = '''out=$(cpb update pb 2>&1 </dev/null); printf '%s' "$out" | grep -qF "pass --yes" && grep -F "upstream v1" "$HOME/.claude-playbooks/pb/CLAUDE.md" >/dev/null && echo consent-required'''
 contains = "consent-required"
 
 [[verify.commands]]
-command = 'claude-playbook update pb --yes && grep -F "upstream v2" "$HOME/.claude-playbooks/pb/CLAUDE.md" && echo updated'
+command = 'cpb update pb --yes && grep -F "upstream v2" "$HOME/.claude-playbooks/pb/CLAUDE.md" && echo updated'
 contains = "updated"
 
 [[verify.commands]]
@@ -104,13 +104,13 @@ command = 'ls -d "$HOME/.claude-playbooks/".pb.bak.* >/dev/null 2>&1 && echo bac
 contains = "backed-up"
 
 [[verify.commands]]
-command = 'claude-playbook SHOW PLAYBOOK pb'
+command = 'cpb SHOW PLAYBOOK pb'
 contains = "2.0.0"
 
 [[verify.commands]]
 # A playbook with no [source] cannot update natively, and says so rather than
 # failing obscurely.
-command = '''mkdir -p "$HOME/.claude-playbooks/orphan" && printf '%s\n' '# orphan' > "$HOME/.claude-playbooks/orphan/CLAUDE.md" && claude-playbook update orphan 2>&1 || true'''
+command = '''mkdir -p "$HOME/.claude-playbooks/orphan" && printf '%s\n' '# orphan' > "$HOME/.claude-playbooks/orphan/CLAUDE.md" && cpb update orphan 2>&1 || true'''
 contains = "nothing to update from"
 
 [[verify.commands]]

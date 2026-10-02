@@ -14,7 +14,7 @@ import (
 
 func TestStatementCreateAndDropPlaybook(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 
 	mustStmt(t, "CREATE PLAYBOOK fresh ALIAS fr SANDBOX")
 	m, err := manifest.Read(filepath.Join(root, "fresh"))
@@ -42,7 +42,7 @@ func TestStatementCreateAndDropPlaybook(t *testing.T) {
 
 func TestStatementCreatePlaybookFromSource(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	src := t.TempDir()
 	if err := manifest.Write(src, &manifest.Manifest{Version: "1.0.0", Name: "upstream", Launcher: "up"}); err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestStatementCreatePlaybookFromSource(t *testing.T) {
 
 func TestStatementCreatePlaybookLink(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	bare := t.TempDir()
 	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare); err == nil || !strings.Contains(err.Error(), "add one to the target first") {
 		t.Fatalf("LINK without a manifest must name the way out: %v", err)
@@ -81,7 +81,7 @@ func TestStatementCreatePlaybookLink(t *testing.T) {
 
 func TestStatementRenameAndAlias(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{})
 
 	mustStmt(t, "ALTER PLAYBOOK old RENAME TO new ALIAS nw")
@@ -114,7 +114,7 @@ func TestStatementRenameAndAlias(t *testing.T) {
 // name launcher too; ALIAS <its name> retires the alias it replaces.
 func TestStatementLauncherIsOneOrNone(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	has := func(cmd string) bool {
 		_, exists, _ := launcher.Lookup(config.LauncherDir, cmd)
 		return exists

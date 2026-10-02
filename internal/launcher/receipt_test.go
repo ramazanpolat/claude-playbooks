@@ -8,21 +8,21 @@ import (
 )
 
 // All receipt tests (and every launcher test that calls Write/Remove) run
-// against an isolated receipt via CLAUDE_LAUNCHER_RECEIPT, so nothing
+// against an isolated receipt via CPB_LAUNCHER_RECEIPT, so nothing
 // touches the real ~/.local/state.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "launcher-receipt-*")
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(dir, "launchers"))
+	os.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(dir, "launchers"))
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
 }
 
 func TestWriteRecordsAndRemoveUnrecords(t *testing.T) {
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir := t.TempDir()
 
 	path, err := Write(dir, "recorded")
@@ -57,7 +57,7 @@ func TestWriteRecordsAndRemoveUnrecords(t *testing.T) {
 
 func TestRecordedSkipsBlanksAndDuplicates(t *testing.T) {
 	rp := filepath.Join(t.TempDir(), "launchers")
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", rp)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", rp)
 	if err := os.WriteFile(rp, []byte("/a/b\n\n/a/b\n  /c/d\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestRecordedSkipsBlanksAndDuplicates(t *testing.T) {
 func TestRemoveReceiptCleansStateDir(t *testing.T) {
 	dir := t.TempDir()
 	rp := filepath.Join(dir, "state", "launchers")
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", rp)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", rp)
 	if err := record("/x/y"); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRemoveReceiptCleansStateDir(t *testing.T) {
 // valid launcher name, a path with one is refused outright, even when the
 // tab arrives through the working directory.
 func TestReceiptRefusesSeparators(t *testing.T) {
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	if err := ValidateName("a\tb"); err == nil {
 		t.Fatal("tab accepted in a command name")
 	}
@@ -114,7 +114,7 @@ func TestReceiptRefusesSeparators(t *testing.T) {
 // resolved), persisted absolute, and a legacy attributed line (v3.10.1) is
 // still read by its path.
 func TestReceiptNormalizesPathsAndReadsLegacyLines(t *testing.T) {
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	real := filepath.Join(t.TempDir(), "bin")
 	if err := os.MkdirAll(real, 0o755); err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestReceiptNormalizesPathsAndReadsLegacyLines(t *testing.T) {
 // A launcher directory spelled with different case on a case-insensitive
 // filesystem is the same directory: record and unrecord must agree.
 func TestReceiptMatchesCaseVariantDirectory(t *testing.T) {
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	base := t.TempDir()
 	lower := filepath.Join(base, "bin")
 	upper := filepath.Join(base, "BIN")
@@ -210,7 +210,7 @@ func TestNamesRejectWhitespaceAndLinesKeepPaths(t *testing.T) {
 			t.Fatalf("whitespace accepted in command name %q", bad)
 		}
 	}
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	if err := os.WriteFile(ReceiptPath(), []byte("  /a/b \n/c/d\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestNamesRejectWhitespaceAndLinesKeepPaths(t *testing.T) {
 // line for that entry, and the CLI's reserved symlink is never a
 // candidate under any spelling.
 func TestRemoveClearsCaseVariantLinesAndSparesReserved(t *testing.T) {
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir := t.TempDir()
 	if _, err := Write(dir, "Foo"); err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ func TestRemoveClearsCaseVariantLinesAndSparesReserved(t *testing.T) {
 // no longer creatable, and an entry merely named CPB in a directory with
 // no cpb symlink is not mistaken for the reserved one.
 func TestRemovalSideNamingAndReservedListing(t *testing.T) {
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir := t.TempDir()
 	bin, err := BinPath()
 	if err != nil {

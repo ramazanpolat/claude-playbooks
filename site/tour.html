@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cpb — the tour</title>
-<meta name="description" content="cpb (claude-playbooks) gives you as many isolated Claude Code setups as you need: config, environment, login and process, each described in a file you can apply anywhere.">
+<meta name="description" content="cpb (Claude PlayBooks) gives you as many isolated Claude Code setups as you need: config, environment, login and process, each described in a file you can apply anywhere.">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -155,7 +155,7 @@ Deleted playbook "scratch".</span></code></pre>
       what a launch sets and which layer set it &mdash; and a custom <code class="inline">/model</code>
       list travels with the playbook too.
     </p>
-    <div class="term" data-verify="README.md:59-64, examples/14-model-picker">
+    <div class="term" data-verify="README.md:59-68, examples/14-model-picker">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
         <div class="term-title">real run, v4 (pre-release)</div>
@@ -213,7 +213,7 @@ Login: isolated: no link to ~/.claude's login and no machine token; /login once 
       <code class="inline">~/.claude</code>, your shell's environment, or your other
       playbooks.
     </p>
-    <div class="term" data-verify="README.md:77-81, docs/guides/sandbox.md:11-18">
+    <div class="term" data-verify="README.md:75-84, docs/guides/sandbox.md:11-18">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
         <div class="term-title">sbx (Docker Sandboxes)</div>
@@ -250,7 +250,7 @@ Login: isolated: no link to ~/.claude's login and no machine token; /login once 
       <code class="inline">--dry-run</code> shows every change, and applying twice changes
       nothing.
     </p>
-    <div class="term" data-verify="README.md:94-110 (adapted: a local MCP server and skill dir, so it runs without a private repo or network)">
+    <div class="term" data-verify="README.md:96-112 (adapted: a local MCP server and skill dir, so it runs without a private repo or network)">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
         <div class="term-title">reviewer.cpb</div>
@@ -469,7 +469,7 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
   <section id="install">
     <p class="eyebrow">Get it</p>
     <h2>Install</h2>
-    <div class="term" data-verify="README.md:32, docs/guides/installation.md:8, cpb --version run on testbed">
+    <div class="term" data-verify="README.md:32, docs/guides/installation.md:9, cpb --version run on testbed">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
         <div class="term-title">install</div>
@@ -477,9 +477,9 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh</span>
 <span class="cmd"><span class="prompt">$ </span>cpb --version</span>
-<span class="out">claude-playbook version v3.27.0</span></code></pre>
+<span class="out">cpb version dev</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed</span>
+        <span class="verified-tag">verified against v4 (pre-release), testbed</span>
       </div>
     </div>
     <p class="install-row">

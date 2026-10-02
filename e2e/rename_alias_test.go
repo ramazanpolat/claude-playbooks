@@ -32,7 +32,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 	shim := shimDir(t)
 	dump := filepath.Join(work, "envdump")
 	// The alias invokes the binary by bare name, so the directory holding the
-	// binary under test must be on PATH. Relying on an installed claude-playbook
+	// binary under test must be on PATH. Relying on an installed cpb
 	// made this pass on a developer machine and fail on a clean CI runner.
 	baseEnv := []string{
 		"PATH=" + shim +
@@ -51,7 +51,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("claude-playbook %v: %v\n%s", full, err, out)
+			t.Fatalf("cpb %v: %v\n%s", full, err, out)
 		}
 		return string(out)
 	}

@@ -5,7 +5,7 @@
 // Claude Code drops subscriptionType from its account profile when
 // CLAUDE_CODE_OAUTH_TOKEN is set, so its interactive entitlement check cannot
 // confirm the plan and fails closed -- a Max seat is told the model requires
-// usage credits (anthropics/claude-code#79597). claude-playbook restores the
+// usage credits (anthropics/claude-code#79597). cpb restores the
 // descriptors from the account's own credential store.
 //
 // These assert on what the child process actually received, for the same reason

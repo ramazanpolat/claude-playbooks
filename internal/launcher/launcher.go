@@ -1,5 +1,5 @@
 // Package launcher manages per-playbook launcher commands: symlinks to the
-// claude-playbook binary placed in a directory on PATH. When the binary is
+// cpb binary placed in a directory on PATH. When the binary is
 // invoked through such a link it sees the link's name in argv[0] and
 // dispatches to `run <name>` — the multicall pattern used by busybox and
 // git. The launcher itself carries no state: name resolution happens at
@@ -24,8 +24,7 @@ var ErrTaken = errors.New("command name taken by a file this tool did not genera
 // ReservedNames are argv[0] values that always mean the CLI itself and may
 // never name a launcher.
 var ReservedNames = map[string]bool{
-	"claude-playbook": true,
-	"cpb":             true,
+	"cpb": true,
 }
 
 // Entry describes one launcher symlink found in the launcher directory.

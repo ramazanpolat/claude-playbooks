@@ -42,7 +42,7 @@ ALTER PLAYBOOK work
 
 func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	path := writePlaybookFile(t, scratchPlaybook)
 
 	out, err := apply(t, path, "--dry-run")
@@ -82,7 +82,7 @@ func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 // SHOW CREATE ALL writes a file that APPLY finds already true.
 func TestShowCreateAllRoundTrips(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	helper, _ := fakeHelper(t)
 	if out, err := apply(t, writePlaybookFile(t, scratchPlaybook)); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -179,7 +179,7 @@ func TestApplyWritesNothingOnAParseError(t *testing.T) {
 // A file never consents to DROP PLAYBOOK on its own.
 func TestApplyDropsNeedYes(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{})
 	path := writePlaybookFile(t, "CREATE ENV e;\nDROP PLAYBOOK old;\n")
 
@@ -209,7 +209,7 @@ func TestApplyDropsNeedYes(t *testing.T) {
 // is a warning, never an error, and changes nothing.
 func TestApplyWarnsOnSourceDrift(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 	before := snapshot(t, root)
 
@@ -238,7 +238,7 @@ func TestApplyWarnsOnSourceDrift(t *testing.T) {
 // how much of each file was applied.
 func TestApplySeveralFiles(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	base := writePlaybookFile(t, "CREATE OR REPLACE ENV base SET A=1;\n")
 	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;\n")
 	broken := writePlaybookFile(t, "CREATE ENV other;\nALTER ENV other FOO;\n")
@@ -287,7 +287,7 @@ func TestApplySeveralFiles(t *testing.T) {
 // so does a dry run.
 func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	helper, _ := fakeHelper(t)
 	path := writePlaybookFile(t, "ALTER DEFAULTS SET SECRET HELPER '"+helper+"';\nCREATE OR REPLACE ENV r;\nALTER ENV r SET TOKEN FROM 'keychain:ok/r';\n")
 	if out, err := apply(t, path, "--dry-run"); err != nil {
@@ -320,7 +320,7 @@ func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 // written, not only against what they would have created.
 func TestApplyDryRunSeesEarlierChanges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "p", &manifest.Manifest{})
 	mustStmt(t, "CREATE ENV a")
 	mustStmt(t, "CREATE ENV b")
@@ -359,7 +359,7 @@ func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 // default launcher (named after the playbook) instead of writing NO ALIAS.
 func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "tok", &manifest.Manifest{Source: &manifest.Source{Repository: "https://user:ghp_s3cret@example.com/r.git"}})
 	var err error
 	out := captureStdout(t, func() { err = runStatement(words("SHOW CREATE PLAYBOOK tok")) })

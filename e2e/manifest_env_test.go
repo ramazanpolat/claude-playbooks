@@ -102,7 +102,7 @@ func TestStartHonorsManifestEnv(t *testing.T) {
 	}
 }
 
-// launchFails runs claude-playbook expecting a non-zero exit and returns its
+// launchFails runs cpb expecting a non-zero exit and returns its
 // combined output; the stub claude must never have been reached.
 func launchFails(t *testing.T, playbooksDir string, l launch) string {
 	t.Helper()
@@ -118,7 +118,7 @@ func launchFails(t *testing.T, playbooksDir string, l launch) string {
 	}, l.env...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("claude-playbook %v exited 0:\n%s", args, out)
+		t.Fatalf("cpb %v exited 0:\n%s", args, out)
 	}
 	if _, serr := os.Stat(dump); serr == nil {
 		t.Fatalf("stub claude was launched despite the refusal:\n%s", out)

@@ -48,7 +48,7 @@ CI runs exactly these on every PR. A PR with red CI is not reviewed.
 
 ## Reporting bugs
 
-Use the bug template. The output of `claude-playbook --version`, your OS,
+Use the bug template. The output of `cpb --version`, your OS,
 and an exact command sequence beat any amount of description.
 
 ## Release process

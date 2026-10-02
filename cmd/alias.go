@@ -115,7 +115,7 @@ func doAlias(o aliasOpts, args []string) error {
 			return fmt.Errorf("command name %q already addresses playbook %q", newAlias, owner.Name)
 		}
 		if !launcherOpsAllowed() {
-			fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; run manually with:\n  claude-playbook --playbooks-dir %q run %q\n", config.ResolvePlaybooksDir(), newAlias)
+			fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; run manually with:\n  cpb --playbooks-dir %q run %q\n", config.ResolvePlaybooksDir(), newAlias)
 			return nil
 		}
 		ldir, derr := config.ResolveLauncherDir()
@@ -123,7 +123,7 @@ func doAlias(o aliasOpts, args []string) error {
 			return fmt.Errorf("no launcher written: %w", derr)
 		}
 		if _, _, foreign := launcher.Lookup(ldir, newAlias); foreign {
-			return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", newAlias)
+			return fmt.Errorf("command name %q is taken by a file cpb did not generate", newAlias)
 		}
 		lpath, werr := launcher.Write(ldir, newAlias)
 		if werr != nil {
@@ -176,7 +176,7 @@ func doAlias(o aliasOpts, args []string) error {
 	if launcherOpsAllowed() {
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 			if _, _, foreign := launcher.Lookup(ldir, newAlias); foreign {
-				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", newAlias)
+				return fmt.Errorf("command name %q is taken by a file cpb did not generate", newAlias)
 			}
 		}
 	}

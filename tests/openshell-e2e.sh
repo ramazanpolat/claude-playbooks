@@ -4,9 +4,9 @@
 #
 # Needs: Linux, Docker Engine 28+, OpenShell 0.1.x with host mounts enabled
 # (docs/guides/sandbox.md, "OpenShell backend"), tmux, python3, and the
-# claude-playbook binary to test. Not run in CI. Run it on a disposable host.
+# cpb binary to test. Not run in CI. Run it on a disposable host.
 #
-#   tests/openshell-e2e.sh /path/to/claude-playbook
+#   tests/openshell-e2e.sh /path/to/cpb
 #
 # Everything is dummy: a throwaway HOME (the gateway registration is borrowed
 # from ~/.config/openshell), a fake Anthropic endpoint on this host that
@@ -16,14 +16,14 @@
 # built image (cpb-openshell/claude:*) stays for the next run.
 set -u
 unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
-CPB=${1:?usage: $0 /path/to/claude-playbook}
+CPB=${1:?usage: $0 /path/to/cpb}
 REAL_HOME=$HOME
 E=$(mktemp -d /tmp/cpb-openshell-e2e.XXXXXX)
 GW=$REAL_HOME/.config/openshell/gateway.toml
 export HOME=$E/home
 mkdir -p "$HOME/.config" "$E/bin" "$E/work" "$E/ro"
 ln -s "$REAL_HOME/.config/openshell" "$HOME/.config/openshell"
-ln -s "$(readlink -f "$CPB")" "$E/bin/claude-playbook"
+ln -s "$(readlink -f "$CPB")" "$E/bin/cpb"
 export PATH="$E/bin:$PATH"
 W=$(cd "$E/work" && pwd -P); RO=$(cd "$E/ro" && pwd -P)
 echo work > "$W/README"; echo ro > "$RO/NOTE"
@@ -88,13 +88,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-claude-playbook CREATE PLAYBOOK e2e NO ALIAS >/dev/null
+cpb CREATE PLAYBOOK e2e NO ALIAS >/dev/null
 P=$HOME/.claude-playbooks/e2e
-claude-playbook CREATE ENV r SET ANTHROPIC_BASE_URL=http://localhost:18080 ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-1 AS PLAINTEXT >/dev/null
-claude-playbook ALTER PLAYBOOK e2e USE ENV r >/dev/null
+cpb CREATE ENV r SET ANTHROPIC_BASE_URL=http://localhost:18080 ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-1 AS PLAINTEXT >/dev/null
+cpb ALTER PLAYBOOK e2e USE ENV r >/dev/null
 # Test fixture: a second host the sandbox may reach (with no credential).
-claude-playbook ALTER PLAYBOOK e2e SET SANDBOX allow_net=host.openshell.internal:18081 >/dev/null
-L() { n=$1; shift; timeout 900 claude-playbook run --sandbox=openshell --workdir "$W" --mount "$RO:ro" e2e "$@" </dev/null >"$E/out.$n" 2>&1; echo $? >"$E/rc.$n"; }
+cpb ALTER PLAYBOOK e2e SET SANDBOX allow_net=host.openshell.internal:18081 >/dev/null
+L() { n=$1; shift; timeout 900 cpb run --sandbox=openshell --workdir "$W" --mount "$RO:ro" e2e "$@" </dev/null >"$E/out.$n" 2>&1; echo $? >"$E/rc.$n"; }
 has() { grep -qF -- "$2" "$E/out.$1"; }
 got() { grep -F "\"port\": $1" "$E/received.jsonl" 2>/dev/null | grep -qF -- "$2"; }
 
@@ -120,14 +120,14 @@ got 18081 dummy-e2e-token && bad "nothing reached the other host with the key" |
 O sandbox stop "$SB" >/dev/null
 
 echo "== 3 rotation: a new token in the profile, the stopped sandbox started"
-claude-playbook ALTER ENV r SET ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-2 AS PLAINTEXT >/dev/null
+cpb ALTER ENV r SET ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-2 AS PLAINTEXT >/dev/null
 L 3 -p "say hi"
 has 3 "Starting sandbox $SB" && ok "stopped sandbox started on reuse" || bad "started on reuse"
 [ "$(cat "$E/rc.3")" = 0 ] && got 18080 "Bearer dummy-e2e-token-2" && ok "rotated token injected" || bad "rotation"
 
 echo "== 4 the claude TUI under the generated hard_requirement policy"
 T="tmux -L cpbe2e"
-$T new-session -d -s tui -x 160 -y 45 "claude-playbook run --sandbox=openshell --workdir '$W' --mount '$RO:ro' e2e; echo EXIT_RC=\$?; sleep 600"
+$T new-session -d -s tui -x 160 -y 45 "cpb run --sandbox=openshell --workdir '$W' --mount '$RO:ro' e2e; echo EXIT_RC=\$?; sleep 600"
 main=""; for _ in $(seq 40); do
   sleep 3; s=$($T capture-pane -p -t tui)
   case "$s" in
@@ -147,7 +147,7 @@ $T capture-pane -p -t tui | grep -q "Sandbox $SB stopped" && ok "stopped after t
 $T kill-server 2>/dev/null
 
 echo "== 5 revoke: the token gone from the profile"
-claude-playbook ALTER ENV r UNSET ANTHROPIC_AUTH_TOKEN >/dev/null
+cpb ALTER ENV r UNSET ANTHROPIC_AUTH_TOKEN >/dev/null
 L 5 -p "say hi"
 has 5 "Secret ANTHROPIC_AUTH_TOKEN revoked at the proxy" && ok "revoked" || bad "revoked"
 O provider list | grep -q "$ID" && bad "provider deleted" || ok "provider deleted"
@@ -162,7 +162,7 @@ systemctl --user start openshell-gateway; gateway_up || bad "gateway back up"
 # Host mounts off: the create fails and names the fix. --sandbox-fresh first
 # removes the sandbox and cpb's providers and profiles (token set again, so
 # there is one to remove).
-claude-playbook ALTER ENV r SET ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-3 AS PLAINTEXT >/dev/null
+cpb ALTER ENV r SET ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-3 AS PLAINTEXT >/dev/null
 L 6c -p hi; O provider list | grep -q "$ID" || bad "provider back for the removal check"
 cp "$GW" "$E/gateway.toml.bak"; sed -i 's/^\([[:space:]]*\)enable_bind_mounts[[:space:]]*=[[:space:]]*true/\1enable_bind_mounts = false/' "$GW"
 grep -q 'enable_bind_mounts = false' "$GW" || bad "host mounts switched off for the check" "no enable_bind_mounts = true in $GW"

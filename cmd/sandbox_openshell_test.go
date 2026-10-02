@@ -25,7 +25,7 @@ case "$1 $2" in
 "sandbox list") printf '{"sandboxes":['; s=""; for n in $OS_STUB_LS; do printf '%s{"name":"%s"}' "$s" "$n"; s=,; done; printf ']}\n';;
 "sandbox get") j="$OS_STUB_GET"; [ -n "$j" ] || j='{"phase":"Ready","labels":{}}'; printf '%s\n' "$j";;
 "sandbox create") p=""; for a in "$@"; do [ "$p" = --policy ] && cp "$a" "$d/policy.yaml"; p="$a"; done;;
-"sandbox exec") case "$*" in *pgrep*) echo "${OS_STUB_PGREP:-idle}";; *"cat ~/.claude-playbook-sandbox"*) printf 'skills=private';; esac;;
+"sandbox exec") case "$*" in *pgrep*) echo "${OS_STUB_PGREP:-idle}";; *"cat ~/.cpb-sandbox"*) printf 'skills=private';; esac;;
 "sandbox provider") if [ "$3" = list ]; then printf '{"providers":['; s=""; for n in $OS_STUB_ATTACHED; do printf '%s{"name":"%s"}' "$s" "$n"; s=,; done; printf ']}\n'; fi;;
 "profile export") has "$OS_STUB_PROFILES" "$3" || exit 1; j="$OS_STUB_PROFILE_JSON"; [ -n "$j" ] || j='{"endpoints":[{"host":"router.local","port":9}]}'; printf '%s\n' "$j";;
 "profile import") p=""; for a in "$@"; do [ "$p" = -f ] && cp "$a" "$d/profile.yaml"; p="$a"; done;;
@@ -203,7 +203,7 @@ func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 		"docker build -t cpb-openshell/claude:"+label+" --build-arg CLAUDE_CODE_VERSION="+openshellClaudeVersion+" -",
 		"sandbox create --name cpb-box --from cpb-openshell/claude:"+label+" --detach --policy ",
 		`--driver-config-json {"docker":{"mounts":[{"type":"bind","source":"`+cwork+`","target":"`+cwork+`","read_only":false},{"type":"bind","source":"`+pbDir+`","target":"`+pbDir+`","read_only":false}]}} --label cpb-image=`+label,
-		"sandbox exec -n cpb-box --no-tty -- bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox",
+		"sandbox exec -n cpb-box --no-tty -- bash -lc printf %s 'skills=private' > ~/.cpb-sandbox",
 		"policy update cpb-box --binary /** --add-endpoint api.example.com:443 --wait",
 		// A host on this machine, with a port or as an IPv6 address, is
 		// spelled as the sandbox reaches it.

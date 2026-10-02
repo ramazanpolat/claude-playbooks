@@ -256,12 +256,12 @@ func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 
 func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
 	resetCommandTestState(t)
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
 	root := t.TempDir()
 	// Launcher mutations only apply to the default playbooks root — point
 	// HOME at the sandbox so the default root lands inside it.
 	t.Setenv("HOME", root)
-	os.Unsetenv("CLAUDE_PLAYBOOKS_DIR")
+	os.Unsetenv("CPB_PLAYBOOKS_DIR")
 	config.PlaybooksDir = filepath.Join(root, ".claude-playbooks")
 	target := filepath.Join(root, "target")
 	configDir := filepath.Join(target, "config")
@@ -424,7 +424,7 @@ func quoteTOML(s string) string {
 func resetCommandTestState(t *testing.T) {
 	t.Helper()
 	isolateCredentials(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	// A developer's own secret helper must not reach a test.
 	t.Setenv("CPB_SECRET_HELPER", "")
 	config.PlaybooksDir = ""
@@ -551,6 +551,6 @@ func isolateCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
 	os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN")
 }

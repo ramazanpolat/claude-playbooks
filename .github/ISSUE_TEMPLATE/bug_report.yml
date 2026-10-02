@@ -6,7 +6,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `claude-playbook --version`
+      description: Output of `cpb --version`
       placeholder: v3.1.0
     validations:
       required: true

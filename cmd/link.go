@@ -137,7 +137,7 @@ func doLink(o linkOpts, args []string) error {
 	fmt.Printf("Linked %s -> %s\n", dest, abs)
 
 	if o.noAlias {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
+		fmt.Printf("\nRun with:\n  cpb run %s\n", name)
 		return nil
 	}
 

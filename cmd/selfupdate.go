@@ -93,9 +93,9 @@ func runSelfUpdate(force, checkOnly, major bool) error {
 
 	cfg := selfUpdateConfig{
 		currentVersion: Version,
-		repo:           envOr("CLAUDE_PLAYBOOK_UPDATE_REPO", defaultUpdateRepo),
-		apiBase:        envOr("CLAUDE_PLAYBOOK_UPDATE_API_BASE", "https://api.github.com"),
-		downloadBase:   os.Getenv("CLAUDE_PLAYBOOK_UPDATE_DOWNLOAD_BASE"),
+		repo:           envOr("CPB_UPDATE_REPO", defaultUpdateRepo),
+		apiBase:        envOr("CPB_UPDATE_API_BASE", "https://api.github.com"),
+		downloadBase:   os.Getenv("CPB_UPDATE_DOWNLOAD_BASE"),
 		goos:           runtime.GOOS,
 		goarch:         runtime.GOARCH,
 		execPath:       exe,
@@ -116,7 +116,7 @@ func runSelfUpdate(force, checkOnly, major bool) error {
 // replacing the first, so the hint says to change the ref, not to re-add.
 const nixUpdateHint = "Installed through Nix (devbox or a flake): update there instead. In a devbox project, change\n" +
 	"the tag in devbox.json and run `devbox install`; the package is\n" +
-	"  git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook"
+	"  git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#cpb"
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -206,7 +206,7 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 		return nil
 	}
 
-	asset := fmt.Sprintf("claude-playbook-%s-%s", cfg.goos, cfg.goarch)
+	asset := fmt.Sprintf("cpb-%s-%s", cfg.goos, cfg.goarch)
 	downloadBase := cfg.downloadBase
 	if downloadBase == "" {
 		downloadBase = fmt.Sprintf("https://github.com/%s/releases/download", cfg.repo)
@@ -218,7 +218,7 @@ func selfUpdate(w io.Writer, cfg selfUpdateConfig) error {
 	// Stage the download in the target's own directory so the final rename is
 	// an atomic same-filesystem swap (never a cross-device copy).
 	dir := filepath.Dir(cfg.execPath)
-	tmp, err := os.CreateTemp(dir, ".claude-playbook.update-*")
+	tmp, err := os.CreateTemp(dir, ".cpb.update-*")
 	if err != nil {
 		if os.IsPermission(err) {
 			return fmt.Errorf("cannot write to %s: permission denied. Re-run with elevated privileges (e.g. sudo) or reinstall via the installer", dir)
@@ -356,7 +356,7 @@ func fetchReleaseTags(cfg selfUpdateConfig) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "claude-playbook-selfupdate")
+		req.Header.Set("User-Agent", "cpb-selfupdate")
 		req.Header.Set("Accept", "application/vnd.github+json")
 		if cfg.token != "" {
 			req.Header.Set("Authorization", "Bearer "+cfg.token)
@@ -399,7 +399,7 @@ func downloadTo(cfg selfUpdateConfig, url string, dst io.Writer) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "claude-playbook-selfupdate")
+	req.Header.Set("User-Agent", "cpb-selfupdate")
 	resp, err := cfg.httpClient.Do(req)
 	if err != nil {
 		return err
@@ -429,7 +429,7 @@ func verifyChecksum(w io.Writer, cfg selfUpdateConfig, downloadBase, latest, ass
 		fmt.Fprintf(w, "Warning: no SHA256SUMS for %s; skipping checksum verification\n", latest)
 		return nil
 	}
-	req.Header.Set("User-Agent", "claude-playbook-selfupdate")
+	req.Header.Set("User-Agent", "cpb-selfupdate")
 	resp, err := cfg.httpClient.Do(req)
 	if err != nil {
 		fmt.Fprintf(w, "Warning: no SHA256SUMS for %s; skipping checksum verification\n", latest)

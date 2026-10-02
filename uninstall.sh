@@ -1,31 +1,24 @@
 #!/bin/sh
 set -e
 
-DEFAULT_INSTALL_DIR="${DEFAULT_INSTALL_DIR:-/usr/local/bin}"
+CPB_INSTALL_DEFAULT_DIR="${CPB_INSTALL_DEFAULT_DIR:-/usr/local/bin}"
 
 # The uninstall logic lives in ONE place: the binary itself. Launcher
-# ownership, the cpb sibling, and completion-line cleanup all need the same
+# ownership and completion-line cleanup need the same
 # judgment the CLI already implements and tests — duplicating it in shell is
 # how uninstallers grow divergent bugs. This script only decides WHICH
 # binaries to hand the job to, and keeps a literal-artifact fallback for a
 # binary that is broken or too old to know --binary-only.
 
-# Fallback: remove only the two literal artifacts install.sh writes;
-# nothing here guesses at ownership.
+# Fallback: remove only the literal artifact install.sh writes; nothing
+# here guesses at ownership.
 REMOVED=0
 remove_artifacts_in() {
   dir="$1"
   [ -n "$dir" ] || return 0
-  # cpb is ours only as the exact `cpb -> claude-playbook` link install.sh
-  # creates (dangling included); anything else under that name is foreign.
-  if [ -L "$dir/cpb" ] && [ "$(readlink "$dir/cpb" 2>/dev/null)" = "claude-playbook" ]; then
+  if [ -e "$dir/cpb" ] || [ -L "$dir/cpb" ]; then
     rm -f "$dir/cpb"
     echo "Removed $dir/cpb"
-    REMOVED=1
-  fi
-  if [ -e "$dir/claude-playbook" ] || [ -L "$dir/claude-playbook" ]; then
-    rm -f "$dir/claude-playbook"
-    echo "Removed $dir/claude-playbook"
     REMOVED=1
   fi
 }
@@ -34,12 +27,12 @@ remove_artifacts_in() {
 # user actually runs — then the fixed install locations, so a dual install
 # (e.g. ~/.local/bin plus a later sudo install) is cleaned everywhere, as
 # the pre-delegation script did.
-if [ -n "${INSTALL_DIR:-}" ]; then
-  set -- "$INSTALL_DIR/claude-playbook"
+if [ -n "${CPB_INSTALL_DIR:-}" ]; then
+  set -- "$CPB_INSTALL_DIR/cpb"
 else
-  set -- "$(command -v claude-playbook 2>/dev/null || true)" \
-         "$DEFAULT_INSTALL_DIR/claude-playbook" \
-         "$HOME/.local/bin/claude-playbook"
+  set -- "$(command -v cpb 2>/dev/null || true)" \
+         "$CPB_INSTALL_DEFAULT_DIR/cpb" \
+         "$HOME/.local/bin/cpb"
 fi
 
 DELEGATED=0
@@ -60,19 +53,13 @@ for BIN in "$@"; do
     "$BIN" self-uninstall --binary-only --yes
     DELEGATED=1
     # The candidate may be a symlink whose physical target the delegated
-    # uninstall just removed (package-manager-style indirection): reserved
-    # names are excluded from the launcher sweep, so clear the now-dangling
-    # PATH entry — and its cpb twin — here. Only dangling links are
-    # touched: if the binary survived (e.g. permission denied), both still
-    # resolve and stay.
+    # uninstall just removed (package-manager-style indirection): the
+    # reserved name is excluded from the launcher sweep, so clear the
+    # now-dangling PATH entry here. Only a dangling link is touched: if the
+    # binary survived (e.g. permission denied), it still resolves and stays.
     if [ -L "$BIN" ] && [ ! -e "$BIN" ]; then
       rm -f "$BIN"
       echo "Removed $BIN"
-      twin="$(dirname "$BIN")/cpb"
-      if [ -L "$twin" ] && [ ! -e "$twin" ]; then
-        rm -f "$twin"
-        echo "Removed $twin"
-      fi
     fi
   else
     remove_artifacts_in "$(dirname "$BIN")"
@@ -81,16 +68,16 @@ for BIN in "$@"; do
 done
 
 if [ "$HANDLED" -eq 0 ]; then
-  if [ -n "${INSTALL_DIR:-}" ]; then
-    remove_artifacts_in "$INSTALL_DIR"
+  if [ -n "${CPB_INSTALL_DIR:-}" ]; then
+    remove_artifacts_in "$CPB_INSTALL_DIR"
   else
-    remove_artifacts_in "$DEFAULT_INSTALL_DIR"
+    remove_artifacts_in "$CPB_INSTALL_DEFAULT_DIR"
     remove_artifacts_in "$HOME/.local/bin"
   fi
 fi
 
 if [ "$DELEGATED" -eq 0 ] && [ "$REMOVED" -eq 0 ]; then
-  echo "claude-playbook was not found in the expected install locations."
+  echo "cpb was not found in the expected install locations."
 fi
 if [ "$FELL_BACK" -eq 1 ] && [ "$REMOVED" -eq 1 ]; then
   echo "Note: that binary could not run the built-in uninstaller, so launcher"
@@ -100,5 +87,5 @@ fi
 
 if [ "$DELEGATED" -eq 0 ]; then
   echo ""
-  echo "Playbooks were not touched: ${CLAUDE_PLAYBOOKS_DIR:-$HOME/.claude-playbooks}"
+  echo "Playbooks were not touched: ${CPB_PLAYBOOKS_DIR:-$HOME/.claude-playbooks}"
 fi

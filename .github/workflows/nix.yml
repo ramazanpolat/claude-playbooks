@@ -1,8 +1,8 @@
 name: nix
 
-# The flake is how devbox and Nix users install claude-playbook:
+# The flake is how devbox and Nix users install cpb:
 #
-#   devbox add github:ramazanpolat/claude-playbooks/<tag>#claude-playbook
+#   devbox add github:ramazanpolat/claude-playbooks/<tag>#cpb
 #
 # This proves it on both OSes, the way a user meets it: a plain `nix build`,
 # then a fresh devbox project that adds the flake by a REAL github: reference
@@ -32,18 +32,18 @@ jobs:
 
       - name: nix build
         run: |
-          nix build .#claude-playbook
-          want="claude-playbook version v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
-          got=$(./result/bin/claude-playbook --version)
+          nix build .#cpb
+          want="cpb version v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -1)"
+          got=$(./result/bin/cpb --version)
           echo "$got"
           [ "$got" = "$want" ] || { echo "::error::--version is '$got', want '$want'"; exit 1; }
-          [ "$(./result/bin/cpb --version)" = "$want" ] || { echo "::error::cpb does not report $want"; exit 1; }
-          [ -L result/bin/cpb ] || { echo "::error::cpb is not a symlink"; exit 1; }
+          # One executable, cpb, and no second name beside it.
+          [ "$(ls result/bin)" = cpb ] && [ ! -L result/bin/cpb ] || { echo "::error::result/bin is not one cpb: $(ls -l result/bin)"; exit 1; }
 
       - name: static on Linux
         if: runner.os == 'Linux'
         run: |
-          file -L result/bin/claude-playbook | tee /dev/stderr | grep -q 'statically linked'
+          file -L result/bin/cpb | tee /dev/stderr | grep -q 'statically linked'
 
       # devbox's own installer, not jetify-com/devbox-install-action: the
       # action runs `devbox install` in the repository root and fails without
@@ -58,7 +58,7 @@ jobs:
           # Self-update's release lookup; authenticated so a hosted runner's
           # shared IP is not rate-limited.
           GITHUB_TOKEN: ${{ github.token }}
-          REF: git+https://github.com/${{ github.repository }}?rev=${{ github.event.pull_request.head.sha || github.sha }}#claude-playbook
+          REF: git+https://github.com/${{ github.repository }}?rev=${{ github.event.pull_request.head.sha || github.sha }}#cpb
         run: |
           set -eu
           P=$(mktemp -d); cd "$P"
@@ -66,10 +66,10 @@ jobs:
           devbox add "$REF"
           # The lock records the pinned github: resolution, not a moving ref.
           grep -F "$REF" devbox.lock
-          want="claude-playbook version v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/package.json" | head -1)"
-          [ "$(devbox run -- claude-playbook --version)" = "$want" ]
+          want="cpb version v$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/package.json" | head -1)"
+          [ "$(devbox run -- cpb --version)" = "$want" ]
           # command -v resolves inside the project's profile, not the store.
-          devbox run -- sh -c 'command -v claude-playbook' | tee /dev/stderr | grep -q "$P/.devbox/"
+          devbox run -- sh -c 'command -v cpb' | tee /dev/stderr | grep -q "$P/.devbox/"
 
           # Project-local playbooks root: CREATE … FROM and SHOW land under it,
           # and no launcher is written even when one is ASKED for (ALIAS):
@@ -78,10 +78,10 @@ jobs:
           # there, not that there was nowhere to write.
           mkdir -p fix "$HOME/.local/bin"; printf 'name = "fx"\n' > fix/.playbook; printf '# fx\n' > fix/CLAUDE.md
           before=$(ls -A "$HOME/.local/bin" | sort)
-          out=$(devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook CREATE PLAYBOOK fx FROM "$P/fix" ALIAS fxcmd 2>&1)
+          out=$(devbox run -- env CPB_PLAYBOOKS_DIR="$P/pb" cpb CREATE PLAYBOOK fx FROM "$P/fix" ALIAS fxcmd 2>&1)
           echo "$out"
           echo "$out" | grep -q 'launchers are managed only for the default playbooks root'
-          devbox run -- env CLAUDE_PLAYBOOKS_DIR="$P/pb" claude-playbook SHOW PLAYBOOK fx | grep -q "^Path: *$P/pb/fx"
+          devbox run -- env CPB_PLAYBOOKS_DIR="$P/pb" cpb SHOW PLAYBOOK fx | grep -q "^Path: *$P/pb/fx"
           [ "$before" = "$(ls -A "$HOME/.local/bin" | sort)" ]
           [ ! -e "$HOME/.local/bin/fxcmd" ] && [ ! -e "$P/.devbox/nix/profile/default/bin/fxcmd" ]
 
@@ -91,7 +91,7 @@ jobs:
           # inside devbox's environment (an outer "$PATH" drops the profile),
           # and `devbox run` re-wraps its command as a script, so `sh -c ...`
           # positional arguments do not survive it.
-          printf '#!/bin/sh\nPATH="%s:$PATH" CLAUDE_PLAYBOOKS_DIR="%s" exec claude-playbook run fx\n' "$P/stub" "$P/pb" > runfx.sh
+          printf '#!/bin/sh\nPATH="%s:$PATH" CPB_PLAYBOOKS_DIR="%s" exec cpb run fx\n' "$P/stub" "$P/pb" > runfx.sh
           devbox run -- sh "$P/runfx.sh" | tee /dev/stderr | grep -qx "CFG=$P/pb/fx"
 
           # Self-update refuses a Nix-managed binary even when it is current
@@ -100,7 +100,7 @@ jobs:
           # Explicit exits: a negated pipeline never trips set -e, and inside a
           # loop only the last iteration's status would count.
           for args in "self-update" "self-update --force"; do
-            if out=$(devbox run -- claude-playbook $args 2>&1); then echo "::error::'$args' did not refuse"; echo "$out"; exit 1; fi
+            if out=$(devbox run -- cpb $args 2>&1); then echo "::error::'$args' did not refuse"; echo "$out"; exit 1; fi
             echo "$out" | grep -q 'managed by Nix' || { echo "::error::'$args' refused without naming Nix"; echo "$out"; exit 1; }
             if echo "$out" | grep -qi -e sudo -e 'up to date'; then echo "::error::'$args' mentions sudo or 'up to date'"; echo "$out"; exit 1; fi
           done

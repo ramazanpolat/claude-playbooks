@@ -178,7 +178,7 @@ func TestManifestProfilesApplyAtLaunch(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
 		Name:  "account",
@@ -218,7 +218,7 @@ func TestMissingProfileIsReportedTyped(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 
 	configDir := filepath.Join(root, "pb")
@@ -308,7 +308,7 @@ func TestProfileErrorStopsBeforeAuthMutation(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 	if err := os.MkdirAll(envprofile.Dir(root), 0o755); err != nil {
 		t.Fatal(err)
@@ -348,7 +348,7 @@ func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
 		Name: "work", Set: map[string]string{"MODEL": "profile", "FROM_PROFILE": "yes"}, Block: []string{OAuthTokenEnv},
@@ -413,7 +413,7 @@ func TestOwnTokenDropsGlobalPlanDescriptors(t *testing.T) {
 	}
 	writeStore(t, global, `{"claudeAiOauth":{"accessToken":"g","subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}`)
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 
 	configDir := filepath.Join(root, "pb")
@@ -483,7 +483,7 @@ func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{Name: "base", Set: map[string]string{"FROM_DEFAULT": "yes", "MODEL": "default"}, Block: []string{OAuthTokenEnv}}); err != nil {
 		t.Fatal(err)

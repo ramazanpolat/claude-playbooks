@@ -60,7 +60,7 @@ func TestApplyJSONPlan(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	store := filepath.Join(home, "store")
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", store)
+	t.Setenv("CPB_PLAYBOOKS_DIR", store)
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	writeCpb(t, dir, "base.cpb", "CREATE OR REPLACE ENV router SET BASE=http://router.invalid;\n")
 	main := writeCpb(t, dir, "main.cpb", "INCLUDE 'base.cpb';\nUSE PLAYBOOK other;\nALTER PLAYBOOK USE ENV router;\nCREATE PLAYBOOK IF NOT EXISTS named NO ALIAS;\n")

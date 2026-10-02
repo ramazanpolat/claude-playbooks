@@ -18,12 +18,12 @@ import (
 // failure is a warning with manual instructions, never a command failure.
 func installLauncher(cmdName, playbookName, configDir string) {
 	manual := func() {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", shell.QuoteArg(playbookName))
+		fmt.Printf("\nRun with:\n  cpb run %s\n", shell.QuoteArg(playbookName))
 	}
 
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root (%s); none written for custom root %s.\n", defaultPlaybooksRoot(), config.ResolvePlaybooksDir())
-		fmt.Printf("\nRun with:\n  claude-playbook --playbooks-dir %s run %s\n", shell.QuoteArg(config.ResolvePlaybooksDir()), shell.QuoteArg(playbookName))
+		fmt.Printf("\nRun with:\n  cpb --playbooks-dir %s run %s\n", shell.QuoteArg(config.ResolvePlaybooksDir()), shell.QuoteArg(playbookName))
 		return
 	}
 
@@ -168,7 +168,7 @@ func captureManifestRestore(dir string) (func(), error) {
 // distinguished from the documented one-shot assignment — mutating links
 // for either would corrupt the default registry's commands. How the default
 // root was expressed does not matter: an exported
-// CLAUDE_PLAYBOOKS_DIR=$HOME/.claude-playbooks resolves to the same
+// CPB_PLAYBOOKS_DIR=$HOME/.claude-playbooks resolves to the same
 // registry dispatch will see and is allowed.
 func launcherOpsAllowed() bool {
 	return samePath(config.ResolvePlaybooksDir(), defaultPlaybooksRoot())
