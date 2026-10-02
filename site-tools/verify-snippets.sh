@@ -23,13 +23,13 @@ cpb=$(cd "$(dirname "$cpb_bin")" && pwd)/$(basename "$cpb_bin")
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 ci="$repo/examples/.ci"
-chmod 755 "$ci/claude" "$ci/with-secret"
+chmod 755 "$ci/claude" "$here/stand-in-secret-helper"
 
 home=$(mktemp -d)
 trap 'rm -rf "$home"' EXIT
 mkdir -p "$home/bin"
 ln -s "$cpb" "$home/bin/cpb"
-export HOME="$home" PATH="$ci:$home/bin:$PATH" CPB_SECRET_HELPER="$ci/with-secret" FAKE_MARKETS=""
+export HOME="$home" PATH="$ci:$home/bin:$PATH" CPB_SECRET_HELPER="$here/stand-in-secret-helper" FAKE_MARKETS=""
 cd "$home"
 
 fail=0
@@ -84,7 +84,7 @@ out=$(cpb SHOW CREATE PLAYBOOK reviewer --skip-secrets); check "recipe: SHOW CRE
 echo "== mcp + secret ref =="
 out=$(cpb CREATE PLAYBOOK researcher NO ALIAS); check "mcp: created" 'Created playbook "researcher"'
 out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER files COMMAND npx ARGS -y @modelcontextprotocol/server-filesystem /srv/notes); check "mcp: add files server" "MCP server files"
-out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL https://mcp.sentry.dev/mcp HEADER Authorization FROM keychain:pilot/sentry-auth); check "mcp: add sentry server" "MCP server sentry"
+out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL https://mcp.sentry.dev/mcp HEADER Authorization FROM keychain:sentry-auth); check "mcp: add sentry server" "MCP server sentry"
 out=$(cpb EXPLAIN PLAYBOOK researcher); check "mcp: EXPLAIN shows the placeholder var" "CPB_MCP_SENTRY_H_AUTHORIZATION_"
 
 echo "== sessions + SELECT =="

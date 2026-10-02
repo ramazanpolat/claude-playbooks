@@ -2,7 +2,7 @@
   "zones": [
     {"id": "host", "kind": "host", "label": "Your machine", "tag": "host"},
     {"id": "sbx", "kind": "sandbox", "label": "microVM", "tag": "sbx", "backend": "sbx"},
-    {"id": "openshell", "kind": "sandbox", "label": "OpenShell container", "tag": "experimental", "backend": "openshell"},
+    {"id": "openshell", "kind": "sandbox", "label": "OpenShell container", "tag": "openshell", "backend": "openshell"},
     {"id": "remote", "kind": "remote", "label": "Another machine", "tag": "over ssh"},
     {"id": "throwaway", "kind": "ephemeral", "label": "Throwaway folder", "tag": "--delete"}
   ],

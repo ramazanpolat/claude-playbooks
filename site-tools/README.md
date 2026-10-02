@@ -41,11 +41,11 @@ TUI goldens.
 - **The tour.** It re-runs the commands `tour.html` shows and checks the
   lines a reader relies on. `check-tui-goldens.py` diffs its `cpb tui` blocks
   against `internal/tui/testdata/*.golden`, the real screens. Those blocks
-  show the fixtures' own names (`kommander-dev`, `k9`, `9router`), so change
+  show the fixtures' own names (`alpha`, `rt`, `proxy`), so change
   them in the goldens, never on the page alone.
 - **The home page.** `showcase.cpb` is the recipe behind the five cards.
-  `showcase-data.py` applies it in a throwaway home (the `claude` and secret
-  helper stand-ins in `examples/.ci` keep it offline), reads what cpb reports
+  `showcase-data.py` applies it in a throwaway home (the `claude` stand-in in
+  `examples/.ci` and `stand-in-secret-helper` here keep it offline), reads what cpb reports
   (`SHOW PLAYBOOK --json`, `EXPLAIN PLAYBOOK --json`, the `APPLY --dry-run
   --json` plan, the files cpb wrote), and either checks the page's JSON block
   against it (`--check`, what CI does) or rewrites the block (`--write`).
