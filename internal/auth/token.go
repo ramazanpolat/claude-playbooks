@@ -297,7 +297,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 			// The machine-global token file: the descriptors in the global
 			// store describe the account that minted it. Only the MISSING
 			// ones are filled in: a descriptor the shell exported is the
-			// operator's deliberate override (a Team seat needs exactly
+			// pilot's deliberate override (a Team seat needs exactly
 			// that) and outranks what is inferred from disk, see
 			// appendSubscriptionEnv.
 			env = appendSubscriptionEnv(env)

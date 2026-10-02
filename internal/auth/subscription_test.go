@@ -229,7 +229,7 @@ func TestGlobalSubscriptionFallsBackToKeychain(t *testing.T) {
 
 // An explicit export outranks the inferred value, and must survive in the
 // returned slice -- asserting only that the inferred value is absent would pass
-// against an implementation that dropped the operator's value entirely.
+// against an implementation that dropped the pilot's value entirely.
 func TestAppendSubscriptionEnvRespectsExistingExport(t *testing.T) {
 	stubKeychain(t, nil, errors.New("no such item"))
 	writeGlobalCreds(t, `{"claudeAiOauth":{"subscriptionType":"pro","rateLimitTier":"tier_x"}}`)
@@ -248,10 +248,10 @@ func TestAppendSubscriptionEnvRespectsExistingExport(t *testing.T) {
 		}
 	}
 	if !sawOperator {
-		t.Fatalf("appendSubscriptionEnv() = %v, dropped the operator's export", got)
+		t.Fatalf("appendSubscriptionEnv() = %v, dropped the pilot's export", got)
 	}
 	if sawInferred {
-		t.Fatalf("appendSubscriptionEnv() = %v, overrode the operator's export", got)
+		t.Fatalf("appendSubscriptionEnv() = %v, overrode the pilot's export", got)
 	}
 	// One explicit value must not suppress the other descriptor.
 	if !sawTier {
@@ -259,7 +259,7 @@ func TestAppendSubscriptionEnvRespectsExistingExport(t *testing.T) {
 	}
 }
 
-// os.Getenv cannot distinguish unset from `export FOO=`, but the operator who
+// os.Getenv cannot distinguish unset from `export FOO=`, but the pilot who
 // typed the latter meant something by it. Scanning the slice can tell them
 // apart, and must.
 func TestAppendSubscriptionEnvRespectsExplicitEmptyExport(t *testing.T) {

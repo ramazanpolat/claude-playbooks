@@ -37,7 +37,7 @@ func runFailing(t *testing.T, playbooksDir string, env, args []string) string {
 
 // runOutput runs cpb expecting success, and returns its combined
 // output. childEnv asserts on the CHILD's environment; this asserts on what the
-// tool itself said to the operator.
+// tool itself said to the pilot.
 func runOutput(t *testing.T, playbooksDir string, env, args []string) string {
 	t.Helper()
 	work := t.TempDir()

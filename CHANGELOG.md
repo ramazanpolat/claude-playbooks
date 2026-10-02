@@ -106,7 +106,8 @@ Grammar words and flags (#180):
 | `ADD MCP SERVER … ENV K=V`, `ENV K FROM '<ref>'` | `VAR K=V`, `VAR K FROM '<ref>'` |
 | `--env-profile NAME` | `--env-set NAME` |
 | `--unset KEY` | `--block KEY` |
-| "env profile", "alias", "command name" | "env set", "launcher" |
+| "env profile" | "env set" |
+| "alias", "command name" (meaning a launcher) | "launcher" |
 
 JSON (#174, #175, #183):
 
