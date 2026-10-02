@@ -10,6 +10,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 func TestCopyDirDereferencesInternalSymlinks(t *testing.T) {
@@ -372,6 +373,51 @@ func assertNotSymlink(t *testing.T, path string) {
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		t.Fatalf("%s is still a symlink", path)
+	}
+}
+
+// LINK takes the launcher the target's own manifest records: the shared
+// manifest is never mutated, and the launcher resolves through it. The
+// playbook's config is the linked directory itself.
+func TestLinkUsesTheTargetManifestLauncher(t *testing.T) {
+	resetCommandTestState(t)
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
+	root := t.TempDir()
+	// Launcher mutations only apply to the default playbooks root — point
+	// HOME at the sandbox so the default root lands inside it.
+	t.Setenv("HOME", root)
+	os.Unsetenv("CPB_PLAYBOOKS_DIR")
+	config.PlaybooksDir = filepath.Join(root, ".claude-playbooks")
+	target := filepath.Join(root, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestText := "isolated_login = true\nlauncher = \"linkedalias\"\n"
+	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte(manifestText), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := doLink(linkOpts{name: "linked"}, []string{target}); err != nil {
+		t.Fatal(err)
+	}
+	pb, err := playbook.Require(config.PlaybooksDir, "linked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.Path != filepath.Join(config.PlaybooksDir, "linked") {
+		t.Fatalf("linked playbook path=%q", pb.Path)
+	}
+	entries, err := launcher.List(config.LauncherDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].CmdName != "linkedalias" {
+		t.Fatalf("launcher entries = %#v", entries)
+	}
+	if pb.Manifest == nil || pb.Manifest.Launcher != "linkedalias" {
+		t.Fatalf("manifest launcher not recorded: %#v", pb.Manifest)
+	}
+	if data, _ := os.ReadFile(filepath.Join(target, ".playbook")); string(data) != manifestText {
+		t.Fatalf("the shared manifest was mutated:\n%s", data)
 	}
 }
 
