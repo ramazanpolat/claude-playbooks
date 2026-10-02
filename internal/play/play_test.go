@@ -39,7 +39,7 @@ func TestResolve(t *testing.T) {
 	// A bare x.cpb or dir/x.cpb is a path too: a template name has no dot
 	// or slash, and every other form a scheme.
 	for _, ref := range []string{"reviewer.cpb", "recipes/reviewer.cpb", "recipes/reviewer"} {
-		if got, err := Resolve(ref, "v3.28.0"); err != nil || got.Kind != KindLocal || got.Name != "reviewer" || !filepath.IsAbs(got.Path) {
+		if got, err := Resolve(ref, "v4.0.0"); err != nil || got.Kind != KindLocal || got.Name != "reviewer" || !filepath.IsAbs(got.Path) {
 			t.Errorf("%s: %+v %v", ref, got, err)
 		}
 	}
@@ -345,7 +345,7 @@ func TestSuggest(t *testing.T) {
 			t.Errorf("%s: %q, want %q", name, got, want)
 		}
 	}
-	if got := IndexURL("https://raw.githubusercontent.com/o/r/v3.28.0/site/p/x.cpb"); got != "https://raw.githubusercontent.com/o/r/v3.28.0/site/p/index.txt" {
+	if got := IndexURL("https://raw.githubusercontent.com/o/r/v4.0.0/site/p/x.cpb"); got != "https://raw.githubusercontent.com/o/r/v4.0.0/site/p/index.txt" {
 		t.Errorf("index URL: %s", got)
 	}
 }
