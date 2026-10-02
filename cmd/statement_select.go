@@ -47,7 +47,7 @@ var versionRe = regexp.MustCompile(versionPattern)
 // playbooksLateColumns are the PLAYBOOKS columns added after v3.24.0, the
 // stable release: clickhouse-local's SELECT * lists them after the computed
 // version_tuple, where they were appended.
-var playbooksLateColumns = []string{"pilot_profile"}
+var playbooksLateColumns = []string{"pilot_profile", "play"}
 
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
@@ -56,10 +56,10 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
 		columns: []string{"name", "version", "version_tuple", "path", "source", "linked", "launcher", "envs", "vars", "sandbox", "isolated_login",
-			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "pilot_profile"},
+			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "pilot_profile", "play"},
 		structure: "name String, version Nullable(String), path String, source JSON, linked Nullable(String), " +
 			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox Bool, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
-			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, pilot_profile String",
+			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, pilot_profile String, play JSON",
 		rows: playbookRows,
 	},
 	"ENVS": {

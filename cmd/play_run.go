@@ -100,6 +100,12 @@ func playConfirmations(res *play.Result) []play.Risk {
 // terminal, takes them from --yes, --trust-endpoint and --trust-secret.
 // --yes never confirms what must be typed.
 func playConfirm(res *play.Result, interactive bool) error {
+	return playConfirmAsk(res, interactive, "\nRun this playbook? [y/N] ")
+}
+
+// playConfirmAsk is playConfirm with the yes question given (--keep and
+// --update ask their own).
+func playConfirmAsk(res *play.Result, interactive bool, question string) error {
 	typed := playConfirmations(res)
 	if !interactive {
 		if !playYes {
@@ -128,7 +134,7 @@ func playConfirm(res *play.Result, interactive bool) error {
 		return nil
 	}
 	if !playYes {
-		a, ok := promptLine("\nRun this playbook? [y/N] ")
+		a, ok := promptLine(question)
 		if !ok {
 			return errPlayCancelled
 		}
@@ -140,7 +146,9 @@ func playConfirm(res *play.Result, interactive bool) error {
 		var q string
 		switch r.Code {
 		case play.RiskUsesSecret:
-			q = fmt.Sprintf("Type the secret this playbook may read (%s): ", r.Confirm)
+			// A recipe with references never runs sandboxed: the reader is
+			// this machine, as you, and the prompt says so where it is typed.
+			q = fmt.Sprintf("Type the secret this playbook may read, on this machine, as you (%s): ", r.Confirm)
 		case play.RiskTLSOrProxy:
 			if r.Confirm == "TLS" {
 				q = "Type TLS to let this playbook change which certificates are trusted: "

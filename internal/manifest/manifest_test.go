@@ -330,3 +330,23 @@ func TestMCPRecordRoundTrip(t *testing.T) {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
 }
+
+// The [play] record round-trips, and a manifest without one has none.
+func TestPlayRecordRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	in := &Manifest{Name: "reviewer", Play: &Play{Ref: "github:acme/agents/reviewer.cpb@v1.2.0",
+		URL: "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb", SHA256: "3f1a", Played: "2026-10-02-10_00"}}
+	if err := Write(dir, in); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(dir)
+	if err != nil || got.Play == nil || *got.Play != *in.Play {
+		t.Fatalf("%+v %v", got.Play, err)
+	}
+	if err := Write(dir, &Manifest{Name: "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Read(dir); got.Play != nil {
+		t.Fatalf("a manifest without [play] has one: %+v", got.Play)
+	}
+}

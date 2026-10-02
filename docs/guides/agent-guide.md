@@ -14,7 +14,7 @@ Never assume a playbook exists or a name is free. The registry is the filesystem
 
 ```bash
 cpb SHOW PLAYBOOKS --json            # an array of playbook objects (a bare `cpb SHOW --json` is the same)
-cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, launcher, envs, vars, sandbox, marketplaces, plugins, agent, mcp_servers, tools, skills, statusline, model
+cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, launcher, envs, vars, sandbox, marketplaces, plugins, agent, mcp_servers, tools, skills, statusline, model, pilot_profile, play
 cpb SHOW ENVS --json                 # env sets: name, description, vars, used_by, default
 cpb "SELECT name, envs FROM PLAYBOOKS" --json   # chosen columns, one table (anything beyond columns needs clickhouse-local)
 cpb SHOW DEFAULTS --json             # {"envs": [...], "secret_helper": {...} | null}
