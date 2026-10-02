@@ -12,7 +12,7 @@ change to them and to cpb's play code:
   2. each file follows the agreed convention (ASCII, a header of
      `-- key: value` lines, one name-less ALTER PLAYBOOK, no secret), plans
      with APPLY --dry-run --json, applies to a new playbook in a throwaway
-     HOME (stand-ins for `claude` (examples/.ci) and the secret helper (site-tools/), a
+     HOME (stand-ins for `claude` and the secret helper from examples/.ci, a
      local mirror for `github:` skill sources), and applying it again
      changes nothing.
 

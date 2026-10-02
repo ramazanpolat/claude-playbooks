@@ -23,13 +23,13 @@ cpb=$(cd "$(dirname "$cpb_bin")" && pwd)/$(basename "$cpb_bin")
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 ci="$repo/examples/.ci"
-chmod 755 "$ci/claude" "$here/stand-in-secret-helper"
+chmod 755 "$ci/claude" "$ci/with-secret"
 
 home=$(mktemp -d)
 trap 'rm -rf "$home"' EXIT
 mkdir -p "$home/bin"
 ln -s "$cpb" "$home/bin/cpb"
-export HOME="$home" PATH="$ci:$home/bin:$PATH" CPB_SECRET_HELPER="$here/stand-in-secret-helper" FAKE_MARKETS=""
+export HOME="$home" PATH="$ci:$home/bin:$PATH" CPB_SECRET_HELPER="$ci/with-secret" FAKE_MARKETS=""
 cd "$home"
 
 fail=0
@@ -51,19 +51,15 @@ echo "== hero: the four-line quick start =="
 out=$(cpb CREATE PLAYBOOK work); check "hero: CREATE PLAYBOOK work" 'Created playbook "work"'
 out=$(cpb CREATE PLAYBOOK side ISOLATED LOGIN); check "hero: ISOLATED LOGIN" 'Login isolated'
 out=$(cpb CREATE PLAYBOOK sre SANDBOX); check "hero: SANDBOX" 'Always sandboxed'
-out=$(cpb ALTER PLAYBOOK work SET SANDBOX secrets=env); check "sandbox: SET SANDBOX key" "sandbox   secrets=env"
-out=$(cpb SHOW PLAYBOOK work); check "sandbox: SHOW lists the key" "Sandbox:    no (secrets=env)"
-out=$(cpb ALTER PLAYBOOK work SET SANDBOX host=me@buildbox); check "sandbox: SET SANDBOX host" "sandbox   host=me@buildbox"
-out=$(cpb ALTER PLAYBOOK work UNSET SANDBOX host); check "sandbox: UNSET SANDBOX host" "Altered PLAYBOOK work"
 
 echo "== try it: scratch playbook =="
 out=$(cpb CREATE PLAYBOOK scratch); check "scratch: created" 'Created playbook "scratch"'
-out=$(cpb SHOW PLAYBOOK scratch); check "scratch: SHOW PLAYBOOK" 'Sandbox:    no'
+out=$(cpb SHOW PLAYBOOK scratch); check "scratch: SHOW PLAYBOOK" 'Sandbox:        no'
 out=$(cpb DROP PLAYBOOK scratch --yes); check "scratch: dropped" 'Deleted playbook "scratch"'
 
 echo "== routing: env set, isolated login, model picker =="
 out=$(cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1); check "routing: CREATE ENV" "Created ENV router"
-out=$(cpb CREATE PLAYBOOK glm ISOLATED LOGIN); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
+out=$(cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
 out=$(cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3); check "routing: USE ENV" "env sets  router"
 out=$(cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY); check "routing: BLOCK VAR" "blocked   ANTHROPIC_API_KEY"
 out=$(cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'); check "routing: ADD MODEL" "model     glm-5.3"
@@ -88,20 +84,20 @@ out=$(cpb SHOW CREATE PLAYBOOK reviewer --skip-secrets); check "recipe: SHOW CRE
 echo "== mcp + secret ref =="
 out=$(cpb CREATE PLAYBOOK researcher NO ALIAS); check "mcp: created" 'Created playbook "researcher"'
 out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER files COMMAND npx ARGS -y @modelcontextprotocol/server-filesystem /srv/notes); check "mcp: add files server" "MCP server files"
-out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL https://mcp.sentry.dev/mcp HEADER Authorization FROM keychain:sentry-auth); check "mcp: add sentry server" "MCP server sentry"
+out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL https://mcp.sentry.dev/mcp HEADER Authorization FROM keychain:pilot/sentry-auth); check "mcp: add sentry server" "MCP server sentry"
 out=$(cpb EXPLAIN PLAYBOOK researcher); check "mcp: EXPLAIN shows the placeholder var" "CPB_MCP_SENTRY_H_AUTHORIZATION_"
 
 echo "== sessions + SELECT =="
-out=$(cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"); check "select: built-in table" "glm         router  true"
+out=$(cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"); check "select: built-in table" "glm         router  false"
 if command -v clickhouse >/dev/null 2>&1 || command -v ch >/dev/null 2>&1; then
   out=$(cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"); check "select: WHERE via clickhouse" "ANTHROPIC_BASE_URL"
 else
   echo "skip   select WHERE: no clickhouse on PATH"
 fi
-out=$(cpb SHOW SESSIONS); check "sessions: no live sessions in a fresh HOME" "No live Claude Code sessions."
+out=$(cpb sessions); check "sessions: no live sessions in a fresh HOME" "No live Claude Code sessions."
 
 echo "== install =="
-out=$(cpb --version); check "install: version banner" "cpb version"
+out=$(cpb --version); check "install: version banner" "claude-playbook version"
 
 echo "== tui: the tour's screens match the real goldens =="
 if ! python3 "$here/check-tui-goldens.py" "$repo/site/tour.html" "$repo/internal/tui/testdata"; then

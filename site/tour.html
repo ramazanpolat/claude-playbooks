@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cpb — the tour</title>
-<meta name="description" content="cpb (Claude PlayBooks) gives you as many isolated Claude Code setups as you need: config, environment, login and process, each described in a file you can apply anywhere.">
+<meta name="description" content="cpb (claude-playbooks) gives you as many isolated Claude Code setups as you need: config, environment, login and process, each described in a file you can apply anywhere.">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -117,7 +117,7 @@
     <div class="term" data-verify="examples/01-first-playbook">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4 (pre-release)</div>
+        <div class="term-title">real run, v3.27.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK scratch</span>
@@ -127,19 +127,20 @@ Command:  scratch  (launcher at /home/you/bin/scratch)
 Run it now:
   'scratch'</span>
 <span class="cmd"><span class="prompt">$ </span>cpb SHOW PLAYBOOK scratch</span>
-<span class="out">Name:       scratch
-Version:    (none)
-Path:       /home/you/.claude-playbooks/scratch
-Source:     (none)
-Launcher:   (none)
-Env sets:   (none)
-Variables:  (none)
-Sandbox:    no</span>
+<span class="out">Name:           scratch
+Version:        (none)
+Path:           /home/you/.claude-playbooks/scratch
+Source:         (none)
+Launcher:       (none)
+Env sets:       (none)
+Variables:      (none)
+Sandbox:        no
+Pilot profile:  imported (CLAUDE.md imports ~/.pilot-profile/)</span>
 <span class="cmd"><span class="prompt">$ </span>cpb DROP PLAYBOOK scratch --yes</span>
 <span class="out">Removed command "scratch"
 Deleted playbook "scratch".</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
       </div>
     </div>
     <p>A throwaway session in a throwaway folder works the same way:
@@ -155,16 +156,16 @@ Deleted playbook "scratch".</span></code></pre>
       what a launch sets and which layer set it &mdash; and a custom <code class="inline">/model</code>
       list travels with the playbook too.
     </p>
-    <div class="term" data-verify="README.md:59-68, examples/14-model-picker">
+    <div class="term" data-verify="README.md:59-64, examples/14-model-picker">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4 (pre-release)</div>
+        <div class="term-title">real run, v3.27.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1</span>
 <span class="out">Created ENV router
   set       ANTHROPIC_BASE_URL</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm ISOLATED LOGIN</span>
+<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN</span>
 <span class="out">Created playbook "glm" at /home/you/.claude-playbooks/glm
 Login isolated: it shares no login with ~/.claude; run /login once in it.</span>
 <span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3</span>
@@ -197,11 +198,14 @@ Model: glm-5.3 (ANTHROPIC_MODEL); a launch's --model and /model still win
 Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)
 Login: isolated: no link to ~/.claude's login and no machine token; /login once in it</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
       </div>
     </div>
     <p><code class="inline">ISOLATED LOGIN</code> keeps your Anthropic login away from that
-      provider.</p>
+      provider, and <code class="inline">NO PILOT PROFILE</code> keeps a local profile import
+      (such as <code class="inline">~/.pilot-profile/</code>) out of the playbook's
+      <code class="inline">CLAUDE.md</code> &mdash; cpb warns once if a playbook that already
+      imports one is later routed to a non-Anthropic host.</p>
   </section>
 
   <section id="sandbox">
@@ -213,7 +217,7 @@ Login: isolated: no link to ~/.claude's login and no machine token; /login once 
       <code class="inline">~/.claude</code>, your shell's environment, or your other
       playbooks.
     </p>
-    <div class="term" data-verify="README.md:75-84, docs/guides/sandbox.md:11-18">
+    <div class="term" data-verify="README.md:77-81, docs/guides/sandbox.md:11-18">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
         <div class="term-title">sbx (Docker Sandboxes)</div>
@@ -227,13 +231,13 @@ Login: isolated: no link to ~/.claude's login and no machine token; /login once 
     <p>By default your backend API keys stay on the host: the sandbox sees a placeholder
       that a host-side proxy swaps for the real key, for that endpoint only. If a key can't
       be registered with the proxy, the launch refuses rather than fall back to sending it in
-      plain (v3.26.0); <code class="inline">ALTER PLAYBOOK work SET SANDBOX secrets=env</code>
-      is the only way to pass one in as a variable instead. A <code class="inline">SANDBOX</code>
-      playbook is sandboxed on every launch: <code class="inline">ALTER PLAYBOOK work SET SANDBOX</code>
-      makes an existing playbook one, and <code class="inline">UNSET SANDBOX</code> turns it off.
-      The sandbox settings (<code class="inline">backend</code>, <code class="inline">host</code>,
-      <code class="inline">mounts</code>, <code class="inline">allow_net</code> and the rest) are set one by one
-      the same way: <code class="inline">SET SANDBOX host=me@buildbox</code>.</p>
+      plain (v3.26.0); <code class="inline">[sandbox] secrets = "env"</code> is the only way
+      to pass one in as a variable instead. A <code class="inline">SANDBOX</code> playbook is
+      sandboxed on every launch.</p>
+    <p>On Linux with Docker, <code class="inline">--sandbox=openshell</code> runs the session
+      in <a href="https://github.com/NVIDIA/OpenShell" target="_blank" rel="noopener">NVIDIA OpenShell</a>
+      instead of <code class="inline">sbx</code> &mdash; <strong>experimental, Linux with Docker
+      only, opt-in</strong> (v3.27.0).</p>
   </section>
 
   <section id="recipes">
@@ -246,7 +250,7 @@ Login: isolated: no link to ~/.claude's login and no machine token; /login once 
       <code class="inline">--dry-run</code> shows every change, and applying twice changes
       nothing.
     </p>
-    <div class="term" data-verify="README.md:96-112 (adapted: a local MCP server and skill dir, so it runs without a private repo or network)">
+    <div class="term" data-verify="README.md:94-110 (adapted: a local MCP server and skill dir, so it runs without a private repo or network)">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
         <div class="term-title">reviewer.cpb</div>
@@ -304,18 +308,18 @@ ALTER PLAYBOOK reviewer
     <div class="term" data-verify="examples/09-mcp-servers">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4 (pre-release)</div>
+        <div class="term-title">real run, v3.27.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'</span>
+      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth'</span>
 <span class="out">Altered PLAYBOOK researcher
   MCP server sentry</span>
 <span class="cmd"><span class="prompt">$ </span>cpb EXPLAIN PLAYBOOK researcher</span>
-<span class="out">VARIABLE                                 VALUE                        FROM
---------                                 -----                        ----
-CPB_MCP_SENTRY_H_AUTHORIZATION_32770652  &lt;from keychain:sentry-auth&gt;  PLAYBOOK researcher
+<span class="out">VARIABLE                                 VALUE                              FROM
+--------                                 -----                              ----
+CPB_MCP_SENTRY_H_AUTHORIZATION_32770652  &lt;from keychain:pilot/sentry-auth&gt;  PLAYBOOK researcher
 
-Secret helper: /home/you/helper (from CPB_SECRET_HELPER)
+Secret helper: (none)
 Plugins: (none)
 Agent: (none)
 MCP servers: files, sentry</span>
@@ -325,9 +329,9 @@ MCP servers: files, sentry</span>
 
 ALTER PLAYBOOK researcher
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
-  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth';</span></code></pre>
+  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth';</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
       </div>
     </div>
     <p>The value never appears in a file, in argv, or in any <code class="inline">SHOW</code>/<code class="inline">EXPLAIN</code>
@@ -339,7 +343,7 @@ ALTER PLAYBOOK researcher
     <p class="eyebrow">Sessions &amp; SQL</p>
     <h2>See everything that is running</h2>
     <p class="section-lede">
-      <code class="inline">cpb SHOW SESSIONS</code> lists every live Claude Code session, in every
+      <code class="inline">cpb sessions</code> lists every live Claude Code session, in every
       playbook. <code class="inline">SELECT</code> queries the same state as tables &mdash;
       built in for plain column lists, or through <code class="inline">clickhouse local</code>
       for <code class="inline">WHERE</code>, <code class="inline">ORDER BY</code> and functions.
@@ -347,20 +351,20 @@ ALTER PLAYBOOK researcher
     <div class="term" data-verify="examples/18-sessions, examples/13-select">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4 (pre-release), with example 18's stand-in session</div>
+        <div class="term-title">real run, v3.27.0, with example 18's stand-in session</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb SHOW SESSIONS</span>
+      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb sessions</span>
 <span class="out">PLAYBOOK  PID     TTY  KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
 --------  ---     ---  ----         ------  ---  ------  -----            -------                               ---
-worker    312146  -    interactive  idle    0s   0s      claude-opus-5-5  0e5c1a2b-0000-4000-8000-000000000001  /home/you/project</span>
-<span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"</span>
-<span class="out">NAME        ENVS    ISOLATED_LOGIN
-----        ----    --------------
-glm         router  true
+worker    246892  -    interactive  idle    0s   0s      claude-opus-5-5  0e5c1a2b-0000-4000-8000-000000000001  /home/you/project</span>
+<span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"</span>
+<span class="out">NAME        ENVS    SANDBOX
+----        ----    -------
+glm         router  false
 researcher  -       false
 reviewer    -       false
-side        -       true
+side        -       false
 sre         -       true
 work        -       false</span>
 <span class="cmd"><span class="prompt">$ </span>cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"</span>
@@ -371,15 +375,12 @@ glm         ANTHROPIC_BASE_URL
 glm         ANTHROPIC_MODEL
 researcher  CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
+        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
       </div>
     </div>
-    <p><code class="inline">cpb run worker --continue</code> resumes the newest session in this folder,
-      and <code class="inline">--resume &lt;id&gt;</code> resumes one, through its playbook (a launcher
-      takes the same flags). cpb refuses a session that is still live &mdash; two processes on one
-      session id would corrupt it &mdash; and one typed in the wrong folder.
-      <code class="inline">SHOW SESSIONS</code> prints each session's resume command, <code class="inline">cd</code>
-      included.</p>
+    <p><code class="inline">cpb RESUME</code> starts this folder's latest session, in its own
+      playbook, and never resumes one that's already live &mdash; two processes on one session
+      id would corrupt it.</p>
   </section>
 
   <section id="tui">
@@ -399,9 +400,9 @@ researcher  CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
       </div>
       <pre><code> cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  NAME    LAUNCHER  VERSION  ENV SETS  LOGIN     SESSIONS  MODEL
-▸ alpha   al        v1.2.0   -         shared    1         claude-opus-5-5
-  router  rt        -        proxy     isolated  1         glm-5.3
+  NAME           LAUNCHER  ENV SETS  LOGIN     SESSIONS  MODEL
+▸ kommander-dev  kd        -         shared    1         claude-opus-5-5
+  router         k9        9router   isolated  1         glm-5.3
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
@@ -416,15 +417,16 @@ reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json</code></pre>
       </div>
       <pre><code> cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
- router  (launcher rt · ~/.claude-playbooks/router)
+ router  (launcher k9 · ~/.claude-playbooks/router)
  [Overview] Env  Vars  Plugins  MCP  Skills  Status line  Model  Sessions
 
   Version         -
   Source          (none)
   Login           isolated
-  Env sets        proxy
+  Pilot profile   not imported
+  Env sets        9router
   Tools           -
-  Live sessions   1 · newest 2d ago in ~/DEV/app
+  Live sessions   1 · newest 2d ago in ~/DEV/claude-playbooks
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
@@ -465,7 +467,7 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
   <section id="install">
     <p class="eyebrow">Get it</p>
     <h2>Install</h2>
-    <div class="term" data-verify="README.md:32, docs/guides/installation.md:9, cpb --version run on testbed">
+    <div class="term" data-verify="README.md:32, docs/guides/installation.md:8, cpb --version run on testbed">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
         <div class="term-title">install</div>
@@ -473,9 +475,9 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh</span>
 <span class="cmd"><span class="prompt">$ </span>cpb --version</span>
-<span class="out">cpb version dev</span></code></pre>
+<span class="out">claude-playbook version v3.27.0</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4 (pre-release), testbed</span>
+        <span class="verified-tag">verified against v3.27.0, testbed</span>
       </div>
     </div>
     <p class="install-row">
