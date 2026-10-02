@@ -1,8 +1,6 @@
-# claude-playbooks own-arena suite 4: `install` from a local directory.
-# The target dir name comes from the fixture's .playbook manifest (not
-# the source dir name), the copy is faithful (diff -r), the launcher
-# lands, and delete -y removes the playbook (the launcher is kept by
-# design and cleaned explicitly, as the product itself suggests).
+# claude-playbooks own-arena suite 4: CREATE PLAYBOOK … FROM a local
+# directory. The copy is faithful (diff -r), the launcher lands, and DROP
+# PLAYBOOK --yes removes the playbook and its launcher.
 # Mid-sequence state is proven inside chained commands — gentar runs
 # verify.files (post-steps only) before verify.commands.
 
@@ -23,8 +21,8 @@ steps = [
 path = "~/fixture-src/.playbook"
 
 [[verify.commands]]
-# Manifest names the target: fixture-src -> fixture-pb.
-command = 'claude-playbook install "$HOME/fixture-src" && test -f "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && test -f "$HOME/.claude-playbooks/fixture-pb/skills/demo/SKILL.md" && echo installed'
+# The statement names the target: fixture-src -> fixture-pb.
+command = 'claude-playbook CREATE PLAYBOOK fixture-pb FROM "$HOME/fixture-src" && test -f "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && test -f "$HOME/.claude-playbooks/fixture-pb/skills/demo/SKILL.md" && echo installed'
 
 [[verify.commands]]
 command = 'test -x "$HOME/.local/bin/fixture-pb" && echo launcher-ok'

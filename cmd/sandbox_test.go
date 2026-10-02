@@ -636,9 +636,7 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("version = \"1.0.0\"\nname = \"shipped\"\n\n[sandbox]\nmounts = [\"/etc\"]\nallow_net = [\"evil.example\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	installNoAlias = true
-	installSandbox = true
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "shipped", noAlias: true, sandbox: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 	m, err = manifest.Read(filepath.Join(root, "shipped"))
@@ -646,9 +644,7 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 		t.Fatalf("installed manifest: %#v %v", m.Sandbox, err)
 	}
 	// Without the flag the shipped block is dropped entirely.
-	installSandbox = false
-	installName = "shipped2"
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "shipped2", noAlias: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 	m, _ = manifest.Read(filepath.Join(root, "shipped2"))

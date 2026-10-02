@@ -55,33 +55,26 @@ The human layout may change between releases; scripts read `--json`.
 
 ## Install a shared playbook repo
 
-`install` is the one-step shortcut: clone, install and create the launcher,
-taking the name and launcher from the source's manifest.
+`CREATE PLAYBOOK … FROM` clones or copies a source, installs it under the name
+you give and creates its launcher: the source manifest's `alias`, unless you
+name one.
 
 ```bash
-cpb install https://github.com/ramazanpolat/awesome-playbooks
-cpb install https://github.com/user/awesome --name team-tools --alias tt
-cpb install ~/dev/my-playbook              # a local directory, copied
-```
-
-The statement form says the same with every choice written out, which is what a
-playbook file uses:
-
-```bash
+cpb CREATE PLAYBOOK awesome FROM https://github.com/ramazanpolat/awesome-playbooks
 cpb CREATE PLAYBOOK team-tools FROM https://github.com/user/awesome BRANCH main ALIAS tt
+cpb CREATE PLAYBOOK mine FROM ~/dev/my-playbook        # a local directory, copied
 ```
 
 ### Install one playbook from a larger repo
 
 ```bash
-cpb install https://github.com/user/awesome/tree/main/playbooks/dba
-cpb install https://github.com/user/awesome --subdir playbooks/dba --name dba --alias ap-dba
 cpb CREATE PLAYBOOK dba FROM https://github.com/user/awesome SUBDIR playbooks/dba ALIAS ap-dba
+cpb CREATE PLAYBOOK dba FROM https://github.com/user/awesome/tree/main/playbooks/dba   # the same, as a GitHub tree URL
 ```
 
 Cherry-picked installs are flat top-level playbooks. Branch names containing `/`
-are resolved against the repository's remote refs; `--branch` / `BRANCH` makes
-the boundary explicit.
+are resolved against the repository's remote refs; `BRANCH` makes the boundary
+explicit.
 
 ## Develop a playbook in place
 
@@ -100,7 +93,7 @@ Dropping a linked playbook removes only the symlink.
 
 ## Launcher commands
 
-`CREATE PLAYBOOK` and `install` register each playbook as a **launcher command**:
+`CREATE PLAYBOOK` registers each playbook as a **launcher command**:
 a symlink to the `claude-playbook` binary placed next to it (falling back to
 `~/.local/bin` when that directory is not writable):
 
@@ -194,8 +187,8 @@ itself, so layers stack; see
 Update pulls the playbook from the source recorded in its `.playbook`:
 
 ```bash
+cpb update awesome --dry-run    # the available version and the migrate step; changes nothing
 cpb update awesome
-cpb update awesome --check    # report the available version only
 ```
 
 Git installs record their repository, branch and selected subdirectory, and a
@@ -220,15 +213,30 @@ preserve = ["settings.json", "config/local.toml"]
 ```
 
 New stock settings still arrive alongside (conventionally
-`settings.json.template`) for you to merge by hand. Afterwards, an executable
-`migrations/apply.sh` in the playbook runs as
-`migrations/apply.sh <from-version> <to-version> <install-dir>`; runners are
-expected to be idempotent.
+`settings.json.template`) for you to merge by hand.
 
-Linked playbooks and manifests that select their config through a top-level
-`subdir` cannot be updated this way. `cpb update --all` was withdrawn in v3.15.0;
-update playbooks one at a time. `cpb update` with no name self-updates the
-binary; see [Installation](installation.md#updating-the-tool).
+A source can declare a **migrate step**, a script that adapts the install's
+own data once the new files are in place:
+
+```toml
+[update]
+migrate = "migrations/apply.sh"
+```
+
+It runs as `<script> <from-version> <to-version> <install-dir>`, in the
+install directory, after the registry lock is released (so it may run cpb
+statements itself), and it is expected to be idempotent. Nothing runs that the
+source does not declare. The step is agreed to before anything changes:
+`--dry-run` shows it with its sha256; on a terminal, `update` asks; otherwise
+it needs `--yes`, and without it the update is refused and nothing changes.
+The script must resolve inside the playbook, and it runs only if its bytes are
+still the ones previewed.
+
+A playbook kept by `cpb play` updates from its recorded recipe instead: see
+[Play someone else's playbook](play.md). Linked playbooks and manifests that
+select their config through a top-level `subdir` cannot be updated this way.
+`cpb self-update` updates cpb itself; see
+[Installation](installation.md#updating-the-tool).
 
 ## Use temporary config locations
 

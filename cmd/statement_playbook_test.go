@@ -58,9 +58,6 @@ func TestStatementCreatePlaybookFromSource(t *testing.T) {
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "up"); exists {
 		t.Fatal("NO ALIAS still wrote the source's launcher")
 	}
-	if installName != "" || installNoAlias {
-		t.Fatalf("install flags leaked: %q %v", installName, installNoAlias)
-	}
 }
 
 func TestStatementCreatePlaybookLink(t *testing.T) {

@@ -30,9 +30,13 @@ type Source struct {
 // Update holds per-playbook update policy. Preserve names install-local files
 // that must survive an update even though the source ships its own copy; the
 // CLI already preserves settings.json and the Claude Code state files, so this
-// is for anything beyond that. Paths are relative to the playbook root.
+// is for anything beyond that. Migrate is the playbook's migration step: a
+// script `cpb update` runs, once you consent, after the new files are in
+// place, as `<script> <from-version> <to-version> <install-dir>`. Without it
+// no migration runs. Paths are relative to the playbook root.
 type Update struct {
 	Preserve []string `toml:"preserve,omitempty"`
+	Migrate  string   `toml:"migrate,omitempty"`
 }
 
 // Env holds per-install environment overrides applied by `run`, `start`, and
@@ -273,14 +277,14 @@ type Manifest struct {
 	// update restores it (docs/reference/cli-grammar.md, "Skills").
 	Skills map[string]*SkillRecord `toml:"skills,omitempty"`
 
-	// Play records where a kept played recipe came from, so `cpb play
-	// --update` can fetch it again (v4.0.0; docs/guides/play.md).
+	// Play records where a kept played recipe came from, so `cpb update`
+	// can fetch it again (v4.0.0; docs/guides/play.md).
 	Play *Play `toml:"play,omitempty"`
 }
 
 // Play is the [play] record of a playbook `cpb play --keep` built.
 type Play struct {
-	// Ref is what was played, as --update resolves it again: a template
+	// Ref is what was played, as `cpb update` resolves it again: a template
 	// name, a URL, a github: ref, or a local file's absolute path.
 	Ref string `toml:"ref"`
 	// URL is the address the bytes came from; empty for a local file.
@@ -442,6 +446,9 @@ func (m *Manifest) validate(path string) error {
 				return err
 			}
 		}
+		if err := validateRelativePath(path, "update.migrate", m.Update.Migrate); err != nil {
+			return err
+		}
 	}
 	if m.Env != nil {
 		for _, name := range m.Env.Profiles {
@@ -573,15 +580,21 @@ func Write(dir string, m *Manifest) error {
 			fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(m.Source.Subdir))
 		}
 	}
-	if m.Update != nil && len(m.Update.Preserve) > 0 {
-		b.WriteString("\n[update]\npreserve = [")
-		for i, rel := range m.Update.Preserve {
-			if i > 0 {
-				b.WriteString(", ")
+	if m.Update != nil && (len(m.Update.Preserve) > 0 || m.Update.Migrate != "") {
+		b.WriteString("\n[update]\n")
+		if len(m.Update.Preserve) > 0 {
+			b.WriteString("preserve = [")
+			for i, rel := range m.Update.Preserve {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(QuoteTOML(rel))
 			}
-			b.WriteString(QuoteTOML(rel))
+			b.WriteString("]\n")
 		}
-		b.WriteString("]\n")
+		if m.Update.Migrate != "" {
+			fmt.Fprintf(&b, "migrate = %s\n", QuoteTOML(m.Update.Migrate))
+		}
 	}
 	if !m.Env.Empty() {
 		// [env] must precede [env.set] in TOML; both are emitted in sorted

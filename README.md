@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/
 ```
 
 Linux and macOS, amd64/arm64. Installs `claude-playbook` and the shorter `cpb`;
-`cpb update` updates it. [devbox, Nix, npx and source builds →](docs/guides/installation.md)
+`cpb self-update` updates it. [devbox, Nix, npx and source builds →](docs/guides/installation.md)
 
 ## What you can do with it
 

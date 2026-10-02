@@ -75,13 +75,13 @@ A playbook's **name** is simply its directory name under the playbooks root:
 
 Names are used wherever a playbook is referenced: `run`, `auth status`, `update`, and every statement that names a playbook. Env set names are a separate namespace (`CREATE ENV`).
 
-The charset is enforced for names being **created** (`CREATE PLAYBOOK`, with or without `LINK`, `install`, `ALTER PLAYBOOK … RENAME TO`): a name must match `^[A-Za-z0-9_][A-Za-z0-9_-]*$` — letters, digits, underscores and dashes, starting with an alphanumeric or underscore. A playbook name is interpolated into a launcher command name, a `run <name>` argument, and commands printed for the user to paste, so shell metacharacters are rejected at the front door rather than escaped at each site. Names must not start with `.` (to avoid hidden directories) and must not contain `/` or `\` (names are single directory segments, never paths). Lookup paths (`DROP PLAYBOOK`, discovery) only require a single path segment, so an existing playbook with an odd name can still be listed, run and removed.
+The charset is enforced for names being **created** (`CREATE PLAYBOOK`, with `FROM`, `LINK` or neither, and `ALTER PLAYBOOK … RENAME TO`): a name must match `^[A-Za-z0-9_][A-Za-z0-9_-]*$` — letters, digits, underscores and dashes, starting with an alphanumeric or underscore. A playbook name is interpolated into a launcher command name, a `run <name>` argument, and commands printed for the user to paste, so shell metacharacters are rejected at the front door rather than escaped at each site. Names must not start with `.` (to avoid hidden directories) and must not contain `/` or `\` (names are single directory segments, never paths). Lookup paths (`DROP PLAYBOOK`, discovery) only require a single path segment, so an existing playbook with an odd name can still be listed, run and removed.
 
 ---
 
 ## Launcher Commands (v2.13.0)
 
-Since v2.13.0, per-playbook commands are **launchers** — symlinks to the `claude-playbook` binary placed in a PATH directory — replacing the shell-alias registration of earlier releases. `CREATE PLAYBOOK` (with or without `LINK`) and `install` register one.
+Since v2.13.0, per-playbook commands are **launchers** — symlinks to the `claude-playbook` binary placed in a PATH directory — replacing the shell-alias registration of earlier releases. `CREATE PLAYBOOK` registers one.
 
 - **Multicall dispatch.** Invoked through a launcher, the binary sees the link's name in argv[0] and dispatches as `run <name>` (the busybox/git pattern). The launcher carries no state: the name resolves at invocation time against the live registry — playbook directory names first, then manifest `alias` fields — so nothing goes stale on rename or move.
 - **Launcher directory.** `--launcher-dir` / `CLAUDE_LAUNCHER_DIR`, else the directory the binary was invoked from (on PATH by construction), falling back to `~/.local/bin` when that is unwritable.
@@ -272,14 +272,11 @@ claude-playbook -- manage isolated Claude Code instances
 Playbooks directory: ~/.claude-playbooks
 No playbooks installed yet. Get started with one of:
 
-  # Install a single playbook from a Git repo:
-  claude-playbook install https://github.com/user/pai
-
-  # Cherry-pick one playbook out of a monorepo (e.g. DBA):
-  claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/dba
-
-  # Create your own from scratch:
+  # Your own, from scratch:
   cpb CREATE PLAYBOOK <name>
+
+  # One from a Git repository or a directory (SUBDIR picks one out of a monorepo):
+  cpb CREATE PLAYBOOK <name> FROM <git-url-or-dir>
 
 Run 'claude-playbook --help' for all commands.
 ```
@@ -340,7 +337,7 @@ claude-playbook run --sandbox --sandbox-fresh sre                  # recreate th
 
 The flags belong to the same leading runs as the launch flags, in any order among them; `--sandbox-fresh`, `--clone`, `--workdir` and `--mount` without a sandbox (no flag and no `always`, or `--no-sandbox`) refuse the launch. `--workdir` and `--mount` values may be `~`-prefixed.
 
-**Always sandboxed (v3.12.0).** A manifest with `[sandbox] always = true` sandboxes every launch of the playbook without a flag: `run`, and launcher dispatch (`sre -p "..."`). `--no-sandbox` overrides it for one launch, loudly (above); there is no environment variable or setting that overrides it silently. `CREATE PLAYBOOK … SANDBOX` and `install --sandbox` write the key together with `isolate_auth = true`, because the machine login cannot follow a playbook into its sandbox (below). The backend comes from `--sandbox=BACKEND`, else `[sandbox].backend`, else `sbx`; the launch logic talks to it through one seam (list, create, allow network, shell, attach, remove), so a further backend is an implementation, not a redesign. `[sandbox]` is install-local, like `[env]`: `install` never adopts a source-shipped block (it would mount host paths or widen the network), dropping it with a note, and `update` preserves the live one.
+**Always sandboxed (v3.12.0).** A manifest with `[sandbox] always = true` sandboxes every launch of the playbook without a flag: `run`, and launcher dispatch (`sre -p "..."`). `--no-sandbox` overrides it for one launch, loudly (above); there is no environment variable or setting that overrides it silently. `CREATE PLAYBOOK … SANDBOX` writes the key together with `isolate_auth = true`, because the machine login cannot follow a playbook into its sandbox (below). The backend comes from `--sandbox=BACKEND`, else `[sandbox].backend`, else `sbx`; the launch logic talks to it through one seam (list, create, allow network, shell, attach, remove), so a further backend is an implementation, not a redesign. `[sandbox]` is install-local, like `[env]`: `CREATE PLAYBOOK … FROM` never adopts a source-shipped block (it would mount host paths or widen the network), dropping it with a note, and `update` preserves the live one.
 
 Procedure: resolve the environment exactly as an unsandboxed launch would (registry default profile, profiles, block, launch flags, the authentication decision including quarantine and identity purge of the playbook's own store, which the sandbox then reads through the mount; the config directory is made absolute first, so a relative `--playbooks-dir` cannot leak a relative `CLAUDE_CONFIG_DIR`), then reduce it to the variables the sandbox receives: the keys the effective block and launch flags **set**, plus `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER` and `CLAUDE_CONFIG_DIR` when the launch decided them. Nothing else of the host environment enters the sandbox. **A shared login does not enter it either:** when the store is still a symlink after preparation and the environment carries no `CLAUDE_CODE_OAUTH_TOKEN` (the shared-login path; a token launch authenticates with the token, and the link it may leave behind, one to a grantless store, holds nothing to adopt), its target `~/.claude` is not mounted and `sbx` mounts directories only, so the link would dangle inside and Claude Code would be logged out. A missing store on a non-isolated target (a fresh directory or playbook on a machine without a login) is the same shape with nothing to link to yet, and is treated the same way. The link is re-pointed (or created) instead, at a **sandbox-local** file: `<sandbox home>/.claude-playbook-logins/<sandbox name>/.credentials.json` (`/home/agent/...` under `sbx`), whose directory the attach command creates inside before `claude` starts. `/login` inside writes through the link into the sandbox, where the grant persists with the sandbox (and goes with `--sandbox-fresh`) and never reaches the host. The account state the host sync copied in (`oauthAccount`, cached flags) is purged as for an isolated playbook, and `Shared login stays on the host: playbook "<name>" authenticates on its own inside the sandbox (run /login once there; the login lives in the sandbox)` is printed on stderr. When the session returns, or the launch is refused anywhere before the attach (a mount check, a failed create, a key the proxy could not register), the launch runs the credential sync again, which replaces any link that is not the shared one with the shared one and copies nothing, so the host sees the shared link as before; the next sandboxed launch re-points it again and the sandbox login is still there. While a sandboxed session is live (or after a launch that never returned) the host store link dangles, which every host command tolerates: `update` preserves it as it is, `DROP PLAYBOOK` removes it, `auth status` shows `shared-login` with the sandbox target and `no login`, and the next host launch repairs it. A sandboxed **token** launch that finds the store linked to a sandbox login detaches the link first (on the host the quarantine saw a dangling link and nothing to detach, but inside it would resolve to the earlier grant, which Claude Code's 401 recovery adopts over a token), exactly as the quarantine detaches a shared link with a grant. The machine's own config directory (`~/.claude`, by identity) is never sandboxed: it holds the machine login as a regular store, and mounting it would hand that login to the sandbox; `start --sandbox ~/.claude` is refused before any preparation. Nor may any mount contain it: the working directory, the root, and every extra mount (read-only or not) are refused when the machine config directory, the machine credentials store at its resolved location (the store may be a symlink into another directory), the long-lived token file, or the registry's env profiles directory (`<playbooks root>/.env-profiles`, the secret store proxy injection keeps out of the sandbox) exists below them, decided by filesystem identity along the credential's ancestors (so `/`, a differently cased spelling, or any alias of the directory counts), so `--workdir ~`, `start --sandbox ~`, `--mount ~:ro` and `--mount /:ro` all refuse (`sandbox mount <path> contains the machine's Claude config directory <dir>: the machine login would enter the sandbox. Mount a narrower directory`). Every refusal happens before the backend is called. The login must never land as a regular file on the mount: the host sync promotes a newer regular grant-bearing store into the machine store, which is exactly what a sandbox login must not do. The machine login is never read, copied or moved. Every path that crosses into the sandbox is absolute and symlink-resolved (the target is what exists at that path inside): the working directory, the playbook root, the extra mounts (a missing one refuses the launch), and `CLAUDE_CONFIG_DIR` itself, which inside the sandbox names the resolved config directory, so a linked registry entry (`CREATE PLAYBOOK … LINK`) mounts and addresses its target. The root is not mounted again when it lies inside the working directory, and a config directory outside the mounted root is mounted on its own. `sbx ls -q` decides whether `cpb-<name>` exists; `--sandbox-fresh` removes it (`sbx rm -f`); a sandbox that is reused is inspected first (`sbx ls --json`, its `workspaces`): mounts are creation-time, so the existing mounts must cover every path this launch needs, by containment (a working directory below an existing mount is covered; a different one would not exist inside) and pass the same guards as new mounts (the machine-login and profiles guard, and in proxy mode the manifest-key guard over the existing, possibly wider, mounts), else the launch refuses and names `--sandbox-fresh` (`sandbox cpb-<name> was created with mounts ...; this launch also needs ..., which a reused sandbox cannot add. Recreate it with --sandbox-fresh` / `sandbox cpb-<name> mounts <path>, which contains <what>: the machine login would be inside. Recreate it with --sandbox-fresh`); a missing sandbox is created with `sbx create --name cpb-<name> [--clone] claude <workdir> <playbook root> <extra mounts...>`. A service on this machine is a special case: inside the sandbox `localhost` is the sandbox itself, so an `ANTHROPIC_BASE_URL` at `localhost`, `127.0.0.1` or `::1` is rewritten for the sandbox to the backend's host alias (`host.docker.internal` under `sbx`), scheme, port and path kept, with `ANTHROPIC_BASE_URL names this machine: inside the sandbox it is <url>` on stderr; and the backend's policy and secret store know that service as `localhost` whatever name the sandbox used (verified on `sbx` 0.38.0: an allow rule or a secret for `host.docker.internal` never matches, one for `localhost` does), so allow rules and secret registrations for the host alias, `localhost`, `127.0.0.1` or `::1` are spelled `localhost`, in `[sandbox].allow_net` too. After creation, and only then, every host in `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL` (when the effective environment sets one) is allowed for that sandbox (`sbx policy allow network --sandbox cpb-<name> <host>`; a failure is a warning, the launch continues), and a `[sandbox].claude_version` pin installs that Claude Code inside the sandbox through the official installer (a failure is a warning; the image's own version runs). **Remote sandbox host (v3.13.0).** `sbx` drives only the machine it runs on, so "the host the sandbox runs on" is the host where `claude-playbook` runs. With `--sandbox-host USER@HOST` (or the manifest's `[sandbox] host`, used whenever the launch is sandboxed) the whole launch is forwarded there over ssh, as the same subcommand rebuilt from what the launch parser consumed (never from the raw text, so `claude`'s own arguments travel verbatim and nothing in them is mistaken for a flag): `ssh [-t] -- USER@HOST 'env CPB_CMD=<base64> sh -c '"'"'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'"'"''`, where the decoded text is `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec claude-playbook run [--playbooks-dir=D] --sandbox[=BACKEND] [--sandbox-fresh] [--clone] [--workdir=W] [--mount=M]... [--env-profile=P | --env=K=V | --unset=K]... NAME [claude args...]` (`start` likewise, with `--delete` before the path). The transport exists because ssh hands the text to the remote user's login shell, whose family is unknown (tcsh breaks POSIX single quotes on a newline and expands `!`) and whose non-interactive PATH lacks `~/.local/bin`: the outer text is plain words every shell family passes through untouched, only POSIX `sh` parses the command, `sh`'s stdin is the ssh channel and its exit status is `claude-playbook`'s (`exec`), and the PATH is widened inside with the installer's and the package managers' directories. `base64 --decode` is GNU and BSD alike, every value flag in its inline form so a value that looks like a flag stays a value there too (a value that is exactly `--` travels as two words, since a standalone `--` is where the registry scan stops on both sides; every `--workdir` occurrence is forwarded in order, the last winning there as here), every argument single-quoted into the one command string ssh hands the remote shell, the launch flags forwarded as typed and unevaluated (no env file is read for a remote launch, whether the host comes from the flag or from the manifest: the flags are evaluated only once the launch is known to be local), `-t` only when this process has a terminal on both ends, ssh's own options ended by `--` before the destination. The host is validated like the manifest key (no whitespace, no slash, no leading dash: `--sandbox-host "<value>" must be an ssh destination such as user@host`). `--sandbox` is always present, so the remote launch is sandboxed there whatever its manifest says; the remote host's own registry, profiles, manifest and secrets apply, and the sandbox, its login and its proxy mappings live there. Requirements on the remote: `claude-playbook` in `~/.local/bin` (the installer's default), `/opt/homebrew/bin`, `/usr/local/bin`, or on the PATH an ssh session gets, a credential store `sbx` can read from a non-interactive ssh session (a Linux host with a headless keyring unlocked at boot; a macOS host keeps the Hub session in the login Keychain, which an ssh session cannot read until `security unlock-keychain` runs, so `sbx` fails there with `cannot prompt the user for password`), the playbook installed there (for `start`, the path is a path there; a directory manifest naming a host forwards a sandboxed `start` the same way, and `--delete` then acts there), `sbx` logged in. With the flag, the playbook need not be registered here at all. A `--playbooks-dir` travels as given, a path on that host. Refused: `--env-file` (a local file, refused by name; it is never opened), and `--sandbox-host` together with `--no-sandbox`; `--no-sandbox` on a playbook whose manifest names a host runs it here, on this host. Printed first: `Sandbox on USER@HOST: claude-playbook run ...`. The exit status is the remote launch's.
 
@@ -419,30 +416,20 @@ All wrapper flags, `--delete` included, are recognised only as a **leading run**
 
 ---
 
-### `claude-playbook install <source>`
+### `CREATE PLAYBOOK <name> FROM <source>`
 
-Installs a single playbook from a Git repository or a local directory. The result is always **one flat playbook** under the playbooks root.
+Installs a single playbook from a Git repository or a local directory, as `<name>`. The result is always **one flat playbook** under the playbooks root.
 
-`install` always **copies** the source into the playbooks root — both Git URLs (via clone) and local directories (via recursive copy). The installed playbook is a self-contained, independent copy; later edits to the original source do not affect it. To keep an *external* directory in place and expose it under the playbooks root as a symlink instead of a copy, use `CREATE PLAYBOOK <name> LINK <dir>`.
+It always **copies** the source into the playbooks root — Git URLs via clone, local directories via recursive copy. The installed playbook is a self-contained, independent copy; later edits to the original source do not affect it. To keep an *external* directory in place and expose it under the playbooks root as a symlink instead of a copy, use `CREATE PLAYBOOK <name> LINK <dir>`.
 
 ```bash
-# Git repo (derives install name from the URL)
-claude-playbook install https://github.com/user/pai
-
-# Git repo with a custom install name
-claude-playbook install https://github.com/user/repo --name myrepo
-
-# Install a specific branch/tag
-claude-playbook install https://github.com/user/repo --branch dev
-
-# Local directory (copied into the playbooks root, becomes independent of source)
-claude-playbook install ~/dev/my-playbook
-
-# Install one playbook out of a monorepo (the primary multi-playbook-repo path)
-claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/sre --name sre --alias sre
-
-# Same thing, spelled with explicit flags
-claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --subdir playbooks/sre --branch main --name sre --alias sre
+cpb CREATE PLAYBOOK pai FROM https://github.com/user/pai                     # a Git repository
+cpb CREATE PLAYBOOK repo FROM https://github.com/user/repo BRANCH dev        # a branch or tag
+cpb CREATE PLAYBOOK mine FROM ~/dev/my-playbook                              # a local directory, copied
+cpb CREATE PLAYBOOK sre FROM https://github.com/user/repo SUBDIR playbooks/sre ALIAS sre
+                                                                             # one playbook out of a monorepo
+cpb CREATE PLAYBOOK sre FROM https://github.com/user/repo/tree/main/playbooks/sre ALIAS sre
+                                                                             # the same, as a GitHub tree URL
 ```
 
 **Source types:**
@@ -450,61 +437,60 @@ claude-playbook install https://github.com/ramazanpolat/awesome-playbooks --subd
 | Source | Behaviour |
 |--------|-----------|
 | URL (`http://`, `https://`, `git@`, `git://`, `ssh://`, `file://`) | Shallow-cloned (`git clone --depth=1`) into the install directory |
-| GitHub `/tree/<ref>/<path>` URL | Recognized and split automatically into clone URL + `--branch <ref>` + `--subdir <path>`; remote refs are consulted so branch names containing `/` work |
+| GitHub `/tree/<ref>/<path>` URL | Recognized and split automatically into clone URL + `BRANCH <ref>` + `SUBDIR <path>`; remote refs are consulted so branch names containing `/` work |
 | Anything else | Treated as a local filesystem path and **copied** into the install directory |
 
-**Flags:**
+**Clauses:**
 
-| Flag | Description |
+| Clause | Description |
 |------|-------------|
-| `--name <name>` | Override the install directory name under the playbooks root |
-| `--subdir <path>` | Install only this subdirectory of the source (see below) |
-| `--branch <ref>` | Git URL only: clone this branch/tag/ref instead of the default branch |
-| `--alias <alias>` | Custom launcher command name for the installed playbook |
-| `--no-alias` | Skip launcher creation |
-| `--sandbox` | Set `[sandbox] always = true` and `isolate_auth = true` on the installed manifest: every launch is sandboxed and the playbook authenticates on its own. A `[sandbox]` block shipped by the source is never adopted, with or without this flag (`Note: ignoring the [sandbox] block shipped in the source's .playbook; sandbox settings are install-local ...`). |
+| `SUBDIR <path>` | Install only this subdirectory of the source (see below) |
+| `BRANCH <ref>` | Git URL only: clone this branch/tag/ref instead of the default branch |
+| `ALIAS <launcher>` | Custom launcher command name for the installed playbook |
+| `NO ALIAS` | Skip launcher creation |
+| `SANDBOX` | Set `[sandbox] always = true` and `isolate_auth = true` on the installed manifest: every launch is sandboxed and the playbook authenticates on its own. A `[sandbox]` block shipped by the source is never adopted, with or without this clause (`Note: ignoring the [sandbox] block shipped in the source's .playbook; sandbox settings are install-local ...`). |
+| `ISOLATED LOGIN` | Set `isolate_auth = true` without a sandbox |
 
-**Steps (no `--subdir`):**
-1. Stage the source (Git URL → `git clone --depth=1`, with `--branch <ref>` if given, into a temp dir; local path → read in place) so its `.playbook` can be consulted before choosing a name.
-2. Derive the install directory name from `--name`, or the manifest `name`, or the last path segment of the URL (stripped of `.git`), or the source directory's name.
+**Steps (no `SUBDIR`):**
+1. Stage the source (Git URL → `git clone --depth=1`, with `BRANCH <ref>` if given, into a temp dir; local path → read in place) so its `.playbook` can be consulted.
+2. The install directory is `<name>`; the source manifest's `name` never chooses it.
 3. Check the target doesn't already exist under the playbooks root.
-4. Preflight command names against the registry under the registry lock — the install name and the effective alias (`--alias`, or the staged manifest's `alias`) — erroring **before anything is copied** if a name already addresses another playbook.
+4. Preflight command names against the registry under the registry lock — the name and the effective alias (`ALIAS`, or the staged manifest's `alias`) — erroring **before anything is copied** if a name already addresses another playbook.
 5. Copy the staged tree into the target. The installed directory **is** the playbook. If a `.playbook` is present it supplies metadata; if not, the directory is still a valid playbook.
 6. Register a launcher command per the rules below.
 7. Print a summary.
 
-`install` never writes a `.playbook` into the source, and never needs one to succeed.
+The source never gets a `.playbook` written into it, and does not need one.
 
-**Steps (with `--subdir <path>`):**
+**Steps (with `SUBDIR <path>`):**
 1. Fetch the source as above into a scratch location (for URLs, a temp directory; for local paths, the source itself).
 2. Verify `<source>/<path>` exists and is a directory.
 3. Copy `<source>/<path>` into `~/.claude-playbooks/<name>/`. For URL sources, the rest of the clone is discarded.
 4. Treat the result as one flat playbook. Any `.playbook` already inside `<source>/<path>` provides metadata for that one playbook.
-5. Default install name (`--name` not given) is the last segment of `<path>`.
 
-`--subdir` is how you consume a monorepo — a repo laid out as `playbooks/sre`, `playbooks/dba`, `playbooks/frontend`, etc. Each `install --subdir` (or `/tree/<ref>/<path>` URL) copies everything under that one directory into its own playbook. To take several, run several installs; there is intentionally no "install the whole suite at once."
+`SUBDIR` is how you consume a monorepo — a repo laid out as `playbooks/sre`, `playbooks/dba`, `playbooks/frontend`, etc. Each `CREATE PLAYBOOK … FROM … SUBDIR` (or `/tree/<ref>/<path>` URL) copies everything under that one directory into its own playbook. To take several, write several statements (a playbook file holds them).
 
 **Default command name**
 
-One launcher is registered, named by the `--alias` value, or the manifest's `alias` field, or its `name` field, or the install directory name, in that order. `--no-alias` skips it. When `--alias` differs from what the installed manifest records, the alias is written into the installed playbook's `.playbook` — a custom command name is only resolvable at invocation time through the manifest `alias` field (on manifest-write failure the install is rolled back).
+One launcher is registered, named by `ALIAS`, or the source manifest's `alias` field, or `<name>`, in that order. `NO ALIAS` skips it. When `ALIAS` differs from what the installed manifest records, the alias is written into the installed playbook's `.playbook` — a custom command name is only resolvable at invocation time through the manifest `alias` field (on manifest-write failure the install is rolled back).
 
 **Command-name collision handling**: collisions against the registry are a hard **pre-copy error**, not a skip-with-warning — `command name "sre" already addresses playbook "other". Pick another name or alias`, and nothing is copied. Only a *foreign file* (not a launcher) already occupying the name in the launcher directory degrades to a post-install warning: the playbook is installed and runnable via `claude-playbook run <name>`, and the warning suggests renaming or removing the conflicting file.
 
 **CLAUDE.md warning:** if the installed playbook has no `CLAUDE.md`, a warning is printed. Claude Code works without one, but most playbooks benefit from having one.
 
 **Errors:**
-- `--branch` with a local path → `--branch only applies to Git URLs`
-- `--subdir` path missing in source → `source.subdir "<path>" not found below <source root>: <stat error>` (the flag is resolved as a source-relative path, so it reports under that field name)
+- `BRANCH` with a local path → `BRANCH only applies to Git URLs`
+- `SUBDIR` path missing in source → `source.subdir "<path>" not found below <source root>: <stat error>` (it is resolved as a source-relative path, so it reports under that field name)
 - Source not found → `'~/dev/foo' not found`
 - Source is a file → `'~/dev/foo' is not a directory`
-- Install name already taken → `"myrepo" already exists at ~/.claude-playbooks/myrepo. Use --name to choose a different name`
+- Name already taken → `"myrepo" already exists at ~/.claude-playbooks/myrepo; choose another name`
 - Command name taken → `command name "sre" already addresses playbook "other". Pick another name or alias`
 - `git` not on PATH → `'git' command not found`
 - Clone fails → git's error output is shown directly
 
 **Sample output:**
 ```
-Cloning https://github.com/ramazanpolat/awesome-playbooks (branch main) (subdir playbooks/sre)...
+Cloning https://github.com/user/repo (branch main) (subdir playbooks/sre)...
 Installed "sre" at ~/.claude-playbooks/sre
 Command:  sre  (launcher at /Users/you/.local/bin/sre)
 
@@ -640,7 +626,7 @@ The registry default applies to every launch of every playbook, manifest or not,
 
 **Writes** parse and validate the whole statement before taking the registry lock and rewriting the manifest (bootstrapping one for a flat playbook). `SET VAR` removes the key from the blocked list; `BLOCK VAR` removes it from `set`; `UNSET VAR` removes it from both; `ADD ENV` appends a set (moving an attached one to the end) after checking it exists, `USE ENV` replaces the list, and `DROP ENV` detaches. An emptied block is dropped from the file. A manifest that cannot be parsed is reported as an advisory launch warning and treated as declaring nothing.
 
-**Install-local.** `update` carries the live block forward and ignores the source's, assembling the final manifest in the staged tree *before* the overlay so a source-shipped block is never live, even transiently; `install` drops a source-shipped block with a note, assembling the install in a dot-prefixed staging directory (invisible to discovery) and renaming it into the registry only once its manifest is sanitized. A local source directory is always staged into a private copy first (in the system temp dir, or the user cache dir when that lies inside the source), so neither command ever writes into the pilot's source. A published manifest must not be able to redirect an install's API endpoint or strip its authentication.
+**Install-local.** `update` carries the live block forward and ignores the source's, assembling the final manifest in the staged tree *before* the overlay so a source-shipped block is never live, even transiently; `CREATE PLAYBOOK … FROM` drops a source-shipped block with a note, assembling the install in a dot-prefixed staging directory (invisible to discovery) and renaming it into the registry only once its manifest is sanitized. A local source directory is always staged into a private copy first (in the system temp dir, or the user cache dir when that lies inside the source), so neither command ever writes into the pilot's source. A published manifest must not be able to redirect an install's API endpoint or strip its authentication.
 
 Linked playbooks: the manifest is the LINK TARGET's shared state, so mutations are refused — edit the target's manifest directly if you really mean it.
 
@@ -677,18 +663,14 @@ When a long-lived token file exists, a trailing line names it and notes that its
 
 ---
 
-### `claude-playbook update [name]`
-
-Updates either the `claude-playbook` tool itself, or a specific playbook — based on whether a name is given.
-
-#### `claude-playbook update` (no arguments) — self-update
+### `claude-playbook self-update`
 
 Updates the running `claude-playbook` binary in place to the latest GitHub release.
 
 ```bash
-claude-playbook update            # download + install the latest release
-claude-playbook update --check    # report the latest version without installing
-claude-playbook update --force    # reinstall even if already on the latest
+claude-playbook self-update            # download + install the latest release
+claude-playbook self-update --check    # report the latest version without installing
+claude-playbook self-update --force    # reinstall even if already on the latest
 ```
 
 It resolves the latest release tag from the GitHub API, downloads the asset for
@@ -716,44 +698,52 @@ rate limits.
 `/nix/store/` (installed through devbox, `nix profile` or the flake), the store
 is read-only and content-addressed: replacing a file there would corrupt the
 package, and the generic permission advice would suggest `sudo` against it. So
-`update` and `update --force` exit non-zero **before any release lookup** (no
+`self-update` and `self-update --force` exit non-zero **before any release lookup** (no
 network, whatever the latest version is), telling the operator to change the
 tag in `devbox.json` and run `devbox install` (a `devbox add` with a different
 ref appends a second package rather than replacing the first); an up-to-date store binary never answers *Already up to
-date.* as if it could update itself. `update --check` still reports, and prints
-the same hint instead of *Run 'claude-playbook update'*. The decision uses the
+date.* as if it could update itself. `self-update --check` still reports, and
+prints the same hint instead of *Run 'cpb self-update'*. The decision uses the
 symlink-resolved path, because under devbox `argv[0]` is the profile's symlink,
 not the store.
 
-#### `claude-playbook update <name>` — update a playbook
+### `claude-playbook update <name>`
 
-Updates the playbook from the `[source]` metadata recorded in its `.playbook`. The CLI owns the update end to end; there is no delegated update script.
+Updates a playbook from where it came from: a playbook kept by `cpb play` (a `[play]` record) fetches its recorded recipe again (see `cpb play` in `docs/reference/cli-grammar.md`); any other updates from the `[source]` metadata recorded in its `.playbook`. The CLI owns the update end to end.
 
 ```bash
-claude-playbook update sre
-claude-playbook update sre --check
+claude-playbook update sre --dry-run   # versions and the migrate step; changes nothing
+claude-playbook update sre             # asks about a migrate step on a terminal
+claude-playbook update sre --yes       # off a terminal: runs a declared migrate step
 ```
 
-**Behaviour:**
+`--json`, `--sha256`, `--trust-endpoint` and `--trust-secret` apply to a played playbook only, as for `cpb play`.
+
+**Behaviour (`[source]`):**
 1. Resolve the named playbook and require `[source].repository` metadata.
 2. Refuse linked playbooks and installs whose config is selected through a top-level `subdir`.
 3. Validate `[update].preserve` before touching anything, so an escaping path fails before the overlay starts.
 4. Fetch `[source].repository` at the recorded branch and source subdirectory into a staging directory.
-5. With `--check`, report the installed version (`version` from the live `.playbook`) against the available one (`version` from the staged `.playbook`, falling back to the staged `VERSION` file), and stop.
-6. Take the registry lock and re-read the live manifest. If the install directory is no longer the same filesystem object, or any `[source]` field changed while staging ran, activate nothing.
-7. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. The live root directory keeps its own mode; only entries below it take the source's. A failure at any point rolls back: entries the source **introduced** are removed and moved entries are restored from the backup; if any restoration fails the backup is kept and named in the error rather than deleted.
-8. Restore the preserved files over the incoming copies: `settings.json`, `settings.local.json`, `.credentials.json`, `.claude.json`, plus every path in `[update].preserve`. A preserved file the source ships but the install did not have is removed rather than adopted, whether it arrived under a moved entry or a newly introduced one. Preserved paths under an entry the overlay never touched are left alone. Whether a preserved path's top-level entry was touched is decided by filesystem identity, not spelling, so on a case-insensitive filesystem a source-shipped `SETTINGS.JSON` is the preserved `settings.json`. Before anything is removed or written, every ancestor between a nested preserved path and its top-level entry is checked for **physical** containment inside that entry (symlinks evaluated, nearest existing ancestor; the final component itself is never followed, so a preserved entry that is a symlink such as the shared `.credentials.json` is recreated as a link). A source that turned a directory on the path into a symlink — pointing outside the install, or into a sibling entry the overlay never backed up — makes the update fail and roll back: `<rel> resolves outside <top>/ after the update (a symlinked ancestor); refusing to restore through it`.
-9. Assemble the manifest that goes live in the staged tree before the overlay: local alias, authentication-isolation, `[env]` overrides, the `[sandbox]` block, and source metadata are preserved from the live manifest (a source-shipped `[env]` or `[sandbox]` block is never adopted, not even transiently), and the install's `name` is always reset to its directory name.
-10. If `migrations/apply.sh` exists in the updated install and is executable, run it as `migrations/apply.sh <from-version> <to-version> <install-dir>` with working directory the install and `CLAUDE_CONFIG_DIR`, `CLAUDE_PLAYBOOK_TARGET`, `CLAUDE_PLAYBOOK_PATH` in the environment. Runners are expected to be idempotent; the CLI does not track which migrations have run. Migrations are skipped with a warning when either side has no `version`.
+5. Read the staged source's migrate step, `[update] migrate`: it must resolve inside the staged tree (symlinks may not leave it) to an executable regular file, whose sha256 is taken. Nothing runs that the source does not declare.
+6. With `--dry-run`, report the installed version (`version` from the live `.playbook`) against the available one (`version` from the staged `.playbook`, falling back to the staged `VERSION` file), and the migrate step with its sha256, and stop.
+7. A declared step is agreed to before anything changes: `--yes`, or a yes on a terminal; otherwise the update is refused (`… declares a migrate step (…); pass --yes to run it, or --dry-run to see the update; nothing was changed`), and a no on a terminal cancels it.
+8. Take the registry lock and re-read the live manifest. If the install directory is no longer the same filesystem object, or any `[source]` field changed while staging ran, activate nothing.
+9. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. The live root directory keeps its own mode; only entries below it take the source's. A failure at any point rolls back: entries the source **introduced** are removed and moved entries are restored from the backup; if any restoration fails the backup is kept and named in the error rather than deleted.
+10. Restore the preserved files over the incoming copies: `settings.json`, `settings.local.json`, `.credentials.json`, `.claude.json`, plus every path in `[update].preserve`. A preserved file the source ships but the install did not have is removed rather than adopted, whether it arrived under a moved entry or a newly introduced one. Preserved paths under an entry the overlay never touched are left alone. Whether a preserved path's top-level entry was touched is decided by filesystem identity, not spelling, so on a case-insensitive filesystem a source-shipped `SETTINGS.JSON` is the preserved `settings.json`. Before anything is removed or written, every ancestor between a nested preserved path and its top-level entry is checked for **physical** containment inside that entry (symlinks evaluated, nearest existing ancestor; the final component itself is never followed, so a preserved entry that is a symlink such as the shared `.credentials.json` is recreated as a link). A source that turned a directory on the path into a symlink — pointing outside the install, or into a sibling entry the overlay never backed up — makes the update fail and roll back: `<rel> resolves outside <top>/ after the update (a symlinked ancestor); refusing to restore through it`.
+11. Assemble the manifest that goes live in the staged tree before the overlay: local alias, authentication-isolation, `[env]` overrides, the `[sandbox]` block, and source metadata are preserved from the live manifest (a source-shipped `[env]` or `[sandbox]` block is never adopted, not even transiently), and the install's `name` is always reset to its directory name.
+12. Release the registry lock, then run the migrate step from the installed copy, only if it still resolves inside the install and its sha256 is the one agreed to: as `<script> <from-version> <to-version> <install-dir>` with working directory the install and `CLAUDE_CONFIG_DIR`, `CLAUDE_PLAYBOOK_TARGET`, `CLAUDE_PLAYBOOK_PATH` in the environment. It may run cpb statements, which take the lock themselves. Steps are expected to be idempotent; the CLI does not track which have run. A declared step is not run, with a warning, when either side has no `version`.
 
 **Errors:**
+- No name → `update takes one playbook name: cpb update <name> (cpb self-update updates cpb itself)`
 - Target not found → `unknown playbook "sre". `cpb SHOW PLAYBOOKS` lists them`
-- Source metadata missing → `"sre" has no [source] metadata in .playbook; nothing to update from`
+- Neither record → `"sre" has no [source] or [play] record in .playbook; nothing to update from`
 - Linked install → `"sre" is linked; native update is disabled to avoid replacing its external source`
 - Subdir-selected install → `"sre" uses manifest subdir "...": native update requires a flat playbook`
-- Extra arguments → `unexpected argument "..."; `update <name>` accepts only --check`
+- A played-playbook flag on a `[source]` one → `--json applies to a playbook kept by cpb play; sre updates from its [source]`
 - Install changed while staging → `playbook "sre" changed while the update was staging (deleted, re-created, or re-sourced); nothing activated -- re-run update`
-- Migration runner exits non-zero → `"sre" is at code version <v> but migrations failed: <err>`
+- Migrate step outside the playbook → `the source's migrate step: update.migrate "<path>" resolves outside <root>`
+- Migrate step changed after the preview → `<path> changed between the preview and the run (…); it was not run`
+- Migrate step exits non-zero → `"sre" is at code version <v>, but its migrate step failed: <err>`
 
 ### `claude-playbook self-uninstall`
 
@@ -821,7 +811,7 @@ version = "1.0.0"
 name = "sre"
 alias = "sre"
 description = "Site Reliability Engineering assistant"
-homepage = "https://github.com/ramazanpolat/awesome-playbooks"
+homepage = "https://github.com/user/repo"
 author = "Ramazan Polat"
 
 [source]
@@ -838,8 +828,8 @@ preserve = ["settings.json"]
 | Field | Meaning |
 |-------|---------|
 | `version` | Version of the playbook itself (free-form semver string). Shown by `SHOW PLAYBOOK`. Not enforced by the tool. |
-| `name` | Preferred playbook name. `install` uses it as a suggestion; the actual name is always the install directory name. |
-| `alias` | Preferred alias for `install` and `CREATE PLAYBOOK` to suggest when writing the default alias. |
+| `name` | Informational. A playbook's name is always its directory name, the one `CREATE PLAYBOOK <name>` gives. |
+| `alias` | The launcher `CREATE PLAYBOOK … FROM` registers when the statement names none. |
 | `subdir` | Optional. Used for backward compatibility. Points at a subdirectory of the install that holds the Claude config. New installations will automatically extract the subdir flatly into the target directory and clear this field in the manifest to ensure all playbooks remain flat at the root level. |
 | `description` | Human-readable description, shown by `SHOW PLAYBOOK`. |
 | `homepage` | Optional URL, shown by `SHOW PLAYBOOK`. |
@@ -852,7 +842,8 @@ preserve = ["settings.json"]
 | `source.branch` | Optional Git branch or tag used by native update. |
 | `source.subdir` | Optional source-relative directory selected during native update. Must remain physically below the fetched source, including through symlinks. |
 | `update.preserve` | Optional list of install-local paths that survive an update even when the source ships its own copy. Each must be relative to and physically below the playbook root. `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json` are always preserved and need not be listed. |
-| `sandbox.always` | When true, every launch of this playbook is sandboxed (`run`, launcher dispatch; `start` for a directory carrying the manifest); `--no-sandbox` overrides one launch, loudly. Install-local: `CREATE PLAYBOOK … SANDBOX` and `install --sandbox` write it with `isolate_auth = true`; never adopted from a source; preserved by `update`. |
+| `update.migrate` | Optional migrate step: a script, relative to and physically below the playbook root, that `update` runs after the new files are in place (`<script> <from-version> <to-version> <install-dir>`), once agreed to (`--yes`, or a yes on a terminal). Without it no migration runs. Read from the source being updated to. |
+| `sandbox.always` | When true, every launch of this playbook is sandboxed (`run`, launcher dispatch; `start` for a directory carrying the manifest); `--no-sandbox` overrides one launch, loudly. Install-local: `CREATE PLAYBOOK … SANDBOX` writes it with `isolate_auth = true`; never adopted from a source; preserved by `update`. |
 | `sandbox.host` | Optional ssh destination (`user@host`; ports and jump hosts through `~/.ssh/config`) where sandboxed launches of this playbook run, with `claude-playbook` and the playbook installed there. `--sandbox-host` overrides it for one launch. Install-local. |
 | `sandbox.backend` | Optional sandbox implementation name; `sbx` (Docker Sandboxes), the default, or `openshell` (NVIDIA OpenShell, v3.27.0). `--sandbox=BACKEND` overrides it for one launch. Install-local. |
 | `sandbox.share_skills` | When true, the backend's shared skills store is mounted into the sandbox (what `sbx` does on its own). Default false: `sbx create` gets `--no-share-skills`, so a sandbox cannot plant a skill a later sandbox runs. Creation-time. |
@@ -861,13 +852,13 @@ preserve = ["settings.json"]
 | `sandbox.mounts` | Optional list of extra host paths mounted into the sandbox at the same absolute path, each absolute or `~`-prefixed, with `:ro` as the only accepted option (read-only). Nothing else of the host is visible inside. |
 | `sandbox.allow_net` | Optional list of hosts (domains, wildcards, CIDR ranges, no whitespace) allowed for this playbook's sandbox on top of the active sandbox policy, applied once when the sandbox is created. The host of an `ANTHROPIC_BASE_URL` the effective environment sets is allowed automatically. |
 | `sandbox.claude_version` | Optional Claude Code version (`2.1.263`) installed inside the sandbox at creation; empty runs the sandbox image's own. A playbook routed to a backend that rejects a newer Claude Code's tool schemas pins the last version that works. |
-| `play.ref`, `play.url`, `play.sha256`, `play.played` | Written by `cpb play --keep` (v4.0.0): where the playbook's recipe came from. `ref` is what `cpb play --update` resolves again (a template name, an https URL, a `github:` ref, or a local file's absolute path); `url` the address the bytes were read from (absent for a local file); `sha256` the recipe's; `played` when, as `YYYY-MM-DD-HH_MM`. The bytes themselves are kept as `.play/recipe.cpb` in the playbook. `claude-playbook update` never reads or changes either; `cpb play --update` rewrites both when it applies new bytes. A release older than v4.0.0 ignores the table on read, and drops it if it rewrites the manifest. See docs/reference/cli-grammar.md, "cpb play". |
+| `play.ref`, `play.url`, `play.sha256`, `play.played` | Written by `cpb play --keep` (v4.0.0): where the playbook's recipe came from. `ref` is what `cpb update <name>` resolves again (a template name, an https URL, a `github:` ref, or a local file's absolute path); `url` the address the bytes were read from (absent for a local file); `sha256` the recipe's; `played` when, as `YYYY-MM-DD-HH_MM`. The bytes themselves are kept as `.play/recipe.cpb` in the playbook. `cpb update <name>` rewrites both when it applies new bytes. A release older than v4.0.0 ignores the table on read, and drops it if it rewrites the manifest. See docs/reference/cli-grammar.md, "cpb play". |
 
 **Forward compatibility:** unknown fields are ignored. Manifest authors may include fields for future tool versions without breaking older installs.
 
 **Errors:**
 - Invalid TOML → `invalid .playbook at <path>: TOML syntax error at line <n> (content not shown)`. The parser's own message is never echoed: since v3.5.0 a manifest may hold credential values under `[env.set]`, and this error reaches the terminal from every command that discovers playbooks.
-- `subdir`, `source.subdir`, or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`. One helper validates all three, so the field name is the only difference between them.
+- `subdir`, `source.subdir`, `update.migrate` or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`. One helper validates them all, so the field name is the only difference between them.
 - `subdir` or `source.subdir` names a path that does not exist, or is not a directory → `<field> "<value>" not found below <root>: <stat error>` / `<field> "<value>" is not a directory below <root>`. Raised when the path is resolved, so it carries the root it was resolved against rather than the manifest path.
 - An `env` key is not a valid variable name → `invalid .playbook at <path>: env.set: invalid environment variable name "<key>"`
 - An `env` key is `CLAUDE_CONFIG_DIR` or `CLAUDE_CONFIG_DIR_OVERRIDE` (the reserved keys) → `invalid .playbook at <path>: env.set: <key> is managed by claude-playbook and cannot be overridden`
@@ -920,7 +911,7 @@ These have no flag equivalent:
 | `CLAUDE_CONFIG_DIR_OVERRIDE` | The config directory `run` and launcher dispatch bind, in place of the playbook's install directory. Absolute or `~`-prefixed; empty means unset; never created. Consumed -- stripped from the child's environment after every layer. A **reserved key**: a manifest, profile, `--env` or `--env-file` that declares it is refused. Refused together with a sandboxed launch. A bare `CLAUDE_CONFIG_DIR` is still discarded. See *Environment overrides*. |
 | `XDG_STATE_HOME` | Parent of the launcher receipt directory (`<XDG_STATE_HOME>/claude-playbook/launchers`). Default `~/.local/state`. |
 | `CLAUDE_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam; not part of the supported surface. |
-| `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `update` (no name) makes, raising the anonymous rate limit. |
+| `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `self-update` makes, raising the anonymous rate limit. |
 | `CLAUDE_PLAYBOOK_UPDATE_REPO`, `CLAUDE_PLAYBOOK_UPDATE_API_BASE`, `CLAUDE_PLAYBOOK_UPDATE_DOWNLOAD_BASE` | Redirect self-update at another repository, API, or asset host. Test seams; not part of the supported surface. |
 
 A variable marked *test seam* is honoured by the binary but carries no compatibility promise: it exists so the suites can run without network or a real release, and may change or disappear in any version.

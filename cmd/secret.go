@@ -50,13 +50,6 @@ func resolveHelper() (*envprofile.Helper, string, error) {
 	return h, path, nil
 }
 
-// checkRefs asks the helper whether every reference a statement writes
-// resolves, before anything is written. The helper reports presence only;
-// its own words go to stderr.
-func checkRefs(clauses []grammar.Clause) error {
-	return checkRefsWith(helperState{}, clauses)
-}
-
 // helperState is the secret helper a run will have configured by a given
 // point: a playbook file may set the helper and use it in the same run, so
 // its references are checked against that helper, not the one configured
@@ -98,7 +91,9 @@ func (s helperState) resolve() (*envprofile.Helper, string, error) {
 	return s.h, path, nil
 }
 
-// checkRefsWith is checkRefs against the helper state s.
+// checkRefsWith asks the helper (state s) whether every reference a
+// statement writes resolves, before anything is written. The helper reports
+// presence only; its own words go to stderr.
 func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 	var refs []grammar.Var
 	for _, c := range clauses {

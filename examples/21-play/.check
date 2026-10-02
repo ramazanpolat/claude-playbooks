@@ -21,18 +21,18 @@ cpb play --yes --no-sandbox ./reviewer.cpb > "$HOME/run.out" 2>&1
 grep -q "Sandbox off (--no-sandbox)" "$HOME/run.out"
 out=$(cpb SHOW PLAYBOOKS --json)
 if printf '%s\n' "$out" | grep -q '"play-reviewer-'; then exit 1; fi
-# --keep: a playbook of your own, with the record; --update with the same bytes changes nothing.
+# --keep: a playbook of your own, with the record; cpb update with the same bytes changes nothing.
 w=$(mktemp -d)
 cp reviewer.cpb "$w/reviewer.cpb"
 out=$(cpb play --keep --yes "$w/reviewer.cpb")
 printf '%s\n' "$out" | grep -q "Kept as reviewer"
 out=$(cpb SHOW PLAYBOOK reviewer)
 printf '%s\n' "$out" | grep -q "Played from:"
-out=$(cpb play --update reviewer)
+out=$(cpb update reviewer)
 printf '%s\n' "$out" | grep -q "reviewer is unchanged"
 # New bytes: the diff, then the update with a yes.
 sed "s/'Grep' 'Glob'/'Grep' 'Glob' 'LS'/" reviewer.cpb > "$w/reviewer.cpb"
-cpb play --update reviewer --yes > "$HOME/update.out"
+cpb update reviewer --yes > "$HOME/update.out"
 grep -q "^  -   ALLOW TOOL 'Read' 'Grep' 'Glob'$" "$HOME/update.out"
 grep -q "^  +   ALLOW TOOL 'Read' 'Grep' 'Glob' 'LS'$" "$HOME/update.out"
 grep -q "Updated reviewer" "$HOME/update.out"

@@ -112,12 +112,12 @@ examples: [examples/](examples/).
 ## Update
 
 ```sh
-cpb update --check      # exit 0; says whether a newer release exists
-cpb update              # installs the latest release
-cpb --version           # verify: the new version
+cpb self-update --check   # exit 0; says whether a newer release exists
+cpb self-update           # installs the latest release
+cpb --version             # verify: the new version
 ```
 
-A binary installed through devbox or Nix is never replaced by `cpb update`
+A binary installed through devbox or Nix is never replaced by `cpb self-update`
 (it refuses and says so): change the tag in the devbox project instead
 (below).
 

@@ -11,40 +11,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-var (
-	installName    string
-	installSubdir  string
-	installBranch  string
-	installAlias   string
-	installNoAlias bool
-	installSandbox bool
-)
-
-var installCmd = &cobra.Command{
-	Use:   "install <source>",
-	Short: "Install a playbook from a Git URL or local directory",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runInstall,
-}
-
-func init() {
-	installCmd.Flags().StringVar(&installName, "name", "", "directory name under the playbooks root")
-	installCmd.Flags().StringVar(&installSubdir, "subdir", "", "cherry-pick: install only this subdirectory of the source")
-	installCmd.Flags().StringVar(&installBranch, "branch", "", "Git URL only: clone this ref instead of the default branch")
-	installCmd.Flags().StringVar(&installAlias, "alias", "", "launcher command name for the installed playbook")
-	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip launcher command creation entirely")
-	installCmd.Flags().BoolVar(&installSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
-}
-
-// installOpts carries install's options: its flags for the command, the statement's
-// clauses for the grammar. No state is shared between two calls.
+// installOpts carries CREATE PLAYBOOK … FROM's clauses. No state is shared
+// between two calls.
 type installOpts struct {
 	name    string
 	subdir  string
@@ -55,10 +28,6 @@ type installOpts struct {
 	// isolatedLogin: isolate_auth = true without a sandbox (CREATE
 	// PLAYBOOK … FROM … ISOLATED LOGIN).
 	isolatedLogin bool
-}
-
-func runInstall(cmd *cobra.Command, args []string) error {
-	return doInstall(installOpts{name: installName, subdir: installSubdir, branch: installBranch, alias: installAlias, noAlias: installNoAlias, sandbox: installSandbox}, args)
 }
 
 func doInstall(o installOpts, args []string) error {
@@ -88,7 +57,6 @@ func doInstall(o installOpts, args []string) error {
 	}
 
 	subdir := strings.Trim(o.subdir, "/")
-	cherryPick := subdir != ""
 
 	playbooksDir := config.ResolvePlaybooksDir()
 	if err := os.MkdirAll(playbooksDir, 0755); err != nil {
@@ -109,32 +77,15 @@ func doInstall(o installOpts, args []string) error {
 		return err
 	}
 
-	// Stage 2: pick the target name. Order: --name, manifest's name, then a
-	// fallback derived from the source.
+	// Stage 2: the target is the statement's name; the source's manifest
+	// name does not choose it.
 	targetName := o.name
-	if targetName == "" {
-		if mPre != nil && mPre.Name != "" {
-			targetName = mPre.Name
-		}
-	}
-	if targetName == "" {
-		if cherryPick {
-			targetName = lastSegmentOfPath(subdir)
-		} else if isGit {
-			targetName = deriveNameFromURL(source)
-		} else {
-			targetName = deriveNameFromLocal(source)
-		}
-	}
-	if targetName == "" {
-		return fmt.Errorf("could not derive name from source; use --name")
-	}
-	if err := validateTopLevelName("install name", targetName); err != nil {
+	if err := validateTopLevelName("playbook name", targetName); err != nil {
 		return err
 	}
 	dest := filepath.Join(playbooksDir, targetName)
 	if _, err := os.Lstat(dest); err == nil {
-		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
+		return fmt.Errorf("%q already exists at %s; choose another name", targetName, dest)
 	}
 
 	// Serialize preflight-through-registration across concurrent installs
@@ -159,7 +110,7 @@ func doInstall(o installOpts, args []string) error {
 	// the source is copied into the registry, not as a post-copy warning.
 	// The installed manifest normalizes its name to targetName, so this
 	// resolved name is still the command to write after the copy.
-	launcherName, err := resolveLauncherName(o.noAlias, effectiveAlias, targetName, "install")
+	launcherName, err := resolveLauncherName(o.noAlias, effectiveAlias, targetName, "create the playbook")
 	if err != nil {
 		return err
 	}
@@ -207,7 +158,7 @@ func doInstall(o installOpts, args []string) error {
 	if !mPre.Sandbox.Empty() {
 		// [sandbox] is install-local too: a published manifest must not be
 		// able to mount host paths or widen the sandbox's network.
-		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: claude-playbook install --sandbox, or edit the installed manifest\n", manifest.FileName)
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: CREATE PLAYBOOK … SANDBOX, or edit the installed manifest\n", manifest.FileName)
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}
@@ -378,7 +329,7 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 	}
 
 	if ref != "" {
-		return "", func() {}, fmt.Errorf("--branch only applies to Git URLs")
+		return "", func() {}, fmt.Errorf("BRANCH only applies to Git URLs")
 	}
 	abs, err := filepath.Abs(source)
 	if err != nil {
@@ -479,20 +430,9 @@ func insideTree(path, rootReal string) bool {
 	}
 }
 
-func deriveNameFromLocal(source string) string {
-	abs, err := filepath.Abs(source)
-	if err != nil {
-		return ""
-	}
-	return filepath.Base(strings.TrimRight(abs, string(filepath.Separator)))
-}
-
-// parseGitTreeURL recognises GitHub /tree/<ref>/<path...> URLs and returns
-// (clone-url, ref, subdir, true). For other URLs returns ("","","",false).
-func parseGitTreeURL(s string) (string, string, string, bool) {
-	return parseGitTreeURLWithRef(s, "")
-}
-
+// parseGitTreeURLWithRef recognises GitHub /tree/<ref>/<path...> URLs and
+// returns (clone-url, ref, subdir, true). For other URLs returns
+// ("","","",false).
 func parseGitTreeURLWithRef(s, preferredRef string) (string, string, string, bool) {
 	u, err := url.Parse(s)
 	if err != nil {
@@ -568,29 +508,6 @@ func isGitURL(s string) bool {
 		strings.HasPrefix(s, "git://") ||
 		strings.HasPrefix(s, "ssh://") ||
 		strings.HasPrefix(s, "file://")
-}
-
-func deriveNameFromURL(source string) string {
-	source = strings.TrimRight(source, "/")
-	name := filepath.Base(source)
-	name = strings.TrimSuffix(name, ".git")
-	return name
-}
-
-func lastSegmentOfPath(p string) string {
-	p = strings.TrimSuffix(p, "/")
-	i := strings.LastIndex(p, "/")
-	if i < 0 {
-		return p
-	}
-	return p[i+1:]
-}
-
-func pluralS(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // copyDir recursively copies the tree rooted at src into dst.

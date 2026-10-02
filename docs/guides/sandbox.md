@@ -32,7 +32,7 @@ To make a playbook sandboxed every time, say so once:
 
 ```bash
 cpb CREATE PLAYBOOK sre SANDBOX       # [sandbox] always = true, isolate_auth = true
-cpb install <source> --sandbox        # same, for an installed playbook
+cpb CREATE PLAYBOOK ops FROM <src> SANDBOX   # the same, for one from a source
 sre -p "run the tests"                # sandboxed, no flag needed
 sre --no-sandbox                      # this launch on the host; cpb says so on stderr
 cpb start --sandbox --delete /tmp/x   # a throwaway session in a throwaway sandbox
@@ -109,8 +109,8 @@ secrets = "env"                     # pass API keys as plain variables instead o
 share_skills = true                 # mount sbx's shared skills store after all
 ```
 
-The block is install-local: `cpb install` never adopts one shipped by a source,
-and `cpb update` keeps yours.
+The block is install-local: `CREATE PLAYBOOK … FROM` never adopts one shipped
+by a source, and `cpb update` keeps yours.
 
 `claude_version` matters for a playbook routed to a third-party backend that
 rejects a newer Claude Code's tool schemas: the sandbox keeps running the last

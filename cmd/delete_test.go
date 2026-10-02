@@ -149,8 +149,17 @@ func TestShowPlaybookManifestFields(t *testing.T) {
 	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK plain --json")), &v); err != nil {
 		t.Fatal(err)
 	}
-	if v["description"] != nil || v["homepage"] != nil || v["author"] != nil {
-		t.Errorf("plain --json fields = %v, %v, %v; want null", v["description"], v["homepage"], v["author"])
+	if v["description"] != nil || v["homepage"] != nil || v["author"] != nil || v["migrate"] != nil {
+		t.Errorf("plain --json fields = %v, %v, %v, %v; want null", v["description"], v["homepage"], v["author"], v["migrate"])
+	}
+
+	// The declared migrate step, which cpb update runs.
+	writePlaybook(t, config.PlaybooksDir, "migrating", &manifest.Manifest{Update: &manifest.Update{Migrate: "migrations/apply.sh"}})
+	if out := mustStmt(t, "SHOW PLAYBOOK migrating"); !strings.Contains(out, "Migrate:") || !strings.Contains(out, "migrations/apply.sh (run by cpb update)") {
+		t.Errorf("SHOW PLAYBOOK lacks the migrate step:\n%s", out)
+	}
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK migrating --json")), &v); err != nil || v["migrate"] != "migrations/apply.sh" {
+		t.Errorf("--json migrate = %v (%v)", v["migrate"], err)
 	}
 }
 

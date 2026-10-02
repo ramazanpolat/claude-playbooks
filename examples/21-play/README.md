@@ -6,7 +6,7 @@ cpb play --dry-run --json ./reviewer.cpb         # the plan, for a program
 cpb play ./reviewer.cpb                          # preview, yes, run, removed afterwards
 cpb play ./router.cpb                            # type router.example.net to run it
 cpb play ./reviewer.cpb --keep                   # keep it as a playbook of your own
-cpb play --update reviewer                       # fetch it again; the diff before anything changes
+cpb update reviewer                              # fetch it again; the diff before anything changes
 ```
 
 `cpb play` runs a recipe someone else wrote in a throwaway playbook, after it
@@ -24,7 +24,7 @@ code-reviewer`), an https URL, or `github:<owner>/<repo>/<path>.cpb@<tag>`.
   it. `--yes` alone is refused and names `--trust-endpoint`.
 - `--keep` builds the recipe as a playbook in your store (here `reviewer`),
   records where it came from (`SHOW PLAYBOOK reviewer`: `Played from:`), and
-  runs nothing. `--update` fetches it again and shows the diff first.
+  runs nothing. `cpb update` fetches it again and shows the diff first.
 
 `playbook.cpb` is the other path: once you trust a recipe, include it in a
 playbook of your own and `APPLY` it, like any other file. That is what CI

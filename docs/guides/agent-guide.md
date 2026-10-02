@@ -73,9 +73,8 @@ cpb CREATE PLAYBOOK <name> FROM <git-url> BRANCH <ref> SUBDIR <path> NO ALIAS
 cpb CREATE PLAYBOOK <name> LINK <dir> NO ALIAS              # the target needs a .playbook first
 cpb ALTER PLAYBOOK <name> RENAME TO <new>
 cpb DROP PLAYBOOK IF EXISTS <name> --yes
-cpb install <git-url-or-dir> --name <name> --no-alias       # the one-step shortcut
-cpb update <name>                                           # from [source]; settings.json, data/, [env] survive
-cpb update <name> --check                                   # versions only, touches nothing
+cpb update <name> --yes                                     # from [source]; settings.json, data/, [env] survive; --yes runs a declared migrate step
+cpb update <name> --dry-run                                 # versions and the migrate step, touches nothing
 ```
 
 `IF NOT EXISTS` / `IF EXISTS` make a statement safe to repeat: "already there" and "not there" become no-ops. Name collisions are hard errors before anything is copied (`command name "x" already addresses playbook "y"`). A statement applies whole or not at all, and a non-zero exit means nothing changed, with one exception: the plugin, MCP server and skill clauses run in clause order (`claude plugin`, `claude mcp`, files under `skills/`), and the error names what already ran (running the statement again finishes it).
@@ -165,10 +164,11 @@ An agent cannot complete an interactive `/login`. If a headless run exits with a
 
 - Go through the CLI for anything it has a statement for. Hand edits are honoured but never defended: a broken manifest fails loudly at the next use.
 - Never write into a playbook source directory you were given to install from; `install` and `update` stage a private copy, and so should you.
-- Do not put secrets into a playbook you intend to publish. Env blocks and env sets are install-local by design: `update` ignores a source-shipped block and `install` drops it with a note.
+- Do not put secrets into a playbook you intend to publish. Env blocks and env sets are install-local by design: `update` ignores a source-shipped block and `CREATE PLAYBOOK … FROM` drops it with a note.
 - A raw `claude` launch bypasses authentication preparation and environment layers. For the playbook's semantics, launch through `run`, `start`, or the launcher.
 - Registry mutations are serialized by a lock; launches take no lock and read the manifest at launch time.
-- The self-update is `cpb update` with no name; `--check` reports without installing.
+- The self-update is `cpb self-update`; `--check` reports without installing.
+- A source's migrate step (`[update] migrate`) never runs unattended by surprise: off a terminal, `update` refuses until you pass `--yes`, and `--dry-run` shows the step and its sha256.
 
 ## Reading errors
 
