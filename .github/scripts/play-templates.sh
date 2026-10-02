@@ -6,8 +6,9 @@
 # Usage: .github/scripts/play-templates.sh <path to the cpb binary>
 set -eu
 cpb=$1
-names=$(grep -ohE 'cpb play [a-z0-9][a-z0-9-]*( |$)' README.md docs/guides/*.md docs/reference/*.md examples/*/README.md \
-  | awk '{print $3}' | sort -u)
+# The name ends at a space, a backtick (`cpb play x` inline) or the line's end.
+names=$(grep -ohE 'cpb play [a-z0-9][a-z0-9-]*([ `]|$)' README.md docs/guides/*.md docs/reference/*.md examples/*/README.md \
+  | tr -d '`' | awk '{print $3}' | sort -u)
 [ -n "$names" ] || { echo "FAIL: no template name found in the docs (has the README example moved?)"; exit 1; }
 fail=0
 for n in $names; do

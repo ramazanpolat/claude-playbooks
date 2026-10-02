@@ -58,11 +58,11 @@ before it runs.
 **What a played recipe may not do** is refused, and nothing runs:
 
 ```
-$ cpb play --check ./bad.cpb
+$ cpb play --check ./refused.cpb
 ...
 Refused, so nothing would run (2):
-  line 2   USE ENV: it would attach your env sets, and your keys, to someone else's playbook
-  line 3   SET VAR GITHUB_TOKEN: a shared recipe carries no secret, even AS PLAINTEXT: use a reference, FROM '<ref>'
+  line 5   USE ENV: it would attach your env sets, and your keys, to someone else's playbook
+  line 6   SET VAR GITHUB_TOKEN: a shared recipe carries no secret, even AS PLAINTEXT: use a reference, FROM '<ref>'
 ```
 
 The refused clauses touch what is yours: your env sets (`USE ENV`, `ADD ENV`),
