@@ -48,7 +48,12 @@ for pb in $pbs; do
   if ! cmp -s "$home/old-explain-$pb.json" "$home/new-explain-$pb.json"; then echo "EXPLAIN $pb differs:"; diff "$home/old-explain-$pb.json" "$home/new-explain-$pb.json" | head -20; exit 1; fi
 done
 for pb in $pbs; do
-  cfg=$(cpb SHOW PLAYBOOK "$pb" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])')
+  # A playbook sandboxed on every launch needs sbx, which this job does not
+  # have: its launch would refuse. The example's own .check covers that
+  # refusal; here the launch is skipped, and upgrade.sh's line says so.
+  info=$(cpb SHOW PLAYBOOK "$pb" --json | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["sandbox"]["always"], v["path"])')
+  if [ "${info%% *}" = True ]; then echo "$pb" >> "$home/launch-skipped"; continue; fi
+  cfg=${info#* }
   rm -f "$cfg/.fake-claude/launch-env"
   cpb run "$pb" > /dev/null 2>&1
   if [ ! -f "$cfg/.fake-claude/launch-env" ]; then echo "run $pb did not launch claude"; exit 1; fi

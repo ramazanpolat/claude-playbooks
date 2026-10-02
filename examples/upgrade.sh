@@ -7,7 +7,9 @@
 #   - re-applying the example with the new binary changes nothing;
 #   - EXPLAIN --json of every playbook (what a launch sets) is identical;
 #   - auth status --json is identical;
-#   - every playbook launches (the stand-in claude records the launch);
+#   - every playbook launches (the stand-in claude records the launch),
+#     except one sandboxed on every launch: there is no sbx here, and the
+#     log says it was skipped;
 #   - every playbook drops cleanly;
 #   - the machine's login store and state are byte-identical throughout.
 # The examples applied are the OLD release's own (its tag's examples/): the
@@ -38,7 +40,9 @@ for dir in "$src"/[0-9][0-9]-*/; do
   home=$(mktemp -d)
   if sh -e "$here/.ci/upgrade-one.sh" "$old" "$new" "$dir" "$home" "$here/.ci" > "$home/log" 2>&1; then rc=0; else rc=$?; fi
   case $rc in
-    0) echo "ok    $name ($(cat "$home/count") playbooks)"; ran=$((ran + 1)) ;;
+    0) skipped=""
+       [ -f "$home/launch-skipped" ] && skipped="; launch skipped for $(tr '\n' ' ' < "$home/launch-skipped" | sed 's/ $//'): sandboxed on every launch, and no sbx here"
+       echo "ok    $name ($(cat "$home/count") playbooks$skipped)"; ran=$((ran + 1)) ;;
     3) echo "skip  $name (the old release refuses it)" ;;
     *) echo "FAIL  $name"; sed 's/^/      /' "$home/log" | tail -30; fail=1 ;;
   esac
