@@ -282,13 +282,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
-	since := time.Now()
-	err = preserveExitCode(runAttached(c))
 	// The exit line names the command that resumes this session in this
 	// playbook; a caller-supplied config dir is not the playbook's, so
 	// that launch gets none.
-	if !override && !playSessionRunning {
-		printResumeLine(sd, claudeArgs, since)
+	exitLine := !override && !playSessionRunning && wantsResumeLine(claudeArgs)
+	var before map[string]time.Time
+	if exitLine {
+		before = transcriptStamps(sd.path)
+	}
+	err = preserveExitCode(runAttached(c))
+	if exitLine {
+		printResumeLine(sd, before)
 	}
 	return err
 }

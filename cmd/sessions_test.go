@@ -370,13 +370,17 @@ func TestResumeNoteForASandbox(t *testing.T) {
 }
 
 // The exit line: after claude exits under cpb run, on a terminal, cpb names
-// the launcher command that resumes the session.
+// the launcher command that resumes the session: the transcript the launch
+// wrote, judged against the transcripts there before it, never against the
+// clock (a file's time can read as earlier than the launch that wrote it).
 func TestRunPrintsTheResumeLine(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
 	fakeProcs(t, nil)
 	dir := t.TempDir()
-	script := "#!/bin/sh\nd=\"$CLAUDE_CONFIG_DIR/projects/-w\"\nmkdir -p \"$d\"\necho '{}' > \"$d/" + sidLive + ".jsonl\"\n"
+	// A stand-in claude that writes $FAKE_SID's transcript, if set, and
+	// with FAKE_OLD stamps it long before this launch began.
+	script := "#!/bin/sh\n[ -n \"$FAKE_SID\" ] || exit 0\nd=\"$CLAUDE_CONFIG_DIR/projects/-w\"\nmkdir -p \"$d\"\necho '{}' >> \"$d/$FAKE_SID.jsonl\"\n[ -z \"$FAKE_OLD\" ] || touch -t 202001010000 \"$d/$FAKE_SID.jsonl\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -385,20 +389,40 @@ func TestRunPrintsTheResumeLine(t *testing.T) {
 	old := stderrTTY
 	stderrTTY = func() bool { return tty }
 	t.Cleanup(func() { stderrTTY = old })
-
-	var err error
-	msg := captureStderr(t, func() { err = runRun(nil, []string{"alpha"}) })
-	if err != nil || !strings.Contains(msg, "Resume this playbook's session with: al --resume "+sidLive) {
-		t.Fatalf("%v\n%s", err, msg)
+	launch := func(sid, stamp string, args ...string) string {
+		t.Helper()
+		t.Setenv("FAKE_SID", sid)
+		t.Setenv("FAKE_OLD", stamp)
+		var err error
+		msg := captureStderr(t, func() { err = runRun(nil, append([]string{"alpha"}, args...)) })
+		if err != nil {
+			t.Fatalf("%v\n%s", err, msg)
+		}
+		return msg
 	}
-	msg = captureStderr(t, func() { err = runRun(nil, []string{"alpha", "-p", "hi"}) })
-	if err != nil || strings.Contains(msg, "Resume this") {
-		t.Fatalf("print mode: %v\n%s", err, msg)
+	line := "Resume this playbook's session with: al --resume "
+
+	if msg := launch(sidLive, ""); !strings.Contains(msg, line+sidLive) {
+		t.Fatalf("a new session:\n%s", msg)
+	}
+	// Written by this launch, though its time says years ago.
+	if msg := launch(sidDead, "1"); !strings.Contains(msg, line+sidDead) {
+		t.Fatalf("a transcript stamped before the launch:\n%s", msg)
+	}
+	// A launch that wrote nothing names nothing, though transcripts are there.
+	if msg := launch("", ""); strings.Contains(msg, "Resume this") {
+		t.Fatalf("no message, yet a line:\n%s", msg)
+	}
+	// A resumed session, appended to: that one, not the newest by time.
+	if msg := launch(sidDead, ""); !strings.Contains(msg, line+sidDead) {
+		t.Fatalf("a resumed session:\n%s", msg)
+	}
+	if msg := launch(sidLive, "", "-p", "hi"); strings.Contains(msg, "Resume this") {
+		t.Fatalf("print mode:\n%s", msg)
 	}
 	tty = false
-	msg = captureStderr(t, func() { err = runRun(nil, []string{"alpha"}) })
-	if err != nil || strings.Contains(msg, "Resume this") {
-		t.Fatalf("no tty: %v\n%s", err, msg)
+	if msg := launch(sidLive, ""); strings.Contains(msg, "Resume this") {
+		t.Fatalf("no tty:\n%s", msg)
 	}
 }
 
