@@ -4,5 +4,5 @@
 
 ALTER PLAYBOOK
   SET MODEL 'claude-opus-5-5'
-  ALLOW TOOL 'Grep' 'Glob'
+  ALLOW TOOL 'Read' 'Grep' 'Glob'
   DENY TOOL 'Write' 'Edit';

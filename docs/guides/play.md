@@ -35,10 +35,12 @@ anything you have built can be shared as one `.cpb` file.
 
 ## Reading the preview
 
+The recipe below is [example 21](../../examples/21-play/)'s `reviewer.cpb`.
+
 ```
 $ cpb play --check ./reviewer.cpb
 Recipe:  ./reviewer.cpb
-From:    /home/you/reviewer.cpb
+From:    /home/you/claude-playbooks/examples/21-play/reviewer.cpb
 sha256:  31fc13e26557885b1a41e58d6f08c75d88a1e01956c0038e18069ab1be6c0ad7 (196 bytes)
 Title:   Code reviewer
 About:   Reads code, never writes it.
@@ -134,8 +136,10 @@ exactly. The `"play"` block of `--json` carries the ref, the final URL, the
 sha256, the header, the risks as `{code, line, clause, detail, confirm}`,
 and the sandbox decision.
 
-Exit codes: 0 when the session ran (claude's own code passes through), 1 when
-the recipe was refused by a check, a confirmation or `--sha256`.
+Exit codes: 0 when it checked, planned, kept, updated (or found nothing to
+update), or the session ran, whose own exit code passes through; 1 when the
+recipe was refused by a check, its header, a confirmation or `--sha256`; 2 on
+a usage error.
 
 ## Keeping one
 

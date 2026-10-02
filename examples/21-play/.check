@@ -1,28 +1,38 @@
+# Each cpb's output is captured first, so a failing cpb stops the check
+# (sh -e does not see a failure inside a pipeline or an if-condition).
 # --check: the preview's head and its risks; a refused recipe exits 1 with its lines.
-cpb play --check ./reviewer.cpb | grep -q "Title:   Code reviewer"
+out=$(cpb play --check ./reviewer.cpb)
+printf '%s\n' "$out" | grep -q "Title:   Code reviewer"
 if cpb play --check ./refused.cpb > "$HOME/refused.out"; then exit 1; fi
-grep -q "line 5   USE ENV" "$HOME/refused.out" && grep -q "line 6   SET VAR GITHUB_TOKEN" "$HOME/refused.out"
-rm -f "$HOME/refused.out"
+grep -q "line 5   USE ENV" "$HOME/refused.out"
+grep -q "line 6   SET VAR GITHUB_TOKEN" "$HOME/refused.out"
 # A moved endpoint: one typed confirmation, never a plain --yes.
-cpb play --check ./router.cpb | grep -q "you will type: router.example.net"
+out=$(cpb play --check ./router.cpb)
+printf '%s\n' "$out" | grep -q "you will type: router.example.net"
 if cpb play --yes --no-sandbox ./router.cpb > "$HOME/router.out" 2>&1; then exit 1; fi
-grep -q -- "--trust-endpoint router.example.net" "$HOME/router.out" && rm -f "$HOME/router.out"
+grep -q -- "--trust-endpoint router.example.net" "$HOME/router.out"
 # --dry-run --json: APPLY's plan plus the "play" block; nothing is written.
 cpb play --dry-run --json ./reviewer.cpb > "$HOME/plan.json"
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); p=r["play"]; assert r["ok"] and p["header"]["title"]=="Code reviewer" and len(p["sha256"])==64 and p["playbook"].startswith("play-reviewer-"), r' "$HOME/plan.json"
-rm -f "$HOME/plan.json"
-if cpb SHOW PLAYBOOKS --json | grep -q '"play-reviewer-'; then exit 1; fi
+out=$(cpb SHOW PLAYBOOKS --json)
+if printf '%s\n' "$out" | grep -q '"play-reviewer-'; then exit 1; fi
 # A run in a throwaway playbook (the stub claude records the launch); gone afterwards.
 cpb play --yes --no-sandbox ./reviewer.cpb > "$HOME/run.out" 2>&1
-grep -q "Sandbox off (--no-sandbox)" "$HOME/run.out" && rm -f "$HOME/run.out"
-if cpb SHOW PLAYBOOKS --json | grep -q '"play-reviewer-'; then exit 1; fi
+grep -q "Sandbox off (--no-sandbox)" "$HOME/run.out"
+out=$(cpb SHOW PLAYBOOKS --json)
+if printf '%s\n' "$out" | grep -q '"play-reviewer-'; then exit 1; fi
 # --keep: a playbook of your own, with the record; --update with the same bytes changes nothing.
 w=$(mktemp -d) && cp reviewer.cpb "$w/reviewer.cpb"
-cpb play --keep --yes "$w/reviewer.cpb" | grep -q "Kept as reviewer"
-cpb SHOW PLAYBOOK reviewer | grep -q "Played from:"
-cpb play --update reviewer | grep -q "reviewer is unchanged"
+out=$(cpb play --keep --yes "$w/reviewer.cpb")
+printf '%s\n' "$out" | grep -q "Kept as reviewer"
+out=$(cpb SHOW PLAYBOOK reviewer)
+printf '%s\n' "$out" | grep -q "Played from:"
+out=$(cpb play --update reviewer)
+printf '%s\n' "$out" | grep -q "reviewer is unchanged"
 # New bytes: the diff, then the update with a yes.
 sed "s/'Grep' 'Glob'/'Grep' 'Glob' 'LS'/" reviewer.cpb > "$w/reviewer.cpb"
 cpb play --update reviewer --yes > "$HOME/update.out"
-grep -q "+   ALLOW TOOL 'Grep' 'Glob' 'LS'" "$HOME/update.out" && grep -q "Updated reviewer" "$HOME/update.out"
-rm -rf "$HOME/update.out" "$w"
+grep -q "^  -   ALLOW TOOL 'Read' 'Grep' 'Glob'$" "$HOME/update.out"
+grep -q "^  +   ALLOW TOOL 'Read' 'Grep' 'Glob' 'LS'$" "$HOME/update.out"
+grep -q "Updated reviewer" "$HOME/update.out"
+rm -rf "$w" "$HOME/refused.out" "$HOME/router.out" "$HOME/plan.json" "$HOME/run.out" "$HOME/update.out"
