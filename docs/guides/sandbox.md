@@ -101,9 +101,9 @@ A playbook describes its sandbox in the `[sandbox]` table of its manifest.
 forgets one, so you never edit the file:
 
 ```bash
-cpb ALTER PLAYBOOK sre SET SANDBOX host=me@buildbox mounts=~/shared-libs:ro allow_net=internal.corp
-cpb ALTER PLAYBOOK sre UNSET SANDBOX host
-cpb SHOW PLAYBOOK sre                 # Sandbox: yes (mounts=~/shared-libs:ro, allow_net=internal.corp)
+cpb ALTER PLAYBOOK dev SET SANDBOX host=me@buildbox mounts=~/shared-libs:ro allow_net=internal.corp
+cpb ALTER PLAYBOOK dev UNSET SANDBOX host
+cpb SHOW PLAYBOOK dev                 # Sandbox: yes (mounts=~/shared-libs:ro, allow_net=internal.corp)
 ```
 
 The keys, as the table holds them:
