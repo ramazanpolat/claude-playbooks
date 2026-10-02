@@ -394,8 +394,8 @@ researcher	CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
       and <code class="inline">--resume &lt;id&gt;</code> resumes one, through its playbook (a launcher
       takes the same flags). cpb refuses a session that is still live &mdash; two processes on one
       session id would corrupt it &mdash; and one typed in the wrong folder.
-      <code class="inline">SHOW SESSIONS</code> prints each session's resume command, <code class="inline">cd</code>
-      included.</p>
+      <code class="inline">SHOW SESSIONS --json</code> gives each session's resume command in its
+      <code class="inline">resume</code> field, <code class="inline">cd</code> included.</p>
   </section>
 
   <section id="tui">

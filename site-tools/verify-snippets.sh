@@ -113,6 +113,11 @@ for f in index.html tour.html; do
   fi
 done
 
+echo "== tour: the check itself fails when it should =="
+if ! python3 "$here/test-tour-outputs.py"; then
+  fail=1
+fi
+
 echo "== tour: every pasted output is what cpb prints =="
 # tour-transcript.sh runs the page's commands in homes of its own and prints
 # each with its real output; tour-outputs.py compares the page with that.

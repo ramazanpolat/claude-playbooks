@@ -348,6 +348,7 @@
     var notes = [];
     if (r.needs.length) notes.push("Needs a secret helper for " + r.needs.map(function (x) { return "<code>" + esc(x) + "</code>"; }).join(", ") + ". Store each secret yourself, then apply.");
     if (sel.sandbox) notes.push("Sandboxed launches need <code>sbx</code> (Docker Sandboxes).");
+    if (sel.sandbox && sel.mode === "recipe") notes.push("<code>cpb CREATE PLAYBOOK</code> refuses a name that exists already. For an existing playbook, run <code>cpb ALTER PLAYBOOK " + esc(sel.name) + " SET SANDBOX</code> instead of it.");
     if (sel.model.kind === "router") notes.push("Attach your router's key with an env set; it is never written to this file.");
     return "<h4>Use it</h4><ol class=\"cmds\">" + cmds + "</ol>" + (notes.length ? '<ul class="notes">' + notes.map(function (n) { return "<li>" + n + "</li>"; }).join("") + "</ul>" : "");
   }
