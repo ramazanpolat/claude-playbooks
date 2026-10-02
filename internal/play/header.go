@@ -72,7 +72,9 @@ func (h Header) WantsSandbox() bool {
 
 // A build past a release tag, as git describe names it (v3.27.0-3-g562f9ff,
 // or -dirty): newer than that tag, and carrying what comes after it.
-var describedBuild = regexp.MustCompile(`-[0-9]+-g[0-9a-f]+|-dirty`)
+// At least one commit: git describe --long writes -0-g<hash> at the tag
+// itself, which is that release.
+var describedBuild = regexp.MustCompile(`-[1-9][0-9]*-g[0-9a-f]+|-dirty`)
 
 // TooOld reports whether version (this cpb's, vX.Y.Z or X.Y.Z) is older
 // than min-cpb. A dev build, a build past a tag (git describe), or an

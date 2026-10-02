@@ -154,7 +154,7 @@ func TestHeader(t *testing.T) {
 	}
 	for v, old := range map[string]bool{"v3.27.0": true, "v3.28.0": false, "3.28.1": false, "v3.29.0-rc1": false, "dev": false, "v4.0.0": false, "v3.9.9": true,
 		// a build past a tag (git describe) or dirty is a dev build; an rc is its release
-		"v3.27.0-3-g562f9ff": false, "v3.27.0-dirty": false, "v3.27.0-3-g562f9ff-dirty": false, "v3.28.0-rc1": false, "v3.27.0-rc1": true} {
+		"v3.27.0-3-g562f9ff": false, "v3.27.0-1-g562f9ff": false, "v3.27.0-0-g562f9ff": true, "v3.27.0-dirty": false, "v3.27.0-3-g562f9ff-dirty": false, "v3.28.0-rc1": false, "v3.27.0-rc1": true} {
 		if got := h.TooOld(v); got != old {
 			t.Errorf("TooOld(%s) = %v, want %v", v, got, old)
 		}
