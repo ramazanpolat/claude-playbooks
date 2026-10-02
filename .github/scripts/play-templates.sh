@@ -1,16 +1,24 @@
 #!/bin/sh
 # Every template name the docs tell users to play must exist in this tree.
+# Run in the site's tree (.github/scripts/site-tree.sh: the pinned ref's docs
+# and cpb, this checkout's site/), by templates-verify.yml.
 # `cpb play <name>` reads site/p/<name>.cpb at the release's own tag, so a
 # template missing here is a 404 for everyone on that release, for good.
-# Run on every change, it fails before a tag rather than after.
+# It runs with the site's checks, and in the release PR's site pass (the pin at
+# HEAD), so it fails before a tag rather than after.
 # Usage: .github/scripts/play-templates.sh <path to the cpb binary>
 set -eu
 cpb=$1
 # Each file is read as one line, so `cpb play` wrapped before the name still
 # counts; the name ends at a space, a backtick (`cpb play x` inline) or the end.
+played='cpb play [a-z0-9][a-z0-9-]*([ `]|$)'
+# The pattern is checked on a sample, not on the docs: docs that play no
+# template (a release before play's) are fine, a pattern that finds none is not.
+[ "$(printf 'see `cpb play code-reviewer` and\n' | grep -oE "$played" | tr -d '`' | awk '{print $3}')" = code-reviewer ] \
+  || { echo "FAIL: the template-name pattern no longer finds a name"; exit 1; }
 names=$(for f in README.md docs/guides/*.md docs/reference/*.md examples/*/README.md; do tr '\n' ' ' < "$f"; echo; done \
-  | grep -oE 'cpb play [a-z0-9][a-z0-9-]*([ `]|$)' | tr -d '`' | awk '{print $3}' | sort -u)
-[ -n "$names" ] || { echo "FAIL: no template name found in the docs (has the README example moved?)"; exit 1; }
+  | grep -oE "$played" | tr -d '`' | awk '{print $3}' | sort -u || true)
+[ -n "$names" ] || echo "no template is played in these docs"
 fail=0
 for n in $names; do
   # The URL cpb resolves the name to, through a proxy that is not there:
