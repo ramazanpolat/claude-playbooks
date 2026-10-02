@@ -16,7 +16,9 @@
 #       tag of that version yet, passes with a warning: the bump commit of a
 #       release that is about to be tagged. The warning says what npx does
 #       meanwhile: runs the newest release within the same major, or nothing
-#       for a new major (bin/npx-shim.sh never falls back across one).
+#       for a new major (bin/npx-shim.sh never falls back across one). A
+#       release candidate (X.Y.Z-rcN) that is tagged and newer than the
+#       highest release passes: npx serves that pre-release, which is right.
 set -eu
 
 # minor_of v3.24.1 → v3.24; v3.24.0-rc1 → v3.24; anything else ("-beta",
@@ -66,6 +68,14 @@ npx-check)
     echo "package.json version ($pkg) matches the latest release ($latest)"
     exit 0
   fi
+  case "$pkg" in
+  *-rc*)
+    if [ -n "$(minor_of "v$pkg")" ] && [ -n "$(git tag -l "v$pkg")" ] && newer "${pkg%%-rc*}" "${latest#v}"; then
+      echo "package.json names v$pkg, a tagged release candidate newer than the latest release ($latest): npx serves it"
+      exit 0
+    fi
+    ;;
+  esac
   if newer "$pkg" "${latest#v}" && [ -z "$(git tag -l "v$pkg")" ]; then
     # The shim stands in the newest release only within one major.
     if [ "${pkg%%.*}" = "$(printf '%s' "${latest#v}" | cut -d. -f1)" ]; then

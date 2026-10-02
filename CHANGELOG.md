@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.0.0 (unreleased)
+## [v4.0.0-rc1] -- unreleased
 
 cpb v4 is one CLI with one grammar. It breaks v3 on purpose: names, files,
 flags and JSON change, and v4 reads no v3 name. Nothing converts v3 state

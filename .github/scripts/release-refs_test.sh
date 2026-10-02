@@ -79,5 +79,15 @@ want 0 -  sh "$refs" npx-check 3.25.0
 want 1 -  sh "$refs" npx-check 3.24.0                     # behind the newest: refused
 git tag v3.24.1 "$r1"                                     # a patch after a newer minor
 want 0 -  sh "$refs" npx-check 3.25.0                     # the newest is still v3.25.0 (version sort, not date)
+# release candidates of the next major: untagged is a pending tag, tagged is served
+want 0 -  sh "$refs" npx-check 4.0.0-rc1                  # the rc's bump, before its tag: a warning
+git tag v4.0.0-rc1 "$m1"
+want 0 -  sh "$refs" npx-check 4.0.0-rc1                  # tagged and newer than v3.25.0: npx serves it
+case "$(sh "$refs" npx-check 4.0.0-rc1)" in *"a tagged release candidate newer than the latest release (v3.25.0)"*) echo "ok:   a tagged rc newer than the latest release passes, saying so" ;; *) echo "FAIL: tagged rc message"; fail=1 ;; esac
+want 1 -  sh "$refs" npx-check 3.24.0-rc1                 # tagged, but older than v3.25.0: refused
+want 0 -  sh "$refs" npx-check 4.0.0-rc2                  # the next rc, before its tag: a warning
+git tag v4.0.0 "$m1"
+want 1 -  sh "$refs" npx-check 4.0.0-rc1                  # the final is out: main must name it
+want 0 -  sh "$refs" npx-check 4.0.0
 
 exit $fail

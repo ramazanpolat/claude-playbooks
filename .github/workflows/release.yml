@@ -143,8 +143,8 @@ jobs:
           out="$("$bin" --version)"
           echo "$out"
           case "$out" in *"$TAG"*) ;; *) echo "binary does not report the tag"; exit 1;; esac
-          # A registry command against an empty scratch root, not just --version.
-          "$bin" --playbooks-dir "$RUNNER_TEMP/pb" list
+          # A registry statement against an empty scratch root, not just --version.
+          "$bin" --playbooks-dir "$RUNNER_TEMP/pb" SHOW PLAYBOOKS
 
   release:
     needs: [build, smoke-darwin]
@@ -158,8 +158,14 @@ jobs:
           name: dist
           path: dist
 
+      # A release candidate (vX.Y.Z-rcN) is a pre-release and never the
+      # Latest release. Its tag starts phase 2 itself, so the first run of
+      # this workflow on it stops at arena-gate; re-run it once that phase 2
+      # is green, and it publishes. A final release keeps GitHub's default.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          make_latest: ${{ contains(github.ref_name, '-rc') && 'false' || 'legacy' }}

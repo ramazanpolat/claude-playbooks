@@ -2,13 +2,15 @@
 # documented install path, on a release shaped as release.yml publishes it:
 # one `cpb-<os>-<arch>` asset and its SHA256SUMS.
 #
-# There is no published v4 release to pin yet, so the release is a fixture
-# served on loopback: this checkout's install.sh, and a build of this
-# checkout stamped v4.0.0 as the asset. The release PR repins the suite to
-# the published tag, script and CPB_INSTALL_VERSION on one immutable tag
-# (unpinned installs hit api.github.com rate limits from the shared bench
-# egress IP, and a script from mutable main could drift under a pinned
-# binary).
+# The release is a fixture served on loopback: this checkout's install.sh,
+# and a build of this checkout stamped v4.0.0 as the asset. A release
+# commit is tested before its tag exists (the release gate needs a green
+# phase 2 on the commit the tag will name), so the suite cannot download the
+# release it gates. Once the first v4 release is published, a commit after
+# it may repin the suite to that tag, script and CPB_INSTALL_VERSION on one
+# immutable tag (unpinned installs hit api.github.com rate limits from the
+# shared bench egress IP, and a script from mutable main could drift under a
+# pinned binary).
 
 [scenario]
 name = "cli-release-install"
