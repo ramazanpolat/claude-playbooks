@@ -345,6 +345,33 @@ func TestUpdateDoesNotRunAnUndeclaredScript(t *testing.T) {
 	}
 }
 
+// The step comes from the source being updated to, never from the
+// installed copy: an install that declares one, updating from a source that
+// does not, runs nothing.
+func TestUpdateIgnoresTheInstalledCopysMigrateStep(t *testing.T) {
+	installed, receipt := migrateFixture(t, false)
+	m, err := manifest.Read(installed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update = &manifest.Update{Migrate: "migrations/apply.sh"}
+	if err := manifest.Write(installed, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(installed, "migrations"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "migrations", "apply.sh"), []byte("#!/bin/sh\ntouch "+receipt+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatal("the installed copy's migrate step ran")
+	}
+}
+
 // Without a terminal and without --yes, a declared step refuses the whole
 // update before anything changes.
 func TestUpdateMigrateStepNeedsConsent(t *testing.T) {

@@ -535,8 +535,10 @@ type migration struct {
 	skip     bool // declared, but a version is unknown on one side
 }
 
-// migrateStep reads the staged source's declared step. A declared step must
-// resolve inside the staged tree to an executable file.
+// migrateStep reads the staged source's declared step, and only the source's:
+// the installed copy's [update] never counts (a rewrite by an older cpb may
+// have dropped it, and the step belongs to the version being installed). A
+// declared step must resolve inside the staged tree to an executable file.
 func migrateStep(work string, staged *manifest.Manifest, from, to string) (migration, error) {
 	if staged == nil || staged.Update == nil || staged.Update.Migrate == "" {
 		return migration{}, nil
