@@ -70,18 +70,19 @@ TUI goldens.
   the `.cpb` text they render. The page loads it, and so does CI under Node, so
   what a visitor copies is what was tested. `templates-cases.js --write`
   regenerates `site/p/*.cpb` from it. `test-customizer.js` unit-tests the logic.
-  `check-templates.py` checks that `site/p/` is what the code renders, that each
-  file follows the header convention (`-- title:`, `-- description:`,
-  `-- min-cpb:`, optionally `-- needs:` and `-- create-with:`, then one name-less
-  `ALTER PLAYBOOK`) and holds no secret, and applies each one with a real cpb in
-  a throwaway home (stand-ins for `claude` and the secret helper, a local
-  mirror for the `github:` skill sources) and then again, expecting a no-op. It
-  also plans (`APPLY --dry-run --json`) every template's defaults, an
-  "everything on" selection and a reproducible set of random ones, each as a
-  playbook file and as a recipe, and requires `ok` from cpb for all of them.
+  `check-templates.py` checks that `site/p/` is what the code renders, and plans
+  (`APPLY --dry-run --json`) every template's defaults, an "everything on"
+  selection and a reproducible set of random ones, each as a playbook file and
+  as a recipe, requiring `ok` from cpb for all of them; the defaults and the
+  "everything on" selections are also applied for real, twice, in a throwaway
+  home (stand-ins for `claude` and the secret helper, a local mirror for the
+  `github:` skill sources). The template files themselves are checked against
+  cpb by `check-template-files.py` (`cpb play --check site/p`, the header
+  convention, no secret, apply to a new playbook, apply again as a no-op), which
+  has its own workflow, `templates-verify.yml`.
   To add a template, add it to `TEMPLATES` in `customizer-core.js`, run
-  `templates-cases.js --write`, and a glyph for it to the sprite. Ids are
-  stable: a tool may fetch a template by its id.
+  `templates-cases.js --write`, and a glyph for it to the sprite. A tool
+  can fetch a template by its id.
 
 To change the cards, edit `showcase.cpb` and regenerate:
 

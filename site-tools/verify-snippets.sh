@@ -9,9 +9,10 @@
 #     exactly what cpb reports (site-tools/showcase-data.py); check-sprites.py
 #     checks the logos the page asks for exist; sync-sprite.py checks every
 #     page carries the same sprite;
-#   - site/templates.html and site/p/: the customizer's own logic (unit tests,
-#     under Node), then every template file and a large set of option
-#     combinations applied with this cpb (check-templates.py).
+#   - site/templates.html: the customizer's own logic (unit tests, under Node),
+#     that site/p/ is what it renders, and a large set of option combinations
+#     planned and applied with this cpb (check-templates.py). The template
+#     files themselves are checked by the Site templates workflow.
 # If a statement stops parsing or an output changes shape, this fails loudly
 # instead of letting the site drift from the grammar.
 #
@@ -123,7 +124,7 @@ if ! node "$here/test-customizer.js"; then
   fail=1
 fi
 
-echo "== templates: the files in site/p/ and the customizer's output, applied with this cpb =="
+echo "== templates: site/p/ is what the customizer renders, and its output applies with this cpb =="
 # The page and this check share site/customizer-core.js. It checks site/p/ is
 # what the code renders, then dry-runs and applies the selections in throwaway
 # HOMEs (its own).

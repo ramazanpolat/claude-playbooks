@@ -4,9 +4,10 @@ name: Site snippets
 # grammar: builds this commit's cpb, re-runs every command the tour shows and
 # applies the home page's showcase recipe in a throwaway HOME, checks each
 # card's claims against what cpb says, and diffs the `cpb tui` blocks against
-# the real test goldens. It also applies every template in site/p/ and a large
-# set of the customizer's option combinations with this build. See
-# site-tools/verify-snippets.sh.
+# the real test goldens. It also plans and applies a large set of the
+# customizer's option combinations with this build. See
+# site-tools/verify-snippets.sh. The template files in site/p/ are checked by
+# templates-verify.yml.
 
 on:
   push:

@@ -74,7 +74,7 @@ ok("sandbox implies an isolated login; flags go where cpb takes them", function 
   const r = core.render(Object.assign(core.clone(s), { mode: "recipe" }));
   assert.ok(!/CREATE PLAYBOOK/.test(r.text) && !/ISOLATED LOGIN/.test(r.text));
   assert.deepStrictEqual(r.commands[0], "cpb CREATE PLAYBOOK work SANDBOX NO PILOT PROFILE");
-  assert.ok(r.text.includes("-- create-with: SANDBOX NO PILOT PROFILE"));
+  assert.ok(r.text.includes("-- create-with: SANDBOX\n") && !/create-with:.*NO PILOT PROFILE/.test(r.text));
   const i = core.render(sel({ isolated: true, mode: "recipe" }));
   assert.ok(i.text.includes("SET ISOLATED LOGIN;"));
 });

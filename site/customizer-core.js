@@ -280,8 +280,7 @@
     if (sel.model && sel.model.kind === "router") parts.push("your router's key, attached with an env set (it is not stored in this file)");
     if (parts.length) l.push("-- needs: " + parts.join("; "));
     if (sel.mode === "recipe") {
-      var cw = []; if (sel.sandbox) cw.push("SANDBOX"); if (sel.noProfile) cw.push("NO PILOT PROFILE");
-      if (cw.length) l.push("-- create-with: " + cw.join(" "));
+      if (sel.sandbox) l.push("-- create-with: SANDBOX");
     }
     return l;
   }
@@ -313,12 +312,6 @@
       warns.push("This playbook is routed away from Anthropic and still imports ~/.pilot-profile/. cpb will warn once; turn on NO PILOT PROFILE to keep that profile out of its CLAUDE.md.");
     }
     return { ok: true, text: text, file: file, create: flags, commands: cmds, needs: needs(sel), warnings: warns, lines: body.length };
-  }
-
-  /* what `cpb play` would add, kept off the page until it ships */
-  /* the bare template name: cpb reads site/p/<name>.cpb at its own release tag */
-  function playCommands(sel) {
-    return ["cpb play " + sel.template];
   }
 
   function canonical(id) {
@@ -377,7 +370,7 @@
   return {
     MIN_CPB: MIN_CPB, MARKET: MARKET, SKILLS_SRC: SKILLS_SRC, MODELS: MODELS, MCP: MCP, SKILLS: SKILLS, PLUGINS: PLUGINS, RULES: RULES, VARS: VARS,
     TEMPLATES: TEMPLATES, template: template, defaultSelection: defaultSelection, validate: validate, render: render,
-    playCommands: playCommands, canonical: canonical, randomSelection: randomSelection, everything: everything,
+    canonical: canonical, randomSelection: randomSelection, everything: everything,
     secretLike: secretLike, check: check, clone: clone
   };
 });
