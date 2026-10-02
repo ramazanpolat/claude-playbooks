@@ -70,11 +70,16 @@ func (h Header) WantsSandbox() bool {
 	return false
 }
 
+// A build past a release tag, as git describe names it (v3.27.0-3-g562f9ff,
+// or -dirty): newer than that tag, and carrying what comes after it.
+var describedBuild = regexp.MustCompile(`-[0-9]+-g[0-9a-f]+|-dirty`)
+
 // TooOld reports whether version (this cpb's, vX.Y.Z or X.Y.Z) is older
-// than min-cpb. A dev build or an unreadable version is never too old: it
-// is built from a tree newer than any release.
+// than min-cpb. A dev build, a build past a tag (git describe), or an
+// unreadable version is never too old: it is built from a tree newer than
+// the release it names. An rc compares as its release (v3.28.0-rc1 is 3.28.0).
 func (h Header) TooOld(version string) bool {
-	if h.MinCPB == "" {
+	if h.MinCPB == "" || describedBuild.MatchString(version) {
 		return false
 	}
 	v := strings.TrimPrefix(version, "v")
