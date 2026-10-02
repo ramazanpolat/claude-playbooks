@@ -36,6 +36,11 @@ func errConfigDirOverrideSandbox() error {
 		config.ConfigDirOverrideEnv, config.ConfigDirOverrideEnv)
 }
 
+// onLaunch, when set, is told the session's process once it starts: cpb
+// play forwards a SIGTERM or SIGHUP aimed at cpb to it, and names it in its
+// sweep marker. Start then Wait is what Run does.
+var onLaunch func(*os.Process)
+
 func runRun(cmd *cobra.Command, args []string) error {
 	original := args
 	rest, err := takePlaybooksDirArg(args)
@@ -234,7 +239,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 	c.Stderr = os.Stderr
 
 	since := time.Now()
-	err = preserveExitCode(c.Run())
+	err = c.Start()
+	if err == nil {
+		if onLaunch != nil {
+			onLaunch(c.Process)
+		}
+		err = c.Wait()
+	}
+	err = preserveExitCode(err)
 	// The exit line names the command that resumes this session in this
 	// playbook; a caller-supplied config dir is not the playbook's, so
 	// that launch gets none.

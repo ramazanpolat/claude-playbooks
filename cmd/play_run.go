@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,26 +44,40 @@ const playSweepAge = 24 * time.Hour
 // promptIn is where the prompts read from (a test replaces it).
 var promptIn io.Reader = os.Stdin
 
+// promptCancel, when set, ends a waiting prompt: the play guard's
+// cancellation, so ^C at a prompt stops the play instead of being swallowed.
+var promptCancel <-chan struct{}
+
 // promptLine reads one line, a byte at a time: a buffered reader would
 // take the following answers with it, and the next prompt would read
-// nothing.
-func promptLine(prompt string) string {
+// nothing. It returns ok false when the play is cancelled while it waits.
+func promptLine(prompt string) (string, bool) {
 	fmt.Print(prompt)
-	var line []byte
-	b := make([]byte, 1)
-	for {
-		n, err := promptIn.Read(b)
-		if n == 1 {
-			if b[0] == '\n' {
+	got := make(chan string, 1)
+	go func() {
+		var line []byte
+		b := make([]byte, 1)
+		for {
+			n, err := promptIn.Read(b)
+			if n == 1 {
+				if b[0] == '\n' {
+					break
+				}
+				line = append(line, b[0])
+			}
+			if err != nil {
 				break
 			}
-			line = append(line, b[0])
 		}
-		if err != nil {
-			break
-		}
+		got <- strings.TrimSpace(string(line))
+	}()
+	select {
+	case line := <-got:
+		return line, true
+	case <-promptCancel:
+		fmt.Println()
+		return "", false
 	}
-	return strings.TrimSpace(string(line))
 }
 
 // playConfirmations are what must be typed before a recipe runs: each
@@ -113,7 +127,11 @@ func playConfirm(res *play.Result, interactive bool) error {
 		return nil
 	}
 	if !playYes {
-		if a := strings.ToLower(promptLine("\nRun this playbook? [y/N] ")); a != "y" && a != "yes" {
+		a, ok := promptLine("\nRun this playbook? [y/N] ")
+		if !ok {
+			return errPlayCancelled
+		}
+		if a = strings.ToLower(a); a != "y" && a != "yes" {
 			return errors.New("not confirmed; nothing was written")
 		}
 	}
@@ -131,7 +149,11 @@ func playConfirm(res *play.Result, interactive bool) error {
 		default:
 			q = fmt.Sprintf("Type the host this playbook will send your requests to (%s): ", r.Confirm)
 		}
-		if promptLine(q) != r.Confirm {
+		a, ok := promptLine(q)
+		if !ok {
+			return errPlayCancelled
+		}
+		if a != r.Confirm {
 			return fmt.Errorf("%s was not confirmed; nothing was written", r.Confirm)
 		}
 	}
@@ -152,8 +174,17 @@ func sweepStalePlays() {
 		if err != nil {
 			continue
 		}
-		pid, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(string(data)), "pid="))
-		if err != nil || pidAlive(pid) {
+		// "pid=<cpb> [child=<session>]": both must be gone, since a session
+		// can outlive a killed cpb.
+		alive, parsed := false, false
+		for _, f := range strings.Fields(string(data)) {
+			k, v, _ := strings.Cut(f, "=")
+			if pid, err := strconv.Atoi(v); err == nil && (k == "pid" || k == "child") {
+				parsed = true
+				alive = alive || pidAlive(pid)
+			}
+		}
+		if !parsed || alive {
 			continue
 		}
 		_ = os.RemoveAll(d)
@@ -209,8 +240,11 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 	// Installed before the store exists and released after it is gone.
 	guard := newPlayGuard()
 	defer guard.release()
+	promptCancel = guard.cancelled
+	defer func() { promptCancel = nil }()
 	return withThrowawayStore(func(dir string) error {
-		if err := os.WriteFile(filepath.Join(dir, playMarker), []byte("pid="+strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		marker := filepath.Join(dir, playMarker)
+		if err := os.WriteFile(marker, []byte("pid="+strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
 			return err
 		}
 		keep, err := copyEnvSets(userStore, config.ResolvePlaybooksDir())
@@ -234,6 +268,9 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 			return err
 		}
 
+		if guard.isCancelled() {
+			return errPlayCancelled
+		}
 		// Apply the same bytes for real, in the throwaway store.
 		stdout := os.Stdout
 		os.Stdout = os.Stderr
@@ -248,37 +285,55 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 			// lives in this directory now; heal it back into the machine
 			// login before the directory goes, or a rotated refresh token
 			// would be lost with it.
+			// Only on the shared-login path: an isolated playbook's login
+			// (a moved endpoint's, or the recipe's own) never touches the
+			// machine's.
+			if auth.IsAuthIsolated(pbDir) {
+				return
+			}
 			if err := auth.SyncCredentials(pbDir); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not hand the login back to your machine: %v\n", err)
 			}
 		}()
-		return playSession(guard, name, claudeArgs)
+		return playSession(guard, marker, name, claudeArgs)
 	})
 }
 
-// playGuard keeps cpb alive through every way a session ends, until the
-// throwaway store is removed. ^C reaches claude from the terminal (it is in
-// cpb's process group), so cpb only waits for it; SIGTERM and SIGHUP are
-// passed on to the group while the session is live, for a kill aimed at
-// cpb alone. The signals stay caught until clean-up is done: a forwarded
-// signal reaches cpb too, and with the default action restored it could
-// arrive after the session and end cpb before the store is gone.
+// playGuard keeps cpb alive through every way a play ends, until the
+// throwaway store is removed. It is installed before the store exists and
+// released after it is gone.
+//   - Before the session (the preview, the prompts, the apply), a ^C, TERM or
+//     HUP cancels: a waiting prompt returns, the run stops, and the store is
+//     removed on the way out.
+//   - During the session, ^C reaches claude from the terminal, so cpb only
+//     waits. A TERM or HUP is passed to the session's own process, never to
+//     a process group: the group can be the caller's (a script, an IDE), and
+//     cpb would receive its own signal back.
+//   - Signals stay caught through clean-up.
 type playGuard struct {
-	sigs chan os.Signal
-	live atomic.Bool
-	done chan struct{}
+	sigs      chan os.Signal
+	done      chan struct{}
+	cancelled chan struct{}
+	once      sync.Once
+	mu        sync.Mutex
+	child     *os.Process
 }
 
 func newPlayGuard() *playGuard {
-	g := &playGuard{sigs: make(chan os.Signal, 8), done: make(chan struct{})}
+	g := &playGuard{sigs: make(chan os.Signal, 8), done: make(chan struct{}), cancelled: make(chan struct{})}
 	signal.Notify(g.sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		for {
 			select {
 			case s := <-g.sigs:
-				if g.live.Load() && (s == syscall.SIGTERM || s == syscall.SIGHUP) {
-					pgid, _ := syscall.Getpgid(0)
-					_ = syscall.Kill(-pgid, s.(syscall.Signal))
+				g.mu.Lock()
+				child := g.child
+				g.mu.Unlock()
+				switch {
+				case child == nil:
+					g.once.Do(func() { close(g.cancelled) })
+				case s == syscall.SIGTERM || s == syscall.SIGHUP:
+					_ = child.Signal(s)
 				}
 			case <-g.done:
 				return
@@ -288,21 +343,44 @@ func newPlayGuard() *playGuard {
 	return g
 }
 
+func (g *playGuard) setChild(p *os.Process) {
+	g.mu.Lock()
+	g.child = p
+	g.mu.Unlock()
+}
+
+func (g *playGuard) isCancelled() bool {
+	select {
+	case <-g.cancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // release ends the guard after clean-up. TERM and HUP stay ignored for the
-// few instructions cpb has left, so a late forwarded one cannot end it with
-// a half-written exit; ^C goes back to its default.
+// few instructions cpb has left; ^C goes back to its default.
 func (g *playGuard) release() {
 	close(g.done)
 	signal.Ignore(syscall.SIGTERM, syscall.SIGHUP)
 	signal.Reset(os.Interrupt)
 }
 
-// playSession runs the session under the guard.
-func playSession(g *playGuard, name string, claudeArgs []string) error {
-	g.live.Store(true)
-	defer g.live.Store(false)
+// errPlayCancelled: a signal before the session; nothing ran.
+var errPlayCancelled = errors.New("cancelled; nothing ran, and the throwaway playbook is removed")
+
+// playSession runs the session under the guard, telling it the session's
+// process, and naming that process in the sweep marker too.
+func playSession(g *playGuard, marker, name string, claudeArgs []string) error {
+	if g.isCancelled() {
+		return errPlayCancelled
+	}
 	playSessionRunning = true
-	defer func() { playSessionRunning = false }()
+	onLaunch = func(p *os.Process) {
+		g.setChild(p)
+		_ = os.WriteFile(marker, []byte("pid="+strconv.Itoa(os.Getpid())+" child="+strconv.Itoa(p.Pid)+"\n"), 0o600)
+	}
+	defer func() { playSessionRunning, onLaunch = false, nil; g.setChild(nil) }()
 	return runRun(nil, append([]string{name}, claudeArgs...))
 }
 

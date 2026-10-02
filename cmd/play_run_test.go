@@ -179,12 +179,39 @@ func TestSweepStalePlays(t *testing.T) {
 	stale := mk("cpb-play-stale", dead.Process.Pid, 25*time.Hour)
 	alive := mk("cpb-play-alive", os.Getpid(), 25*time.Hour)
 	fresh := mk("cpb-play-fresh", dead.Process.Pid, time.Hour)
+	// cpb is gone but its session is not: kept (a session can outlive a
+	// killed cpb).
+	childAlive := filepath.Join(os.TempDir(), "cpb-play-child-alive")
+	os.MkdirAll(childAlive, 0o700)
+	cm := filepath.Join(childAlive, playMarker)
+	os.WriteFile(cm, []byte("pid="+strconv.Itoa(dead.Process.Pid)+" child="+strconv.Itoa(os.Getpid())+"\n"), 0o600)
+	oldTime := time.Now().Add(-25 * time.Hour)
+	os.Chtimes(cm, oldTime, oldTime)
 	unmarked := filepath.Join(os.TempDir(), "cpb-play-unmarked")
 	os.MkdirAll(unmarked, 0o700)
 	sweepStalePlays()
-	for d, gone := range map[string]bool{stale: true, alive: false, fresh: false, unmarked: false} {
+	for d, gone := range map[string]bool{stale: true, alive: false, fresh: false, unmarked: false, childAlive: false} {
 		if _, err := os.Stat(d); os.IsNotExist(err) != gone {
 			t.Errorf("%s: gone %v, want %v", filepath.Base(d), os.IsNotExist(err), gone)
 		}
+	}
+}
+
+// ^C (or TERM, HUP) at a prompt cancels the play: the prompt returns, and
+// nothing runs.
+func TestPlayConfirmCancelled(t *testing.T) {
+	res := play.Check([]byte("ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1;\n"))
+	playRunFlags(t, false, nil, nil, nil)
+	r, w, _ := os.Pipe() // a prompt that would wait for ever
+	defer w.Close()
+	promptIn = r
+	cancel := make(chan struct{})
+	promptCancel = cancel
+	defer func() { promptIn, promptCancel = os.Stdin, nil }()
+	go func() { time.Sleep(50 * time.Millisecond); close(cancel) }()
+	var err error
+	captureStdout(t, func() { err = playConfirm(res, true) })
+	if err != errPlayCancelled {
+		t.Fatalf("a cancelled prompt: %v", err)
 	}
 }
