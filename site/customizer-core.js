@@ -68,8 +68,8 @@
   ];
 
   var RULES = {
-    allow: ["Bash(gh pr *)", "Bash(gh pr view *)", "Bash(git diff *)", "Bash(git status)", "Bash(kubectl get *)", "Bash(npm test *)"],
-    deny: ["Bash(git push --force *)", "Bash(rm -rf *)", "Bash(kubectl delete *)", "Bash(curl *)", "Edit", "Write"]
+    allow: ["Bash(gh pr *)", "Bash(gh pr view *)", "Bash(git diff *)", "Bash(git status)", "Bash(kubectl get *)", "Bash(kubectl describe *)", "Bash(kubectl logs *)", "Bash(npm test *)"],
+    deny: ["Bash(git push --force *)", "Bash(rm -rf *)", "Bash(kubectl delete *)", "Bash(kubectl apply *)", "Bash(curl *)", "Edit", "Write"]
   };
 
   var VARS = [
@@ -99,9 +99,10 @@
         allow: ["Bash(gh pr view *)", "Bash(git diff *)"], deny: ["Edit", "Write"] } }),
     T({ id: "sre-sandbox", color: 2, name: "sre", glyph: "g-sre", title: "SRE in a sandbox",
       tagline: "Operations work, inside a microVM.",
-      description: "For operations work in a microVM: Sentry and the Cloudflare docs, read-only kubectl.",
-      defaults: { mcp: ["sentry", "cloudflare-docs"], skills: ["doc-coauthoring"], allow: ["Bash(kubectl get *)"],
-        deny: ["Bash(kubectl delete *)"], sandbox: true } }),
+      description: "For operations work in a microVM: the Cloudflare docs, runbooks with doc-coauthoring, and read-only kubectl.",
+      defaults: { mcp: ["cloudflare-docs"], skills: ["doc-coauthoring"],
+        allow: ["Bash(kubectl get *)", "Bash(kubectl describe *)", "Bash(kubectl logs *)"],
+        deny: ["Bash(kubectl delete *)", "Bash(kubectl apply *)"], sandbox: true } }),
     T({ id: "second-account", color: 1, name: "side", glyph: "g-side", title: "Second account",
       tagline: "Another Anthropic account, side by side.",
       description: "A second Anthropic account beside your first: an isolated login, Notion, Playwright and the creative skills.",
@@ -315,8 +316,9 @@
   }
 
   /* what `cpb play` would add, kept off the page until it ships */
-  function playCommands(sel, tag) {
-    return ["cpb play github:ramazanpolat/claude-playbooks/site/p/" + sel.template + ".cpb" + (tag ? "@" + tag : "")];
+  /* the bare template name: cpb reads site/p/<name>.cpb at its own release tag */
+  function playCommands(sel) {
+    return ["cpb play " + sel.template];
   }
 
   function canonical(id) {

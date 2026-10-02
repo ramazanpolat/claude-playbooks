@@ -1,12 +1,10 @@
 -- title: SRE in a sandbox
--- description: For operations work in a microVM: Sentry and the Cloudflare docs, read-only kubectl.
+-- description: For operations work in a microVM: the Cloudflare docs, runbooks with doc-coauthoring, and read-only kubectl.
 -- min-cpb: 3.24.0
--- needs: a secret helper for keychain:sentry-auth
 -- create-with: SANDBOX
 
 ALTER PLAYBOOK
-  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
   ADD MCP SERVER cloudflare-docs URL 'https://docs.mcp.cloudflare.com/mcp'
   ADD SKILL doc-coauthoring FROM 'github:anthropics/skills' SUBDIR 'skills/doc-coauthoring'
-  ALLOW TOOL 'Bash(kubectl get *)'
-  DENY TOOL 'Bash(kubectl delete *)';
+  ALLOW TOOL 'Bash(kubectl get *)' 'Bash(kubectl describe *)' 'Bash(kubectl logs *)'
+  DENY TOOL 'Bash(kubectl delete *)' 'Bash(kubectl apply *)';
