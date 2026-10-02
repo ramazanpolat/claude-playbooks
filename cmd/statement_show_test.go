@@ -13,6 +13,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 const (
@@ -310,5 +311,52 @@ func TestExplainFollowsAncestorManifestForManifestFreePlaybook(t *testing.T) {
 	mustStmt(t, "ALTER PLAYBOOK bare SET VAR OWN=1")
 	if got := explainKeys(t, "bare"); !reflect.DeepEqual(got, []string{"OWN"}) {
 		t.Fatalf("EXPLAIN once the playbook has its own manifest: %v", got)
+	}
+}
+
+// SHOW reports the command a pilot types: the playbook's name when the
+// default launcher is in place, its LAUNCHER otherwise, and null only under
+// NO LAUNCHER. cpb writes no version nobody gave, and the resume command
+// of a session uses the same launcher.
+func TestShowPlaybookLauncherIsTheCommand(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	mustStmt(t, "CREATE PLAYBOOK writer")
+	mustStmt(t, "CREATE PLAYBOOK sre LAUNCHER ops")
+	mustStmt(t, "CREATE PLAYBOOK quiet NO LAUNCHER")
+	var rows []struct {
+		Name     string  `json:"name"`
+		Launcher *string `json:"launcher"`
+		Version  *string `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOKS --json")), &rows); err != nil || len(rows) != 3 {
+		t.Fatalf("SHOW PLAYBOOKS --json: %v %+v", err, rows)
+	}
+	want := map[string]string{"writer": "writer", "sre": "ops", "quiet": ""}
+	for _, r := range rows {
+		got := ""
+		if r.Launcher != nil {
+			got = *r.Launcher
+		}
+		if got != want[r.Name] {
+			t.Errorf("%s: launcher %q, want %q", r.Name, got, want[r.Name])
+		}
+		if r.Version != nil {
+			t.Errorf("%s: version %q, but nobody gave one", r.Name, *r.Version)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "sre", manifest.FileName))
+	if err != nil || strings.Contains(string(data), "version") {
+		t.Fatalf("the manifest that records the launcher: %v\n%s", err, data)
+	}
+	if out := mustStmt(t, "SHOW PLAYBOOK writer"); !regexp.MustCompile(`(?m)^Launcher:\s+writer$`).MatchString(out) {
+		t.Errorf("SHOW PLAYBOOK writer:\n%s", out)
+	}
+	pb, err := playbook.Find(config.ResolvePlaybooksDir(), "writer")
+	if err != nil || pb == nil {
+		t.Fatal(err)
+	}
+	if got := playbookSessionDir(pb).resumeCommand("abc"); got != "writer --resume abc" {
+		t.Errorf("resume command %q, want writer --resume abc", got)
 	}
 }

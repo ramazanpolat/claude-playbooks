@@ -546,8 +546,6 @@ func Write(dir string, m *Manifest) error {
 	var b strings.Builder
 	if m.Version != "" {
 		fmt.Fprintf(&b, "version = %s\n", QuoteTOML(m.Version))
-	} else {
-		b.WriteString(`version = "0.1.0"` + "\n")
 	}
 	if m.Name != "" {
 		fmt.Fprintf(&b, "name = %s\n", QuoteTOML(m.Name))
