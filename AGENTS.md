@@ -155,7 +155,7 @@ fallback: [docs/guides/installation.md](docs/guides/installation.md), "Uninstall
 
 ## The OpenShell sandbox backend (maintainers)
 
-`--sandbox=openshell` is experimental and runs only on a Linux host with
+`--sandbox=openshell` runs only on a Linux host with
 OpenShell 0.1.x (see [the sandbox guide](docs/guides/sandbox.md#openshell-backend-linux)).
 CI cannot run it. Two things keep it honest:
 

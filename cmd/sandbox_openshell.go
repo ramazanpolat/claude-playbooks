@@ -21,7 +21,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// The OpenShell backend (experimental): NVIDIA OpenShell 0.1.x driven
+// The OpenShell backend: NVIDIA OpenShell 0.1.x driven
 // through its CLI, on Linux with Docker Engine as the gateway's compute
 // driver. Differences from sbx that shape it: the sandbox reaches only the
 // paths its filesystem policy lists (fixed at creation) and no host by

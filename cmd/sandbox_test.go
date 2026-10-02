@@ -806,7 +806,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// A service on this machine: the sandbox reaches it as
 	// host.docker.internal, while the policy and the secret name it
 	// localhost (what the sbx proxy matches).
-	if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:20128/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
+	if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:8080/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
 		t.Fatal(err)
 	}
 	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
@@ -825,7 +825,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 			t.Fatalf("host service: missing %q in %q", want, calls)
 		}
 	}
-	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
+	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:8080/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
 		t.Fatalf("host service attach: %q", calls)
 	}
 	// No endpoint: the key goes to Anthropic's host.

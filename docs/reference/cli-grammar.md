@@ -694,7 +694,7 @@ Name:       work
 Version:    1.2.0
 Path:       /Users/me/.claude-playbooks/work
 Source:     https://github.com/example/work-playbook (branch v1.2.0)
-Launcher:   ki
+Launcher:   w
 Env sets:   router, glm-5.3
 Variables:  MAX_THINKING_TOKENS=8000
             ANTHROPIC_AUTH_TOKEN <from keychain:router-token>
@@ -712,7 +712,7 @@ created empty; `Launcher:` reads `(none)` without one.
  "path": "/Users/me/.claude-playbooks/work",
  "source": {"url": "https://github.com/example/work-playbook", "branch": "v1.2.0", "subdir": null},
  "linked": null,
- "launcher": "ki",
+ "launcher": "w",
  "envs": ["router", "glm-5.3"],
  "vars": [<variable>, ...],
  "sandbox": false}
@@ -1819,8 +1819,7 @@ block added. It is a new top-level field, absent from `APPLY`'s own report:
 and `update` are present only for `--keep` and `--update`.
 
 **The header.** A recipe may open with `-- key: value` lines, one per line,
-then a blank line. This is the template convention agreed with the website
-on 2026-10-01. The keys:
+then a blank line. The keys:
 - `title`, `description` and `needs`, shown in the preview;
 - `create-with`: advisory create-time flags. `SANDBOX` makes the play
   sandboxed: refused where no backend is available, unless `--no-sandbox`;
@@ -1930,7 +1929,7 @@ runs no session:
   serves other bytes ("the tag moved"), the plan, and every confirmation
   again. Then one `ALTER PLAYBOOK` undoes what the old recipe set and the new
   one no longer sets the same way (`UNSET VAR`, `UNSET TOOL`, `DROP PLUGIN`,
-  `DROP MCP SERVER`, `DROP SKILL`, `DROP PANEL`, `DROP MODEL`, the `UNSET`s of
+  `DROP MCP SERVER`, `DROP SKILL`, `DROP MODEL`, the `UNSET`s of
   the agent, model, picker and status line; plugins before their
   marketplace; a login is never unset), the new bytes are applied, and the
   record is updated;

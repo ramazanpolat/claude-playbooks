@@ -139,7 +139,7 @@ network_policies:
 			t.Errorf("version %q: want %v", v, ok)
 		}
 	}
-	if h, p := profileEndpoint(`{"profile":{"id":"x","endpoints":[{"host":"buildbox","port":20128}]}}`); h != "buildbox" || p != 20128 {
+	if h, p := profileEndpoint(`{"profile":{"id":"x","endpoints":[{"host":"buildbox","port":8080}]}}`); h != "buildbox" || p != 8080 {
 		t.Errorf("profileEndpoint: %s %d", h, p)
 	}
 }

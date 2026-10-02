@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# openshell-e2e.sh -- end-to-end check of the experimental OpenShell sandbox
+# openshell-e2e.sh -- end-to-end check of the OpenShell sandbox
 # backend (--sandbox=openshell) against a real OpenShell gateway.
 #
 # Needs: Linux, Docker Engine 28+, OpenShell 0.1.x with host mounts enabled

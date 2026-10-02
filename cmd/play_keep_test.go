@@ -215,10 +215,10 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	}
 
 	boxed := writeRecipe(t, dir, "boxed.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n")
-	refs := writeRecipe(t, dir, "refs.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET VAR GH FROM 'keychain:pilot/gh';\n")
+	refs := writeRecipe(t, dir, "refs.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';\n")
 	playFlags(t, false, false, false, "")
 	playKeepFlags(t, true, "", "")
-	playRunFlags(t, true, nil, []string{"keychain:pilot/gh"}, nil)
+	playRunFlags(t, true, nil, []string{"keychain:gh"}, nil)
 	captureStdout(t, func() { err = runPlay(playCmd, []string{boxed}) })
 	if err != nil || showPlaybook(t, "boxed")["sandbox"] != true {
 		t.Fatalf("create-with SANDBOX: %v", err)

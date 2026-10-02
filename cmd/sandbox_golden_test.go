@@ -37,7 +37,7 @@ func TestSbxCallLogGolden(t *testing.T) {
 			return "box", []string{"--env", "EXTRA=1", "-p", "it's"}
 		}},
 		{"host-service", func(t *testing.T, root, work string) (string, []string) {
-			if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:20128/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
+			if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:8080/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
 				t.Fatal(err)
 			}
 			writePlaybook(t, root, "onhost", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"local"}},

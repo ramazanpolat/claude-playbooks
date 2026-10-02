@@ -217,7 +217,7 @@ directory you built yourself:
 
 ```bash
 CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb run work
-CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 k
+CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 work
 ```
 
 That directory becomes the launch's config directory; authentication, credential

@@ -127,11 +127,11 @@ command = 'P="$HOME/.claude-playbooks"; claude-playbook CREATE ENV nest >/dev/nu
 contains = "drop-env-guard-ok"
 
 [[verify.commands]]
-# INCLUDE stacks playbook files: bare -> kommander -> chaos. The shared base,
+# INCLUDE stacks playbook files: base -> agent -> team. The shared base,
 # included twice (once through a symlink), runs once; the later layer wins
-# (chaos's ADD ENV over kommander's USE ENV, at launch); a cycle is refused
+# (team's ADD ENV over agent's USE ENV, at launch); a cycle is refused
 # with its chain and nothing is written.
-command = '''D="$HOME/inc"; mkdir -p "$D" && printf "CREATE OR REPLACE ENV ib SET LAYER=base;\nCREATE OR REPLACE ENV ik SET LAYER=kommander;\nCREATE OR REPLACE ENV ic SET LAYER=chaos;\nCREATE PLAYBOOK IF NOT EXISTS ipb NO ALIAS;\n" > "$D/base.cpb" && ln -sf base.cpb "$D/base-link.cpb" && printf "INCLUDE 'base.cpb';\nALTER PLAYBOOK ipb USE ENV ib ik;\n" > "$D/kommander.cpb" && printf "INCLUDE 'kommander.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK ipb ADD ENV ic;\n" > "$D/chaos.cpb" && claude-playbook APPLY "$D/chaos.cpb" > "$D/apply.out" && grep -q " 4 created, 2 changed, 0 unchanged," "$D/apply.out" && grep -F "profiles = [\"ib\", \"ik\", \"ic\"]" "$HOME/.claude-playbooks/ipb/.playbook" >/dev/null && rm -f "$HOME/claude-env" && claude-playbook run ipb && grep -x LAYER=chaos "$HOME/claude-env" >/dev/null && printf "CREATE ENV cyc;\nINCLUDE 'b.cpb';\n" > "$D/a.cpb" && printf "INCLUDE 'a.cpb';\n" > "$D/b.cpb" && if claude-playbook APPLY "$D/a.cpb" > "$D/cyc.out" 2>&1; then echo cycle-accepted; else grep -q "INCLUDE cycle: .*a.cpb -> .*b.cpb -> .*a.cpb" "$D/cyc.out" && test ! -e "$HOME/.claude-playbooks/.env-profiles/cyc.toml" && echo include-ok; fi'''
+command = '''D="$HOME/inc"; mkdir -p "$D" && printf "CREATE OR REPLACE ENV ib SET LAYER=base;\nCREATE OR REPLACE ENV ia SET LAYER=agent;\nCREATE OR REPLACE ENV it SET LAYER=team;\nCREATE PLAYBOOK IF NOT EXISTS ipb NO ALIAS;\n" > "$D/base.cpb" && ln -sf base.cpb "$D/base-link.cpb" && printf "INCLUDE 'base.cpb';\nALTER PLAYBOOK ipb USE ENV ib ia;\n" > "$D/agent.cpb" && printf "INCLUDE 'agent.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK ipb ADD ENV it;\n" > "$D/team.cpb" && claude-playbook APPLY "$D/team.cpb" > "$D/apply.out" && grep -q " 4 created, 2 changed, 0 unchanged," "$D/apply.out" && grep -F "profiles = [\"ib\", \"ia\", \"it\"]" "$HOME/.claude-playbooks/ipb/.playbook" >/dev/null && rm -f "$HOME/claude-env" && claude-playbook run ipb && grep -x LAYER=team "$HOME/claude-env" >/dev/null && printf "CREATE ENV cyc;\nINCLUDE 'b.cpb';\n" > "$D/a.cpb" && printf "INCLUDE 'a.cpb';\n" > "$D/b.cpb" && if claude-playbook APPLY "$D/a.cpb" > "$D/cyc.out" 2>&1; then echo cycle-accepted; else grep -q "INCLUDE cycle: .*a.cpb -> .*b.cpb -> .*a.cpb" "$D/cyc.out" && test ! -e "$HOME/.claude-playbooks/.env-profiles/cyc.toml" && echo include-ok; fi'''
 contains = "include-ok"
 
 [[verify.commands]]
@@ -274,7 +274,7 @@ command = '''S="$HOME/sbxstub"; W="$HOME/sbxwork"; mkdir -p "$S" "$W" && printf 
 contains = "sandbox-secret-refuse-ok"
 
 [[verify.commands]]
-# The experimental OpenShell backend (v3.27.0) refuses before it touches
+# The OpenShell backend (v3.27.0) refuses before it touches
 # anything when OpenShell is missing or unsupported, and an unknown backend's
 # message lists it. No OpenShell on the bench; a stub reports an old version.
 # On macOS (phase-1 runs there too) the first refusal is that it is Linux-only.
