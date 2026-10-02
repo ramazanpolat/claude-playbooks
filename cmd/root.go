@@ -29,7 +29,7 @@ State is changed and read with statements:
   cpb EXPLAIN PLAYBOOK <name> [--json]
   cpb APPLY <file> [<file> ...] [--dry-run] [--yes]
 
-The grammar: https://github.com/ramazanpolat/claude-playbooks/blob/main/docs/reference/cli-grammar.md`,
+The grammar: https://github.com/ramazanpolat/claude-playbooks/blob/main/SPEC.md`,
 	Version:       Version,
 	SilenceErrors: true,
 	SilenceUsage:  true,
@@ -69,7 +69,7 @@ func Execute() {
 		os.Exit(1)
 	}
 	// A grammar statement never reaches cobra, which would read its words
-	// as flags and subcommands (docs/cli-grammar.md).
+	// as flags and subcommands (SPEC.md).
 	if stmt, ok := statementArgs(os.Args[1:]); ok {
 		if err := runStatement(stmt); err != nil {
 			// APPLY --json has printed its report and exits with its class.

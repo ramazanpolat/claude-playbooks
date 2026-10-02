@@ -16,7 +16,7 @@ import (
 )
 
 // runApply runs one or more playbook files, in the order given
-// (docs/cli-grammar.md, "playbook.cpb"). It parses and validates every
+// (SPEC.md, "playbook.cpb"). It parses and validates every
 // file and writes nothing if any of it fails, then runs the statements in
 // order, each whole-or-nothing, and stops at the first failure. Every
 // statement SHOW CREATE writes is safe to repeat, so running the fixed
@@ -253,7 +253,7 @@ type located struct {
 }
 
 // applyLoader reads the files APPLY runs and expands their INCLUDEs
-// (docs/reference/cli-grammar.md, "INCLUDE"): included files run in place
+// (SPEC.md, "INCLUDE"): included files run in place
 // of the directive, a file reached twice runs once, at its first
 // occurrence, and a cycle is refused. Every error is collected, so one run
 // reports every problem and nothing is written.

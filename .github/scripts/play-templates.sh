@@ -18,7 +18,7 @@ played='cpb play [a-z0-9][a-z0-9-]*([ `]|$)'
   || { echo "FAIL: the template-name pattern no longer finds a name"; exit 1; }
 # A glob that matches nothing stays literal in sh: skip it, or set -e ends the
 # loop there and the files after it go unread.
-names=$(for f in README.md docs/guides/*.md docs/reference/*.md examples/*/README.md; do [ -f "$f" ] || continue; tr '\n' ' ' < "$f"; echo; done \
+names=$(for f in README.md SPEC.md docs/guides/*.md docs/reference/*.md examples/*/README.md; do [ -f "$f" ] || continue; tr '\n' ' ' < "$f"; echo; done \
   | grep -oE "$played" | tr -d '`' | awk '{print $3}' | sort -u || true)
 [ -n "$names" ] || echo "no template is played in these docs"
 fail=0

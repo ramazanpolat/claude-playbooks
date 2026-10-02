@@ -227,5 +227,5 @@ of templates the way the site's CI does: every template, the header, and an
 
 - [Sandboxed sessions](sandbox.md): the sandbox backends.
 - [Environment overrides](environment.md): env sets, which `--env-set` attaches.
-- [CLI grammar](../reference/cli-grammar.md#cpb-play): the full reference.
+- [CLI grammar](../../SPEC.md#cpb-play): the full reference.
 - [Example 21](../../examples/21-play/): a recipe checked, planned and kept in CI.

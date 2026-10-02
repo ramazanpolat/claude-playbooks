@@ -2,7 +2,7 @@
 
 Notes kept for the record. They describe cpb as it was when they were
 written, and nothing here is maintained or current: for how cpb works today,
-read the [reference](../reference/cli-grammar.md) and the [guides](../guides/).
+read the [reference](../../SPEC.md) and the [guides](../guides/).
 
 | Note | What it records |
 |---|---|

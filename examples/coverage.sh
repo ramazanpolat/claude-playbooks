@@ -25,7 +25,7 @@ for k in $(printf '%s\n' "$kinds" | tr ' ' '_'); do
     "UNSET SANDBOX <key>") re='(^|[^A-Z])UNSET[[:space:]]+SANDBOX[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
     *) re="(^|[^A-Z])$(printf '%s' "$k" | sed 's/ /[[:space:]]+/g')([^A-Z]|$)" ;;
   esac
-  grep -Eq "$re" docs/reference/cli-grammar.md || { echo "no reference entry: $k"; fail=1; }
+  grep -Eq "$re" SPEC.md || { echo "no reference entry: $k"; fail=1; }
   grep -Eq "$re" "$run" || { echo "no example CI runs: $k"; fail=1; }
 done
 [ $fail = 0 ] && echo "every clause has a reference entry and an example CI runs"

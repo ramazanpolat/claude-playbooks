@@ -13,7 +13,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// Skills (docs/reference/cli-grammar.md, "Skills"): ADD SKILL puts a skill
+// Skills (SPEC.md, "Skills"): ADD SKILL puts a skill
 // directory at <config>/skills/<name>, a directory by a link (a skill under
 // development: edits reach the next session) and a git source by a copy (a
 // pinned artifact that survives the source moving). The manifest records

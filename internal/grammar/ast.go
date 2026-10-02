@@ -8,7 +8,7 @@
 // and whether a secret reference resolves are the engine's questions; this
 // package answers only "is this a well-formed statement, and which one".
 //
-// The spec is docs/reference/cli-grammar.md.
+// The spec is SPEC.md.
 package grammar
 
 // Verb is a statement's first word.

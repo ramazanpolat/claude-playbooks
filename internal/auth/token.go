@@ -156,7 +156,7 @@ func removeEnv(environ []string, keys ...string) []string {
 // itself sets is that playbook's own token and is honoured (see the branch).
 // isAuthIsolated is consulted only inside SyncCredentials, so any branch that
 // skips that call also silently skips the isolated_login contract — which
-// SPEC-v4.md defines as "detach shared credentials and do not copy global
+// SPEC.md defines as "detach shared credentials and do not copy global
 // credentials or account metadata into this playbook". An isolated playbook
 // therefore takes the full SyncCredentials path (which detaches), syncs no
 // account metadata, and has any inherited token stripped from its environment:

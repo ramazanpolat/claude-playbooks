@@ -2,7 +2,7 @@
 
 Creating, installing, linking, launching, renaming, updating and deleting them,
 and keeping a whole setup in one playbook file. The statements below are the
-[CLI grammar](../reference/cli-grammar.md) (v3.20.0); keywords are
+[CLI grammar](../../SPEC.md) (v3.20.0); keywords are
 case-insensitive.
 
 cpb reuses your existing Claude Code authentication for new playbooks, so a new
@@ -159,7 +159,7 @@ The marketplace and plugin clauses run Claude Code's own `claude plugin …` wit
 the playbook as `CLAUDE_CONFIG_DIR`, reading the state first so a repeat runs
 nothing; `SET AGENT` writes `agent` in the playbook's `settings.json`. Sources,
 rules and the confirmation guard for marketplace-declared commands are in
-[Plugins and the agent](../reference/cli-grammar.md#plugins-and-the-agent).
+[Plugins and the agent](../../SPEC.md#plugins-and-the-agent).
 
 ## One file for a whole setup
 
@@ -179,8 +179,8 @@ fixed file again is the recovery. `SHOW CREATE` never prints a credential: a
 credential-looking literal becomes a comment and the command exits non-zero
 unless `--skip-secrets`. A file can `INCLUDE 'base.cpb'` another, relative to
 itself, so layers stack; see
-[playbook.cpb](../reference/cli-grammar.md#playbookcpb-show-create-and-apply) and
-[INCLUDE](../reference/cli-grammar.md#include).
+[playbook.cpb](../../SPEC.md#playbookcpb-show-create-and-apply) and
+[INCLUDE](../../SPEC.md#include).
 
 ## Update
 

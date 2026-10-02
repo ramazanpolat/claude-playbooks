@@ -4,7 +4,7 @@ Pages are grouped by what you came for:
 
 - **tutorials/**: learn it once, start to finish.
 - **guides/**: how to do one common task.
-- **reference/**: complete and dry: every statement, flag, file and format.
+- **[SPEC.md](../SPEC.md)**: complete and dry: every statement, command, flag, file and format.
 - **[examples/](../examples/)**: one small `playbook.cpb` per idea, applied in CI.
 
 ## Tutorials
@@ -34,7 +34,7 @@ Pages are grouped by what you came for:
 
 | | |
 |---|---|
-| [CLI grammar](reference/cli-grammar.md) | the `cpb <VERB> <OBJECT>` statements, playbook files, output formats |
+| [SPEC.md](../SPEC.md) | every statement, command, file and output format |
 
 ## Design and history
 
@@ -43,6 +43,6 @@ Pages are grouped by what you came for:
 | [Design decisions](design/decisions.md) | the decisions behind the grammar, with when they were made |
 | [History](history/) | notes kept for the record, not maintained |
 
-The behavioral contract is [`SPEC-v4.md`](../SPEC-v4.md) in the repository root;
+The behavioral contract is [`SPEC.md`](../SPEC.md) in the repository root;
 when a document here and the spec disagree, the spec wins. Development and
 release process live in [`CONTRIBUTING.md`](../CONTRIBUTING.md).

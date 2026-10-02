@@ -61,7 +61,7 @@ type Update struct {
 //
 // Refs holds secret REFERENCES (keychain:…, op://…), never values: the
 // launch execs claude through the configured secret helper, which resolves
-// them (docs/cli-grammar.md, "Secrets"). A key lives in at most one of Set,
+// them (SPEC.md, "Secrets"). A key lives in at most one of Set,
 // Refs and Block.
 type Env struct {
 	Sets  []string          `toml:"sets,omitempty"`
@@ -268,12 +268,12 @@ type Manifest struct {
 
 	// MCP records, per MCP server a statement declared, the variables cpb
 	// derived for its secret references, so dropping the server forgets
-	// exactly those (docs/reference/cli-grammar.md, "MCP servers").
+	// exactly those (SPEC.md, "MCP servers").
 	MCP map[string]*MCPRecord `toml:"mcp,omitempty"`
 
 	// Skills records, per skill a statement added, where it came from and
 	// how it was put in place, so DROP SKILL removes only what cpb added and
-	// update restores it (docs/reference/cli-grammar.md, "Skills").
+	// update restores it (SPEC.md, "Skills").
 	Skills map[string]*SkillRecord `toml:"skills,omitempty"`
 
 	// Play records where a kept played recipe came from, so `cpb update`

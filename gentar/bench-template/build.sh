@@ -12,7 +12,7 @@
 #      third-party Anthropic-compatible endpoint, and claude-code 2.1.265+
 #      sends the Artifact tool, whose schema at least one such backend
 #      (GLM) rejects with 400 on EVERY interactive turn -- documented in
-#      SPEC-v4.md, which is why cpb has a [sandbox] claude_version pin at
+#      SPEC.md, which is why cpb has a [sandbox] claude_version pin at
 #      all. A gentar bump past 2.1.265 would break our suite for a reason
 #      that has nothing to do with claude-playbooks.
 #   2. Blast radius. Our endpoint credential enters benches made from this

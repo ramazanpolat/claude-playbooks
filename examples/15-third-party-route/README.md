@@ -21,4 +21,4 @@ provider), every request the playbook makes goes there, with whatever its
 
 `localhost` is a route like any other: a local router forwards elsewhere.
 
-Reference: [Objects](../../docs/reference/cli-grammar.md#objects) and [Layers at launch](../../docs/reference/cli-grammar.md#layers-at-launch).
+Reference: [Objects](../../SPEC.md#objects) and [Layers at launch](../../SPEC.md#layers-at-launch).

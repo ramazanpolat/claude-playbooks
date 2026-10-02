@@ -2,7 +2,7 @@
 
 Variables set or blocked for every launch of one playbook and no other, so one
 playbook talks to a proxy or keeps its own login while the rest of your shell
-does not. The statements below are the [CLI grammar](../reference/cli-grammar.md)
+does not. The statements below are the [CLI grammar](../../SPEC.md)
 (v3.20.0).
 
 A fresh playbook has no overrides. Launching it runs `claude` with your shell's

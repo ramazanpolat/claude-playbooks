@@ -120,7 +120,7 @@ share_skills = true                 # mount sbx's shared skills store after all
 
 The block is install-local: `CREATE PLAYBOOK … FROM` never adopts one shipped
 by a source, and `cpb update` keeps yours. `SHOW CREATE` writes it back as `SET
-SANDBOX` statements. See [Sandbox](../reference/cli-grammar.md#sandbox-v400) in
+SANDBOX` statements. See [Sandbox](../../SPEC.md#sandbox) in
 the reference.
 
 `claude_version` matters for a playbook routed to a third-party backend that

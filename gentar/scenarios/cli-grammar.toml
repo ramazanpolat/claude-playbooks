@@ -1,5 +1,5 @@
 # claude-playbooks own-arena suite: cli-grammar -- the statement grammar
-# (docs/cli-grammar.md) on the REAL binary and launch path, and only the
+# (SPEC.md) on the REAL binary and launch path, and only the
 # new code: env sets, DEFAULTS (a list, in order), playbook variables and
 # env-set order, a secret reference resolved by a stub helper at launch,
 # EXPLAIN / SHOW --json, SHOW CREATE feeding APPLY with no change, APPLY

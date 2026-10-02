@@ -17,7 +17,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// SHOW CREATE writes the statements that rebuild the state (docs/cli-grammar.md,
+// SHOW CREATE writes the statements that rebuild the state (SPEC.md,
 // "playbook.cpb"). Every form it writes is safe to repeat, so APPLY of its own
 // output changes nothing. Plain text never travels in the output: a
 // credential-looking literal becomes a comment with the value withheld and

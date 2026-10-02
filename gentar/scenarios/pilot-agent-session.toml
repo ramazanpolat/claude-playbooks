@@ -14,7 +14,7 @@
 #
 # The bench is OURS, not the shared gate template: claude-code 2.1.265+
 # sends the Artifact tool, whose schema a third-party Anthropic-compatible
-# backend can reject with 400 on every interactive turn (SPEC-v4.md), so the
+# backend can reject with 400 on every interactive turn (SPEC.md), so the
 # version this suite runs must not move on someone else's schedule. Built by
 # gentar/bench-template/build.sh; the pin lives in its VERSION file and is
 # asserted below, so a drifted template fails loudly.

@@ -25,7 +25,7 @@ CI runs exactly these on every PR. A PR with red CI is not reviewed.
 
 ## What the codebase promises
 
-- `SPEC-v4.md` is the contract. A behavior change without a matching spec
+- `SPEC.md` is the contract. A behavior change without a matching spec
   change is a bug in the PR, not in the spec.
 - The registry is stateless: playbook discovery reads the filesystem on
   every invocation. Do not add index files, caches, or daemons.

@@ -13,7 +13,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
-// APPLY … --dry-run --json (docs/reference/cli-grammar.md, "APPLY --json"):
+// APPLY … --dry-run --json (SPEC.md, "APPLY --json"):
 // the plan as one JSON object, for a program to read. It follows the --json
 // rule: fields may be added, none changes meaning within a major version.
 // schema is bumped only on a meaning change, and so only with a major cpb

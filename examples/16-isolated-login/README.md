@@ -28,4 +28,4 @@ only if you run `/login` in it.
 
 It is `isolated_login = true` in the playbook's `.playbook`
 ([authentication guide](../../docs/guides/authentication.md)).
-Reference: [Isolated login](../../docs/reference/cli-grammar.md#isolated-login-v3230).
+Reference: [Isolated login](../../SPEC.md#isolated-login).

@@ -19,7 +19,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// Statements (docs/cli-grammar.md) are recognised before cobra runs, so
+// Statements (SPEC.md) are recognised before cobra runs, so
 // cobra never parses a statement's words: a value such as OPTS=-v must not
 // become a flag, and --dry-run / --json belong to the statement. Only the
 // global registry flags may precede the verb.

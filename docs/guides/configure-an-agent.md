@@ -109,4 +109,4 @@ cpb "SELECT name, model, tools FROM PLAYBOOKS"
 ```
 
 Every clause, rule and limit is in the reference:
-[An agent's configuration](../reference/cli-grammar.md#an-agents-configuration-v3210).
+[An agent's configuration](../../SPEC.md#an-agents-configuration).
