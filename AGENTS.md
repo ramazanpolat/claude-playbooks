@@ -25,6 +25,12 @@ preparing a release, read [Before any release](#before-any-release) first.
   that provider with every request: never add imports to it, and if an
   existing playbook's CLAUDE.md imports files, report it to the human rather
   than editing it yourself.
+- **`cpb play` confirmations are the human's.** Never pass `--yes`,
+  `--trust-endpoint` or `--trust-secret` on a human's behalf without their
+  explicit go: typing the host or the secret is how a person agrees that their
+  requests, or a secret, may go there, and an agent must not agree for them.
+  To inspect a recipe, use `cpb play <ref> --dry-run --json` (or `--check`),
+  which runs nothing.
 - **Do not edit** an installed playbook's files by hand; change state
   through `cpb` statements. Do not touch `~/.claude` (the machine's own
   Claude Code config) unless the human asks; then use

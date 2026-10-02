@@ -50,6 +50,17 @@ cpb DROP PLAYBOOK scratch --yes                    # gone; ~/.claude was never t
 cpb start /tmp/spike --delete                      # or a throwaway session in a throwaway folder
 ```
 
+### Try someone's playbook safely
+
+```bash
+cpb play frontend-craft                            # a curated template; or a URL, github:…@tag, ./x.cpb
+cpb play ./team.cpb --keep                         # liked it? keep it as a playbook of your own
+```
+
+It shows exactly what the recipe would do and asks first; a changed model
+endpoint, proxy or secret must be typed to confirm, and the session runs in a
+sandbox where one is available, removed when it ends. [Try someone else's playbook →](docs/guides/play.md)
+
 ### Route one playbook to another model
 
 An env set is a named group of variables, attached to one playbook or to all
