@@ -99,7 +99,7 @@ jobs:
           # lookup, and never suggests sudo.
           # Explicit exits: a negated pipeline never trips set -e, and inside a
           # loop only the last iteration's status would count.
-          for args in "update" "update --force"; do
+          for args in "self-update" "self-update --force"; do
             if out=$(devbox run -- claude-playbook $args 2>&1); then echo "::error::'$args' did not refuse"; echo "$out"; exit 1; fi
             echo "$out" | grep -q 'managed by Nix' || { echo "::error::'$args' refused without naming Nix"; echo "$out"; exit 1; }
             if echo "$out" | grep -qi -e sudo -e 'up to date'; then echo "::error::'$args' mentions sudo or 'up to date'"; echo "$out"; exit 1; fi
