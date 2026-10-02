@@ -142,6 +142,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", name)
 	}
 
+	// Before the sandbox decision: a manifest on the way up may ask for
+	// one, or for an isolated login.
+	guardDir := pb.Path
+	if override {
+		guardDir = overrideDir
+	}
+	if err := refuseUnreadableManifest(guardDir); err != nil {
+		return err
+	}
+
 	var sbm *manifest.Sandbox
 	if pb.Manifest != nil {
 		sbm = pb.Manifest.Sandbox
@@ -219,9 +229,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	configDir := pb.Path
 	if override {
 		configDir = overrideDir
-	}
-	if err := refuseUnreadableManifest(configDir); err != nil {
-		return err
 	}
 
 	// The sixth way to get the flags wrong: a profile that does not resolve.

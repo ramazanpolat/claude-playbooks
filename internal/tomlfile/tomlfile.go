@@ -48,10 +48,14 @@ func Decode(file string, data []byte, v any) error {
 		return err
 	}
 	var keys []toml.Key
+	seen := map[string]bool{}
 	for _, k := range md.Undecoded() {
-		if n := len(keys); n > 0 && within(k, keys[n-1]) {
+		// Under a table already named, or the same table again (an array
+		// of tables lists each element's key).
+		if n := len(keys); (n > 0 && within(k, keys[n-1])) || seen[k.String()] {
 			continue
 		}
+		seen[k.String()] = true
 		keys = append(keys, k)
 	}
 	if len(keys) == 0 {
@@ -89,29 +93,31 @@ func lineOf(lines map[string]int, k toml.Key) int {
 	return 0
 }
 
-// keyLines maps each table header and key of data, as its full path joined
-// by NUL, to the line it first appears on. It reads only what it needs to
-// place keys: headers, `key =` lines, and multi-line strings to skip.
+// keyLines maps each table header and key of data, and each prefix of a
+// dotted one, as its full path joined by NUL, to the line it first appears
+// on. It scans just enough TOML to tell a key from a value: strings of the
+// four kinds (multi-line ones span lines), comments, and the brackets of
+// arrays and inline tables, whose own keys are placed by the key holding
+// them.
 func keyLines(data []byte) map[string]int {
 	out := map[string]int{}
 	var table []string
-	inString := ""
+	var v valueState
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for n := 1; sc.Scan(); n++ {
-		line := strings.TrimSpace(sc.Text())
-		if inString != "" {
-			if strings.Count(line, inString)%2 == 1 {
-				inString = ""
-			}
+		line := sc.Text()
+		if v.open() {
+			v.scan(line)
 			continue
 		}
+		t := strings.TrimSpace(line)
 		switch {
-		case line == "" || line[0] == '#':
+		case t == "" || t[0] == '#':
 			continue
-		case strings.HasPrefix(line, "["):
-			inner := strings.TrimLeft(line, "[")
-			if i := strings.Index(inner, "]"); i >= 0 {
+		case t[0] == '[':
+			inner := strings.TrimPrefix(strings.TrimPrefix(t, "["), "[")
+			if i := outsideQuotes(inner, ']'); i >= 0 {
 				if path, ok := splitKey(inner[:i]); ok {
 					table = path
 					record(out, path, n)
@@ -119,27 +125,91 @@ func keyLines(data []byte) map[string]int {
 			}
 			continue
 		}
-		eq := strings.Index(line, "=")
+		eq := outsideQuotes(t, '=')
 		if eq <= 0 {
 			continue
 		}
-		path, ok := splitKey(line[:eq])
-		if !ok {
-			continue
+		if path, ok := splitKey(t[:eq]); ok {
+			record(out, append(append([]string(nil), table...), path...), n)
 		}
-		record(out, append(append([]string(nil), table...), path...), n)
-		for _, q := range []string{`"""`, `'''`} {
-			if strings.Count(line[eq+1:], q)%2 == 1 {
-				inString = q
-			}
-		}
+		v.scan(t[eq+1:])
 	}
 	return out
 }
 
+// record notes path, and each of its prefixes, at line, unless seen before.
 func record(out map[string]int, path []string, line int) {
-	if k := strings.Join(path, "\x00"); out[k] == 0 {
-		out[k] = line
+	for i := 1; i <= len(path); i++ {
+		if k := strings.Join(path[:i], "\x00"); out[k] == 0 {
+			out[k] = line
+		}
+	}
+}
+
+// outsideQuotes is the index of the first c in s that is not inside a
+// "basic" or 'literal' string, or -1.
+func outsideQuotes(s string, c byte) int {
+	var q byte
+	for i := 0; i < len(s); i++ {
+		switch {
+		case q == '"' && s[i] == '\\':
+			i++
+		case q != 0:
+			if s[i] == q {
+				q = 0
+			}
+		case s[i] == '"' || s[i] == '\'':
+			q = s[i]
+		case s[i] == c:
+			return i
+		}
+	}
+	return -1
+}
+
+// valueState is where a value scan stands at the end of a line: inside a
+// multi-line string, or inside depth brackets of arrays and inline tables.
+type valueState struct {
+	ml    string // `"""` or `'''`, while inside one
+	depth int
+}
+
+func (v *valueState) open() bool { return v.ml != "" || v.depth > 0 }
+
+// scan reads one line of value text, from where the last one stopped.
+func (v *valueState) scan(s string) {
+	for i := 0; i < len(s); i++ {
+		if v.ml != "" {
+			switch {
+			case v.ml == `"""` && s[i] == '\\':
+				i++
+			case strings.HasPrefix(s[i:], v.ml):
+				i += 2
+				v.ml = ""
+			}
+			continue
+		}
+		switch c := s[i]; c {
+		case '#':
+			return
+		case '"', '\'':
+			if q := s[i : i+min(3, len(s)-i)]; q == `"""` || q == "'''" {
+				v.ml = q
+				i += 2
+				continue
+			}
+			for i++; i < len(s) && s[i] != c; i++ {
+				if c == '"' && s[i] == '\\' {
+					i++
+				}
+			}
+		case '[', '{':
+			v.depth++
+		case ']', '}':
+			if v.depth > 0 {
+				v.depth--
+			}
+		}
 	}
 }
 

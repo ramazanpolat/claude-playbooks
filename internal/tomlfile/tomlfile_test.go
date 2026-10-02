@@ -90,3 +90,37 @@ func TestDecodePlacesInlineTableKeys(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// The scanner tells a key from a value: quotes of any kind inside one-line
+// strings and comments, a dotted key's table, an array of tables named
+// once, '=' and ']' inside quoted keys, and key-like text inside multi-line
+// arrays and strings (agy on #176).
+func TestDecodePlacesKeysAroundTrickyValues(t *testing.T) {
+	type modelled struct {
+		Pattern string   `toml:"pattern"`
+		K       int      `toml:"k"`
+		Arr     []string `toml:"arr"`
+		Note    string   `toml:"note"`
+	}
+	for name, c := range map[string]struct {
+		src  string
+		want []Unknown
+	}{
+		"''' in a basic string":   {"pattern = \"'''\"\nunexpected = 1\n", []Unknown{{"unexpected", 2}}},
+		`""" in a literal string`: {"pattern = '\"\"\"'\nunexpected = 1\n", []Unknown{{"unexpected", 2}}},
+		`""" in a comment`:        {"k = 1 # \"\"\"\nunexpected = 1\n", []Unknown{{"unexpected", 2}}},
+		"a dotted key":            {"k = 1\nunknown.field = 42\n", []Unknown{{"unknown.field", 2}}},
+		"an array of tables":      {"[[bad]]\nx = 1\n\n[[bad]]\ny = 2\n", []Unknown{{"bad", 1}}},
+		"= in a quoted key":       {"k = 1\n\"bad=key\" = \"v\"\n", []Unknown{{`"bad=key"`, 2}}},
+		"] in a quoted header":    {"k = 1\n[\"table]name\"]\nbad = 1\n", []Unknown{{`"table]name"`, 2}}},
+		"a multi-line array":      {"arr = [\n  \"a = b\",\n  \"[c]\",\n]\nunexpected = 1\n", []Unknown{{"unexpected", 5}}},
+		"a multi-line string":     {"note = \"\"\"\nnope = 1\n[fake]\n\"\"\"\nnope = 2\n", []Unknown{{"nope", 5}}},
+	} {
+		var v modelled
+		err := Decode("f", []byte(c.src), &v)
+		var uk *UnknownKeyError
+		if !errors.As(err, &uk) || !reflect.DeepEqual(uk.Keys, c.want) {
+			t.Errorf("%s: %v, want %+v", name, err, c.want)
+		}
+	}
+}

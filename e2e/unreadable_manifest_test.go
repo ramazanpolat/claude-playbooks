@@ -36,4 +36,19 @@ func TestLaunchRefusesAnUnreadableManifest(t *testing.T) {
 			t.Errorf("%s linked a login into the directory", c.name)
 		}
 	}
+
+	// A sandboxed run is refused before the sandbox is decided: here the
+	// unreadable manifest sits above a root whose playbook has none.
+	parent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(parent, ".playbook"), []byte("isolate_auth = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "root")
+	if err := os.MkdirAll(filepath.Join(root, "flat"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := runFailing(t, root, nil, []string{"run", "--sandbox", "flat"})
+	if !strings.Contains(out, `unknown key "isolate_auth" in `+filepath.Join(parent, ".playbook")) || !strings.Contains(out, "does not launch over a manifest it cannot read") {
+		t.Errorf("a sandboxed run:\n%s", out)
+	}
 }
