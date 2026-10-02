@@ -198,15 +198,16 @@ func TestPilotProfileField(t *testing.T) {
 		if err := json.Unmarshal([]byte(out), &v); err != nil || v["pilot_profile"] != want {
 			t.Errorf("%s: pilot_profile = %v, want %s (%v)", name, v["pilot_profile"], want, err)
 		}
-		if !strings.HasSuffix(strings.TrimSpace(out), `"pilot_profile": "`+want+`"`+"\n}") {
-			t.Errorf("%s: pilot_profile is not the last field:\n%s", name, out)
+		// The last field until v3.28.0 appended play after it.
+		if !strings.HasSuffix(strings.TrimSpace(out), `"pilot_profile": "`+want+`",`+"\n  \"play\": null\n}") {
+			t.Errorf("%s: pilot_profile is not the field before play, the last:\n%s", name, out)
 		}
 	}
 	if h := mustStmt(t, "SHOW PLAYBOOK without"); !strings.Contains(h, "Pilot profile") || !strings.Contains(h, "not imported") {
 		t.Fatalf("human:\n%s", h)
 	}
 	cols, _ := describeTable("PLAYBOOKS")
-	if last := cols[len(cols)-1]; last.Name != "pilot_profile" || last.Type != "String" {
+	if last, prev := cols[len(cols)-1], cols[len(cols)-2]; last.Name != "play" || prev.Name != "pilot_profile" || prev.Type != "String" {
 		t.Fatalf("last column: %+v", last)
 	}
 	var rows []map[string]any

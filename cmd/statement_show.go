@@ -79,6 +79,16 @@ type playbookJSON struct {
 	// line, or no CLAUDE.md) or "unknown" (CLAUDE.md cannot be read). Last,
 	// so every earlier field keeps its place.
 	PilotProfile string `json:"pilot_profile"`
+	// Play is the [play] record of a playbook `cpb play --keep` built, null
+	// for every other (v3.28.0). Last, as above.
+	Play *playRecordJSON `json:"play"`
+}
+
+type playRecordJSON struct {
+	Ref    string `json:"ref"`
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+	Played string `json:"played"`
 }
 
 type envJSON struct {
@@ -211,6 +221,10 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
 		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
 		Skills: describeSkills(pb.Manifest), PilotProfile: pilotProfileState(pb.Path)}
+	if pb.Manifest != nil && pb.Manifest.Play != nil {
+		p := pb.Manifest.Play
+		v.Play = &playRecordJSON{Ref: p.Ref, URL: p.URL, SHA256: p.SHA256, Played: p.Played}
+	}
 	// What the playbook's settings.json declares; an unreadable file shows
 	// none rather than failing the whole SHOW.
 	if sf, err := settings.Load(pb.Path); err == nil {
@@ -353,6 +367,9 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		pilotNotImported: "not imported",
 		pilotUnknown:     "unknown (CLAUDE.md cannot be read)",
 	}[v.PilotProfile]})
+	if v.Play != nil {
+		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb play --update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.Played, v.Name)})
+	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.
 	if len(v.Tools.Allow)+len(v.Tools.Deny) > 0 {
@@ -764,4 +781,12 @@ func statuslineLine(v playbookJSON) string {
 		return fmt.Sprintf("%s (refreshes every %d s)", *v.Statusline, *v.StatuslineRefresh)
 	}
 	return *v.Statusline
+}
+
+// shortSHA is the first 12 hex digits of a sha256, as the preview names it.
+func shortSHA(h string) string {
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
 }

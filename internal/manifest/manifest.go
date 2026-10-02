@@ -272,6 +272,22 @@ type Manifest struct {
 	// how it was put in place, so DROP SKILL removes only what cpb added and
 	// update restores it (docs/reference/cli-grammar.md, "Skills").
 	Skills map[string]*SkillRecord `toml:"skills,omitempty"`
+
+	// Play records where a kept played recipe came from, so `cpb play
+	// --update` can fetch it again (v3.28.0; docs/guides/play.md).
+	Play *Play `toml:"play,omitempty"`
+}
+
+// Play is the [play] record of a playbook `cpb play --keep` built.
+type Play struct {
+	// Ref is what was played, as --update resolves it again: a template
+	// name, a URL, a github: ref, or a local file's absolute path.
+	Ref string `toml:"ref"`
+	// URL is the address the bytes came from; empty for a local file.
+	URL    string `toml:"url,omitempty"`
+	SHA256 string `toml:"sha256"`
+	// Played is when, as YYYY-MM-DD-HH_MM local time.
+	Played string `toml:"played"`
 }
 
 // SkillRecord is one skill cpb put at <config>/skills/<name>.
@@ -668,6 +684,15 @@ func Write(dir string, m *Manifest) error {
 			}
 			fmt.Fprintf(&b, "mode = %s\n", QuoteTOML(r.Mode))
 		}
+	}
+	if m.Play != nil {
+		b.WriteString("\n[play]\n")
+		fmt.Fprintf(&b, "ref = %s\n", QuoteTOML(m.Play.Ref))
+		if m.Play.URL != "" {
+			fmt.Fprintf(&b, "url = %s\n", QuoteTOML(m.Play.URL))
+		}
+		fmt.Fprintf(&b, "sha256 = %s\n", QuoteTOML(m.Play.SHA256))
+		fmt.Fprintf(&b, "played = %s\n", QuoteTOML(m.Play.Played))
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
 	// carrying any is written private, like an env profile. Existing files

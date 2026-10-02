@@ -757,7 +757,7 @@ changes only by these rules (the stabilization week, decided by the pilot on
 |---|---|
 | The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
 | The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), `tui` (v3.25.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
-| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
+| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records, `[play]` from v3.28.0), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
 | `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json`, `SHOW SESSIONS --json` and `RESUME --list --json` (v3.25.0) |
 | Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`, `marketplace_ref_not_cloneable` from v3.27.0); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
 
@@ -836,6 +836,13 @@ imports `~/.pilot-profile/`:
 It is the same detector the `pilot_profile_third_party_endpoint` warning
 uses. cpb reads the import line only; it never reads the profile, and never
 runs a pilot-profile tool.
+
+**`play`** (v3.28.0) follows it, last. It is the `[play]` record of a
+playbook `cpb play --keep` built, and `null` for every other:
+`{"ref", "url", "sha256", "played"}`. `ref` is what `cpb play --update`
+fetches again (a template name, a URL, a `github:` ref, or a local file's
+absolute path); `url` is empty for a local file; `played` is
+`YYYY-MM-DD-HH_MM`. The human form has a `Played from:` line.
 
 **`SHOW PLAYBOOKS`** (also a bare `SHOW`, and `SHOW --json`): human form, one header line and then one line per
 playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
@@ -945,7 +952,7 @@ so `source.url` and `vars[1].key` work):
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`pilot_profile`, v3.25.0, is the last column) |
+| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`pilot_profile`, v3.25.0, then `play`, v3.28.0, are the last columns) |
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
 | `PANELS` | status line panel, per playbook (v3.25.0) | `playbook panel type source cpb row priority align` |
