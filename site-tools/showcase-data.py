@@ -180,7 +180,7 @@ def build(cpb):
             show = r.json("SHOW", "PLAYBOOK", name, "--json")
             explain = r.json("EXPLAIN", "PLAYBOOK", name, "--json")
             d = Path(show["path"])
-            login = "sandbox" if show["sandbox"] else "isolated" if show["isolated_login"] else "shared"
+            login = "sandbox" if show["sandbox"]["always"] else "isolated" if show["isolated_login"] else "shared"
 
             env = []
             for v in explain["vars"]:
