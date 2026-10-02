@@ -4,6 +4,7 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -13,9 +14,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/tomlfile"
 )
 
 const FileName = ".playbook"
@@ -30,49 +30,52 @@ type Source struct {
 // Update holds per-playbook update policy. Preserve names install-local files
 // that must survive an update even though the source ships its own copy; the
 // CLI already preserves settings.json and the Claude Code state files, so this
-// is for anything beyond that. Paths are relative to the playbook root.
+// is for anything beyond that. Migrate is the playbook's migration step: a
+// script `cpb update` runs, once you consent, after the new files are in
+// place, as `<script> <from-version> <to-version> <install-dir>`. Without it
+// no migration runs. Paths are relative to the playbook root.
 type Update struct {
 	Preserve []string `toml:"preserve,omitempty"`
+	Migrate  string   `toml:"migrate,omitempty"`
 }
 
 // Env holds per-install environment overrides applied by `run`, `start`, and
 // launcher dispatch to the child claude process, after the process's own
 // environment and before CLAUDE_CONFIG_DIR is bound. Set entries override
-// inherited values; Unset entries are removed from the child's environment
+// inherited values; Block entries are removed from the child's environment
 // even when the shell exports them.
 //
-// The block is INSTALL-LOCAL state, like `alias`: `update` carries the live
+// The [env] table is INSTALL-LOCAL state, like `launcher`: `update` carries the live
 // block forward and ignores the source's, and `install` drops a block the
 // source ships. A playbook repository must not be able to point an install's
 // ANTHROPIC_BASE_URL somewhere else by publishing a manifest.
 //
-// Unsetting CLAUDE_CODE_OAUTH_TOKEN has a documented side effect: the
+// Blocking CLAUDE_CODE_OAUTH_TOKEN has a documented side effect: the
 // long-lived token is treated as inactive for that install, so the launch
 // takes the stored-credentials path (no quarantine, no injection). Setting
 // it supplies a per-install token that wins over the machine-global file.
 //
-// Profiles names shared env profiles (files under the playbooks root's
-// .env-profiles/ directory) layered UNDER this block: profiles apply in
-// list order, later ones overriding earlier, and the block's own Set/Unset
-// apply last. Resolution happens at launch; the manifest records names only.
+// Sets names shared env sets (files under the playbooks root's .env-sets/
+// directory) layered UNDER this table: sets apply in list order, later ones
+// overriding earlier, and the table's own Set/Block apply last. Resolution happens at launch; the manifest records names only.
 //
 // Refs holds secret REFERENCES (keychain:…, op://…), never values: the
 // launch execs claude through the configured secret helper, which resolves
-// them (docs/cli-grammar.md, "Secrets"). A key lives in at most one of Set,
-// Refs and Unset.
+// them (SPEC.md, "Secrets"). A key lives in at most one of Set,
+// Refs and Block.
 type Env struct {
-	Profiles []string          `toml:"profiles,omitempty"`
-	Set      map[string]string `toml:"set,omitempty"`
-	Refs     map[string]string `toml:"refs,omitempty"`
-	Unset    []string          `toml:"unset,omitempty"`
+	Sets  []string          `toml:"sets,omitempty"`
+	Set   map[string]string `toml:"set,omitempty"`
+	Refs  map[string]string `toml:"refs,omitempty"`
+	Block []string          `toml:"block,omitempty"`
 }
 
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-// ValidateProfileName reports whether name can name an env profile file.
-func ValidateProfileName(name string) error {
+// ValidateSetName reports whether name can name an env set file.
+func ValidateSetName(name string) error {
 	if !profileNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid profile name %q: use letters, digits, dots, dashes, underscores", name)
+		return fmt.Errorf("invalid env set name %q: use letters, digits, dots, dashes, underscores", name)
 	}
 	return nil
 }
@@ -82,7 +85,7 @@ func (e *Env) Uses(profile string) bool {
 	if e == nil {
 		return false
 	}
-	for _, p := range e.Profiles {
+	for _, p := range e.Sets {
 		if p == profile {
 			return true
 		}
@@ -103,7 +106,7 @@ func MergeEnv(layers ...*Env) *Env {
 			continue
 		}
 		for key, ref := range layer.Refs {
-			out.Unset = dropKey(out.Unset, key)
+			out.Block = dropKey(out.Block, key)
 			delete(out.Set, key)
 			if out.Refs == nil {
 				out.Refs = map[string]string{}
@@ -111,15 +114,15 @@ func MergeEnv(layers ...*Env) *Env {
 			out.Refs[key] = ref
 		}
 		for key, value := range layer.Set {
-			out.Unset = dropKey(out.Unset, key)
+			out.Block = dropKey(out.Block, key)
 			delete(out.Refs, key)
 			out.Set[key] = value
 		}
-		for _, key := range layer.Unset {
+		for _, key := range layer.Block {
 			delete(out.Set, key)
 			delete(out.Refs, key)
-			if !out.Unsets(key) {
-				out.Unset = append(out.Unset, key)
+			if !out.Blocks(key) {
+				out.Block = append(out.Block, key)
 			}
 		}
 	}
@@ -204,7 +207,7 @@ func ValidateEnvValue(key, value string) error {
 // --env or --env-file: the tool owns them and binds them after every override
 // is applied.
 //
-// CLAUDE_CONFIG_DIR_OVERRIDE is reserved for a subtler reason than
+// CPB_CONFIG_DIR is reserved for a subtler reason than
 // CLAUDE_CONFIG_DIR. Declaring it could never redirect the launch that
 // declares it (the request is read from the process environment before any
 // layer is applied), but it would place the variable in the child's
@@ -225,22 +228,22 @@ func ValidateEnvKey(key string) error {
 		return fmt.Errorf("invalid environment variable name %q", key)
 	}
 	if ReservedEnvKeys[key] {
-		return fmt.Errorf("%s is managed by claude-playbook and cannot be overridden", key)
+		return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
 	}
 	return nil
 }
 
 // Empty reports whether the block declares nothing.
 func (e *Env) Empty() bool {
-	return e == nil || (len(e.Profiles) == 0 && len(e.Set) == 0 && len(e.Refs) == 0 && len(e.Unset) == 0)
+	return e == nil || (len(e.Sets) == 0 && len(e.Set) == 0 && len(e.Refs) == 0 && len(e.Block) == 0)
 }
 
-// Unsets reports whether key is listed for removal.
-func (e *Env) Unsets(key string) bool {
+// Blocks reports whether key is listed for removal.
+func (e *Env) Blocks(key string) bool {
 	if e == nil {
 		return false
 	}
-	for _, k := range e.Unset {
+	for _, k := range e.Block {
 		if k == key {
 			return true
 		}
@@ -250,44 +253,43 @@ func (e *Env) Unsets(key string) bool {
 
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
-	Version     string   `toml:"version"`
-	Name        string   `toml:"name"`
-	Alias       string   `toml:"alias"`
-	Subdir      string   `toml:"subdir"`
-	Description string   `toml:"description"`
-	Homepage    string   `toml:"homepage"`
-	Author      string   `toml:"author"`
-	IsolateAuth bool     `toml:"isolate_auth"`
-	Source      *Source  `toml:"source,omitempty"`
-	Update      *Update  `toml:"update,omitempty"`
-	Env         *Env     `toml:"env,omitempty"`
-	Sandbox     *Sandbox `toml:"sandbox,omitempty"`
+	Version       string   `toml:"version"`
+	Name          string   `toml:"name"`
+	Launcher      string   `toml:"launcher"`
+	Description   string   `toml:"description"`
+	Homepage      string   `toml:"homepage"`
+	Author        string   `toml:"author"`
+	IsolatedLogin bool     `toml:"isolated_login"`
+	Source        *Source  `toml:"source,omitempty"`
+	Update        *Update  `toml:"update,omitempty"`
+	Env           *Env     `toml:"env,omitempty"`
+	Sandbox       *Sandbox `toml:"sandbox,omitempty"`
 
 	// MCP records, per MCP server a statement declared, the variables cpb
 	// derived for its secret references, so dropping the server forgets
-	// exactly those (docs/reference/cli-grammar.md, "MCP servers").
+	// exactly those (SPEC.md, "MCP servers").
 	MCP map[string]*MCPRecord `toml:"mcp,omitempty"`
 
 	// Skills records, per skill a statement added, where it came from and
 	// how it was put in place, so DROP SKILL removes only what cpb added and
-	// update restores it (docs/reference/cli-grammar.md, "Skills").
+	// update restores it (SPEC.md, "Skills").
 	Skills map[string]*SkillRecord `toml:"skills,omitempty"`
 
-	// Play records where a kept played recipe came from, so `cpb play
-	// --update` can fetch it again (v3.28.0; docs/guides/play.md).
+	// Play records where a kept played recipe came from, so `cpb update`
+	// can fetch it again (v4.0.0; docs/guides/play.md).
 	Play *Play `toml:"play,omitempty"`
 }
 
 // Play is the [play] record of a playbook `cpb play --keep` built.
 type Play struct {
-	// Ref is what was played, as --update resolves it again: a template
+	// Ref is what was played, as `cpb update` resolves it again: a template
 	// name, a URL, a github: ref, or a local file's absolute path.
 	Ref string `toml:"ref"`
 	// URL is the address the bytes came from; empty for a local file.
 	URL    string `toml:"url,omitempty"`
 	SHA256 string `toml:"sha256"`
-	// Played is when, as YYYY-MM-DD-HH_MM local time.
-	Played string `toml:"played"`
+	// PlayedAt is when, in RFC 3339, UTC.
+	PlayedAt string `toml:"played_at"`
 }
 
 // SkillRecord is one skill cpb put at <config>/skills/<name>.
@@ -316,11 +318,11 @@ type Sandbox struct {
 	// default.
 	Backend string `toml:"backend,omitempty"`
 	// ShareSkills mounts the backend's shared skills store into the
-	// sandbox (sbx does so by default; claude-playbook does not, since a
+	// sandbox (sbx does so by default; cpb does not, since a
 	// sandbox could then plant a skill a later sandbox runs).
 	ShareSkills bool `toml:"share_skills,omitempty"`
 	// Host names the machine the sandbox runs on ("user@host", reached
-	// over ssh), where claude-playbook and this playbook are installed;
+	// over ssh), where cpb and this playbook are installed;
 	// empty runs the sandbox here.
 	Host string `toml:"host,omitempty"`
 	// Secrets says how backend API keys reach the sandbox: "proxy" (the
@@ -354,7 +356,10 @@ func Read(dir string) (*Manifest, error) {
 		return nil, err
 	}
 	var m Manifest
-	if _, err := toml.Decode(string(data), &m); err != nil {
+	if err := tomlfile.Decode(path, data, &m); err != nil {
+		if errors.As(err, new(*tomlfile.UnknownKeyError)) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("invalid .playbook at %s: %s", path, SanitizeTOMLError(err))
 	}
 	if err := m.validate(path); err != nil {
@@ -369,7 +374,7 @@ func Read(dir string) (*Manifest, error) {
 //
 // An unreadable or invalid manifest on the way up does not stop the walk --
 // the closest VALID manifest still governs, so a stray broken file in a
-// subdir cannot silently switch off an install root's isolate_auth. The
+// subdir cannot silently switch off an install root's isolated_login. The
 // first such error is returned alongside whatever was found, so callers can
 // report it. Returns (nil, nil) when no ancestor has a manifest.
 func Nearest(dir string) (*Manifest, error) {
@@ -411,7 +416,7 @@ func (m *Manifest) validate(path string) error {
 	// arguments: a name from a hand-written or source-shipped manifest is
 	// held to the same rule the grammar applies, never trusted.
 	for name, r := range m.Skills {
-		if ValidateProfileName(name) != nil {
+		if ValidateSetName(name) != nil {
 			return fmt.Errorf("invalid %s at %s: [skills] entry %q is not a valid skill name", FileName, path, name)
 		}
 		if r != nil && r.Mode != "link" && r.Mode != "copy" {
@@ -419,7 +424,7 @@ func (m *Manifest) validate(path string) error {
 		}
 	}
 	for name := range m.MCP {
-		if ValidateProfileName(name) != nil {
+		if ValidateSetName(name) != nil {
 			return fmt.Errorf("invalid %s at %s: [mcp] entry %q is not a valid MCP server name", FileName, path, name)
 		}
 	}
@@ -427,9 +432,6 @@ func (m *Manifest) validate(path string) error {
 		if err := m.Sandbox.validate(); err != nil {
 			return fmt.Errorf("invalid %s at %s: %w", FileName, path, err)
 		}
-	}
-	if err := validateRelativePath(path, "subdir", m.Subdir); err != nil {
-		return err
 	}
 	if m.Source != nil {
 		if err := validateRelativePath(path, "source.subdir", m.Source.Subdir); err != nil {
@@ -442,11 +444,14 @@ func (m *Manifest) validate(path string) error {
 				return err
 			}
 		}
+		if err := validateRelativePath(path, "update.migrate", m.Update.Migrate); err != nil {
+			return err
+		}
 	}
 	if m.Env != nil {
-		for _, name := range m.Env.Profiles {
-			if err := ValidateProfileName(name); err != nil {
-				return fmt.Errorf("invalid .playbook at %s: env.profiles: %w", path, err)
+		for _, name := range m.Env.Sets {
+			if err := ValidateSetName(name); err != nil {
+				return fmt.Errorf("invalid .playbook at %s: env.sets: %w", path, err)
 			}
 		}
 		for key, value := range m.Env.Set {
@@ -457,15 +462,15 @@ func (m *Manifest) validate(path string) error {
 				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
 			}
 		}
-		for _, key := range m.Env.Unset {
+		for _, key := range m.Env.Block {
 			if err := ValidateEnvKey(key); err != nil {
-				return fmt.Errorf("invalid .playbook at %s: env.unset: %w", path, err)
+				return fmt.Errorf("invalid .playbook at %s: env.block: %w", path, err)
 			}
 			if _, both := m.Env.Set[key]; both {
-				return fmt.Errorf("invalid .playbook at %s: env: %s is both set and unset", path, key)
+				return fmt.Errorf("invalid .playbook at %s: env: %s is both set and blocked", path, key)
 			}
 		}
-		if err := ValidateRefs(m.Env.Refs, m.Env.Set, m.Env.Unset); err != nil {
+		if err := ValidateRefs(m.Env.Refs, m.Env.Set, m.Env.Block); err != nil {
 			return fmt.Errorf("invalid .playbook at %s: env.refs: %w", path, err)
 		}
 	}
@@ -528,8 +533,7 @@ func ResolvePath(root, field, value string) (string, error) {
 	return candidate, nil
 }
 
-// Write serializes a manifest to the .playbook file inside dir. Used by `link`
-// after collecting metadata interactively.
+// Write serializes a manifest to the .playbook file inside dir.
 func Write(dir string, m *Manifest) error {
 	path := filepath.Join(dir, FileName)
 	if err := m.validate(path); err != nil {
@@ -538,17 +542,12 @@ func Write(dir string, m *Manifest) error {
 	var b strings.Builder
 	if m.Version != "" {
 		fmt.Fprintf(&b, "version = %s\n", QuoteTOML(m.Version))
-	} else {
-		b.WriteString(`version = "0.1.0"` + "\n")
 	}
 	if m.Name != "" {
 		fmt.Fprintf(&b, "name = %s\n", QuoteTOML(m.Name))
 	}
-	if m.Alias != "" {
-		fmt.Fprintf(&b, "alias = %s\n", QuoteTOML(m.Alias))
-	}
-	if m.Subdir != "" {
-		fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(m.Subdir))
+	if m.Launcher != "" {
+		fmt.Fprintf(&b, "launcher = %s\n", QuoteTOML(m.Launcher))
 	}
 	if m.Description != "" {
 		fmt.Fprintf(&b, "description = %s\n", QuoteTOML(m.Description))
@@ -559,8 +558,8 @@ func Write(dir string, m *Manifest) error {
 	if m.Author != "" {
 		fmt.Fprintf(&b, "author = %s\n", QuoteTOML(m.Author))
 	}
-	if m.IsolateAuth {
-		fmt.Fprintf(&b, "isolate_auth = true\n")
+	if m.IsolatedLogin {
+		fmt.Fprintf(&b, "isolated_login = true\n")
 	}
 	if m.Source != nil {
 		b.WriteString("\n[source]\n")
@@ -574,23 +573,29 @@ func Write(dir string, m *Manifest) error {
 			fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(m.Source.Subdir))
 		}
 	}
-	if m.Update != nil && len(m.Update.Preserve) > 0 {
-		b.WriteString("\n[update]\npreserve = [")
-		for i, rel := range m.Update.Preserve {
-			if i > 0 {
-				b.WriteString(", ")
+	if m.Update != nil && (len(m.Update.Preserve) > 0 || m.Update.Migrate != "") {
+		b.WriteString("\n[update]\n")
+		if len(m.Update.Preserve) > 0 {
+			b.WriteString("preserve = [")
+			for i, rel := range m.Update.Preserve {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(QuoteTOML(rel))
 			}
-			b.WriteString(QuoteTOML(rel))
+			b.WriteString("]\n")
 		}
-		b.WriteString("]\n")
+		if m.Update.Migrate != "" {
+			fmt.Fprintf(&b, "migrate = %s\n", QuoteTOML(m.Update.Migrate))
+		}
 	}
 	if !m.Env.Empty() {
 		// [env] must precede [env.set] in TOML; both are emitted in sorted
 		// order so a rewrite never reorders a hand-edited file arbitrarily.
 		b.WriteString("\n[env]\n")
-		if len(m.Env.Profiles) > 0 {
-			b.WriteString("profiles = [")
-			for i, name := range m.Env.Profiles {
+		if len(m.Env.Sets) > 0 {
+			b.WriteString("sets = [")
+			for i, name := range m.Env.Sets {
 				if i > 0 {
 					b.WriteString(", ")
 				}
@@ -598,11 +603,11 @@ func Write(dir string, m *Manifest) error {
 			}
 			b.WriteString("]\n")
 		}
-		if len(m.Env.Unset) > 0 {
-			unset := append([]string(nil), m.Env.Unset...)
-			sort.Strings(unset)
-			b.WriteString("unset = [")
-			for i, key := range unset {
+		if len(m.Env.Block) > 0 {
+			block := append([]string(nil), m.Env.Block...)
+			sort.Strings(block)
+			b.WriteString("block = [")
+			for i, key := range block {
 				if i > 0 {
 					b.WriteString(", ")
 				}
@@ -692,10 +697,10 @@ func Write(dir string, m *Manifest) error {
 			fmt.Fprintf(&b, "url = %s\n", QuoteTOML(m.Play.URL))
 		}
 		fmt.Fprintf(&b, "sha256 = %s\n", QuoteTOML(m.Play.SHA256))
-		fmt.Fprintf(&b, "played = %s\n", QuoteTOML(m.Play.Played))
+		fmt.Fprintf(&b, "played_at = %s\n", QuoteTOML(m.Play.PlayedAt))
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
-	// carrying any is written private, like an env profile. Existing files
+	// carrying any is written private, like an env set. Existing files
 	// are only ever tightened, never loosened.
 	// An existing file keeps its mode exactly (as an in-place rewrite would
 	// have), and is tightened to owner-only when values are present. It is
@@ -759,8 +764,8 @@ func WritePrivate(path string, data []byte, perm os.FileMode) error {
 
 var claudeVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
-// SandboxBackends lists the sandbox implementations claude-playbook drives.
-var SandboxBackends = []string{"sbx", "openshell"}
+// SandboxBackends lists the sandbox implementations cpb drives.
+var SandboxBackends = []string{"sbx"}
 
 // KnownSandboxBackend reports whether name is one of SandboxBackends.
 func KnownSandboxBackend(name string) bool {

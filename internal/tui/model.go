@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -32,9 +31,6 @@ func quit() Msg { return tea.Quit() }
 // Options are the TUI's connections to the world, all replaceable in tests.
 type Options struct {
 	Runner Runner
-	// Resume builds the command a resume runs (cpb RESUME …); nil disables
-	// resuming.
-	Resume func(args ...string) *exec.Cmd
 	// Clipboard receives copied text; nil sets the terminal's clipboard
 	// with OSC 52 (tea.SetClipboard).
 	Clipboard func(string) error
@@ -42,7 +38,7 @@ type Options struct {
 	NoColor bool
 	Now     func() time.Time
 	Home    string // for ~ in paths
-	Cwd     string // where export writes, and RESUME --list looks
+	Cwd     string // where export writes
 	Poll    time.Duration
 }
 
@@ -70,8 +66,6 @@ type Model struct {
 	msg      string
 	view     view
 	cursor   map[view]int
-	recent   bool
-	recents  []Recent
 	detail   *detail
 	text     *textPane
 	confirm  *confirm
@@ -112,10 +106,6 @@ type (
 		s   []Session
 		err error
 	}
-	recentMsg struct {
-		r   []Recent
-		err error
-	}
 	playbookMsg struct {
 		name string
 		p    Playbook
@@ -133,10 +123,6 @@ type (
 	exportMsg struct {
 		name, body string
 		err        error
-	}
-	resumeDoneMsg struct {
-		stmt string
-		err  error
 	}
 	tickMsg time.Time
 )
@@ -183,14 +169,6 @@ func (m Model) loadSessions() Cmd {
 	}
 }
 
-func (m Model) loadRecent() Cmd {
-	r := m.o.Runner
-	return func() Msg {
-		rs, err := loadRecent(r)
-		return recentMsg{rs, err}
-	}
-}
-
 // polling: sessions are re-read only while a screen that shows them is up.
 func (m Model) polling() bool {
 	if m.text != nil || m.confirm != nil || m.help {
@@ -199,7 +177,7 @@ func (m Model) polling() bool {
 	if m.detail != nil {
 		return m.detail.tab == len(detailTabs)-1 || m.detail.tab == 0
 	}
-	return (m.view == vPlaybooks || m.view == vSessions) && !m.recent
+	return m.view == vPlaybooks || m.view == vSessions
 }
 
 // Update is tea.Model's; update is the same with the concrete model, which
@@ -232,14 +210,6 @@ func (m Model) update(msg Msg) (Model, Cmd) {
 			m.st.Sessions, m.lastRead = msg.s, m.o.Now()
 			m.clampCursors()
 		}
-		return m, nil
-	case recentMsg:
-		if msg.err != nil {
-			m.msg = msg.err.Error()
-			return m, nil
-		}
-		m.recents = msg.r
-		m.clampCursors()
 		return m, nil
 	case playbookMsg:
 		if m.detail != nil && m.detail.pb == msg.name {
@@ -274,15 +244,6 @@ func (m Model) update(msg Msg) (Model, Cmd) {
 		return m, nil
 	case exportMsg:
 		return m.export(msg)
-	case resumeDoneMsg:
-		if msg.err != nil {
-			m.logf("%s: %v", msg.stmt, msg.err)
-			m.msg = msg.stmt + ": " + msg.err.Error()
-		} else {
-			m.logf("%s: exited 0", msg.stmt)
-			m.msg = msg.stmt + ": done"
-		}
-		return m, batch(m.loadAll(), m.loadRecent())
 	case tickMsg:
 		if m.polling() && m.loaded {
 			return m, batch(m.tick(), m.loadSessions())
@@ -373,13 +334,10 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 		return m, nil
 	case "1", "2", "3", "4", "5":
 		m.view = view(s[0] - '1')
-		m.filter, m.recent = "", false
+		m.filter = ""
 		return m, nil
 	case "r":
 		m.msg = "refreshing…"
-		if m.recent {
-			return m, batch(m.loadAll(), m.loadRecent())
-		}
 		return m, m.loadAll()
 	case "/":
 		m.typing, m.filter = true, ""
@@ -408,7 +366,7 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 			m.detail = &detail{pb: pb.Name}
 			return m, batch(m.loadPlaybook(pb.Name), m.loadExplain(pb.Name))
 		case "s":
-			m.view, m.filter, m.recent = vSessions, pb.Name, false
+			m.view, m.filter = vSessions, pb.Name
 			return m, nil
 		case "c":
 			return m, m.showCreate("PLAYBOOK", pb.Name)
@@ -419,18 +377,12 @@ func (m Model) key(k tea.KeyPressMsg) (Model, Cmd) {
 		}
 	case vSessions:
 		switch s {
-		case "R":
-			m.recent = !m.recent
-			m.cursor[vSessions] = 0
-			if m.recent {
-				return m, m.loadRecent()
-			}
-			return m, nil
-		case "enter":
-			return m.resumeSelected()
 		case "y":
-			if stmt, ok := m.selectedResumeStatement(); ok {
-				return m.copy(stmt, "")
+			// The command that resumes the session once it ends, as SHOW
+			// SESSIONS prints it: a live one is refused.
+			rows := m.sessionRows()
+			if i := m.cursor[vSessions]; i < len(rows) {
+				return m.copy(rows[i].Resume, "")
 			}
 		}
 	case vEnvs:
@@ -577,85 +529,6 @@ func (m Model) copy(text, stmt string) (Model, Cmd) {
 	return m, cmd
 }
 
-// resumeArgs is the RESUME statement for a session of label (a playbook
-// name, or a plain directory's path).
-func resumeArgs(label, id string) []string {
-	args := []string{"RESUME", "SESSION", id}
-	if !strings.HasPrefix(label, "/") {
-		args = append(args, "FOR", "PLAYBOOK", label)
-	}
-	return args
-}
-
-func (m Model) selectedResumeStatement() (string, bool) {
-	i := m.cursor[vSessions]
-	if m.recent {
-		rows := m.recentRows()
-		if i < len(rows) {
-			return statement(resumeArgs(rows[i].Playbook, rows[i].SessionID)), true
-		}
-		return "", false
-	}
-	rows := m.sessionRows()
-	if i < len(rows) {
-		return statement(resumeArgs(rows[i].Playbook, rows[i].SessionID)), true
-	}
-	return "", false
-}
-
-// statement quotes a session id as the grammar writes it.
-func statement(args []string) string {
-	out := make([]string, len(args))
-	for i, a := range args {
-		out[i] = a
-		if i > 0 && args[i-1] == "SESSION" {
-			out[i] = "'" + a + "'"
-		}
-	}
-	return strings.Join(out, " ")
-}
-
-func (m Model) resumeSelected() (Model, Cmd) {
-	i := m.cursor[vSessions]
-	var label, id string
-	var livePID int
-	var tty string
-	if m.recent {
-		rows := m.recentRows()
-		if i >= len(rows) {
-			return m, nil
-		}
-		label, id = rows[i].Playbook, rows[i].SessionID
-		if rows[i].Live && rows[i].PID != nil {
-			livePID = *rows[i].PID
-		}
-	} else {
-		rows := m.sessionRows()
-		if i >= len(rows) {
-			return m, nil
-		}
-		label, id, livePID = rows[i].Playbook, rows[i].SessionID, rows[i].PID
-		if rows[i].TTY != nil {
-			tty = " on " + *rows[i].TTY
-		}
-	}
-	if livePID != 0 {
-		// cpb refuses a live session; the TUI says so rather than ask.
-		m.msg = fmt.Sprintf("%s is running in pid %d%s: cpb does not resume a live session (R lists the others)", shortID(id), livePID, tty)
-		return m, nil
-	}
-	if m.o.Resume == nil {
-		return m, nil
-	}
-	args := resumeArgs(label, id)
-	stmt := statement(args)
-	m.logf("%s", stmt)
-	// bubbletea hands the terminal to the session and takes it back: its
-	// input reader is cancelled first, so no key typed for the session is
-	// read here.
-	return m, tea.ExecProcess(m.o.Resume(args...), func(err error) Msg { return resumeDoneMsg{stmt, err} })
-}
-
 func (m Model) selectedPlaybook() (Playbook, bool) {
 	rows := m.playbookRows()
 	i := m.cursor[vPlaybooks]
@@ -697,9 +570,6 @@ func (m Model) rowCount() int {
 	case vPlaybooks:
 		return len(m.playbookRows())
 	case vSessions:
-		if m.recent {
-			return len(m.recentRows())
-		}
 		return len(m.sessionRows())
 	case vEnvs:
 		return len(m.envRows())
@@ -738,16 +608,6 @@ func (m Model) sessionRows() []Session {
 	for _, s := range m.st.Sessions {
 		if matches(m.filter, s.Playbook, s.Cwd, s.SessionID, deref(s.Model)) {
 			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func (m Model) recentRows() []Recent {
-	var out []Recent
-	for _, r := range m.recents {
-		if matches(m.filter, r.Playbook, r.SessionID, deref(r.Title), deref(r.Model)) {
-			out = append(out, r)
 		}
 	}
 	return out

@@ -8,16 +8,16 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// The read statements. Their --json form is a contract (docs/cli-grammar.md,
-// "Output"): fields may be added, and a field never changes meaning within
-// a major version. The human form may change; nothing should grep it.
+// The read statements. Their --json form is for programs (SPEC.md,
+// "Output"); the release notes name every change to it. The human form may
+// change; nothing should grep it.
 // No value of a credential-looking key is ever printed, in either form.
 
 // varJSON is one variable, with exactly one of value, ref, redacted or
@@ -44,16 +44,26 @@ type sourceJSON struct {
 }
 
 type playbookJSON struct {
-	Name     string      `json:"name"`
-	Version  *string     `json:"version"`
-	Path     string      `json:"path"`
+	Name        string  `json:"name"`
+	Version     *string `json:"version"`
+	Description *string `json:"description"`
+	Homepage    *string `json:"homepage"`
+	Author      *string `json:"author"`
+	Path        string  `json:"path"`
+	// LastUsed is when the playbook's config directory last changed
+	// (RFC3339, UTC).
+	LastUsed *string     `json:"last_used"`
 	Source   *sourceJSON `json:"source"`
-	Linked   *string     `json:"linked"`
-	Launcher *string     `json:"launcher"`
-	Envs     []string    `json:"envs"`
-	Vars     []varJSON   `json:"vars"`
-	Sandbox  bool        `json:"sandbox"`
-	// IsolatedLogin is isolate_auth: no login shared with ~/.claude (a
+	// Migrate is the declared migrate step ([update] migrate) that
+	// cpb update runs after the new files are in place.
+	Migrate  *string   `json:"migrate"`
+	Linked   *string   `json:"linked"`
+	Launcher *string   `json:"launcher"`
+	Envs     []string  `json:"envs"`
+	Vars     []varJSON `json:"vars"`
+	// Sandbox is the [sandbox] table, key for key.
+	Sandbox sandboxJSON `json:"sandbox"`
+	// IsolatedLogin is isolated_login: no login shared with ~/.claude (a
 	// sandboxed playbook is always isolated).
 	IsolatedLogin bool `json:"isolated_login"`
 
@@ -69,26 +79,71 @@ type playbookJSON struct {
 	// StatuslineHistory is what SET STATUSLINE PREVIOUS can go back to,
 	// newest first (v3.25.0).
 	StatuslineHistory []slHistoryJSON `json:"statusline_history"`
-	// Panels are the SPC/1 panels of the config directory and its enabled
-	// plugins (v3.25.0).
-	Panels      []panelJSON `json:"panels"`
-	Model       *string     `json:"model"`
-	ModelPicker *pickerJSON `json:"model_picker"`
-	// PilotProfile is whether the playbook's CLAUDE.md imports
-	// ~/.pilot-profile/ (v3.25.0): "imported", "not_imported" (no import
-	// line, or no CLAUDE.md) or "unknown" (CLAUDE.md cannot be read). Last,
-	// so every earlier field keeps its place.
-	PilotProfile string `json:"pilot_profile"`
+	Model             *string         `json:"model"`
+	ModelPicker       *pickerJSON     `json:"model_picker"`
 	// Play is the [play] record of a playbook `cpb play --keep` built, null
-	// for every other (v3.28.0). Last, as above.
+	// for every other. Last.
 	Play *playRecordJSON `json:"play"`
 }
 
+// sandboxJSON is a playbook's [sandbox] table: always, then each setting,
+// null or empty when unset.
+type sandboxJSON struct {
+	Always        bool     `json:"always"`
+	Backend       *string  `json:"backend"`
+	Host          *string  `json:"host"`
+	Workdir       *string  `json:"workdir"`
+	Mounts        []string `json:"mounts"`
+	AllowNet      []string `json:"allow_net"`
+	Secrets       *string  `json:"secrets"`
+	ClaudeVersion *string  `json:"claude_version"`
+	ShareSkills   bool     `json:"share_skills"`
+}
+
+// settings is every set key but always, as <key>=<value>, in the [sandbox]
+// table's order: what SET SANDBOX writes.
+func (v sandboxJSON) settings() []string {
+	var out []string
+	add := func(k string, s *string) {
+		if s != nil {
+			out = append(out, k+"="+*s)
+		}
+	}
+	list := func(k string, l []string) {
+		if len(l) > 0 {
+			out = append(out, k+"="+strings.Join(l, ","))
+		}
+	}
+	add("backend", v.Backend)
+	add("host", v.Host)
+	add("workdir", v.Workdir)
+	list("mounts", v.Mounts)
+	list("allow_net", v.AllowNet)
+	add("secrets", v.Secrets)
+	add("claude_version", v.ClaudeVersion)
+	if v.ShareSkills {
+		out = append(out, "share_skills=true")
+	}
+	return out
+}
+
+func describeSandbox(s *manifest.Sandbox) sandboxJSON {
+	v := sandboxJSON{Mounts: []string{}, AllowNet: []string{}}
+	if s == nil {
+		return v
+	}
+	v.Always, v.ShareSkills = s.Always, s.ShareSkills
+	v.Backend, v.Host, v.Workdir = optStr(s.Backend), optStr(s.Host), optStr(s.Workdir)
+	v.Secrets, v.ClaudeVersion = optStr(s.Secrets), optStr(s.ClaudeVersion)
+	v.Mounts, v.AllowNet = nonNil(s.Mounts), nonNil(s.AllowNet)
+	return v
+}
+
 type playRecordJSON struct {
-	Ref    string `json:"ref"`
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-	Played string `json:"played"`
+	Ref      string `json:"ref"`
+	URL      string `json:"url"`
+	SHA256   string `json:"sha256"`
+	PlayedAt string `json:"played_at"`
 }
 
 type envJSON struct {
@@ -156,12 +211,27 @@ func printLaunchPlugins(plugins []string, agent *agentJSON) {
 	}
 }
 
+// effectiveLauncher is the command that runs pb, the one a pilot types: the
+// launcher its manifest records (LAUNCHER), else the launcher named after
+// the playbook when it is in place (CREATE PLAYBOOK writes it unless told
+// NO LAUNCHER; its only record is the link itself), "" for none. A recorded
+// launcher is reported as recorded, as SHOW CREATE writes it back.
+func effectiveLauncher(pb *playbook.Playbook) string {
+	if pb.Manifest != nil && pb.Manifest.Launcher != "" {
+		return pb.Manifest.Launcher
+	}
+	if hasNameLauncher(pb.Name) {
+		return pb.Name
+	}
+	return ""
+}
+
 func readStatement(st *grammar.Stmt) error {
 	if st.Verb == grammar.Show && st.ShowCreate {
 		return showCreate(st)
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 	switch {
 	case st.Verb == grammar.Explain:
 		return explainPlaybook(playbooksDir, dir, st)
@@ -199,7 +269,7 @@ func readStatement(st *grammar.Stmt) error {
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
 		return showEnvs(playbooksDir, dir, st)
 	case st.Object == grammar.Defaults:
-		names, err := envprofile.Defaults(dir)
+		names, err := envset.Defaults(dir)
 		if err != nil {
 			return fmt.Errorf("DEFAULTS cannot be read: %w", err)
 		}
@@ -218,12 +288,12 @@ func readStatement(st *grammar.Stmt) error {
 }
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
-	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{},
+	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{}, Sandbox: describeSandbox(nil),
 		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
-		Skills: describeSkills(pb.Manifest), PilotProfile: pilotProfileState(pb.Path)}
+		Skills: describeSkills(pb.Manifest)}
 	if pb.Manifest != nil && pb.Manifest.Play != nil {
 		p := pb.Manifest.Play
-		v.Play = &playRecordJSON{Ref: p.Ref, URL: p.URL, SHA256: p.SHA256, Played: p.Played}
+		v.Play = &playRecordJSON{Ref: p.Ref, URL: p.URL, SHA256: p.SHA256, PlayedAt: p.PlayedAt}
 	}
 	// What the playbook's settings.json declares; an unreadable file shows
 	// none rather than failing the whole SHOW.
@@ -236,7 +306,9 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.StatuslineRefresh = statuslineRefresh(sf.Root)
 	}
 	v.StatuslineHistory = describeSLHistory(pb.Path)
-	v.Panels = describePanels(pb.Path)
+	if !pb.LastUsed.IsZero() {
+		v.LastUsed = strPtr(rfc3339(pb.LastUsed))
+	}
 	root := pb.RootPath
 	if root == "" {
 		root = pb.Path
@@ -246,25 +318,24 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 			v.Linked = &target
 		}
 	}
+	v.Launcher = optStr(effectiveLauncher(pb))
 	m := pb.Manifest
 	if m == nil {
 		return v
 	}
-	if m.Version != "" {
-		v.Version = strPtr(m.Version)
-	}
-	if m.Alias != "" {
-		v.Launcher = strPtr(m.Alias)
-	}
+	v.Version, v.Description, v.Homepage, v.Author = optStr(m.Version), optStr(m.Description), optStr(m.Homepage), optStr(m.Author)
 	if m.Source != nil && m.Source.Repository != "" {
 		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
 	}
-	v.Sandbox = m.Sandbox != nil && m.Sandbox.Always
+	if m.Update != nil {
+		v.Migrate = optStr(m.Update.Migrate)
+	}
+	v.Sandbox = describeSandbox(m.Sandbox)
 	// A sandbox never shares the machine's login, whatever the manifest says.
-	v.IsolatedLogin = m.IsolateAuth || v.Sandbox
+	v.IsolatedLogin = m.IsolatedLogin || v.Sandbox.Always
 	if m.Env != nil {
-		v.Envs = nonNil(m.Env.Profiles)
-		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Unset)
+		v.Envs = nonNil(m.Env.Sets)
+		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
 	}
 	return v
 }
@@ -317,7 +388,7 @@ func humanVar(v varJSON, value string) string {
 	case v.Ref != nil:
 		return v.Key + " <from " + *v.Ref + ">"
 	case v.Redacted:
-		shown := displayEnvValue(v.Key, value, false)
+		shown := displayEnvValue(v.Key, value)
 		if strings.HasSuffix(shown, " chars)") || strings.HasSuffix(shown, " chars>") {
 			return v.Key + "=" + shown[:len(shown)-1] + ", plaintext" + shown[len(shown)-1:]
 		}
@@ -346,29 +417,43 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		}
 	}
 	sandbox := "no"
-	if v.Sandbox {
+	if v.Sandbox.Always {
 		sandbox = "yes"
+	}
+	if s := v.Sandbox.settings(); len(s) > 0 {
+		sandbox += " (" + strings.Join(s, ", ") + ")"
 	}
 	rows := [][2]string{
 		{"Name", v.Name},
 		{"Version", deref(v.Version, "(none)")},
+	}
+	// The manifest's own words, when it has them.
+	for _, r := range []struct {
+		label string
+		value *string
+	}{{"Description", v.Description}, {"Homepage", v.Homepage}, {"Author", v.Author}} {
+		if r.value != nil {
+			rows = append(rows, [2]string{r.label, *r.value})
+		}
+	}
+	rows = append(rows, [][2]string{
 		{"Path", v.Path},
 		{"Source", source},
+	}...)
+	if v.Migrate != nil {
+		rows = append(rows, [2]string{"Migrate", *v.Migrate + " (run by cpb update)"})
+	}
+	rows = append(rows, [][2]string{
 		{"Launcher", deref(v.Launcher, "(none)")},
 		{"Env sets", listOrNone(v.Envs)},
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
 		{"Sandbox", sandbox},
-	}
+	}...)
 	if v.IsolatedLogin {
 		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
 	}
-	rows = append(rows, [2]string{"Pilot profile", map[string]string{
-		pilotImported:    "imported (CLAUDE.md imports ~/.pilot-profile/)",
-		pilotNotImported: "not imported",
-		pilotUnknown:     "unknown (CLAUDE.md cannot be read)",
-	}[v.PilotProfile]})
 	if v.Play != nil {
-		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb play --update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.Played, v.Name)})
+		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.PlayedAt, v.Name)})
 	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.
@@ -448,19 +533,19 @@ func printPlaybooks(all []playbookJSON) {
 }
 
 func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
-	var profiles []*envprofile.Profile
+	var profiles []*envset.Set
 	if st.Object == grammar.Env {
-		p, err := envprofile.Read(dir, st.Name)
+		p, err := envset.Read(dir, st.Name)
 		if err != nil {
 			return err
 		}
 		if p == nil {
 			return fmt.Errorf("no env set %q", st.Name)
 		}
-		profiles = []*envprofile.Profile{p}
+		profiles = []*envset.Set{p}
 	} else {
 		var err error
-		if profiles, err = envprofile.List(dir); err != nil {
+		if profiles, err = envset.List(dir); err != nil {
 			return err
 		}
 	}
@@ -468,12 +553,12 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
-	defaults, derr := envprofile.Defaults(dir)
+	defaults, derr := envset.Defaults(dir)
 	all := make([]envJSON, 0, len(profiles))
 	for _, p := range profiles {
 		all = append(all, envJSON{
 			Name: p.Name, Description: p.Description,
-			Vars: layerVars(p.Set, p.Refs, p.Unset), UsedBy: nonNil(users[p.Name]),
+			Vars: layerVars(p.Set, p.Refs, p.Block), UsedBy: nonNil(users[p.Name]),
 			Default: isRegistryDefault(dir, defaults, p.Name),
 		})
 	}
@@ -511,7 +596,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 		if used == "" {
 			used = "-"
 		}
-		t.add(name, fmt.Sprint(len(profiles[i].Set)), fmt.Sprint(len(profiles[i].Unset)), used, v.Description)
+		t.add(name, fmt.Sprint(len(profiles[i].Set)), fmt.Sprint(len(profiles[i].Block)), used, v.Description)
 	}
 	t.render(os.Stdout)
 	return nil
@@ -529,7 +614,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if governing != nil {
 		block = governing.Env
 	}
-	origins, err := envprofile.Explain(dir, block)
+	origins, err := envset.Explain(dir, block)
 	if err != nil {
 		return fmt.Errorf("the launch of %q would be refused: %w", st.Name, err)
 	}
@@ -561,6 +646,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
 		fmt.Printf("\nSecret helper: %s\n", humanHelper(helper))
+		printLaunchSandbox(pb)
 		printLaunchPlugins(plugins, agent)
 		printMCPNames(mcpNames(pb))
 		printToolsAndModel(pb, vars)
@@ -570,14 +656,15 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	for _, v := range vars {
 		shown := strings.TrimPrefix(humanVar(v, values[v.Key]), v.Key)
 		shown = strings.TrimPrefix(strings.TrimPrefix(shown, "="), " ")
-		from := v.Layer.Kind
+		// The table names a layer as the statements do.
+		var from string
 		switch v.Layer.Kind {
-		case envprofile.LayerEnv:
-			from += " " + v.Layer.Name
-		case envprofile.LayerDefaults:
-			from += " (ENV " + v.Layer.Name + ")"
-		case envprofile.LayerPlaybook:
-			from += " " + pb.Name
+		case envset.LayerEnv:
+			from = "ENV " + v.Layer.Name
+		case envset.LayerDefaults:
+			from = "DEFAULTS (ENV " + v.Layer.Name + ")"
+		case envset.LayerPlaybook:
+			from = "PLAYBOOK " + pb.Name
 		}
 		t.add(v.Key, shown, from)
 	}
@@ -586,15 +673,29 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if refs > 0 && helper == nil {
 		fmt.Println("This launch uses secret references and no helper is configured: it would be refused.")
 	}
+	printLaunchSandbox(pb)
 	printLaunchPlugins(plugins, agent)
 	printMCPNames(mcpNames(pb))
 	printToolsAndModel(pb, vars)
 	return nil
 }
 
+// printLaunchSandbox says where a launch runs and what its login is, when
+// that is not the default (on this machine, the login shared with
+// ~/.claude).
+func printLaunchSandbox(pb *playbook.Playbook) {
+	v := describePlaybook(pb)
+	switch {
+	case v.Sandbox.Always:
+		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, UNSET ISOLATED LOGIN shares it again")
+	case v.IsolatedLogin:
+		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (UNSET ISOLATED LOGIN shares it again)")
+	}
+}
+
 // helperInEffect is the configured secret helper for --json, nil if none.
 func helperInEffect(dir string) (*helperJSON, error) {
-	h, err := envprofile.SecretHelper(dir)
+	h, err := envset.SecretHelper(dir)
 	if err != nil || h == nil {
 		return nil, err
 	}
@@ -753,22 +854,8 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	if v.Statusline != nil {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
 	}
-	if n := len(v.Panels); n > 0 {
-		ids := make([]string, n)
-		for i, p := range v.Panels {
-			ids[i] = p.Panel
-		}
-		line := fmt.Sprintf("Panels: %d (%s)", n, strings.Join(ids, ", "))
-		if v.Statusline == nil || !isHostCommand(*v.Statusline) {
-			line += "; the status line is not a host, so they do not render"
-		}
-		fmt.Println(line)
-	}
 	if n := len(v.StatuslineHistory); n > 0 {
 		fmt.Printf("Status line history: %d earlier (SET STATUSLINE PREVIOUS restores %s)\n", n, v.StatuslineHistory[0].Command)
-	}
-	if v.IsolatedLogin {
-		fmt.Println("Login: isolated: no link to ~/.claude's login and no machine token; /login once in it")
 	}
 }
 
@@ -789,4 +876,63 @@ func shortSHA(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// governingManifest returns the manifest a launch of pb consults, resolved
+// exactly as the launch resolves it: the nearest valid manifest walking up
+// from the config directory (manifest.NearestPath, the lookup behind
+// PrepareLaunchEnv and auth status). Usually that is the playbook's own root
+// manifest, and the returned directory is "". It is the directory of the
+// governing manifest when that is some other file: a legacy `subdir` layout
+// whose subdirectory carries a manifest of its own, or a manifest-free
+// playbook under an ancestor directory that has one.
+func governingManifest(pb *playbook.Playbook) (*manifest.Manifest, string) {
+	m, dir, _ := manifest.NearestPath(pb.Path)
+	if m == nil || dir == pb.RootPath {
+		return m, ""
+	}
+	return m, dir
+}
+
+// profileUsers maps each env set to the sorted playbooks that use it.
+func profileUsers(playbooksDir string) (map[string][]string, error) {
+	pbs, err := playbook.Discover(playbooksDir)
+	if err != nil {
+		return nil, err
+	}
+	users := map[string][]string{}
+	for _, pb := range pbs {
+		// A launch reads the governing manifest, which in a subdir layout
+		// can be a nested one; the root manifest is what ALTER PLAYBOOK edits. Both
+		// count, so a set either one names is never deleted from under it.
+		named := map[string]bool{}
+		governing, _ := governingManifest(pb)
+		for _, m := range []*manifest.Manifest{pb.Manifest, governing} {
+			if m == nil || m.Env == nil {
+				continue
+			}
+			for _, name := range m.Env.Sets {
+				if !named[name] {
+					named[name] = true
+					users[name] = append(users[name], pb.Name)
+				}
+			}
+		}
+	}
+	for name := range users {
+		sort.Strings(users[name])
+	}
+	return users, nil
+}
+
+// isRegistryDefault reports whether name is one of the registry defaults,
+// by spelling or by file identity (one file, two spellings, on a
+// case-insensitive filesystem). No defaults match nothing.
+func isRegistryDefault(dir string, defaults []string, name string) bool {
+	for _, d := range defaults {
+		if d == name || envset.SameProfile(dir, d, name) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,0 +1,15 @@
+# CI has no sbx: a launch, sandboxed by the playbook itself, refuses before it
+# touches anything, and names what to install.
+if cpb run box -p hi > "$HOME/sbx.out" 2>&1; then echo "launched without sbx"; exit 1; fi
+grep -q "'sbx' (Docker Sandboxes) not found" "$HOME/sbx.out"
+# The [sandbox] table is the playbook's, and SHOW CREATE writes it back.
+cpb SHOW CREATE PLAYBOOK box > "$HOME/box.cpb"
+grep -q "SET SANDBOX backend=sbx mounts=~/shared-libs:ro allow_net=api.github.com" "$HOME/box.cpb"
+cpb SHOW PLAYBOOK box --json > "$HOME/box.json"
+python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); s=v["sandbox"]; assert s["always"] is True and s["backend"] == "sbx" and s["allow_net"] == ["api.github.com"] and v["isolated_login"] is True, v' "$HOME/box.json"
+# UNSET SANDBOX turns always off and leaves the login isolated; UNSET SANDBOX
+# <key> forgets one setting.
+cpb ALTER PLAYBOOK box UNSET SANDBOX UNSET SANDBOX allow_net > /dev/null
+cpb SHOW PLAYBOOK box --json > "$HOME/box.json"
+python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); s=v["sandbox"]; assert s["always"] is False and s["backend"] == "sbx" and s["allow_net"] == [] and v["isolated_login"] is True, v' "$HOME/box.json"
+rm -f "$HOME/sbx.out" "$HOME/box.cpb" "$HOME/box.json"

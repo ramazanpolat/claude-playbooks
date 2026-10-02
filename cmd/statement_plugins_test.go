@@ -30,16 +30,16 @@ case "$*" in
     u="${4%%#*}"; ref=""
     case "$4" in *#*) ref="${4#*#}" ;; esac
     if [ -n "$ref" ]; then
-      printf '[{"name":"%s","source":"git","url":"%s","ref":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$u" "$ref" > "$st/mkts"
+      printf '[{"name":"%s","source":"git","url":"%s","ref":"%s"}]' "${FAKE_MKT_NAME:-toolkit}" "$u" "$ref" > "$st/mkts"
     else
-      printf '[{"name":"%s","source":"git","url":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$u" > "$st/mkts"
+      printf '[{"name":"%s","source":"git","url":"%s"}]' "${FAKE_MKT_NAME:-toolkit}" "$u" > "$st/mkts"
     fi ;;
   "plugin marketplace add "*)
     # owner/repo#ref: repo and ref apart, as Claude Code records them.
     repo="${4%%#*}"
     case "$4" in
-      *#*) printf '[{"name":"%s","source":"github","repo":"%s","ref":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$repo" "${4#*#}" > "$st/mkts" ;;
-      *) printf '[{"name":"%s","source":"github","repo":"%s"}]' "${FAKE_MKT_NAME:-kommander}" "$repo" > "$st/mkts" ;;
+      *#*) printf '[{"name":"%s","source":"github","repo":"%s","ref":"%s"}]' "${FAKE_MKT_NAME:-toolkit}" "$repo" "${4#*#}" > "$st/mkts" ;;
+      *) printf '[{"name":"%s","source":"github","repo":"%s"}]' "${FAKE_MKT_NAME:-toolkit}" "$repo" > "$st/mkts" ;;
     esac ;;
   "plugin marketplace remove "*) echo '[]' > "$st/mkts" ;;
   "plugin install needs@"*)
@@ -80,11 +80,11 @@ func TestPluginClausesRunClaudePlugin(t *testing.T) {
 	log := fakeClaude(t)
 	root := seedFlatPlaybook(t, "k")
 
-	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander SET AGENT kommander")
+	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit SET AGENT toolkit")
 	got := runs(t, log)
 	want := []string{
-		"|plugin marketplace add ramazanpolat/kommander-playbook --scope user",
-		"|plugin install kommander@kommander --scope user --json",
+		"|plugin marketplace add example/toolkit --scope user",
+		"|plugin install toolkit@toolkit --scope user --json",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("commands run:\n%s", strings.Join(got, "\n"))
@@ -96,41 +96,41 @@ func TestPluginClausesRunClaudePlugin(t *testing.T) {
 	}
 	var s map[string]any
 	data, _ := os.ReadFile(filepath.Join(root, "settings.json"))
-	if json.Unmarshal(data, &s) != nil || s["agent"] != "kommander" {
+	if json.Unmarshal(data, &s) != nil || s["agent"] != "toolkit" {
 		t.Fatalf("SET AGENT: settings.json is %s", data)
 	}
 
 	// Already true: nothing runs, and the statement is unchanged.
-	out := mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander SET AGENT kommander")
+	out := mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit SET AGENT toolkit")
 	if n := len(runs(t, log)); n != 2 || !strings.Contains(out, "unchanged") {
 		t.Fatalf("a repeat ran commands (%d) or changed: %s", n, out)
 	}
 
 	for stmtText, wantErr := range map[string]string{
-		"ALTER PLAYBOOK k ADD PLUGIN x@other":                                 "marketplace other is not declared",
-		"ALTER PLAYBOOK k DROP MARKETPLACE kommander":                         "plugins still use it: kommander@kommander",
-		"ALTER PLAYBOOK k ADD PLUGIN needs@kommander":                         "--accept-command abc123",
-		"ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:someone/else": "already declared from another source",
+		"ALTER PLAYBOOK k ADD PLUGIN x@other":                               "marketplace other is not declared",
+		"ALTER PLAYBOOK k DROP MARKETPLACE toolkit":                         "plugins still use it: toolkit@toolkit",
+		"ALTER PLAYBOOK k ADD PLUGIN needs@toolkit":                         "--accept-command abc123",
+		"ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:someone/else": "already declared from another source",
 	} {
 		if _, err := stmt(t, stmtText); err == nil || !strings.Contains(err.Error(), wantErr) {
 			t.Errorf("%s: %v, want %q", stmtText, err, wantErr)
 		}
 	}
-	if _, err := stmt(t, "ALTER PLAYBOOK k ADD PLUGIN needs@kommander"); err == nil || !strings.Contains(err.Error(), "never accepts for you") {
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD PLUGIN needs@toolkit"); err == nil || !strings.Contains(err.Error(), "never accepts for you") {
 		t.Errorf("a marketplace-declared command was not shown for the pilot: %v", err)
 	}
 
-	mustStmt(t, "ALTER PLAYBOOK k DROP PLUGIN kommander@kommander DROP MARKETPLACE kommander UNSET AGENT")
+	mustStmt(t, "ALTER PLAYBOOK k DROP PLUGIN toolkit@toolkit DROP MARKETPLACE toolkit UNSET AGENT")
 	got = runs(t, log)
 	tail := got[len(got)-2:]
-	if !strings.HasSuffix(tail[0], "|plugin uninstall kommander@kommander --scope user --keep-data --json") ||
-		!strings.HasSuffix(tail[1], "|plugin marketplace remove kommander --scope user") {
+	if !strings.HasSuffix(tail[0], "|plugin uninstall toolkit@toolkit --scope user --keep-data --json") ||
+		!strings.HasSuffix(tail[1], "|plugin marketplace remove toolkit --scope user") {
 		t.Fatalf("drops ran:\n%s", strings.Join(tail, "\n"))
 	}
 
 	// The source declares its own name; a different one is not kept.
 	t.Setenv("FAKE_MKT_NAME", "other")
-	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:a/b"); err == nil || !strings.Contains(err.Error(), "the source declares other, not kommander") {
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:a/b"); err == nil || !strings.Contains(err.Error(), "the source declares other, not toolkit") {
 		t.Fatalf("a mismatched name: %v", err)
 	}
 	if got := runs(t, log); !strings.HasSuffix(got[len(got)-1], "|plugin marketplace remove other --scope user") {
@@ -144,12 +144,12 @@ func TestPluginClausesDryRun(t *testing.T) {
 	aliasTestHome(t)
 	log := fakeClaude(t)
 	seedFlatPlaybook(t, "k")
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook' ADD PLUGIN kommander@kommander;\n")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM 'github:example/toolkit' ADD PLUGIN toolkit@toolkit;\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "would run: claude plugin marketplace add ramazanpolat/kommander-playbook --scope user; claude plugin install kommander@kommander --scope user --json") {
+	if !strings.Contains(out, "would run: claude plugin marketplace add example/toolkit --scope user; claude plugin install toolkit@toolkit --scope user --json") {
 		t.Fatalf("dry run output:\n%s", out)
 	}
 	if got := runs(t, log); len(got) != 0 {
@@ -163,8 +163,8 @@ func TestShowPluginsAndAgent(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	root := seedFlatPlaybook(t, "k")
-	settingsJSON := `{"permissions":{},"extraKnownMarketplaces":{"kommander":{"source":{"source":"github","repo":"ramazanpolat/kommander-playbook"}}},` +
-		`"enabledPlugins":{"kommander@kommander":true,"old@kommander":false},"agent":"kommander"}`
+	settingsJSON := `{"permissions":{},"extraKnownMarketplaces":{"toolkit":{"source":{"source":"github","repo":"example/toolkit"}}},` +
+		`"enabledPlugins":{"toolkit@toolkit":true,"old@toolkit":false},"agent":"toolkit"}`
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(settingsJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -179,19 +179,19 @@ func TestShowPluginsAndAgent(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &v); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if len(v.Marketplaces) != 1 || len(v.Plugins) != 2 || v.Plugins[1].Enabled || v.Agent == nil || *v.Agent != "kommander" {
+	if len(v.Marketplaces) != 1 || len(v.Plugins) != 2 || v.Plugins[1].Enabled || v.Agent == nil || *v.Agent != "toolkit" {
 		t.Fatalf("SHOW --json: %s", out)
 	}
 	out = mustStmt(t, "SHOW CREATE PLAYBOOK k")
 	for _, want := range []string{
-		"-- PLUGIN old@kommander is false in settings.json; not written",
-		"ALTER PLAYBOOK k\n  ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook'\n  ADD PLUGIN kommander@kommander\n  SET AGENT 'kommander';",
+		"-- PLUGIN old@toolkit is false in settings.json; not written",
+		"ALTER PLAYBOOK k\n  ADD MARKETPLACE toolkit FROM 'github:example/toolkit'\n  ADD PLUGIN toolkit@toolkit\n  SET AGENT 'toolkit';",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("SHOW CREATE missing %q:\n%s", want, out)
 		}
 	}
-	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Plugins: kommander@kommander") || !strings.Contains(out, "Agent: kommander (playbook settings)") {
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Plugins: toolkit@toolkit") || !strings.Contains(out, "Agent: toolkit (playbook settings)") {
 		t.Errorf("EXPLAIN:\n%s", out)
 	}
 }
@@ -200,11 +200,11 @@ func TestShowPluginsAndAgent(t *testing.T) {
 // statement, across a rename.
 func TestPluginDryRunCarriesState(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	log := fakeClaude(t)
-	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
-	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander")
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET AGENT 'x';\nALTER PLAYBOOK k UNSET AGENT;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN kommander@kommander;\n")
+	mustStmt(t, "CREATE PLAYBOOK k NO LAUNCHER")
+	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET AGENT 'x';\nALTER PLAYBOOK k UNSET AGENT;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN toolkit@toolkit;\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out)
@@ -212,7 +212,7 @@ func TestPluginDryRunCarriesState(t *testing.T) {
 	// UNSET AGENT after SET AGENT changes something, and the renamed
 	// playbook still has the plugin to uninstall.
 	for _, want := range []string{
-		"would run: claude plugin uninstall kommander@kommander --scope user --keep-data --json",
+		"would run: claude plugin uninstall toolkit@toolkit --scope user --keep-data --json",
 		"0 created, 4 changed, 0 unchanged, 0 dropped",
 	} {
 		if !strings.Contains(out, want) {
@@ -258,19 +258,19 @@ func TestMarketplaceGitRefSource(t *testing.T) {
 		out := captureStdout(t, func() { err = runStatement([]string{line}) })
 		return out, err
 	}
-	add := "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM 'https://example.com/kommander.git#v1.2.0'"
+	add := "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM 'https://example.com/toolkit.git#v1.2.0'"
 	if _, err := quoted(add); err != nil {
 		t.Fatal(err)
 	}
-	if got := runs(t, log); len(got) != 1 || !strings.HasSuffix(got[0], "|plugin marketplace add https://example.com/kommander.git#v1.2.0 --scope user") {
+	if got := runs(t, log); len(got) != 1 || !strings.HasSuffix(got[0], "|plugin marketplace add https://example.com/toolkit.git#v1.2.0 --scope user") {
 		t.Fatalf("add ran:\n%s", strings.Join(got, "\n"))
 	}
 	out, err := quoted(add)
 	if err != nil || !strings.Contains(out, "unchanged") || len(runs(t, log)) != 1 {
 		t.Fatalf("an unchanged #ref source: %v\n%s", err, out)
 	}
-	for _, other := range []string{"https://example.com/kommander.git#v1.3.0", "https://example.com/kommander.git", "https://example.com/other.git#v1.2.0"} {
-		if _, err := quoted("ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM '" + other + "'"); err == nil || !strings.Contains(err.Error(), "already declared from another source") {
+	for _, other := range []string{"https://example.com/toolkit.git#v1.3.0", "https://example.com/toolkit.git", "https://example.com/other.git#v1.2.0"} {
+		if _, err := quoted("ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM '" + other + "'"); err == nil || !strings.Contains(err.Error(), "already declared from another source") {
 			t.Errorf("%s: %v, want the refusal", other, err)
 		}
 	}
@@ -314,7 +314,7 @@ func TestPluginClausesNeedClaudeVersion(t *testing.T) {
 	t.Cleanup(func() { claudeVersion = old })
 
 	claudeVersion = func() string { return "2.1.245" }
-	_, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook ADD PLUGIN kommander@kommander")
+	_, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit")
 	if err == nil || !strings.Contains(err.Error(), "need Claude Code 2.1.268 or newer") || !strings.Contains(err.Error(), "this claude is 2.1.245") {
 		t.Fatalf("an old claude: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestPluginClausesNeedClaudeVersion(t *testing.T) {
 		t.Fatalf("commands ran before the refusal: %v", got)
 	}
 	// No install or uninstall in the plan: the version does not matter.
-	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM github:ramazanpolat/kommander-playbook"); err != nil {
+	if _, err := stmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit"); err != nil {
 		t.Fatalf("marketplace only: %v", err)
 	}
 	claudeVersion = func() string { return "2.1.99" } // numbers, not strings: 99 < 268
@@ -415,9 +415,13 @@ func TestMarketplaceGitRefLooksLikeCommit(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("dry run exit %d: %v", code, rep)
 	}
-	w, _ := stmts(rep)[0]["warning"].(map[string]any)
+	ws, _ := stmts(rep)[0]["warnings"].([]any)
+	if len(ws) != 1 {
+		t.Fatalf("dry run warnings: %v", stmts(rep)[0]["warnings"])
+	}
+	w, _ := ws[0].(map[string]any)
 	if w == nil || w["code"] != "marketplace_ref_not_cloneable" {
-		t.Fatalf("dry run warning: %v", stmts(rep)[0]["warning"])
+		t.Fatalf("dry run warning: %v", w)
 	}
 	msg, _ := w["message"].(string)
 	if !strings.Contains(msg, "MARKETPLACE gitmkt #0123abcd: Claude Code clones marketplaces by branch or tag; this ref looks like a commit and will not clone: use a tag at that commit") || strings.Contains(msg, "secret-path") {
@@ -432,8 +436,27 @@ func TestMarketplaceGitRefLooksLikeCommit(t *testing.T) {
 	// A tag, or no ref, is not warned about.
 	for _, src := range []string{url + "#v1.2.0", url} {
 		rep, _, _ := applyJSON(t, writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE gitmkt FROM '"+src+"';\n"), "--dry-run", "--json")
-		if w := stmts(rep)[0]["warning"]; w != nil {
-			t.Errorf("%s: warned %v", src, w)
+		if ws, _ := stmts(rep)[0]["warnings"].([]any); len(ws) != 0 {
+			t.Errorf("%s: warned %v", src, ws)
 		}
+	}
+	// Two in one statement are two warnings, each with its code, and the
+	// summary counts both.
+	rep, _, code = applyJSON(t, writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE gitmkt FROM '"+url+"#0123abcd' ADD MARKETPLACE other FROM '"+url+"#89abcdef';\n"), "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("two commit refs: exit %d: %v", code, rep)
+	}
+	ws, _ = stmts(rep)[0]["warnings"].([]any)
+	if len(ws) != 2 {
+		t.Fatalf("two commit refs: warnings %v", ws)
+	}
+	for i, name := range []string{"gitmkt #0123abcd", "other #89abcdef"} {
+		w, _ := ws[i].(map[string]any)
+		if msg, _ := w["message"].(string); w["code"] != "marketplace_ref_not_cloneable" || !strings.HasPrefix(msg, "MARKETPLACE "+name+":") {
+			t.Errorf("warning %d: %v", i, w)
+		}
+	}
+	if sum, _ := rep["summary"].(map[string]any); sum["warnings"] != float64(2) {
+		t.Errorf("summary: %v", rep["summary"])
 	}
 }

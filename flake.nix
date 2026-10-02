@@ -1,10 +1,10 @@
 {
-  description = "claude-playbook (cpb): install, isolate and launch Claude Code playbooks";
+  description = "cpb (Claude PlayBooks): install, isolate and launch Claude Code playbooks";
 
   # For devbox and Nix users:
   #
-  #   devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook"
-  #   nix run   "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook" -- --version
+  #   devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#cpb"
+  #   nix run   "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#cpb" -- --version
   #
   # git+https, not github: -- a github: ref is resolved through GitHub's API,
   # which rate-limits unauthenticated callers per IP (403 behind a shared IP,
@@ -25,8 +25,8 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        claude-playbook = pkgs.buildGoModule {
-          pname = "claude-playbook";
+        cpb = pkgs.buildGoModule {
+          pname = "cpb";
           inherit version;
           src = pkgs.lib.fileset.toSource {
             root = ./.;
@@ -45,19 +45,18 @@
           # The Go suite runs in CI on both OSes; inside the Nix sandbox it has
           # no HOME, no git and no network, which several tests need.
           doCheck = false;
-          # The module is claude-playbooks; the command is claude-playbook,
-          # with cpb beside it exactly as install.sh lays them out.
+          # The module is claude-playbooks; the command is cpb, as install.sh
+          # lays it out.
           postInstall = ''
-            mv $out/bin/claude-playbooks $out/bin/claude-playbook
-            ln -s claude-playbook $out/bin/cpb
+            mv $out/bin/claude-playbooks $out/bin/cpb
           '';
           meta = {
             description = "Install, isolate and launch Claude Code playbooks";
             homepage = "https://github.com/ramazanpolat/claude-playbooks";
-            mainProgram = "claude-playbook";
+            mainProgram = "cpb";
           };
         };
-        default = claude-playbook;
+        default = cpb;
       });
     };
 }

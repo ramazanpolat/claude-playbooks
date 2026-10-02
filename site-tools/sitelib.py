@@ -1,5 +1,6 @@
 """Shared by the site's checks: a throwaway HOME with a cpb, the `claude` and
-secret-helper stand-ins from examples/.ci, and an offline stand-in for the
+secret-helper stand-ins (`claude` from examples/.ci, the helper from this
+directory), and an offline stand-in for the
 GitHub sources recipes use (skills from `github:owner/repo`, marketplaces).
 
 A recipe's `github:` skills are served from a local git mirror through git's
@@ -18,6 +19,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 CI = REPO / "examples" / ".ci"
+HELPER = HERE / "stand-in-secret-helper"
 
 
 class Run:
@@ -27,8 +29,8 @@ class Run:
         self.homes = {str(self.home), str(self.home.resolve())}
         (self.home / "bin").mkdir()
         os.symlink(Path(cpb).resolve(), self.home / "bin" / "cpb")
-        for stand_in in ("claude", "with-secret"):
-            os.chmod(CI / stand_in, 0o755)
+        for stand_in in (CI / "claude", HELPER):
+            os.chmod(stand_in, 0o755)
         text = "\n".join(texts)
         for name in sorted(set(re.findall(r"FROM '~/skills/([^']+)'", text))):
             d = self.home / "skills" / name
@@ -58,7 +60,7 @@ class Run:
             os.environ,
             HOME=str(self.home),
             PATH=f"{CI}:{self.home / 'bin'}:{os.environ['PATH']}",
-            CPB_SECRET_HELPER=str(CI / "with-secret"),
+            CPB_SECRET_HELPER=str(HELPER),
             FAKE_MARKETS=markets,
             **git_env,
         )

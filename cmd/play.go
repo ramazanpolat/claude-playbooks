@@ -14,27 +14,27 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
 )
 
-// cpb play <ref> (v3.28.0): try someone else's playbook. This slice fetches
+// cpb play <ref> (v4.0.0): try someone else's playbook. This slice fetches
 // and checks the recipe (--check) and plans it against a throwaway store
 // (--dry-run, --json); running it arrives with the next slice. Design:
 // task claude-playbooks-cli, design-cpb-play-2026-10-01-21_58.md.
 var playCmd = &cobra.Command{
-	Use:   "play <ref> | play --update <name>",
+	Use:   "play <ref>",
 	Short: "Try someone else's playbook: preview it, confirm, run it in a throwaway playbook",
 	Long: `play fetches a recipe once, checks it, and shows exactly what it would do.
 
 <ref> is a template name (reviewer), an https URL, github:<owner>/<repo>/<path>.cpb@<ref>,
 or a local file (./x.cpb). A played recipe changes nothing on your machine but
-the playbook play makes: no env sets, no DEFAULTS, no plaintext secrets, and
-never your pilot profile.
+the playbook play makes: no env sets, no DEFAULTS and no plaintext secrets, and
+its CLAUDE.md imports nothing.
 
-It runs in a sandbox where one is available (sbx, or OpenShell on Linux), and
+It runs in a sandbox (sbx) where one is available, and
 says so when none is; --no-sandbox runs it on this machine, as you. A recipe
 whose header asks for a sandbox (-- create-with: SANDBOX) is refused where none
 is available. A recipe that reads a secret reference cannot run sandboxed
@@ -44,20 +44,9 @@ available it is refused unless you pass --no-sandbox.
 --keep keeps it instead, as a playbook in your store (--as names it), with a
 launcher and a [play] record of where it came from; no session runs. Your
 DEFAULTS apply to it like to any playbook, and the preview names them.
-cpb play --update <name> fetches the recorded ref again: the same bytes
-change nothing; others show the diff and the full preview again.`,
+cpb update <name> fetches a kept playbook's recorded ref again: the same
+bytes change nothing; others show the diff and the full preview again.`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if playUpdate != "" {
-			switch {
-			case len(args) > 0:
-				return errors.New("--update <name> takes no <ref>: it fetches the one the playbook recorded")
-			case playKeep || playAs != "" || playCheck:
-				return errors.New("--update cannot be combined with --keep, --as or --check")
-			case cmd.Flags().Changed("sandbox") || playNoSandbox:
-				return errors.New("--update keeps the playbook's sandbox setting: ALTER it, or keep the recipe again")
-			}
-			return nil
-		}
 		if playAs != "" && !playKeep {
 			return errors.New("--as names a kept playbook: add --keep")
 		}
@@ -95,13 +84,12 @@ func init() {
 	playCmd.Flags().BoolVar(&playYes, "yes", false, "answer the yes, for scripts; never confirms an endpoint, a proxy, TLS or a secret")
 	playCmd.Flags().StringArrayVar(&playTrustEndpoint, "trust-endpoint", nil, "without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
 	playCmd.Flags().StringArrayVar(&playTrustSecret, "trust-secret", nil, "without a terminal: confirm a secret reference; repeatable")
-	playCmd.Flags().StringArrayVar(&playEnvSets, "env", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
-	playCmd.Flags().StringVar(&playSandboxFlag, "sandbox", "", "run sandboxed (the default where a backend is available); =sbx or =openshell picks one")
+	playCmd.Flags().StringArrayVar(&playEnvSets, "env-set", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
+	playCmd.Flags().StringVar(&playSandboxFlag, "sandbox", "", "run sandboxed (the default where sbx is available); =sbx names the backend")
 	playCmd.Flags().Lookup("sandbox").NoOptDefVal = "auto"
 	playCmd.Flags().BoolVar(&playNoSandbox, "no-sandbox", false, "run on this machine, as you; the preview says so")
 	playCmd.Flags().BoolVar(&playKeep, "keep", false, "keep it as a playbook in your store, with a [play] record, instead of running it")
 	playCmd.Flags().StringVar(&playAs, "as", "", "with --keep: the kept playbook's name (default: the recipe's)")
-	playCmd.Flags().StringVar(&playUpdate, "update", "", "fetch a kept playbook's recorded recipe again, and update it after the preview")
 	rootCmd.AddCommand(playCmd)
 }
 
@@ -123,9 +111,9 @@ type playJSON struct {
 	Risks    []play.Risk    `json:"risks"`
 	// Sandbox: where it would run (slice 3); null in --check.
 	Sandbox *playSandbox `json:"sandbox"`
-	// Keep: --keep's plan, against the user's own store (slice 4).
+	// Keep: --keep's plan, against the pilot's own store (slice 4).
 	Keep bool `json:"keep,omitempty"`
-	// Update: --update's, against the kept playbook (slice 4).
+	// Update: cpb update <name>'s, against the kept playbook (slice 4).
 	Update *playUpdateJSON `json:"update,omitempty"`
 }
 
@@ -150,6 +138,9 @@ func fetchRecipe(ref string) (*play.Source, *play.Recipe, error) {
 		rec, err = play.Fetch(context.Background(), play.NewClient(), src.URL, "cpb/"+Version+" (play)")
 	}
 	if err != nil {
+		if src.Kind == play.KindTemplate && errors.Is(err, play.ErrNotFound) {
+			return src, nil, templateMiss(src)
+		}
 		return src, nil, err
 	}
 	if playSHA256 != "" && !strings.EqualFold(playSHA256, rec.SHA256) {
@@ -166,7 +157,7 @@ func checkRecipe(rec *play.Recipe) *play.Result {
 	}
 	if res.Header.TooOld(Version) {
 		res.Refused = append(res.Refused, play.Refusal{Line: 0, What: "the header",
-			Reason: fmt.Sprintf("this recipe needs cpb %s or later; this is %s (cpb update)", res.Header.MinCPB, Version)})
+			Reason: fmt.Sprintf("this recipe needs cpb %s or later; this is %s (cpb self-update)", res.Header.MinCPB, Version)})
 	}
 	return res
 }
@@ -174,9 +165,6 @@ func checkRecipe(rec *play.Recipe) *play.Result {
 func runPlay(cmd *cobra.Command, args []string) error {
 	if playJSONF && !playDryRun && !playCheck {
 		return errors.New("--json needs --dry-run or --check")
-	}
-	if playUpdate != "" {
-		return playUpdateRun(playUpdate)
 	}
 	ref := args[0]
 	var claudeArgs []string
@@ -324,15 +312,15 @@ func playBlockedVars() []string {
 }
 
 // playSetup is the statement play writes before the recipe: the throwaway
-// playbook itself, never with the pilot profile, and, when the endpoint
-// moves, with a login of its own and the credentials blocked.
+// playbook itself and, when the endpoint moves, a login of its own with the
+// credentials blocked.
 func playSetup(name string, res *play.Result) string { return playSetupKeeping(name, res, nil) }
 
 // playSetupKeeping is playSetup with keep's keys left out of the credential
-// BLOCK: the ones an --env set the user attached provides.
+// BLOCK: the ones an --env-set set the pilot attached provides.
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO ALIAS NO PILOT PROFILE", name)
+	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO LAUNCHER", name)
 	if res.Endpoint != "" {
 		b.WriteString(" ISOLATED LOGIN")
 	}
@@ -352,7 +340,7 @@ func playSetupKeeping(name string, res *play.Result, keep map[string]bool) strin
 }
 
 // withThrowawayStore runs fn with a fresh, empty playbooks store, so the
-// user's DEFAULTS and env sets cannot layer into a played recipe. Only the
+// pilot's DEFAULTS and env sets cannot layer into a played recipe. Only the
 // secret helper setting is copied, so references can be checked.
 func withThrowawayStore(fn func(dir string) error) error {
 	userStore := config.ResolvePlaybooksDir()
@@ -365,11 +353,11 @@ func withThrowawayStore(fn func(dir string) error) error {
 		return err
 	}
 	store := filepath.Join(tmp, "store")
-	if err := os.MkdirAll(envprofile.Dir(store), 0o700); err != nil {
+	if err := os.MkdirAll(envset.Dir(store), 0o700); err != nil {
 		return err
 	}
-	if h, err := envprofile.SecretHelper(envprofile.Dir(userStore)); err == nil && h != nil {
-		if err := envprofile.SetSecretHelper(envprofile.Dir(store), h.Command); err != nil {
+	if h, err := envset.SecretHelper(envset.Dir(userStore)); err == nil && h != nil {
+		if err := envset.SetSecretHelper(envset.Dir(store), h.Command); err != nil {
 			return err
 		}
 	}
@@ -504,4 +492,18 @@ func playCheckDir(dir string) error {
 		return &commandExitError{code: 1}
 	}
 	return nil
+}
+
+// templateMiss is the error for a template name that is not there: the
+// index is fetched, only now, to suggest close names.
+func templateMiss(src *play.Source) error {
+	msg := fmt.Sprintf("no template named %s (%s)", src.Name, src.URL)
+	idx, err := play.Fetch(context.Background(), play.NewClient(), play.IndexURL(src.URL), "cpb/"+Version+" (play)")
+	if err != nil {
+		return errors.New(msg)
+	}
+	if s := play.Suggest(idx.Bytes, src.Name); len(s) > 0 {
+		return fmt.Errorf("%s: did you mean %s?", msg, strings.Join(s, ", "))
+	}
+	return fmt.Errorf("%s; the templates: %s", msg, strings.Join(strings.Fields(string(idx.Bytes)), ", "))
 }

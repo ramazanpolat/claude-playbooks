@@ -1,15 +1,13 @@
 -- Two env sets, attached in order: a later set wins over an earlier one,
 -- and the playbook's own variables win over both.
 CREATE OR REPLACE ENV router
-  DESCRIBE 'A model router on this machine'
-  SET ANTHROPIC_BASE_URL=http://localhost:20128/v1 ANTHROPIC_MODEL=glm-5.3;
+  DESCRIPTION 'A model router on this machine'
+  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3;
 
 CREATE OR REPLACE ENV thinking
   SET MAX_THINKING_TOKENS=8000;
 
--- Routed to a model router: its CLAUDE.md leaves out the ~/.pilot-profile/
--- imports, which would otherwise go to the router with every request.
-CREATE PLAYBOOK IF NOT EXISTS work NO ALIAS NO PILOT PROFILE;
+CREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;
 
 ALTER PLAYBOOK work
   USE ENV router thinking

@@ -1,5 +1,5 @@
 // Package launcher manages per-playbook launcher commands: symlinks to the
-// claude-playbook binary placed in a directory on PATH. When the binary is
+// cpb binary placed in a directory on PATH. When the binary is
 // invoked through such a link it sees the link's name in argv[0] and
 // dispatches to `run <name>` — the multicall pattern used by busybox and
 // git. The launcher itself carries no state: name resolution happens at
@@ -19,18 +19,17 @@ import (
 
 // ErrTaken is returned by Write when the target name exists in the launcher
 // directory but is not a symlink to this binary.
-var ErrTaken = errors.New("command name taken by a file this tool did not generate")
+var ErrTaken = errors.New("launcher name taken by a file this tool did not generate")
 
 // ReservedNames are argv[0] values that always mean the CLI itself and may
 // never name a launcher.
 var ReservedNames = map[string]bool{
-	"claude-playbook": true,
-	"cpb":             true,
+	"cpb": true,
 }
 
 // Entry describes one launcher symlink found in the launcher directory.
 type Entry struct {
-	CmdName string // link name = the command the user types
+	CmdName string // link name = the command the pilot types
 	Path    string // absolute path of the symlink
 	Target  string // what the link points to
 }
@@ -244,7 +243,7 @@ func IsReservedEntry(dir, cmdName string) bool {
 
 // isOurs reports whether path is a symlink resolving to this binary. A
 // dangling link is never ours: claiming it by its target's basename would
-// let cleanup delete a user's own `foo -> /old/tool/cpb`, and the binary is
+// let cleanup delete a pilot's own `foo -> /old/tool/cpb`, and the binary is
 // always alive while this code runs, so genuine launchers always resolve.
 func isOurs(path, binPath string) bool {
 	info, err := os.Lstat(path)
@@ -259,13 +258,13 @@ func isOurs(path, binPath string) bool {
 // callers can reject an impossible --alias before mutating anything.
 func ValidateName(cmdName string) error {
 	if !singleSegment(cmdName) || strings.ContainsAny(cmdName, " \t\n\r") {
-		return fmt.Errorf("invalid command name %q", cmdName)
+		return fmt.Errorf("invalid launcher name %q", cmdName)
 	}
 	// Reserved under any spelling: a case-insensitive filesystem would fold
 	// "CPB" onto the CLI's own cpb symlink.
 	for reserved := range ReservedNames {
 		if strings.EqualFold(cmdName, reserved) {
-			return fmt.Errorf("command name %q is reserved for the CLI itself", cmdName)
+			return fmt.Errorf("launcher name %q is reserved for the CLI itself", cmdName)
 		}
 	}
 	return nil

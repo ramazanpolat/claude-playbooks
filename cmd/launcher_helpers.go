@@ -18,20 +18,20 @@ import (
 // failure is a warning with manual instructions, never a command failure.
 func installLauncher(cmdName, playbookName, configDir string) {
 	manual := func() {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", shell.QuoteArg(playbookName))
+		fmt.Printf("\nRun with:\n  cpb run %s\n", shell.QuoteArg(playbookName))
 	}
 
 	if !launcherOpsAllowed() {
 		fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root (%s); none written for custom root %s.\n", defaultPlaybooksRoot(), config.ResolvePlaybooksDir())
-		fmt.Printf("\nRun with:\n  claude-playbook --playbooks-dir %s run %s\n", shell.QuoteArg(config.ResolvePlaybooksDir()), shell.QuoteArg(playbookName))
+		fmt.Printf("\nRun with:\n  cpb --playbooks-dir %s run %s\n", shell.QuoteArg(config.ResolvePlaybooksDir()), shell.QuoteArg(playbookName))
 		return
 	}
 
-	// The registry is the ownership authority: refuse a command name that
+	// The registry is the ownership authority: refuse a launcher name that
 	// already addresses another playbook, or the shared name would resolve
 	// to whichever playbook wins the registry scan.
 	if owner, oerr := commandNameOwner(cmdName, playbookName); oerr == nil && owner != nil {
-		fmt.Fprintf(os.Stderr, "Warning: command name %q already addresses playbook %q; no launcher written\n", cmdName, owner.Name)
+		fmt.Fprintf(os.Stderr, "Warning: launcher name %q already addresses playbook %q; no launcher written\n", cmdName, owner.Name)
 		manual()
 		return
 	}
@@ -45,7 +45,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Register a different command name with: claude-playbook alias %s <name> — rename the playbook (and its command) with: claude-playbook rename %s <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
+		fmt.Fprintf(os.Stderr, "Register a different launcher with: cpb ALTER PLAYBOOK %s LAUNCHER <name> — rename the playbook (and its launcher) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
 		manual()
 		return
 	}
@@ -55,7 +55,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 		return
 	}
 
-	fmt.Printf("Command:  %s  (launcher at %s)\n", cmdName, path)
+	fmt.Printf("Launcher: %s  (at %s)\n", cmdName, path)
 	warnIfShadowedOrUnreachable(cmdName, path, configDir)
 	fmt.Printf("\nRun it now:\n  %s\n", shell.QuoteArg(cmdName))
 }
@@ -79,11 +79,11 @@ func defaultPlaybooksRoot() string {
 	return filepath.Join(home, ".claude-playbooks")
 }
 
-// checkAliasFlagConflict guards every registering command's --alias and
-// --no-alias: set together, the requested command name would be ambiguous.
-func checkAliasFlagConflict(alias string, noAlias bool) error {
-	if noAlias && alias != "" {
-		return fmt.Errorf("--no-alias and --alias cannot be used together")
+// checkLauncherConflict guards every registering statement's LAUNCHER and
+// NO LAUNCHER: given together, the launcher it asks for would be ambiguous.
+func checkLauncherConflict(launcher string, noLauncher bool) error {
+	if noLauncher && launcher != "" {
+		return fmt.Errorf("NO LAUNCHER and LAUNCHER cannot be used together")
 	}
 	return nil
 }
@@ -106,7 +106,7 @@ func resolveLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string
 		name = fallbackName
 	}
 	if err := launcher.ValidateName(name); err != nil {
-		return "", fmt.Errorf("%w (pass --no-alias to %s without a launcher)", err, verb)
+		return "", fmt.Errorf("%w (add NO LAUNCHER to %s without a launcher)", err, verb)
 	}
 	return name, nil
 }
@@ -126,10 +126,10 @@ func writeAliasManifest(dir, name, alias string) error {
 		// only the name.
 		m = &manifest.Manifest{Name: name}
 	}
-	if m.Alias == alias {
+	if m.Launcher == alias {
 		return nil
 	}
-	m.Alias = alias
+	m.Launcher = alias
 	return manifest.Write(dir, m)
 }
 
@@ -168,7 +168,7 @@ func captureManifestRestore(dir string) (func(), error) {
 // distinguished from the documented one-shot assignment — mutating links
 // for either would corrupt the default registry's commands. How the default
 // root was expressed does not matter: an exported
-// CLAUDE_PLAYBOOKS_DIR=$HOME/.claude-playbooks resolves to the same
+// CPB_PLAYBOOKS_DIR=$HOME/.claude-playbooks resolves to the same
 // registry dispatch will see and is allowed.
 func launcherOpsAllowed() bool {
 	return samePath(config.ResolvePlaybooksDir(), defaultPlaybooksRoot())

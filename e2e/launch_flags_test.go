@@ -14,7 +14,7 @@ import (
 
 func seedProfile(t *testing.T, root, name, body string) {
 	t.Helper()
-	dir := filepath.Join(root, ".env-profiles")
+	dir := filepath.Join(root, ".env-sets")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func seedProfile(t *testing.T, root, name, body string) {
 func TestLaunchFlagsBeforeAndAfterName(t *testing.T) {
 	root := t.TempDir()
 	playbookWithEnv(t, root, "router", "[env.set]\nMODEL = \"manifest\"\nKEEP = \"manifest\"\n")
-	seedProfile(t, root, "work", "unset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nFROM_PROFILE = \"yes\"\n")
+	seedProfile(t, root, "work", "block = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nFROM_PROFILE = \"yes\"\n")
 	envFile := filepath.Join(t.TempDir(), "extra.env")
 	if err := os.WriteFile(envFile, []byte("FROM_FILE=yes\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -36,15 +36,15 @@ func TestLaunchFlagsBeforeAndAfterName(t *testing.T) {
 
 	got := childEnv(t, root, launch{
 		env: []string{tokenFile(t, "sk-ant-oat01-FROMFILE"), "NOISY=1"},
-		args: []string{"run", "--env-profile", "work", "--env", "MODEL=flag",
-			"router", "--unset", "NOISY", "--env-file", envFile},
+		args: []string{"run", "--env-set", "work", "--env", "MODEL=flag",
+			"router", "--block", "NOISY", "--env-file", envFile},
 	})
 	if got["MODEL"] != "flag" || got["KEEP"] != "manifest" || got["FROM_PROFILE"] != "yes" || got["FROM_FILE"] != "yes" {
 		t.Fatalf("layers not applied: MODEL=%q KEEP=%q FROM_PROFILE=%q FROM_FILE=%q",
 			got["MODEL"], got["KEEP"], got["FROM_PROFILE"], got["FROM_FILE"])
 	}
 	if v, present := got["NOISY"]; present {
-		t.Fatalf("--unset after the name not honoured: NOISY=%q", v)
+		t.Fatalf("--block after the name not honoured: NOISY=%q", v)
 	}
 	if v, present := got[tokenEnv]; present {
 		t.Fatalf("one-off profile's token unset not honoured: %q", v)
@@ -88,9 +88,9 @@ func TestMissingOneOffProfileRefusesLaunch(t *testing.T) {
 	playbook(t, root, "router", false)
 	out := launchFails(t, root, launch{
 		env:  []string{tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")},
-		args: []string{"run", "--env-profile", "ghost", "router"},
+		args: []string{"run", "--env-set", "ghost", "router"},
 	})
-	if !strings.Contains(out, `env profile "ghost" not found`) {
+	if !strings.Contains(out, `env set "ghost" not found`) {
 		t.Fatalf("refusal did not name the profile:\n%s", out)
 	}
 }
@@ -109,7 +109,7 @@ func TestLauncherPassesLaunchFlags(t *testing.T) {
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
 		tokenFileEnv + "=" + filepath.Join(work, "absent"),
 	}
-	create := exec.Command(binPath, "--launcher-dir", launcherDir, "create", "router")
+	create := exec.Command(binPath, "--launcher-dir", launcherDir, "CREATE", "PLAYBOOK", "router")
 	create.Env = baseEnv
 	if out, err := create.CombinedOutput(); err != nil {
 		t.Fatalf("create: %v\n%s", err, out)

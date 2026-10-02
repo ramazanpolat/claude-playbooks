@@ -1,9 +1,12 @@
 #!/bin/sh
 set -e
 
-REPO="${REPO:-ramazanpolat/claude-playbooks}"
-ASSET_PREFIX="${ASSET_PREFIX:-claude-playbook}"
-DEFAULT_INSTALL_DIR="${DEFAULT_INSTALL_DIR:-/usr/local/bin}"
+# Every knob is a CPB_INSTALL_* variable: CPB_INSTALL_VERSION (a tag),
+# CPB_INSTALL_DIR, CPB_INSTALL_DEFAULT_DIR, CPB_INSTALL_REPO,
+# CPB_INSTALL_ASSET_PREFIX, CPB_INSTALL_DOWNLOAD_BASE, CPB_INSTALL_URL.
+REPO="${CPB_INSTALL_REPO:-ramazanpolat/claude-playbooks}"
+ASSET_PREFIX="${CPB_INSTALL_ASSET_PREFIX:-cpb}"
+DEFAULT_INSTALL_DIR="${CPB_INSTALL_DEFAULT_DIR:-/usr/local/bin}"
 
 # Detect OS.
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -22,8 +25,8 @@ esac
 
 ASSET="${ASSET_PREFIX}-${OS}-${ARCH}"
 
-if [ -n "${VERSION:-}" ]; then
-  LATEST="$VERSION"
+if [ -n "${CPB_INSTALL_VERSION:-}" ]; then
+  LATEST="$CPB_INSTALL_VERSION"
 else
   # Fetch latest release tag.
   echo "Fetching latest release..."
@@ -36,22 +39,22 @@ if [ -z "$LATEST" ]; then
   exit 1
 fi
 
-DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL:-https://github.com/${REPO}/releases/download}"
-URL="${INSTALL_URL:-${DOWNLOAD_BASE_URL}/${LATEST}/${ASSET}}"
+DOWNLOAD_BASE_URL="${CPB_INSTALL_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/download}"
+URL="${CPB_INSTALL_URL:-${DOWNLOAD_BASE_URL}/${LATEST}/${ASSET}}"
 
-echo "Installing claude-playbook from ${ASSET} ${LATEST} (${OS}/${ARCH})..."
-TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/claude-playbook.XXXXXX")
+echo "Installing cpb from ${ASSET} ${LATEST} (${OS}/${ARCH})..."
+TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb.XXXXXX")
 trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
 
 curl -fsSL "$URL" -o "$TMP_FILE"
 
 # Verify against the release's SHA256SUMS. A genuine mismatch always
 # aborts; every unverifiable case (no sums published, malformed entry, no
-# sha256 tool, INSTALL_URL override) warns and continues — the sums travel
+# sha256 tool, CPB_INSTALL_URL override) warns and continues — the sums travel
 # over the same channel as the binary, so they guard against corruption
 # and truncation, not a compromised host.
-if [ -n "${INSTALL_URL:-}" ]; then
-  echo "Warning: INSTALL_URL override in use; skipping checksum verification"
+if [ -n "${CPB_INSTALL_URL:-}" ]; then
+  echo "Warning: CPB_INSTALL_URL override in use; skipping checksum verification"
 else
   SUMS=$(curl -fsSL "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" 2>/dev/null || true)
   if [ -n "$SUMS" ]; then
@@ -89,8 +92,9 @@ fi
 
 chmod +x "$TMP_FILE"
 
-# Install to INSTALL_DIR when set, otherwise /usr/local/bin if writable, otherwise ~/.local/bin.
-if [ -n "${INSTALL_DIR:-}" ]; then
+# Install to CPB_INSTALL_DIR when set, otherwise /usr/local/bin if writable, otherwise ~/.local/bin.
+INSTALL_DIR="${CPB_INSTALL_DIR:-}"
+if [ -n "$INSTALL_DIR" ]; then
   mkdir -p "$INSTALL_DIR"
 elif [ -w "$DEFAULT_INSTALL_DIR" ]; then
   INSTALL_DIR="$DEFAULT_INSTALL_DIR"
@@ -99,18 +103,13 @@ else
   mkdir -p "$INSTALL_DIR"
 fi
 
-mv "$TMP_FILE" "$INSTALL_DIR/claude-playbook"
+# Want another name? Use a shell alias or a hard link: a symlink under any
+# other name dispatches as a playbook launcher.
+mv "$TMP_FILE" "$INSTALL_DIR/cpb"
 TMP_FILE=""
 
-# cpb is the short name for the same binary. Want another name? Use a shell
-# alias or a hard link — a symlink under any other name would dispatch as a
-# playbook launcher.
-rm -f "$INSTALL_DIR/cpb"
-ln -s "claude-playbook" "$INSTALL_DIR/cpb"
-echo "Created symlink $INSTALL_DIR/cpb -> claude-playbook"
-
 echo ""
-echo "Installed to $INSTALL_DIR/claude-playbook"
+echo "Installed to $INSTALL_DIR/cpb"
 
 # Warn if install dir is not on PATH.
 case ":$PATH:" in
@@ -126,4 +125,4 @@ echo "  echo 'source <(cpb completion zsh)'  >> ~/.zshrc     # zsh"
 echo "  echo 'source <(cpb completion bash)' >> ~/.bashrc    # bash"
 
 echo ""
-echo "Done. Run: claude-playbook --help (or cpb --help)"
+echo "Done. Run: cpb --help"

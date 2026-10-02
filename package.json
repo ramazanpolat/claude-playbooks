@@ -1,7 +1,7 @@
 {
   "name": "cpb-cli",
-  "version": "3.27.0",
-  "description": "Bootstrap claude-playbook (cpb) via npx: first run installs the release binary to ~/.local/bin, later runs delegate to it. CPB_NPX_BOOTSTRAP=0 for ephemeral mode.",
+  "version": "4.0.0-rc1",
+  "description": "Bootstrap cpb (Claude PlayBooks) via npx: first run installs the release binary to ~/.local/bin, later runs delegate to it. CPB_NPX_BOOTSTRAP=0 for ephemeral mode.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ramazanpolat/claude-playbooks.git"
@@ -11,7 +11,6 @@
     "bin/npx-shim.sh"
   ],
   "bin": {
-    "claude-playbook": "bin/npx-shim.sh",
     "cpb": "bin/npx-shim.sh"
   },
   "os": [

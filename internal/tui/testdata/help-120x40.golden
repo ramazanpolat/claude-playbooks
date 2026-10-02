@@ -9,13 +9,13 @@
   c            SHOW CREATE of the selection (--skip-secrets)
   e            export it as <name>.cpb here (asks before replacing a file)
   y            copy the statement behind the selection
-  R            Sessions: recent sessions in this folder; enter resumes one
+  Sessions     live ones only; y copies the command that resumes one once
+               it ends. Past sessions: <launcher> --resume (or cpb run
+               <playbook> --resume) opens Claude Code's picker
 
   Secret values are never shown: references appear as references,
   plaintext credentials as (redacted). Every screen names the cpb
   statement it reads, so anything here can be scripted.
-
-
 
 
 

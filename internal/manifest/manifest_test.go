@@ -24,7 +24,7 @@ func TestReadRejectsEscapingSourcePaths(t *testing.T) {
 
 func TestReadAllowsDotDotPrefixInOrdinaryName(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("subdir = \"..config\"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("[source]\nsubdir = \"..config\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Read(dir); err != nil {
@@ -76,13 +76,33 @@ func TestPreserveRoundTrips(t *testing.T) {
 	}
 }
 
+func TestMigrateRoundTripsAndValidates(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(dir, &Manifest{Update: &Update{Migrate: "migrations/apply.sh"}}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Read(dir)
+	if err != nil || m == nil || m.Update == nil || m.Update.Migrate != "migrations/apply.sh" || len(m.Update.Preserve) != 0 {
+		t.Fatalf("m=%#v err=%v", m, err)
+	}
+	for _, bad := range []string{"../outside.sh", "/abs/apply.sh"} {
+		content := "version = \"0.1.0\"\n[update]\nmigrate = " + `"` + bad + `"` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, FileName), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Read(dir); err == nil {
+			t.Errorf("update.migrate %q was accepted", bad)
+		}
+	}
+}
+
 func TestEnvRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	in := &Manifest{
 		Name: "pb",
 		Env: &Env{
 			Set:   map[string]string{"ANTHROPIC_BASE_URL": "http://proxy:1/v1", "A_FLAG": "x=y"},
-			Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"},
+			Block: []string{"CLAUDE_CODE_OAUTH_TOKEN"},
 		},
 	}
 	if err := Write(dir, in); err != nil {
@@ -95,13 +115,13 @@ func TestEnvRoundTrips(t *testing.T) {
 	if out.Env.Set["ANTHROPIC_BASE_URL"] != "http://proxy:1/v1" || out.Env.Set["A_FLAG"] != "x=y" {
 		t.Fatalf("set did not round-trip: %#v", out.Env.Set)
 	}
-	if !out.Env.Unsets("CLAUDE_CODE_OAUTH_TOKEN") {
-		t.Fatalf("unset did not round-trip: %#v", out.Env.Unset)
+	if !out.Env.Blocks("CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Fatalf("unset did not round-trip: %#v", out.Env.Block)
 	}
 	// Serialization order is deterministic: [env] header, unset, then the
 	// [env.set] table with sorted keys.
 	data, _ := os.ReadFile(filepath.Join(dir, FileName))
-	want := "[env]\nunset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy:1/v1\"\nA_FLAG = \"x=y\"\n"
+	want := "[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy:1/v1\"\nA_FLAG = \"x=y\"\n"
 	if !strings.HasSuffix(string(data), want) {
 		t.Fatalf("serialized manifest:\n%s\nwant suffix:\n%s", data, want)
 	}
@@ -121,10 +141,10 @@ func TestEnvEmptyBlockIsNotWritten(t *testing.T) {
 func TestReadRejectsInvalidEnv(t *testing.T) {
 	cases := map[string]string{
 		"reserved set":   "[env.set]\nCLAUDE_CONFIG_DIR = \"/x\"\n",
-		"reserved unset": "[env]\nunset = [\"CLAUDE_CONFIG_DIR\"]\n",
-		"bad name":       "[env]\nunset = [\"NOT-A-NAME\"]\n",
+		"reserved unset": "[env]\nblock = [\"CLAUDE_CONFIG_DIR\"]\n",
+		"bad name":       "[env]\nblock = [\"NOT-A-NAME\"]\n",
 		"bad set name":   "[env.set]\n\"1BAD\" = \"v\"\n",
-		"set and unset":  "[env]\nunset = [\"FOO\"]\n[env.set]\nFOO = \"v\"\n",
+		"set and unset":  "[env]\nblock = [\"FOO\"]\n[env.set]\nFOO = \"v\"\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -145,7 +165,7 @@ func TestNearestWalksToInstallRoot(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nsubdir = \"playbook\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	m, err := Nearest(sub)
@@ -174,7 +194,7 @@ func TestWriteKeepsEnvValuesPrivate(t *testing.T) {
 		t.Fatalf("manifest with env values mode = %v, want 0600", info.Mode().Perm())
 	}
 	// Clearing the values never loosens a file the pilot may have made private.
-	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Unset: []string{"K"}}}); err != nil {
+	if err := Write(dir, &Manifest{Name: "pb", Env: &Env{Block: []string{"K"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(filepath.Join(dir, FileName)); info.Mode().Perm() != 0o600 {
@@ -190,14 +210,14 @@ func TestNearestWalksPastBrokenManifest(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nisolate_auth = true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(sub, FileName), []byte("= [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	m, err := Nearest(sub)
-	if m == nil || !m.IsolateAuth {
+	if m == nil || !m.IsolatedLogin {
 		t.Fatalf("Nearest stopped at the broken manifest: m=%#v", m)
 	}
 	if err == nil {
@@ -242,7 +262,7 @@ func TestWritePreservesPartialModes(t *testing.T) {
 	if err := os.WriteFile(at, []byte("name = \"pb\"\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, &Manifest{Name: "pb", Alias: "p"}); err != nil {
+	if err := Write(dir, &Manifest{Name: "pb", Launcher: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(at); info.Mode().Perm() != 0o640 {
@@ -279,7 +299,7 @@ func TestReadDoesNotEchoBrokenManifestContent(t *testing.T) {
 func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
 	dir := t.TempDir()
 	m := &Manifest{Name: "box", Sandbox: &Sandbox{
-		Always: true, Backend: "sbx", Host: "polat@cockpit0", ShareSkills: true, Secrets: "env", Workdir: "~/proj", Mounts: []string{"/data:ro", "~/shared"}, AllowNet: []string{"api.example.com", "10.0.0.0/8"}, ClaudeVersion: "2.1.263",
+		Always: true, Backend: "sbx", Host: "me@buildbox", ShareSkills: true, Secrets: "env", Workdir: "~/proj", Mounts: []string{"/data:ro", "~/shared"}, AllowNet: []string{"api.example.com", "10.0.0.0/8"}, ClaudeVersion: "2.1.263",
 	}}
 	if err := Write(dir, m); err != nil {
 		t.Fatal(err)
@@ -288,7 +308,7 @@ func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
 	if err != nil || got.Sandbox == nil {
 		t.Fatalf("read back: %#v %v", got, err)
 	}
-	if !got.Sandbox.Always || got.Sandbox.Backend != "sbx" || got.Sandbox.Host != "polat@cockpit0" || !got.Sandbox.ShareSkills || got.Sandbox.Secrets != "env" || got.Sandbox.Workdir != "~/proj" || strings.Join(got.Sandbox.Mounts, ",") != "/data:ro,~/shared" ||
+	if !got.Sandbox.Always || got.Sandbox.Backend != "sbx" || got.Sandbox.Host != "me@buildbox" || !got.Sandbox.ShareSkills || got.Sandbox.Secrets != "env" || got.Sandbox.Workdir != "~/proj" || strings.Join(got.Sandbox.Mounts, ",") != "/data:ro,~/shared" ||
 		strings.Join(got.Sandbox.AllowNet, ",") != "api.example.com,10.0.0.0/8" || got.Sandbox.ClaudeVersion != "2.1.263" {
 		t.Fatalf("round trip: %#v", got.Sandbox)
 	}
@@ -309,7 +329,7 @@ func TestSandboxSectionRoundTripsAndValidates(t *testing.T) {
 		"version latest":   {ClaudeVersion: "latest"},
 		"unknown backend":  {Backend: "tart"},
 		"secrets mode":     {Secrets: "vault"},
-		"host with space":  {Host: "polat@cockpit0 -oProxyCommand=x"},
+		"host with space":  {Host: "me@buildbox -oProxyCommand=x"},
 		"host as option":   {Host: "-oProxyCommand=x"},
 	} {
 		if err := Write(t.TempDir(), &Manifest{Name: "x", Sandbox: sb}); err == nil {
@@ -335,7 +355,7 @@ func TestMCPRecordRoundTrip(t *testing.T) {
 func TestPlayRecordRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	in := &Manifest{Name: "reviewer", Play: &Play{Ref: "github:acme/agents/reviewer.cpb@v1.2.0",
-		URL: "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb", SHA256: "3f1a", Played: "2026-10-02-10_00"}}
+		URL: "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb", SHA256: "3f1a", PlayedAt: "2026-10-02-10_00"}}
 	if err := Write(dir, in); err != nil {
 		t.Fatal(err)
 	}

@@ -13,12 +13,9 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
-// APPLY … --dry-run --json (docs/reference/cli-grammar.md, "APPLY --json"):
-// the plan as one JSON object, for a program to read. It follows the --json
-// rule: fields may be added, none changes meaning within a major version.
-// schema is bumped only on a meaning change, and so only with a major cpb
-// version. Verdicts, action types and warning codes are closed sets within
-// a major version.
+// APPLY … --dry-run --json (SPEC.md, "APPLY --dry-run --json"): the plan
+// as one JSON object, for a program to read, with schema 1. The release
+// notes name every change to this shape.
 const applySchema = 1
 
 type applyReport struct {
@@ -31,7 +28,7 @@ type applyReport struct {
 	Warnings   []applyWarning  `json:"warnings"`
 	Statements []applyStmtJSON `json:"statements"`
 	Summary    applySummary    `json:"summary"`
-	// Play: cpb play's block (v3.28.0), absent from APPLY's own report.
+	// Play: cpb play's block (v4.0.0), absent from APPLY's own report.
 	Play *playJSON `json:"play,omitempty"`
 }
 
@@ -59,35 +56,33 @@ type applyWarning struct {
 	shown   string
 }
 
-// The warning codes (a closed set within a major version).
+// The warning codes.
 const (
 	warnUsePlaybookOverridden = "use_playbook_overridden"
 	warnSourceDrift           = "source_drift"
-	// SET STATUSLINE left a host's (statusmux's) status line as it is.
-	warnStatuslineHeldByHost = "statusline_held_by_host"
-	// A playbook importing ~/.pilot-profile/ now has a non-Anthropic
-	// ANTHROPIC_BASE_URL (v3.23.0).
-	warnPilotProfileThirdParty = "pilot_profile_third_party_endpoint"
 	// An ADD MARKETPLACE git source whose #ref looks like a commit, which
 	// Claude Code cannot clone (v3.27.0).
 	warnMarketplaceRefNotCloneable = "marketplace_ref_not_cloneable"
+	// SET ISOLATED LOGIN recorded, but the link to the shared login could
+	// not be removed at once; the next launch removes it.
+	warnSharedLoginLinkKept = "shared_login_link_kept"
 )
 
 func (w applyWarning) String() string { return fmt.Sprintf("%s:%d: %s", w.shown, w.Line, w.Message) }
 
 type applyStmtJSON struct {
-	File      string        `json:"file"`
-	Line      int           `json:"line"`
-	Statement string        `json:"statement"`
-	Verb      string        `json:"verb"`
-	Object    string        `json:"object"`
-	Target    *targetJSON   `json:"target"`
-	Recipe    bool          `json:"recipe"`
-	Implicit  bool          `json:"implicit"`
-	Verdict   string        `json:"verdict"`
-	Reason    *string       `json:"reason"`
-	Warning   *applyWarning `json:"warning"`
-	Actions   []planAction  `json:"actions"`
+	File      string         `json:"file"`
+	Line      int            `json:"line"`
+	Statement string         `json:"statement"`
+	Verb      string         `json:"verb"`
+	Object    string         `json:"object"`
+	Target    *targetJSON    `json:"target"`
+	Recipe    bool           `json:"recipe"`
+	Implicit  bool           `json:"implicit"`
+	Verdict   string         `json:"verdict"`
+	Reason    *string        `json:"reason"`
+	Warnings  []applyWarning `json:"warnings"`
+	Actions   []planAction   `json:"actions"`
 }
 
 type applySummary struct {
@@ -309,9 +304,7 @@ func printApplyReport(rep *applyReport, code int) error {
 	rep.OK = code == 0
 	rep.Summary.Warnings = len(rep.Warnings)
 	for _, s := range rep.Statements {
-		if s.Warning != nil {
-			rep.Summary.Warnings++
-		}
+		rep.Summary.Warnings += len(s.Warnings)
 	}
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil { // cannot happen with these types; still one JSON object

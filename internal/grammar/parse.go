@@ -27,16 +27,13 @@ func init() {
 		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "DEFAULTS", "ALL",
 		"SET", "VAR", "FROM", "BLOCK", "UNSET", "DESCRIBE",
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
-		"RENAME", "TO", "ALIAS", "NO",
+		"RENAME", "TO", "LAUNCHER", "NO",
 		"BRANCH", "SUBDIR", "LINK", "SANDBOX",
 		"SECRET", "HELPER", "AS", "PLAINTEXT",
 		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
-		// PILOT and PROFILE are read only after NO (NO PILOT PROFILE), where
-		// no name can stand, so they stay free to name things: the grammar
-		// has no PILOT object.
 	} {
 		keywords[w] = true
 	}
@@ -46,10 +43,9 @@ func init() {
 func IsKeyword(word string) bool { return keywords[strings.ToUpper(word)] }
 
 // IsStatement reports whether a command line is a grammar statement rather
-// than a pre-grammar command (kept hidden, on its own code path, as a
-// fallback). Only "create" is both: "cpb create x" is the hidden command,
-// "cpb create playbook x" is the grammar, told apart by whether an object
-// keyword (or OR, of CREATE OR REPLACE) follows.
+// than one of the lowercase commands (run, start, update, ...): its first
+// word is a statement verb, in any case, or the whole statement is one
+// quoted argument.
 func IsStatement(args []string) bool {
 	if len(args) == 0 {
 		return false
@@ -60,16 +56,8 @@ func IsStatement(args []string) bool {
 		return true
 	}
 	switch strings.ToUpper(args[0]) {
-	case "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT", "DESCRIBE", "DESC", "RESUME": // INCLUDE and USE, to be refused with their reason
+	case "CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY", "INCLUDE", "USE", "SELECT", "DESCRIBE", "DESC": // INCLUDE and USE, to be refused with their reason
 		return true
-	case "CREATE":
-		if len(args) < 2 {
-			return false
-		}
-		switch strings.ToUpper(args[1]) {
-		case "PLAYBOOK", "ENV", "OR":
-			return true
-		}
 	}
 	return false
 }
@@ -180,10 +168,10 @@ func Expect(args []string) []string {
 // Clause starters per context. A list (of keys, env sets) runs until the
 // next unquoted starter, so these are also the words that end a list.
 var (
-	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIBE"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALIAS", "NO", "ALLOW", "DENY"}
+	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "ALIAS", "NO", "SANDBOX", "ISOLATED"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "ISOLATED"}
 )
 
 var (
@@ -346,7 +334,7 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	}
 	// The invalid name is never quoted back: whatever landed in a name slot
 	// may be a value, a reference or a pasted token.
-	if obj == Env && manifest.ValidateProfileName(t.Text) != nil {
+	if obj == Env && manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid env set name: use letters, digits, dots, dashes and underscores")
 	}
 	if obj == Playbook && isNew && !playbook.NewNamePattern.MatchString(t.Text) {
@@ -358,14 +346,14 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 func (p *parser) launcher() (string, *Error) {
 	if p.atEnd() {
 		p.note("<launcher>")
-		return "", p.fail("ALIAS needs <launcher>")
+		return "", p.fail("LAUNCHER needs <name>")
 	}
 	t := p.toks[p.i]
 	if IsKeyword(t.Text) {
 		return "", errAt(t.Pos, fmt.Sprintf("%q is a keyword and cannot name a launcher", t.Text))
 	}
 	if launcher.ValidateName(t.Text) != nil {
-		return "", errAt(t.Pos, "invalid launcher name: one word, with no path separator or whitespace (cpb and claude-playbook are reserved)")
+		return "", errAt(t.Pos, "invalid launcher name: one word, with no path separator or whitespace (cpb is reserved)")
 	}
 	p.i++
 	return t.Text, nil
@@ -418,13 +406,7 @@ func (p *parser) statement() (*Stmt, *Error) {
 	s := &Stmt{Pos: p.pos()}
 	var err *Error
 	verbs := []string{"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY"}
-	if !p.file {
-		verbs = append(verbs, "RESUME")
-	}
 	if p.file {
-		if p.at("RESUME") {
-			return nil, errAt(s.Pos, "RESUME appears only on the command line: it launches a session")
-		}
 		verbs = append(verbs, "INCLUDE", "USE")
 	} else if p.at("INCLUDE") {
 		return nil, errAt(s.Pos, "INCLUDE appears only in a playbook file; on the command line, APPLY <file> [<file> ...] runs several")
@@ -452,9 +434,6 @@ func (p *parser) statement() (*Stmt, *Error) {
 	case "APPLY":
 		s.Verb = Apply
 		err = p.apply(s)
-	case "RESUME":
-		s.Verb = Resume
-		err = p.resume(s)
 	case "INCLUDE":
 		s.Verb = Include
 		err = p.include(s)
@@ -585,7 +564,7 @@ func (p *parser) drop(s *Stmt) *Error {
 		return err
 	}
 	s.Name = name
-	// DROP PLAYBOOK confirms on a terminal, as `delete` does.
+	// DROP PLAYBOOK confirms on a terminal; --yes skips the question.
 	if s.Object == Playbook && p.kw("--yes") != "" {
 		s.Yes = true
 	}
@@ -650,7 +629,7 @@ func (p *parser) show(s *Stmt) *Error {
 	return nil
 }
 
-// forPlaybook reads an optional FOR PLAYBOOK <name> (SHOW SESSIONS, RESUME).
+// forPlaybook reads an optional FOR PLAYBOOK <name> (SHOW SESSIONS).
 func (p *parser) forPlaybook(s *Stmt) *Error {
 	if p.kw("FOR") == "" {
 		return nil
@@ -669,53 +648,13 @@ func (p *parser) forPlaybook(s *Stmt) *Error {
 	return nil
 }
 
-// sessionID is a Claude Code session id as RESUME SESSION takes it: one
-// safe word (a UUID, in practice), since it names a file under projects/.
+// sessionID is a Claude Code session id as cpb uses one: one safe word (a
+// UUID, in practice), since it names a file under projects/.
 var sessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 // ValidSessionID reports whether id is a session id cpb uses in a path or a
 // printed command; one read from Claude Code's files that is not is ignored.
 func ValidSessionID(id string) bool { return sessionID.MatchString(id) }
-
-// resume reads RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>] and
-// RESUME --list [FOR PLAYBOOK <name>] [--json], in any order.
-func (p *parser) resume(s *Stmt) *Error {
-	for !p.atEnd() {
-		switch p.kw("SESSION", "FOR", "--list", "--json") {
-		case "SESSION":
-			if s.Session != "" {
-				return errAt(p.toks[p.i-1].Pos, "SESSION appears twice")
-			}
-			t, err := p.take("SESSION", "'<id>'")
-			if err != nil {
-				return err
-			}
-			if !sessionID.MatchString(t.Text) {
-				return errAt(t.Pos, "SESSION takes a Claude Code session id (letters, digits, dashes)")
-			}
-			s.Session = t.Text
-		case "FOR":
-			p.i--
-			if err := p.forPlaybook(s); err != nil {
-				return err
-			}
-		case "--list":
-			s.List = true
-		case "--json":
-			s.JSON = true
-		default:
-			return p.unexpected()
-		}
-	}
-	p.kw("SESSION", "FOR", "--list", "--json")
-	switch {
-	case s.List && s.Session != "":
-		return errAt(s.Pos, "RESUME --list lists sessions; RESUME SESSION '<id>' resumes one: use one of them")
-	case s.JSON && !s.List:
-		return errAt(s.Pos, "RESUME has --json only with --list")
-	}
-	return nil
-}
 
 // jsonFlag reads the optional --json of SHOW and EXPLAIN: the stable,
 // scriptable form of their output.
@@ -833,11 +772,11 @@ func (p *parser) envClause() (*Clause, *Error) {
 		keys, err := p.keys("UNSET")
 		c.Keys = keys
 		return c, err
-	case "DESCRIBE":
-		c.Kind = Describe
+	case "DESCRIPTION":
+		c.Kind = Description
 		if p.atEnd() {
 			p.note("'<text>'")
-			return nil, p.fail("DESCRIBE needs '<text>'")
+			return nil, p.fail("DESCRIPTION needs '<text>'")
 		}
 		c.Arg = p.toks[p.i].Text
 		p.i++
@@ -855,9 +794,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	case "USE":
 		return c, p.envList(c, w)
 	case "ADD", "DROP":
-		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL", "PANEL") {
-		case "PANEL":
-			return c, p.panel(c, w)
+		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL") {
 		case "ENV":
 			if w == "ADD" {
 				return c, p.addEnvRest(c)
@@ -874,15 +811,22 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		case "MODEL":
 			return c, p.pickerModel(c, w)
 		}
-		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL, MODEL or PANEL")
+		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
 	case "SET":
-		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED") {
+		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
 		case "ISOLATED":
 			if p.kw("LOGIN") == "" {
 				return nil, p.fail("expected LOGIN after SET ISOLATED")
 			}
 			c.Kind = SetIsolatedLogin
 			return c, nil
+		case "SANDBOX":
+			if p.atEnd() || p.isStarter() {
+				c.Kind = SetSandbox
+				return c, nil
+			}
+			c.Kind = SetSandboxKeys
+			return c, p.sandboxSettings(c)
 		case "AGENT":
 			return c, p.agent(c)
 		case "STATUSLINE":
@@ -903,7 +847,15 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			if p.kw("REFRESH") != "" {
 				n, err := p.refreshSeconds()
 				c.Refresh = n
-				return c, err
+				if err != nil {
+					return c, err
+				}
+			}
+			if p.kw("IF") != "" {
+				if p.kw("UNSET") == "" {
+					return c, p.fail("expected UNSET after IF: SET STATUSLINE '<command>' IF UNSET")
+				}
+				c.IfUnset = true
 			}
 			return c, nil
 		case "MODEL":
@@ -920,7 +872,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Kind = SetModel
 			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL or ISOLATED LOGIN")
+			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
 		}
 		return c, p.set(c)
 	case "ALLOW", "DENY":
@@ -943,13 +895,29 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "ISOLATED") {
+		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
 		case "ISOLATED":
 			if p.kw("LOGIN") == "" {
 				return nil, p.fail("expected LOGIN after UNSET ISOLATED")
 			}
 			c.Kind = UnsetIsolatedLogin
 			return c, nil
+		case "SANDBOX":
+			if p.atEnd() || p.isStarter() {
+				c.Kind = UnsetSandbox
+				return c, nil
+			}
+			c.Kind = UnsetSandboxKeys
+			keys, err := p.list("UNSET SANDBOX", "<key>", func(t Token) *Error {
+				if !manifest.IsSandboxKey(t.Text) {
+					return errAt(t.Pos, t.Text+" is not a [sandbox] key ("+strings.Join(manifest.SandboxKeys, ", ")+")")
+				}
+				return nil
+			})
+			for _, k := range keys {
+				c.Settings = append(c.Settings, Var{Key: k})
+			}
+			return c, err
 		case "AGENT":
 			c.Kind = UnsetAgent
 			return c, nil
@@ -971,7 +939,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Names = rules
 			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL or ISOLATED LOGIN")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -985,19 +953,16 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		name, err := p.name(Playbook, true)
 		c.Arg = name
 		return c, err
-	case "ALIAS":
-		c.Kind = Alias
+	case "LAUNCHER":
+		c.Kind = Launcher
 		name, err := p.launcher()
 		c.Arg = name
 		return c, err
 	case "NO":
-		if p.at("PILOT") {
-			return nil, p.fail("NO PILOT PROFILE applies to CREATE PLAYBOOK only: after create, CLAUDE.md is yours to edit")
+		if p.kw("LAUNCHER") == "" {
+			return nil, p.fail("expected LAUNCHER after NO")
 		}
-		if p.kw("ALIAS") == "" {
-			return nil, p.fail("expected ALIAS after NO")
-		}
-		c.Kind = NoAlias
+		c.Kind = NoLauncher
 		return c, nil
 	}
 	return nil, nil
@@ -1095,24 +1060,17 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		t, err := p.take(w, ph)
 		c.Arg = t.Text
 		return c, err
-	case "ALIAS":
-		c.Kind = Alias
+	case "LAUNCHER":
+		c.Kind = Launcher
 		name, err := p.launcher()
 		c.Arg = name
 		return c, err
 	case "NO":
-		switch p.kw("ALIAS", "PILOT") {
-		case "ALIAS":
-			c.Kind = NoAlias
-			return c, nil
-		case "PILOT":
-			if p.kw("PROFILE") == "" {
-				return nil, p.fail("expected PROFILE after NO PILOT")
-			}
-			c.Kind = NoPilotProfile
-			return c, nil
+		if p.kw("LAUNCHER") == "" {
+			return nil, p.fail("expected LAUNCHER after NO")
 		}
-		return nil, p.fail("expected ALIAS or PILOT PROFILE after NO")
+		c.Kind = NoLauncher
+		return c, nil
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
@@ -1128,6 +1086,35 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 
 // set reads the body of SET [VAR]: a list of K=V, or one K FROM '<ref>'.
 // Nothing here echoes a value or a reference, nor a token that may be one.
+// sandboxSettings is SET SANDBOX's <key>=<value> ...: the [sandbox] table's
+// own keys. A flag (always, share_skills) takes true or false; mounts and
+// allow_net take a comma-separated list.
+func (p *parser) sandboxSettings(c *Clause) *Error {
+	keys := strings.Join(manifest.SandboxKeys, ", ")
+	for !p.atEnd() && !p.isStarter() {
+		t := p.toks[p.i]
+		k, v, ok := strings.Cut(t.Text, "=")
+		if !ok {
+			return errAt(t.Pos, "SET SANDBOX takes <key>=<value> ("+keys+")")
+		}
+		if !manifest.IsSandboxKey(k) {
+			return errAt(t.Pos, k+" is not a [sandbox] key ("+keys+")")
+		}
+		if v == "" {
+			return errAt(t.Pos, "sandbox."+k+" needs a value; UNSET SANDBOX "+k+" clears it")
+		}
+		if manifest.SandboxFlag(k) && v != "true" && v != "false" {
+			return errAt(t.Pos, "sandbox."+k+" takes true or false")
+		}
+		c.Settings = append(c.Settings, Var{Key: k, Value: v})
+		p.i++
+		p.quiet = true
+	}
+	p.note("<key>=<value>")
+	p.note(p.starters...)
+	return nil
+}
+
 func (p *parser) set(c *Clause) *Error {
 	if p.atEnd() || p.isStarter() {
 		p.note("<key>=<value>", "<key>")
@@ -1253,17 +1240,25 @@ func validate(s *Stmt) *Error {
 	keys := map[string]bool{}
 	envs := map[string]bool{}
 	once := map[Kind]bool{
-		Describe: true, UseEnv: true, RenameTo: true,
-		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true, NoPilotProfile: true,
+		Description: true, UseEnv: true, RenameTo: true,
+		Launcher: true, NoLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 		IsolatedLogin: true, SetIsolatedLogin: true, UnsetIsolatedLogin: true,
+		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPicker: true,
 		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true, SetStatuslinePrevious: true,
 	}
+	settings := map[string]bool{}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
+		}
+		for _, v := range c.Settings {
+			if settings[v.Key] {
+				return errAt(c.Pos, "sandbox."+v.Key+" appears twice; one statement changes a setting once")
+			}
+			settings[v.Key] = true
 		}
 		seen[c.Kind] = c.Pos
 		var ks []string
@@ -1292,20 +1287,14 @@ func validate(s *Stmt) *Error {
 		if c.Kind == AddEnv && c.Anchor == c.Names[0] {
 			return errAt(c.Pos, "ADD ENV "+c.Anchor+" cannot be placed relative to itself")
 		}
-		if c.Panel != nil {
-			id := "panel " + c.Panel.NS + "." + c.Panel.ID
-			if envs[id] {
-				return errAt(c.Pos, id+" appears twice")
-			}
-			envs[id] = true
-		}
 	}
-	pairs := [][2]Kind{{Alias, NoAlias}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
+	pairs := [][2]Kind{{Launcher, NoLauncher}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
 		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
 		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
 		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
 		{SetIsolatedLogin, UnsetIsolatedLogin},
+		{SetSandbox, UnsetSandbox}, {SetSandbox, UnsetIsolatedLogin},
 		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
 		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
 	for _, pr := range pairs {
@@ -1319,10 +1308,7 @@ func validate(s *Stmt) *Error {
 		_, from := seen[From]
 		_, link := seen[Link]
 		if pos, ok := seen[IsolatedLogin]; ok && link {
-			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolate_auth there")
-		}
-		if pos, ok := seen[NoPilotProfile]; ok && (from || link) {
-			return errAt(pos, "NO PILOT PROFILE shapes the CLAUDE.md a new playbook gets from cpb's template; with FROM or LINK the CLAUDE.md is the source's own: edit it there")
+			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolated_login there")
 		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {
@@ -1354,7 +1340,7 @@ func (p *parser) marketplace(c *Clause, verb string) *Error {
 		return p.fail(verb + " MARKETPLACE needs <marketplace>")
 	}
 	t := p.toks[p.i]
-	if manifest.ValidateProfileName(t.Text) != nil {
+	if manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid marketplace name: use letters, digits, dots, dashes and underscores")
 	}
 	p.i++
@@ -1421,7 +1407,7 @@ func ValidAgent(a string) bool { return agentPattern.MatchString(a) }
 // PluginID splits a plugin id, <plugin>@<marketplace>.
 func PluginID(id string) (plugin, marketplace string, ok bool) {
 	plugin, marketplace, ok = strings.Cut(id, "@")
-	if !ok || manifest.ValidateProfileName(plugin) != nil || manifest.ValidateProfileName(marketplace) != nil {
+	if !ok || manifest.ValidateSetName(plugin) != nil || manifest.ValidateSetName(marketplace) != nil {
 		return "", "", false
 	}
 	return plugin, marketplace, true
@@ -1518,7 +1504,7 @@ func CredentialHeader(name string) bool {
 }
 
 // mcpServer reads the rest of ADD MCP SERVER n <target> [<part> ...] or
-// DROP MCP SERVER n. A credential in ENV or HEADER takes a reference:
+// DROP MCP SERVER n. A credential in VAR or HEADER takes a reference:
 // AS PLAINTEXT is not accepted here, because the literal would be written
 // into Claude Code's config.
 func (p *parser) mcpServer(c *Clause, verb string) *Error {
@@ -1534,7 +1520,7 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		return p.fail(verb + " MCP SERVER needs <server>")
 	}
 	t := p.toks[p.i]
-	if manifest.ValidateProfileName(t.Text) != nil {
+	if manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid MCP server name: use letters, digits, dots, dashes and underscores")
 	}
 	p.i++
@@ -1586,10 +1572,10 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		}
 	}
 	for {
-		switch p.kw("ENV", "HEADER") {
-		case "ENV":
+		switch p.kw("VAR", "HEADER") {
+		case "VAR":
 			if m.URL != "" {
-				return errAt(p.toks[p.i-1].Pos, "ENV applies to a COMMAND server; a remote server (URL) takes HEADER")
+				return errAt(p.toks[p.i-1].Pos, "VAR applies to a COMMAND server; a remote server (URL) takes HEADER")
 			}
 			if err := p.mcpEnv(m); err != nil {
 				return err
@@ -1610,24 +1596,24 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 
 // mcpPartOrStarter reports whether the next word ends an ARGS list.
 func (p *parser) mcpPartOrStarter() bool {
-	return p.at("ENV") || p.at("HEADER") || p.isStarter()
+	return p.at("VAR") || p.at("HEADER") || p.isStarter()
 }
 
 func (p *parser) mcpEnv(m *MCP) *Error {
 	if p.atEnd() || p.mcpPartOrStarter() {
 		p.note("<key>=<value>", "<key>")
-		return p.fail("ENV needs <key>=<value> or <key> FROM '<ref>'")
+		return p.fail("VAR needs <key>=<value> or <key> FROM '<ref>'")
 	}
 	t := p.toks[p.i]
 	k, v, isKV := strings.Cut(t.Text, "=")
 	if !isKV {
 		if !keyPattern.MatchString(t.Text) {
-			return errAt(t.Pos, "ENV needs <key>=<value> or <key> FROM '<ref>'")
+			return errAt(t.Pos, "VAR needs <key>=<value> or <key> FROM '<ref>'")
 		}
 		p.i++
 		p.quiet = true
 		if p.kw("FROM") == "" {
-			return p.fail("expected FROM after the key: ENV <key>=<value>, or ENV <key> FROM '<ref>'")
+			return p.fail("expected FROM after the key: VAR <key>=<value>, or VAR <key> FROM '<ref>'")
 		}
 		r, err := p.take("FROM", "'<ref>'")
 		if err != nil {
@@ -1649,7 +1635,7 @@ func (p *parser) mcpEnv(m *MCP) *Error {
 			return errAt(t.Pos, "invalid variable name before '='")
 		}
 		if manifest.LooksLikeSecretKey(k) && !manifest.PlainSetting(v) {
-			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential: on an MCP server it takes a reference, ENV %s FROM '<ref>' (a literal would be written into Claude Code's config)", k, k))
+			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential: on an MCP server it takes a reference, VAR %s FROM '<ref>' (a literal would be written into Claude Code's config)", k, k))
 		}
 		m.Env = append(m.Env, Var{Key: k, Value: v})
 		p.i++
@@ -1817,7 +1803,7 @@ func (p *parser) skill(c *Clause, verb string) *Error {
 		return p.fail(verb + " SKILL needs <skill>")
 	}
 	t := p.toks[p.i]
-	if manifest.ValidateProfileName(t.Text) != nil {
+	if manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid skill name: use letters, digits, dots, dashes and underscores")
 	}
 	p.i++

@@ -17,7 +17,7 @@
   "use strict";
 
   /* ---------- the catalog: real, public things ---------- */
-  var MIN_CPB = "3.24.0";           // the oldest cpb whose grammar these recipes use
+  var MIN_CPB = "4.0.0";            // the oldest cpb whose grammar these recipes use
   var MARKET = { name: "claude-code-plugins", from: "github:anthropics/claude-code" };
   var SKILLS_SRC = "github:anthropics/skills";
 
@@ -80,7 +80,7 @@
   /* ---------- the curated templates ---------- */
   function T(o) {
     var d = { model: { kind: "default", id: "" }, mcp: [], skills: [], plugins: [], allow: [], deny: [], vars: [],
-      sandbox: false, isolated: false, noProfile: false };
+      sandbox: false, isolated: false };
     Object.keys(o.defaults || {}).forEach(function (k) { d[k] = o.defaults[k]; });
     o.defaults = d;
     return o;
@@ -113,7 +113,7 @@
       description: "A playbook for a model backend behind your router (GLM here): its own login, the API key blocked, a /model list of its own.",
       defaults: { model: { kind: "router", baseUrl: "http://localhost:4000/v1", id: "glm-5.3", blockKey: true, tokenRef: "",
           picker: [{ id: "glm-5.3", label: "GLM 5.3" }, { id: "glm-5.3-flash", label: "GLM 5.3 Flash", behavesAs: "claude-sonnet-5" }], pickerMode: "ONLY" },
-        mcp: ["context7"], isolated: true, noProfile: true } }),
+        mcp: ["context7"], isolated: true } }),
     T({ id: "docs-writer", color: 0, name: "docs", glyph: "g-docs", title: "Documents and writing",
       tagline: "Word, PDF, sheets and slides.",
       description: "For documents and writing: Word, PDF, spreadsheets and slides, co-authoring, and Notion.",
@@ -144,8 +144,11 @@
   }
 
   /* ---------- validation: the rules cpb itself enforces ---------- */
-  var KEYWORDS = ("ADD ALIAS ALTER APPLY AS BEHAVES BLOCK BRANCH CREATE DEFAULTS DESCRIBE DROP ENV ENVS EXISTS EXPLAIN FROM IF INCLUDE " +
-    "ISOLATED LINK LOGIN NO NOT OR PLAYBOOK PLAYBOOKS REPLACE RENAME SANDBOX SELECT SET SHOW SUBDIR TO UNSET USE VAR").split(" ");
+  /* cpb's reserved words (internal/grammar/parse.go): none may name a playbook. site-tools/check-keywords.py keeps this list equal to cpb's. */
+  var KEYWORDS = ("ADD AFTER AGENT ALL ALLOW ALTER APPEND APPLY ARGS AS BEFORE BEHAVES BLOCK BRANCH COMMAND CREATE DEFAULTS DENY " +
+    "DESCRIBE DESCRIPTION DROP ENV ENVS EXISTS EXPLAIN FIRST FROM HEADER HELPER IF INCLUDE LABEL LAST LAUNCHER " +
+    "LINK MARKETPLACE MCP MODEL NO NOT ONLY OR PICKER PLAINTEXT PLAYBOOK PLAYBOOKS PLUGIN REFRESH RENAME REPLACE " +
+    "SANDBOX SECRET SERVER SET SHOW SKILL SSE STATUSLINE SUBDIR TO TOOL TRANSPORT UNSET URL USE VAR").split(" ");
   var NAME = /^[a-z][a-z0-9_-]{0,39}$/;
   var KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
   var VALUE = /^[A-Za-z0-9_.:\/@%+=,~-]{0,200}$/;
@@ -260,7 +263,6 @@
     var f = [];
     if (sel.sandbox) f.push("SANDBOX");
     if (sel.mode === "file" && sel.isolated && !sel.sandbox) f.push("ISOLATED LOGIN");
-    if (sel.noProfile) f.push("NO PILOT PROFILE");
     return f;
   }
   function needs(sel) {
@@ -303,15 +305,10 @@
     if (sel.mode === "file") {
       cmds.push("cpb APPLY " + file + " --dry-run", "cpb APPLY " + file, name);
     } else {
-      var cw = []; if (sel.sandbox) cw.push("SANDBOX"); if (sel.noProfile) cw.push("NO PILOT PROFILE");
-      if (cw.length) cmds.push("cpb CREATE PLAYBOOK " + name + " " + cw.join(" "));
+      if (sel.sandbox) cmds.push("cpb CREATE PLAYBOOK " + name + " SANDBOX");
       cmds.push("cpb APPLY " + file + " TO " + name + " --dry-run", "cpb APPLY " + file + " TO " + name, name);
     }
-    var warns = [];
-    if (sel.model && sel.model.kind === "router" && !sel.noProfile) {
-      warns.push("This playbook is routed away from Anthropic and still imports ~/.pilot-profile/. cpb will warn once; turn on NO PILOT PROFILE to keep that profile out of its CLAUDE.md.");
-    }
-    return { ok: true, text: text, file: file, create: flags, commands: cmds, needs: needs(sel), warnings: warns, lines: body.length };
+    return { ok: true, text: text, file: file, create: flags, commands: cmds, needs: needs(sel), lines: body.length };
   }
 
   function canonical(id) {
@@ -336,7 +333,7 @@
     var r = rng(seed), s = defaultSelection(id);
     s.mode = r() < 0.5 ? "file" : "recipe";
     s.name = "n" + seed;
-    s.sandbox = r() < 0.4; s.isolated = r() < 0.4; s.noProfile = r() < 0.4;
+    s.sandbox = r() < 0.4; s.isolated = r() < 0.4;
     s.mcp = pick(r, MCP, 0.45).map(function (m) { return m.id; });
     s.skills = pick(r, SKILLS, 0.35).map(function (x) { return x.id; });
     s.plugins = pick(r, PLUGINS, 0.35).map(function (x) { return x.id; });
@@ -356,7 +353,7 @@
     var s = defaultSelection(id);
     s.mode = mode;
     s.name = "all" + mode;
-    s.sandbox = true; s.noProfile = true; s.isolated = true;
+    s.sandbox = true; s.isolated = true;
     s.mcp = MCP.map(function (m) { return m.id; });
     s.skills = SKILLS.map(function (x) { return x.id; });
     s.plugins = PLUGINS.map(function (x) { return x.id; });
@@ -370,7 +367,7 @@
   return {
     MIN_CPB: MIN_CPB, MARKET: MARKET, SKILLS_SRC: SKILLS_SRC, MODELS: MODELS, MCP: MCP, SKILLS: SKILLS, PLUGINS: PLUGINS, RULES: RULES, VARS: VARS,
     TEMPLATES: TEMPLATES, template: template, defaultSelection: defaultSelection, validate: validate, render: render,
-    canonical: canonical, randomSelection: randomSelection, everything: everything,
+    KEYWORDS: KEYWORDS, canonical: canonical, randomSelection: randomSelection, everything: everything,
     secretLike: secretLike, check: check, clone: clone
   };
 });

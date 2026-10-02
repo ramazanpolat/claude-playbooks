@@ -1,6 +1,6 @@
 //go:build !windows
 
-// Package e2e exercises claude-playbook as a real subprocess.
+// Package e2e exercises cpb as a real subprocess.
 //
 // The unit tests in internal/auth verify PrepareLaunchEnv's return value. That
 // is not the same claim as "the child claude process actually receives this
@@ -29,13 +29,13 @@ import (
 
 const (
 	tokenEnv       = "CLAUDE_CODE_OAUTH_TOKEN"
-	tokenFileEnv   = "CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE"
-	isolateEnv     = "CLAUDE_PLAYBOOKS_ISOLATE_AUTH"
+	tokenFileEnv   = "CPB_OAUTH_TOKEN_FILE"
+	isolateEnv     = "CPB_ISOLATED_LOGIN"
 	dumpEnv        = "CPB_TEST_ENVDUMP"
 	securityLogEnv = "CPB_TEST_SECURITY_LOG"
 )
 
-// binPath builds claude-playbook once per test binary run and returns its path.
+// binPath builds cpb once per test binary run and returns its path.
 var binPath string
 
 func TestMain(m *testing.M) {
@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	binPath = filepath.Join(dir, "claude-playbook")
+	binPath = filepath.Join(dir, "cpb")
 	// The module root is the parent of this package.
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	build.Dir = ".."
@@ -52,7 +52,7 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(dir)
 		// Without a binary every test below is vacuous, so fail loudly rather
 		// than skipping into a green run that proves nothing.
-		panic("building claude-playbook for e2e: " + err.Error() + "\n" + string(out))
+		panic("building cpb for e2e: " + err.Error() + "\n" + string(out))
 	}
 
 	code := m.Run()
@@ -93,7 +93,7 @@ func shimDir(t *testing.T) string {
 	return dir
 }
 
-// playbook creates a playbook directory, optionally with isolate_auth set.
+// playbook creates a playbook directory, optionally with isolated_login set.
 func playbook(t *testing.T, root, name string, isolated bool) string {
 	t.Helper()
 	dir := filepath.Join(root, name)
@@ -105,7 +105,7 @@ func playbook(t *testing.T, root, name string, isolated bool) string {
 	}
 	man := "name = \"" + name + "\"\n"
 	if isolated {
-		man += "isolate_auth = true\n"
+		man += "isolated_login = true\n"
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte(man), 0o644); err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func playbook(t *testing.T, root, name string, isolated bool) string {
 }
 
 type launch struct {
-	// extra environment for the claude-playbook process, "K=V" form.
+	// extra environment for the cpb process, "K=V" form.
 	env []string
 	// args after the global flags, e.g. {"run", "shared"}.
 	args []string
@@ -125,7 +125,7 @@ type launch struct {
 	seedHome func(t *testing.T, home string)
 }
 
-// childEnv runs claude-playbook and returns the environment its child received.
+// childEnv runs cpb and returns the environment its child received.
 func childEnv(t *testing.T, playbooksDir string, l launch) map[string]string {
 	t.Helper()
 	work := t.TempDir()
@@ -151,7 +151,7 @@ func childEnv(t *testing.T, playbooksDir string, l launch) map[string]string {
 	}, l.env...)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("claude-playbook %v: %v\n%s", args, err, out)
+		t.Fatalf("cpb %v: %v\n%s", args, err, out)
 	}
 
 	data, err := os.ReadFile(dump)
@@ -207,7 +207,7 @@ func TestNonIsolatedReceivesToken(t *testing.T) {
 	})
 }
 
-// The isolate_auth contract (SPEC-v4.md) exists so two accounts can run side by
+// The isolated_login contract (SPEC.md) exists so two accounts can run side by
 // side. A leaked global token silently defeats it: both playbooks authenticate
 // as the same account while appearing isolated.
 //
@@ -270,7 +270,7 @@ func TestStartHonorsIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg, ".playbook"),
-		[]byte("name = \"startcfg\"\nisolate_auth = true\n"), 0o644); err != nil {
+		[]byte("name = \"startcfg\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -351,7 +351,7 @@ func TestConfigDirBoundToPlaybook(t *testing.T) {
 	}
 }
 
-// The environment is only half the isolate_auth contract; the other half is that
+// The environment is only half the isolated_login contract; the other half is that
 // a shared credentials symlink is detached. Skipping SyncCredentials broke both
 // at once, so both are asserted.
 func TestIsolatedDetachesSharedCredentialsSymlink(t *testing.T) {

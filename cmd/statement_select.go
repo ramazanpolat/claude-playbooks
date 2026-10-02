@@ -15,12 +15,12 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// SELECT (docs/reference/cli-grammar.md, "SELECT"). cpb answers one form
+// SELECT (SPEC.md, "SELECT"). cpb answers one form
 // itself, SELECT <col>[, <col>…] FROM <table>, a strict subset of
 // ClickHouse SQL, so a query means the same on both paths. Anything else is
 // handed to ClickHouse's clickhouse-local, when it is installed: the
@@ -28,11 +28,13 @@ import (
 // (secrets redacted, references as references), and nothing else.
 
 // selectTable is one queryable table: its columns in order, the typed
-// structure clickhouse-local reads its rows with, and the rows: the objects
-// SHOW … --json prints, one per row.
+// structure clickhouse-local reads its rows with, what each column means
+// (DESCRIBE's comment; SPEC.md's DESCRIBE has the same lines), and the rows:
+// the objects SHOW … --json prints, one per row.
 type selectTable struct {
 	columns   []string
 	structure string
+	comments  map[string]string
 	rows      func() ([]any, error)
 }
 
@@ -44,10 +46,9 @@ const versionPattern = `^v?([0-9]+([.][0-9]+)*)`
 
 var versionRe = regexp.MustCompile(versionPattern)
 
-// playbooksLateColumns are the PLAYBOOKS columns added after v3.24.0, the
-// stable release: clickhouse-local's SELECT * lists them after the computed
-// version_tuple, where they were appended.
-var playbooksLateColumns = []string{"pilot_profile", "play"}
+// playbooksLateColumns are the PLAYBOOKS columns clickhouse-local's
+// SELECT * lists after the computed version_tuple, where they were appended.
+var playbooksLateColumns = []string{"play"}
 
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
@@ -55,27 +56,71 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
-		columns: []string{"name", "version", "version_tuple", "path", "source", "linked", "launcher", "envs", "vars", "sandbox", "isolated_login",
-			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "pilot_profile", "play"},
-		structure: "name String, version Nullable(String), path String, source JSON, linked Nullable(String), " +
-			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox Bool, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
-			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, pilot_profile String, play JSON",
+		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "isolated_login",
+			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "play"},
+		structure: "name String, version Nullable(String), description Nullable(String), homepage Nullable(String), author Nullable(String), " +
+			"path String, last_used Nullable(DateTime64(3, 'UTC')), source JSON, migrate Nullable(String), linked Nullable(String), " +
+			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
+			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, play JSON",
+		comments: map[string]string{
+			"name":               "The playbook's name.",
+			"version":            "The manifest's version; null when it has none.",
+			"version_tuple":      "The numbers of the version's leading numeric part ([3, 12, 3] for v3.12.3-rc1), to compare and sort versions; computed.",
+			"description":        "The manifest's description; null when it has none.",
+			"homepage":           "The manifest's homepage; null when it has none.",
+			"author":             "The manifest's author; null when it has none.",
+			"path":               "The playbook's directory under the playbooks root: its config directory.",
+			"last_used":          "When the playbook's config directory last changed (UTC).",
+			"source":             "Where the playbook was installed from: url, branch, subdir; null for a playbook without one.",
+			"migrate":            "The declared migrate step ([update] migrate) that cpb update runs; null without one.",
+			"linked":             "The target directory of a linked playbook; null otherwise.",
+			"launcher":           "The command that runs the playbook, the one you type; null when no launcher is in place, as under NO LAUNCHER.",
+			"envs":               "The env sets the playbook uses, in order.",
+			"vars":               "The playbook's own variables, each a value, a reference, a redacted credential or a block.",
+			"sandbox":            "The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills.",
+			"isolated_login":     "True when the playbook shares no login with the machine; true for a sandboxed playbook too.",
+			"marketplaces":       "The plugin marketplaces in the playbook's settings: name, source.",
+			"plugins":            "The plugins in the playbook's settings: id, enabled.",
+			"agent":              "The agent the playbook pins (SET AGENT); null when unset.",
+			"mcp_servers":        "The MCP servers: name, transport, command and args or url, env and headers as variables.",
+			"tools":              "The tool permission rules: allow, deny.",
+			"skills":             "The skills cpb recorded: name, source, branch, subdir, mode.",
+			"statusline":         "The status line command; null for none.",
+			"statusline_refresh": "How often the status line refreshes, in whole seconds; null when unset.",
+			"statusline_history": "The status lines SET STATUSLINE PREVIOUS can go back to, newest first: command, refresh, replaced_at.",
+			"model":              "The playbook's default model (SET MODEL); null when unset.",
+			"model_picker":       "The model picker: mode (only or append) and options; null when unset.",
+			"play":               "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
+		},
 		rows: playbookRows,
 	},
 	"ENVS": {
 		columns:   []string{"name", "description", "vars", "used_by", "default"},
 		structure: "name String, description String, vars Array(JSON), used_by Array(String), `default` Bool",
-		rows:      envRows,
+		comments: map[string]string{
+			"name":        "The env set's name.",
+			"description": "The env set's description.",
+			"vars":        "The env set's variables, each a value, a reference, a redacted credential or a block.",
+			"used_by":     "The playbooks that use the env set.",
+			"default":     "True when the env set is in DEFAULTS.",
+		},
+		rows: envRows,
 	},
 	"VARS": {
 		columns:   []string{"playbook", "key", "value", "ref", "redacted", "plaintext", "blocked", "layer", "effective"},
 		structure: "playbook String, key String, value Nullable(String), ref Nullable(String), redacted Bool, plaintext Bool, blocked Bool, layer JSON, effective Bool",
-		rows:      varRows,
-	},
-	"PANELS": {
-		columns:   []string{"playbook", "panel", "type", "source", "cpb", "row", "priority", "align"},
-		structure: "playbook String, panel String, type String, source String, cpb Bool, row Nullable(UInt32), priority Nullable(UInt32), align String",
-		rows:      panelRows,
+		comments: map[string]string{
+			"playbook":  "The playbook a launch gives the variable to.",
+			"key":       "The variable's name.",
+			"value":     "The literal value; null for a reference, a redacted credential or a block.",
+			"ref":       "The secret reference the value is read from at launch; null otherwise.",
+			"redacted":  "True when the value is withheld from output, as for a credential-looking literal.",
+			"plaintext": "True when a credential-looking value is stored as a literal rather than a reference.",
+			"blocked":   "True when the layer blocks the variable (BLOCK).",
+			"layer":     "Where the entry comes from: kind (defaults, env or playbook) and, for an env set, its name.",
+			"effective": "True for the entry a launch uses.",
+		},
+		rows: varRows,
 	},
 	"SESSIONS": {
 		columns: []string{"playbook", "pid", "session_id", "cwd", "kind", "status", "name", "claude_version",
@@ -83,12 +128,33 @@ var selectTables = map[string]selectTable{
 		structure: "playbook String, pid UInt32, session_id String, cwd String, kind String, status Nullable(String), name Nullable(String), " +
 			"claude_version Nullable(String), started_at DateTime64(3, 'UTC'), last_active Nullable(DateTime64(3, 'UTC')), model Nullable(String), " +
 			"launcher Nullable(String), config_dir String, resume String, tty Nullable(String)",
+		comments: map[string]string{
+			"playbook":       "The playbook's name; a plain directory's path.",
+			"pid":            "The Claude Code process's id.",
+			"session_id":     "The session's id.",
+			"cwd":            "The session's working directory.",
+			"kind":           "interactive or bg.",
+			"status":         "The session's status, as Claude Code records it; null when it records none.",
+			"name":           "The session's name, as Claude Code records it; null when it records none.",
+			"claude_version": "The Claude Code version the session runs; null when it records none.",
+			"started_at":     "When the session started (UTC).",
+			"last_active":    "When the transcript last changed (UTC); null before the first message.",
+			"model":          "The model of the transcript's last assistant message; null before one.",
+			"launcher":       "The playbook's launcher, as SHOW PLAYBOOK reports it; null for a plain directory.",
+			"config_dir":     "The config directory the session runs under.",
+			"resume":         "The command that resumes this session from any folder once it ends.",
+			"tty":            "The process's controlling terminal (pts/3, ttys012); null for none, as for a bg session.",
+		},
 		rows: sessionRows,
 	},
 	"DEFAULTS": {
 		columns:   []string{"envs", "secret_helper"},
 		structure: "envs Array(String), secret_helper JSON",
-		rows:      defaultsRows,
+		comments: map[string]string{
+			"envs":          "The env sets every launch applies first, in order.",
+			"secret_helper": "The command that resolves secret references, and where it is set (setting or CPB_SECRET_HELPER); null when none is configured.",
+		},
+		rows: defaultsRows,
 	},
 }
 
@@ -138,30 +204,10 @@ func playbookRows() ([]any, error) {
 	return rows, nil
 }
 
-// panelRowJSON is one PANELS row: a panel of one playbook (v3.25.0).
-type panelRowJSON struct {
-	Playbook string `json:"playbook"`
-	panelJSON
-}
-
-func panelRows() ([]any, error) {
-	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
-	if err != nil {
-		return nil, err
-	}
-	rows := []any{}
-	for _, pb := range pbs {
-		for _, p := range describePanels(pb.Path) {
-			rows = append(rows, panelRowJSON{Playbook: pb.Name, panelJSON: p})
-		}
-	}
-	return rows, nil
-}
-
 func envRows() ([]any, error) {
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
-	profiles, err := envprofile.List(dir)
+	dir := envset.Dir(playbooksDir)
+	profiles, err := envset.List(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -169,11 +215,11 @@ func envRows() ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defaults, _ := envprofile.Defaults(dir)
+	defaults, _ := envset.Defaults(dir)
 	rows := []any{}
 	for _, p := range profiles {
 		rows = append(rows, envJSON{Name: p.Name, Description: p.Description,
-			Vars: layerVars(p.Set, p.Refs, p.Unset), UsedBy: nonNil(users[p.Name]),
+			Vars: layerVars(p.Set, p.Refs, p.Block), UsedBy: nonNil(users[p.Name]),
 			Default: isRegistryDefault(dir, defaults, p.Name)})
 	}
 	return rows, nil
@@ -183,7 +229,7 @@ func envRows() ([]any, error) {
 // shows for every layer, with effective marking the entry a launch uses.
 func varRows() ([]any, error) {
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 	pbs, err := playbook.Discover(playbooksDir)
 	if err != nil {
 		return nil, err
@@ -196,7 +242,7 @@ func varRows() ([]any, error) {
 		if governing != nil {
 			env = governing.Env
 		}
-		origins, err := envprofile.ExplainAll(dir, env)
+		origins, err := envset.ExplainAll(dir, env)
 		if err != nil {
 			continue // EXPLAIN reports a broken layer; the table leaves it out
 		}
@@ -216,8 +262,8 @@ func varRows() ([]any, error) {
 }
 
 func defaultsRows() ([]any, error) {
-	dir := envprofile.Dir(config.ResolvePlaybooksDir())
-	names, err := envprofile.Defaults(dir)
+	dir := envset.Dir(config.ResolvePlaybooksDir())
+	names, err := envset.Defaults(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +414,7 @@ func planSelect(q string) (*selectPlan, error) {
 		table := strings.ToUpper(m[2])
 		t, ok := selectTables[table]
 		if !ok {
-			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS)", m[2])
+			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS)", m[2])
 		}
 		var cols []string
 		for _, c := range strings.Split(m[1], ",") {
@@ -393,7 +439,7 @@ func planSelect(q string) (*selectPlan, error) {
 		return nil, errors.New("one statement at a time: remove what follows the semicolon")
 	}
 	if len(froms) == 0 {
-		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS")
+		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS")
 	}
 	if len(froms) > 1 {
 		return nil, errors.New("a query reads one table; join them in ClickHouse yourself: cpb SHOW … --json | clickhouse local …")
@@ -432,14 +478,14 @@ var selectTTY = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 // per row on a terminal, so nothing wraps.
 const wideColumns = 6
 
-// rendered reports whether cpb renders the result itself: on a terminal,
-// when the query names no FORMAT of its own. A pipe gets clickhouse-local's
-// default (TSV), and a FORMAT in the query always wins.
-func (p *selectPlan) rendered() bool { return !p.format && selectTTY() }
+// rendered reports whether cpb prints the result itself, which it does
+// unless the query names a FORMAT of its own: then clickhouse local writes
+// it, and a FORMAT in the query always wins.
+func (p *selectPlan) rendered() bool { return !p.format }
 
-// clickhouseArgs is the clickhouse-local command line. When cpb renders the
-// result, it asks for JSONCompact (names, types, and the values as JSON)
-// and prints it as the built-in form does.
+// clickhouseArgs is the clickhouse-local command line. When cpb prints the
+// result, it asks for JSONCompact (names, types, and the values as JSON,
+// 64-bit integers as numbers) and prints it as the built-in form does.
 func (p *selectPlan) clickhouseArgs() []string {
 	args := []string{"local", "--input-format", "JSONEachRow", "--structure", selectTables[p.table].structure}
 	// SESSIONS' times are RFC 3339, which ClickHouse's basic DateTime input
@@ -448,7 +494,7 @@ func (p *selectPlan) clickhouseArgs() []string {
 		args = append(args, "--date_time_input_format", "best_effort")
 	}
 	if p.rendered() {
-		args = append(args, "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0")
+		args = append(args, "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0", "--output_format_json_quote_64bit_integers=0")
 	}
 	return append(args, "-q", p.query)
 }
@@ -477,6 +523,9 @@ func runSelect(q string, explain, asJSON bool) error {
 	}
 	if p.query == "" {
 		return printSelect(p.table, p.columns, rows, asJSON)
+	}
+	if asJSON && p.format {
+		return fmt.Errorf("--json and a FORMAT in the query cannot be combined: drop one (the query's FORMAT is written as clickhouse local writes it)")
 	}
 	bin, err := clickhouseBinary()
 	if err != nil {
@@ -519,8 +568,55 @@ func runSelect(q string, explain, asJSON bool) error {
 	for i, m := range res.Meta {
 		cols[i] = m.Name
 	}
-	renderRows(os.Stdout, cols, res.Data, len(cols) > wideColumns)
+	return emitResult(cols, res.Data, asJSON)
+}
+
+// emitResult prints a result as both engines print it: --json, an array of
+// one object per row with the keys in the query's column order; on a
+// terminal, rendered (renderRows); in a pipe, TSV with a header row of the
+// column names, each cell as the terminal shows it, with a tab, a line break
+// or a backslash in it escaped as \t, \n and \\.
+func emitResult(cols []string, rows [][]any, asJSON bool) error {
+	if asJSON {
+		out := make([]orderedRow, 0, len(rows))
+		for _, r := range rows {
+			vals := make(map[string]any, len(cols))
+			for i, c := range cols {
+				if _, seen := vals[c]; !seen && i < len(r) {
+					vals[c] = r[i]
+				}
+			}
+			out = append(out, orderedRow{cols: cols, vals: vals})
+		}
+		return printJSON(out)
+	}
+	if selectTTY() {
+		renderRows(os.Stdout, cols, rows, len(cols) > wideColumns)
+		return nil
+	}
+	writeTSV(os.Stdout, cols, rows)
 	return nil
+}
+
+var tsvEscape = strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\n", "\\n", "\r", "\\r")
+
+// writeTSV prints a header row of the column names, then one line per row,
+// every field escaped alike.
+func writeTSV(w io.Writer, cols []string, rows [][]any) {
+	header := make([]string, len(cols))
+	for i, c := range cols {
+		header[i] = tsvEscape.Replace(c)
+	}
+	fmt.Fprintln(w, strings.Join(header, "\t"))
+	for _, r := range rows {
+		cells := make([]string, len(cols))
+		for i := range cols {
+			if i < len(r) {
+				cells[i] = tsvEscape.Replace(cellText(r[i]))
+			}
+		}
+		fmt.Fprintln(w, strings.Join(cells, "\t"))
+	}
 }
 
 // renderRows prints a result for a person: a table, or, when vertical, one
@@ -578,13 +674,6 @@ func printSelect(table string, cols []string, objs []any, asJSON bool) error {
 		}
 		rows = append(rows, row)
 	}
-	if asJSON {
-		out := make([]orderedRow, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, orderedRow{cols: cols, vals: r})
-		}
-		return printJSON(out)
-	}
 	data := make([][]any, 0, len(rows))
 	for _, r := range rows {
 		row := make([]any, len(cols))
@@ -593,8 +682,7 @@ func printSelect(table string, cols []string, objs []any, asJSON bool) error {
 		}
 		data = append(data, row)
 	}
-	renderRows(os.Stdout, cols, data, len(cols) > wideColumns && selectTTY())
-	return nil
+	return emitResult(cols, data, asJSON)
 }
 
 // orderedRow is one --json row with its keys in the query's column order,
@@ -718,15 +806,17 @@ func selectArgs(args []string) (query string, explain, asJSON bool, ok bool) {
 	return "", false, false, false
 }
 
-// DESCRIBE [TABLE] <table> (DESC too) lists a SELECT table's columns and
-// their types: the typed structure clickhouse-local reads the rows with,
-// plus the computed version_tuple.
+// DESCRIBE [TABLE] <table> (DESC too) lists a SELECT table's columns: each
+// one's name, its type (the typed structure clickhouse-local reads the rows
+// with, plus the computed version_tuple) and a comment saying what it means,
+// as ClickHouse's DESC has.
 
 // describeArgs recognises DESCRIBE / DESC, word by word or as one quoted
-// argument, with an optional --json. ok with an empty table is a DESCRIBE
-// that names none, refused by runDescribe.
-func describeArgs(args []string) (table string, asJSON, ok bool) {
-	words := args
+// argument, with an optional --json. words are what follows DESCRIBE
+// [TABLE], a trailing ";" dropped; runDescribe refuses anything but one
+// table.
+func describeArgs(args []string) (words []string, asJSON, ok bool) {
+	words = append([]string(nil), args...)
 	if len(args) == 1 {
 		words = strings.Fields(strings.TrimSpace(args[0]))
 	}
@@ -734,34 +824,35 @@ func describeArgs(args []string) (table string, asJSON, ok bool) {
 		asJSON, words = true, words[:len(words)-1]
 	}
 	if len(words) == 0 {
-		return "", false, false
+		return nil, false, false
 	}
 	switch strings.ToUpper(words[0]) {
 	case "DESCRIBE", "DESC":
 	default:
-		return "", false, false
+		return nil, false, false
 	}
 	words = words[1:]
 	if len(words) > 0 && strings.EqualFold(words[0], "TABLE") {
 		words = words[1:]
 	}
-	if len(words) == 1 {
-		table = strings.TrimSuffix(words[0], ";")
-	} else if len(words) == 2 && words[1] == ";" {
-		table = words[0]
+	if n := len(words); n > 0 && words[n-1] == ";" {
+		words = words[:n-1]
+	} else if n > 0 {
+		words[n-1] = strings.TrimSuffix(words[n-1], ";")
 	}
-	return table, asJSON, true
+	return words, asJSON, true
 }
 
 type columnJSON struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Comment string `json:"comment"`
 }
 
 func describeTable(name string) ([]columnJSON, error) {
 	t, ok := selectTables[strings.ToUpper(name)]
 	if !ok {
-		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS)", name)
+		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS)", name)
 	}
 	types := map[string]string{"version_tuple": "Array(UInt32)"} // computed, not in the structure
 	depth, start := 0, 0
@@ -787,26 +878,22 @@ func describeTable(name string) ([]columnJSON, error) {
 	}
 	out := make([]columnJSON, 0, len(t.columns))
 	for _, c := range t.columns {
-		out = append(out, columnJSON{Name: c, Type: types[c]})
+		out = append(out, columnJSON{Name: c, Type: types[c], Comment: t.comments[c]})
 	}
 	return out, nil
 }
 
-func runDescribe(table string, asJSON bool) error {
-	if table == "" {
-		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS or DEFAULTS")
+func runDescribe(words []string, asJSON bool) error {
+	if len(words) != 1 {
+		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, SESSIONS or DEFAULTS")
 	}
-	cols, err := describeTable(table)
+	cols, err := describeTable(words[0])
 	if err != nil {
 		return err
 	}
-	if asJSON {
-		return printJSON(cols)
-	}
 	data := make([][]any, 0, len(cols))
 	for _, c := range cols {
-		data = append(data, []any{c.Name, c.Type})
+		data = append(data, []any{c.Name, c.Type, c.Comment})
 	}
-	renderRows(os.Stdout, []string{"name", "type"}, data, false)
-	return nil
+	return emitResult([]string{"name", "type", "comment"}, data, asJSON)
 }

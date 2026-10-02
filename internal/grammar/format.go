@@ -124,8 +124,8 @@ func (c *Clause) words(varWord bool) []string {
 			w = append(w, quoteWord(k))
 		}
 		return w
-	case Describe:
-		return []string{"DESCRIBE", quote(c.Arg)}
+	case Description:
+		return []string{"DESCRIPTION", quote(c.Arg)}
 	case UseEnv, DropEnv:
 		w := strings.Fields(string(c.Kind))
 		for _, n := range c.Names {
@@ -159,6 +159,9 @@ func (c *Clause) words(varWord bool) []string {
 		w := []string{"SET", "STATUSLINE", quote(c.Arg)}
 		if c.Refresh > 0 {
 			w = append(w, "REFRESH", strconv.Itoa(c.Refresh))
+		}
+		if c.IfUnset {
+			w = append(w, "IF", "UNSET")
 		}
 		return w
 	case SetStatuslineRefresh:
@@ -213,9 +216,9 @@ func (c *Clause) words(varWord bool) []string {
 		}
 		for _, v := range m.Env {
 			if v.Ref != "" {
-				w = append(w, "ENV", quoteWord(v.Key), "FROM", quote(v.Ref))
+				w = append(w, "VAR", quoteWord(v.Key), "FROM", quote(v.Ref))
 			} else {
-				w = append(w, "ENV", v.Key+"="+quoteValue(v.Value))
+				w = append(w, "VAR", v.Key+"="+quoteValue(v.Value))
 			}
 		}
 		for _, h := range m.Headers {
@@ -226,11 +229,21 @@ func (c *Clause) words(varWord bool) []string {
 			}
 		}
 		return w
-	case RenameTo, Alias, From, Branch, Subdir, Link:
+	case RenameTo, Launcher, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	case AddPanel, DropPanel:
-		return panelWords(c)
-	default: // SetStatuslinePrevious, NoAlias, Sandbox, NoPilotProfile, IsolatedLogin, SetIsolatedLogin, UnsetIsolatedLogin, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
+	case SetSandboxKeys:
+		w := []string{"SET", "SANDBOX"}
+		for _, v := range c.Settings {
+			w = append(w, v.Key+"="+quoteValue(v.Value))
+		}
+		return w
+	case UnsetSandboxKeys:
+		w := []string{"UNSET", "SANDBOX"}
+		for _, v := range c.Settings {
+			w = append(w, v.Key)
+		}
+		return w
+	default: // SetStatuslinePrevious, NoAlias, Sandbox, IsolatedLogin, SetIsolatedLogin, UnsetIsolatedLogin, SetSandbox, UnsetSandbox, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

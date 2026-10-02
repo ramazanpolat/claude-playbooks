@@ -5,7 +5,7 @@
 // nothing of cpb's engine, so what it shows is exactly what the command
 // line prints, and it can do nothing the grammar cannot. v1 only reads:
 // it browses, shows SHOW CREATE, copies statements, exports a playbook's
-// SHOW CREATE as a .cpb file, and resumes a session through RESUME.
+// SHOW CREATE as a .cpb file, and copies the command that resumes a session.
 //
 // Secret values never reach it: cpb's --json prints references as
 // references and plaintext credentials redacted, and SHOW CREATE is always
@@ -50,13 +50,8 @@ func (r ExecRunner) Run(args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// Command is the argv for a resume, for tea.ExecProcess.
-func (r ExecRunner) Command(args ...string) *exec.Cmd {
-	return exec.Command(r.Bin, append(append([]string{}, r.Prefix...), args...)...)
-}
-
 // The shapes below are the subset of cpb's --json objects the TUI shows
-// (docs/reference/cli-grammar.md, "Output" and "Sessions"). Fields it does
+// (SPEC.md, "Output" and "Sessions"). Fields it does
 // not show are not decoded.
 
 type Var struct {
@@ -96,15 +91,13 @@ func (v Var) LayerName() string {
 	if v.Layer == nil {
 		return "-"
 	}
-	switch strings.ToUpper(v.Layer.Kind) {
-	case "ENV":
-		return "env " + v.Layer.Name
-	case "DEFAULTS":
-		return "defaults " + v.Layer.Name
-	case "PLAYBOOK":
+	switch v.Layer.Kind {
+	case "env", "defaults":
+		return v.Layer.Kind + " " + v.Layer.Name
+	case "playbook":
 		return "playbook"
 	}
-	return strings.ToLower(v.Layer.Kind) + " " + v.Layer.Name
+	return v.Layer.Kind + " " + v.Layer.Name
 }
 
 type Playbook struct {
@@ -115,12 +108,14 @@ type Playbook struct {
 		URL    string  `json:"url"`
 		Branch *string `json:"branch"`
 	} `json:"source"`
-	Linked        *string  `json:"linked"`
-	Launcher      *string  `json:"launcher"`
-	Envs          []string `json:"envs"`
-	Vars          []Var    `json:"vars"`
-	Sandbox       bool     `json:"sandbox"`
-	IsolatedLogin bool     `json:"isolated_login"`
+	Linked   *string  `json:"linked"`
+	Launcher *string  `json:"launcher"`
+	Envs     []string `json:"envs"`
+	Vars     []Var    `json:"vars"`
+	Sandbox  struct {
+		Always bool `json:"always"`
+	} `json:"sandbox"`
+	IsolatedLogin bool `json:"isolated_login"`
 	Marketplaces  []struct {
 		Name string `json:"name"`
 	} `json:"marketplaces"`
@@ -151,12 +146,6 @@ type Playbook struct {
 	StatuslineHistory []struct {
 		Command string `json:"command"`
 	} `json:"statusline_history"`
-	Panels []struct {
-		Panel  string `json:"panel"`
-		Type   string `json:"type"`
-		Source string `json:"source"`
-		Cpb    bool   `json:"cpb"`
-	} `json:"panels"`
 	Model       *string `json:"model"`
 	ModelPicker *struct {
 		Mode    string `json:"mode"`
@@ -165,15 +154,12 @@ type Playbook struct {
 			Label *string `json:"label"`
 		} `json:"options"`
 	} `json:"model_picker"`
-	// PilotProfile is "imported", "not_imported" or "unknown" (v3.25.0);
-	// "" from an older cpb.
-	PilotProfile string `json:"pilot_profile"`
 }
 
 // Login is the kind of login the playbook has: never a value.
 func (p Playbook) Login() string {
 	switch {
-	case p.Sandbox:
+	case p.Sandbox.Always:
 		return "sandbox"
 	case p.IsolatedLogin:
 		return "isolated"
@@ -196,19 +182,6 @@ type Session struct {
 	Launcher   *string `json:"launcher"`
 	Resume     string  `json:"resume"`
 	TTY        *string `json:"tty"` // v3.25.0; nil from an older cpb
-}
-
-// Recent is one row of RESUME --list --json.
-type Recent struct {
-	Playbook   string  `json:"playbook"`
-	SessionID  string  `json:"session_id"`
-	Cwd        string  `json:"cwd"`
-	LastActive string  `json:"last_active"`
-	Model      *string `json:"model"`
-	Title      *string `json:"title"`
-	Live       bool    `json:"live"`
-	PID        *int    `json:"pid"`
-	Resume     string  `json:"resume"`
 }
 
 type EnvSet struct {
@@ -256,7 +229,6 @@ var (
 	readSessions  = []string{"SHOW", "SESSIONS", "--json"}
 	readEnvs      = []string{"SHOW", "ENVS", "--json"}
 	readDefaults  = []string{"SHOW", "DEFAULTS", "--json"}
-	readRecent    = []string{"RESUME", "--list", "--json"}
 )
 
 func loadState(r Runner) (State, error) {
@@ -279,11 +251,6 @@ func loadState(r Runner) (State, error) {
 func loadSessions(r Runner) ([]Session, error) {
 	var s []Session
 	return s, readJSON(r, &s, readSessions...)
-}
-
-func loadRecent(r Runner) ([]Recent, error) {
-	var s []Recent
-	return s, readJSON(r, &s, readRecent...)
 }
 
 func loadExplain(r Runner, name string) (Explain, error) {

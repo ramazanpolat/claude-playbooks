@@ -1,6 +1,6 @@
 # Configure an agent
 
-A playbook is a Claude Code agent. Since v3.21.0 a playbook file can describe
+A playbook is a Claude Code agent. A playbook file can describe
 all of it: route, plugins, main-thread agent, MCP servers, tool permissions,
 status line, model and skills. Each clause below goes on `ALTER PLAYBOOK`,
 on the command line or in a file, and applying it again changes nothing.
@@ -18,7 +18,7 @@ ALTER PLAYBOOK reviewer
 ## MCP servers
 
 ```
-ADD MCP SERVER <name> COMMAND '<cmd>' [ARGS '<arg>' ...] [ENV K=V | ENV K FROM '<ref>' ...]
+ADD MCP SERVER <name> COMMAND '<cmd>' [ARGS '<arg>' ...] [VAR K=V | VAR K FROM '<ref>' ...]
 ADD MCP SERVER <name> URL '<url>' [TRANSPORT SSE] [HEADER '<name>' '<value>' | HEADER '<name>' FROM '<ref>' ...]
 DROP MCP SERVER <name>
 ```
@@ -49,12 +49,10 @@ model is the playbook's default and the weakest choice: `ANTHROPIC_MODEL`,
 `--model` and `/model` all win over it, and `EXPLAIN PLAYBOOK` says which
 one decides. Example: [10](../../examples/10-tools-statusline-model/).
 
-If the status line is a host's (`statusmux render`), `SET STATUSLINE` leaves
-it as it is and warns (`statusline_held_by_host`): contribute your bar as a
-statusmux panel instead, with `ADD PANEL local.bar EXEC '<command>'` (or
-`ADD PANEL local.bar FROM STATUSLINE` to adopt the one you have); see
-[example 17](../../examples/17-statusline-panels/). `REFRESH` still applies. `UNSET STATUSLINE` takes
-the slot back if you mean to.
+`SET STATUSLINE` always applies. A recipe that offers a status line without
+replacing one you chose writes `SET STATUSLINE '<command>' IF UNSET`, which
+applies only where no status line is set yet; see
+[example 17](../../examples/17-statusline-if-unset/).
 
 ## The model picker
 
@@ -111,4 +109,4 @@ cpb "SELECT name, model, tools FROM PLAYBOOKS"
 ```
 
 Every clause, rule and limit is in the reference:
-[An agent's configuration](../reference/cli-grammar.md#an-agents-configuration-v3210).
+[An agent's configuration](../../SPEC.md#an-agents-configuration).

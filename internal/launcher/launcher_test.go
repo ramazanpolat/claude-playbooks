@@ -67,7 +67,7 @@ func TestWriteRefreshesOwnLink(t *testing.T) {
 
 func TestWriteRejectsBadAndReservedNames(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"", ".", "..", "a/b", "cpb", "claude-playbook"} {
+	for _, name := range []string{"", ".", "..", "a/b", "cpb"} {
 		if _, err := Write(dir, name); err == nil {
 			t.Errorf("name %q accepted", name)
 		}
@@ -155,12 +155,12 @@ func TestConcurrentWritesSameName(t *testing.T) {
 
 func TestRemoveNeverTouchesReservedNames(t *testing.T) {
 	dir := t.TempDir()
-	// The installer's own cpb shortcut also resolves to this binary.
+	// The CLI's own name, as a link resolving to this binary.
 	bin, _ := BinPath()
 	if err := os.Symlink(bin, filepath.Join(dir, "cpb")); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"cpb", "claude-playbook", "../cpb"} {
+	for _, name := range []string{"cpb", "../cpb"} {
 		if removed, err := Remove(dir, name); err != nil || removed {
 			t.Errorf("Remove(%q) = %v, %v", name, removed, err)
 		}

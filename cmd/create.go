@@ -6,53 +6,22 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-var (
-	createAlias          string
-	createNoAlias        bool
-	createSandbox        bool
-	createNoPilotProfile bool
-	createIsolatedLogin  bool
-)
-
-var createCmd = &cobra.Command{
-	Hidden: true, // pre-grammar fallback: docs/reference/cli-grammar.md
-	Use:    "create <name>",
-	Short:  "Create a new top-level playbook",
-	Args:   cobra.ExactArgs(1),
-	RunE:   runCreate,
-}
-
-func init() {
-	createCmd.Flags().StringVar(&createAlias, "alias", "", "launcher command name (default: <name>)")
-	createCmd.Flags().BoolVar(&createNoAlias, "no-alias", false, "skip launcher command creation")
-	createCmd.Flags().BoolVar(&createSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
-	createCmd.Flags().BoolVar(&createNoPilotProfile, "no-pilot-profile", false, "write CLAUDE.md without the ~/.pilot-profile/ imports")
-	createCmd.Flags().BoolVar(&createIsolatedLogin, "isolated-login", false, "share no login with ~/.claude (isolate_auth = true): /login once in the playbook")
-}
-
-// createOpts carries create's options: its flags for the command, the statement's
-// clauses for the grammar. No state is shared between two calls.
+// createOpts carries CREATE PLAYBOOK's clauses. No state is shared between
+// two calls.
 type createOpts struct {
-	alias          string
-	noAlias        bool
-	sandbox        bool
-	noPilotProfile bool // CLAUDE.md without the pilot-profile imports
-	isolatedLogin  bool // isolate_auth = true without a sandbox
-}
-
-func runCreate(cmd *cobra.Command, args []string) error {
-	return doCreate(createOpts{alias: createAlias, noAlias: createNoAlias, sandbox: createSandbox, noPilotProfile: createNoPilotProfile, isolatedLogin: createIsolatedLogin}, args)
+	launcher      string
+	noLauncher    bool
+	sandbox       bool
+	isolatedLogin bool // isolated_login = true without a sandbox
 }
 
 func doCreate(o createOpts, args []string) error {
-	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
+	if err := checkLauncherConflict(o.launcher, o.noLauncher); err != nil {
 		return err
 	}
 
@@ -78,17 +47,17 @@ func doCreate(o createOpts, args []string) error {
 	// itself) must be writable, or creation would succeed without its
 	// advertised command. --no-alias opts out of a launcher entirely and
 	// skips this.
-	launcherName, err := resolveLauncherName(o.noAlias, o.alias, name, "create the playbook")
+	launcherName, err := resolveLauncherName(o.noLauncher, o.launcher, name, "create the playbook")
 	if err != nil {
 		return err
 	}
 
-	// Preflight command names BEFORE the directory exists: once created it
+	// Preflight launcher names BEFORE the directory exists: once created it
 	// joins the registry, and dispatch resolves directory names ahead of
 	// aliases, so a clash would silently re-route an existing command.
 	// Serialize preflight-through-registration: without the registry lock,
 	// two concurrent creates can both pass the ownership check and register
-	// duplicate owners for one command name.
+	// duplicate owners for one launcher name.
 	unlock, err := lockRegistry()
 	if err != nil {
 		return err
@@ -112,7 +81,7 @@ func doCreate(o createOpts, args []string) error {
 	// login cannot follow it into the sandbox. Written before the
 	// credential sync so the sync already sees the isolation.
 	if o.sandbox || o.isolatedLogin {
-		m := &manifest.Manifest{Name: name, IsolateAuth: true}
+		m := &manifest.Manifest{Name: name, IsolatedLogin: true}
 		if o.sandbox {
 			m.Sandbox = &manifest.Sandbox{Always: true}
 		}
@@ -126,7 +95,7 @@ func doCreate(o createOpts, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
-	if err := writeDefaultClaudeMD(dest, name, !o.noPilotProfile); err != nil {
+	if err := writeDefaultClaudeMD(dest, name); err != nil {
 		return fmt.Errorf("failed to write CLAUDE.md: %w", err)
 	}
 
@@ -137,10 +106,10 @@ func doCreate(o createOpts, args []string) error {
 		fmt.Println("Login isolated: it shares no login with ~/.claude; run /login once in it.")
 	}
 
-	if o.noAlias {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", name)
+	if o.noLauncher {
+		fmt.Printf("\nRun with:\n  cpb run %s\n", name)
 	} else {
-		// A custom command name must be resolvable at invocation time: record
+		// A custom launcher name must be resolvable at invocation time: record
 		// it as the manifest alias so multicall dispatch finds the playbook.
 		if launcherName != name {
 			if err := writeAliasManifest(dest, name, launcherName); err != nil {
@@ -148,7 +117,7 @@ func doCreate(o createOpts, args []string) error {
 				// dest already joined the registry, so leaving it would block a
 				// retry under the same name — roll it back, as install does.
 				os.RemoveAll(dest)
-				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", launcherName, err)
+				return fmt.Errorf("cannot record launcher %q in manifest (required for the launcher to resolve): %w", launcherName, err)
 			}
 		}
 
@@ -159,46 +128,23 @@ func doCreate(o createOpts, args []string) error {
 }
 
 // defaultClaudeMD is written into a freshly created playbook so that the
-// Claude Code session opened inside it knows what a playbook is and how this
-// directory relates to the rest of the user's setup. Users are expected to
-// edit or replace this file with playbook-specific instructions.
-const defaultClaudeMD = "# Playbook: %s\n\n" +
-	"This Claude Code session is running inside an **isolated playbook** — a self-contained Claude Code config directory managed by `claude-playbook`.\n\n" +
-	"Your `CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, custom agents, slash commands, and this `CLAUDE.md` are all scoped here. Nothing in this playbook affects the user's default `~/.claude` install or other playbooks.\n\n" +
-	"This directory is a playbook simply because it lives directly under the playbooks root — every direct child directory of that root is one playbook. You may optionally add a `.playbook` TOML manifest to set metadata (version, description, homepage, author), but it is not required for discovery.\n\n" +
-	"## Useful `claude-playbook` commands\n\n" +
+// Claude Code session opened inside it knows what a playbook is. It imports
+// nothing: the playbook sees only its own config dir until the pilot adds
+// instructions of their own. The pilot is expected to replace it.
+const defaultClaudeMD = "# Playbook: %[1]s\n\n" +
+	"This Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n" +
+	"`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n" +
+	"## Useful cpb statements\n\n" +
 	"```\n" +
-	"claude-playbook list           # list playbooks and their commands\n" +
-	"claude-playbook info <name>    # show details for one\n" +
-	"claude-playbook rename         # rename a playbook (and its command)\n" +
-	"claude-playbook delete <name>  # remove a playbook\n" +
+	"cpb SHOW PLAYBOOKS                      # every playbook and its launcher\n" +
+	"cpb SHOW PLAYBOOK %[1]s\n" +
+	"cpb ALTER PLAYBOOK %[1]s RENAME TO <name>\n" +
+	"cpb DROP PLAYBOOK %[1]s\n" +
 	"```\n\n" +
-	"Full command reference: https://github.com/ramazanpolat/claude-playbooks\n\n" +
+	"Reference: https://github.com/ramazanpolat/claude-playbooks\n\n" +
 	"## Customizing\n\n" +
-	"This `CLAUDE.md` was generated by `claude-playbook create`. Replace its contents with instructions for how *this* playbook should behave — that is what makes one playbook different from another.\n"
+	"Replace this file with instructions for how *this* playbook should behave: that is what makes one playbook different from another.\n"
 
-// pilotProfileSection follows defaultClaudeMD unless the playbook is created
-// with NO PILOT PROFILE (--no-pilot-profile): a playbook meant for a
-// non-Anthropic model route must not send the profile there.
-const pilotProfileSection = "\n" +
-	// Inert when the profile is absent: Claude Code skips a missing @import
-	// silently, so a user without ~/.pilot-profile/ sees no error, no warning
-	// and no behaviour change. A user who has one gets it in every new
-	// playbook with no wiring step. Safe to write here specifically because a
-	// created playbook's CLAUDE.md is untracked and never reset over.
-	"## Pilot profile\n\n" +
-	"The shared pilot profile at `~/.pilot-profile/`, imported when present and\n" +
-	"silently skipped when not. See https://github.com/agent-realm/pilot-profile\n\n" +
-	"@~/.pilot-profile/PROFILE.md\n" +
-	"@~/.pilot-profile/identity.md\n" +
-	"@~/.pilot-profile/preferences.md\n" +
-	"@~/.pilot-profile/capture-protocol.md\n"
-
-func writeDefaultClaudeMD(dir, name string, pilotProfile bool) error {
-	path := filepath.Join(dir, "CLAUDE.md")
-	content := fmt.Sprintf(defaultClaudeMD, name)
-	if pilotProfile {
-		content += pilotProfileSection
-	}
-	return os.WriteFile(path, []byte(content), 0644)
+func writeDefaultClaudeMD(dir, name string) error {
+	return os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(fmt.Sprintf(defaultClaudeMD, name)), 0644)
 }

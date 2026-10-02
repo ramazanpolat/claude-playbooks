@@ -1,6 +1,6 @@
 -- title: Front-end craft
 -- description: For front-end work: the design plugin and skills, Playwright for the browser, Context7 for library docs.
--- min-cpb: 3.24.0
+-- min-cpb: 4.0.0
 
 ALTER PLAYBOOK
   ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'

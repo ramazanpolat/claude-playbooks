@@ -36,7 +36,7 @@ func TestParseEnvFile(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, e.Set[k], v)
 		}
 	}
-	if len(e.Set) != len(want) || len(e.Unset) != 0 {
+	if len(e.Set) != len(want) || len(e.Block) != 0 {
 		t.Fatalf("unexpected entries: %#v", e)
 	}
 }

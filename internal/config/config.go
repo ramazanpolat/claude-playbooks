@@ -14,7 +14,7 @@ var (
 )
 
 // ResolveLauncherDir returns the directory launcher commands are written to:
-// the --launcher-dir flag, then $CLAUDE_LAUNCHER_DIR, then the directory of
+// the --launcher-dir flag, then $CPB_LAUNCHER_DIR, then the directory of
 // the running binary — which is on PATH by construction whenever the tool
 // itself was invoked by name. A system-installed binary (e.g. in
 // /usr/local/bin) sits in a directory an unprivileged user cannot write, so
@@ -23,7 +23,7 @@ func ResolveLauncherDir() (string, error) {
 	if LauncherDir != "" {
 		return LauncherDir, nil
 	}
-	if v := os.Getenv("CLAUDE_LAUNCHER_DIR"); v != "" {
+	if v := os.Getenv("CPB_LAUNCHER_DIR"); v != "" {
 		return v, nil
 	}
 	// Prefer the directory of the command as INVOKED (argv[0] resolved via
@@ -88,7 +88,7 @@ func dirWritable(dir string) bool {
 // The variable is consumed: it is stripped from the launched process's
 // environment (see auth.PrepareLaunchEnvWith), so it cannot redirect a
 // further launch made from inside the session.
-const ConfigDirOverrideEnv = "CLAUDE_CONFIG_DIR_OVERRIDE"
+const ConfigDirOverrideEnv = "CPB_CONFIG_DIR"
 
 // ResolveConfigDirOverride returns the caller-supplied config directory and
 // whether one was requested. Unset or empty means no override, which is the
@@ -130,12 +130,12 @@ func ResolveConfigDirOverride() (string, bool, error) {
 	return filepath.Clean(v), true, nil
 }
 
-// WithoutConfigDirOverride removes CLAUDE_CONFIG_DIR_OVERRIDE from an
+// WithoutConfigDirOverride removes CPB_CONFIG_DIR from an
 // environment slice. Every subprocess the tool starts with an explicitly
 // chosen CLAUDE_CONFIG_DIR uses it: that choice is authoritative, and leaving
 // a request for a different directory beside it is incoherent. It also stops
 // the variable reaching anything the subprocess itself launches -- a migration
-// runner that calls `claude-playbook run` would otherwise be redirected.
+// runner that calls `cpb run` would otherwise be redirected.
 //
 // Launches go through auth.PrepareLaunchEnv, which consumes the variable as
 // part of binding CLAUDE_CONFIG_DIR; this is for the paths that build an
@@ -155,14 +155,14 @@ func ResolvePlaybooksDir() string {
 	if PlaybooksDir != "" {
 		return PlaybooksDir
 	}
-	if v := os.Getenv("CLAUDE_PLAYBOOKS_DIR"); v != "" {
+	if v := os.Getenv("CPB_PLAYBOOKS_DIR"); v != "" {
 		return v
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude-playbooks")
 }
 
-// invokedBinDir returns the directory of the command as the user reached it:
+// invokedBinDir returns the directory of the command as the pilot reached it:
 // the literal argv[0] directory, or its PATH entry — deliberately without
 // resolving the final symlink. Empty when argv[0] cannot be located.
 func invokedBinDir() string {

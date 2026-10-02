@@ -15,7 +15,7 @@ type Header struct {
 	Description string
 	Needs       string
 	// CreateWith is advisory: create-time flags a recipe cannot set
-	// ("SANDBOX", "NO PILOT PROFILE"). play honours SANDBOX.
+	// ("SANDBOX"). play honours SANDBOX.
 	CreateWith string
 	// MinCPB is the oldest cpb the recipe is written for, as X.Y.Z.
 	MinCPB string

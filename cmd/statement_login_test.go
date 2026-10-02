@@ -17,10 +17,10 @@ func isolateAuthOf(t *testing.T, name string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return m != nil && m.IsolateAuth
+	return m != nil && m.IsolatedLogin
 }
 
-// ISOLATED LOGIN: isolate_auth without a sandbox. CREATE … ISOLATED LOGIN
+// ISOLATED LOGIN: isolated_login without a sandbox. CREATE … ISOLATED LOGIN
 // and SET ISOLATED LOGIN record it and drop the link to the shared login at
 // once; UNSET is refused on a sandboxed playbook and while the playbook
 // holds a login of its own. SHOW, EXPLAIN, SELECT and SHOW CREATE (round
@@ -37,15 +37,17 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mustStmt(t, "CREATE PLAYBOOK a NO ALIAS ISOLATED LOGIN")
+	mustStmt(t, "CREATE PLAYBOOK a NO LAUNCHER ISOLATED LOGIN")
 	if !isolateAuthOf(t, "a") {
-		t.Fatal("CREATE … ISOLATED LOGIN did not record isolate_auth")
+		t.Fatal("CREATE … ISOLATED LOGIN did not record isolated_login")
 	}
 	var v struct {
-		Sandbox       bool `json:"sandbox"`
+		Sandbox struct {
+			Always bool `json:"always"`
+		} `json:"sandbox"`
 		IsolatedLogin bool `json:"isolated_login"`
 	}
-	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK a --json")), &v); err != nil || !v.IsolatedLogin || v.Sandbox {
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK a --json")), &v); err != nil || !v.IsolatedLogin || v.Sandbox.Always {
 		t.Fatalf("SHOW --json: %v %+v", err, v)
 	}
 
@@ -59,7 +61,7 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatalf("SET report:\n%s", out)
 	}
 	if !isolateAuthOf(t, "k") {
-		t.Fatal("SET ISOLATED LOGIN did not record isolate_auth")
+		t.Fatal("SET ISOLATED LOGIN did not record isolated_login")
 	}
 	if _, err := os.Lstat(link); !os.IsNotExist(err) {
 		t.Fatalf("the link to the shared login is still there: %v", err)
@@ -70,8 +72,8 @@ func TestIsolatedLogin(t *testing.T) {
 	if out := mustStmt(t, "ALTER PLAYBOOK k SET ISOLATED LOGIN"); !strings.Contains(out, "unchanged") {
 		t.Fatalf("a repeat:\n%s", out)
 	}
-	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Login: isolated") {
-		t.Fatalf("EXPLAIN:\n%s", out)
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); strings.Count(out, "Login:") != 1 || !strings.Contains(out, "Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it") {
+		t.Fatalf("EXPLAIN: one Login line:\n%s", out)
 	}
 	if out := mustStmt(t, "SHOW PLAYBOOK k"); !strings.Contains(out, "isolated (shares nothing with ~/.claude)") {
 		t.Fatalf("SHOW:\n%s", out)
@@ -111,7 +113,7 @@ func TestIsolatedLogin(t *testing.T) {
 	}
 	mustStmt(t, "ALTER PLAYBOOK k UNSET ISOLATED LOGIN")
 	if isolateAuthOf(t, "k") {
-		t.Fatal("UNSET ISOLATED LOGIN left isolate_auth")
+		t.Fatal("UNSET ISOLATED LOGIN left isolated_login")
 	}
 	if created := mustStmt(t, "SHOW CREATE PLAYBOOK k"); strings.Contains(created, "ISOLATED LOGIN") {
 		t.Fatalf("SHOW CREATE after UNSET:\n%s", created)
@@ -119,7 +121,7 @@ func TestIsolatedLogin(t *testing.T) {
 
 	// A sandboxed playbook is isolated by SANDBOX: UNSET is refused and
 	// SHOW CREATE does not repeat it.
-	mustStmt(t, "CREATE PLAYBOOK s NO ALIAS SANDBOX")
+	mustStmt(t, "CREATE PLAYBOOK s NO LAUNCHER SANDBOX")
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK s UNSET ISOLATED LOGIN"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("UNSET on a sandboxed playbook: %v", err)
 	}
@@ -144,11 +146,11 @@ func TestIsolatedLogin(t *testing.T) {
 func TestIsolatedLoginDryRun(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	f := writePlaybookFile(t, "CREATE PLAYBOOK d NO ALIAS SANDBOX;\nALTER PLAYBOOK d UNSET ISOLATED LOGIN;\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK d NO LAUNCHER SANDBOX;\nALTER PLAYBOOK d UNSET ISOLATED LOGIN;\n")
 	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("dry run, UNSET on a sandboxed playbook: %v", err)
 	}
-	f = writePlaybookFile(t, "CREATE PLAYBOOK e NO ALIAS;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\n")
+	f = writePlaybookFile(t, "CREATE PLAYBOOK e NO LAUNCHER;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\nALTER PLAYBOOK e SET ISOLATED LOGIN;\n")
 	out, err := apply(t, f, "--dry-run")
 	if err != nil || !strings.Contains(out, "1 created, 1 changed, 1 unchanged") {
 		t.Fatalf("dry run:\n%v\n%s", err, out)
@@ -158,7 +160,7 @@ func TestIsolatedLoginDryRun(t *testing.T) {
 	}
 }
 
-// A sandboxed playbook reads as isolated even without isolate_auth; and a
+// A sandboxed playbook reads as isolated even without isolated_login; and a
 // dry run keeps a renamed playbook's login setting, refusing UNSET as the
 // real run does (agy review, v3.23.0).
 func TestIsolatedLoginSandboxAndRename(t *testing.T) {
@@ -178,7 +180,7 @@ func TestIsolatedLoginSandboxAndRename(t *testing.T) {
 	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("dry run after a rename: %v", err)
 	}
-	mustStmt(t, "CREATE PLAYBOOK own NO ALIAS ISOLATED LOGIN")
+	mustStmt(t, "CREATE PLAYBOOK own NO LAUNCHER ISOLATED LOGIN")
 	own := filepath.Join(config.ResolvePlaybooksDir(), "own", ".credentials.json")
 	if err := os.WriteFile(own, []byte(`{"claudeAiOauth":{"accessToken":"own"}}`), 0o600); err != nil {
 		t.Fatal(err)

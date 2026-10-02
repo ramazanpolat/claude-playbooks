@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
 
 func TestToolsStatuslineModel(t *testing.T) {
@@ -16,7 +18,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(orig), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(kommander-helper*) DENY TOOL Read(*) SET STATUSLINE ~/bin/status.sh SET MODEL claude-opus-5-5"
+	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(toolkit-helper*) DENY TOOL Read(*) SET STATUSLINE ~/bin/status.sh SET MODEL claude-opus-5-5"
 	mustStmt(t, stmtText)
 	var s struct {
 		Permissions map[string][]string `json:"permissions"`
@@ -28,7 +30,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(s.Permissions["allow"], ",") != "Bash(kommander-helper*)" || strings.Join(s.Permissions["deny"], ",") != "Read(*)" ||
+	if strings.Join(s.Permissions["allow"], ",") != "Bash(toolkit-helper*)" || strings.Join(s.Permissions["deny"], ",") != "Read(*)" ||
 		strings.Join(s.Permissions["ask"], ",") != "Bash(git push*)" {
 		t.Fatalf("permissions: %v (a rule moves between lists; ask is kept)", s.Permissions)
 	}
@@ -39,7 +41,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 		t.Fatalf("a repeat changed something:\n%s", out)
 	}
 	create := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	for _, want := range []string{"ALLOW TOOL 'Bash(kommander-helper*)'", "DENY TOOL 'Read(*)'", "SET STATUSLINE '~/bin/status.sh'", "SET MODEL 'claude-opus-5-5'"} {
+	for _, want := range []string{"ALLOW TOOL 'Bash(toolkit-helper*)'", "DENY TOOL 'Read(*)'", "SET STATUSLINE '~/bin/status.sh'", "SET MODEL 'claude-opus-5-5'"} {
 		if !strings.Contains(create, want) {
 			t.Errorf("SHOW CREATE missing %q:\n%s", want, create)
 		}
@@ -47,7 +49,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	// ANTHROPIC_MODEL from a layer wins over the settings model, and EXPLAIN says so.
 	mustStmt(t, "ALTER PLAYBOOK k SET VAR ANTHROPIC_MODEL=glm-5.3")
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Model: glm-5.3 (ANTHROPIC_MODEL); the settings model claude-opus-5-5 is overridden") ||
-		!strings.Contains(out, "Tools: allow Bash(kommander-helper*); deny Read(*)") {
+		!strings.Contains(out, "Tools: allow Bash(toolkit-helper*); deny Read(*)") {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
 	mustStmt(t, "ALTER PLAYBOOK k UNSET TOOL Read(*) UNSET STATUSLINE UNSET MODEL")
@@ -80,5 +82,69 @@ func TestExplainModelByReference(t *testing.T) {
 	mustStmt(t, "ALTER PLAYBOOK k SET MODEL claude-opus-5-5 SET VAR ANTHROPIC_MODEL FROM keychain:ok/model")
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Model: (by reference) (ANTHROPIC_MODEL); the settings model claude-opus-5-5 is overridden") {
 		t.Fatalf("EXPLAIN:\n%s", out)
+	}
+}
+
+// SET STATUSLINE always applies, whatever the current command is; IF UNSET
+// applies only where none is set yet. Neither writes anything beside
+// settings.json.
+func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "k")
+	read := func() map[string]any {
+		var s struct {
+			StatusLine map[string]any `json:"statusLine"`
+		}
+		data, _ := os.ReadFile(filepath.Join(root, "settings.json"))
+		_ = json.Unmarshal(data, &s)
+		return s.StatusLine
+	}
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"statusLine": {"type": "command", "command": "$HOME/bin/my-status", "refreshInterval": 5}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE mine IF UNSET"); !strings.Contains(out, "unchanged") || read()["command"] != "$HOME/bin/my-status" {
+		t.Fatalf("IF UNSET over a set status line:\n%s\n%v", out, read())
+	}
+	mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE mine")
+	if sl := read(); sl["command"] != "mine" || sl["refreshInterval"] != float64(5) {
+		t.Fatalf("SET STATUSLINE did not apply: %v", sl)
+	}
+	mustStmt(t, "ALTER PLAYBOOK k UNSET STATUSLINE")
+	mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE fresh REFRESH 3 IF UNSET")
+	if sl := read(); sl["command"] != "fresh" || sl["refreshInterval"] != float64(3) {
+		t.Fatalf("IF UNSET on an empty slot: %v", sl)
+	}
+	if out := mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE fresh REFRESH 3 IF UNSET"); !strings.Contains(out, "unchanged") {
+		t.Fatalf("a repeat changed something:\n%s", out)
+	}
+	if create := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(create, "SET STATUSLINE 'fresh' REFRESH 3") || strings.Contains(create, "IF UNSET") {
+		t.Fatalf("SHOW CREATE writes the state, not the condition:\n%s", create)
+	}
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), "statusline") {
+				t.Fatalf("a status line statement wrote %s", e.Name())
+			}
+		}
+	}
+}
+
+// The CLAUDE.md a new playbook gets imports nothing and names statements.
+func TestDefaultClaudeMDPlain(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	mustStmt(t, "CREATE PLAYBOOK fresh NO LAUNCHER")
+	data, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "fresh", "CLAUDE.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "@") {
+			t.Errorf("an import line: %q", line)
+		}
+	}
+	if !strings.Contains(string(data), "cpb SHOW PLAYBOOK fresh") || !strings.Contains(string(data), "cpb (Claude PlayBooks)") {
+		t.Fatalf("CLAUDE.md:\n%s", data)
 	}
 }

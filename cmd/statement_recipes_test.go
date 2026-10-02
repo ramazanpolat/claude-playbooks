@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 func TestApplyRecipes(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 
 	// TO fills the name-less statements; a missing target is created bare.
@@ -37,7 +37,7 @@ func TestApplyRecipes(t *testing.T) {
 		t.Fatalf("USE PLAYBOOK: %v\n%s", err, out)
 	}
 	for _, pb := range []string{"a", "b"} {
-		if e := readEnv(t, filepath.Join(root, pb)); strings.Join(e.Profiles, ",") != "shared" {
+		if e := readEnv(t, filepath.Join(root, pb)); strings.Join(e.Sets, ",") != "shared" {
 			t.Fatalf("%s: %#v", pb, e)
 		}
 	}
@@ -60,7 +60,7 @@ func TestApplyRecipes(t *testing.T) {
 // written, rather than skipping the missing target's CREATE.
 func TestApplyTargetDiscoveryError(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(root, "broken"), 0o755); err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestApplyTargetDiscoveryError(t *testing.T) {
 	if _, err := apply(t, recipe, "TO", "fresh"); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 		t.Fatalf("discovery error: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(envprofile.Dir(root), "e.toml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(envset.Dir(root), "e.toml")); !os.IsNotExist(err) {
 		t.Fatal("a statement ran before the registry error")
 	}
 }

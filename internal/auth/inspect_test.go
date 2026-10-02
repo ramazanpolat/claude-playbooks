@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
 
 func inspectFixture(t *testing.T) (root, configDir string) {
@@ -21,7 +21,7 @@ func inspectFixture(t *testing.T) (root, configDir string) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv(oauthTokenFileEnv, filepath.Join(home, "no-token"))
@@ -32,7 +32,7 @@ func TestInspectModes(t *testing.T) {
 	now := time.Now()
 	t.Run("shared login", func(t *testing.T) {
 		_, dir := inspectFixture(t)
-		if r := Inspect("pb", dir, now); r.Mode != ModeSharedLogin || r.Store != StoreAbsent || r.NeedsAttention() != "no login" {
+		if r := Inspect("pb", dir, now); r.Mode != ModeSharedLogin || r.TokenBlocked || r.Store != StoreAbsent || r.NeedsAttention() != "no login" {
 			t.Fatalf("%+v", r)
 		}
 	})
@@ -47,7 +47,7 @@ func TestInspectModes(t *testing.T) {
 		if r.Mode != ModeToken || r.TokenFile != tf || r.NeedsAttention() != "" {
 			t.Fatalf("%+v", r)
 		}
-		// ~/.claude is not launched by claude-playbook: the token FILE does
+		// ~/.claude is not launched by cpb: the token FILE does
 		// not make it token mode, only the exported variable does.
 		home, _ := os.UserHomeDir()
 		global := filepath.Join(home, ".claude")
@@ -64,32 +64,32 @@ func TestInspectModes(t *testing.T) {
 	})
 	t.Run("own login via manifest unset", func(t *testing.T) {
 		_, dir := inspectFixture(t)
-		writeManifest(t, dir, "[env]\nunset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
+		writeManifest(t, dir, "[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
 		t.Setenv(OAuthTokenEnv, "sk-ant-oat01-ENV")
-		if r := Inspect("pb", dir, now); r.Mode != ModeOwnLogin {
+		if r := Inspect("pb", dir, now); r.Mode != ModeSharedLogin || !r.TokenBlocked {
 			t.Fatalf("%+v", r)
 		}
 	})
 	t.Run("own token via profile", func(t *testing.T) {
 		root, dir := inspectFixture(t)
-		if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{Name: "acct", Set: map[string]string{OAuthTokenEnv: "sk-ant-oat01-OWN"}}); err != nil {
+		if err := envset.Write(envset.Dir(root), &envset.Set{Name: "acct", Set: map[string]string{OAuthTokenEnv: "sk-ant-oat01-OWN"}}); err != nil {
 			t.Fatal(err)
 		}
-		writeManifest(t, dir, "[env]\nprofiles = [\"acct\"]\n")
-		if r := Inspect("pb", dir, now); r.Mode != ModeOwnToken {
+		writeManifest(t, dir, "[env]\nsets = [\"acct\"]\n")
+		if r := Inspect("pb", dir, now); r.Mode != ModePlaybookToken {
 			t.Fatalf("%+v", r)
 		}
 	})
 	t.Run("isolated", func(t *testing.T) {
 		_, dir := inspectFixture(t)
-		writeManifest(t, dir, "isolate_auth = true\n")
-		if r := Inspect("pb", dir, now); r.Mode != ModeIsolated {
+		writeManifest(t, dir, "isolated_login = true\n")
+		if r := Inspect("pb", dir, now); r.Mode != ModeIsolatedLogin {
 			t.Fatalf("%+v", r)
 		}
 	})
 	t.Run("profile error", func(t *testing.T) {
 		_, dir := inspectFixture(t)
-		writeManifest(t, dir, "[env]\nprofiles = [\"ghost\"]\n")
+		writeManifest(t, dir, "[env]\nsets = [\"ghost\"]\n")
 		r := Inspect("pb", dir, now)
 		if r.Mode != ModeError || r.ModeError == "" || r.NeedsAttention() != "launch refused" {
 			t.Fatalf("%+v", r)
@@ -155,13 +155,13 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // the offending text may be a credential.
 func TestInspectSanitizesProfileErrors(t *testing.T) {
 	root, dir := inspectFixture(t)
-	if err := os.MkdirAll(envprofile.Dir(root), 0o755); err != nil {
+	if err := os.MkdirAll(envset.Dir(root), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(envprofile.Dir(root), "bad.toml"), []byte("[set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(envset.Dir(root), "bad.toml"), []byte("[set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeManifest(t, dir, "[env]\nprofiles = [\"bad\"]\n")
+	writeManifest(t, dir, "[env]\nsets = [\"bad\"]\n")
 	r := Inspect("pb", dir, time.Now())
 	if r.Mode != ModeError {
 		t.Fatalf("%+v", r)
@@ -175,7 +175,8 @@ func TestInspectSanitizesProfileErrors(t *testing.T) {
 }
 
 // An explicitly empty token set by the manifest is inactive for the launch
-// (resolveToken), so the mode is own-login even with a global token file.
+// (resolveToken), so the mode is shared-login, token blocked, even with a
+// global token file.
 func TestInspectEmptyManifestTokenIsOwnLogin(t *testing.T) {
 	_, dir := inspectFixture(t)
 	tf := filepath.Join(t.TempDir(), "oauth-token")
@@ -184,8 +185,8 @@ func TestInspectEmptyManifestTokenIsOwnLogin(t *testing.T) {
 	}
 	t.Setenv(oauthTokenFileEnv, tf)
 	writeManifest(t, dir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"\"\n")
-	if r := Inspect("pb", dir, time.Now()); r.Mode != ModeOwnLogin {
-		t.Fatalf("mode = %s, want own-login", r.Mode)
+	if r := Inspect("pb", dir, time.Now()); r.Mode != ModeSharedLogin || !r.TokenBlocked {
+		t.Fatalf("mode = %s (token blocked %v), want shared-login, token blocked", r.Mode, r.TokenBlocked)
 	}
 }
 
@@ -198,7 +199,7 @@ func TestInspectGlobalIgnoresIsolationOverride(t *testing.T) {
 	if err := os.MkdirAll(global, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
 	if g := InspectGlobal(global, time.Now()); g.Mode != ModeSharedLogin {
 		t.Fatalf("global mode = %s, want shared-login", g.Mode)
 	}
@@ -227,17 +228,17 @@ func TestInspectTokenModeIgnoresDaemonMarker(t *testing.T) {
 }
 
 // An isolated playbook whose manifest sets a token launches by that token
-// (injected, grant quarantined): own-token, isolated, and no stored-login
+// (injected, grant quarantined): playbook-token, isolated, and no stored-login
 // judgement even with a live daemon marker.
 func TestInspectIsolatedWithOwnTokenIsOwnToken(t *testing.T) {
 	_, dir := inspectFixture(t)
-	writeManifest(t, dir, "isolate_auth = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	writeManifest(t, dir, "isolated_login = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
 	now := time.Now()
 	if err := os.WriteFile(filepath.Join(dir, "daemon-auth-status.json"), []byte(`{"status":"auth_required","since":`+itoa(now.UnixMilli())+`}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	r := Inspect("pb", dir, now)
-	if r.Mode != ModeOwnToken || !r.Isolated || r.ReauthRequired || r.NeedsAttention() != "" {
+	if r.Mode != ModePlaybookToken || !r.IsolatedLogin || r.ReauthRequired || r.NeedsAttention() != "" {
 		t.Fatalf("%+v note=%q", r, r.NeedsAttention())
 	}
 }
@@ -282,9 +283,9 @@ func TestInspectUnorderableDaemonMarkerIsStale(t *testing.T) {
 // error: it is a manifest property, not an outcome of profile resolution.
 func TestInspectReportsIsolationDespiteProfileError(t *testing.T) {
 	_, dir := inspectFixture(t)
-	writeManifest(t, dir, "isolate_auth = true\n\n[env]\nprofiles = [\"ghost\"]\n")
+	writeManifest(t, dir, "isolated_login = true\n\n[env]\nsets = [\"ghost\"]\n")
 	r := Inspect("pb", dir, time.Now())
-	if r.Mode != ModeError || !r.Isolated {
+	if r.Mode != ModeError || !r.IsolatedLogin {
 		t.Fatalf("%+v", r)
 	}
 }

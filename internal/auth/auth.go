@@ -175,7 +175,7 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 					// Only the machine's own account may be copied over the
 					// machine's store; any other login, or one that cannot be
 					// told apart, is set aside
-					// (docs/known-issues/shared-launch-copies-own-login-over-machine-login.md).
+					// (CHANGELOG.md, v3.23.1).
 					sourceInfo, err := os.Stat(sourceAbs)
 					switch {
 					case os.IsNotExist(err):
@@ -223,15 +223,15 @@ func detachSharedCredentials(targetDir string) error {
 	return nil
 }
 
-// IsolateAuthEnv forces the isolation path for a launch when set to "true".
-const IsolateAuthEnv = "CLAUDE_PLAYBOOKS_ISOLATE_AUTH"
+// IsolatedLoginEnv forces the isolation path for a launch when set to "true".
+const IsolatedLoginEnv = "CPB_ISOLATED_LOGIN"
 
 // IsAuthIsolated reports whether launches of targetDir run with isolated
-// authentication (manifest isolate_auth, or the override variable).
+// authentication (manifest isolated_login, or the override variable).
 func IsAuthIsolated(targetDir string) bool { return isAuthIsolated(targetDir) }
 
 func isAuthIsolated(targetDir string) bool {
-	if os.Getenv(IsolateAuthEnv) == "true" {
+	if os.Getenv(IsolatedLoginEnv) == "true" {
 		return true
 	}
 	// A read error on the way up is not a reason to drop isolation: the
@@ -240,7 +240,7 @@ func isAuthIsolated(targetDir string) bool {
 	if m == nil {
 		return false
 	}
-	return m.IsolateAuth
+	return m.IsolatedLogin
 }
 
 func copyFile(src, dst string, perm os.FileMode) error {

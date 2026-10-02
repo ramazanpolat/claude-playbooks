@@ -7,9 +7,9 @@ import (
 
 func TestMergeEnvWithReferences(t *testing.T) {
 	got := MergeEnv(
-		&Env{Set: map[string]string{"A": "lit", "B": "lit"}, Unset: []string{"C"}},
+		&Env{Set: map[string]string{"A": "lit", "B": "lit"}, Block: []string{"C"}},
 		&Env{Refs: map[string]string{"A": "keychain:a", "C": "keychain:c"}},
-		&Env{Set: map[string]string{"C": "own"}, Unset: []string{"B"}},
+		&Env{Set: map[string]string{"C": "own"}, Block: []string{"B"}},
 	)
 	if got.Refs["A"] != "keychain:a" || got.Set["A"] != "" {
 		t.Errorf("a later ref overrides a literal: %#v", got)
@@ -17,17 +17,17 @@ func TestMergeEnvWithReferences(t *testing.T) {
 	if got.Set["C"] != "own" || got.Refs["C"] != "" {
 		t.Errorf("a later literal overrides a ref: %#v", got)
 	}
-	if !got.Unsets("B") {
+	if !got.Blocks("B") {
 		t.Errorf("unset: %#v", got)
 	}
-	blocked := MergeEnv(&Env{Refs: map[string]string{"X": "op://v/i/f"}}, &Env{Unset: []string{"X"}})
-	if len(blocked.Refs) != 0 || !blocked.Unsets("X") {
+	blocked := MergeEnv(&Env{Refs: map[string]string{"X": "op://v/i/f"}}, &Env{Block: []string{"X"}})
+	if len(blocked.Refs) != 0 || !blocked.Blocks("X") {
 		t.Errorf("an unset drops a ref: %#v", blocked)
 	}
 }
 
 func TestValidateRefs(t *testing.T) {
-	ok := map[string]string{"TOKEN": "keychain:pilot/x", "KEY": "op://vault/item/field"}
+	ok := map[string]string{"TOKEN": "keychain:x", "KEY": "op://vault/item/field"}
 	if err := ValidateRefs(ok, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestValidateRefs(t *testing.T) {
 		"both set":        {map[string]string{"T": "keychain:x"}, map[string]string{"T": "v"}, nil, "both set"},
 		"both unset":      {map[string]string{"T": "keychain:x"}, nil, []string{"T"}, "both unset"},
 		"refused key":     {map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:x"}, nil, nil, "cannot be a secret reference"},
-		"reserved key":    {map[string]string{"CLAUDE_CONFIG_DIR": "keychain:x"}, nil, nil, "managed by claude-playbook"},
+		"reserved key":    {map[string]string{"CLAUDE_CONFIG_DIR": "keychain:x"}, nil, nil, "managed by cpb"},
 	} {
 		err := ValidateRefs(c.refs, c.set, c.unset)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

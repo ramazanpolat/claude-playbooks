@@ -161,18 +161,6 @@ func (o *Object) MarshalJSON() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// Equal reports whether two objects hold the same members in the same order
-// with the same JSON, compared compactly.
-func Equal(a, b *Object) bool {
-	x, _ := a.MarshalJSON()
-	y, _ := b.MarshalJSON()
-	var cx, cy bytes.Buffer
-	if json.Compact(&cx, x) != nil || json.Compact(&cy, y) != nil {
-		return false
-	}
-	return bytes.Equal(cx.Bytes(), cy.Bytes())
-}
-
 func encode(v any) ([]byte, error) {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)

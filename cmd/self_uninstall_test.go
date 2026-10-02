@@ -17,7 +17,7 @@ func seedCompletionRc(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	content := "# user content\nsource <(claude-playbook completion zsh)\nsource <(cpb completion zsh)\n"
+	content := "# user content\nsource <(cpb completion zsh)\nsource <(cpb completion zsh)\n"
 	for _, name := range []string{".bashrc", ".zshrc"} {
 		if err := os.WriteFile(filepath.Join(home, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -51,7 +51,7 @@ func TestSelfUninstallDryRunPreviewsCompletionLinesAndMutatesNothing(t *testing.
 	resetCommandTestState(t)
 	home := seedCompletionRc(t)
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	lockFile := filepath.Join(home, ".zshrc.claude-playbook.lock")
+	lockFile := filepath.Join(home, ".zshrc.cpb.lock")
 	if err := os.WriteFile(lockFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -128,14 +128,14 @@ func TestLaunchersToRemoveExcludesReservedNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"deploy", "cpb", "claude-playbook"} {
+	for _, name := range []string{"deploy", "cpb"} {
 		if err := os.Symlink(exe, filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	les := launchersToRemove(dir, nil)
 	if len(les) != 1 || les[0].CmdName != "deploy" {
-		t.Fatalf("reserved names must be left to sibling/binary cleanup, got %#v", les)
+		t.Fatalf("the reserved name must be left to the binary cleanup, got %#v", les)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A recorded path the user has since repointed at another executable:
+	// A recorded path the pilot has since repointed at another executable:
 	// live foreign command, must never be removed on the receipt's say-so.
 	foreign := filepath.Join(customDir, "foreign-cmd")
 	otherBin := filepath.Join(customDir, "other-tool")
@@ -171,7 +171,7 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A recorded path the user deleted by hand: skipped, not an error.
+	// A recorded path the pilot deleted by hand: skipped, not an error.
 	if _, err := launcher.Write(customDir, "hand-deleted"); err != nil {
 		t.Fatal(err)
 	}
@@ -214,77 +214,6 @@ func TestLauncherRemovalPlanCoversReceiptedCustomDirs(t *testing.T) {
 	if !byPath[danglingPath] {
 		t.Fatalf("dangling recorded launcher missing from plan: %v", plan)
 	}
-}
-
-func TestSiblingToRemoveRequiresSameResolution(t *testing.T) {
-	resetCommandTestState(t)
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "claude-playbook")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cpb := filepath.Join(dir, "cpb")
-
-	if got := siblingToRemove(bin); got != "" {
-		t.Fatalf("no sibling on disk, got %q", got)
-	}
-
-	// The installer's own pair: cpb -> claude-playbook is removed.
-	if err := os.Symlink("claude-playbook", cpb); err != nil {
-		t.Fatal(err)
-	}
-	if got := siblingToRemove(bin); got != cpb {
-		t.Fatalf("installer sibling: got %q, want %q", got, cpb)
-	}
-
-	// Invoked THROUGH the symlink: the real binary is the sibling.
-	if got := siblingToRemove(cpb); got != bin {
-		t.Fatalf("exec via symlink: got %q, want %q", got, bin)
-	}
-
-	// A foreign regular file under the reserved name survives.
-	if err := os.Remove(cpb); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(cpb, []byte("someone else's cpb"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got := siblingToRemove(bin); got != "" {
-		t.Fatalf("foreign regular file claimed as sibling: %q", got)
-	}
-
-	// A symlink resolving elsewhere survives.
-	other := filepath.Join(dir, "other-tool")
-	if err := os.WriteFile(other, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(cpb); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("other-tool", cpb); err != nil {
-		t.Fatal(err)
-	}
-	if got := siblingToRemove(bin); got != "" {
-		t.Fatalf("foreign symlink claimed as sibling: %q", got)
-	}
-
-	// Non-reserved basenames never have siblings.
-	if got := siblingToRemove(other); got != "" {
-		t.Fatalf("non-reserved basename produced sibling %q", got)
-	}
-
-	// --keep-binary keeps the pair intact.
-	if err := os.Remove(cpb); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("claude-playbook", cpb); err != nil {
-		t.Fatal(err)
-	}
-	selfUninstallKeepBinary = true
-	if got := siblingToRemove(bin); got != "" {
-		t.Fatalf("--keep-binary still selects sibling %q", got)
-	}
-	selfUninstallKeepBinary = false
 }
 
 func captureStdout(t *testing.T, fn func()) string {

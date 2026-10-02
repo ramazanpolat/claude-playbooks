@@ -21,35 +21,35 @@ Say you reach a model through a local router. Put its variables in an env set,
 a named group that any playbook can use:
 
 ```bash
-cpb CREATE ENV router DESCRIBE 'my model router' SET ANTHROPIC_BASE_URL=http://localhost:20128/v1 ANTHROPIC_MODEL=glm-5.3
+cpb CREATE ENV router DESCRIPTION 'my model router' SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
 cpb ALTER PLAYBOOK scratch USE ENV router
 cpb EXPLAIN PLAYBOOK scratch
 ```
 
-cpb prints a warning at the `USE ENV`. The `CLAUDE.md` that `CREATE PLAYBOOK`
-wrote imports the pilot profile (`~/.pilot-profile/`, when you have one), and
-Claude Code sends it with every request, which now go to the router. If that
-is not what you want, delete the "Pilot profile" lines from
-`~/.claude-playbooks/scratch/CLAUDE.md`. A playbook made for a route is
-better created without them: `cpb CREATE PLAYBOOK <name> NO PILOT PROFILE`
-([example 15](../../examples/15-third-party-route/)).
+Every request of `scratch` now goes to the router, with what its `CLAUDE.md`
+holds. The one `CREATE PLAYBOOK` wrote imports nothing; whatever you add to it
+goes along ([example 15](../../examples/15-third-party-route/)).
 
 `EXPLAIN` lists every variable a launch of `scratch` sets and the layer that
 decided it. The playbook's own `SET VAR` wins over its env sets, a later set
 wins over an earlier one, and `ALTER DEFAULTS USE ENV …` puts sets under every
 playbook.
 
-The router's token does not belong in the set as text. Store it with a secret
-helper, then refer to it:
+The router's token does not belong in the set as text. Store it where a secret
+helper can read it, then refer to it. With the sample helper,
+[`cpb-secret-file`](../../examples/secret-helper/), copied onto your `PATH`:
 
 ```bash
-cpb ALTER DEFAULTS SET SECRET HELPER with-secret
-cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/router-token'
+mkdir -p ~/.config/cpb-secrets && chmod 700 ~/.config/cpb-secrets
+(umask 077 && read -r v && printf '%s' "$v" > ~/.config/cpb-secrets/router-token)
+cpb ALTER DEFAULTS SET SECRET HELPER cpb-secret-file
+cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token'
 ```
 
 cpb stores the reference, checks it with the helper, and resolves it only at
-launch. Any helper with the same interface works
-([Secrets](../reference/cli-grammar.md#secrets-optional)).
+launch. Any helper with the same interface works, a wrapper around your
+keychain or password manager included
+([Secrets](../../SPEC.md#secrets-optional)).
 
 ## 3. The file
 
@@ -77,4 +77,4 @@ it again.
 
 - [Stack layers into an agent](stacked-agent.md): plugins, the agent, `INCLUDE`.
 - [Examples](../../examples/): one small file per idea.
-- [The grammar](../reference/cli-grammar.md): every statement and rule.
+- [The grammar](../../SPEC.md): every statement and rule.

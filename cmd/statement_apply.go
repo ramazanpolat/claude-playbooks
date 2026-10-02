@@ -10,13 +10,13 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // runApply runs one or more playbook files, in the order given
-// (docs/cli-grammar.md, "playbook.cpb"). It parses and validates every
+// (SPEC.md, "playbook.cpb"). It parses and validates every
 // file and writes nothing if any of it fails, then runs the statements in
 // order, each whole-or-nothing, and stops at the first failure. Every
 // statement SHOW CREATE writes is safe to repeat, so running the fixed
@@ -97,7 +97,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	// secret reference must resolve, against the helper the files will have
 	// set by then (a file may set the helper and use it in one run).
 	var helper helperState
-	envDir := envprofile.Dir(config.ResolvePlaybooksDir())
+	envDir := envset.Dir(config.ResolvePlaybooksDir())
 	// Whether each env set exists at that point of the files: an earlier
 	// CREATE makes it, an earlier DROP removes it, and the disk says the rest.
 	envExists := map[string]bool{}
@@ -105,7 +105,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		if e, ok := envExists[name]; ok {
 			return e
 		}
-		p, _ := envprofile.Read(envDir, name)
+		p, _ := envset.Read(envDir, name)
 		return p != nil
 	}
 	for _, x := range stmts {
@@ -167,7 +167,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	done := map[string]int{} // statements applied per file
 	for _, x := range stmts {
 		s := x.s
-		r.outcome, r.note, r.warning, r.warningCode, r.actions = "", "", "", "", nil
+		r.outcome, r.note, r.warnings, r.actions = "", "", nil, nil
 		where := fmt.Sprintf("%s:%d", x.file, s.Pos.Line)
 		head := stmtHead(s)
 		if !st.DryRun {
@@ -175,7 +175,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		}
 		entry := func(verdict string) applyStmtJSON {
 			return applyStmtJSON{File: x.path, Line: s.Pos.Line, Statement: head, Verb: string(s.Verb), Object: string(s.Object),
-				Target: stmtTarget(s), Recipe: x.recipe, Implicit: x.implicit, Verdict: verdict, Actions: nonNilActions(r.actions)}
+				Target: stmtTarget(s), Recipe: x.recipe, Implicit: x.implicit, Verdict: verdict, Warnings: []applyWarning{}, Actions: nonNilActions(r.actions)}
 		}
 		if err := execStatement(r, s); err != nil {
 			if st.DryRun {
@@ -199,8 +199,8 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		counts[r.outcome]++
 		if rep != nil {
 			e := entry(r.outcome)
-			if r.warning != "" {
-				e.Warning = &applyWarning{Code: r.warningCode, File: x.path, Line: s.Pos.Line, Message: r.warning, shown: x.file}
+			for _, w := range r.warnings {
+				e.Warnings = append(e.Warnings, applyWarning{Code: w.code, File: x.path, Line: s.Pos.Line, Message: w.message, shown: x.file})
 			}
 			rep.Statements = append(rep.Statements, e)
 			switch r.outcome {
@@ -214,17 +214,17 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 				rep.Summary.Dropped++
 			}
 		}
-		if r.warning != "" {
+		for _, w := range r.warnings {
 			counts["warning"]++
-			fmt.Fprintf(os.Stderr, "Warning: %s: %s\n", where, r.warning)
+			fmt.Fprintf(os.Stderr, "Warning: %s: %s\n", where, w.message)
 		}
 		if st.DryRun {
 			line := fmt.Sprintf("%-20s %-9s %s", where, r.outcome, head)
 			if r.note != "" {
 				line += "  (" + r.note + ")"
 			}
-			if r.warning != "" {
-				line += "  WARNING: " + r.warning
+			for _, w := range r.warnings {
+				line += "  WARNING: " + w.message
 			}
 			fmt.Println(line)
 		}
@@ -253,7 +253,7 @@ type located struct {
 }
 
 // applyLoader reads the files APPLY runs and expands their INCLUDEs
-// (docs/reference/cli-grammar.md, "INCLUDE"): included files run in place
+// (SPEC.md, "INCLUDE"): included files run in place
 // of the directive, a file reached twice runs once, at its first
 // occurrence, and a cycle is refused. Every error is collected, so one run
 // reports every problem and nothing is written.

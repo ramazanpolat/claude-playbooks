@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,8 +24,9 @@ func selectFixture(t *testing.T) string {
 
 func TestSelectBuiltIn(t *testing.T) {
 	selectFixture(t)
+	// In a pipe: TSV with a header row (tests run off a terminal).
 	out := mustStmt(t, "SELECT name, version FROM PLAYBOOKS")
-	if !strings.Contains(out, "alpha") || !strings.Contains(out, "v3.12.3") || !strings.Contains(out, "NAME") {
+	if !strings.HasPrefix(out, "name\tversion\n") || !strings.Contains(out, "alpha\tv3.12.3\n") {
 		t.Fatalf("built in:\n%s", out)
 	}
 	var got []map[string]any
@@ -56,7 +58,8 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 	selectFixture(t)
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "clickhouse")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + dir + "/args\"\ncat > \"" + dir + "/stdin\"\necho ok\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + dir + "/args\"\ncat > \"" + dir + "/stdin\"\n" +
+		"echo '{\"meta\":[{\"name\":\"name\"}],\"data\":[[\"ok\"]],\"rows\":1}'\n"
 	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -65,12 +68,13 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 	out := captureStdout(t, func() {
 		err = runStatement([]string{"SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"})
 	})
-	if err != nil || !strings.Contains(out, "ok") {
-		t.Fatalf("handoff: %v\n%s", err, out)
+	if err != nil || out != "name\nok\n" {
+		t.Fatalf("handoff: %v\n%q", err, out)
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
 	want := strings.Join([]string{"local", "--input-format", "JSONEachRow", "--structure", selectTables["PLAYBOOKS"].structure,
-		"-q", "SELECT name FROM (SELECT * EXCEPT (pilot_profile, play), " + versionTupleSQL + " AS version_tuple, pilot_profile, play FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
+		"--date_time_input_format", "best_effort", "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0", "--output_format_json_quote_64bit_integers=0",
+		"-q", "SELECT name FROM (SELECT * EXCEPT (play), " + versionTupleSQL + " AS version_tuple, play FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
 	if string(args) != want {
 		t.Fatalf("args:\n%s\nwant:\n%s", args, want)
 	}
@@ -178,9 +182,9 @@ func TestSelectQuotedJSONAndExactColumns(t *testing.T) {
 	}
 }
 
-// On a terminal, with no FORMAT in the query, cpb asks clickhouse-local for
-// JSONCompact and renders it; a pipe, or a FORMAT of the query's own, gets
-// clickhouse-local's output untouched.
+// With no FORMAT in the query, cpb asks clickhouse-local for JSONCompact and
+// prints it itself, on a terminal and in a pipe; a FORMAT of the query's own
+// gets clickhouse-local's output untouched.
 func TestSelectOutputChoice(t *testing.T) {
 	selectFixture(t)
 	old := selectTTY
@@ -193,11 +197,10 @@ func TestSelectOutputChoice(t *testing.T) {
 		}
 		return strings.Join(p.clickhouseArgs(), " ")
 	}
-	if a := args(false, "SELECT count() FROM PLAYBOOKS"); strings.Contains(a, "--output-format") {
-		t.Errorf("pipe: %s", a)
-	}
-	if a := args(true, "SELECT count() FROM PLAYBOOKS"); !strings.Contains(a, "--output-format JSONCompact --output_format_json_escape_forward_slashes=0") {
-		t.Errorf("terminal: %s", a)
+	for _, tty := range []bool{false, true} {
+		if a := args(tty, "SELECT count() FROM PLAYBOOKS"); !strings.Contains(a, "--output-format JSONCompact --output_format_json_escape_forward_slashes=0 --output_format_json_quote_64bit_integers=0") {
+			t.Errorf("terminal %v: %s", tty, a)
+		}
 	}
 	if a := args(true, "SELECT count() FROM PLAYBOOKS format TSV"); strings.Contains(a, "--output-format") {
 		t.Errorf("the query's FORMAT lost: %s", a)
@@ -265,7 +268,7 @@ func TestSelectRendersForATerminal(t *testing.T) {
 }
 
 // The built-in form: a wide selection is one block per row on a terminal,
-// a table in a pipe, with the same headers.
+// TSV with a header row in a pipe.
 func TestSelectBuiltInOnATerminal(t *testing.T) {
 	selectFixture(t)
 	old := selectTTY
@@ -276,30 +279,175 @@ func TestSelectBuiltInOnATerminal(t *testing.T) {
 		t.Fatalf("terminal:\n%s", out)
 	}
 	selectTTY = func() bool { return false }
-	if out := mustStmt(t, q); strings.Contains(out, "Row 1") || !strings.Contains(out, "SANDBOX") {
+	if out := mustStmt(t, q); strings.Contains(out, "Row 1") || !strings.HasPrefix(out, "name\tversion\tpath\tlinked\tlauncher\tenvs\tsandbox\n") {
 		t.Fatalf("pipe:\n%s", out)
+	}
+}
+
+// Both engines print a result the same way: the same rows through the
+// built-in form and through clickhouse-local give the same bytes in a pipe
+// and with --json. A FORMAT of the query's own cannot be combined with
+// --json, and a TSV cell escapes a tab, a line break and a backslash.
+func TestSelectSameShapeOnBothEngines(t *testing.T) {
+	selectFixture(t)
+	old := selectTTY
+	t.Cleanup(func() { selectTTY = old })
+	selectTTY = func() bool { return false }
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "clickhouse")
+	write := func(doc string) {
+		script := "#!/bin/sh\ncat >/dev/null\ncat <<'EOF'\n" + doc + "\nEOF\n"
+		if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CPB_CLICKHOUSE", stub)
+	write(`{"meta":[{"name":"name","type":"String"},{"name":"version","type":"Nullable(String)"}],"data":[["alpha","v3.12.3"],["beta","v3.9.0"]],"rows":2}`)
+	for _, flags := range [][]string{nil, {"--json"}} {
+		builtIn := captureStdout(t, func() {
+			if err := runStatement(append([]string{"SELECT name, version FROM PLAYBOOKS"}, flags...)); err != nil {
+				t.Fatal(err)
+			}
+		})
+		viaClickHouse := captureStdout(t, func() {
+			if err := runStatement(append([]string{"SELECT name, version FROM PLAYBOOKS WHERE 1"}, flags...)); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if builtIn != viaClickHouse {
+			t.Errorf("%v: the engines differ:\nbuilt in:\n%s\nclickhouse:\n%s", flags, builtIn, viaClickHouse)
+		}
+	}
+	write(`{"meta":[{"name":"n","type":"UInt64"},{"name":"s\tt","type":"String"}],"data":[[18446744073709551615,"a\tb\\c\nd"]],"rows":1}`)
+	out := captureStdout(t, func() {
+		if err := runStatement([]string{"SELECT count() AS n, 'x' AS s FROM PLAYBOOKS"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if out != "n\ts\\tt\n18446744073709551615\ta\\tb\\\\c\\nd\n" {
+		t.Errorf("TSV escaping: %q", out)
+	}
+	js := captureStdout(t, func() {
+		if err := runStatement([]string{"SELECT count() AS n, 'x' AS s FROM PLAYBOOKS", "--json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(js, `"n": 18446744073709551615`) {
+		t.Errorf("--json through clickhouse: a UInt64 must stay exact: %s", js)
+	}
+	if _, err := stmt(t, "SELECT name FROM PLAYBOOKS FORMAT TSV --json"); err == nil || !strings.Contains(err.Error(), "--json and a FORMAT in the query cannot be combined") {
+		t.Errorf("--json with a FORMAT: %v", err)
 	}
 }
 
 func TestDescribe(t *testing.T) {
 	selectFixture(t)
+	old := selectTTY
+	t.Cleanup(func() { selectTTY = old })
+	selectTTY = func() bool { return true }
 	out := mustStmt(t, "DESCRIBE playbooks")
-	for _, want := range []string{"NAME", "TYPE", "version_tuple", "Array(UInt32)", "source", "JSON", "model"} {
+	for _, want := range []string{"NAME", "TYPE", "COMMENT", "version_tuple", "Array(UInt32)", "source", "JSON", "model", "to compare and sort versions"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("DESCRIBE playbooks lacks %q:\n%s", want, out)
+			t.Fatalf("DESCRIBE playbooks on a terminal lacks %q:\n%s", want, out)
 		}
+	}
+	selectTTY = func() bool { return false }
+	tsv := mustStmt(t, "DESC TABLE defaults")
+	if want := "name\ttype\tcomment\nenvs\tArray(String)\tThe env sets every launch applies first, in order.\n"; !strings.HasPrefix(tsv, want) || strings.Count(tsv, "\n") != 3 {
+		t.Fatalf("DESC TABLE defaults in a pipe: TSV with a header row:\n%q", tsv)
 	}
 	var cols []columnJSON
 	var err error
 	js := captureStdout(t, func() { err = runStatement([]string{"DESC TABLE envs --json"}) })
-	if err != nil || json.Unmarshal([]byte(js), &cols) != nil || len(cols) != 5 || cols[4] != (columnJSON{Name: "default", Type: "Bool"}) {
+	if err != nil || json.Unmarshal([]byte(js), &cols) != nil || len(cols) != 5 ||
+		cols[4] != (columnJSON{Name: "default", Type: "Bool", Comment: "True when the env set is in DEFAULTS."}) {
 		t.Fatalf("DESC TABLE envs --json: %v %v\n%s", err, cols, js)
+	}
+	if keys := jsonKeys(t, js); len(keys) != 5 || strings.Join(keys[0], " ") != "name type comment" {
+		t.Fatalf("--json keys: %v", keys)
 	}
 	if _, err := stmt(t, "DESCRIBE nope"); err == nil || !strings.Contains(err.Error(), `unknown table "nope"`) {
 		t.Fatalf("unknown table: %v", err)
 	}
-	if _, err := stmt(t, "DESCRIBE"); err == nil || !strings.Contains(err.Error(), "needs one table") {
-		t.Fatalf("no table: %v", err)
+	for _, line := range []string{"DESCRIBE", "DESCRIBE playbooks envs"} {
+		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), "needs one table") {
+			t.Fatalf("%s: %v", line, err)
+		}
+	}
+}
+
+// TestDescribeEveryColumnHasAComment: DESCRIBE's comment says what each
+// column means, so none may be empty, and a comment names no column the
+// table lacks.
+func TestDescribeEveryColumnHasAComment(t *testing.T) {
+	for name, tbl := range selectTables {
+		cols, err := describeTable(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range cols {
+			if c.Type == "" || strings.TrimSpace(c.Comment) == "" {
+				t.Errorf("%s.%s: type %q, comment %q", name, c.Name, c.Type, c.Comment)
+			}
+		}
+		if len(tbl.comments) != len(tbl.columns) {
+			t.Errorf("%s: %d comments for %d columns", name, len(tbl.comments), len(tbl.columns))
+		}
+	}
+}
+
+// TestDescribeMatchesSpec holds SPEC.md's DESCRIBE column tables to the
+// code, line for line: every table, every column in order, its type and its
+// comment.
+func TestDescribeMatchesSpec(t *testing.T) {
+	data, err := os.ReadFile("../SPEC.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "\n### DESCRIBE\n")
+	if start < 0 {
+		t.Fatal("SPEC.md has no DESCRIBE section")
+	}
+	section := text[start+1:]
+	for _, next := range []string{"\n## ", "\n### "} {
+		if end := strings.Index(section, next); end >= 0 {
+			section = section[:end]
+		}
+	}
+	spec := map[string][]columnJSON{}
+	table := ""
+	row := regexp.MustCompile("^\\| `([^`]+)` \\| `([^`]+)` \\| (.+) \\|$")
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "**`") && strings.HasSuffix(line, "`**") {
+			table = strings.TrimSuffix(strings.TrimPrefix(line, "**`"), "`**")
+			continue
+		}
+		if !strings.HasPrefix(line, "|") || line == "| Column | Type | Comment |" || line == "|---|---|---|" {
+			continue
+		}
+		m := row.FindStringSubmatch(line)
+		if m == nil || table == "" {
+			t.Errorf("SPEC.md's DESCRIBE has a row this test cannot read: %q", line)
+			continue
+		}
+		spec[table] = append(spec[table], columnJSON{Name: m[1], Type: m[2], Comment: m[3]})
+	}
+	if len(spec) != len(selectTables) {
+		t.Fatalf("SPEC.md's DESCRIBE lists %d tables, the code has %d", len(spec), len(selectTables))
+	}
+	for name := range selectTables {
+		cols, _ := describeTable(name)
+		got := spec[name]
+		if len(got) != len(cols) {
+			t.Errorf("%s: SPEC.md lists %d columns, the code %d", name, len(got), len(cols))
+			continue
+		}
+		for i := range cols {
+			if got[i] != cols[i] {
+				t.Errorf("%s column %d:\n SPEC.md %+v\n code    %+v", name, i+1, got[i], cols[i])
+			}
+		}
 	}
 }
 

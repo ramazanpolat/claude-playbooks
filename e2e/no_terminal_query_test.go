@@ -49,14 +49,14 @@ func TestNoTerminalQueryAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := []string{"HOME=" + home, "PATH=" + fake + ":/usr/bin:/bin", "TERM=xterm-256color"}
-	create := exec.Command(binPath, "CREATE", "PLAYBOOK", "pty", "NO", "ALIAS")
+	create := exec.Command(binPath, "CREATE", "PLAYBOOK", "pty", "NO", "LAUNCHER")
 	create.Env = env
 	if out, err := create.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	for _, line := range []string{
 		binPath + " SHOW PLAYBOOKS",
-		binPath + " sessions",
+		binPath + " SHOW SESSIONS",
 		binPath + " run pty --version", // what a launcher runs
 		binPath,                        // bare cpb, on a terminal
 	} {

@@ -15,7 +15,7 @@ func TestTakeLaunchFlagsLeadingRunOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	rest, layers, err := takeLaunchFlags([]string{
-		"--env-profile", "glm", "--env=K=V", "--unset", "TOKEN", "--env-file", envFile,
+		"--env-set", "glm", "--env=K=V", "--block", "TOKEN", "--env-file", envFile,
 		"router", "-p", "hi", "--env", "NOT_OURS=1",
 	})
 	if err != nil {
@@ -27,7 +27,7 @@ func TestTakeLaunchFlagsLeadingRunOnly(t *testing.T) {
 	if len(layers) != 4 {
 		t.Fatalf("layers = %d, want 4", len(layers))
 	}
-	if !layers[0].Uses("glm") || layers[1].Set["K"] != "V" || !layers[2].Unsets("TOKEN") || layers[3].Set["FROM_FILE"] != "yes" {
+	if !layers[0].Uses("glm") || layers[1].Set["K"] != "V" || !layers[2].Blocks("TOKEN") || layers[3].Set["FROM_FILE"] != "yes" {
 		t.Fatalf("layers = %#v", layers)
 	}
 	// No flags: nothing consumed, nothing produced.
@@ -43,9 +43,9 @@ func TestTakeLaunchFlagsRejects(t *testing.T) {
 		{"--env", "NOEQUALS"},
 		{"--env", "CLAUDE_CONFIG_DIR=/x"},
 		{"--env", "BAD-KEY=1"},
-		{"--unset", "K=V"},
-		{"--unset", "CLAUDE_CONFIG_DIR"},
-		{"--env-profile", "bad name"},
+		{"--block", "K=V"},
+		{"--block", "CLAUDE_CONFIG_DIR"},
+		{"--env-set", "bad name"},
 		{"--env-file", filepath.Join(t.TempDir(), "absent.env")},
 	} {
 		if _, _, err := takeLaunchFlags(args); err == nil {
@@ -65,8 +65,8 @@ func TestHelpAfterLaunchFlagsPrintsUsage(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"run", func(a []string) error { return runRun(nil, a) }, []string{"--env", "K=V", "--help"}, "Usage: claude-playbook run"},
-		{"start", func(a []string) error { return runStart(nil, a) }, []string{"--env-file=" + writeTempEnvFile(t), "-h"}, "Usage: claude-playbook start"},
+		{"run", func(a []string) error { return runRun(nil, a) }, []string{"--env", "K=V", "--help"}, "Usage: cpb run"},
+		{"start", func(a []string) error { return runStart(nil, a) }, []string{"--env-file=" + writeTempEnvFile(t), "-h"}, "Usage: cpb start"},
 	} {
 		out := captureStdout(t, func() {
 			if err := tc.run(tc.args); err != nil {

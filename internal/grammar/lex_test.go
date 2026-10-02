@@ -34,7 +34,7 @@ func TestLexFile(t *testing.T) {
 		{"A --", [][]string{{"A"}}},
 		{"SET A='hello world'", [][]string{{"SET", "A=hello world"}}},
 		{`SET A="x y" B='it''s'`, [][]string{{"SET", "A=x y", "B=it's"}}},
-		{"DESCRIBE 'semi;colon -- not a comment'", [][]string{{"DESCRIBE", "semi;colon -- not a comment"}}},
+		{"DESCRIPTION 'semi;colon -- not a comment'", [][]string{{"DESCRIPTION", "semi;colon -- not a comment"}}},
 		{"X=''", [][]string{{"X="}}},
 		{"''", [][]string{{""}}},
 		{"A\tB\r\nC", [][]string{{"A", "B", "C"}}},
@@ -79,9 +79,9 @@ func TestLexPositions(t *testing.T) {
 }
 
 func TestLexUnterminatedQuote(t *testing.T) {
-	_, err := lexFile("ALTER ENV e DESCRIBE 'never closed")
+	_, err := lexFile("ALTER ENV e DESCRIPTION 'never closed")
 	var pe *Error
-	if !errors.As(err, &pe) || !strings.Contains(pe.Msg, "unterminated quote") || pe.Pos != (Pos{Line: 1, Col: 22}) {
+	if !errors.As(err, &pe) || !strings.Contains(pe.Msg, "unterminated quote") || pe.Pos != (Pos{Line: 1, Col: 25}) {
 		t.Errorf("got %v", err)
 	}
 }

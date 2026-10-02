@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"os"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 
@@ -13,7 +12,7 @@ import (
 
 // tuiCmd is `cpb tui` (v3.25.0): a terminal UI over the grammar. It reads
 // through cpb's own --json outputs, run as subprocesses of this binary,
-// and in v1 changes nothing (docs/reference/cli-grammar.md, "cpb tui").
+// and in v1 changes nothing (SPEC.md, "cpb tui").
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Browse playbooks, sessions and env sets in a terminal UI (read-only)",
@@ -43,7 +42,6 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	home, _ := os.UserHomeDir()
 	return tui.Run(tui.Options{
 		Runner: r,
-		Resume: func(args ...string) *exec.Cmd { return r.Command(args...) },
 		Home:   home,
 		Cwd:    cwd,
 	})

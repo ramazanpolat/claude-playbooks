@@ -41,7 +41,7 @@ func ParseEnvFile(path string) (*Env, error) {
 		}
 		key = strings.TrimSpace(key)
 		if ReservedEnvKeys[key] {
-			return nil, fmt.Errorf("%s:%d: %s is managed by claude-playbook and cannot be overridden", path, lineNo, key)
+			return nil, fmt.Errorf("%s:%d: %s is managed by cpb and cannot be overridden", path, lineNo, key)
 		}
 		if err := ValidateEnvKey(key); err != nil {
 			// The rejected "key" is not echoed either: a secret containing

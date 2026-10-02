@@ -1,2 +1,2 @@
-work$ printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO ALIAS;' 'ALTER PLAYBOOK demo USE ENV synth-router BLOCK VAR HTTP_PROXY;' > demo.cpb
+work$ printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO LAUNCHER;' 'ALTER PLAYBOOK demo USE ENV synth-router BLOCK VAR HTTP_PROXY;' > demo.cpb
 work$ 

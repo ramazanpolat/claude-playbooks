@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -30,10 +30,10 @@ func apply(t *testing.T, path string, flags ...string) (string, error) {
 
 const scratchPlaybook = `-- a machine from nothing
 CREATE OR REPLACE ENV glm
-  DESCRIBE 'GLM via the router'
-  SET BASE=http://tr0:20128/v1 MODEL=glm-5.3;
+  DESCRIPTION 'GLM via the router'
+  SET BASE=http://buildbox:8080/v1 MODEL=glm-5.3;
 ALTER DEFAULTS USE ENV glm;
-CREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;
+CREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;
 ALTER PLAYBOOK work
   USE ENV glm
   SET VAR MAX_THINKING_TOKENS=8000
@@ -42,7 +42,7 @@ ALTER PLAYBOOK work
 
 func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	path := writePlaybookFile(t, scratchPlaybook)
 
 	out, err := apply(t, path, "--dry-run")
@@ -65,10 +65,10 @@ func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 		t.Fatalf("apply: %v\n%s", err, out)
 	}
 	e := readEnv(t, filepath.Join(root, "work"))
-	if strings.Join(e.Profiles, ",") != "glm" || e.Set["MAX_THINKING_TOKENS"] != "8000" || strings.Join(e.Unset, ",") != "HTTP_PROXY" {
+	if strings.Join(e.Sets, ",") != "glm" || e.Set["MAX_THINKING_TOKENS"] != "8000" || strings.Join(e.Block, ",") != "HTTP_PROXY" {
 		t.Fatalf("applied block: %#v", e)
 	}
-	if d, _ := envprofile.Defaults(envprofile.Dir(root)); strings.Join(d, ",") != "glm" {
+	if d, _ := envset.Defaults(envset.Dir(root)); strings.Join(d, ",") != "glm" {
 		t.Fatalf("DEFAULTS: %q", d)
 	}
 
@@ -82,18 +82,18 @@ func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 // SHOW CREATE ALL writes a file that APPLY finds already true.
 func TestShowCreateAllRoundTrips(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	helper, _ := fakeHelper(t)
 	if out, err := apply(t, writePlaybookFile(t, scratchPlaybook)); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
 	mustStmt(t, "ALTER PLAYBOOK work SET VAR API_TOKEN FROM keychain:ok/work")
-	writePlaybook(t, root, "src", &manifest.Manifest{Alias: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
+	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 
 	dump := mustStmt(t, "SHOW CREATE ALL")
 	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm\n  SET SECRET HELPER '" + helper + "';",
-		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  ALIAS s;",
+		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  LAUNCHER s;",
 		"SET VAR API_TOKEN FROM 'keychain:ok/work'"} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("SHOW CREATE ALL missing %q:\n%s", want, dump)
@@ -117,8 +117,8 @@ func snapshot(t *testing.T, root string) string {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		if base := filepath.Base(p); base == manifest.FileName || strings.HasSuffix(base, envprofile.FileExt) ||
-			base == envprofile.DefaultMarker || base == envprofile.SecretHelperFile {
+		if base := filepath.Base(p); base == manifest.FileName || strings.HasSuffix(base, envset.FileExt) ||
+			base == envset.DefaultMarker || base == envset.SecretHelperFile {
 			data, _ := os.ReadFile(p)
 			b.WriteString(p + "\n" + string(data) + "\n")
 		}
@@ -179,7 +179,7 @@ func TestApplyWritesNothingOnAParseError(t *testing.T) {
 // A file never consents to DROP PLAYBOOK on its own.
 func TestApplyDropsNeedYes(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{})
 	path := writePlaybookFile(t, "CREATE ENV e;\nDROP PLAYBOOK old;\n")
 
@@ -209,8 +209,8 @@ func TestApplyDropsNeedYes(t *testing.T) {
 // is a warning, never an error, and changes nothing.
 func TestApplyWarnsOnSourceDrift(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	writePlaybook(t, root, "src", &manifest.Manifest{Alias: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 	before := snapshot(t, root)
 
 	same := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS src FROM https://example.com/s.git BRANCH v1;\n")
@@ -238,9 +238,9 @@ func TestApplyWarnsOnSourceDrift(t *testing.T) {
 // how much of each file was applied.
 func TestApplySeveralFiles(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	base := writePlaybookFile(t, "CREATE OR REPLACE ENV base SET A=1;\n")
-	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;\n")
+	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
 	broken := writePlaybookFile(t, "CREATE ENV other;\nALTER ENV other FOO;\n")
 
 	// A later file that does not parse: nothing from the first is written.
@@ -258,7 +258,7 @@ func TestApplySeveralFiles(t *testing.T) {
 	if out, err := apply(t, base, machine); err != nil {
 		t.Fatalf("apply across files: %v\n%s", err, out)
 	}
-	if d, _ := envprofile.Defaults(envprofile.Dir(root)); strings.Join(d, ",") != "base" {
+	if d, _ := envset.Defaults(envset.Dir(root)); strings.Join(d, ",") != "base" {
 		t.Fatalf("DEFAULTS: %q", d)
 	}
 
@@ -287,7 +287,7 @@ func TestApplySeveralFiles(t *testing.T) {
 // so does a dry run.
 func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	helper, _ := fakeHelper(t)
 	path := writePlaybookFile(t, "ALTER DEFAULTS SET SECRET HELPER '"+helper+"';\nCREATE OR REPLACE ENV r;\nALTER ENV r SET TOKEN FROM 'keychain:ok/r';\n")
 	if out, err := apply(t, path, "--dry-run"); err != nil {
@@ -320,7 +320,7 @@ func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 // written, not only against what they would have created.
 func TestApplyDryRunSeesEarlierChanges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "p", &manifest.Manifest{})
 	mustStmt(t, "CREATE ENV a")
 	mustStmt(t, "CREATE ENV b")
@@ -334,7 +334,7 @@ func TestApplyDryRunSeesEarlierChanges(t *testing.T) {
 	if out, err := apply(t, path); err != nil {
 		t.Fatalf("apply: %v\n%s", err, out)
 	}
-	if e := readEnv(t, filepath.Join(root, "q")); strings.Join(e.Profiles, ",") != "b" {
+	if e := readEnv(t, filepath.Join(root, "q")); strings.Join(e.Sets, ",") != "b" {
 		t.Fatalf("applied: %#v", e)
 	}
 }
@@ -356,10 +356,10 @@ func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 }
 
 // SHOW CREATE never prints a source URL's credentials, and keeps the
-// default launcher (named after the playbook) instead of writing NO ALIAS.
+// default launcher (named after the playbook) instead of writing NO LAUNCHER.
 func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "tok", &manifest.Manifest{Source: &manifest.Source{Repository: "https://user:ghp_s3cret@example.com/r.git"}})
 	var err error
 	out := captureStdout(t, func() { err = runStatement(words("SHOW CREATE PLAYBOOK tok")) })
@@ -368,12 +368,12 @@ func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	}
 
 	mustStmt(t, "CREATE PLAYBOOK named")
-	mustStmt(t, "CREATE PLAYBOOK bare NO ALIAS")
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "NO ALIAS") {
-		t.Errorf("the default launcher became NO ALIAS:\n%s", out)
+	mustStmt(t, "CREATE PLAYBOOK bare NO LAUNCHER")
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "NO LAUNCHER") {
+		t.Errorf("the default launcher became NO LAUNCHER:\n%s", out)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "NO ALIAS") {
-		t.Errorf("a playbook with no launcher lost NO ALIAS:\n%s", out)
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "NO LAUNCHER") {
+		t.Errorf("a playbook with no launcher lost NO LAUNCHER:\n%s", out)
 	}
 }
 

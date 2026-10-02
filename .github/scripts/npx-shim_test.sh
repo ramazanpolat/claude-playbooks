@@ -11,7 +11,7 @@ trap 'rm -rf "$t"' EXIT
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$(uname -m)" in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
-asset="claude-playbook-$os-$arch"
+asset="cpb-$os-$arch"
 store="$t/store" # store/<tag>/<asset>, store/<tag>/SHA256SUMS, store/latest
 
 # publish <tag>: a release whose binary prints its own tag and its args.
@@ -61,7 +61,7 @@ run() {
   : > "$t/curl.log"
   set +e
   env PATH="$t/stub:/usr/bin:/bin" HOME="$t/home" FAKE_STORE="$store" \
-    DOWNLOAD_BASE_URL=https://dl.test CPB_NPX_CACHE="$t/cache" CPB_NPX_BOOTSTRAP=0 \
+    CPB_INSTALL_DOWNLOAD_BASE=https://dl.test CPB_NPX_CACHE="$t/cache" CPB_NPX_BOOTSTRAP=0 \
     "$@" sh "$shim" --version > "$t/out" 2> "$t/err"
   rc=$?
   set -e
@@ -92,7 +92,7 @@ check "an unpublished package version falls back" [ $rc = 0 ]
 check "  to the newest published release" out_is "cpb v3.25.0 --version"
 check "  and says so, in one line" err_has "cpb v3.26.0 is not published yet; running v3.25.0"
 check "  after trying its own release first" fetched "https://dl.test/v3.26.0/$asset"
-check "  into the fallback's own cache" [ -x "$t/cache/v3.25.0/claude-playbook" ]
+check "  into the fallback's own cache" [ -x "$t/cache/v3.25.0/cpb" ]
 check "  leaving no temp file behind" sh -c "! ls -A '$t/cache/v3.26.0' 2>/dev/null | grep -q ."
 
 # A second run reuses the fallback's cached binary: no second download.
@@ -126,13 +126,13 @@ check "no fallback when the latest release cannot be read" [ $rc != 0 ]
 check "  it says why" err_has "was found to run instead (latest: none)"
 latest v3.25.0
 
-# An explicit CPB_VERSION is the user's pin: a missing one is an error.
-run CPB_VERSION=v3.26.0
-check "a missing CPB_VERSION is not replaced" [ $rc != 0 ]
+# An explicit CPB_NPX_VERSION is the pilot's pin: a missing one is an error.
+run CPB_NPX_VERSION=v3.26.0
+check "a missing CPB_NPX_VERSION is not replaced" [ $rc != 0 ]
 check "  it names the 404" err_has "v3.26.0 has no $asset (HTTP 404)"
 check "  and runs nothing" out_is ""
-run CPB_VERSION=v3.25.0 npm_package_version=3.26.0
-check "CPB_VERSION wins over the package version" out_is "cpb v3.25.0 --version"
+run CPB_NPX_VERSION=v3.25.0 npm_package_version=3.26.0
+check "CPB_NPX_VERSION wins over the package version" out_is "cpb v3.25.0 --version"
 
 # Only a 404 means "not published": any other failure is an error.
 run npm_package_version=3.26.0 FAKE_HTTP=500
@@ -144,12 +144,12 @@ check "  and does not look up the latest release" sh -c "! grep -q releases/late
 n=$((n + 1)); rm -rf "$t/inst"; : > "$t/curl.log"
 set +e
 env PATH="$t/stub:/usr/bin:/bin" HOME="$t/home" FAKE_STORE="$store" \
-  DOWNLOAD_BASE_URL=https://dl.test CPB_NPX_INSTALL_DIR="$t/inst" npm_package_version=3.26.0 \
+  CPB_INSTALL_DOWNLOAD_BASE=https://dl.test CPB_NPX_INSTALL_DIR="$t/inst" npm_package_version=3.26.0 \
   sh "$shim" --version > "$t/out" 2> "$t/err"
 rc=$?
 set -e
 check "bootstrap falls back too" out_is "cpb v3.25.0 --version"
-check "  and installs it, with the cpb link" sh -c "[ -x '$t/inst/claude-playbook' ] && [ -L '$t/inst/cpb' ]"
-check "  naming the release it installed" err_has "Installed claude-playbook v3.25.0"
+check "  and installs it as cpb, the only name" sh -c "[ -x '$t/inst/cpb' ] && [ ! -L '$t/inst/cpb' ] && [ \"\$(ls '$t/inst')\" = cpb ]"
+check "  naming the release it installed" err_has "Installed cpb v3.25.0"
 
 exit $fail

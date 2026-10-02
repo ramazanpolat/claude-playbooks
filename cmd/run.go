@@ -12,7 +12,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -34,6 +34,17 @@ var runCmd = &cobra.Command{
 func errConfigDirOverrideSandbox() error {
 	return fmt.Errorf("%s and a sandboxed launch together are not supported: a sandbox mounts the config directory, and content reached through symlinks dangles inside it. Launch on the host, or unset %s",
 		config.ConfigDirOverrideEnv, config.ConfigDirOverrideEnv)
+}
+
+// refuseUnreadableManifest refuses a launch of dir while a manifest that
+// would govern it, or one on the way up, cannot be read. It may ask for an
+// isolated login or a sandbox, and launching as if it said nothing would
+// hand over the shared login, or run on the host.
+func refuseUnreadableManifest(dir string) error {
+	if _, _, err := manifest.NearestPath(dir); err != nil {
+		return fmt.Errorf("%w. cpb does not launch over a manifest it cannot read: it may ask for an isolated login or a sandbox", err)
+	}
+	return nil
 }
 
 // onLaunch, when set, is told the session's process once it starts: cpb
@@ -70,19 +81,19 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// A --help at the NAME position prints usage, whether or not launch
 	// flags preceded it; after the name it belongs to claude.
 	if restRequestsHelp(rest) {
-		fmt.Println("Usage: claude-playbook run " + runFlagsUsage + " <name> [claude-flags...]")
+		fmt.Println("Usage: cpb run " + runFlagsUsage + " <name> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Runs Claude Code with the named playbook.")
 		fmt.Println("Launch flags add one-off environment layers on top of the playbook's [env]")
 		fmt.Println("block, in order, for this launch only; they go before the name or right after it.")
-		fmt.Println("  --env-profile NAME   layer an existing env profile")
+		fmt.Println("  --env-set NAME   layer an existing env set")
 		fmt.Println("  --env KEY=VALUE      set one variable")
-		fmt.Println("  --unset KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")
+		fmt.Println("  --block KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
 		fmt.Println("Sandbox flags run the playbook inside a sandbox (backend sbx, Docker Sandboxes):")
-		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use); --sbx is a synonym")
+		fmt.Println("  --sandbox[=BACKEND]  launch in the playbook's sandbox cpb-<name> (created on first use)")
 		fmt.Println("  --no-sandbox         launch on the host although the manifest says [sandbox] always = true")
-		fmt.Println("  --sandbox-host U@H   run the sandboxed launch on that machine over ssh (claude-playbook and the playbook installed there)")
+		fmt.Println("  --sandbox-host U@H   run the sandboxed launch on that machine over ssh (cpb and the playbook installed there)")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
 		fmt.Println("  --clone              at creation, work on a private clone of the working directory's repo")
 		fmt.Println("  --workdir PATH       working directory to mount and enter (default: current directory)")
@@ -92,7 +103,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(rest) == 0 {
-		return fmt.Errorf("playbook name required\nUsage: claude-playbook run " + runFlagsUsage + " <name> [claude-flags...]")
+		return fmt.Errorf("playbook name required\nUsage: cpb run " + runFlagsUsage + " <name> [claude-flags...]")
 	}
 	name := rest[0]
 	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts, nil)
@@ -128,7 +139,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if pb == nil {
-		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
+		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", name)
+	}
+
+	// Before the sandbox decision: a manifest on the way up may ask for
+	// one, or for an isolated login.
+	guardDir := pb.Path
+	if override {
+		guardDir = overrideDir
+	}
+	if err := refuseUnreadableManifest(guardDir); err != nil {
+		return err
 	}
 
 	var sbm *manifest.Sandbox
@@ -143,6 +164,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if override {
 			return errConfigDirOverrideSandbox()
 		}
+		resumeNote(claudeArgs)
 		if host := sandboxHost(sbm, &sopts); host != "" {
 			return forwardToSandboxHost(host, "run", original, &sopts, tokens, nil, name, claudeArgs)
 		}
@@ -216,7 +238,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
 	eff, perr := auth.EffectiveBlock(configDir, layers)
-	if errors.Is(perr, envprofile.ErrProfile) {
+	if errors.Is(perr, envset.ErrSet) {
 		return perr
 	}
 	// Secret references exec the launch through the helper; with none
@@ -226,12 +248,22 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// A --resume or --continue of a session still live elsewhere is refused
+	// before anything is mutated (resume.go).
+	sd := playbookSessionDir(pb)
+	if override {
+		sd = sessionDir{label: configDir, path: configDir}
+	}
+	if err := guardResume(sd, claudeArgs); err != nil {
+		return err
+	}
+
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configDir, layers)
-	if errors.Is(syncErr, envprofile.ErrProfile) {
+	if errors.Is(syncErr, envset.ErrSet) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
 		// wrong credentials -- refuse, do not warn.
@@ -240,7 +272,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if syncErr != nil {
 		// Neutral wording: PrepareLaunchEnv may have been syncing credentials,
 		// account metadata, or detaching for an isolated playbook. Naming
-		// credentials specifically sent users after credential files and symlinks
+		// credentials specifically sent pilots after credential files and symlinks
 		// for failures in paths where credential syncing was deliberately skipped.
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
@@ -250,13 +282,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
-	since := time.Now()
-	err = preserveExitCode(runAttached(c))
 	// The exit line names the command that resumes this session in this
 	// playbook; a caller-supplied config dir is not the playbook's, so
 	// that launch gets none.
-	if !override && !playSessionRunning {
-		printResumeLine(playbookSessionDir(pb), claudeArgs, since)
+	exitLine := !override && !playSessionRunning && wantsResumeLine(claudeArgs)
+	var before map[string]time.Time
+	if exitLine {
+		before = transcriptStamps(sd.path)
+	}
+	err = preserveExitCode(runAttached(c))
+	if exitLine {
+		printResumeLine(sd, before)
 	}
 	return err
 }

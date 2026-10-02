@@ -1,8 +1,6 @@
-# claude-playbooks own-arena suite 4: `install` from a local directory.
-# The target dir name comes from the fixture's .playbook manifest (not
-# the source dir name), the copy is faithful (diff -r), the launcher
-# lands, and delete -y removes the playbook (the launcher is kept by
-# design and cleaned explicitly, as the product itself suggests).
+# claude-playbooks own-arena suite 4: CREATE PLAYBOOK … FROM a local
+# directory. The copy is faithful (diff -r), the launcher lands, and DROP
+# PLAYBOOK --yes removes the playbook and its launcher.
 # Mid-sequence state is proven inside chained commands — gentar runs
 # verify.files (post-steps only) before verify.commands.
 
@@ -13,8 +11,8 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   '''FIX="$HOME/fixture-src"; mkdir -p "$FIX/skills/demo"; printf 'name = "fixture-pb"\n' > "$FIX/.playbook"; printf '# fixture playbook\n' > "$FIX/CLAUDE.md"; printf '# demo skill\n' > "$FIX/skills/demo/SKILL.md"''',
 ]
 
@@ -23,15 +21,15 @@ steps = [
 path = "~/fixture-src/.playbook"
 
 [[verify.commands]]
-# Manifest names the target: fixture-src -> fixture-pb.
-command = 'claude-playbook install "$HOME/fixture-src" && test -f "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && test -f "$HOME/.claude-playbooks/fixture-pb/skills/demo/SKILL.md" && echo installed'
+# The statement names the target: fixture-src -> fixture-pb.
+command = 'cpb CREATE PLAYBOOK fixture-pb FROM "$HOME/fixture-src" && test -f "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && test -f "$HOME/.claude-playbooks/fixture-pb/skills/demo/SKILL.md" && echo installed'
 
 [[verify.commands]]
 command = 'test -x "$HOME/.local/bin/fixture-pb" && echo launcher-ok'
 contains = "launcher-ok"
 
 [[verify.commands]]
-command = 'claude-playbook list | grep -F fixture-pb'
+command = 'cpb SHOW PLAYBOOKS | grep -F fixture-pb'
 contains = "fixture-pb"
 
 [[verify.commands]]
@@ -39,7 +37,6 @@ command = 'diff -r "$HOME/fixture-src" "$HOME/.claude-playbooks/fixture-pb" >/de
 contains = "faithful"
 
 [[verify.commands]]
-# -y: headless delete; the kept launcher is removed explicitly after,
-# exactly as the product's own removal hint suggests.
-command = 'claude-playbook delete fixture-pb -y && rm -f "$HOME/.local/bin/fixture-pb" && test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo clean'
+# --yes: a headless DROP; the launcher named for the playbook goes with it.
+command = 'cpb DROP PLAYBOOK fixture-pb --yes && test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo clean'
 contains = "clean"

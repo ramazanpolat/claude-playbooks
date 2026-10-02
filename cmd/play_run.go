@@ -16,8 +16,9 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
 )
 
@@ -104,7 +105,7 @@ func playConfirm(res *play.Result, interactive bool) error {
 }
 
 // playConfirmAsk is playConfirm with the yes question given (--keep and
-// --update ask their own).
+// cpb update ask their own).
 func playConfirmAsk(res *play.Result, interactive bool, question string) error {
 	typed := playConfirmations(res)
 	if !interactive {
@@ -209,20 +210,20 @@ func pidAlive(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-// copyEnvSets copies the --env sets from the user's store into the
+// copyEnvSets copies the --env-set sets from the pilot's store into the
 // throwaway one, so the played playbook can USE them; it returns the keys
 // they set, which the credential BLOCK must leave alone.
 func copyEnvSets(userStore, store string) (map[string]bool, error) {
 	keys := map[string]bool{}
 	for _, name := range playEnvSets {
-		p, err := envprofile.Read(envprofile.Dir(userStore), name)
+		p, err := envset.Read(envset.Dir(userStore), name)
 		if err != nil {
 			return nil, err
 		}
 		if p == nil {
-			return nil, fmt.Errorf("--env %s: no such env set (SHOW ENVS)", name)
+			return nil, fmt.Errorf("--env-set %s: no such env set (SHOW ENVS)", name)
 		}
-		if err := envprofile.Write(envprofile.Dir(store), p); err != nil {
+		if err := envset.Write(envset.Dir(store), p); err != nil {
 			return nil, err
 		}
 		e := p.Env()
@@ -287,12 +288,22 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 		if guard.isCancelled() {
 			return errPlayCancelled
 		}
-		// Apply the same bytes for real, in the throwaway store.
+		// Apply the same bytes for real, in the throwaway store. Its report
+		// repeats the plan just shown, and names a playbook about to be
+		// removed ("Run with: …"), so it is kept, and shown only on failure.
+		logf, err := os.Create(filepath.Join(dir, "apply.log"))
+		if err != nil {
+			return err
+		}
 		stdout := os.Stdout
-		os.Stdout = os.Stderr
+		os.Stdout = logf
 		err = applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, Yes: true}, nil)
 		os.Stdout = stdout
+		logf.Close()
 		if err != nil {
+			if b, rerr := os.ReadFile(logf.Name()); rerr == nil {
+				os.Stderr.Write(b)
+			}
 			return err
 		}
 		pbDir := filepath.Join(config.ResolvePlaybooksDir(), name)
@@ -432,7 +443,7 @@ func writePlayFiles(dir string, src *play.Source, rec *play.Recipe, setupText st
 	return setup, recipe, nil
 }
 
-// playSetupFor is playSetup with the --env sets attached and their keys
+// playSetupFor is playSetup with the --env-set sets attached and their keys
 // left out of the credential BLOCK.
 func playSetupFor(name string, res *play.Result, envSets []string, keep map[string]bool) string {
 	text := playSetupKeeping(name, res, keep)
@@ -450,20 +461,15 @@ var (
 )
 
 // playSandboxAvailable reports whether a backend can run here (a test
-// replaces it): sbx on PATH, or OpenShell's preflight.
+// replaces it): sbx on PATH.
 var playSandboxAvailable = func(kind string) error {
-	switch kind {
-	case "sbx":
-		_, err := exec.LookPath("sbx")
-		if err != nil {
-			return errors.New("'sbx' (Docker Sandboxes) is not installed")
-		}
-		return nil
-	case "openshell":
-		_, err := openshellPreflight()
-		return err
+	if kind != "sbx" {
+		return fmt.Errorf("unknown sandbox backend %q (available: %s)", kind, strings.Join(manifest.SandboxBackends, ", "))
 	}
-	return fmt.Errorf("unknown sandbox backend %q", kind)
+	if _, err := exec.LookPath("sbx"); err != nil {
+		return errors.New("'sbx' (Docker Sandboxes) is not installed")
+	}
+	return nil
 }
 
 // playSandbox is where a play runs: a backend, or "" for this machine,
@@ -474,8 +480,7 @@ type playSandbox struct {
 }
 
 // choosePlaySandbox decides where a play runs. The sandbox is the default
-// wherever a backend is available (sbx, or OpenShell where its preflight
-// passes); --no-sandbox opts out, said plainly; a recipe that asks for a
+// wherever sbx is available; --no-sandbox opts out, said plainly; a recipe that asks for a
 // sandbox (create-with: SANDBOX) is refused where none is available. A
 // recipe with secret references cannot run sandboxed yet (a sandboxed
 // launch cannot resolve them), so it is refused there too, never quietly
@@ -495,11 +500,8 @@ func choosePlaySandbox(res *play.Result) (playSandbox, error) {
 	var backend string
 	switch playSandboxFlag {
 	case "", "auto":
-		for _, k := range []string{"sbx", "openshell"} {
-			if playSandboxAvailable(k) == nil {
-				backend = k
-				break
-			}
+		if playSandboxAvailable("sbx") == nil {
+			backend = "sbx"
 		}
 	default:
 		if err := playSandboxAvailable(playSandboxFlag); err != nil {
@@ -509,9 +511,9 @@ func choosePlaySandbox(res *play.Result) (playSandbox, error) {
 	}
 	if backend == "" {
 		if wants {
-			return playSandbox{}, errors.New("the recipe asks to run sandboxed (create-with: SANDBOX), and no sandbox is available here (sbx, or OpenShell on Linux): install one, or run it on this machine with --no-sandbox")
+			return playSandbox{}, errors.New("the recipe asks to run sandboxed (create-with: SANDBOX), and no sandbox is available here (sbx): install it, or run it on this machine with --no-sandbox")
 		}
-		return playSandbox{Note: "No sandbox available here (sbx, or OpenShell on Linux): this agent will run on your machine, as you."}, nil
+		return playSandbox{Note: "No sandbox available here (sbx): this agent will run on your machine, as you."}, nil
 	}
 	var refs []string
 	for _, r := range res.Risks {

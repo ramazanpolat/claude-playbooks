@@ -36,6 +36,13 @@ func TestResolve(t *testing.T) {
 	if got, _ := Resolve("./x/My Recipe.cpb", "v3.28.0"); got == nil || got.Kind != KindLocal || got.Name != "my-recipe" || !filepath.IsAbs(got.Path) {
 		t.Errorf("local: %+v", got)
 	}
+	// A bare x.cpb or dir/x.cpb is a path too: a template name has no dot
+	// or slash, and every other form a scheme.
+	for _, ref := range []string{"reviewer.cpb", "recipes/reviewer.cpb", "recipes/reviewer"} {
+		if got, err := Resolve(ref, "v4.0.0"); err != nil || got.Kind != KindLocal || got.Name != "reviewer" || !filepath.IsAbs(got.Path) {
+			t.Errorf("%s: %+v %v", ref, got, err)
+		}
+	}
 	for ref, want := range map[string]string{
 		"":                                "play what?",
 		"http://example.com/x.cpb":        "https only",
@@ -48,7 +55,6 @@ func TestResolve(t *testing.T) {
 		"github:acme/agents/rev.cpb@-x":   "github:<owner>/<repo>/<path>.cpb",
 		"github:acme/agents/rev.cpb@a..b": "github:<owner>/<repo>/<path>.cpb",
 		"Reviewer":                        "is not a template name",
-		"reviewer.cpb":                    "is not a template name",
 	} {
 		if _, err := Resolve(ref, "v3.28.0"); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", ref, err, want)
@@ -148,7 +154,7 @@ func TestReadLocal(t *testing.T) {
 }
 
 func TestHeader(t *testing.T) {
-	h := ParseHeader([]byte("-- title: Code reviewer\n-- description: Reads code.\n-- needs: a helper for keychain:x\n-- create-with: SANDBOX NO PILOT PROFILE\n-- min-cpb: 3.28.0\n-- colour: blue\n\n-- title: not header\nALTER PLAYBOOK SET MODEL 'x';\n"))
+	h := ParseHeader([]byte("-- title: Code reviewer\n-- description: Reads code.\n-- needs: a helper for keychain:x\n-- create-with: SANDBOX\n-- min-cpb: 3.28.0\n-- colour: blue\n\n-- title: not header\nALTER PLAYBOOK SET MODEL 'x';\n"))
 	if h.Title != "Code reviewer" || h.Description != "Reads code." || h.Needs != "a helper for keychain:x" || !h.WantsSandbox() || h.MinCPB != "3.28.0" || len(h.Unknown) != 1 || h.Unknown[0] != "colour" {
 		t.Fatalf("header: %+v", h)
 	}
@@ -230,12 +236,12 @@ func TestCheckRisks(t *testing.T) {
   ADD MARKETPLACE acme FROM 'github:acme/plugins#v1'
   ADD PLUGIN tool@acme
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'files-server'
-  ADD MCP SERVER gh URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:pilot/github-mcp'
+  ADD MCP SERVER gh URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
   ALLOW TOOL 'Bash' 'Bash(python3 *)' 'Write(~/**)' 'WebFetch' 'Bash(gh pr view *)'
   SET STATUSLINE 'bash ~/bin/sl.sh'
   ADD SKILL review FROM 'https://github.com/acme/skills' SUBDIR review
   SET VAR SENTRY_URL=https://sentry.example.com/1 OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com
-  SET VAR GH_TOKEN FROM 'keychain:pilot/gh';
+  SET VAR GH_TOKEN FROM 'keychain:gh';
 `
 	r := Check([]byte(src))
 	if len(r.Refused) != 0 {
@@ -259,7 +265,7 @@ func TestCheckRisks(t *testing.T) {
 			header = &r.Risks[i]
 		}
 	}
-	if header == nil || header.Confirm != "keychain:pilot/github-mcp" || !strings.Contains(header.Detail, "HEADER Authorization, to api.githubcopilot.com") {
+	if header == nil || header.Confirm != "keychain:github-mcp" || !strings.Contains(header.Detail, "HEADER Authorization, to api.githubcopilot.com") {
 		t.Fatalf("the header reference: %+v", header)
 	}
 	if r.Endpoint != "" {
@@ -314,12 +320,32 @@ func TestWideAllow(t *testing.T) {
 	}
 }
 
-// NO ALIAS is harmless in a recipe (play makes no launcher anyway).
+// NO LAUNCHER is harmless in a recipe (play makes no launcher anyway).
 func TestCheckNoAlias(t *testing.T) {
-	if r := Check([]byte("ALTER PLAYBOOK NO ALIAS SET MODEL 'm';\n")); len(r.Refused) != 0 {
-		t.Fatalf("NO ALIAS: %+v", r.Refused)
+	if r := Check([]byte("ALTER PLAYBOOK NO LAUNCHER SET MODEL 'm';\n")); len(r.Refused) != 0 {
+		t.Fatalf("NO LAUNCHER: %+v", r.Refused)
 	}
-	if r := Check([]byte("ALTER PLAYBOOK ALIAS x;\n")); len(r.Refused) != 1 {
-		t.Fatalf("ALIAS: %+v", r.Refused)
+	if r := Check([]byte("ALTER PLAYBOOK LAUNCHER x;\n")); len(r.Refused) != 1 {
+		t.Fatalf("LAUNCHER: %+v", r.Refused)
+	}
+}
+
+// After a template miss: close names from the index, nothing for a name
+// close to none.
+func TestSuggest(t *testing.T) {
+	idx := []byte("code-reviewer\nglm-router\nsre-sandbox\nwriter\n")
+	for name, want := range map[string]string{
+		"reviewer":    "code-reviewer",
+		"code-review": "code-reviewer",
+		"writr":       "writer",
+		"sre":         "sre-sandbox",
+		"kubernetes":  "",
+	} {
+		if got := strings.Join(Suggest(idx, name), ","); got != want {
+			t.Errorf("%s: %q, want %q", name, got, want)
+		}
+	}
+	if got := IndexURL("https://raw.githubusercontent.com/o/r/v4.0.0/site/p/x.cpb"); got != "https://raw.githubusercontent.com/o/r/v4.0.0/site/p/index.txt" {
+		t.Errorf("index URL: %s", got)
 	}
 }

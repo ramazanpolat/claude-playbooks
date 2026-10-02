@@ -1,5 +1,5 @@
-// Package shell edits the user's shell rc files in the one narrow way this
-// tool still touches them: removing the exact completion lines a user (or a
+// Package shell edits the pilot's shell rc files in the one narrow way this
+// tool still touches them: removing the exact completion lines a pilot (or a
 // pre-3.x installer) added. Playbook commands are launcher symlinks and
 // manifest aliases — nothing here writes command definitions into rc files.
 //
@@ -16,7 +16,7 @@ import (
 )
 
 // QuoteArg renders s as a single shell word. Use it for any value
-// interpolated into a command the user is told to run.
+// interpolated into a command the pilot is told to run.
 func QuoteArg(s string) string { return shellQuote(s) }
 
 func shellQuote(s string) string {
@@ -108,7 +108,7 @@ func writeLines(path string, lines []string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".claude-playbook-shell-*")
+	tmp, err := os.CreateTemp(dir, ".cpb-shell-*")
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,7 @@ func withConfigLock(configFile string, fn func() error) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(configFile+".claude-playbook.lock", os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(configFile+".cpb.lock", os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}

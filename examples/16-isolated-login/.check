@@ -1,7 +1,7 @@
 p="$HOME/.claude-playbooks"
-grep -qx 'isolate_auth = true' "$p/other-account/.playbook"
-grep -qx 'isolate_auth = true' "$p/scratch/.playbook"
-cpb SHOW PLAYBOOK scratch --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["isolated_login"] is True and v["sandbox"] is False, v'
+grep -qx 'isolated_login = true' "$p/other-account/.playbook"
+grep -qx 'isolated_login = true' "$p/scratch/.playbook"
+cpb SHOW PLAYBOOK scratch --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["isolated_login"] is True and v["sandbox"]["always"] is False, v'
 cpb EXPLAIN PLAYBOOK scratch | grep -q '^Login: isolated'
 cpb SHOW CREATE PLAYBOOK scratch | grep -qx '  SET ISOLATED LOGIN;'
 # A login of its own blocks UNSET: a shared launch would copy it over the
@@ -12,4 +12,4 @@ grep -q 'has a login of its own' "$HOME/unset.err"
 # Logged out, it goes through; the next launch links the shared login again.
 rm "$p/scratch/.credentials.json"
 cpb "ALTER PLAYBOOK scratch UNSET ISOLATED LOGIN"
-if grep -q 'isolate_auth' "$p/scratch/.playbook"; then echo "isolate_auth left"; exit 1; fi
+if grep -q 'isolated_login' "$p/scratch/.playbook"; then echo "isolated_login left"; exit 1; fi

@@ -4,8 +4,7 @@
 # build.sh emits the binary at the repo root; the release workflow cross-compiles
 # into dist/. These are anchored with a leading slash: as bare patterns they
 # would match a file or directory of that name at ANY depth, so a future
-# cmd/claude-playbook/ package would be silently dropped from the tree.
-/claude-playbook
+# cmd/cpb/ package would be silently dropped from the tree.
 /cpb
 /bin/test-cpb
 /dist/
@@ -56,7 +55,7 @@ id_ed25519
 # highest-value thing in the tree to keep out of git.
 #
 # Anchored to the repo root, which is where Claude Code actually writes, so
-# these can never collide with a test fixture of the same name under tests/.
+# these can never match a directory of the same name deeper in the tree.
 /projects/
 /file-history/
 /shell-snapshots/
@@ -90,6 +89,6 @@ docs/demo/cpb-linux
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Local, untracked agent notes (per Kommander's CLAUDE.local.md convention)
+# Local, untracked agent notes
 # ---------------------------------------------------------------------------
 /CLAUDE.local.md

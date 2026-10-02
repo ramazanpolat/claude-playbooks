@@ -6,7 +6,6 @@ import (
 	"flag"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -48,42 +47,36 @@ func (f *fakeRunner) Run(args ...string) ([]byte, error) {
 // The fixture is what cpb's --json prints: a credential is already
 // redacted (no value), a reference is a reference.
 const fixturePlaybooks = `[
- {"name":"kommander-dev","version":"v3.11.4","path":"/home/p/.claude-playbooks/kommander-dev","source":{"url":"https://github.com/ramazanpolat/kommander-playbook","branch":"v3.11.4","subdir":null},"linked":null,"launcher":"kd","envs":[],"vars":[],"sandbox":false,"isolated_login":false,"marketplaces":[],"plugins":[],"agent":null,"mcp_servers":[],"tools":{"allow":["Bash(git:*)"],"deny":[]},"skills":[],"statusline":"\"$HOME/.local/bin/statusmux\" render","statusline_refresh":10,"statusline_history":[{"command":"echo old","refresh":null,"replaced_at":"2026-09-27T10:00:00Z"}],"panels":[{"panel":"local.clock","type":"exec","source":"config","cpb":true,"row":1,"priority":60,"align":"right"}],"model":"claude-opus-5-5","model_picker":null,"pilot_profile":"imported"},
- {"name":"router","version":null,"path":"/home/p/.claude-playbooks/router","source":null,"linked":null,"launcher":"k9","envs":["9router"],"vars":[{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true},{"key":"MY_FLAG","value":"1"}],"sandbox":false,"isolated_login":true,"marketplaces":[{"name":"agentship","source":{"source":"github","repo":"x/y"}}],"plugins":[{"id":"kommander@agentship","enabled":true}],"agent":"kommander:k","mcp_servers":[{"name":"sentry","transport":"http","url":"https://mcp.sentry.dev/mcp","env":[],"headers":[{"key":"Authorization","ref":"keychain:pilot/sentry"}]}],"tools":{"allow":[],"deny":[]},"skills":[{"name":"notes","source":"/home/p/notes","branch":null,"subdir":null,"mode":"link"}],"statusline":null,"statusline_refresh":null,"statusline_history":[],"panels":[],"model":"glm-5.3","model_picker":{"mode":"append","options":[{"model":"glm-5.3","label":"GLM","description":null,"behaves_as":null}]},"pilot_profile":"not_imported"}
+ {"name":"alpha","version":"v1.2.0","path":"/home/me/.claude-playbooks/alpha","source":{"url":"https://github.com/example/work-playbook","branch":"v1.2.0","subdir":null},"linked":null,"launcher":"al","envs":[],"vars":[],"sandbox":{"always":false},"isolated_login":false,"marketplaces":[],"plugins":[],"agent":null,"mcp_servers":[],"tools":{"allow":["Bash(git:*)"],"deny":[]},"skills":[],"statusline":"$HOME/bin/my-status","statusline_refresh":10,"statusline_history":[{"command":"echo old","refresh":null,"replaced_at":"2026-09-27T10:00:00Z"}],"model":"claude-opus-5-5","model_picker":null},
+ {"name":"router","version":null,"path":"/home/me/.claude-playbooks/router","source":null,"linked":null,"launcher":"rt","envs":["proxy"],"vars":[{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true},{"key":"MY_FLAG","value":"1"}],"sandbox":{"always":false},"isolated_login":true,"marketplaces":[{"name":"team","source":{"source":"github","repo":"x/y"}}],"plugins":[{"id":"reviewer@team","enabled":true}],"agent":"reviewer:reviewer","mcp_servers":[{"name":"sentry","transport":"http","url":"https://mcp.sentry.dev/mcp","env":[],"headers":[{"key":"Authorization","ref":"keychain:sentry"}]}],"tools":{"allow":[],"deny":[]},"skills":[{"name":"notes","source":"/home/me/notes","branch":null,"subdir":null,"mode":"link"}],"statusline":null,"statusline_refresh":null,"statusline_history":[],"model":"glm-5.3","model_picker":{"mode":"append","options":[{"model":"glm-5.3","label":"GLM","description":null,"behaves_as":null}]}}
 ]`
 
 const fixtureSessions = `[
- {"playbook":"kommander-dev","config_dir":"/home/p/.claude-playbooks/kommander-dev","pid":47904,"session_id":"08c4811b-3867-4f18-b08f-de6d1e07395f","cwd":"/home/p/DEV/claude-playbooks","kind":"interactive","status":"busy","name":"cp-3c","claude_version":"2.1.283","started_at":"2026-09-28T03:00:00.000Z","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","launcher":"kd","resume":"kd --resume 08c4811b-3867-4f18-b08f-de6d1e07395f","tty":"ttys039"},
- {"playbook":"router","config_dir":"/home/p/.claude-playbooks/router","pid":43627,"session_id":"e7377ba9-434b-4ff2-a592-dd0da81f6e2f","cwd":"/home/p/DEV/claude-playbooks","kind":"bg","status":"idle","name":null,"claude_version":"2.1.283","started_at":"2026-09-26T12:00:00.000Z","last_active":"2026-09-28T11:32:00.000Z","model":"glm-5.3","launcher":"k9","resume":"k9 --resume e7377ba9-434b-4ff2-a592-dd0da81f6e2f","tty":null}
+ {"playbook":"alpha","config_dir":"/home/me/.claude-playbooks/alpha","pid":47904,"session_id":"08c4811b-3867-4f18-b08f-de6d1e07395f","cwd":"/home/me/DEV/app","kind":"interactive","status":"busy","name":"release","claude_version":"2.1.283","started_at":"2026-09-28T03:00:00.000Z","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","launcher":"al","resume":"cd '/home/me/DEV/app' && al --resume 08c4811b-3867-4f18-b08f-de6d1e07395f","tty":"ttys039"},
+ {"playbook":"router","config_dir":"/home/me/.claude-playbooks/router","pid":43627,"session_id":"e7377ba9-434b-4ff2-a592-dd0da81f6e2f","cwd":"/home/me/DEV/app","kind":"bg","status":"idle","name":null,"claude_version":"2.1.283","started_at":"2026-09-26T12:00:00.000Z","last_active":"2026-09-28T11:32:00.000Z","model":"glm-5.3","launcher":"rt","resume":"cd '/home/me/DEV/app' && rt --resume e7377ba9-434b-4ff2-a592-dd0da81f6e2f","tty":null}
 ]`
 
 const fixtureEnvs = `[
- {"name":"9router","description":"LLM proxy on tr0","vars":[{"key":"ANTHROPIC_BASE_URL","value":"http://tr0:20128/v1"},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:pilot/9r"}],"used_by":["router"],"default":false},
+ {"name":"proxy","description":"LLM proxy","vars":[{"key":"ANTHROPIC_BASE_URL","value":"http://localhost:8080/v1"},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:proxy-token"}],"used_by":["router"],"default":false},
  {"name":"base","description":"","vars":[{"key":"X","value":"1"}],"used_by":[],"default":true}
 ]`
 
-const fixtureDefaults = `{"envs":["base"],"secret_helper":{"command":"with-secret","from":"setting"}}`
+const fixtureDefaults = `{"envs":["base"],"secret_helper":{"command":"cpb-secret-file","from":"setting"}}`
 
-const fixtureExplain = `{"playbook":"router","vars":[{"key":"X","value":"1","layer":{"kind":"DEFAULTS","name":"base"}},{"key":"ANTHROPIC_BASE_URL","value":"http://tr0:20128/v1","layer":{"kind":"ENV","name":"9router"}},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:pilot/9r","layer":{"kind":"ENV","name":"9router"}},{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true,"layer":{"kind":"PLAYBOOK"}},{"key":"MY_FLAG","value":"1","layer":{"kind":"PLAYBOOK"}}],"secret_helper":null}`
+const fixtureExplain = `{"playbook":"router","vars":[{"key":"X","value":"1","layer":{"kind":"defaults","name":"base"}},{"key":"ANTHROPIC_BASE_URL","value":"http://localhost:8080/v1","layer":{"kind":"env","name":"proxy"}},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:proxy-token","layer":{"kind":"env","name":"proxy"}},{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true,"layer":{"kind":"playbook"}},{"key":"MY_FLAG","value":"1","layer":{"kind":"playbook"}}],"secret_helper":null}`
 
-const fixtureRecent = `[
- {"playbook":"kommander-dev","config_dir":"/home/p/.claude-playbooks/kommander-dev","session_id":"08c4811b-3867-4f18-b08f-de6d1e07395f","cwd":"/home/p/DEV/claude-playbooks","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","title":"Open task claude-playbooks-cli","launcher":"kd","live":true,"pid":47904,"resume":"kd --resume 08c4811b"},
- {"playbook":"kommander-dev","config_dir":"/home/p/.claude-playbooks/kommander-dev","session_id":"d0a04774-d6ed-49f7-bb32-3c57962348fa","cwd":"/home/p/DEV/claude-playbooks","last_active":"2026-09-24T09:00:00.000Z","model":"claude-opus-5-5","title":"Cpb-env-redact-secrets","launcher":"kd","live":false,"pid":null,"resume":"kd --resume d0a04774"}
-]`
-
-const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router ALIAS k9;\nALTER PLAYBOOK router USE ENV 9router SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
+const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router LAUNCHER rt;\nALTER PLAYBOOK router USE ENV proxy SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
 
 func fixture() *fakeRunner {
 	f := &fakeRunner{out: map[string]string{
-		"SHOW PLAYBOOKS --json":                             fixturePlaybooks,
-		"SHOW SESSIONS --json":                              fixtureSessions,
-		"SHOW ENVS --json":                                  fixtureEnvs,
-		"SHOW DEFAULTS --json":                              fixtureDefaults,
-		"EXPLAIN PLAYBOOK router --json":                    fixtureExplain,
-		"RESUME --list --json":                              fixtureRecent,
-		"SHOW CREATE PLAYBOOK router --skip-secrets":        fixtureCreate,
-		"SHOW CREATE ENV 9router --skip-secrets":            "CREATE ENV IF NOT EXISTS 9router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/9r';\n",
-		"SHOW CREATE PLAYBOOK kommander-dev --skip-secrets": "CREATE PLAYBOOK IF NOT EXISTS kommander-dev ALIAS kd;\n",
+		"SHOW PLAYBOOKS --json":                      fixturePlaybooks,
+		"SHOW SESSIONS --json":                       fixtureSessions,
+		"SHOW ENVS --json":                           fixtureEnvs,
+		"SHOW DEFAULTS --json":                       fixtureDefaults,
+		"EXPLAIN PLAYBOOK router --json":             fixtureExplain,
+		"SHOW CREATE PLAYBOOK router --skip-secrets": fixtureCreate,
+		"SHOW CREATE ENV proxy --skip-secrets":       "CREATE ENV IF NOT EXISTS proxy SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:proxy-token';\n",
+		"SHOW CREATE PLAYBOOK alpha --skip-secrets":  "CREATE PLAYBOOK IF NOT EXISTS alpha LAUNCHER al;\n",
 	}}
 	singular(f, fixturePlaybooks)
 	return f
@@ -106,26 +99,21 @@ func singular(f *fakeRunner, all string) {
 }
 
 type harness struct {
-	t       *testing.T
-	m       Model
-	r       *fakeRunner
-	clip    []string
-	resumed [][]string
+	t    *testing.T
+	m    Model
+	r    *fakeRunner
+	clip []string
 }
 
 func newHarness(t *testing.T, w, h int) *harness {
-	return newHarnessIn(t, w, h, "/home/p/DEV/claude-playbooks")
+	return newHarnessIn(t, w, h, "/home/me/DEV/app")
 }
 
 func newHarnessIn(t *testing.T, w, h int, cwd string) *harness {
 	t.Helper()
 	hs := &harness{t: t, r: fixture()}
-	o := Options{Runner: hs.r, Now: func() time.Time { return now }, Home: "/home/p", Cwd: cwd, Poll: time.Nanosecond, NoColor: true,
-		Clipboard: func(s string) error { hs.clip = append(hs.clip, s); return nil },
-		Resume: func(args ...string) *exec.Cmd {
-			hs.resumed = append(hs.resumed, args)
-			return exec.Command("true")
-		}}
+	o := Options{Runner: hs.r, Now: func() time.Time { return now }, Home: "/home/me", Cwd: cwd, Poll: time.Nanosecond, NoColor: true,
+		Clipboard: func(s string) error { hs.clip = append(hs.clip, s); return nil }}
 	hs.m = New(o)
 	hs.send(tea.WindowSizeMsg{Width: w, Height: h})
 	st, err := loadState(hs.r)
@@ -158,9 +146,7 @@ func (hs *harness) run(cmd Cmd) {
 	case nil, tickMsg, tea.QuitMsg:
 		return
 	}
-	// tea.ExecProcess's message starts a process in a real program (the
-	// harness records the resume in Options.Resume), and tea's own
-	// messages (SetClipboard) are the program's business.
+	// tea's own messages (SetClipboard) are the program's business.
 	if strings.HasPrefix(reflect.TypeOf(msg).String(), "tea.") {
 		return
 	}
@@ -223,7 +209,6 @@ func TestGoldenScreens(t *testing.T) {
 		}{
 			{"playbooks", nil},
 			{"sessions", []string{"2"}},
-			{"sessions-recent", []string{"2", "R"}},
 			{"envs", []string{"3"}},
 			{"defaults", []string{"4"}},
 			{"detail-overview", []string{"down", "enter"}},
@@ -249,7 +234,7 @@ func TestNoSecretOnAnyScreen(t *testing.T) {
 	const canary = "sk-tui-canary-000000000000"
 	leak := strings.Replace(fixturePlaybooks, `{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true}`,
 		`{"key":"OPENAI_API_KEY","value":"`+canary+`","redacted":true,"plaintext":true}`, 1)
-	leak = strings.Replace(leak, `{"key":"Authorization","ref":"keychain:pilot/sentry"}`,
+	leak = strings.Replace(leak, `{"key":"Authorization","ref":"keychain:sentry"}`,
 		`{"key":"Authorization","value":"`+canary+`","redacted":true}`, 1)
 	if strings.Count(leak, canary) != 2 {
 		t.Fatal("the canary was not planted")
@@ -276,7 +261,7 @@ func TestNoSecretOnAnyScreen(t *testing.T) {
 	}
 	hs := newHarness(t, 120, 40)
 	hs.keys("down", "enter", "3")
-	if v := hs.view(); !strings.Contains(v, "FROM 'keychain:pilot/9r'") || !strings.Contains(v, "(redacted, plaintext)") {
+	if v := hs.view(); !strings.Contains(v, "FROM 'keychain:proxy-token'") || !strings.Contains(v, "(redacted, plaintext)") {
 		t.Fatalf("vars:\n%s", v)
 	}
 }
@@ -304,12 +289,8 @@ func TestReadsNameTheirStatement(t *testing.T) {
 	if !strings.Contains(hs.view(), "reads: cpb SHOW SESSIONS --json") {
 		t.Fatal(hs.view())
 	}
-	hs.keys("R")
-	if !strings.Contains(hs.view(), "reads: cpb RESUME --list --json") {
-		t.Fatal(hs.view())
-	}
 	for _, c := range hs.r.calls {
-		if !strings.HasPrefix(c, "SHOW ") && !strings.HasPrefix(c, "EXPLAIN ") && c != "RESUME --list --json" {
+		if !strings.HasPrefix(c, "SHOW ") && !strings.HasPrefix(c, "EXPLAIN ") {
 			t.Fatalf("a read that is not a read: %s", c)
 		}
 	}
@@ -353,10 +334,10 @@ func TestCopyStatements(t *testing.T) {
 	hs := newHarness(t, 120, 40)
 	hs.keys("down", "y")
 	hs.keys("2", "y")
-	hs.keys("R", "down", "y")
+	hs.keys("down", "y")
 	want := []string{"SHOW PLAYBOOK router",
-		"RESUME SESSION '08c4811b-3867-4f18-b08f-de6d1e07395f' FOR PLAYBOOK kommander-dev",
-		"RESUME SESSION 'd0a04774-d6ed-49f7-bb32-3c57962348fa' FOR PLAYBOOK kommander-dev"}
+		"cd '/home/me/DEV/app' && al --resume 08c4811b-3867-4f18-b08f-de6d1e07395f",
+		"cd '/home/me/DEV/app' && rt --resume e7377ba9-434b-4ff2-a592-dd0da81f6e2f"}
 	if !reflect.DeepEqual(hs.clip, want) {
 		t.Fatalf("copied %q", hs.clip)
 	}
@@ -366,25 +347,18 @@ func TestCopyStatements(t *testing.T) {
 	}
 }
 
-// RESUME runs through cpb, for a session that is not live; a live one is
-// refused by the TUI with the pid, and nothing starts.
-func TestResume(t *testing.T) {
-	hs := newHarness(t, 120, 40)
-	hs.keys("2", "enter")
-	if len(hs.resumed) != 0 || !strings.Contains(hs.view(), "is running in pid 47904 on ttys039") {
-		t.Fatalf("live: %v\n%s", hs.resumed, hs.view())
+// The TUI resumes nothing: Sessions shows the live ones and says where the
+// past ones are, and enter and R start no process and change no view.
+func TestSessionsPointAtPastSessions(t *testing.T) {
+	hs := newHarness(t, 80, 24)
+	hs.keys("2")
+	before := hs.view()
+	if !strings.Contains(before, "past sessions: <launcher> --resume") {
+		t.Fatalf("Sessions does not say where past sessions are:\n%s", before)
 	}
-	hs.keys("R", "enter")
-	if len(hs.resumed) != 0 {
-		t.Fatalf("resumed a live recent session: %v", hs.resumed)
-	}
-	hs.keys("down", "enter")
-	want := []string{"RESUME", "SESSION", "d0a04774-d6ed-49f7-bb32-3c57962348fa", "FOR", "PLAYBOOK", "kommander-dev"}
-	if len(hs.resumed) != 1 || !reflect.DeepEqual(hs.resumed[0], want) {
-		t.Fatalf("resume: %v", hs.resumed)
-	}
-	if got := resumeArgs("/home/p/plain", "abc"); !reflect.DeepEqual(got, []string{"RESUME", "SESSION", "abc"}) {
-		t.Fatalf("a plain dir's session: %v", got)
+	hs.keys("enter", "R")
+	if hs.view() != before || len(hs.clip) != 0 {
+		t.Fatalf("enter or R did something:\n%s", hs.view())
 	}
 }
 
@@ -398,9 +372,9 @@ func TestPollsOnlyWhileSessionsShow(t *testing.T) {
 	if hs.m.polling() {
 		t.Fatal("Env sets shows no sessions")
 	}
-	hs.keys("2", "R")
-	if hs.m.polling() {
-		t.Fatal("recent sessions are read on r, not polled")
+	hs.keys("2")
+	if !hs.m.polling() {
+		t.Fatal("Sessions shows the live sessions")
 	}
 }
 
@@ -408,7 +382,7 @@ func TestFilter(t *testing.T) {
 	hs := newHarness(t, 120, 40)
 	hs.keys("/", "r", "o", "u", "enter")
 	v := hs.view()
-	if strings.Contains(v, "kommander-dev") && !strings.Contains(v, "router") {
+	if strings.Contains(v, "alpha") && !strings.Contains(v, "router") {
 		t.Fatal(v)
 	}
 	if rows := hs.m.playbookRows(); len(rows) != 1 || rows[0].Name != "router" {
@@ -589,7 +563,7 @@ func TestBackspaceDeletesACharacter(t *testing.T) {
 // an 80x24 screen is wider than 80, and the replace prompt's folder is cut
 // to fit (Codex on #138).
 func TestWideCharactersFitTheScreen(t *testing.T) {
-	cjk := strings.NewReplacer("kommander-dev", "中文プレイブック名前がとても長い", "claude-opus-5-5", "模型名字🙂很长很长很长").Replace(fixturePlaybooks)
+	cjk := strings.NewReplacer("alpha", "中文プレイブック名前がとても長い", "claude-opus-5-5", "模型名字🙂很长很长很长").Replace(fixturePlaybooks)
 	deep := filepath.Join(t.TempDir(), "项目", strings.Repeat("很长的文件夹名字", 6))
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)

@@ -9,7 +9,7 @@ the tool touches credentials.
 
 ```text
 token active for this playbook?
-  = the playbook's [env] (or a profile it uses) sets CLAUDE_CODE_OAUTH_TOKEN
+  = the playbook's [env] (or an env set it uses) sets CLAUDE_CODE_OAUTH_TOKEN
     or the shell exports CLAUDE_CODE_OAUTH_TOKEN
     or ~/.config/claude-code/oauth-token is non-empty
   and the playbook's [env] does not unset it
@@ -18,7 +18,7 @@ yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth
          MCP logins survive); sync non-secret account metadata so the dir presents as logged in
 no   ->  link the playbook's .credentials.json to ~/.claude/.credentials.json; remove nothing;
          Claude Code refreshes the shared login itself
-isolate_auth = true  ->  neither: detach from the shared store, strip the global token,
+isolated_login = true  ->  neither: detach from the shared store, strip the global token,
          keep only what this playbook logs in itself; while it has no login of its own,
          drop the account record and cached feature flags left from a non-isolated past
 ```
@@ -38,10 +38,10 @@ session.
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT` (this key never takes a reference: cpb reads it itself) | that token wins over the file; its own login removed |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolate_auth = true` in its `.playbook`. `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
-[env profile](environment.md#env-profiles-define-once-attach-to-many) shared by
+[env set](environment.md#env-sets-define-once-attach-to-many) shared by
 several playbooks.
 
 ## The token middle ground
@@ -53,20 +53,20 @@ transient 401 cannot swap the working token for a dead one. That is right for
 most playbooks and wrong for one that must use a different account or a proxy
 that does not want the token.
 
-Unsetting `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through a
-profile, does more than drop the variable: the token is treated as inactive for
+Blocking `CLAUDE_CODE_OAUTH_TOKEN` for a playbook, directly or through an
+env set, does more than drop the variable: the token is treated as inactive for
 that playbook, so the launch takes the stored-credentials path. No token is
 injected, the playbook's own login is left alone, and the shared credentials are
 synced. `/login` once there and it sticks, while every other playbook keeps using
 the token. Setting the variable instead supplies a per-playbook token that wins
 over the machine-global file; such a launch counts as another account, so the
 plan descriptors read from your global login are not injected into it (the
-profile may set its own). The same holds for a token you export in the shell
+env set may set its own). The same holds for a token you export in the shell
 yourself: only the token read from the token file gets the global descriptors.
-This is a middle ground between sharing the token and `isolate_auth` (the
+This is a middle ground between sharing the token and `isolated_login` (the
 playbook shares nothing).
 
-## Only the machine's own account is shared (v3.23.1)
+## Only the machine's own account is shared
 
 Claude Code writes its plaintext login store by renaming a new file over
 `.credentials.json`. So a refresh or a `/login` inside a shared playbook
@@ -98,22 +98,18 @@ fallback:
 - The file rules above apply when Claude Code falls back to the file. On
   Linux the file is the only store.
 
-## A source never carries a login (v3.22.1)
+## A source never carries a login
 
 A playbook you install brings no login with it. `install` and
 `CREATE PLAYBOOK … FROM` leave a source's `.credentials.json`, and the
 account keys of its `.claude.json`, out of the install, and say so in one
 line each. `LINK` sets them aside in place rather than deleting anything.
-Before v3.22.1, a shipped `.credentials.json` was copied over your machine's
-login at the first sync: installing someone's playbook could switch every
-shared playbook to their account.
-(`docs/known-issues/shared-launch-copies-own-login-over-machine-login.md`)
 
 ## Routing a playbook to another backend
 
 A playbook whose `settings.json` or env block points `ANTHROPIC_BASE_URL` at a
 third-party Anthropic-compatible endpoint (a GLM plan through a router, say)
-should carry `isolate_auth = true`. Claude Code decides which claude.ai-hosted
+should carry `isolated_login = true`. Claude Code decides which claude.ai-hosted
 tools to send from the feature flags it cached while an Anthropic account was
 logged in, not from where requests go; a playbook that ran as your global account
 before being rerouted keeps sending them, and since Claude Code 2.1.265 at least
@@ -131,17 +127,21 @@ cpb auth status
 ```
 
 ```text
-NAME               MODE          STORE                                   EXPIRES   DAEMON  NOTE
-~/.claude          shared-login  file                                    in 6h12m  -
-kommander          token         absent                                  -         -
-kommander-9router  own-login     symlink -> ~/.claude/.credentials.json  in 6h12m  -
-personal           isolated      file                                    in 22m    -
+NAME               MODE                          STORE                                   EXPIRES   DAEMON  NOTE
+~/.claude          shared-login                  file                                    in 6h12m  -
+work               token                         absent                                  -         -
+review             shared-login (token blocked)  symlink -> ~/.claude/.credentials.json  in 6h12m  -
+personal           isolated-login                file                                    in 22m    -
 ```
 
-`MODE` is the decision `run` would make. `EXPIRES` is the stored grant's expiry.
+`MODE` is the decision `run` would make: `token`, `playbook-token` (a token
+the playbook or its env set sets), `shared-login`, `isolated-login` or
+`error`. `(token blocked)` marks a playbook that blocks the machine's token,
+so it uses the stored login; `--json` says `"token_blocked": true`. `EXPIRES` is the stored grant's expiry.
 `DAEMON` reads Claude Code's own `daemon-auth-status.json`, shown as
 `auth_required` only when the marker is newer than the current grant. `--json`
-for scripts, `--claude` to add `claude auth status` per directory.
+for scripts (times in UTC), `--claude` to add `claude auth status` per
+directory (`logged_in`, `subscription_type`, `auth_method`).
 
 ## Two things to know about shared-login mode
 

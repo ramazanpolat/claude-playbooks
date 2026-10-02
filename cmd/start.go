@@ -11,7 +11,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -34,7 +34,7 @@ var startCmd = &cobra.Command{
 // as a warning rather than a refusal: start's own path is valid and the
 // session runs.
 //
-// dirShown is the directory start will actually use, spelled as the operator
+// dirShown is the directory start will actually use, spelled as the pilot
 // will recognise it -- resolved locally, or as typed for a remote start.
 func noteStartIgnoresOverride(dirShown string) {
 	overrideDir, override, err := config.ResolveConfigDirOverride()
@@ -48,7 +48,7 @@ func noteStartIgnoresOverride(dirShown string) {
 
 func runStart(cmd *cobra.Command, args []string) error {
 	// start addresses a path, not a registry name, but the playbooks-dir
-	// value still names the root whose .env-profiles/ the path's manifest
+	// value still names the root whose .env-sets/ the path's manifest
 	// may reference, so it is applied to this process exactly as run does
 	// (and kept out of the args forwarded to claude).
 	original := args
@@ -73,19 +73,19 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// A --help at the PATH position prints usage, whether or not launch
 	// flags preceded it; after the path, the flag is forwarded to claude.
 	if restRequestsHelp(rest) {
-		fmt.Println("Usage: claude-playbook start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
+		fmt.Println("Usage: cpb start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
 		fmt.Println("Creates the directory if it does not exist.")
 		fmt.Println("Wrapper flags go before the path or immediately after it; the first other")
 		fmt.Println("argument (or --) ends them and everything from there on is claude's.")
 		fmt.Println("  --delete             delete the directory when the session ends")
-		fmt.Println("  --env-profile NAME   layer an existing env profile, this launch only")
+		fmt.Println("  --env-set NAME   layer an existing env set, this launch only")
 		fmt.Println("  --env KEY=VALUE      set one variable")
-		fmt.Println("  --unset KEY          remove one variable")
+		fmt.Println("  --block KEY          remove one variable")
 		fmt.Println("  --env-file PATH      layer a dotenv-style file of KEY=VALUE lines")
 		fmt.Println("Sandbox flags run the session inside a sandbox (backend sbx, Docker Sandboxes):")
-		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpbstart-<dir> (created on first use); --sbx is a synonym")
+		fmt.Println("  --sandbox[=BACKEND]  launch in the directory's sandbox cpbstart-<dir> (created on first use)")
 		fmt.Println("  --no-sandbox         launch on the host although the directory's manifest says [sandbox] always = true")
 		fmt.Println("  --sandbox-host U@H   run the sandboxed start on that machine over ssh (the path is a path there)")
 		fmt.Println("  --sandbox-fresh      remove and recreate that sandbox first")
@@ -100,7 +100,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		// "--" is never a path: taking it as one would resume wrapper
 		// parsing right after it, and `start -- --delete` would remove a
 		// directory literally named "--".
-		return fmt.Errorf("path required\nUsage: claude-playbook start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
+		return fmt.Errorf("path required\nUsage: cpb start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
 	}
 
 	path := rest[0]
@@ -145,7 +145,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// The directory's own manifest supplies [sandbox] (always and the
-	// defaults); an unreadable one is reported by the launch preparation.
+	// defaults); an unreadable one refuses the launch.
+	if err := refuseUnreadableManifest(absPath); err != nil {
+		return err
+	}
 	var sbm *manifest.Sandbox
 	if m, err := manifest.Read(absPath); err == nil && m != nil {
 		sbm = m.Sandbox
@@ -224,7 +227,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
 	eff, perr := auth.EffectiveBlock(absPath, layers)
-	if errors.Is(perr, envprofile.ErrProfile) {
+	if errors.Is(perr, envset.ErrSet) {
 		return perr
 	}
 	// See cmd/run.go: references exec through the helper, or refuse here.
@@ -238,7 +241,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
-	if errors.Is(syncErr, envprofile.ErrProfile) {
+	if errors.Is(syncErr, envset.ErrSet) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
 		// wrong credentials -- refuse, do not warn.

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -17,11 +17,11 @@ import (
 const OAuthTokenEnv = "CLAUDE_CODE_OAUTH_TOKEN"
 
 // oauthTokenFileEnv lets callers/tests override the token file location.
-const oauthTokenFileEnv = "CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE"
+const oauthTokenFileEnv = "CPB_OAUTH_TOKEN_FILE"
 
 // OAuthTokenFile returns the path of the long-lived OAuth token file.
 // Default: $HOME/.config/claude-code/oauth-token. Overridable via
-// CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE (primarily for tests).
+// CPB_OAUTH_TOKEN_FILE (primarily for tests).
 func OAuthTokenFile() string {
 	if p := os.Getenv(oauthTokenFileEnv); p != "" {
 		return p
@@ -65,7 +65,7 @@ func TokenActive() (inject string, active bool) {
 // on top. The manifest is the per-install authority over the machine-global
 // token file:
 //
-//   - env.unset lists CLAUDE_CODE_OAUTH_TOKEN: the token is inactive here, no
+//   - env.block lists CLAUDE_CODE_OAUTH_TOKEN: the token is inactive here, no
 //     matter what the file or the shell says. The launch then takes the
 //     stored-credentials path. Stripping the variable alone would be the
 //     worst of both worlds -- the quarantine would still wipe the stored
@@ -75,7 +75,7 @@ func TokenActive() (inject string, active bool) {
 //     inactive, matching the file rule.
 //   - otherwise TokenActive decides.
 func resolveToken(menv *manifest.Env) (inject string, active bool) {
-	if menv.Unsets(OAuthTokenEnv) {
+	if menv.Blocks(OAuthTokenEnv) {
 		return "", false
 	}
 	if menv != nil {
@@ -104,13 +104,13 @@ func applyManifestEnv(environ []string, menv *manifest.Env) []string {
 	if menv.Empty() {
 		return environ
 	}
-	keys := make([]string, 0, len(menv.Set)+len(menv.Unset))
+	keys := make([]string, 0, len(menv.Set)+len(menv.Block))
 	for key := range menv.Set {
 		if key != OAuthTokenEnv {
 			keys = append(keys, key)
 		}
 	}
-	for _, key := range menv.Unset {
+	for _, key := range menv.Block {
 		if key != OAuthTokenEnv {
 			keys = append(keys, key)
 		}
@@ -155,8 +155,8 @@ func removeEnv(environ []string, keys ...string) []string {
 // with one install-local exception: a CLAUDE_CODE_OAUTH_TOKEN the manifest
 // itself sets is that playbook's own token and is honoured (see the branch).
 // isAuthIsolated is consulted only inside SyncCredentials, so any branch that
-// skips that call also silently skips the isolate_auth contract — which
-// SPEC-v4.md defines as "detach shared credentials and do not copy global
+// skips that call also silently skips the isolated_login contract — which
+// SPEC.md defines as "detach shared credentials and do not copy global
 // credentials or account metadata into this playbook". An isolated playbook
 // therefore takes the full SyncCredentials path (which detaches), syncs no
 // account metadata, and has any inherited token stripped from its environment:
@@ -197,8 +197,8 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 }
 
 // PrepareLaunchEnvWith is PrepareLaunchEnv with one-off layers applied on top
-// of the playbook's own block, in order: the launch flags (--env-profile,
-// --env, --unset, --env-file). Each layer may name profiles, which are
+// of the playbook's own block, in order: the launch flags (--env-set,
+// --env, --block, --env-file). Each layer may name profiles, which are
 // resolved from the same root as the manifest's. The flattened result drives
 // the token decision exactly as the manifest block alone would, so a one-off
 // unset of CLAUDE_CODE_OAUTH_TOKEN takes the stored-credentials path for
@@ -215,7 +215,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	}
 
 	// The block is resolved with its profiles flattened in. Any profile
-	// resolution failure satisfies errors.Is(err, envprofile.ErrProfile);
+	// resolution failure satisfies errors.Is(err, envset.ErrProfile);
 	// callers that launch treat it as fatal (see cmd/run.go), everything
 	// else stays advisory.
 	menv, merr, perr := effectiveBlock(configDir, layers)
@@ -297,7 +297,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 			// The machine-global token file: the descriptors in the global
 			// store describe the account that minted it. Only the MISSING
 			// ones are filled in: a descriptor the shell exported is the
-			// operator's deliberate override (a Team seat needs exactly
+			// pilot's deliberate override (a Team seat needs exactly
 			// that) and outranks what is inferred from disk, see
 			// appendSubscriptionEnv.
 			env = appendSubscriptionEnv(env)
@@ -316,9 +316,9 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 // of them.
 //
 // CLAUDE_CONFIG_DIR is bound to the directory this launch decided.
-// CLAUDE_CONFIG_DIR_OVERRIDE is consumed -- the request has been read, and the
+// CPB_CONFIG_DIR is consumed -- the request has been read, and the
 // child must not see it, or an agent inside the session running
-// `claude-playbook run other-playbook` would have that launch redirected into
+// `cpb run other-playbook` would have that launch redirected into
 // this one's directory: the wrong playbook writing into the wrong state.
 //
 // Both happen HERE rather than earlier because applyManifestEnv runs above and
@@ -340,7 +340,7 @@ func bindOwnEnv(env []string, configDir string) []string {
 // EffectiveBlock is the flattened [env] block a launch of configDir applies:
 // the registry default profile, the governing manifest's block with its
 // profiles expanded, then the one-off layers in order. The error satisfies
-// errors.Is(err, envprofile.ErrProfile) when a profile cannot be resolved,
+// errors.Is(err, envset.ErrProfile) when a profile cannot be resolved,
 // the same condition on which a launch is refused. A manifest that cannot
 // be read is not an error here: the launch treats it as declaring nothing.
 func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, error) {
@@ -353,13 +353,13 @@ func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, er
 func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.Env, merr, perr error) {
 	// The registry default profile is the bottom layer of every playbook,
 	// manifest or not.
-	profilesDir := envprofile.Dir(config.ResolvePlaybooksDir())
+	profilesDir := envset.Dir(config.ResolvePlaybooksDir())
 	m, merr := manifest.Nearest(configDir)
 	var block *manifest.Env
 	if m != nil {
 		block = m.Env
 	}
-	menv, perr = envprofile.ExpandWithDefault(profilesDir, block)
+	menv, perr = envset.ExpandWithDefault(profilesDir, block)
 	if perr != nil {
 		return nil, merr, perr
 	}
@@ -367,7 +367,7 @@ func effectiveBlock(configDir string, layers []*manifest.Env) (menv *manifest.En
 		flat := make([]*manifest.Env, 0, len(layers)+1)
 		flat = append(flat, menv)
 		for _, layer := range layers {
-			expanded, perr := envprofile.Expand(profilesDir, layer)
+			expanded, perr := envset.Expand(profilesDir, layer)
 			if perr != nil {
 				return nil, merr, perr
 			}

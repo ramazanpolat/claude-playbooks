@@ -33,11 +33,11 @@ type Playbook struct {
 //
 // A playbook name is not just a directory name. It is interpolated into a
 // generated shell alias, into that alias's `run <name>` argument, and into
-// commands printed for the user to paste. Permitting shell metacharacters made
+// commands printed for the pilot to paste. Permitting shell metacharacters made
 // every one of those an encoding problem -- an apostrophe alone was a command
-// injection into the user's shell config. Rejecting the name at the front door
+// injection into the pilot's shell config. Rejecting the name at the front door
 // removes the whole class instead of escaping it at each site, and matches the
-// charset already required of launcher command names.
+// charset already required of launcher names.
 //
 // Deliberately applied to names being CREATED (create/rename/link/install), not
 // to names being looked up: delete and the discovery paths keep using
@@ -48,7 +48,7 @@ var NewNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 // Alias returns the playbook's manifest alias, "" if none.
 func (p *Playbook) Alias() string {
 	if p.Manifest != nil {
-		return p.Manifest.Alias
+		return p.Manifest.Launcher
 	}
 	return ""
 }
@@ -85,7 +85,7 @@ func Require(playbooksDir, name string) (*Playbook, error) {
 		return nil, err
 	}
 	if pb == nil {
-		return nil, fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", name)
+		return nil, fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", name)
 	}
 	return pb, nil
 }
@@ -118,21 +118,11 @@ func discover(root string) ([]*Playbook, error) {
 		if err != nil {
 			return nil, err
 		}
-		configPath := path
-		configInfo := info
-		if m != nil {
-			resolved, resolvedInfo, err := resolveManifestSubdir(path, m)
-			if err != nil {
-				return nil, err
-			}
-			configPath = resolved
-			configInfo = resolvedInfo
-		}
 		pb := &Playbook{
 			Name:     e.Name(),
-			Path:     configPath,
+			Path:     path,
 			RootPath: path,
-			LastUsed: configInfo.ModTime(),
+			LastUsed: info.ModTime(),
 			Manifest: m,
 		}
 		if m != nil {
@@ -141,20 +131,4 @@ func discover(root string) ([]*Playbook, error) {
 		out = append(out, pb)
 	}
 	return out, nil
-}
-
-func resolveManifestSubdir(root string, m *manifest.Manifest) (string, os.FileInfo, error) {
-	if m == nil || m.Subdir == "" {
-		info, err := os.Stat(root)
-		return root, info, err
-	}
-	resolved, err := manifest.ResolveSubdir(root, "subdir", m.Subdir)
-	if err != nil {
-		return "", nil, err
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", nil, err
-	}
-	return resolved, info, nil
 }

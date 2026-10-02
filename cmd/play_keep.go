@@ -10,25 +10,24 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// cpb play --keep and --update (slice 4): a played recipe kept as a
-// playbook in the user's own store, with a [play] record, and updated only
-// when asked.
+// cpb play --keep (slice 4): a played recipe kept as a playbook in the
+// pilot's own store, with a [play] record, and updated only when asked
+// (cpb update <name>).
 
 var (
-	playKeep   bool
-	playAs     string
-	playUpdate string
+	playKeep bool
+	playAs   string
 )
 
 // playRecipeFile is where a kept playbook holds the exact bytes it was
-// built from: --update diffs against them and undoes what they added.
+// built from: an update diffs against them and undoes what they added.
 const playRecipeFile = ".play/recipe.cpb"
 
 // playKeepName is the kept playbook's name: --as, or the template's or
@@ -49,7 +48,7 @@ func keepSandbox(res *play.Result) (sandboxed bool, backend string, err error) {
 		return false, "", errors.New("--sandbox and --no-sandbox together: pick one")
 	}
 	if playSandboxFlag != "" && playSandboxFlag != "auto" && !manifest.KnownSandboxBackend(playSandboxFlag) {
-		return false, "", fmt.Errorf("--sandbox=%s: not a sandbox backend (sbx, openshell)", playSandboxFlag)
+		return false, "", fmt.Errorf("--sandbox=%s: not a sandbox backend (available: %s)", playSandboxFlag, strings.Join(manifest.SandboxBackends, ", "))
 	}
 	sandboxed = playSandboxFlag != "" || (res.Header.WantsSandbox() && !playNoSandbox)
 	if sandboxed {
@@ -83,17 +82,17 @@ func keepSandboxNote(sandboxed bool, res *play.Result) string {
 	return "Not sandboxed: it will run on your machine, as you, unless you launch it with --sandbox."
 }
 
-// defaultsKeys is the user's DEFAULTS env sets and the keys they carry: a
-// kept playbook lives in the user's store, so they layer into it.
+// defaultsKeys is the pilot's DEFAULTS env sets and the keys they carry: a
+// kept playbook lives in the pilot's store, so they layer into it.
 func defaultsKeys(store string) ([]string, map[string]bool, error) {
-	dir := envprofile.Dir(store)
-	names, err := envprofile.Defaults(dir)
+	dir := envset.Dir(store)
+	names, err := envset.Defaults(dir)
 	if err != nil {
 		return nil, nil, err
 	}
 	keys := map[string]bool{}
 	for _, n := range names {
-		p, err := envprofile.Read(dir, n)
+		p, err := envset.Read(dir, n)
 		if err != nil || p == nil {
 			continue
 		}
@@ -108,17 +107,17 @@ func defaultsKeys(store string) ([]string, map[string]bool, error) {
 	return names, keys, nil
 }
 
-// envSetKeys checks the --env sets exist in the user's store and returns
+// envSetKeys checks the --env-set sets exist in the pilot's store and returns
 // the keys they set, which the credential BLOCK leaves alone.
 func envSetKeys(store string, sets []string) (map[string]bool, error) {
 	keys := map[string]bool{}
 	for _, name := range sets {
-		p, err := envprofile.Read(envprofile.Dir(store), name)
+		p, err := envset.Read(envset.Dir(store), name)
 		if err != nil {
 			return nil, err
 		}
 		if p == nil {
-			return nil, fmt.Errorf("--env %s: no such env set (SHOW ENVS)", name)
+			return nil, fmt.Errorf("--env-set %s: no such env set (SHOW ENVS)", name)
 		}
 		e := p.Env()
 		for k := range e.Set {
@@ -134,7 +133,7 @@ func envSetKeys(store string, sets []string) (map[string]bool, error) {
 // keepBlocked is the BLOCK VAR list of a kept playbook whose endpoint
 // moves: play's credential list, and every key the DEFAULTS sets would
 // layer in (they do not follow the recipe to another host), minus the keys
-// of the --env sets the user attached and the ones the recipe sets itself.
+// of the --env-set sets the pilot attached and the ones the recipe sets itself.
 func keepBlocked(defaults, keep, own map[string]bool) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -159,11 +158,11 @@ func keepBlocked(defaults, keep, own map[string]bool) []string {
 }
 
 // keepSetup is what --keep writes before the recipe: the playbook, with a
-// launcher and never the pilot profile; a login of its own and the
-// credentials blocked when the endpoint moves; and the --env sets.
+// launcher; a login of its own and the credentials blocked when the
+// endpoint moves; and the --env-set sets.
 func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE PLAYBOOK %s NO PILOT PROFILE", name)
+	fmt.Fprintf(&b, "CREATE PLAYBOOK %s", name)
 	if res.Endpoint != "" {
 		b.WriteString(" ISOLATED LOGIN")
 	}
@@ -191,7 +190,7 @@ func printDefaultsNote(names []string, res *play.Result) {
 		return
 	}
 	fmt.Printf("\nYour DEFAULTS (%s) will NOT follow it to %s: their keys are blocked in this playbook.\n"+
-		"Attach a set it may use with --env <set>.\n", strings.Join(names, ", "), res.Endpoint)
+		"Attach a set it may use with --env-set <set>.\n", strings.Join(names, ", "), res.Endpoint)
 }
 
 // playStage writes statement files into a private temp directory and
@@ -235,9 +234,9 @@ func writePlayRecord(pbDir string, src *play.Source, rec *play.Recipe, backend s
 	}
 	ref := src.Ref
 	if src.Kind == play.KindLocal {
-		ref = src.Path // absolute: --update resolves it from anywhere
+		ref = src.Path // absolute: an update resolves it from anywhere
 	}
-	m.Play = &manifest.Play{Ref: ref, URL: rec.URL, SHA256: rec.SHA256, Played: time.Now().Format("2006-01-02-15_04")}
+	m.Play = &manifest.Play{Ref: ref, URL: rec.URL, SHA256: rec.SHA256, PlayedAt: time.Now().UTC().Format(time.RFC3339)}
 	if backend != "" {
 		if m.Sandbox == nil {
 			m.Sandbox = &manifest.Sandbox{}
@@ -247,7 +246,7 @@ func writePlayRecord(pbDir string, src *play.Source, rec *play.Recipe, backend s
 	return manifest.Write(pbDir, m)
 }
 
-// playKeepRun: the preview against the user's own store, the
+// playKeepRun: the preview against the pilot's own store, the
 // confirmations, then the playbook built and recorded. No session.
 func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *playJSON) error {
 	name := playKeepName(src)
@@ -271,7 +270,7 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 	} else if pb != nil {
 		hint := "keep it under another name with --as <name>"
 		if pb.Manifest != nil && pb.Manifest.Play != nil {
-			hint += ", or update it with cpb play --update " + name
+			hint += ", or update it with cpb update " + name
 		}
 		return fmt.Errorf("a playbook named %s exists: %s; nothing was written", name, hint)
 	}
@@ -324,12 +323,12 @@ func playKeepRun(src *play.Source, rec *play.Recipe, res *play.Result, block *pl
 	if err := writePlayRecord(pb.RootPath, src, rec, backend); err != nil {
 		return fmt.Errorf("kept %s, but could not record where it came from: %v", name, err)
 	}
-	fmt.Printf("\nKept as %s: run it with `%s` (or cpb run %s). Update it with cpb play --update %s.\n", name, name, name, name)
+	fmt.Printf("\nKept as %s: run it with `%s` (or cpb run %s). Update it with cpb update %s.\n", name, name, name, name)
 	return nil
 }
 
 // dropHalfKept removes a playbook --keep created when applying the recipe
-// failed part-way: it did not exist before, so nothing of the user's goes.
+// failed part-way: it did not exist before, so nothing of the pilot's goes.
 func dropHalfKept(name string) {
 	files, done, err := playStage([2]string{"_play-drop.cpb", fmt.Sprintf("DROP PLAYBOOK IF EXISTS %s;\n", name)})
 	if err != nil {
@@ -344,7 +343,7 @@ func dropHalfKept(name string) {
 	os.Stdout = stdout
 }
 
-// undoItem is one thing a recipe clause sets: key names it, so --update
+// undoItem is one thing a recipe clause sets: key names it, so an update
 // can tell what the new recipe no longer sets; sig is the clause as
 // written, so it can tell what changed; undo removes it.
 type undoItem struct {
@@ -393,9 +392,6 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		return []u{{"skill:" + c.Names[0], one(c), grammar.Clause{Kind: grammar.DropSkill, Names: c.Names[:1]}}}
 	case grammar.AddModel:
 		return []u{{"model:" + c.Row.Model, one(c), grammar.Clause{Kind: grammar.DropModel, Names: []string{c.Row.Model}}}}
-	case grammar.AddPanel:
-		id := c.Panel.NS + "." + c.Panel.ID
-		return []u{{"panel:" + id, one(c), grammar.Clause{Kind: grammar.DropPanel, Panel: &grammar.Panel{NS: c.Panel.NS, ID: c.Panel.ID}}}}
 	case grammar.SetAgent:
 		return []u{{"agent", one(c), grammar.Clause{Kind: grammar.UnsetAgent}}}
 	case grammar.SetModel:
@@ -407,7 +403,7 @@ func clauseUndo(c grammar.Clause) []undoItem {
 	case grammar.SetStatuslineRefresh:
 		return []u{{"refresh", one(c), grammar.Clause{Kind: grammar.UnsetStatuslineRefresh}}}
 	}
-	// SET ISOLATED LOGIN and NO ALIAS: a login is never unset by an update,
+	// SET ISOLATED LOGIN and NO LAUNCHER: a login is never unset by an update,
 	// and the launcher is play's.
 	return nil
 }
@@ -487,12 +483,12 @@ func lineDiff(a, b []string) []string {
 		switch {
 		case i < n && j < m && a[i] == b[j]:
 			i, j = i+1, j+1
-		case j < m && (i == n || lcs[i][j+1] >= lcs[i+1][j]):
-			out = append(out, "+ "+b[j])
-			j++
-		default:
+		case i < n && (j == m || lcs[i+1][j] >= lcs[i][j+1]):
 			out = append(out, "- "+a[i])
 			i++
+		default:
+			out = append(out, "+ "+b[j])
+			j++
 		}
 	}
 	return out
@@ -564,7 +560,7 @@ func playUpdateRun(name string) error {
 	}
 	attached := map[string]bool{}
 	if pb.Manifest.Env != nil {
-		for _, p := range pb.Manifest.Env.Profiles {
+		for _, p := range pb.Manifest.Env.Sets {
 			attached[p] = true
 			if k, err := envSetKeys(store, []string{p}); err == nil {
 				for key := range k {
@@ -629,7 +625,7 @@ func playUpdateRun(name string) error {
 	return nil
 }
 
-// playUpdateJSON is the play block's "update" in --update --dry-run --json.
+// playUpdateJSON is the play block's "update" in cpb update <name> --dry-run --json.
 type playUpdateJSON struct {
 	FromSHA256 string `json:"from_sha256"`
 	Unchanged  bool   `json:"unchanged"`

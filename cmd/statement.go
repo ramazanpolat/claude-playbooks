@@ -12,14 +12,14 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// Statements (docs/cli-grammar.md) are recognised before cobra runs, so
+// Statements (SPEC.md) are recognised before cobra runs, so
 // cobra never parses a statement's words: a value such as OPTS=-v must not
 // become a flag, and --dry-run / --json belong to the statement. Only the
 // global registry flags may precede the verb.
@@ -68,8 +68,8 @@ scan:
 
 // runStatement parses and executes one statement.
 func runStatement(args []string) error {
-	if table, asJSON, ok := describeArgs(args); ok {
-		return runDescribe(table, asJSON)
+	if words, asJSON, ok := describeArgs(args); ok {
+		return runDescribe(words, asJSON)
 	}
 	if q, explain, asJSON, ok := selectArgs(args); ok {
 		return runSelect(q, explain, asJSON)
@@ -95,13 +95,10 @@ func runStatement(args []string) error {
 	if st.Verb == grammar.Apply {
 		return runApply(st)
 	}
-	if st.Verb == grammar.Resume {
-		return runResume(st)
-	}
 	r := &stmtRun{}
 	err = execStatement(r, st)
-	if r.warning != "" {
-		fmt.Fprintf(os.Stderr, "Warning: %s\n", r.warning)
+	for _, w := range r.warnings {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", w.message)
 	}
 	return err
 }
@@ -123,9 +120,8 @@ type stmtRun struct {
 	dry     *dryState // in a dry run: what earlier statements would have written
 	outcome string
 	note    string // a dry run's detail, e.g. what a drop would delete
-	warning string // reported, never an error: e.g. a source that drifted
-	// warningCode is the warning's stable code, for APPLY --json.
-	warningCode string
+	// warnings are reported, never errors: e.g. a source that drifted.
+	warnings []stmtWarning
 	// actions: in a dry run, what a real run would do beyond the
 	// playbook's own files (APPLY --json).
 	actions []planAction
@@ -133,6 +129,14 @@ type stmtRun struct {
 	// backedUp marks the files of plain config directories a run already
 	// backed up (TO '<dir>'): each is backed up once, before its first write.
 	backedUp map[string]bool
+}
+
+// stmtWarning is one warning a statement raises, with its code for APPLY
+// --json. A statement may raise several.
+type stmtWarning struct{ code, message string }
+
+func (r *stmtRun) warn(code, message string) {
+	r.warnings = append(r.warnings, stmtWarning{code, message})
 }
 
 // checkRefs checks a statement's references against the helper in effect
@@ -158,16 +162,6 @@ func (r *stmtRun) say(head string, lines []string) {
 }
 
 func execStatement(r *stmtRun, st *grammar.Stmt) error {
-	names := r.exposureCandidates(st)
-	before := r.profileExposure(names)
-	err := execStatementOnly(r, st)
-	if err == nil && names != nil {
-		r.warnExposure(before, r.profileExposure(names))
-	}
-	return err
-}
-
-func execStatementOnly(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case st.Dir != "":
 		return dirStatement(r, st)
@@ -190,7 +184,7 @@ func execStatementOnly(r *stmtRun, st *grammar.Stmt) error {
 
 func envStatement(r *stmtRun, st *grammar.Stmt) error {
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 
 	unlock, err := r.lockRegistry()
 	if err != nil {
@@ -220,8 +214,8 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 			return fmt.Errorf("env set %q already exists: change it with ALTER ENV %s, or use CREATE OR REPLACE ENV / CREATE ENV IF NOT EXISTS", st.Name, st.Name)
 		}
 		old := p
-		p = &envprofile.Profile{Name: st.Name, Set: map[string]string{}}
-		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
+		p = &envset.Set{Name: st.Name, Set: map[string]string{}}
+		lines := applyVarClauses(&p.Set, &p.Refs, &p.Block, &p.Description, st.Clauses)
 		return r.writeProfile(dir, old, p, "Replaced", "ENV "+st.Name, lines)
 
 	case grammar.Alter:
@@ -232,7 +226,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 		if p.Set == nil {
 			p.Set = map[string]string{}
 		}
-		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
+		lines := applyVarClauses(&p.Set, &p.Refs, &p.Block, &p.Description, st.Clauses)
 		return r.writeProfile(dir, old, p, "Altered", "ENV "+st.Name, lines)
 	}
 
@@ -266,7 +260,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.recordProfile(st.Name, nil)
 		return nil
 	}
-	if err := envprofile.Delete(dir, st.Name); err != nil {
+	if err := envset.Delete(dir, st.Name); err != nil {
 		return err
 	}
 	fmt.Printf("Dropped ENV %s\n", st.Name)
@@ -276,7 +270,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 // writeProfile writes an env set unless nothing changed or this is a dry
 // run, and records the outcome. old is nil for a new set; changed is the
 // report's verb when it existed ("Replaced", "Altered").
-func (r *stmtRun) writeProfile(dir string, old, p *envprofile.Profile, changed, what string, lines []string) error {
+func (r *stmtRun) writeProfile(dir string, old, p *envset.Set, changed, what string, lines []string) error {
 	switch {
 	case old == nil:
 		r.outcome = outCreated
@@ -291,7 +285,7 @@ func (r *stmtRun) writeProfile(dir string, old, p *envprofile.Profile, changed, 
 		r.recordProfile(p.Name, p)
 		return nil
 	}
-	if err := envprofile.Write(dir, p); err != nil {
+	if err := envset.Write(dir, p); err != nil {
 		return fmt.Errorf("cannot write env set: %w", err)
 	}
 	head := changed + " " + what
@@ -303,7 +297,7 @@ func (r *stmtRun) writeProfile(dir string, old, p *envprofile.Profile, changed, 
 }
 
 func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
-	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	dir := envset.Dir(config.ResolvePlaybooksDir())
 
 	var listClauses, helperClauses []grammar.Clause
 	for _, c := range st.Clauses {
@@ -322,7 +316,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 
 	// Everything is decided before anything is written.
 	var names, lines, current []string
-	write := envprofile.WriteDefaultsUnchecked
+	write := envset.WriteDefaultsUnchecked
 	if len(listClauses) > 0 {
 		current, err = r.defaultsList(dir)
 		if err != nil {
@@ -340,7 +334,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		// when one is broken; adding checks every name.
 		for _, c := range listClauses {
 			if c.Kind == grammar.UseEnv || c.Kind == grammar.AddEnv {
-				write = envprofile.WriteDefaults
+				write = envset.WriteDefaults
 			}
 		}
 	}
@@ -349,7 +343,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	listSame := len(listClauses) == 0 || slices.Equal(current, names)
 	helperSame := true
 	for _, c := range helperClauses {
-		h, _ := os.ReadFile(filepath.Join(dir, envprofile.SecretHelperFile))
+		h, _ := os.ReadFile(filepath.Join(dir, envset.SecretHelperFile))
 		stored := strings.TrimSpace(string(h))
 		helperSame = (c.Kind == grammar.SetHelper && stored == c.Arg) || (c.Kind == grammar.UnsetHelper && stored == "")
 	}
@@ -374,7 +368,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	// then fails, so the statement applies whole or not at all.
 	restore := func() {}
 	for _, c := range helperClauses {
-		path := filepath.Join(dir, envprofile.SecretHelperFile)
+		path := filepath.Join(dir, envset.SecretHelperFile)
 		old, rerr := os.ReadFile(path)
 		existed := rerr == nil
 		restore = func() {
@@ -385,18 +379,18 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 		if c.Kind == grammar.SetHelper {
-			if err := envprofile.SetSecretHelper(dir, c.Arg); err != nil {
+			if err := envset.SetSecretHelper(dir, c.Arg); err != nil {
 				return fmt.Errorf("cannot store the secret helper: %w", err)
 			}
 			lines = append(lines, "secret helper  "+c.Arg)
 		} else {
-			if err := envprofile.ClearSecretHelper(dir); err != nil {
+			if err := envset.ClearSecretHelper(dir); err != nil {
 				return fmt.Errorf("cannot remove the secret helper: %w", err)
 			}
 			lines = append(lines, "secret helper  (none)")
 		}
-		if v, ok := os.LookupEnv(envprofile.SecretHelperEnv); ok && v != "" {
-			lines = append(lines, "(note: "+envprofile.SecretHelperEnv+" is set in this environment and overrides the setting here)")
+		if v, ok := os.LookupEnv(envset.SecretHelperEnv); ok && v != "" {
+			lines = append(lines, "(note: "+envset.SecretHelperEnv+" is set in this environment and overrides the setting here)")
 		}
 	}
 	if len(listClauses) > 0 {
@@ -414,7 +408,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		return err
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 
 	unlock, err := r.lockRegistry()
 	if err != nil {
@@ -437,12 +431,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	case known && !exists:
 		return fmt.Errorf("unknown playbook %q (dropped earlier in the file)", st.Name)
 	case pb == nil && !(known && exists):
-		return fmt.Errorf("unknown playbook %q. Run 'claude-playbook list' to see available playbooks", st.Name)
+		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", st.Name)
 	}
 	var m *manifest.Manifest
 	if pb != nil {
 		// A linked playbook's manifest is shared with every registration of
-		// the target directory: same refusal as the pre-grammar env command.
+		// the target directory, so its environment is not changed here.
 		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
 			if pluginClauses(st.Clauses) || mcpClauses(st.Clauses) || skillClauses(st.Clauses) {
 				return fmt.Errorf("cannot change the plugins or MCP servers of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
@@ -498,9 +492,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 				}
 			}
 		}
-		if held := statuslineHeld(sf.Root, st.Clauses, "PLAYBOOK "+st.Name); held != "" {
-			r.warning, r.warningCode = held, warnStatuslineHeldByHost
-		}
 		r.warnMarketplaceRef(st.Clauses)
 		slKey := cfg
 		if slKey == "" { // created earlier in this dry run: no history yet
@@ -528,12 +519,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Set == nil {
 		m.Env.Set = map[string]string{}
 	}
-	profiles, lines, err := r.applyEnvList(dir, m.Env.Profiles, st.Clauses)
+	profiles, lines, err := r.applyEnvList(dir, m.Env.Sets, st.Clauses)
 	if err != nil {
 		return err
 	}
-	m.Env.Profiles = profiles
-	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Refs, &m.Env.Unset, nil, st.Clauses)...)
+	m.Env.Sets = profiles
+	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Refs, &m.Env.Block, nil, st.Clauses)...)
 	// MCP servers: planned against the playbook's .claude.json; their
 	// secret references land in this same layer, under derived variables.
 	var mcp *mcpPlan
@@ -556,14 +547,29 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
-	// ISOLATED LOGIN: isolate_auth, in the same manifest write.
+	// SANDBOX: the [sandbox] block, in the same manifest write. Planned
+	// first: bare SET SANDBOX also isolates the login.
 	wasIsolated := r.isolated(st.Name, m)
+	wasSandboxed := r.sandboxed(st.Name, m)
+	beforeSandbox := cloneSandbox(m.Sandbox)
+	sandbox, isolate, sandboxLines, err := planSandbox(m.Sandbox, st.Clauses)
+	if err != nil {
+		return err
+	}
+	sandboxChange := !reflect.DeepEqual(beforeSandbox, sandbox)
+	m.Sandbox = sandbox
+	lines = append(lines, sandboxLines...)
+	// ISOLATED LOGIN: isolated_login, in the same manifest write.
 	nowIsolated, loginLines, err := r.planIsolatedLogin(st.Name, m, r.configDir(st.Name, pb), st.Clauses)
 	if err != nil {
 		return err
 	}
+	if isolate && !nowIsolated {
+		nowIsolated = true
+		loginLines = append(loginLines, "login     isolated: a sandbox shares nothing with ~/.claude; /login once in it")
+	}
 	loginChange := nowIsolated != wasIsolated
-	m.IsolateAuth = nowIsolated
+	m.IsolatedLogin = nowIsolated
 	lines = append(lines, loginLines...)
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
@@ -601,30 +607,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	skillChange := skills != nil && (len(skills.ops) > 0 || !reflect.DeepEqual(beforeSkills, afterSkills))
-	// Panels: SPC/1 manifests in the config directory, planned against the
-	// files as the run sees them.
-	var panelOps []panelOp
-	if hasPanelClauses(st.Clauses) {
-		cfg := r.configDir(st.Name, pb)
-		root := settings.NewObject()
-		if cfg != "" {
-			if f, err := settings.Load(cfg); err == nil {
-				root = f.Root
-			}
-		}
-		if r.dry != nil {
-			if raw, ok := r.dry.settings[st.Name]; ok {
-				if o, err := settings.ParseObject(raw); err == nil {
-					root = o
-				}
-			}
-		}
-		var panelLines []string
-		if panelOps, panelLines, err = r.planPanels(st.Name, cfg, root, st.Clauses); err != nil {
-			return err
-		}
-		lines = append(lines, panelLines...)
-	}
 	if skills != nil {
 		steps = append(steps, skills.steps()...)
 	}
@@ -635,7 +617,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && len(steps) == 0 && len(panelOps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
@@ -645,6 +627,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.recordPlaybookEnv(st.Name, m.Env)
 		if loginChange && r.dry != nil {
 			r.dry.isolated[st.Name] = nowIsolated
+		}
+		if nowSandboxed := sandbox != nil && sandbox.Always; nowSandboxed != wasSandboxed && r.dry != nil {
+			r.dry.sandboxed[st.Name] = nowSandboxed
 		}
 		if mcp != nil {
 			finishMCP()
@@ -671,9 +656,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			cmds = append(cmds, s.command())
 			r.actions = append(r.actions, stepActions(dir, s, refOf)...)
 		}
-		if len(panelOps) > 0 {
-			_ = r.applyPanels(st.Name, panelOps)
-		}
 		if skills != nil {
 			r.recordSkills(st.Name, afterSkills, skills)
 		}
@@ -682,7 +664,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return nil
 	}
-	if envChange || mcpRecordChange || loginChange {
+	if envChange || mcpRecordChange || loginChange || sandboxChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}
@@ -692,7 +674,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	// is left to the next launch, which links the store as it always does.
 	if loginChange && nowIsolated {
 		if err := auth.SyncCredentials(pb.Path); err != nil {
-			r.warning = fmt.Sprintf("PLAYBOOK %s: isolate_auth is recorded, but the link to the shared login could not be removed now (%v); the next launch removes it", st.Name, err)
+			r.warn(warnSharedLoginLinkKept, fmt.Sprintf("PLAYBOOK %s: isolated_login is recorded, but the link to the shared login could not be removed now (%v); the next launch removes it", st.Name, err))
 		}
 	}
 	if skills != nil {
@@ -759,11 +741,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 		lines = append(lines, agentLines...)
-	}
-	if len(panelOps) > 0 {
-		if err := r.applyPanels(st.Name, panelOps); err != nil {
-			return fmt.Errorf("cannot write the panels: %w", err)
-		}
 	}
 	r.say("Altered PLAYBOOK "+st.Name, lines)
 	for _, c := range st.Clauses {
@@ -845,17 +822,17 @@ func (r *stmtRun) requireEnv(dir, name string) error {
 	return nil
 }
 
-// applyVarClauses applies SET, SET … FROM, BLOCK and UNSET (and DESCRIBE,
+// applyVarClauses applies SET, SET … FROM, BLOCK and UNSET (and DESCRIPTION,
 // when desc is not nil) to one layer and returns a report line per change.
-// A key lives in exactly one of set, refs and unset. Values are never
+// A key lives in exactly one of set, refs and block. Values are never
 // reported; references are not secrets and are.
-func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string, clauses []grammar.Clause) []string {
+func applyVarClauses(set, refs *map[string]string, block *[]string, desc *string, clauses []grammar.Clause) []string {
 	var lines []string
 	for _, c := range clauses {
 		switch c.Kind {
 		case grammar.SetRef:
 			for _, v := range c.Vars {
-				*unset = dropString(*unset, v.Key)
+				*block = dropString(*block, v.Key)
 				delete(*set, v.Key)
 				if *refs == nil {
 					*refs = map[string]string{}
@@ -865,7 +842,7 @@ func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string
 			}
 		case grammar.SetVar:
 			for _, v := range c.Vars {
-				*unset = dropString(*unset, v.Key)
+				*block = dropString(*block, v.Key)
 				delete(*refs, v.Key)
 				(*set)[v.Key] = v.Value
 				line := "set       " + v.Key
@@ -878,8 +855,8 @@ func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string
 			for _, k := range c.Keys {
 				delete(*set, k)
 				delete(*refs, k)
-				if !slices.Contains(*unset, k) {
-					*unset = append(*unset, k)
+				if !slices.Contains(*block, k) {
+					*block = append(*block, k)
 				}
 				lines = append(lines, "blocked   "+k)
 			}
@@ -887,10 +864,10 @@ func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string
 			for _, k := range c.Keys {
 				delete(*set, k)
 				delete(*refs, k)
-				*unset = dropString(*unset, k)
+				*block = dropString(*block, k)
 				lines = append(lines, "unset     "+k)
 			}
-		case grammar.Describe:
+		case grammar.Description:
 			if desc != nil {
 				*desc = c.Arg
 				lines = append(lines, "described")
@@ -907,13 +884,13 @@ func report(head string, lines []string) {
 	}
 }
 
-func cloneProfile(p *envprofile.Profile) *envprofile.Profile {
+func cloneProfile(p *envset.Set) *envset.Set {
 	c := *p
-	c.Set, c.Refs, c.Unset = maps.Clone(p.Set), maps.Clone(p.Refs), slices.Clone(p.Unset)
+	c.Set, c.Refs, c.Block = maps.Clone(p.Set), maps.Clone(p.Refs), slices.Clone(p.Block)
 	return &c
 }
 
-func profileEqual(a, b *envprofile.Profile) bool {
+func profileEqual(a, b *envset.Set) bool {
 	return a.Description == b.Description && envEqual(a.Env(), b.Env())
 }
 
@@ -921,7 +898,7 @@ func cloneEnv(e *manifest.Env) *manifest.Env {
 	if e == nil {
 		return nil
 	}
-	return &manifest.Env{Profiles: slices.Clone(e.Profiles), Set: maps.Clone(e.Set), Refs: maps.Clone(e.Refs), Unset: slices.Clone(e.Unset)}
+	return &manifest.Env{Sets: slices.Clone(e.Sets), Set: maps.Clone(e.Set), Refs: maps.Clone(e.Refs), Block: slices.Clone(e.Block)}
 }
 
 // envEqual compares two blocks as a launch sees them: attached sets in
@@ -930,8 +907,19 @@ func envEqual(a, b *manifest.Env) bool {
 	if a.Empty() || b.Empty() {
 		return a.Empty() && b.Empty()
 	}
-	ua, ub := slices.Clone(a.Unset), slices.Clone(b.Unset)
+	ua, ub := slices.Clone(a.Block), slices.Clone(b.Block)
 	slices.Sort(ua)
 	slices.Sort(ub)
-	return slices.Equal(a.Profiles, b.Profiles) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
+	return slices.Equal(a.Sets, b.Sets) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
+}
+
+// dropString is list without s.
+func dropString(list []string, s string) []string {
+	out := list[:0:0]
+	for _, v := range list {
+		if v != s {
+			out = append(out, v)
+		}
+	}
+	return out
 }

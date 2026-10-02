@@ -1,15 +1,15 @@
  cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log                                                ? help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- router  (launcher k9 · ~/.claude-playbooks/router)
+ router  (launcher rt · ~/.claude-playbooks/router)
  [Overview] Env  Vars  Plugins  MCP  Skills  Status line  Model  Sessions 
 
   Version         -
   Source          (none)
   Login           isolated
-  Pilot profile   not imported
-  Env sets        9router
+  Env sets        proxy
   Tools           -
-  Live sessions   1 · newest 2d ago in ~/DEV/claude-playbooks
+  Live sessions   1 · newest 2d ago in ~/DEV/app
+
 
 
 

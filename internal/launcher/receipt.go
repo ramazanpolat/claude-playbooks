@@ -14,17 +14,16 @@ import (
 // (custom --launcher-dir installs), but every entry is verified against
 // the live filesystem before anything is removed, and launchers created
 // before the receipt existed are still found by the resolution scan. An
-// entry whose path the user renamed or deleted by hand simply no longer
-// matches anything and is skipped. v3.10.1 appended two tab-separated
-// fields (registry root and playbook) to each line; those lines are still
-// read, by their path, and rewritten path-only when touched.
+// entry whose path the pilot renamed or deleted by hand simply no longer
+// matches anything and is skipped. Each line is one absolute path and
+// nothing else.
 
-// ReceiptPath returns the receipt file location: $CLAUDE_LAUNCHER_RECEIPT
-// (test seam), else $XDG_STATE_HOME/claude-playbook/launchers, else
-// ~/.local/state/claude-playbook/launchers. Empty when no home is known —
+// ReceiptPath returns the receipt file location: $CPB_LAUNCHER_RECEIPT
+// (test seam), else $XDG_STATE_HOME/cpb/launchers, else
+// ~/.local/state/cpb/launchers. Empty when no home is known —
 // callers then skip receipt bookkeeping rather than guess a path.
 func ReceiptPath() string {
-	if v := os.Getenv("CLAUDE_LAUNCHER_RECEIPT"); v != "" {
+	if v := os.Getenv("CPB_LAUNCHER_RECEIPT"); v != "" {
 		return v
 	}
 	base := os.Getenv("XDG_STATE_HOME")
@@ -35,7 +34,7 @@ func ReceiptPath() string {
 		}
 		base = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(base, "claude-playbook", "launchers")
+	return filepath.Join(base, "cpb", "launchers")
 }
 
 // normalizeLauncherPath is the form launcher paths are COMPARED in:
@@ -62,7 +61,7 @@ func Recorded() []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, line := range receiptLines() {
-		p := entryPath(line)
+		p := line
 		if seen[p] {
 			continue
 		}
@@ -129,15 +128,6 @@ func sameLauncher(a, b string) bool {
 	return os.SameFile(da, db)
 }
 
-// entryPath is the launcher path of a receipt line: everything before the
-// first tab, the whole line for a path-only entry.
-func entryPath(line string) string {
-	if i := strings.IndexByte(line, '\t'); i >= 0 {
-		return line[:i]
-	}
-	return line
-}
-
 // RemoveReceipt deletes the receipt file (and its lock, and the state
 // directory if that leaves it empty). Called by uninstall once the
 // launchers themselves are gone.
@@ -175,7 +165,7 @@ func record(path string) error {
 		var kept []string
 		replaced := false
 		for _, l := range lines {
-			if !sameLauncher(entryPath(l), path) {
+			if !sameLauncher(l, path) {
 				kept = append(kept, l)
 				continue
 			}
@@ -195,7 +185,7 @@ func unrecord(path string) error {
 	return editReceipt(func(lines []string) []string {
 		var kept []string
 		for _, l := range lines {
-			if !sameLauncher(entryPath(l), path) {
+			if !sameLauncher(l, path) {
 				kept = append(kept, l)
 			}
 		}
@@ -208,8 +198,8 @@ func unrecord(path string) error {
 func recordedMatching(path string) []string {
 	var out []string
 	for _, l := range receiptLines() {
-		if p := entryPath(l); sameLauncher(p, path) {
-			out = append(out, p)
+		if sameLauncher(l, path) {
+			out = append(out, l)
 		}
 	}
 	return out
@@ -228,7 +218,7 @@ func unrecordExact(stored []string) error {
 	return editReceipt(func(lines []string) []string {
 		var kept []string
 		for _, l := range lines {
-			if !drop[entryPath(l)] {
+			if !drop[l] {
 				kept = append(kept, l)
 			}
 		}

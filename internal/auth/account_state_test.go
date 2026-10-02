@@ -95,7 +95,7 @@ func TestIsolatedLaunchPurgesStaleIdentity(t *testing.T) {
 
 	// 1. isolated, no store, no own token: purged
 	dir := t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	if _, err := PrepareLaunchEnv(dir); err != nil {
 		t.Fatalf("launch: %v", err)
@@ -106,7 +106,7 @@ func TestIsolatedLaunchPurgesStaleIdentity(t *testing.T) {
 
 	// 2. isolated with its own stored login: kept
 	dir = t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	writeStore(t, dir, `{"claudeAiOauth":{"accessToken":"own","expiresAt":9999999999999}}`)
 	PrepareLaunchEnv(dir)
@@ -116,11 +116,11 @@ func TestIsolatedLaunchPurgesStaleIdentity(t *testing.T) {
 
 	// 3. isolated with an own token from the block: kept
 	dir = t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	writeManifest(t, dir, "isolated_login = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
 	writeState(t, dir, identityFixture)
 	PrepareLaunchEnv(dir)
 	if got := StaleIdentityState(dir); len(got) != len(identityStateKeys) {
-		t.Fatalf("own-token isolated playbook lost state: %v", got)
+		t.Fatalf("playbook-token isolated playbook lost state: %v", got)
 	}
 
 	// 4. not isolated: untouched by this path
@@ -134,7 +134,7 @@ func TestIsolatedLaunchPurgesStaleIdentity(t *testing.T) {
 
 	// 5. isolated, unreadable state: launch proceeds, error advisory, file intact
 	dir = t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	p := writeState(t, dir, "{not json")
 	env, err := PrepareLaunchEnv(dir)
 	if len(env) == 0 || err == nil || !strings.Contains(err.Error(), "invalid "+StateFileName) {
@@ -150,10 +150,10 @@ func TestInspectReportsStaleIdentity(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	r := Inspect("iso", dir, time.Now())
-	if r.Mode != ModeIsolated || len(r.StaleIdentity) != len(identityStateKeys) {
+	if r.Mode != ModeIsolatedLogin || len(r.StaleIdentity) != len(identityStateKeys) {
 		t.Fatalf("mode=%s stale=%v", r.Mode, r.StaleIdentity)
 	}
 	if note := r.NeedsAttention(); note != "no login; stale account state, purged at launch" {
@@ -195,7 +195,7 @@ func TestIdentityQuarantineSafeSides(t *testing.T) {
 	// unreadable store
 	if os.Geteuid() != 0 {
 		dir := t.TempDir()
-		writeManifest(t, dir, "isolate_auth = true\n")
+		writeManifest(t, dir, "isolated_login = true\n")
 		writeState(t, dir, identityFixture)
 		store := writeStore(t, dir, `{"claudeAiOauth":{"accessToken":"own"}}`)
 		if err := os.Chmod(store, 0o000); err != nil {
@@ -213,7 +213,7 @@ func TestIdentityQuarantineSafeSides(t *testing.T) {
 
 	// unparsable store: same
 	dir := t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	writeStore(t, dir, "{not json")
 	if _, err := PrepareLaunchEnv(dir); err == nil || !strings.Contains(err.Error(), "invalid "+CredentialsFileName) {
@@ -248,7 +248,7 @@ func TestIdentityQuarantineSafeSides(t *testing.T) {
 	}
 	writeStore(t, global, `{"claudeAiOauth":{"accessToken":"g","expiresAt":9999999999999}}`)
 	dir = t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	if err := os.Symlink(filepath.Join(global, CredentialsFileName), filepath.Join(dir, CredentialsFileName)); err != nil {
 		t.Fatal(err)
@@ -280,7 +280,7 @@ func TestInspectPendingRemovalMatchesLaunch(t *testing.T) {
 
 	// unparsable regular store: no promise
 	dir := t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	writeStore(t, dir, "{not json")
 	r := Inspect("iso", dir, time.Now())
@@ -296,7 +296,7 @@ func TestInspectPendingRemovalMatchesLaunch(t *testing.T) {
 	now := time.Now()
 	writeStore(t, global, fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"g","expiresAt":%d}}`, now.Add(time.Minute).UnixMilli()))
 	dir = t.TempDir()
-	writeManifest(t, dir, "isolate_auth = true\n")
+	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	if err := os.Symlink(filepath.Join(global, CredentialsFileName), filepath.Join(dir, CredentialsFileName)); err != nil {
 		t.Fatal(err)

@@ -16,8 +16,20 @@ import (
 var Version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:           "claude-playbook",
-	Short:         "Manage isolated Claude Code instances",
+	Use:   "cpb",
+	Short: "cpb (Claude PlayBooks): manage isolated Claude Code instances",
+	// Statements never reach cobra, so its help names them itself.
+	Long: `cpb (Claude PlayBooks): manage isolated Claude Code instances.
+
+State is changed and read with statements:
+
+  cpb CREATE | ALTER | DROP   PLAYBOOK | ENV | DEFAULTS  <name> <clause> ...
+  cpb SHOW [PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name>] [--json]
+  cpb SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL }
+  cpb EXPLAIN PLAYBOOK <name> [--json]
+  cpb APPLY <file> [<file> ...] [--dry-run] [--yes]
+
+The grammar: https://github.com/ramazanpolat/claude-playbooks/blob/main/SPEC.md`,
 	Version:       Version,
 	SilenceErrors: true,
 	SilenceUsage:  true,
@@ -53,11 +65,11 @@ func Execute() {
 			}
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook. (If this symlink is your own alias for the CLI, name it %q or %q, or use a hard link.)\n", base, "claude-playbook", "cpb")
+		fmt.Fprintf(os.Stderr, "Error: unknown playbook %q — this launcher no longer matches any playbook. Remove the link or recreate the playbook. (If this symlink is your own alias for the CLI, name it %q, or use a hard link.)\n", base, "cpb")
 		os.Exit(1)
 	}
 	// A grammar statement never reaches cobra, which would read its words
-	// as flags and subcommands (docs/cli-grammar.md).
+	// as flags and subcommands (SPEC.md).
 	if stmt, ok := statementArgs(os.Args[1:]); ok {
 		if err := runStatement(stmt); err != nil {
 			// APPLY --json has printed its report and exits with its class.
@@ -82,24 +94,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&config.PlaybooksDir, "playbooks-dir", "", "playbooks directory (default: ~/.claude-playbooks)")
 	rootCmd.PersistentFlags().StringVar(&config.LauncherDir, "launcher-dir", "", "directory for launcher commands (default: directory of this binary)")
 
-	rootCmd.AddCommand(listCmd)
-	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(startCmd)
-	rootCmd.AddCommand(installCmd)
-	rootCmd.AddCommand(linkCmd)
-	rootCmd.AddCommand(infoCmd)
-	rootCmd.AddCommand(renameCmd)
-	rootCmd.AddCommand(aliasCmd)
-	rootCmd.AddCommand(dealiasCmd)
-	rootCmd.AddCommand(envCmd)
-	rootCmd.AddCommand(envProfileCmd)
 	rootCmd.AddCommand(authCmd)
-	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(selfUninstallCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(selfUpdateCmd)
 	rootCmd.AddCommand(completionCmd)
-	rootCmd.AddCommand(sessionsCmd)
 	rootCmd.AddCommand(tuiCmd)
 }
 
@@ -111,23 +112,20 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Println("claude-playbook -- manage isolated Claude Code instances")
+	fmt.Println("cpb (Claude PlayBooks) -- manage isolated Claude Code instances")
 	fmt.Println()
 	fmt.Printf("Playbooks directory: %s\n", playbooksDir)
 
 	if len(pbs) == 0 {
 		fmt.Println("No playbooks installed yet. Get started with one of:")
 		fmt.Println()
-		fmt.Println("  # Install a single playbook from a Git repo:")
-		fmt.Println("  claude-playbook install https://github.com/user/pai")
+		fmt.Println("  # Your own, from scratch:")
+		fmt.Println("  cpb CREATE PLAYBOOK <name>")
 		fmt.Println()
-		fmt.Println("  # Cherry-pick one playbook out of a monorepo (e.g. DBA):")
-		fmt.Println("  claude-playbook install https://github.com/ramazanpolat/awesome-playbooks/tree/main/playbooks/dba")
+		fmt.Println("  # One from a Git repository or a directory (SUBDIR picks one out of a monorepo):")
+		fmt.Println("  cpb CREATE PLAYBOOK <name> FROM <git-url-or-dir>")
 		fmt.Println()
-		fmt.Println("  # Create your own from scratch:")
-		fmt.Println("  claude-playbook create <name>")
-		fmt.Println()
-		fmt.Println("Run 'claude-playbook --help' for all commands.")
+		fmt.Println("Run 'cpb --help' for all commands.")
 		printTUIHint()
 		return nil
 	}
@@ -142,11 +140,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			maxLen = l
 		}
 	}
-	cmdColW := maxLen + len("claude-playbook run ")
+	cmdColW := maxLen + len("cpb run ")
 
-	// Launcher commands take display precedence over manifest aliases,
-	// exactly as in `list` — a launcher-only playbook has a working command
-	// and must not be shown as "(no alias set)".
+	// Launcher commands take display precedence over manifest aliases: a
+	// launcher-only playbook has a working command and must not be shown as
+	// "(no launcher)".
 	// Gate before resolving: ResolveLauncherDir probes directory writability
 	// by creating a temp file, which a custom-root invocation must not do.
 	launcherNames := map[string]bool{}
@@ -162,7 +160,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		}
 	}
 	for _, pb := range pbs {
-		runStr := fmt.Sprintf("claude-playbook run %s", pb.Name)
+		runStr := fmt.Sprintf("cpb run %s", pb.Name)
 		command := ""
 		for _, n := range launcherNamesFor(pb) {
 			if launcherNames[n] {
@@ -173,12 +171,12 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		if command != "" {
 			fmt.Printf("  %-*s  %-*s  (or: %s)\n", maxLen, pb.Name, cmdColW, runStr, command)
 		} else {
-			fmt.Printf("  %-*s  %-*s  (no command registered)\n", maxLen, pb.Name, cmdColW, runStr)
+			fmt.Printf("  %-*s  %-*s  (no launcher)\n", maxLen, pb.Name, cmdColW, runStr)
 		}
 	}
 
 	fmt.Println()
-	fmt.Println("Run 'claude-playbook --help' for all commands.")
+	fmt.Println("Run 'cpb --help' for all commands.")
 	printTUIHint()
 	return nil
 }

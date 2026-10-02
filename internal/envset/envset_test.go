@@ -1,0 +1,310 @@
+package envset
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+)
+
+func TestWriteReadRoundTrip(t *testing.T) {
+	dir := Dir(t.TempDir())
+	in := &Set{Name: "glm", Description: "GLM via router",
+		Set: map[string]string{"B": "2", "A": "1"}, Block: []string{"Z"}}
+	if err := Write(dir, in); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "glm.toml"))
+	want := "description = \"GLM via router\"\nblock = [\"Z\"]\n\n[set]\nA = \"1\"\nB = \"2\"\n"
+	if string(data) != want {
+		t.Fatalf("serialized:\n%s\nwant:\n%s", data, want)
+	}
+	if info, _ := os.Stat(filepath.Join(dir, "glm.toml")); info.Mode().Perm() != 0o600 {
+		t.Fatalf("profile mode = %v, want 0600 (values may be secrets)", info.Mode().Perm())
+	}
+	out, err := Read(dir, "glm")
+	if err != nil || out == nil || out.Name != "glm" || out.Description != "GLM via router" ||
+		out.Set["A"] != "1" || out.Set["B"] != "2" || len(out.Block) != 1 || out.Block[0] != "Z" {
+		t.Fatalf("read back: %#v err=%v", out, err)
+	}
+	if p, err := Read(dir, "absent"); p != nil || err != nil {
+		t.Fatalf("Read(absent) = %#v, %v", p, err)
+	}
+}
+
+func TestReadRejectsInvalidProfiles(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		"reserved":      "[set]\nCLAUDE_CONFIG_DIR = \"/x\"\n",
+		"bad key":       "block = [\"NOT-A-NAME\"]\n",
+		"set and unset": "block = [\"A\"]\n[set]\nA = \"1\"\n",
+		"bad toml":      "= [\n",
+	}
+	for name, body := range cases {
+		if err := os.WriteFile(filepath.Join(dir, "p.toml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Read(dir, "p"); err == nil {
+			t.Errorf("%s: profile accepted:\n%s", name, body)
+		}
+	}
+	for _, name := range []string{"", ".hidden", "a/b", "a b", "../x"} {
+		if _, err := Read(dir, name); err == nil {
+			t.Errorf("name %q accepted", name)
+		}
+	}
+}
+
+func TestListSortsAndSkipsNonProfiles(t *testing.T) {
+	root := t.TempDir()
+	dir := Dir(root)
+	if got, err := List(dir); got != nil || err != nil {
+		t.Fatalf("List(missing dir) = %v, %v", got, err)
+	}
+	for _, name := range []string{"zeta", "alpha"} {
+		if err := Write(dir, &Set{Name: name, Set: map[string]string{"K": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("not a profile"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := List(dir)
+	if err != nil || len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "zeta" {
+		t.Fatalf("List = %v, %v", got, err)
+	}
+}
+
+func TestExpandLayersProfilesUnderPlaybookEntries(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := Write(dir, &Set{Name: "base", Set: map[string]string{"URL": "base", "MODEL": "base", "KEEP": "base"}, Block: []string{"TOKEN", "GONE"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(dir, &Set{Name: "over", Set: map[string]string{"MODEL": "over", "TOKEN": "re-set"}, Block: []string{"URL"}}); err != nil {
+		t.Fatal(err)
+	}
+	e := &manifest.Env{Sets: []string{"base", "over"}, Set: map[string]string{"URL": "own"}, Block: []string{"MODEL"}}
+
+	got, err := Expand(dir, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// URL: base set, over unset, own set -> "own". MODEL: base, over, own unset -> unset.
+	// TOKEN: base unset, over set -> "re-set". GONE: unset. KEEP: "base".
+	if got.Set["URL"] != "own" || got.Set["TOKEN"] != "re-set" || got.Set["KEEP"] != "base" {
+		t.Fatalf("set = %#v", got.Set)
+	}
+	if _, still := got.Set["MODEL"]; still || !got.Blocks("MODEL") || !got.Blocks("GONE") || got.Blocks("URL") || got.Blocks("TOKEN") {
+		t.Fatalf("unset = %#v set = %#v", got.Block, got.Set)
+	}
+	if len(got.Sets) != 0 {
+		t.Fatalf("profiles leaked into the flattened block: %v", got.Sets)
+	}
+
+	// Without profiles the block is returned untouched, nil included.
+	plain := &manifest.Env{Set: map[string]string{"A": "1"}}
+	if got, err := Expand(dir, plain); err != nil || got != plain {
+		t.Fatalf("Expand(no profiles) = %#v, %v", got, err)
+	}
+	if got, err := Expand(dir, nil); err != nil || got != nil {
+		t.Fatalf("Expand(nil) = %#v, %v", got, err)
+	}
+}
+
+func TestExpandMissingProfileIsTyped(t *testing.T) {
+	dir := Dir(t.TempDir())
+	_, err := Expand(dir, &manifest.Env{Sets: []string{"nope"}})
+	var missing *MissingError
+	if !errors.As(err, &missing) || missing.Name != "nope" {
+		t.Fatalf("err = %v, want *MissingError for nope", err)
+	}
+}
+
+// Every failure to resolve a referenced profile -- not only absence -- must
+// be recognisable to launch paths, which refuse rather than drop the layer.
+func TestExpandErrorsAllMatchErrProfile(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.toml"), []byte("= [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "invalid.toml"), []byte("[set]\nCLAUDE_CONFIG_DIR = \"/x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"absent", "broken", "invalid"} {
+		_, err := Expand(dir, &manifest.Env{Sets: []string{name}})
+		if !errors.Is(err, ErrSet) {
+			t.Errorf("%s: err = %v, want errors.Is ErrProfile", name, err)
+		}
+	}
+	var resolve *ResolveError
+	_, err := Expand(dir, &manifest.Env{Sets: []string{"broken"}})
+	if !errors.As(err, &resolve) || resolve.Name != "broken" {
+		t.Fatalf("broken profile err = %v, want *ResolveError naming it", err)
+	}
+}
+
+// A profile file created 0644 by hand is tightened by the next write.
+func TestWriteTightensExistingProfile(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	at := filepath.Join(dir, "p.toml")
+	if err := os.WriteFile(at, []byte("[set]\nA = \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(dir, &Set{Name: "p", Set: map[string]string{"API_KEY": "secret"}}); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(at); info.Mode().Perm() != 0o600 {
+		t.Fatalf("profile mode after write = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestReadDoesNotEchoBrokenProfileContent(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.toml"), []byte("[set]\nKEY = sk-ant-SECRETVALUE-unquoted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Read(dir, "p")
+	if err == nil || strings.Contains(err.Error(), "SECRETVALUE") {
+		t.Fatalf("error echoes profile content: %v", err)
+	}
+}
+
+func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if names, err := Defaults(dir); names != nil || err != nil {
+		t.Fatalf("Defaults(no marker) = %q, %v", names, err)
+	}
+	if err := WriteDefaults(dir, []string{"ghost"}); !errors.Is(err, ErrSet) {
+		t.Fatalf("WriteDefaults of a missing profile: %v", err)
+	}
+	if err := Write(dir, &Set{Name: "base", Set: map[string]string{"A": "default", "B": "default"}, Block: []string{"TOKEN"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(dir, &Set{Name: "pb", Set: map[string]string{"B": "profile"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDefaults(dir, []string{"base"}); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := Defaults(dir); strings.Join(names, ",") != "base" {
+		t.Fatalf("Defaults = %q", names)
+	}
+	info, _ := os.Stat(filepath.Join(dir, DefaultMarker))
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("marker mode %v", info.Mode().Perm())
+	}
+
+	// no manifest block at all: the default still applies
+	got, err := ExpandWithDefault(dir, nil)
+	if err != nil || got.Set["A"] != "default" || !got.Blocks("TOKEN") {
+		t.Fatalf("nil block: %#v %v", got, err)
+	}
+	// a block with its own profile and set: default < profile < own
+	got, err = ExpandWithDefault(dir, &manifest.Env{Sets: []string{"pb"}, Set: map[string]string{"TOKEN": "own"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Set["A"] != "default" || got.Set["B"] != "profile" || got.Set["TOKEN"] != "own" || got.Blocks("TOKEN") {
+		t.Fatalf("layering: %#v", got)
+	}
+
+	if err := ClearDefaults(dir); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := Defaults(dir); names != nil {
+		t.Fatalf("Defaults after clear = %q", names)
+	}
+	if err := ClearDefaults(dir); err != nil {
+		t.Fatalf("clearing absent defaults: %v", err)
+	}
+
+	// a default that names a missing profile refuses like any other
+	if err := os.WriteFile(filepath.Join(dir, DefaultMarker), []byte("gone\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExpandWithDefault(dir, nil); !errors.Is(err, ErrSet) {
+		t.Fatalf("missing default: %v", err)
+	}
+}
+
+// DEFAULTS became a list with the grammar: layered in listed order, later
+// wins, all under the playbook's own profiles and block.
+func TestRegistryDefaultsLayerInOrder(t *testing.T) {
+	dir := Dir(t.TempDir())
+	for name, v := range map[string]string{"a": "from-a", "b": "from-b"} {
+		if err := Write(dir, &Set{Name: name, Set: map[string]string{"X": v, "ONLY_" + strings.ToUpper(name): "1"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := WriteDefaults(dir, []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, DefaultMarker))
+	if string(data) != "a\nb\n" {
+		t.Fatalf("marker = %q", data)
+	}
+	got, err := ExpandWithDefault(dir, nil)
+	if err != nil || got.Set["X"] != "from-b" || got.Set["ONLY_A"] != "1" || got.Set["ONLY_B"] != "1" {
+		t.Fatalf("a then b: %#v %v", got, err)
+	}
+	if err := WriteDefaults(dir, []string{"b", "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := ExpandWithDefault(dir, nil); got.Set["X"] != "from-a" {
+		t.Fatalf("b then a: %#v", got)
+	}
+	got, err = ExpandWithDefault(dir, &manifest.Env{Set: map[string]string{"X": "own"}})
+	if err != nil || got.Set["X"] != "own" {
+		t.Fatalf("own block over defaults: %#v %v", got, err)
+	}
+	if err := WriteDefaults(dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, DefaultMarker)); !os.IsNotExist(err) {
+		t.Fatalf("an empty list must remove the marker: %v", err)
+	}
+}
+
+func TestDefaultsMarkerFormats(t *testing.T) {
+	dir := Dir(t.TempDir())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for content, want := range map[string]string{
+		"base\n":            "base",  // the single-name format before DEFAULTS was a list
+		"base":              "base",  // no trailing newline
+		"a\nb\n":            "a,b",   // one per line
+		"  a  \n\n b\n":     "a,b",   // blank lines and padding ignored
+		"":                  "ERROR", // empty is an error, not "no defaults"
+		"\n\n":              "ERROR", // so is only blank lines
+		"a\na\n":            "ERROR", // a name listed twice
+		"not a valid name!": "ERROR", // invalid name
+	} {
+		if err := os.WriteFile(filepath.Join(dir, DefaultMarker), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		names, err := Defaults(dir)
+		got := strings.Join(names, ",")
+		if err != nil {
+			got = "ERROR"
+		}
+		if got != want {
+			t.Errorf("marker %q: got %q (%v), want %q", content, got, err, want)
+		}
+	}
+}

@@ -20,14 +20,14 @@ func writeCpb(t *testing.T, dir, name, text string) string {
 // INCLUDEs, or by another spelling) runs once.
 func TestApplyIncludeStacksFiles(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir, _ := filepath.EvalSymlinks(t.TempDir()) // reports name files by their resolved path
 	writeCpb(t, dir, "base.cpb", "CREATE OR REPLACE ENV glm SET MODEL=glm-5.3;\n")
 	if err := os.Symlink("base.cpb", filepath.Join(dir, "base-link.cpb")); err != nil {
 		t.Fatal(err)
 	}
-	writeCpb(t, dir, "kommander.cpb", "INCLUDE 'base.cpb';\nCREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;\n")
-	top := writeCpb(t, dir, "chaos.cpb", "INCLUDE 'kommander.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK work USE ENV glm;\n")
+	writeCpb(t, dir, "toolkit.cpb", "INCLUDE 'base.cpb';\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
+	top := writeCpb(t, dir, "top.cpb", "INCLUDE 'toolkit.cpb';\nINCLUDE 'base-link.cpb';\nALTER PLAYBOOK work USE ENV glm;\n")
 
 	out, err := apply(t, top)
 	if err != nil {
@@ -72,9 +72,9 @@ func TestApplyIncludeRefusals(t *testing.T) {
 // file's directory, as INCLUDE does.
 func TestApplyRelativeMarketplaceSource(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	fakeClaude(t)
-	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK k NO LAUNCHER")
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(dir, "stub", ".claude-plugin"), 0o755); err != nil {
 		t.Fatal(err)

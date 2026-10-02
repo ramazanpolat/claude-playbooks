@@ -1,7 +1,7 @@
 == calls
 ls -q
 ls --json
-exec cpb-rot bash -lc cat ~/.claude-playbook-sandbox 2>/dev/null
+exec cpb-rot bash -lc cat ~/.cpb-sandbox 2>/dev/null
 secret ls --sandbox cpb-rot
 secret set-custom --host api.anthropic.com --env ANTHROPIC_API_KEY --value new-key --placeholder cpb-rot-ANTHROPIC_API_KEY --sandbox cpb-rot
 exec -i -e ANTHROPIC_API_KEY=cpb-rot-ANTHROPIC_API_KEY -e CLAUDE_CONFIG_DIR=<ROOT>/rot cpb-rot bash -lc cd '<WORK>' && exec claude

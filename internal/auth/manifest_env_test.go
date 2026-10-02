@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -51,7 +51,7 @@ func TestManifestUnsetTokenTakesStoredCredentialsPath(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	configDir := t.TempDir()
-	writeManifest(t, configDir, "[env]\nunset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
+	writeManifest(t, configDir, "[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
 	store := writeStore(t, configDir, `{`+grantJSON+`,`+mcpJSON+`}`)
 
 	env, _ := PrepareLaunchEnv(configDir)
@@ -104,7 +104,7 @@ func TestManifestEnvSetAndUnset(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/inherited")
 
 	configDir := t.TempDir()
-	writeManifest(t, configDir, "[env]\nunset = [\"NOISY\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\nNEW_VAR = \"yes\"\n")
+	writeManifest(t, configDir, "[env]\nblock = [\"NOISY\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\nNEW_VAR = \"yes\"\n")
 
 	env, err := PrepareLaunchEnv(configDir)
 	if err != nil {
@@ -133,7 +133,7 @@ func TestManifestEnvAppliesToIsolatedPlaybook(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	configDir := t.TempDir()
-	writeManifest(t, configDir, "isolate_auth = true\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\n")
+	writeManifest(t, configDir, "isolated_login = true\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\n")
 
 	env, _ := PrepareLaunchEnv(configDir)
 
@@ -178,12 +178,12 @@ func TestManifestProfilesApplyAtLaunch(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
+	if err := envset.Write(envset.Dir(root), &envset.Set{
 		Name:  "account",
 		Set:   map[string]string{"ANTHROPIC_BASE_URL": "http://profile/v1", "MODEL": "profile"},
-		Unset: []string{OAuthTokenEnv},
+		Block: []string{OAuthTokenEnv},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestManifestProfilesApplyAtLaunch(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeManifest(t, configDir, "[env]\nprofiles = [\"account\"]\n\n[env.set]\nMODEL = \"own\"\n")
+	writeManifest(t, configDir, "[env]\nsets = [\"account\"]\n\n[env.set]\nMODEL = \"own\"\n")
 	store := writeStore(t, configDir, `{`+grantJSON+`}`)
 
 	env, err := PrepareLaunchEnv(configDir)
@@ -218,19 +218,19 @@ func TestMissingProfileIsReportedTyped(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 
 	configDir := filepath.Join(root, "pb")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeManifest(t, configDir, "[env]\nprofiles = [\"ghost\"]\n")
+	writeManifest(t, configDir, "[env]\nsets = [\"ghost\"]\n")
 
 	_, err := PrepareLaunchEnv(configDir)
-	var missing *envprofile.MissingError
+	var missing *envset.MissingError
 	if !errors.As(err, &missing) || missing.Name != "ghost" {
-		t.Fatalf("err = %v, want *envprofile.MissingError", err)
+		t.Fatalf("err = %v, want *envset.MissingError", err)
 	}
 }
 
@@ -248,7 +248,7 @@ func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	configDir := t.TempDir()
-	writeManifest(t, configDir, "isolate_auth = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	writeManifest(t, configDir, "isolated_login = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
 	store := writeStore(t, configDir, `{`+grantJSON+`,`+mcpJSON+`}`)
 
 	env, _ := PrepareLaunchEnv(configDir)
@@ -268,9 +268,9 @@ func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
 	}
 }
 
-// A broken manifest in a subdir does not switch the install root's
-// isolation off: the token must still be stripped.
-func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
+// A broken manifest nearer the config directory does not switch the install
+// root's isolation off: the token must still be stripped.
+func TestIsolationSurvivesABrokenNearerManifest(t *testing.T) {
 	t.Setenv(oauthTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-INHERITED")
 	t.Setenv("HOME", t.TempDir())
@@ -280,7 +280,7 @@ func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("name = \"pb\"\nisolate_auth = true\nsubdir = \"playbook\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("name = \"pb\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(sub, ".playbook"), []byte("= [\n"), 0o644); err != nil {
@@ -289,7 +289,7 @@ func TestIsolationSurvivesBrokenSubdirManifest(t *testing.T) {
 
 	env, err := PrepareLaunchEnv(sub)
 	if _, present := envValue(t, env, OAuthTokenEnv); present {
-		t.Fatalf("broken subdir manifest switched isolation off: %v", env)
+		t.Fatalf("a broken nearer manifest switched isolation off: %v", env)
 	}
 	if err == nil {
 		t.Fatal("the broken manifest went unreported")
@@ -308,12 +308,12 @@ func TestProfileErrorStopsBeforeAuthMutation(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := os.MkdirAll(envprofile.Dir(root), 0o755); err != nil {
+	if err := os.MkdirAll(envset.Dir(root), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(envprofile.Dir(root), "broken.toml"), []byte("= [\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(envset.Dir(root), "broken.toml"), []byte("= [\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -321,11 +321,11 @@ func TestProfileErrorStopsBeforeAuthMutation(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeManifest(t, configDir, "[env]\nprofiles = [\"broken\"]\n")
+	writeManifest(t, configDir, "[env]\nsets = [\"broken\"]\n")
 	store := writeStore(t, configDir, `{`+grantJSON+`}`)
 
 	env, err := PrepareLaunchEnv(configDir)
-	if !errors.Is(err, envprofile.ErrProfile) {
+	if !errors.Is(err, envset.ErrSet) {
 		t.Fatalf("err = %v, want ErrProfile", err)
 	}
 	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
@@ -348,10 +348,10 @@ func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{
-		Name: "work", Set: map[string]string{"MODEL": "profile", "FROM_PROFILE": "yes"}, Unset: []string{OAuthTokenEnv},
+	if err := envset.Write(envset.Dir(root), &envset.Set{
+		Name: "work", Set: map[string]string{"MODEL": "profile", "FROM_PROFILE": "yes"}, Block: []string{OAuthTokenEnv},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
 	before, _ := os.ReadFile(filepath.Join(configDir, ".playbook"))
 
 	layers := []*manifest.Env{
-		{Profiles: []string{"work"}},
+		{Sets: []string{"work"}},
 		{Set: map[string]string{"MODEL": "flag"}},
 	}
 	env, err := PrepareLaunchEnvWith(configDir, layers)
@@ -391,8 +391,8 @@ func TestOneOffLayersApplyOnTopOfTheBlock(t *testing.T) {
 	}
 
 	// A one-off profile that does not exist refuses, before any mutation.
-	_, err = PrepareLaunchEnvWith(configDir, []*manifest.Env{{Profiles: []string{"ghost"}}})
-	if !errors.Is(err, envprofile.ErrProfile) {
+	_, err = PrepareLaunchEnvWith(configDir, []*manifest.Env{{Sets: []string{"ghost"}}})
+	if !errors.Is(err, envset.ErrSet) {
 		t.Fatalf("missing one-off profile: err = %v", err)
 	}
 }
@@ -413,26 +413,26 @@ func TestOwnTokenDropsGlobalPlanDescriptors(t *testing.T) {
 	}
 	writeStore(t, global, `{"claudeAiOauth":{"accessToken":"g","subscriptionType":"max","rateLimitTier":"default_claude_max_20x"}}`)
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 
 	configDir := filepath.Join(root, "pb")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-METU\"\n")
+	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-WORK\"\n")
 	env, _ := PrepareLaunchEnv(configDir)
-	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-METU" {
+	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-WORK" {
 		t.Fatalf("token = %q", got)
 	}
 	for _, key := range []string{SubscriptionTypeEnv, RateLimitTierEnv} {
 		if v, present := envValue(t, env, key); present {
-			t.Fatalf("%s=%q leaked into an own-token launch", key, v)
+			t.Fatalf("%s=%q leaked into a playbook-token launch", key, v)
 		}
 	}
 
 	// The block may supply the other account's descriptor itself.
-	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-METU\"\nCLAUDE_CODE_SUBSCRIPTION_TYPE = \"pro\"\n")
+	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-WORK\"\nCLAUDE_CODE_SUBSCRIPTION_TYPE = \"pro\"\n")
 	env, _ = PrepareLaunchEnv(configDir)
 	if got, _ := envValue(t, env, SubscriptionTypeEnv); got != "pro" {
 		t.Fatalf("block-set descriptor lost: %q", got)
@@ -483,12 +483,12 @@ func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	if err := envprofile.Write(envprofile.Dir(root), &envprofile.Profile{Name: "base", Set: map[string]string{"FROM_DEFAULT": "yes", "MODEL": "default"}, Unset: []string{OAuthTokenEnv}}); err != nil {
+	if err := envset.Write(envset.Dir(root), &envset.Set{Name: "base", Set: map[string]string{"FROM_DEFAULT": "yes", "MODEL": "default"}, Block: []string{OAuthTokenEnv}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := envprofile.WriteDefaults(envprofile.Dir(root), []string{"base"}); err != nil {
+	if err := envset.WriteDefaults(envset.Dir(root), []string{"base"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -527,8 +527,8 @@ func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
 	}
 
 	// Inspect sees the default too.
-	if r := Inspect("plain", plain, time.Now()); r.Mode != ModeOwnLogin {
-		t.Fatalf("inspect mode = %s, want own-login from the default's unset", r.Mode)
+	if r := Inspect("plain", plain, time.Now()); r.Mode != ModeSharedLogin || !r.TokenBlocked {
+		t.Fatalf("inspect mode = %s (token blocked %v), want shared-login, token blocked by the default's block", r.Mode, r.TokenBlocked)
 	}
 }
 
@@ -566,7 +566,7 @@ func TestConfigDirOverrideConsumedAfterEveryLayer(t *testing.T) {
 
 	t.Run("isolated path", func(t *testing.T) {
 		configDir := t.TempDir()
-		writeManifest(t, configDir, "isolate_auth = true\n")
+		writeManifest(t, configDir, "isolated_login = true\n")
 		writeStore(t, configDir, `{`+grantJSON+`}`)
 		env, err := PrepareLaunchEnvWith(configDir, leaky())
 		if err != nil {
@@ -579,9 +579,9 @@ func TestConfigDirOverrideConsumedAfterEveryLayer(t *testing.T) {
 		// A refusal returns early, before the layers are applied at all. The
 		// env it hands back is still well-formed and must still be bound.
 		configDir := t.TempDir()
-		layers := append(leaky(), &manifest.Env{Profiles: []string{"ghost"}})
+		layers := append(leaky(), &manifest.Env{Sets: []string{"ghost"}})
 		env, err := PrepareLaunchEnvWith(configDir, layers)
-		if !errors.Is(err, envprofile.ErrProfile) {
+		if !errors.Is(err, envset.ErrSet) {
 			t.Fatalf("want a profile refusal, got %v", err)
 		}
 		assertConsumed(t, env, configDir)

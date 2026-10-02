@@ -14,10 +14,10 @@ import (
 )
 
 // playKeepFlags sets slice 4's flags for one call, and resets them after.
-func playKeepFlags(t *testing.T, keep bool, as, update string) {
+func playKeepFlags(t *testing.T, keep bool, as string) {
 	t.Helper()
-	playKeep, playAs, playUpdate = keep, as, update
-	t.Cleanup(func() { playKeep, playAs, playUpdate = false, "", "" })
+	playKeep, playAs = keep, as
+	t.Cleanup(func() { playKeep, playAs = false, "" })
 }
 
 func showPlaybook(t *testing.T, name string) map[string]any {
@@ -46,8 +46,8 @@ func playbookVars(t *testing.T, name string) map[string]string {
 const keepV1 = "-- title: Keeper\n-- description: Kept.\n\nALTER PLAYBOOK\n  SET VAR FOO=1 EDITOR=vim\n  SET MODEL 'claude-opus-5-5';\n"
 const keepV2 = "-- title: Keeper\n-- description: Kept, v2.\n\nALTER PLAYBOOK\n  SET VAR BAR=2 EDITOR=vim\n  SET MODEL 'claude-sonnet-5';\n"
 
-// --keep: the preview and the yes, then a playbook in the user's store with
-// a launcher, never the pilot profile, the exact bytes and the [play]
+// --keep: the preview and the yes, then a playbook in the pilot's store with
+// a launcher, the exact bytes and the [play]
 // record; no session. --update: the same bytes change nothing; new ones
 // need the yes again, show the diff, and undo what the old recipe set.
 func TestPlayKeepAndUpdate(t *testing.T) {
@@ -58,7 +58,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 	dir := t.TempDir()
 	p := writeRecipe(t, dir, "keeper.cpb", keepV1)
 	playFlags(t, false, false, false, "")
-	playKeepFlags(t, true, "", "")
+	playKeepFlags(t, true, "")
 
 	// No terminal, no --yes: refused, nothing kept.
 	playRunFlags(t, false, nil, nil, nil)
@@ -78,7 +78,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 	}
 	v := showPlaybook(t, "keeper")
 	rec, _ := v["play"].(map[string]any)
-	if rec == nil || rec["ref"] != canon(t, p) && rec["ref"] != p || len(rec["sha256"].(string)) != 64 || v["pilot_profile"] != "not_imported" {
+	if rec == nil || rec["ref"] != canon(t, p) && rec["ref"] != p || len(rec["sha256"].(string)) != 64 {
 		t.Fatalf("the kept playbook: %v", v)
 	}
 	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "keeper"); !exists || foreign {
@@ -98,15 +98,15 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 		t.Fatalf("SELECT play: %v\n%s", err, js)
 	}
 
-	// Kept again under the same name: refused, naming --as and --update.
+	// Kept again under the same name: refused, naming --as and cpb update.
 	captureStdout(t, func() { err = runPlay(playCmd, []string{p}) })
-	if err == nil || !strings.Contains(err.Error(), "--as") || !strings.Contains(err.Error(), "cpb play --update keeper") {
+	if err == nil || !strings.Contains(err.Error(), "--as") || !strings.Contains(err.Error(), "cpb update keeper") {
 		t.Fatalf("a second keep: %v", err)
 	}
 
-	// --update with the same bytes: unchanged.
-	playKeepFlags(t, false, "", "keeper")
-	out = captureStdout(t, func() { err = runPlay(playCmd, nil) })
+	// cpb update with the same bytes: unchanged. update dispatches a played
+	// playbook to its recipe.
+	out = captureStdout(t, func() { err = runUpdate(updateCmd, []string{"keeper"}) })
 	if err != nil || !strings.Contains(out, "keeper is unchanged") {
 		t.Fatalf("unchanged: %v\n%s", err, out)
 	}
@@ -114,7 +114,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 	// New bytes: refused without the yes; nothing changes.
 	writeRecipe(t, dir, "keeper.cpb", keepV2)
 	playRunFlags(t, false, nil, nil, nil)
-	out = captureStdout(t, func() { err = runPlay(playCmd, nil) })
+	out = captureStdout(t, func() { err = playUpdateRun("keeper") })
 	if err == nil || !strings.Contains(out, "- ") || !strings.Contains(out, "+ ") {
 		t.Fatalf("update without --yes: %v\n%s", err, out)
 	}
@@ -123,7 +123,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 	}
 
 	playRunFlags(t, true, nil, nil, nil)
-	out = captureStdout(t, func() { err = runPlay(playCmd, nil) })
+	out = captureStdout(t, func() { err = playUpdateRun("keeper") })
 	if err != nil || !strings.Contains(out, "-   SET VAR FOO=1 EDITOR=vim") || !strings.Contains(out, "+   SET VAR BAR=2 EDITOR=vim") || !strings.Contains(out, "Updated keeper") {
 		t.Fatalf("update: %v\n%s", err, out)
 	}
@@ -139,17 +139,17 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 		t.Fatalf("the recorded bytes after the update: %q", b)
 	}
 
-	// A playbook play did not keep has nothing to update.
-	mustStmt(t, "CREATE PLAYBOOK plain NO ALIAS")
-	playKeepFlags(t, false, "", "plain")
-	if err := runPlay(playCmd, nil); err == nil || !strings.Contains(err.Error(), "[play] record") {
+	// A playbook neither played nor created FROM a source has nothing to
+	// update.
+	mustStmt(t, "CREATE PLAYBOOK plain NO LAUNCHER")
+	if err := runUpdate(updateCmd, []string{"plain"}); err == nil || !strings.Contains(err.Error(), "nothing to update from") {
 		t.Fatalf("update of an unplayed playbook: %v", err)
 	}
 }
 
-// A kept playbook lives in the user's store, so DEFAULTS layer into it. When
+// A kept playbook lives in the pilot's store, so DEFAULTS layer into it. When
 // the recipe moves the endpoint, their keys are blocked there (named in the
-// preview), the login is its own, and an --env set's keys are not blocked.
+// preview), the login is its own, and an --env-set set's keys are not blocked.
 func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
@@ -160,7 +160,7 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	mustStmt(t, "ALTER DEFAULTS USE ENV mine")
 	mustStmt(t, "CREATE ENV routerkey SET ANTHROPIC_AUTH_TOKEN=router-token AS PLAINTEXT")
 	playFlags(t, false, false, false, "")
-	playKeepFlags(t, true, "", "")
+	playKeepFlags(t, true, "")
 
 	// --yes alone does not confirm the endpoint.
 	playRunFlags(t, true, nil, nil, nil)
@@ -183,16 +183,16 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unset := strings.Join(m.Env.Unset, " ")
+	unset := strings.Join(m.Env.Block, " ")
 	if !strings.Contains(unset, "EDITOR") || !strings.Contains(unset, "ANTHROPIC_API_KEY") || strings.Contains(unset, "ANTHROPIC_AUTH_TOKEN") || strings.Contains(unset, "ANTHROPIC_BASE_URL") {
 		t.Fatalf("blocked: %q", unset)
 	}
-	if strings.Join(m.Env.Profiles, " ") != "routerkey" {
-		t.Fatalf("--env: %v", m.Env.Profiles)
+	if strings.Join(m.Env.Sets, " ") != "routerkey" {
+		t.Fatalf("--env: %v", m.Env.Sets)
 	}
 }
 
-// --keep --dry-run --json plans against the user's store and writes
+// --keep --dry-run --json plans against the pilot's store and writes
 // nothing; create-with: SANDBOX keeps it sandboxed; usage errors.
 func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	resetCommandTestState(t)
@@ -200,7 +200,7 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	dir := t.TempDir()
 	p := writeRecipe(t, dir, "keeper.cpb", keepV1)
 	playFlags(t, false, true, true, "")
-	playKeepFlags(t, true, "kept", "")
+	playKeepFlags(t, true, "kept")
 	var err error
 	out := captureStdout(t, func() { err = runPlay(playCmd, []string{p}) })
 	var rep struct {
@@ -215,12 +215,12 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	}
 
 	boxed := writeRecipe(t, dir, "boxed.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n")
-	refs := writeRecipe(t, dir, "refs.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET VAR GH FROM 'keychain:pilot/gh';\n")
+	refs := writeRecipe(t, dir, "refs.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';\n")
 	playFlags(t, false, false, false, "")
-	playKeepFlags(t, true, "", "")
-	playRunFlags(t, true, nil, []string{"keychain:pilot/gh"}, nil)
+	playKeepFlags(t, true, "")
+	playRunFlags(t, true, nil, []string{"keychain:gh"}, nil)
 	captureStdout(t, func() { err = runPlay(playCmd, []string{boxed}) })
-	if err != nil || showPlaybook(t, "boxed")["sandbox"] != true {
+	if err != nil || showPlaybook(t, "boxed")["sandbox"].(map[string]any)["always"] != true {
 		t.Fatalf("create-with SANDBOX: %v", err)
 	}
 	captureStdout(t, func() { err = runPlay(playCmd, []string{refs}) })
@@ -231,17 +231,15 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	// Usage.
 	for _, c := range []struct {
 		keep      bool
-		as, upd   string
+		as        string
 		check     bool
 		args      []string
 		wantError string
 	}{
-		{false, "x", "", false, []string{p}, "--as names a kept playbook"},
-		{true, "", "", true, []string{p}, "--check runs nothing to keep"},
-		{false, "", "kept", false, []string{p}, "takes no <ref>"},
-		{true, "", "kept", false, nil, "cannot be combined"},
+		{false, "x", false, []string{p}, "--as names a kept playbook"},
+		{true, "", true, []string{p}, "--check runs nothing to keep"},
 	} {
-		playKeepFlags(t, c.keep, c.as, c.upd)
+		playKeepFlags(t, c.keep, c.as)
 		playFlags(t, c.check, false, false, "")
 		playCmd.Flags().Parse(c.args)
 		if err := playCmd.Args(playCmd, c.args); err == nil || !strings.Contains(err.Error(), c.wantError) {
@@ -250,7 +248,7 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	}
 }
 
-// What --update undoes: what the old recipe set and the new one does not
+// What an update undoes: what the old recipe set and the new one does not
 // set the same way; plugins before their marketplace; nothing for clauses
 // that stay.
 func TestUndoFor(t *testing.T) {
@@ -278,7 +276,7 @@ func TestUndoFor(t *testing.T) {
 
 func TestLineDiff(t *testing.T) {
 	got := strings.Join(lineDiff([]string{"a", "b", "c"}, []string{"a", "x", "c", "d"}), "|")
-	if got != "- b|+ x|+ d" && got != "+ x|- b|+ d" {
+	if got != "- b|+ x|+ d" { // what went, then what came
 		t.Fatalf("%q", got)
 	}
 }

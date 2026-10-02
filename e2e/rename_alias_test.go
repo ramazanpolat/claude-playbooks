@@ -32,7 +32,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 	shim := shimDir(t)
 	dump := filepath.Join(work, "envdump")
 	// The alias invokes the binary by bare name, so the directory holding the
-	// binary under test must be on PATH. Relying on an installed claude-playbook
+	// binary under test must be on PATH. Relying on an installed cpb
 	// made this pass on a developer machine and fail on a clean CI runner.
 	baseEnv := []string{
 		"PATH=" + shim +
@@ -51,15 +51,15 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("claude-playbook %v: %v\n%s", full, err, out)
+			t.Fatalf("cpb %v: %v\n%s", full, err, out)
 		}
 		return string(out)
 	}
 
-	cpb("create", "before", "--alias", "ab")
-	cpb("rename", "before", "after")
+	cpb("CREATE", "PLAYBOOK", "oldpb", "LAUNCHER", "ab")
+	cpb("ALTER", "PLAYBOOK", "oldpb", "RENAME", "TO", "newpb")
 
-	// Executing the launcher is what happens when the user types `ab`.
+	// Executing the launcher is what happens when the pilot types `ab`.
 	script := filepath.Join(launcherDir, "ab")
 	cmd := exec.Command(script)
 	cmd.Env = baseEnv
@@ -83,7 +83,7 @@ func TestRenamedPlaybookLauncherStillLaunches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDir := "CLAUDE_CONFIG_DIR=" + filepath.Join(root, "after")
+	wantDir := "CLAUDE_CONFIG_DIR=" + filepath.Join(root, "newpb")
 	if !strings.Contains(string(data), wantDir) {
 		t.Fatalf("launcher used the wrong config dir; wanted %s", wantDir)
 	}

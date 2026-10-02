@@ -11,58 +11,27 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-var (
-	installName    string
-	installSubdir  string
-	installBranch  string
-	installAlias   string
-	installNoAlias bool
-	installSandbox bool
-)
-
-var installCmd = &cobra.Command{
-	Use:   "install <source>",
-	Short: "Install a playbook from a Git URL or local directory",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runInstall,
-}
-
-func init() {
-	installCmd.Flags().StringVar(&installName, "name", "", "directory name under the playbooks root")
-	installCmd.Flags().StringVar(&installSubdir, "subdir", "", "cherry-pick: install only this subdirectory of the source")
-	installCmd.Flags().StringVar(&installBranch, "branch", "", "Git URL only: clone this ref instead of the default branch")
-	installCmd.Flags().StringVar(&installAlias, "alias", "", "launcher command name for the installed playbook")
-	installCmd.Flags().BoolVar(&installNoAlias, "no-alias", false, "skip launcher command creation entirely")
-	installCmd.Flags().BoolVar(&installSandbox, "sandbox", false, "always launch inside a sandbox ([sandbox] always = true) with isolated authentication")
-}
-
-// installOpts carries install's options: its flags for the command, the statement's
-// clauses for the grammar. No state is shared between two calls.
+// installOpts carries CREATE PLAYBOOK … FROM's clauses. No state is shared
+// between two calls.
 type installOpts struct {
-	name    string
-	subdir  string
-	branch  string
-	alias   string
-	noAlias bool
-	sandbox bool
-	// isolatedLogin: isolate_auth = true without a sandbox (CREATE
+	name       string
+	subdir     string
+	branch     string
+	launcher   string
+	noLauncher bool
+	sandbox    bool
+	// isolatedLogin: isolated_login = true without a sandbox (CREATE
 	// PLAYBOOK … FROM … ISOLATED LOGIN).
 	isolatedLogin bool
 }
 
-func runInstall(cmd *cobra.Command, args []string) error {
-	return doInstall(installOpts{name: installName, subdir: installSubdir, branch: installBranch, alias: installAlias, noAlias: installNoAlias, sandbox: installSandbox}, args)
-}
-
 func doInstall(o installOpts, args []string) error {
-	if err := checkAliasFlagConflict(o.alias, o.noAlias); err != nil {
+	if err := checkLauncherConflict(o.launcher, o.noLauncher); err != nil {
 		return err
 	}
 
@@ -88,7 +57,6 @@ func doInstall(o installOpts, args []string) error {
 	}
 
 	subdir := strings.Trim(o.subdir, "/")
-	cherryPick := subdir != ""
 
 	playbooksDir := config.ResolvePlaybooksDir()
 	if err := os.MkdirAll(playbooksDir, 0755); err != nil {
@@ -109,32 +77,15 @@ func doInstall(o installOpts, args []string) error {
 		return err
 	}
 
-	// Stage 2: pick the target name. Order: --name, manifest's name, then a
-	// fallback derived from the source.
+	// Stage 2: the target is the statement's name; the source's manifest
+	// name does not choose it.
 	targetName := o.name
-	if targetName == "" {
-		if mPre != nil && mPre.Name != "" {
-			targetName = mPre.Name
-		}
-	}
-	if targetName == "" {
-		if cherryPick {
-			targetName = lastSegmentOfPath(subdir)
-		} else if isGit {
-			targetName = deriveNameFromURL(source)
-		} else {
-			targetName = deriveNameFromLocal(source)
-		}
-	}
-	if targetName == "" {
-		return fmt.Errorf("could not derive name from source; use --name")
-	}
-	if err := validateTopLevelName("install name", targetName); err != nil {
+	if err := validateTopLevelName("playbook name", targetName); err != nil {
 		return err
 	}
 	dest := filepath.Join(playbooksDir, targetName)
 	if _, err := os.Lstat(dest); err == nil {
-		return fmt.Errorf("%q already exists at %s. Use --name to choose a different name", targetName, dest)
+		return fmt.Errorf("%q already exists at %s; choose another name", targetName, dest)
 	}
 
 	// Serialize preflight-through-registration across concurrent installs
@@ -145,21 +96,21 @@ func doInstall(o installOpts, args []string) error {
 	}
 	defer unlock()
 
-	// Preflight command names BEFORE the directory joins the registry:
+	// Preflight launcher names BEFORE the directory joins the registry:
 	// dispatch resolves directory names ahead of aliases, so a clash would
 	// silently re-route an existing command. The target name joins the
 	// registry even under --no-alias, and an imported manifest's alias
 	// registers without any flag.
-	effectiveAlias := o.alias
+	effectiveAlias := o.launcher
 	if effectiveAlias == "" && mPre != nil {
-		effectiveAlias = mPre.Alias
+		effectiveAlias = mPre.Launcher
 	}
 	// The launcher that will actually be written uses the effective alias,
 	// falling back to the target name — an unwritable name must fail before
 	// the source is copied into the registry, not as a post-copy warning.
 	// The installed manifest normalizes its name to targetName, so this
 	// resolved name is still the command to write after the copy.
-	launcherName, err := resolveLauncherName(o.noAlias, effectiveAlias, targetName, "install")
+	launcherName, err := resolveLauncherName(o.noLauncher, effectiveAlias, targetName, "create the playbook")
 	if err != nil {
 		return err
 	}
@@ -167,15 +118,7 @@ func doInstall(o installOpts, args []string) error {
 		return err
 	}
 
-	// Read the optional manifest from staging to check if we need to cherry-pick a subdir.
 	copySrc := work
-	hasManifestSubdir := mPre != nil && mPre.Subdir != ""
-	if hasManifestSubdir {
-		copySrc, err = manifest.ResolveSubdir(work, "subdir", mPre.Subdir)
-		if err != nil {
-			return err
-		}
-	}
 
 	// Stage 3: assemble the install in a dot-prefixed directory beside its
 	// destination -- discovery skips dot entries, so nothing can launch it
@@ -200,32 +143,27 @@ func doInstall(o installOpts, args []string) error {
 	if !mPre.Env.Empty() {
 		// [env] is install-local state: a published manifest must not be
 		// able to redirect an install's API endpoint or strip its auth.
-		fmt.Fprintf(os.Stderr, "Note: ignoring the [env] block shipped in the source's %s; environment overrides are install-local. Set them with: claude-playbook env %s set KEY=VALUE\n", manifest.FileName, targetName)
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [env] block shipped in the source's %s; environment overrides are install-local. Set them with: cpb ALTER PLAYBOOK %s SET VAR KEY=VALUE\n", manifest.FileName, targetName)
 		mPre.Env = nil
 		needsManifestWrite = true
 	}
 	if !mPre.Sandbox.Empty() {
 		// [sandbox] is install-local too: a published manifest must not be
 		// able to mount host paths or widen the sandbox's network.
-		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: claude-playbook install --sandbox, or edit the installed manifest\n", manifest.FileName)
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: CREATE PLAYBOOK … SANDBOX, or edit the installed manifest\n", manifest.FileName)
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}
 	if o.sandbox {
-		mPre.IsolateAuth = true
+		mPre.IsolatedLogin = true
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
 		needsManifestWrite = true
 	}
 	if o.isolatedLogin {
-		mPre.IsolateAuth = true
+		mPre.IsolatedLogin = true
 		needsManifestWrite = true
 	}
 	sourceSubdir := subdir
-	if hasManifestSubdir {
-		sourceSubdir = path.Join(sourceSubdir, mPre.Subdir)
-		mPre.Subdir = ""
-		needsManifestWrite = true
-	}
 	if isGit {
 		mPre.Source = &manifest.Source{
 			Repository: source,
@@ -248,73 +186,50 @@ func doInstall(o installOpts, args []string) error {
 		}
 	}
 
-	// Read the optional .playbook of the assembled install. A missing
+	// Check the optional .playbook of the assembled install. A missing
 	// manifest is fine: the installed directory is a valid flat playbook.
-	m, err := manifest.Read(stage)
-	if err != nil {
+	if _, err := manifest.Read(stage); err != nil {
 		os.RemoveAll(stage)
 		return err
 	}
-	configStage := stage
-	if m != nil && m.Subdir != "" {
-		if configStage, err = manifest.ResolveSubdir(stage, "subdir", m.Subdir); err != nil {
-			os.RemoveAll(stage)
-			return err
-		}
-	}
 	// A source never carries a login: its .credentials.json and the account
-	// state of its .claude.json stay out of the install, at its root and in
-	// its config directory (docs/known-issues/shared-launch-copies-own-login-
-	// over-machine-login.md).
-	for _, dir := range []string{stage, configStage} {
-		if err := stripSourceLogin(dir, source); err != nil {
-			os.RemoveAll(stage)
-			return err
-		}
-		if configStage == stage {
-			break
-		}
+	// state of its .claude.json stay out of the install (CHANGELOG.md,
+	// v3.22.1).
+	if err := stripSourceLogin(stage, source); err != nil {
+		os.RemoveAll(stage)
+		return err
 	}
 	if err := os.Rename(stage, dest); err != nil {
 		os.RemoveAll(stage)
 		return fmt.Errorf("failed to activate %s: %w", dest, err)
 	}
-	configDest := dest
-	if m != nil && m.Subdir != "" {
-		configDest, err = manifest.ResolveSubdir(dest, "subdir", m.Subdir)
-		if err != nil {
-			os.RemoveAll(dest)
-			return err
-		}
-	}
-
-	if err := auth.SyncCredentials(configDest); err != nil {
+	if err := auth.SyncCredentials(dest); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to sync credentials: %v\n", err)
 	}
 
 	fmt.Printf("Installed %q at %s\n", targetName, dest)
 
 	// CLAUDE.md warning.
-	warnIfNoClaudeMD(configDest, targetName)
+	warnIfNoClaudeMD(dest, targetName)
 
 	// Alias handling.
-	if o.noAlias {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", targetName)
+	if o.noLauncher {
+		fmt.Printf("\nRun with:\n  cpb run %s\n", targetName)
 	} else {
-		// A custom command name must be resolvable at invocation time: record
+		// A custom launcher name must be resolvable at invocation time: record
 		// it as the manifest alias so multicall dispatch finds the playbook.
-		if o.alias != "" {
-			if err := writeAliasManifest(dest, targetName, o.alias); err != nil {
+		if o.launcher != "" {
+			if err := writeAliasManifest(dest, targetName, o.launcher); err != nil {
 				// Without the manifest entry the alias can never resolve; and
 				// dest already joined the registry, so leaving it would block a
 				// retry under the same name — roll it back like the other
 				// post-copy error paths.
 				os.RemoveAll(dest)
-				return fmt.Errorf("cannot record alias %q in manifest (required for the command to resolve): %w", o.alias, err)
+				return fmt.Errorf("cannot record launcher %q in manifest (required for the launcher to resolve): %w", o.launcher, err)
 			}
 		}
 
-		installLauncher(launcherName, targetName, configDest)
+		installLauncher(launcherName, targetName, dest)
 	}
 
 	return nil
@@ -335,7 +250,7 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 		if _, err := exec.LookPath("git"); err != nil {
 			return "", func() {}, fmt.Errorf("'git' command not found")
 		}
-		tmp, err := os.MkdirTemp("", "claude-playbook-clone-")
+		tmp, err := os.MkdirTemp("", "cpb-clone-")
 		if err != nil {
 			return "", func() {}, err
 		}
@@ -378,7 +293,7 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 	}
 
 	if ref != "" {
-		return "", func() {}, fmt.Errorf("--branch only applies to Git URLs")
+		return "", func() {}, fmt.Errorf("BRANCH only applies to Git URLs")
 	}
 	abs, err := filepath.Abs(source)
 	if err != nil {
@@ -433,7 +348,7 @@ func stageTempDir(work string) (string, error) {
 	}
 	candidates := []string{os.TempDir()}
 	if cache, err := os.UserCacheDir(); err == nil {
-		candidates = append(candidates, filepath.Join(cache, "claude-playbook"))
+		candidates = append(candidates, filepath.Join(cache, "cpb"))
 	}
 	for _, base := range candidates {
 		// A relative TMPDIR (".tmp" while running inside the source) must
@@ -455,7 +370,7 @@ func stageTempDir(work string) (string, error) {
 		if err := os.MkdirAll(base, 0o755); err != nil {
 			continue
 		}
-		if tmp, err := os.MkdirTemp(base, "claude-playbook-stage-"); err == nil {
+		if tmp, err := os.MkdirTemp(base, "cpb-stage-"); err == nil {
 			return tmp, nil
 		}
 	}
@@ -479,20 +394,9 @@ func insideTree(path, rootReal string) bool {
 	}
 }
 
-func deriveNameFromLocal(source string) string {
-	abs, err := filepath.Abs(source)
-	if err != nil {
-		return ""
-	}
-	return filepath.Base(strings.TrimRight(abs, string(filepath.Separator)))
-}
-
-// parseGitTreeURL recognises GitHub /tree/<ref>/<path...> URLs and returns
-// (clone-url, ref, subdir, true). For other URLs returns ("","","",false).
-func parseGitTreeURL(s string) (string, string, string, bool) {
-	return parseGitTreeURLWithRef(s, "")
-}
-
+// parseGitTreeURLWithRef recognises GitHub /tree/<ref>/<path...> URLs and
+// returns (clone-url, ref, subdir, true). For other URLs returns
+// ("","","",false).
 func parseGitTreeURLWithRef(s, preferredRef string) (string, string, string, bool) {
 	u, err := url.Parse(s)
 	if err != nil {
@@ -568,29 +472,6 @@ func isGitURL(s string) bool {
 		strings.HasPrefix(s, "git://") ||
 		strings.HasPrefix(s, "ssh://") ||
 		strings.HasPrefix(s, "file://")
-}
-
-func deriveNameFromURL(source string) string {
-	source = strings.TrimRight(source, "/")
-	name := filepath.Base(source)
-	name = strings.TrimSuffix(name, ".git")
-	return name
-}
-
-func lastSegmentOfPath(p string) string {
-	p = strings.TrimSuffix(p, "/")
-	i := strings.LastIndex(p, "/")
-	if i < 0 {
-		return p
-	}
-	return p[i+1:]
-}
-
-func pluralS(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // copyDir recursively copies the tree rooted at src into dst.

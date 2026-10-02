@@ -16,8 +16,8 @@
 # skips it by name). Phase 2 and nightly only: the kit's lint keeps judged
 # suites out of phase 1. Choice fixtures:
 # gentar/judge-fixtures/cpb-goal-grammar/goal/<expected action>/*.txt,
-# measured with the engine's bin/judge-eval. Assertions confirmed by root as
-# the pilot's delegate, 2026-09-27.
+# measured with the engine's bin/judge-eval. Assertions confirmed
+# 2026-09-27.
 
 [scenario]
 name = "cpb-goal-grammar"
@@ -27,12 +27,12 @@ data = "synthetic"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook" && ln -sf claude-playbook "$HOME/.local/bin/cpb"',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
-  'claude-playbook CREATE ENV synth-router SET ANTHROPIC_BASE_URL=http://router.invalid/v1 DESCRIBE "synthetic router"',
-  'claude-playbook CREATE ENV synth-direct SET ANTHROPIC_BASE_URL=http://direct.invalid/v1 DESCRIBE "synthetic direct"',
-  'claude-playbook CREATE PLAYBOOK keep NO ALIAS && claude-playbook ALTER PLAYBOOK keep USE ENV synth-direct',
+  'cpb CREATE ENV synth-router SET ANTHROPIC_BASE_URL=http://router.invalid/v1 DESCRIPTION "synthetic router"',
+  'cpb CREATE ENV synth-direct SET ANTHROPIC_BASE_URL=http://direct.invalid/v1 DESCRIPTION "synthetic direct"',
+  'cpb CREATE PLAYBOOK keep NO LAUNCHER && cpb ALTER PLAYBOOK keep USE ENV synth-direct',
   'cksum < "$HOME/.claude-playbooks/keep/.playbook" > "$HOME/keep.sum" && mkdir -p "$HOME/work"',
 ]
 
@@ -46,13 +46,13 @@ timeout = 300
 
 [[driver.actions]]
 id = "write_file"
-send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO ALIAS;' 'ALTER PLAYBOOK demo USE ENV synth-router BLOCK VAR HTTP_PROXY;' > demo.cpb'''
+send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO LAUNCHER;' 'ALTER PLAYBOOK demo USE ENV synth-router BLOCK VAR HTTP_PROXY;' > demo.cpb'''
 then = "enter"
 when = "writes demo.cpb with a playbook demo on the env set synth-router and HTTP_PROXY blocked, replacing any demo.cpb already there: the first step while demo.cpb does not exist yet or holds anything else"
 
 [[driver.actions]]
 id = "write_file_direct"
-send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO ALIAS;' 'ALTER PLAYBOOK demo USE ENV synth-direct BLOCK VAR HTTP_PROXY;' > demo.cpb'''
+send = '''printf '%s\n' 'CREATE PLAYBOOK IF NOT EXISTS demo NO LAUNCHER;' 'ALTER PLAYBOOK demo USE ENV synth-direct BLOCK VAR HTTP_PROXY;' > demo.cpb'''
 then = "enter"
 when = "writes demo.cpb with a playbook demo on the env set synth-direct and HTTP_PROXY blocked (replacing any demo.cpb already there)"
 
@@ -94,17 +94,17 @@ pass_rate_min = 0.66
 [[verify.commands]]
 # The file exists and the state already matches it: applying it again
 # would create and change nothing.
-command = 'cd "$HOME/work" && test -f demo.cpb && claude-playbook APPLY demo.cpb --dry-run | grep -q " 0 created, 0 changed, 2 unchanged," && echo file-state-agree'
+command = 'cd "$HOME/work" && test -f demo.cpb && cpb APPLY demo.cpb --dry-run | grep -q " 0 created, 0 changed, 2 unchanged," && echo file-state-agree'
 contains = "file-state-agree"
 
 [[verify.commands]]
 # demo is on synth-router, and only that, with HTTP_PROXY blocked.
-command = 'J=$(claude-playbook SHOW PLAYBOOK demo --json | tr -d " \n") && printf "%s" "$J" | grep -qF "\"envs\":[\"synth-router\"]" && printf "%s" "$J" | grep -qF "{\"key\":\"HTTP_PROXY\",\"blocked\":true}" && echo demo-ok'
+command = 'J=$(cpb SHOW PLAYBOOK demo --json | tr -d " \n") && printf "%s" "$J" | grep -qF "\"envs\":[\"synth-router\"]" && printf "%s" "$J" | grep -qF "{\"key\":\"HTTP_PROXY\",\"blocked\":true}" && echo demo-ok'
 contains = "demo-ok"
 
 [[verify.commands]]
 # keep is byte-identical, and synth-direct is still used by keep alone.
-command = 'test -f "$HOME/.claude-playbooks/keep/.playbook" && [ "$(cksum < "$HOME/.claude-playbooks/keep/.playbook")" = "$(cat "$HOME/keep.sum")" ] && claude-playbook SHOW ENV synth-direct --json | tr -d " \n" | grep -qF "\"used_by\":[\"keep\"]" && echo keep-untouched'
+command = 'test -f "$HOME/.claude-playbooks/keep/.playbook" && [ "$(cksum < "$HOME/.claude-playbooks/keep/.playbook")" = "$(cat "$HOME/keep.sum")" ] && cpb SHOW ENV synth-direct --json | tr -d " \n" | grep -qF "\"used_by\":[\"keep\"]" && echo keep-untouched'
 contains = "keep-untouched"
 
 [[verify.commands]]
@@ -115,7 +115,7 @@ contains = "registry-ok"
 [[verify.commands]]
 # A launch through the stub claude gets the router and not the proxy the
 # shell exports.
-command = 'rm -f "$HOME/claude-env"; HTTP_PROXY=http://proxy.invalid claude-playbook run demo && grep -qx "ANTHROPIC_BASE_URL=http://router.invalid/v1" "$HOME/claude-env" && ! grep -q "^HTTP_PROXY=" "$HOME/claude-env" && echo launch-ok'
+command = 'rm -f "$HOME/claude-env"; HTTP_PROXY=http://proxy.invalid cpb run demo && grep -qx "ANTHROPIC_BASE_URL=http://router.invalid/v1" "$HOME/claude-env" && ! grep -q "^HTTP_PROXY=" "$HOME/claude-env" && echo launch-ok'
 contains = "launch-ok"
 
 [[verify.judge]]

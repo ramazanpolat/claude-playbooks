@@ -6,7 +6,7 @@
 set -eu
 cpb=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 here=$(cd "$(dirname "$0")" && pwd)
-chmod 755 "$here/.ci/claude" "$here/.ci/with-secret"
+chmod 755 "$here/.ci/claude" "$here/secret-helper/cpb-secret-file"
 fail=0
 ran=0
 for dir in "$here"/[0-9][0-9]-*/; do

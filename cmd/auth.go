@@ -35,7 +35,9 @@ var authStatusCmd = &cobra.Command{
 authenticate -- exactly as run does, without launching -- and report the
 stored login next to it:
 
-  MODE     token | own-token | own-login | shared-login | isolated | error
+  MODE     token | playbook-token | shared-login | isolated-login | error;
+           shared-login (token blocked) when the playbook blocks the
+           machine's token
   STORE    what sits at .credentials.json: symlink -> target, file, or absent
   EXPIRES  the stored grant's expiry, "expired", or "-" when there is no grant
   DAEMON   Claude Code's daemon-auth-status.json, when it says re-auth is
@@ -45,7 +47,7 @@ stored login next to it:
 The global ~/.claude, owner of the shared store, is listed first. Nothing is
 written, no credential value is read into the output, no network call is
 made. --claude additionally runs 'claude auth status --json' per directory
-(one process each) and adds its loggedIn and subscriptionType.`,
+(one process each) and adds its logged_in, subscription_type and auth_method.`,
 	ValidArgsFunction: autocompletePlaybookNames,
 	RunE:              runAuthStatus,
 }
@@ -84,10 +86,12 @@ func (a authRow) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fields)
 }
 
+// claudeAuth is what --claude adds to a row: claude auth status --json,
+// with cpb's snake_case keys.
 type claudeAuth struct {
-	LoggedIn         bool   `json:"loggedIn"`
-	SubscriptionType string `json:"subscriptionType,omitempty"`
-	AuthMethod       string `json:"authMethod,omitempty"`
+	LoggedIn         bool   `json:"logged_in"`
+	SubscriptionType string `json:"subscription_type,omitempty"`
+	AuthMethod       string `json:"auth_method,omitempty"`
 	Error            string `json:"error,omitempty"`
 }
 
@@ -155,11 +159,15 @@ func askClaude(dir string) *claudeAuth {
 		}
 		return &claudeAuth{Error: msg}
 	}
-	var got claudeAuth
+	var got struct {
+		LoggedIn         bool   `json:"loggedIn"`
+		SubscriptionType string `json:"subscriptionType"`
+		AuthMethod       string `json:"authMethod"`
+	}
 	if err := json.Unmarshal(out, &got); err != nil {
 		return &claudeAuth{Error: "unparsable output"}
 	}
-	return &got
+	return &claudeAuth{LoggedIn: got.LoggedIn, SubscriptionType: got.SubscriptionType, AuthMethod: got.AuthMethod}
 }
 
 func printAuthTable(rows []authRow, now time.Time) {
@@ -200,8 +208,11 @@ func printAuthTable(rows []authRow, now time.Time) {
 			note = "launch refused: " + r.ModeError
 		}
 		mode := string(r.Mode)
-		if r.Isolated && r.Mode != auth.ModeIsolated {
+		if r.IsolatedLogin && r.Mode != auth.ModeIsolatedLogin {
 			mode += " (isolated)"
+		}
+		if r.TokenBlocked {
+			mode += " (token blocked)"
 		}
 		row := []string{r.Name, mode, store, exp, daemon, note}
 		if r.Claude != nil {

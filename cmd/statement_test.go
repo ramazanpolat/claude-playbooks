@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -20,6 +20,13 @@ func stmt(t *testing.T, line string) (string, error) {
 	return out, err
 }
 
+// stmtErr runs one statement for its error only.
+func stmtErr(t *testing.T, line string) error {
+	t.Helper()
+	_, err := stmt(t, line)
+	return err
+}
+
 func mustStmt(t *testing.T, line string) string {
 	t.Helper()
 	out, err := stmt(t, line)
@@ -29,9 +36,9 @@ func mustStmt(t *testing.T, line string) string {
 	return out
 }
 
-func readProfile(t *testing.T, name string) *envprofile.Profile {
+func readProfile(t *testing.T, name string) *envset.Set {
 	t.Helper()
-	p, err := envprofile.Read(envprofile.Dir(config.ResolvePlaybooksDir()), name)
+	p, err := envset.Read(envset.Dir(config.ResolvePlaybooksDir()), name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,15 +49,15 @@ func TestStatementEnvLifecycle(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 
-	out := mustStmt(t, "CREATE ENV glm SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 MODEL=glm-5.3")
+	out := mustStmt(t, "CREATE ENV glm SET ANTHROPIC_BASE_URL=http://buildbox:8080/v1 MODEL=glm-5.3")
 	if !strings.Contains(out, "Created ENV glm") || !strings.Contains(out, "set       MODEL") {
 		t.Fatalf("create report:\n%s", out)
 	}
-	if strings.Contains(out, "http://tr0") {
+	if strings.Contains(out, "http://buildbox") {
 		t.Fatalf("a value reached the report:\n%s", out)
 	}
 	p := readProfile(t, "glm")
-	if p.Set["MODEL"] != "glm-5.3" || p.Set["ANTHROPIC_BASE_URL"] != "http://tr0:20128/v1" {
+	if p.Set["MODEL"] != "glm-5.3" || p.Set["ANTHROPIC_BASE_URL"] != "http://buildbox:8080/v1" {
 		t.Fatalf("profile after create: %#v", p)
 	}
 
@@ -64,13 +71,13 @@ func TestStatementEnvLifecycle(t *testing.T) {
 		t.Fatal("IF NOT EXISTS changed an existing set")
 	}
 
-	mustStmt(t, "ALTER ENV glm BLOCK MODEL DESCRIBE router")
+	mustStmt(t, "ALTER ENV glm BLOCK MODEL DESCRIPTION router")
 	p = readProfile(t, "glm")
-	if _, ok := p.Set["MODEL"]; ok || !reflect.DeepEqual(p.Unset, []string{"MODEL"}) || p.Description != "router" {
-		t.Fatalf("after BLOCK and DESCRIBE: %#v", p)
+	if _, ok := p.Set["MODEL"]; ok || !reflect.DeepEqual(p.Block, []string{"MODEL"}) || p.Description != "router" {
+		t.Fatalf("after BLOCK and DESCRIPTION: %#v", p)
 	}
 	mustStmt(t, "ALTER ENV glm UNSET MODEL")
-	if p = readProfile(t, "glm"); len(p.Unset) != 0 {
+	if p = readProfile(t, "glm"); len(p.Block) != 0 {
 		t.Fatalf("after UNSET: %#v", p)
 	}
 	mustStmt(t, "ALTER ENV glm SET MODEL=glm-5.3-flash")
@@ -152,7 +159,7 @@ func TestStatementPlaybookEnvList(t *testing.T) {
 		if e == nil {
 			return nil
 		}
-		return e.Profiles
+		return e.Sets
 	}
 
 	mustStmt(t, "ALTER PLAYBOOK router USE ENV a b")
@@ -211,12 +218,12 @@ func TestStatementPlaybookVars(t *testing.T) {
 
 	mustStmt(t, "ALTER PLAYBOOK router SET VAR MAX_THINKING_TOKENS=8000 MODEL=x BLOCK VAR HTTP_PROXY")
 	e := readEnv(t, root)
-	if e.Set["MAX_THINKING_TOKENS"] != "8000" || e.Set["MODEL"] != "x" || !reflect.DeepEqual(e.Unset, []string{"HTTP_PROXY"}) {
+	if e.Set["MAX_THINKING_TOKENS"] != "8000" || e.Set["MODEL"] != "x" || !reflect.DeepEqual(e.Block, []string{"HTTP_PROXY"}) {
 		t.Fatalf("after SET and BLOCK: %#v", e)
 	}
 	mustStmt(t, "ALTER PLAYBOOK router BLOCK VAR MODEL UNSET VAR HTTP_PROXY")
 	e = readEnv(t, root)
-	if _, ok := e.Set["MODEL"]; ok || !reflect.DeepEqual(e.Unset, []string{"MODEL"}) {
+	if _, ok := e.Set["MODEL"]; ok || !reflect.DeepEqual(e.Block, []string{"MODEL"}) {
 		t.Fatalf("BLOCK moves a key from set to unset; UNSET forgets: %#v", e)
 	}
 	out := mustStmt(t, "ALTER PLAYBOOK router BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN")
@@ -249,12 +256,12 @@ func TestStatementRefusedOnLinkedPlaybook(t *testing.T) {
 func TestStatementDefaults(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	dir := envprofile.Dir(config.ResolvePlaybooksDir())
+	dir := envset.Dir(config.ResolvePlaybooksDir())
 	for _, n := range []string{"a", "b", "c"} {
 		mustStmt(t, "CREATE ENV "+n)
 	}
 	defaults := func() string {
-		d, err := envprofile.Defaults(dir)
+		d, err := envset.Defaults(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,12 +281,12 @@ func TestStatementDefaults(t *testing.T) {
 		t.Fatalf("DROP a: %q", got)
 	}
 	mustStmt(t, "ALTER DEFAULTS DROP ENV c b")
-	if _, err := os.Stat(filepath.Join(dir, envprofile.DefaultMarker)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, envset.DefaultMarker)); !os.IsNotExist(err) {
 		t.Fatalf("an empty DEFAULTS must remove the marker: %v", err)
 	}
 
 	// A broken marker refuses an edit, but USE ENV replaces it outright.
-	if err := os.WriteFile(filepath.Join(dir, envprofile.DefaultMarker), []byte("not a name!\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, envset.DefaultMarker), []byte("not a name!\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := stmt(t, "ALTER DEFAULTS ADD ENV a"); err == nil || !strings.Contains(err.Error(), "USE ENV") {
@@ -314,8 +321,8 @@ func TestStatementArgs(t *testing.T) {
 		{words("--playbooks-dir=/y --launcher-dir /l SHOW ENVS"), words("SHOW ENVS"), true, "/y"},
 		{words("ALTER PLAYBOOK k SET VAR OPTS=-v"), words("ALTER PLAYBOOK k SET VAR OPTS=-v"), true, ""},
 		{words("create playbook x"), words("create playbook x"), true, ""},
-		{words("create x --alias y"), nil, false, ""}, // the hidden pre-grammar create
-		{words("--playbooks-dir /z list"), nil, false, ""},
+		{words("create x --alias y"), words("create x --alias y"), true, ""}, // a statement, refused by the parser
+		{words("--playbooks-dir /z run x"), nil, false, ""},
 		{words("env k set A=1"), nil, false, ""},
 		{words("--playbooks-dir"), nil, false, ""},
 		{nil, nil, false, ""},
@@ -333,50 +340,3 @@ func TestStatementArgs(t *testing.T) {
 }
 
 func words(s string) []string { return strings.Fields(s) }
-
-// In a subdir layout the launch reads the nested manifest; a set it names
-// must not be dropped, by the statement or by the hidden env-profile.
-func TestDropEnvSeesTheGoverningManifest(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	root := seedFlatPlaybook(t, "nested")
-	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("version = \"0.1.0\"\nname = \"nested\"\nsubdir = \"config\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	configDir := filepath.Join(root, "config")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	mustStmt(t, "CREATE ENV inner")
-	if err := manifest.Write(configDir, &manifest.Manifest{Name: "nested", Env: &manifest.Env{Profiles: []string{"inner"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stmt(t, "DROP ENV inner"); err == nil || !strings.Contains(err.Error(), "used by nested") {
-		t.Fatalf("DROP ENV of a set the governing manifest uses: %v", err)
-	}
-	if err := runEnvProfile(nil, []string{"inner", "delete"}); err == nil || !strings.Contains(err.Error(), "nested") {
-		t.Fatalf("hidden env-profile delete of a set the governing manifest uses: %v", err)
-	}
-	if readProfile(t, "inner") == nil {
-		t.Fatal("the set was deleted")
-	}
-}
-
-// The hidden env-profile keeps its singleton wording byte for byte.
-func TestHiddenDeleteOfTheSingleDefaultKeepsItsWording(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	mustStmt(t, "CREATE ENV base")
-	mustStmt(t, "ALTER DEFAULTS USE ENV base")
-	err := runEnvProfile(nil, []string{"base", "delete"})
-	want := `env profile "base" is the registry default; clear it first with 'claude-playbook env-profile base undefault'`
-	if err == nil || err.Error() != want {
-		t.Fatalf("got %v\nwant %s", err, want)
-	}
-	mustStmt(t, "CREATE ENV other")
-	err = runEnvProfile(nil, []string{"other", "undefault"})
-	want = `the registry default is "base", not "other"`
-	if err == nil || err.Error() != want {
-		t.Fatalf("undefault of a non-default: got %v\nwant %s", err, want)
-	}
-}

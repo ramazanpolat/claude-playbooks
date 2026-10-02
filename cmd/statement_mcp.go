@@ -20,7 +20,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// MCP servers (docs/reference/cli-grammar.md, "An agent's configuration"):
+// MCP servers (SPEC.md, "An agent's configuration"):
 // ADD / DROP MCP SERVER run Claude Code's own `claude mcp add-json` and
 // `claude mcp remove`, user scope, with CLAUDE_CONFIG_DIR set to the
 // playbook. A secret never enters Claude's config: the server gets a
@@ -210,7 +210,7 @@ func planMCP(state map[string]json.RawMessage, rec map[string]*manifest.MCPRecor
 				return nil, fmt.Errorf("ADD MCP SERVER %s: HEADER applies to a remote server (URL)", name)
 			}
 			if c.MCP.URL != "" && len(c.MCP.Env) > 0 {
-				return nil, fmt.Errorf("ADD MCP SERVER %s: ENV applies to a COMMAND server; a remote server takes HEADER", name)
+				return nil, fmt.Errorf("ADD MCP SERVER %s: VAR applies to a COMMAND server; a remote server takes HEADER", name)
 			}
 			cfg, refs := mcpConfig(name, c.MCP)
 			vars := make([]string, 0, len(refs))
@@ -431,7 +431,7 @@ func mcpCreateClauses(configDir string, m *manifest.Manifest) ([]grammar.Clause,
 			Env     map[string]string `json:"env"`
 			Headers map[string]string `json:"headers"`
 		}
-		if json.Unmarshal(state[name], &cfg) != nil || manifest.ValidateProfileName(name) != nil {
+		if json.Unmarshal(state[name], &cfg) != nil || manifest.ValidateSetName(name) != nil {
 			comments = append(comments, "-- MCP SERVER "+name+" is not one the grammar writes; not written")
 			continue
 		}

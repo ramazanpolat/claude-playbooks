@@ -81,14 +81,14 @@ func TestPlayRun(t *testing.T) {
 	if err != nil || args != "-p hi" || !strings.Contains(env["CLAUDE_CONFIG_DIR"], "cpb-play-") || !strings.Contains(env["CLAUDE_CONFIG_DIR"], "/play-plain-") {
 		t.Fatalf("--yes: %v, args %q, config %q\n%s", err, args, env["CLAUDE_CONFIG_DIR"], out)
 	}
-	if !strings.Contains(out, "No sandbox available here (sbx, or OpenShell on Linux): this agent will run on your machine, as you.") || strings.Contains(stderr, "Resume this playbook's session") {
+	if !strings.Contains(out, "No sandbox available here (sbx): this agent will run on your machine, as you.") || strings.Contains(stderr, "Resume this playbook's session") {
 		t.Fatalf("the preview, or a resume line for a removed playbook:\n%s\n%s", out, stderr)
 	}
 	if _, err := os.Stat(env["CLAUDE_CONFIG_DIR"]); !os.IsNotExist(err) || len(playStores(t)) != 0 {
 		t.Fatalf("left behind: %v %v", err, playStores(t))
 	}
 	if out := mustStmt(t, "SHOW PLAYBOOKS --json"); strings.Contains(out, "play-plain-") {
-		t.Fatalf("a playbook in the user's store: %s", out)
+		t.Fatalf("a playbook in the pilot's store: %s", out)
 	}
 
 	// A moved endpoint: --yes alone refuses and names the flag.
@@ -102,7 +102,7 @@ func TestPlayRun(t *testing.T) {
 		t.Fatal("launched without the endpoint confirmed")
 	}
 
-	// Confirmed: the key a user attaches with --env follows; the shell's
+	// Confirmed: the key the pilot attaches with --env-set follows; the shell's
 	// own credentials do not.
 	t.Setenv("ANTHROPIC_API_KEY", "shell-key-must-not-follow")
 	t.Setenv("MY_SECRET_TOKEN", "shell-secret-must-not-follow")
@@ -125,14 +125,14 @@ func TestPlayRun(t *testing.T) {
 
 // On a terminal: the yes, then each typed confirmation, exactly.
 func TestPlayConfirmInteractive(t *testing.T) {
-	res := play.Check([]byte("ALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 HTTPS_PROXY=http://p.example:8080\n  SET VAR GH FROM 'keychain:pilot/gh';\n"))
+	res := play.Check([]byte("ALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 HTTPS_PROXY=http://p.example:8080\n  SET VAR GH FROM 'keychain:gh';\n"))
 	playRunFlags(t, false, nil, nil, nil)
 	defer func() { promptIn = os.Stdin }()
 	for input, wantErr := range map[string]string{
-		"y\nrouter.example.net\np.example\nkeychain:pilot/gh\n": "",
+		"y\nrouter.example.net\np.example\nkeychain:gh\n": "",
 		"n\n":                    "not confirmed",
 		"y\nrouter.example.ne\n": "router.example.net was not confirmed",
-		"y\nrouter.example.net\np.example\nkeychain:pilot/other\n": "keychain:pilot/gh was not confirmed",
+		"y\nrouter.example.net\np.example\nkeychain:other\n": "keychain:gh was not confirmed",
 	} {
 		promptIn = strings.NewReader(input)
 		var err error
@@ -143,7 +143,7 @@ func TestPlayConfirmInteractive(t *testing.T) {
 	}
 	// --yes answers the yes, never the typed ones.
 	playRunFlags(t, true, nil, nil, nil)
-	promptIn = strings.NewReader("router.example.net\np.example\nkeychain:pilot/gh\n")
+	promptIn = strings.NewReader("router.example.net\np.example\nkeychain:gh\n")
 	var err error
 	captureStdout(t, func() { err = playConfirm(res, true) })
 	if err != nil {
@@ -151,10 +151,10 @@ func TestPlayConfirmInteractive(t *testing.T) {
 	}
 	// Without a terminal: each typed one needs its flag.
 	playRunFlags(t, true, []string{"router.example.net", "p.example"}, nil, nil)
-	if err := playConfirm(res, false); err == nil || !strings.Contains(err.Error(), "--trust-secret keychain:pilot/gh") {
+	if err := playConfirm(res, false); err == nil || !strings.Contains(err.Error(), "--trust-secret keychain:gh") {
 		t.Fatalf("a secret without --trust-secret: %v", err)
 	}
-	playRunFlags(t, true, []string{"router.example.net", "p.example"}, []string{"keychain:pilot/gh"}, nil)
+	playRunFlags(t, true, []string{"router.example.net", "p.example"}, []string{"keychain:gh"}, nil)
 	if err := playConfirm(res, false); err != nil {
 		t.Fatalf("all trusted: %v", err)
 	}
@@ -240,7 +240,7 @@ func playSandboxFlags(t *testing.T, flag string, off bool) {
 func TestChoosePlaySandbox(t *testing.T) {
 	plain := play.Check([]byte(plainRecipe))
 	wants := play.Check([]byte("-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n"))
-	refs := play.Check([]byte("ALTER PLAYBOOK SET VAR GH FROM 'keychain:pilot/gh';\n"))
+	refs := play.Check([]byte("ALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';\n"))
 	saved := playSandboxAvailable
 	defer func() { playSandboxAvailable = saved }()
 	avail := map[string]bool{}
@@ -259,16 +259,15 @@ func TestChoosePlaySandbox(t *testing.T) {
 		backend   string
 		note, err string
 	}{
-		{"sbx first", []string{"sbx", "openshell"}, "", false, plain, "sbx", "Sandboxed (sbx)", ""},
-		{"openshell when no sbx", []string{"openshell"}, "", false, plain, "openshell", "Sandboxed (openshell)", ""},
-		{"picked", []string{"sbx", "openshell"}, "openshell", false, plain, "openshell", "Sandboxed (openshell)", ""},
-		{"picked, missing", []string{"sbx"}, "openshell", false, plain, "", "", "--sandbox=openshell"},
+		{"sbx when installed", []string{"sbx"}, "", false, plain, "sbx", "Sandboxed (sbx)", ""},
+		{"picked", []string{"sbx"}, "sbx", false, plain, "sbx", "Sandboxed (sbx)", ""},
+		{"picked, missing", nil, "sbx", false, plain, "", "", "--sandbox=sbx"},
 		{"none", nil, "", false, plain, "", "No sandbox available here", ""},
 		{"--no-sandbox", []string{"sbx"}, "", true, plain, "", "Sandbox off (--no-sandbox)", ""},
 		{"both flags", []string{"sbx"}, "sbx", true, plain, "", "", "together"},
 		{"wants, none", nil, "", false, wants, "", "", "create-with: SANDBOX"},
 		{"wants, --no-sandbox", nil, "", true, wants, "", "although the recipe asks for one", ""},
-		{"refs, sandboxed", []string{"sbx"}, "", false, refs, "", "", "keychain:pilot/gh"},
+		{"refs, sandboxed", []string{"sbx"}, "", false, refs, "", "", "keychain:gh"},
 		{"refs, --no-sandbox", []string{"sbx"}, "", true, refs, "", "Sandbox off", ""},
 		{"refs, none here", nil, "", false, refs, "", "No sandbox available here", ""},
 	} {

@@ -16,10 +16,11 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
+	"github.com/ramazanpolat/claude-playbooks/internal/tomlfile"
 )
 
 // A recipe applied TO a plain Claude Code config directory, such as
-// ~/.claude (docs/reference/cli-grammar.md, "TO a plain config directory").
+// ~/.claude (SPEC.md, "TO a plain config directory").
 // Nothing of cpb runs at that directory's launches, so only Claude Code's
 // own configuration applies: plugins, the agent, MCP servers without
 // references, tool permissions, the status line, the model, skills, and
@@ -29,17 +30,21 @@ import (
 
 // dirRefusals names why each refused clause cannot apply to a directory.
 var dirRefusals = map[grammar.Kind]string{
-	grammar.SetRef:   "a secret reference is resolved by cpb's launcher, which never runs for this directory",
-	grammar.BlockVar: "removing a variable at launch is the launcher's job",
-	grammar.UseEnv:   "env sets are layered by the launcher",
-	grammar.AddEnv:   "env sets are layered by the launcher",
-	grammar.DropEnv:  "env sets are layered by the launcher",
-	grammar.RenameTo: "the directory is not in the registry",
-	grammar.Alias:    "the directory has no launcher",
-	grammar.NoAlias:  "the directory has no launcher",
+	grammar.SetRef:     "a secret reference is resolved by cpb's launcher, which never runs for this directory",
+	grammar.BlockVar:   "removing a variable at launch is the launcher's job",
+	grammar.UseEnv:     "env sets are layered by the launcher",
+	grammar.AddEnv:     "env sets are layered by the launcher",
+	grammar.DropEnv:    "env sets are layered by the launcher",
+	grammar.RenameTo:   "the directory is not in the registry",
+	grammar.Launcher:   "the directory has no launcher",
+	grammar.NoLauncher: "the directory has no launcher",
 
-	grammar.SetIsolatedLogin:   "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetIsolatedLogin: "isolate_auth is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetIsolatedLogin:   "isolated_login is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetIsolatedLogin: "isolated_login is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetSandbox:         "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetSandboxKeys:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetSandboxKeys:   "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 }
 
 // validateDirClauses refuses, with its reason, a clause that cannot apply
@@ -119,9 +124,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 	}
-	if held := statuslineHeld(sf.Root, st.Clauses, st.Dir); held != "" {
-		r.warning, r.warningCode = held, warnStatuslineHeldByHost
-	}
 	r.warnMarketplaceRef(st.Clauses)
 	slKey, _ := filepath.Abs(dir)
 	slp, err := r.planSLHistory(slKey, dir, st.Clauses)
@@ -136,11 +138,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
-	panelOps, panelLines, err := r.planPanels(key, dir, sf.Root, st.Clauses)
-	if err != nil {
-		return err
-	}
-	lines = append(lines, panelLines...)
 
 	var skills *skillPlan
 	recs, err := dirSkillRecords(dir)
@@ -179,7 +176,7 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	sort.SliceStable(steps, func(i, j int) bool { return steps[i].clause < steps[j].clause })
 	settingsChange := setChange || envChange
-	if len(steps) == 0 && !settingsChange && !skillChange && len(panelOps) == 0 {
+	if len(steps) == 0 && !settingsChange && !skillChange {
 		r.outcome = outUnchanged
 		r.say(stmtHead(st)+" unchanged", lines)
 		return nil
@@ -205,16 +202,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		if skills != nil {
 			r.recordSkills(key, after, skills)
 		}
-		for _, op := range panelOps {
-			if op.data == nil {
-				what = append(what, "remove "+op.path)
-				r.actions = append(r.actions, deleteAction("panel", op.path))
-			} else {
-				what = append(what, "write "+op.path)
-				r.actions = append(r.actions, planAction{Type: "write", Path: op.path})
-			}
-		}
-		_ = r.applyPanels(key, panelOps)
 		if settingsChange && r.dry != nil {
 			r.dry.settings[key], _ = sf.Root.MarshalJSON()
 			if slp.changed {
@@ -263,9 +250,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		if err == nil {
 			lines = append(append(lines, setLines...), envLines...)
 		}
-	}
-	if err == nil && len(panelOps) > 0 {
-		err = r.applyPanels(key, panelOps)
 	}
 	if err == nil && skills != nil && !reflect.DeepEqual(cloneSkills(cur), after) {
 		// Records that change without a file operation (a DROP of a skill
@@ -414,7 +398,10 @@ func readDirState() (*dirStateFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := toml.Decode(string(data), st); err != nil {
+	if err := tomlfile.Decode(dirStatePath(), data, st); err != nil {
+		if errors.As(err, new(*tomlfile.UnknownKeyError)) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("%s: %s", dirStatePath(), manifest.SanitizeTOMLError(err))
 	}
 	if st.Dirs == nil {
@@ -425,7 +412,7 @@ func readDirState() (*dirStateFile, error) {
 			continue
 		}
 		for n, rec := range e.Skills {
-			if manifest.ValidateProfileName(n) != nil || rec == nil || (rec.Mode != "link" && rec.Mode != "copy") {
+			if manifest.ValidateSetName(n) != nil || rec == nil || (rec.Mode != "link" && rec.Mode != "copy") {
 				return nil, fmt.Errorf("%s: an invalid skill record %q for %s", dirStatePath(), n, d)
 			}
 		}

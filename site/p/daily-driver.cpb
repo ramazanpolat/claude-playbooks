@@ -1,6 +1,6 @@
 -- title: Daily driver
 -- description: The everyday setup: GitHub and Linear, the document skills, Opus, and a guard against force pushes.
--- min-cpb: 3.24.0
+-- min-cpb: 4.0.0
 -- needs: a secret helper for keychain:github-mcp
 
 ALTER PLAYBOOK

@@ -5,7 +5,7 @@
 // Claude Code drops subscriptionType from its account profile when
 // CLAUDE_CODE_OAUTH_TOKEN is set, so its interactive entitlement check cannot
 // confirm the plan and fails closed -- a Max seat is told the model requires
-// usage credits (anthropics/claude-code#79597). claude-playbook restores the
+// usage credits (anthropics/claude-code#79597). cpb restores the
 // descriptors from the account's own credential store.
 //
 // These assert on what the child process actually received, for the same reason
@@ -88,7 +88,7 @@ func TestSubscriptionDescriptorsAbsentWithoutToken(t *testing.T) {
 	}
 }
 
-// An explicit export is a deliberate act by the user and outranks what this
+// An explicit export is a deliberate act by the pilot and outranks what this
 // process infers from disk -- notably for a Team seat, whose real
 // subscriptionType the picker does not accept, and which #79597 documents as
 // needing a manual override.
@@ -106,7 +106,7 @@ func TestExportedSubscriptionDescriptorWins(t *testing.T) {
 	})
 
 	if got := env[subTypeEnv]; got != "operator_override" {
-		t.Fatalf("%s = %q, want the operator's exported value", subTypeEnv, got)
+		t.Fatalf("%s = %q, want the pilot's exported value", subTypeEnv, got)
 	}
 	// The un-overridden descriptor is still filled in: one explicit value must
 	// not suppress the other.
@@ -115,7 +115,7 @@ func TestExportedSubscriptionDescriptorWins(t *testing.T) {
 	}
 }
 
-// isolate_auth exists so two accounts can run side by side. The descriptors
+// isolated_login exists so two accounts can run side by side. The descriptors
 // describe the GLOBAL account, so leaking them tells an isolated playbook's
 // session the plan of an account it is deliberately not authenticating as.
 // Inheritance is the leak here, so they must be actively removed, not merely

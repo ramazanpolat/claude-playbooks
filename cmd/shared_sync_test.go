@@ -11,7 +11,7 @@ import (
 )
 
 // The known issue's path 2, end to end: one launch isolated by
-// CLAUDE_PLAYBOOKS_ISOLATE_AUTH, a login of another account made there, then
+// CPB_ISOLATED_LOGIN, a login of another account made there, then
 // a plain launch. The machine store stays byte-identical, and the login is
 // set aside, not copied (v3.23.1).
 func TestOneIsolatedLaunchNeverSwapsTheMachineLogin(t *testing.T) {
@@ -20,7 +20,7 @@ func TestOneIsolatedLaunchNeverSwapsTheMachineLogin(t *testing.T) {
 	store := seedMachineLogin(t)
 	stubClaude(t)
 	home, _ := os.UserHomeDir()
-	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"hasCompletedOnboarding":true,"oauthAccount":{"accountUuid":"pilot-acct"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"hasCompletedOnboarding":true,"oauthAccount":{"accountUuid":"machine-acct"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var notices []string
@@ -28,9 +28,9 @@ func TestOneIsolatedLaunchNeverSwapsTheMachineLogin(t *testing.T) {
 	auth.Notice = func(m string) { notices = append(notices, m) }
 	t.Cleanup(func() { auth.Notice = old })
 
-	mustStmt(t, "CREATE PLAYBOOK z NO ALIAS")
+	mustStmt(t, "CREATE PLAYBOOK z NO LAUNCHER")
 	pb := filepath.Join(config.ResolvePlaybooksDir(), "z")
-	t.Setenv(auth.IsolateAuthEnv, "true")
+	t.Setenv(auth.IsolatedLoginEnv, "true")
 	var err error
 	captureStderr(t, func() { err = runRun(nil, []string{"z", "--version"}) })
 	if err != nil {
@@ -43,7 +43,7 @@ func TestOneIsolatedLaunchNeverSwapsTheMachineLogin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pb, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"other-acct"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(auth.IsolateAuthEnv, "")
+	t.Setenv(auth.IsolatedLoginEnv, "")
 	captureStderr(t, func() { err = runRun(nil, []string{"z", "--version"}) })
 	if err != nil {
 		t.Fatal(err)

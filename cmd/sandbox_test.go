@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func stubSbx(t *testing.T, existing ...string) string {
 		"if [ \"$1\" = ls ] && [ \"$2\" = --json ]; then J=\"$SBX_STUB_LSJSON\"; [ -n \"$J\" ] || J='{\"sandboxes\":[]}'; printf '%s' \"$J\"; exit 0; fi\n" +
 		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
 		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
-		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.claude-playbook-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
+		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.cpb-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
 		"if [ \"$1\" = secret ] && [ \"$2\" = ls ]; then printf 'CUSTOM SECRETS\\nSCOPE TARGETS ENV PLACEHOLDER SECRET\\n%s\\n' \"$SBX_STUB_SECRETS\"; exit 0; fi\n" +
 		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo \"stub failure: $*\" >&2; exit 1; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "sbx"), []byte(script), 0o755); err != nil {
@@ -88,13 +89,13 @@ func TestSandboxHelpers(t *testing.T) {
 	if got := sandboxName("my pb/x_1.2"); got != "cpb-my-pb-x-1.2" {
 		t.Fatalf("sandboxName: %q", got)
 	}
-	env := []string{"HOME=/h", "SECRET=1", "CLAUDE_CONFIG_DIR=/c", "MODEL=glm", "CLAUDE_CODE_OAUTH_TOKEN=t", "ANTHROPIC_BASE_URL=http://tr0:20128/v1"}
+	env := []string{"HOME=/h", "SECRET=1", "CLAUDE_CONFIG_DIR=/c", "MODEL=glm", "CLAUDE_CODE_OAUTH_TOKEN=t", "ANTHROPIC_BASE_URL=http://buildbox:8080/v1"}
 	got := sandboxEnv(env, &manifest.Env{Set: map[string]string{"MODEL": "glm", "ANTHROPIC_BASE_URL": "x"}})
-	want := "CLAUDE_CONFIG_DIR=/c MODEL=glm CLAUDE_CODE_OAUTH_TOKEN=t ANTHROPIC_BASE_URL=http://tr0:20128/v1"
+	want := "CLAUDE_CONFIG_DIR=/c MODEL=glm CLAUDE_CODE_OAUTH_TOKEN=t ANTHROPIC_BASE_URL=http://buildbox:8080/v1"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("sandboxEnv: %q", got)
 	}
-	if h := baseURLHost(env); h != "tr0" {
+	if h := baseURLHost(env); h != "buildbox" {
 		t.Fatalf("baseURLHost: %q", h)
 	}
 	if h := baseURLHost([]string{"ANTHROPIC_BASE_URL=::bad"}); h != "" {
@@ -121,7 +122,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	want := []string{
 		"ls -q",
 		"create --name cpb-box --no-share-skills claude " + work + " " + pbDir + " " + extra + ":ro",
-		"exec cpb-box bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox",
+		"exec cpb-box bash -lc printf %s 'skills=private' > ~/.cpb-sandbox",
 		"policy allow network --sandbox cpb-box api.example.com",
 		"policy allow network --sandbox cpb-box router.local",
 		"exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
@@ -133,7 +134,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	}
 	attach := calls[len(calls)-1]
 	// Tests run without a terminal, so no pty is requested.
-	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-box' && cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
+	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
 		if !strings.Contains(attach, frag) {
 			t.Errorf("attach lacks %q: %q", frag, attach)
 		}
@@ -153,17 +154,19 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if len(calls) != 5 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpb-box" || !strings.HasPrefix(calls[4], "exec -i ") {
+	if len(calls) != 5 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.Contains(calls[2], ".cpb-sandbox") || calls[3] != "secret ls --sandbox cpb-box" || !strings.HasPrefix(calls[4], "exec -i ") {
 		t.Fatalf("reuse should list, read the marker, list secrets and attach: %q", calls)
 	}
-	// A sandbox without the marker (created by an earlier release, with
-	// the shared skills store mounted) or with other creation settings is
-	// refused until recreated.
-	for _, marker := range []string{"none", "skills=shared"} {
+	// A sandbox without the marker (cpb cannot prove it made it) or with
+	// other creation settings is refused until recreated.
+	for marker, want := range map[string]string{
+		"none":          "a sandbox named cpb-box exists but has no cpb marker: remove it (sbx rm -f cpb-box) or launch with --sandbox-fresh",
+		"skills=shared": "share_skills changed. Recreate it with --sandbox-fresh",
+	} {
 		os.Remove(log)
 		t.Setenv("SBX_STUB_MARKER", marker)
 		err := runRun(nil, []string{"--sandbox", "--workdir", work, "box"})
-		if err == nil || !strings.Contains(err.Error(), "--sandbox-fresh") {
+		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("marker %q: %v", marker, err)
 		}
 		if strings.Contains(strings.Join(sbxCalls(t, log), "\n"), "exec -i") {
@@ -257,13 +260,13 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 		t.Fatalf("shared login: %v", err)
 	}
 	store := filepath.Join(root, "box", ".credentials.json")
-	want := "/home/agent/.claude-playbook-logins/cpb-box/.credentials.json"
+	want := "/home/agent/.cpb-logins/cpb-box/.credentials.json"
 	// The stub's attach ran with the store pointing into the sandbox (the
 	// stub records the link target it saw); once the session returned,
 	// the shared link is back.
 	calls := sbxCalls(t, log)
 	last := calls[len(calls)-1]
-	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-box' && cd ") {
+	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd ") {
 		t.Fatalf("attach: %q", calls)
 	}
 	if seen, _ := os.ReadFile(filepath.Join(filepath.Dir(log), "store-during-attach")); strings.TrimSpace(string(seen)) != want {
@@ -320,7 +323,7 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	}
 	os.Remove(log)
 	// An isolated playbook holds its own store: launched.
-	writePlaybook(t, root, "iso", &manifest.Manifest{IsolateAuth: true})
+	writePlaybook(t, root, "iso", &manifest.Manifest{IsolatedLogin: true})
 	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "iso"}); err != nil {
 		t.Fatal(err)
 	}
@@ -403,8 +406,8 @@ func stubClaude(t *testing.T) string {
 
 func TestRunSandboxAlwaysAndOverride(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	writePlaybook(t, root, "locked", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}})
-	writePlaybook(t, root, "plain", &manifest.Manifest{IsolateAuth: true})
+	writePlaybook(t, root, "locked", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true}})
+	writePlaybook(t, root, "plain", &manifest.Manifest{IsolatedLogin: true})
 	work := t.TempDir()
 	sbxLog := stubSbx(t)
 	claudeLog := stubClaude(t)
@@ -456,8 +459,8 @@ func TestRunSandboxAlwaysAndOverride(t *testing.T) {
 			t.Errorf("%q reached sbx", args)
 		}
 	}
-	// --sbx and --sandbox=sbx are the same switch.
-	for _, flag := range []string{"--sbx", "--sandbox=sbx"} {
+	// --sandbox and --sandbox=sbx are the same switch.
+	for _, flag := range []string{"--sandbox", "--sandbox=sbx"} {
 		os.Remove(sbxLog)
 		if err := runRun(nil, []string{flag, "--workdir", work, "plain"}); err != nil {
 			t.Fatalf("%s: %v", flag, err)
@@ -498,7 +501,7 @@ func TestStartSandbox(t *testing.T) {
 	}
 	// The directory's manifest can say always; --delete removes the
 	// sandbox after the session, then the directory.
-	if err := manifest.Write(dir, &manifest.Manifest{Name: "scratch", IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}}); err != nil {
+	if err := manifest.Write(dir, &manifest.Manifest{Name: "scratch", IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true}}); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(log)
@@ -508,7 +511,7 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 6 || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpbstart-scratch-dir" || !strings.HasPrefix(calls[4], "exec -i ") || calls[5] != "rm -f cpbstart-scratch-dir" {
+	if len(calls) != 6 || calls[1] != "ls --json" || !strings.Contains(calls[2], ".cpb-sandbox") || calls[3] != "secret ls --sandbox cpbstart-scratch-dir" || !strings.HasPrefix(calls[4], "exec -i ") || calls[5] != "rm -f cpbstart-scratch-dir" {
 		t.Fatalf("start --delete under always: %q", calls)
 	}
 	t.Setenv("SBX_STUB_LSJSON", "")
@@ -555,7 +558,7 @@ func TestStartSandbox(t *testing.T) {
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(tokenDir, "oauth-token"))
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(tokenDir, "oauth-token"))
 	// The machine store may itself be a symlink into another directory:
 	// that directory carries the machine grant too.
 	vault := filepath.Join(t.TempDir(), "vault")
@@ -589,7 +592,7 @@ func TestStartSandbox(t *testing.T) {
 			t.Fatalf("%q: --delete removed the directory after a refusal", args)
 		}
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
 	os.RemoveAll(vault)
 	// A fresh non-isolated directory with no machine login still gets the
 	// sandbox-local link (a /login inside must not land on the mount), and
@@ -600,20 +603,18 @@ func TestStartSandbox(t *testing.T) {
 	if err := runStart(nil, []string{"--sandbox", "--workdir", work, fresh}); err != nil {
 		t.Fatal(err)
 	}
-	if target, err := os.Readlink(filepath.Join(fresh, ".credentials.json")); err != nil || target != "/home/agent/.claude-playbook-logins/cpbstart-fresh/.credentials.json" {
+	if target, err := os.Readlink(filepath.Join(fresh, ".credentials.json")); err != nil || target != "/home/agent/.cpb-logins/cpbstart-fresh/.credentials.json" {
 		t.Fatalf("fresh directory store: %q %v", target, err)
 	}
-	if calls := sbxCalls(t, log); !strings.Contains(calls[len(calls)-1], "mkdir -p '/home/agent/.claude-playbook-logins/cpbstart-fresh' && cd ") {
+	if calls := sbxCalls(t, log); !strings.Contains(calls[len(calls)-1], "mkdir -p '/home/agent/.cpb-logins/cpbstart-fresh' && cd ") {
 		t.Fatalf("fresh directory attach: %q", calls)
 	}
 }
 
 func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	createSandbox = true
-	createNoAlias = true
 	out := captureStdout(t, func() {
-		if err := runCreate(nil, []string{"boxed"}); err != nil {
+		if err := doCreate(createOpts{sandbox: true, noLauncher: true}, []string{"boxed"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -621,29 +622,14 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 		t.Fatalf("create output: %q", out)
 	}
 	m, err := manifest.Read(filepath.Join(root, "boxed"))
-	if err != nil || m == nil || !m.IsolateAuth || m.Sandbox == nil || !m.Sandbox.Always {
+	if err != nil || m == nil || !m.IsolatedLogin || m.Sandbox == nil || !m.Sandbox.Always {
 		t.Fatalf("created manifest: %#v %v", m, err)
 	}
 	if info, err := os.Lstat(filepath.Join(root, "boxed", ".credentials.json")); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		t.Fatal("an always-sandboxed playbook was linked to the machine login")
 	}
-	// info renders the block.
-	info := captureStdout(t, func() {
-		if err := runInfo(nil, []string{"boxed"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(info, "Sandbox:     always") {
-		t.Fatalf("info: %q", info)
-	}
-	writePlaybook(t, root, "modes", &manifest.Manifest{Sandbox: &manifest.Sandbox{ShareSkills: true, Secrets: "env"}})
-	info = captureStdout(t, func() {
-		if err := runInfo(nil, []string{"modes"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(info, "Sandbox:     share_skills, secrets env") {
-		t.Fatalf("info with the mode keys only: %q", info)
+	if show := mustStmt(t, "SHOW PLAYBOOK boxed"); !regexp.MustCompile(`(?m)^Sandbox: +yes$`).MatchString(show) {
+		t.Fatalf("SHOW PLAYBOOK: %q", show)
 	}
 
 	// install --sandbox: the flag sets the block; a source-shipped
@@ -652,64 +638,46 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("version = \"1.0.0\"\nname = \"shipped\"\n\n[sandbox]\nmounts = [\"/etc\"]\nallow_net = [\"evil.example\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	installNoAlias = true
-	installSandbox = true
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "shipped", noLauncher: true, sandbox: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 	m, err = manifest.Read(filepath.Join(root, "shipped"))
-	if err != nil || m == nil || !m.IsolateAuth || m.Sandbox == nil || !m.Sandbox.Always || len(m.Sandbox.Mounts) != 0 || len(m.Sandbox.AllowNet) != 0 {
+	if err != nil || m == nil || !m.IsolatedLogin || m.Sandbox == nil || !m.Sandbox.Always || len(m.Sandbox.Mounts) != 0 || len(m.Sandbox.AllowNet) != 0 {
 		t.Fatalf("installed manifest: %#v %v", m.Sandbox, err)
 	}
 	// Without the flag the shipped block is dropped entirely.
-	installSandbox = false
-	installName = "shipped2"
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "shipped2", noLauncher: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 	m, _ = manifest.Read(filepath.Join(root, "shipped2"))
-	if m == nil || !m.Sandbox.Empty() || m.IsolateAuth {
+	if m == nil || !m.Sandbox.Empty() || m.IsolatedLogin {
 		t.Fatalf("install without --sandbox adopted the source block: %#v", m)
 	}
 }
 
 func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	// Keys come from an env profile: profiles live in the registry root,
+	// Keys come from an env set: profiles live in the registry root,
 	// outside every mount.
-	if err := runEnvProfile(nil, []string{"router", "set", "ANTHROPIC_BASE_URL=http://router.local:9/v1", "ANTHROPIC_AUTH_TOKEN=real-token", "ANTHROPIC_API_KEY=real-key", "MODEL=glm"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=real-token ANTHROPIC_API_KEY=real-key MODEL=glm AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}}})
 	work := t.TempDir()
 	log := stubSbx(t)
 	// A key in the playbook's own manifest is on the mount: refused before
 	// any sbx call, unless secrets = "env" accepts the exposure.
-	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}})
+	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}})
 	err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"})
-	if err == nil || !strings.Contains(err.Error(), "which the sandbox mounts") || !strings.Contains(err.Error(), "cpb env-profile <profile> set ANTHROPIC_API_KEY=") {
+	if err == nil || !strings.Contains(err.Error(), "which the sandbox mounts") || !strings.Contains(err.Error(), "cpb CREATE ENV <set> SET ANTHROPIC_API_KEY=") || !strings.Contains(err.Error(), "cpb ALTER PLAYBOOK <playbook> ADD ENV <set> UNSET VAR ANTHROPIC_API_KEY") {
 		t.Fatalf("key on the mount: %v", err)
 	}
 	if _, statErr := os.Stat(log); statErr == nil {
 		t.Fatal("sbx was called with a key on the mount")
 	}
-	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
+	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"}); err != nil {
 		t.Fatalf("key on the mount with secrets = env: %v", err)
-	}
-	// A subdir install keeps its [env] in the root's manifest, above the
-	// config directory: still on the mount, still refused.
-	writePlaybook(t, root, "subpb", &manifest.Manifest{IsolateAuth: true, Subdir: "config", Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_AUTH_TOKEN": "root-disk"}}})
-	if err := os.MkdirAll(filepath.Join(root, "subpb", "config"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	os.Remove(log)
-	err = runRun(nil, []string{"--sandbox", "--workdir", work, "subpb"})
-	if err == nil || !strings.Contains(err.Error(), filepath.Join(root, "subpb", ".playbook")) {
-		t.Fatalf("key in the root manifest of a subdir install: %v", err)
-	}
-	if _, statErr := os.Stat(log); statErr == nil {
-		t.Fatal("sbx was called with a key on the mount (subdir)")
 	}
 	// A start directory under the working directory inherits the manifest
 	// above it, which the working-directory mount carries: refused.
@@ -748,9 +716,8 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	t.Setenv("SBX_STUB_LS", "")
 	t.Setenv("SBX_STUB_LSJSON", "")
 	// A manifest that cannot be parsed might hold a key: refused, not
-	// skipped. run refuses an invalid manifest at lookup already; start
-	// reads the directory's manifest leniently, so the guard is what
-	// stands between the key and the mount there.
+	// skipped. run refuses an invalid manifest at lookup, and start before
+	// it reads the directory's [sandbox], so sbx is never reached.
 	broken := filepath.Join(t.TempDir(), "broken")
 	if err := os.MkdirAll(broken, 0o755); err != nil {
 		t.Fatal(err)
@@ -760,17 +727,17 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	os.Remove(log)
 	err = runStart(nil, []string{"--sandbox", "--workdir", work, broken})
-	if err == nil || !strings.Contains(err.Error(), "cannot check") {
+	if err == nil || !strings.Contains(err.Error(), "does not launch over a manifest it cannot read") {
 		t.Fatalf("unreadable manifest: %v", err)
 	}
 	if _, statErr := os.Stat(log); statErr == nil {
 		t.Fatal("sbx was called with an uncheckable manifest")
 	}
-	// The registry's env profiles are never mounted: a working directory
+	// The registry's env sets are never mounted: a working directory
 	// at the registry root (or above) is refused.
 	os.Remove(log)
 	err = runRun(nil, []string{"--sandbox", "--workdir", root, "box"})
-	if err == nil || !strings.Contains(err.Error(), "the registry's env profiles") {
+	if err == nil || !strings.Contains(err.Error(), "the registry's env sets") {
 		t.Fatalf("workdir at the registry root: %v", err)
 	}
 	if _, statErr := os.Stat(log); statErr == nil {
@@ -806,10 +773,10 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// A service on this machine: the sandbox reaches it as
 	// host.docker.internal, while the policy and the secret name it
 	// localhost (what the sbx proxy matches).
-	if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:20128/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV local SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_AUTH_TOKEN=lt AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
+	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onhost"}); err != nil {
 		t.Fatal(err)
@@ -825,14 +792,14 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 			t.Fatalf("host service: missing %q in %q", want, calls)
 		}
 	}
-	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
+	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:8080/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
 		t.Fatalf("host service attach: %q", calls)
 	}
 	// No endpoint: the key goes to Anthropic's host.
-	if err := runEnvProfile(nil, []string{"direct", "set", "ANTHROPIC_API_KEY=k"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV direct SET ANTHROPIC_API_KEY=k AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "direct", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"direct"}}})
+	writePlaybook(t, root, "direct", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"direct"}}})
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
 		t.Fatal(err)
@@ -842,7 +809,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	// secrets = "env" passes plain values and registers nothing;
 	// share_skills = true drops the --no-share-skills flag.
-	writePlaybook(t, root, "plain", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "plain-key"}}, Sandbox: &manifest.Sandbox{Secrets: "env", ShareSkills: true}})
+	writePlaybook(t, root, "plain", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "plain-key"}}, Sandbox: &manifest.Sandbox{Secrets: "env", ShareSkills: true}})
 	// (a plain-mode key may sit in the manifest: the exposure is accepted)
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "plain"}); err != nil {
@@ -856,7 +823,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// A key registered by an earlier launch and no longer in the
 	// environment is revoked: its placeholder is re-registered as its own
 	// value, for the current endpoint host.
-	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
+	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
 	t.Setenv("SBX_STUB_LS", "cpb-revoke")
 	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]}`)
 	t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
@@ -878,10 +845,10 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// the sandbox as a plain value, and its value is in no message, even
 	// when the backend's own error echoes it (the stub echoes its argv).
 	const canary = "cpbcanary148value"
-	if err := runEnvProfile(nil, []string{"canary", "set", "ANTHROPIC_API_KEY=" + canary}); err != nil {
+	if err := stmtErr(t, "CREATE ENV canary SET ANTHROPIC_API_KEY="+canary+" AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"canary"}}})
+	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"canary"}}})
 	t.Setenv("SBX_STUB_FAIL", "secret")
 	os.Remove(log)
 	var runErr error
@@ -908,7 +875,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	// secrets = "env" is the only way a key goes in plainly: it registers
 	// nothing, so the same backend failure cannot arise.
-	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"canary"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
+	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"canary"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "failreg"}); err != nil {
 		t.Fatalf("secrets = \"env\" with a failing backend secret step: %v", err)
@@ -945,40 +912,40 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// What ssh receives: options ended by --, the destination, and the
 	// command in its transport: base64 in CPB_CMD, decoded and evaluated by
-	// an explicit sh, the PATH widened and claude-playbook exec'd inside.
+	// an explicit sh, the PATH widened and cpb exec'd inside.
 	remote := func(cmd string) string {
 		inner := `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec ` + cmd
-		return "-- polat@cockpit0 env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(inner)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'` + "\n"
+		return "-- me@buildbox env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(inner)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'` + "\n"
 	}
 	// The flag forwards the whole launch, rebuilt from what the parser
 	// consumed; the playbook need not exist here; ssh's options end before
 	// the destination; claude's arguments travel verbatim, even ones that
 	// look like wrapper flags.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	want := remote("claude-playbook run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'")
+	want := remote("cpb run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'")
 	if got := read(); got != want {
 		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
 	}
 	if _, err := os.Stat(sbxLog); err == nil {
 		t.Fatal("sbx was called locally for a remote launch")
 	}
-	// Flags after the name, the = form, --sbx, a backend, fresh and clone
-	// all forward in canonical order; -- ends the wrapper scan.
-	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-fresh", "--clone", "--sandbox-host=polat@cockpit0", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
+	// Flags after the name, the = form, a backend, fresh and clone all
+	// forward in canonical order; -- ends the wrapper scan.
+	if err := runRun(nil, []string{"ghost", "--sandbox", "--sandbox-fresh", "--clone", "--sandbox-host=me@buildbox", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {
 		t.Fatalf("after the name: %q", got)
 	}
 	// The manifest names the host: a bare launch of an always-sandboxed
 	// playbook goes there; --no-sandbox keeps it here, on the host.
-	writePlaybook(t, root, "remote", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	writePlaybook(t, root, "remote", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true, Host: "me@buildbox"}})
 	if err := runRun(nil, []string{"remote", "--version"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' 'remote' '--version'") {
+	if got := read(); got != remote("cpb run '--sandbox' 'remote' '--version'") {
 		t.Fatalf("manifest host: %q", got)
 	}
 	claudeLog := stubClaude(t)
@@ -993,7 +960,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// A manifest host without always is used only when the launch is
 	// sandboxed.
-	writePlaybook(t, root, "opt", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "polat@cockpit0"}})
+	writePlaybook(t, root, "opt", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{Host: "me@buildbox"}})
 	os.Remove(claudeLog)
 	if err := runRun(nil, []string{"opt", "--version"}); err != nil {
 		t.Fatal(err)
@@ -1004,45 +971,45 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox", "opt", "--version"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' 'opt' '--version'") {
+	if got := read(); got != remote("cpb run '--sandbox' 'opt' '--version'") {
 		t.Fatalf("manifest host with --sandbox: %q", got)
 	}
 	// --playbooks-dir travels as given: a path on that host.
-	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "polat@cockpit0", "ghost"}); err != nil {
+	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "me@buildbox", "ghost"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'") {
+	if got := read(); got != remote("cpb run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'") {
 		t.Fatalf("--playbooks-dir forwarding: %q", got)
 	}
 	config.PlaybooksDir = root // the flag set the process-wide registry; back to the test's
 	// A value that looks like a flag stays a value on the remote side too:
 	// value flags travel inline.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir=--playbooks-dir", "--block", "--sandbox", "ghost", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--workdir=--playbooks-dir' '--block=--sandbox' 'ghost' '-p' 'hi'") {
 		t.Fatalf("flag-like values: %q", got)
 	}
 	// A value that is exactly "--" keeps the registry-scan boundary the
 	// local launch had: two words, so a --playbooks-dir among claude's
 	// arguments stays claude's on the remote side too.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
 		t.Fatalf("bare -- value: %q", got)
 	}
 	// An overridden --workdir is forwarded too, in order, so a boundary it
 	// set survives and the last value still wins.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
 		t.Fatalf("overridden workdir: %q", got)
 	}
 	// A manifest host forwards without evaluating any launch flag: an env
 	// file that does not exist is refused by name, not opened.
-	writePlaybook(t, root, "mh", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	writePlaybook(t, root, "mh", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true, Host: "me@buildbox"}})
 	err := runRun(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), "mh"})
 	if err == nil || !strings.Contains(err.Error(), "names a local file") {
 		t.Fatalf("manifest host with an env file: %v", err)
@@ -1055,7 +1022,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := os.MkdirAll(mdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.Write(mdir, &manifest.Manifest{Name: "mh", IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}}); err != nil {
+	if err := manifest.Write(mdir, &manifest.Manifest{Name: "mh", IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true, Host: "me@buildbox"}}); err != nil {
 		t.Fatal(err)
 	}
 	err = runStart(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), mdir})
@@ -1070,12 +1037,12 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--sandbox-host", "polat@cockpit0", "--env-file", envFile, "ghost"}, "names a local file"},
-		{[]string{"ghost", "--sandbox-host", "polat@cockpit0", "--env-file=" + envFile}, "names a local file"},
-		{[]string{"--env-file", envFile, "ghost", "--sandbox-host", "polat@cockpit0"}, "names a local file"},
-		{[]string{"--sandbox-host", "polat@cockpit0", "--no-sandbox", "ghost"}, "pick one"},
+		{[]string{"--sandbox-host", "me@buildbox", "--env-file", envFile, "ghost"}, "names a local file"},
+		{[]string{"ghost", "--sandbox-host", "me@buildbox", "--env-file=" + envFile}, "names a local file"},
+		{[]string{"--env-file", envFile, "ghost", "--sandbox-host", "me@buildbox"}, "names a local file"},
+		{[]string{"--sandbox-host", "me@buildbox", "--no-sandbox", "ghost"}, "pick one"},
 		{[]string{"--sandbox-host=-V", "ghost"}, "must be an ssh destination"},
-		{[]string{"--sandbox-host", "polat@cockpit0 -oProxyCommand=x", "ghost"}, "must be an ssh destination"},
+		{[]string{"--sandbox-host", "me@buildbox -oProxyCommand=x", "ghost"}, "must be an ssh destination"},
 	} {
 		err := runRun(nil, c.args)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
@@ -1088,23 +1055,23 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	// start forwards too, --delete included, the path being remote; a
 	// directory manifest naming the host forwards a sandboxed start as
 	// well, and nothing local runs or is deleted.
-	if err := runStart(nil, []string{"--sandbox-host", "polat@cockpit0", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
+	if err := runStart(nil, []string{"--sandbox-host", "me@buildbox", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'") {
+	if got := read(); got != remote("cpb start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'") {
 		t.Fatalf("start forwarding: %q", got)
 	}
 	dir := filepath.Join(t.TempDir(), "remote-dir")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.Write(dir, &manifest.Manifest{Name: "rd", IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "polat@cockpit0"}}); err != nil {
+	if err := manifest.Write(dir, &manifest.Manifest{Name: "rd", IsolatedLogin: true, Sandbox: &manifest.Sandbox{Host: "me@buildbox"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runStart(nil, []string{"--sandbox", "--delete", dir}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '"+dir+"'") {
+	if got := read(); got != remote("cpb start '--sandbox' '--delete' '"+dir+"'") {
 		t.Fatalf("start with a manifest host: %q", got)
 	}
 	if _, err := os.Stat(dir); err != nil {
@@ -1129,10 +1096,10 @@ func TestRunSandboxRefusalRestoresSharedLogin(t *testing.T) {
 	if err := os.WriteFile(globalStore, []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := runEnvProfile(nil, []string{"keyed", "set", "ANTHROPIC_API_KEY=cpbcanary148restore"}); err != nil {
+	if err := stmtErr(t, "CREATE ENV keyed SET ANTHROPIC_API_KEY=cpbcanary148restore AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{Env: &manifest.Env{Profiles: []string{"keyed"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{Env: &manifest.Env{Sets: []string{"keyed"}}})
 	store := filepath.Join(root, "box", ".credentials.json")
 	log := stubSbx(t)
 	for _, fail := range []string{"secret", "create"} {

@@ -15,17 +15,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
-// Sessions (docs/reference/cli-grammar.md, "Sessions"): the live Claude
+// Sessions (SPEC.md, "Sessions"): the live Claude
 // Code sessions of cpb's config dirs, SHOW SESSIONS, the SESSIONS table,
-// RESUME and the line printed when a launch ends.
+// the resume guard of a launch, and the line printed when it ends.
 //
 // Everything here reads Claude Code's own files and nothing else:
 // <configDir>/sessions/<pid>.json, which Claude Code keeps for each live
@@ -235,31 +233,33 @@ func sessionDirs(forName string) ([]sessionDir, error) {
 }
 
 func playbookSessionDir(pb *playbook.Playbook) sessionDir {
-	d := sessionDir{label: pb.Name, path: pb.Path, pb: pb}
-	if pb.Manifest != nil {
-		d.launcher = pb.Manifest.Alias
-	}
-	return d
+	return sessionDir{label: pb.Name, path: pb.Path, pb: pb, launcher: effectiveLauncher(pb)}
 }
 
-// cliName is how the pilot calls cpb, for the commands cpb prints.
-func cliName() string {
-	if b := filepath.Base(os.Args[0]); b == "cpb" || b == "claude-playbook" {
-		return b
-	}
-	return "claude-playbook"
-}
-
-// resumeCommand is the command that resumes id in d: the launcher, cpb run,
-// or, for a plain directory, claude under that config dir.
-func (d sessionDir) resumeCommand(id string) string {
+// pickCommand is the command that opens Claude Code's session picker in d:
+// the launcher, cpb run, or, for a plain directory, claude under that
+// config dir, with --resume and no id.
+func (d sessionDir) pickCommand() string {
 	switch {
 	case d.launcher != "":
-		return d.launcher + " --resume " + id
+		return d.launcher + " --resume"
 	case d.pb != nil:
-		return cliName() + " run " + d.pb.Name + " --resume " + id
+		return "cpb run " + d.pb.Name + " --resume"
 	}
-	return "CLAUDE_CONFIG_DIR=" + shell.QuoteArg(d.path) + " claude --resume " + id
+	return "CLAUDE_CONFIG_DIR=" + shell.QuoteArg(d.path) + " claude --resume"
+}
+
+// resumeCommand is the command that resumes id in d from the folder it ran
+// in.
+func (d sessionDir) resumeCommand(id string) string { return d.pickCommand() + " " + id }
+
+// resumeIn is the command that resumes id in d from anywhere: a cd into
+// cwd, the folder it ran in, first. Claude Code finds a session by it.
+func (d sessionDir) resumeIn(id, cwd string) string {
+	if cwd == "" {
+		return d.resumeCommand(id)
+	}
+	return "cd " + shell.QuoteArg(cwd) + " && " + d.resumeCommand(id)
 }
 
 // liveSession is a session file with its dir and what cpb can tell about
@@ -443,7 +443,7 @@ func (s liveSession) json() sessionJSON {
 		Playbook: s.dir.label, ConfigDir: s.dir.path, PID: s.f.PID, SessionID: s.f.SessionID,
 		Cwd: s.f.Cwd, Kind: s.f.Kind, Status: optStr(s.f.Status), Name: optStr(s.f.Name),
 		ClaudeVersion: optStr(s.f.Version), StartedAt: rfc3339(time.UnixMilli(s.f.StartedAt)),
-		Launcher: optStr(s.dir.launcher), Resume: s.dir.resumeCommand(s.f.SessionID),
+		Launcher: optStr(s.dir.launcher), Resume: s.dir.resumeIn(s.f.SessionID, s.f.Cwd),
 		TTY: optStr(s.tty),
 	}
 	if p := transcriptPath(s.dir.path, s.f.Cwd, s.f.SessionID); p != "" {
@@ -524,20 +524,4 @@ func showSessions(st *grammar.Stmt) error {
 	}
 	t.render(os.Stdout)
 	return nil
-}
-
-// sessionsCmd is `cpb sessions`: the documented lowercase shorthand for
-// exactly SHOW SESSIONS [--json].
-var sessionsCmd = &cobra.Command{
-	Use:   "sessions",
-	Short: "List the live Claude Code sessions of your playbooks (SHOW SESSIONS)",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		asJSON, _ := cmd.Flags().GetBool("json")
-		return showSessions(&grammar.Stmt{Verb: grammar.Show, Object: grammar.Sessions, JSON: asJSON})
-	},
-}
-
-func init() {
-	sessionsCmd.Flags().Bool("json", false, "print the sessions as JSON, as SHOW SESSIONS --json")
 }

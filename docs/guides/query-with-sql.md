@@ -1,18 +1,20 @@
 # Query your setup with SQL
 
-Since v3.21.0, `cpb SELECT` does this for one table at a time (see
+`cpb SELECT` does this for one table at a time (see
 [example 13](../../examples/13-select/) and the reference's
-[SELECT](../reference/cli-grammar.md#select-v3210)):
+[SELECT](../../SPEC.md#select)):
 
 ```bash
 cpb "SELECT name, envs FROM PLAYBOOKS"                                  # built in
 cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook"  # through clickhouse-local
 ```
 
-`cpb DESCRIBE playbooks` lists a table's columns and types. On a terminal
+`cpb DESCRIBE playbooks` lists a table's columns: each one's name, type,
+and a comment saying what it means. On a terminal
 `SELECT` prints a table, or one block per row for more than 6 columns,
-with objects as JSON. In a pipe it prints TSV, and a `FORMAT` in the query
-always wins.
+with objects as JSON. In a pipe it prints TSV with a header row, and
+`--json` prints JSON rows, whichever engine runs the query; a `FORMAT` in
+the query always wins.
 
 This guide is the manual form underneath it, for what `SELECT` does not do:
 joining two reads, or feeding ClickHouse settings of your own. Every read has
@@ -75,10 +77,10 @@ cpb SHOW PLAYBOOKS --json | ch local --input-format JSONEachRow -q "SELECT * FRO
 ## What to parse
 
 The `--json` objects are for scripts
-([reference, Output](../reference/cli-grammar.md#output)); the release notes
+([reference, Output](../../SPEC.md#output)); the release notes
 name every change to them. Parse them, never the human form.
 
-`cpb SELECT …` does this for you ([reference](../reference/cli-grammar.md#select-v3210)):
+`cpb SELECT …` does this for you ([reference](../../SPEC.md#select)):
 columns alone are answered by cpb itself, and any other query is piped to
 `clickhouse local` the same way, over the same `--json` rows. This page is
 the manual form, for a pipeline of your own.

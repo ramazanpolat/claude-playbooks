@@ -1,28 +1,27 @@
 #!/bin/sh
-# npx entry point for claude-playbook.
+# npx entry point for cpb.
 #
 #   npx github:ramazanpolat/claude-playbooks <args...>
 #   npx cpb <args...>                        (when published to npm)
 #
 # Behavior:
-#   1. claude-playbook/cpb already on PATH -> exec it. The installed binary
+#   1. cpb already on PATH -> exec it. The installed binary
 #      is the source of truth; npx just routes to it. No download, no
-#      version games: update the installed one with `cpb update` (no
-#      playbook name).
+#      version games: update the installed one with `cpb self-update`.
 #   2. Not installed (first run) -> bootstrap: download the release binary,
 #      verify against the release's SHA256SUMS, install to ~/.local/bin
-#      (user-owned only -- never /usr/local/bin, never sudo), create the
-#      cpb link, announce it, exec it.
+#      (user-owned only -- never /usr/local/bin, never sudo) as cpb,
+#      announce it, exec it.
 #   3. CPB_NPX_BOOTSTRAP=0 -> no install, no delegation: fetch (or reuse
-#      cache) under ~/.claude-playbooks/bin/<tag>/ and exec from there.
-#      Ephemeral mode; also the way to test a pinned version alongside an
-#      installed one:
-#        CPB_NPX_BOOTSTRAP=0 CPB_VERSION=v3.8.0 npx cpb --version
+#      cache) under ${XDG_CACHE_HOME:-~/.cache}/cpb/npx/<tag>/ and exec
+#      from there. Ephemeral mode; also the way to test a pinned version
+#      alongside an installed one:
+#        CPB_NPX_BOOTSTRAP=0 CPB_NPX_VERSION=v4.0.0 npx cpb --version
 #
 # Version resolution for downloads, first match wins:
-#   1. CPB_VERSION env (e.g. "v3.9.1") -- escape hatch / testing
+#   1. CPB_NPX_VERSION env (e.g. "v4.0.0") -- escape hatch / testing
 #   2. this package's version (npm_package_version under npx) -- so
-#      `npx github:...#v3.9.1` runs that release, not latest. Bump
+#      `npx github:...#v4.0.0` runs that release, not latest. Bump
 #      package.json "version" together with the release tag.
 #   3. latest release from the GitHub API -- same as install.sh
 #
@@ -30,13 +29,14 @@
 # release-prep commit is on main before its tag publishes. When that
 # release's binary is missing (HTTP 404), the shim runs the newest
 # published release instead and says so on stderr -- never an rc, never
-# another major. An explicit CPB_VERSION is never replaced.
+# another major. An explicit CPB_NPX_VERSION is never replaced.
 set -e
 
-REPO="${REPO:-ramazanpolat/claude-playbooks}"
-ASSET_PREFIX="${ASSET_PREFIX:-claude-playbook}"
-DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL:-https://github.com/${REPO}/releases/download}"
-CACHE_ROOT="${CPB_NPX_CACHE:-$HOME/.claude-playbooks/bin}"
+REPO="${CPB_INSTALL_REPO:-ramazanpolat/claude-playbooks}"
+ASSET_PREFIX="${CPB_INSTALL_ASSET_PREFIX:-cpb}"
+DOWNLOAD_BASE_URL="${CPB_INSTALL_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/download}"
+# Outside the playbooks root, which would list a directory there as a playbook.
+CACHE_ROOT="${CPB_NPX_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/cpb/npx}"
 INSTALL_DIR="${CPB_NPX_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS.
@@ -56,8 +56,8 @@ esac
 
 ASSET="${ASSET_PREFIX}-${OS}-${ARCH}"
 
-# Delegate to an installed claude-playbook. Skipped in ephemeral mode so a
-# pinned CPB_VERSION can run beside the install.
+# Delegate to an installed cpb. Skipped in ephemeral mode so a pinned
+# CPB_NPX_VERSION can run beside the install.
 #
 # Under npx, this package's own bin dir sits first on PATH, so a naive
 # `command -v cpb` finds THIS SHIM (bin/cpb -> npx-shim.sh) and exec'ing it
@@ -98,10 +98,6 @@ if [ "${CPB_NPX_BOOTSTRAP:-}" != "0" ]; then
   if [ -n "$FOUND" ]; then
     exec "$FOUND" "$@"
   fi
-  FOUND=$(find_other claude-playbook) || FOUND=""
-  if [ -n "$FOUND" ]; then
-    exec "$FOUND" "$@"
-  fi
 fi
 
 # The newest published, non-prerelease release's tag (GitHub's own notion,
@@ -114,8 +110,8 @@ latest_tag() {
 # Resolve which release tag to fetch.
 TAG=""
 TAG_FROM=""
-if [ -n "${CPB_VERSION:-}" ]; then
-  TAG="$CPB_VERSION"
+if [ -n "${CPB_NPX_VERSION:-}" ]; then
+  TAG="$CPB_NPX_VERSION"
   TAG_FROM=env
 elif [ -n "${npm_package_version:-}" ] && [ "$npm_package_version" != "0.0.0" ]; then
   TAG="v$npm_package_version"
@@ -126,7 +122,7 @@ else
 fi
 if [ -z "$TAG" ]; then
   echo "Error: could not determine which release to fetch. Check your internet connection," >&2
-  echo "or pin one explicitly: CPB_VERSION=v3.9.1 npx github:${REPO} ..." >&2
+  echo "or pin one explicitly: CPB_NPX_VERSION=v4.0.0 npx github:${REPO} ..." >&2
   exit 1
 fi
 
@@ -142,7 +138,7 @@ set_bin() {
   else
     BIN_DIR="$INSTALL_DIR"
   fi
-  BIN="${BIN_DIR}/claude-playbook"
+  BIN="${BIN_DIR}/cpb"
 }
 set_bin
 
@@ -152,10 +148,10 @@ set_bin
 TMP_FILE=""
 trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
 download() {
-  echo "Fetching claude-playbook ${TAG} (${OS}/${ARCH}) to ${BIN_DIR}..." >&2
+  echo "Fetching cpb ${TAG} (${OS}/${ARCH}) to ${BIN_DIR}..." >&2
   mkdir -p "$BIN_DIR" || return 1
   # mktemp inside the target dir: the final mv stays on one filesystem.
-  TMP_FILE=$(mktemp "${BIN_DIR}/.claude-playbook.XXXXXX") || return 1
+  TMP_FILE=$(mktemp "${BIN_DIR}/.cpb.XXXXXX") || return 1
 
   code=$(curl -sSL -o "$TMP_FILE" -w '%{http_code}' "${DOWNLOAD_BASE_URL}/${TAG}/${ASSET}") || code=""
   case "$code" in
@@ -214,12 +210,12 @@ fallback_tag() {
   _new=$(latest_tag) || _new=""
   _major=${TAG#v}; _major=${_major%%.*}
   if ! printf '%s\n' "$_new" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-    echo "Error: claude-playbook ${TAG} is not published yet, and no published vX.Y.Z release was found to run instead (latest: ${_new:-none})." >&2
+    echo "Error: cpb ${TAG} is not published yet, and no published vX.Y.Z release was found to run instead (latest: ${_new:-none})." >&2
     return 1
   fi
   _nmajor=${_new#v}; _nmajor=${_nmajor%%.*}
   if [ "$_new" = "$TAG" ] || [ "$_nmajor" != "$_major" ]; then
-    echo "Error: claude-playbook ${TAG} has no ${ASSET} yet, and the newest published release (${_new}) cannot stand in for it. Try again later, or pin one: CPB_VERSION=vX.Y.Z" >&2
+    echo "Error: cpb ${TAG} has no ${ASSET} yet, and the newest published release (${_new}) cannot stand in for it. Try again later, or pin one: CPB_NPX_VERSION=vX.Y.Z" >&2
     return 1
   fi
   printf '%s' "$_new"
@@ -236,21 +232,15 @@ if [ ! -x "$BIN" ]; then
     if [ ! -x "$BIN" ]; then download || rc=$?; fi
   fi
   if [ "$rc" = 4 ]; then
-    echo "Error: claude-playbook ${TAG} has no ${ASSET} (HTTP 404). Check the version, or pin one: CPB_VERSION=vX.Y.Z" >&2
+    echo "Error: cpb ${TAG} has no ${ASSET} (HTTP 404). Check the version, or pin one: CPB_NPX_VERSION=vX.Y.Z" >&2
   fi
   [ "$rc" = 0 ] || exit 1
 fi
 
 if [ "$MODE" = "bootstrap" ]; then
-  # cpb is the short name for the same binary. Relative link, exactly like
-  # install.sh: a symlink to the binary under any other name is treated as
-  # a playbook launcher and dispatched accordingly.
-  rm -f "${BIN_DIR}/cpb"
-  ln -s claude-playbook "${BIN_DIR}/cpb"
-
   if [ -n "${FETCHED:-}" ]; then
     echo "" >&2
-    echo "Installed claude-playbook ${TAG} to ${BIN_DIR}" >&2
+    echo "Installed cpb ${TAG} to ${BIN_DIR}" >&2
     echo "  Uninstall anytime: cpb self-uninstall --keep-data" >&2
   fi
   case ":$PATH:" in
@@ -261,6 +251,5 @@ if [ "$MODE" = "bootstrap" ]; then
 fi
 
 # Exec with argv[0] = the binary's own path: the multicall dispatch in the
-# Go binary then behaves exactly like a direct claude-playbook invocation
-# ("cpb" is only a short alias for the same root command).
+# Go binary then behaves exactly like a direct cpb invocation.
 exec "$BIN" "$@"

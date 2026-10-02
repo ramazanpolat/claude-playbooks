@@ -18,7 +18,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
@@ -48,7 +48,7 @@ const defaultSandboxBackend = "sbx"
 
 // sandboxOpts are the --sandbox family of run/start flags.
 type sandboxOpts struct {
-	enabled  bool   // --sandbox, --sbx, --sandbox=BACKEND
+	enabled  bool   // --sandbox, --sandbox=BACKEND
 	disabled bool   // --no-sandbox
 	backend  string // --sandbox=BACKEND
 	fresh    bool
@@ -196,7 +196,7 @@ func takeSandboxValueFlags(args []string, opts *sandboxOpts) (rest []string, con
 // adds command-specific boolean flags (start's --delete).
 func takeRunFlags(args []string, opts *sandboxOpts, extra map[string]*bool) (rest []string, tokens []launchToken, err error) {
 	bools := map[string]*bool{
-		"--sandbox": &opts.enabled, "--sbx": &opts.enabled, "--no-sandbox": &opts.disabled,
+		"--sandbox": &opts.enabled, "--no-sandbox": &opts.disabled,
 		"--sandbox-fresh": &opts.fresh, "--clone": &opts.clone,
 	}
 	for k, v := range extra {
@@ -287,7 +287,7 @@ func sandboxHost(sb *manifest.Sandbox, opts *sandboxOpts) string {
 // forwardToSandboxHost runs this launch on host instead: the same
 // subcommand, rebuilt from what the launch parser consumed (never from
 // the raw text, so claude's own arguments are carried verbatim and
-// nothing in them is mistaken for a flag), over ssh, where claude-playbook
+// nothing in them is mistaken for a flag), over ssh, where cpb
 // and the target are installed. Every value flag is forwarded in its
 // inline form (--flag=value), so a value that looks like a flag stays a
 // value on the remote side too. Launch flags travel as typed, unevaluated:
@@ -306,7 +306,7 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	}
 	for _, t := range tokens {
 		if t.flag == "--env-file" {
-			return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env profile on that host, or --env KEY=VALUE", host)
+			return fmt.Errorf("--env-file names a local file: a launch on %s cannot read it. Use an env set on that host, or --env KEY=VALUE", host)
 		}
 	}
 	var f []string
@@ -347,7 +347,7 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	f = append(f, wrapper...)
 	f = append(f, target)
 	f = append(f, claudeArgs...)
-	quoted := []string{"claude-playbook", subcommand}
+	quoted := []string{"cpb", subcommand}
 	for _, a := range f {
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
@@ -477,10 +477,9 @@ func baseURLHost(env []string) string {
 	return ""
 }
 
-// sandboxBackend is the seam every sandbox implementation fills: the six
-// operations a launch needs: sbx, and the experimental OpenShell backend
-// (sandbox_openshell.go). The seam keeps the launch logic independent of
-// their CLIs.
+// sandboxBackend is the seam a sandbox implementation fills: the
+// operations a launch needs. sbx is the one backend; the seam keeps the
+// launch logic independent of its CLI.
 type sandboxBackend interface {
 	// names lists the existing sandboxes.
 	names() ([]string, error)
@@ -540,12 +539,6 @@ func newSandboxBackend(kind string) (sandboxBackend, error) {
 			return nil, fmt.Errorf("'sbx' (Docker Sandboxes) not found; install it (macOS: brew trust docker/tap && brew install docker/tap/sbx) and run 'sbx login' once, or launch without --sandbox")
 		}
 		return sbxBackend{bin: bin}, nil
-	case "openshell":
-		bin, err := openshellPreflight()
-		if err != nil {
-			return nil, err
-		}
-		return &openshellBackend{bin: bin, claudeVersion: openshellClaudeVersion}, nil
 	}
 	return nil, fmt.Errorf("unknown sandbox backend %q (available: %s)", kind, strings.Join(manifest.SandboxBackends, ", "))
 }
@@ -774,7 +767,7 @@ func isTerminal(f *os.File) bool {
 // not share: a file below the sandbox user's home, which exists only inside
 // the sandbox and persists with it.
 func sandboxLoginPath(backend sandboxBackend, name string) string {
-	return backend.homeDir() + "/.claude-playbook-logins/" + name + "/" + auth.CredentialsFileName
+	return backend.homeDir() + "/.cpb-logins/" + name + "/" + auth.CredentialsFileName
 }
 
 // isSandboxLoginLink reports whether the store at configPath is a link to
@@ -782,7 +775,7 @@ func sandboxLoginPath(backend sandboxBackend, name string) string {
 // resolves.
 func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 	target, err := os.Readlink(filepath.Join(configPath, auth.CredentialsFileName))
-	return err == nil && strings.HasPrefix(target, backend.homeDir()+"/.claude-playbook-logins/")
+	return err == nil && strings.HasPrefix(target, backend.homeDir()+"/.cpb-logins/")
 }
 
 // prepareSandboxEnv runs the host-side authentication decision for a
@@ -805,7 +798,7 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
-	if errors.Is(syncErr, envprofile.ErrProfile) {
+	if errors.Is(syncErr, envset.ErrSet) {
 		return nil, "", syncErr
 	}
 	if syncErr != nil {
@@ -897,7 +890,7 @@ func checkMountedManifests(configPath string, mounts []string) error {
 			if m != nil && m.Env != nil {
 				for _, key := range secretEnvVars {
 					if m.Env.Set[key] != "" {
-						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env profile, which lives outside the mount (cpb env-profile <profile> set %s=...; cpb env <playbook> use <profile>; cpb env <playbook> clear %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
+						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env set, which lives outside the mount (cpb CREATE ENV <set> SET %s=... AS PLAINTEXT; cpb ALTER PLAYBOOK <playbook> ADD ENV <set> UNSET VAR %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
 					}
 				}
 			}
@@ -960,10 +953,10 @@ func machineLoginInside(mount string) string {
 			return "the machine's long-lived token file " + resolved
 		}
 	}
-	// The registry's env profiles are its secret store (proxy injection
+	// The registry's env sets are its secret store (proxy injection
 	// keeps their keys out of the sandbox only while the files stay out).
-	if profiles, err := filepath.EvalSymlinks(envprofile.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
-		return "the registry's env profiles " + profiles
+	if profiles, err := filepath.EvalSymlinks(envset.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
+		return "the registry's env sets " + profiles
 	}
 	return ""
 }
@@ -1071,20 +1064,11 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	// on the way up is checked while its directory lies under one of this
 	// launch's mounts (a subdir install keeps its [env] in the root's; a
 	// start directory under the working directory inherits from above
-	// it). Env profiles live in the registry root, outside every mount,
+	// it). Env sets live in the registry root, outside every mount,
 	// so that is where a secret belongs; refused before the sandbox
 	// exists.
 	if sb.Secrets != "env" {
 		if err := checkMountedManifests(t.configPath, mounts); err != nil {
-			return false, err
-		}
-	}
-
-	// A backend with a lifecycle of its own (OpenShell) takes this
-	// launch's settings first; sbx has none.
-	lifecycle, _ := backend.(sandboxLifecycle)
-	if lifecycle != nil {
-		if err := lifecycle.prepare(sb, opts.clone, env); err != nil {
 			return false, err
 		}
 	}
@@ -1105,18 +1089,6 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 			return false, fmt.Errorf("could not remove sandbox %s: %w", name, err)
 		}
 		exists = false
-	}
-	if exists && lifecycle != nil {
-		// A reuse that refuses leaves the sandbox as it found it.
-		if err := lifecycle.reuse(name); err != nil {
-			return false, err
-		}
-	}
-	if lifecycle != nil {
-		// From here the sandbox may be running (started for reuse, or about
-		// to be created): every way out, a refusal before the attach
-		// included, stops it when no session is left in it.
-		defer lifecycle.finish(name)
 	}
 	if exists {
 		// Mounts are creation-time: a reused sandbox keeps the ones it was
@@ -1141,13 +1113,16 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	if exists {
 		// Creation-time choices this launch cannot see from outside: the
 		// marker cpb wrote inside at creation says what they were. A
-		// sandbox without one predates the marker (v3.12.0 and earlier,
-		// created with sbx's shared skills store mounted) and must be
-		// recreated; one whose choices differ from the manifest too.
+		// sandbox without one is never attached to, since cpb cannot prove
+		// it made it; one whose choices differ from the manifest must be
+		// recreated.
 		marker, err := backend.shellOutput(name, "cat ~/"+sandboxMarkerFile+" 2>/dev/null")
 		want := sandboxMarker(sb.ShareSkills)
-		if err != nil || strings.TrimSpace(marker) != want {
-			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): an earlier claude-playbook, or a changed share_skills. Recreate it with --sandbox-fresh", name, strings.TrimSpace(marker), want)
+		switch got := strings.TrimSpace(marker); {
+		case err != nil || got == "":
+			return false, fmt.Errorf("a sandbox named %s exists but has no cpb marker: remove it (sbx rm -f %s) or launch with --sandbox-fresh", name, name)
+		case got != want:
+			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): share_skills changed. Recreate it with --sandbox-fresh", name, got, want)
 		}
 	}
 	if !exists {
@@ -1169,7 +1144,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 				fmt.Fprintf(os.Stderr, "Warning: could not allow network %q for sandbox %s: %v\n", h, name, err)
 			}
 		}
-		if sb.ClaudeVersion != "" && (lifecycle == nil || !lifecycle.imageCarriesClaude()) {
+		if sb.ClaudeVersion != "" {
 			install := "set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s " + shell.QuoteArg(sb.ClaudeVersion)
 			if err := backend.shell(name, install); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not pin Claude Code %s inside sandbox %s: %v (the image's own version runs)\n", sb.ClaudeVersion, name, err)
@@ -1238,7 +1213,7 @@ func rewriteHostEndpoint(env []string, backend sandboxBackend) []string {
 
 // sandboxMarkerFile, below the sandbox user's home, records the
 // creation-time settings a launch cannot read back from the backend.
-const sandboxMarkerFile = ".claude-playbook-sandbox"
+const sandboxMarkerFile = ".cpb-sandbox"
 
 func sandboxMarker(shareSkills bool) string {
 	if shareSkills {
@@ -1283,16 +1258,8 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 	// no longer carries would still inject that key for anyone inside who
 	// sends the (predictable) placeholder, so they are revoked (sbx cannot
 	// delete them and neutralizes them instead).
-	// A backend that injects its placeholders itself (OpenShell) would hand
-	// a key the pilot removed to the next session, so for it a mapping that
-	// cannot be listed or revoked stops the launch; sbx warns.
-	lifecycle, _ := backend.(sandboxLifecycle)
-	strict := lifecycle != nil && lifecycle.revokeFailsClosed()
 	registered, err := backend.secrets(sandbox)
 	if err != nil {
-		if strict {
-			return nil, fmt.Errorf("could not list the secrets registered for sandbox %s (%v), so the launch stops: a key removed from the environment may still be injected. Retry, or recreate the sandbox with --sandbox-fresh", sandbox, err)
-		}
 		fmt.Fprintf(os.Stderr, "Warning: could not list the sandbox's secrets (%v); a key registered by an earlier launch may still be mapped\n", err)
 	}
 	for _, key := range secretEnvVars {
@@ -1304,9 +1271,6 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 		}
 		if value == "" {
 			done, err := backend.revoke(sandbox, host, key, registered)
-			if err != nil && strict {
-				return nil, fmt.Errorf("%s is no longer in the environment but its mapping in sandbox %s could not be revoked (%v), so the launch stops: it would still be injected. Retry, or recreate the sandbox with --sandbox-fresh", key, sandbox, err)
-			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
 			} else if done {

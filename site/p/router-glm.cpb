@@ -1,6 +1,6 @@
 -- title: Another model backend
 -- description: A playbook for a model backend behind your router (GLM here): its own login, the API key blocked, a /model list of its own.
--- min-cpb: 3.24.0
+-- min-cpb: 4.0.0
 -- needs: your router's key, attached with an env set (it is not stored in this file)
 
 ALTER PLAYBOOK

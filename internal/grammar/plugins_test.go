@@ -8,21 +8,21 @@ import (
 
 func TestParsePluginClauses(t *testing.T) {
 	st, err := ParseArgs([]string{"ALTER", "PLAYBOOK", "k",
-		"ADD", "MARKETPLACE", "kommander", "FROM", "github:ramazanpolat/kommander-playbook",
-		"ADD", "PLUGIN", "kommander@kommander",
-		"SET", "AGENT", "kommander:kommander",
-		"ADD", "ENV", "kommander", // an env set may share a marketplace's name
-		"DROP", "PLUGIN", "old@kommander",
+		"ADD", "MARKETPLACE", "toolkit", "FROM", "github:example/toolkit",
+		"ADD", "PLUGIN", "toolkit@toolkit",
+		"SET", "AGENT", "toolkit:toolkit",
+		"ADD", "ENV", "toolkit", // an env set may share a marketplace's name
+		"DROP", "PLUGIN", "old@toolkit",
 		"DROP", "MARKETPLACE", "old"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []Clause{
-		{Kind: AddMarketplace, Names: []string{"kommander"}, Arg: "github:ramazanpolat/kommander-playbook"},
-		{Kind: AddPlugin, Names: []string{"kommander@kommander"}},
-		{Kind: SetAgent, Arg: "kommander:kommander"},
-		{Kind: AddEnv, Names: []string{"kommander"}, Where: Last},
-		{Kind: DropPlugin, Names: []string{"old@kommander"}},
+		{Kind: AddMarketplace, Names: []string{"toolkit"}, Arg: "github:example/toolkit"},
+		{Kind: AddPlugin, Names: []string{"toolkit@toolkit"}},
+		{Kind: SetAgent, Arg: "toolkit:toolkit"},
+		{Kind: AddEnv, Names: []string{"toolkit"}, Where: Last},
+		{Kind: DropPlugin, Names: []string{"old@toolkit"}},
 		{Kind: DropMarketplace, Names: []string{"old"}},
 	}
 	if got := strip(st).Clauses; !reflect.DeepEqual(got, want) {
@@ -54,7 +54,7 @@ func TestParsePluginErrors(t *testing.T) {
 		{w("ALTER PLAYBOOK k ADD PLUGIN a@b ADD PLUGIN a@b"), "plugin a@b appears twice"},
 		{w("ALTER PLAYBOOK k SET AGENT a UNSET AGENT"), "cannot be combined"},
 		{w("ALTER PLAYBOOK k SET AGENT a/b"), "an agent is <name> or <plugin>:<name>"},
-		{w("ALTER PLAYBOOK k ADD FOO"), "ADD takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL, MODEL or PANEL"},
+		{w("ALTER PLAYBOOK k ADD FOO"), "ADD takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL"},
 		{w("ALTER DEFAULTS ADD PLUGIN a@b"), "ADD takes ENV"},
 		{w("INCLUDE base.cpb"), "INCLUDE appears only in a playbook file"},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM ./mkt"), "resolves against its playbook file"},
@@ -89,7 +89,7 @@ func TestParseInclude(t *testing.T) {
 }
 
 func TestQuotedKeywordIsANewName(t *testing.T) {
-	stmts, err := ParseFile(`CREATE ENV 'include'; CREATE PLAYBOOK IF NOT EXISTS 'agent' NO ALIAS;`)
+	stmts, err := ParseFile(`CREATE ENV 'include'; CREATE PLAYBOOK IF NOT EXISTS 'agent' NO LAUNCHER;`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,8 +110,8 @@ func TestExpectPlugins(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{w("ALTER PLAYBOOK k ADD"), []string{"ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL", "PANEL"}},
-		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED"}},
+		{w("ALTER PLAYBOOK k ADD"), []string{"ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL"}},
+		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX"}},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m"), []string{"FROM"}},
 	}
 	for _, tc := range cases {

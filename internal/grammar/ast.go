@@ -8,7 +8,7 @@
 // and whether a secret reference resolves are the engine's questions; this
 // package answers only "is this a well-formed statement, and which one".
 //
-// The spec is docs/reference/cli-grammar.md.
+// The spec is SPEC.md.
 package grammar
 
 // Verb is a statement's first word.
@@ -23,10 +23,6 @@ const (
 	Apply   Verb = "APPLY"
 	Include Verb = "INCLUDE" // playbook files only: INCLUDE '<path>'
 	Use     Verb = "USE"     // playbook files only: USE PLAYBOOK <name>
-	// Resume: the command line only. RESUME [SESSION '<id>'] [FOR PLAYBOOK
-	// <name>] resumes a Claude Code session through its playbook's launch
-	// path; RESUME --list lists the recent ones in the current folder.
-	Resume Verb = "RESUME"
 )
 
 // Object is what a statement acts on or reads.
@@ -47,33 +43,39 @@ const (
 type Kind string
 
 const (
-	SetVar   Kind = "SET"       // SET [VAR] K=V ...
-	SetRef   Kind = "SET FROM"  // SET [VAR] K FROM '<ref>'
-	BlockVar Kind = "BLOCK"     // BLOCK [VAR] K ...
-	UnsetVar Kind = "UNSET"     // UNSET [VAR] K ...
-	Describe Kind = "DESCRIBE"  // DESCRIBE '<text>'
-	UseEnv   Kind = "USE ENV"   // USE ENV a b ...
-	AddEnv   Kind = "ADD ENV"   // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
-	DropEnv  Kind = "DROP ENV"  // DROP ENV a b ...
-	RenameTo Kind = "RENAME TO" // RENAME TO n
-	Alias    Kind = "ALIAS"     // ALIAS launcher
-	NoAlias  Kind = "NO ALIAS"  // NO ALIAS
-	From     Kind = "FROM"      // CREATE PLAYBOOK ... FROM <source>
-	Branch   Kind = "BRANCH"    // CREATE PLAYBOOK ... BRANCH <ref>
-	Subdir   Kind = "SUBDIR"    // CREATE PLAYBOOK ... SUBDIR <dir>
-	Link     Kind = "LINK"      // CREATE PLAYBOOK ... LINK <dir>
-	Sandbox  Kind = "SANDBOX"   // CREATE PLAYBOOK ... SANDBOX
+	SetVar      Kind = "SET"         // SET [VAR] K=V ...
+	SetRef      Kind = "SET FROM"    // SET [VAR] K FROM '<ref>'
+	BlockVar    Kind = "BLOCK"       // BLOCK [VAR] K ...
+	UnsetVar    Kind = "UNSET"       // UNSET [VAR] K ...
+	Description Kind = "DESCRIPTION" // DESCRIPTION '<text>'
+	UseEnv      Kind = "USE ENV"     // USE ENV a b ...
+	AddEnv      Kind = "ADD ENV"     // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
+	DropEnv     Kind = "DROP ENV"    // DROP ENV a b ...
+	RenameTo    Kind = "RENAME TO"   // RENAME TO n
+	Launcher    Kind = "LAUNCHER"    // LAUNCHER <name>
+	NoLauncher  Kind = "NO LAUNCHER" // NO LAUNCHER
+	From        Kind = "FROM"        // CREATE PLAYBOOK ... FROM <source>
+	Branch      Kind = "BRANCH"      // CREATE PLAYBOOK ... BRANCH <ref>
+	Subdir      Kind = "SUBDIR"      // CREATE PLAYBOOK ... SUBDIR <dir>
+	Link        Kind = "LINK"        // CREATE PLAYBOOK ... LINK <dir>
+	Sandbox     Kind = "SANDBOX"     // CREATE PLAYBOOK ... SANDBOX
 
-	// NoPilotProfile: CREATE PLAYBOOK ... NO PILOT PROFILE, a template
-	// CLAUDE.md without the ~/.pilot-profile/ imports.
-	NoPilotProfile Kind = "NO PILOT PROFILE"
-
-	// Isolated login (manifest isolate_auth): the playbook shares no login
+	// Isolated login (manifest isolated_login): the playbook shares no login
 	// with ~/.claude. CREATE PLAYBOOK ... ISOLATED LOGIN, or ALTER PLAYBOOK
 	// ... SET | UNSET ISOLATED LOGIN.
 	IsolatedLogin      Kind = "ISOLATED LOGIN"
 	SetIsolatedLogin   Kind = "SET ISOLATED LOGIN"
 	UnsetIsolatedLogin Kind = "UNSET ISOLATED LOGIN"
+
+	// The [sandbox] table (ALTER PLAYBOOK): bare SET SANDBOX is always =
+	// true and isolates the login, as CREATE … SANDBOX does; bare UNSET
+	// SANDBOX is always = false and leaves the login as it is. The keyed
+	// forms name the table's own keys (Settings) and never touch always
+	// unless they name it.
+	SetSandbox       Kind = "SET SANDBOX"
+	UnsetSandbox     Kind = "UNSET SANDBOX"
+	SetSandboxKeys   Kind = "SET SANDBOX <key>=<value>"
+	UnsetSandboxKeys Kind = "UNSET SANDBOX <key>"
 
 	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
 	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
@@ -88,7 +90,7 @@ const (
 	UnsetAgent      Kind = "UNSET AGENT"      // UNSET AGENT
 
 	// MCP servers (ALTER PLAYBOOK only): claude mcp add-json / remove.
-	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, ENV …, HEADER …
+	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, VAR …, HEADER …
 	DropMCP Kind = "DROP MCP SERVER" // DROP MCP SERVER n
 
 	// Tool permissions, status line and model (ALTER PLAYBOOK only): keys
@@ -112,10 +114,6 @@ const (
 	// SetStatuslinePrevious: SET STATUSLINE PREVIOUS, the status line cpb
 	// replaced last, from its history.
 	SetStatuslinePrevious Kind = "SET STATUSLINE PREVIOUS"
-
-	// Panels (SPC/1 manifests, v3.25.0): ADD PANEL <ns>.<id> …, DROP PANEL.
-	AddPanel  Kind = "ADD PANEL"
-	DropPanel Kind = "DROP PANEL" // UNSET STATUSLINE REFRESH
 
 	AddModel         Kind = "ADD MODEL"          // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
 	DropModel        Kind = "DROP MODEL"         // DROP MODEL '<id>'
@@ -187,15 +185,12 @@ type Stmt struct {
 	Dir    string
 	DryRun bool // APPLY <file> --dry-run
 
-	// For: SHOW SESSIONS … FOR PLAYBOOK <name>, RESUME … FOR PLAYBOOK <name>.
+	// For: SHOW SESSIONS … FOR PLAYBOOK <name>.
 	For string
-	// Session: RESUME SESSION '<id>'. List: RESUME --list.
-	Session string
-	List    bool
 
 	SkipSecrets bool // SHOW CREATE ... --skip-secrets
 	Yes         bool // DROP PLAYBOOK ... --yes, APPLY ... --yes
-	JSON        bool // SHOW ... --json, EXPLAIN ... --json, APPLY ... --dry-run --json, RESUME --list --json
+	JSON        bool // SHOW ... --json, EXPLAIN ... --json, APPLY ... --dry-run --json
 
 	Pos Pos
 }
@@ -208,11 +203,16 @@ type Clause struct {
 	Vars   []Var    // SET: one per K=V; SET FROM: exactly one, with Ref
 	Keys   []string // BLOCK, UNSET
 	Names  []string // USE ENV, DROP ENV; ADD ENV, the MARKETPLACE and PLUGIN clauses: exactly one
-	Arg    string   // RENAME TO, ALIAS, DESCRIBE, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER, SET AGENT, ADD MARKETPLACE's source
+	Arg    string   // RENAME TO, LAUNCHER, DESCRIPTION, FROM, BRANCH, SUBDIR, LINK, SET SECRET HELPER, SET AGENT, ADD MARKETPLACE's source
 	Where  Where    // ADD ENV
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
 
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
+
+	// Settings: SET SANDBOX <key>=<value> ... (Key, Value) and UNSET SANDBOX
+	// <key> ... (Key only), the [sandbox] table's keys. Apart from Vars and
+	// Keys, which name variables.
+	Settings []Var
 
 	MCP   *MCP       // ADD MCP SERVER
 	Skill *Skill     // ADD SKILL
@@ -220,38 +220,16 @@ type Clause struct {
 	// Refresh: SET STATUSLINE … REFRESH <n> and SET STATUSLINE REFRESH <n>,
 	// whole seconds (0: not given).
 	Refresh int
-
-	Panel *Panel // ADD PANEL, DROP PANEL
+	// IfUnset: SET STATUSLINE … IF UNSET, which applies only to a config
+	// dir with no status line yet.
+	IfUnset bool
 
 	Pos Pos
 }
 
-// Panel is one SPC/1 panel manifest (ADD PANEL, v3.25.0): the panel
-// statusmux-style hosts discover under <config dir>/statusline.d/<NS>/.
-// Numbers are nil when not given (the host's default applies).
-type Panel struct {
-	NS, ID string
-	// Type is exec, template, records or observe. FromStatusline: an exec
-	// panel whose command is the current status line's.
-	Type           string
-	FromStatusline bool
-	Source         string // exec/observe: the command; template: the text; records: the path
-	Format         string // exec: "text" or "records"
-	When           string // template
-	Align          string // "left" or "right"
-	Row, Priority  *int
-	Timeout        *int // ms, exec
-	MaxRun         *int // ms, exec and observe
-	TTL, Width     *int // exec
-	Stale          *int // ms, exec and records
-	Every          *int // ms, observe
-	// Plaintext: AS PLAINTEXT, a credential-looking literal stored knowingly.
-	Plaintext bool
-}
-
 // Var is one variable of a SET clause: a literal Value, or a secret
 // reference in Ref (never both). A reference is stored, never resolved, by
-// anything in cpb except the launch exec through with-secret.
+// anything in cpb except the launch exec through the secret helper.
 type Var struct {
 	Key   string
 	Value string

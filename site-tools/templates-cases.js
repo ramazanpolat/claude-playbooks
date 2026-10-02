@@ -50,7 +50,7 @@ if (arg === "--write") {
     const r = core.render(sel);
     if (!r.ok) throw new Error(kind + " " + sel.template + ": " + r.errors.join("; "));
     cases.push({ id: kind + "/" + sel.template + "/" + sel.mode, kind: kind, template: sel.template, mode: sel.mode, name: sel.name,
-      file: r.file, text: r.text, create: r.create, needs: r.needs, warnings: r.warnings });
+      file: r.file, text: r.text, create: r.create, needs: r.needs });
   }
   core.TEMPLATES.forEach(function (t) {
     ["file", "recipe"].forEach(function (mode) {

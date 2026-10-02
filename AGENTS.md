@@ -1,8 +1,8 @@
 # AGENTS.md
 
 For an agent (Claude Code, Codex, Gemini, OpenCode, …) asked to install,
-verify, update, deploy or uninstall **claude-playbooks** (`cpb`,
-`claude-playbook`). Each step gives the exact command and how to tell it
+verify, update, deploy or uninstall **claude-playbooks** (`cpb`).
+Each step gives the exact command and how to tell it
 worked. The human docs are linked, not repeated.
 
 If you are writing or driving playbooks rather than installing the tool,
@@ -14,18 +14,23 @@ preparing a release, read [Before any release](#before-any-release) first.
 - **Never handle a secret value.** Do not ask the human to paste a token, do
   not write one into a file, a command line or a message. Store secrets by
   reference (`SET … FROM '<ref>'`, see
-  [docs/reference/cli-grammar.md](docs/reference/cli-grammar.md), "Secrets").
+  [SPEC.md](SPEC.md), "Secrets").
 - **Ask the human first** before: `cpb self-uninstall`, `DROP PLAYBOOK`,
   `APPLY … --yes`, `APPLY … TO '<dir>'`, deleting anything under
   `~/.claude-playbooks/`, and any login (`/login`, `claude setup-token`):
   those need a person.
 - **A playbook for a non-Anthropic route, or a throwaway,** is created
-  `CREATE PLAYBOOK <name> NO PILOT PROFILE ISOLATED LOGIN`. Without `NO PILOT
-  PROFILE`, its CLAUDE.md sends the human's `~/.pilot-profile/` to that
-  provider with every request. Without `ISOLATED LOGIN`, a `/login` in it
-  writes through to the machine's login. A `pilot_profile_third_party_endpoint`
-  warning means an existing playbook still imports the profile: report it to
-  the human, never edit its CLAUDE.md yourself.
+  `CREATE PLAYBOOK <name> ISOLATED LOGIN`. Without `ISOLATED LOGIN`, a
+  `/login` in it writes through to the machine's login. Its CLAUDE.md goes to
+  that provider with every request: never add imports to it, and if an
+  existing playbook's CLAUDE.md imports files, report it to the human rather
+  than editing it yourself.
+- **`cpb play` confirmations are the human's.** Never pass `--yes`,
+  `--trust-endpoint` or `--trust-secret` on a human's behalf without their
+  explicit go: typing the host or the secret is how a person agrees that their
+  requests, or a secret, may go there, and an agent must not agree for them.
+  To inspect a recipe, use `cpb play <ref> --dry-run --json` (or `--check`),
+  which runs nothing.
 - **Do not edit** an installed playbook's files by hand; change state
   through `cpb` statements. Do not touch `~/.claude` (the machine's own
   Claude Code config) unless the human asks; then use
@@ -97,29 +102,29 @@ file. Without one it is refused before anything is written.
   source clones it. Both need `claude` or `git` on `PATH` and, for a remote
   source, the network.
 - A `SET … FROM '<ref>'` that fails its check means the secret is not stored:
-  ask the human to store it (`with-secret --store <name>` or their helper's
-  equivalent). Never ask for the value.
+  ask the human to store it with their secret helper. Never ask for the
+  value.
 
 The statements and file rules:
-[docs/reference/cli-grammar.md](docs/reference/cli-grammar.md). Worked
+[SPEC.md](SPEC.md). Worked
 examples: [examples/](examples/).
 
 ## Update
 
 ```sh
-cpb update --check      # exit 0; says whether a newer release exists
-cpb update              # installs the latest release
-cpb --version           # verify: the new version
+cpb self-update --check   # exit 0; says whether a newer release exists
+cpb self-update           # installs the newest release of this major version
+cpb --version             # verify: the new version
 ```
 
-A binary installed through devbox or Nix is never replaced by `cpb update`
+A binary installed through devbox or Nix is never replaced by `cpb self-update`
 (it refuses and says so): change the tag in the devbox project instead
 (below).
 
 ## Deploy in a devbox project
 
 ```sh
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook"
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#cpb"
 devbox run -- cpb --version       # verify: exit 0, the tag's version
 ```
 
@@ -148,44 +153,12 @@ fallback: [docs/guides/installation.md](docs/guides/installation.md), "Uninstall
   the command, the output, `cpb --version` and `uname -a`. Never include a
   secret value; redact tokens before posting.
 
-## The OpenShell sandbox backend (maintainers)
-
-`--sandbox=openshell` is experimental and runs only on a Linux host with
-OpenShell 0.1.x (see [the sandbox guide](docs/guides/sandbox.md#openshell-backend-experimental-linux)).
-CI cannot run it. Two things keep it honest:
-
-- **Unit tests** (`cmd/sandbox_openshell_test.go`) put fake `openshell`,
-  `docker`, `systemctl` and `loginctl` first on PATH and check every call. They
-  also check that a key's value reaches `openshell` only in its environment. A
-  change to the backend seam must also leave `TestSbxCallLogGolden`
-  (`cmd/testdata/sbx-golden/`) passing unchanged: that test pins the whole
-  sbx launch.
-- **The end-to-end run** (`tests/openshell-e2e.sh <claude-playbook binary>`) runs
-  on a disposable Linux host with OpenShell, such as the `testbed` VM, never on
-  a workstation. It uses dummy keys, restarts the gateway twice and restores it.
-  It must end `0 failed`, including the Claude Code TUI under the generated
-  policy.
-
-**Bumping the Claude Code the image carries** (`openshellClaudeVersion` in
-`cmd/sandbox_openshell.go`):
-
-1. Change the constant, build the binary, and run `tests/openshell-e2e.sh` on
-   the testbed host. Every step must pass, including the TUI.
-2. Only then commit the new pin.
-3. Say it in the release notes: "OpenShell sandboxes: Claude Code A → B.
-   Existing sandboxes keep A until `--sandbox-fresh`."
-
-The same run is required before accepting a new OpenShell minor, and before
-changing the recipe (`cmd/openshell/Dockerfile`, whose base image is pinned by
-digest).
-
 ## Before any release
 
-No release without its docs. The pilot's rule (2026-09-26), verbatim:
-
-```
-"1) a good readme, short, precise, represents a) what is it b) why it exists c) how it is used 2) a docs with full tutorials and some guides for some common operations 3) examples with smallest features/usages/utilities to full blown ones, each has their own readme.md files 4) an agent entry for installation and deployment, etc."
-```
+No release without its docs: a short README that says what cpb is, why it
+exists and how it is used; docs with tutorials and guides for common
+operations; examples from the smallest use to the full-blown one, each with
+its own README; and this file, for installing and deploying.
 
 Before a version is tagged, check each item, for every feature in that
 release:
@@ -193,7 +166,7 @@ release:
 - [ ] **README.md** says what cpb is, why it exists and how it is used:
       short and precise, with the current grammar in its first example.
 - [ ] **docs/**: the tutorials, the guides for common operations, and the
-      reference ([docs/reference/cli-grammar.md](docs/reference/cli-grammar.md))
+      specification ([SPEC.md](SPEC.md))
       are current. Nothing built is still marked **planned**.
 - [ ] **examples/** covers every new clause, from the smallest use to the
       full-blown one, each directory with its own README.md, and all of them
@@ -208,14 +181,15 @@ release:
       clause, a command, a flag, a file format, a `--json` shape or a code.
 - [ ] **The upgrade from the previous release passes:** the CI `upgrade`
       job, on ubuntu and macOS, green on the commit to be tagged
-      (`examples/upgrade.sh`).
+      (`examples/upgrade.sh`). It compares with the newest release of
+      `package.json`'s major, and has nothing to compare with before a
+      major's first release.
 - [ ] **A full arena regression (phase 2) is green on the exact commit to be
       tagged.** release.yml's gate refuses a tag without one, and
       `gentar/policy.toml` `[phase2] max_age_days = 2` refuses one older
       than two days. A re-run is allowed only for an infrastructure failure
       (the judge unreachable, a provider refusing the key); a real red means
-      fix first, then a fresh pass. (The pilot's rule, 2026-09-29. It
-      replaces "7 consecutive green nights".)
+      fix first, then a fresh pass.
 - [ ] **No open security issue and no known data-loss bug.** Check
       `docs/known-issues/`.
 - [ ] **Every review finding** on the release's PRs is fixed or answered
@@ -223,14 +197,12 @@ release:
       `gh pr view <n> --comments` prints the reviews and the replies to check.
 
 **Nightlies are drift monitors (report on red).** Every night
-`arena-nightly` runs phase 2 on main and on the newest `release/v*` branch,
-the release line. Not on a release tag: the kit's plan never gives a `v*` tag
-the bench, so a tag dispatch would be skipped and read as green (v3.25.0 on
-2026-09-30). A release cut from main is close enough to main that main's run
-covers its drift. `arena-nightly` fails when a dispatched run's `arena /
-phase2` job is skipped or absent, naming the ref and plan's reason. A red on
-main is fixed like any bug; a red on the release branch becomes a patch
-release. They gate nothing.
+`arena-nightly` runs phase 2 on main; a dispatch with `ref` runs another ref.
+Not on a release tag: the kit's plan never gives a `v*` tag the bench, so a
+tag dispatch would be skipped and read as green.
+`arena-nightly` fails when a dispatched run's `arena / phase2` job is skipped
+or absent, naming the ref and plan's reason. A red is fixed like any bug.
+They gate nothing.
 
 If any is missing, build it first; never tag without it.
 
@@ -247,9 +219,8 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
 3. **The release-prep commit on the branch**:
    - `package.json` → X.Y.Z, which npx serves and release.yml requires to
      equal the tag;
-   - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`);
-   - the reference's status line.
-4. **A green full arena phase 2 on that head.** Check the VM 142 bench is
+   - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`).
+4. **A green full arena phase 2 on that head.** Check the arena bench is
    idle first, then dispatch `gentar-arena.yml` on the branch with no
    scenario. The run's head sha must be the exact commit you will tag, which
    is what the release gate checks. A new commit on the branch needs a new
@@ -266,4 +237,11 @@ A release cut from main (a new minor) needs only steps 3 to 5, on main: the
 release-prep commit, a green full phase 2 on it, and the tag on it. Its bump
 commit passes the npx check with a warning until the tag exists (the version
 is ahead of the newest release, and not yet tagged). Meanwhile npx runs the
-newest published release and says so on stderr (`bin/npx-shim.sh`).
+newest published release of the same major and says so on stderr
+(`bin/npx-shim.sh`); for a new major's first release it serves nothing until
+the tag, since the shim never falls back across a major.
+
+A **release candidate**, `vX.Y.Z-rcN`, follows the same steps. It publishes
+as a GitHub pre-release, never as the Latest release. Its tag starts phase 2
+on its commit, so the release workflow's first run on it stops at the arena
+gate: re-run that run once phase 2 is green, and it publishes.

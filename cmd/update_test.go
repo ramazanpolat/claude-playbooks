@@ -92,7 +92,7 @@ func TestNativeUpdateRestoresInstallName(t *testing.T) {
 	if err := manifest.Write(source, &manifest.Manifest{Name: "upstream"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.Write(installed, &manifest.Manifest{Name: "kommander", Source: &manifest.Source{Repository: source}}); err != nil {
+	if err := manifest.Write(installed, &manifest.Manifest{Name: "toolkit", Source: &manifest.Source{Repository: source}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,49 +269,238 @@ func TestNativeUpdateLeavesRuntimeStateInPlace(t *testing.T) {
 	}
 }
 
-func TestNativeUpdateRunsMigrations(t *testing.T) {
+// migrateFixture is a playbook pb at 1.0.0 whose source, at 2.0.0, ships
+// migrations/apply.sh; declared puts it in the source's [update] migrate.
+// The script writes its arguments to the returned receipt.
+func migrateFixture(t *testing.T, declared bool) (installed, receipt string) {
+	t.Helper()
 	resetCommandTestState(t)
 	root := t.TempDir()
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
 	source := filepath.Join(root, "source")
-	installed := filepath.Join(config.PlaybooksDir, "pb")
-	if err := os.MkdirAll(filepath.Join(source, "migrations"), 0755); err != nil {
-		t.Fatal(err)
+	installed = filepath.Join(config.PlaybooksDir, "pb")
+	for _, d := range []string{filepath.Join(source, "migrations"), installed} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.MkdirAll(installed, 0755); err != nil {
-		t.Fatal(err)
-	}
-	receipt := filepath.Join(root, "migrated.txt")
+	receipt = filepath.Join(root, "migrated.txt")
 	apply := "#!/bin/sh\nprintf '%s %s %s\\n' \"$1\" \"$2\" \"$3\" > " + receipt + "\n"
 	if err := os.WriteFile(filepath.Join(source, "migrations", "apply.sh"), []byte(apply), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.Write(source, &manifest.Manifest{Version: "2.0.0"}); err != nil {
+	src := &manifest.Manifest{Version: "2.0.0"}
+	if declared {
+		src.Update = &manifest.Update{Migrate: "migrations/apply.sh"}
+	}
+	if err := manifest.Write(source, src); err != nil {
 		t.Fatal(err)
 	}
 	if err := manifest.Write(installed, &manifest.Manifest{Version: "1.0.0", Source: &manifest.Source{Repository: source}}); err != nil {
 		t.Fatal(err)
 	}
+	return installed, receipt
+}
 
-	if err := updateOnePlaybook("pb", false); err != nil {
+func installedVersion(t *testing.T, dir string) string {
+	t.Helper()
+	m, err := manifest.Read(dir)
+	if err != nil || m == nil {
+		t.Fatalf("manifest: %#v %v", m, err)
+	}
+	return m.Version
+}
+
+// A declared migrate step runs after the new files are in place, as
+// <script> <from> <to> <install dir>.
+func TestUpdateRunsTheDeclaredMigrateStep(t *testing.T) {
+	installed, receipt := migrateFixture(t, true)
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
 		t.Fatal(err)
 	}
-
 	got, err := os.ReadFile(receipt)
 	if err != nil {
-		t.Fatalf("migrations did not run: %v", err)
+		t.Fatalf("the migrate step did not run: %v", err)
 	}
-	want := "1.0.0 2.0.0 " + installed + "\n"
-	if string(got) != want {
-		t.Fatalf("migration args=%q want %q", got, want)
+	if want := "1.0.0 2.0.0 " + installed + "\n"; string(got) != want {
+		t.Fatalf("migrate args=%q want %q", got, want)
 	}
-	m, err := manifest.Read(installed)
-	if err != nil || m == nil || m.Version != "2.0.0" {
-		t.Fatalf("version not advanced: m=%#v err=%v", m, err)
+	if v := installedVersion(t, installed); v != "2.0.0" {
+		t.Fatalf("version not advanced: %s", v)
 	}
 }
 
-func TestNativeUpdateCheckDoesNotInstall(t *testing.T) {
+// Only a declared step runs: a source that ships migrations/apply.sh and
+// does not declare it updates without running it.
+func TestUpdateDoesNotRunAnUndeclaredScript(t *testing.T) {
+	installed, receipt := migrateFixture(t, false)
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("an undeclared script ran: %v", err)
+	}
+	if v := installedVersion(t, installed); v != "2.0.0" {
+		t.Fatalf("version not advanced: %s", v)
+	}
+}
+
+// The step comes from the source being updated to, never from the
+// installed copy: an install that declares one, updating from a source that
+// does not, runs nothing.
+func TestUpdateIgnoresTheInstalledCopysMigrateStep(t *testing.T) {
+	installed, receipt := migrateFixture(t, false)
+	m, err := manifest.Read(installed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update = &manifest.Update{Migrate: "migrations/apply.sh"}
+	if err := manifest.Write(installed, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(installed, "migrations"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "migrations", "apply.sh"), []byte("#!/bin/sh\ntouch "+receipt+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatal("the installed copy's migrate step ran")
+	}
+}
+
+// Without a terminal and without --yes, a declared step refuses the whole
+// update before anything changes.
+func TestUpdateMigrateStepNeedsConsent(t *testing.T) {
+	installed, receipt := migrateFixture(t, true)
+	updateAsks = func() bool { return false }
+	t.Cleanup(func() { updateAsks = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) } })
+	err := runPlaybookUpdate(io.Discard, "pb", updateOpts{})
+	if err == nil || !strings.Contains(err.Error(), "pass --yes") || !strings.Contains(err.Error(), "nothing was changed") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatal("the step ran without consent")
+	}
+	if v := installedVersion(t, installed); v != "1.0.0" {
+		t.Fatalf("the update went ahead without consent: %s", v)
+	}
+}
+
+// A declared step needs consent even when it will not run (no version on
+// one side): the update itself still runs ahead of it.
+func TestUpdateMigrateStepNeedsConsentEvenWhenSkipped(t *testing.T) {
+	installed, receipt := migrateFixture(t, true)
+	// By hand: manifest.Write supplies a default version.
+	noVersion := "name = \"pb\"\n\n[source]\nrepository = " + quoteTOML(readSource(t, installed).Repository) + "\n"
+	if err := os.WriteFile(filepath.Join(installed, manifest.FileName), []byte(noVersion), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updateAsks = func() bool { return false }
+	t.Cleanup(func() { updateAsks = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) } })
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{}); err == nil || !strings.Contains(err.Error(), "pass --yes") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatal("a step with no version on one side ran")
+	}
+}
+
+// readSource is the [source] a fixture's installed manifest records.
+func readSource(t *testing.T, dir string) *manifest.Source {
+	t.Helper()
+	m, err := manifest.Read(dir)
+	if err != nil || m == nil || m.Source == nil {
+		t.Fatalf("manifest: %#v %v", m, err)
+	}
+	return m.Source
+}
+
+// On a terminal the step is asked about: no cancels the update, yes runs
+// it.
+func TestUpdateMigrateStepAsksOnATerminal(t *testing.T) {
+	installed, receipt := migrateFixture(t, true)
+	updateAsks = func() bool { return true }
+	t.Cleanup(func() { updateAsks = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) } })
+	var out strings.Builder
+	feedStdin(t, "n\n")
+	if err := runPlaybookUpdate(&out, "pb", updateOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "declares a migrate step: migrations/apply.sh (sha256 ") || !strings.Contains(out.String(), "Cancelled; nothing was changed.") {
+		t.Fatalf("declined:\n%s", out.String())
+	}
+	if v := installedVersion(t, installed); v != "1.0.0" {
+		t.Fatalf("a declined update changed the playbook: %s", v)
+	}
+	feedStdin(t, "y\n")
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); err != nil {
+		t.Fatalf("a confirmed step did not run: %v", err)
+	}
+}
+
+// --dry-run shows the step with its sha256, and changes nothing.
+func TestUpdateDryRunShowsTheMigrateStep(t *testing.T) {
+	installed, receipt := migrateFixture(t, true)
+	var out strings.Builder
+	if err := runPlaybookUpdate(&out, "pb", updateOpts{dryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"installed: 1.0.0", "available: 2.0.0", "migrate:   migrations/apply.sh (sha256 ", "run as migrations/apply.sh 1.0.0 2.0.0 <install dir>", "Nothing was changed (--dry-run)."} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("--dry-run lacks %q:\n%s", want, out.String())
+		}
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatal("--dry-run ran the step")
+	}
+	if v := installedVersion(t, installed); v != "1.0.0" {
+		t.Fatalf("--dry-run changed the playbook: %s", v)
+	}
+}
+
+// A declared step must resolve inside the source: a symlink out of it is
+// refused before anything changes.
+func TestUpdateRefusesAMigrateStepOutsideThePlaybook(t *testing.T) {
+	installed, receipt := migrateFixture(t, true)
+	m, err := manifest.Read(installed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := m.Source.Repository
+	outside := filepath.Join(t.TempDir(), "evil.sh")
+	if err := os.WriteFile(outside, []byte("#!/bin/sh\ntouch "+receipt+"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(source, "migrations", "apply.sh")
+	if err := os.Remove(script); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, script); err != nil {
+		t.Fatal(err)
+	}
+	err = runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true})
+	if err == nil || !strings.Contains(err.Error(), "resolves outside") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatal("a step outside the playbook ran")
+	}
+	if v := installedVersion(t, installed); v != "1.0.0" {
+		t.Fatalf("the update went ahead: %s", v)
+	}
+}
+
+func TestNativeUpdateDryRunDoesNotInstall(t *testing.T) {
 	resetCommandTestState(t)
 	root := t.TempDir()
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
@@ -341,42 +530,44 @@ func TestNativeUpdateCheckDoesNotInstall(t *testing.T) {
 	}
 
 	if got, err := os.ReadFile(filepath.Join(installed, "CLAUDE.md")); err != nil || string(got) != "old\n" {
-		t.Fatalf("--check installed the update: %q err=%v", got, err)
+		t.Fatalf("--dry-run installed the update: %q err=%v", got, err)
 	}
 	backups, err := filepath.Glob(filepath.Join(config.PlaybooksDir, ".pb.bak.*"))
 	if err != nil || len(backups) != 0 {
-		t.Fatalf("--check made a backup: %v err=%v", backups, err)
+		t.Fatalf("--dry-run made a backup: %v err=%v", backups, err)
 	}
 }
 
-// updateOnePlaybook is the single-playbook update as these tests exercise it,
-// with output discarded. An already-current playbook is re-applied rather than
-// skipped, which is how a drifted install is repaired -- and is now the only
-// behaviour there is, since the bulk path that skipped unchanged playbooks was
-// withdrawn.
-func updateOnePlaybook(name string, checkOnly bool) error {
-	err := runPlaybookUpdate(io.Discard, name, checkOnly)
-	return err
+// updateOnePlaybook is the single-playbook update as these tests exercise it:
+// output discarded, run as a script runs it (no terminal, --yes). An
+// already-current playbook is re-applied rather than skipped, which is how a
+// drifted install is repaired.
+func updateOnePlaybook(name string, dryRun bool) error {
+	return runPlaybookUpdate(io.Discard, name, updateOpts{dryRun: dryRun, yes: true})
 }
 
-// --all shipped in v3.14.0 and was withdrawn in v3.15.0. It stays in the flag
-// parser deliberately: without the case, "--all" falls through to the default
-// branch and is taken for a playbook name, so a script carrying the flag from
-// v3.14.0 would get "playbook --all not found" instead of a real explanation.
-// This pins the explanation, not the removal.
-func TestUpdateAllIsWithdrawnWithAnExplanation(t *testing.T) {
-	resetCommandTestState(t)
-	err := runUpdate(nil, []string{"--all"})
-	if err == nil {
-		t.Fatal("expected --all to be rejected")
+// update takes one name; the self-update moved to its own command.
+func TestUpdateNeedsANameAndPointsAtSelfUpdate(t *testing.T) {
+	if err := updateCmd.Args(updateCmd, nil); err == nil || !strings.Contains(err.Error(), "cpb self-update") {
+		t.Fatalf("update with no name: %v", err)
 	}
-	for _, want := range []string{"--all", "not available", "one at a time"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error should mention %q, got: %v", want, err)
-		}
+	if c, _, err := rootCmd.Find([]string{"self-update"}); err != nil || c != selfUpdateCmd {
+		t.Fatalf("self-update is not a command: %v", err)
 	}
-	// The failure must not be the flag being read as a playbook name.
-	if strings.Contains(err.Error(), "not found") {
-		t.Fatalf("--all was taken for a playbook name: %v", err)
+}
+
+// The played-playbook flags are refused for a playbook that updates from its
+// [source].
+func TestUpdateRefusesPlayFlagsForASourcePlaybook(t *testing.T) {
+	migrateFixture(t, false)
+	if err := updateCmd.Flags().Set("trust-secret", "keychain:x"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		updateTrustSecret = nil
+		updateCmd.Flags().Lookup("trust-secret").Changed = false
+	})
+	if err := runUpdate(updateCmd, []string{"pb"}); err == nil || !strings.Contains(err.Error(), "--trust-secret applies to a playbook kept by cpb play") {
+		t.Fatalf("err = %v", err)
 	}
 }

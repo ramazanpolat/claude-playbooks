@@ -94,16 +94,16 @@ jobs:
         if: steps.release_gate.outputs.release == 'true'
         run: |
           mkdir dist
-          GOOS=darwin  GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-darwin-arm64  .
-          GOOS=darwin  GOARCH=amd64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-darwin-amd64  .
-          GOOS=linux   GOARCH=amd64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-linux-amd64   .
-          GOOS=linux   GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/claude-playbook-linux-arm64   .
+          GOOS=darwin  GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/cpb-darwin-arm64  .
+          GOOS=darwin  GOARCH=amd64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/cpb-darwin-amd64  .
+          GOOS=linux   GOARCH=amd64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/cpb-linux-amd64   .
+          GOOS=linux   GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/cpb-linux-arm64   .
 
       - name: Generate checksums
         if: steps.release_gate.outputs.release == 'true'
         run: |
           cd dist
-          sha256sum claude-playbook-* > SHA256SUMS
+          sha256sum cpb-* > SHA256SUMS
           cat SHA256SUMS
 
       - uses: actions/upload-artifact@v4
@@ -134,8 +134,8 @@ jobs:
           # macos-latest has moved between Intel and Apple silicon over the
           # years; pick the asset that matches the host instead of assuming.
           case "$(uname -m)" in
-            arm64)  bin=dist/claude-playbook-darwin-arm64 ;;
-            x86_64) bin=dist/claude-playbook-darwin-amd64 ;;
+            arm64)  bin=dist/cpb-darwin-arm64 ;;
+            x86_64) bin=dist/cpb-darwin-amd64 ;;
             *) echo "unexpected runner architecture: $(uname -m)"; exit 1 ;;
           esac
           echo "runner: $(uname -m), asset: $bin"
@@ -143,8 +143,8 @@ jobs:
           out="$("$bin" --version)"
           echo "$out"
           case "$out" in *"$TAG"*) ;; *) echo "binary does not report the tag"; exit 1;; esac
-          # A registry command against an empty scratch root, not just --version.
-          "$bin" --playbooks-dir "$RUNNER_TEMP/pb" list
+          # A registry statement against an empty scratch root, not just --version.
+          "$bin" --playbooks-dir "$RUNNER_TEMP/pb" SHOW PLAYBOOKS
 
   release:
     needs: [build, smoke-darwin]
@@ -158,8 +158,14 @@ jobs:
           name: dist
           path: dist
 
+      # A release candidate (vX.Y.Z-rcN) is a pre-release and never the
+      # Latest release. Its tag starts phase 2 itself, so the first run of
+      # this workflow on it stops at arena-gate; re-run it once that phase 2
+      # is green, and it publishes. A final release keeps GitHub's default.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
+          make_latest: ${{ contains(github.ref_name, '-rc') && 'false' || 'legacy' }}

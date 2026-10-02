@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -15,9 +15,9 @@ import (
 // disk: a file is judged against the state its own earlier statements
 // produce, as it would run.
 type dryState struct {
-	profiles    map[string]*envprofile.Profile // env sets written; nil: dropped
-	playbooks   map[string]bool                // true: created or renamed to; false: dropped or renamed from
-	pbEnvs      map[string]*manifest.Env       // a playbook's env block after earlier statements; nil: empty
+	profiles    map[string]*envset.Set   // env sets written; nil: dropped
+	playbooks   map[string]bool          // true: created or renamed to; false: dropped or renamed from
+	pbEnvs      map[string]*manifest.Env // a playbook's env block after earlier statements; nil: empty
 	defaults    []string
 	hasDefaults bool
 
@@ -39,11 +39,7 @@ type dryState struct {
 	skillRecords map[string]map[string]*manifest.SkillRecord
 	skillKnown   map[string]map[string]bool
 
-	// pilotProfile, per playbook created earlier: whether the CLAUDE.md its
-	// CREATE would write imports ~/.pilot-profile/.
-	pilotProfile map[string]bool
-
-	// isolated and sandboxed, per playbook: isolate_auth and [sandbox]
+	// isolated and sandboxed, per playbook: isolated_login and [sandbox]
 	// always as earlier statements would leave them.
 	isolated  map[string]bool
 	sandboxed map[string]bool
@@ -51,15 +47,11 @@ type dryState struct {
 	// slHistory, per config directory key: the status line history as
 	// earlier statements would leave it.
 	slHistory map[string][]slEntry
-
-	// panels, per playbook or directory key: manifests earlier statements
-	// would have written (bytes) or removed (nil), by path.
-	panels map[string]map[string][]byte
 }
 
 func newDryState() *dryState {
 	return &dryState{
-		profiles:     map[string]*envprofile.Profile{},
+		profiles:     map[string]*envset.Set{},
 		playbooks:    map[string]bool{},
 		pbEnvs:       map[string]*manifest.Env{},
 		worlds:       map[string]*pluginWorld{},
@@ -69,16 +61,14 @@ func newDryState() *dryState {
 		mcpRecords:   map[string]map[string]*manifest.MCPRecord{},
 		skillRecords: map[string]map[string]*manifest.SkillRecord{},
 		skillKnown:   map[string]map[string]bool{},
-		pilotProfile: map[string]bool{},
 		isolated:     map[string]bool{},
 		sandboxed:    map[string]bool{},
 		slHistory:    map[string][]slEntry{},
-		panels:       map[string]map[string][]byte{},
 	}
 }
 
 // profile reads an env set as the run sees it: nil when it does not exist.
-func (r *stmtRun) profile(dir, name string) (*envprofile.Profile, error) {
+func (r *stmtRun) profile(dir, name string) (*envset.Set, error) {
 	if r.dry != nil {
 		if p, ok := r.dry.profiles[name]; ok {
 			if p == nil {
@@ -87,11 +77,11 @@ func (r *stmtRun) profile(dir, name string) (*envprofile.Profile, error) {
 			return cloneProfile(p), nil
 		}
 	}
-	return envprofile.Read(dir, name)
+	return envset.Read(dir, name)
 }
 
 // recordProfile keeps a dry run's write of an env set; p nil records a drop.
-func (r *stmtRun) recordProfile(name string, p *envprofile.Profile) {
+func (r *stmtRun) recordProfile(name string, p *envset.Set) {
 	if r.dry == nil {
 		return
 	}
@@ -126,7 +116,6 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.mcpRecords, name)
 		delete(r.dry.skillRecords, name)
 		delete(r.dry.skillKnown, name)
-		delete(r.dry.pilotProfile, name)
 		delete(r.dry.isolated, name)
 		delete(r.dry.sandboxed, name)
 	}
@@ -147,7 +136,6 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	mr, mrok := r.dry.mcpRecords[from]
 	sr, srok := r.dry.skillRecords[from]
 	sk, skok := r.dry.skillKnown[from]
-	pp, ppok := r.dry.pilotProfile[from]
 	iso, isook := r.dry.isolated[from]
 	sbx, sbxok := r.dry.sandboxed[from]
 	// A playbook on disk carries its login setting under its new name: the
@@ -155,7 +143,7 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	if cfg != "" && !(isook && sbxok) {
 		if m, _ := manifest.Nearest(cfg); m != nil {
 			if !isook {
-				iso, isook = m.IsolateAuth, true
+				iso, isook = m.IsolatedLogin, true
 			}
 			if !sbxok {
 				sbx, sbxok = m.Sandbox != nil && m.Sandbox.Always, true
@@ -178,9 +166,6 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	if skok {
 		r.dry.skillKnown[to] = sk
-	}
-	if ppok {
-		r.dry.pilotProfile[to] = pp
 	}
 	if isook {
 		r.dry.isolated[to] = iso
@@ -230,7 +215,7 @@ func (r *stmtRun) defaultsList(dir string) ([]string, error) {
 	if r.dry != nil && r.dry.hasDefaults {
 		return slices.Clone(r.dry.defaults), nil
 	}
-	return envprofile.Defaults(dir)
+	return envset.Defaults(dir)
 }
 
 func (r *stmtRun) recordDefaults(names []string) {
@@ -262,7 +247,7 @@ func (r *stmtRun) envUsers(playbooksDir string) (map[string][]string, error) {
 		if e == nil {
 			continue
 		}
-		for _, set := range e.Profiles {
+		for _, set := range e.Sets {
 			if !slices.Contains(users[set], pb) {
 				users[set] = append(users[set], pb)
 			}

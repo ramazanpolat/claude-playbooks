@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
-	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -17,7 +17,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// SHOW CREATE writes the statements that rebuild the state (docs/cli-grammar.md,
+// SHOW CREATE writes the statements that rebuild the state (SPEC.md,
 // "playbook.cpb"). Every form it writes is safe to repeat, so APPLY of its own
 // output changes nothing. Plain text never travels in the output: a
 // credential-looking literal becomes a comment with the value withheld and
@@ -32,11 +32,11 @@ type createBlock struct {
 
 func showCreate(st *grammar.Stmt) error {
 	playbooksDir := config.ResolvePlaybooksDir()
-	dir := envprofile.Dir(playbooksDir)
+	dir := envset.Dir(playbooksDir)
 	var blocks []createBlock
 	switch st.Object {
 	case grammar.Env:
-		p, err := envprofile.Read(dir, st.Name)
+		p, err := envset.Read(dir, st.Name)
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func showCreate(st *grammar.Stmt) error {
 		}
 		blocks = append(blocks, b)
 	default: // ALL: env sets, DEFAULTS, playbooks, so each statement finds what it names
-		profiles, err := envprofile.List(dir)
+		profiles, err := envset.List(dir)
 		if err != nil {
 			return err
 		}
@@ -140,12 +140,12 @@ func varClauses(set, refs map[string]string, unset []string, fix func(key string
 	return clauses, comments
 }
 
-func createEnvBlock(p *envprofile.Profile) createBlock {
+func createEnvBlock(p *envset.Set) createBlock {
 	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Env, Name: p.Name, OrReplace: true}
 	if p.Description != "" {
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Describe, Arg: p.Description})
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Description, Arg: p.Description})
 	}
-	clauses, comments := varClauses(p.Set, p.Refs, p.Unset, func(k string) string {
+	clauses, comments := varClauses(p.Set, p.Refs, p.Block, func(k string) string {
 		return fmt.Sprintf("ALTER ENV %s SET %s FROM '<ref>'", p.Name, k)
 	})
 	st.Clauses = append(st.Clauses, clauses...)
@@ -153,7 +153,7 @@ func createEnvBlock(p *envprofile.Profile) createBlock {
 }
 
 func createDefaultsBlock(dir string) (createBlock, error) {
-	names, err := envprofile.Defaults(dir)
+	names, err := envset.Defaults(dir)
 	if err != nil {
 		return createBlock{}, fmt.Errorf("DEFAULTS cannot be read: %w", err)
 	}
@@ -162,7 +162,7 @@ func createDefaultsBlock(dir string) (createBlock, error) {
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: names})
 	}
 	// Only the stored setting: CPB_SECRET_HELPER belongs to one process.
-	if data, err := os.ReadFile(filepath.Join(dir, envprofile.SecretHelperFile)); err == nil {
+	if data, err := os.ReadFile(filepath.Join(dir, envset.SecretHelperFile)); err == nil {
 		if cmd := strings.TrimSpace(string(data)); cmd != "" {
 			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetHelper, Arg: cmd})
 		}
@@ -191,15 +191,12 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	}
 	switch {
 	case v.Launcher != nil:
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Alias, Arg: *v.Launcher})
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: *v.Launcher})
 	case hasNameLauncher(pb.Name):
 		// The default launcher, named after the playbook: no clause
 		// creates it again.
 	default:
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoAlias})
-	}
-	if v.Sandbox && v.Linked == nil {
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Sandbox})
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoLauncher})
 	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole
@@ -235,9 +232,6 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		// MCP servers and skills, as clauses of their own statement.
 		mcps, mcpComments := mcpCreateClauses(pb.Path, m)
 		mcps = append(mcps, skillCreateClauses(m)...)
-		pcl, pcom := panelCreateClauses(pb.Path)
-		mcps = append(mcps, pcl...)
-		mcpComments = append(mcpComments, pcom...)
 		if len(mcps)+len(mcpComments) > 0 {
 			t := strings.Join(mcpComments, "\n")
 			if len(mcps) > 0 {
@@ -269,10 +263,20 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			}
 		}
 	}
-	// An isolated login travels as SET ISOLATED LOGIN; SANDBOX already
-	// implies it, and a linked playbook's manifest is the target's.
-	isolated := v.IsolatedLogin && !v.Sandbox && v.Linked == nil
-	if env.Empty() && !isolated {
+	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
+	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
+	// existing playbook too, where CREATE IF NOT EXISTS would not. An
+	// isolated login travels as SET ISOLATED LOGIN; SET SANDBOX already
+	// implies it. A linked playbook's manifest is the target's.
+	sandboxed := v.Sandbox.Always && v.Linked == nil
+	var sandboxSettings []grammar.Var
+	if v.Linked == nil && m != nil && m.Sandbox != nil {
+		for _, kv := range m.Sandbox.Settings() {
+			sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
+		}
+	}
+	isolated := v.IsolatedLogin && !sandboxed && v.Linked == nil
+	if env.Empty() && !isolated && !sandboxed && len(sandboxSettings) == 0 {
 		return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
 	}
 	if v.Linked != nil {
@@ -281,17 +285,23 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
 	var comments []string
 	if !env.Empty() {
-		if len(env.Profiles) > 0 {
-			alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Profiles})
+		if len(env.Sets) > 0 {
+			alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Sets})
 		}
 		var clauses []grammar.Clause
-		clauses, comments = varClauses(env.Set, env.Refs, env.Unset, func(k string) string {
+		clauses, comments = varClauses(env.Set, env.Refs, env.Block, func(k string) string {
 			return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
 		})
 		alter.Clauses = append(alter.Clauses, clauses...)
 	}
 	if isolated {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetIsolatedLogin})
+	}
+	if sandboxed {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})
+	}
+	if len(sandboxSettings) > 0 {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
 	}
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"

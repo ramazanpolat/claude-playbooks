@@ -31,10 +31,12 @@ profile works as it does on the host.
 To make a playbook sandboxed every time, say so once:
 
 ```bash
-cpb CREATE PLAYBOOK sre SANDBOX       # [sandbox] always = true, isolate_auth = true
-cpb install <source> --sandbox        # same, for an installed playbook
+cpb CREATE PLAYBOOK sre SANDBOX       # [sandbox] always = true, isolated_login = true
+cpb CREATE PLAYBOOK ops FROM <src> SANDBOX   # the same, for one from a source
+cpb ALTER PLAYBOOK dev SET SANDBOX    # the same, for a playbook you have
 sre -p "run the tests"                # sandboxed, no flag needed
 sre --no-sandbox                      # this launch on the host; cpb says so on stderr
+cpb ALTER PLAYBOOK sre UNSET SANDBOX  # back on the host; the login stays isolated
 cpb start --sandbox --delete /tmp/x   # a throwaway session in a throwaway sandbox
 ```
 
@@ -42,17 +44,17 @@ cpb start --sandbox --delete /tmp/x   # a throwaway session in a throwaway sandb
 
 ## On another machine
 
-The sandbox can live on another machine. `cpb run --sandbox-host polat@cockpit0
+The sandbox can live on another machine. `cpb run --sandbox-host me@buildbox
 sre` runs the same launch there over ssh, where `cpb` and the playbook are
 installed and `sbx` is logged in (a Linux host with a headless keyring; a Mac
 keeps the sbx login in its Keychain, which an ssh session cannot open);
-`[sandbox] host = "polat@cockpit0"` in the manifest makes it the playbook's home
+`[sandbox] host = "me@buildbox"` in the manifest makes it the playbook's home
 for sandboxed launches. Everything about the sandbox, its login and its keys then
 lives on that host.
 
 ## Secrets
 
-API keys from your env profiles never enter the sandbox either (profiles are the
+API keys from your env sets never enter the sandbox either (profiles are the
 place for them: a key set directly on the playbook lives in its `.playbook`,
 which is on the mount, and a sandboxed launch refuses that). `cpb` registers them
 with `sbx` as proxy-injected secrets for the endpoint host and hands the sandbox a
@@ -72,13 +74,9 @@ When a key does go in:
   would not work.
 - **Never because a registration failed.** If `cpb` cannot register a key with
   the proxy, the launch stops and names the key and the host (never the
-  value). Retry, or choose `secrets = "env"`. Before v3.26.0 it warned and
-  passed the key in.
+  value). Retry, or choose `secrets = "env"`.
 
-The shared `sbx` skills store stays out as well. `--sbx` is a
-synonym for `--sandbox`; `--sandbox=BACKEND` picks the backend: `sbx`, the
-default, or the experimental `openshell` on Linux
-([below](#openshell-backend-experimental-linux)).
+The shared `sbx` skills store stays out as well.
 
 ## Lifetime and environment
 
@@ -95,7 +93,17 @@ the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
 
 ## Manifest block
 
-A playbook can describe its sandbox in the manifest:
+A playbook describes its sandbox in the `[sandbox]` table of its manifest.
+`SET SANDBOX <key>=<value>` writes it key by key and `UNSET SANDBOX <key>`
+forgets one, so you never edit the file:
+
+```bash
+cpb ALTER PLAYBOOK dev SET SANDBOX host=me@buildbox mounts=~/shared-libs:ro allow_net=internal.corp
+cpb ALTER PLAYBOOK dev UNSET SANDBOX host
+cpb SHOW PLAYBOOK dev                 # Sandbox: yes (mounts=~/shared-libs:ro, allow_net=internal.corp)
+```
+
+The keys, as the table holds them:
 
 ```toml
 [sandbox]
@@ -104,119 +112,16 @@ mounts = ["~/shared-libs:ro"]       # extra host paths, :ro for read-only
 allow_net = ["internal.corp"]       # hosts allowed beyond the policy
 claude_version = "2.1.263"          # pin the Claude Code installed inside
 always = true                       # every launch sandboxed; --no-sandbox overrides one
-host = "polat@cockpit0"             # sandboxed launches run on that machine over ssh
+host = "me@buildbox"             # sandboxed launches run on that machine over ssh
 secrets = "env"                     # pass API keys as plain variables instead of proxy injection
 share_skills = true                 # mount sbx's shared skills store after all
 ```
 
-The block is install-local: `cpb install` never adopts one shipped by a source,
-and `cpb update` keeps yours.
+The block is install-local: `CREATE PLAYBOOK … FROM` never adopts one shipped
+by a source, and `cpb update` keeps yours. `SHOW CREATE` writes it back as `SET
+SANDBOX` statements. See [Sandbox](../../SPEC.md#sandbox) in
+the reference.
 
 `claude_version` matters for a playbook routed to a third-party backend that
 rejects a newer Claude Code's tool schemas: the sandbox keeps running the last
 version that works while the host moves on.
-
-## OpenShell backend (experimental, Linux)
-
-`--sandbox=openshell` runs the session in [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell)
-instead of `sbx`: a container confined by Landlock and seccomp, with no network
-unless a rule allows it. It is for a Linux host with Docker Engine. On macOS use
-`sbx`, or `--sandbox-host` to a Linux machine. It is experimental: OpenShell is
-young (0.1.0 shipped on 2026-09-25), and `cpb` supports 0.1.2 up to any later 0.1.x.
-
-```bash
-cpb run --sandbox=openshell sre                          # this folder is the workdir
-cpb run --sandbox=openshell --mount ~/shared-libs:ro sre # one more directory, read-only
-cpb run --sandbox=openshell --sandbox-fresh sre          # throw the sandbox away first
-```
-
-### One-time host setup
-
-Run these once on the host, in order:
-
-```bash
-# 1. Telemetry off, before the gateway ever starts (OpenShell has no install-time switch).
-mkdir -p ~/.config/openshell
-echo OPENSHELL_TELEMETRY_ENABLED=false > ~/.config/openshell/gateway.env
-
-# 2. The gateway uses Docker, and lets sandboxes mount host directories.
-cat > ~/.config/openshell/gateway.toml <<'EOF'
-version = 2
-[openshell.gateway]
-compute_driver = "docker"
-[openshell.drivers.docker]
-allow_driver_config = true
-enable_bind_mounts = true
-[openshell.drivers.docker.resource_admission]
-enabled = false
-EOF
-
-# 3. Install OpenShell (Docker Engine 28+ must be installed already).
-curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh | OPENSHELL_VERSION=v0.1.2 sh
-openshell status                      # Connected. On a cold host the installer may
-                                      # report a timeout although the install worked.
-
-# 4. Keep the gateway running after you log out.
-sudo loginctl enable-linger "$USER"
-```
-
-Step 2 applies to the whole gateway, so every sandbox on it can ask for host
-mounts, not only `cpb`'s. OpenShell's docs warn that host mounts can bypass its
-workspace isolation. `cpb` keeps each sandbox to the paths it mounted by listing
-exactly those paths in the sandbox's filesystem policy.
-
-Before touching anything, every launch checks the requirements: Linux, the
-`openshell` CLI and its version, Docker Engine 28 or newer, a gateway that
-answers, and not running as root. A failure refuses the launch with one line that
-names the fix. A gateway that is starting gets up to 45 s. Linger off is only a
-warning.
-
-### How it differs from sbx
-
-| | `sbx` | `openshell` |
-|---|---|---|
-| Network | your sbx policy (balanced by default) | nothing by default; `cpb` allows Claude Code's own hosts for the `claude` binary, the endpoint host, and `allow_net` |
-| Files | the mounts | the mounts, and only the paths the sandbox's policy lists (Landlock, required) |
-| Secrets | a placeholder the proxy swaps | the same, bound to one endpoint: sent anywhere else, the proxy refuses it (`403 credential_endpoint_mismatch`) |
-| Between launches | kept running | **stopped** when the last session in it ends, started by the next launch (about 5 s) |
-| Image | sbx's | built by `cpb` on first use, with Claude Code pinned |
-| `--clone`, `share_skills` | yes | not yet: the launch refuses |
-| macOS | yes | no |
-
-The sandbox is stopped between launches because an idle OpenShell sandbox costs
-about a third of a CPU core. A stopped one costs nothing and keeps its state,
-including a `/login` made inside it.
-
-### The image
-
-`cpb` builds the image once per Claude Code version, on the gateway host, from a
-recipe built into the `cpb` binary. The first build takes several minutes. The base image is pinned by digest, and
-Claude Code is pinned to the version `cpb` was tested with (2.1.285), or to
-`[sandbox] claude_version`. The version is fixed per sandbox:
-
-- **You set `claude_version` to one the sandbox does not carry:** the launch
-  refuses, and `--sandbox-fresh` rebuilds it.
-- **A newer `cpb` moves the default:** the old sandbox keeps running, and `cpb`
-  tells you `--sandbox-fresh` moves it.
-
-Claude Code's self-updater is off inside, since the image is the pin. Old images
-stay until you remove them (`docker image prune`, or
-`docker image rm cpb-openshell/claude:<tag>`).
-
-### Secrets
-
-Each key (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) becomes an OpenShell
-provider named `cpb-<playbook>-<key>`, bound to the endpoint's host and port.
-`cpb` hands the value to `openshell` in its environment, never on a command line.
-Inside the sandbox, the variable holds OpenShell's own placeholder:
-
-- **Rotation:** change the key in its env set, and the next launch updates it in place.
-- **Revoke:** remove it, and the next launch detaches and deletes the provider.
-- **`--sandbox-fresh`:** deletes them with the sandbox.
-- **Failure:** a key that cannot be registered stops the launch, as with `sbx`.
-
-### Removing it
-
-Remove the sandboxes first (`openshell sandbox delete --all`, and
-`openshell provider list` shows any `cpb-…` providers left), then follow
-OpenShell's own uninstall steps, and remove `~/.config/openshell` too.

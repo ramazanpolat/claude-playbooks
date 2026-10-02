@@ -135,9 +135,8 @@ func TestInstallRejectsPathNameFlag(t *testing.T) {
 	resetCommandTestState(t)
 	source := testPlaybookSource(t, "safe")
 	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
-	installName = "../escape"
 
-	err := runInstall(nil, []string{source})
+	err := doInstall(installOpts{name: "../escape"}, []string{source})
 	if err == nil {
 		t.Fatal("expected install to reject path-like --name")
 	}
@@ -149,17 +148,21 @@ func TestInstallRejectsPathNameFlag(t *testing.T) {
 	}
 }
 
-func TestInstallRejectsPathManifestName(t *testing.T) {
+// The statement's name chooses where a playbook goes; the source manifest's
+// name, path-like or not, never does.
+func TestInstallNameIsTheStatementsNotTheManifests(t *testing.T) {
 	resetCommandTestState(t)
 	source := testPlaybookSource(t, "../escape")
 	config.PlaybooksDir = filepath.Join(t.TempDir(), "playbooks")
 
-	err := runInstall(nil, []string{source})
-	if err == nil {
-		t.Fatal("expected install to reject path-like manifest name")
+	if err := doInstall(installOpts{name: "pb", noLauncher: true}, []string{source}); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "top-level playbook name") {
-		t.Fatalf("error = %v", err)
+	if m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "pb")); err != nil || m == nil || m.Name != "pb" {
+		t.Fatalf("not installed under the statement's name: %#v %v", m, err)
+	}
+	if _, err := os.Stat(filepath.Join(config.PlaybooksDir, "..", "escape")); !os.IsNotExist(err) {
+		t.Fatalf("the manifest's name chose a path: %v", err)
 	}
 }
 
@@ -175,9 +178,7 @@ func TestInstallRejectsEscapingSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	installSubdir = "../sibling"
-	installNoAlias = true
-	if err := runInstall(nil, []string{source}); err == nil {
+	if err := doInstall(installOpts{subdir: "../sibling", noLauncher: true}, []string{source}); err == nil {
 		t.Fatal("expected escaping --subdir to be rejected")
 	}
 	entries, err := os.ReadDir(config.PlaybooksDir)
@@ -198,8 +199,7 @@ func TestDeleteRejectsParentSegment(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("keep"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	deleteYes = true
-	if err := runDelete(nil, []string{".."}); err == nil {
+	if err := doDelete(deleteOpts{yes: true}, []string{".."}); err == nil {
 		t.Fatal("expected parent segment to be rejected")
 	}
 	if _, err := os.Stat(sentinel); err != nil {
@@ -224,7 +224,7 @@ func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 	if err := os.Mkdir(repo, 0755); err != nil {
 		t.Fatal(err)
 	}
-	manifestData := "name = \"custom-update\"\nisolate_auth = true\n[update]\npreserve = [\"local.conf\"]\n"
+	manifestData := "name = \"custom-update\"\nisolated_login = true\n[update]\npreserve = [\"local.conf\"]\n"
 	if err := os.WriteFile(filepath.Join(repo, ".playbook"), []byte(manifestData), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -239,8 +239,7 @@ func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 		}
 	}
 	config.PlaybooksDir = filepath.Join(root, "playbooks")
-	installNoAlias = true
-	if err := runInstall(nil, []string{"file://" + repo}); err != nil {
+	if err := doInstall(installOpts{name: "custom-update", noLauncher: true}, []string{"file://" + repo}); err != nil {
 		t.Fatal(err)
 	}
 	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "custom-update"))
@@ -255,105 +254,22 @@ func TestGitInstallPreservesManifestUpdatePolicy(t *testing.T) {
 	}
 }
 
-func TestLinkManifestSubdirUsesConfigPath(t *testing.T) {
-	resetCommandTestState(t)
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
-	root := t.TempDir()
-	// Launcher mutations only apply to the default playbooks root — point
-	// HOME at the sandbox so the default root lands inside it.
-	t.Setenv("HOME", root)
-	os.Unsetenv("CLAUDE_PLAYBOOKS_DIR")
-	config.PlaybooksDir = filepath.Join(root, ".claude-playbooks")
-	target := filepath.Join(root, "target")
-	configDir := filepath.Join(target, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	// The alias lives in the target's own manifest: a pre-existing shared
-	// manifest is never alias-mutated by link.
-	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte("subdir = \"config\"\nisolate_auth = true\nalias = \"linkedalias\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	linkName = "linked"
-	if err := runLink(nil, []string{target}); err != nil {
-		t.Fatal(err)
-	}
-	pb, err := playbook.Require(config.PlaybooksDir, "linked")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pb.Path != filepath.Join(config.PlaybooksDir, "linked", "config") {
-		t.Fatalf("linked playbook path=%q", pb.Path)
-	}
-	entries, err := launcher.List(config.LauncherDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].CmdName != "linkedalias" {
-		t.Fatalf("launcher entries = %#v", entries)
-	}
-	// The alias must be resolvable at invocation time via the manifest.
-	if pb.Manifest == nil || pb.Manifest.Alias != "linkedalias" {
-		t.Fatalf("manifest alias not recorded: %#v", pb.Manifest)
-	}
-}
-
-func TestRenameMovesRootForSubdirManifest(t *testing.T) {
-	resetCommandTestState(t)
-	home := t.TempDir()
-	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	root := filepath.Join(config.PlaybooksDir, "old")
-	configDir := filepath.Join(root, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("version = \"0.1.0\"\nname = \"old\"\nsubdir = \"config\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "CLAUDE.md"), []byte("# Config\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := runRename(nil, []string{"old", "new"}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Stat(root); !os.IsNotExist(err) {
-		t.Fatalf("old root still exists, err=%v", err)
-	}
-	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "new"))
-	if err != nil || m == nil {
-		t.Fatalf("new root missing manifest: m=%#v err=%v", m, err)
-	}
-	if m.Name != "new" {
-		t.Fatalf("manifest name = %q, want \"new\"", m.Name)
-	}
-	if m.Subdir != "config" {
-		t.Fatalf("manifest subdir = %q, want \"config\"", m.Subdir)
-	}
-	newConfig := filepath.Join(config.PlaybooksDir, "new", "config")
-	if _, err := os.Stat(filepath.Join(newConfig, "CLAUDE.md")); err != nil {
-		t.Fatalf("new config missing contents: %v", err)
-	}
-}
-
 func TestInstallRewritesManifestNameToInstallName(t *testing.T) {
 	resetCommandTestState(t)
 	home := t.TempDir()
 	config.PlaybooksDir = filepath.Join(home, "playbooks")
-	src := testPlaybookSource(t, "kommander")
+	src := testPlaybookSource(t, "toolkit")
 
-	installName = "kommander-dev"
-	installNoAlias = true
-	if err := runInstall(nil, []string{src}); err != nil {
+	if err := doInstall(installOpts{name: "toolkit-dev", noLauncher: true}, []string{src}); err != nil {
 		t.Fatal(err)
 	}
 
-	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "kommander-dev"))
+	m, err := manifest.Read(filepath.Join(config.PlaybooksDir, "toolkit-dev"))
 	if err != nil || m == nil {
 		t.Fatalf("installed manifest: m=%#v err=%v", m, err)
 	}
-	if m.Name != "kommander-dev" {
-		t.Fatalf("manifest name = %q, want \"kommander-dev\"", m.Name)
+	if m.Name != "toolkit-dev" {
+		t.Fatalf("manifest name = %q, want \"toolkit-dev\"", m.Name)
 	}
 }
 
@@ -374,7 +290,7 @@ func TestRenameLinkedPlaybookKeepsExternalManifest(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(config.PlaybooksDir, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	if err := runRename(nil, []string{"linked", "moved"}); err != nil {
+	if err := doRename(renameOpts{}, []string{"linked", "moved"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -428,57 +344,24 @@ func quoteTOML(s string) string {
 func resetCommandTestState(t *testing.T) {
 	t.Helper()
 	isolateCredentials(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	// A developer's own secret helper must not reach a test.
 	t.Setenv("CPB_SECRET_HELPER", "")
 	config.PlaybooksDir = ""
 	config.LauncherDir = t.TempDir()
-	installName = ""
-	installSubdir = ""
-	installBranch = ""
-	installAlias = ""
-	installNoAlias = false
-	installSandbox = false
-	createSandbox = false
-	createAlias = ""
-	createNoAlias = false
-	aliasRemove = false
-	renameAlias = ""
-	renameNoAlias = false
 	selfUninstallYes = false
 	selfUninstallKeepData = false
 	selfUninstallKeepBinary = false
 	selfUninstallDryRun = false
 	selfUninstallBinaryOnly = false
-	deleteYes = false
-	linkName = ""
-	linkAlias = ""
-	linkNoAlias = false
-	revealSecrets = false
 	t.Cleanup(func() {
 		config.PlaybooksDir = ""
 		config.LauncherDir = ""
-		installName = ""
-		installSubdir = ""
-		installBranch = ""
-		installAlias = ""
-		installNoAlias = false
-		installSandbox = false
-		createSandbox = false
-		createAlias = ""
-		createNoAlias = false
-		aliasRemove = false
-		renameAlias = ""
-		renameNoAlias = false
 		selfUninstallYes = false
 		selfUninstallKeepData = false
 		selfUninstallKeepBinary = false
 		selfUninstallDryRun = false
 		selfUninstallBinaryOnly = false
-		deleteYes = false
-		linkName = ""
-		linkAlias = ""
-		linkNoAlias = false
 	})
 }
 
@@ -493,44 +376,68 @@ func assertNotSymlink(t *testing.T, path string) {
 	}
 }
 
-func TestInstallFlattensSubdirFromManifest(t *testing.T) {
+// LINK takes the launcher the target's own manifest records: the shared
+// manifest is never mutated, and the launcher resolves through it. The
+// playbook's config is the linked directory itself.
+func TestLinkUsesTheTargetManifestLauncher(t *testing.T) {
 	resetCommandTestState(t)
-	home := t.TempDir()
-	config.PlaybooksDir = filepath.Join(home, "playbooks")
-
-	// Create source directory
-	src := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(src, "playbook"), 0755); err != nil {
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
+	root := t.TempDir()
+	// Launcher mutations only apply to the default playbooks root — point
+	// HOME at the sandbox so the default root lands inside it.
+	t.Setenv("HOME", root)
+	os.Unsetenv("CPB_PLAYBOOKS_DIR")
+	config.PlaybooksDir = filepath.Join(root, ".claude-playbooks")
+	target := filepath.Join(root, "target")
+	if err := os.MkdirAll(target, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("version = \"0.1.0\"\nname = \"flatpb\"\nsubdir = \"playbook\"\n"), 0644); err != nil {
+	manifestText := "isolated_login = true\nlauncher = \"linkedalias\"\n"
+	if err := os.WriteFile(filepath.Join(target, ".playbook"), []byte(manifestText), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, "playbook", "CLAUDE.md"), []byte("# flat CLAUDE\n"), 0644); err != nil {
+	if err := doLink(linkOpts{name: "linked"}, []string{target}); err != nil {
 		t.Fatal(err)
 	}
-
-	if err := runInstall(nil, []string{src}); err != nil {
-		t.Fatal(err)
-	}
-
-	dest := filepath.Join(config.PlaybooksDir, "flatpb")
-	// The playbook files should be flat under dest
-	if _, err := os.Stat(filepath.Join(dest, "CLAUDE.md")); err != nil {
-		t.Fatalf("expected CLAUDE.md flat under dest: %v", err)
-	}
-	// The extra "playbook" folder should NOT exist under dest
-	if _, err := os.Stat(filepath.Join(dest, "playbook")); !os.IsNotExist(err) {
-		t.Fatalf("expected extra 'playbook' directory to not exist under dest")
-	}
-
-	// Manifest should exist flat and have subdir cleared
-	data, err := os.ReadFile(filepath.Join(dest, ".playbook"))
+	pb, err := playbook.Require(config.PlaybooksDir, "linked")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "subdir") {
-		t.Fatalf("expected subdir field to be removed from manifest, got: %s", string(data))
+	if pb.Path != filepath.Join(config.PlaybooksDir, "linked") {
+		t.Fatalf("linked playbook path=%q", pb.Path)
+	}
+	entries, err := launcher.List(config.LauncherDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].CmdName != "linkedalias" {
+		t.Fatalf("launcher entries = %#v", entries)
+	}
+	if pb.Manifest == nil || pb.Manifest.Launcher != "linkedalias" {
+		t.Fatalf("manifest launcher not recorded: %#v", pb.Manifest)
+	}
+	if data, _ := os.ReadFile(filepath.Join(target, ".playbook")); string(data) != manifestText {
+		t.Fatalf("the shared manifest was mutated:\n%s", data)
+	}
+}
+
+// A source whose manifest names a top-level subdir (a config directory
+// below the playbook root) is refused: v4 has no such key, so the strict
+// decoder names it. A slice of a source is SUBDIR, recorded as source.subdir.
+func TestInstallRefusesATopLevelSubdir(t *testing.T) {
+	resetCommandTestState(t)
+	home := t.TempDir()
+	config.PlaybooksDir = filepath.Join(home, "playbooks")
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, ".playbook"), []byte("name = \"flatpb\"\nsubdir = \"playbook\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := doInstall(installOpts{name: "flatpb"}, []string{src})
+	if err == nil || !strings.Contains(err.Error(), `unknown key "subdir"`) {
+		t.Fatalf("a source with a top-level subdir: %v", err)
+	}
+	if _, serr := os.Stat(filepath.Join(config.PlaybooksDir, "flatpb")); !os.IsNotExist(serr) {
+		t.Fatal("the refused source was installed")
 	}
 }
 
@@ -543,17 +450,16 @@ func TestRenameAliasCollisionPreflightLeavesStateUntouched(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Command name "x" belongs to bbb via its manifest alias.
+	// Command name "x" belongs to bbb via its manifest launcher.
 	if err := manifest.Write(filepath.Join(config.PlaybooksDir, "bbb"),
-		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Alias: "x"}); err != nil {
+		&manifest.Manifest{Version: "0.1.0", Name: "bbb", Launcher: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := launcher.Write(config.LauncherDir, "x"); err != nil {
 		t.Fatal(err)
 	}
 
-	renameAlias = "x"
-	err := runRename(nil, []string{"aaa", "ccc"})
+	err := doRename(renameOpts{launcher: "x"}, []string{"aaa", "ccc"})
 	if err == nil {
 		t.Fatal("expected collision error")
 	}
@@ -589,6 +495,6 @@ func isolateCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", stub+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
 	os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN")
 }

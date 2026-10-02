@@ -1,7 +1,7 @@
 # The terminal UI
 
 `cpb tui` shows your playbooks, their sessions, env sets and defaults on
-one screen, and resumes a session in the right playbook. It is a view of
+one screen, with the command that resumes each session. It is a view of
 the grammar: every screen is a `cpb … --json` statement, named on its last
 line. v1 only reads.
 
@@ -14,14 +14,14 @@ cpb tui
 ```
  cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  NAME           LAUNCHER  ENV SETS  LOGIN     SESSIONS  MODEL
-▸ kommander-dev  kd        -         shared    1         claude-opus-5-5
-  router         k9        9router   isolated  1         glm-5.3
+  NAME    LAUNCHER  VERSION  ENV SETS  LOGIN     SESSIONS  MODEL
+▸ alpha   al        v1.2.0   -         shared    1         claude-opus-5-5
+  router  rt        -        proxy     isolated  1         glm-5.3
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
  enter open  s sessions  c SHOW CREATE  e export  y copy  / filter  q quit
-reads: cpb SHOW PLAYBOOKS --json
+reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json
 ```
 
 - **LOGIN** is the kind of login: `shared` with `~/.claude`, `isolated`, or
@@ -40,21 +40,21 @@ line, Model and Sessions. `←→` or `1`–`9` switch between them.
 ```
  cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
- router  (launcher k9 · ~/.claude-playbooks/router)
+ router  (launcher rt · ~/.claude-playbooks/router)
   Overview  Env [Vars] Plugins  MCP  Skills  Status line  Model  Sessions
 
   effective at launch, from EXPLAIN
-  KEY                   VALUE / REF               LAYER
-  X                     1                         defaults base
-  ANTHROPIC_BASE_URL    http://tr0:20128/v1       env 9router
-  ANTHROPIC_AUTH_TOKEN  FROM 'keychain:pilot/9r'  env 9router
-  OPENAI_API_KEY        (redacted, plaintext)     playbook
-  MY_FLAG               1                         playbook
+  KEY                   VALUE / REF                  LAYER
+  X                     1                            defaults base
+  ANTHROPIC_BASE_URL    http://localhost:8080/v1     env proxy
+  ANTHROPIC_AUTH_TOKEN  FROM 'keychain:proxy-token'  env proxy
+  OPENAI_API_KEY        (redacted, plaintext)        playbook
+  MY_FLAG               1                            playbook
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
  ←→/1-9 tab  c SHOW CREATE  e export .cpb  y copy  r refresh  esc back  q quit
-reads: cpb EXPLAIN PLAYBOOK router --json
+reads: cpb SHOW PLAYBOOK router --json · cpb EXPLAIN PLAYBOOK router --json
 ```
 
 - **Vars** shows the variables in effect at launch, with the layer each
@@ -62,46 +62,43 @@ reads: cpb EXPLAIN PLAYBOOK router --json
 - **A reference is shown as the reference.** A plaintext credential shows
   as `(redacted, plaintext)`. No screen ever holds a secret value, since
   cpb has withheld it before the TUI reads it.
-- **Overview** says whether the playbook's `CLAUDE.md` imports your pilot
-  profile.
 
 ## Sessions
 
 ```
  cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  PLAYBOOK       PID    TTY      AGE  ACTIVE  MODEL            CWD
-▸ kommander-dev  47904  ttys039  9h   54s     claude-opus-5-5  ~/DEV/claude-pla…
-  router         43627  -        2d   28m     glm-5.3          ~/DEV/claude-pla…
+  PLAYBOOK  PID    TTY      KIND  AGE  ACTIVE  MODEL            CWD
+▸ alpha     47904  ttys039  int   9h   54s     claude-opus-5-5  ~/DEV/app
+  router    43627  -        bg    2d   28m     glm-5.3          ~/DEV/app
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
- R recent here (to resume)  y copy RESUME  / filter  r refresh  q quit
+ y copy resume  / filter  r refresh  q quit  past sessions: <launcher> --resume
 reads: cpb SHOW SESSIONS --json
 ```
 
 - **Where each one is running:** the pid, the terminal (TTY), how long it
   has run, when it last did something, its model and its folder.
 - **The list refreshes** every 5 seconds while it is on screen.
-- **`R` switches to the recent sessions of the current folder**, live or
-  not. `enter` on one that is not running resumes it: the TUI hands the
-  terminal to `cpb RESUME SESSION '<id>' FOR PLAYBOOK <name>`, and comes
-  back when you leave Claude.
-- **A running session** is not resumed. The TUI names the pid that holds
-  it, since two processes on one session corrupt it.
+- **`y` copies the command that resumes a session** once it ends, from any
+  folder: `cd '<folder>' && <launcher> --resume <id>`. A running session is
+  not resumed, since two processes on one session corrupt it.
+- **Past sessions** are in Claude Code's own picker: `<launcher> --resume`
+  in the folder they ran in.
 
 ## Take it with you
 
 | Key | What |
 |---|---|
-| `y` | copy the statement behind the selection (`SHOW PLAYBOOK router`, `RESUME SESSION '…' FOR PLAYBOOK …`) |
+| `y` | copy the statement behind the selection (`SHOW PLAYBOOK router`), or a session's resume command |
 | `c` | show the selection's `SHOW CREATE`, without secrets; `y` there copies the text |
 | `e` | write that text as `<name>.cpb` in this folder, a recipe `cpb APPLY` re-applies; an existing file is replaced only after a typed `y` |
 
 ## Env sets and defaults
 
-- **`3` lists the env sets.** They are also called env profiles, and are
-  stored in `~/.claude-playbooks/.env-profiles/`. The list shows their
+- **`3` lists the env sets.** They are also called env sets, and are
+  stored in `~/.claude-playbooks/.env-sets/`. The list shows their
   variables, which playbooks use them, and which one is a default.
 - **`4` shows `DEFAULTS`:** the env sets layered under every playbook, and
   the secret helper.
@@ -119,4 +116,4 @@ reads: cpb SHOW SESSIONS --json
   the rest will each be shown as the statement it runs, planned with
   `APPLY --dry-run --json`, and confirmed.
 
-Reference: [cpb tui](../reference/cli-grammar.md#cpb-tui-v3250).
+Reference: [cpb tui](../../SPEC.md#cpb-tui).

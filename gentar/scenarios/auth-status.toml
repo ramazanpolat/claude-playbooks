@@ -12,40 +12,40 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
-  'claude-playbook create auth-pb --no-alias',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
+  'cpb CREATE PLAYBOOK auth-pb NO LAUNCHER',
   'sleep 1 && touch "$HOME/before-status"',
 ]
 
 [[verify.commands]]
-command = 'claude-playbook auth status | grep -E "^auth-pb +shared-login +absent +- +- +no login" && echo table-ok'
+command = 'cpb auth status | grep -E "^auth-pb +shared-login +absent +- +- +no login" && echo table-ok'
 contains = "table-ok"
 
 [[verify.commands]]
-command = 'out=$(claude-playbook auth status --json auth-pb) && printf "%s" "$out" | grep -F "\"mode\": \"shared-login\"" >/dev/null && printf "%s" "$out" | grep -F "\"store\": \"absent\"" >/dev/null && printf "%s" "$out" | grep -F "\"has_grant\": false" >/dev/null && printf "%s" "$out" | grep -F "\"reauth_required\": false" >/dev/null && echo json-ok'
+command = 'out=$(cpb auth status --json auth-pb) && printf "%s" "$out" | grep -F "\"mode\": \"shared-login\"" >/dev/null && printf "%s" "$out" | grep -F "\"store\": \"absent\"" >/dev/null && printf "%s" "$out" | grep -F "\"has_grant\": false" >/dev/null && printf "%s" "$out" | grep -F "\"reauth_required\": false" >/dev/null && echo json-ok'
 contains = "json-ok"
 
 [[verify.commands]]
 # Read-only: nothing under the playbooks root is newer than the marker
 # after two invocations.
-command = 'claude-playbook auth status >/dev/null && claude-playbook auth status --json >/dev/null && [ -z "$(find "$HOME/.claude-playbooks" -newer "$HOME/before-status" -type f)" ] && echo read-only'
+command = 'cpb auth status >/dev/null && cpb auth status --json >/dev/null && [ -z "$(find "$HOME/.claude-playbooks" -newer "$HOME/before-status" -type f)" ] && echo read-only'
 contains = "read-only"
 
 [[verify.commands]]
 # Unknown names are refused with the registry's own message.
-command = 'claude-playbook auth status nope 2>&1 | grep -F "unknown playbook \"nope\"" && echo unknown-ok'
+command = 'cpb auth status nope 2>&1 | grep -F "unknown playbook \"nope\"" && echo unknown-ok'
 contains = "unknown-ok"
 
 [[verify.commands]]
-# isolate_auth is the one authentication mode with no other coverage: a
+# isolated_login is the one authentication mode with no other coverage: a
 # playbook that shares nothing, whose own login is the only one it has.
-# `auth status` must report it as isolated rather than as a shared login,
-# because that report is what a pilot checks before a headless run.
-command = '''claude-playbook create solo --no-alias && printf '%s\n' 'name = "solo"' 'isolate_auth = true' > "$HOME/.claude-playbooks/solo/.playbook" && claude-playbook auth status solo'''
-contains = "isolated"
+# `auth status` must report it as isolated-login rather than as a shared
+# login, because that report is what a pilot checks before a headless run.
+command = '''cpb CREATE PLAYBOOK solo NO LAUNCHER && printf '%s\n' 'name = "solo"' 'isolated_login = true' > "$HOME/.claude-playbooks/solo/.playbook" && cpb auth status solo'''
+contains = "isolated-login"
 
 [[verify.commands]]
 # And the JSON form agrees -- it is what a script reads.
-command = 'claude-playbook auth status solo --json'
-contains = "isolated"
+command = 'cpb auth status solo --json'
+contains = '"mode": "isolated-login"'

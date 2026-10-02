@@ -25,7 +25,7 @@ old=$(abs "$1")
 new=$(abs "$2")
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "${3:-$here}" && pwd)
-chmod 755 "$here/.ci/claude" "$here/.ci/with-secret"
+chmod 755 "$here/.ci/claude" "$here/secret-helper/cpb-secret-file"
 # Both binaries must run here at all, or every example would read as a skip.
 for b in "$old" "$new"; do
   "$b" --version > /dev/null 2>&1 || { echo "cannot run $b:"; "$b" --version 2>&1 || true; exit 1; }

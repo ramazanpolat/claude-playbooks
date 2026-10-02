@@ -103,7 +103,7 @@ const liveStart = "Mon Sep 28 07:29:55 2026"
 func sessionFixture(t *testing.T) (root, work string, files []string) {
 	t.Helper()
 	root = sandboxDefaultRoot(t)
-	writePlaybook(t, root, "alpha", &manifest.Manifest{Alias: "al"})
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
 	writePlaybook(t, root, "beta", nil)
 	work, _ = filepath.EvalSymlinks(t.TempDir())
 	a, b := filepath.Join(root, "alpha"), filepath.Join(root, "beta")
@@ -151,7 +151,7 @@ func TestShowSessionsListsOnlyLiveOnes(t *testing.T) {
 	r := rows[0]
 	want := map[string]any{"playbook": "alpha", "pid": float64(101), "session_id": sidLive, "cwd": work, "kind": "interactive",
 		"launcher": "al", "model": "claude-opus-5-5", "claude_version": "2.1.283", "status": "idle",
-		"config_dir": filepath.Join(root, "alpha"), "resume": "al --resume " + sidLive}
+		"config_dir": filepath.Join(root, "alpha"), "resume": "cd " + shellQuoteTest(work) + " && al --resume " + sidLive}
 	for k, v := range want {
 		if !reflect.DeepEqual(r[k], v) {
 			t.Errorf("%s = %v, want %v", k, r[k], v)
@@ -159,15 +159,6 @@ func TestShowSessionsListsOnlyLiveOnes(t *testing.T) {
 	}
 	if la, _ := r["last_active"].(string); la == "" || !strings.HasSuffix(la, "Z") {
 		t.Errorf("last_active = %v", r["last_active"])
-	}
-	// The shorthand is exactly the statement.
-	short := captureStdout(t, func() {
-		rootCmd.SetArgs([]string{"sessions", "--json"})
-		err = rootCmd.Execute()
-	})
-	rootCmd.SetArgs(nil)
-	if err != nil || short != out {
-		t.Fatalf("cpb sessions --json differs (%v):\n%s\nvs\n%s", err, short, out)
 	}
 	human := mustStmt(t, "SHOW SESSIONS")
 	if !strings.Contains(human, "PLAYBOOK") || !strings.Contains(human, sidLive) || strings.Contains(human, sidDead) {
@@ -215,9 +206,9 @@ func TestSelectFromSessions(t *testing.T) {
 		t.Fatalf("types: %v", types)
 	}
 	sp := &selectPlan{table: "SESSIONS", query: "SELECT 1"}
-	pp := &selectPlan{table: "PLAYBOOKS", query: "SELECT 1"}
+	ep := &selectPlan{table: "ENVS", query: "SELECT 1"}
 	if !strings.Contains(strings.Join(sp.clickhouseArgs(), " "), "--date_time_input_format best_effort") ||
-		strings.Contains(strings.Join(pp.clickhouseArgs(), " "), "date_time_input_format") {
+		strings.Contains(strings.Join(ep.clickhouseArgs(), " "), "date_time_input_format") {
 		t.Fatal("best_effort only for a table with DateTime columns")
 	}
 }
@@ -256,138 +247,140 @@ func chdirT(t *testing.T, dir string) {
 	t.Cleanup(func() { _ = os.Chdir(old) })
 }
 
-func TestResumeRefusesALiveSession(t *testing.T) {
-	_, work, files := sessionFixture(t)
+// runClaude runs cpb run with args against the fake claude of resumeClaude,
+// and returns what claude logged, cpb's stderr and its error.
+func runClaude(t *testing.T, log string, args ...string) (string, string, error) {
+	t.Helper()
+	_ = os.Remove(log)
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, args) })
+	return readSessLog(t, log), msg, err
+}
+
+func TestResumeTarget(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		id   string
+		cont bool
+	}{
+		{nil, "", false},
+		{[]string{"--resume", sidLive}, sidLive, false},
+		{[]string{"-r", sidLive, "-p", "hi"}, sidLive, false},
+		{[]string{"--resume=" + sidLive}, sidLive, false},
+		{[]string{"--resume"}, "", false},                  // Claude's picker
+		{[]string{"--resume", "release notes"}, "", false}, // a search term
+		{[]string{"--resume", "auth"}, "", false},          // one word is a search term too
+		{[]string{"--resume=auth"}, "", false},
+		{[]string{"--resume", sidLive, "--resume"}, "", false}, // the last --resume wins: the picker
+		{[]string{"-r", sidOld, "--resume=" + sidLive}, sidLive, false},
+		{[]string{"-c"}, "", true},
+		{[]string{"--continue", "--model", "opus"}, "", true},
+		{[]string{"--resume", sidLive, "--fork-session"}, "", false},
+		{[]string{"--continue", "--fork-session"}, "", false},
+		{[]string{"--", "--resume", sidLive}, "", false}, // a prompt
+	} {
+		if id, cont := resumeTarget(c.args); id != c.id || cont != c.cont {
+			t.Errorf("%q: %q %v, want %q %v", c.args, id, cont, c.id, c.cont)
+		}
+	}
+}
+
+// cpb run and the launchers refuse a --resume of a session that is live in
+// any config dir, before claude starts, and name the picker; a fork makes a
+// new id, so it runs.
+func TestRunRefusesResumingALiveSession(t *testing.T) {
+	root, work, files := sessionFixture(t)
 	log := resumeClaude(t)
 	chdirT(t, work)
 	before := fileBytes(t, files)
-	var err error
-	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidLive}) })
-	if err == nil || !strings.Contains(err.Error(), "still running") || !strings.Contains(err.Error(), "pid 101") || !strings.Contains(err.Error(), "alpha") {
-		t.Fatalf("live: %v", err)
+	for _, args := range [][]string{
+		{"alpha", "--resume", sidLive}, {"alpha", "-r", sidLive}, {"alpha", "--resume=" + sidLive},
+		{"beta", "--resume", sidLive}, // a copy in another dir is still the live session
+	} {
+		l, _, err := runClaude(t, log, args...)
+		if err == nil || !strings.Contains(err.Error(), "still running") || !strings.Contains(err.Error(), "pid 101") ||
+			!strings.Contains(err.Error(), "playbook alpha") || !strings.Contains(err.Error(), "pick another with ") || l != "" {
+			t.Fatalf("%q: %v (claude: %q)", args, err, l)
+		}
 	}
-	if l := readSessLog(t, log); l != "" {
-		t.Fatalf("claude ran: %s", l)
+	if _, _, err := runClaude(t, log, "alpha", "--resume", sidLive); !strings.Contains(err.Error(), "pick another with al --resume") {
+		t.Errorf("the picker is the launcher's: %v", err)
 	}
 	if after := fileBytes(t, files); !reflect.DeepEqual(before, after) {
 		t.Fatal("a session file changed")
 	}
-}
-
-func TestResumePicksTheNewestNotLive(t *testing.T) {
-	root, work, files := sessionFixture(t)
-	log := resumeClaude(t)
-	elsewhere := t.TempDir()
-	chdirT(t, work)
-	var err error
-	msg := captureStderr(t, func() { err = runStatement([]string{"RESUME"}) })
-	if err != nil {
-		t.Fatalf("%v\n%s", err, msg)
+	if l, msg, err := runClaude(t, log, "alpha", "--resume", sidLive, "--fork-session"); err != nil || l != work+"|"+filepath.Join(root, "alpha")+"|--resume "+sidLive+" --fork-session\n" {
+		t.Fatalf("fork: %v %q\n%s", err, l, msg)
 	}
-	if !strings.Contains(msg, "1 newer session is live (pid 101); resuming "+sidDead+" of alpha") {
-		t.Fatalf("the pick is named: %s", msg)
-	}
-	realWork := work
-	if l := readSessLog(t, log); l != realWork+"|"+filepath.Join(root, "alpha")+"|--resume "+sidDead+"\n" {
-		t.Fatalf("launch: %q", l)
-	}
-	// SESSION from another folder: found by id, run where it ran.
-	chdirT(t, elsewhere)
-	_ = os.Remove(log)
-	msg = captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidOld}) })
-	if err != nil {
-		t.Fatalf("%v\n%s", err, msg)
-	}
-	if l := readSessLog(t, log); l != realWork+"|"+filepath.Join(root, "beta")+"|--resume "+sidOld+"\n" || !strings.Contains(msg, "where the session ran") {
-		t.Fatalf("launch: %q\n%s", l, msg)
-	}
-	for _, f := range files {
-		if _, err := os.Stat(f); err != nil {
-			t.Fatalf("%s: %v", f, err)
+	// Not live, or not known to cpb: claude gets it as it is.
+	for _, id := range []string{sidDead, "99999999-9999-4999-8999-999999999999"} {
+		if l, msg, err := runClaude(t, log, "alpha", "--resume", id); err != nil || l != work+"|"+filepath.Join(root, "alpha")+"|--resume "+id+"\n" {
+			t.Fatalf("%s: %v %q\n%s", id, err, l, msg)
 		}
 	}
 }
 
-func TestResumeAmbiguousAndMissing(t *testing.T) {
+// --continue resumes the newest session of the playbook in this folder;
+// cpb refuses it when that one is live.
+func TestRunGuardsContinue(t *testing.T) {
 	root, work, _ := sessionFixture(t)
-	resumeClaude(t)
+	log := resumeClaude(t)
 	chdirT(t, work)
-	// The same id copied into beta.
-	writeTranscript(t, filepath.Join(root, "beta"), work, sidDead, "m", "", time.Now())
-	if _, err := stmt(t, "RESUME SESSION "+sidDead); err == nil || !strings.Contains(err.Error(), "more than one config dir") {
-		t.Fatalf("ambiguous: %v", err)
+	if l, _, err := runClaude(t, log, "alpha", "--continue"); err == nil || !strings.Contains(err.Error(), "--continue resumes the newest session in this folder") ||
+		!strings.Contains(err.Error(), sidLive) || l != "" {
+		t.Fatalf("alpha's newest is live: %v (claude: %q)", err, l)
 	}
-	var err error
-	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidDead, "FOR", "PLAYBOOK", "beta"}) })
-	if err != nil {
-		t.Fatalf("FOR PLAYBOOK picks one: %v", err)
+	if l, msg, err := runClaude(t, log, "alpha", "-c", "--fork-session"); err != nil || l == "" {
+		t.Fatalf("fork: %v %q\n%s", err, l, msg)
 	}
-	if _, err := stmt(t, "RESUME SESSION 99999999-9999-4999-8999-999999999999"); err == nil || !strings.Contains(err.Error(), "no session") {
-		t.Fatalf("missing: %v", err)
+	if l, msg, err := runClaude(t, log, "beta", "-c"); err != nil || l != work+"|"+filepath.Join(root, "beta")+"|-c\n" {
+		t.Fatalf("beta's newest is not live: %v %q\n%s", err, l, msg)
 	}
 	chdirT(t, t.TempDir())
-	if _, err := stmt(t, "RESUME"); err == nil || !strings.Contains(err.Error(), "no Claude Code session was found") {
-		t.Fatalf("empty folder: %v", err)
+	if l, msg, err := runClaude(t, log, "alpha", "--continue"); err != nil || l == "" {
+		t.Fatalf("no session here: %v %q\n%s", err, l, msg)
 	}
 }
 
-func TestResumeList(t *testing.T) {
-	_, work, _ := sessionFixture(t)
-	chdirT(t, work)
-	out := mustStmt(t, "RESUME --list --json")
-	var rows []map[string]any
-	if err := json.Unmarshal([]byte(out), &rows); err != nil || len(rows) != 3 {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if rows[0]["session_id"] != sidLive || rows[0]["live"] != true || rows[0]["pid"] != float64(101) || rows[0]["title"] != "live one" {
-		t.Fatalf("newest first, live marked: %v", rows[0])
-	}
-	if rows[1]["session_id"] != sidDead || rows[1]["live"] != false || rows[2]["playbook"] != "beta" {
-		t.Fatalf("%v", rows)
-	}
-	human := mustStmt(t, "RESUME --list")
-	if !strings.Contains(human, "pid 101") || !strings.Contains(human, "beta") {
-		t.Fatalf("human:\n%s", human)
-	}
-}
-
-func TestResumeGrammarRefusals(t *testing.T) {
-	sessionFixture(t)
-	for line, want := range map[string]string{
-		"RESUME --list SESSION " + sidLive: "use one of them",
-		"RESUME --json":                    "only with --list",
-		"RESUME SESSION ../x":              "session id",
-		"RESUME FOR alpha":                 "FOR PLAYBOOK",
-	} {
-		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%s: %v", line, err)
-		}
-	}
-}
-
-func TestResumeRefusesASandboxedPlaybook(t *testing.T) {
-	root := sandboxDefaultRoot(t)
-	writePlaybook(t, root, "sb", &manifest.Manifest{Sandbox: &manifest.Sandbox{Always: true}})
-	work, _ := filepath.EvalSymlinks(t.TempDir())
-	writeTranscript(t, filepath.Join(root, "sb"), work, sidOld, "m", "", time.Now())
-	fakeProcs(t, nil)
+// Claude Code finds a session by the folder it ran in: a --resume from
+// elsewhere is refused with the cd that resumes it, and runs in its folder.
+func TestRunResumeFromAnotherFolder(t *testing.T) {
+	root, work, _ := sessionFixture(t)
 	log := resumeClaude(t)
+	chdirT(t, t.TempDir())
+	want := "cd " + shellQuoteTest(work) + " && cpb run beta --resume " + sidOld
+	if l, _, err := runClaude(t, log, "beta", "--resume", sidOld); err == nil || !strings.Contains(err.Error(), "ran in "+work) || !strings.Contains(err.Error(), want) || l != "" {
+		t.Fatalf("elsewhere: %v (claude: %q), want %q", err, l, want)
+	}
 	chdirT(t, work)
-	var err error
-	captureStderr(t, func() { err = runStatement([]string{"RESUME"}) })
-	if err == nil || !strings.Contains(err.Error(), "sandbox") || readSessLog(t, log) != "" {
-		t.Fatalf("sandboxed: %v", err)
+	if l, msg, err := runClaude(t, log, "beta", "--resume", sidOld); err != nil || l != work+"|"+filepath.Join(root, "beta")+"|--resume "+sidOld+"\n" {
+		t.Fatalf("here: %v %q\n%s", err, l, msg)
+	}
+}
+
+// A sandbox holds its sessions where cpb cannot see them: the launch says
+// so instead of guarding.
+func TestResumeNoteForASandbox(t *testing.T) {
+	if msg := captureStderr(t, func() { resumeNote([]string{"--resume", sidOld}) }); !strings.Contains(msg, "cannot check") {
+		t.Fatalf("resume: %q", msg)
+	}
+	if msg := captureStderr(t, func() { resumeNote([]string{"-p", "hi"}) }); msg != "" {
+		t.Fatalf("a new session: %q", msg)
 	}
 }
 
 // The exit line: after claude exits under cpb run, on a terminal, cpb names
-// the launcher command that resumes the session.
+// the launcher command that resumes the session: the transcript the launch
+// wrote, judged against the transcripts there before it, never against the
+// clock (a file's time can read as earlier than the launch that wrote it).
 func TestRunPrintsTheResumeLine(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	writePlaybook(t, root, "alpha", &manifest.Manifest{Alias: "al"})
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
 	fakeProcs(t, nil)
 	dir := t.TempDir()
-	script := "#!/bin/sh\nd=\"$CLAUDE_CONFIG_DIR/projects/-w\"\nmkdir -p \"$d\"\necho '{}' > \"$d/" + sidLive + ".jsonl\"\n"
+	// A stand-in claude that writes $FAKE_SID's transcript, if set, and
+	// with FAKE_OLD stamps it long before this launch began.
+	script := "#!/bin/sh\n[ -n \"$FAKE_SID\" ] || exit 0\nd=\"$CLAUDE_CONFIG_DIR/projects/-w\"\nmkdir -p \"$d\"\necho '{}' >> \"$d/$FAKE_SID.jsonl\"\n[ -z \"$FAKE_OLD\" ] || touch -t 202001010000 \"$d/$FAKE_SID.jsonl\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -396,25 +389,45 @@ func TestRunPrintsTheResumeLine(t *testing.T) {
 	old := stderrTTY
 	stderrTTY = func() bool { return tty }
 	t.Cleanup(func() { stderrTTY = old })
-
-	var err error
-	msg := captureStderr(t, func() { err = runRun(nil, []string{"alpha"}) })
-	if err != nil || !strings.Contains(msg, "Resume this playbook's session with: al --resume "+sidLive) {
-		t.Fatalf("%v\n%s", err, msg)
+	launch := func(sid, stamp string, args ...string) string {
+		t.Helper()
+		t.Setenv("FAKE_SID", sid)
+		t.Setenv("FAKE_OLD", stamp)
+		var err error
+		msg := captureStderr(t, func() { err = runRun(nil, append([]string{"alpha"}, args...)) })
+		if err != nil {
+			t.Fatalf("%v\n%s", err, msg)
+		}
+		return msg
 	}
-	msg = captureStderr(t, func() { err = runRun(nil, []string{"alpha", "-p", "hi"}) })
-	if err != nil || strings.Contains(msg, "Resume this") {
-		t.Fatalf("print mode: %v\n%s", err, msg)
+	line := "Resume this playbook's session with: al --resume "
+
+	if msg := launch(sidLive, ""); !strings.Contains(msg, line+sidLive) {
+		t.Fatalf("a new session:\n%s", msg)
+	}
+	// Written by this launch, though its time says years ago.
+	if msg := launch(sidDead, "1"); !strings.Contains(msg, line+sidDead) {
+		t.Fatalf("a transcript stamped before the launch:\n%s", msg)
+	}
+	// A launch that wrote nothing names nothing, though transcripts are there.
+	if msg := launch("", ""); strings.Contains(msg, "Resume this") {
+		t.Fatalf("no message, yet a line:\n%s", msg)
+	}
+	// A resumed session, appended to: that one, not the newest by time.
+	if msg := launch(sidDead, ""); !strings.Contains(msg, line+sidDead) {
+		t.Fatalf("a resumed session:\n%s", msg)
+	}
+	if msg := launch(sidLive, "", "-p", "hi"); strings.Contains(msg, "Resume this") {
+		t.Fatalf("print mode:\n%s", msg)
 	}
 	tty = false
-	msg = captureStderr(t, func() { err = runRun(nil, []string{"alpha"}) })
-	if err != nil || strings.Contains(msg, "Resume this") {
-		t.Fatalf("no tty: %v\n%s", err, msg)
+	if msg := launch(sidLive, ""); strings.Contains(msg, "Resume this") {
+		t.Fatalf("no tty:\n%s", msg)
 	}
 }
 
 func TestEncodeProjectDir(t *testing.T) {
-	if got := encodeProjectDir("/Users/polat/agent-realm/.worktrees/agentmux/root"); got != "-Users-polat-agent-realm--worktrees-agentmux-root" {
+	if got := encodeProjectDir("/Users/me/src/.worktrees/app/main"); got != "-Users-me-src--worktrees-app-main" {
 		t.Fatal(got)
 	}
 }
@@ -454,13 +467,11 @@ func TestNoProcStartIsNotConfirmedLive(t *testing.T) {
 	if out := mustStmt(t, "SHOW SESSIONS --json"); !strings.Contains(out, sidLive) {
 		t.Fatalf("listed:\n%s", out)
 	}
-	var err error
-	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidLive}) })
-	if err == nil || !strings.Contains(err.Error(), "records no start time") || readSessLog(t, log) != "" {
+	if l, _, err := runClaude(t, log, "alpha", "--resume", sidLive); err == nil || !strings.Contains(err.Error(), "records no start time") || l != "" {
 		t.Fatalf("resumed an unconfirmed session: %v", err)
 	}
-	if _, err := stmt(t, "RESUME"); err == nil || !strings.Contains(err.Error(), "still running") {
-		t.Fatalf("bare RESUME: %v", err)
+	if l, _, err := runClaude(t, log, "alpha", "--continue"); err == nil || !strings.Contains(err.Error(), "may still be running") || l != "" {
+		t.Fatalf("--continue: %v", err)
 	}
 }
 
@@ -479,10 +490,10 @@ func TestUnreadableDirRegistryFails(t *testing.T) {
 	}
 }
 
-// The working directory comes from the transcript's head when its tail is
-// one oversized record; with none at all, RESUME from elsewhere is refused
-// rather than run in the wrong folder (Codex, #132).
-func TestResumeCwdFromTheHead(t *testing.T) {
+// The folder a session ran in comes from its transcript's head when the tail
+// is one oversized record; a transcript that records none is left to claude
+// (Codex, #132).
+func TestRunResumeCwdFromTheHead(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "alpha", nil)
 	fakeProcs(t, nil)
@@ -501,25 +512,16 @@ func TestResumeCwdFromTheHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := resumeClaude(t)
-	elsewhere := t.TempDir()
-	chdirT(t, elsewhere)
-	var err error
-	msg := captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidDead}) })
-	if err != nil || !strings.HasPrefix(readSessLog(t, log), work+"|") {
-		t.Fatalf("%v %q\n%s", err, readSessLog(t, log), msg)
+	chdirT(t, t.TempDir())
+	if l, _, err := runClaude(t, log, "alpha", "--resume", sidDead); err == nil || !strings.Contains(err.Error(), "cd "+shellQuoteTest(work)+" && ") || l != "" {
+		t.Fatalf("cwd from the head: %v (claude: %q)", err, l)
 	}
-	// RESUME moved into the session's folder; go back out.
-	chdirT(t, elsewhere)
-	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidOld}) })
-	if err == nil || !strings.Contains(err.Error(), "records no working directory") {
-		t.Fatalf("no cwd, elsewhere: %v", err)
+	if l, msg, err := runClaude(t, log, "alpha", "--resume", sidOld); err != nil || l == "" {
+		t.Fatalf("no cwd: %v %q\n%s", err, l, msg)
 	}
-	// In its own folder, a transcript with no cwd still resumes there.
 	chdirT(t, work)
-	_ = os.Remove(log)
-	captureStderr(t, func() { err = runStatement([]string{"RESUME", "SESSION", sidOld}) })
-	if err != nil || !strings.HasPrefix(readSessLog(t, log), work+"|") {
-		t.Fatalf("no cwd, here: %v %q", err, readSessLog(t, log))
+	if l, msg, err := runClaude(t, log, "alpha", "--resume", sidDead); err != nil || !strings.HasPrefix(l, work+"|") {
+		t.Fatalf("here: %v %q\n%s", err, l, msg)
 	}
 }
 

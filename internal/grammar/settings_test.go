@@ -8,7 +8,7 @@ import (
 
 func TestParseSettingsClauses(t *testing.T) {
 	stmts, err := ParseFile(`ALTER PLAYBOOK k
-  ALLOW TOOL 'Bash(kommander-helper *)' 'mcp__sentry'
+  ALLOW TOOL 'Bash(toolkit-helper *)' 'mcp__sentry'
   DENY TOOL 'Bash(rm -rf *)'
   UNSET TOOL 'Read(~/x)'
   SET STATUSLINE '~/bin/status.sh --short'
@@ -17,7 +17,7 @@ func TestParseSettingsClauses(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := stmts[0].Clauses
-	if c[0].Kind != AllowTool || !reflect.DeepEqual(c[0].Names, []string{"Bash(kommander-helper *)", "mcp__sentry"}) ||
+	if c[0].Kind != AllowTool || !reflect.DeepEqual(c[0].Names, []string{"Bash(toolkit-helper *)", "mcp__sentry"}) ||
 		c[1].Kind != DenyTool || c[2].Kind != UnsetTool || c[3].Kind != SetStatusline || c[3].Arg != "~/bin/status.sh --short" ||
 		c[4].Kind != SetModel || c[4].Arg != "claude-opus-5-5" {
 		t.Fatalf("clauses: %+v", c)

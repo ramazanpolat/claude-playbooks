@@ -17,7 +17,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// Plugins and the agent (docs/reference/cli-grammar.md, "Plugins and the
+// Plugins and the agent (SPEC.md, "Plugins and the
 // agent"). The marketplace and plugin clauses delegate to Claude Code's own
 // CLI, `claude plugin …`, run with CLAUDE_CONFIG_DIR set to the playbook, so
 // its user scope is that playbook: the format of settings.json and the
@@ -527,6 +527,11 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 		case grammar.UnsetModel:
 			unset(keyModel, "model")
 		case grammar.SetStatusline:
+			// IF UNSET applies only where no status line is set yet: a
+			// recipe that offers a bar leaves the one you chose alone.
+			if c.IfUnset && f.Root.Has(keyStatusline) {
+				continue
+			}
 			sl, err := f.Root.Object(keyStatusline)
 			if err != nil {
 				return nil, false, err
@@ -539,18 +544,6 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 			// Without REFRESH, an existing refreshInterval is kept, as
 			// padding and every other field are.
 			if typ == "command" && cmd == c.Arg && (c.Refresh == 0 || refresh == c.Refresh) {
-				continue
-			}
-			// A host (statusmux) holds the slot: the command stays, the
-			// statement reports it (statuslineHeld), and only an interval
-			// applies, which the host needs.
-			if typ == "command" && isHostCommand(cmd) && cmd != c.Arg {
-				if c.Refresh > 0 && refresh != c.Refresh {
-					_ = sl.Set(keyRefreshInterval, c.Refresh)
-					f.Root.SetObject(keyStatusline, sl)
-					changed = true
-					lines = append(lines, fmt.Sprintf("statusline refresh %d s (the command stays: a host holds the slot)", c.Refresh))
-				}
 				continue
 			}
 			_ = sl.Set("type", "command")
@@ -761,7 +754,7 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 	written := map[string]bool{}
 	for _, m := range mps {
 		src, ok := sourceString(m.Source)
-		if !ok || manifest.ValidateProfileName(m.Name) != nil {
+		if !ok || manifest.ValidateSetName(m.Name) != nil {
 			comments = append(comments, fmt.Sprintf("-- MARKETPLACE %s has a source the grammar does not write; not written", m.Name))
 			continue
 		}
@@ -894,10 +887,6 @@ func (r *stmtRun) warnMarketplaceRef(clauses []grammar.Clause) {
 			continue
 		}
 		msg := "MARKETPLACE " + c.Names[0] + " #" + ref + ": Claude Code clones marketplaces by branch or tag; this ref looks like a commit and will not clone: use a tag at that commit"
-		if r.warning != "" {
-			r.warning += "; " + msg
-		} else {
-			r.warning, r.warningCode = msg, warnMarketplaceRefNotCloneable
-		}
+		r.warn(warnMarketplaceRefNotCloneable, msg)
 	}
 }

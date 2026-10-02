@@ -32,7 +32,7 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := seedFlatPlaybook(t, "own")
-	if err := manifest.Write(own, &manifest.Manifest{Name: "own", Env: &manifest.Env{Unset: []string{"CLAUDE_CODE_OAUTH_TOKEN"}}}); err != nil {
+	if err := manifest.Write(own, &manifest.Manifest{Name: "own", Env: &manifest.Env{Block: []string{"CLAUDE_CODE_OAUTH_TOKEN"}}}); err != nil {
 		t.Fatal(err)
 	}
 	_ = root
@@ -43,7 +43,7 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	for _, want := range []string{"NAME", "MODE", "~/.claude", "shared-login", "shared", "symlink -> ~/.claude/.credentials.json", "in 3h00m", "own", "own-login", "no login"} {
+	for _, want := range []string{"NAME", "MODE", "~/.claude", "shared-login", "shared", "symlink -> ~/.claude/.credentials.json", "in 3h00m", "own", "shared-login (token blocked)", "no login"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("table missing %q:\n%s", want, out)
 		}
@@ -53,7 +53,7 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 	}
 	// An error row carries the documented note prefix.
 	broken := seedFlatPlaybook(t, "broken")
-	if err := manifest.Write(broken, &manifest.Manifest{Name: "broken", Env: &manifest.Env{Profiles: []string{"ghost"}}}); err != nil {
+	if err := manifest.Write(broken, &manifest.Manifest{Name: "broken", Env: &manifest.Env{Sets: []string{"ghost"}}}); err != nil {
 		t.Fatal(err)
 	}
 	errOut := captureStdout(t, func() {
@@ -61,14 +61,18 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(errOut, "launch refused: env profile \"ghost\" not found") {
+	if !strings.Contains(errOut, "launch refused: env set \"ghost\" not found") {
 		t.Fatalf("error row note:\n%s", errOut)
 	}
 
+	// Times are UTC whatever the local zone.
+	local := time.Local
+	time.Local = time.FixedZone("UTC+3", 3*3600)
+	t.Cleanup(func() { time.Local = local })
 	authStatusJSON = true
 	t.Cleanup(func() { authStatusJSON = false })
 	raw := captureStdout(t, func() {
-		if err := runAuthStatus(nil, []string{"shared"}); err != nil {
+		if err := runAuthStatus(nil, []string{"shared", "own"}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -76,8 +80,50 @@ func TestAuthStatusTableAndJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
 		t.Fatalf("json: %v\n%s", err, raw)
 	}
-	if len(rows) != 1 || rows[0]["name"] != "shared" || rows[0]["mode"] != "shared-login" || rows[0]["store"] != "symlink" || rows[0]["has_grant"] != true {
+	if len(rows) != 2 || rows[0]["name"] != "shared" || rows[0]["mode"] != "shared-login" || rows[0]["token_blocked"] != false ||
+		rows[0]["isolated_login"] != false || rows[0]["store"] != "symlink" || rows[0]["has_grant"] != true {
 		t.Fatalf("json rows: %v", rows)
+	}
+	if e, _ := rows[0]["expires_at"].(string); !strings.HasSuffix(e, "Z") {
+		t.Errorf("expires_at %q is not UTC", e)
+	}
+	if _, old := rows[0]["isolated"]; old {
+		t.Errorf("the v3 key isolated is still emitted: %v", rows[0])
+	}
+	// A playbook that blocks the machine's token uses the stored login.
+	if rows[1]["name"] != "own" || rows[1]["mode"] != "shared-login" || rows[1]["token_blocked"] != true {
+		t.Fatalf("token-blocked row: %v", rows[1])
+	}
+}
+
+// --claude reports claude auth status --json under cpb's snake_case keys.
+func TestAuthStatusClaudeKeys(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	seedFlatPlaybook(t, "plain")
+	bin := filepath.Join(os.Getenv("HOME"), "stub-bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/bin/sh\nprintf '%s\\n' '{\"loggedIn\":true,\"subscriptionType\":\"max\",\"authMethod\":\"claude.ai\"}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	authStatusJSON, authStatusClaude = true, true
+	t.Cleanup(func() { authStatusJSON, authStatusClaude = false, false })
+	raw := captureStdout(t, func() {
+		if err := runAuthStatus(nil, []string{"plain"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil || len(rows) != 1 {
+		t.Fatalf("json: %v\n%s", err, raw)
+	}
+	c, _ := rows[0]["claude"].(map[string]any)
+	if c["logged_in"] != true || c["subscription_type"] != "max" || c["auth_method"] != "claude.ai" || len(c) != 3 {
+		t.Fatalf("claude field: %v\n%s", c, raw)
 	}
 }
 

@@ -35,19 +35,19 @@ func multicallPlaybook() (string, bool, error) {
 		}
 	}
 	for _, pb := range pbs {
-		if pb.Manifest != nil && pb.Manifest.Alias == base {
+		if pb.Manifest != nil && pb.Manifest.Launcher == base {
 			return pb.Name, true, nil
 		}
 	}
 	return "", false, nil
 }
 
-// launcherNamesFor returns the command names that may address a playbook:
+// launcherNamesFor returns the launcher names that may address a playbook:
 // its directory name and, when set, its manifest alias.
 func launcherNamesFor(pb *playbook.Playbook) []string {
 	names := []string{pb.Name}
-	if pb.Manifest != nil && pb.Manifest.Alias != "" && pb.Manifest.Alias != pb.Name {
-		names = append(names, pb.Manifest.Alias)
+	if pb.Manifest != nil && pb.Manifest.Launcher != "" && pb.Manifest.Launcher != pb.Name {
+		names = append(names, pb.Manifest.Launcher)
 	}
 	return names
 }
@@ -90,10 +90,10 @@ func preflightCommandNames(exceptName string, names ...string) error {
 			// Dispatch relies on the same discovery call: registering a
 			// name it cannot verify would advertise a command that cannot
 			// resolve.
-			return fmt.Errorf("cannot verify command name %q: %w", n, err)
+			return fmt.Errorf("cannot verify launcher name %q: %w", n, err)
 		}
 		if owner != nil {
-			return fmt.Errorf("command name %q already addresses playbook %q. Pick another name or alias", n, owner.Name)
+			return fmt.Errorf("launcher name %q already addresses playbook %q. Pick another name", n, owner.Name)
 		}
 	}
 	return nil
@@ -129,7 +129,7 @@ func invokedViaLauncher() bool {
 // lockRegistry takes an exclusive advisory lock serializing
 // preflight-through-registration across concurrent processes: without it,
 // two creates can both pass the ownership check before either playbook is
-// visible and register duplicate owners for one command name. The lock is
+// visible and register duplicate owners for one launcher name. The lock is
 // machine-user-global and lives OUTSIDE every registry root (user cache
 // dir, tmp as fallback): commands under different --playbooks-dir roots
 // contend for shared resources (a linked target's external manifest, the
@@ -141,12 +141,12 @@ func invokedViaLauncher() bool {
 // registryLockPath is the machine-user-global lock file lockRegistry flocks.
 func registryLockPath() string {
 	if cache, cerr := os.UserCacheDir(); cerr == nil {
-		dir := filepath.Join(cache, "claude-playbook")
+		dir := filepath.Join(cache, "cpb")
 		if merr := os.MkdirAll(dir, 0o755); merr == nil {
 			return filepath.Join(dir, "registry.lock")
 		}
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("claude-playbook-registry-%d.lock", os.Getuid()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("cpb-registry-%d.lock", os.Getuid()))
 }
 
 func lockRegistry() (unlock func(), err error) {

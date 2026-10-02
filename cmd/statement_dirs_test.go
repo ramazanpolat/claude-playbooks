@@ -10,14 +10,14 @@ import (
 
 func TestApplyToPlainDirectory(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	cfg, _ := filepath.EvalSymlinks(t.TempDir()) // stands in for ~/.claude
 	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{"theme": "dark"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	skill := makeSkill(t, filepath.Join(dir, "notes"))
-	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(kommander-helper *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
+	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(toolkit-helper *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
 
 	// Not a terminal and no --yes: refused before anything is written.
 	if _, err := apply(t, recipe, "TO", cfg); err == nil || !strings.Contains(err.Error(), "--yes") {
@@ -41,7 +41,7 @@ func TestApplyToPlainDirectory(t *testing.T) {
 		Permissions map[string][]string `json:"permissions"`
 	}
 	data, _ := os.ReadFile(filepath.Join(cfg, "settings.json"))
-	if json.Unmarshal(data, &s) != nil || s.Theme != "dark" || s.Model != "claude-opus-5-5" || s.Env["FOO"] != "bar" || s.Permissions["allow"][0] != "Bash(kommander-helper *)" {
+	if json.Unmarshal(data, &s) != nil || s.Theme != "dark" || s.Model != "claude-opus-5-5" || s.Env["FOO"] != "bar" || s.Permissions["allow"][0] != "Bash(toolkit-helper *)" {
 		t.Fatalf("settings: %s", data)
 	}
 	backups, _ := filepath.Glob(filepath.Join(cfg, "settings.json.cpb-backup-*"))
@@ -79,7 +79,9 @@ func TestPlainDirectoryRefusals(t *testing.T) {
 		"ALTER PLAYBOOK SET VAR K FROM 'keychain:x';": "secret reference",
 		"ALTER PLAYBOOK USE ENV e;":                   "env sets are layered by the launcher",
 		"ALTER PLAYBOOK BLOCK VAR K;":                 "launcher's job",
-		"ALTER PLAYBOOK SET ISOLATED LOGIN;":          "isolate_auth is recorded in a playbook's manifest",
+		"ALTER PLAYBOOK SET ISOLATED LOGIN;":          "isolated_login is recorded in a playbook's manifest",
+		"ALTER PLAYBOOK SET SANDBOX;":                 "[sandbox] is recorded in a playbook's manifest",
+		"ALTER PLAYBOOK UNSET SANDBOX host;":          "[sandbox] is recorded in a playbook's manifest",
 		"ALTER PLAYBOOK ADD MCP SERVER s URL 'https://x.example/mcp' HEADER 'Authorization' FROM 'keychain:x';": "only cpb's launcher resolves",
 	} {
 		f := writeCpb(t, dir, "r.cpb", text+"\n")
@@ -94,7 +96,7 @@ func TestPlainDirectoryRefusals(t *testing.T) {
 // cannot be written to cpb's state is taken away again.
 func TestPlainDirectoryBackupsAndSkillRecords(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	cfg, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)

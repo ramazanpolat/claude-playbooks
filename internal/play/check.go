@@ -11,7 +11,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// Risk codes: a closed set within a major version.
+// Risk codes.
 const (
 	RiskRunsProgram       = "runs_program"
 	RiskThirdPartyCode    = "third_party_code"
@@ -111,7 +111,7 @@ var refusedClauses = map[grammar.Kind]string{
 	grammar.DropEnv:            "it would detach your env sets: " + onlyThisPlaybook,
 	grammar.UnsetIsolatedLogin: "the login is play's decision, not the recipe's",
 	grammar.RenameTo:           "the name is play's decision, not the recipe's",
-	grammar.Alias:              "the launcher is play's decision, not the recipe's",
+	grammar.Launcher:           "the launcher is play's decision, not the recipe's",
 }
 
 func (r *Result) clause(c grammar.Clause) {
@@ -135,7 +135,7 @@ func (r *Result) clause(c grammar.Clause) {
 	case grammar.AddPlugin:
 		r.risk(line, RiskThirdPartyCode, kind+" "+c.Names[0], "a plugin can carry hooks (shell commands run on events) and commands", "")
 	case grammar.SetAgent, grammar.SetModel, grammar.AddModel, grammar.SetModelPicker,
-		grammar.DenyTool, grammar.SetStatuslineRefresh, grammar.BlockVar, grammar.SetIsolatedLogin, grammar.NoAlias:
+		grammar.DenyTool, grammar.SetStatuslineRefresh, grammar.BlockVar, grammar.SetIsolatedLogin, grammar.NoLauncher:
 		// configuration only
 	case grammar.AllowTool:
 		for _, rule := range c.Names {
@@ -145,10 +145,6 @@ func (r *Result) clause(c grammar.Clause) {
 		}
 	case grammar.SetStatusline:
 		r.risk(line, RiskRunsProgram, kind, "runs '"+c.Arg+"' every few seconds, as you", "")
-	case grammar.AddPanel:
-		if p := c.Panel; p != nil && (p.Type == "exec" || p.Type == "observe") && !p.FromStatusline {
-			r.risk(line, RiskRunsProgram, kind+" "+p.NS+"."+p.ID, "runs '"+p.Source+"' for the status line, as you", "")
-		}
 	case grammar.AddSkill:
 		r.skill(c)
 	case grammar.AddMCP:

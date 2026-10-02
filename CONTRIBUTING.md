@@ -25,7 +25,7 @@ CI runs exactly these on every PR. A PR with red CI is not reviewed.
 
 ## What the codebase promises
 
-- `SPEC-v4.md` is the contract. A behavior change without a matching spec
+- `SPEC.md` is the contract. A behavior change without a matching spec
   change is a bug in the PR, not in the spec.
 - The registry is stateless: playbook discovery reads the filesystem on
   every invocation. Do not add index files, caches, or daemons.
@@ -48,13 +48,13 @@ CI runs exactly these on every PR. A PR with red CI is not reviewed.
 
 ## Reporting bugs
 
-Use the bug template. The output of `claude-playbook --version`, your OS,
+Use the bug template. The output of `cpb --version`, your OS,
 and an exact command sequence beat any amount of description.
 
 ## Release process
 
 A release needs its docs first: README, docs/ (tutorials, guides,
-reference), examples/ for every new clause, and AGENTS.md. The pilot's rule
+reference), examples/ for every new clause, and AGENTS.md. The maintainer's rule
 and the checklist are in [AGENTS.md, "Before any release"](AGENTS.md#before-any-release);
 never tag without them.
 
