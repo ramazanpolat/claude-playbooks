@@ -529,9 +529,14 @@ func emitResult(cols []string, rows [][]any, asJSON bool) error {
 
 var tsvEscape = strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\n", "\\n", "\r", "\\r")
 
-// writeTSV prints a header row of the column names, then one line per row.
+// writeTSV prints a header row of the column names, then one line per row,
+// every field escaped alike.
 func writeTSV(w io.Writer, cols []string, rows [][]any) {
-	fmt.Fprintln(w, strings.Join(cols, "\t"))
+	header := make([]string, len(cols))
+	for i, c := range cols {
+		header[i] = tsvEscape.Replace(c)
+	}
+	fmt.Fprintln(w, strings.Join(header, "\t"))
 	for _, r := range rows {
 		cells := make([]string, len(cols))
 		for i := range cols {

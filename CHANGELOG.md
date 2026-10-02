@@ -151,6 +151,7 @@ The APPLY JSON schema stays 1.
   with a header row in a pipe, JSON rows with `--json`. A query run through
   `clickhouse local` printed bare TSV in a pipe and ignored `--json`. A
   `FORMAT` in the query still wins, and cannot be combined with `--json`.
+  ClickHouse's `JSON` type keeps only an object's non-null keys.
 - **SHOW's `launcher` is the command you type**: the playbook's recorded
   `LAUNCHER`, or its name when the default launcher is in place; null under
   `NO LAUNCHER` (and when the default launcher is not in place). v3 reported

@@ -317,23 +317,22 @@ func TestSelectSameShapeOnBothEngines(t *testing.T) {
 			t.Errorf("%v: the engines differ:\nbuilt in:\n%s\nclickhouse:\n%s", flags, builtIn, viaClickHouse)
 		}
 	}
-	write(`{"meta":[{"name":"n","type":"UInt64"},{"name":"s","type":"String"}],"data":[[2,"a\tb\\c"]],"rows":1}`)
+	write(`{"meta":[{"name":"n","type":"UInt64"},{"name":"s\tt","type":"String"}],"data":[[18446744073709551615,"a\tb\\c\nd"]],"rows":1}`)
 	out := captureStdout(t, func() {
 		if err := runStatement([]string{"SELECT count() AS n, 'x' AS s FROM PLAYBOOKS"}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if out != "n\ts\n2\ta\\tb\\\\c\n" {
+	if out != "n\ts\\tt\n18446744073709551615\ta\\tb\\\\c\\nd\n" {
 		t.Errorf("TSV escaping: %q", out)
 	}
-	var rows []map[string]any
 	js := captureStdout(t, func() {
 		if err := runStatement([]string{"SELECT count() AS n, 'x' AS s FROM PLAYBOOKS", "--json"}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if json.Unmarshal([]byte(js), &rows) != nil || len(rows) != 1 || rows[0]["n"] != float64(2) {
-		t.Errorf("--json through clickhouse: %s", js)
+	if !strings.Contains(js, `"n": 18446744073709551615`) {
+		t.Errorf("--json through clickhouse: a UInt64 must stay exact: %s", js)
 	}
 	if _, err := stmt(t, "SELECT name FROM PLAYBOOKS FORMAT TSV --json"); err == nil || !strings.Contains(err.Error(), "--json and a FORMAT in the query cannot be combined") {
 		t.Errorf("--json with a FORMAT: %v", err)
