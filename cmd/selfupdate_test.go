@@ -19,7 +19,7 @@ import (
 // `<asset> --version` prints the version string, which verifyBinary checks.
 func fakeReleaseServer(t *testing.T, tag, versionOutput string) *httptest.Server {
 	t.Helper()
-	asset := fmt.Sprintf("claude-playbook-%s-%s", runtime.GOOS, runtime.GOARCH)
+	asset := fmt.Sprintf("cpb-%s-%s", runtime.GOOS, runtime.GOARCH)
 	script := "#!/bin/sh\necho \"" + versionOutput + "\"\n"
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -35,7 +35,7 @@ func fakeReleaseServer(t *testing.T, tag, versionOutput string) *httptest.Server
 
 func newExecutable(t *testing.T) string {
 	t.Helper()
-	exe := filepath.Join(t.TempDir(), "claude-playbook")
+	exe := filepath.Join(t.TempDir(), "cpb")
 	if err := os.WriteFile(exe, []byte("OLD-BINARY"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func baseConfig(exe string, srv *httptest.Server) selfUpdateConfig {
 
 func TestSelfUpdateReplacesBinary(t *testing.T) {
 	tag := "v9.9.9"
-	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	srv := fakeReleaseServer(t, tag, "cpb version "+tag)
 	defer srv.Close()
 	exe := newExecutable(t)
 
@@ -86,7 +86,7 @@ func TestSelfUpdateReplacesBinary(t *testing.T) {
 
 func TestSelfUpdateAlreadyCurrentSkips(t *testing.T) {
 	tag := "v9.9.9"
-	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	srv := fakeReleaseServer(t, tag, "cpb version "+tag)
 	defer srv.Close()
 	exe := newExecutable(t)
 
@@ -107,7 +107,7 @@ func TestSelfUpdateAlreadyCurrentSkips(t *testing.T) {
 
 func TestSelfUpdateForceReinstalls(t *testing.T) {
 	tag := "v9.9.9"
-	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	srv := fakeReleaseServer(t, tag, "cpb version "+tag)
 	defer srv.Close()
 	exe := newExecutable(t)
 
@@ -126,7 +126,7 @@ func TestSelfUpdateForceReinstalls(t *testing.T) {
 
 func TestSelfUpdateCheckOnlyDoesNotReplace(t *testing.T) {
 	tag := "v9.9.9"
-	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	srv := fakeReleaseServer(t, tag, "cpb version "+tag)
 	defer srv.Close()
 	exe := newExecutable(t)
 
@@ -149,7 +149,7 @@ func TestSelfUpdateCheckOnlyDoesNotReplace(t *testing.T) {
 func TestSelfUpdateVerifyRejectsBadDownload(t *testing.T) {
 	tag := "v9.9.9"
 	// The asset reports the WRONG version -> verification must reject it.
-	srv := fakeReleaseServer(t, tag, "claude-playbook version v0.0.0")
+	srv := fakeReleaseServer(t, tag, "cpb version v0.0.0")
 	defer srv.Close()
 	exe := newExecutable(t)
 
@@ -170,7 +170,7 @@ func TestSelfUpdateVerifyRejectsBadDownload(t *testing.T) {
 // content is produced by sums(asset, script).
 func sumsReleaseServer(t *testing.T, tag, versionOutput string, sums func(asset, script string) string) *httptest.Server {
 	t.Helper()
-	asset := fmt.Sprintf("claude-playbook-%s-%s", runtime.GOOS, runtime.GOARCH)
+	asset := fmt.Sprintf("cpb-%s-%s", runtime.GOOS, runtime.GOARCH)
 	script := "#!/bin/sh\necho \"" + versionOutput + "\"\n"
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -192,7 +192,7 @@ func scriptDigest(script string) string {
 }
 
 func TestSelfUpdateChecksumVerifies(t *testing.T) {
-	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+	srv := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
 		return scriptDigest(script) + "  " + asset + "\n"
 	})
 	defer srv.Close()
@@ -210,7 +210,7 @@ func TestSelfUpdateChecksumVerifies(t *testing.T) {
 }
 
 func TestSelfUpdateChecksumMismatchAborts(t *testing.T) {
-	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+	srv := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
 		return strings.Repeat("ab", 32) + "  " + asset + "\n"
 	})
 	defer srv.Close()
@@ -230,7 +230,7 @@ func TestSelfUpdateChecksumMismatchAborts(t *testing.T) {
 }
 
 func TestSelfUpdateChecksumMalformedWarnsAndProceeds(t *testing.T) {
-	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+	srv := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
 		return "1234  " + asset + "\n"
 	})
 	defer srv.Close()
@@ -248,7 +248,7 @@ func TestSelfUpdateChecksumMalformedWarnsAndProceeds(t *testing.T) {
 }
 
 func TestSelfUpdateNoSumsWarnsAndProceeds(t *testing.T) {
-	srv := fakeReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9")
+	srv := fakeReleaseServer(t, "v9.9.9", "cpb version v9.9.9")
 	defer srv.Close()
 	exe := newExecutable(t)
 	cfg := baseConfig(exe, srv)
@@ -264,7 +264,7 @@ func TestSelfUpdateNoSumsWarnsAndProceeds(t *testing.T) {
 }
 
 func TestSelfUpdateChecksumBinaryModeEntryVerifies(t *testing.T) {
-	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+	srv := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
 		return scriptDigest(script) + " *" + asset + "\n"
 	})
 	defer srv.Close()
@@ -282,7 +282,7 @@ func TestSelfUpdateChecksumBinaryModeEntryVerifies(t *testing.T) {
 }
 
 func TestSelfUpdateOversizedSumsWarnsAndProceeds(t *testing.T) {
-	srv := sumsReleaseServer(t, "v9.9.9", "claude-playbook version v9.9.9", func(asset, script string) string {
+	srv := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
 		return strings.Repeat("x", 70*1024)
 	})
 	defer srv.Close()
@@ -301,10 +301,10 @@ func TestSelfUpdateOversizedSumsWarnsAndProceeds(t *testing.T) {
 
 func TestIsNixStorePath(t *testing.T) {
 	for p, want := range map[string]bool{
-		"/nix/store/2y7j-claude-playbook-3.17.0/bin/claude-playbook": true,
-		"/home/u/.local/bin/claude-playbook":                         false,
-		"/nix/var/nix/profiles/default/bin/claude-playbook":          false,
-		"/tmp/nix/store/x/bin/claude-playbook":                       false,
+		"/nix/store/2y7j-cpb-3.17.0/bin/cpb":    true,
+		"/home/u/.local/bin/cpb":                false,
+		"/nix/var/nix/profiles/default/bin/cpb": false,
+		"/tmp/nix/store/x/bin/cpb":              false,
 	} {
 		if got := isNixStorePath(p); got != want {
 			t.Errorf("isNixStorePath(%q) = %v, want %v", p, got, want)
@@ -316,7 +316,7 @@ func TestIsNixStorePath(t *testing.T) {
 // generic permission-error advice ("re-run with sudo") would corrupt it.
 func TestSelfUpdateRefusesNixManagedBinary(t *testing.T) {
 	tag := "v9.9.9"
-	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	srv := fakeReleaseServer(t, tag, "cpb version "+tag)
 	defer srv.Close()
 	exe := newExecutable(t)
 
@@ -335,7 +335,7 @@ func TestSelfUpdateRefusesNixManagedBinary(t *testing.T) {
 	if got, _ := os.ReadFile(exe); string(got) != "OLD-BINARY" {
 		t.Fatalf("a Nix-managed binary was replaced: %q", got)
 	}
-	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), ".claude-playbook.update-*")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), ".cpb.update-*")); len(left) != 0 {
 		t.Fatalf("staged files left behind: %v", left)
 	}
 }
@@ -343,7 +343,7 @@ func TestSelfUpdateRefusesNixManagedBinary(t *testing.T) {
 // --check still reports, and points at devbox rather than at self-update.
 func TestSelfUpdateCheckOnlyNixManagedHintsDevbox(t *testing.T) {
 	tag := "v9.9.9"
-	srv := fakeReleaseServer(t, tag, "claude-playbook version "+tag)
+	srv := fakeReleaseServer(t, tag, "cpb version "+tag)
 	defer srv.Close()
 	exe := newExecutable(t)
 
@@ -356,7 +356,7 @@ func TestSelfUpdateCheckOnlyNixManagedHintsDevbox(t *testing.T) {
 	if err := selfUpdate(&out, cfg); err != nil {
 		t.Fatalf("selfUpdate: %v", err)
 	}
-	if !strings.Contains(out.String(), "update is available") || !strings.Contains(out.String(), "devbox.json and run `devbox install`") || strings.Contains(out.String(), "Run 'claude-playbook update'") {
+	if !strings.Contains(out.String(), "update is available") || !strings.Contains(out.String(), "devbox.json and run `devbox install`") || strings.Contains(out.String(), "Run 'cpb update'") {
 		t.Fatalf("expected the devbox hint instead of the self-update hint, got:\n%s", out.String())
 	}
 }
@@ -388,7 +388,7 @@ func TestSelfUpdateRefusesNixManagedBeforeLookup(t *testing.T) {
 // prints that tag. hits records every path asked for.
 func listServer(t *testing.T, hits *[]string, pages ...string) *httptest.Server {
 	t.Helper()
-	asset := fmt.Sprintf("claude-playbook-%s-%s", runtime.GOOS, runtime.GOARCH)
+	asset := fmt.Sprintf("cpb-%s-%s", runtime.GOOS, runtime.GOARCH)
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if hits != nil {
@@ -408,7 +408,7 @@ func listServer(t *testing.T, hits *[]string, pages ...string) *httptest.Server 
 			fmt.Fprint(w, pages[n-1])
 		case strings.HasSuffix(r.URL.Path, "/"+asset):
 			tag := filepath.Base(filepath.Dir(r.URL.Path))
-			fmt.Fprintf(w, "#!/bin/sh\necho \"claude-playbook version %s\"\n", tag)
+			fmt.Fprintf(w, "#!/bin/sh\necho \"cpb version %s\"\n", tag)
 		default:
 			http.NotFound(w, r)
 		}

@@ -23,7 +23,7 @@ func stubSbx(t *testing.T, existing ...string) string {
 		"if [ \"$1\" = ls ] && [ \"$2\" = --json ]; then J=\"$SBX_STUB_LSJSON\"; [ -n \"$J\" ] || J='{\"sandboxes\":[]}'; printf '%s' \"$J\"; exit 0; fi\n" +
 		"if [ \"$1\" = ls ]; then printf '%s\\n' $SBX_STUB_LS; fi\n" +
 		"if [ \"$1\" = exec ] && [ -n \"$SBX_STUB_STORE\" ]; then readlink \"$SBX_STUB_STORE\" > \"$(dirname \"$SBX_STUB_LOG\")/store-during-attach\" 2>/dev/null; fi\n" +
-		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.claude-playbook-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
+		"if [ \"$1\" = exec ]; then case \"$*\" in *'cat ~/.cpb-sandbox'*) [ \"$SBX_STUB_MARKER\" = none ] || printf '%s' \"${SBX_STUB_MARKER:-skills=private}\";; esac; fi\n" +
 		"if [ \"$1\" = secret ] && [ \"$2\" = ls ]; then printf 'CUSTOM SECRETS\\nSCOPE TARGETS ENV PLACEHOLDER SECRET\\n%s\\n' \"$SBX_STUB_SECRETS\"; exit 0; fi\n" +
 		"if [ \"$1\" = \"$SBX_STUB_FAIL\" ]; then echo \"stub failure: $*\" >&2; exit 1; fi\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "sbx"), []byte(script), 0o755); err != nil {
@@ -122,7 +122,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	want := []string{
 		"ls -q",
 		"create --name cpb-box --no-share-skills claude " + work + " " + pbDir + " " + extra + ":ro",
-		"exec cpb-box bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox",
+		"exec cpb-box bash -lc printf %s 'skills=private' > ~/.cpb-sandbox",
 		"policy allow network --sandbox cpb-box api.example.com",
 		"policy allow network --sandbox cpb-box router.local",
 		"exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
@@ -134,7 +134,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	}
 	attach := calls[len(calls)-1]
 	// Tests run without a terminal, so no pty is requested.
-	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-box' && cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
+	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
 		if !strings.Contains(attach, frag) {
 			t.Errorf("attach lacks %q: %q", frag, attach)
 		}
@@ -154,7 +154,7 @@ func TestRunSandboxReusesOrRecreates(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, log)
-	if len(calls) != 5 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpb-box" || !strings.HasPrefix(calls[4], "exec -i ") {
+	if len(calls) != 5 || calls[0] != "ls -q" || calls[1] != "ls --json" || !strings.Contains(calls[2], ".cpb-sandbox") || calls[3] != "secret ls --sandbox cpb-box" || !strings.HasPrefix(calls[4], "exec -i ") {
 		t.Fatalf("reuse should list, read the marker, list secrets and attach: %q", calls)
 	}
 	// A sandbox without the marker (created by an earlier release, with
@@ -258,13 +258,13 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 		t.Fatalf("shared login: %v", err)
 	}
 	store := filepath.Join(root, "box", ".credentials.json")
-	want := "/home/agent/.claude-playbook-logins/cpb-box/.credentials.json"
+	want := "/home/agent/.cpb-logins/cpb-box/.credentials.json"
 	// The stub's attach ran with the store pointing into the sandbox (the
 	// stub records the link target it saw); once the session returned,
 	// the shared link is back.
 	calls := sbxCalls(t, log)
 	last := calls[len(calls)-1]
-	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.claude-playbook-logins/cpb-box' && cd ") {
+	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd ") {
 		t.Fatalf("attach: %q", calls)
 	}
 	if seen, _ := os.ReadFile(filepath.Join(filepath.Dir(log), "store-during-attach")); strings.TrimSpace(string(seen)) != want {
@@ -509,7 +509,7 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls = sbxCalls(t, log)
-	if len(calls) != 6 || calls[1] != "ls --json" || !strings.Contains(calls[2], ".claude-playbook-sandbox") || calls[3] != "secret ls --sandbox cpbstart-scratch-dir" || !strings.HasPrefix(calls[4], "exec -i ") || calls[5] != "rm -f cpbstart-scratch-dir" {
+	if len(calls) != 6 || calls[1] != "ls --json" || !strings.Contains(calls[2], ".cpb-sandbox") || calls[3] != "secret ls --sandbox cpbstart-scratch-dir" || !strings.HasPrefix(calls[4], "exec -i ") || calls[5] != "rm -f cpbstart-scratch-dir" {
 		t.Fatalf("start --delete under always: %q", calls)
 	}
 	t.Setenv("SBX_STUB_LSJSON", "")
@@ -556,7 +556,7 @@ func TestStartSandbox(t *testing.T) {
 	if err := os.MkdirAll(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(tokenDir, "oauth-token"))
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(tokenDir, "oauth-token"))
 	// The machine store may itself be a symlink into another directory:
 	// that directory carries the machine grant too.
 	vault := filepath.Join(t.TempDir(), "vault")
@@ -590,7 +590,7 @@ func TestStartSandbox(t *testing.T) {
 			t.Fatalf("%q: --delete removed the directory after a refusal", args)
 		}
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(home, "no-token"))
 	os.RemoveAll(vault)
 	// A fresh non-isolated directory with no machine login still gets the
 	// sandbox-local link (a /login inside must not land on the mount), and
@@ -601,10 +601,10 @@ func TestStartSandbox(t *testing.T) {
 	if err := runStart(nil, []string{"--sandbox", "--workdir", work, fresh}); err != nil {
 		t.Fatal(err)
 	}
-	if target, err := os.Readlink(filepath.Join(fresh, ".credentials.json")); err != nil || target != "/home/agent/.claude-playbook-logins/cpbstart-fresh/.credentials.json" {
+	if target, err := os.Readlink(filepath.Join(fresh, ".credentials.json")); err != nil || target != "/home/agent/.cpb-logins/cpbstart-fresh/.credentials.json" {
 		t.Fatalf("fresh directory store: %q %v", target, err)
 	}
-	if calls := sbxCalls(t, log); !strings.Contains(calls[len(calls)-1], "mkdir -p '/home/agent/.claude-playbook-logins/cpbstart-fresh' && cd ") {
+	if calls := sbxCalls(t, log); !strings.Contains(calls[len(calls)-1], "mkdir -p '/home/agent/.cpb-logins/cpbstart-fresh' && cd ") {
 		t.Fatalf("fresh directory attach: %q", calls)
 	}
 }
@@ -924,7 +924,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// What ssh receives: options ended by --, the destination, and the
 	// command in its transport: base64 in CPB_CMD, decoded and evaluated by
-	// an explicit sh, the PATH widened and claude-playbook exec'd inside.
+	// an explicit sh, the PATH widened and cpb exec'd inside.
 	remote := func(cmd string) string {
 		inner := `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec ` + cmd
 		return "-- me@buildbox env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(inner)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'` + "\n"
@@ -936,7 +936,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	want := remote("claude-playbook run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'")
+	want := remote("cpb run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'")
 	if got := read(); got != want {
 		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
 	}
@@ -948,7 +948,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"ghost", "--sandbox", "--sandbox-fresh", "--clone", "--sandbox-host=me@buildbox", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {
 		t.Fatalf("after the name: %q", got)
 	}
 	// The manifest names the host: a bare launch of an always-sandboxed
@@ -957,7 +957,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"remote", "--version"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' 'remote' '--version'") {
+	if got := read(); got != remote("cpb run '--sandbox' 'remote' '--version'") {
 		t.Fatalf("manifest host: %q", got)
 	}
 	claudeLog := stubClaude(t)
@@ -983,14 +983,14 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox", "opt", "--version"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' 'opt' '--version'") {
+	if got := read(); got != remote("cpb run '--sandbox' 'opt' '--version'") {
 		t.Fatalf("manifest host with --sandbox: %q", got)
 	}
 	// --playbooks-dir travels as given: a path on that host.
 	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "me@buildbox", "ghost"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'") {
+	if got := read(); got != remote("cpb run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'") {
 		t.Fatalf("--playbooks-dir forwarding: %q", got)
 	}
 	config.PlaybooksDir = root // the flag set the process-wide registry; back to the test's
@@ -999,7 +999,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'") {
 		t.Fatalf("flag-like values: %q", got)
 	}
 	// A value that is exactly "--" keeps the registry-scan boundary the
@@ -1008,7 +1008,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
 		t.Fatalf("bare -- value: %q", got)
 	}
 	// An overridden --workdir is forwarded too, in order, so a boundary it
@@ -1016,7 +1016,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
+	if got := read(); got != remote("cpb run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
 		t.Fatalf("overridden workdir: %q", got)
 	}
 	// A manifest host forwards without evaluating any launch flag: an env
@@ -1070,7 +1070,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runStart(nil, []string{"--sandbox-host", "me@buildbox", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'") {
+	if got := read(); got != remote("cpb start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'") {
 		t.Fatalf("start forwarding: %q", got)
 	}
 	dir := filepath.Join(t.TempDir(), "remote-dir")
@@ -1083,7 +1083,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := runStart(nil, []string{"--sandbox", "--delete", dir}); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '"+dir+"'") {
+	if got := read(); got != remote("cpb start '--sandbox' '--delete' '"+dir+"'") {
 		t.Fatalf("start with a manifest host: %q", got)
 	}
 	if _, err := os.Stat(dir); err != nil {

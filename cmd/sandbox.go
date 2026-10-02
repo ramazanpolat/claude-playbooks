@@ -287,7 +287,7 @@ func sandboxHost(sb *manifest.Sandbox, opts *sandboxOpts) string {
 // forwardToSandboxHost runs this launch on host instead: the same
 // subcommand, rebuilt from what the launch parser consumed (never from
 // the raw text, so claude's own arguments are carried verbatim and
-// nothing in them is mistaken for a flag), over ssh, where claude-playbook
+// nothing in them is mistaken for a flag), over ssh, where cpb
 // and the target are installed. Every value flag is forwarded in its
 // inline form (--flag=value), so a value that looks like a flag stays a
 // value on the remote side too. Launch flags travel as typed, unevaluated:
@@ -347,7 +347,7 @@ func forwardToSandboxHost(host, subcommand string, original []string, opts *sand
 	f = append(f, wrapper...)
 	f = append(f, target)
 	f = append(f, claudeArgs...)
-	quoted := []string{"claude-playbook", subcommand}
+	quoted := []string{"cpb", subcommand}
 	for _, a := range f {
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
@@ -774,7 +774,7 @@ func isTerminal(f *os.File) bool {
 // not share: a file below the sandbox user's home, which exists only inside
 // the sandbox and persists with it.
 func sandboxLoginPath(backend sandboxBackend, name string) string {
-	return backend.homeDir() + "/.claude-playbook-logins/" + name + "/" + auth.CredentialsFileName
+	return backend.homeDir() + "/.cpb-logins/" + name + "/" + auth.CredentialsFileName
 }
 
 // isSandboxLoginLink reports whether the store at configPath is a link to
@@ -782,7 +782,7 @@ func sandboxLoginPath(backend sandboxBackend, name string) string {
 // resolves.
 func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 	target, err := os.Readlink(filepath.Join(configPath, auth.CredentialsFileName))
-	return err == nil && strings.HasPrefix(target, backend.homeDir()+"/.claude-playbook-logins/")
+	return err == nil && strings.HasPrefix(target, backend.homeDir()+"/.cpb-logins/")
 }
 
 // prepareSandboxEnv runs the host-side authentication decision for a
@@ -1147,7 +1147,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		marker, err := backend.shellOutput(name, "cat ~/"+sandboxMarkerFile+" 2>/dev/null")
 		want := sandboxMarker(sb.ShareSkills)
 		if err != nil || strings.TrimSpace(marker) != want {
-			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): an earlier claude-playbook, or a changed share_skills. Recreate it with --sandbox-fresh", name, strings.TrimSpace(marker), want)
+			return false, fmt.Errorf("sandbox %s was created with other creation-time settings (found %q, this launch needs %q): an earlier cpb, or a changed share_skills. Recreate it with --sandbox-fresh", name, strings.TrimSpace(marker), want)
 		}
 	}
 	if !exists {
@@ -1238,7 +1238,7 @@ func rewriteHostEndpoint(env []string, backend sandboxBackend) []string {
 
 // sandboxMarkerFile, below the sandbox user's home, records the
 // creation-time settings a launch cannot read back from the backend.
-const sandboxMarkerFile = ".claude-playbook-sandbox"
+const sandboxMarkerFile = ".cpb-sandbox"
 
 func sandboxMarker(shareSkills bool) string {
 	if shareSkills {

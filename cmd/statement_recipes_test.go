@@ -12,7 +12,7 @@ import (
 
 func TestApplyRecipes(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 
 	// TO fills the name-less statements; a missing target is created bare.
@@ -60,7 +60,7 @@ func TestApplyRecipes(t *testing.T) {
 // written, rather than skipping the missing target's CREATE.
 func TestApplyTargetDiscoveryError(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(root, "broken"), 0o755); err != nil {
 		t.Fatal(err)

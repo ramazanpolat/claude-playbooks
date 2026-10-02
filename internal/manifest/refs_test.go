@@ -42,7 +42,7 @@ func TestValidateRefs(t *testing.T) {
 		"both set":        {map[string]string{"T": "keychain:x"}, map[string]string{"T": "v"}, nil, "both set"},
 		"both unset":      {map[string]string{"T": "keychain:x"}, nil, []string{"T"}, "both unset"},
 		"refused key":     {map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:x"}, nil, nil, "cannot be a secret reference"},
-		"reserved key":    {map[string]string{"CLAUDE_CONFIG_DIR": "keychain:x"}, nil, nil, "managed by claude-playbook"},
+		"reserved key":    {map[string]string{"CLAUDE_CONFIG_DIR": "keychain:x"}, nil, nil, "managed by cpb"},
 	} {
 		err := ValidateRefs(c.refs, c.set, c.unset)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

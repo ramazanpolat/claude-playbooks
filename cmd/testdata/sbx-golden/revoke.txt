@@ -1,7 +1,7 @@
 == calls
 ls -q
 ls --json
-exec cpb-revoke bash -lc cat ~/.claude-playbook-sandbox 2>/dev/null
+exec cpb-revoke bash -lc cat ~/.cpb-sandbox 2>/dev/null
 secret ls --sandbox cpb-revoke
 secret set-custom --host router.local --env ANTHROPIC_AUTH_TOKEN --value cpb-revoke-ANTHROPIC_AUTH_TOKEN --placeholder cpb-revoke-ANTHROPIC_AUTH_TOKEN --sandbox cpb-revoke
 exec -i -e ANTHROPIC_BASE_URL=http://router.local:9/v1 -e CLAUDE_CONFIG_DIR=<ROOT>/revoke cpb-revoke bash -lc cd '<WORK>' && exec claude

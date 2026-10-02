@@ -19,12 +19,12 @@ import (
 // fields (registry root and playbook) to each line; those lines are still
 // read, by their path, and rewritten path-only when touched.
 
-// ReceiptPath returns the receipt file location: $CLAUDE_LAUNCHER_RECEIPT
-// (test seam), else $XDG_STATE_HOME/claude-playbook/launchers, else
-// ~/.local/state/claude-playbook/launchers. Empty when no home is known —
+// ReceiptPath returns the receipt file location: $CPB_LAUNCHER_RECEIPT
+// (test seam), else $XDG_STATE_HOME/cpb/launchers, else
+// ~/.local/state/cpb/launchers. Empty when no home is known —
 // callers then skip receipt bookkeeping rather than guess a path.
 func ReceiptPath() string {
-	if v := os.Getenv("CLAUDE_LAUNCHER_RECEIPT"); v != "" {
+	if v := os.Getenv("CPB_LAUNCHER_RECEIPT"); v != "" {
 		return v
 	}
 	base := os.Getenv("XDG_STATE_HOME")
@@ -35,7 +35,7 @@ func ReceiptPath() string {
 		}
 		base = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(base, "claude-playbook", "launchers")
+	return filepath.Join(base, "cpb", "launchers")
 }
 
 // normalizeLauncherPath is the form launcher paths are COMPARED in:

@@ -20,7 +20,7 @@ func writeCpb(t *testing.T, dir, name, text string) string {
 // INCLUDEs, or by another spelling) runs once.
 func TestApplyIncludeStacksFiles(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	dir, _ := filepath.EvalSymlinks(t.TempDir()) // reports name files by their resolved path
 	writeCpb(t, dir, "base.cpb", "CREATE OR REPLACE ENV glm SET MODEL=glm-5.3;\n")
 	if err := os.Symlink("base.cpb", filepath.Join(dir, "base-link.cpb")); err != nil {
@@ -72,7 +72,7 @@ func TestApplyIncludeRefusals(t *testing.T) {
 // file's directory, as INCLUDE does.
 func TestApplyRelativeMarketplaceSource(t *testing.T) {
 	sandboxDefaultRoot(t)
-	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	fakeClaude(t)
 	mustStmt(t, "CREATE PLAYBOOK k NO ALIAS")
 	dir, _ := filepath.EvalSymlinks(t.TempDir())

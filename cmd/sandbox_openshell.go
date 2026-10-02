@@ -110,7 +110,7 @@ func openshellPreflight() (string, error) {
 		if v == "" {
 			v = "(no version reported)"
 		}
-		return "", fmt.Errorf("OpenShell %s is not supported by this claude-playbook (it needs 0.1.2 up to 0.1.x)", strings.TrimPrefix(v, "openshell "))
+		return "", fmt.Errorf("OpenShell %s is not supported by this cpb (it needs 0.1.2 up to 0.1.x)", strings.TrimPrefix(v, "openshell "))
 	}
 	dv, err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Output()
 	major, _ := strconv.Atoi(strings.SplitN(strings.TrimSpace(string(dv)), ".", 2)[0])
@@ -477,7 +477,7 @@ func (b *openshellBackend) reuse(name string) error {
 		if b.pinned {
 			return fmt.Errorf("sandbox %s runs image %q; this launch pins Claude Code %s (%s). Recreate it with --sandbox-fresh", name, have, b.claudeVersion, want)
 		}
-		fmt.Fprintf(os.Stderr, "Sandbox %s runs image %q; this claude-playbook's default is %s: --sandbox-fresh moves it\n", name, have, want)
+		fmt.Fprintf(os.Stderr, "Sandbox %s runs image %q; this cpb's default is %s: --sandbox-fresh moves it\n", name, have, want)
 	}
 	if s.Phase == "Stopped" {
 		fmt.Fprintf(os.Stderr, "Starting sandbox %s (stopped after its last session) ...\n", name)
@@ -516,7 +516,7 @@ func openshellProfile(id, sandbox, env, host string, port int) string {
 	}
 	return "id: " + id + "\n" +
 		"display_name: " + yamlString("cpb "+sandbox+" "+env) + "\n" +
-		"description: " + yamlString("claude-playbook: "+env+" for sandbox "+sandbox) + "\n" +
+		"description: " + yamlString("cpb: "+env+" for sandbox "+sandbox) + "\n" +
 		"category: inference\n" +
 		"credentials:\n" +
 		"  - name: key\n" +

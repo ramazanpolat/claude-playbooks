@@ -1,12 +1,14 @@
 # claude-playbooks own-arena suite 2: docs-honesty — the README's
-# documented install path. Script and VERSION are pinned to the same
-# immutable tag (same policy as gentar's claude-playbooks-install
-# suite): unpinned installs hit api.github.com rate limits from the
-# shared bench egress IP, and a script pulled from mutable main could
-# drift under a pinned binary. This proves the RELEASED path — local
-# edits to install.sh are cli-head-build territory (it builds from the
-# staged tree). Bump the pin deliberately when a release should be
-# proven; cli-head-build covers the moving tip.
+# documented install path, on a release shaped as release.yml publishes it:
+# one `cpb-<os>-<arch>` asset and its SHA256SUMS.
+#
+# There is no published v4 release to pin yet, so the release is a fixture
+# served on loopback: this checkout's install.sh, and a build of this
+# checkout stamped v4.0.0 as the asset. The release PR repins the suite to
+# the published tag, script and CPB_INSTALL_VERSION on one immutable tag
+# (unpinned installs hit api.github.com rate limits from the shared bench
+# egress IP, and a script from mutable main could drift under a pinned
+# binary).
 
 [scenario]
 name = "cli-release-install"
@@ -15,15 +17,53 @@ agent = "shell"
 
 [oracle]
 steps = [
-  "curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v3.13.0/install.sh | VERSION=v3.13.0 sh",
+  # The asset: this checkout, stamped as the release it stands in for.
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=v4.0.0" -o .fixture-v4.0.0 .' ''',
+  # dl/v4.0.0/{cpb-<os>-<arch>,SHA256SUMS}, and dlbad/ with an asset that does
+  # not match the sums beside it.
+  '''os=$(uname -s | tr '[:upper:]' '[:lower:]'); case $(uname -m) in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; esac; for d in dl dlbad; do mkdir -p "$HOME/fx/$d/v4.0.0"; done && cp "$WORKSPACE_DIR/.fixture-v4.0.0" "$HOME/fx/dl/v4.0.0/cpb-$os-$a" && (cd "$HOME/fx/dl/v4.0.0" && { sha256sum "cpb-$os-$a" 2>/dev/null || shasum -a 256 "cpb-$os-$a"; } > SHA256SUMS) && cp "$HOME/fx/dl/v4.0.0/SHA256SUMS" "$HOME/fx/dlbad/v4.0.0/" && printf 'not a binary\n' > "$HOME/fx/dlbad/v4.0.0/cpb-$os-$a"''',
+  # serve.sh DL CMD...: serve ~/fx on a free loopback port for the length of
+  # CMD, with the download base pointed at ~/fx/DL. The server binds port 0
+  # itself and reports what it got, so no port is picked and released for
+  # someone else to take; the trap stops it however this script ends.
+  '''cat > "$HOME/serve.sh" <<'EOF'
+#!/bin/sh
+dl=$1; shift
+log=$(mktemp)
+python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$HOME/fx" >"$log" 2>&1 &
+pid=$!
+cpid=
+trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
+trap 'exit 143' INT TERM HUP
+i=0; port=
+while [ -z "$port" ] && [ "$i" -lt 300 ]; do port=$(sed -n 's/.* port \([0-9][0-9]*\).*/\1/p' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || { kill -0 "$pid" 2>/dev/null || break; sleep 0.1; }; done
+[ -n "$port" ] || { echo "serve: server did not start; its output:" >&2; cat "$log" >&2; exit 3; }
+export CPB_INSTALL_DOWNLOAD_BASE="http://127.0.0.1:$port/$dl"
+"$@" & cpid=$!
+wait "$cpid"
+EOF
+chmod +x "$HOME/serve.sh"''',
+  '''"$HOME/serve.sh" dl env CPB_INSTALL_VERSION=v4.0.0 CPB_INSTALL_DIR="$HOME/.local/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/install.out" 2>&1''',
 ]
-
-[[verify.files]]
-path = "~/.local/bin/claude-playbook"
 
 [[verify.files]]
 path = "~/.local/bin/cpb"
 
 [[verify.commands]]
-command = "claude-playbook --version"
-contains = "v3.13.0"
+command = "cpb --version"
+contains = "cpb version v4.0.0"
+
+[[verify.commands]]
+# One regular file, named cpb, and nothing else: no second name, no symlink.
+command = '''test -f "$HOME/.local/bin/cpb" && test ! -L "$HOME/.local/bin/cpb" && [ "$(ls -A "$HOME/.local/bin")" = cpb ] && echo one-file'''
+contains = "one-file"
+
+[[verify.commands]]
+# The asset was checked against the release's SHA256SUMS.
+command = '''grep -qF "Checksum verified (sha256)." "$HOME/install.out" && echo sums-verified'''
+contains = "sums-verified"
+
+[[verify.commands]]
+# An asset that does not match its sums aborts, and installs nothing.
+command = '''if "$HOME/serve.sh" dlbad env CPB_INSTALL_VERSION=v4.0.0 CPB_INSTALL_DIR="$HOME/bad" sh "$WORKSPACE_DIR/install.sh" > "$HOME/bad.out" 2>&1; then echo installed-a-mismatch; else grep -q "checksum mismatch for cpb-" "$HOME/bad.out" && [ -z "$(ls -A "$HOME/bad" 2>/dev/null)" ] && echo mismatch-refused; fi'''
+contains = "mismatch-refused"

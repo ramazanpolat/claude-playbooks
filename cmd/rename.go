@@ -93,7 +93,7 @@ func doRename(o renameOpts, args []string) error {
 	if writeName != "" && launcherOpsAllowed() {
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 			if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
-				return fmt.Errorf("command name %q is taken by a file claude-playbook did not generate", writeName)
+				return fmt.Errorf("command name %q is taken by a file cpb did not generate", writeName)
 			}
 		}
 	}

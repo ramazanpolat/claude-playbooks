@@ -10,12 +10,12 @@ import (
 	"testing"
 )
 
-const overrideEnv = "CLAUDE_CONFIG_DIR_OVERRIDE"
+const overrideEnv = "CPB_CONFIG_DIR"
 
 // configDirEnv is the variable the child receives; the override is the request.
 const configDirEnv = "CLAUDE_CONFIG_DIR"
 
-// runFailing runs claude-playbook expecting a non-zero exit, and returns the
+// runFailing runs cpb expecting a non-zero exit, and returns the
 // combined output. The counterpart to childEnv, which fails the test on a
 // non-zero exit and so cannot express a refusal.
 func runFailing(t *testing.T, playbooksDir string, env, args []string) string {
@@ -30,12 +30,12 @@ func runFailing(t *testing.T, playbooksDir string, env, args []string) string {
 	}, env...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatalf("expected claude-playbook %v to fail, it succeeded:\n%s", args, out)
+		t.Fatalf("expected cpb %v to fail, it succeeded:\n%s", args, out)
 	}
 	return string(out)
 }
 
-// runOutput runs claude-playbook expecting success, and returns its combined
+// runOutput runs cpb expecting success, and returns its combined
 // output. childEnv asserts on the CHILD's environment; this asserts on what the
 // tool itself said to the operator.
 func runOutput(t *testing.T, playbooksDir string, env, args []string) string {
@@ -50,7 +50,7 @@ func runOutput(t *testing.T, playbooksDir string, env, args []string) string {
 	}, env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("claude-playbook %v: %v\n%s", args, err, out)
+		t.Fatalf("cpb %v: %v\n%s", args, err, out)
 	}
 	return string(out)
 }
@@ -247,7 +247,7 @@ func TestLauncherDispatchHonoursOverride(t *testing.T) {
 		"HOME=" + work,
 		dumpEnv + "=" + dump,
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
-		"CLAUDE_PLAYBOOKS_DIR=" + root,
+		"CPB_PLAYBOOKS_DIR=" + root,
 		overrideEnv + "=" + record,
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -352,7 +352,7 @@ func TestOverrideCannotBeReintroducedByEnvLayers(t *testing.T) {
 
 	t.Run("launch flag", func(t *testing.T) {
 		out := runFailing(t, root, nil, []string{"run", "--env", overrideEnv + "=/leak", "pb"})
-		if !strings.Contains(out, "managed by claude-playbook") {
+		if !strings.Contains(out, "managed by cpb") {
 			t.Errorf("--env %s was not refused:\n%s", overrideEnv, out)
 		}
 	})
@@ -368,7 +368,7 @@ func TestOverrideCannotBeReintroducedByEnvLayers(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := runFailing(t, root, nil, []string{"run", "pb"})
-		if !strings.Contains(out, "managed by claude-playbook") {
+		if !strings.Contains(out, "managed by cpb") {
 			t.Errorf("a manifest setting %s was not refused:\n%s", overrideEnv, out)
 		}
 	})
@@ -379,14 +379,14 @@ func TestOverrideCannotBeReintroducedByEnvLayers(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := runFailing(t, root, nil, []string{"run", "--env-file", f, "pb"})
-		if !strings.Contains(out, "managed by claude-playbook") {
+		if !strings.Contains(out, "managed by cpb") {
 			t.Errorf("an env file setting %s was not refused:\n%s", overrideEnv, out)
 		}
 	})
 
 	t.Run("env set", func(t *testing.T) {
 		out := runFailing(t, root, nil, []string{"CREATE", "ENV", "leaky", "SET", overrideEnv + "=/leak"})
-		if !strings.Contains(out, "managed by claude-playbook") {
+		if !strings.Contains(out, "managed by cpb") {
 			t.Errorf("a profile setting %s was not refused:\n%s", overrideEnv, out)
 		}
 	})
@@ -589,7 +589,7 @@ func TestInputErrorsPrecedeTheAgentLookup(t *testing.T) {
 	}{
 		{"flag without a value", []string{"run", "--env"}, "needs an argument"},
 		{"--env not KEY=VALUE", []string{"run", "--env", "NOTKV", "pb"}, "expects KEY=VALUE"},
-		{"reserved key", []string{"run", "--env", overrideEnv + "=/x", "pb"}, "managed by claude-playbook"},
+		{"reserved key", []string{"run", "--env", overrideEnv + "=/x", "pb"}, "managed by cpb"},
 		{"--env-file missing", []string{"run", "--env-file", filepath.Join(home, "nope.env"), "pb"}, "--env-file"},
 		{"--env-file malformed", []string{"run", "--env-file", badFile, "pb"}, "--env-file"},
 		{"profile does not resolve", []string{"run", "--env-profile", "ghost", "pb"}, "env profile"},

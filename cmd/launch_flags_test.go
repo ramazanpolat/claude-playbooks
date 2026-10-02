@@ -65,8 +65,8 @@ func TestHelpAfterLaunchFlagsPrintsUsage(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"run", func(a []string) error { return runRun(nil, a) }, []string{"--env", "K=V", "--help"}, "Usage: claude-playbook run"},
-		{"start", func(a []string) error { return runStart(nil, a) }, []string{"--env-file=" + writeTempEnvFile(t), "-h"}, "Usage: claude-playbook start"},
+		{"run", func(a []string) error { return runRun(nil, a) }, []string{"--env", "K=V", "--help"}, "Usage: cpb run"},
+		{"start", func(a []string) error { return runStart(nil, a) }, []string{"--env-file=" + writeTempEnvFile(t), "-h"}, "Usage: cpb start"},
 	} {
 		out := captureStdout(t, func() {
 			if err := tc.run(tc.args); err != nil {

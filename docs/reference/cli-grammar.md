@@ -26,7 +26,7 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
   (refused with an error naming the keyword); an existing object whose name
   is a keyword can still be addressed in the name slot.
 - **Global flags go before the verb** (`cpb --playbooks-dir X ALTER …`), and
-  `CLAUDE_PLAYBOOKS_DIR` works as today. cpb recognises a statement before
+  `CPB_PLAYBOOKS_DIR` works as today. cpb recognises a statement before
   its flag parser runs, so every word after the verb belongs to the
   statement: `SET VAR OPTS=-v` is a value, and `--dry-run` /
   `--skip-secrets` are the statement's own.
@@ -523,7 +523,7 @@ closed sets** within a major version.
 --json` is not in this release. The human lines of the dry run go to
 stderr.
 
-A dry run **creates nothing**: not the store (`CLAUDE_PLAYBOOKS_DIR`),
+A dry run **creates nothing**: not the store (`CPB_PLAYBOOKS_DIR`),
 nothing under it, and no lock file. A store that does not exist yet is
 planned as empty.
 

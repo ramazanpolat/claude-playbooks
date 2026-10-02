@@ -348,7 +348,7 @@ func TestRunResumeFromAnotherFolder(t *testing.T) {
 	root, work, _ := sessionFixture(t)
 	log := resumeClaude(t)
 	chdirT(t, t.TempDir())
-	want := "cd " + shellQuoteTest(work) + " && claude-playbook run beta --resume " + sidOld
+	want := "cd " + shellQuoteTest(work) + " && cpb run beta --resume " + sidOld
 	if l, _, err := runClaude(t, log, "beta", "--resume", sidOld); err == nil || !strings.Contains(err.Error(), "ran in "+work) || !strings.Contains(err.Error(), want) || l != "" {
 		t.Fatalf("elsewhere: %v (claude: %q), want %q", err, l, want)
 	}

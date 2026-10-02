@@ -1,7 +1,7 @@
 # claude-playbooks own-arena suite 14: SIMULATED PILOT at the most
 # destructive prompt the tool has.
 #
-# `self-uninstall` removes the binary, its cpb sibling, every launcher
+# `self-uninstall` removes the binary, every launcher
 # pointing at it, completion lines from rc files, and -- by default -- every
 # playbook and the playbooks root. Nothing tested it. It appeared in
 # docs-honesty's --help list, which proves the command exists, not that it
@@ -26,20 +26,18 @@ template = "gentar-bench-v1"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
-  # The cpb sibling, as a real install has it: a RELATIVE symlink.
-  'ln -sf claude-playbook "$HOME/.local/bin/cpb"',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   # Two launchers for the sweep to find, and they have to be made the way a
   # pilot makes them: `create X --alias y` registers ONLY y, replacing the
   # default rather than adding to it, so a second command is what produces
   # both. Asserted below before the uninstall, so "removed" cannot pass by
   # having never existed -- which is exactly what an earlier draft of this
   # suite did.
-  '"$HOME/.local/bin/claude-playbook" CREATE PLAYBOOK keeper-one',
-  '"$HOME/.local/bin/claude-playbook" ALTER PLAYBOOK keeper-one ALIAS k1',
+  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK keeper-one',
+  '"$HOME/.local/bin/cpb" ALTER PLAYBOOK keeper-one ALIAS k1',
   # And one deliberately WITHOUT a launcher: it must still survive --keep-data.
-  '"$HOME/.local/bin/claude-playbook" CREATE PLAYBOOK keeper-two NO ALIAS',
+  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK keeper-two NO ALIAS',
   # A file that is NOT ours, in the same directory the sweep walks. It must
   # survive: the sweep removes symlinks resolving to THIS binary, nothing else.
   '''printf '%s\n' '#!/bin/sh' 'echo not ours' > "$HOME/.local/bin/bystander"''',
@@ -51,8 +49,8 @@ steps = [
   # verifies -- so anything asserted in verify happens after the uninstall,
   # when there is nothing left to have preserved. A step that exits non-zero
   # fails the suite, which is the assertion.
-  '"$HOME/.local/bin/claude-playbook" self-uninstall --dry-run >/dev/null',
-  'test -x "$HOME/.local/bin/claude-playbook"',
+  '"$HOME/.local/bin/cpb" self-uninstall --dry-run >/dev/null',
+  'test -x "$HOME/.local/bin/cpb"',
   'test -d "$HOME/.claude-playbooks/keeper-one"',
   # Both launchers exist NOW. Without this the removal assertions below are
   # satisfied by absence that was never presence.
@@ -64,15 +62,15 @@ steps = [
 [driver]
 # Interactive, with --keep-data: the pilot is removing the TOOL, not their
 # work. A bare run would read EOF and cancel, which is why this is a pty.
-command = 'claude-playbook self-uninstall --keep-data'
+command = 'cpb self-uninstall --keep-data'
 
 turns = [
   { type = "answer", prompt = "Permanently uninstall", send = "y", timeout = 60 },
 ]
 
 [[verify.commands]]
-# The binary and its sibling are gone.
-command = 'test ! -e "$HOME/.local/bin/claude-playbook" && test ! -e "$HOME/.local/bin/cpb" && echo binary-removed'
+# The binary is gone.
+command = 'test ! -e "$HOME/.local/bin/cpb" && echo binary-removed'
 contains = "binary-removed"
 
 [[verify.commands]]

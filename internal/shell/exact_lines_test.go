@@ -7,8 +7,8 @@ import (
 )
 
 var completionDoomed = []string{
-	"source <(claude-playbook completion bash)",
-	"source <(claude-playbook completion zsh)",
+	"source <(cpb completion bash)",
+	"source <(cpb completion zsh)",
 	"source <(cpb completion bash)",
 	"source <(cpb completion zsh)",
 }
@@ -16,7 +16,7 @@ var completionDoomed = []string{
 func TestRemoveExactLinesKeepsEverythingElse(t *testing.T) {
 	rc := filepath.Join(t.TempDir(), ".zshrc")
 	content := "export PATH=/usr/local/bin:$PATH\n" +
-		"source <(claude-playbook completion zsh)\n" +
+		"source <(cpb completion zsh)\n" +
 		"alias ll='ls -la'\n" +
 		"source <(cpb completion zsh)\n" +
 		"# source <(cpb completion zsh) -- commented, must stay\n" +
@@ -53,11 +53,11 @@ func TestRemoveExactLinesKeepsEverythingElse(t *testing.T) {
 }
 
 func TestRemoveExactLinesKeepsPrecedingClaudePlaybookComment(t *testing.T) {
-	// The alias editors strip a preceding "# claude-playbook:" marker line;
+	// The alias editors strip a preceding "# cpb:" marker line;
 	// completion lines are never written with one, so here such a comment is
 	// user-authored and must survive.
 	rc := filepath.Join(t.TempDir(), ".zshrc")
-	content := "# claude-playbook: custom setup\nsource <(cpb completion zsh)\n"
+	content := "# cpb: custom setup\nsource <(cpb completion zsh)\n"
 	if err := os.WriteFile(rc, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestRemoveExactLinesKeepsPrecedingClaudePlaybookComment(t *testing.T) {
 		t.Fatalf("removed %d lines, want 1", n)
 	}
 	got, _ := os.ReadFile(rc)
-	if string(got) != "# claude-playbook: custom setup\n" {
+	if string(got) != "# cpb: custom setup\n" {
 		t.Fatalf("user comment did not survive: %q", got)
 	}
 }
@@ -129,7 +129,7 @@ func TestRemoveExactLinesNoMatchLeavesFileUntouched(t *testing.T) {
 
 func TestCountExactLines(t *testing.T) {
 	rc := filepath.Join(t.TempDir(), ".bashrc")
-	if err := os.WriteFile(rc, []byte("a\nsource <(cpb completion bash)\nsource <(claude-playbook completion bash)\n"), 0o644); err != nil {
+	if err := os.WriteFile(rc, []byte("a\nsource <(cpb completion bash)\nsource <(cpb completion bash)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	n, err := CountExactLines(rc, completionDoomed)

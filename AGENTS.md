@@ -2,7 +2,7 @@
 
 For an agent (Claude Code, Codex, Gemini, OpenCode, …) asked to install,
 verify, update, deploy or uninstall **claude-playbooks** (`cpb`,
-`claude-playbook`). Each step gives the exact command and how to tell it
+`cpb`). Each step gives the exact command and how to tell it
 worked. The human docs are linked, not repeated.
 
 If you are writing or driving playbooks rather than installing the tool,
@@ -124,7 +124,7 @@ A binary installed through devbox or Nix is never replaced by `cpb self-update`
 ## Deploy in a devbox project
 
 ```sh
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#claude-playbook"
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/<tag>#cpb"
 devbox run -- cpb --version       # verify: exit 0, the tag's version
 ```
 
@@ -165,7 +165,7 @@ CI cannot run it. Two things keep it honest:
   change to the backend seam must also leave `TestSbxCallLogGolden`
   (`cmd/testdata/sbx-golden/`) passing unchanged: that test pins the whole
   sbx launch.
-- **The end-to-end run** (`tests/openshell-e2e.sh <claude-playbook binary>`) runs
+- **The end-to-end run** (`tests/openshell-e2e.sh <cpb binary>`) runs
   on a disposable Linux host with OpenShell, never on a workstation. It uses dummy keys, restarts the gateway twice and restores it.
   It must end `0 failed`, including the Claude Code TUI under the generated
   policy.

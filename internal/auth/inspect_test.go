@@ -21,7 +21,7 @@ func inspectFixture(t *testing.T) (root, configDir string) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 	os.Unsetenv(OAuthTokenEnv)
 	t.Setenv(oauthTokenFileEnv, filepath.Join(home, "no-token"))
@@ -47,7 +47,7 @@ func TestInspectModes(t *testing.T) {
 		if r.Mode != ModeToken || r.TokenFile != tf || r.NeedsAttention() != "" {
 			t.Fatalf("%+v", r)
 		}
-		// ~/.claude is not launched by claude-playbook: the token FILE does
+		// ~/.claude is not launched by cpb: the token FILE does
 		// not make it token mode, only the exported variable does.
 		home, _ := os.UserHomeDir()
 		global := filepath.Join(home, ".claude")
@@ -198,7 +198,7 @@ func TestInspectGlobalIgnoresIsolationOverride(t *testing.T) {
 	if err := os.MkdirAll(global, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
 	if g := InspectGlobal(global, time.Now()); g.Mode != ModeSharedLogin {
 		t.Fatalf("global mode = %s, want shared-login", g.Mode)
 	}

@@ -79,7 +79,7 @@ func TestSyncCredentialsRepairsWrongSymlink(t *testing.T) {
 }
 
 func TestSyncCredentialsPreservesValidLocalCredentials(t *testing.T) {
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".claude")
@@ -147,7 +147,7 @@ func TestSyncCredentialsIsolationDoesNotCreateCredentials(t *testing.T) {
 }
 
 func TestSyncCredentialsIsolationDetachesExistingSymlink(t *testing.T) {
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	globalDir := filepath.Join(home, ".claude")

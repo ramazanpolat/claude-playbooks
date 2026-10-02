@@ -1,4 +1,4 @@
-# Claude Playbooks
+# cpb (Claude PlayBooks)
 
 [![CI](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml/badge.svg)](https://github.com/ramazanpolat/claude-playbooks/actions/workflows/ci.yml)
 
@@ -24,7 +24,7 @@ cpb CREATE PLAYBOOK sre SANDBOX                    # every launch inside a micro
 work                                               # Claude Code, bound to that playbook
 ```
 
-![claude-playbook demo](docs/demo.gif)
+![cpb demo](docs/demo.gif)
 
 ## Install
 
@@ -32,7 +32,7 @@ work                                               # Claude Code, bound to that 
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
 ```
 
-Linux and macOS, amd64/arm64. Installs `claude-playbook` and the shorter `cpb`;
+Linux and macOS, amd64/arm64. Installs `cpb` and the shorter `cpb`;
 `cpb self-update` updates it. [devbox, Nix, npx and source builds →](docs/guides/installation.md)
 
 ## What you can do with it

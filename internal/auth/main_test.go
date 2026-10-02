@@ -38,8 +38,8 @@ func TestMain(m *testing.M) {
 	// which the scratch HOME already isolates, and several tests build their
 	// layout under the HOME they set themselves.
 	os.Setenv("HOME", scratch)
-	os.Setenv("CLAUDE_PLAYBOOKS_OAUTH_TOKEN_FILE", scratch+"/no-token")
-	os.Unsetenv("CLAUDE_PLAYBOOKS_DIR")
+	os.Setenv("CPB_OAUTH_TOKEN_FILE", scratch+"/no-token")
+	os.Unsetenv("CPB_PLAYBOOKS_DIR")
 	os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN")
 	code := m.Run()
 	os.RemoveAll(scratch)

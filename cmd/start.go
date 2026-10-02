@@ -73,7 +73,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// A --help at the PATH position prints usage, whether or not launch
 	// flags preceded it; after the path, the flag is forwarded to claude.
 	if restRequestsHelp(rest) {
-		fmt.Println("Usage: claude-playbook start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
+		fmt.Println("Usage: cpb start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
 		fmt.Println()
 		fmt.Println("Starts an ad-hoc Claude Code session at the given directory.")
 		fmt.Println("Creates the directory if it does not exist.")
@@ -100,7 +100,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		// "--" is never a path: taking it as one would resume wrapper
 		// parsing right after it, and `start -- --delete` would remove a
 		// directory literally named "--".
-		return fmt.Errorf("path required\nUsage: claude-playbook start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
+		return fmt.Errorf("path required\nUsage: cpb start " + runFlagsUsage + " [--delete] <path> [claude-flags...]")
 	}
 
 	path := rest[0]

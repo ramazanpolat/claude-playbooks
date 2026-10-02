@@ -114,7 +114,7 @@ func tokenEntries(env []string) []string {
 // credentials symlink survived, because SyncCredentials (the only caller of
 // isAuthIsolated) was skipped entirely.
 func TestPrepareLaunchEnvIsolatedPlaybookRejectsTokenFromFile(t *testing.T) {
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
 
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "oauth-token")
@@ -160,7 +160,7 @@ func TestPrepareLaunchEnvIsolatedPlaybookRejectsTokenFromFile(t *testing.T) {
 // playbook, inheriting is exactly the failure -- so it must be stripped, not
 // merely left uninjected.
 func TestPrepareLaunchEnvIsolatedStripsInheritedToken(t *testing.T) {
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "true")
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-INHERITED")
 
 	dir := t.TempDir()
@@ -189,8 +189,8 @@ func TestPrepareLaunchEnvIsolatedStripsInheritedToken(t *testing.T) {
 // one entry -- not a second, appended copy whose resolution would depend on
 // exec's duplicate-key behaviour.
 func TestPrepareLaunchEnvInheritedTokenNotDuplicated(t *testing.T) {
-	t.Setenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH", "")
-	os.Unsetenv("CLAUDE_PLAYBOOKS_ISOLATE_AUTH")
+	t.Setenv("CPB_ISOLATED_LOGIN", "")
+	os.Unsetenv("CPB_ISOLATED_LOGIN")
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-FROMENV")
 
 	dir := t.TempDir()

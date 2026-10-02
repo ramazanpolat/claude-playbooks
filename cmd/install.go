@@ -250,7 +250,7 @@ func doInstall(o installOpts, args []string) error {
 
 	// Alias handling.
 	if o.noAlias {
-		fmt.Printf("\nRun with:\n  claude-playbook run %s\n", targetName)
+		fmt.Printf("\nRun with:\n  cpb run %s\n", targetName)
 	} else {
 		// A custom command name must be resolvable at invocation time: record
 		// it as the manifest alias so multicall dispatch finds the playbook.
@@ -286,7 +286,7 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 		if _, err := exec.LookPath("git"); err != nil {
 			return "", func() {}, fmt.Errorf("'git' command not found")
 		}
-		tmp, err := os.MkdirTemp("", "claude-playbook-clone-")
+		tmp, err := os.MkdirTemp("", "cpb-clone-")
 		if err != nil {
 			return "", func() {}, err
 		}
@@ -384,7 +384,7 @@ func stageTempDir(work string) (string, error) {
 	}
 	candidates := []string{os.TempDir()}
 	if cache, err := os.UserCacheDir(); err == nil {
-		candidates = append(candidates, filepath.Join(cache, "claude-playbook"))
+		candidates = append(candidates, filepath.Join(cache, "cpb"))
 	}
 	for _, base := range candidates {
 		// A relative TMPDIR (".tmp" while running inside the source) must
@@ -406,7 +406,7 @@ func stageTempDir(work string) (string, error) {
 		if err := os.MkdirAll(base, 0o755); err != nil {
 			continue
 		}
-		if tmp, err := os.MkdirTemp(base, "claude-playbook-stage-"); err == nil {
+		if tmp, err := os.MkdirTemp(base, "cpb-stage-"); err == nil {
 			return tmp, nil
 		}
 	}

@@ -4,8 +4,8 @@
 # build.sh emits the binary at the repo root; the release workflow cross-compiles
 # into dist/. These are anchored with a leading slash: as bare patterns they
 # would match a file or directory of that name at ANY depth, so a future
-# cmd/claude-playbook/ package would be silently dropped from the tree.
-/claude-playbook
+# cmd/cpb/ package would be silently dropped from the tree.
+/cpb
 /cpb
 /bin/test-cpb
 /dist/

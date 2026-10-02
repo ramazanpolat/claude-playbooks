@@ -11,7 +11,7 @@ import (
 )
 
 // The known issue's path 2, end to end: one launch isolated by
-// CLAUDE_PLAYBOOKS_ISOLATE_AUTH, a login of another account made there, then
+// CPB_ISOLATED_LOGIN, a login of another account made there, then
 // a plain launch. The machine store stays byte-identical, and the login is
 // set aside, not copied (v3.23.1).
 func TestOneIsolatedLaunchNeverSwapsTheMachineLogin(t *testing.T) {

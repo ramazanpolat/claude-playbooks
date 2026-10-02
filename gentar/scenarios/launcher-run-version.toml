@@ -15,16 +15,16 @@ template = "gentar-bench-v1"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
-  'claude-playbook CREATE PLAYBOOK run-version-pb',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
+  'cpb CREATE PLAYBOOK run-version-pb',
 ]
 
 [[verify.commands]]
 # claude --version answers keyless; wrapping proves BOTH exit 0 and
 # captured output in one check. Flags after the name are forwarded —
 # that forwarding is under test as much as the spawn.
-command = 'out=$(claude-playbook run run-version-pb --version 2>&1) && printf "runok:%s" "$out"'
+command = 'out=$(cpb run run-version-pb --version 2>&1) && printf "runok:%s" "$out"'
 contains = "runok:"
 
 [[verify.commands]]

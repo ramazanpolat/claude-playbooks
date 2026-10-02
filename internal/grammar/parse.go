@@ -353,7 +353,7 @@ func (p *parser) launcher() (string, *Error) {
 		return "", errAt(t.Pos, fmt.Sprintf("%q is a keyword and cannot name a launcher", t.Text))
 	}
 	if launcher.ValidateName(t.Text) != nil {
-		return "", errAt(t.Pos, "invalid launcher name: one word, with no path separator or whitespace (cpb and claude-playbook are reserved)")
+		return "", errAt(t.Pos, "invalid launcher name: one word, with no path separator or whitespace (cpb is reserved)")
 	}
 	p.i++
 	return t.Text, nil

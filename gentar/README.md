@@ -243,7 +243,7 @@ only says what each suite is for.
 | `launcher-run-version` | `run` launches claude with the playbook wired (keyless, via `--version`) |
 | `env-overrides` | manifest `[env]`, env sets and launch flags reach the child process |
 | `cli-grammar` | the statement grammar on the real launch path: env sets, DEFAULTS, a secret reference resolved by a stub helper, `EXPLAIN --json`, `SHOW CREATE` into `APPLY` with no change, `APPLY` across files, the `DROP PLAYBOOK` guard, source drift, a credential literal never printed, `INCLUDE` stacking files (shared base once, later layer wins, cycle refused), the plugin clauses through a stub `claude plugin`, and v3.21.0's MCP servers (credential by reference), tools / status line / model, skills, recipes and `TO <playbook>` / `TO '<dir>'`, `SELECT` (stub clickhouse-local), a git marketplace's `#ref`, and v3.22.0's `APPLY --dry-run --json` (schema, exit codes, a dry run that writes nothing, references never values) model picker, the refusal of a claude too old for the plugin clauses, `DESCRIBE`, and v3.26.0's `SELECT --json` key order and a sandboxed launch refusing when its key cannot be registered at the proxy (stub `sbx`), and v3.27.0's `github:` marketplace pinned to a tag (a commit refused) |
-| `config-dir-override` | `CLAUDE_CONFIG_DIR_OVERRIDE` end to end |
+| `config-dir-override` | `CPB_CONFIG_DIR` end to end |
 | `auth-status` | `auth status` reports without touching anything |
 | `pilot-interactive-delete` | a simulated pilot answering prompts on a pty |
 | `pilot-self-uninstall` | a simulated pilot at the most destructive prompt the tool has |
@@ -287,7 +287,7 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
   is `cli-head-build`, `docs-honesty` and `playbook-lifecycle`; Go 1.26 for the
   bench-free checks (and `golang:1.26` for the bench's build); phase 2 on dispatch, the `arena` tag or a `v*-rc*` tag; a
   release gate.
-- **`gentar/hooks.py`**: `prepare()` builds `claude-playbook` the way the bench
+- **`gentar/hooks.py`**: `prepare()` builds `cpb` the way the bench
   does; `SKIP_STEP_SUBSTR` skips the container build it replaces;
   `HIDE_FROM_PATH` hides `cpb` (suites create it).
 - **`gentar/policy.toml` `os`**: the bench-free checks run on Ubuntu and on

@@ -7,7 +7,7 @@
 // process.env.CLAUDE_CODE_OAUTH_TOKEN. Under token auth nothing refreshes that
 // stored grant, so it expires and the first transient 401 swaps a working
 // long-lived token for a dead one that cannot be refreshed either -- forcing an
-// interactive /login. claude-playbook removes the grant so the recovery path
+// interactive /login. cpb removes the grant so the recovery path
 // finds nothing to adopt.
 //
 // The unit tests in internal/auth cover the file surgery. These assert the

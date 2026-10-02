@@ -24,21 +24,20 @@ var (
 
 var selfUninstallCmd = &cobra.Command{
 	Use:   "self-uninstall",
-	Short: "Remove claude-playbook, its playbooks, launchers, and shell integration",
+	Short: "Remove cpb, its playbooks, launchers, and shell integration",
 	Long: `Removes all installed playbooks, their launcher commands, the
 completion lines install.sh added to shell rc files, the playbooks
-directory, and the claude-playbook binary itself.
+directory, and the cpb binary itself.
 
 Use --keep-data to preserve the playbooks directory.
 Use --keep-binary to leave the binary in place.
-Use --binary-only to remove only the binary, its cpb sibling, launchers,
-and completion lines — playbooks stay (uninstall.sh
-delegates to this mode).
+Use --binary-only to remove only the binary, launchers, and completion
+lines — playbooks stay (uninstall.sh delegates to this mode).
 Use --dry-run to preview what would be removed without making any changes.
 
 Launchers are removed wherever they were created: every launcher this
 tool writes is recorded in a registry file, so custom --launcher-dir and
-CLAUDE_LAUNCHER_DIR locations are cleaned automatically; a resolution
+CPB_LAUNCHER_DIR locations are cleaned automatically; a resolution
 scan of the standard directories additionally covers launchers that
 predate the registry.`,
 	Args: cobra.NoArgs,
@@ -49,7 +48,7 @@ func init() {
 	selfUninstallCmd.Flags().BoolVarP(&selfUninstallYes, "yes", "y", false, "skip confirmation prompt")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepData, "keep-data", false, "preserve the playbooks directory")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallKeepBinary, "keep-binary", false, "leave the binary in place")
-	selfUninstallCmd.Flags().BoolVar(&selfUninstallBinaryOnly, "binary-only", false, "remove only the binary, its cpb sibling, launchers, and completion lines — playbooks untouched (what uninstall.sh runs)")
+	selfUninstallCmd.Flags().BoolVar(&selfUninstallBinaryOnly, "binary-only", false, "remove only the binary, launchers, and completion lines — playbooks untouched (what uninstall.sh runs)")
 	selfUninstallCmd.Flags().BoolVar(&selfUninstallDryRun, "dry-run", false, "print what would be removed without doing anything")
 }
 
@@ -79,9 +78,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		if !selfUninstallKeepBinary {
 			fmt.Printf("  Binary:        %s\n", execPath)
-			if s := siblingToRemove(execPath); s != "" {
-				fmt.Printf("  Sibling:       %s\n", s)
-			}
 		}
 		for _, e := range launcherRemovalPlan(pbs) {
 			fmt.Printf("  Launcher:      %s (%s)\n", e.CmdName, e.Path)
@@ -99,7 +95,7 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 			}
 		}
 		fmt.Println()
-		if !confirm("Permanently uninstall claude-playbook? [y/N] ") {
+		if !confirm("Permanently uninstall cpb? [y/N] ") {
 			fmt.Println("Cancelled.")
 			return nil
 		}
@@ -119,9 +115,6 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 		if !selfUninstallKeepBinary {
 			fmt.Printf("  binary: %s\n", execPath)
-			if s := siblingToRemove(execPath); s != "" {
-				fmt.Printf("  sibling: %s\n", s)
-			}
 		}
 		for _, e := range launcherRemovalPlan(pbs) {
 			fmt.Printf("  launcher: %s (%s)\n", e.CmdName, e.Path)
@@ -206,12 +199,8 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 4: remove the binary. The sibling must be identified BEFORE the
-	// binary goes: ownership is proven by both resolving to the same file,
-	// which is impossible to check once one of them is deleted.
+	// Step 4: remove the binary.
 	if !selfUninstallKeepBinary && execPath != "(unknown)" {
-		siblingPath := siblingToRemove(execPath)
-
 		if err := os.Remove(execPath); err != nil {
 			if os.IsPermission(err) {
 				fmt.Fprintf(os.Stderr, "note: cannot remove binary (permission denied). Run manually:\n  sudo rm %s\n", execPath)
@@ -222,30 +211,11 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		} else {
 			removed = append(removed, fmt.Sprintf("binary (%s)", execPath))
 		}
-
-		if siblingPath != "" {
-			if info, err := os.Lstat(siblingPath); err == nil {
-				if err := os.Remove(siblingPath); err != nil {
-					if os.IsPermission(err) {
-						fmt.Fprintf(os.Stderr, "note: cannot remove sibling binary (permission denied). Run manually:\n  sudo rm %s\n", siblingPath)
-						needsManual = append(needsManual, fmt.Sprintf("sudo rm %s", siblingPath))
-					} else {
-						fmt.Fprintf(os.Stderr, "warning: failed to remove sibling binary %s: %v\n", siblingPath, err)
-					}
-				} else {
-					typeName := "sibling binary"
-					if info.Mode()&os.ModeSymlink != 0 {
-						typeName = "sibling symlink"
-					}
-					removed = append(removed, fmt.Sprintf("%s (%s)", typeName, siblingPath))
-				}
-			}
-		}
 	}
 
-	// The advisory rc lock files (<rc>.claude-playbook.lock) are deliberately
+	// The advisory rc lock files (<rc>.cpb.lock) are deliberately
 	// LEFT BEHIND: unlinking a flock pathname splits any concurrent locker
-	// onto a different inode, and a claude-playbook process already running
+	// onto a different inode, and a cpb process already running
 	// survives its binary's removal — deleting the lock could let its edit
 	// overlap a later editor's and lose rc content. Two empty files are the
 	// cheaper failure.
@@ -299,10 +269,10 @@ func launchersToRemove(ldir string, pbs []*playbook.Playbook) []launcher.Entry {
 		fmt.Fprintf(os.Stderr, "warning: failed to list launchers: %v\n", err)
 		return nil
 	}
-	// The reserved CLI names resolve to this binary too but are not
-	// playbook launchers — the sibling/binary cleanup owns them. Sweeping
-	// them here would double-report the same path (launcher AND sibling)
-	// and desync the preview from what each step actually removes.
+	// The reserved CLI name resolves to this binary too but is not a
+	// playbook launcher — the binary cleanup owns it. Sweeping it here
+	// would double-report the same path and desync the preview from what
+	// each step actually removes.
 	var out []launcher.Entry
 	for _, e := range les {
 		if launcher.ReservedNames[e.CmdName] {
@@ -326,10 +296,10 @@ func completionRcFiles() []string {
 }
 
 // completionLines is the exact set of `source <(NAME completion SHELL)`
-// lines install.sh appends: both CLI names, plus the basename the binary is
-// actually running under in case an install predates the fixed-name scheme.
+// lines the install suggests: the CLI's name, plus the basename the binary
+// is running under.
 func completionLines() []string {
-	names := map[string]bool{"claude-playbook": true, "cpb": true}
+	names := map[string]bool{"cpb": true}
 	if exe, err := os.Executable(); err == nil {
 		names[filepath.Base(exe)] = true
 	}
@@ -340,43 +310,6 @@ func completionLines() []string {
 		}
 	}
 	return out
-}
-
-// siblingToRemove returns the OTHER reserved-name entry beside the binary
-// (claude-playbook <-> cpb) if and only if it resolves to the same file as
-// the binary being removed — the installer only ever creates the pair that
-// way, so an unrelated regular file or foreign link under a reserved name
-// is left alone. Shared by preview and removal. Empty when there is nothing
-// provably ours to remove.
-func siblingToRemove(execPath string) string {
-	if selfUninstallKeepBinary || execPath == "(unknown)" {
-		return ""
-	}
-	var siblingName string
-	switch filepath.Base(execPath) {
-	case "claude-playbook":
-		siblingName = "cpb"
-	case "cpb":
-		siblingName = "claude-playbook"
-	default:
-		return ""
-	}
-	p := filepath.Join(filepath.Dir(execPath), siblingName)
-	if _, err := os.Lstat(p); err != nil {
-		return ""
-	}
-	pResolved, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return ""
-	}
-	execResolved, err := filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return ""
-	}
-	if pResolved != execResolved {
-		return ""
-	}
-	return p
 }
 
 // launcherRemovalPlan is THE list of launchers uninstall will delete —

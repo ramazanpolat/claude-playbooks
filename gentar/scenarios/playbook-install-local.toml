@@ -11,8 +11,8 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   '''FIX="$HOME/fixture-src"; mkdir -p "$FIX/skills/demo"; printf 'name = "fixture-pb"\n' > "$FIX/.playbook"; printf '# fixture playbook\n' > "$FIX/CLAUDE.md"; printf '# demo skill\n' > "$FIX/skills/demo/SKILL.md"''',
 ]
 
@@ -22,14 +22,14 @@ path = "~/fixture-src/.playbook"
 
 [[verify.commands]]
 # The statement names the target: fixture-src -> fixture-pb.
-command = 'claude-playbook CREATE PLAYBOOK fixture-pb FROM "$HOME/fixture-src" && test -f "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && test -f "$HOME/.claude-playbooks/fixture-pb/skills/demo/SKILL.md" && echo installed'
+command = 'cpb CREATE PLAYBOOK fixture-pb FROM "$HOME/fixture-src" && test -f "$HOME/.claude-playbooks/fixture-pb/CLAUDE.md" && test -f "$HOME/.claude-playbooks/fixture-pb/skills/demo/SKILL.md" && echo installed'
 
 [[verify.commands]]
 command = 'test -x "$HOME/.local/bin/fixture-pb" && echo launcher-ok'
 contains = "launcher-ok"
 
 [[verify.commands]]
-command = 'claude-playbook SHOW PLAYBOOKS | grep -F fixture-pb'
+command = 'cpb SHOW PLAYBOOKS | grep -F fixture-pb'
 contains = "fixture-pb"
 
 [[verify.commands]]
@@ -38,5 +38,5 @@ contains = "faithful"
 
 [[verify.commands]]
 # --yes: a headless DROP; the launcher named for the playbook goes with it.
-command = 'claude-playbook DROP PLAYBOOK fixture-pb --yes && test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo clean'
+command = 'cpb DROP PLAYBOOK fixture-pb --yes && test ! -e "$HOME/.claude-playbooks/fixture-pb" && test ! -e "$HOME/.local/bin/fixture-pb" && echo clean'
 contains = "clean"

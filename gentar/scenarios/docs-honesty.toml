@@ -12,8 +12,8 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
 ]
 
 # Every subcommand the README documents must answer --help in the
@@ -21,7 +21,7 @@ steps = [
 # belongs in its own suite (self-uninstall: pilot-self-uninstall). Extend the list when README gains commands — the
 # failure mode this suite exists for is docs drifting AHEAD of code.
 [[verify.commands]]
-command = 'for c in run start update self-update auth self-uninstall completion tui play; do claude-playbook "$c" --help >/dev/null 2>&1 || { echo "missing: $c"; exit 1; }; done; echo cmds-ok'
+command = 'for c in run start update self-update auth self-uninstall completion tui play; do cpb "$c" --help >/dev/null 2>&1 || { echo "missing: $c"; exit 1; }; done; echo cmds-ok'
 contains = "cmds-ok"
 
 [[verify.commands]]

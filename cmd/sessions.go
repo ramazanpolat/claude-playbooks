@@ -240,14 +240,6 @@ func playbookSessionDir(pb *playbook.Playbook) sessionDir {
 	return d
 }
 
-// cliName is how the pilot calls cpb, for the commands cpb prints.
-func cliName() string {
-	if b := filepath.Base(os.Args[0]); b == "cpb" || b == "claude-playbook" {
-		return b
-	}
-	return "claude-playbook"
-}
-
 // pickCommand is the command that opens Claude Code's session picker in d:
 // the launcher, cpb run, or, for a plain directory, claude under that
 // config dir, with --resume and no id.
@@ -256,7 +248,7 @@ func (d sessionDir) pickCommand() string {
 	case d.launcher != "":
 		return d.launcher + " --resume"
 	case d.pb != nil:
-		return cliName() + " run " + d.pb.Name + " --resume"
+		return "cpb run " + d.pb.Name + " --resume"
 	}
 	return "CLAUDE_CONFIG_DIR=" + shell.QuoteArg(d.path) + " claude --resume"
 }

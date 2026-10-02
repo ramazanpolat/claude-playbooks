@@ -207,7 +207,7 @@ func ValidateEnvValue(key, value string) error {
 // --env or --env-file: the tool owns them and binds them after every override
 // is applied.
 //
-// CLAUDE_CONFIG_DIR_OVERRIDE is reserved for a subtler reason than
+// CPB_CONFIG_DIR is reserved for a subtler reason than
 // CLAUDE_CONFIG_DIR. Declaring it could never redirect the launch that
 // declares it (the request is read from the process environment before any
 // layer is applied), but it would place the variable in the child's
@@ -228,7 +228,7 @@ func ValidateEnvKey(key string) error {
 		return fmt.Errorf("invalid environment variable name %q", key)
 	}
 	if ReservedEnvKeys[key] {
-		return fmt.Errorf("%s is managed by claude-playbook and cannot be overridden", key)
+		return fmt.Errorf("%s is managed by cpb and cannot be overridden", key)
 	}
 	return nil
 }
@@ -319,11 +319,11 @@ type Sandbox struct {
 	// default.
 	Backend string `toml:"backend,omitempty"`
 	// ShareSkills mounts the backend's shared skills store into the
-	// sandbox (sbx does so by default; claude-playbook does not, since a
+	// sandbox (sbx does so by default; cpb does not, since a
 	// sandbox could then plant a skill a later sandbox runs).
 	ShareSkills bool `toml:"share_skills,omitempty"`
 	// Host names the machine the sandbox runs on ("user@host", reached
-	// over ssh), where claude-playbook and this playbook are installed;
+	// over ssh), where cpb and this playbook are installed;
 	// empty runs the sandbox here.
 	Host string `toml:"host,omitempty"`
 	// Secrets says how backend API keys reach the sandbox: "proxy" (the
@@ -773,7 +773,7 @@ func WritePrivate(path string, data []byte, perm os.FileMode) error {
 
 var claudeVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
-// SandboxBackends lists the sandbox implementations claude-playbook drives.
+// SandboxBackends lists the sandbox implementations cpb drives.
 var SandboxBackends = []string{"sbx", "openshell"}
 
 // KnownSandboxBackend reports whether name is one of SandboxBackends.

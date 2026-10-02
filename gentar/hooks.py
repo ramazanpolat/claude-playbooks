@@ -16,11 +16,11 @@ REPO = Path(__file__).resolve().parent.parent
 # Steps whose substring appears here are skipped verbatim (prepare()
 # already did the equivalent locally). Example: ("docker build",).
 SKIP_STEP_SUBSTR = (
-    # Every suite begins by building claude-playbook in a golang:1.26
+    # Every suite begins by building cpb in a golang:1.26
     # container from the staged checkout, then installing it to
     # ~/.local/bin. prepare() does both, with the local toolchain.
     'docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src',
-    'install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+    'install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
 )
 
 # Executables that must NEVER be found on your real PATH while a suite
@@ -41,7 +41,7 @@ def prepare(env: dict) -> None:
 
     Mirrors the bench: run.sh freezes the version into the staged checkout
     as .gentar-version (the bench has no usable .git), the container step
-    builds $WORKSPACE_DIR/claude-playbook with it, and the install step
+    builds $WORKSPACE_DIR/cpb with it, and the install step
     copies it to ~/.local/bin. cli-head-build asserts the binary reports that
     version, so it is resolved the same way, --match 'v*' included.
 
@@ -54,14 +54,14 @@ def prepare(env: dict) -> None:
         ["git", "-C", str(REPO), "describe", "--tags", "--always", "--dirty", "--match", "v*"],
         capture_output=True, text=True).stdout.strip() or "dev"
     Path(ws, ".gentar-version").write_text(v + "\n")
-    built = Path(ws, "claude-playbook")
+    built = Path(ws, "cpb")
     r = subprocess.run(
         ["go", "build", "-ldflags",
          f"-X github.com/ramazanpolat/claude-playbooks/cmd.Version={v}", "-o", str(built), "."],
         cwd=ws, capture_output=True, text=True)
     if r.returncode:
         sys.exit("build failed:\n" + r.stderr)
-    dest = Path(env["HOME"], ".local/bin/claude-playbook")
+    dest = Path(env["HOME"], ".local/bin/cpb")
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(built, dest)
     os.chmod(dest, 0o755)

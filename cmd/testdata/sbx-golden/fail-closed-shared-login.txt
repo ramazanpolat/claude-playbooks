@@ -1,7 +1,7 @@
 == calls
 ls -q
 create --name cpb-failreg --no-share-skills claude <WORK> <ROOT>/failreg
-exec cpb-failreg bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox
+exec cpb-failreg bash -lc printf %s 'skills=private' > ~/.cpb-sandbox
 secret ls --sandbox cpb-failreg
 secret set-custom --host api.anthropic.com --env ANTHROPIC_API_KEY --value cpbcanaryvalue --placeholder cpb-failreg-ANTHROPIC_API_KEY --sandbox cpb-failreg
 == stderr

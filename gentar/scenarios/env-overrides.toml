@@ -13,12 +13,12 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o claude-playbook .' ''',
-  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
-  'claude-playbook CREATE PLAYBOOK env-pb',
-  'claude-playbook ALTER PLAYBOOK env-pb SET VAR FROM_MANIFEST=yes BLOCK VAR NOISY',
-  'claude-playbook CREATE ENV glm SET FROM_PROFILE=yes && claude-playbook ALTER PLAYBOOK env-pb USE ENV glm',
+  'cpb CREATE PLAYBOOK env-pb',
+  'cpb ALTER PLAYBOOK env-pb SET VAR FROM_MANIFEST=yes BLOCK VAR NOISY',
+  'cpb CREATE ENV glm SET FROM_PROFILE=yes && cpb ALTER PLAYBOOK env-pb USE ENV glm',
 ]
 
 [[verify.files]]
@@ -36,39 +36,39 @@ contains = "manifest-ok"
 # The launch: the playbook's own variable and the env set's reach the
 # child, the blocked variable is removed though exported, and
 # CLAUDE_CONFIG_DIR is bound.
-command = 'rm -f "$HOME/claude-env"; NOISY=1 claude-playbook run env-pb && grep -x FROM_MANIFEST=yes "$HOME/claude-env" >/dev/null && grep -x FROM_PROFILE=yes "$HOME/claude-env" >/dev/null && ! grep -q "^NOISY=" "$HOME/claude-env" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/env-pb$" "$HOME/claude-env" && echo env-ok'
+command = 'rm -f "$HOME/claude-env"; NOISY=1 cpb run env-pb && grep -x FROM_MANIFEST=yes "$HOME/claude-env" >/dev/null && grep -x FROM_PROFILE=yes "$HOME/claude-env" >/dev/null && ! grep -q "^NOISY=" "$HOME/claude-env" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/.claude-playbooks/env-pb$" "$HOME/claude-env" && echo env-ok'
 contains = "env-ok"
 
 [[verify.commands]]
 # An env set in use cannot be dropped; detached, it can.
-command = 'if claude-playbook DROP ENV glm >/dev/null 2>&1; then echo not-refused; else claude-playbook ALTER PLAYBOOK env-pb DROP ENV glm >/dev/null && claude-playbook DROP ENV glm >/dev/null && test ! -e "$HOME/.claude-playbooks/.env-sets/glm.toml" && echo delete-guarded; fi'
+command = 'if cpb DROP ENV glm >/dev/null 2>&1; then echo not-refused; else cpb ALTER PLAYBOOK env-pb DROP ENV glm >/dev/null && cpb DROP ENV glm >/dev/null && test ! -e "$HOME/.claude-playbooks/.env-sets/glm.toml" && echo delete-guarded; fi'
 contains = "delete-guarded"
 
 [[verify.commands]]
 # One-off launch flags before and after the name, layered over the
 # manifest, and nothing written back to it.
-command = 'rm -f "$HOME/claude-env"; cp "$HOME/.claude-playbooks/env-pb/.playbook" "$HOME/manifest-before"; claude-playbook run --env ONE_OFF=yes env-pb --unset FROM_MANIFEST && grep -x ONE_OFF=yes "$HOME/claude-env" >/dev/null && ! grep -q "^FROM_MANIFEST=" "$HOME/claude-env" && cmp -s "$HOME/manifest-before" "$HOME/.claude-playbooks/env-pb/.playbook" && echo flags-ok'
+command = 'rm -f "$HOME/claude-env"; cp "$HOME/.claude-playbooks/env-pb/.playbook" "$HOME/manifest-before"; cpb run --env ONE_OFF=yes env-pb --unset FROM_MANIFEST && grep -x ONE_OFF=yes "$HOME/claude-env" >/dev/null && ! grep -q "^FROM_MANIFEST=" "$HOME/claude-env" && cmp -s "$HOME/manifest-before" "$HOME/.claude-playbooks/env-pb/.playbook" && echo flags-ok'
 contains = "flags-ok"
 
 [[verify.commands]]
 # An env file layer, and the launcher form with flags at the start.
-command = 'printf "FROM_FILE=yes\n" > "$HOME/w.env"; rm -f "$HOME/claude-env"; claude-playbook run --env-file "$HOME/w.env" env-pb && grep -x FROM_FILE=yes "$HOME/claude-env" >/dev/null && rm -f "$HOME/claude-env" && "$HOME/.local/bin/env-pb" --env VIA_LAUNCHER=yes && grep -x VIA_LAUNCHER=yes "$HOME/claude-env" >/dev/null && echo file-and-launcher-ok'
+command = 'printf "FROM_FILE=yes\n" > "$HOME/w.env"; rm -f "$HOME/claude-env"; cpb run --env-file "$HOME/w.env" env-pb && grep -x FROM_FILE=yes "$HOME/claude-env" >/dev/null && rm -f "$HOME/claude-env" && "$HOME/.local/bin/env-pb" --env VIA_LAUNCHER=yes && grep -x VIA_LAUNCHER=yes "$HOME/claude-env" >/dev/null && echo file-and-launcher-ok'
 contains = "file-and-launcher-ok"
 
 [[verify.commands]]
 # An env set in DEFAULTS is the bottom layer of every launch; the
 # playbook's own entry wins over it; DROP ENV is refused while it is there.
-command = 'claude-playbook CREATE ENV base SET FROM_DEFAULT=yes FROM_MANIFEST=default >/dev/null && claude-playbook ALTER DEFAULTS USE ENV base >/dev/null && rm -f "$HOME/claude-env" && claude-playbook run env-pb && grep -x FROM_DEFAULT=yes "$HOME/claude-env" >/dev/null && grep -x FROM_MANIFEST=yes "$HOME/claude-env" >/dev/null && if claude-playbook DROP ENV base >/dev/null 2>&1; then echo default-delete-not-refused; else claude-playbook ALTER DEFAULTS DROP ENV base >/dev/null && claude-playbook DROP ENV base >/dev/null && echo default-ok; fi'
+command = 'cpb CREATE ENV base SET FROM_DEFAULT=yes FROM_MANIFEST=default >/dev/null && cpb ALTER DEFAULTS USE ENV base >/dev/null && rm -f "$HOME/claude-env" && cpb run env-pb && grep -x FROM_DEFAULT=yes "$HOME/claude-env" >/dev/null && grep -x FROM_MANIFEST=yes "$HOME/claude-env" >/dev/null && if cpb DROP ENV base >/dev/null 2>&1; then echo default-delete-not-refused; else cpb ALTER DEFAULTS DROP ENV base >/dev/null && cpb DROP ENV base >/dev/null && echo default-ok; fi'
 contains = "default-ok"
 
 [[verify.commands]]
 # `--delete` after `--` belongs to claude, never to the wrapper.
-command = 'mkdir -p "$HOME/keepme"; claude-playbook start "$HOME/keepme" -- --delete && test -d "$HOME/keepme" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/keepme$" "$HOME/claude-env" && echo delete-boundary-ok'
+command = 'mkdir -p "$HOME/keepme"; cpb start "$HOME/keepme" -- --delete && test -d "$HOME/keepme" && grep -q "^CLAUDE_CONFIG_DIR=$HOME/keepme$" "$HOME/claude-env" && echo delete-boundary-ok'
 contains = "delete-boundary-ok"
 
 [[verify.commands]]
 # A credential-shaped value never appears in SHOW: the key's value is
 # masked to its first/last 4 characters plus a length, and an ordinary key
 # alongside it (FROM_MANIFEST) stays fully visible.
-command = '''claude-playbook ALTER PLAYBOOK env-pb SET VAR THE_AUTH_TOKEN=abcdef0123456789fedcba9876543210 AS PLAINTEXT >/dev/null && OUT=$(claude-playbook SHOW PLAYBOOK env-pb) && ! printf '%s' "$OUT" | grep -q abcdef0123456789fedcba9876543210 && printf '%s' "$OUT" | grep -qF "THE_AUTH_TOKEN=abcd...3210 (32 chars, plaintext)" && printf '%s' "$OUT" | grep -qF "FROM_MANIFEST=yes" && echo redact-ok'''
+command = '''cpb ALTER PLAYBOOK env-pb SET VAR THE_AUTH_TOKEN=abcdef0123456789fedcba9876543210 AS PLAINTEXT >/dev/null && OUT=$(cpb SHOW PLAYBOOK env-pb) && ! printf '%s' "$OUT" | grep -q abcdef0123456789fedcba9876543210 && printf '%s' "$OUT" | grep -qF "THE_AUTH_TOKEN=abcd...3210 (32 chars, plaintext)" && printf '%s' "$OUT" | grep -qF "FROM_MANIFEST=yes" && echo redact-ok'''
 contains = "redact-ok"

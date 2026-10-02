@@ -1,7 +1,7 @@
 == calls
 ls -q
 create --name cpb-box --no-share-skills claude <WORK> <ROOT>/box <TMP>/extra:ro
-exec cpb-box bash -lc printf %s 'skills=private' > ~/.claude-playbook-sandbox
+exec cpb-box bash -lc printf %s 'skills=private' > ~/.cpb-sandbox
 policy allow network --sandbox cpb-box api.example.com
 policy allow network --sandbox cpb-box router.local
 exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'

@@ -108,7 +108,7 @@ ago.
    - `update` is not affected: it preserves `.credentials.json` and never
      takes one from upstream (`defaultPreserved` in `cmd/update.go`).
 2. **One isolated launch, then a shared one.**
-   - `CREATE PLAYBOOK z`, then `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true cpb run z`,
+   - `CREATE PLAYBOOK z`, then `CPB_ISOLATED_LOGIN=true cpb run z`,
      which detaches the link.
    - A `/login` there as another account writes a regular file. The repro
      writes it by hand.
@@ -164,7 +164,7 @@ removed while its file still holds a grant.
      account record in the playbook's `.claude.json` against the machine's.
      That needs a check against Claude Code's current files before it is
      built.
-3. `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` could record, in the playbook, that
+3. `CPB_ISOLATED_LOGIN=true` could record, in the playbook, that
    a login was made under isolation, so a later shared launch treats it as
    fix 2 does. Fix 2 already covers this case.
 
