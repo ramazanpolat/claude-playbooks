@@ -26,7 +26,7 @@ your shell's environment
 
 `EXPLAIN PLAYBOOK <name>` prints that result: every variable a launch would
 change, its value (masked when it looks like a credential), and the layer that
-decided it. `--json` gives the same as a stable object for scripts.
+decided it. `--json` gives the same as an object for scripts.
 
 A `SET` overrides whatever the shell exported; a `BLOCK` removes a variable
 even when the shell exports it. Raw `claude` launches bypass all of this.

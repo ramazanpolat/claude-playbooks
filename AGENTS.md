@@ -202,16 +202,11 @@ release:
       or `.check` command that CI runs: README prose does not count).
 - [ ] **AGENTS.md** (this file) is current: install, verify, update, deploy.
 
-**Stability** (from v3.24.0, the first stable release; the rules are in
+**Versions.** Nothing in cpb is stable before v4.0.0 (see
 [docs/reference/cli-grammar.md](docs/reference/cli-grammar.md), "Stability"):
 
-- [ ] **The version matches the change.**
-  - A breaking change to the stable surface (grammar, visible commands,
-    file formats, `--json` shapes, codes) goes only in a new major.
-  - An addition goes in a minor.
-  - A fix goes in a patch; if it changes a result, the notes say so.
-- [ ] **Deprecations** warn on stderr, off a terminal too, for at least one
-      minor release before the major that removes them.
+- [ ] **The release notes name every change of a result:** a statement, a
+      clause, a command, a flag, a file format, a `--json` shape or a code.
 - [ ] **The upgrade from the previous release passes:** the CI `upgrade`
       job, on ubuntu and macOS, green on the commit to be tagged
       (`examples/upgrade.sh`).
@@ -230,7 +225,7 @@ release:
 
 **Nightlies are drift monitors (report on red).** Every night
 `arena-nightly` runs phase 2 on main and on the newest `release/v*` branch,
-the stable line. Not on a release tag: the kit's plan never gives a `v*` tag
+the release line. Not on a release tag: the kit's plan never gives a `v*` tag
 the bench, so a tag dispatch would be skipped and read as green (v3.25.0 on
 2026-09-30). A release cut from main is close enough to main that main's run
 covers its drift. `arena-nightly` fails when a dispatched run's `arena /
@@ -242,7 +237,7 @@ If any is missing, build it first; never tag without it.
 
 ### Releasing from a release branch
 
-A stable minor is released from its own branch, `release/vX.Y`, while main
+A minor is released from its own branch, `release/vX.Y`, while main
 moves on. The release workflow publishes a tag only when its commit is on
 main or on `origin/release/vX.Y` for the tag's own minor. Any other tag fails
 the run, with the reason (`.github/scripts/release-refs.sh`). The order:

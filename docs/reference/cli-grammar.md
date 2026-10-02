@@ -1,7 +1,7 @@
 # CLI grammar
 
-Status: **implemented, v3.27.0; the stable surface from v3.24.0** (see
-"Stability"). Decided with the pilot on 2026-09-25/27. Everything on this
+Status: **implemented, v3.27.0; not stable yet** (see "Stability").
+Decided with the pilot on 2026-09-25/27. Everything on this
 page is built; a section specified before it is built is marked
 **planned**.
 
@@ -88,7 +88,7 @@ is a data-governance leak. It happened once, on 2026-09-27.
 - **The warning.** Take a playbook whose `CLAUDE.md` has an `@` import under
   `~/.pilot-profile/`, whether written with `~` or with the home directory.
   A statement that gives it a non-Anthropic `ANTHROPIC_BASE_URL` gets one
-  warning line on stderr. In `APPLY --json`, it also gets the stable code
+  warning line on stderr. In `APPLY --json`, it also gets the code
   `pilot_profile_third_party_endpoint`.
   - The URL counted is what a launch would get from `DEFAULTS`, the
     playbook's env sets and its own block. A host of `anthropic.com` or
@@ -670,7 +670,7 @@ the pilot names (that one is v4.0.0).
 - **Hidden:** `env`, `env-profile`, `create <name>`, `link`, `delete`,
   `rename`, `alias`, `dealias`, `list`, `info` are hidden from help and
   completion and keep working with all their flags. They are **deprecated**
-  and are removed in v4.0.0, the first release after the stable v3.24.0.
+  and are removed in v4.0.0.
   Every use prints one line on stderr, on a terminal or not, so scripts are
   warned too: ``Deprecated: `claude-playbook <command>` is removed in v4.0.0;
   the grammar form is: cpb …``. It gives the exact statement for the given
@@ -730,55 +730,23 @@ the pilot names (that one is v4.0.0).
   guess, so downgrading after `ALTER DEFAULTS` with two sets needs a
   one-line edit.
 
-## Stability (from v3.24.0)
+## Stability
 
-v3.24.0 is cpb's first **stable** release. From it on, the surface below
-changes only by these rules (the stabilization week, decided by the pilot on
-2026-09-27):
-
-- **Breaking changes only in a new major version.** A statement or clause
-  that stops parsing, a clause whose effect changes, a `--json` field that
-  changes meaning or goes away, a file-format change an older cpb cannot
-  read: each waits for the next major.
-- **Additions are minor releases:** a new clause, a new object, a new
-  optional `--json` field, a new warning code, a new `SELECT` column. A
-  script that reads what it knows keeps working. A new clause's words are **not**
-  reserved, as with `PILOT`, `PROFILE`, `ISOLATED` and `LOGIN`: a newly
-  reserved word would refuse a name that works today.
-- **Deprecations warn and keep working for at least one minor release**
-  before the major that removes them, on stderr and off a terminal too.
-- **Fixes are patch releases.** A fix may change a result that was wrong,
-  for example the security fixes in v3.22.1 and v3.23.1. The release notes
-  say so.
-
-**The stable surface:**
-
-| Part | What |
-|---|---|
-| The grammar | every statement and clause in this reference, with its effect and its refusals; the reserved words |
-| The visible commands | `install`, `run`, `start`, `update`, `auth status`, `completion`, `self-uninstall`, `sessions` (v3.25.0), `tui` (v3.25.0), with their documented flags; `--dry-run`, `--yes`, `--json` on statements |
-| File formats | `.playbook` (the keys cpb reads and writes, `[env]` with `set` / `refs` / `unset` / `profiles`, `isolate_auth`, `[sandbox]`, the MCP and skill records, `[play]` from v3.28.0), `.env-profiles/<name>.toml`, `.env-profiles/.default`, `.state/dirs.toml`, `.state/statusline-history.json` and the SPC/1 manifests cpb writes under `statusline.d/` (v3.25.0); the `settings.json` keys cpb writes (see "Where each clause writes") |
-| `--json` shapes | `SHOW` / `EXPLAIN` / `SHOW PLAYBOOKS` / `SHOW ENVS` (see Output), `APPLY --dry-run --json` (schema 1; `APPLY` has `--json` only with `--dry-run`, and without it the command is a usage error), `SELECT … --json` and `DESCRIBE` (the tables and their columns), `auth status --json`, `SHOW SESSIONS --json` and `RESUME --list --json` (v3.25.0) |
-| Codes | the warning codes in `APPLY --dry-run --json` (`use_playbook_overridden`, `source_drift`, `pilot_profile_third_party_endpoint`, `statusline_held_by_host`, `marketplace_ref_not_cloneable` from v3.27.0); the exit codes of `APPLY --dry-run --json` (0 planned, 1 refused, 2 usage or internal error); and, for every statement and command, 0 on success and non-zero on failure |
-
-**Not stable:**
-- the human form of every output: tables, labels, wording, the order of
-  lines;
-- the text of error and warning messages. Only the warning codes above are
-  stable; errors carry no code;
-- cpb's other internal files, and anything under `gentar/`.
+Nothing in cpb is stable yet. Until v4.0.0, any release may change a
+statement, a clause, a command, a flag, a file format, a `--json` shape or a
+code. Its release notes say what changed. v4.0.0 is the first release that
+will declare a stable surface.
 
 **Deprecated:** the hidden pre-grammar commands (see "Pre-grammar
-commands"). They are neither stable nor free to change. They keep working
-**unchanged** through 3.x (behaviour, flags, and stdout), apart from the
-deprecation line on stderr, and v4.0.0 removes them.
+commands"). They keep working through 3.x, apart from the deprecation line
+on stderr, and v4.0.0 removes them.
 
 ## Output
 
 Every `SHOW` and `EXPLAIN` has two forms. The **human form** is for reading;
-its layout may change between releases. The **`--json` form** is the
-contract for scripts: fields may be added, and an existing field never
-changes meaning within a major version. Nothing should grep the human form.
+its layout may change between releases. The **`--json` form** is the form
+for scripts. Until v4.0.0 its fields may change in any release, and the
+release notes say so. Nothing should grep the human form.
 
 A variable, wherever it appears, is one JSON object with exactly one of:
 

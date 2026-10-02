@@ -126,8 +126,8 @@ cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"    # state as tables; add ClickH
 
 ## Built to be relied on
 
-- **Stable since v3.24.0:** breaking changes wait for a major version.
-  [What is stable →](docs/reference/cli-grammar.md#stability-from-v3240)
+- **Not stable yet:** until v4.0.0, any statement, flag, file format or
+  `--json` shape may change in any release. [Why →](docs/reference/cli-grammar.md#stability)
 - **Tested on every change:** CI applies all 19 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
   same. Each release passes a full [arena](gentar/README.md) regression on the

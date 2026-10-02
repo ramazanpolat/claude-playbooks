@@ -42,7 +42,7 @@ cpb run experiment --model claude-opus-5 --permission-mode auto
 ```bash
 cpb SHOW                          # the same as SHOW PLAYBOOKS
 cpb SHOW PLAYBOOK experiment      # path, version, source, launcher, env sets, variables, sandbox
-cpb SHOW PLAYBOOKS --json         # the stable form for scripts
+cpb SHOW PLAYBOOKS --json         # the form for scripts
 ```
 
 ```
