@@ -170,7 +170,7 @@ Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with c
   it:
 
   ```
-  Played from:    /home/you/reviewer.cpb (sha256 c684ff05c8b3, 2026-10-02-02_26; cpb update reviewer)
+  Played from:    /home/you/reviewer.cpb (sha256 c684ff05c8b3, 2026-10-01T23:26:00Z; cpb update reviewer)
   ```
 
 ## Updating a kept one

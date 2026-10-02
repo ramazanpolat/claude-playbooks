@@ -13,12 +13,12 @@ import (
 func TestWriteReadRoundTrip(t *testing.T) {
 	dir := Dir(t.TempDir())
 	in := &Profile{Name: "glm", Description: "GLM via router",
-		Set: map[string]string{"B": "2", "A": "1"}, Unset: []string{"Z"}}
+		Set: map[string]string{"B": "2", "A": "1"}, Block: []string{"Z"}}
 	if err := Write(dir, in); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "glm.toml"))
-	want := "description = \"GLM via router\"\nunset = [\"Z\"]\n\n[set]\nA = \"1\"\nB = \"2\"\n"
+	want := "description = \"GLM via router\"\nblock = [\"Z\"]\n\n[set]\nA = \"1\"\nB = \"2\"\n"
 	if string(data) != want {
 		t.Fatalf("serialized:\n%s\nwant:\n%s", data, want)
 	}
@@ -27,7 +27,7 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	}
 	out, err := Read(dir, "glm")
 	if err != nil || out == nil || out.Name != "glm" || out.Description != "GLM via router" ||
-		out.Set["A"] != "1" || out.Set["B"] != "2" || len(out.Unset) != 1 || out.Unset[0] != "Z" {
+		out.Set["A"] != "1" || out.Set["B"] != "2" || len(out.Block) != 1 || out.Block[0] != "Z" {
 		t.Fatalf("read back: %#v err=%v", out, err)
 	}
 	if p, err := Read(dir, "absent"); p != nil || err != nil {
@@ -42,8 +42,8 @@ func TestReadRejectsInvalidProfiles(t *testing.T) {
 	}
 	cases := map[string]string{
 		"reserved":      "[set]\nCLAUDE_CONFIG_DIR = \"/x\"\n",
-		"bad key":       "unset = [\"NOT-A-NAME\"]\n",
-		"set and unset": "unset = [\"A\"]\n[set]\nA = \"1\"\n",
+		"bad key":       "block = [\"NOT-A-NAME\"]\n",
+		"set and unset": "block = [\"A\"]\n[set]\nA = \"1\"\n",
 		"bad toml":      "= [\n",
 	}
 	for name, body := range cases {
@@ -83,13 +83,13 @@ func TestListSortsAndSkipsNonProfiles(t *testing.T) {
 
 func TestExpandLayersProfilesUnderPlaybookEntries(t *testing.T) {
 	dir := Dir(t.TempDir())
-	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"URL": "base", "MODEL": "base", "KEEP": "base"}, Unset: []string{"TOKEN", "GONE"}}); err != nil {
+	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"URL": "base", "MODEL": "base", "KEEP": "base"}, Block: []string{"TOKEN", "GONE"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, &Profile{Name: "over", Set: map[string]string{"MODEL": "over", "TOKEN": "re-set"}, Unset: []string{"URL"}}); err != nil {
+	if err := Write(dir, &Profile{Name: "over", Set: map[string]string{"MODEL": "over", "TOKEN": "re-set"}, Block: []string{"URL"}}); err != nil {
 		t.Fatal(err)
 	}
-	e := &manifest.Env{Profiles: []string{"base", "over"}, Set: map[string]string{"URL": "own"}, Unset: []string{"MODEL"}}
+	e := &manifest.Env{Sets: []string{"base", "over"}, Set: map[string]string{"URL": "own"}, Block: []string{"MODEL"}}
 
 	got, err := Expand(dir, e)
 	if err != nil {
@@ -100,11 +100,11 @@ func TestExpandLayersProfilesUnderPlaybookEntries(t *testing.T) {
 	if got.Set["URL"] != "own" || got.Set["TOKEN"] != "re-set" || got.Set["KEEP"] != "base" {
 		t.Fatalf("set = %#v", got.Set)
 	}
-	if _, still := got.Set["MODEL"]; still || !got.Unsets("MODEL") || !got.Unsets("GONE") || got.Unsets("URL") || got.Unsets("TOKEN") {
-		t.Fatalf("unset = %#v set = %#v", got.Unset, got.Set)
+	if _, still := got.Set["MODEL"]; still || !got.Blocks("MODEL") || !got.Blocks("GONE") || got.Blocks("URL") || got.Blocks("TOKEN") {
+		t.Fatalf("unset = %#v set = %#v", got.Block, got.Set)
 	}
-	if len(got.Profiles) != 0 {
-		t.Fatalf("profiles leaked into the flattened block: %v", got.Profiles)
+	if len(got.Sets) != 0 {
+		t.Fatalf("profiles leaked into the flattened block: %v", got.Sets)
 	}
 
 	// Without profiles the block is returned untouched, nil included.
@@ -119,7 +119,7 @@ func TestExpandLayersProfilesUnderPlaybookEntries(t *testing.T) {
 
 func TestExpandMissingProfileIsTyped(t *testing.T) {
 	dir := Dir(t.TempDir())
-	_, err := Expand(dir, &manifest.Env{Profiles: []string{"nope"}})
+	_, err := Expand(dir, &manifest.Env{Sets: []string{"nope"}})
 	var missing *MissingError
 	if !errors.As(err, &missing) || missing.Name != "nope" {
 		t.Fatalf("err = %v, want *MissingError for nope", err)
@@ -140,13 +140,13 @@ func TestExpandErrorsAllMatchErrProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"absent", "broken", "invalid"} {
-		_, err := Expand(dir, &manifest.Env{Profiles: []string{name}})
+		_, err := Expand(dir, &manifest.Env{Sets: []string{name}})
 		if !errors.Is(err, ErrProfile) {
 			t.Errorf("%s: err = %v, want errors.Is ErrProfile", name, err)
 		}
 	}
 	var resolve *ResolveError
-	_, err := Expand(dir, &manifest.Env{Profiles: []string{"broken"}})
+	_, err := Expand(dir, &manifest.Env{Sets: []string{"broken"}})
 	if !errors.As(err, &resolve) || resolve.Name != "broken" {
 		t.Fatalf("broken profile err = %v, want *ResolveError naming it", err)
 	}
@@ -192,7 +192,7 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 	if err := WriteDefaults(dir, []string{"ghost"}); !errors.Is(err, ErrProfile) {
 		t.Fatalf("WriteDefaults of a missing profile: %v", err)
 	}
-	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"A": "default", "B": "default"}, Unset: []string{"TOKEN"}}); err != nil {
+	if err := Write(dir, &Profile{Name: "base", Set: map[string]string{"A": "default", "B": "default"}, Block: []string{"TOKEN"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Write(dir, &Profile{Name: "pb", Set: map[string]string{"B": "profile"}}); err != nil {
@@ -211,15 +211,15 @@ func TestRegistryDefaultLayersUnderEverything(t *testing.T) {
 
 	// no manifest block at all: the default still applies
 	got, err := ExpandWithDefault(dir, nil)
-	if err != nil || got.Set["A"] != "default" || !got.Unsets("TOKEN") {
+	if err != nil || got.Set["A"] != "default" || !got.Blocks("TOKEN") {
 		t.Fatalf("nil block: %#v %v", got, err)
 	}
 	// a block with its own profile and set: default < profile < own
-	got, err = ExpandWithDefault(dir, &manifest.Env{Profiles: []string{"pb"}, Set: map[string]string{"TOKEN": "own"}})
+	got, err = ExpandWithDefault(dir, &manifest.Env{Sets: []string{"pb"}, Set: map[string]string{"TOKEN": "own"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Set["A"] != "default" || got.Set["B"] != "profile" || got.Set["TOKEN"] != "own" || got.Unsets("TOKEN") {
+	if got.Set["A"] != "default" || got.Set["B"] != "profile" || got.Set["TOKEN"] != "own" || got.Blocks("TOKEN") {
 		t.Fatalf("layering: %#v", got)
 	}
 

@@ -63,7 +63,7 @@ func doAlias(o aliasOpts, args []string) error {
 		if cerr != nil {
 			return cerr
 		}
-		pb.Manifest.Alias = ""
+		pb.Manifest.Launcher = ""
 		if err := manifest.Write(pb.RootPath, pb.Manifest); err != nil {
 			restore()
 			return err

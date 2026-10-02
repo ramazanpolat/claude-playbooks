@@ -28,7 +28,7 @@ func seedShowFixture(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	root := seedFlatPlaybook(t, "router")
-	if err := manifest.Write(root, &manifest.Manifest{Name: "router", Version: "1.2.3", Alias: "rt",
+	if err := manifest.Write(root, &manifest.Manifest{Name: "router", Version: "1.2.3", Launcher: "rt",
 		Source: &manifest.Source{Repository: "https://example.com/r.git", Branch: "v1"}}); err != nil {
 		t.Fatal(err)
 	}

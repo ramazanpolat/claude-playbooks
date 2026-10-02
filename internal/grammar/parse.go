@@ -1308,7 +1308,7 @@ func validate(s *Stmt) *Error {
 		_, from := seen[From]
 		_, link := seen[Link]
 		if pos, ok := seen[IsolatedLogin]; ok && link {
-			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolate_auth there")
+			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolated_login there")
 		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {

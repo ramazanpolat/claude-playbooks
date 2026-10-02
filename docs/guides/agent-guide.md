@@ -115,7 +115,7 @@ cpb run demo --version
 rm -rf /tmp/pb-$$
 ```
 
-Before a statement, only `--playbooks-dir` and `--launcher-dir` are accepted. `run`, `start` and `update` accept `--playbooks-dir` before the name as well. Env sets are resolved from the same root (`<root>/.env-profiles/`).
+Before a statement, only `--playbooks-dir` and `--launcher-dir` are accepted. `run`, `start` and `update` accept `--playbooks-dir` before the name as well. Env sets are resolved from the same root (`<root>/.env-sets/`).
 
 ## Run inside a Docker Sandbox
 
@@ -125,7 +125,7 @@ Before a statement, only `--playbooks-dir` and `--launcher-dir` are accepted. `r
 cpb run --sandbox --workdir "$REPO" demo -p "run the tests"      # sandbox cpb-demo, created on first use
 cpb run --sandbox --sandbox-fresh --clone --workdir "$REPO" demo -p "..."   # new sandbox on a private clone
 cpb run --sandbox --mount /data:ro demo                          # extra read-only mount
-cpb CREATE PLAYBOOK demo SANDBOX NO ALIAS                        # [sandbox] always = true + isolate_auth = true
+cpb CREATE PLAYBOOK demo SANDBOX NO ALIAS                        # [sandbox] always = true + isolated_login = true
 cpb run --no-sandbox demo -p "..."                               # host launch; stderr says the manifest was overridden
 ```
 
@@ -149,7 +149,7 @@ A credential-looking literal (`*TOKEN*`, `*SECRET*`, `*_KEY`, …) is refused. S
 
 ## Choose an authentication mode per playbook
 
-At every launch cpb decides whether a long-lived token is active for that playbook (`~/.config/claude-code/oauth-token`, or the variable exported, or the playbook's layers setting it, and not blocking it). Token active: inject it and remove the playbook's own stored login so a 401 cannot swap the token for a dead grant. Token inactive: symlink the playbook's credentials to `~/.claude/.credentials.json`. `isolate_auth = true`: share nothing.
+At every launch cpb decides whether a long-lived token is active for that playbook (`~/.config/claude-code/oauth-token`, or the variable exported, or the playbook's layers setting it, and not blocking it). Token active: inject it and remove the playbook's own stored login so a 401 cannot swap the token for a dead grant. Token inactive: symlink the playbook's credentials to `~/.claude/.credentials.json`. `isolated_login = true`: share nothing.
 
 | Goal | Statement |
 |---|---|

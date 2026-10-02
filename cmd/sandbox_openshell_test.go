@@ -186,7 +186,7 @@ func TestRunSandboxOpenshellCreatesInjectsAndStops(t *testing.T) {
 	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=real-token MODEL=glm AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"api.example.com", "127.0.0.1:8000", "::1"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"api.example.com", "127.0.0.1:8000", "::1"}}})
 	work := t.TempDir()
 	log := stubOpenshell(t)
 	var err error
@@ -269,7 +269,7 @@ func TestRunSandboxOpenshellReuseRotateRevoke(t *testing.T) {
 	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=new-token AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}}})
 	work := t.TempDir()
 	log := stubOpenshell(t)
 	label := (&openshellBackend{claudeVersion: openshellClaudeVersion}).imageLabel()
@@ -319,7 +319,7 @@ func TestRunSandboxOpenshellReuseRotateRevoke(t *testing.T) {
 		t.Fatalf("busy sandbox stopped, or a running one started:\n%s", joined)
 	}
 	// An explicit pin the sandbox's image does not carry refuses.
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}, Sandbox: &manifest.Sandbox{ClaudeVersion: "2.1.300"}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}}, Sandbox: &manifest.Sandbox{ClaudeVersion: "2.1.300"}})
 	os.Remove(log)
 	t.Setenv("OS_STUB_PGREP", "idle")
 	err = runRun(nil, []string{"--sandbox=openshell", "--workdir", work, "box"})
@@ -332,7 +332,7 @@ func TestRunSandboxOpenshellReuseRotateRevoke(t *testing.T) {
 		t.Fatalf("a refused reuse touched the sandbox:\n%s", joined)
 	}
 	// --sandbox-fresh removes the sandbox and cpb's providers and profiles.
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}}})
 	os.Remove(log)
 	t.Setenv("OS_STUB_PGREP", "")
 	if err := runRun(nil, []string{"--sandbox=openshell", "--sandbox-fresh", "--workdir", work, "box"}); err != nil {
@@ -346,7 +346,7 @@ func TestRunSandboxOpenshellRefusals(t *testing.T) {
 	if err := stmtErr(t, "CREATE ENV canary SET ANTHROPIC_API_KEY=cpbcanaryopenshell AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"canary"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"canary"}}})
 	work := t.TempDir()
 	log := stubOpenshell(t)
 	// A provider that cannot be created refuses the launch before any
@@ -384,13 +384,13 @@ func TestRunSandboxOpenshellRefusals(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox=openshell", "--clone", "--workdir", work, "box"}); err == nil || !strings.Contains(err.Error(), "--clone is sbx-only for now") {
 		t.Fatalf("--clone: %v", err)
 	}
-	writePlaybook(t, root, "shared", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{ShareSkills: true}})
+	writePlaybook(t, root, "shared", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{ShareSkills: true}})
 	if err := runRun(nil, []string{"--sandbox=openshell", "--workdir", work, "shared"}); err == nil || !strings.Contains(err.Error(), "share_skills applies to sbx") {
 		t.Fatalf("share_skills: %v", err)
 	}
 	// Linger off is a warning, not a refusal.
 	t.Setenv("LOGINCTL_STUB", "no")
-	writePlaybook(t, root, "plain", &manifest.Manifest{IsolateAuth: true})
+	writePlaybook(t, root, "plain", &manifest.Manifest{IsolatedLogin: true})
 	stderr = captureStderr(t, func() { err = runRun(nil, []string{"--sandbox=openshell", "--workdir", work, "plain"}) })
 	if err != nil || !strings.Contains(stderr, "Warning: linger is off for") {
 		t.Fatalf("linger: %v\n%s", err, stderr)
@@ -402,7 +402,7 @@ func TestRunSandboxOpenshellEndpointRules(t *testing.T) {
 	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=tok AS PLAINTEXT"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"router"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}}})
 	work := t.TempDir()
 	log := stubOpenshell(t)
 	label := (&openshellBackend{claudeVersion: openshellClaudeVersion}).imageLabel()

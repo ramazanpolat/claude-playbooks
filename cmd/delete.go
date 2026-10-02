@@ -267,7 +267,7 @@ func countContents(dir string) (files, dirs int) {
 // The store is protected along its whole resolution, exactly as the kernel
 // resolves it, one component at a time: the registry entry, every symlink
 // met on the way (in the final component or in any parent component,
-// `.env-profiles -> .bridge/profiles` with `.bridge -> .leftover/sub`), and
+// `.env-sets -> .bridge/profiles` with `.bridge -> .leftover/sub`), and
 // the final physical directory. Two shapes are refused, both judged by file
 // identity (os.SameFile), never by spelling, so a case variant on a
 // case-insensitive filesystem, a relative playbooks root, or a symlink on
@@ -340,7 +340,7 @@ func refuseRegistryOwned(playbooksDir, name, path string) error {
 	if !a.IsDir() {
 		// A symlink or a file: removal never descends. The entry may still
 		// be the store's own, a profile file or the default marker, when
-		// the store resolves to the directory holding it (`.env-profiles
+		// the store resolves to the directory holding it (`.env-sets
 		// -> .`); those are `DROP ENV`'s business, with
 		// its reference and default checks. Only entries the store itself
 		// would read count: a linked playbook or a stray file beside them

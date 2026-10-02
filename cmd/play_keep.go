@@ -236,7 +236,7 @@ func writePlayRecord(pbDir string, src *play.Source, rec *play.Recipe, backend s
 	if src.Kind == play.KindLocal {
 		ref = src.Path // absolute: an update resolves it from anywhere
 	}
-	m.Play = &manifest.Play{Ref: ref, URL: rec.URL, SHA256: rec.SHA256, Played: time.Now().Format("2006-01-02-15_04")}
+	m.Play = &manifest.Play{Ref: ref, URL: rec.URL, SHA256: rec.SHA256, PlayedAt: time.Now().UTC().Format(time.RFC3339)}
 	if backend != "" {
 		if m.Sandbox == nil {
 			m.Sandbox = &manifest.Sandbox{}
@@ -560,7 +560,7 @@ func playUpdateRun(name string) error {
 	}
 	attached := map[string]bool{}
 	if pb.Manifest.Env != nil {
-		for _, p := range pb.Manifest.Env.Profiles {
+		for _, p := range pb.Manifest.Env.Sets {
 			attached[p] = true
 			if k, err := envSetKeys(store, []string{p}); err == nil {
 				for key := range k {

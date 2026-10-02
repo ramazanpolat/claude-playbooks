@@ -45,7 +45,7 @@ The playbook's `.playbook` now ends with:
 
 ```toml
 [env]
-unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
+block = ["CLAUDE_CODE_OAUTH_TOKEN"]
 
 [env.set]
 ANTHROPIC_MODEL = "claude-opus-5"
@@ -66,7 +66,7 @@ reference or a `BLOCK`. Inside `ALTER PLAYBOOK` the word `VAR` is required.
 
 When several playbooks want the same variables, put them in an **env set**
 (called an env profile before v3.20.0): a named file under
-`~/.claude-playbooks/.env-profiles/`, attached to playbooks by name.
+`~/.claude-playbooks/.env-sets/`, attached to playbooks by name.
 
 ```bash
 cpb CREATE ENV glm DESCRIBE 'GLM through the local router' \
@@ -74,11 +74,11 @@ cpb CREATE ENV glm DESCRIBE 'GLM through the local router' \
     BLOCK CLAUDE_CODE_OAUTH_TOKEN
 ```
 
-That wrote `~/.claude-playbooks/.env-profiles/glm.toml` (mode `0600`):
+That wrote `~/.claude-playbooks/.env-sets/glm.toml` (mode `0600`):
 
 ```toml
 description = "GLM through the local router"
-unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
+block = ["CLAUDE_CODE_OAUTH_TOKEN"]
 
 [set]
 ANTHROPIC_BASE_URL = "http://proxy:1/v1"
@@ -99,7 +99,7 @@ cpb ALTER PLAYBOOK router SET VAR ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # o
 
 ```toml
 [env]
-profiles = ["glm"]
+sets = ["glm"]
 
 [env.set]
 ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.4"
@@ -135,9 +135,8 @@ cpb ALTER DEFAULTS DROP ENV corp-proxy
 cpb SHOW DEFAULTS                                  # the list, and the secret helper
 ```
 
-The list lives in `~/.claude-playbooks/.env-profiles/.default`, one name per
-line; a single-name file from an older cpb is read as a one-element list. An
-older cpb refuses a multi-line file rather than guess.
+The list lives in `~/.claude-playbooks/.env-sets/.defaults`, one name per
+line.
 
 ## Secrets
 

@@ -27,7 +27,7 @@ func TestTakeLaunchFlagsLeadingRunOnly(t *testing.T) {
 	if len(layers) != 4 {
 		t.Fatalf("layers = %d, want 4", len(layers))
 	}
-	if !layers[0].Uses("glm") || layers[1].Set["K"] != "V" || !layers[2].Unsets("TOKEN") || layers[3].Set["FROM_FILE"] != "yes" {
+	if !layers[0].Uses("glm") || layers[1].Set["K"] != "V" || !layers[2].Blocks("TOKEN") || layers[3].Set["FROM_FILE"] != "yes" {
 		t.Fatalf("layers = %#v", layers)
 	}
 	// No flags: nothing consumed, nothing produced.

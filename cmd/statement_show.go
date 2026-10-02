@@ -63,7 +63,7 @@ type playbookJSON struct {
 	Vars     []varJSON `json:"vars"`
 	// Sandbox is the [sandbox] table, key for key.
 	Sandbox sandboxJSON `json:"sandbox"`
-	// IsolatedLogin is isolate_auth: no login shared with ~/.claude (a
+	// IsolatedLogin is isolated_login: no login shared with ~/.claude (a
 	// sandboxed playbook is always isolated).
 	IsolatedLogin bool `json:"isolated_login"`
 
@@ -140,10 +140,10 @@ func describeSandbox(s *manifest.Sandbox) sandboxJSON {
 }
 
 type playRecordJSON struct {
-	Ref    string `json:"ref"`
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-	Played string `json:"played"`
+	Ref      string `json:"ref"`
+	URL      string `json:"url"`
+	SHA256   string `json:"sha256"`
+	PlayedAt string `json:"played_at"`
 }
 
 type envJSON struct {
@@ -278,7 +278,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		Skills: describeSkills(pb.Manifest)}
 	if pb.Manifest != nil && pb.Manifest.Play != nil {
 		p := pb.Manifest.Play
-		v.Play = &playRecordJSON{Ref: p.Ref, URL: p.URL, SHA256: p.SHA256, Played: p.Played}
+		v.Play = &playRecordJSON{Ref: p.Ref, URL: p.URL, SHA256: p.SHA256, PlayedAt: p.PlayedAt}
 	}
 	// What the playbook's settings.json declares; an unreadable file shows
 	// none rather than failing the whole SHOW.
@@ -308,8 +308,8 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		return v
 	}
 	v.Version, v.Description, v.Homepage, v.Author = optStr(m.Version), optStr(m.Description), optStr(m.Homepage), optStr(m.Author)
-	if m.Alias != "" {
-		v.Launcher = strPtr(m.Alias)
+	if m.Launcher != "" {
+		v.Launcher = strPtr(m.Launcher)
 	}
 	if m.Source != nil && m.Source.Repository != "" {
 		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
@@ -319,10 +319,10 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	v.Sandbox = describeSandbox(m.Sandbox)
 	// A sandbox never shares the machine's login, whatever the manifest says.
-	v.IsolatedLogin = m.IsolateAuth || v.Sandbox.Always
+	v.IsolatedLogin = m.IsolatedLogin || v.Sandbox.Always
 	if m.Env != nil {
-		v.Envs = nonNil(m.Env.Profiles)
-		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Unset)
+		v.Envs = nonNil(m.Env.Sets)
+		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
 	}
 	return v
 }
@@ -440,7 +440,7 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
 	}
 	if v.Play != nil {
-		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.Played, v.Name)})
+		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.PlayedAt, v.Name)})
 	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.
@@ -545,7 +545,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 	for _, p := range profiles {
 		all = append(all, envJSON{
 			Name: p.Name, Description: p.Description,
-			Vars: layerVars(p.Set, p.Refs, p.Unset), UsedBy: nonNil(users[p.Name]),
+			Vars: layerVars(p.Set, p.Refs, p.Block), UsedBy: nonNil(users[p.Name]),
 			Default: isRegistryDefault(dir, defaults, p.Name),
 		})
 	}
@@ -583,7 +583,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 		if used == "" {
 			used = "-"
 		}
-		t.add(name, fmt.Sprint(len(profiles[i].Set)), fmt.Sprint(len(profiles[i].Unset)), used, v.Description)
+		t.add(name, fmt.Sprint(len(profiles[i].Set)), fmt.Sprint(len(profiles[i].Block)), used, v.Description)
 	}
 	t.render(os.Stdout)
 	return nil
@@ -900,7 +900,7 @@ func profileUsers(playbooksDir string) (map[string][]string, error) {
 			if m == nil || m.Env == nil {
 				continue
 			}
-			for _, name := range m.Env.Profiles {
+			for _, name := range m.Env.Sets {
 				if !named[name] {
 					named[name] = true
 					users[name] = append(users[name], pb.Name)

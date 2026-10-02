@@ -38,11 +38,11 @@ command = 'claude-playbook auth status nope 2>&1 | grep -F "unknown playbook \"n
 contains = "unknown-ok"
 
 [[verify.commands]]
-# isolate_auth is the one authentication mode with no other coverage: a
+# isolated_login is the one authentication mode with no other coverage: a
 # playbook that shares nothing, whose own login is the only one it has.
 # `auth status` must report it as isolated rather than as a shared login,
 # because that report is what a pilot checks before a headless run.
-command = '''claude-playbook CREATE PLAYBOOK solo NO ALIAS && printf '%s\n' 'name = "solo"' 'isolate_auth = true' > "$HOME/.claude-playbooks/solo/.playbook" && claude-playbook auth status solo'''
+command = '''claude-playbook CREATE PLAYBOOK solo NO ALIAS && printf '%s\n' 'name = "solo"' 'isolated_login = true' > "$HOME/.claude-playbooks/solo/.playbook" && claude-playbook auth status solo'''
 contains = "isolated"
 
 [[verify.commands]]

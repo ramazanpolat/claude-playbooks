@@ -103,7 +103,7 @@ const liveStart = "Mon Sep 28 07:29:55 2026"
 func sessionFixture(t *testing.T) (root, work string, files []string) {
 	t.Helper()
 	root = sandboxDefaultRoot(t)
-	writePlaybook(t, root, "alpha", &manifest.Manifest{Alias: "al"})
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
 	writePlaybook(t, root, "beta", nil)
 	work, _ = filepath.EvalSymlinks(t.TempDir())
 	a, b := filepath.Join(root, "alpha"), filepath.Join(root, "beta")
@@ -373,7 +373,7 @@ func TestResumeNoteForASandbox(t *testing.T) {
 // the launcher command that resumes the session.
 func TestRunPrintsTheResumeLine(t *testing.T) {
 	root := sandboxDefaultRoot(t)
-	writePlaybook(t, root, "alpha", &manifest.Manifest{Alias: "al"})
+	writePlaybook(t, root, "alpha", &manifest.Manifest{Launcher: "al"})
 	fakeProcs(t, nil)
 	dir := t.TempDir()
 	script := "#!/bin/sh\nd=\"$CLAUDE_CONFIG_DIR/projects/-w\"\nmkdir -p \"$d\"\necho '{}' > \"$d/" + sidLive + ".jsonl\"\n"

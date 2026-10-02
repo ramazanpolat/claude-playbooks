@@ -60,7 +60,7 @@ const (
 	Link     Kind = "LINK"      // CREATE PLAYBOOK ... LINK <dir>
 	Sandbox  Kind = "SANDBOX"   // CREATE PLAYBOOK ... SANDBOX
 
-	// Isolated login (manifest isolate_auth): the playbook shares no login
+	// Isolated login (manifest isolated_login): the playbook shares no login
 	// with ~/.claude. CREATE PLAYBOOK ... ISOLATED LOGIN, or ALTER PLAYBOOK
 	// ... SET | UNSET ISOLATED LOGIN.
 	IsolatedLogin      Kind = "ISOLATED LOGIN"

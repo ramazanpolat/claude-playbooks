@@ -26,10 +26,10 @@ steps = [
 path = "~/.claude-playbooks/env-pb/.playbook"
 
 [[verify.files]]
-path = "~/.claude-playbooks/.env-profiles/glm.toml"
+path = "~/.claude-playbooks/.env-sets/glm.toml"
 
 [[verify.commands]]
-command = 'grep -F "profiles = [\"glm\"]" "$HOME/.claude-playbooks/env-pb/.playbook" && grep -F "FROM_MANIFEST = \"yes\"" "$HOME/.claude-playbooks/env-pb/.playbook" && grep -F "unset = [\"NOISY\"]" "$HOME/.claude-playbooks/env-pb/.playbook" && echo manifest-ok'
+command = 'grep -F "sets = [\"glm\"]" "$HOME/.claude-playbooks/env-pb/.playbook" && grep -F "FROM_MANIFEST = \"yes\"" "$HOME/.claude-playbooks/env-pb/.playbook" && grep -F "block = [\"NOISY\"]" "$HOME/.claude-playbooks/env-pb/.playbook" && echo manifest-ok'
 contains = "manifest-ok"
 
 [[verify.commands]]
@@ -41,7 +41,7 @@ contains = "env-ok"
 
 [[verify.commands]]
 # An env set in use cannot be dropped; detached, it can.
-command = 'if claude-playbook DROP ENV glm >/dev/null 2>&1; then echo not-refused; else claude-playbook ALTER PLAYBOOK env-pb DROP ENV glm >/dev/null && claude-playbook DROP ENV glm >/dev/null && test ! -e "$HOME/.claude-playbooks/.env-profiles/glm.toml" && echo delete-guarded; fi'
+command = 'if claude-playbook DROP ENV glm >/dev/null 2>&1; then echo not-refused; else claude-playbook ALTER PLAYBOOK env-pb DROP ENV glm >/dev/null && claude-playbook DROP ENV glm >/dev/null && test ! -e "$HOME/.claude-playbooks/.env-sets/glm.toml" && echo delete-guarded; fi'
 contains = "delete-guarded"
 
 [[verify.commands]]

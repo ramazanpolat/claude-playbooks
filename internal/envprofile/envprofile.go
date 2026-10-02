@@ -1,14 +1,14 @@
-// Package envprofile reads and writes shared env profiles: named set/unset
-// blocks stored as TOML files under <playbooks root>/.env-profiles/ and
-// referenced from playbook manifests by name. A profile is the reusable half
-// of a playbook's [env] block -- "the proxy and model pins for provider X" --
+// Package envprofile reads and writes shared env sets: named set/block
+// layers stored as TOML files under <playbooks root>/.env-sets/ and
+// referenced from playbook manifests by name. A set is the reusable half
+// of a playbook's [env] table -- "the proxy and model pins for provider X" --
 // so ten playbooks can share one definition instead of ten copies.
 //
 // The directory is dot-prefixed so playbook discovery skips it. A profile
-// file has the same shape as a manifest's [env] block, hoisted to top level:
+// file has the same shape as a manifest's [env] table, hoisted to top level:
 //
 //	description = "GLM 5.3 through the local router"
-//	unset = ["CLAUDE_CODE_OAUTH_TOKEN"]
+//	block = ["CLAUDE_CODE_OAUTH_TOKEN"]
 //
 //	[set]
 //	ANTHROPIC_BASE_URL = "http://router:1/v1"
@@ -22,13 +22,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/tomlfile"
 )
 
-// DirName is the profiles directory under the playbooks root.
-const DirName = ".env-profiles"
+// DirName is the env-set directory under the playbooks root.
+const DirName = ".env-sets"
 
 // FileExt is the extension of a profile file under DirName.
 const FileExt = ".toml"
@@ -44,17 +43,17 @@ type Profile struct {
 	Description string            `toml:"description,omitempty"`
 	Set         map[string]string `toml:"set,omitempty"`
 	Refs        map[string]string `toml:"refs,omitempty"` // secret references, never values
-	Unset       []string          `toml:"unset,omitempty"`
+	Block       []string          `toml:"block,omitempty"`
 }
 
 // Env returns the profile as a manifest env layer.
 func (p *Profile) Env() *manifest.Env {
-	return &manifest.Env{Set: p.Set, Refs: p.Refs, Unset: p.Unset}
+	return &manifest.Env{Set: p.Set, Refs: p.Refs, Block: p.Block}
 }
 
 // Empty reports whether the profile declares no variables.
 func (p *Profile) Empty() bool {
-	return p == nil || (len(p.Set) == 0 && len(p.Refs) == 0 && len(p.Unset) == 0)
+	return p == nil || (len(p.Set) == 0 && len(p.Refs) == 0 && len(p.Block) == 0)
 }
 
 // ErrProfile is matched (errors.Is) by every error Expand returns, whether
@@ -103,8 +102,11 @@ func Read(dir, name string) (*Profile, error) {
 		return nil, err
 	}
 	var p Profile
-	if _, err := toml.Decode(string(data), &p); err != nil {
-		return nil, fmt.Errorf("invalid env profile at %s: %s", path(dir, name), manifest.SanitizeTOMLError(err))
+	if err := tomlfile.Decode(path(dir, name), data, &p); err != nil {
+		if errors.As(err, new(*tomlfile.UnknownKeyError)) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("invalid env set at %s: %s", path(dir, name), manifest.SanitizeTOMLError(err))
 	}
 	p.Name = name
 	if err := validate(&p, path(dir, name)); err != nil {
@@ -116,21 +118,21 @@ func Read(dir, name string) (*Profile, error) {
 func validate(p *Profile, at string) error {
 	for key, value := range p.Set {
 		if err := manifest.ValidateEnvKey(key); err != nil {
-			return fmt.Errorf("invalid env profile at %s: set: %w", at, err)
+			return fmt.Errorf("invalid env set at %s: set: %w", at, err)
 		}
 		if err := manifest.ValidateEnvValue(key, value); err != nil {
-			return fmt.Errorf("invalid env profile at %s: set: %w", at, err)
+			return fmt.Errorf("invalid env set at %s: set: %w", at, err)
 		}
 	}
-	for _, key := range p.Unset {
+	for _, key := range p.Block {
 		if err := manifest.ValidateEnvKey(key); err != nil {
-			return fmt.Errorf("invalid env profile at %s: unset: %w", at, err)
+			return fmt.Errorf("invalid env set at %s: block: %w", at, err)
 		}
 		if _, both := p.Set[key]; both {
-			return fmt.Errorf("invalid env profile at %s: %s is both set and unset", at, key)
+			return fmt.Errorf("invalid env set at %s: %s is both set and blocked", at, key)
 		}
 	}
-	if err := manifest.ValidateRefs(p.Refs, p.Set, p.Unset); err != nil {
+	if err := manifest.ValidateRefs(p.Refs, p.Set, p.Block); err != nil {
 		return fmt.Errorf("invalid env profile at %s: refs: %w", at, err)
 	}
 	return nil
@@ -153,11 +155,11 @@ func Write(dir string, p *Profile) error {
 	if p.Description != "" {
 		fmt.Fprintf(&b, "description = %s\n", manifest.QuoteTOML(p.Description))
 	}
-	if len(p.Unset) > 0 {
-		unset := append([]string(nil), p.Unset...)
-		sort.Strings(unset)
-		b.WriteString("unset = [")
-		for i, key := range unset {
+	if len(p.Block) > 0 {
+		block := append([]string(nil), p.Block...)
+		sort.Strings(block)
+		b.WriteString("block = [")
+		for i, key := range block {
 			if i > 0 {
 				b.WriteString(", ")
 			}
@@ -228,12 +230,11 @@ func List(dir string) ([]*Profile, error) {
 	return out, nil
 }
 
-// DefaultMarker is the file under the profiles directory naming the registry
-// defaults: env sets applied under every playbook's own block, in order, the
-// bottom layer above the shell environment. One name per line; a marker from
-// before DEFAULTS became a list holds a single name and reads unchanged.
-// Absent means no defaults.
-const DefaultMarker = ".default"
+// DefaultMarker is the file under the env-set directory naming the registry
+// defaults: env sets applied under every playbook's own table, in order, the
+// bottom layer above the shell environment. One name per line. Absent means
+// no defaults.
+const DefaultMarker = ".defaults"
 
 // Defaults returns the registry default env sets in order, nil when none.
 // Only an ABSENT marker means none: an empty one, one holding an invalid or
@@ -343,7 +344,7 @@ func ExpandWithDefault(dir string, e *manifest.Env) (*manifest.Env, error) {
 	if len(names) == 0 {
 		return Expand(dir, e)
 	}
-	base, err := Expand(dir, &manifest.Env{Profiles: names})
+	base, err := Expand(dir, &manifest.Env{Sets: names})
 	if err != nil {
 		return nil, err
 	}
@@ -360,11 +361,11 @@ func ExpandWithDefault(dir string, e *manifest.Env) (*manifest.Env, error) {
 // ErrProfile): a missing profile is a *MissingError, anything else a
 // *ResolveError.
 func Expand(dir string, e *manifest.Env) (*manifest.Env, error) {
-	if e == nil || len(e.Profiles) == 0 {
+	if e == nil || len(e.Sets) == 0 {
 		return e, nil
 	}
-	layers := make([]*manifest.Env, 0, len(e.Profiles)+1)
-	for _, name := range e.Profiles {
+	layers := make([]*manifest.Env, 0, len(e.Sets)+1)
+	for _, name := range e.Sets {
 		p, err := Read(dir, name)
 		if err != nil {
 			return nil, &ResolveError{Name: name, Err: err}
@@ -374,6 +375,6 @@ func Expand(dir string, e *manifest.Env) (*manifest.Env, error) {
 		}
 		layers = append(layers, p.Env())
 	}
-	layers = append(layers, &manifest.Env{Set: e.Set, Refs: e.Refs, Unset: e.Unset})
+	layers = append(layers, &manifest.Env{Set: e.Set, Refs: e.Refs, Block: e.Block})
 	return manifest.MergeEnv(layers...), nil
 }

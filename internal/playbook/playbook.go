@@ -48,7 +48,7 @@ var NewNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 // Alias returns the playbook's manifest alias, "" if none.
 func (p *Playbook) Alias() string {
 	if p.Manifest != nil {
-		return p.Manifest.Alias
+		return p.Manifest.Launcher
 	}
 	return ""
 }

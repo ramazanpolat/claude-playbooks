@@ -93,7 +93,7 @@ func shimDir(t *testing.T) string {
 	return dir
 }
 
-// playbook creates a playbook directory, optionally with isolate_auth set.
+// playbook creates a playbook directory, optionally with isolated_login set.
 func playbook(t *testing.T, root, name string, isolated bool) string {
 	t.Helper()
 	dir := filepath.Join(root, name)
@@ -105,7 +105,7 @@ func playbook(t *testing.T, root, name string, isolated bool) string {
 	}
 	man := "name = \"" + name + "\"\n"
 	if isolated {
-		man += "isolate_auth = true\n"
+		man += "isolated_login = true\n"
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte(man), 0o644); err != nil {
 		t.Fatal(err)
@@ -207,7 +207,7 @@ func TestNonIsolatedReceivesToken(t *testing.T) {
 	})
 }
 
-// The isolate_auth contract (SPEC-v4.md) exists so two accounts can run side by
+// The isolated_login contract (SPEC-v4.md) exists so two accounts can run side by
 // side. A leaked global token silently defeats it: both playbooks authenticate
 // as the same account while appearing isolated.
 //
@@ -270,7 +270,7 @@ func TestStartHonorsIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg, ".playbook"),
-		[]byte("name = \"startcfg\"\nisolate_auth = true\n"), 0o644); err != nil {
+		[]byte("name = \"startcfg\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -351,7 +351,7 @@ func TestConfigDirBoundToPlaybook(t *testing.T) {
 	}
 }
 
-// The environment is only half the isolate_auth contract; the other half is that
+// The environment is only half the isolated_login contract; the other half is that
 // a shared credentials symlink is detached. Skipping SyncCredentials broke both
 // at once, so both are asserted.
 func TestIsolatedDetachesSharedCredentialsSymlink(t *testing.T) {

@@ -18,7 +18,7 @@ yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth
          MCP logins survive); sync non-secret account metadata so the dir presents as logged in
 no   ->  link the playbook's .credentials.json to ~/.claude/.credentials.json; remove nothing;
          Claude Code refreshes the shared login itself
-isolate_auth = true  ->  neither: detach from the shared store, strip the global token,
+isolated_login = true  ->  neither: detach from the shared store, strip the global token,
          keep only what this playbook logs in itself; while it has no login of its own,
          drop the account record and cached feature flags left from a non-isolated past
 ```
@@ -38,7 +38,7 @@ session.
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT` (this key never takes a reference: cpb reads it itself) | that token wins over the file; its own login removed |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolate_auth = true` in its `.playbook`. `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolated_login = true` in its `.playbook`. `CLAUDE_PLAYBOOKS_ISOLATE_AUTH=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
 [env profile](environment.md#env-profiles-define-once-attach-to-many) shared by
@@ -63,7 +63,7 @@ over the machine-global file; such a launch counts as another account, so the
 plan descriptors read from your global login are not injected into it (the
 profile may set its own). The same holds for a token you export in the shell
 yourself: only the token read from the token file gets the global descriptors.
-This is a middle ground between sharing the token and `isolate_auth` (the
+This is a middle ground between sharing the token and `isolated_login` (the
 playbook shares nothing).
 
 ## Only the machine's own account is shared (v3.23.1)
@@ -113,7 +113,7 @@ shared playbook to their account.
 
 A playbook whose `settings.json` or env block points `ANTHROPIC_BASE_URL` at a
 third-party Anthropic-compatible endpoint (a GLM plan through a router, say)
-should carry `isolate_auth = true`. Claude Code decides which claude.ai-hosted
+should carry `isolated_login = true`. Claude Code decides which claude.ai-hosted
 tools to send from the feature flags it cached while an Anthropic account was
 logged in, not from where requests go; a playbook that ran as your global account
 before being rerouted keeps sending them, and since Claude Code 2.1.265 at least

@@ -257,8 +257,8 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	} else {
 		copied := *updated
 		updated = &copied
-		updated.Alias = liveManifest.Alias
-		updated.IsolateAuth = liveManifest.IsolateAuth
+		updated.Launcher = liveManifest.Launcher
+		updated.IsolatedLogin = liveManifest.IsolatedLogin
 		updated.Source = liveManifest.Source
 		updated.Env = liveManifest.Env
 		updated.Sandbox = liveManifest.Sandbox

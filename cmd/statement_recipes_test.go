@@ -37,7 +37,7 @@ func TestApplyRecipes(t *testing.T) {
 		t.Fatalf("USE PLAYBOOK: %v\n%s", err, out)
 	}
 	for _, pb := range []string{"a", "b"} {
-		if e := readEnv(t, filepath.Join(root, pb)); strings.Join(e.Profiles, ",") != "shared" {
+		if e := readEnv(t, filepath.Join(root, pb)); strings.Join(e.Sets, ",") != "shared" {
 			t.Fatalf("%s: %#v", pb, e)
 		}
 	}

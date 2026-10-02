@@ -56,12 +56,12 @@ func Explain(dir string, e *manifest.Env) ([]Origin, error) {
 		}
 	}
 	if e != nil {
-		for _, name := range e.Profiles {
+		for _, name := range e.Sets {
 			if err := add(LayerEnv, name); err != nil {
 				return nil, err
 			}
 		}
-		layers = append(layers, layer{LayerPlaybook, "", &manifest.Env{Set: e.Set, Refs: e.Refs, Unset: e.Unset}})
+		layers = append(layers, layer{LayerPlaybook, "", &manifest.Env{Set: e.Set, Refs: e.Refs, Block: e.Block}})
 	}
 
 	decided := map[string]Origin{}
@@ -72,7 +72,7 @@ func Explain(dir string, e *manifest.Env) ([]Origin, error) {
 		for key, value := range l.env.Set {
 			decided[key] = Origin{Key: key, Value: value, Kind: l.kind, Set: l.set}
 		}
-		for _, key := range l.env.Unset {
+		for _, key := range l.env.Block {
 			decided[key] = Origin{Key: key, Blocked: true, Kind: l.kind, Set: l.set}
 		}
 	}
@@ -116,7 +116,7 @@ func ExplainAll(dir string, e *manifest.Env) ([]LayerOrigin, error) {
 		for key, value := range env.Set {
 			entries = append(entries, Origin{Key: key, Value: value, Kind: kind, Set: set})
 		}
-		for _, key := range env.Unset {
+		for _, key := range env.Block {
 			entries = append(entries, Origin{Key: key, Blocked: true, Kind: kind, Set: set})
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Key < entries[j].Key })
@@ -133,14 +133,14 @@ func ExplainAll(dir string, e *manifest.Env) ([]LayerOrigin, error) {
 		add(LayerDefaults, name, p.Env())
 	}
 	if e != nil {
-		for _, name := range e.Profiles {
+		for _, name := range e.Sets {
 			p, err := Read(dir, name)
 			if err != nil || p == nil {
 				continue
 			}
 			add(LayerEnv, name, p.Env())
 		}
-		add(LayerPlaybook, "", &manifest.Env{Set: e.Set, Refs: e.Refs, Unset: e.Unset})
+		add(LayerPlaybook, "", &manifest.Env{Set: e.Set, Refs: e.Refs, Block: e.Block})
 	}
 	return out, nil
 }

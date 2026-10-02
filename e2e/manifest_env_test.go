@@ -28,7 +28,7 @@ func playbookWithEnv(t *testing.T, root, name, envBlock string) string {
 func TestManifestUnsetTokenKeepsGrantAndStripsToken(t *testing.T) {
 	root := t.TempDir()
 	dir := playbookWithEnv(t, root, "account",
-		"[env]\nunset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
+		"[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
 	creds := seedPlaybookCredentials(t, dir)
 
 	got := childEnv(t, root, launch{
@@ -48,7 +48,7 @@ func TestManifestUnsetTokenKeepsGrantAndStripsToken(t *testing.T) {
 // applies there. This is the whole point over renaming the token file.
 func TestSiblingPlaybookStillReceivesToken(t *testing.T) {
 	root := t.TempDir()
-	playbookWithEnv(t, root, "account", "[env]\nunset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
+	playbookWithEnv(t, root, "account", "[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
 	playbook(t, root, "shared", false)
 
 	got := childEnv(t, root, launch{
@@ -63,7 +63,7 @@ func TestSiblingPlaybookStillReceivesToken(t *testing.T) {
 func TestManifestSetAndUnsetReachChild(t *testing.T) {
 	root := t.TempDir()
 	playbookWithEnv(t, root, "router",
-		"[env]\nunset = [\"NOISY\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\n")
+		"[env]\nblock = [\"NOISY\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\n")
 
 	got := childEnv(t, root, launch{
 		env: []string{
@@ -130,15 +130,15 @@ func launchFails(t *testing.T, playbooksDir string, l launch) string {
 // the playbook's own entries.
 func TestProfileReachesChild(t *testing.T) {
 	root := t.TempDir()
-	profiles := filepath.Join(root, ".env-profiles")
+	profiles := filepath.Join(root, ".env-sets")
 	if err := os.MkdirAll(profiles, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(profiles, "glm.toml"),
-		[]byte("unset = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nANTHROPIC_BASE_URL = \"http://profile/v1\"\nMODEL = \"profile\"\n"), 0o600); err != nil {
+		[]byte("block = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nANTHROPIC_BASE_URL = \"http://profile/v1\"\nMODEL = \"profile\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	playbookWithEnv(t, root, "router", "[env]\nprofiles = [\"glm\"]\n\n[env.set]\nMODEL = \"own\"\n")
+	playbookWithEnv(t, root, "router", "[env]\nsets = [\"glm\"]\n\n[env.set]\nMODEL = \"own\"\n")
 
 	got := childEnv(t, root, launch{
 		env:  []string{tokenFile(t, "sk-ant-oat01-FROMFILE")},
@@ -155,7 +155,7 @@ func TestProfileReachesChild(t *testing.T) {
 // A referenced profile that does not exist refuses the launch outright.
 func TestMissingProfileRefusesLaunch(t *testing.T) {
 	root := t.TempDir()
-	playbookWithEnv(t, root, "router", "[env]\nprofiles = [\"ghost\"]\n")
+	playbookWithEnv(t, root, "router", "[env]\nsets = [\"ghost\"]\n")
 
 	out := launchFails(t, root, launch{
 		env:  []string{tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")},
@@ -170,14 +170,14 @@ func TestMissingProfileRefusesLaunch(t *testing.T) {
 // both run and start refuse rather than launch with the layer dropped.
 func TestBrokenProfileRefusesLaunch(t *testing.T) {
 	root := t.TempDir()
-	profiles := filepath.Join(root, ".env-profiles")
+	profiles := filepath.Join(root, ".env-sets")
 	if err := os.MkdirAll(profiles, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(profiles, "broken.toml"), []byte("= [\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := playbookWithEnv(t, root, "router", "[env]\nprofiles = [\"broken\"]\n")
+	cfg := playbookWithEnv(t, root, "router", "[env]\nsets = [\"broken\"]\n")
 	noToken := tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent")
 
 	out := launchFails(t, root, launch{env: []string{noToken}, args: []string{"run", "router"}})
@@ -195,7 +195,7 @@ func TestBrokenProfileRefusesLaunch(t *testing.T) {
 // profile here is only found if start honours it.
 func TestStartResolvesProfilesFromGivenRoot(t *testing.T) {
 	root := t.TempDir()
-	profiles := filepath.Join(root, ".env-profiles")
+	profiles := filepath.Join(root, ".env-sets")
 	if err := os.MkdirAll(profiles, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestStartResolvesProfilesFromGivenRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cfg, ".playbook"),
-		[]byte("name = \"startcfg\"\n\n[env]\nprofiles = [\"glm\"]\n"), 0o644); err != nil {
+		[]byte("name = \"startcfg\"\n\n[env]\nsets = [\"glm\"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -225,7 +225,7 @@ func TestStartResolvesProfilesFromGivenRoot(t *testing.T) {
 func TestRegistryDefaultProfileReachesChild(t *testing.T) {
 	root := t.TempDir()
 	seedProfile(t, root, "base", "[set]\nFROM_DEFAULT = \"yes\"\n")
-	if err := os.WriteFile(filepath.Join(root, ".env-profiles", ".default"), []byte("base\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".env-sets", ".defaults"), []byte("base\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	playbook(t, root, "plain", false)
@@ -241,7 +241,7 @@ func TestRegistryDefaultProfileReachesChild(t *testing.T) {
 		t.Fatalf("default not applied to start: %v", got)
 	}
 
-	if err := os.WriteFile(filepath.Join(root, ".env-profiles", ".default"), []byte("ghost\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".env-sets", ".defaults"), []byte("ghost\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out := launchFails(t, root, launch{env: []string{noToken}, args: []string{"run", "plain"}})

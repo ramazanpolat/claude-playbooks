@@ -227,7 +227,7 @@ func detachSharedCredentials(targetDir string) error {
 const IsolateAuthEnv = "CLAUDE_PLAYBOOKS_ISOLATE_AUTH"
 
 // IsAuthIsolated reports whether launches of targetDir run with isolated
-// authentication (manifest isolate_auth, or the override variable).
+// authentication (manifest isolated_login, or the override variable).
 func IsAuthIsolated(targetDir string) bool { return isAuthIsolated(targetDir) }
 
 func isAuthIsolated(targetDir string) bool {
@@ -240,7 +240,7 @@ func isAuthIsolated(targetDir string) bool {
 	if m == nil {
 		return false
 	}
-	return m.IsolateAuth
+	return m.IsolatedLogin
 }
 
 func copyFile(src, dst string, perm os.FileMode) error {

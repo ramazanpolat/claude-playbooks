@@ -183,12 +183,12 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unset := strings.Join(m.Env.Unset, " ")
+	unset := strings.Join(m.Env.Block, " ")
 	if !strings.Contains(unset, "EDITOR") || !strings.Contains(unset, "ANTHROPIC_API_KEY") || strings.Contains(unset, "ANTHROPIC_AUTH_TOKEN") || strings.Contains(unset, "ANTHROPIC_BASE_URL") {
 		t.Fatalf("blocked: %q", unset)
 	}
-	if strings.Join(m.Env.Profiles, " ") != "routerkey" {
-		t.Fatalf("--env: %v", m.Env.Profiles)
+	if strings.Join(m.Env.Sets, " ") != "routerkey" {
+		t.Fatalf("--env: %v", m.Env.Sets)
 	}
 }
 

@@ -36,8 +36,8 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 | Object | What it is | Lives at |
 |---|---|---|
 | `PLAYBOOK` | an installed playbook: dir, launcher, source, attached ENVs, own variables | `<root>/<name>/` |
-| `ENV` | an **env set**: a named, reusable set of variables (formerly "env profile") | `<root>/.env-profiles/<name>.toml` |
-| `DEFAULTS` | the machine-wide layer under every playbook: an ordered list of env sets; a singleton, no name | `<root>/.env-profiles/.default` |
+| `ENV` | an **env set**: a named, reusable set of variables (formerly "env profile") | `<root>/.env-sets/<name>.toml` |
+| `DEFAULTS` | the machine-wide layer under every playbook: an ordered list of env sets; a singleton, no name | `<root>/.env-sets/.defaults` |
 
 Two words keep the variables apart: **`ENV` is a named set**, **`VAR` is one
 variable**. "Profile" is deliberately not a keyword: it would be ambiguous with other
@@ -163,7 +163,7 @@ Two limits keep every statement whole-or-nothing:
 - `LINK` deletes nothing in your directory. It renames a
   `.credentials.json` there to `.credentials.json.cpb-ignored-<stamp>`, and
   backs up `.claude.json` to `.claude.json.cpb-backup-<stamp>` before
-  removing the same keys. A directory with `isolate_auth = true` keeps both.
+  removing the same keys. A directory with `isolated_login = true` keeps both.
 - `update` already kept the install's own files.
 - See `docs/known-issues/shared-launch-copies-own-login-over-machine-login.md`.
 
@@ -203,14 +203,14 @@ stores commands; files store the result.
 
 | Clause | Writes |
 |---|---|
-| `CREATE / ALTER / DROP ENV` | `<root>/.env-profiles/<name>.toml`: `description`, `[set]`, `[refs]`, `unset` |
-| `ALTER PLAYBOOK … USE / ADD / DROP ENV` | the playbook's `.playbook`, `[env] profiles = [...]` |
+| `CREATE / ALTER / DROP ENV` | `<root>/.env-sets/<name>.toml`: `description`, `[set]`, `[refs]`, `block` |
+| `ALTER PLAYBOOK … USE / ADD / DROP ENV` | the playbook's `.playbook`, `[env] sets = [...]` |
 | `ALTER PLAYBOOK … SET VAR K=V` | `.playbook` `[env.set]` |
 | `ALTER PLAYBOOK … SET VAR K FROM '<ref>'` | `.playbook` `[env.refs]` (new) |
-| `ALTER PLAYBOOK … BLOCK VAR K` | `.playbook` `[env] unset = [...]` |
+| `ALTER PLAYBOOK … BLOCK VAR K` | `.playbook` `[env] block = [...]` |
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
-| `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-profiles/.default`, one set name per line, in order |
-| `ALTER DEFAULTS SET / UNSET SECRET HELPER` | `<root>/.env-profiles/.secret-helper`, one line: the command |
+| `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-sets/.defaults`, one set name per line, in order |
+| `ALTER DEFAULTS SET / UNSET SECRET HELPER` | `<root>/.env-sets/.secret-helper`, one line: the command |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `ALIAS`, `NO ALIAS` | the playbook dir, the registry and the launcher |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
 | `ALTER PLAYBOOK … SET / UNSET AGENT` | the playbook's `settings.json`, `agent` |
@@ -218,9 +218,9 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … ALLOW / DENY / UNSET TOOL` | the playbook's `settings.json`, `permissions.allow` / `permissions.deny` |
 | `ALTER PLAYBOOK … SET / UNSET STATUSLINE`, `SET / UNSET MODEL` | the playbook's `settings.json`, `statusLine` / `model` |
 | `ALTER PLAYBOOK … ADD / DROP SKILL` | `<playbook>/skills/<name>` (a link or a copy) and the manifest's `[skills.<name>]` record |
-| `ALTER PLAYBOOK … SET / UNSET SANDBOX` | the playbook's `.playbook`, `[sandbox]` (bare `SET SANDBOX` also `isolate_auth = true`) |
+| `ALTER PLAYBOOK … SET / UNSET SANDBOX` | the playbook's `.playbook`, `[sandbox]` (bare `SET SANDBOX` also `isolated_login = true`) |
 
-A key lives in exactly one of `set`, `refs`, `unset` within a layer; writing
+A key lives in exactly one of `set`, `refs`, `block` within a layer; writing
 it to one removes it from the others.
 
 ## Layers at launch
@@ -257,7 +257,7 @@ link to `~/.claude/.credentials.json`, and `/login` in any playbook logs in
 all of them. An **isolated login** shares nothing. There is no link, no
 machine-wide token, and no account record carried over from a shared past,
 so the playbook is logged in only if it runs `/login` itself. It is the
-manifest's `isolate_auth = true` (see the authentication guide). Before
+manifest's `isolated_login = true` (see the authentication guide). Before
 v3.23.0 only `SANDBOX` or a hand edit set it.
 
 ```
@@ -269,7 +269,7 @@ ALTER PLAYBOOK <name> UNSET ISOLATED LOGIN
 - **Use it** for a second account, or for a throwaway or a third-party route
   where a `/login` must not land in the machine's shared store. In a shared
   playbook, `/login` writes through the link.
-- **`SET ISOLATED LOGIN`** records `isolate_auth = true` and removes the link
+- **`SET ISOLATED LOGIN`** records `isolated_login = true` and removes the link
   to the shared store at once, so `cpb auth status` reports `isolated`
   straight away. A `.credentials.json` that is a file, the playbook's own
   login, is kept.
@@ -682,10 +682,10 @@ one.
 
 **`play`** (v4.0.0) is the object's last field. It is the `[play]` record of a
 playbook `cpb play --keep` built, and `null` for every other:
-`{"ref", "url", "sha256", "played"}`. `ref` is what `cpb update <name>`
+`{"ref", "url", "sha256", "played_at"}`. `ref` is what `cpb update <name>`
 fetches again (a template name, a URL, a `github:` ref, or a local file's
-absolute path); `url` is empty for a local file; `played` is
-`YYYY-MM-DD-HH_MM`. The human form has a `Played from:` line.
+absolute path); `url` is empty for a local file; `played_at` is RFC 3339,
+UTC. The human form has a `Played from:` line.
 
 **`SHOW PLAYBOOKS`** (also a bare `SHOW`, and `SHOW --json`): human form, one header line and then one line per
 playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
@@ -1170,7 +1170,7 @@ Refused, each with its reason:
   layered by the launcher.
 - `RENAME TO`, `ALIAS`, `NO ALIAS`, `SANDBOX`: the directory is not in the
   registry and has no launcher.
-- `SET / UNSET ISOLATED LOGIN`: `isolate_auth` is recorded in a playbook's
+- `SET / UNSET ISOLATED LOGIN`: `isolated_login` is recorded in a playbook's
   manifest, which the directory does not have.
 
 **Safety.** Before its first write to a directory in a run, cpb copies that
@@ -1866,7 +1866,7 @@ runs no session:
   ref = "github:acme/agents/reviewer.cpb@v1.2.0"   # what cpb update resolves again; a local file's absolute path
   url = "https://raw.githubusercontent.com/acme/agents/v1.2.0/reviewer.cpb"   # absent for a local file
   sha256 = "3f1a…c9"
-  played = "2026-10-01-21_58"
+  played_at = "2026-10-01T18:58:00Z"
   ```
 
   `SHOW PLAYBOOK --json` shows it as `play` (see Output);

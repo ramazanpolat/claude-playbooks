@@ -148,7 +148,7 @@ func envRows() ([]any, error) {
 	rows := []any{}
 	for _, p := range profiles {
 		rows = append(rows, envJSON{Name: p.Name, Description: p.Description,
-			Vars: layerVars(p.Set, p.Refs, p.Unset), UsedBy: nonNil(users[p.Name]),
+			Vars: layerVars(p.Set, p.Refs, p.Block), UsedBy: nonNil(users[p.Name]),
 			Default: isRegistryDefault(dir, defaults, p.Name)})
 	}
 	return rows, nil

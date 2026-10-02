@@ -126,10 +126,10 @@ func writeAliasManifest(dir, name, alias string) error {
 		// only the name.
 		m = &manifest.Manifest{Name: name}
 	}
-	if m.Alias == alias {
+	if m.Launcher == alias {
 		return nil
 	}
-	m.Alias = alias
+	m.Launcher = alias
 	return manifest.Write(dir, m)
 }
 

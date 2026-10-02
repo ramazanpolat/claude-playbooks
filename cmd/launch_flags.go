@@ -81,7 +81,7 @@ func launchLayer(flag, value string) (*manifest.Env, error) {
 		if err := manifest.ValidateProfileName(value); err != nil {
 			return nil, err
 		}
-		return &manifest.Env{Profiles: []string{value}}, nil
+		return &manifest.Env{Sets: []string{value}}, nil
 	case "--env":
 		key, val, ok := strings.Cut(value, "=")
 		if !ok {
@@ -101,7 +101,7 @@ func launchLayer(flag, value string) (*manifest.Env, error) {
 		if err := manifest.ValidateEnvKey(value); err != nil {
 			return nil, err
 		}
-		return &manifest.Env{Unset: []string{value}}, nil
+		return &manifest.Env{Block: []string{value}}, nil
 	case "--env-file":
 		layer, err := manifest.ParseEnvFile(value)
 		if err != nil {

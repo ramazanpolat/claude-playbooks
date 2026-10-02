@@ -128,7 +128,7 @@ func TestOAuthTokenReferenceRefusedAtEveryLayer(t *testing.T) {
 
 func TestLaunchExecsThroughTheHelper(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	writePlaybook(t, root, "router", &manifest.Manifest{IsolateAuth: true})
+	writePlaybook(t, root, "router", &manifest.Manifest{IsolatedLogin: true})
 	helper, helperLog := fakeHelper(t)
 	claudeLog := stubClaude(t)
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
@@ -171,7 +171,7 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 
 func TestSandboxedLaunchRefusesReferences(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	writePlaybook(t, root, "boxed", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true}})
+	writePlaybook(t, root, "boxed", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true}})
 	helper, _ := fakeHelper(t)
 	stubSbx(t)
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)

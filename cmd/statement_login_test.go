@@ -17,10 +17,10 @@ func isolateAuthOf(t *testing.T, name string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return m != nil && m.IsolateAuth
+	return m != nil && m.IsolatedLogin
 }
 
-// ISOLATED LOGIN: isolate_auth without a sandbox. CREATE … ISOLATED LOGIN
+// ISOLATED LOGIN: isolated_login without a sandbox. CREATE … ISOLATED LOGIN
 // and SET ISOLATED LOGIN record it and drop the link to the shared login at
 // once; UNSET is refused on a sandboxed playbook and while the playbook
 // holds a login of its own. SHOW, EXPLAIN, SELECT and SHOW CREATE (round
@@ -39,7 +39,7 @@ func TestIsolatedLogin(t *testing.T) {
 
 	mustStmt(t, "CREATE PLAYBOOK a NO ALIAS ISOLATED LOGIN")
 	if !isolateAuthOf(t, "a") {
-		t.Fatal("CREATE … ISOLATED LOGIN did not record isolate_auth")
+		t.Fatal("CREATE … ISOLATED LOGIN did not record isolated_login")
 	}
 	var v struct {
 		Sandbox struct {
@@ -61,7 +61,7 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatalf("SET report:\n%s", out)
 	}
 	if !isolateAuthOf(t, "k") {
-		t.Fatal("SET ISOLATED LOGIN did not record isolate_auth")
+		t.Fatal("SET ISOLATED LOGIN did not record isolated_login")
 	}
 	if _, err := os.Lstat(link); !os.IsNotExist(err) {
 		t.Fatalf("the link to the shared login is still there: %v", err)
@@ -113,7 +113,7 @@ func TestIsolatedLogin(t *testing.T) {
 	}
 	mustStmt(t, "ALTER PLAYBOOK k UNSET ISOLATED LOGIN")
 	if isolateAuthOf(t, "k") {
-		t.Fatal("UNSET ISOLATED LOGIN left isolate_auth")
+		t.Fatal("UNSET ISOLATED LOGIN left isolated_login")
 	}
 	if created := mustStmt(t, "SHOW CREATE PLAYBOOK k"); strings.Contains(created, "ISOLATED LOGIN") {
 		t.Fatalf("SHOW CREATE after UNSET:\n%s", created)
@@ -160,7 +160,7 @@ func TestIsolatedLoginDryRun(t *testing.T) {
 	}
 }
 
-// A sandboxed playbook reads as isolated even without isolate_auth; and a
+// A sandboxed playbook reads as isolated even without isolated_login; and a
 // dry run keeps a renamed playbook's login setting, refusing UNSET as the
 // real run does (agy review, v3.23.0).
 func TestIsolatedLoginSandboxAndRename(t *testing.T) {

@@ -4,6 +4,7 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -13,9 +14,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/tomlfile"
 )
 
 const FileName = ".playbook"
@@ -42,33 +42,32 @@ type Update struct {
 // Env holds per-install environment overrides applied by `run`, `start`, and
 // launcher dispatch to the child claude process, after the process's own
 // environment and before CLAUDE_CONFIG_DIR is bound. Set entries override
-// inherited values; Unset entries are removed from the child's environment
+// inherited values; Block entries are removed from the child's environment
 // even when the shell exports them.
 //
-// The block is INSTALL-LOCAL state, like `alias`: `update` carries the live
+// The [env] table is INSTALL-LOCAL state, like `launcher`: `update` carries the live
 // block forward and ignores the source's, and `install` drops a block the
 // source ships. A playbook repository must not be able to point an install's
 // ANTHROPIC_BASE_URL somewhere else by publishing a manifest.
 //
-// Unsetting CLAUDE_CODE_OAUTH_TOKEN has a documented side effect: the
+// Blocking CLAUDE_CODE_OAUTH_TOKEN has a documented side effect: the
 // long-lived token is treated as inactive for that install, so the launch
 // takes the stored-credentials path (no quarantine, no injection). Setting
 // it supplies a per-install token that wins over the machine-global file.
 //
-// Profiles names shared env profiles (files under the playbooks root's
-// .env-profiles/ directory) layered UNDER this block: profiles apply in
-// list order, later ones overriding earlier, and the block's own Set/Unset
-// apply last. Resolution happens at launch; the manifest records names only.
+// Sets names shared env sets (files under the playbooks root's .env-sets/
+// directory) layered UNDER this table: sets apply in list order, later ones
+// overriding earlier, and the table's own Set/Block apply last. Resolution happens at launch; the manifest records names only.
 //
 // Refs holds secret REFERENCES (keychain:…, op://…), never values: the
 // launch execs claude through the configured secret helper, which resolves
 // them (docs/cli-grammar.md, "Secrets"). A key lives in at most one of Set,
-// Refs and Unset.
+// Refs and Block.
 type Env struct {
-	Profiles []string          `toml:"profiles,omitempty"`
-	Set      map[string]string `toml:"set,omitempty"`
-	Refs     map[string]string `toml:"refs,omitempty"`
-	Unset    []string          `toml:"unset,omitempty"`
+	Sets  []string          `toml:"sets,omitempty"`
+	Set   map[string]string `toml:"set,omitempty"`
+	Refs  map[string]string `toml:"refs,omitempty"`
+	Block []string          `toml:"block,omitempty"`
 }
 
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -86,7 +85,7 @@ func (e *Env) Uses(profile string) bool {
 	if e == nil {
 		return false
 	}
-	for _, p := range e.Profiles {
+	for _, p := range e.Sets {
 		if p == profile {
 			return true
 		}
@@ -107,7 +106,7 @@ func MergeEnv(layers ...*Env) *Env {
 			continue
 		}
 		for key, ref := range layer.Refs {
-			out.Unset = dropKey(out.Unset, key)
+			out.Block = dropKey(out.Block, key)
 			delete(out.Set, key)
 			if out.Refs == nil {
 				out.Refs = map[string]string{}
@@ -115,15 +114,15 @@ func MergeEnv(layers ...*Env) *Env {
 			out.Refs[key] = ref
 		}
 		for key, value := range layer.Set {
-			out.Unset = dropKey(out.Unset, key)
+			out.Block = dropKey(out.Block, key)
 			delete(out.Refs, key)
 			out.Set[key] = value
 		}
-		for _, key := range layer.Unset {
+		for _, key := range layer.Block {
 			delete(out.Set, key)
 			delete(out.Refs, key)
-			if !out.Unsets(key) {
-				out.Unset = append(out.Unset, key)
+			if !out.Blocks(key) {
+				out.Block = append(out.Block, key)
 			}
 		}
 	}
@@ -236,15 +235,15 @@ func ValidateEnvKey(key string) error {
 
 // Empty reports whether the block declares nothing.
 func (e *Env) Empty() bool {
-	return e == nil || (len(e.Profiles) == 0 && len(e.Set) == 0 && len(e.Refs) == 0 && len(e.Unset) == 0)
+	return e == nil || (len(e.Sets) == 0 && len(e.Set) == 0 && len(e.Refs) == 0 && len(e.Block) == 0)
 }
 
-// Unsets reports whether key is listed for removal.
-func (e *Env) Unsets(key string) bool {
+// Blocks reports whether key is listed for removal.
+func (e *Env) Blocks(key string) bool {
 	if e == nil {
 		return false
 	}
-	for _, k := range e.Unset {
+	for _, k := range e.Block {
 		if k == key {
 			return true
 		}
@@ -254,18 +253,18 @@ func (e *Env) Unsets(key string) bool {
 
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
-	Version     string   `toml:"version"`
-	Name        string   `toml:"name"`
-	Alias       string   `toml:"alias"`
-	Subdir      string   `toml:"subdir"`
-	Description string   `toml:"description"`
-	Homepage    string   `toml:"homepage"`
-	Author      string   `toml:"author"`
-	IsolateAuth bool     `toml:"isolate_auth"`
-	Source      *Source  `toml:"source,omitempty"`
-	Update      *Update  `toml:"update,omitempty"`
-	Env         *Env     `toml:"env,omitempty"`
-	Sandbox     *Sandbox `toml:"sandbox,omitempty"`
+	Version       string   `toml:"version"`
+	Name          string   `toml:"name"`
+	Launcher      string   `toml:"launcher"`
+	Subdir        string   `toml:"subdir"`
+	Description   string   `toml:"description"`
+	Homepage      string   `toml:"homepage"`
+	Author        string   `toml:"author"`
+	IsolatedLogin bool     `toml:"isolated_login"`
+	Source        *Source  `toml:"source,omitempty"`
+	Update        *Update  `toml:"update,omitempty"`
+	Env           *Env     `toml:"env,omitempty"`
+	Sandbox       *Sandbox `toml:"sandbox,omitempty"`
 
 	// MCP records, per MCP server a statement declared, the variables cpb
 	// derived for its secret references, so dropping the server forgets
@@ -290,8 +289,8 @@ type Play struct {
 	// URL is the address the bytes came from; empty for a local file.
 	URL    string `toml:"url,omitempty"`
 	SHA256 string `toml:"sha256"`
-	// Played is when, as YYYY-MM-DD-HH_MM local time.
-	Played string `toml:"played"`
+	// PlayedAt is when, in RFC 3339, UTC.
+	PlayedAt string `toml:"played_at"`
 }
 
 // SkillRecord is one skill cpb put at <config>/skills/<name>.
@@ -358,7 +357,10 @@ func Read(dir string) (*Manifest, error) {
 		return nil, err
 	}
 	var m Manifest
-	if _, err := toml.Decode(string(data), &m); err != nil {
+	if err := tomlfile.Decode(path, data, &m); err != nil {
+		if errors.As(err, new(*tomlfile.UnknownKeyError)) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("invalid .playbook at %s: %s", path, SanitizeTOMLError(err))
 	}
 	if err := m.validate(path); err != nil {
@@ -373,7 +375,7 @@ func Read(dir string) (*Manifest, error) {
 //
 // An unreadable or invalid manifest on the way up does not stop the walk --
 // the closest VALID manifest still governs, so a stray broken file in a
-// subdir cannot silently switch off an install root's isolate_auth. The
+// subdir cannot silently switch off an install root's isolated_login. The
 // first such error is returned alongside whatever was found, so callers can
 // report it. Returns (nil, nil) when no ancestor has a manifest.
 func Nearest(dir string) (*Manifest, error) {
@@ -451,9 +453,9 @@ func (m *Manifest) validate(path string) error {
 		}
 	}
 	if m.Env != nil {
-		for _, name := range m.Env.Profiles {
+		for _, name := range m.Env.Sets {
 			if err := ValidateProfileName(name); err != nil {
-				return fmt.Errorf("invalid .playbook at %s: env.profiles: %w", path, err)
+				return fmt.Errorf("invalid .playbook at %s: env.sets: %w", path, err)
 			}
 		}
 		for key, value := range m.Env.Set {
@@ -464,15 +466,15 @@ func (m *Manifest) validate(path string) error {
 				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
 			}
 		}
-		for _, key := range m.Env.Unset {
+		for _, key := range m.Env.Block {
 			if err := ValidateEnvKey(key); err != nil {
-				return fmt.Errorf("invalid .playbook at %s: env.unset: %w", path, err)
+				return fmt.Errorf("invalid .playbook at %s: env.block: %w", path, err)
 			}
 			if _, both := m.Env.Set[key]; both {
-				return fmt.Errorf("invalid .playbook at %s: env: %s is both set and unset", path, key)
+				return fmt.Errorf("invalid .playbook at %s: env: %s is both set and blocked", path, key)
 			}
 		}
-		if err := ValidateRefs(m.Env.Refs, m.Env.Set, m.Env.Unset); err != nil {
+		if err := ValidateRefs(m.Env.Refs, m.Env.Set, m.Env.Block); err != nil {
 			return fmt.Errorf("invalid .playbook at %s: env.refs: %w", path, err)
 		}
 	}
@@ -550,8 +552,8 @@ func Write(dir string, m *Manifest) error {
 	if m.Name != "" {
 		fmt.Fprintf(&b, "name = %s\n", QuoteTOML(m.Name))
 	}
-	if m.Alias != "" {
-		fmt.Fprintf(&b, "alias = %s\n", QuoteTOML(m.Alias))
+	if m.Launcher != "" {
+		fmt.Fprintf(&b, "launcher = %s\n", QuoteTOML(m.Launcher))
 	}
 	if m.Subdir != "" {
 		fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(m.Subdir))
@@ -565,8 +567,8 @@ func Write(dir string, m *Manifest) error {
 	if m.Author != "" {
 		fmt.Fprintf(&b, "author = %s\n", QuoteTOML(m.Author))
 	}
-	if m.IsolateAuth {
-		fmt.Fprintf(&b, "isolate_auth = true\n")
+	if m.IsolatedLogin {
+		fmt.Fprintf(&b, "isolated_login = true\n")
 	}
 	if m.Source != nil {
 		b.WriteString("\n[source]\n")
@@ -600,9 +602,9 @@ func Write(dir string, m *Manifest) error {
 		// [env] must precede [env.set] in TOML; both are emitted in sorted
 		// order so a rewrite never reorders a hand-edited file arbitrarily.
 		b.WriteString("\n[env]\n")
-		if len(m.Env.Profiles) > 0 {
-			b.WriteString("profiles = [")
-			for i, name := range m.Env.Profiles {
+		if len(m.Env.Sets) > 0 {
+			b.WriteString("sets = [")
+			for i, name := range m.Env.Sets {
 				if i > 0 {
 					b.WriteString(", ")
 				}
@@ -610,11 +612,11 @@ func Write(dir string, m *Manifest) error {
 			}
 			b.WriteString("]\n")
 		}
-		if len(m.Env.Unset) > 0 {
-			unset := append([]string(nil), m.Env.Unset...)
-			sort.Strings(unset)
-			b.WriteString("unset = [")
-			for i, key := range unset {
+		if len(m.Env.Block) > 0 {
+			block := append([]string(nil), m.Env.Block...)
+			sort.Strings(block)
+			b.WriteString("block = [")
+			for i, key := range block {
 				if i > 0 {
 					b.WriteString(", ")
 				}
@@ -704,7 +706,7 @@ func Write(dir string, m *Manifest) error {
 			fmt.Fprintf(&b, "url = %s\n", QuoteTOML(m.Play.URL))
 		}
 		fmt.Fprintf(&b, "sha256 = %s\n", QuoteTOML(m.Play.SHA256))
-		fmt.Fprintf(&b, "played = %s\n", QuoteTOML(m.Play.Played))
+		fmt.Fprintf(&b, "played_at = %s\n", QuoteTOML(m.Play.PlayedAt))
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
 	// carrying any is written private, like an env profile. Existing files

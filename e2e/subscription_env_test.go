@@ -115,7 +115,7 @@ func TestExportedSubscriptionDescriptorWins(t *testing.T) {
 	}
 }
 
-// isolate_auth exists so two accounts can run side by side. The descriptors
+// isolated_login exists so two accounts can run side by side. The descriptors
 // describe the GLOBAL account, so leaking them tells an isolated playbook's
 // session the plan of an account it is deliberately not authenticating as.
 // Inheritance is the leak here, so they must be actively removed, not merely

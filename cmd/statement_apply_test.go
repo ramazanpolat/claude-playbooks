@@ -65,7 +65,7 @@ func TestApplyBuildsFromScratchAndConverges(t *testing.T) {
 		t.Fatalf("apply: %v\n%s", err, out)
 	}
 	e := readEnv(t, filepath.Join(root, "work"))
-	if strings.Join(e.Profiles, ",") != "glm" || e.Set["MAX_THINKING_TOKENS"] != "8000" || strings.Join(e.Unset, ",") != "HTTP_PROXY" {
+	if strings.Join(e.Sets, ",") != "glm" || e.Set["MAX_THINKING_TOKENS"] != "8000" || strings.Join(e.Block, ",") != "HTTP_PROXY" {
 		t.Fatalf("applied block: %#v", e)
 	}
 	if d, _ := envprofile.Defaults(envprofile.Dir(root)); strings.Join(d, ",") != "glm" {
@@ -89,7 +89,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 	}
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
 	mustStmt(t, "ALTER PLAYBOOK work SET VAR API_TOKEN FROM keychain:ok/work")
-	writePlaybook(t, root, "src", &manifest.Manifest{Alias: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
+	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 
 	dump := mustStmt(t, "SHOW CREATE ALL")
 	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm\n  SET SECRET HELPER '" + helper + "';",
@@ -210,7 +210,7 @@ func TestApplyDropsNeedYes(t *testing.T) {
 func TestApplyWarnsOnSourceDrift(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CLAUDE_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	writePlaybook(t, root, "src", &manifest.Manifest{Alias: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
+	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 	before := snapshot(t, root)
 
 	same := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS src FROM https://example.com/s.git BRANCH v1;\n")
@@ -334,7 +334,7 @@ func TestApplyDryRunSeesEarlierChanges(t *testing.T) {
 	if out, err := apply(t, path); err != nil {
 		t.Fatalf("apply: %v\n%s", err, out)
 	}
-	if e := readEnv(t, filepath.Join(root, "q")); strings.Join(e.Profiles, ",") != "b" {
+	if e := readEnv(t, filepath.Join(root, "q")); strings.Join(e.Sets, ",") != "b" {
 		t.Fatalf("applied: %#v", e)
 	}
 }

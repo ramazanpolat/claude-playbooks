@@ -208,7 +208,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		old := p
 		p = &envprofile.Profile{Name: st.Name, Set: map[string]string{}}
-		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
+		lines := applyVarClauses(&p.Set, &p.Refs, &p.Block, &p.Description, st.Clauses)
 		return r.writeProfile(dir, old, p, "Replaced", "ENV "+st.Name, lines)
 
 	case grammar.Alter:
@@ -219,7 +219,7 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 		if p.Set == nil {
 			p.Set = map[string]string{}
 		}
-		lines := applyVarClauses(&p.Set, &p.Refs, &p.Unset, &p.Description, st.Clauses)
+		lines := applyVarClauses(&p.Set, &p.Refs, &p.Block, &p.Description, st.Clauses)
 		return r.writeProfile(dir, old, p, "Altered", "ENV "+st.Name, lines)
 	}
 
@@ -512,12 +512,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Set == nil {
 		m.Env.Set = map[string]string{}
 	}
-	profiles, lines, err := r.applyEnvList(dir, m.Env.Profiles, st.Clauses)
+	profiles, lines, err := r.applyEnvList(dir, m.Env.Sets, st.Clauses)
 	if err != nil {
 		return err
 	}
-	m.Env.Profiles = profiles
-	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Refs, &m.Env.Unset, nil, st.Clauses)...)
+	m.Env.Sets = profiles
+	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Refs, &m.Env.Block, nil, st.Clauses)...)
 	// MCP servers: planned against the playbook's .claude.json; their
 	// secret references land in this same layer, under derived variables.
 	var mcp *mcpPlan
@@ -552,7 +552,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	sandboxChange := !reflect.DeepEqual(beforeSandbox, sandbox)
 	m.Sandbox = sandbox
 	lines = append(lines, sandboxLines...)
-	// ISOLATED LOGIN: isolate_auth, in the same manifest write.
+	// ISOLATED LOGIN: isolated_login, in the same manifest write.
 	nowIsolated, loginLines, err := r.planIsolatedLogin(st.Name, m, r.configDir(st.Name, pb), st.Clauses)
 	if err != nil {
 		return err
@@ -562,7 +562,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		loginLines = append(loginLines, "login     isolated: a sandbox shares nothing with ~/.claude; /login once in it")
 	}
 	loginChange := nowIsolated != wasIsolated
-	m.IsolateAuth = nowIsolated
+	m.IsolatedLogin = nowIsolated
 	lines = append(lines, loginLines...)
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
@@ -667,7 +667,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	// is left to the next launch, which links the store as it always does.
 	if loginChange && nowIsolated {
 		if err := auth.SyncCredentials(pb.Path); err != nil {
-			r.warning = fmt.Sprintf("PLAYBOOK %s: isolate_auth is recorded, but the link to the shared login could not be removed now (%v); the next launch removes it", st.Name, err)
+			r.warning = fmt.Sprintf("PLAYBOOK %s: isolated_login is recorded, but the link to the shared login could not be removed now (%v); the next launch removes it", st.Name, err)
 		}
 	}
 	if skills != nil {
@@ -817,15 +817,15 @@ func (r *stmtRun) requireEnv(dir, name string) error {
 
 // applyVarClauses applies SET, SET … FROM, BLOCK and UNSET (and DESCRIBE,
 // when desc is not nil) to one layer and returns a report line per change.
-// A key lives in exactly one of set, refs and unset. Values are never
+// A key lives in exactly one of set, refs and block. Values are never
 // reported; references are not secrets and are.
-func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string, clauses []grammar.Clause) []string {
+func applyVarClauses(set, refs *map[string]string, block *[]string, desc *string, clauses []grammar.Clause) []string {
 	var lines []string
 	for _, c := range clauses {
 		switch c.Kind {
 		case grammar.SetRef:
 			for _, v := range c.Vars {
-				*unset = dropString(*unset, v.Key)
+				*block = dropString(*block, v.Key)
 				delete(*set, v.Key)
 				if *refs == nil {
 					*refs = map[string]string{}
@@ -835,7 +835,7 @@ func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string
 			}
 		case grammar.SetVar:
 			for _, v := range c.Vars {
-				*unset = dropString(*unset, v.Key)
+				*block = dropString(*block, v.Key)
 				delete(*refs, v.Key)
 				(*set)[v.Key] = v.Value
 				line := "set       " + v.Key
@@ -848,8 +848,8 @@ func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string
 			for _, k := range c.Keys {
 				delete(*set, k)
 				delete(*refs, k)
-				if !slices.Contains(*unset, k) {
-					*unset = append(*unset, k)
+				if !slices.Contains(*block, k) {
+					*block = append(*block, k)
 				}
 				lines = append(lines, "blocked   "+k)
 			}
@@ -857,7 +857,7 @@ func applyVarClauses(set, refs *map[string]string, unset *[]string, desc *string
 			for _, k := range c.Keys {
 				delete(*set, k)
 				delete(*refs, k)
-				*unset = dropString(*unset, k)
+				*block = dropString(*block, k)
 				lines = append(lines, "unset     "+k)
 			}
 		case grammar.Describe:
@@ -879,7 +879,7 @@ func report(head string, lines []string) {
 
 func cloneProfile(p *envprofile.Profile) *envprofile.Profile {
 	c := *p
-	c.Set, c.Refs, c.Unset = maps.Clone(p.Set), maps.Clone(p.Refs), slices.Clone(p.Unset)
+	c.Set, c.Refs, c.Block = maps.Clone(p.Set), maps.Clone(p.Refs), slices.Clone(p.Block)
 	return &c
 }
 
@@ -891,7 +891,7 @@ func cloneEnv(e *manifest.Env) *manifest.Env {
 	if e == nil {
 		return nil
 	}
-	return &manifest.Env{Profiles: slices.Clone(e.Profiles), Set: maps.Clone(e.Set), Refs: maps.Clone(e.Refs), Unset: slices.Clone(e.Unset)}
+	return &manifest.Env{Sets: slices.Clone(e.Sets), Set: maps.Clone(e.Set), Refs: maps.Clone(e.Refs), Block: slices.Clone(e.Block)}
 }
 
 // envEqual compares two blocks as a launch sees them: attached sets in
@@ -900,10 +900,10 @@ func envEqual(a, b *manifest.Env) bool {
 	if a.Empty() || b.Empty() {
 		return a.Empty() && b.Empty()
 	}
-	ua, ub := slices.Clone(a.Unset), slices.Clone(b.Unset)
+	ua, ub := slices.Clone(a.Block), slices.Clone(b.Block)
 	slices.Sort(ua)
 	slices.Sort(ub)
-	return slices.Equal(a.Profiles, b.Profiles) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
+	return slices.Equal(a.Sets, b.Sets) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
 }
 
 // dropString is list without s.

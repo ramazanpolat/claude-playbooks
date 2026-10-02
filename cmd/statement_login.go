@@ -9,7 +9,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// isolated reports whether a playbook's login is isolated (isolate_auth),
+// isolated reports whether a playbook's login is isolated (isolated_login),
 // as the run sees it.
 func (r *stmtRun) isolated(name string, m *manifest.Manifest) bool {
 	if r.dry != nil {
@@ -17,7 +17,7 @@ func (r *stmtRun) isolated(name string, m *manifest.Manifest) bool {
 			return v
 		}
 	}
-	return m != nil && m.IsolateAuth
+	return m != nil && m.IsolatedLogin
 }
 
 // sandboxed reports whether a playbook always runs in a sandbox, as the run
