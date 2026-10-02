@@ -242,4 +242,6 @@ on its commit, so the release workflow's first run on it stops at the arena
 gate: re-run that run once phase 2 is green, and it publishes. Its bump
 commit passes the npx check with a warning until the tag exists (the version
 is ahead of the newest release, and not yet tagged). Meanwhile npx runs the
-newest published release and says so on stderr (`bin/npx-shim.sh`).
+newest published release of the same major and says so on stderr
+(`bin/npx-shim.sh`); for a new major's first release it serves nothing until
+the tag, since the shim never falls back across a major.
