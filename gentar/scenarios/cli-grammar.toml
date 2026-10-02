@@ -249,10 +249,11 @@ contains = "claude-version-ok"
 
 [[verify.commands]]
 # DESCRIBE (v3.22.0): DESCRIBE [TABLE] <table> / DESC lists a SELECT table's
-# columns and types, --json too; an unknown table is refused. And a SELECT
-# through clickhouse-local asks it for JSONCompact in a pipe too (stub
-# clickhouse, as select-ok): cpb prints both engines' results itself.
-command = '''cpb DESCRIBE playbooks > "$HOME/desc.out" && grep -q '^version_tuple  *Array(UInt32)' "$HOME/desc.out" && grep -q '^model_picker  *JSON' "$HOME/desc.out" && cpb "DESC TABLE vars --json" | tr -d ' \n' | grep -qF '{"name":"effective","type":"Bool"}' && if cpb DESCRIBE nope > "$HOME/desc.err" 2>&1; then echo unknown-accepted; elif ! grep -q 'unknown table "nope"' "$HOME/desc.err"; then echo wrong-error; else CPB_CLICKHOUSE="$HOME/chstub/clickhouse" cpb "SELECT name FROM PLAYBOOKS WHERE 1" | cat > /dev/null && grep -qx -- "--output-format" "$HOME/ch.args" && grep -qx JSONCompact "$HOME/ch.args" && echo describe-ok; fi'''
+# columns: name, type and comment (v4), TSV with a header row in a pipe,
+# --json too; an unknown table is refused. And a SELECT through
+# clickhouse-local asks it for JSONCompact in a pipe too (stub clickhouse, as
+# select-ok): cpb prints both engines' results itself.
+command = '''cpb DESCRIBE playbooks > "$HOME/desc.out" && [ "$(head -n 1 "$HOME/desc.out")" = "$(printf 'name\ttype\tcomment')" ] && grep -q "$(printf '^version_tuple\tArray(UInt32)\tThe numbers')" "$HOME/desc.out" && grep -q "$(printf '^model_picker\tJSON\tThe model picker')" "$HOME/desc.out" && cpb "DESC TABLE vars --json" | tr -d ' \n' | grep -qF '{"name":"effective","type":"Bool","comment":"Truefortheentryalaunchuses."}' && if cpb DESCRIBE nope > "$HOME/desc.err" 2>&1; then echo unknown-accepted; elif ! grep -q 'unknown table "nope"' "$HOME/desc.err"; then echo wrong-error; else CPB_CLICKHOUSE="$HOME/chstub/clickhouse" cpb "SELECT name FROM PLAYBOOKS WHERE 1" | cat > /dev/null && grep -qx -- "--output-format" "$HOME/ch.args" && grep -qx JSONCompact "$HOME/ch.args" && echo describe-ok; fi'''
 contains = "describe-ok"
 
 [[verify.commands]]
@@ -400,7 +401,7 @@ obj() { printf %s "$J" | tr '}' '\n' | grep -F "\"session_id\":\"$1\""; }
 obj "$N1" | grep -qF '"tty":null' && obj "$T1" | grep -qF "\"tty\":\"$PT\"" || { echo tty-show-wrong; exit 1; }
 cpb "SELECT session_id, tty FROM SESSIONS" --json | tr -d ' \n' | grep -qF "\"tty\":\"$PT\"" || { echo tty-select-wrong; exit 1; }
 D="$(cpb DESCRIBE SESSIONS --json | tr -d ' \n')"
-[ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)"}]' || { echo tty-describe-wrong; exit 1; }
+[ "$(printf %s "$D" | grep -o '"name":"[^"]*"' | sed -e 's/"name":"//' -e 's/"$//' | tr '\n' ' ')" = "playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty " ] && printf %s "$D" | grep -qF '{"name":"tty","type":"Nullable(String)","comment":"The' || { echo tty-describe-wrong; exit 1; }
 echo sessions-tty-ok'''
 contains = "sessions-tty-ok"
 
@@ -410,7 +411,7 @@ contains = "sessions-tty-ok"
 command = '''
 cpb CREATE PLAYBOOK ppi NO LAUNCHER >/dev/null || exit 1
 cpb SHOW PLAYBOOK ppi --json | tr -d ' \n' | grep -qF '"model_picker":null,"play":null}' || { echo show-tail-wrong; exit 1; }
-cpb DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -qF '{"name":"model_picker","type":"JSON"},{"name":"play","type":"JSON"}]' || { echo describe-tail-wrong; exit 1; }
+[ "$(cpb DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -o '"name":"[^"]*","type":"[^"]*"' | tail -n 2 | tr '\n' ' ')" = '"name":"model_picker","type":"JSON" "name":"play","type":"JSON" ' ] || { echo describe-tail-wrong; exit 1; }
 echo playbook-fields-ok'''
 contains = "playbook-fields-ok"
 

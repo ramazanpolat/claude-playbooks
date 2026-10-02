@@ -156,6 +156,10 @@ The APPLY JSON schema stays 1.
   `clickhouse local` printed bare TSV in a pipe and ignored `--json`. A
   `FORMAT` in the query still wins, and cannot be combined with `--json`.
   ClickHouse's `JSON` type keeps only an object's non-null keys.
+- **DESCRIBE has a `comment` column**: `name`, `type`, `comment`, one line
+  saying what each column means, as ClickHouse's `DESC` has; SPEC.md lists
+  the same lines. It prints in SELECT's three forms (in a pipe, TSV with a
+  header row, where v3 printed the terminal table).
 - **SHOW's `launcher` is the command you type**: the playbook's recorded
   `LAUNCHER`, or its name when the default launcher is in place; null under
   `NO LAUNCHER` (and when the default launcher is not in place). v3 reported

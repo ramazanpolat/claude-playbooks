@@ -1258,15 +1258,16 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
 
 **Tables.** Their columns are the `--json` fields, and ClickHouse reads each
 with a typed structure (a nested object or list as `JSON` / `Array(JSON)`,
-so `source.url` and `vars[1].key` work):
+so `source.url` and `vars[1].key` work). Each column, with its type and
+what it means, is listed under *DESCRIBE* below.
 
 | Table | One row per | Columns |
 |---|---|---|
 | `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play` is the last column) |
-| `ENVS` | env set | `name description vars used_by default` |
-| `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
-| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty` (`tty`) |
-| `DEFAULTS` | (one row) | `envs secret_helper` |
+| `ENVS` | env set | the `SHOW ENV` object |
+| `VARS` | variable, per layer, per playbook | one variable of one layer, with its `playbook`, `layer` and `effective` |
+| `SESSIONS` | live Claude Code session | the `SHOW SESSIONS --json` object (`tty` is the last column) |
+| `DEFAULTS` | (one row) | the `SHOW DEFAULTS` object |
 
 `version_tuple` is `Array(UInt32)`, the numbers of the version's leading
 numeric part (`"v3.12.3-rc1"` → `[3, 12, 3]`; no version → `[]`): compare
@@ -1279,19 +1280,113 @@ the one a launch uses. The manual form, piping `SHOW … --json` yourself, is in
 
 ### DESCRIBE
 
-`DESCRIBE [TABLE] <table>`, or `DESC`, lists a `SELECT` table's columns and
-their types: the typed structure `clickhouse local` reads the rows with,
-plus the computed `version_tuple`. A table name is case-insensitive, as in
-`SELECT`.
+`DESCRIBE [TABLE] <table>`, or `DESC`, lists a `SELECT` table's columns
+as ClickHouse's `DESC` does. Each column is one row of three fields:
+
+- `name`;
+- `type`: the typed structure `clickhouse local` reads the rows with, or
+  `Array(UInt32)` for the computed `version_tuple`;
+- `comment`: one line saying what the column means.
+
+A table name is case-insensitive, as in `SELECT`. The output takes
+`SELECT`'s three forms: a table on a terminal, TSV with a header row in a
+pipe, and with `--json` an array of `{"name", "type", "comment"}` objects.
 
 ```
-cpb DESCRIBE playbooks          # NAME / TYPE, one row per column
-cpb "DESC TABLE vars --json"    # [{"name": "playbook", "type": "String"}, …]
+cpb DESCRIBE playbooks          # NAME / TYPE / COMMENT, one row per column
+cpb "DESC TABLE vars --json"    # [{"name": "playbook", "type": "String", "comment": "The playbook …"}, …]
 ```
 
-An unknown table is refused, naming the four; `DESCRIBE` with no table is
-refused too. It reads no playbook: the columns are the same on every
-machine.
+- An unknown table is refused, and the refusal names the five tables.
+- `DESCRIBE` with no table, or with more than one, is refused too.
+- It reads no playbook: the columns are the same on every machine.
+
+The columns, as `DESCRIBE` prints them (a test holds these tables and the
+code to the same lines):
+
+**`PLAYBOOKS`**
+
+| Column | Type | Comment |
+|---|---|---|
+| `name` | `String` | The playbook's name. |
+| `version` | `Nullable(String)` | The manifest's version; null when it has none. |
+| `version_tuple` | `Array(UInt32)` | The numbers of the version's leading numeric part ([3, 12, 3] for v3.12.3-rc1), to compare and sort versions; computed. |
+| `description` | `Nullable(String)` | The manifest's description; null when it has none. |
+| `homepage` | `Nullable(String)` | The manifest's homepage; null when it has none. |
+| `author` | `Nullable(String)` | The manifest's author; null when it has none. |
+| `path` | `String` | The playbook's directory under the playbooks root: its config directory. |
+| `last_used` | `Nullable(DateTime64(3, 'UTC'))` | When the playbook's config directory last changed (UTC). |
+| `source` | `JSON` | Where the playbook was installed from: url, branch, subdir; null for a playbook without one. |
+| `migrate` | `Nullable(String)` | The declared migrate step ([update] migrate) that cpb update runs; null without one. |
+| `linked` | `Nullable(String)` | The target directory of a linked playbook; null otherwise. |
+| `launcher` | `Nullable(String)` | The command that runs the playbook, the one you type; null under NO LAUNCHER. |
+| `envs` | `Array(String)` | The env sets the playbook uses, in order. |
+| `vars` | `Array(JSON)` | The playbook's own variables, each a value, a reference, a redacted credential or a block. |
+| `sandbox` | `JSON` | The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills. |
+| `isolated_login` | `Bool` | True when the playbook shares no login with the machine; true for a sandboxed playbook too. |
+| `marketplaces` | `Array(JSON)` | The plugin marketplaces in the playbook's settings: name, source. |
+| `plugins` | `Array(JSON)` | The plugins in the playbook's settings: id, enabled. |
+| `agent` | `Nullable(String)` | The agent the playbook pins (SET AGENT); null when unset. |
+| `mcp_servers` | `Array(JSON)` | The MCP servers: name, transport, command and args or url, env and headers as variables. |
+| `tools` | `JSON` | The tool permission rules: allow, deny. |
+| `skills` | `Array(JSON)` | The skills cpb recorded: name, source, branch, subdir, mode. |
+| `statusline` | `Nullable(String)` | The status line command; null for none. |
+| `statusline_refresh` | `Nullable(UInt32)` | How often the status line refreshes, in whole seconds; null when unset. |
+| `statusline_history` | `Array(JSON)` | The status lines SET STATUSLINE PREVIOUS can go back to, newest first: command, refresh, replaced_at. |
+| `model` | `Nullable(String)` | The playbook's default model (SET MODEL); null when unset. |
+| `model_picker` | `JSON` | The model picker: mode (only or append) and options; null when unset. |
+| `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
+
+**`ENVS`**
+
+| Column | Type | Comment |
+|---|---|---|
+| `name` | `String` | The env set's name. |
+| `description` | `String` | The env set's description. |
+| `vars` | `Array(JSON)` | The env set's variables, each a value, a reference, a redacted credential or a block. |
+| `used_by` | `Array(String)` | The playbooks that use the env set. |
+| `default` | `Bool` | True when the env set is in DEFAULTS. |
+
+**`VARS`**
+
+| Column | Type | Comment |
+|---|---|---|
+| `playbook` | `String` | The playbook a launch gives the variable to. |
+| `key` | `String` | The variable's name. |
+| `value` | `Nullable(String)` | The literal value; null for a reference, a redacted credential or a block. |
+| `ref` | `Nullable(String)` | The secret reference the value is read from at launch; null otherwise. |
+| `redacted` | `Bool` | True when the value is a credential-looking literal, never shown. |
+| `plaintext` | `Bool` | True when a credential-looking value is stored as a literal, not a reference. |
+| `blocked` | `Bool` | True when the layer blocks the variable (BLOCK). |
+| `layer` | `JSON` | Where the entry comes from: kind (defaults, env or playbook) and the env set's name. |
+| `effective` | `Bool` | True for the entry a launch uses. |
+
+**`SESSIONS`**
+
+| Column | Type | Comment |
+|---|---|---|
+| `playbook` | `String` | The playbook's name; a plain directory's path. |
+| `pid` | `UInt32` | The Claude Code process's id. |
+| `session_id` | `String` | The session's id. |
+| `cwd` | `String` | The session's working directory. |
+| `kind` | `String` | interactive or bg. |
+| `status` | `Nullable(String)` | The session's status, as Claude Code records it; null when it records none. |
+| `name` | `Nullable(String)` | The session's name, as Claude Code records it; null when it records none. |
+| `claude_version` | `Nullable(String)` | The Claude Code version the session runs; null when it records none. |
+| `started_at` | `DateTime64(3, 'UTC')` | When the session started (UTC). |
+| `last_active` | `Nullable(DateTime64(3, 'UTC'))` | When the transcript last changed (UTC); null before the first message. |
+| `model` | `Nullable(String)` | The model of the transcript's last assistant message; null before one. |
+| `launcher` | `Nullable(String)` | The playbook's launcher, as SHOW PLAYBOOK reports it; null for a plain directory. |
+| `config_dir` | `String` | The config directory the session runs under. |
+| `resume` | `String` | The command that resumes this session from any folder once it ends. |
+| `tty` | `Nullable(String)` | The process's controlling terminal (pts/3, ttys012); null for none, as for a bg session. |
+
+**`DEFAULTS`**
+
+| Column | Type | Comment |
+|---|---|---|
+| `envs` | `Array(String)` | The env sets every launch applies first, in order. |
+| `secret_helper` | `JSON` | The command that resolves secret references, and where it is set (setting or CPB_SECRET_HELPER); null when none is configured. |
 
 ## SHOW SESSIONS
 

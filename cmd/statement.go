@@ -68,8 +68,8 @@ scan:
 
 // runStatement parses and executes one statement.
 func runStatement(args []string) error {
-	if table, asJSON, ok := describeArgs(args); ok {
-		return runDescribe(table, asJSON)
+	if words, asJSON, ok := describeArgs(args); ok {
+		return runDescribe(words, asJSON)
 	}
 	if q, explain, asJSON, ok := selectArgs(args); ok {
 		return runSelect(q, explain, asJSON)
