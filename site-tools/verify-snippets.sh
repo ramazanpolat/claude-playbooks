@@ -54,12 +54,12 @@ out=$(cpb CREATE PLAYBOOK sre SANDBOX); check "hero: SANDBOX" 'Always sandboxed'
 
 echo "== try it: scratch playbook =="
 out=$(cpb CREATE PLAYBOOK scratch); check "scratch: created" 'Created playbook "scratch"'
-out=$(cpb SHOW PLAYBOOK scratch); check "scratch: SHOW PLAYBOOK" 'Sandbox:        no'
+out=$(cpb SHOW PLAYBOOK scratch); check "scratch: SHOW PLAYBOOK" 'Sandbox:    no'
 out=$(cpb DROP PLAYBOOK scratch --yes); check "scratch: dropped" 'Deleted playbook "scratch"'
 
 echo "== routing: env set, isolated login, model picker =="
 out=$(cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1); check "routing: CREATE ENV" "Created ENV router"
-out=$(cpb CREATE PLAYBOOK glm NO PILOT PROFILE ISOLATED LOGIN); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
+out=$(cpb CREATE PLAYBOOK glm ISOLATED LOGIN); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
 out=$(cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3); check "routing: USE ENV" "env sets  router"
 out=$(cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY); check "routing: BLOCK VAR" "blocked   ANTHROPIC_API_KEY"
 out=$(cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'); check "routing: ADD MODEL" "model     glm-5.3"

@@ -235,7 +235,6 @@ def build(cpb):
                 "path": r.norm(show["path"]),
                 "launcher": name if (r.home / "bin" / name).exists() else None,
                 "login": login,
-                "pilot_profile": show["pilot_profile"],
                 "model": (explain["model"] or {}).get("name"),
                 "model_picker": show["model_picker"],
                 "skills": [
