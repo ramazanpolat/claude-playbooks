@@ -54,6 +54,10 @@ inside the product. [SPEC.md](SPEC.md) describes v4 as it is.
   kernel of the sandboxes the end-to-end suites run in does not provide it, so
   no suite can run it end to end. `sbx` is the only backend.
 - **`--sbx`** (#174): use `--sandbox=sbx`.
+- **A manifest's top-level `subdir`**, a config directory below the playbook
+  root: a playbook's config is its root. A source manifest or an installed
+  playbook that names one is refused as an unknown key. `SUBDIR`, the slice
+  of a source recorded as `[source] subdir`, stays.
 
 ### Renamed
 

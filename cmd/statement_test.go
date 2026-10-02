@@ -340,28 +340,3 @@ func TestStatementArgs(t *testing.T) {
 }
 
 func words(s string) []string { return strings.Fields(s) }
-
-// In a subdir layout the launch reads the nested manifest; a set it names
-// must not be dropped, by the statement or by the hidden env-set.
-func TestDropEnvSeesTheGoverningManifest(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	root := seedFlatPlaybook(t, "nested")
-	if err := os.WriteFile(filepath.Join(root, ".playbook"), []byte("version = \"0.1.0\"\nname = \"nested\"\nsubdir = \"config\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	configDir := filepath.Join(root, "config")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	mustStmt(t, "CREATE ENV inner")
-	if err := manifest.Write(configDir, &manifest.Manifest{Name: "nested", Env: &manifest.Env{Sets: []string{"inner"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stmt(t, "DROP ENV inner"); err == nil || !strings.Contains(err.Error(), "used by nested") {
-		t.Fatalf("DROP ENV of a set the governing manifest uses: %v", err)
-	}
-	if readProfile(t, "inner") == nil {
-		t.Fatal("the set was deleted")
-	}
-}

@@ -24,7 +24,7 @@ func TestReadRejectsEscapingSourcePaths(t *testing.T) {
 
 func TestReadAllowsDotDotPrefixInOrdinaryName(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("subdir = \"..config\"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("[source]\nsubdir = \"..config\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Read(dir); err != nil {
@@ -165,7 +165,7 @@ func TestNearestWalksToInstallRoot(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\nsubdir = \"playbook\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte("name = \"pb\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	m, err := Nearest(sub)

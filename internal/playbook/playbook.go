@@ -118,21 +118,11 @@ func discover(root string) ([]*Playbook, error) {
 		if err != nil {
 			return nil, err
 		}
-		configPath := path
-		configInfo := info
-		if m != nil {
-			resolved, resolvedInfo, err := resolveManifestSubdir(path, m)
-			if err != nil {
-				return nil, err
-			}
-			configPath = resolved
-			configInfo = resolvedInfo
-		}
 		pb := &Playbook{
 			Name:     e.Name(),
-			Path:     configPath,
+			Path:     path,
 			RootPath: path,
-			LastUsed: configInfo.ModTime(),
+			LastUsed: info.ModTime(),
 			Manifest: m,
 		}
 		if m != nil {
@@ -141,20 +131,4 @@ func discover(root string) ([]*Playbook, error) {
 		out = append(out, pb)
 	}
 	return out, nil
-}
-
-func resolveManifestSubdir(root string, m *manifest.Manifest) (string, os.FileInfo, error) {
-	if m == nil || m.Subdir == "" {
-		info, err := os.Stat(root)
-		return root, info, err
-	}
-	resolved, err := manifest.ResolveSubdir(root, "subdir", m.Subdir)
-	if err != nil {
-		return "", nil, err
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", nil, err
-	}
-	return resolved, info, nil
 }

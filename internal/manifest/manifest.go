@@ -256,7 +256,6 @@ type Manifest struct {
 	Version       string   `toml:"version"`
 	Name          string   `toml:"name"`
 	Launcher      string   `toml:"launcher"`
-	Subdir        string   `toml:"subdir"`
 	Description   string   `toml:"description"`
 	Homepage      string   `toml:"homepage"`
 	Author        string   `toml:"author"`
@@ -434,9 +433,6 @@ func (m *Manifest) validate(path string) error {
 			return fmt.Errorf("invalid %s at %s: %w", FileName, path, err)
 		}
 	}
-	if err := validateRelativePath(path, "subdir", m.Subdir); err != nil {
-		return err
-	}
 	if m.Source != nil {
 		if err := validateRelativePath(path, "source.subdir", m.Source.Subdir); err != nil {
 			return err
@@ -552,9 +548,6 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.Launcher != "" {
 		fmt.Fprintf(&b, "launcher = %s\n", QuoteTOML(m.Launcher))
-	}
-	if m.Subdir != "" {
-		fmt.Fprintf(&b, "subdir = %s\n", QuoteTOML(m.Subdir))
 	}
 	if m.Description != "" {
 		fmt.Fprintf(&b, "description = %s\n", QuoteTOML(m.Description))
