@@ -112,9 +112,13 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if updateJSON && !updateDryRun {
 		return errors.New("--json goes with --dry-run")
 	}
-	// The played path reads play's own options.
+	// The played path reads play's own options, for this call only.
 	playDryRun, playJSONF, playYes, playSHA256 = updateDryRun, updateJSON, updateYes, updateSHA256
 	playTrustEndpoint, playTrustSecret, playEnvSets = updateTrustEndpoint, updateTrustSecret, nil
+	defer func() {
+		playDryRun, playJSONF, playYes, playSHA256 = false, false, false, ""
+		playTrustEndpoint, playTrustSecret, playEnvSets = nil, nil, nil
+	}()
 	return playUpdateRun(name)
 }
 
@@ -189,9 +193,10 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		fmt.Fprintln(w, "Nothing was changed (--dry-run).")
 		return nil
 	}
-	// The migrate step is agreed to before anything changes: declined, the
+	// A declared migrate step is agreed to before anything changes, even one
+	// that will not run (a version unknown on one side): declined, the
 	// update does not happen at all, so the files never run ahead of it.
-	if step.rel != "" && !step.skip {
+	if step.rel != "" {
 		switch {
 		case o.yes:
 		case updateAsks():
@@ -302,6 +307,11 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		}
 	}
 
+	// The installed step is checked while the lock is still held, so no
+	// other cpb process can change it between the check and the release.
+	if err := step.verify(root); err != nil {
+		return fmt.Errorf("%q is at code version %s, but its migrate step was not run: %w", name, displayVersion(toVersion), err)
+	}
 	unlock()
 	if err := step.run(w, name, root); err != nil {
 		return fmt.Errorf("%q is at code version %s, but its migrate step failed: %w", name, displayVersion(toVersion), err)
@@ -573,14 +583,10 @@ func (m migration) describe() string {
 	}
 }
 
-// run runs the step from the installed playbook: the same bytes that were
-// previewed, as <script> <from> <to> <install dir>, in the install dir.
-func (m migration) run(w io.Writer, name, root string) error {
-	if m.rel == "" {
-		return nil
-	}
-	if m.skip {
-		fmt.Fprintf(os.Stderr, "Warning: %s's migrate step %s was not run: the version is unknown on one side\n", name, m.rel)
+// verify checks the installed step: still inside the playbook, and the same
+// bytes that were previewed and agreed to.
+func (m migration) verify(root string) error {
+	if m.rel == "" || m.skip {
 		return nil
 	}
 	sum, err := migrateScriptSum(root, m.rel)
@@ -588,7 +594,20 @@ func (m migration) run(w io.Writer, name, root string) error {
 		return err
 	}
 	if sum != m.sha256 {
-		return fmt.Errorf("%s changed between the preview and the run (sha256 %s, previewed %s); it was not run", m.rel, shortSHA(sum), shortSHA(m.sha256))
+		return fmt.Errorf("%s changed between the preview and the run (sha256 %s, previewed %s)", m.rel, shortSHA(sum), shortSHA(m.sha256))
+	}
+	return nil
+}
+
+// run runs the verified step from the installed playbook, as <script>
+// <from> <to> <install dir>, in the install dir.
+func (m migration) run(w io.Writer, name, root string) error {
+	if m.rel == "" {
+		return nil
+	}
+	if m.skip {
+		fmt.Fprintf(os.Stderr, "Warning: %s's migrate step %s was not run: the version is unknown on one side\n", name, m.rel)
+		return nil
 	}
 	fmt.Fprintf(w, "Running the migrate step %s %s -> %s...\n", m.rel, m.from, m.to)
 	c := exec.Command(filepath.Join(root, filepath.FromSlash(m.rel)), m.from, m.to, root)

@@ -163,7 +163,7 @@ An agent cannot complete an interactive `/login`. If a headless run exits with a
 ## Rules that keep the registry consistent
 
 - Go through the CLI for anything it has a statement for. Hand edits are honoured but never defended: a broken manifest fails loudly at the next use.
-- Never write into a playbook source directory you were given to install from; `install` and `update` stage a private copy, and so should you.
+- Never write into a playbook source directory you were given to install from; `CREATE PLAYBOOK … FROM` and `update` stage a private copy, and so should you.
 - Do not put secrets into a playbook you intend to publish. Env blocks and env sets are install-local by design: `update` ignores a source-shipped block and `CREATE PLAYBOOK … FROM` drops it with a note.
 - A raw `claude` launch bypasses authentication preparation and environment layers. For the playbook's semantics, launch through `run`, `start`, or the launcher.
 - Registry mutations are serialized by a lock; launches take no lock and read the manifest at launch time.

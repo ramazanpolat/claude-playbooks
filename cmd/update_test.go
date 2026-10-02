@@ -363,6 +363,38 @@ func TestUpdateMigrateStepNeedsConsent(t *testing.T) {
 	}
 }
 
+// A declared step needs consent even when it will not run (no version on
+// one side): the update itself still runs ahead of it.
+func TestUpdateMigrateStepNeedsConsentEvenWhenSkipped(t *testing.T) {
+	installed, receipt := migrateFixture(t, true)
+	// By hand: manifest.Write supplies a default version.
+	noVersion := "name = \"pb\"\n\n[source]\nrepository = " + quoteTOML(readSource(t, installed).Repository) + "\n"
+	if err := os.WriteFile(filepath.Join(installed, manifest.FileName), []byte(noVersion), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updateAsks = func() bool { return false }
+	t.Cleanup(func() { updateAsks = func() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) } })
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{}); err == nil || !strings.Contains(err.Error(), "pass --yes") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := runPlaybookUpdate(io.Discard, "pb", updateOpts{yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatal("a step with no version on one side ran")
+	}
+}
+
+// readSource is the [source] a fixture's installed manifest records.
+func readSource(t *testing.T, dir string) *manifest.Source {
+	t.Helper()
+	m, err := manifest.Read(dir)
+	if err != nil || m == nil || m.Source == nil {
+		t.Fatalf("manifest: %#v %v", m, err)
+	}
+	return m.Source
+}
+
 // On a terminal the step is asked about: no cancels the update, yes runs
 // it.
 func TestUpdateMigrateStepAsksOnATerminal(t *testing.T) {

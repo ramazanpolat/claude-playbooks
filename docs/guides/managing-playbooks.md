@@ -230,7 +230,7 @@ source does not declare. The step is agreed to before anything changes:
 `--dry-run` shows it with its sha256; on a terminal, `update` asks; otherwise
 it needs `--yes`, and without it the update is refused and nothing changes.
 The script must resolve inside the playbook, and it runs only if its bytes are
-still the ones previewed.
+still the ones previewed, checked before the lock is released.
 
 A playbook kept by `cpb play` updates from its recorded recipe instead: see
 [Play someone else's playbook](play.md). Linked playbooks and manifests that
