@@ -97,8 +97,8 @@ func runStatement(args []string) error {
 	}
 	r := &stmtRun{}
 	err = execStatement(r, st)
-	if r.warning != "" {
-		fmt.Fprintf(os.Stderr, "Warning: %s\n", r.warning)
+	for _, w := range r.warnings {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", w.message)
 	}
 	return err
 }
@@ -120,9 +120,8 @@ type stmtRun struct {
 	dry     *dryState // in a dry run: what earlier statements would have written
 	outcome string
 	note    string // a dry run's detail, e.g. what a drop would delete
-	warning string // reported, never an error: e.g. a source that drifted
-	// warningCode is the warning's stable code, for APPLY --json.
-	warningCode string
+	// warnings are reported, never errors: e.g. a source that drifted.
+	warnings []stmtWarning
 	// actions: in a dry run, what a real run would do beyond the
 	// playbook's own files (APPLY --json).
 	actions []planAction
@@ -130,6 +129,14 @@ type stmtRun struct {
 	// backedUp marks the files of plain config directories a run already
 	// backed up (TO '<dir>'): each is backed up once, before its first write.
 	backedUp map[string]bool
+}
+
+// stmtWarning is one warning a statement raises, with its code for APPLY
+// --json. A statement may raise several.
+type stmtWarning struct{ code, message string }
+
+func (r *stmtRun) warn(code, message string) {
+	r.warnings = append(r.warnings, stmtWarning{code, message})
 }
 
 // checkRefs checks a statement's references against the helper in effect
@@ -667,7 +674,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	// is left to the next launch, which links the store as it always does.
 	if loginChange && nowIsolated {
 		if err := auth.SyncCredentials(pb.Path); err != nil {
-			r.warning = fmt.Sprintf("PLAYBOOK %s: isolated_login is recorded, but the link to the shared login could not be removed now (%v); the next launch removes it", st.Name, err)
+			r.warn(warnSharedLoginLinkKept, fmt.Sprintf("PLAYBOOK %s: isolated_login is recorded, but the link to the shared login could not be removed now (%v); the next launch removes it", st.Name, err))
 		}
 	}
 	if skills != nil {

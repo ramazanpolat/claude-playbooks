@@ -91,15 +91,13 @@ func (v Var) LayerName() string {
 	if v.Layer == nil {
 		return "-"
 	}
-	switch strings.ToUpper(v.Layer.Kind) {
-	case "ENV":
-		return "env " + v.Layer.Name
-	case "DEFAULTS":
-		return "defaults " + v.Layer.Name
-	case "PLAYBOOK":
+	switch v.Layer.Kind {
+	case "env", "defaults":
+		return v.Layer.Kind + " " + v.Layer.Name
+	case "playbook":
 		return "playbook"
 	}
-	return strings.ToLower(v.Layer.Kind) + " " + v.Layer.Name
+	return v.Layer.Kind + " " + v.Layer.Name
 }
 
 type Playbook struct {

@@ -415,9 +415,13 @@ func TestMarketplaceGitRefLooksLikeCommit(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("dry run exit %d: %v", code, rep)
 	}
-	w, _ := stmts(rep)[0]["warning"].(map[string]any)
+	ws, _ := stmts(rep)[0]["warnings"].([]any)
+	if len(ws) != 1 {
+		t.Fatalf("dry run warnings: %v", stmts(rep)[0]["warnings"])
+	}
+	w, _ := ws[0].(map[string]any)
 	if w == nil || w["code"] != "marketplace_ref_not_cloneable" {
-		t.Fatalf("dry run warning: %v", stmts(rep)[0]["warning"])
+		t.Fatalf("dry run warning: %v", w)
 	}
 	msg, _ := w["message"].(string)
 	if !strings.Contains(msg, "MARKETPLACE gitmkt #0123abcd: Claude Code clones marketplaces by branch or tag; this ref looks like a commit and will not clone: use a tag at that commit") || strings.Contains(msg, "secret-path") {
@@ -432,8 +436,27 @@ func TestMarketplaceGitRefLooksLikeCommit(t *testing.T) {
 	// A tag, or no ref, is not warned about.
 	for _, src := range []string{url + "#v1.2.0", url} {
 		rep, _, _ := applyJSON(t, writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE gitmkt FROM '"+src+"';\n"), "--dry-run", "--json")
-		if w := stmts(rep)[0]["warning"]; w != nil {
-			t.Errorf("%s: warned %v", src, w)
+		if ws, _ := stmts(rep)[0]["warnings"].([]any); len(ws) != 0 {
+			t.Errorf("%s: warned %v", src, ws)
 		}
+	}
+	// Two in one statement are two warnings, each with its code, and the
+	// summary counts both.
+	rep, _, code = applyJSON(t, writePlaybookFile(t, "ALTER PLAYBOOK k ADD MARKETPLACE gitmkt FROM '"+url+"#0123abcd' ADD MARKETPLACE other FROM '"+url+"#89abcdef';\n"), "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("two commit refs: exit %d: %v", code, rep)
+	}
+	ws, _ = stmts(rep)[0]["warnings"].([]any)
+	if len(ws) != 2 {
+		t.Fatalf("two commit refs: warnings %v", ws)
+	}
+	for i, name := range []string{"gitmkt #0123abcd", "other #89abcdef"} {
+		w, _ := ws[i].(map[string]any)
+		if msg, _ := w["message"].(string); w["code"] != "marketplace_ref_not_cloneable" || !strings.HasPrefix(msg, "MARKETPLACE "+name+":") {
+			t.Errorf("warning %d: %v", i, w)
+		}
+	}
+	if sum, _ := rep["summary"].(map[string]any); sum["warnings"] != float64(2) {
+		t.Errorf("summary: %v", rep["summary"])
 	}
 }

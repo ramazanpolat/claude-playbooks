@@ -54,7 +54,7 @@ contains = "launch-ok"
 
 [[verify.commands]]
 # EXPLAIN --json names the reference and the layer that decided each key.
-command = 'OUT=$(cpb EXPLAIN PLAYBOOK gpb --json) && printf "%s" "$OUT" | grep -qF "\"ref\": \"keychain:ok/glm\"" && printf "%s" "$OUT" | grep -qF "\"kind\": \"ENV\"" && printf "%s" "$OUT" | grep -qF "\"blocked\": true" && printf "%s" "$OUT" | grep -qF "\"command\": \"$HOME/.local/bin/test-helper\"" && echo explain-ok'
+command = 'OUT=$(cpb EXPLAIN PLAYBOOK gpb --json) && printf "%s" "$OUT" | grep -qF "\"ref\": \"keychain:ok/glm\"" && printf "%s" "$OUT" | grep -qF "\"kind\": \"env\"" && printf "%s" "$OUT" | grep -qF "\"blocked\": true" && printf "%s" "$OUT" | grep -qF "\"command\": \"$HOME/.local/bin/test-helper\"" && echo explain-ok'
 contains = "explain-ok"
 
 [[verify.commands]]

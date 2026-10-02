@@ -887,10 +887,6 @@ func (r *stmtRun) warnMarketplaceRef(clauses []grammar.Clause) {
 			continue
 		}
 		msg := "MARKETPLACE " + c.Names[0] + " #" + ref + ": Claude Code clones marketplaces by branch or tag; this ref looks like a commit and will not clone: use a tag at that commit"
-		if r.warning != "" {
-			r.warning += "; " + msg
-		} else {
-			r.warning, r.warningCode = msg, warnMarketplaceRefNotCloneable
-		}
+		r.warn(warnMarketplaceRefNotCloneable, msg)
 	}
 }

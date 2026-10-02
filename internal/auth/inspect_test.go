@@ -32,7 +32,7 @@ func TestInspectModes(t *testing.T) {
 	now := time.Now()
 	t.Run("shared login", func(t *testing.T) {
 		_, dir := inspectFixture(t)
-		if r := Inspect("pb", dir, now); r.Mode != ModeSharedLogin || r.Store != StoreAbsent || r.NeedsAttention() != "no login" {
+		if r := Inspect("pb", dir, now); r.Mode != ModeSharedLogin || r.TokenBlocked || r.Store != StoreAbsent || r.NeedsAttention() != "no login" {
 			t.Fatalf("%+v", r)
 		}
 	})
@@ -66,7 +66,7 @@ func TestInspectModes(t *testing.T) {
 		_, dir := inspectFixture(t)
 		writeManifest(t, dir, "[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n")
 		t.Setenv(OAuthTokenEnv, "sk-ant-oat01-ENV")
-		if r := Inspect("pb", dir, now); r.Mode != ModeOwnLogin {
+		if r := Inspect("pb", dir, now); r.Mode != ModeSharedLogin || !r.TokenBlocked {
 			t.Fatalf("%+v", r)
 		}
 	})
@@ -76,14 +76,14 @@ func TestInspectModes(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeManifest(t, dir, "[env]\nsets = [\"acct\"]\n")
-		if r := Inspect("pb", dir, now); r.Mode != ModeOwnToken {
+		if r := Inspect("pb", dir, now); r.Mode != ModePlaybookToken {
 			t.Fatalf("%+v", r)
 		}
 	})
 	t.Run("isolated", func(t *testing.T) {
 		_, dir := inspectFixture(t)
 		writeManifest(t, dir, "isolated_login = true\n")
-		if r := Inspect("pb", dir, now); r.Mode != ModeIsolated {
+		if r := Inspect("pb", dir, now); r.Mode != ModeIsolatedLogin {
 			t.Fatalf("%+v", r)
 		}
 	})
@@ -175,7 +175,8 @@ func TestInspectSanitizesProfileErrors(t *testing.T) {
 }
 
 // An explicitly empty token set by the manifest is inactive for the launch
-// (resolveToken), so the mode is own-login even with a global token file.
+// (resolveToken), so the mode is shared-login, token blocked, even with a
+// global token file.
 func TestInspectEmptyManifestTokenIsOwnLogin(t *testing.T) {
 	_, dir := inspectFixture(t)
 	tf := filepath.Join(t.TempDir(), "oauth-token")
@@ -184,8 +185,8 @@ func TestInspectEmptyManifestTokenIsOwnLogin(t *testing.T) {
 	}
 	t.Setenv(oauthTokenFileEnv, tf)
 	writeManifest(t, dir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"\"\n")
-	if r := Inspect("pb", dir, time.Now()); r.Mode != ModeOwnLogin {
-		t.Fatalf("mode = %s, want own-login", r.Mode)
+	if r := Inspect("pb", dir, time.Now()); r.Mode != ModeSharedLogin || !r.TokenBlocked {
+		t.Fatalf("mode = %s (token blocked %v), want shared-login, token blocked", r.Mode, r.TokenBlocked)
 	}
 }
 
@@ -227,7 +228,7 @@ func TestInspectTokenModeIgnoresDaemonMarker(t *testing.T) {
 }
 
 // An isolated playbook whose manifest sets a token launches by that token
-// (injected, grant quarantined): own-token, isolated, and no stored-login
+// (injected, grant quarantined): playbook-token, isolated, and no stored-login
 // judgement even with a live daemon marker.
 func TestInspectIsolatedWithOwnTokenIsOwnToken(t *testing.T) {
 	_, dir := inspectFixture(t)
@@ -237,7 +238,7 @@ func TestInspectIsolatedWithOwnTokenIsOwnToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := Inspect("pb", dir, now)
-	if r.Mode != ModeOwnToken || !r.Isolated || r.ReauthRequired || r.NeedsAttention() != "" {
+	if r.Mode != ModePlaybookToken || !r.IsolatedLogin || r.ReauthRequired || r.NeedsAttention() != "" {
 		t.Fatalf("%+v note=%q", r, r.NeedsAttention())
 	}
 }
@@ -284,7 +285,7 @@ func TestInspectReportsIsolationDespiteProfileError(t *testing.T) {
 	_, dir := inspectFixture(t)
 	writeManifest(t, dir, "isolated_login = true\n\n[env]\nsets = [\"ghost\"]\n")
 	r := Inspect("pb", dir, time.Now())
-	if r.Mode != ModeError || !r.Isolated {
+	if r.Mode != ModeError || !r.IsolatedLogin {
 		t.Fatalf("%+v", r)
 	}
 }

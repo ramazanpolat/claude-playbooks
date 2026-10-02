@@ -131,17 +131,21 @@ cpb auth status
 ```
 
 ```text
-NAME               MODE          STORE                                   EXPIRES   DAEMON  NOTE
-~/.claude          shared-login  file                                    in 6h12m  -
-work               token         absent                                  -         -
-review             own-login     symlink -> ~/.claude/.credentials.json  in 6h12m  -
-personal           isolated      file                                    in 22m    -
+NAME               MODE                          STORE                                   EXPIRES   DAEMON  NOTE
+~/.claude          shared-login                  file                                    in 6h12m  -
+work               token                         absent                                  -         -
+review             shared-login (token blocked)  symlink -> ~/.claude/.credentials.json  in 6h12m  -
+personal           isolated-login                file                                    in 22m    -
 ```
 
-`MODE` is the decision `run` would make. `EXPIRES` is the stored grant's expiry.
+`MODE` is the decision `run` would make: `token`, `playbook-token` (a token
+the playbook or its env set sets), `shared-login`, `isolated-login` or
+`error`. `(token blocked)` marks a playbook that blocks the machine's token,
+so it uses the stored login; `--json` says `"token_blocked": true`. `EXPIRES` is the stored grant's expiry.
 `DAEMON` reads Claude Code's own `daemon-auth-status.json`, shown as
 `auth_required` only when the marker is newer than the current grant. `--json`
-for scripts, `--claude` to add `claude auth status` per directory.
+for scripts (times in UTC), `--claude` to add `claude auth status` per
+directory (`logged_in`, `subscription_type`, `auth_method`).
 
 ## Two things to know about shared-login mode
 

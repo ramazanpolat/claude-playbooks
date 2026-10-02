@@ -63,7 +63,7 @@ const fixtureEnvs = `[
 
 const fixtureDefaults = `{"envs":["base"],"secret_helper":{"command":"cpb-secret-file","from":"setting"}}`
 
-const fixtureExplain = `{"playbook":"router","vars":[{"key":"X","value":"1","layer":{"kind":"DEFAULTS","name":"base"}},{"key":"ANTHROPIC_BASE_URL","value":"http://localhost:8080/v1","layer":{"kind":"ENV","name":"proxy"}},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:proxy-token","layer":{"kind":"ENV","name":"proxy"}},{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true,"layer":{"kind":"PLAYBOOK"}},{"key":"MY_FLAG","value":"1","layer":{"kind":"PLAYBOOK"}}],"secret_helper":null}`
+const fixtureExplain = `{"playbook":"router","vars":[{"key":"X","value":"1","layer":{"kind":"defaults","name":"base"}},{"key":"ANTHROPIC_BASE_URL","value":"http://localhost:8080/v1","layer":{"kind":"env","name":"proxy"}},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:proxy-token","layer":{"kind":"env","name":"proxy"}},{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true,"layer":{"kind":"playbook"}},{"key":"MY_FLAG","value":"1","layer":{"kind":"playbook"}}],"secret_helper":null}`
 
 const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router LAUNCHER rt;\nALTER PLAYBOOK router USE ENV proxy SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
 

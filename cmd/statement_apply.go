@@ -167,7 +167,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	done := map[string]int{} // statements applied per file
 	for _, x := range stmts {
 		s := x.s
-		r.outcome, r.note, r.warning, r.warningCode, r.actions = "", "", "", "", nil
+		r.outcome, r.note, r.warnings, r.actions = "", "", nil, nil
 		where := fmt.Sprintf("%s:%d", x.file, s.Pos.Line)
 		head := stmtHead(s)
 		if !st.DryRun {
@@ -175,7 +175,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		}
 		entry := func(verdict string) applyStmtJSON {
 			return applyStmtJSON{File: x.path, Line: s.Pos.Line, Statement: head, Verb: string(s.Verb), Object: string(s.Object),
-				Target: stmtTarget(s), Recipe: x.recipe, Implicit: x.implicit, Verdict: verdict, Actions: nonNilActions(r.actions)}
+				Target: stmtTarget(s), Recipe: x.recipe, Implicit: x.implicit, Verdict: verdict, Warnings: []applyWarning{}, Actions: nonNilActions(r.actions)}
 		}
 		if err := execStatement(r, s); err != nil {
 			if st.DryRun {
@@ -199,8 +199,8 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		counts[r.outcome]++
 		if rep != nil {
 			e := entry(r.outcome)
-			if r.warning != "" {
-				e.Warning = &applyWarning{Code: r.warningCode, File: x.path, Line: s.Pos.Line, Message: r.warning, shown: x.file}
+			for _, w := range r.warnings {
+				e.Warnings = append(e.Warnings, applyWarning{Code: w.code, File: x.path, Line: s.Pos.Line, Message: w.message, shown: x.file})
 			}
 			rep.Statements = append(rep.Statements, e)
 			switch r.outcome {
@@ -214,17 +214,17 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 				rep.Summary.Dropped++
 			}
 		}
-		if r.warning != "" {
+		for _, w := range r.warnings {
 			counts["warning"]++
-			fmt.Fprintf(os.Stderr, "Warning: %s: %s\n", where, r.warning)
+			fmt.Fprintf(os.Stderr, "Warning: %s: %s\n", where, w.message)
 		}
 		if st.DryRun {
 			line := fmt.Sprintf("%-20s %-9s %s", where, r.outcome, head)
 			if r.note != "" {
 				line += "  (" + r.note + ")"
 			}
-			if r.warning != "" {
-				line += "  WARNING: " + r.warning
+			for _, w := range r.warnings {
+				line += "  WARNING: " + w.message
 			}
 			fmt.Println(line)
 		}

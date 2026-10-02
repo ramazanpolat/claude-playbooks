@@ -40,12 +40,12 @@ contains = "unknown-ok"
 [[verify.commands]]
 # isolated_login is the one authentication mode with no other coverage: a
 # playbook that shares nothing, whose own login is the only one it has.
-# `auth status` must report it as isolated rather than as a shared login,
-# because that report is what a pilot checks before a headless run.
+# `auth status` must report it as isolated-login rather than as a shared
+# login, because that report is what you check before a headless run.
 command = '''cpb CREATE PLAYBOOK solo NO LAUNCHER && printf '%s\n' 'name = "solo"' 'isolated_login = true' > "$HOME/.claude-playbooks/solo/.playbook" && cpb auth status solo'''
-contains = "isolated"
+contains = "isolated-login"
 
 [[verify.commands]]
 # And the JSON form agrees -- it is what a script reads.
 command = 'cpb auth status solo --json'
-contains = "isolated"
+contains = '"mode": "isolated-login"'

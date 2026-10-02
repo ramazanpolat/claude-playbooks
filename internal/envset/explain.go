@@ -8,9 +8,9 @@ import (
 
 // Layer kinds, bottom to top.
 const (
-	LayerDefaults = "DEFAULTS" // an env set listed in DEFAULTS
-	LayerEnv      = "ENV"      // an env set the playbook uses
-	LayerPlaybook = "PLAYBOOK" // the playbook's own block
+	LayerDefaults = "defaults" // an env set listed in DEFAULTS
+	LayerEnv      = "env"      // an env set the playbook uses
+	LayerPlaybook = "playbook" // the playbook's own block
 )
 
 // Origin is one variable a launch changes, and the layer that decided it.

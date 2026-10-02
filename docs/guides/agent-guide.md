@@ -30,7 +30,7 @@ cpb auth status --json           # per playbook: mode, store, expires_at, reauth
 cpb auth status <name>           # one row, human-readable
 ```
 
-Blockers: `"mode":"error"` (the launch is refused) and `"reauth_required":true` (only set for the stored-login modes `own-login`, `shared-login`, `isolated`). Report these instead of retrying. `"expired":true` is advisory: Claude Code refreshes the stored grant at launch while its refresh token is valid. Token modes (`token`, `own-token`) carry no stored login to judge.
+Blockers: `"mode":"error"` (the launch is refused) and `"reauth_required":true` (only set for the stored-login modes `shared-login` and `isolated-login`). Report these instead of retrying. `"expired":true` is advisory: Claude Code refreshes the stored grant at launch while its refresh token is valid. Token modes (`token`, `playbook-token`) carry no stored login to judge. `"token_blocked":true` means the playbook blocks the machine's token and uses the stored login.
 
 ## Launch a session headlessly
 
