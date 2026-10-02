@@ -19,7 +19,7 @@ anything you have built can be shared as one `.cpb` file.
 ## What happens, step by step
 
 1. **Fetch.** The recipe is read once, into memory: https only, at most 64 KiB,
-   three redirects (never to http), ten seconds to connect. The bytes you
+   three redirects (never to http), ten seconds to connect and thirty in all. The bytes you
    preview are the bytes that run.
 2. **Check.** Some clauses are refused outright, with the line and the reason.
    Nothing is written.
