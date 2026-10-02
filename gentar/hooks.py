@@ -31,8 +31,9 @@ SKIP_STEP_SUBSTR = (
 #     would let a suite pass that fails on the bench.
 # Anything prepare() installs into the scratch ~/.local/bin is hidden
 # automatically; list only what it does not. Example: ("cpb", "pilot").
-# cpb: suites create it themselves, as a real install does (a relative
-# symlink).
+# cpb: the CLI itself. prepare() installs it into the scratch bin, which is
+# hidden anyway; the release suites install it there through install.sh,
+# without prepare(), so a cpb on the real PATH must never answer for it.
 HIDE_FROM_PATH = ("cpb",)
 
 
@@ -45,9 +46,7 @@ def prepare(env: dict) -> None:
     copies it to ~/.local/bin. cli-head-build asserts the binary reports that
     version, so it is resolved the same way, --match 'v*' included.
 
-    No `cpb` symlink: nothing on the bench makes one; the suites that need it
-    create it themselves. `go build` caches on its own, so building per suite
-    costs little.
+    `go build` caches on its own, so building per suite costs little.
     """
     ws = env["WORKSPACE_DIR"]
     v = subprocess.run(

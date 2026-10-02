@@ -23,7 +23,11 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'for v in v4.0.0 v4.0.1; do GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$v" -o .fixture-$v . || exit 1; done' ''',
+  # Not the suites' standard build (which the dry-run's prepare() stands in
+  # for, matched by that step's flag order), so a dry-run runs this one too:
+  # with the local go when there is one, else in the container, as on the
+  # bench.
+  '''b='for v in v4.0.0 v4.0.1; do go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$v" -o .fixture-$v . || exit 1; done'; if command -v go >/dev/null 2>&1; then (cd "$WORKSPACE_DIR" && sh -c "$b"); else docker run --rm -e HOME=/tmp -e GOCACHE=/tmp/gocache -u "$(id -u):$(id -g)" -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c "$b"; fi''',
   # dl/<tag>/{cpb-<os>-<arch>,SHA256SUMS}; dlbad/v4.0.1 holds an asset that
   # does not match the real sums beside it.
   '''os=$(uname -s | tr '[:upper:]' '[:lower:]'); case $(uname -m) in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; esac; F="$HOME/fx"; sums() { (cd "$1" && { sha256sum "cpb-$os-$a" 2>/dev/null || shasum -a 256 "cpb-$os-$a"; } > SHA256SUMS); }; for v in v4.0.0 v4.0.1; do mkdir -p "$F/dl/$v" && cp "$WORKSPACE_DIR/.fixture-$v" "$F/dl/$v/cpb-$os-$a" && sums "$F/dl/$v" || exit 1; done; mkdir -p "$F/dl/v5.0.0" "$F/dlbad/v4.0.1" && printf '#!/bin/sh\necho "cpb version v5.0.0"\n' > "$F/dl/v5.0.0/cpb-$os-$a" && chmod 755 "$F/dl/v5.0.0/cpb-$os-$a" && sums "$F/dl/v5.0.0" && cp "$F/dl/v4.0.1/SHA256SUMS" "$F/dlbad/v4.0.1/" && printf 'not a binary\n' > "$F/dlbad/v4.0.1/cpb-$os-$a"''',
