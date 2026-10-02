@@ -234,14 +234,14 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
    release publishes.
 
 A release cut from main (a new minor) needs only steps 3 to 5, on main: the
-release-prep commit, a green full phase 2 on it, and the tag on it.
-
-A **release candidate**, `vX.Y.Z-rcN`, follows the same steps. It publishes
-as a GitHub pre-release, never as the Latest release. Its tag starts phase 2
-on its commit, so the release workflow's first run on it stops at the arena
-gate: re-run that run once phase 2 is green, and it publishes. Its bump
+release-prep commit, a green full phase 2 on it, and the tag on it. Its bump
 commit passes the npx check with a warning until the tag exists (the version
 is ahead of the newest release, and not yet tagged). Meanwhile npx runs the
 newest published release of the same major and says so on stderr
 (`bin/npx-shim.sh`); for a new major's first release it serves nothing until
 the tag, since the shim never falls back across a major.
+
+A **release candidate**, `vX.Y.Z-rcN`, follows the same steps. It publishes
+as a GitHub pre-release, never as the Latest release. Its tag starts phase 2
+on its commit, so the release workflow's first run on it stops at the arena
+gate: re-run that run once phase 2 is green, and it publishes.
