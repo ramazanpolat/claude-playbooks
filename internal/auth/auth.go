@@ -175,7 +175,7 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 					// Only the machine's own account may be copied over the
 					// machine's store; any other login, or one that cannot be
 					// told apart, is set aside
-					// (docs/known-issues/shared-launch-copies-own-login-over-machine-login.md).
+					// (CHANGELOG.md, v3.23.1).
 					sourceInfo, err := os.Stat(sourceAbs)
 					switch {
 					case os.IsNotExist(err):

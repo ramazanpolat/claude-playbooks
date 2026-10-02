@@ -1,6 +1,6 @@
 # Query your setup with SQL
 
-Since v3.21.0, `cpb SELECT` does this for one table at a time (see
+`cpb SELECT` does this for one table at a time (see
 [example 13](../../examples/13-select/) and the reference's
 [SELECT](../../SPEC.md#select)):
 

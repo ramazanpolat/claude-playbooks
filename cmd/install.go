@@ -215,8 +215,7 @@ func doInstall(o installOpts, args []string) error {
 	}
 	// A source never carries a login: its .credentials.json and the account
 	// state of its .claude.json stay out of the install, at its root and in
-	// its config directory (docs/known-issues/shared-launch-copies-own-login-
-	// over-machine-login.md).
+	// its config directory (CHANGELOG.md, v3.22.1).
 	for _, dir := range []string{stage, configStage} {
 		if err := stripSourceLogin(dir, source); err != nil {
 			os.RemoveAll(stage)

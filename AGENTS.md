@@ -113,7 +113,7 @@ examples: [examples/](examples/).
 
 ```sh
 cpb self-update --check   # exit 0; says whether a newer release exists
-cpb self-update           # installs the latest release
+cpb self-update           # installs the newest release of this major version
 cpb --version             # verify: the new version
 ```
 
@@ -155,11 +155,10 @@ fallback: [docs/guides/installation.md](docs/guides/installation.md), "Uninstall
 
 ## Before any release
 
-No release without its docs. The maintainer's rule (2026-09-26), verbatim:
-
-```
-"1) a good readme, short, precise, represents a) what is it b) why it exists c) how it is used 2) a docs with full tutorials and some guides for some common operations 3) examples with smallest features/usages/utilities to full blown ones, each has their own readme.md files 4) an agent entry for installation and deployment, etc."
-```
+No release without its docs: a short README that says what cpb is, why it
+exists and how it is used; docs with tutorials and guides for common
+operations; examples from the smallest use to the full-blown one, each with
+its own README; and this file, for installing and deploying.
 
 Before a version is tagged, check each item, for every feature in that
 release:
@@ -190,8 +189,7 @@ release:
       `gentar/policy.toml` `[phase2] max_age_days = 2` refuses one older
       than two days. A re-run is allowed only for an infrastructure failure
       (the judge unreachable, a provider refusing the key); a real red means
-      fix first, then a fresh pass. (The maintainer's rule, 2026-09-29. It
-      replaces "7 consecutive green nights".)
+      fix first, then a fresh pass.
 - [ ] **No open security issue and no known data-loss bug.** Check
       `docs/known-issues/`.
 - [ ] **Every review finding** on the release's PRs is fixed or answered
@@ -201,7 +199,7 @@ release:
 **Nightlies are drift monitors (report on red).** Every night
 `arena-nightly` runs phase 2 on main; a dispatch with `ref` runs another ref.
 Not on a release tag: the kit's plan never gives a `v*` tag the bench, so a
-tag dispatch would be skipped and read as green (v3.25.0 on 2026-09-30).
+tag dispatch would be skipped and read as green.
 `arena-nightly` fails when a dispatched run's `arena / phase2` job is skipped
 or absent, naming the ref and plan's reason. A red is fixed like any bug.
 They gate nothing.
@@ -221,8 +219,7 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
 3. **The release-prep commit on the branch**:
    - `package.json` → X.Y.Z, which npx serves and release.yml requires to
      equal the tag;
-   - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`);
-   - the reference's status line.
+   - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`).
 4. **A green full arena phase 2 on that head.** Check the arena bench is
    idle first, then dispatch `gentar-arena.yml` on the branch with no
    scenario. The run's head sha must be the exact commit you will tag, which

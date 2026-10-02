@@ -2,7 +2,7 @@
 
 Creating, installing, linking, launching, renaming, updating and deleting them,
 and keeping a whole setup in one playbook file. The statements below are the
-[CLI grammar](../../SPEC.md) (v3.20.0); keywords are
+[CLI grammar](../../SPEC.md); keywords are
 case-insensitive.
 
 cpb reuses your existing Claude Code authentication for new playbooks, so a new

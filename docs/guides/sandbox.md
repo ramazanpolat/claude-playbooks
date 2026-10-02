@@ -74,8 +74,7 @@ When a key does go in:
   would not work.
 - **Never because a registration failed.** If `cpb` cannot register a key with
   the proxy, the launch stops and names the key and the host (never the
-  value). Retry, or choose `secrets = "env"`. Before v3.26.0 it warned and
-  passed the key in.
+  value). Retry, or choose `secrets = "env"`.
 
 The shared `sbx` skills store stays out as well.
 
