@@ -33,9 +33,15 @@ def esc(t):
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def mask(text):
+def mask(text, cmd=""):
     text = re.sub(r"(?m)^(\w+\s+)\d+(\s)", r"\1PID\2", text)        # a SHOW SESSIONS row's pid
-    return re.sub(r"(?<![\w.-])\d+[smhd](?![\w.-])", "N", text)      # ages: 0s, 12m
+    text = re.sub(r"(?<![\w.-])\d+[smhd](?![\w.-])", "N", text)      # ages: 0s, 12m
+    if cmd == "cpb SHOW SESSIONS":
+        # that table sizes its PID column to the pid, so its spacing and the
+        # dashes under the header vary with the run, not with cpb
+        text = re.sub(r" {2,}", " ", text)
+        text = re.sub(r"-{2,}", "-", text)
+    return text
 
 
 def read_transcript(path):
@@ -72,7 +78,7 @@ def main():
         seen += 1
         real = "\n".join(trans[cmd]).rstrip("\n")
         have = clean(m.group(3)).rstrip("\n")
-        if mask(real) == mask(have):
+        if mask(real, cmd) == mask(have, cmd):
             return m.group(0)
         bad += 1
         changed.append(cmd)
