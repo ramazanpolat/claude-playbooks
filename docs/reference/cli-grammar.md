@@ -1881,14 +1881,19 @@ confirmation.
 ## cpb play (v3.28.0, in progress)
 
 `cpb play <ref>` tries someone else's playbook: it fetches a recipe once,
-checks it, shows exactly what it would do, and (in a later part of v3.28.0)
-runs it as a throwaway playbook that is removed on exit. **This part builds
-the fetch, the check and the plan:** `--check`, `--dry-run`, `--json` and
-`--sha256`. Running a played recipe, the sandbox default, `--keep` and the
-typed confirmations arrive before v3.28.0 ships. The design (approved by
+checks it, shows exactly what it would do, asks, and runs it as a throwaway
+playbook that is removed when the session ends. **Built so far:**
+- the fetch, the check and the plan: `--check`, `--dry-run`, `--json`,
+  `--sha256`;
+- running, with the typed confirmations, `--env` and clean-up on every way
+  out.
+
+The sandbox default and `--keep` arrive before v3.28.0 ships. The design (approved by
 root on 2026-10-01) is in the task's `design-cpb-play-2026-10-01-21_58.md`.
 
 ```
+cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env <set>]...
+               [--sha256 <hex>] [-- <claude arguments>]      preview, confirm, run, remove
 cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals and risks
 cpb play <ref> --dry-run [--json] [--sha256 <hex>]    the plan against a throwaway playbook
 cpb play <dir> --check                                 a template directory, as the website's CI runs it
@@ -2020,8 +2025,54 @@ on 2026-10-01. The keys:
 key, and a valid `min-cpb`. It also checks that `index.txt` lists exactly
 those names, sorted, one per line.
 
+**Running.** `cpb play <ref>` follows these steps:
+
+1. It shows the preview: the recipe, its risks, and the plan of the exact
+   bytes.
+2. It asks `Run this playbook? [y/N]`.
+3. It asks for each typed confirmation in turn:
+   - `Type the host this playbook will send your requests to (<host>):`;
+   - `Type the proxy …`, or `Type TLS …`;
+   - `Type the secret this playbook may read (<ref>):`.
+
+   An exact match goes on; anything else stops with nothing written.
+4. It applies the same bytes to the throwaway playbook, runs the session
+   (arguments after `--` go to `claude`), and removes everything afterwards.
+
+Until the sandbox default lands, the preview says "No sandbox yet: this
+agent runs on your machine, as you".
+
+**Without a terminal**, `--yes` answers the yes. It **never** confirms what
+must be typed: each model-endpoint or proxy host needs `--trust-endpoint
+<host>` (`TLS` for a TLS change), and each secret reference needs
+`--trust-secret <ref>`. A missing one refuses, naming the flags. Without
+`--yes`, a run off a terminal is refused.
+
+**`--env <set>`** copies one of your env sets into the throwaway store and
+attaches it (`USE ENV`, in the order given). It is how a key reaches a moved
+endpoint: the keys it sets are left out of the credential `BLOCK`, and
+nothing else of yours follows.
+
+**Clean-up on every way out.**
+- **`^C`** reaches Claude Code from the terminal, so cpb waits for it to
+  exit.
+- **A closed terminal (`SIGHUP`) or `kill <cpb>` (`SIGTERM`)** is passed on
+  to the session. cpb itself stays alive until the throwaway store is
+  removed.
+- **A panic** still removes it.
+- **A shared login that Claude Code refreshed** during the session is handed
+  back to your machine login first, so a rotated refresh token is not lost
+  with the directory.
+- **A cpb killed outright (`SIGKILL`)** leaves its store, with a marker
+  naming its pid. The next `play` sweeps it once that pid is gone and the
+  marker is more than 24 hours old.
+
+The resume line a session usually ends with is not printed, because its
+playbook is gone.
+
 **Exit codes:** 0 when checked or planned; 1 when refused (a check, the
-header, or `--sha256`); 2 on a usage error.
+header, `--sha256`, or a confirmation); 2 on a usage error. A session's
+own exit code passes through.
 
 ## Completion
 

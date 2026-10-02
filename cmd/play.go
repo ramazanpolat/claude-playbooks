@@ -33,7 +33,17 @@ var playCmd = &cobra.Command{
 or a local file (./x.cpb). A played recipe changes nothing on your machine but
 the playbook play makes: no env sets, no DEFAULTS, no plaintext secrets, and
 never your pilot profile.`,
-	Args: cobra.ExactArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		// <ref>, then claude's own arguments after --.
+		at := cmd.ArgsLenAtDash()
+		if len(args) == 0 || at == 0 {
+			return errors.New("play what? cpb play <ref> [-- <claude arguments>]")
+		}
+		if (at < 0 && len(args) > 1) || at > 1 {
+			return errors.New("one <ref>; claude's own arguments go after --")
+		}
+		return nil
+	},
 	RunE: runPlay,
 }
 
@@ -49,6 +59,10 @@ func init() {
 	playCmd.Flags().BoolVar(&playDryRun, "dry-run", false, "show the plan against a throwaway playbook, and run nothing")
 	playCmd.Flags().BoolVar(&playJSONF, "json", false, "with --dry-run or --check: the plan as JSON")
 	playCmd.Flags().StringVar(&playSHA256, "sha256", "", "refuse any recipe whose sha256 is not this")
+	playCmd.Flags().BoolVar(&playYes, "yes", false, "answer the yes, for scripts; never confirms an endpoint, a proxy, TLS or a secret")
+	playCmd.Flags().StringArrayVar(&playTrustEndpoint, "trust-endpoint", nil, "without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
+	playCmd.Flags().StringArrayVar(&playTrustSecret, "trust-secret", nil, "without a terminal: confirm a secret reference; repeatable")
+	playCmd.Flags().StringArrayVar(&playEnvSets, "env", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
 	rootCmd.AddCommand(playCmd)
 }
 
@@ -114,11 +128,12 @@ func checkRecipe(rec *play.Recipe) *play.Result {
 
 func runPlay(cmd *cobra.Command, args []string) error {
 	ref := args[0]
+	var claudeArgs []string
+	if at := cmd.ArgsLenAtDash(); at >= 0 {
+		claudeArgs = args[at:]
+	}
 	if playJSONF && !playDryRun && !playCheck {
 		return errors.New("--json needs --dry-run or --check")
-	}
-	if !playCheck && !playDryRun {
-		return errors.New("running a played recipe arrives with the next part of cpb play (v3.28.0); see what it would do with --dry-run, or --check")
 	}
 	if playCheck {
 		if info, err := os.Stat(ref); err == nil && info.IsDir() {
@@ -141,7 +156,10 @@ func runPlay(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	return playDryRunPlan(src, rec, res, block)
+	if playDryRun {
+		return playDryRunPlan(src, rec, res, block)
+	}
+	return playRun(src, rec, res, claudeArgs)
 }
 
 func playBlock(src *play.Source, rec *play.Recipe, res *play.Result, playbookName string) *playJSON {
@@ -257,7 +275,11 @@ func playBlockedVars() []string {
 // playSetup is the statement play writes before the recipe: the throwaway
 // playbook itself, never with the pilot profile, and, when the endpoint
 // moves, with a login of its own and the credentials blocked.
-func playSetup(name string, res *play.Result) string {
+func playSetup(name string, res *play.Result) string { return playSetupKeeping(name, res, nil) }
+
+// playSetupKeeping is playSetup with keep's keys left out of the credential
+// BLOCK: the ones an --env set the user attached provides.
+func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO ALIAS NO PILOT PROFILE", name)
 	if res.Endpoint != "" {
@@ -265,7 +287,15 @@ func playSetup(name string, res *play.Result) string {
 	}
 	b.WriteString(";\n")
 	if res.Endpoint != "" {
-		fmt.Fprintf(&b, "ALTER PLAYBOOK %s BLOCK VAR %s;\n", name, strings.Join(playBlockedVars(), " "))
+		var blocked []string
+		for _, k := range playBlockedVars() {
+			if !keep[k] {
+				blocked = append(blocked, k)
+			}
+		}
+		if len(blocked) > 0 {
+			fmt.Fprintf(&b, "ALTER PLAYBOOK %s BLOCK VAR %s;\n", name, strings.Join(blocked, " "))
+		}
 	}
 	return b.String()
 }
@@ -301,11 +331,7 @@ func withThrowawayStore(fn func(dir string) error) error {
 // playDryRunPlan plans the recipe against a throwaway playbook: the
 // preview's head, then APPLY's own dry run of the exact bytes fetched.
 func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block *playJSON) error {
-	suffix := make([]byte, 3)
-	if _, err := rand.Read(suffix); err != nil {
-		return err
-	}
-	name := "play-" + src.Name + "-" + hex.EncodeToString(suffix)
+	name := playName(src)
 	block.Playbook = name
 	if len(res.Refused) > 0 {
 		if playJSONF {
@@ -314,15 +340,14 @@ func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block 
 		printPlayCheck(os.Stdout, src, rec, res)
 		return &commandExitError{code: 1}
 	}
+	userStore := config.ResolvePlaybooksDir()
 	return withThrowawayStore(func(dir string) error {
-		// "_" cannot start a recipe's file name (baseName keeps [a-z0-9-]),
-		// so the two never collide.
-		setup := filepath.Join(dir, "_play-setup.cpb")
-		recipe := filepath.Join(dir, src.Name+".cpb")
-		if err := os.WriteFile(setup, []byte(playSetup(name, res)), 0o600); err != nil {
+		keep, err := copyEnvSets(userStore, config.ResolvePlaybooksDir())
+		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(recipe, rec.Bytes, 0o600); err != nil {
+		setup, recipe, err := writePlayFiles(dir, src, rec, playSetupFor(name, res, playEnvSets, keep))
+		if err != nil {
 			return err
 		}
 		st := &grammar.Stmt{Verb: grammar.Apply, Files: []string{setup, recipe}, Target: name, DryRun: true, Yes: true, JSON: playJSONF}
@@ -333,6 +358,14 @@ func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block 
 		fmt.Println("\nThe plan, against a throwaway playbook (nothing is written):")
 		return applyRun(st, nil)
 	})
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return strings.Repeat("0", 2*n)
+	}
+	return hex.EncodeToString(b)
 }
 
 // runPlayApplyJSON is runApplyJSON with the play block added.

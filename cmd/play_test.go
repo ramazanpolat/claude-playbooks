@@ -112,9 +112,10 @@ func TestPlayCheckAndDryRun(t *testing.T) {
 		t.Fatalf("dry run of a refused recipe: %v\n%s", err, out)
 	}
 
-	// Running is the next slice: said, nothing done.
+	// Running without a terminal needs --yes (slice 2): refused, nothing done.
 	playFlags(t, false, false, false, "")
-	if err := runPlay(playCmd, []string{good}); err == nil || !strings.Contains(err.Error(), "--dry-run") {
+	captureStdout(t, func() { err = runPlay(playCmd, []string{good}) })
+	if err == nil || !strings.Contains(err.Error(), "confirm with --yes") {
 		t.Fatalf("run: %v", err)
 	}
 }

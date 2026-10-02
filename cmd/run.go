@@ -238,7 +238,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// The exit line names the command that resumes this session in this
 	// playbook; a caller-supplied config dir is not the playbook's, so
 	// that launch gets none.
-	if !override {
+	if !override && !playSessionRunning {
 		printResumeLine(playbookSessionDir(pb), claudeArgs, since)
 	}
 	return err

@@ -16,6 +16,7 @@ steps = [
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
   '''F="$HOME/playfx"; mkdir -p "$F/tpl" && printf '%s\n' "ALTER PLAYBOOK" "  USE ENV work" "  SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;" "ALTER DEFAULTS SET SECRET HELPER 'x';" > "$F/bad.cpb" && printf '%s\n' "-- title: Router" "-- description: GLM through a router." "" "ALTER PLAYBOOK" "  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1" "  SET MODEL 'glm-5.3';" > "$F/router.cpb" && cp "$F/router.cpb" "$F/tpl/router.cpb" && printf '%s\n' "-- title: Reviewer" "-- description: Reads code." "-- min-cpb: 3.28.0" "" "ALTER PLAYBOOK SET MODEL 'opus';" > "$F/tpl/code-reviewer.cpb" && printf '%s\n' code-reviewer router > "$F/tpl/index.txt"''',
   'claude-playbook CREATE ENV mine SET ANTHROPIC_BASE_URL=https://mine.example && claude-playbook ALTER DEFAULTS USE ENV mine',
+  '''F="$HOME/playfx"; printf '%s\n' "-- title: Plain" "-- description: A model." "" "ALTER PLAYBOOK SET MODEL 'claude-opus-5-5';" > "$F/plain.cpb" && mkdir -p "$HOME/sleepclaude" && printf '%s\n' '#!/bin/sh' 'echo "$CLAUDE_CONFIG_DIR" > "$HOME/play-cfg"' 'sleep 30' > "$HOME/sleepclaude/claude" && chmod 755 "$HOME/sleepclaude/claude"''',
 ]
 
 [[verify.commands]]
@@ -42,3 +43,14 @@ contains = "play-sha-ok"
 # template, a title and description, and index.txt listing them sorted.
 command = '''F="$HOME/playfx/tpl"; claude-playbook play --check "$F" > "$HOME/d.out" 2>&1 && grep -q "ok   index.txt (2 template(s))" "$HOME/d.out" && printf '%s\n' router code-reviewer > "$F/index.txt" && if claude-playbook play --check "$F" > "$HOME/d2.out" 2>&1; then echo unsorted-accepted; else grep -q "FAIL index.txt" "$HOME/d2.out" && echo play-dir-ok; fi'''
 contains = "play-dir-ok"
+
+[[verify.commands]]
+# Slice 2: a played recipe runs in a throwaway playbook that is removed on
+# every way out. A stub claude records its config dir and sleeps; then ^C
+# (SIGINT to the process group), a closed terminal (SIGHUP to the group) and
+# `kill <cpb>` (SIGTERM to cpb alone, which passes it on) each end the
+# session, and after each the store is gone and cpb has exited. It starts
+# through python with INT and HUP at their defaults, in its own session: a
+# shell's `cmd &` would start it with SIGINT ignored, unlike a terminal.
+command = '''F="$HOME/playfx"; ok=0; for sig in INT HUP TERM; do rm -f "$HOME/play-cfg"; PATH="$HOME/sleepclaude:$PATH" python3 -c 'import os,signal,sys; [signal.signal(x, signal.SIG_DFL) for x in (signal.SIGINT, signal.SIGHUP)]; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' claude-playbook play --yes "$F/plain.cpb" > "$HOME/play-$sig.out" 2>&1 & pid=$!; i=0; while [ ! -s "$HOME/play-cfg" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; cfg=$(cat "$HOME/play-cfg" 2>/dev/null); [ -n "$cfg" ] && [ -d "$cfg" ] || { echo "$sig-no-session"; break; }; if [ $sig = TERM ]; then kill -TERM $pid; else python3 -c 'import os,signal,sys; os.killpg(int(sys.argv[1]), getattr(signal, "SIG"+sys.argv[2]))' $pid $sig; fi; i=0; while kill -0 $pid 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; if kill -0 $pid 2>/dev/null; then echo "$sig-cpb-still-running"; break; fi; if [ -e "$cfg" ]; then echo "$sig-left-$cfg"; break; fi; store=${cfg%/store/*}; if [ -e "$store" ]; then echo "$sig-left-store"; break; fi; ok=$((ok+1)); done; [ $ok = 3 ] && echo play-cleanup-ok'''
+contains = "play-cleanup-ok"
