@@ -405,7 +405,7 @@ func TestDeleteStoreGuardByIdentity(t *testing.T) {
 
 	// The store's registry SYMLINK addressed by a case variant: refused, link intact.
 	if caseInsensitive {
-		if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
+		if err := doDelete(deleteOpts{yes: true}, []string{".ENV-SETS"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
 			t.Fatalf("case variant of the store link must get the store message, not the intermediate-link one: %v", err)
 		}
 		if _, err := os.Lstat(store); err != nil {
@@ -553,10 +553,10 @@ func TestDeleteStoreGuardTraversedDirsAndDanglingEntry(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, ".gone"), store); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".ENV-PROFILES")); err == nil || os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".ENV-SETS")); err == nil || os.IsNotExist(err) {
 		// case-insensitive: Lstat of the variant is the link itself
-		if fi, err := os.Lstat(filepath.Join(root, ".ENV-PROFILES")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			if err := doDelete(deleteOpts{yes: true}, []string{".ENV-PROFILES"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
+		if fi, err := os.Lstat(filepath.Join(root, ".ENV-SETS")); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			if err := doDelete(deleteOpts{yes: true}, []string{".ENV-SETS"}); err == nil || !strings.Contains(err.Error(), `".env-sets" is the registry's env profile store`) {
 				t.Fatalf("dangling store link by case variant: %v", err)
 			}
 		}
