@@ -9,13 +9,13 @@ import (
 func TestParseSandboxClauses(t *testing.T) {
 	stmts, err := ParseFile(`ALTER PLAYBOOK k
   SET SANDBOX
-  SET SANDBOX backend=openshell host=me@buildbox mounts=~/libs:ro,~/data allow_net=api.example.com:443 secrets=env claude_version=2.1.0 share_skills=true workdir='~/my proj';
+  SET SANDBOX backend=sbx host=me@buildbox mounts=~/libs:ro,~/data allow_net=api.example.com:443 secrets=env claude_version=2.1.0 share_skills=true workdir='~/my proj';
 ALTER PLAYBOOK k UNSET SANDBOX UNSET SANDBOX host mounts;`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := stmts[0].Clauses
-	want := []Var{{Key: "backend", Value: "openshell"}, {Key: "host", Value: "me@buildbox"}, {Key: "mounts", Value: "~/libs:ro,~/data"},
+	want := []Var{{Key: "backend", Value: "sbx"}, {Key: "host", Value: "me@buildbox"}, {Key: "mounts", Value: "~/libs:ro,~/data"},
 		{Key: "allow_net", Value: "api.example.com:443"}, {Key: "secrets", Value: "env"}, {Key: "claude_version", Value: "2.1.0"},
 		{Key: "share_skills", Value: "true"}, {Key: "workdir", Value: "~/my proj"}}
 	if c[0].Kind != SetSandbox || c[1].Kind != SetSandboxKeys || !reflect.DeepEqual(c[1].Settings, want) {

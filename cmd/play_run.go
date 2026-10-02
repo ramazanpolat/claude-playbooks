@@ -18,6 +18,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envprofile"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/play"
 )
 
@@ -460,20 +461,15 @@ var (
 )
 
 // playSandboxAvailable reports whether a backend can run here (a test
-// replaces it): sbx on PATH, or OpenShell's preflight.
+// replaces it): sbx on PATH.
 var playSandboxAvailable = func(kind string) error {
-	switch kind {
-	case "sbx":
-		_, err := exec.LookPath("sbx")
-		if err != nil {
-			return errors.New("'sbx' (Docker Sandboxes) is not installed")
-		}
-		return nil
-	case "openshell":
-		_, err := openshellPreflight()
-		return err
+	if kind != "sbx" {
+		return fmt.Errorf("unknown sandbox backend %q (available: %s)", kind, strings.Join(manifest.SandboxBackends, ", "))
 	}
-	return fmt.Errorf("unknown sandbox backend %q", kind)
+	if _, err := exec.LookPath("sbx"); err != nil {
+		return errors.New("'sbx' (Docker Sandboxes) is not installed")
+	}
+	return nil
 }
 
 // playSandbox is where a play runs: a backend, or "" for this machine,
@@ -484,8 +480,7 @@ type playSandbox struct {
 }
 
 // choosePlaySandbox decides where a play runs. The sandbox is the default
-// wherever a backend is available (sbx, or OpenShell where its preflight
-// passes); --no-sandbox opts out, said plainly; a recipe that asks for a
+// wherever sbx is available; --no-sandbox opts out, said plainly; a recipe that asks for a
 // sandbox (create-with: SANDBOX) is refused where none is available. A
 // recipe with secret references cannot run sandboxed yet (a sandboxed
 // launch cannot resolve them), so it is refused there too, never quietly
@@ -505,11 +500,8 @@ func choosePlaySandbox(res *play.Result) (playSandbox, error) {
 	var backend string
 	switch playSandboxFlag {
 	case "", "auto":
-		for _, k := range []string{"sbx", "openshell"} {
-			if playSandboxAvailable(k) == nil {
-				backend = k
-				break
-			}
+		if playSandboxAvailable("sbx") == nil {
+			backend = "sbx"
 		}
 	default:
 		if err := playSandboxAvailable(playSandboxFlag); err != nil {
@@ -519,9 +511,9 @@ func choosePlaySandbox(res *play.Result) (playSandbox, error) {
 	}
 	if backend == "" {
 		if wants {
-			return playSandbox{}, errors.New("the recipe asks to run sandboxed (create-with: SANDBOX), and no sandbox is available here (sbx, or OpenShell on Linux): install one, or run it on this machine with --no-sandbox")
+			return playSandbox{}, errors.New("the recipe asks to run sandboxed (create-with: SANDBOX), and no sandbox is available here (sbx): install it, or run it on this machine with --no-sandbox")
 		}
-		return playSandbox{Note: "No sandbox available here (sbx, or OpenShell on Linux): this agent will run on your machine, as you."}, nil
+		return playSandbox{Note: "No sandbox available here (sbx): this agent will run on your machine, as you."}, nil
 	}
 	var refs []string
 	for _, r := range res.Risks {

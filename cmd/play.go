@@ -34,7 +34,7 @@ or a local file (./x.cpb). A played recipe changes nothing on your machine but
 the playbook play makes: no env sets, no DEFAULTS and no plaintext secrets, and
 its CLAUDE.md imports nothing.
 
-It runs in a sandbox where one is available (sbx, or OpenShell on Linux), and
+It runs in a sandbox (sbx) where one is available, and
 says so when none is; --no-sandbox runs it on this machine, as you. A recipe
 whose header asks for a sandbox (-- create-with: SANDBOX) is refused where none
 is available. A recipe that reads a secret reference cannot run sandboxed
@@ -85,7 +85,7 @@ func init() {
 	playCmd.Flags().StringArrayVar(&playTrustEndpoint, "trust-endpoint", nil, "without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
 	playCmd.Flags().StringArrayVar(&playTrustSecret, "trust-secret", nil, "without a terminal: confirm a secret reference; repeatable")
 	playCmd.Flags().StringArrayVar(&playEnvSets, "env", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
-	playCmd.Flags().StringVar(&playSandboxFlag, "sandbox", "", "run sandboxed (the default where a backend is available); =sbx or =openshell picks one")
+	playCmd.Flags().StringVar(&playSandboxFlag, "sandbox", "", "run sandboxed (the default where sbx is available); =sbx names the backend")
 	playCmd.Flags().Lookup("sandbox").NoOptDefVal = "auto"
 	playCmd.Flags().BoolVar(&playNoSandbox, "no-sandbox", false, "run on this machine, as you; the preview says so")
 	playCmd.Flags().BoolVar(&playKeep, "keep", false, "keep it as a playbook in your store, with a [play] record, instead of running it")

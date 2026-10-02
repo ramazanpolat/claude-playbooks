@@ -34,9 +34,9 @@ func TestSetSandboxForms(t *testing.T) {
 	aliasTestHome(t)
 	mustStmt(t, "CREATE PLAYBOOK p NO ALIAS")
 
-	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX backend=openshell host=me@buildbox mounts=~/libs:ro,~/data")
+	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX backend=sbx host=me@buildbox mounts=~/libs:ro,~/data")
 	sb := sandboxOf(t, "p")
-	if sb == nil || sb.Always || sb.Backend != "openshell" || sb.Host != "me@buildbox" || !reflect.DeepEqual(sb.Mounts, []string{"~/libs:ro", "~/data"}) {
+	if sb == nil || sb.Always || sb.Backend != "sbx" || sb.Host != "me@buildbox" || !reflect.DeepEqual(sb.Mounts, []string{"~/libs:ro", "~/data"}) {
 		t.Fatalf("keyed SET SANDBOX: %#v", sb)
 	}
 	if isolateAuthOf(t, "p") {
@@ -44,7 +44,7 @@ func TestSetSandboxForms(t *testing.T) {
 	}
 
 	out := mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX")
-	if sb := sandboxOf(t, "p"); !sb.Always || sb.Backend != "openshell" || !isolateAuthOf(t, "p") {
+	if sb := sandboxOf(t, "p"); !sb.Always || sb.Backend != "sbx" || !isolateAuthOf(t, "p") {
 		t.Fatalf("bare SET SANDBOX: %#v isolated=%v", sb, isolateAuthOf(t, "p"))
 	}
 	if !strings.Contains(out, "login     isolated") {
@@ -56,7 +56,7 @@ func TestSetSandboxForms(t *testing.T) {
 	}
 
 	mustStmt(t, "ALTER PLAYBOOK p UNSET SANDBOX")
-	if sb := sandboxOf(t, "p"); sb.Always || sb.Backend != "openshell" || !isolateAuthOf(t, "p") {
+	if sb := sandboxOf(t, "p"); sb.Always || sb.Backend != "sbx" || !isolateAuthOf(t, "p") {
 		t.Fatalf("UNSET SANDBOX: %#v isolated=%v", sb, isolateAuthOf(t, "p"))
 	}
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK p"); !strings.Contains(out, "Login: isolated") {
@@ -109,14 +109,14 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	mustStmt(t, "CREATE PLAYBOOK p NO ALIAS")
-	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX SET SANDBOX backend=openshell allow_net=api.example.com:443 share_skills=true")
+	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true")
 
 	sb, _ := showPlaybook(t, "p")["sandbox"].(map[string]any)
-	if sb["always"] != true || sb["backend"] != "openshell" || sb["host"] != nil || sb["share_skills"] != true ||
+	if sb["always"] != true || sb["backend"] != "sbx" || sb["host"] != nil || sb["share_skills"] != true ||
 		!reflect.DeepEqual(sb["allow_net"], []any{"api.example.com:443"}) || !reflect.DeepEqual(sb["mounts"], []any{}) {
 		t.Fatalf("SHOW --json sandbox: %#v", sb)
 	}
-	if out := mustStmt(t, "SHOW PLAYBOOK p"); !strings.Contains(out, "yes (backend=openshell, allow_net=api.example.com:443, share_skills=true)") {
+	if out := mustStmt(t, "SHOW PLAYBOOK p"); !strings.Contains(out, "yes (backend=sbx, allow_net=api.example.com:443, share_skills=true)") {
 		t.Errorf("SHOW PLAYBOOK Sandbox line:\n%s", out)
 	}
 	if v := showPlaybook(t, "p")["isolated_login"]; v != true {
@@ -124,7 +124,7 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	}
 
 	text := mustStmt(t, "SHOW CREATE PLAYBOOK p")
-	for _, want := range []string{"SET SANDBOX\n", "SET SANDBOX backend=openshell allow_net=api.example.com:443 share_skills=true"} {
+	for _, want := range []string{"SET SANDBOX\n", "SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 		}
