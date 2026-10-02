@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -341,23 +342,112 @@ func TestSelectSameShapeOnBothEngines(t *testing.T) {
 
 func TestDescribe(t *testing.T) {
 	selectFixture(t)
+	old := selectTTY
+	t.Cleanup(func() { selectTTY = old })
+	selectTTY = func() bool { return true }
 	out := mustStmt(t, "DESCRIBE playbooks")
-	for _, want := range []string{"NAME", "TYPE", "version_tuple", "Array(UInt32)", "source", "JSON", "model"} {
+	for _, want := range []string{"NAME", "TYPE", "COMMENT", "version_tuple", "Array(UInt32)", "source", "JSON", "model", "to compare and sort versions"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("DESCRIBE playbooks lacks %q:\n%s", want, out)
+			t.Fatalf("DESCRIBE playbooks on a terminal lacks %q:\n%s", want, out)
 		}
+	}
+	selectTTY = func() bool { return false }
+	tsv := mustStmt(t, "DESC TABLE defaults")
+	if want := "name\ttype\tcomment\nenvs\tArray(String)\tThe env sets every launch applies first, in order.\n"; !strings.HasPrefix(tsv, want) || strings.Count(tsv, "\n") != 3 {
+		t.Fatalf("DESC TABLE defaults in a pipe: TSV with a header row:\n%q", tsv)
 	}
 	var cols []columnJSON
 	var err error
 	js := captureStdout(t, func() { err = runStatement([]string{"DESC TABLE envs --json"}) })
-	if err != nil || json.Unmarshal([]byte(js), &cols) != nil || len(cols) != 5 || cols[4] != (columnJSON{Name: "default", Type: "Bool"}) {
+	if err != nil || json.Unmarshal([]byte(js), &cols) != nil || len(cols) != 5 ||
+		cols[4] != (columnJSON{Name: "default", Type: "Bool", Comment: "True when the env set is in DEFAULTS."}) {
 		t.Fatalf("DESC TABLE envs --json: %v %v\n%s", err, cols, js)
+	}
+	if keys := jsonKeys(t, js); len(keys) != 5 || strings.Join(keys[0], " ") != "name type comment" {
+		t.Fatalf("--json keys: %v", keys)
 	}
 	if _, err := stmt(t, "DESCRIBE nope"); err == nil || !strings.Contains(err.Error(), `unknown table "nope"`) {
 		t.Fatalf("unknown table: %v", err)
 	}
-	if _, err := stmt(t, "DESCRIBE"); err == nil || !strings.Contains(err.Error(), "needs one table") {
-		t.Fatalf("no table: %v", err)
+	for _, line := range []string{"DESCRIBE", "DESCRIBE playbooks envs"} {
+		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), "needs one table") {
+			t.Fatalf("%s: %v", line, err)
+		}
+	}
+}
+
+// TestDescribeEveryColumnHasAComment: DESCRIBE's comment says what each
+// column means, so none may be empty, and a comment names no column the
+// table lacks.
+func TestDescribeEveryColumnHasAComment(t *testing.T) {
+	for name, tbl := range selectTables {
+		cols, err := describeTable(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range cols {
+			if c.Type == "" || strings.TrimSpace(c.Comment) == "" {
+				t.Errorf("%s.%s: type %q, comment %q", name, c.Name, c.Type, c.Comment)
+			}
+		}
+		if len(tbl.comments) != len(tbl.columns) {
+			t.Errorf("%s: %d comments for %d columns", name, len(tbl.comments), len(tbl.columns))
+		}
+	}
+}
+
+// TestDescribeMatchesSpec holds SPEC.md's DESCRIBE column tables to the
+// code, line for line: every table, every column in order, its type and its
+// comment.
+func TestDescribeMatchesSpec(t *testing.T) {
+	data, err := os.ReadFile("../SPEC.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "\n### DESCRIBE\n")
+	if start < 0 {
+		t.Fatal("SPEC.md has no DESCRIBE section")
+	}
+	section := text[start+1:]
+	for _, next := range []string{"\n## ", "\n### "} {
+		if end := strings.Index(section, next); end >= 0 {
+			section = section[:end]
+		}
+	}
+	spec := map[string][]columnJSON{}
+	table := ""
+	row := regexp.MustCompile("^\\| `([^`]+)` \\| `([^`]+)` \\| (.+) \\|$")
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "**`") && strings.HasSuffix(line, "`**") {
+			table = strings.TrimSuffix(strings.TrimPrefix(line, "**`"), "`**")
+			continue
+		}
+		if !strings.HasPrefix(line, "|") || line == "| Column | Type | Comment |" || line == "|---|---|---|" {
+			continue
+		}
+		m := row.FindStringSubmatch(line)
+		if m == nil || table == "" {
+			t.Errorf("SPEC.md's DESCRIBE has a row this test cannot read: %q", line)
+			continue
+		}
+		spec[table] = append(spec[table], columnJSON{Name: m[1], Type: m[2], Comment: m[3]})
+	}
+	if len(spec) != len(selectTables) {
+		t.Fatalf("SPEC.md's DESCRIBE lists %d tables, the code has %d", len(spec), len(selectTables))
+	}
+	for name := range selectTables {
+		cols, _ := describeTable(name)
+		got := spec[name]
+		if len(got) != len(cols) {
+			t.Errorf("%s: SPEC.md lists %d columns, the code %d", name, len(got), len(cols))
+			continue
+		}
+		for i := range cols {
+			if got[i] != cols[i] {
+				t.Errorf("%s column %d:\n SPEC.md %+v\n code    %+v", name, i+1, got[i], cols[i])
+			}
+		}
 	}
 }
 
