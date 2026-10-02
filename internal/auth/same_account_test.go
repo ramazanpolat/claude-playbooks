@@ -42,7 +42,7 @@ func newSyncFixture(t *testing.T, machineAccount, ownAccount string) *syncFixtur
 	t.Helper()
 	f := &syncFixture{home: t.TempDir()}
 	t.Setenv("HOME", f.home)
-	t.Setenv(IsolateAuthEnv, "")
+	t.Setenv(IsolatedLoginEnv, "")
 	if err := os.MkdirAll(filepath.Join(f.home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
