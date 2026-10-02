@@ -1910,7 +1910,7 @@ playbook is gone.
 **`--keep [--as <name>]`** shows the same preview and asks the same
 confirmations, then builds the recipe as a playbook in **your** store, and
 runs no session:
-- `CREATE PLAYBOOK <name> NO PILOT PROFILE`, with a launcher; `ISOLATED
+- `CREATE PLAYBOOK <name>`, with a launcher; `ISOLATED
   LOGIN` when the endpoint moves; `SANDBOX` when the header asks for it or
   `--sandbox` is given (`--no-sandbox` overrides the header). A recipe with a
   secret reference cannot be kept sandboxed;
