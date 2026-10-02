@@ -6,7 +6,7 @@
   Command         "$HOME/.local/bin/statusmux" render
   Refresh         10 s
   History         1 (SET STATUSLINE PREVIOUS puts back the newest)
-  Panels          local.clock  exec  (config, cpb)
+
 
 
 

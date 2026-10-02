@@ -456,11 +456,6 @@ func (m Model) tabBody(p Playbook, tab string) []string {
 		} else if p.Linked != nil {
 			src = "(linked) " + m.short(*p.Linked)
 		}
-		pilot := map[string]string{"imported": "imported (CLAUDE.md imports ~/.pilot-profile/)",
-			"not_imported": "not imported", "unknown": "unknown (CLAUDE.md cannot be read)"}[p.PilotProfile]
-		if pilot == "" {
-			pilot = "- (this cpb does not report it)"
-		}
 		live := m.sessionsOf(p.Name)
 		liveS := "none"
 		if len(live) > 0 {
@@ -474,7 +469,6 @@ func (m Model) tabBody(p Playbook, tab string) []string {
 			kv("Version", orDash(deref(p.Version))),
 			kv("Source", src),
 			kv("Login", p.Login()),
-			kv("Pilot profile", pilot),
 			kv("Env sets", orDash(strings.Join(p.Envs, ", "))),
 			kv("Tools", tools),
 			kv("Live sessions", liveS),
@@ -567,20 +561,6 @@ func (m Model) tabBody(p Playbook, tab string) []string {
 			kv("Command", orDash(deref(p.Statusline))),
 			kv("Refresh", refresh),
 			kv("History", fmt.Sprintf("%d (SET STATUSLINE PREVIOUS puts back the newest)", len(p.StatuslineHistory))),
-		}
-		if len(p.Panels) == 0 {
-			return append(out, kv("Panels", "-"))
-		}
-		for i, x := range p.Panels {
-			label := ""
-			if i == 0 {
-				label = "Panels"
-			}
-			who := "yours"
-			if x.Cpb {
-				who = "cpb"
-			}
-			out = append(out, kv(label, fmt.Sprintf("%s  %s  (%s, %s)", x.Panel, x.Type, x.Source, who)))
 		}
 		return out
 	case "Model":

@@ -201,7 +201,7 @@ contains = "dir-target-ok"
 # it. The real clickhouse-local is not assumed on the bench: GitHub CI's
 # select-clickhouse job runs it end to end, and a unit test pins stdin to
 # SHOW … --json byte for byte.
-command = '''H="$HOME/chstub"; mkdir -p "$H" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "$HOME/ch.args"' 'cat > "$HOME/ch.in"' 'echo stub-ok' > "$H/clickhouse" && chmod 755 "$H/clickhouse" && N=$(claude-playbook "SELECT name FROM PLAYBOOKS" | tail -n +3 | wc -l | tr -d ' ') && [ "$N" -ge 5 ] && claude-playbook "SELECT name, envs FROM PLAYBOOKS" | grep -q "^opb " && claude-playbook "SELECT name FROM PLAYBOOKS --json" | grep -qF '"name": "gpb"' && if claude-playbook "SELECT NAME FROM PLAYBOOKS" > "$HOME/sel.err" 2>&1; then echo case-accepted; elif ! grep -q "unknown column 'NAME'" "$HOME/sel.err"; then echo case-wrong-error; elif claude-playbook "SELECT count() FROM PLAYBOOKS; SELECT 1" >/dev/null 2>&1; then echo second-statement-accepted; else CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT name FROM PLAYBOOKS WHERE name != 'FROM VARS' ORDER BY name" | grep -qx stub-ok && [ "$(head -1 "$HOME/ch.args")" = local ] && grep -qx JSONEachRow "$HOME/ch.args" && grep -qx -- "--structure" "$HOME/ch.args" && tail -1 "$HOME/ch.args" | grep -qF "AS version_tuple, pilot_profile, play FROM table) WHERE name != 'FROM VARS' ORDER BY name" && [ "$(wc -l < "$HOME/ch.in" | tr -d ' ')" = "$N" ] && [ "$(grep -c '^{"name":"' "$HOME/ch.in")" = "$N" ] && ! grep -q "sk-live" "$HOME/ch.in" && CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT key FROM VARS WHERE playbook = 'gpb'" | grep -qx stub-ok && grep -q '"key":"X_TOKEN"' "$HOME/ch.in" && ! grep -q "sk-live" "$HOME/ch.in" && echo select-ok; fi'''
+command = '''H="$HOME/chstub"; mkdir -p "$H" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "$HOME/ch.args"' 'cat > "$HOME/ch.in"' 'echo stub-ok' > "$H/clickhouse" && chmod 755 "$H/clickhouse" && N=$(claude-playbook "SELECT name FROM PLAYBOOKS" | tail -n +3 | wc -l | tr -d ' ') && [ "$N" -ge 5 ] && claude-playbook "SELECT name, envs FROM PLAYBOOKS" | grep -q "^opb " && claude-playbook "SELECT name FROM PLAYBOOKS --json" | grep -qF '"name": "gpb"' && if claude-playbook "SELECT NAME FROM PLAYBOOKS" > "$HOME/sel.err" 2>&1; then echo case-accepted; elif ! grep -q "unknown column 'NAME'" "$HOME/sel.err"; then echo case-wrong-error; elif claude-playbook "SELECT count() FROM PLAYBOOKS; SELECT 1" >/dev/null 2>&1; then echo second-statement-accepted; else CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT name FROM PLAYBOOKS WHERE name != 'FROM VARS' ORDER BY name" | grep -qx stub-ok && [ "$(head -1 "$HOME/ch.args")" = local ] && grep -qx JSONEachRow "$HOME/ch.args" && grep -qx -- "--structure" "$HOME/ch.args" && tail -1 "$HOME/ch.args" | grep -qF "AS version_tuple, play FROM table) WHERE name != 'FROM VARS' ORDER BY name" && [ "$(wc -l < "$HOME/ch.in" | tr -d ' ')" = "$N" ] && [ "$(grep -c '^{"name":"' "$HOME/ch.in")" = "$N" ] && ! grep -q "sk-live" "$HOME/ch.in" && CPB_CLICKHOUSE="$H/clickhouse" claude-playbook "SELECT key FROM VARS WHERE playbook = 'gpb'" | grep -qx stub-ok && grep -q '"key":"X_TOKEN"' "$HOME/ch.in" && ! grep -q "sk-live" "$HOME/ch.in" && echo select-ok; fi'''
 contains = "select-ok"
 
 [[verify.commands]]
@@ -270,7 +270,7 @@ contains = "select-order-ok"
 # (#148, v3.26.0): it names the key and the host, never the value (the stub
 # sbx echoes its argv, value included, in its error), and attaches nothing.
 # A stub sbx on PATH; no real sandbox.
-command = '''S="$HOME/sbxstub"; W="$HOME/sbxwork"; mkdir -p "$S" "$W" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/sbx.log"' 'if [ "$1" = ls ] && [ "$2" = --json ]; then printf "{\"sandboxes\":[]}"; exit 0; fi' 'if [ "$1" = secret ] && [ "$2" = ls ]; then exit 0; fi' 'if [ "$1" = secret ]; then echo "stub failure: $*" >&2; exit 1; fi' 'exit 0' > "$S/sbx" && chmod 755 "$S/sbx" && claude-playbook CREATE ENV canary148 SET ANTHROPIC_API_KEY=cpbcanary148value AS PLAINTEXT >/dev/null && claude-playbook CREATE PLAYBOOK failreg NO ALIAS NO PILOT PROFILE ISOLATED LOGIN >/dev/null && claude-playbook ALTER PLAYBOOK failreg USE ENV canary148 >/dev/null && rm -f "$HOME/sbx.log" && if PATH="$S:$PATH" claude-playbook run --sandbox --workdir "$W" failreg > "$HOME/fr.out" 2>&1; then echo failreg-launched; elif grep -q cpbcanary148value "$HOME/fr.out"; then echo failreg-leaked; elif ! grep -q "ANTHROPIC_API_KEY could not be registered at the sandbox proxy for api.anthropic.com" "$HOME/fr.out"; then echo failreg-wrong-message; elif grep -q "^exec -i" "$HOME/sbx.log"; then echo failreg-attached; else echo sandbox-secret-refuse-ok; fi'''
+command = '''S="$HOME/sbxstub"; W="$HOME/sbxwork"; mkdir -p "$S" "$W" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/sbx.log"' 'if [ "$1" = ls ] && [ "$2" = --json ]; then printf "{\"sandboxes\":[]}"; exit 0; fi' 'if [ "$1" = secret ] && [ "$2" = ls ]; then exit 0; fi' 'if [ "$1" = secret ]; then echo "stub failure: $*" >&2; exit 1; fi' 'exit 0' > "$S/sbx" && chmod 755 "$S/sbx" && claude-playbook CREATE ENV canary148 SET ANTHROPIC_API_KEY=cpbcanary148value AS PLAINTEXT >/dev/null && claude-playbook CREATE PLAYBOOK failreg NO ALIAS ISOLATED LOGIN >/dev/null && claude-playbook ALTER PLAYBOOK failreg USE ENV canary148 >/dev/null && rm -f "$HOME/sbx.log" && if PATH="$S:$PATH" claude-playbook run --sandbox --workdir "$W" failreg > "$HOME/fr.out" 2>&1; then echo failreg-launched; elif grep -q cpbcanary148value "$HOME/fr.out"; then echo failreg-leaked; elif ! grep -q "ANTHROPIC_API_KEY could not be registered at the sandbox proxy for api.anthropic.com" "$HOME/fr.out"; then echo failreg-wrong-message; elif grep -q "^exec -i" "$HOME/sbx.log"; then echo failreg-attached; else echo sandbox-secret-refuse-ok; fi'''
 contains = "sandbox-secret-refuse-ok"
 
 [[verify.commands]]
@@ -302,14 +302,10 @@ command = '''P="$HOME/.claude-playbooks/srf"; S="$P/settings.json"; c() { tr -d 
 contains = "statusline-refresh-ok"
 
 [[verify.commands]]
-# NO PILOT PROFILE and the third-party warning (v3.23.0), on throwaway
-# playbooks: NO PILOT PROFILE writes CLAUDE.md without the ~/.pilot-profile/
-# imports, the default keeps them, FROM refuses the clause; routing the
-# importing playbook to a non-Anthropic host warns once, naming playbook and
-# host only; the one without imports is not warned; a dry-run plan carries
-# the stable code and creates nothing.
-command = '''P="$HOME/.claude-playbooks"; claude-playbook CREATE PLAYBOOK npp NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppd NO ALIAS >/dev/null && head -1 "$P/npp/CLAUDE.md" | grep -qx '# Playbook: npp' && ! grep -q 'pilot-profile' "$P/npp/CLAUDE.md" && grep -qx '@~/.pilot-profile/PROFILE.md' "$P/ppd/CLAUDE.md" && if claude-playbook "CREATE PLAYBOOK nfr FROM '$HOME' NO PILOT PROFILE" > "$HOME/npp.err" 2>&1; then echo from-accepted; elif ! grep -q "the source's own" "$HOME/npp.err" || test -e "$P/nfr"; then echo from-wrong; else claude-playbook CREATE ENV rt SET ANTHROPIC_BASE_URL=http://router.example:1/v1 >/dev/null && claude-playbook ALTER PLAYBOOK ppd USE ENV rt > /dev/null 2> "$HOME/w1.err" && grep -qF 'PLAYBOOK ppd (router.example) imports ~/.pilot-profile/' "$HOME/w1.err" && ! grep -q ':1/v1' "$HOME/w1.err" && claude-playbook ALTER PLAYBOOK ppd USE ENV rt > /dev/null 2> "$HOME/w2.err" && [ ! -s "$HOME/w2.err" ] && claude-playbook ALTER PLAYBOOK npp USE ENV rt > /dev/null 2> "$HOME/w3.err" && [ ! -s "$HOME/w3.err" ] && printf 'CREATE PLAYBOOK pdr NO ALIAS;\nALTER PLAYBOOK pdr USE ENV rt;\n' > "$HOME/pdr.cpb" && claude-playbook APPLY "$HOME/pdr.cpb" --dry-run --json | tr -d ' \n' | grep -qF '"code":"pilot_profile_third_party_endpoint"' && ! test -e "$P/pdr" && echo no-pilot-profile-ok; fi'''
-contains = "no-pilot-profile-ok"
+# A new playbook's CLAUDE.md imports nothing and names statements, never the
+# pilot profile; NO PILOT PROFILE is not grammar: refused, nothing created.
+command = '''P="$HOME/.claude-playbooks"; claude-playbook CREATE PLAYBOOK pcm NO ALIAS >/dev/null && head -1 "$P/pcm/CLAUDE.md" | grep -qx '# Playbook: pcm' && ! grep -q '^@' "$P/pcm/CLAUDE.md" && ! grep -qi 'pilot' "$P/pcm/CLAUDE.md" && grep -qF 'cpb SHOW PLAYBOOK pcm' "$P/pcm/CLAUDE.md" && if claude-playbook CREATE PLAYBOOK npp NO PILOT PROFILE > "$HOME/npp.err" 2>&1; then echo npp-accepted; elif ! grep -q 'expected ALIAS after NO' "$HOME/npp.err" || test -e "$P/npp"; then echo npp-wrong; else echo plain-claude-md-ok; fi'''
+contains = "plain-claude-md-ok"
 
 [[verify.commands]]
 # ISOLATED LOGIN (v3.23.0), on throwaway playbooks with a made-up shared
@@ -332,18 +328,18 @@ command = '''G="$HOME/.claude/.credentials.json"; P="$HOME/.claude-playbooks"; m
 contains = "shared-sync-same-account-ok"
 
 [[verify.commands]]
-# A status line host holds the slot: a recipe's SET STATUSLINE over a
-# statusmux command leaves it as it is, reports unchanged and warns with a
-# stable code (a dry run too); REFRESH on it still applies; UNSET takes the
-# slot back and SET then applies.
-command = '''P="$HOME/.claude-playbooks/shh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK shh NO ALIAS >/dev/null && printf '{"statusLine":{"type":"command","command":"statusmux render","refreshInterval":10}}\n' > "$S" && printf "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain';\n" > "$HOME/shh.cpb" && claude-playbook APPLY "$HOME/shh.cpb" --dry-run --json | tr -d ' \n' | grep -qF '"code":"statusline_held_by_host"' && claude-playbook APPLY "$HOME/shh.cpb" > "$HOME/shh.out" 2> "$HOME/shh.err" && grep -q " 0 changed, 1 unchanged" "$HOME/shh.out" && grep -q "held by a host" "$HOME/shh.err" && c | grep -qF '"command":"statusmuxrender"' && claude-playbook "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain' REFRESH 5" > /dev/null 2>&1 && c | grep -qF '"command":"statusmuxrender"' && c | grep -qF '"refreshInterval":5' && claude-playbook "ALTER PLAYBOOK shh UNSET STATUSLINE" > /dev/null && claude-playbook "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain'" > /dev/null 2>&1 && c | grep -qF '"command":"echoplain"' && echo statusline-host-kept-ok'''
-contains = "statusline-host-kept-ok"
+# SET STATUSLINE always applies, whatever command holds the slot (a
+# statusmux command included), with no warning; IF UNSET leaves a set status
+# line alone (unchanged) and applies to an empty slot; SHOW CREATE writes the
+# status line as it is, never the condition.
+command = '''P="$HOME/.claude-playbooks/shh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK shh NO ALIAS >/dev/null && printf '{"statusLine":{"type":"command","command":"statusmux render","refreshInterval":10}}\n' > "$S" && printf "ALTER PLAYBOOK shh SET STATUSLINE 'echo offered' IF UNSET;\n" > "$HOME/shu.cpb" && claude-playbook APPLY "$HOME/shu.cpb" > "$HOME/shu.out" 2> "$HOME/shu.err" && grep -q " 0 changed, 1 unchanged" "$HOME/shu.out" && c | grep -qF '"command":"statusmuxrender"' && claude-playbook "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain'" > /dev/null 2> "$HOME/shh.err" && ! grep -qi 'host' "$HOME/shh.err" && c | grep -qF '"command":"echoplain"' && c | grep -qF '"refreshInterval":10' && claude-playbook "ALTER PLAYBOOK shh UNSET STATUSLINE" > /dev/null && claude-playbook APPLY "$HOME/shu.cpb" > "$HOME/shu2.out" && grep -q " 1 changed" "$HOME/shu2.out" && c | grep -qF '"command":"echooffered"' && claude-playbook SHOW CREATE PLAYBOOK shh > "$HOME/shc.out" && grep -qF "SET STATUSLINE 'echo offered'" "$HOME/shc.out" && ! grep -q 'IF UNSET' "$HOME/shc.out" && echo statusline-if-unset-ok'''
+contains = "statusline-if-unset-ok"
 
 [[verify.commands]]
 # The hidden pre-grammar commands are deprecated: off a terminal too, each
 # use prints one stderr line (removed in v4.0.0, with the grammar form), and
 # stdout is exactly what the command prints on its own.
-command = '''claude-playbook CREATE PLAYBOOK hdp NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook list > "$HOME/hd.out" 2> "$HOME/hd.err" && grep -qF 'Deprecated: `claude-playbook list` is removed in v4.0.0; the grammar form is: ' "$HOME/hd.err" && [ "$(wc -l < "$HOME/hd.err" | tr -d ' ')" = 1 ] && ! grep -q Deprecated "$HOME/hd.out" && grep -q hdp "$HOME/hd.out" && claude-playbook env hdp > /dev/null 2> "$HOME/hd2.err" && grep -qF 'Deprecated: `claude-playbook env` is removed in v4.0.0' "$HOME/hd2.err" && echo hidden-deprecated-ok'''
+command = '''claude-playbook CREATE PLAYBOOK hdp NO ALIAS >/dev/null && claude-playbook list > "$HOME/hd.out" 2> "$HOME/hd.err" && grep -qF 'Deprecated: `claude-playbook list` is removed in v4.0.0; the grammar form is: ' "$HOME/hd.err" && [ "$(wc -l < "$HOME/hd.err" | tr -d ' ')" = 1 ] && ! grep -q Deprecated "$HOME/hd.out" && grep -q hdp "$HOME/hd.out" && claude-playbook env hdp > /dev/null 2> "$HOME/hd2.err" && grep -qF 'Deprecated: `claude-playbook env` is removed in v4.0.0' "$HOME/hd2.err" && echo hidden-deprecated-ok'''
 contains = "hidden-deprecated-ok"
 
 [[verify.commands]]
@@ -352,21 +348,14 @@ contains = "hidden-deprecated-ok"
 # and interval, PREVIOUS again restores b; SHOW --json lists the history;
 # the history is cpb's own state (0600), never in the playbook; SHOW CREATE
 # does not write it.
-command = '''P="$HOME/.claude-playbooks/slh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK slh NO ALIAS NO PILOT PROFILE >/dev/null && if claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" > "$HOME/slh.err" 2>&1; then echo previous-accepted; elif ! grep -q "no earlier status line is recorded" "$HOME/slh.err"; then echo previous-wrong; else printf '{"statusLine":{"type":"command","command":"echo a","padding":2,"refreshInterval":7}}\n' > "$S" && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE 'echo b' REFRESH 3" >/dev/null && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echoa"' && c | grep -qF '"padding":2' && c | grep -qF '"refreshInterval":7' && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echob"' && claude-playbook SHOW PLAYBOOK slh --json | tr -d ' \n' | grep -qF '"statusline_history":[{"command":"echoa","refresh":7,' && H="$HOME/.claude-playbooks/.state/statusline-history.json" && [ "$(stat -c %a "$H" 2>/dev/null || stat -f %Lp "$H")" = 600 ] && ! ls -a "$P" | grep -q history && ! claude-playbook SHOW CREATE PLAYBOOK slh | grep -q PREVIOUS && echo statusline-history-ok; fi'''
+command = '''P="$HOME/.claude-playbooks/slh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK slh NO ALIAS >/dev/null && if claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" > "$HOME/slh.err" 2>&1; then echo previous-accepted; elif ! grep -q "no earlier status line is recorded" "$HOME/slh.err"; then echo previous-wrong; else printf '{"statusLine":{"type":"command","command":"echo a","padding":2,"refreshInterval":7}}\n' > "$S" && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE 'echo b' REFRESH 3" >/dev/null && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echoa"' && c | grep -qF '"padding":2' && c | grep -qF '"refreshInterval":7' && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echob"' && claude-playbook SHOW PLAYBOOK slh --json | tr -d ' \n' | grep -qF '"statusline_history":[{"command":"echoa","refresh":7,' && H="$HOME/.claude-playbooks/.state/statusline-history.json" && [ "$(stat -c %a "$H" 2>/dev/null || stat -f %Lp "$H")" = 600 ] && ! ls -a "$P" | grep -q history && ! claude-playbook SHOW CREATE PLAYBOOK slh | grep -q PREVIOUS && echo statusline-history-ok; fi'''
 contains = "statusline-history-ok"
 
 [[verify.commands]]
-# Status line panels (v3.25.0), on a throwaway playbook: ADD PANEL writes one
-# SPC/1 manifest per type with cpb's marker and contract = 1, a repeat is
-# unchanged; a quoted host variable is refused; a hand-written manifest is
-# neither overwritten nor dropped; DROP removes manifests and the emptied
-# namespace; SHOW --json lists panels with ownership; SHOW CREATE writes
-# only cpb's and re-applies unchanged; FROM STATUSLINE refuses the host
-# itself; the pilot's layout file is never written; a cpb-written manifest
-# edited since (marker kept) is the pilot's: ADD and DROP refused, file
-# untouched; a credential-looking literal in a command is refused.
-command = '''P="$HOME/.claude-playbooks/pnl"; D="$P/statusline.d"; claude-playbook CREATE PLAYBOOK pnl NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.clock EXEC 'date +%H:%M' ROW 1 PRIORITY 60 ALIGN RIGHT ADD PANEL local.model TEMPLATE '{model.display_name}' ADD PANEL kom.lease RECORDS 'lease.ndjson' STALE 30000 ADD PANEL kom.beat OBSERVE 'sh \${PANEL_DIR}/beat.sh' EVERY 10000" >/dev/null && for f in local/clock local/model kom/lease kom/beat; do head -1 "$D/$f.toml" | grep -q '^# Written by cpb' && grep -qx 'contract = 1' "$D/$f.toml" || exit 1; done && grep -qx 'type = "observe"' "$D/kom/beat.toml" && grep -qx 'priority = 60' "$D/local/clock.toml" && claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.clock EXEC 'date +%H:%M' ROW 1 PRIORITY 60 ALIGN RIGHT" | grep -q unchanged && if claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.q EXEC 'sh \"\${PANEL_DIR}/x.sh\"'" > "$HOME/pnl.err" 2>&1; then echo quoted-accepted; elif ! grep -q "inside quotes" "$HOME/pnl.err"; then echo quoted-wrong; else printf 'contract = 1\nid = "mine"\ntype = "template"\ntext = "hand"\n' > "$D/local/mine.toml" && cp "$D/local/mine.toml" "$HOME/mine.before" && ! claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.mine TEMPLATE 'cpb'" >/dev/null 2>&1 && ! claude-playbook "ALTER PLAYBOOK pnl DROP PANEL local.mine" >/dev/null 2>&1 && cmp -s "$D/local/mine.toml" "$HOME/mine.before" && claude-playbook "ALTER PLAYBOOK pnl DROP PANEL kom.lease DROP PANEL kom.beat" >/dev/null && ! test -e "$D/kom" && claude-playbook SHOW PLAYBOOK pnl --json | tr -d ' \n' | grep -qF '"panels":[{"panel":"local.clock","type":"exec","source":"config","cpb":true' && claude-playbook SHOW PLAYBOOK pnl --json | tr -d ' \n' | grep -qF '"panel":"local.mine","type":"template","source":"config","cpb":false' && claude-playbook SHOW CREATE PLAYBOOK pnl > "$HOME/pnl.cpb" && grep -qF "ADD PANEL local.clock EXEC 'date +%H:%M'" "$HOME/pnl.cpb" && ! grep -q "local.mine" "$HOME/pnl.cpb" && claude-playbook APPLY "$HOME/pnl.cpb" | grep -q " 0 created, 0 changed," && printf '{"statusLine":{"type":"command","command":"statusmux render"}}\n' > "$P/settings.json" && ! claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.bar FROM STATUSLINE" >/dev/null 2>&1 && ! test -e "$P/statusline.toml" && sed -i.bak 's/^text = .*/text = "mine"/' "$D/local/model.toml" && rm -f "$D/local/model.toml.bak" && cp "$D/local/model.toml" "$HOME/model.before" && ! claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.model TEMPLATE 'y'" > "$HOME/pnl-ed.err" 2>&1 && grep -q "was edited after cpb wrote it" "$HOME/pnl-ed.err" && ! claude-playbook "ALTER PLAYBOOK pnl DROP PANEL local.model" >/dev/null 2>&1 && cmp -s "$D/local/model.toml" "$HOME/model.before" && ! claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.x EXEC 'curl -H \"Authorization: Bearer sk-arena-0000000000000000\" https://x.example'" > "$HOME/pnl-cred.err" 2>&1 && grep -q "looks like a credential" "$HOME/pnl-cred.err" && ! grep -q "sk-arena" "$HOME/pnl-cred.err" && ! test -e "$D/local/x.toml" && echo panels-ok; fi'''
-contains = "panels-ok"
+# Panels are not part of cpb: ADD PANEL is refused and writes nothing,
+# there is no PANELS table, and SHOW PLAYBOOK --json has no panels field.
+command = '''P="$HOME/.claude-playbooks/pnl"; claude-playbook CREATE PLAYBOOK pnl NO ALIAS >/dev/null && if claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.clock EXEC 'date'" > "$HOME/pnl.err" 2>&1; then echo add-panel-accepted; elif ! grep -q 'ADD takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL' "$HOME/pnl.err" || test -e "$P/statusline.d"; then echo add-panel-wrong; elif claude-playbook "SELECT * FROM PANELS" > /dev/null 2>&1; then echo panels-table; elif claude-playbook SHOW PLAYBOOK pnl --json | grep -q '"panels"'; then echo panels-field; else echo panels-gone-ok; fi'''
+contains = "panels-gone-ok"
 
 [[verify.commands]]
 # Sessions (v3.25.x), on throwaway playbooks, with a real live process: a
@@ -392,7 +381,7 @@ pst() { if [ -r "/proc/$1/stat" ]; then sed 's/.*) //' "/proc/$1/stat" | awk '{p
 sf() { mkdir -p "$1/sessions"; printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":%s000,"procStart":"%s","version":"2.1.283","kind":"%s","entrypoint":"cli","status":"idle","name":"arena"}' "$2" "$3" "$W" "$(date +%s)" "$4" "$5" > "$1/sessions/$2.json"; }
 tr_() { mkdir -p "$1/projects/$E"; printf '{"type":"assistant","cwd":"%s","sessionId":"%s","message":{"model":"%s"}}\n' "$W" "$2" "$3" > "$1/projects/$E/$2.jsonl"; [ -z "$4" ] || touch -t "$4" "$1/projects/$E/$2.jsonl"; }
 printf '#!/bin/sh\nprintf "%%s|%%s|%%s\\n" "$(pwd -P)" "$CLAUDE_CONFIG_DIR" "$*" >> "$HOME/sesfk/log"\nif [ -z "$*" ]; then mkdir -p "$CLAUDE_CONFIG_DIR/projects/-x" && echo "{}" > "$CLAUDE_CONFIG_DIR/projects/-x/%s.jsonl"; fi\n' "$X1" > "$HOME/sesfk/claude" && chmod +x "$HOME/sesfk/claude"
-claude-playbook CREATE PLAYBOOK sesa NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK sesb NO ALIAS NO PILOT PROFILE >/dev/null || exit 1
+claude-playbook CREATE PLAYBOOK sesa NO ALIAS >/dev/null && claude-playbook CREATE PLAYBOOK sesb NO ALIAS >/dev/null || exit 1
 sf "$P/sesa" "$LP" "$L1" "$ST" interactive; sf "$P/sesa" "$DP" "$D1" 1 interactive; sf "$P/sesb" "$LP" "$RU" 1 interactive; sf "$P/sesb" "$SPP" "$SP" "$(pst $SPP)" spare
 tr_ "$P/sesa" "$L1" arena-model-1 ""; tr_ "$P/sesa" "$D1" arena-model-2 202601010000; tr_ "$P/sesb" "$D2" arena-model-3 202501010000
 sha() { find "$P/sesa/sessions" "$P/sesb/sessions" -type f | sort | xargs cat | cksum; }; B="$(sha)"
@@ -418,7 +407,7 @@ contains = "sessions-ok"
 command = '''
 P="$HOME/.claude-playbooks/tty"; W="$HOME/ttyw"; mkdir -p "$W" && W="$(cd "$W" && pwd -P)"
 N1=77777777-aaaa-4aaa-8aaa-777777777771; T1=77777777-aaaa-4aaa-8aaa-777777777772
-claude-playbook CREATE PLAYBOOK tty NO ALIAS NO PILOT PROFILE >/dev/null || exit 1
+claude-playbook CREATE PLAYBOOK tty NO ALIAS >/dev/null || exit 1
 sleep 600 & NP=$!
 tty_() { if script --version >/dev/null 2>&1; then script -qec "$1" /dev/null; else script -q /dev/null sh -c "$1"; fi; }
 tty_ 'sleep 600 & echo $! > "$HOME/tty.pid"; sleep 3' > /dev/null 2>&1 &
@@ -439,21 +428,19 @@ echo sessions-tty-ok'''
 contains = "sessions-tty-ok"
 
 [[verify.commands]]
-# pilot_profile (v3.25.0) in SHOW PLAYBOOK --json and the PLAYBOOKS table:
-# the field before play (v3.28.0), the last.
-# imported for a plain CREATE, not_imported for NO PILOT PROFILE and for no
-# CLAUDE.md, unknown for a CLAUDE.md that cannot be read (a directory here,
-# whatever the uid); last in the object and the table; a human line.
+# No pilot_profile anywhere: SHOW PLAYBOOK --json ends with model_picker then
+# play; DESCRIBE PLAYBOOKS ends the same way; SELECT of pilot_profile is an
+# unknown column; the human SHOW has no Pilot profile line.
 command = '''
-P="$HOME/.claude-playbooks"; f() { printf '%s\n' "$(claude-playbook SHOW PLAYBOOK "$1" --json | tr -d ' \n')" | sed -n 's/.*\("pilot_profile":"[a-z_]*"\),"play":null}$/\1}/p'; }
-claude-playbook CREATE PLAYBOOK ppi NO ALIAS >/dev/null && claude-playbook CREATE PLAYBOOK ppn NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppg NO ALIAS NO PILOT PROFILE >/dev/null && claude-playbook CREATE PLAYBOOK ppu NO ALIAS >/dev/null || exit 1
-rm "$P/ppg/CLAUDE.md" && rm "$P/ppu/CLAUDE.md" && mkdir "$P/ppu/CLAUDE.md" || exit 1
-[ "$(f ppi)" = '"pilot_profile":"imported"}' ] && [ "$(f ppn)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppg)" = '"pilot_profile":"not_imported"}' ] && [ "$(f ppu)" = '"pilot_profile":"unknown"}' ] || { echo pp-show-wrong; exit 1; }
-claude-playbook "SELECT name, pilot_profile FROM PLAYBOOKS" --json | tr -d ' \n' | grep -qF '"name":"ppi","pilot_profile":"imported"' || { echo pp-select-wrong; exit 1; }
-claude-playbook DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -qF '{"name":"pilot_profile","type":"String"},{"name":"play","type":"JSON"}]' || { echo pp-describe-wrong; exit 1; }
-claude-playbook SHOW PLAYBOOK ppn | grep -q '^Pilot profile: *not imported$' || { echo pp-human-wrong; exit 1; }
-echo pilot-profile-field-ok'''
-contains = "pilot-profile-field-ok"
+claude-playbook CREATE PLAYBOOK ppi NO ALIAS >/dev/null || exit 1
+claude-playbook SHOW PLAYBOOK ppi --json | tr -d ' \n' | grep -qF '"model_picker":null,"play":null}' || { echo show-tail-wrong; exit 1; }
+if claude-playbook SHOW PLAYBOOK ppi --json | grep -q pilot_profile; then echo show-has-pilot; exit 1; fi
+claude-playbook DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -qF '{"name":"model_picker","type":"JSON"},{"name":"play","type":"JSON"}]' || { echo describe-tail-wrong; exit 1; }
+if claude-playbook "SELECT name, pilot_profile FROM PLAYBOOKS" > "$HOME/pps.err" 2>&1; then echo select-accepted; exit 1; fi
+grep -q "unknown column 'pilot_profile'" "$HOME/pps.err" || { echo select-wrong-error; exit 1; }
+if claude-playbook SHOW PLAYBOOK ppi | grep -q 'Pilot profile'; then echo human-has-pilot; exit 1; fi
+echo uncoupled-fields-ok'''
+contains = "uncoupled-fields-ok"
 
 [[verify.commands]]
 # cpb tui v1 (v3.25.0), read-only, on the real binary under a pty (script,
@@ -474,8 +461,8 @@ P="$HOME/.claude-playbooks"; W="$HOME/tuiw"; K="$HOME/tuifk"; mkdir -p "$W" "$K"
 DS=88888888-aaaa-4aaa-8aaa-888888888881; LS=88888888-aaaa-4aaa-8aaa-888888888882; CAN=sk-arena-canary-4b9e00000000000000000000
 printf '#!/bin/sh\nexit 0\n' > "$K/helper"; chmod +x "$K/helper"
 printf '#!/bin/sh\nprintf "%%s|%%s\\n" "$CLAUDE_CONFIG_DIR" "$*" >> "$HOME/tuifk/log"\n' > "$K/claude"; chmod +x "$K/claude"
-claude-playbook CREATE PLAYBOOK tuia NO ALIAS NO PILOT PROFILE >/dev/null && CPB_SECRET_HELPER="$K/helper" claude-playbook "ALTER PLAYBOOK tuia SET VAR ARENA_API_KEY=$CAN AS PLAINTEXT SET VAR ARENA_REF FROM 'keychain:ok/arena-tui'" >/dev/null 2>&1 || { echo tui-setup-wrong; exit 1; }
-claude-playbook CREATE PLAYBOOK tuir NO ALIAS NO PILOT PROFILE >/dev/null || exit 1
+claude-playbook CREATE PLAYBOOK tuia NO ALIAS >/dev/null && CPB_SECRET_HELPER="$K/helper" claude-playbook "ALTER PLAYBOOK tuia SET VAR ARENA_API_KEY=$CAN AS PLAINTEXT SET VAR ARENA_REF FROM 'keychain:ok/arena-tui'" >/dev/null 2>&1 || { echo tui-setup-wrong; exit 1; }
+claude-playbook CREATE PLAYBOOK tuir NO ALIAS >/dev/null || exit 1
 mkdir -p "$P/tuir/projects/$E" && printf '{"type":"assistant","cwd":"%s","message":{"model":"arena-tui-model"}}\n' "$W" > "$P/tuir/projects/$E/$DS.jsonl"
 sleep 600 & LP=$!; trap 'kill $LP 2>/dev/null' EXIT
 pst() { if [ -r "/proc/$1/stat" ]; then sed 's/.*) //' "/proc/$1/stat" | awk '{print $20}'; else TZ=UTC LC_ALL=C ps -o lstart= -p "$1" | awk '{$1=$1; print}'; fi; }

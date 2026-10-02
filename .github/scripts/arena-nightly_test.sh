@@ -1,6 +1,5 @@
 #!/bin/sh
-# Tests arena-nightly.sh: which release branch the nightly picks, and the
-# verdict on a dispatched run, against real runs of 2026-09-30 (testdata/).
+# Tests arena-nightly.sh: the verdict on a dispatched run, against real runs of 2026-09-30 (testdata/).
 # Run by CI on both OSes: sh .github/scripts/arena-nightly_test.sh
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
@@ -8,16 +7,6 @@ s="$here/arena-nightly.sh"
 fail=0
 ok() { echo "ok:   $1"; }
 bad() { echo "FAIL: $1"; fail=1; }
-
-# newest-release-branch: by version, not by text; nothing when there is none
-got=$(printf 'main\nrelease/v3.9\nrelease/v3.24\nrelease/v3.10\nclaude/x\nrelease/v3.24-old\n' | sh "$s" newest-release-branch)
-[ "$got" = release/v3.24 ] && ok "newest release branch by version: $got" || bad "newest release branch: '$got'"
-got=$(printf 'release/v3.9\nrelease/v3.10\n' | sh "$s" newest-release-branch)
-[ "$got" = release/v3.10 ] && ok "v3.10 is newer than v3.9" || bad "v3.10 vs v3.9: '$got'"
-got=$(printf 'release/v9.0\nrelease/v10.0\n' | sh "$s" newest-release-branch)
-[ "$got" = release/v10.0 ] && ok "v10.0 is newer than v9.0 (the major sorts by number)" || bad "v10.0 vs v9.0: '$got'"
-got=$(printf 'main\nclaude/x\n' | sh "$s" newest-release-branch)
-[ -z "$got" ] && ok "no release branch: nothing" || bad "no release branch: '$got'"
 
 # verdict (rc, stdout)
 v() { # v <fixture> <ref> [reason]: sets rc and out

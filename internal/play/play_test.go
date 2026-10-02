@@ -148,7 +148,7 @@ func TestReadLocal(t *testing.T) {
 }
 
 func TestHeader(t *testing.T) {
-	h := ParseHeader([]byte("-- title: Code reviewer\n-- description: Reads code.\n-- needs: a helper for keychain:x\n-- create-with: SANDBOX NO PILOT PROFILE\n-- min-cpb: 3.28.0\n-- colour: blue\n\n-- title: not header\nALTER PLAYBOOK SET MODEL 'x';\n"))
+	h := ParseHeader([]byte("-- title: Code reviewer\n-- description: Reads code.\n-- needs: a helper for keychain:x\n-- create-with: SANDBOX\n-- min-cpb: 3.28.0\n-- colour: blue\n\n-- title: not header\nALTER PLAYBOOK SET MODEL 'x';\n"))
 	if h.Title != "Code reviewer" || h.Description != "Reads code." || h.Needs != "a helper for keychain:x" || !h.WantsSandbox() || h.MinCPB != "3.28.0" || len(h.Unknown) != 1 || h.Unknown[0] != "colour" {
 		t.Fatalf("header: %+v", h)
 	}

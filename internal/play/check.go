@@ -145,10 +145,6 @@ func (r *Result) clause(c grammar.Clause) {
 		}
 	case grammar.SetStatusline:
 		r.risk(line, RiskRunsProgram, kind, "runs '"+c.Arg+"' every few seconds, as you", "")
-	case grammar.AddPanel:
-		if p := c.Panel; p != nil && (p.Type == "exec" || p.Type == "observe") && !p.FromStatusline {
-			r.risk(line, RiskRunsProgram, kind+" "+p.NS+"."+p.ID, "runs '"+p.Source+"' for the status line, as you", "")
-		}
 	case grammar.AddSkill:
 		r.skill(c)
 	case grammar.AddMCP:

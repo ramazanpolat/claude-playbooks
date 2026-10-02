@@ -30,8 +30,7 @@ func lifecycle(st *grammar.Stmt) bool {
 
 type createOptions struct {
 	from, branch, subdir, link, alias string
-	noAlias, sandbox, noPilotProfile  bool
-	isolatedLogin                     bool
+	noAlias, sandbox, isolatedLogin   bool
 }
 
 func createOptionsOf(st *grammar.Stmt) createOptions {
@@ -52,8 +51,6 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			o.noAlias = true
 		case grammar.Sandbox:
 			o.sandbox = true
-		case grammar.NoPilotProfile:
-			o.noPilotProfile = true
 		case grammar.IsolatedLogin:
 			o.isolatedLogin = true
 		}
@@ -106,9 +103,6 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.recordPlaybook(st.Name, true)
 		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
 		if r.dry != nil {
-			// cpb's template imports the profile; a source's own CLAUDE.md
-			// is not known before it is fetched, so it is not judged.
-			r.dry.pilotProfile[st.Name] = o.from == "" && o.link == "" && !o.noPilotProfile
 			r.dry.isolated[st.Name] = o.sandbox || o.isolatedLogin
 			r.dry.sandboxed[st.Name] = o.sandbox
 		}
@@ -140,7 +134,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return doLink(linkOpts{name: st.Name, alias: o.alias, noAlias: o.noAlias}, []string{o.link})
 	}
-	return doCreate(createOpts{alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox, noPilotProfile: o.noPilotProfile, isolatedLogin: o.isolatedLogin}, []string{st.Name})
+	return doCreate(createOpts{alias: o.alias, noAlias: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{st.Name})
 }
 
 func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {

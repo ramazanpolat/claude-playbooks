@@ -102,7 +102,6 @@ func TestShowPlaybookHuman(t *testing.T) {
 		`(?m)^Launcher: +rt$`,
 		`(?m)^Source: +https://example\.com/r\.git \(branch v1\)$`,
 		`(?m)^Env sets: +glm$`,
-		`(?m)^Pilot profile: +not imported$`,
 	} {
 		if !regexp.MustCompile(re).MatchString(out) {
 			t.Errorf("missing %s in:\n%s", re, out)

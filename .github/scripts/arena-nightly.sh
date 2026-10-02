@@ -2,10 +2,6 @@
 # What arena-nightly runs phase 2 on, and whether each dispatched run really
 # runs it. Used by arena-nightly.yml; tested by arena-nightly_test.sh.
 #
-#   arena-nightly.sh newest-release-branch
-#       Branch names on stdin. Prints the newest release/vX.Y by version
-#       (release/v3.10 is newer than release/v3.9), or nothing.
-#
 #   arena-nightly.sh verdict <ref> [<plan's reason>]
 #       The run's jobs on stdin, as `gh run view --json jobs` prints them.
 #       0: the run has an `arena / phase2` job that was not skipped (queued,
@@ -23,10 +19,6 @@
 set -eu
 
 case "${1:-}" in
-newest-release-branch)
-  grep -E '^release/v[0-9]+\.[0-9]+$' | sed 's|^release/v||' |
-    sort -t. -k1,1n -k2,2n | tail -n 1 | sed 's|^|release/v|'
-  ;;
 verdict)
   ref=${2:?usage: arena-nightly.sh verdict <ref> [<reason>]}
   reason=${3:-}
@@ -84,7 +76,7 @@ check)
   printf '%s' "$jobs" | sh "$0" verdict "$ref" "$reason"
   ;;
 *)
-  echo "usage: arena-nightly.sh newest-release-branch | verdict <ref> [<reason>] | check <run id> <ref>" >&2
+  echo "usage: arena-nightly.sh verdict <ref> [<reason>] | check <run id> <ref>" >&2
   exit 2
   ;;
 esac

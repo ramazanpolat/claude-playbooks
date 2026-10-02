@@ -151,12 +151,6 @@ type Playbook struct {
 	StatuslineHistory []struct {
 		Command string `json:"command"`
 	} `json:"statusline_history"`
-	Panels []struct {
-		Panel  string `json:"panel"`
-		Type   string `json:"type"`
-		Source string `json:"source"`
-		Cpb    bool   `json:"cpb"`
-	} `json:"panels"`
 	Model       *string `json:"model"`
 	ModelPicker *struct {
 		Mode    string `json:"mode"`
@@ -165,9 +159,6 @@ type Playbook struct {
 			Label *string `json:"label"`
 		} `json:"options"`
 	} `json:"model_picker"`
-	// PilotProfile is "imported", "not_imported" or "unknown" (v3.25.0);
-	// "" from an older cpb.
-	PilotProfile string `json:"pilot_profile"`
 }
 
 // Login is the kind of login the playbook has: never a value.

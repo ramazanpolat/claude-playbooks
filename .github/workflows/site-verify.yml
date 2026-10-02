@@ -18,7 +18,9 @@ on:
       - "README.md"
       - "docs/**"
       - "examples/**"
-      - "internal/tui/testdata/**"
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
   pull_request:
     paths:
       - "site/**"
@@ -26,7 +28,9 @@ on:
       - "README.md"
       - "docs/**"
       - "examples/**"
-      - "internal/tui/testdata/**"
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
 
 jobs:
   verify-snippets:

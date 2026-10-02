@@ -47,7 +47,7 @@ const keepV1 = "-- title: Keeper\n-- description: Kept.\n\nALTER PLAYBOOK\n  SET
 const keepV2 = "-- title: Keeper\n-- description: Kept, v2.\n\nALTER PLAYBOOK\n  SET VAR BAR=2 EDITOR=vim\n  SET MODEL 'claude-sonnet-5';\n"
 
 // --keep: the preview and the yes, then a playbook in the user's store with
-// a launcher, never the pilot profile, the exact bytes and the [play]
+// a launcher, the exact bytes and the [play]
 // record; no session. --update: the same bytes change nothing; new ones
 // need the yes again, show the diff, and undo what the old recipe set.
 func TestPlayKeepAndUpdate(t *testing.T) {
@@ -78,7 +78,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 	}
 	v := showPlaybook(t, "keeper")
 	rec, _ := v["play"].(map[string]any)
-	if rec == nil || rec["ref"] != canon(t, p) && rec["ref"] != p || len(rec["sha256"].(string)) != 64 || v["pilot_profile"] != "not_imported" {
+	if rec == nil || rec["ref"] != canon(t, p) && rec["ref"] != p || len(rec["sha256"].(string)) != 64 {
 		t.Fatalf("the kept playbook: %v", v)
 	}
 	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "keeper"); !exists || foreign {

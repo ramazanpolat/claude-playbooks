@@ -29,9 +29,9 @@ read it identically:
 | [12-recipes-and-targets](12-recipes-and-targets/) | one recipe for two playbooks, `TO <playbook>`, `TO '<dir>'` |
 | [13-select](13-select/) | `SELECT` over playbooks, env sets and variables |
 | [14-model-picker](14-model-picker/) | the `/model` picker: its rows, ONLY or APPEND |
-| [15-third-party-route](15-third-party-route/) | a routed playbook without the pilot profile; the warning |
+| [15-third-party-route](15-third-party-route/) | a playbook routed away from Anthropic: its own login, credentials blocked |
 | [16-isolated-login](16-isolated-login/) | a playbook that shares no login with `~/.claude` |
-| [17-statusline-panels](17-statusline-panels/) | a status line host and its panels (SPC/1) |
+| [17-statusline-if-unset](17-statusline-if-unset/) | a status line offered with IF UNSET, never imposed |
 | [18-sessions](18-sessions/) | live sessions, `RESUME`, and what cpb refuses to resume |
 | [19-tui](19-tui/) | what `cpb tui` shows, and the statements behind each screen |
 | [20-openshell-sandbox](20-openshell-sandbox/) | a playbook in an OpenShell sandbox (experimental, Linux) |

@@ -44,10 +44,9 @@ const versionPattern = `^v?([0-9]+([.][0-9]+)*)`
 
 var versionRe = regexp.MustCompile(versionPattern)
 
-// playbooksLateColumns are the PLAYBOOKS columns added after v3.24.0, the
-// stable release: clickhouse-local's SELECT * lists them after the computed
-// version_tuple, where they were appended.
-var playbooksLateColumns = []string{"pilot_profile", "play"}
+// playbooksLateColumns are the PLAYBOOKS columns clickhouse-local's
+// SELECT * lists after the computed version_tuple, where they were appended.
+var playbooksLateColumns = []string{"play"}
 
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
@@ -56,10 +55,10 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
 		columns: []string{"name", "version", "version_tuple", "path", "source", "linked", "launcher", "envs", "vars", "sandbox", "isolated_login",
-			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "pilot_profile", "play"},
+			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "play"},
 		structure: "name String, version Nullable(String), path String, source JSON, linked Nullable(String), " +
 			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox Bool, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
-			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, pilot_profile String, play JSON",
+			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, play JSON",
 		rows: playbookRows,
 	},
 	"ENVS": {
@@ -71,11 +70,6 @@ var selectTables = map[string]selectTable{
 		columns:   []string{"playbook", "key", "value", "ref", "redacted", "plaintext", "blocked", "layer", "effective"},
 		structure: "playbook String, key String, value Nullable(String), ref Nullable(String), redacted Bool, plaintext Bool, blocked Bool, layer JSON, effective Bool",
 		rows:      varRows,
-	},
-	"PANELS": {
-		columns:   []string{"playbook", "panel", "type", "source", "cpb", "row", "priority", "align"},
-		structure: "playbook String, panel String, type String, source String, cpb Bool, row Nullable(UInt32), priority Nullable(UInt32), align String",
-		rows:      panelRows,
 	},
 	"SESSIONS": {
 		columns: []string{"playbook", "pid", "session_id", "cwd", "kind", "status", "name", "claude_version",
@@ -134,26 +128,6 @@ func playbookRows() ([]any, error) {
 	rows := []any{}
 	for _, pb := range pbs {
 		rows = append(rows, describePlaybook(pb))
-	}
-	return rows, nil
-}
-
-// panelRowJSON is one PANELS row: a panel of one playbook (v3.25.0).
-type panelRowJSON struct {
-	Playbook string `json:"playbook"`
-	panelJSON
-}
-
-func panelRows() ([]any, error) {
-	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
-	if err != nil {
-		return nil, err
-	}
-	rows := []any{}
-	for _, pb := range pbs {
-		for _, p := range describePanels(pb.Path) {
-			rows = append(rows, panelRowJSON{Playbook: pb.Name, panelJSON: p})
-		}
 	}
 	return rows, nil
 }
@@ -368,7 +342,7 @@ func planSelect(q string) (*selectPlan, error) {
 		table := strings.ToUpper(m[2])
 		t, ok := selectTables[table]
 		if !ok {
-			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS)", m[2])
+			return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS)", m[2])
 		}
 		var cols []string
 		for _, c := range strings.Split(m[1], ",") {
@@ -393,7 +367,7 @@ func planSelect(q string) (*selectPlan, error) {
 		return nil, errors.New("one statement at a time: remove what follows the semicolon")
 	}
 	if len(froms) == 0 {
-		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS")
+		return nil, errors.New("a query reads FROM one of the tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS")
 	}
 	if len(froms) > 1 {
 		return nil, errors.New("a query reads one table; join them in ClickHouse yourself: cpb SHOW … --json | clickhouse local …")
@@ -761,7 +735,7 @@ type columnJSON struct {
 func describeTable(name string) ([]columnJSON, error) {
 	t, ok := selectTables[strings.ToUpper(name)]
 	if !ok {
-		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS, DEFAULTS)", name)
+		return nil, fmt.Errorf("unknown table %q (tables: PLAYBOOKS, ENVS, VARS, SESSIONS, DEFAULTS)", name)
 	}
 	types := map[string]string{"version_tuple": "Array(UInt32)"} // computed, not in the structure
 	depth, start := 0, 0
@@ -794,7 +768,7 @@ func describeTable(name string) ([]columnJSON, error) {
 
 func runDescribe(table string, asJSON bool) error {
 	if table == "" {
-		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, PANELS, SESSIONS or DEFAULTS")
+		return errors.New("DESCRIBE needs one table: PLAYBOOKS, ENVS, VARS, SESSIONS or DEFAULTS")
 	}
 	cols, err := describeTable(table)
 	if err != nil {

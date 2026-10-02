@@ -39,10 +39,6 @@ type dryState struct {
 	skillRecords map[string]map[string]*manifest.SkillRecord
 	skillKnown   map[string]map[string]bool
 
-	// pilotProfile, per playbook created earlier: whether the CLAUDE.md its
-	// CREATE would write imports ~/.pilot-profile/.
-	pilotProfile map[string]bool
-
 	// isolated and sandboxed, per playbook: isolate_auth and [sandbox]
 	// always as earlier statements would leave them.
 	isolated  map[string]bool
@@ -51,10 +47,6 @@ type dryState struct {
 	// slHistory, per config directory key: the status line history as
 	// earlier statements would leave it.
 	slHistory map[string][]slEntry
-
-	// panels, per playbook or directory key: manifests earlier statements
-	// would have written (bytes) or removed (nil), by path.
-	panels map[string]map[string][]byte
 }
 
 func newDryState() *dryState {
@@ -69,11 +61,9 @@ func newDryState() *dryState {
 		mcpRecords:   map[string]map[string]*manifest.MCPRecord{},
 		skillRecords: map[string]map[string]*manifest.SkillRecord{},
 		skillKnown:   map[string]map[string]bool{},
-		pilotProfile: map[string]bool{},
 		isolated:     map[string]bool{},
 		sandboxed:    map[string]bool{},
 		slHistory:    map[string][]slEntry{},
-		panels:       map[string]map[string][]byte{},
 	}
 }
 
@@ -126,7 +116,6 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.mcpRecords, name)
 		delete(r.dry.skillRecords, name)
 		delete(r.dry.skillKnown, name)
-		delete(r.dry.pilotProfile, name)
 		delete(r.dry.isolated, name)
 		delete(r.dry.sandboxed, name)
 	}
@@ -147,7 +136,6 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	mr, mrok := r.dry.mcpRecords[from]
 	sr, srok := r.dry.skillRecords[from]
 	sk, skok := r.dry.skillKnown[from]
-	pp, ppok := r.dry.pilotProfile[from]
 	iso, isook := r.dry.isolated[from]
 	sbx, sbxok := r.dry.sandboxed[from]
 	// A playbook on disk carries its login setting under its new name: the
@@ -178,9 +166,6 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	if skok {
 		r.dry.skillKnown[to] = sk
-	}
-	if ppok {
-		r.dry.pilotProfile[to] = pp
 	}
 	if isook {
 		r.dry.isolated[to] = iso

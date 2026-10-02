@@ -55,65 +55,12 @@ Two words keep the variables apart: **`ENV` is a named set**, **`VAR` is one
 variable**. "Profile" is deliberately not a keyword: it would be ambiguous with other
 tools' profiles.
 
-**cpb knows nothing about pilots** (decided with the pilot on 2026-09-26:
-components stay standalone and loosely coupled). A playbook takes the pilot
-profile through its own `CLAUDE.md` imports, and choosing a pilot for a
-playbook is pilot-profile's own command, run by the pilot. No statement
-here reads, writes or calls anything of pilot-profile's. Two things touch
-the playbook's own `CLAUDE.md` lines that import `~/.pilot-profile/`
-(v3.23.0, below): `NO PILOT PROFILE` leaves them out of a new playbook, and
-a warning says when a playbook that has them is routed away from Anthropic.
-
-### The pilot profile and non-Anthropic routes (v3.23.0)
-
-The `CLAUDE.md` that `CREATE PLAYBOOK` writes ends with four
-`@~/.pilot-profile/…` imports, which are inert when there is no profile.
-When there is one, Claude Code sends it with every request. That includes
-the pilot's name, emails, host index and secret reference names. For a
-playbook routed to another provider (a router, EVREN, GLM, DeepSeek), that
-is a data-governance leak. It happened once, on 2026-09-27.
-
-- **`CREATE PLAYBOOK <name> … NO PILOT PROFILE`** writes the same
-  `CLAUDE.md` without the "Pilot profile" section. The hidden command takes
-  `create <name> --no-pilot-profile`.
-  - It applies at create time only. After create, `CLAUDE.md` is the pilot's
-    file and no statement edits it, so there is no `ALTER` form. To take the
-    imports out later, delete the lines.
-  - It is refused with `FROM` or `LINK`, whose `CLAUDE.md` is the source's
-    own.
-  - `SHOW CREATE` does not write it, just as it writes nothing else of
-    `CLAUDE.md`.
-  - `PILOT` and `PROFILE` are read only after `NO`, so they are not
-    reserved words: a playbook can still be called `pilot`.
-- **The warning.** Take a playbook whose `CLAUDE.md` has an `@` import under
-  `~/.pilot-profile/`, whether written with `~` or with the home directory.
-  A statement that gives it a non-Anthropic `ANTHROPIC_BASE_URL` gets one
-  warning line on stderr. In `APPLY --json`, it also gets the code
-  `pilot_profile_third_party_endpoint`.
-  - The URL counted is what a launch would get from `DEFAULTS`, the
-    playbook's env sets and its own block. A host of `anthropic.com` or
-    `*.anthropic.com` is Anthropic's; any other host is not, `localhost`
-    included, since a local router forwards elsewhere.
-  - A local proxy that only passes through to Anthropic warns too. cpb sees
-    the proxy's host, not where the proxy sends a request, and the proxy
-    decides that per request: 9router and LiteLLM can pass one model through
-    to Anthropic and route the next to GLM. The 2026-09-27 leak went through
-    exactly such a local proxy. For a pure passthrough, ignore the warning:
-    it never refuses.
-  - Any statement that makes this so is warned: `ALTER PLAYBOOK` (`USE ENV`,
-    `ADD ENV`, `SET VAR`, `UNSET VAR`, …), `ALTER ENV` / `CREATE OR REPLACE
-    ENV` on a set the playbook uses, `ALTER DEFAULTS`, and `CREATE PLAYBOOK`
-    under such `DEFAULTS`.
-  - It is only that statement. A later one that leaves the playbook as it
-    was is not warned again, and neither is a move from one non-Anthropic
-    host to another.
-  - The message names the playbooks and their hosts, never a URL, a path or
-    a value. It is never a refusal: where the profile may go is the pilot's
-    decision.
-  - A base URL given by reference is not resolved for a warning, so it is not
-    judged. Neither is a playbook created `FROM` a source in a dry run,
-    because its `CLAUDE.md` is not known before the fetch.
-  - A dry run warns from the state its earlier statements would leave.
+**A playbook routed away from Anthropic** sends every request to its
+`ANTHROPIC_BASE_URL`, with what its `CLAUDE.md` holds. The `CLAUDE.md` that
+`CREATE PLAYBOOK` writes imports nothing; whatever you add to it, `@` imports
+included, goes along. `ISOLATED LOGIN` keeps such a playbook's login apart,
+and `BLOCK VAR` keeps your Anthropic credentials out of its launches
+([example 15](../../examples/15-third-party-route/)).
 
 ## Grammar
 
@@ -126,7 +73,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX] [ISOLATED LOGIN] [NO PILOT PROFILE]
+            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX] [ISOLATED LOGIN]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -171,11 +118,9 @@ pb-clause  := set-clause
             | ALLOW TOOL '<rule>' ...      settings.json permissions.allow
             | DENY TOOL '<rule>' ...       settings.json permissions.deny
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
-            | SET STATUSLINE '<command>' [REFRESH <n>] | UNSET STATUSLINE
+            | SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET] | UNSET STATUSLINE
             | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH   v3.23.0
             | SET STATUSLINE PREVIOUS      v3.25.0, the status line cpb replaced last
-            | ADD PANEL <ns>.<id> panel-body   v3.25.0, see "Status line panels"
-            | DROP PANEL <ns>.<id>
             | SET ISOLATED LOGIN | UNSET ISOLATED LOGIN   v3.23.0, see "Isolated login"
             | SET MODEL '<model>' | UNSET MODEL
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
@@ -204,9 +149,8 @@ session    := RESUME [SESSION '<id>'] [FOR PLAYBOOK <name>]     the command line
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
 and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
 and `BRANCH` / `SUBDIR` only with `FROM`; `ALIAS` and `NO ALIAS` exclude each
-other; `NO PILOT PROFILE` takes neither `FROM` nor `LINK`, and `SANDBOX` and
-`ISOLATED LOGIN` do not take `LINK`. The clauses of `origin`, `launcher`,
-`SANDBOX`, `ISOLATED LOGIN` and `NO PILOT PROFILE` may come in any order.
+other; `SANDBOX` and `ISOLATED LOGIN` do not take `LINK`. The clauses of
+`origin`, `launcher`, `SANDBOX` and `ISOLATED LOGIN` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal, as `delete` does;
 `--yes` skips it.
 
@@ -611,9 +555,9 @@ planned as empty.
   | `fetch` | `source`, `branch`, `subdir`, `to` | `CREATE PLAYBOOK … FROM`: what a real run installs. `network` is false for a local directory. |
   | `backup` | `path`, `to` | TO a plain directory: a file backed up before its first write. |
   | `write` | `path` | TO a plain directory: its `settings.json`. |
-  | `delete` | `what` (`playbook`, `skill`, or `panel` from v3.25.0), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
+  | `delete` | `what` (`playbook` or `skill`), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
 
-- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs) from v3.23.0 `pilot_profile_third_party_endpoint` (a playbook importing `~/.pilot-profile/` now has a non-Anthropic `ANTHROPIC_BASE_URL`; see "The pilot profile and non-Anthropic routes"), `statusline_held_by_host` (a `SET STATUSLINE` left a host's status line as it is; see the status line clauses), and from v3.27.0 `marketplace_ref_not_cloneable` (an `ADD MARKETPLACE` git source whose `#<ref>` looks like a commit, 7 to 40 hex characters, which Claude Code will not clone; see "Plugins and the agent"). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
+- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs), and from v3.27.0 `marketplace_ref_not_cloneable` (an `ADD MARKETPLACE` git source whose `#<ref>` looks like a commit, 7 to 40 hex characters, which Claude Code will not clone; see "Plugins and the agent"). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
 - **No secret value** appears anywhere: references stay references, and a literal credential a file sets is not in the plan.
 
 **Exit codes:**
@@ -698,7 +642,7 @@ the pilot names (that one is v4.0.0).
 
 | Hidden | Grammar |
 |---|---|
-| `create <n> [--alias a \| --no-alias] [--sandbox] [--isolated-login] [--no-pilot-profile]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX] [ISOLATED LOGIN] [NO PILOT PROFILE]` |
+| `create <n> [--alias a \| --no-alias] [--sandbox] [--isolated-login]` | `CREATE PLAYBOOK <n> [ALIAS a \| NO ALIAS] [SANDBOX] [ISOLATED LOGIN]` |
 | `link <target> [--name n] [--alias a \| --no-alias]` | `CREATE PLAYBOOK n LINK <target> [ALIAS a \| NO ALIAS]` (`n` defaults to the target's basename) |
 | `delete <n> [--yes]` | `DROP PLAYBOOK <n> [--yes]` |
 | `rename <a> <b> [--alias x \| --no-alias]` | `ALTER PLAYBOOK <a> RENAME TO <b> [ALIAS x \| NO ALIAS]` |
@@ -781,20 +725,7 @@ created empty; `Launcher:` reads `(none)` without one.
 `source` is null for a playbook without one; `linked` is the target directory
 of a linked playbook, else null; `launcher` is null without one.
 
-**`pilot_profile`** (v3.25.0) is the object's last field, and the human form
-has a `Pilot profile:` line. It says whether the playbook's `CLAUDE.md`
-imports `~/.pilot-profile/`:
-- `"imported"`: an `@~/.pilot-profile/…` line, or one through the home
-  directory;
-- `"not_imported"`: none, including a playbook created `NO PILOT PROFILE`,
-  and one with no `CLAUDE.md`;
-- `"unknown"`: `CLAUDE.md` cannot be read. cpb never guesses.
-
-It is the same detector the `pilot_profile_third_party_endpoint` warning
-uses. cpb reads the import line only; it never reads the profile, and never
-runs a pilot-profile tool.
-
-**`play`** (v3.28.0) follows it, last. It is the `[play]` record of a
+**`play`** (v3.28.0) is the object's last field. It is the `[play]` record of a
 playbook `cpb play --keep` built, and `null` for every other:
 `{"ref", "url", "sha256", "played"}`. `ref` is what `cpb play --update`
 fetches again (a template name, a URL, a `github:` ref, or a local file's
@@ -909,10 +840,9 @@ so `source.url` and `vars[1].key` work):
 
 | Table | One row per | Columns |
 |---|---|---|
-| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`pilot_profile`, v3.25.0, then `play`, v3.28.0, are the last columns) |
+| `PLAYBOOKS` | playbook | the `SHOW PLAYBOOK` object, plus the computed `version_tuple` (`play`, v3.28.0, is the last column) |
 | `ENVS` | env set | `name description vars used_by default` |
 | `VARS` | variable, per layer, per playbook | `playbook key value ref redacted plaintext blocked layer effective` |
-| `PANELS` | status line panel, per playbook (v3.25.0) | `playbook panel type source cpb row priority align` |
 | `SESSIONS` | live Claude Code session (v3.25.0) | the `SHOW SESSIONS --json` object: `playbook pid session_id cwd kind status name claude_version started_at last_active model launcher config_dir resume tty` (`tty` v3.25.0) |
 | `DEFAULTS` | (one row) | `envs secret_helper` |
 
@@ -1409,7 +1339,14 @@ Built (v3.21.0).
 
 - `SET STATUSLINE '<command>'` writes `statusLine = {"type": "command",
   "command": "<command>"}`, keeping any other field of an existing
-  `statusLine` (such as `padding`); `UNSET STATUSLINE` removes it.
+  `statusLine` (such as `padding`); `UNSET STATUSLINE` removes it. It always
+  applies, whatever command the slot holds.
+- **`IF UNSET`** (v4.0.0): `SET STATUSLINE '<command>' [REFRESH <n>] IF UNSET`
+  applies only where no `statusLine` is set yet, and otherwise reports
+  unchanged. A recipe that offers a status line uses it, so applying the
+  recipe leaves a status line you chose in place. `SHOW CREATE` writes the
+  status line as it is, never the condition
+  ([example 17](../../examples/17-statusline-if-unset/)).
 - **REFRESH** (v3.23.0) sets `statusLine.refreshInterval`, in whole seconds:
   - `SET STATUSLINE '<command>' REFRESH <n>` sets both the command and the
     interval.
@@ -1424,9 +1361,7 @@ Built (v3.21.0).
     as `SET STATUSLINE '<command>' REFRESH <n>`, so it round-trips.
   - Why it matters: without `refreshInterval`, Claude Code (verified on
     2.1.283) does not re-render the status line while a session is idle.
-    Anything that rides on renders stops: Kommander's database-lease
-    heartbeat lets a lease die after 30 s idle (agent-kommander#2), and the
-    statusmux host needs it too.
+    Anything that rides on renders stops, a heartbeat for example.
   - `SHOW PLAYBOOK --json` gains `"statusline_refresh": <n> | null`, and
     `statusline` keeps its meaning. `SELECT`'s `PLAYBOOKS` has a
     `statusline_refresh` column. `SHOW` and `EXPLAIN` print `Status line:
@@ -1444,7 +1379,7 @@ Built (v3.21.0).
   - The history is cpb's own state:
     `<playbooks root>/.state/statusline-history.json` (mode 0600), keyed by
     the config directory. At most 10 entries are kept per directory. A
-    change made outside cpb (statusmux's `wire`, `/statusline`, a hand edit)
+    change made outside cpb (`/statusline`, another tool, a hand edit)
     is recorded the next time a cpb statement replaces it.
   - `SHOW PLAYBOOK --json` has `statusline_history`: `[{"command",
     "refresh", "replaced_at"}]`, newest first. `SELECT`'s `PLAYBOOKS` has
@@ -1453,101 +1388,12 @@ Built (v3.21.0).
   - `SHOW CREATE` never writes it, since it is state and not configuration.
   - It is valid on a plain config directory, and it is refused together with
     another status line clause in one statement.
-- **A host holds the slot.** A status line host, such as statusmux (SPC/1),
-  owns the one `statusLine` slot and composes the bar from panels. Its
-  observers, a lease heartbeat for example, run only while it holds the
-  slot. So when the current command is a host's, `SET STATUSLINE
-  '<another command>'` leaves the slot as it is.
-  - The clause reports unchanged. One warning line says so, and `APPLY
-    --json` gives it the code `statusline_held_by_host`.
-  - A recipe re-applied after the pilot wired a host therefore no longer
-    unwires it.
-  - `REFRESH` on a host-held slot still applies, since the host needs the
-    interval.
-  - `UNSET STATUSLINE` is the explicit way to take the slot back; then `SET
-    STATUSLINE` applies.
-  - A command counts as a host's when its first word, after `env`, `exec`
-    and `VAR=value` words, is a program named `statusmux` and its second word
-    is `render`. That is the shape statusmux documents for cpb.
-  - cpb reads nothing of statusmux's own and never calls it.
 - `SET MODEL '<model>'` writes `model`; `UNSET MODEL` removes it. It is the
   playbook's default model and the lowest-priority choice: `ANTHROPIC_MODEL`
   from an env set or `SET VAR`, a launch's `--model`, and `/model` in a
   session all win over it. `EXPLAIN PLAYBOOK` says which one decides.
 
 Both are settings keys with no CLI.
-
-### Status line panels (v3.25.0)
-
-A status line **host**, statusmux, holds Claude Code's one `statusLine` slot
-and composes the bar from **panels**. A panel is a small manifest file,
-defined by SPC/1 (`docs/spc-1.md` in agent-realm/statusmux). cpb writes and
-removes those manifests; it never runs or calls the host.
-
-```
-ADD PANEL <ns>.<id> EXEC '<command>' [FORMAT TEXT | RECORDS] [ROW <n>] [PRIORITY <n>] [ALIGN LEFT | RIGHT]
-                                     [TIMEOUT <ms>] [MAX RUN <ms>] [TTL <ms>] [STALE <ms>] [WIDTH <n>]
-ADD PANEL <ns>.<id> TEMPLATE '<text>' [WHEN '<field>'] [ROW …] [PRIORITY …] [ALIGN …]
-ADD PANEL <ns>.<id> RECORDS '<path>' [STALE <ms>] [ROW …] [PRIORITY …] [ALIGN …]
-ADD PANEL <ns>.<id> OBSERVE '<command>' EVERY <ms> [MAX RUN <ms>]
-ADD PANEL <ns>.<id> FROM STATUSLINE [ROW …] …       the current status line's command, as an exec panel
-DROP PANEL <ns>.<id>
-```
-
-- **Where it writes.** One manifest,
-  `<config dir>/statusline.d/<ns>/<id>.toml`, with `contract = 1` and only
-  the fields the clause gives; the host's defaults apply to the rest. The
-  options map to the SPC/1 fields `row`, `priority`, `align`, `format`,
-  `timeout_ms`, `max_run_ms`, `ttl_ms`, `stale_ms`, `max_width`, `when` and
-  `every_ms`, and each is accepted only where SPC/1 gives it a meaning.
-- **Never the pilot's layout.** cpb never writes `statusline.toml`, the
-  pilot's layout (SPC/1 §6 reserves it for the pilot), and never touches a
-  plugin's or a project's panels.
-- **The id** is always qualified: `<ns>.<id>`, each part lowercase letters,
-  digits and dashes.
-  - `local` is the namespace for your own panels.
-  - A recipe that ships panels uses its own name as the namespace
-    (SPC/1 §2).
-  - `project` is refused, since it belongs to a repository.
-- **Commands.** `${PANEL_DIR}`, `${HOME}`, `${CLAUDE_CONFIG_DIR}` and
-  `${CLAUDE_PLUGIN_ROOT}` are expanded by the host, which quotes each value
-  itself. So a command that puts one inside quotes of its own is refused
-  (`sh ${PANEL_DIR}/x.sh`, never `sh "${PANEL_DIR}/x.sh"`).
-- **Ownership.** A manifest cpb writes starts with a `# Written by cpb
-  (ADD PANEL) sha256=<hash>` line, the hash of the rest of the file.
-  - cpb overwrites or drops a manifest only while it still matches that
-    hash.
-  - A manifest without the line is yours, and so is one cpb wrote and you
-    edited since, marker kept or not. `ADD PANEL` over it and `DROP PANEL`
-    of it are refused, naming the file, and cpb never changes it.
-- **Credentials.** A panel manifest ships with the playbook, so a
-  credential-looking literal in an `EXEC` or `OBSERVE` command or `TEMPLATE`
-  text is refused unless `AS PLAINTEXT` is given (at the end of the clause).
-  - The detector is `SET VAR`'s, applied to what has a name: a `KEY=value`
-    or `--flag=value` word, a `--flag value` pair, a quoted
-    `"Authorization: …"`-style header, or a URL carrying a password.
-  - There is no reference here, since the host runs the command and nothing
-    resolves one. Read a secret at run time, from a file or the environment.
-  - `SHOW CREATE` never prints such a panel: it is withheld as a comment.
-- **Repeats and removal.** A repeated `ADD PANEL` with the same options is
-  unchanged. `DROP PANEL` of an absent panel is unchanged. An emptied
-  namespace directory is removed.
-- **`FROM STATUSLINE`** adopts the bar you have today, the equivalent of
-  `statusmux adopt`. It is refused when there is no status line command,
-  and when the status line is the host itself.
-- **Reads:**
-  - `SHOW PLAYBOOK --json` has `panels`: `[{"panel", "type", "source",
-    "cpb", "row", "priority", "align"}]`. It lists the config directory's
-    own panels (`source: "config"`) and, read-only, those of every enabled
-    plugin, found as SPC/1 §2 finds them (`source: "plugin <name@market>"`).
-  - `SELECT … FROM PANELS` has the same rows, with the playbook.
-  - `EXPLAIN` lists them, and says when the status line is not a host, so
-    they do not render.
-  - `SHOW CREATE` writes the panels cpb wrote as `ADD PANEL` clauses; a
-    panel made `FROM STATUSLINE` is written with its command. It writes
-    neither yours nor a plugin's.
-- It is valid on a plain config directory (`TO '<dir>'`), and dry runs
-  write nothing. The clause words are not reserved.
 
 ### Model picker
 
@@ -1758,7 +1604,7 @@ session.
 | View | Reads | Shows |
 |---|---|---|
 | Playbooks | `SHOW PLAYBOOKS --json`, `SHOW SESSIONS --json` | name, launcher, version, env sets, login kind (`shared`, `isolated`, `sandbox`), live-session count, model |
-| a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview (with `Pilot profile`), Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line (history, panels), Model (the picker), Sessions |
+| a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview, Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line (history), Model (the picker), Sessions |
 | Sessions | `SHOW SESSIONS --json`; `R`: `RESUME --list --json` | pid, tty, kind, status, age, last active, model, folder; `R` switches to this folder's recent sessions, which `enter` resumes |
 | Env sets | `SHOW ENVS --json` | the env sets (env profiles): variables, `used_by`, default |
 | Defaults | `SHOW DEFAULTS --json` | the env sets under every playbook, the secret helper |
@@ -1888,7 +1734,7 @@ PLAYBOOK` statements: a recipe. These clauses are allowed:
 - `ADD MARKETPLACE`, `ADD PLUGIN`, `SET AGENT`;
 - `ADD MCP SERVER`;
 - `ALLOW TOOL`, `DENY TOOL`;
-- `SET STATUSLINE`, `ADD PANEL`;
+- `SET STATUSLINE`;
 - `SET MODEL`, `ADD MODEL`, `SET MODEL PICKER`;
 - `ADD SKILL` from a git source;
 - `SET VAR` (not a credential), `SET VAR … FROM '<ref>'`, `BLOCK VAR`;
@@ -1958,8 +1804,8 @@ An exact command line such as `Bash(npm test)` is narrow.
 store**, a fresh temp directory with only your secret helper setting copied.
 So your `DEFAULTS` and env sets never layer into a played recipe, and
 nothing is written to your store. The plan is `APPLY`'s, for two files:
-- a setup file: `CREATE PLAYBOOK IF NOT EXISTS play-<name>-<6 hex> NO ALIAS
-  NO PILOT PROFILE`, with `ISOLATED LOGIN` and the `BLOCK VAR` above when
+- a setup file: `CREATE PLAYBOOK IF NOT EXISTS play-<name>-<6 hex> NO
+  ALIAS`, with `ISOLATED LOGIN` and the `BLOCK VAR` above when
   the endpoint moves;
 - the recipe.
 

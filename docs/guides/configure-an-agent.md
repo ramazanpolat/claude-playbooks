@@ -49,12 +49,10 @@ model is the playbook's default and the weakest choice: `ANTHROPIC_MODEL`,
 `--model` and `/model` all win over it, and `EXPLAIN PLAYBOOK` says which
 one decides. Example: [10](../../examples/10-tools-statusline-model/).
 
-If the status line is a host's (`statusmux render`), `SET STATUSLINE` leaves
-it as it is and warns (`statusline_held_by_host`): contribute your bar as a
-statusmux panel instead, with `ADD PANEL local.bar EXEC '<command>'` (or
-`ADD PANEL local.bar FROM STATUSLINE` to adopt the one you have); see
-[example 17](../../examples/17-statusline-panels/). `REFRESH` still applies. `UNSET STATUSLINE` takes
-the slot back if you mean to.
+`SET STATUSLINE` always applies. A recipe that offers a status line without
+replacing one you chose writes `SET STATUSLINE '<command>' IF UNSET`, which
+applies only where no status line is set yet; see
+[example 17](../../examples/17-statusline-if-unset/).
 
 ## The model picker
 

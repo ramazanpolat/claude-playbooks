@@ -19,11 +19,13 @@ func TestParseStatuslineRefresh(t *testing.T) {
 		t.Fatalf("round trip %q: %v", st.String(), err)
 	}
 	for line, want := range map[string]Clause{
-		"ALTER PLAYBOOK k SET STATUSLINE REFRESH 5": {Kind: SetStatuslineRefresh, Refresh: 5},
-		"ALTER PLAYBOOK k UNSET STATUSLINE REFRESH": {Kind: UnsetStatuslineRefresh},
-		"ALTER PLAYBOOK k UNSET STATUSLINE":         {Kind: UnsetStatusline},
-		"ALTER PLAYBOOK k SET STATUSLINE 'x'":       {Kind: SetStatusline, Arg: "x"},
-		"ALTER PLAYBOOK k SET STATUSLINE 'refresh'": {Kind: SetStatusline, Arg: "refresh"},
+		"ALTER PLAYBOOK k SET STATUSLINE REFRESH 5":              {Kind: SetStatuslineRefresh, Refresh: 5},
+		"ALTER PLAYBOOK k UNSET STATUSLINE REFRESH":              {Kind: UnsetStatuslineRefresh},
+		"ALTER PLAYBOOK k UNSET STATUSLINE":                      {Kind: UnsetStatusline},
+		"ALTER PLAYBOOK k SET STATUSLINE 'x'":                    {Kind: SetStatusline, Arg: "x"},
+		"ALTER PLAYBOOK k SET STATUSLINE 'refresh'":              {Kind: SetStatusline, Arg: "refresh"},
+		"ALTER PLAYBOOK k SET STATUSLINE 'x' IF UNSET":           {Kind: SetStatusline, Arg: "x", IfUnset: true},
+		"ALTER PLAYBOOK k SET STATUSLINE 'x' REFRESH 5 IF UNSET": {Kind: SetStatusline, Arg: "x", Refresh: 5, IfUnset: true},
 	} {
 		st, err := ParseLine(line)
 		if err != nil || !reflect.DeepEqual(strip(st).Clauses, []Clause{want}) {
@@ -44,6 +46,38 @@ func TestStatuslineRefreshErrors(t *testing.T) {
 	} {
 		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", line, err, want)
+		}
+	}
+}
+
+// IF UNSET round-trips, and IF takes only UNSET.
+func TestStatuslineIfUnset(t *testing.T) {
+	st, err := ParseLine("ALTER PLAYBOOK k SET STATUSLINE 'bash sl.sh' REFRESH 10 IF UNSET")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.String(); !strings.Contains(got, "SET STATUSLINE 'bash sl.sh' REFRESH 10 IF UNSET") {
+		t.Fatalf("format: %s", got)
+	}
+	again, err := ParseFile(st.String())
+	if err != nil || !reflect.DeepEqual(strip(again[0]), strip(st)) {
+		t.Fatalf("round trip %q: %v", st.String(), err)
+	}
+	for line, want := range map[string]string{
+		"ALTER PLAYBOOK k SET STATUSLINE 'x' IF NOT EXISTS": "expected UNSET after IF",
+		"ALTER PLAYBOOK k SET STATUSLINE 'x' IF":            "expected UNSET after IF",
+	} {
+		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", line, err, want)
+		}
+	}
+}
+
+// NO PILOT PROFILE is not part of the grammar.
+func TestNoPilotProfileClauseGone(t *testing.T) {
+	for _, line := range []string{"CREATE PLAYBOOK p NO PILOT PROFILE", "ALTER PLAYBOOK p NO PILOT PROFILE"} {
+		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), "expected ALIAS after NO") {
+			t.Errorf("%s: %v", line, err)
 		}
 	}
 }
