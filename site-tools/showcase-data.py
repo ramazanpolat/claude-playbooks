@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Builds the home page's card data from real cpb output, or checks it.
 
-Applies showcase.cpb in a throwaway HOME (examples/.ci supplies stand-ins for
-`claude` and the secret helper, so nothing needs a network or a login), then
+Applies showcase.cpb in a throwaway HOME (a `claude` stand-in from examples/.ci and
+`stand-in-secret-helper` from this directory, so nothing needs a network or a login), then
 reads what cpb itself reports: SHOW PLAYBOOK --json, EXPLAIN PLAYBOOK --json,
 the APPLY --dry-run --json plan (plugins, which Claude Code would install),
 and the files cpb wrote into each playbook's CLAUDE_CONFIG_DIR. The result is

@@ -1,0 +1,5 @@
+-- base.cpb: the bottom layer, a recipe (its ALTER PLAYBOOK names no
+-- playbook): the model and the tools any agent built on it may use.
+ALTER PLAYBOOK
+  SET MODEL 'claude-sonnet-5-5'
+  ALLOW TOOL 'Bash(git diff *)' 'Bash(git log *)';

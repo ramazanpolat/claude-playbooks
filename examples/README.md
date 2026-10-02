@@ -4,14 +4,17 @@ One idea per directory, each a `playbook.cpb` you can apply as it is. CI
 applies every one of them (`examples/check.sh`): dry run, apply, apply again
 with no change, then what the README shows beyond `APPLY` (`.check`).
 
-`examples/upgrade.sh` checks the upgrade from the previous release, and CI
-runs it on every change. The previous release's binary applies that
-release's own examples. This build then takes over the same state and must
+`examples/upgrade.sh` checks the upgrade from the previous release of the
+same major, and CI runs it on every change. The previous release's binary
+applies that release's own examples. This build then takes over the same state and must
 read it identically:
 - `SHOW CREATE ALL`, `EXPLAIN --json` and `auth status --json` are the same;
 - a re-apply changes nothing;
 - every playbook launches and drops;
 - a made-up machine login is never touched.
+
+[`secret-helper/`](secret-helper/) is not an example: it is a sample secret
+helper, `cpb-secret-file`, which examples 04 and 09 use.
 
 | | |
 |---|---|
@@ -22,7 +25,7 @@ read it identically:
 | [05-show-create-roundtrip](05-show-create-roundtrip/) | a machine as one file, applied elsewhere |
 | [06-install-from-git](06-install-from-git/) | one playbook out of a Git repository, pinned |
 | [07-plugins-local](07-plugins-local/) | a plugin and an agent from a local marketplace |
-| [08-kommander-agent](08-kommander-agent/) | an agent from three stacked recipes, with its tools and status line |
+| [08-stacked-agent](08-stacked-agent/) | an agent from three stacked recipes, with its tools and status line |
 | [09-mcp-servers](09-mcp-servers/) | MCP servers, a credential by reference |
 | [10-tools-statusline-model](10-tools-statusline-model/) | tool permissions, the status line, the default model |
 | [11-skills](11-skills/) | a skill, linked from a directory |
@@ -34,5 +37,5 @@ read it identically:
 | [17-statusline-if-unset](17-statusline-if-unset/) | a status line offered with IF UNSET, never imposed |
 | [18-sessions](18-sessions/) | live sessions, `RESUME`, and what cpb refuses to resume |
 | [19-tui](19-tui/) | what `cpb tui` shows, and the statements behind each screen |
-| [20-openshell-sandbox](20-openshell-sandbox/) | a playbook in an OpenShell sandbox (experimental, Linux) |
+| [20-openshell-sandbox](20-openshell-sandbox/) | a playbook in an OpenShell sandbox (Linux) |
 | [21-play](21-play/) | `cpb play`: check, plan, run, keep and update someone else's recipe |

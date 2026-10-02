@@ -18,12 +18,11 @@ always hidden, so anything under 12 characters is redacted whole.
 implementers. The rest of this writeup is left as-is for the root-cause
 record.
 
-Found live 2026-09-21 while attaching the
-`claude-opus-5` env profile to `kommander-metu` for an unrelated task (a code
-review run through that playbook). Running `claude-playbook env kommander-metu`
-to check which profiles were attached printed the fully resolved effective
-environment, including `ANTHROPIC_AUTH_TOKEN=sk-...` in plain text, into an
-active Claude Code session transcript.
+Found live 2026-09-21 while attaching an env profile to a playbook for an
+unrelated task. Running `claude-playbook env <name>` to check which profiles
+were attached printed the fully resolved effective environment, including
+`ANTHROPIC_AUTH_TOKEN=sk-...` in plain text, into an active Claude Code
+session transcript.
 
 ## Root cause
 
@@ -56,9 +55,8 @@ same way.
 ## Why this matters here specifically
 
 The rest of this project's secret handling is presence-only by convention —
-`with-secret --check` (the chaos-secret / pilot-profile pattern this repo's own
-docs point to) deliberately never prints a resolved value, only whether one is
-set. `claude-playbook env <name>`'s status display is the one place that
+a secret helper's `--check` (the interface this repo's docs define)
+deliberately never prints a resolved value, only whether one is set. `claude-playbook env <name>`'s status display is the one place that
 breaks that pattern: it's the *intended, everyday* way to check which profiles
 are attached to a playbook, and it silently leaks whatever those profiles
 resolve to.

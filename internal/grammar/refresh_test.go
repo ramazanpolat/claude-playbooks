@@ -72,12 +72,3 @@ func TestStatuslineIfUnset(t *testing.T) {
 		}
 	}
 }
-
-// NO PILOT PROFILE is not part of the grammar.
-func TestNoPilotProfileClauseGone(t *testing.T) {
-	for _, line := range []string{"CREATE PLAYBOOK p NO PILOT PROFILE", "ALTER PLAYBOOK p NO PILOT PROFILE"} {
-		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), "expected ALIAS after NO") {
-			t.Errorf("%s: %v", line, err)
-		}
-	}
-}

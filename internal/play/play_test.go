@@ -236,12 +236,12 @@ func TestCheckRisks(t *testing.T) {
   ADD MARKETPLACE acme FROM 'github:acme/plugins#v1'
   ADD PLUGIN tool@acme
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'files-server'
-  ADD MCP SERVER gh URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:pilot/github-mcp'
+  ADD MCP SERVER gh URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
   ALLOW TOOL 'Bash' 'Bash(python3 *)' 'Write(~/**)' 'WebFetch' 'Bash(gh pr view *)'
   SET STATUSLINE 'bash ~/bin/sl.sh'
   ADD SKILL review FROM 'https://github.com/acme/skills' SUBDIR review
   SET VAR SENTRY_URL=https://sentry.example.com/1 OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com
-  SET VAR GH_TOKEN FROM 'keychain:pilot/gh';
+  SET VAR GH_TOKEN FROM 'keychain:gh';
 `
 	r := Check([]byte(src))
 	if len(r.Refused) != 0 {
@@ -265,7 +265,7 @@ func TestCheckRisks(t *testing.T) {
 			header = &r.Risks[i]
 		}
 	}
-	if header == nil || header.Confirm != "keychain:pilot/github-mcp" || !strings.Contains(header.Detail, "HEADER Authorization, to api.githubcopilot.com") {
+	if header == nil || header.Confirm != "keychain:github-mcp" || !strings.Contains(header.Detail, "HEADER Authorization, to api.githubcopilot.com") {
 		t.Fatalf("the header reference: %+v", header)
 	}
 	if r.Endpoint != "" {

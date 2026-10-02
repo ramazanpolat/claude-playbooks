@@ -221,7 +221,7 @@ type Clause struct {
 
 // Var is one variable of a SET clause: a literal Value, or a secret
 // reference in Ref (never both). A reference is stored, never resolved, by
-// anything in cpb except the launch exec through with-secret.
+// anything in cpb except the launch exec through the secret helper.
 type Var struct {
 	Key   string
 	Value string

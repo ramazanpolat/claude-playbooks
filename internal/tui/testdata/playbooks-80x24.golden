@@ -1,8 +1,8 @@
  cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  NAME           LAUNCHER  ENV SETS  LOGIN     SESSIONS  MODEL
-▸ kommander-dev  kd        -         shared    1         claude-opus-5-5
-  router         k9        9router   isolated  1         glm-5.3
+  NAME    LAUNCHER  VERSION  ENV SETS  LOGIN     SESSIONS  MODEL
+▸ alpha   al        v1.2.0   -         shared    1         claude-opus-5-5
+  router  rt        -        proxy     isolated  1         glm-5.3
 
 
 

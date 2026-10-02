@@ -5,7 +5,7 @@
 dir=$1 home=$2 ci=$3
 entry=playbook.cpb
 [ -f "$dir/.entry" ] && entry=$(cat "$dir/.entry")
-export HOME="$home" PATH="$ci:$home/bin:$PATH" CPB_SECRET_HELPER= FAKE_MARKETS=""
+export HOME="$home" PATH="$ci:$ci/../secret-helper:$home/bin:$PATH" CPB_SECRET_HELPER= FAKE_MARKETS=""
 cd "$dir"
 if [ -f .setup ]; then sh -e .setup; fi
 cpb APPLY "$entry" --dry-run > "$home/dry.out"

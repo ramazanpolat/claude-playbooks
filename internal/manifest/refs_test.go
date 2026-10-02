@@ -27,7 +27,7 @@ func TestMergeEnvWithReferences(t *testing.T) {
 }
 
 func TestValidateRefs(t *testing.T) {
-	ok := map[string]string{"TOKEN": "keychain:pilot/x", "KEY": "op://vault/item/field"}
+	ok := map[string]string{"TOKEN": "keychain:x", "KEY": "op://vault/item/field"}
 	if err := ValidateRefs(ok, nil, nil); err != nil {
 		t.Fatal(err)
 	}

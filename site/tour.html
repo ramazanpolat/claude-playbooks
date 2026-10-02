@@ -232,7 +232,7 @@ Login: isolated: no link to ~/.claude's login and no machine token; /login once 
       sandboxed on every launch.</p>
     <p>On Linux with Docker, <code class="inline">--sandbox=openshell</code> runs the session
       in <a href="https://github.com/NVIDIA/OpenShell" target="_blank" rel="noopener">NVIDIA OpenShell</a>
-      instead of <code class="inline">sbx</code> &mdash; <strong>experimental, Linux with Docker
+      instead of <code class="inline">sbx</code> &mdash; <strong>Linux with Docker
       only, opt-in</strong> (v3.27.0).</p>
   </section>
 
@@ -304,18 +304,18 @@ ALTER PLAYBOOK reviewer
     <div class="term" data-verify="examples/09-mcp-servers">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0</div>
+        <div class="term-title">real run, v4 (pre-release)</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth'</span>
+      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'</span>
 <span class="out">Altered PLAYBOOK researcher
   MCP server sentry</span>
 <span class="cmd"><span class="prompt">$ </span>cpb EXPLAIN PLAYBOOK researcher</span>
-<span class="out">VARIABLE                                 VALUE                              FROM
---------                                 -----                              ----
-CPB_MCP_SENTRY_H_AUTHORIZATION_32770652  &lt;from keychain:pilot/sentry-auth&gt;  PLAYBOOK researcher
+<span class="out">VARIABLE                                 VALUE                        FROM
+--------                                 -----                        ----
+CPB_MCP_SENTRY_H_AUTHORIZATION_32770652  &lt;from keychain:sentry-auth&gt;  PLAYBOOK researcher
 
-Secret helper: (none)
+Secret helper: /home/you/helper (from CPB_SECRET_HELPER)
 Plugins: (none)
 Agent: (none)
 MCP servers: files, sentry</span>
@@ -325,9 +325,9 @@ MCP servers: files, sentry</span>
 
 ALTER PLAYBOOK researcher
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
-  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth';</span></code></pre>
+  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth';</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME</span>
       </div>
     </div>
     <p>The value never appears in a file, in argv, or in any <code class="inline">SHOW</code>/<code class="inline">EXPLAIN</code>
@@ -396,9 +396,9 @@ researcher  CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
       </div>
       <pre><code> cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  NAME           LAUNCHER  ENV SETS  LOGIN     SESSIONS  MODEL
-▸ kommander-dev  kd        -         shared    1         claude-opus-5-5
-  router         k9        9router   isolated  1         glm-5.3
+  NAME    LAUNCHER  VERSION  ENV SETS  LOGIN     SESSIONS  MODEL
+▸ alpha   al        v1.2.0   -         shared    1         claude-opus-5-5
+  router  rt        -        proxy     isolated  1         glm-5.3
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
@@ -413,15 +413,15 @@ reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json</code></pre>
       </div>
       <pre><code> cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
- router  (launcher k9 · ~/.claude-playbooks/router)
+ router  (launcher rt · ~/.claude-playbooks/router)
  [Overview] Env  Vars  Plugins  MCP  Skills  Status line  Model  Sessions
 
   Version         -
   Source          (none)
   Login           isolated
-  Env sets        9router
+  Env sets        proxy
   Tools           -
-  Live sessions   1 · newest 2d ago in ~/DEV/claude-playbooks
+  Live sessions   1 · newest 2d ago in ~/DEV/app
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago

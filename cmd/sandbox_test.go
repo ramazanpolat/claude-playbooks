@@ -88,13 +88,13 @@ func TestSandboxHelpers(t *testing.T) {
 	if got := sandboxName("my pb/x_1.2"); got != "cpb-my-pb-x-1.2" {
 		t.Fatalf("sandboxName: %q", got)
 	}
-	env := []string{"HOME=/h", "SECRET=1", "CLAUDE_CONFIG_DIR=/c", "MODEL=glm", "CLAUDE_CODE_OAUTH_TOKEN=t", "ANTHROPIC_BASE_URL=http://tr0:20128/v1"}
+	env := []string{"HOME=/h", "SECRET=1", "CLAUDE_CONFIG_DIR=/c", "MODEL=glm", "CLAUDE_CODE_OAUTH_TOKEN=t", "ANTHROPIC_BASE_URL=http://buildbox:8080/v1"}
 	got := sandboxEnv(env, &manifest.Env{Set: map[string]string{"MODEL": "glm", "ANTHROPIC_BASE_URL": "x"}})
-	want := "CLAUDE_CONFIG_DIR=/c MODEL=glm CLAUDE_CODE_OAUTH_TOKEN=t ANTHROPIC_BASE_URL=http://tr0:20128/v1"
+	want := "CLAUDE_CONFIG_DIR=/c MODEL=glm CLAUDE_CODE_OAUTH_TOKEN=t ANTHROPIC_BASE_URL=http://buildbox:8080/v1"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("sandboxEnv: %q", got)
 	}
-	if h := baseURLHost(env); h != "tr0" {
+	if h := baseURLHost(env); h != "buildbox" {
 		t.Fatalf("baseURLHost: %q", h)
 	}
 	if h := baseURLHost([]string{"ANTHROPIC_BASE_URL=::bad"}); h != "" {
@@ -806,7 +806,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// A service on this machine: the sandbox reaches it as
 	// host.docker.internal, while the policy and the secret name it
 	// localhost (what the sbx proxy matches).
-	if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:20128/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
+	if err := runEnvProfile(nil, []string{"local", "set", "ANTHROPIC_BASE_URL=http://localhost:8080/v1", "ANTHROPIC_AUTH_TOKEN=lt"}); err != nil {
 		t.Fatal(err)
 	}
 	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolateAuth: true, Env: &manifest.Env{Profiles: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
@@ -825,7 +825,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 			t.Fatalf("host service: missing %q in %q", want, calls)
 		}
 	}
-	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:20128/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
+	if !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_BASE_URL=http://host.docker.internal:8080/v1 ") || strings.Contains(joined, "host.docker.internal\n") {
 		t.Fatalf("host service attach: %q", calls)
 	}
 	// No endpoint: the key goes to Anthropic's host.
@@ -948,13 +948,13 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	// an explicit sh, the PATH widened and claude-playbook exec'd inside.
 	remote := func(cmd string) string {
 		inner := `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec ` + cmd
-		return "-- polat@cockpit0 env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(inner)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'` + "\n"
+		return "-- me@buildbox env CPB_CMD=" + base64.StdEncoding.EncodeToString([]byte(inner)) + ` sh -c 'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'` + "\n"
 	}
 	// The flag forwards the whole launch, rebuilt from what the parser
 	// consumed; the playbook need not exist here; ssh's options end before
 	// the destination; claude's arguments travel verbatim, even ones that
 	// look like wrapper flags.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "/home/polat/proj", "--env", "K=V", "ghost", "-p", "it's", "--sandbox", "--env-file", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	want := remote("claude-playbook run '--sandbox' '--workdir=/home/polat/proj' '--env=K=V' 'ghost' '-p' 'it'\\''s' '--sandbox' '--env-file' 'x'")
@@ -966,7 +966,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// Flags after the name, the = form, --sbx, a backend, fresh and clone
 	// all forward in canonical order; -- ends the wrapper scan.
-	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-fresh", "--clone", "--sandbox-host=polat@cockpit0", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
+	if err := runRun(nil, []string{"ghost", "--sbx", "--sandbox-fresh", "--clone", "--sandbox-host=me@buildbox", "--mount", "/data:ro", "--", "--sandbox-host", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); got != remote("claude-playbook run '--sandbox' '--sandbox-fresh' '--clone' '--mount=/data:ro' 'ghost' '--' '--sandbox-host' 'x'") {
@@ -974,7 +974,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// The manifest names the host: a bare launch of an always-sandboxed
 	// playbook goes there; --no-sandbox keeps it here, on the host.
-	writePlaybook(t, root, "remote", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	writePlaybook(t, root, "remote", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "me@buildbox"}})
 	if err := runRun(nil, []string{"remote", "--version"}); err != nil {
 		t.Fatal(err)
 	}
@@ -993,7 +993,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// A manifest host without always is used only when the launch is
 	// sandboxed.
-	writePlaybook(t, root, "opt", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "polat@cockpit0"}})
+	writePlaybook(t, root, "opt", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "me@buildbox"}})
 	os.Remove(claudeLog)
 	if err := runRun(nil, []string{"opt", "--version"}); err != nil {
 		t.Fatal(err)
@@ -1008,7 +1008,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 		t.Fatalf("manifest host with --sandbox: %q", got)
 	}
 	// --playbooks-dir travels as given: a path on that host.
-	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "polat@cockpit0", "ghost"}); err != nil {
+	if err := runRun(nil, []string{"--playbooks-dir", "/srv/pbs", "--sandbox-host", "me@buildbox", "ghost"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); got != remote("claude-playbook run '--playbooks-dir=/srv/pbs' '--sandbox' 'ghost'") {
@@ -1017,7 +1017,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	config.PlaybooksDir = root // the flag set the process-wide registry; back to the test's
 	// A value that looks like a flag stays a value on the remote side too:
 	// value flags travel inline.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir=--playbooks-dir", "--unset", "--sandbox", "ghost", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir=--playbooks-dir' '--unset=--sandbox' 'ghost' '-p' 'hi'") {
@@ -1026,7 +1026,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	// A value that is exactly "--" keeps the registry-scan boundary the
 	// local launch had: two words, so a --playbooks-dir among claude's
 	// arguments stays claude's on the remote side too.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "--", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
@@ -1034,7 +1034,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// An overridden --workdir is forwarded too, in order, so a boundary it
 	// set survives and the last value still wins.
-	if err := runRun(nil, []string{"--sandbox-host", "polat@cockpit0", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox-host", "me@buildbox", "--workdir", "--", "--workdir", "/srv/project", "ghost", "-p", "--playbooks-dir=/tmp/other"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); got != remote("claude-playbook run '--sandbox' '--workdir' '--' '--workdir=/srv/project' 'ghost' '-p' '--playbooks-dir=/tmp/other'") {
@@ -1042,7 +1042,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	}
 	// A manifest host forwards without evaluating any launch flag: an env
 	// file that does not exist is refused by name, not opened.
-	writePlaybook(t, root, "mh", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}})
+	writePlaybook(t, root, "mh", &manifest.Manifest{IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "me@buildbox"}})
 	err := runRun(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), "mh"})
 	if err == nil || !strings.Contains(err.Error(), "names a local file") {
 		t.Fatalf("manifest host with an env file: %v", err)
@@ -1055,7 +1055,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := os.MkdirAll(mdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.Write(mdir, &manifest.Manifest{Name: "mh", IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "polat@cockpit0"}}); err != nil {
+	if err := manifest.Write(mdir, &manifest.Manifest{Name: "mh", IsolateAuth: true, Sandbox: &manifest.Sandbox{Always: true, Host: "me@buildbox"}}); err != nil {
 		t.Fatal(err)
 	}
 	err = runStart(nil, []string{"--env-file", filepath.Join(t.TempDir(), "missing.env"), mdir})
@@ -1070,12 +1070,12 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--sandbox-host", "polat@cockpit0", "--env-file", envFile, "ghost"}, "names a local file"},
-		{[]string{"ghost", "--sandbox-host", "polat@cockpit0", "--env-file=" + envFile}, "names a local file"},
-		{[]string{"--env-file", envFile, "ghost", "--sandbox-host", "polat@cockpit0"}, "names a local file"},
-		{[]string{"--sandbox-host", "polat@cockpit0", "--no-sandbox", "ghost"}, "pick one"},
+		{[]string{"--sandbox-host", "me@buildbox", "--env-file", envFile, "ghost"}, "names a local file"},
+		{[]string{"ghost", "--sandbox-host", "me@buildbox", "--env-file=" + envFile}, "names a local file"},
+		{[]string{"--env-file", envFile, "ghost", "--sandbox-host", "me@buildbox"}, "names a local file"},
+		{[]string{"--sandbox-host", "me@buildbox", "--no-sandbox", "ghost"}, "pick one"},
 		{[]string{"--sandbox-host=-V", "ghost"}, "must be an ssh destination"},
-		{[]string{"--sandbox-host", "polat@cockpit0 -oProxyCommand=x", "ghost"}, "must be an ssh destination"},
+		{[]string{"--sandbox-host", "me@buildbox -oProxyCommand=x", "ghost"}, "must be an ssh destination"},
 	} {
 		err := runRun(nil, c.args)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
@@ -1088,7 +1088,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	// start forwards too, --delete included, the path being remote; a
 	// directory manifest naming the host forwards a sandboxed start as
 	// well, and nothing local runs or is deleted.
-	if err := runStart(nil, []string{"--sandbox-host", "polat@cockpit0", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
+	if err := runStart(nil, []string{"--sandbox-host", "me@buildbox", "--delete", "/home/polat/scratch", "-p", "hi"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(); got != remote("claude-playbook start '--sandbox' '--delete' '/home/polat/scratch' '-p' 'hi'") {
@@ -1098,7 +1098,7 @@ func TestRunSandboxHostForwardsOverSSH(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := manifest.Write(dir, &manifest.Manifest{Name: "rd", IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "polat@cockpit0"}}); err != nil {
+	if err := manifest.Write(dir, &manifest.Manifest{Name: "rd", IsolateAuth: true, Sandbox: &manifest.Sandbox{Host: "me@buildbox"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runStart(nil, []string{"--sandbox", "--delete", dir}); err != nil {

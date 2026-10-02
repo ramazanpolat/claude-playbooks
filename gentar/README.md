@@ -261,17 +261,18 @@ before upload: bench-host values and declared credentials are masked, and an
 agent transcript appears only as its length.
 
 **Telemetry to ClickStack.** This repo sets the repository secrets
-`GENTAR_OTLP_EXPORT` (the collector's base URL on arf's internal network) and
+`GENTAR_OTLP_EXPORT` (the collector's base URL on the bench's internal network) and
 `GENTAR_OTLP_KEY` (its ingestion key), so every arena run also lands in the
-pilot's ClickStack as one trace: the scenario at the root, each step and the
+maintainer's ClickStack as one trace: the scenario at the root, each step and the
 agent's session, turns and tool calls as child spans, and the run's CI
 identity on the resource. It is scrubbed exactly as the dashboard is, and a
 collector that is down never changes a verdict. Locally, lend the key for one
-run instead of writing it anywhere:
+run instead of writing it anywhere, through your secret helper (here the
+sample one, [`cpb-secret-file`](../examples/secret-helper/)):
 
 ```bash
 GENTAR_OTLP_EXPORT=<collector base URL> \
-  with-secret GENTAR_OTLP_KEY=keychain:pilot/clickstack-ingest -- gentar/run.sh cli-head-build
+  cpb-secret-file GENTAR_OTLP_KEY=file:otlp-key -- gentar/run.sh cli-head-build
 ```
 
 Both or neither: one without the other is refused (exit 2) before any bench
@@ -283,7 +284,7 @@ Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
 --check` enforces it. What is this repo's lives only here:
 
 - **`gentar/policy.toml`**: no bench for PRs (`bench = "off"`: the repo is
-  public, the runner persistent, and the pilot chose it); the main-push floor
+  public, the runner persistent, and the maintainer chose it); the main-push floor
   is `cli-head-build`, `docs-honesty` and `playbook-lifecycle`; Go 1.26 for the
   bench-free checks (and `golang:1.26` for the bench's build); phase 2 on dispatch, the `arena` tag or a `v*-rc*` tag; a
   release gate.
@@ -327,7 +328,7 @@ points it at an existing checkout instead.
 
 The layout mirrors a bench: your checkout is staged into `WORKSPACE_DIR`,
 which sits *under* `HOME` rather than being it, and steps run with the
-workspace as cwd. So a `~/…` assertion asks about the pilot's home, never
+workspace as cwd. So a `~/…` assertion asks about the user's home, never
 about a file that shipped in your repo.
 
 It is not a substitute for the arena. There is no sandbox, no template and no

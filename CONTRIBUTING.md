@@ -54,7 +54,7 @@ and an exact command sequence beat any amount of description.
 ## Release process
 
 A release needs its docs first: README, docs/ (tutorials, guides,
-reference), examples/ for every new clause, and AGENTS.md. The pilot's rule
+reference), examples/ for every new clause, and AGENTS.md. The maintainer's rule
 and the checklist are in [AGENTS.md, "Before any release"](AGENTS.md#before-any-release);
 never tag without them.
 

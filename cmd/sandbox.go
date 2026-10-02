@@ -478,7 +478,7 @@ func baseURLHost(env []string) string {
 }
 
 // sandboxBackend is the seam every sandbox implementation fills: the six
-// operations a launch needs: sbx, and the experimental OpenShell backend
+// operations a launch needs: sbx, and the OpenShell backend
 // (sandbox_openshell.go). The seam keeps the launch logic independent of
 // their CLIs.
 type sandboxBackend interface {

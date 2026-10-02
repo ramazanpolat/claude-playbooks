@@ -1,0 +1,5 @@
+{
+  "name": "team",
+  "version": "0.0.1",
+  "description": "The team layer: a SessionStart hook that adds one line of context."
+}

@@ -22,6 +22,6 @@ expands when it starts the server. A header's reference resolves to the
 whole value, so store `Bearer <token>`, not the bare token. A literal
 credential is refused, and `AS PLAINTEXT` is not accepted here.
 
-`keychain:pilot/sentry-auth` and `/srv/notes` are placeholders: point them at
-your own. `DROP MCP SERVER sentry` removes the server and forgets its
+`file:sentry-auth` (read by the sample helper, [`cpb-secret-file`](../secret-helper/))
+and `/srv/notes` are placeholders: point them at your own. `DROP MCP SERVER sentry` removes the server and forgets its
 reference.

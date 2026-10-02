@@ -1,4 +1,0 @@
--- bare.cpb: the bottom layer, a recipe: the model route. glm-5.3-flash is an
--- env set on the author's machine; use any route you have (SHOW ENVS lists
--- them), or leave this file's statement out to run on the machine's DEFAULTS.
-ALTER PLAYBOOK USE ENV glm-5.3-flash;

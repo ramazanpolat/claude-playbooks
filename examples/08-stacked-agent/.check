@@ -1,0 +1,14 @@
+python3 - "$HOME/.claude-playbooks/reviewer-agent/settings.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+assert s["agent"] == "reviewer", s
+assert s["model"] == "claude-sonnet-5-5", s
+assert s["permissions"]["allow"] == ["Bash(git diff *)", "Bash(git log *)"], s
+assert s["statusLine"] == {"type": "command", "command": "echo reviewer", "refreshInterval": 10}, s
+PY
+# Both layers' plugins were installed for this playbook (the stand-in claude
+# keeps what it installed in .fake-claude/).
+python3 -c 'import json,sys; ids=sorted(p["id"] for p in json.load(open(sys.argv[1]))); assert ids == ["reviewer@reviewers", "team@team-rules"], ids' "$HOME/.claude-playbooks/reviewer-agent/.fake-claude/plugins.json"
+# The same layers under another name, by TO.
+cpb APPLY team.cpb TO reviewer-lab --yes | grep -q '1 created'
+cpb SHOW PLAYBOOK reviewer-lab --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["agent"] == "reviewer", v'

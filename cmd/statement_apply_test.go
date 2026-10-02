@@ -31,7 +31,7 @@ func apply(t *testing.T, path string, flags ...string) (string, error) {
 const scratchPlaybook = `-- a machine from nothing
 CREATE OR REPLACE ENV glm
   DESCRIBE 'GLM via the router'
-  SET BASE=http://tr0:20128/v1 MODEL=glm-5.3;
+  SET BASE=http://buildbox:8080/v1 MODEL=glm-5.3;
 ALTER DEFAULTS USE ENV glm;
 CREATE PLAYBOOK IF NOT EXISTS work NO ALIAS;
 ALTER PLAYBOOK work

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# openshell-e2e.sh -- end-to-end check of the experimental OpenShell sandbox
+# openshell-e2e.sh -- end-to-end check of the OpenShell sandbox
 # backend (--sandbox=openshell) against a real OpenShell gateway.
 #
 # Needs: Linux, Docker Engine 28+, OpenShell 0.1.x with host mounts enabled
@@ -88,7 +88,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-claude-playbook CREATE PLAYBOOK e2e NO ALIAS NO PILOT PROFILE >/dev/null
+claude-playbook CREATE PLAYBOOK e2e NO ALIAS >/dev/null
 P=$HOME/.claude-playbooks/e2e
 claude-playbook env-profile r set ANTHROPIC_BASE_URL=http://localhost:18080 ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-1 >/dev/null
 claude-playbook env e2e use r >/dev/null

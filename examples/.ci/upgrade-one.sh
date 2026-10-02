@@ -5,7 +5,7 @@ old=$1 new=$2 dir=$3 home=$4 ci=$5
 entry=playbook.cpb
 [ -f "$dir/.entry" ] && entry=$(cat "$dir/.entry")
 mkdir -p "$home/bin" "$home/.claude"
-export HOME="$home" PATH="$ci:$home/bin:$PATH" CPB_SECRET_HELPER= FAKE_MARKETS=""
+export HOME="$home" PATH="$ci:$ci/../secret-helper:$home/bin:$PATH" CPB_SECRET_HELPER= FAKE_MARKETS=""
 use() { ln -sf "$1" "$home/bin/cpb"; }
 # A made-up machine login and account state, which must never change.
 printf '{"claudeAiOauth":{"accessToken":"UPGRADE-MACHINE"}}' > "$home/.claude/.credentials.json"

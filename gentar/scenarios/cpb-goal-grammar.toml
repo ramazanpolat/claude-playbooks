@@ -16,8 +16,8 @@
 # skips it by name). Phase 2 and nightly only: the kit's lint keeps judged
 # suites out of phase 1. Choice fixtures:
 # gentar/judge-fixtures/cpb-goal-grammar/goal/<expected action>/*.txt,
-# measured with the engine's bin/judge-eval. Assertions confirmed by root as
-# the pilot's delegate, 2026-09-27.
+# measured with the engine's bin/judge-eval. Assertions confirmed
+# 2026-09-27.
 
 [scenario]
 name = "cpb-goal-grammar"

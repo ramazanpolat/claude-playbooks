@@ -1,10 +1,10 @@
  cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log                                                ? help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- router  (launcher k9 · ~/.claude-playbooks/router)
+ router  (launcher rt · ~/.claude-playbooks/router)
   Overview  Env  Vars  Plugins [MCP] Skills  Status line  Model  Sessions 
 
   NAME    TRANSPORT  TARGET                      ENV / HEADERS
-  sentry  http       https://mcp.sentry.dev/mcp  Authorization FROM 'keychain:pilot/sentry'
+  sentry  http       https://mcp.sentry.dev/mcp  Authorization FROM 'keychain:sentry'
 
 
 

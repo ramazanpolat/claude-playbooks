@@ -420,9 +420,9 @@ func TestOwnTokenDropsGlobalPlanDescriptors(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-METU\"\n")
+	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-WORK\"\n")
 	env, _ := PrepareLaunchEnv(configDir)
-	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-METU" {
+	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-WORK" {
 		t.Fatalf("token = %q", got)
 	}
 	for _, key := range []string{SubscriptionTypeEnv, RateLimitTierEnv} {
@@ -432,7 +432,7 @@ func TestOwnTokenDropsGlobalPlanDescriptors(t *testing.T) {
 	}
 
 	// The block may supply the other account's descriptor itself.
-	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-METU\"\nCLAUDE_CODE_SUBSCRIPTION_TYPE = \"pro\"\n")
+	writeManifest(t, configDir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-WORK\"\nCLAUDE_CODE_SUBSCRIPTION_TYPE = \"pro\"\n")
 	env, _ = PrepareLaunchEnv(configDir)
 	if got, _ := envValue(t, env, SubscriptionTypeEnv); got != "pro" {
 		t.Fatalf("block-set descriptor lost: %q", got)

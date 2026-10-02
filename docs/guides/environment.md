@@ -37,8 +37,8 @@ remove one the shell exported, which is what `BLOCK` is for.
 ## One playbook, its own variables
 
 ```bash
-cpb ALTER PLAYBOOK kommander SET VAR ANTHROPIC_MODEL=claude-opus-5
-cpb ALTER PLAYBOOK kommander BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN
+cpb ALTER PLAYBOOK work SET VAR ANTHROPIC_MODEL=claude-opus-5
+cpb ALTER PLAYBOOK work BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN
 ```
 
 The playbook's `.playbook` now ends with:
@@ -54,9 +54,9 @@ ANTHROPIC_MODEL = "claude-opus-5"
 Inspect and undo:
 
 ```bash
-cpb SHOW PLAYBOOK kommander                      # its own layer, under "Variables:"
-cpb EXPLAIN PLAYBOOK kommander                   # what a launch would apply, and from where
-cpb ALTER PLAYBOOK kommander UNSET VAR ANTHROPIC_MODEL   # forget the entry; the layer below applies again
+cpb SHOW PLAYBOOK work                      # its own layer, under "Variables:"
+cpb EXPLAIN PLAYBOOK work                   # what a launch would apply, and from where
+cpb ALTER PLAYBOOK work UNSET VAR ANTHROPIC_MODEL   # forget the entry; the layer below applies again
 ```
 
 `UNSET VAR` forgets the playbook's own entry, whether it was a `SET`, a
@@ -92,8 +92,8 @@ imports nothing ([example 15](../../examples/15-third-party-route/)).
 
 ```bash
 cpb ALTER PLAYBOOK router USE ENV glm                 # the whole list, in order
-cpb ALTER PLAYBOOK router ADD ENV work FIRST          # insert one: FIRST, LAST (default), BEFORE x, AFTER x
-cpb ALTER PLAYBOOK router DROP ENV work               # detach
+cpb ALTER PLAYBOOK router ADD ENV team FIRST          # insert one: FIRST, LAST (default), BEFORE x, AFTER x
+cpb ALTER PLAYBOOK router DROP ENV team               # detach
 cpb ALTER PLAYBOOK router SET VAR ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # own entry on top
 ```
 
@@ -130,8 +130,8 @@ layers, manifest or not, `start` included:
 
 ```bash
 cpb ALTER DEFAULTS USE ENV claude-default          # the whole list
-cpb ALTER DEFAULTS ADD ENV metu-proxy              # append (or FIRST / BEFORE x / AFTER x)
-cpb ALTER DEFAULTS DROP ENV metu-proxy
+cpb ALTER DEFAULTS ADD ENV corp-proxy              # append (or FIRST / BEFORE x / AFTER x)
+cpb ALTER DEFAULTS DROP ENV corp-proxy
 cpb SHOW DEFAULTS                                  # the list, and the secret helper
 ```
 
@@ -153,7 +153,7 @@ be a secret passes: empty, an integer, or `true`/`false`, so
 - **By reference**, when a secret helper is configured:
   ```bash
   cpb ALTER DEFAULTS SET SECRET HELPER my-keychain-helper   # one command, no arguments
-  cpb ALTER ENV glm SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:9router'
+  cpb ALTER ENV glm SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token'
   ```
   cpb stores the reference (`[refs]` in the set, `[env.refs]` in a manifest)
   and never the value. The helper is asked `--check KEY=REF` when the statement
@@ -187,12 +187,12 @@ Launch flags go before the playbook name, or right after it, and stop at the
 first argument that is not one of them; everything after that is `claude`'s:
 
 ```bash
-cpb run --env-profile work kommander                     # an existing env set, this launch only
-cpb run kommander --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
-cpb run --unset CLAUDE_CODE_OAUTH_TOKEN kommander        # this launch uses the stored login
-cpb run --env-file ./work-account.env kommander          # KEY=VALUE lines, dotenv style
+cpb run --env-profile router work                        # an existing env set, this launch only
+cpb run work --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
+cpb run --unset CLAUDE_CODE_OAUTH_TOKEN work             # this launch uses the stored login
+cpb run --env-file ./work-account.env work               # KEY=VALUE lines, dotenv style
 cpb start --env-profile glm /tmp/scratch
-kommander --env-profile work -p "..."                    # launchers take them too, at the start
+work --env-profile router -p "..."                       # launchers take them too, at the start
 ```
 
 They apply on top of the playbook's own layer, in command-line order, and obey
@@ -216,8 +216,8 @@ directories, or install it twice. For the narrower case of binding a config
 directory you built yourself:
 
 ```bash
-CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb run kommander
-CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 k
+CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 cpb run work
+CLAUDE_CONFIG_DIR_OVERRIDE=~/records/q1 work
 ```
 
 That directory becomes the launch's config directory; authentication, credential
