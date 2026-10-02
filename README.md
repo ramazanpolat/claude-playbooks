@@ -32,7 +32,7 @@ work                                               # Claude Code, bound to that 
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
 ```
 
-Linux and macOS, amd64/arm64. Installs `cpb` and the shorter `cpb`;
+Linux and macOS, amd64/arm64. Installs one executable, `cpb`;
 `cpb self-update` updates it. [devbox, Nix, npx and source builds →](docs/guides/installation.md)
 
 ## What you can do with it

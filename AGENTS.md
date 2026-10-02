@@ -1,8 +1,8 @@
 # AGENTS.md
 
 For an agent (Claude Code, Codex, Gemini, OpenCode, …) asked to install,
-verify, update, deploy or uninstall **claude-playbooks** (`cpb`,
-`cpb`). Each step gives the exact command and how to tell it
+verify, update, deploy or uninstall **claude-playbooks** (`cpb`).
+Each step gives the exact command and how to tell it
 worked. The human docs are linked, not repeated.
 
 If you are writing or driving playbooks rather than installing the tool,

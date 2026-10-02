@@ -2,7 +2,7 @@
 
 How an AI agent (Claude Code, Codex, OpenCode, a cron job, a CI step) drives `cpb` without a human at the keyboard. It is the same CLI a person uses; the difference is which forms are safe unattended and what to read instead of guess.
 
-The binary is `cpb`, also on PATH as `cpb`. State changes go through the statement grammar (`cpb <VERB> <OBJECT> <name> <clause> …`), whose contract is [docs/reference/cli-grammar.md](../reference/cli-grammar.md); `SPEC-v4.md` is the contract for everything else. When this guide and a spec disagree, the spec wins.
+The binary is `cpb`. State changes go through the statement grammar (`cpb <VERB> <OBJECT> <name> <clause> …`), whose contract is [docs/reference/cli-grammar.md](../reference/cli-grammar.md); `SPEC-v4.md` is the contract for everything else. When this guide and a spec disagree, the spec wins.
 
 ## What a playbook is, in one sentence
 

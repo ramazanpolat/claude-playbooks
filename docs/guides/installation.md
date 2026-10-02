@@ -66,8 +66,8 @@ loads nothing and TAB fails:
   `~/.bash_profile` instead, but `self-uninstall` only cleans `~/.bashrc`.
 
 Keep each line byte for byte as shown: `self-uninstall` removes only exact
-matches of `source <(cpb completion bash)` and `source <(cpb completion zsh)`
-(and the same with `cpb` in place of `cpb`). Any other form (an
+matches of `source <(cpb completion bash)` and `source <(cpb completion zsh)`.
+Any other form (an
 absolute path, extra spaces, `eval "$(...)"`) outlives the binary and errors in
 every new shell.
 

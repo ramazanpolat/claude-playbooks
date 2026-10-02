@@ -6,7 +6,6 @@
 # would match a file or directory of that name at ANY depth, so a future
 # cmd/cpb/ package would be silently dropped from the tree.
 /cpb
-/cpb
 /bin/test-cpb
 /dist/
 

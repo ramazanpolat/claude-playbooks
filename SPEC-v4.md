@@ -249,7 +249,7 @@ run against a local fixture server; they carry no compatibility promise.
 Prints a one-line description and lists all discovered playbooks with how to run each. The parenthetical shows the playbook's registered command (its launcher, by directory name or manifest alias); a playbook with none shows `(no command registered)`.
 
 ```
-cpb -- manage isolated Claude Code instances
+cpb (Claude PlayBooks) -- manage isolated Claude Code instances
 
 Playbooks directory: ~/.claude-playbooks
 
@@ -264,7 +264,7 @@ Run 'cpb --help' for all commands.
 
 Empty state:
 ```
-cpb -- manage isolated Claude Code instances
+cpb (Claude PlayBooks) -- manage isolated Claude Code instances
 
 Playbooks directory: ~/.claude-playbooks
 No playbooks installed yet. Get started with one of:
@@ -682,7 +682,7 @@ cpb self-update --force    # reinstall even if already on the newest
 - **A build that is not a release** (version `dev`) has no major version. It refuses without `--major`, saying so; `--check` says so and installs nothing.
 - **Fails closed:** if the list cannot be fetched or read (a rate limit, the network, malformed JSON, a `next` link outside the API base, more than 10 pages), it says why, exits non-zero and installs nothing. There is no fallback to `/releases/latest`.
 
-It then downloads the asset for the running OS/architecture (`cpb-<goos>-<goarch>`), checks it against the release's `SHA256SUMS`, verifies it by running `--version` against the downloaded file, and atomically replaces the current executable (it stages a temp file in the executable's own directory and `rename`s it into place, so the swap is atomic and never a partial write). Symlinks are resolved first, so invoking through the `cpb` symlink updates the real binary and leaves the link intact.
+It then downloads the asset for the running OS/architecture (`cpb-<goos>-<goarch>`), checks it against the release's `SHA256SUMS`, verifies it by running `--version` against the downloaded file, and atomically replaces the current executable (it stages a temp file in the executable's own directory and `rename`s it into place, so the swap is atomic and never a partial write). Symlinks are resolved first, so a `cpb` reached through a link (a package manager's, say) updates the real binary and leaves the link intact.
 
 ```
 Current version: v4.1.0

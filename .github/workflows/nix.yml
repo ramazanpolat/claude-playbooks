@@ -37,8 +37,8 @@ jobs:
           got=$(./result/bin/cpb --version)
           echo "$got"
           [ "$got" = "$want" ] || { echo "::error::--version is '$got', want '$want'"; exit 1; }
-          [ "$(./result/bin/cpb --version)" = "$want" ] || { echo "::error::cpb does not report $want"; exit 1; }
-          [ -L result/bin/cpb ] || { echo "::error::cpb is not a symlink"; exit 1; }
+          # One executable, cpb, and no second name beside it.
+          [ "$(ls result/bin)" = cpb ] && [ ! -L result/bin/cpb ] || { echo "::error::result/bin is not one cpb: $(ls -l result/bin)"; exit 1; }
 
       - name: static on Linux
         if: runner.os == 'Linux'
