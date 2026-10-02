@@ -13,12 +13,9 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
-// APPLY … --dry-run --json (SPEC.md, "APPLY --json"):
-// the plan as one JSON object, for a program to read. It follows the --json
-// rule: fields may be added, none changes meaning within a major version.
-// schema is bumped only on a meaning change, and so only with a major cpb
-// version. Verdicts, action types and warning codes are closed sets within
-// a major version.
+// APPLY … --dry-run --json (SPEC.md, "APPLY --dry-run --json"): the plan
+// as one JSON object, for a program to read, with schema 1. The release
+// notes name every change to this shape.
 const applySchema = 1
 
 type applyReport struct {
@@ -59,7 +56,7 @@ type applyWarning struct {
 	shown   string
 }
 
-// The warning codes (a closed set within a major version).
+// The warning codes.
 const (
 	warnUsePlaybookOverridden = "use_playbook_overridden"
 	warnSourceDrift           = "source_drift"

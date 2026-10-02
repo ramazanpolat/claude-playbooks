@@ -1495,11 +1495,9 @@ and need no `--yes`.
 
 `cpb APPLY <file> … [TO <target>] --dry-run
 --json` prints the plan as **one JSON object on stdout**, in every case,
-refusals included. It follows the `--json` rule: fields may be added, and
-none changes meaning within a major version. `schema` is bumped only on a
-meaning change, and so only with a major version; a consumer refuses a
-schema it does not know. **Verdicts, action types and warning codes are
-closed sets** within a major version.
+refusals included. It carries `schema: 1`; the release notes name every
+change to this shape, and a consumer refuses a schema it does not know. The
+verdicts, action types and warning codes are the ones listed below.
 
 `--json` needs `--dry-run`: the JSON form is a plan, and there is no real `APPLY --json`. The human lines of the dry run go to
 stderr.

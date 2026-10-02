@@ -15,9 +15,9 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// The read statements. Their --json form is a contract (SPEC.md,
-// "Output"): fields may be added, and a field never changes meaning within
-// a major version. The human form may change; nothing should grep it.
+// The read statements. Their --json form is for programs (SPEC.md,
+// "Output"); the release notes name every change to it. The human form may
+// change; nothing should grep it.
 // No value of a credential-looking key is ever printed, in either form.
 
 // varJSON is one variable, with exactly one of value, ref, redacted or
