@@ -66,7 +66,7 @@ yourself: only the token read from the token file gets the global descriptors.
 This is a middle ground between sharing the token and `isolated_login` (the
 playbook shares nothing).
 
-## Only the machine's own account is shared (v3.23.1)
+## Only the machine's own account is shared
 
 Claude Code writes its plaintext login store by renaming a new file over
 `.credentials.json`. So a refresh or a `/login` inside a shared playbook
@@ -98,16 +98,12 @@ fallback:
 - The file rules above apply when Claude Code falls back to the file. On
   Linux the file is the only store.
 
-## A source never carries a login (v3.22.1)
+## A source never carries a login
 
 A playbook you install brings no login with it. `install` and
 `CREATE PLAYBOOK … FROM` leave a source's `.credentials.json`, and the
 account keys of its `.claude.json`, out of the install, and say so in one
 line each. `LINK` sets them aside in place rather than deleting anything.
-Before v3.22.1, a shipped `.credentials.json` was copied over your machine's
-login at the first sync: installing someone's playbook could switch every
-shared playbook to their account.
-(`docs/known-issues/shared-launch-copies-own-login-over-machine-login.md`)
 
 ## Routing a playbook to another backend
 

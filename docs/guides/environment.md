@@ -2,8 +2,7 @@
 
 Variables set or blocked for every launch of one playbook and no other, so one
 playbook talks to a proxy or keeps its own login while the rest of your shell
-does not. The statements below are the [CLI grammar](../../SPEC.md)
-(v3.20.0).
+does not. The statements below are the [CLI grammar](../../SPEC.md).
 
 A fresh playbook has no overrides. Launching it runs `claude` with your shell's
 environment plus `CLAUDE_CONFIG_DIR`, exactly as before.
@@ -64,8 +63,8 @@ reference or a `BLOCK`. Inside `ALTER PLAYBOOK` the word `VAR` is required.
 
 ## Env sets: define once, attach to many
 
-When several playbooks want the same variables, put them in an **env set**
-(called an env set before v3.20.0): a named file under
+When several playbooks want the same variables, put them in an **env set**:
+a named file under
 `~/.claude-playbooks/.env-sets/`, attached to playbooks by name.
 
 ```bash

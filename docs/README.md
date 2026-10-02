@@ -36,12 +36,12 @@ Pages are grouped by what you came for:
 |---|---|
 | [SPEC.md](../SPEC.md) | every statement, command, file and output format |
 
-## Design and history
+## Design
 
 | | |
 |---|---|
 | [Design decisions](design/decisions.md) | the decisions behind the grammar, with when they were made |
-| [History](history/) | notes kept for the record, not maintained |
+| [Known issues](known-issues/) | limitations that are known and open |
 
 The behavioral contract is [`SPEC.md`](../SPEC.md) in the repository root;
 when a document here and the spec disagree, the spec wins. Development and

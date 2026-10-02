@@ -14,7 +14,7 @@ import (
 // source became the playbook's store, and the first shared sync copied it,
 // as the newer store, over ~/.claude/.credentials.json: installing a source
 // could replace the machine's login with the source's account
-// (docs/known-issues/shared-launch-copies-own-login-over-machine-login.md).
+// (CHANGELOG.md, v3.22.1).
 // Account state in a shipped .claude.json seeds an identity the same way:
 // the metadata sync only fills keys that are absent.
 

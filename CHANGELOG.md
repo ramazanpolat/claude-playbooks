@@ -15,8 +15,8 @@ inside the product. [SPEC.md](SPEC.md) describes v4 as it is.
   generic `unknown key "<key>" in <file>:<line>`, and that playbook does not
   launch (#176). An `.env-profiles/` directory, its `.default` and the old
   launcher receipt are not read. The old `CLAUDE_*` environment variables are
-  ignored. A sandbox created by v3 is refused with "Recreate it with
-  --sandbox-fresh".
+  ignored. A sandbox created by v3 has no v4 marker and is refused: remove
+  it, or launch with `--sandbox-fresh`.
 - **A one-off cutover script converts one machine.** It lives outside the
   product, and the release notes link it. It refuses while a session is live,
   backs up the whole playbooks root first, renames the keys and files listed
@@ -52,8 +52,7 @@ inside the product. [SPEC.md](SPEC.md) describes v4 as it is.
   unmanaged.
 - **The OpenShell sandbox backend** (#179). OpenShell needs Landlock, and the
   kernel of the sandboxes the end-to-end suites run in does not provide it, so
-  no suite can run it end to end. It returns in a v4 release once one can.
-  `sbx` is the only backend.
+  no suite can run it end to end. `sbx` is the only backend.
 - **`--sbx`** (#174): use `--sandbox=sbx`.
 
 ### Renamed
@@ -170,10 +169,7 @@ The APPLY JSON schema stays 1.
 - **Pilot integration is deferred.** cpb names no pilot-profile component.
   Wiring a playbook to a pilot profile is the pilot's own step, `pilot wire`,
   a pilot-profile command that cpb never runs.
-- **OpenShell**, as above.
 - **Statement completion** is planned; only playbook names complete.
-- **A sandboxed launch with secret references** is refused; `cpb play`
-  offers `--no-sandbox` for such a recipe.
 
 ## Earlier releases
 
@@ -208,7 +204,7 @@ in its body. Every v3 release has its own notes on the
 - A shared launch sets another account's own login aside
   (`.credentials.json.cpb-own-<stamp>`); before, it was copied over the
   machine's login
-  ([write-up](docs/known-issues/shared-launch-copies-own-login-over-machine-login.md)).
+  ([write-up](https://github.com/ramazanpolat/claude-playbooks/blob/v3.27.0/docs/known-issues/shared-launch-copies-own-login-over-machine-login.md)).
 
 ### v3.23.0
 
@@ -224,7 +220,7 @@ in its body. Every v3 release has its own notes on the
   `.credentials.json` and account state out of the install, and `LINK` sets
   them aside. Before, the first credential sync copied a source's login over
   the machine's, so installing a source could switch the account
-  ([write-up](docs/known-issues/shared-launch-copies-own-login-over-machine-login.md)).
+  ([write-up](https://github.com/ramazanpolat/claude-playbooks/blob/v3.27.0/docs/known-issues/shared-launch-copies-own-login-over-machine-login.md)).
 
 ### v3.22.0
 

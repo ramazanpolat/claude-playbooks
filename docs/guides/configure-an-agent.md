@@ -1,6 +1,6 @@
 # Configure an agent
 
-A playbook is a Claude Code agent. Since v3.21.0 a playbook file can describe
+A playbook is a Claude Code agent. A playbook file can describe
 all of it: route, plugins, main-thread agent, MCP servers, tool permissions,
 status line, model and skills. Each clause below goes on `ALTER PLAYBOOK`,
 on the command line or in a file, and applying it again changes nothing.

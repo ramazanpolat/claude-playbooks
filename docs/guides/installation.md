@@ -74,7 +74,7 @@ every new shell.
 ## With devbox or Nix
 
 claude-playbooks is a Nix flake, so a [devbox](https://www.jetify.com/devbox)
-project pins it like any other package (v3.18.0 or later):
+project pins it like any other package:
 
 ```bash
 devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v3.27.0#cpb"

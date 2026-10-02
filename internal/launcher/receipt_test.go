@@ -3,7 +3,6 @@ package launcher
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -111,9 +110,8 @@ func TestReceiptRefusesSeparators(t *testing.T) {
 }
 
 // Launcher paths are matched in a normalized form (absolute, directory
-// resolved), persisted absolute, and a legacy attributed line (v3.10.1) is
-// still read by its path.
-func TestReceiptNormalizesPathsAndReadsLegacyLines(t *testing.T) {
+// resolved) and persisted absolute.
+func TestReceiptNormalizesPaths(t *testing.T) {
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	real := filepath.Join(t.TempDir(), "bin")
 	if err := os.MkdirAll(real, 0o755); err != nil {
@@ -148,20 +146,6 @@ func TestReceiptNormalizesPathsAndReadsLegacyLines(t *testing.T) {
 	}
 	if got := Recorded(); len(got) != 1 || !filepath.IsAbs(got[0]) || filepath.Base(got[0]) != "rel" {
 		t.Fatalf("relative path persisted as %v", got)
-	}
-	// a v3.10.1 line with attribution fields is read by its path and rewritten path-only
-	if err := os.WriteFile(ReceiptPath(), []byte("/old/one\t/root\tpb\n/old/two\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := Recorded(); len(got) != 2 || got[0] != "/old/one" || got[1] != "/old/two" {
-		t.Fatalf("legacy lines: %v", got)
-	}
-	if err := record("/old/one"); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(ReceiptPath())
-	if strings.Contains(string(data), "\t") {
-		t.Fatalf("legacy attribution survived a re-record:\n%s", data)
 	}
 }
 
