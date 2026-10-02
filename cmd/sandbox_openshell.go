@@ -770,7 +770,7 @@ func (b *openshellBackend) attach(name string, env []string, tty bool, command s
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	return c.Run()
+	return runAttached(c)
 }
 
 // remove deletes the sandbox and the profiles and providers cpb keeps for

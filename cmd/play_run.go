@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -236,6 +237,13 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 		printPlayCheck(os.Stdout, src, rec, res)
 		return &commandExitError{code: 1}
 	}
+	sb, err := choosePlaySandbox(res)
+	if err != nil {
+		return fmt.Errorf("%v; nothing was written", err)
+	}
+	if sb.Backend == "" {
+		res.Risks = append(res.Risks, play.Risk{Code: play.RiskNoSandbox, Clause: "where it runs", Detail: sb.Note})
+	}
 	userStore := config.ResolvePlaybooksDir()
 	// Installed before the store exists and released after it is gone.
 	guard := newPlayGuard()
@@ -263,7 +271,7 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 		if err := applyRun(&grammar.Stmt{Verb: grammar.Apply, Files: files, Target: name, DryRun: true, Yes: true}, nil); err != nil {
 			return err
 		}
-		fmt.Println("\nNo sandbox yet: this agent runs on your machine, as you.")
+		fmt.Println("\n" + sb.Note)
 		if err := playConfirm(res, interactive); err != nil {
 			return err
 		}
@@ -295,7 +303,7 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 				fmt.Fprintf(os.Stderr, "Warning: could not hand the login back to your machine: %v\n", err)
 			}
 		}()
-		return playSession(guard, marker, name, claudeArgs)
+		return playSession(guard, marker, name, sb.Backend, claudeArgs)
 	})
 }
 
@@ -371,7 +379,7 @@ var errPlayCancelled = errors.New("cancelled; nothing ran, and the throwaway pla
 
 // playSession runs the session under the guard, telling it the session's
 // process, and naming that process in the sweep marker too.
-func playSession(g *playGuard, marker, name string, claudeArgs []string) error {
+func playSession(g *playGuard, marker, name, backend string, claudeArgs []string) error {
 	if g.isCancelled() {
 		return errPlayCancelled
 	}
@@ -381,7 +389,16 @@ func playSession(g *playGuard, marker, name string, claudeArgs []string) error {
 		_ = os.WriteFile(marker, []byte("pid="+strconv.Itoa(os.Getpid())+" child="+strconv.Itoa(p.Pid)+"\n"), 0o600)
 	}
 	defer func() { playSessionRunning, onLaunch = false, nil; g.setChild(nil) }()
-	return runRun(nil, append([]string{name}, claudeArgs...))
+	args := append([]string{name}, claudeArgs...)
+	if backend == "" {
+		return runRun(nil, args)
+	}
+	// The typed confirmations ran before this point: no sandbox exists
+	// until a recipe that moves the endpoint, or asks for a secret, has
+	// been confirmed (the sandbox's proxy injects a key for whatever host
+	// the endpoint names, which is the threat the confirmation guards).
+	defer removeSandbox(backend, sandboxName(name))
+	return runRun(nil, append([]string{"--sandbox=" + backend}, args...))
 }
 
 // playSessionRunning: run is launching a played playbook, whose resume line
@@ -416,4 +433,101 @@ func playSetupFor(name string, res *play.Result, envSets []string, keep map[stri
 		text += fmt.Sprintf("ALTER PLAYBOOK %s USE ENV %s;\n", name, strings.Join(envSets, " "))
 	}
 	return text
+}
+
+var (
+	// playSandboxFlag: "" (not given: auto), "auto", or a backend name.
+	playSandboxFlag string
+	playNoSandbox   bool
+)
+
+// playSandboxAvailable reports whether a backend can run here (a test
+// replaces it): sbx on PATH, or OpenShell's preflight.
+var playSandboxAvailable = func(kind string) error {
+	switch kind {
+	case "sbx":
+		_, err := exec.LookPath("sbx")
+		if err != nil {
+			return errors.New("'sbx' (Docker Sandboxes) is not installed")
+		}
+		return nil
+	case "openshell":
+		_, err := openshellPreflight()
+		return err
+	}
+	return fmt.Errorf("unknown sandbox backend %q", kind)
+}
+
+// playSandbox is where a play runs: a backend, or "" for this machine,
+// with the sentence the preview says.
+type playSandbox struct {
+	Backend string `json:"backend"`
+	Note    string `json:"note"`
+}
+
+// choosePlaySandbox decides where a play runs. The sandbox is the default
+// wherever a backend is available (sbx, or OpenShell where its preflight
+// passes); --no-sandbox opts out, said plainly; a recipe that asks for a
+// sandbox (create-with: SANDBOX) is refused where none is available. A
+// recipe with secret references cannot run sandboxed yet (a sandboxed
+// launch cannot resolve them), so it is refused there too, never quietly
+// run on the host: --no-sandbox runs it on this machine.
+func choosePlaySandbox(res *play.Result) (playSandbox, error) {
+	wants := res.Header.WantsSandbox()
+	if playNoSandbox {
+		if playSandboxFlag != "" {
+			return playSandbox{}, errors.New("--sandbox and --no-sandbox together: pick one")
+		}
+		note := "Sandbox off (--no-sandbox): this agent runs on your machine, as you."
+		if wants {
+			note = "Sandbox off (--no-sandbox), although the recipe asks for one (create-with: SANDBOX): this agent runs on your machine, as you."
+		}
+		return playSandbox{Note: note}, nil
+	}
+	var backend string
+	switch playSandboxFlag {
+	case "", "auto":
+		for _, k := range []string{"sbx", "openshell"} {
+			if playSandboxAvailable(k) == nil {
+				backend = k
+				break
+			}
+		}
+	default:
+		if err := playSandboxAvailable(playSandboxFlag); err != nil {
+			return playSandbox{}, fmt.Errorf("--sandbox=%s: %v", playSandboxFlag, err)
+		}
+		backend = playSandboxFlag
+	}
+	if backend == "" {
+		if wants {
+			return playSandbox{}, errors.New("the recipe asks to run sandboxed (create-with: SANDBOX), and no sandbox is available here (sbx, or OpenShell on Linux): install one, or run it on this machine with --no-sandbox")
+		}
+		return playSandbox{Note: "No sandbox available here (sbx, or OpenShell on Linux): this agent will run on your machine, as you."}, nil
+	}
+	var refs []string
+	for _, r := range res.Risks {
+		if r.Code == play.RiskUsesSecret {
+			refs = append(refs, r.Confirm)
+		}
+	}
+	if len(refs) > 0 {
+		return playSandbox{}, fmt.Errorf("the recipe uses secret references (%s), which a sandboxed launch cannot resolve yet: run it on this machine with --no-sandbox, and the preview will say so", strings.Join(refs, ", "))
+	}
+	return playSandbox{Backend: backend, Note: "Sandboxed (" + backend + "): the agent sees this folder and its own playbook, not your home or ~/.claude; your keys stay outside by default. The sandbox is removed when the session ends."}, nil
+}
+
+// playSandboxDecision is choosePlaySandbox for a plan: a refusal joins the
+// recipe's refusals, and a play that would run on this machine carries the
+// no_sandbox risk.
+func playSandboxDecision(res *play.Result) *playSandbox {
+	sb, err := choosePlaySandbox(res)
+	if err != nil {
+		res.Refused = append(res.Refused, play.Refusal{What: "the sandbox", Reason: err.Error()})
+		return &playSandbox{Note: err.Error()}
+	}
+	if sb.Backend == "" {
+		res.Risks = append(res.Risks, play.Risk{Code: play.RiskNoSandbox, Clause: "where it runs", Detail: sb.Note})
+	}
+	return &sb
 }

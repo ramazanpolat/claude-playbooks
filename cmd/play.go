@@ -32,7 +32,14 @@ var playCmd = &cobra.Command{
 <ref> is a template name (reviewer), an https URL, github:<owner>/<repo>/<path>.cpb@<ref>,
 or a local file (./x.cpb). A played recipe changes nothing on your machine but
 the playbook play makes: no env sets, no DEFAULTS, no plaintext secrets, and
-never your pilot profile.`,
+never your pilot profile.
+
+It runs in a sandbox where one is available (sbx, or OpenShell on Linux), and
+says so when none is; --no-sandbox runs it on this machine, as you. A recipe
+whose header asks for a sandbox (-- create-with: SANDBOX) is refused where none
+is available. A recipe that reads a secret reference cannot run sandboxed
+yet (a sandboxed session cannot resolve references): where a sandbox is
+available it is refused unless you pass --no-sandbox.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		// <ref>, then claude's own arguments after --.
 		at := cmd.ArgsLenAtDash()
@@ -63,6 +70,9 @@ func init() {
 	playCmd.Flags().StringArrayVar(&playTrustEndpoint, "trust-endpoint", nil, "without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
 	playCmd.Flags().StringArrayVar(&playTrustSecret, "trust-secret", nil, "without a terminal: confirm a secret reference; repeatable")
 	playCmd.Flags().StringArrayVar(&playEnvSets, "env", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
+	playCmd.Flags().StringVar(&playSandboxFlag, "sandbox", "", "run sandboxed (the default where a backend is available); =sbx or =openshell picks one")
+	playCmd.Flags().Lookup("sandbox").NoOptDefVal = "auto"
+	playCmd.Flags().BoolVar(&playNoSandbox, "no-sandbox", false, "run on this machine, as you; the preview says so")
 	rootCmd.AddCommand(playCmd)
 }
 
@@ -82,6 +92,8 @@ type playJSON struct {
 	Endpoint string         `json:"endpoint"`
 	Refused  []play.Refusal `json:"refused"`
 	Risks    []play.Risk    `json:"risks"`
+	// Sandbox: where it would run (slice 3); null in --check.
+	Sandbox *playSandbox `json:"sandbox"`
 }
 
 type playHeaderJSON struct {
@@ -333,6 +345,8 @@ func withThrowawayStore(fn func(dir string) error) error {
 func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block *playJSON) error {
 	name := playName(src)
 	block.Playbook = name
+	sb := playSandboxDecision(res)
+	block.Sandbox, block.Refused, block.Risks = sb, res.Refused, res.Risks
 	if len(res.Refused) > 0 {
 		if playJSONF {
 			return printPlayCheckJSON(block)
@@ -355,6 +369,7 @@ func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block 
 			return runPlayApplyJSON(st, block)
 		}
 		printPlayCheck(os.Stdout, src, rec, res)
+		fmt.Println("\n" + sb.Note)
 		fmt.Println("\nThe plan, against a throwaway playbook (nothing is written):")
 		return applyRun(st, nil)
 	})

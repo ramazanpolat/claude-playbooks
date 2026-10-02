@@ -725,7 +725,11 @@ func (b sbxBackend) attach(name string, env []string, tty bool, command string) 
 		args = append(args, "-e", kv)
 	}
 	args = append(args, name, "bash", "-lc", command)
-	return b.run(args...)
+	c := exec.Command(b.bin, args...)
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return runAttached(c)
 }
 
 func (b sbxBackend) remove(name string) error {
