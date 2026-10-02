@@ -94,7 +94,7 @@ if command -v clickhouse >/dev/null 2>&1 || command -v ch >/dev/null 2>&1; then
 else
   echo "skip   select WHERE: no clickhouse on PATH"
 fi
-out=$(cpb sessions); check "sessions: no live sessions in a fresh HOME" "No live Claude Code sessions."
+out=$(cpb SHOW SESSIONS); check "sessions: no live sessions in a fresh HOME" "No live Claude Code sessions."
 
 echo "== install =="
 out=$(cpb --version); check "install: version banner" "claude-playbook version"

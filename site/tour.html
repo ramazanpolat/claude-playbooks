@@ -339,7 +339,7 @@ ALTER PLAYBOOK researcher
     <p class="eyebrow">Sessions &amp; SQL</p>
     <h2>See everything that is running</h2>
     <p class="section-lede">
-      <code class="inline">cpb sessions</code> lists every live Claude Code session, in every
+      <code class="inline">cpb SHOW SESSIONS</code> lists every live Claude Code session, in every
       playbook. <code class="inline">SELECT</code> queries the same state as tables &mdash;
       built in for plain column lists, or through <code class="inline">clickhouse local</code>
       for <code class="inline">WHERE</code>, <code class="inline">ORDER BY</code> and functions.
@@ -347,13 +347,13 @@ ALTER PLAYBOOK researcher
     <div class="term" data-verify="examples/18-sessions, examples/13-select">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v3.27.0, with example 18's stand-in session</div>
+        <div class="term-title">real run, v4 (pre-release), with example 18's stand-in session</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb sessions</span>
+      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb SHOW SESSIONS</span>
 <span class="out">PLAYBOOK  PID     TTY  KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
 --------  ---     ---  ----         ------  ---  ------  -----            -------                               ---
-worker    246892  -    interactive  idle    0s   0s      claude-opus-5-5  0e5c1a2b-0000-4000-8000-000000000001  /home/you/project</span>
+worker    312146  -    interactive  idle    0s   0s      claude-opus-5-5  0e5c1a2b-0000-4000-8000-000000000001  /home/you/project</span>
 <span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"</span>
 <span class="out">NAME        ENVS    SANDBOX
 ----        ----    -------
@@ -371,7 +371,7 @@ glm         ANTHROPIC_BASE_URL
 glm         ANTHROPIC_MODEL
 researcher  CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v3.27.0, testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
+        <span class="verified-tag">verified against v4 (pre-release), testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
       </div>
     </div>
     <p><code class="inline">cpb RESUME</code> starts this folder's latest session, in its own
