@@ -35,4 +35,4 @@ It reads no process's environment, and never changes the files.
 The `.check` fakes a live session with a `sleep` and a session file shaped
 like Claude Code's.
 
-Reference: [Sessions](../../docs/reference/cli-grammar.md#sessions-v3250).
+Reference: [Sessions](../../SPEC.md#show-sessions).

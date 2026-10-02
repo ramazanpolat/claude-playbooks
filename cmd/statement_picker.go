@@ -10,7 +10,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// The model picker (docs/reference/cli-grammar.md, "Model picker"): the
+// The model picker (SPEC.md, "Model picker"): the
 // settings.json key modelPicker = {options: [{model, label, description,
 // behavesAs}], replaceBuiltInOptions}. Rows are keyed by model id; a row no
 // clause names is kept, whatever wrote it, and a key is written only when a

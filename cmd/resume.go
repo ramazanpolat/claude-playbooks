@@ -11,7 +11,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 )
 
-// The resume guard (docs/reference/cli-grammar.md, "Sessions"): cpb run and
+// The resume guard (SPEC.md, "Sessions"): cpb run and
 // the launchers hand --resume and --continue to claude as they are, after
 // refusing a session that is still live in another process. Two processes
 // on one session id is the --continue hazard, and it corrupts the session.

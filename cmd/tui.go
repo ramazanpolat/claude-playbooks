@@ -12,7 +12,7 @@ import (
 
 // tuiCmd is `cpb tui` (v3.25.0): a terminal UI over the grammar. It reads
 // through cpb's own --json outputs, run as subprocesses of this binary,
-// and in v1 changes nothing (docs/reference/cli-grammar.md, "cpb tui").
+// and in v1 changes nothing (SPEC.md, "cpb tui").
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Browse playbooks, sessions and env sets in a terminal UI (read-only)",

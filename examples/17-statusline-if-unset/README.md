@@ -18,4 +18,4 @@ one slot for it.
   goes before `IF UNSET` and applies with it.
 - `SHOW CREATE` writes the status line the playbook has, never the condition.
 
-Reference: [Status line and model](../../docs/reference/cli-grammar.md#status-line-and-model).
+Reference: [Status line and model](../../SPEC.md#status-line-and-model).

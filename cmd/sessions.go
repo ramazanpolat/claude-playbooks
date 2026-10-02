@@ -21,7 +21,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
-// Sessions (docs/reference/cli-grammar.md, "Sessions"): the live Claude
+// Sessions (SPEC.md, "Sessions"): the live Claude
 // Code sessions of cpb's config dirs, SHOW SESSIONS, the SESSIONS table,
 // the resume guard of a launch, and the line printed when it ends.
 //

@@ -17,7 +17,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// Plugins and the agent (docs/reference/cli-grammar.md, "Plugins and the
+// Plugins and the agent (SPEC.md, "Plugins and the
 // agent"). The marketplace and plugin clauses delegate to Claude Code's own
 // CLI, `claude plugin …`, run with CLAUDE_CONFIG_DIR set to the playbook, so
 // its user scope is that playbook: the format of settings.json and the

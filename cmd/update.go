@@ -300,7 +300,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	fmt.Fprintf(w, "Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
 
 	// The overlay can replace skills/ as a whole: put back the skills
-	// statements added (docs/reference/cli-grammar.md, "Skills").
+	// statements added (SPEC.md, "Skills").
 	if updated.Skills != nil {
 		if err := restoreSkills(w, pb.Path, updated.Skills, shipped); err != nil {
 			return fmt.Errorf("%q is updated, but restoring its skills failed: %w (run its ADD SKILL statements again)", name, err)

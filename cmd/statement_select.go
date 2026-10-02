@@ -20,7 +20,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// SELECT (docs/reference/cli-grammar.md, "SELECT"). cpb answers one form
+// SELECT (SPEC.md, "SELECT"). cpb answers one form
 // itself, SELECT <col>[, <col>…] FROM <table>, a strict subset of
 // ClickHouse SQL, so a query means the same on both paths. Anything else is
 // handed to ClickHouse's clickhouse-local, when it is installed: the

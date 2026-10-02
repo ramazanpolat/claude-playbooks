@@ -2,7 +2,7 @@
 
 Since v3.21.0, `cpb SELECT` does this for one table at a time (see
 [example 13](../../examples/13-select/) and the reference's
-[SELECT](../reference/cli-grammar.md#select-v3210)):
+[SELECT](../../SPEC.md#select)):
 
 ```bash
 cpb "SELECT name, envs FROM PLAYBOOKS"                                  # built in
@@ -75,10 +75,10 @@ cpb SHOW PLAYBOOKS --json | ch local --input-format JSONEachRow -q "SELECT * FRO
 ## What to parse
 
 The `--json` objects are for scripts
-([reference, Output](../reference/cli-grammar.md#output)); the release notes
+([reference, Output](../../SPEC.md#output)); the release notes
 name every change to them. Parse them, never the human form.
 
-`cpb SELECT …` does this for you ([reference](../reference/cli-grammar.md#select-v3210)):
+`cpb SELECT …` does this for you ([reference](../../SPEC.md#select)):
 columns alone are answered by cpb itself, and any other query is piped to
 `clickhouse local` the same way, over the same `--json` rows. This page is
 the manual form, for a pipeline of your own.

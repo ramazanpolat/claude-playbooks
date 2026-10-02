@@ -14,7 +14,7 @@ preparing a release, read [Before any release](#before-any-release) first.
 - **Never handle a secret value.** Do not ask the human to paste a token, do
   not write one into a file, a command line or a message. Store secrets by
   reference (`SET … FROM '<ref>'`, see
-  [docs/reference/cli-grammar.md](docs/reference/cli-grammar.md), "Secrets").
+  [SPEC.md](SPEC.md), "Secrets").
 - **Ask the human first** before: `cpb self-uninstall`, `DROP PLAYBOOK`,
   `APPLY … --yes`, `APPLY … TO '<dir>'`, deleting anything under
   `~/.claude-playbooks/`, and any login (`/login`, `claude setup-token`):
@@ -106,7 +106,7 @@ file. Without one it is refused before anything is written.
   value.
 
 The statements and file rules:
-[docs/reference/cli-grammar.md](docs/reference/cli-grammar.md). Worked
+[SPEC.md](SPEC.md). Worked
 examples: [examples/](examples/).
 
 ## Update
@@ -167,7 +167,7 @@ release:
 - [ ] **README.md** says what cpb is, why it exists and how it is used:
       short and precise, with the current grammar in its first example.
 - [ ] **docs/**: the tutorials, the guides for common operations, and the
-      reference ([docs/reference/cli-grammar.md](docs/reference/cli-grammar.md))
+      specification ([SPEC.md](SPEC.md))
       are current. Nothing built is still marked **planned**.
 - [ ] **examples/** covers every new clause, from the smallest use to the
       full-blown one, each directory with its own README.md, and all of them

@@ -207,7 +207,7 @@ func TestNonIsolatedReceivesToken(t *testing.T) {
 	})
 }
 
-// The isolated_login contract (SPEC-v4.md) exists so two accounts can run side by
+// The isolated_login contract (SPEC.md) exists so two accounts can run side by
 // side. A leaked global token silently defeats it: both playbooks authenticate
 // as the same account while appearing isolated.
 //

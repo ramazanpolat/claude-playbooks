@@ -20,7 +20,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// MCP servers (docs/reference/cli-grammar.md, "An agent's configuration"):
+// MCP servers (SPEC.md, "An agent's configuration"):
 // ADD / DROP MCP SERVER run Claude Code's own `claude mcp add-json` and
 // `claude mcp remove`, user scope, with CLAUDE_CONFIG_DIR set to the
 // playbook. A secret never enters Claude's config: the server gets a

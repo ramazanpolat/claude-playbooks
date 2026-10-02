@@ -1,7 +1,7 @@
 # Design decisions
 
 The decisions behind cpb's grammar, with when they were made. The
-[reference](../reference/cli-grammar.md) states the rules; this page keeps the
+[reference](../../SPEC.md) states the rules; this page keeps the
 record of why they are the rules. Newest last.
 
 | Date | Decision | Where it lives |

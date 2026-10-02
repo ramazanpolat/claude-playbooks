@@ -237,8 +237,8 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Editing the rc files does not reach shells that are already open —
-	// their loaded completion functions go stale only on reload (SPEC
-	// self-uninstall step 7).
+	// their loaded completion functions go stale only on reload (SPEC.md,
+	// cpb self-uninstall, step 6).
 	if completionLinesRemoved > 0 {
 		fmt.Println()
 		fmt.Println("Completion lines were removed; open a new shell (or re-source your rc file) to drop the stale completion functions.")

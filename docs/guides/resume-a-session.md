@@ -71,4 +71,4 @@ cpb's: it opens the session in the playbook, where the transcript lives.
   cpb reads them defensively. If a Claude Code version stops writing them,
   `SHOW SESSIONS` shows nothing rather than guessing.
 
-Reference: [Sessions](../reference/cli-grammar.md#sessions-v3250).
+Reference: [Sessions](../../SPEC.md#show-sessions).

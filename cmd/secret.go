@@ -16,7 +16,7 @@ import (
 )
 
 // Secret references are resolved by a helper the pilot configures, git
-// credential.helper style (docs/cli-grammar.md, "Secrets"). cpb owns the
+// credential.helper style (SPEC.md, "Secrets"). cpb owns the
 // interface and never names or discovers a helper:
 //
 //	<helper> --check KEY=REF              when a reference is written

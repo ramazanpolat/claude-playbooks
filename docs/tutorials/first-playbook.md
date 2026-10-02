@@ -49,7 +49,7 @@ cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token'
 cpb stores the reference, checks it with the helper, and resolves it only at
 launch. Any helper with the same interface works, a wrapper around your
 keychain or password manager included
-([Secrets](../reference/cli-grammar.md#secrets-optional)).
+([Secrets](../../SPEC.md#secrets-optional)).
 
 ## 3. The file
 
@@ -77,4 +77,4 @@ it again.
 
 - [Stack layers into an agent](stacked-agent.md): plugins, the agent, `INCLUDE`.
 - [Examples](../../examples/): one small file per idea.
-- [The grammar](../reference/cli-grammar.md): every statement and rule.
+- [The grammar](../../SPEC.md): every statement and rule.

@@ -51,7 +51,7 @@ func (r ExecRunner) Run(args ...string) ([]byte, error) {
 }
 
 // The shapes below are the subset of cpb's --json objects the TUI shows
-// (docs/reference/cli-grammar.md, "Output" and "Sessions"). Fields it does
+// (SPEC.md, "Output" and "Sessions"). Fields it does
 // not show are not decoded.
 
 type Var struct {

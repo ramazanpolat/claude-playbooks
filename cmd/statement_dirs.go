@@ -20,7 +20,7 @@ import (
 )
 
 // A recipe applied TO a plain Claude Code config directory, such as
-// ~/.claude (docs/reference/cli-grammar.md, "TO a plain config directory").
+// ~/.claude (SPEC.md, "TO a plain config directory").
 // Nothing of cpb runs at that directory's launches, so only Claude Code's
 // own configuration applies: plugins, the agent, MCP servers without
 // references, tool permissions, the status line, the model, skills, and

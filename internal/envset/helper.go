@@ -10,7 +10,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// The secret helper resolves secret references (docs/cli-grammar.md,
+// The secret helper resolves secret references (SPEC.md,
 // "Secrets"): cpb execs `<helper> --check KEY=REF` when a reference is
 // written and `<helper> K=REF … -- claude <args>` at launch. cpb defines
 // the interface and never names or discovers a helper; the pilot configures

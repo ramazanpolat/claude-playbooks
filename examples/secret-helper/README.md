@@ -19,7 +19,7 @@ cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token'
 ```
 
 The interface, which any helper implements
-([reference, Secrets](../../docs/reference/cli-grammar.md#secrets-optional)):
+([reference, Secrets](../../SPEC.md#secrets-optional)):
 
 - `<helper> --check KEY=REF …`: cpb runs it when a statement writes a
   reference. Exit 0 means every reference resolves; anything else fails the

@@ -38,4 +38,4 @@ through `APPLY --dry-run --json` before applying.
 The `.check` cannot open a terminal in CI. It checks the refusal off a
 terminal, and each screen's statement against this recipe.
 
-Reference: [cpb tui](../../docs/reference/cli-grammar.md#cpb-tui-v3250).
+Reference: [cpb tui](../../SPEC.md#cpb-tui).
