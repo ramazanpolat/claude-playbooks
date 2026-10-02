@@ -91,7 +91,7 @@ cpb APPLY playbook.cpb                              # validates everything first
 cpb APPLY base.cpb machine.cpb --yes                # several files; --yes confirms their DROP PLAYBOOKs
 ```
 
-For a program, `cpb APPLY <files> [TO <target>] --dry-run --json` prints the plan as one JSON object: the verdict per statement with its resolved target and `file:line`, the exact `claude` commands a real run would make (references, never values), what it would delete and how big it is, and stable warning codes. Exit 0 means planned, 1 refused by the files, 2 a usage error. The schema is in the [CLI grammar](../reference/cli-grammar.md#apply---dry-run---json).
+For a program, `cpb APPLY <files> [TO <target>] --dry-run --json` prints the plan as one JSON object: the verdict per statement with its resolved target and `file:line`, the exact `claude` commands a real run would make (references, never values), what it would delete and how big it is, and warning codes. Exit 0 means planned, 1 refused by the files, 2 a usage error. The schema is in the [CLI grammar](../reference/cli-grammar.md#apply---dry-run---json).
 
 `APPLY` writes nothing when any statement fails validation (syntax, secret references, a `DROP PLAYBOOK` without `--yes`). It then runs the statements in order and stops at the first failure, reporting what was applied per file; there is no rollback, and running the fixed file again is the recovery. The summary line is `Applied <files>: N created, N changed, N unchanged, N dropped`. `SHOW CREATE` without `--skip-secrets` exits non-zero when it had to withhold a credential-looking literal.
 

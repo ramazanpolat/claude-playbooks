@@ -16,7 +16,7 @@ always wins.
 
 This guide is the manual form underneath it, for what `SELECT` does not do:
 joining two reads, or feeding ClickHouse settings of your own. Every read has
-a stable `--json` form, and ClickHouse's `clickhouse local` (`ch local`) runs
+a `--json` form, and ClickHouse's `clickhouse local` (`ch local`) runs
 full SQL over it without a server: pipe one into the other.
 
 ```bash
@@ -72,12 +72,11 @@ cpb SHOW PLAYBOOKS --json | ch local --input-format JSONEachRow -q "SELECT * FRO
   | ch client -q "INSERT INTO playbooks FORMAT JSONEachRow"
 ```
 
-## What you can rely on
+## What to parse
 
-The `--json` objects are the contract
-([reference, Output](../reference/cli-grammar.md#output)): fields may be
-added, and a field never changes meaning within a major version. Parse
-them, never the human form.
+The `--json` objects are for scripts
+([reference, Output](../reference/cli-grammar.md#output)); the release notes
+name every change to them. Parse them, never the human form.
 
 `cpb SELECT …` does this for you ([reference](../reference/cli-grammar.md#select-v3210)):
 columns alone are answered by cpb itself, and any other query is piped to

@@ -11,6 +11,6 @@ if grep -q '20128' "$HOME/warn.err"; then echo "the warning carries the URL"; ex
 # ... once: the same statement again changes nothing and says nothing.
 cpb "ALTER PLAYBOOK plain USE ENV router" 2> "$HOME/again.err"
 if [ -s "$HOME/again.err" ]; then cat "$HOME/again.err"; exit 1; fi
-# In a plan, the warning has a stable code.
+# In a plan, the warning has a code.
 printf 'CREATE PLAYBOOK plain2 NO ALIAS;\nALTER PLAYBOOK plain2 USE ENV router;\n' > "$HOME/plan.cpb"
 cpb APPLY "$HOME/plan.cpb" --dry-run --json | grep -q '"code": "pilot_profile_third_party_endpoint"'
