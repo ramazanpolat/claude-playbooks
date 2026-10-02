@@ -22,7 +22,8 @@ grep -q "Sandbox off (--no-sandbox)" "$HOME/run.out"
 out=$(cpb SHOW PLAYBOOKS --json)
 if printf '%s\n' "$out" | grep -q '"play-reviewer-'; then exit 1; fi
 # --keep: a playbook of your own, with the record; --update with the same bytes changes nothing.
-w=$(mktemp -d) && cp reviewer.cpb "$w/reviewer.cpb"
+w=$(mktemp -d)
+cp reviewer.cpb "$w/reviewer.cpb"
 out=$(cpb play --keep --yes "$w/reviewer.cpb")
 printf '%s\n' "$out" | grep -q "Kept as reviewer"
 out=$(cpb SHOW PLAYBOOK reviewer)
