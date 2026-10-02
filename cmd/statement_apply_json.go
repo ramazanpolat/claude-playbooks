@@ -66,23 +66,26 @@ const (
 	// An ADD MARKETPLACE git source whose #ref looks like a commit, which
 	// Claude Code cannot clone (v3.27.0).
 	warnMarketplaceRefNotCloneable = "marketplace_ref_not_cloneable"
+	// SET ISOLATED LOGIN recorded, but the link to the shared login could
+	// not be removed at once; the next launch removes it.
+	warnSharedLoginLinkKept = "shared_login_link_kept"
 )
 
 func (w applyWarning) String() string { return fmt.Sprintf("%s:%d: %s", w.shown, w.Line, w.Message) }
 
 type applyStmtJSON struct {
-	File      string        `json:"file"`
-	Line      int           `json:"line"`
-	Statement string        `json:"statement"`
-	Verb      string        `json:"verb"`
-	Object    string        `json:"object"`
-	Target    *targetJSON   `json:"target"`
-	Recipe    bool          `json:"recipe"`
-	Implicit  bool          `json:"implicit"`
-	Verdict   string        `json:"verdict"`
-	Reason    *string       `json:"reason"`
-	Warning   *applyWarning `json:"warning"`
-	Actions   []planAction  `json:"actions"`
+	File      string         `json:"file"`
+	Line      int            `json:"line"`
+	Statement string         `json:"statement"`
+	Verb      string         `json:"verb"`
+	Object    string         `json:"object"`
+	Target    *targetJSON    `json:"target"`
+	Recipe    bool           `json:"recipe"`
+	Implicit  bool           `json:"implicit"`
+	Verdict   string         `json:"verdict"`
+	Reason    *string        `json:"reason"`
+	Warnings  []applyWarning `json:"warnings"`
+	Actions   []planAction   `json:"actions"`
 }
 
 type applySummary struct {
@@ -304,9 +307,7 @@ func printApplyReport(rep *applyReport, code int) error {
 	rep.OK = code == 0
 	rep.Summary.Warnings = len(rep.Warnings)
 	for _, s := range rep.Statements {
-		if s.Warning != nil {
-			rep.Summary.Warnings++
-		}
+		rep.Summary.Warnings += len(s.Warnings)
 	}
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil { // cannot happen with these types; still one JSON object

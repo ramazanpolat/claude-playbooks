@@ -215,11 +215,11 @@ func TestExplainPlaybook(t *testing.T) {
 		got[x.Key] = val + " <- " + strings.TrimSpace(x.Layer.Kind+" "+x.Layer.Name)
 	}
 	for k, want := range map[string]string{
-		"FROM_BASE":           "1 <- DEFAULTS base",
-		"MODEL":               "glm <- ENV glm",
-		"HTTP_PROXY":          "(blocked) <- PLAYBOOK",
-		"API_KEY":             "(redacted) <- PLAYBOOK",
-		"MAX_THINKING_TOKENS": "8000 <- PLAYBOOK",
+		"FROM_BASE":           "1 <- defaults base",
+		"MODEL":               "glm <- env glm",
+		"HTTP_PROXY":          "(blocked) <- playbook",
+		"API_KEY":             "(redacted) <- playbook",
+		"MAX_THINKING_TOKENS": "8000 <- playbook",
 	} {
 		if got[k] != want {
 			t.Errorf("%s: got %q, want %q", k, got[k], want)

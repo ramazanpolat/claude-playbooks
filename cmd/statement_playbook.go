@@ -84,8 +84,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 				if have == "" {
 					have = "no recorded source"
 				}
-				r.warning = fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want)
-				r.warningCode = warnSourceDrift
+				r.warn(warnSourceDrift, fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want))
 			}
 		}
 		return nil

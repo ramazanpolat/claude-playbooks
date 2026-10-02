@@ -120,7 +120,7 @@ func TestIsolatedLaunchPurgesStaleIdentity(t *testing.T) {
 	writeState(t, dir, identityFixture)
 	PrepareLaunchEnv(dir)
 	if got := StaleIdentityState(dir); len(got) != len(identityStateKeys) {
-		t.Fatalf("own-token isolated playbook lost state: %v", got)
+		t.Fatalf("playbook-token isolated playbook lost state: %v", got)
 	}
 
 	// 4. not isolated: untouched by this path
@@ -153,7 +153,7 @@ func TestInspectReportsStaleIdentity(t *testing.T) {
 	writeManifest(t, dir, "isolated_login = true\n")
 	writeState(t, dir, identityFixture)
 	r := Inspect("iso", dir, time.Now())
-	if r.Mode != ModeIsolated || len(r.StaleIdentity) != len(identityStateKeys) {
+	if r.Mode != ModeIsolatedLogin || len(r.StaleIdentity) != len(identityStateKeys) {
 		t.Fatalf("mode=%s stale=%v", r.Mode, r.StaleIdentity)
 	}
 	if note := r.NeedsAttention(); note != "no login; stale account state, purged at launch" {

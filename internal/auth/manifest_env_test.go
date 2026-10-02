@@ -427,7 +427,7 @@ func TestOwnTokenDropsGlobalPlanDescriptors(t *testing.T) {
 	}
 	for _, key := range []string{SubscriptionTypeEnv, RateLimitTierEnv} {
 		if v, present := envValue(t, env, key); present {
-			t.Fatalf("%s=%q leaked into an own-token launch", key, v)
+			t.Fatalf("%s=%q leaked into a playbook-token launch", key, v)
 		}
 	}
 
@@ -527,8 +527,8 @@ func TestRegistryDefaultProfileAppliesToEveryLaunch(t *testing.T) {
 	}
 
 	// Inspect sees the default too.
-	if r := Inspect("plain", plain, time.Now()); r.Mode != ModeOwnLogin {
-		t.Fatalf("inspect mode = %s, want own-login from the default's unset", r.Mode)
+	if r := Inspect("plain", plain, time.Now()); r.Mode != ModeSharedLogin || !r.TokenBlocked {
+		t.Fatalf("inspect mode = %s (token blocked %v), want shared-login, token blocked by the default's block", r.Mode, r.TokenBlocked)
 	}
 }
 

@@ -270,8 +270,8 @@ ALTER PLAYBOOK <name> UNSET ISOLATED LOGIN
   where a `/login` must not land in the machine's shared store. In a shared
   playbook, `/login` writes through the link.
 - **`SET ISOLATED LOGIN`** records `isolated_login = true` and removes the link
-  to the shared store at once, so `cpb auth status` reports `isolated`
-  straight away. A `.credentials.json` that is a file, the playbook's own
+  to the shared store at once, so `cpb auth status` reports
+  `isolated-login` straight away. A `.credentials.json` that is a file, the playbook's own
   login, is kept.
 - **`UNSET ISOLATED LOGIN`** removes it. The next launch links the shared
   store again. It is refused in two cases, each with its reason:
@@ -283,9 +283,10 @@ ALTER PLAYBOOK <name> UNSET ISOLATED LOGIN
     was copied over the machine's login in `~/.claude`. The same account's
     login is copied over the machine's, since it is newer. Run `/logout` in
     it first.
-- **Not "own login".** `cpb auth status` already reports `own-login` for
-  something else: a playbook that blocks the machine token and uses the
-  shared stored login. An isolated playbook is reported as `isolated`.
+- **Not "own login".** A playbook that blocks the machine's token and uses
+  the shared stored login is `shared-login` with `token_blocked: true` in
+  `cpb auth status --json` (`shared-login (token blocked)` in the table). An
+  isolated playbook is `isolated-login`.
 - **Refusals.** It does not apply to `LINK`, where the manifest is the
   target's, or to a plain config directory, which has no manifest.
 - **Reads.** `SHOW` prints `Login: isolated (shares nothing with ~/.claude)`,
@@ -540,7 +541,7 @@ planned as empty.
   "statements": [
     {"file": "/abs/main.cpb", "line": 3, "statement": "ALTER PLAYBOOK fresh",
      "verb": "ALTER", "object": "PLAYBOOK", "target": {"kind": "playbook", "name": "fresh"},
-     "recipe": true, "implicit": false, "verdict": "changed", "reason": null, "warning": null,
+     "recipe": true, "implicit": false, "verdict": "changed", "reason": null, "warnings": [],
      "actions": [
        {"type": "command", "argv": ["claude", "plugin", "marketplace", "add", "/abs/mkt", "--scope", "user"],
         "env": {"CLAUDE_CONFIG_DIR": "/abs/.claude-playbooks/fresh"}, "network": false}
@@ -572,7 +573,7 @@ planned as empty.
   | `write` | `path` | TO a plain directory: its `settings.json`. |
   | `delete` | `what` (`playbook` or `skill`), `path`, `bytes` | what a real run removes, with its size on disk. Symlinks are not followed. A replaced skill is a `delete` then a `skill`. |
 
-- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs), and from v3.27.0 `marketplace_ref_not_cloneable` (an `ADD MARKETPLACE` git source whose `#<ref>` looks like a commit, 7 to 40 hex characters, which Claude Code will not clone; see "Plugins and the agent"). A warning is `{"code", "file", "line", "message"}`. `summary.warnings` counts the file warnings and the statement warnings.
+- **Warning codes:** `use_playbook_overridden` (TO ignores a file's `USE PLAYBOOK`), `source_drift` (an existing playbook's recorded source differs), from v3.27.0 `marketplace_ref_not_cloneable` (an `ADD MARKETPLACE` git source whose `#<ref>` looks like a commit, 7 to 40 hex characters, which Claude Code will not clone; see "Plugins and the agent"), and from v4.0.0 `shared_login_link_kept` (`SET ISOLATED LOGIN` is recorded, but the link to the shared login could not be removed at once; the next launch removes it). A warning is `{"code", "file", "line", "message"}`. The top-level `warnings` are the files' own; each statement's `warnings` lists every warning it raised, one entry each. `summary.warnings` counts them all.
 - **No secret value** appears anywhere: references stay references, and a literal credential a file sets is not in the plan.
 
 **Exit codes:**
@@ -719,11 +720,11 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 
 ```
 {"playbook": "work",
- "vars": [{<variable>, "layer": {"kind": "ENV", "name": "router"}}, ...],
+ "vars": [{<variable>, "layer": {"kind": "env", "name": "router"}}, ...],
  "secret_helper": {"command": "...", "from": "setting"} | null}
 ```
 
-`layer.kind` is `DEFAULTS` (with `name` the env set), `ENV` or `PLAYBOOK`.
+`layer.kind` is `defaults` (with `name` the env set), `env` or `playbook`.
 
 ## SELECT (v3.21.0)
 

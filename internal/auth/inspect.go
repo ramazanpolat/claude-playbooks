@@ -18,12 +18,11 @@ import (
 type Mode string
 
 const (
-	ModeIsolated    Mode = "isolated"     // isolated_login: own store, shares nothing
-	ModeToken       Mode = "token"        // machine-global long-lived token injected
-	ModeOwnToken    Mode = "own-token"    // a token the manifest or a profile sets
-	ModeOwnLogin    Mode = "own-login"    // token unset for this playbook: stored login
-	ModeSharedLogin Mode = "shared-login" // no token anywhere: stored login, shared store
-	ModeError       Mode = "error"        // the launch would be refused (profile error)
+	ModeIsolatedLogin Mode = "isolated-login" // isolated_login: own store, shares nothing
+	ModeToken         Mode = "token"          // machine-global long-lived token injected
+	ModePlaybookToken Mode = "playbook-token" // a token the manifest or an env set sets
+	ModeSharedLogin   Mode = "shared-login"   // stored login, shared store (see TokenBlocked)
+	ModeError         Mode = "error"          // the launch would be refused (env set error)
 )
 
 // StoreKind describes what sits at <configDir>/.credentials.json.
@@ -44,17 +43,23 @@ const daemonRefreshLead = 4 * time.Minute
 
 // Report is the read-only authentication state of one config directory.
 type Report struct {
-	Name      string    `json:"name"`
-	Dir       string    `json:"dir"`
-	Mode      Mode      `json:"mode"`
-	ModeError string    `json:"mode_error,omitempty"`
-	Store     StoreKind `json:"store"`
+	Name      string `json:"name"`
+	Dir       string `json:"dir"`
+	Mode      Mode   `json:"mode"`
+	ModeError string `json:"mode_error,omitempty"`
+	// TokenBlocked is set in shared-login when the playbook blocks the
+	// machine's token (BLOCK CLAUDE_CODE_OAUTH_TOKEN, or SET it empty), so
+	// a launch uses the stored login even where a token is active. Never
+	// set in another mode: an isolated launch never takes the machine's
+	// token, and a playbook token replaces it.
+	TokenBlocked bool      `json:"token_blocked"`
+	Store        StoreKind `json:"store"`
 	// StoreTarget is the symlink target when Store is StoreSymlink.
 	StoreTarget string `json:"store_target,omitempty"`
-	// Isolated is true under isolated_login, whatever the mode: an isolated
-	// playbook may still authenticate by an own token (own-token) or by its
-	// own stored login (isolated).
-	Isolated bool `json:"isolated"`
+	// IsolatedLogin is true under isolated_login, whatever the mode: an
+	// isolated playbook may still authenticate by a token of its own
+	// (playbook-token) or by its own stored login (isolated-login).
+	IsolatedLogin bool `json:"isolated_login"`
 	// StaleIdentity lists the Anthropic account state (oauthAccount, cached
 	// feature flags) an isolated playbook with no login of its own still
 	// carries from a non-isolated past; the next launch removes it. Empty
@@ -88,11 +93,11 @@ func (r Report) MarshalJSON() ([]byte, error) {
 		DaemonSince *time.Time `json:"daemon_since,omitempty"`
 	}{plain: plain(r)}
 	if !r.ExpiresAt.IsZero() {
-		t := r.ExpiresAt
+		t := r.ExpiresAt.UTC()
 		out.ExpiresAt = &t
 	}
 	if !r.DaemonSince.IsZero() {
-		t := r.DaemonSince
+		t := r.DaemonSince.UTC()
 		out.DaemonSince = &t
 	}
 	return json.Marshal(out)
@@ -130,7 +135,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		// Mode: the same decision PrepareLaunchEnv makes, minus its side
 		// effects. Isolation is a manifest property and is reported even
 		// when profile resolution fails.
-		r.Isolated = isAuthIsolated(configDir)
+		r.IsolatedLogin = isAuthIsolated(configDir)
 		var menv *manifest.Env
 		if m, _ := manifest.Nearest(configDir); m != nil {
 			var err error
@@ -155,15 +160,15 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			case setsToken && manifestToken(menv) != "":
 				// Honoured on the isolated path too: PrepareLaunchEnv injects
 				// it and quarantines the stored grant exactly as elsewhere.
-				r.Mode = ModeOwnToken
-			case r.Isolated:
-				r.Mode = ModeIsolated
+				r.Mode = ModePlaybookToken
+			case r.IsolatedLogin:
+				r.Mode = ModeIsolatedLogin
 			case menv.Blocks(OAuthTokenEnv):
-				r.Mode = ModeOwnLogin
+				r.Mode, r.TokenBlocked = ModeSharedLogin, true
 			case setsToken:
 				// Set to an empty value: resolveToken treats that as
 				// inactive, so the launch takes the stored-login path.
-				r.Mode = ModeOwnLogin
+				r.Mode, r.TokenBlocked = ModeSharedLogin, true
 			default:
 				if _, active := TokenActive(); active {
 					r.Mode = ModeToken
@@ -211,7 +216,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	// through that link does not count; a regular store must be KNOWN to
 	// hold no grant, since the launch leaves state alone when it cannot
 	// tell (an unreadable or malformed store may hold a login).
-	if r.Isolated && r.Mode == ModeIsolated {
+	if r.IsolatedLogin && r.Mode == ModeIsolatedLogin {
 		pending := r.Store == StoreSymlink
 		if !pending {
 			if absent, err := storeGrantAbsent(store); err == nil && absent {
@@ -245,7 +250,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			// An isolated playbook's symlinked store is the SHARED login,
 			// detached at launch: a marker about it is not this playbook's
 			// failure to authenticate.
-			sharedDetached := r.Isolated && r.Store == StoreSymlink
+			sharedDetached := r.IsolatedLogin && r.Store == StoreSymlink
 			if d.Status == "auth_required" && r.usesStoredLogin() && r.HasGrant && !sharedDetached && !r.ExpiresAt.IsZero() && !r.DaemonSince.IsZero() {
 				refreshAt := r.ExpiresAt.Add(-daemonRefreshLead)
 				r.ReauthRequired = !r.DaemonSince.Before(refreshAt)
@@ -258,7 +263,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 // usesStoredLogin reports whether the launch authenticates from the stored
 // grant (as opposed to an injected token).
 func (r Report) usesStoredLogin() bool {
-	return r.Mode == ModeOwnLogin || r.Mode == ModeSharedLogin || r.Mode == ModeIsolated
+	return r.Mode == ModeSharedLogin || r.Mode == ModeIsolatedLogin
 }
 
 // NeedsAttention summarises the report as one phrase, "" when all is well.

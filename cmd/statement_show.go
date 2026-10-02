@@ -643,14 +643,15 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	for _, v := range vars {
 		shown := strings.TrimPrefix(humanVar(v, values[v.Key]), v.Key)
 		shown = strings.TrimPrefix(strings.TrimPrefix(shown, "="), " ")
-		from := v.Layer.Kind
+		// The table names a layer as the statements do.
+		var from string
 		switch v.Layer.Kind {
 		case envset.LayerEnv:
-			from += " " + v.Layer.Name
+			from = "ENV " + v.Layer.Name
 		case envset.LayerDefaults:
-			from += " (ENV " + v.Layer.Name + ")"
+			from = "DEFAULTS (ENV " + v.Layer.Name + ")"
 		case envset.LayerPlaybook:
-			from += " " + pb.Name
+			from = "PLAYBOOK " + pb.Name
 		}
 		t.add(v.Key, shown, from)
 	}
