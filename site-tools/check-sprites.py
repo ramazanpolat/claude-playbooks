@@ -23,14 +23,18 @@ def main():
     site = Path(ap.parse_args().site)
     page = (site / "index.html").read_text(encoding="utf-8")
     js = {f.name: f.read_text(encoding="utf-8") for f in site.glob("*.js") if not f.name.startswith(".")}
-    symbols = set(re.findall(r'<symbol id="([^"]+)"', page))
+    sprite = (REPO / "site-tools" / "sprite.html").read_text(encoding="utf-8")
+    symbols = set(re.findall(r'<symbol id="([^"]+)"', sprite))
     wanted = {}  # id -> where
 
     def want(i, where):
         wanted.setdefault(i, where)
 
-    for i in re.findall(r'<use href="#([^"]+)"', page):
-        want(i, "index.html")
+    for html in sorted(site.glob("*.html")):
+        text = html.read_text(encoding="utf-8")
+        text = re.sub(r"<!-- sprite:start -->.*?<!-- sprite:end -->", "", text, flags=re.S)
+        for i in re.findall(r'<use href="#([^"]+)"', text):
+            want(i, html.name)
     for name, text in js.items():
         for i in re.findall(r'<use href="#([a-z0-9-]+)"', text):
             want(i, name)
@@ -58,7 +62,7 @@ def main():
     missing = {i: w for i, w in wanted.items() if i not in symbols}
     if missing:
         for i, w in sorted(missing.items()):
-            print(f"FAIL  no <symbol id=\"{i}\"> in index.html (used by {w})", file=sys.stderr)
+            print(f"FAIL  no <symbol id=\"{i}\"> in site-tools/sprite.html (used by {w})", file=sys.stderr)
         sys.exit(1)
     print(f"ok    sprites: {len(wanted)} marks used, all {len(symbols)} symbols resolve")
 

@@ -601,6 +601,22 @@ footer a:hover { color: var(--fg); text-decoration: underline; }
 .rt-note { margin: 1rem 0 0; color: var(--fg-dim); font-size: 0.92rem; max-width: 62rem; }
 footer .legal { display: block; margin-top: 0.4rem; max-width: 46rem; line-height: 1.5; }
 
+/* ---------- templates teaser ---------- */
+.tpl-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.8rem; }
+.tmini {
+  display: flex; align-items: center; gap: 0.75rem; min-width: 0; text-decoration: none; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: 12px; padding: 0.8rem 0.9rem;
+  transition: transform 0.25s, border-color 0.25s, background 0.25s;
+}
+.tmini:hover { transform: translateY(-3px); border-color: var(--c); background: var(--surface-2); text-decoration: none; }
+.tmini b { display: block; font-family: var(--font-mono); font-size: 0.92rem; line-height: 1.25; }
+.tmini small { display: block; color: var(--c-text); font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.35; margin-top: 0.15rem; }
+.tmini .plogo { width: 2.3rem; height: 2.3rem; }
+.tmini.own { --c: var(--line-strong); --c-text: var(--brand); border-style: dashed; border-top-width: 1px; background: transparent; }
+.tmini.own .plogo { background: transparent; outline: 1.5px dashed var(--brand); outline-offset: -1.5px; color: var(--brand); font-size: 1.3rem; font-weight: 400; }
+.tmini.own:hover { border-color: var(--brand); background: var(--surface); }
+.tpl-cta { margin-top: 1.4rem; }
+
 /* ---------- narrower screens: no hover, no fan, tabs become a row ---------- */
 @media (max-width: 1000px) {
   .hero { grid-template-columns: 1fr; }
@@ -610,7 +626,7 @@ footer .legal { display: block; margin-top: 0.4rem; max-width: 46rem; line-heigh
   .rt { grid-template-columns: minmax(0, 1.25fr) minmax(2.5rem, 0.25fr) minmax(0, 1fr); }
   .stage { --rail: 9.6rem; padding: 1rem var(--rail) 3rem 3.4rem; }
   .sheet { grid-template-columns: 15rem minmax(0, 1fr); }
-  .layer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layer-grid, .tpl-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stage.fan .nb, .stage:focus-within .nb { --sx-step: 20px; --sy-step: 12px; }
 }
 @media (max-width: 860px) {
@@ -646,7 +662,7 @@ footer .legal { display: block; margin-top: 0.4rem; max-width: 46rem; line-heigh
   .agent { width: 100%; flex-wrap: wrap; }
   .agent .reach { display: flex; flex-wrap: wrap; gap: 0.3rem; width: 100%; padding-top: 0.2rem; }
   .agent:hover { transform: none; }
-  .layer-grid { grid-template-columns: 1fr; }
+  .layer-grid, .tpl-row { grid-template-columns: 1fr; }
   .hint { display: none; }
   .hero { padding-top: 2.4rem; }
 }

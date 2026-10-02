@@ -7,7 +7,12 @@
 #     `cpb start --delete`, checks the launch commands in runtimes.json against
 #     this cpb's flags and backends, and checks that every card's data is
 #     exactly what cpb reports (site-tools/showcase-data.py); check-sprites.py
-#     checks the logos the page asks for exist.
+#     checks the logos the page asks for exist; sync-sprite.py checks every
+#     page carries the same sprite;
+#   - site/templates.html: the customizer's own logic (unit tests, under Node),
+#     that site/p/ is what it renders, and a large set of option combinations
+#     planned and applied with this cpb (check-templates.py). The template
+#     files themselves are checked by the Site templates workflow.
 # If a statement stops parsing or an output changes shape, this fails loudly
 # instead of letting the site drift from the grammar.
 #
@@ -106,8 +111,24 @@ if ! python3 "$here/showcase-data.py" --cpb "$cpb" --check; then
   fail=1
 fi
 
-echo "== home: every logo the page asks for is in its sprite =="
+echo "== sprite: every page carries the same one, and every logo asked for is in it =="
+if ! python3 "$here/sync-sprite.py" --check; then
+  fail=1
+fi
 if ! python3 "$here/check-sprites.py"; then
+  fail=1
+fi
+
+echo "== templates: the customizer's logic =="
+if ! node "$here/test-customizer.js"; then
+  fail=1
+fi
+
+echo "== templates: site/p/ is what the customizer renders, and its output applies with this cpb =="
+# The page and this check share site/customizer-core.js. It checks site/p/ is
+# what the code renders, then dry-runs and applies the selections in throwaway
+# HOMEs (its own).
+if ! python3 "$here/check-templates.py" --cpb "$cpb"; then
   fail=1
 fi
 

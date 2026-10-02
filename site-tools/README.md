@@ -14,6 +14,10 @@ files are not served.
   (`showcase-data`).
 - `site/tour.html` is the tour: every command with the output it really
   printed.
+- `site/templates.html` is the template gallery and customizer
+  (`templates.js`). The templates are plain recipes, `site/p/<id>.cpb`, served
+  at `/p/<id>.cpb`, listed in `site/p/index.txt`. The customizer writes a `.cpb`
+  file live from a template and a few switches.
 
 ## Hosting
 
@@ -24,6 +28,8 @@ The site is served by Cloudflare Pages, straight from `site/` on `main`
 - A merge to `main` that touches `site/` deploys on its own. No deploy
   workflow lives in this repo.
 - A pull request that touches `site/` gets a Cloudflare preview link.
+- `site/_headers` serves `/p/*` (the template files) as `text/plain`, so a
+  browser shows one instead of downloading it, with `nosniff` and a short cache.
 
 ## Keeping it honest
 
@@ -53,6 +59,30 @@ TUI goldens.
   playbooks and runtimes are hand-drawn in the same sprite. `check-sprites.py`
   fails if the page, its scripts or the data ask for a mark the sprite lacks,
   including a mark for each playbook in the showcase.
+
+- **The sprite.** One inline sprite (`sprite.html`) is copied into every page
+  between `<!-- sprite:start -->` and `<!-- sprite:end -->`;
+  `sync-sprite.py --write` copies it, `--check` (CI) fails if a page differs.
+  Edit the sprite, never one page's copy. `brand-icons.py` writes the tools'
+  marks into it.
+- **The templates.** `site/customizer-core.js` is the one implementation of
+  the catalog (MCP servers, skills, plugins, models), of the templates and of
+  the `.cpb` text they render. The page loads it, and so does CI under Node, so
+  what a visitor copies is what was tested. `templates-cases.js --write`
+  regenerates `site/p/*.cpb` from it. `test-customizer.js` unit-tests the logic.
+  `check-templates.py` checks that `site/p/` is what the code renders, and plans
+  (`APPLY --dry-run --json`) every template's defaults, an "everything on"
+  selection and a reproducible set of random ones, each as a playbook file and
+  as a recipe, requiring `ok` from cpb for all of them; the defaults and the
+  "everything on" selections are also applied for real, twice, in a throwaway
+  home (stand-ins for `claude` and the secret helper, a local mirror for the
+  `github:` skill sources). The template files themselves are checked against
+  cpb by `check-template-files.py` (`cpb play --check site/p`, the header
+  convention, no secret, apply to a new playbook, apply again as a no-op), which
+  has its own workflow, `templates-verify.yml`.
+  To add a template, add it to `TEMPLATES` in `customizer-core.js`, run
+  `templates-cases.js --write`, and a glyph for it to the sprite. A tool
+  can fetch a template by its id.
 
 To change the cards, edit `showcase.cpb` and regenerate:
 
