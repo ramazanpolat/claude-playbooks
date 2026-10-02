@@ -5,11 +5,11 @@ It fetches the recipe once, checks it, shows you exactly what it would do,
 asks before it runs, and removes everything when the session ends.
 
 ```
-cpb play code-reviewer                                  # a curated template
+cpb play frontend-craft                                 # a curated template
 cpb play https://example.com/agents/reviewer.cpb        # any https URL
 cpb play github:acme/agents/reviewer.cpb@v1.2.0         # a file in a repository, pinned
 cpb play ./reviewer.cpb                                 # a file of your own
-cpb play code-reviewer -- -p "review the last commit"   # claude's own arguments after --
+cpb play frontend-craft -- -p "review the landing page" # claude's own arguments after --
 ```
 
 A shared playbook is a **recipe**: `ALTER PLAYBOOK` statements with no name,
@@ -196,7 +196,7 @@ moved". `cpb update` never touches a played playbook.
 
 ## Templates
 
-A bare name, `cpb play code-reviewer`, is a curated template from this
+A bare name, `cpb play frontend-craft`, is a curated template from this
 project's site, read from `site/p/<name>.cpb` **at the tag of the cpb you
 run**: the template you get is the one this release was tested with. A
 development build reads `main`, and says so. A name that does not exist

@@ -26,6 +26,12 @@ preparing a release, read [Before any release](#before-any-release) first.
   writes through to the machine's login. A `pilot_profile_third_party_endpoint`
   warning means an existing playbook still imports the profile: report it to
   the human, never edit its CLAUDE.md yourself.
+- **`cpb play` confirmations are the human's.** Never pass `--yes`,
+  `--trust-endpoint` or `--trust-secret` on a human's behalf without their
+  explicit go: typing the host or the secret is how a person agrees that their
+  requests, or a secret, may go there, and an agent must not agree for them.
+  To inspect a recipe, use `cpb play <ref> --dry-run --json` (or `--check`),
+  which runs nothing.
 - **Do not edit** an installed playbook's files by hand; change state
   through `cpb` statements. Do not touch `~/.claude` (the machine's own
   Claude Code config) unless the human asks; then use
