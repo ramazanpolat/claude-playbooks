@@ -1,0 +1,14 @@
+-- title: Second account
+-- description: A second Anthropic account beside your first: an isolated login, Notion, Playwright and the creative skills.
+-- min-cpb: 3.24.0
+
+ALTER PLAYBOOK
+  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'
+  ADD PLUGIN frontend-design@claude-code-plugins
+  ADD MCP SERVER notion URL 'https://mcp.notion.com/mcp'
+  ADD MCP SERVER playwright COMMAND 'npx' ARGS '@playwright/mcp@latest'
+  ADD SKILL canvas-design FROM 'github:anthropics/skills' SUBDIR 'skills/canvas-design'
+  ADD SKILL algorithmic-art FROM 'github:anthropics/skills' SUBDIR 'skills/algorithmic-art'
+  SET MODEL 'claude-sonnet-5-5'
+  SET VAR DISABLE_TELEMETRY=1
+  SET ISOLATED LOGIN;
