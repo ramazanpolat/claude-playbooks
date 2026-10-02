@@ -1221,11 +1221,12 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
   `'FROM VARS'` in a string or a comment is not a table. One statement per query: text after a `;` is refused. Without ClickHouse the query is refused in one line: "this
   query needs ClickHouse (clickhouse local); install it, or pick columns
   only". One table per query.
-- **What a terminal and a pipe get:**
-  - **On a terminal, with no `FORMAT` in the query,** cpb renders the result
-    itself, the same way on both paths. For ClickHouse it asks
-    `clickhouse local` for `JSONCompact` and reads the names and values
-    from that.
+- **What a terminal and a pipe get:** with no `FORMAT` in the query, cpb
+  prints the result itself, the same way on both engines. For ClickHouse it
+  asks `clickhouse local` for `JSONCompact` (64-bit integers as numbers) and
+  reads the names and values from that. An object that ClickHouse reads
+  through its `JSON` type keeps only its non-null keys.
+  - **On a terminal,** cpb renders the result:
     - Up to 6 columns print as a table.
     - More print one block per row (`Row 1`, then `NAME:  value` lines), so
       a wide result such as `SELECT *` does not wrap.
@@ -1233,14 +1234,17 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
     - An object, or an array of objects, prints as compact JSON, `/`
       unescaped. Other arrays print as `a, b`.
     - `NULL`, an empty array and an empty object print as `-`, as in `SHOW`.
-  - **In a pipe,** the built-in form prints its table, and a ClickHouse query
-    prints `clickhouse local`'s own default, TSV.
+  - **In a pipe,** TSV: a header row of the column names, then one line per
+    row, each cell as the terminal shows it (`-` for `NULL`, an empty array
+    or object; `a, b` for an array; compact JSON for an object), with a tab,
+    a line break or a backslash escaped as `\t`, `\n`, `\\`.
+  - **With `--json`,** an array of one object per row, keys in the query's
+    column order, on both engines.
   - **A `FORMAT` in the query always wins,** on a terminal too
     (`… FORMAT PrettyCompact`, `… FORMAT JSONEachRow`), and cpb adds no
     `--output-format`. A `FORMAT` inside a string or a comment is not the
-    query's.
-  - `EXPLAIN SELECT` shows the command as it would run in the terminal it
-    is typed in.
+    query's. A `FORMAT` and `--json` cannot be combined.
+  - `EXPLAIN SELECT` shows the command as it runs.
 - **Only what `--json` already shows is handed over:** the rows are exactly
   the `SHOW … --json` objects (a credential redacted, a reference shown as the
   reference), one per line, and nothing else. A test pins those bytes.

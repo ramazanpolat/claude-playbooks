@@ -23,8 +23,9 @@ func selectFixture(t *testing.T) string {
 
 func TestSelectBuiltIn(t *testing.T) {
 	selectFixture(t)
+	// In a pipe: TSV with a header row (tests run off a terminal).
 	out := mustStmt(t, "SELECT name, version FROM PLAYBOOKS")
-	if !strings.Contains(out, "alpha") || !strings.Contains(out, "v3.12.3") || !strings.Contains(out, "NAME") {
+	if !strings.HasPrefix(out, "name\tversion\n") || !strings.Contains(out, "alpha\tv3.12.3\n") {
 		t.Fatalf("built in:\n%s", out)
 	}
 	var got []map[string]any
@@ -56,7 +57,8 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 	selectFixture(t)
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "clickhouse")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + dir + "/args\"\ncat > \"" + dir + "/stdin\"\necho ok\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + dir + "/args\"\ncat > \"" + dir + "/stdin\"\n" +
+		"echo '{\"meta\":[{\"name\":\"name\"}],\"data\":[[\"ok\"]],\"rows\":1}'\n"
 	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -65,12 +67,13 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 	out := captureStdout(t, func() {
 		err = runStatement([]string{"SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"})
 	})
-	if err != nil || !strings.Contains(out, "ok") {
-		t.Fatalf("handoff: %v\n%s", err, out)
+	if err != nil || out != "name\nok\n" {
+		t.Fatalf("handoff: %v\n%q", err, out)
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
 	want := strings.Join([]string{"local", "--input-format", "JSONEachRow", "--structure", selectTables["PLAYBOOKS"].structure,
-		"--date_time_input_format", "best_effort", "-q", "SELECT name FROM (SELECT * EXCEPT (play), " + versionTupleSQL + " AS version_tuple, play FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
+		"--date_time_input_format", "best_effort", "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0", "--output_format_json_quote_64bit_integers=0",
+		"-q", "SELECT name FROM (SELECT * EXCEPT (play), " + versionTupleSQL + " AS version_tuple, play FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
 	if string(args) != want {
 		t.Fatalf("args:\n%s\nwant:\n%s", args, want)
 	}
@@ -178,9 +181,9 @@ func TestSelectQuotedJSONAndExactColumns(t *testing.T) {
 	}
 }
 
-// On a terminal, with no FORMAT in the query, cpb asks clickhouse-local for
-// JSONCompact and renders it; a pipe, or a FORMAT of the query's own, gets
-// clickhouse-local's output untouched.
+// With no FORMAT in the query, cpb asks clickhouse-local for JSONCompact and
+// prints it itself, on a terminal and in a pipe; a FORMAT of the query's own
+// gets clickhouse-local's output untouched.
 func TestSelectOutputChoice(t *testing.T) {
 	selectFixture(t)
 	old := selectTTY
@@ -193,11 +196,10 @@ func TestSelectOutputChoice(t *testing.T) {
 		}
 		return strings.Join(p.clickhouseArgs(), " ")
 	}
-	if a := args(false, "SELECT count() FROM PLAYBOOKS"); strings.Contains(a, "--output-format") {
-		t.Errorf("pipe: %s", a)
-	}
-	if a := args(true, "SELECT count() FROM PLAYBOOKS"); !strings.Contains(a, "--output-format JSONCompact --output_format_json_escape_forward_slashes=0") {
-		t.Errorf("terminal: %s", a)
+	for _, tty := range []bool{false, true} {
+		if a := args(tty, "SELECT count() FROM PLAYBOOKS"); !strings.Contains(a, "--output-format JSONCompact --output_format_json_escape_forward_slashes=0 --output_format_json_quote_64bit_integers=0") {
+			t.Errorf("terminal %v: %s", tty, a)
+		}
 	}
 	if a := args(true, "SELECT count() FROM PLAYBOOKS format TSV"); strings.Contains(a, "--output-format") {
 		t.Errorf("the query's FORMAT lost: %s", a)
@@ -265,7 +267,7 @@ func TestSelectRendersForATerminal(t *testing.T) {
 }
 
 // The built-in form: a wide selection is one block per row on a terminal,
-// a table in a pipe, with the same headers.
+// TSV with a header row in a pipe.
 func TestSelectBuiltInOnATerminal(t *testing.T) {
 	selectFixture(t)
 	old := selectTTY
@@ -276,8 +278,64 @@ func TestSelectBuiltInOnATerminal(t *testing.T) {
 		t.Fatalf("terminal:\n%s", out)
 	}
 	selectTTY = func() bool { return false }
-	if out := mustStmt(t, q); strings.Contains(out, "Row 1") || !strings.Contains(out, "SANDBOX") {
+	if out := mustStmt(t, q); strings.Contains(out, "Row 1") || !strings.HasPrefix(out, "name\tversion\tpath\tlinked\tlauncher\tenvs\tsandbox\n") {
 		t.Fatalf("pipe:\n%s", out)
+	}
+}
+
+// Both engines print a result the same way: the same rows through the
+// built-in form and through clickhouse-local give the same bytes in a pipe
+// and with --json. A FORMAT of the query's own cannot be combined with
+// --json, and a TSV cell escapes a tab, a line break and a backslash.
+func TestSelectSameShapeOnBothEngines(t *testing.T) {
+	selectFixture(t)
+	old := selectTTY
+	t.Cleanup(func() { selectTTY = old })
+	selectTTY = func() bool { return false }
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "clickhouse")
+	write := func(doc string) {
+		script := "#!/bin/sh\ncat >/dev/null\ncat <<'EOF'\n" + doc + "\nEOF\n"
+		if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("CPB_CLICKHOUSE", stub)
+	write(`{"meta":[{"name":"name","type":"String"},{"name":"version","type":"Nullable(String)"}],"data":[["alpha","v3.12.3"],["beta","v3.9.0"]],"rows":2}`)
+	for _, flags := range [][]string{nil, {"--json"}} {
+		builtIn := captureStdout(t, func() {
+			if err := runStatement(append([]string{"SELECT name, version FROM PLAYBOOKS"}, flags...)); err != nil {
+				t.Fatal(err)
+			}
+		})
+		viaClickHouse := captureStdout(t, func() {
+			if err := runStatement(append([]string{"SELECT name, version FROM PLAYBOOKS WHERE 1"}, flags...)); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if builtIn != viaClickHouse {
+			t.Errorf("%v: the engines differ:\nbuilt in:\n%s\nclickhouse:\n%s", flags, builtIn, viaClickHouse)
+		}
+	}
+	write(`{"meta":[{"name":"n","type":"UInt64"},{"name":"s\tt","type":"String"}],"data":[[18446744073709551615,"a\tb\\c\nd"]],"rows":1}`)
+	out := captureStdout(t, func() {
+		if err := runStatement([]string{"SELECT count() AS n, 'x' AS s FROM PLAYBOOKS"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if out != "n\ts\\tt\n18446744073709551615\ta\\tb\\\\c\\nd\n" {
+		t.Errorf("TSV escaping: %q", out)
+	}
+	js := captureStdout(t, func() {
+		if err := runStatement([]string{"SELECT count() AS n, 'x' AS s FROM PLAYBOOKS", "--json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(js, `"n": 18446744073709551615`) {
+		t.Errorf("--json through clickhouse: a UInt64 must stay exact: %s", js)
+	}
+	if _, err := stmt(t, "SELECT name FROM PLAYBOOKS FORMAT TSV --json"); err == nil || !strings.Contains(err.Error(), "--json and a FORMAT in the query cannot be combined") {
+		t.Errorf("--json with a FORMAT: %v", err)
 	}
 }
 
