@@ -55,7 +55,7 @@
   }
 
   /* ---------- highlighting ---------- */
-  var KW = /\b(CREATE|ALTER|PLAYBOOK|IF|NOT|EXISTS|ENV|ADD|SET|USE|VAR|BLOCK|MCP|SERVER|SKILL|PLUGIN|MARKETPLACE|FROM|URL|COMMAND|ARGS|HEADER|ALLOW|DENY|TOOL|MODEL|PICKER|ONLY|APPEND|LABEL|BEHAVES|AS|SANDBOX|ISOLATED|LOGIN|SUBDIR|TO|APPLY|SUBDIR)\b/g;
+  var KW = /\b(CREATE|ALTER|PLAYBOOK|IF|NOT|EXISTS|ENV|ADD|SET|USE|VAR|BLOCK|MCP|SERVER|SKILL|PLUGIN|MARKETPLACE|FROM|URL|COMMAND|ARGS|HEADER|ALLOW|DENY|TOOL|MODEL|PICKER|ONLY|APPEND|LABEL|BEHAVES|AS|SANDBOX|ISOLATED|LOGIN|NO|PILOT|PROFILE|SUBDIR|TO|APPLY|SUBDIR)\b/g;
   function hl(line) {
     if (/^--/.test(line)) {
       var m = line.match(/^(-- )([a-z-]+:)(.*)$/);
@@ -90,6 +90,7 @@
     var f = [];
     if (d.sandbox) f.push('<span class="flag">SANDBOX</span>');
     if (d.isolated || d.sandbox) f.push('<span class="flag">ISOLATED LOGIN</span>');
+    if (d.noProfile) f.push('<span class="flag">NO PILOT PROFILE</span>');
     return f.join("");
   }
 
@@ -146,7 +147,7 @@
     function ids(list, v) { return Array.isArray(v) ? list.filter(function (x) { return v.indexOf(x.id) >= 0; }).map(function (x) { return x.id; }) : s[0]; }
     if (o.mode === "file" || o.mode === "recipe") s.mode = o.mode;
     if (typeof o.name === "string") s.name = o.name.slice(0, 40);
-    ["sandbox", "isolated"].forEach(function (k) { if (typeof o[k] === "boolean") s[k] = o[k]; });
+    ["sandbox", "isolated", "noProfile"].forEach(function (k) { if (typeof o[k] === "boolean") s[k] = o[k]; });
     if (Array.isArray(o.mcp)) s.mcp = ids(C.MCP, o.mcp);
     if (Array.isArray(o.skills)) s.skills = ids(C.SKILLS, o.skills);
     if (Array.isArray(o.plugins)) s.plugins = ids(C.PLUGINS, o.plugins);
@@ -189,7 +190,8 @@
       '<div class="seg2" role="radiogroup" aria-label="Form of the output"><label><input type="radio" name="mode" data-k="mode" value="file"><span><b>A playbook file</b><small>creates the playbook, then sets it up</small></span></label>' +
       '<label><input type="radio" name="mode" data-k="mode" value="recipe"><span><b>A recipe</b><small>applies to any playbook you name</small></span></label></div>') +
     panel(3, "Safety", "", sw("sandbox", "Sandbox", "Every launch inside a microVM that sees only your folder. Needs <code>sbx</code>.") +
-      sw("isolated", "Isolated login", "Shares no login with <code>~/.claude</code>: a second account, or a third-party route.")) +
+      sw("isolated", "Isolated login", "Shares no login with <code>~/.claude</code>: a second account, or a third-party route.") +
+      sw("noProfile", "Keep ~/.pilot-profile out", "Writes the playbook's <code>CLAUDE.md</code> without those imports. Set when it is created.")) +
     panel(4, "Model", "", '<div class="seg2 three" role="radiogroup" aria-label="Model"><label><input type="radio" name="mk" data-k="mk" value="default"><span><b>Default</b><small>leave it to Claude Code</small></span></label>' +
       '<label><input type="radio" name="mk" data-k="mk" value="claude"><span><b>A Claude model</b><small>SET MODEL</small></span></label>' +
       '<label><input type="radio" name="mk" data-k="mk" value="router"><span><b>Another backend</b><small>behind a router</small></span></label></div>' +
@@ -217,6 +219,7 @@
     '<aside class="cz-out" aria-label="The generated file"><div class="out-card">' +
     '<div class="out-head"><span class="fn" id="o-fn"></span><span class="meta" id="o-meta"></span></div>' +
     '<div class="out-actions"><button class="btn primary sm" type="button" data-act="copy">Copy</button><button class="btn sm" type="button" data-act="download">Download</button><button class="btn sm" type="button" data-act="share">Share link</button></div>' +
+    '<div class="out-warn" id="o-warn" hidden></div>' +
     '<pre class="code big" tabindex="0" id="o-code"><code></code></pre>' +
     '<div class="out-err" id="o-err" hidden></div>' +
     '<div class="out-use" id="o-use"></div>' +
@@ -272,6 +275,7 @@
     var iso = q('[data-k="isolated"]');
     iso.checked = sel.isolated || sel.sandbox; iso.disabled = sel.sandbox;
     iso.closest(".swrow").classList.toggle("implied", sel.sandbox);
+    q('[data-k="noProfile"]').checked = sel.noProfile;
     var m = sel.model;
     qa('[data-k="mk"]').forEach(function (r) { r.checked = r.value === m.kind; });
     q('[data-sub="claude"]').hidden = m.kind !== "claude";
@@ -312,7 +316,7 @@
   }
 
   /* ---------- the output ---------- */
-  var oFn = q("#o-fn"), oMeta = q("#o-meta"), oCode = q("#o-code code"), oErr = q("#o-err"), oUse = q("#o-use");
+  var oFn = q("#o-fn"), oMeta = q("#o-meta"), oCode = q("#o-code code"), oWarn = q("#o-warn"), oErr = q("#o-err"), oUse = q("#o-use");
   var last = null;
   function update() {
     fieldErrors();
@@ -336,6 +340,9 @@
       oErr.innerHTML = '<p><b>Not yet.</b> ' + (r.empty ? "A recipe needs at least one thing to apply. Switch something on." : "Fix these to see the file:") + "</p>" +
         (r.empty ? "" : "<ul>" + r.errors.map(function (e) { return "<li>" + esc(e) + "</li>"; }).join("") + "</ul>");
     }
+    var w = r.ok ? r.warnings : [];
+    oWarn.hidden = !w.length;
+    oWarn.innerHTML = w.map(function (x) { return lg("i-alert") + "<span>" + esc(x) + "</span>"; }).join("");
     clearTimeout(urlTimer);
     if (!touched) return;
     urlTimer = setTimeout(function () { try { history.replaceState(null, "", location.pathname + "?c=" + encode(sel) + location.hash); } catch (e) { /* ignore */ } }, 400);
@@ -366,6 +373,7 @@
     if (k === "mode") { sel.mode = t.value; return changed(); }
     if (k === "sandbox") { sel.sandbox = t.checked; return changed(); }
     if (k === "isolated") { sel.isolated = t.checked; return changed(); }
+    if (k === "noProfile") { sel.noProfile = t.checked; return changed(); }
     if (k === "mk") {
       var cur = sel.model;
       if (cur.kind === "claude") memo.claude = cur; if (cur.kind === "router") memo.router = cur;

@@ -2,6 +2,7 @@
   "zones": [
     {"id": "host", "kind": "host", "label": "Your machine", "tag": "host"},
     {"id": "sbx", "kind": "sandbox", "label": "microVM", "tag": "sbx", "backend": "sbx"},
+    {"id": "openshell", "kind": "sandbox", "label": "OpenShell container", "tag": "experimental", "backend": "openshell"},
     {"id": "remote", "kind": "remote", "label": "Another machine", "tag": "over ssh"},
     {"id": "throwaway", "kind": "ephemeral", "label": "Throwaway folder", "tag": "--delete"}
   ],
@@ -9,7 +10,7 @@
     {"playbook": "work", "zone": "host", "cmd": "work"},
     {"playbook": "side", "zone": "host", "cmd": "side"},
     {"playbook": "sre", "zone": "sbx", "cmd": "cpb run --mount ~/shared-libs:ro sre"},
-    {"playbook": "glm", "zone": "sbx", "cmd": "cpb run --sandbox --mount ~/shared-libs:ro glm"},
+    {"playbook": "glm", "zone": "openshell", "cmd": "cpb run --sandbox=openshell --mount ~/shared-libs:ro glm"},
     {"playbook": "reviewer", "zone": "remote", "cmd": "cpb run --sandbox-host me@buildbox reviewer"},
     {"playbook": "spike", "zone": "throwaway", "cmd": "cpb start /tmp/spike --delete"}
   ]
