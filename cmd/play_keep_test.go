@@ -220,7 +220,7 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 	playKeepFlags(t, true, "")
 	playRunFlags(t, true, nil, []string{"keychain:gh"}, nil)
 	captureStdout(t, func() { err = runPlay(playCmd, []string{boxed}) })
-	if err != nil || showPlaybook(t, "boxed")["sandbox"] != true {
+	if err != nil || showPlaybook(t, "boxed")["sandbox"].(map[string]any)["always"] != true {
 		t.Fatalf("create-with SANDBOX: %v", err)
 	}
 	captureStdout(t, func() { err = runPlay(playCmd, []string{refs}) })

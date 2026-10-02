@@ -231,7 +231,19 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case RenameTo, Alias, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	default: // SetStatuslinePrevious, NoAlias, Sandbox, IsolatedLogin, SetIsolatedLogin, UnsetIsolatedLogin, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
+	case SetSandboxKeys:
+		w := []string{"SET", "SANDBOX"}
+		for _, v := range c.Settings {
+			w = append(w, v.Key+"="+quoteValue(v.Value))
+		}
+		return w
+	case UnsetSandboxKeys:
+		w := []string{"UNSET", "SANDBOX"}
+		for _, v := range c.Settings {
+			w = append(w, v.Key)
+		}
+		return w
+	default: // SetStatuslinePrevious, NoAlias, Sandbox, IsolatedLogin, SetIsolatedLogin, UnsetIsolatedLogin, SetSandbox, UnsetSandbox, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

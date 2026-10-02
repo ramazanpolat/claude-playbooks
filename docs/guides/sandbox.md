@@ -33,8 +33,10 @@ To make a playbook sandboxed every time, say so once:
 ```bash
 cpb CREATE PLAYBOOK sre SANDBOX       # [sandbox] always = true, isolate_auth = true
 cpb CREATE PLAYBOOK ops FROM <src> SANDBOX   # the same, for one from a source
+cpb ALTER PLAYBOOK dev SET SANDBOX    # the same, for a playbook you have
 sre -p "run the tests"                # sandboxed, no flag needed
 sre --no-sandbox                      # this launch on the host; cpb says so on stderr
+cpb ALTER PLAYBOOK sre UNSET SANDBOX  # back on the host; the login stays isolated
 cpb start --sandbox --delete /tmp/x   # a throwaway session in a throwaway sandbox
 ```
 
@@ -75,9 +77,8 @@ When a key does go in:
   value). Retry, or choose `secrets = "env"`. Before v3.26.0 it warned and
   passed the key in.
 
-The shared `sbx` skills store stays out as well. `--sbx` is a
-synonym for `--sandbox`; `--sandbox=BACKEND` picks the backend: `sbx`, the
-default, or `openshell` on Linux
+The shared `sbx` skills store stays out as well. `--sandbox=BACKEND` picks
+the backend: `sbx`, the default, or `openshell` on Linux
 ([below](#openshell-backend-linux)).
 
 ## Lifetime and environment
@@ -95,7 +96,17 @@ the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
 
 ## Manifest block
 
-A playbook can describe its sandbox in the manifest:
+A playbook describes its sandbox in the `[sandbox]` table of its manifest.
+`SET SANDBOX <key>=<value>` writes it key by key and `UNSET SANDBOX <key>`
+forgets one, so you never edit the file:
+
+```bash
+cpb ALTER PLAYBOOK sre SET SANDBOX host=me@buildbox mounts=~/shared-libs:ro allow_net=internal.corp
+cpb ALTER PLAYBOOK sre UNSET SANDBOX host
+cpb SHOW PLAYBOOK sre                 # Sandbox: yes (mounts=~/shared-libs:ro, allow_net=internal.corp)
+```
+
+The keys, as the table holds them:
 
 ```toml
 [sandbox]
@@ -110,7 +121,9 @@ share_skills = true                 # mount sbx's shared skills store after all
 ```
 
 The block is install-local: `CREATE PLAYBOOK … FROM` never adopts one shipped
-by a source, and `cpb update` keeps yours.
+by a source, and `cpb update` keeps yours. `SHOW CREATE` writes it back as `SET
+SANDBOX` statements. See [Sandbox](../reference/cli-grammar.md#sandbox-v400) in
+the reference.
 
 `claude_version` matters for a playbook routed to a third-party backend that
 rejects a newer Claude Code's tool schemas: the sandbox keeps running the last

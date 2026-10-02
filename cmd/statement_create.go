@@ -198,9 +198,6 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	default:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoAlias})
 	}
-	if v.Sandbox && v.Linked == nil {
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Sandbox})
-	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole
 	// statement is withheld, shown with the URL masked.
@@ -266,10 +263,20 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			}
 		}
 	}
-	// An isolated login travels as SET ISOLATED LOGIN; SANDBOX already
-	// implies it, and a linked playbook's manifest is the target's.
-	isolated := v.IsolatedLogin && !v.Sandbox && v.Linked == nil
-	if env.Empty() && !isolated {
+	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
+	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
+	// existing playbook too, where CREATE IF NOT EXISTS would not. An
+	// isolated login travels as SET ISOLATED LOGIN; SET SANDBOX already
+	// implies it. A linked playbook's manifest is the target's.
+	sandboxed := v.Sandbox.Always && v.Linked == nil
+	var sandboxSettings []grammar.Var
+	if v.Linked == nil && m != nil && m.Sandbox != nil {
+		for _, kv := range m.Sandbox.Settings() {
+			sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
+		}
+	}
+	isolated := v.IsolatedLogin && !sandboxed && v.Linked == nil
+	if env.Empty() && !isolated && !sandboxed && len(sandboxSettings) == 0 {
 		return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
 	}
 	if v.Linked != nil {
@@ -289,6 +296,12 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	}
 	if isolated {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetIsolatedLogin})
+	}
+	if sandboxed {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})
+	}
+	if len(sandboxSettings) > 0 {
+		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
 	}
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"

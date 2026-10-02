@@ -602,7 +602,12 @@ func (m migration) verify(root string) error {
 }
 
 // run runs the verified step from the installed playbook, as <script>
-// <from> <to> <install dir>, in the install dir.
+// <from> <to> <install dir>, in the install dir. Between verify, under the
+// registry lock, and this exec there is a window in which a writer to the
+// playbook directory could swap the script. That writer is the same user,
+// already able to change anything the playbook runs, so the window is
+// accepted: running a private copy instead would break a script that finds
+// its sibling files through its own path, as kommander's apply.sh does.
 func (m migration) run(w io.Writer, name, root string) error {
 	if m.rel == "" {
 		return nil

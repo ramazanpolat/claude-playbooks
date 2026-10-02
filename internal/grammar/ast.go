@@ -71,6 +71,16 @@ const (
 	SetIsolatedLogin   Kind = "SET ISOLATED LOGIN"
 	UnsetIsolatedLogin Kind = "UNSET ISOLATED LOGIN"
 
+	// The [sandbox] table (ALTER PLAYBOOK): bare SET SANDBOX is always =
+	// true and isolates the login, as CREATE … SANDBOX does; bare UNSET
+	// SANDBOX is always = false and leaves the login as it is. The keyed
+	// forms name the table's own keys (Settings) and never touch always
+	// unless they name it.
+	SetSandbox       Kind = "SET SANDBOX"
+	UnsetSandbox     Kind = "UNSET SANDBOX"
+	SetSandboxKeys   Kind = "SET SANDBOX <key>=<value>"
+	UnsetSandboxKeys Kind = "UNSET SANDBOX <key>"
+
 	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
 	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
 
@@ -205,6 +215,11 @@ type Clause struct {
 	Anchor string   // ADD ENV ... BEFORE/AFTER <anchor>
 
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
+
+	// Settings: SET SANDBOX <key>=<value> ... (Key, Value) and UNSET SANDBOX
+	// <key> ... (Key only), the [sandbox] table's keys. Apart from Vars and
+	// Keys, which name variables.
+	Settings []Var
 
 	MCP   *MCP       // ADD MCP SERVER
 	Skill *Skill     // ADD SKILL

@@ -115,12 +115,14 @@ type Playbook struct {
 		URL    string  `json:"url"`
 		Branch *string `json:"branch"`
 	} `json:"source"`
-	Linked        *string  `json:"linked"`
-	Launcher      *string  `json:"launcher"`
-	Envs          []string `json:"envs"`
-	Vars          []Var    `json:"vars"`
-	Sandbox       bool     `json:"sandbox"`
-	IsolatedLogin bool     `json:"isolated_login"`
+	Linked   *string  `json:"linked"`
+	Launcher *string  `json:"launcher"`
+	Envs     []string `json:"envs"`
+	Vars     []Var    `json:"vars"`
+	Sandbox  struct {
+		Always bool `json:"always"`
+	} `json:"sandbox"`
+	IsolatedLogin bool `json:"isolated_login"`
 	Marketplaces  []struct {
 		Name string `json:"name"`
 	} `json:"marketplaces"`
@@ -164,7 +166,7 @@ type Playbook struct {
 // Login is the kind of login the playbook has: never a value.
 func (p Playbook) Login() string {
 	switch {
-	case p.Sandbox:
+	case p.Sandbox.Always:
 		return "sandbox"
 	case p.IsolatedLogin:
 		return "isolated"

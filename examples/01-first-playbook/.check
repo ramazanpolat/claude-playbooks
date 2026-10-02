@@ -1,6 +1,6 @@
 # The lifecycle clauses the README names, on the command line.
 cpb CREATE PLAYBOOK boxed NO ALIAS SANDBOX
-cpb SHOW PLAYBOOK boxed --json | grep -q '"sandbox": true'
+cpb SHOW PLAYBOOK boxed --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["sandbox"]["always"] is True'
 cpb ALTER PLAYBOOK boxed RENAME TO boxed-lab
 cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"name": "boxed-lab"'
 dev=$(mktemp -d)

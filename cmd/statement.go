@@ -543,11 +543,26 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
-	// ISOLATED LOGIN: isolate_auth, in the same manifest write.
+	// SANDBOX: the [sandbox] block, in the same manifest write. Planned
+	// first: bare SET SANDBOX also isolates the login.
 	wasIsolated := r.isolated(st.Name, m)
+	wasSandboxed := r.sandboxed(st.Name, m)
+	beforeSandbox := cloneSandbox(m.Sandbox)
+	sandbox, isolate, sandboxLines, err := planSandbox(m.Sandbox, st.Clauses)
+	if err != nil {
+		return err
+	}
+	sandboxChange := !reflect.DeepEqual(beforeSandbox, sandbox)
+	m.Sandbox = sandbox
+	lines = append(lines, sandboxLines...)
+	// ISOLATED LOGIN: isolate_auth, in the same manifest write.
 	nowIsolated, loginLines, err := r.planIsolatedLogin(st.Name, m, r.configDir(st.Name, pb), st.Clauses)
 	if err != nil {
 		return err
+	}
+	if isolate && !nowIsolated {
+		nowIsolated = true
+		loginLines = append(loginLines, "login     isolated: a sandbox shares nothing with ~/.claude; /login once in it")
 	}
 	loginChange := nowIsolated != wasIsolated
 	m.IsolateAuth = nowIsolated
@@ -598,7 +613,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
 		return nil
@@ -608,6 +623,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.recordPlaybookEnv(st.Name, m.Env)
 		if loginChange && r.dry != nil {
 			r.dry.isolated[st.Name] = nowIsolated
+		}
+		if nowSandboxed := sandbox != nil && sandbox.Always; nowSandboxed != wasSandboxed && r.dry != nil {
+			r.dry.sandboxed[st.Name] = nowSandboxed
 		}
 		if mcp != nil {
 			finishMCP()
@@ -642,7 +660,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return nil
 	}
-	if envChange || mcpRecordChange || loginChange {
+	if envChange || mcpRecordChange || loginChange || sandboxChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}

@@ -122,7 +122,7 @@ playbook or to `~/.claude`. A playbook can also come from git (`FROM <url> BRANC
 cpb SHOW SESSIONS                                  # live Claude Code sessions, in every playbook
 cpb RESUME                                         # this folder's latest, in its own playbook; never one live elsewhere
 cpb tui                                            # browse playbooks, sessions and env sets; never shows a secret
-cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"    # state as tables; add ClickHouse for full SQL
+cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"   # state as tables; add ClickHouse for full SQL
 ```
 
 ## Built to be relied on

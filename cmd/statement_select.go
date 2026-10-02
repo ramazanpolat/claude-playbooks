@@ -58,7 +58,7 @@ var selectTables = map[string]selectTable{
 			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "play"},
 		structure: "name String, version Nullable(String), description Nullable(String), homepage Nullable(String), author Nullable(String), " +
 			"path String, last_used Nullable(DateTime64(3, 'UTC')), source JSON, migrate Nullable(String), linked Nullable(String), " +
-			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox Bool, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
+			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
 			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, play JSON",
 		rows: playbookRows,
 	},

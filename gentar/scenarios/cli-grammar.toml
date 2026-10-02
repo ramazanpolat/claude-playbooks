@@ -466,3 +466,11 @@ drive "$HOME/t6" '/tuia\r' _ e _ y _ q; cmp -s "$W/tuia.cpb" "$HOME/tuia.want" |
 rm -f "$K/log"; drive "$HOME/t7" 2 _ R _ '\r' _ _ q; [ "$(cat "$K/log" 2>/dev/null)" = "$P/tuir|--resume $DS" ] && { [ "$(cat "$HOME/t7.rc")" = 0 ] || ! script --version >/dev/null 2>&1; } || { echo tui-resume-wrong; exit 1; }
 echo tui-ok'''
 contains = "tui-ok"
+
+[[verify.commands]]
+# SET SANDBOX (v4.0.0): the keyed form sets only its keys; bare SET SANDBOX is
+# always = true and isolates the login; SHOW CREATE writes both forms back,
+# and applying it changes nothing; UNSET SANDBOX turns always off and keeps
+# the login isolated.
+command = '''M="$HOME/.claude-playbooks/sbp/.playbook"; claude-playbook CREATE PLAYBOOK sbp NO ALIAS >/dev/null && claude-playbook ALTER PLAYBOOK sbp SET SANDBOX backend=openshell mounts=~/a:ro >/dev/null && grep -q 'backend = "openshell"' "$M" && ! grep -q 'always' "$M" && claude-playbook ALTER PLAYBOOK sbp SET SANDBOX >/dev/null && grep -q 'always = true' "$M" && grep -q 'isolate_auth = true' "$M" && claude-playbook SHOW CREATE PLAYBOOK sbp > "$HOME/sbp.cpb" && grep -q 'SET SANDBOX backend=openshell mounts=~/a:ro' "$HOME/sbp.cpb" && claude-playbook APPLY "$HOME/sbp.cpb" | grep -q '0 created, 0 changed' && claude-playbook ALTER PLAYBOOK sbp UNSET SANDBOX >/dev/null && ! grep -q 'always = true' "$M" && grep -q 'isolate_auth = true' "$M" && echo sandbox-settings-ok'''
+contains = "sandbox-settings-ok"

@@ -862,13 +862,20 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
 	case "SET":
-		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED") {
+		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
 		case "ISOLATED":
 			if p.kw("LOGIN") == "" {
 				return nil, p.fail("expected LOGIN after SET ISOLATED")
 			}
 			c.Kind = SetIsolatedLogin
 			return c, nil
+		case "SANDBOX":
+			if p.atEnd() || p.isStarter() {
+				c.Kind = SetSandbox
+				return c, nil
+			}
+			c.Kind = SetSandboxKeys
+			return c, p.sandboxSettings(c)
 		case "AGENT":
 			return c, p.agent(c)
 		case "STATUSLINE":
@@ -914,7 +921,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Kind = SetModel
 			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL or ISOLATED LOGIN")
+			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
 		}
 		return c, p.set(c)
 	case "ALLOW", "DENY":
@@ -937,13 +944,29 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "ISOLATED") {
+		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
 		case "ISOLATED":
 			if p.kw("LOGIN") == "" {
 				return nil, p.fail("expected LOGIN after UNSET ISOLATED")
 			}
 			c.Kind = UnsetIsolatedLogin
 			return c, nil
+		case "SANDBOX":
+			if p.atEnd() || p.isStarter() {
+				c.Kind = UnsetSandbox
+				return c, nil
+			}
+			c.Kind = UnsetSandboxKeys
+			keys, err := p.list("UNSET SANDBOX", "<key>", func(t Token) *Error {
+				if !manifest.IsSandboxKey(t.Text) {
+					return errAt(t.Pos, t.Text+" is not a [sandbox] key ("+strings.Join(manifest.SandboxKeys, ", ")+")")
+				}
+				return nil
+			})
+			for _, k := range keys {
+				c.Settings = append(c.Settings, Var{Key: k})
+			}
+			return c, err
 		case "AGENT":
 			c.Kind = UnsetAgent
 			return c, nil
@@ -965,7 +988,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Names = rules
 			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL or ISOLATED LOGIN")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -1112,6 +1135,35 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 
 // set reads the body of SET [VAR]: a list of K=V, or one K FROM '<ref>'.
 // Nothing here echoes a value or a reference, nor a token that may be one.
+// sandboxSettings is SET SANDBOX's <key>=<value> ...: the [sandbox] table's
+// own keys. A flag (always, share_skills) takes true or false; mounts and
+// allow_net take a comma-separated list.
+func (p *parser) sandboxSettings(c *Clause) *Error {
+	keys := strings.Join(manifest.SandboxKeys, ", ")
+	for !p.atEnd() && !p.isStarter() {
+		t := p.toks[p.i]
+		k, v, ok := strings.Cut(t.Text, "=")
+		if !ok {
+			return errAt(t.Pos, "SET SANDBOX takes <key>=<value> ("+keys+")")
+		}
+		if !manifest.IsSandboxKey(k) {
+			return errAt(t.Pos, k+" is not a [sandbox] key ("+keys+")")
+		}
+		if v == "" {
+			return errAt(t.Pos, "sandbox."+k+" needs a value; UNSET SANDBOX "+k+" clears it")
+		}
+		if manifest.SandboxFlag(k) && v != "true" && v != "false" {
+			return errAt(t.Pos, "sandbox."+k+" takes true or false")
+		}
+		c.Settings = append(c.Settings, Var{Key: k, Value: v})
+		p.i++
+		p.quiet = true
+	}
+	p.note("<key>=<value>")
+	p.note(p.starters...)
+	return nil
+}
+
 func (p *parser) set(c *Clause) *Error {
 	if p.atEnd() || p.isStarter() {
 		p.note("<key>=<value>", "<key>")
@@ -1240,14 +1292,22 @@ func validate(s *Stmt) *Error {
 		Describe: true, UseEnv: true, RenameTo: true,
 		Alias: true, NoAlias: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 		IsolatedLogin: true, SetIsolatedLogin: true, UnsetIsolatedLogin: true,
+		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPicker: true,
 		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true, SetStatuslinePrevious: true,
 	}
+	settings := map[string]bool{}
 	for _, c := range s.Clauses {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
+		}
+		for _, v := range c.Settings {
+			if settings[v.Key] {
+				return errAt(c.Pos, "sandbox."+v.Key+" appears twice; one statement changes a setting once")
+			}
+			settings[v.Key] = true
 		}
 		seen[c.Kind] = c.Pos
 		var ks []string
@@ -1283,6 +1343,7 @@ func validate(s *Stmt) *Error {
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
 		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
 		{SetIsolatedLogin, UnsetIsolatedLogin},
+		{SetSandbox, UnsetSandbox}, {SetSandbox, UnsetIsolatedLogin},
 		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
 		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
 	for _, pr := range pairs {

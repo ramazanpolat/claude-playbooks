@@ -93,7 +93,7 @@ P=$HOME/.claude-playbooks/e2e
 claude-playbook CREATE ENV r SET ANTHROPIC_BASE_URL=http://localhost:18080 ANTHROPIC_AUTH_TOKEN=dummy-e2e-token-1 AS PLAINTEXT >/dev/null
 claude-playbook ALTER PLAYBOOK e2e USE ENV r >/dev/null
 # Test fixture: a second host the sandbox may reach (with no credential).
-printf '\n[sandbox]\nallow_net = ["host.openshell.internal:18081"]\n' >> "$P/.playbook"
+claude-playbook ALTER PLAYBOOK e2e SET SANDBOX allow_net=host.openshell.internal:18081 >/dev/null
 L() { n=$1; shift; timeout 900 claude-playbook run --sandbox=openshell --workdir "$W" --mount "$RO:ro" e2e "$@" </dev/null >"$E/out.$n" 2>&1; echo $? >"$E/rc.$n"; }
 has() { grep -qF -- "$2" "$E/out.$1"; }
 got() { grep -F "\"port\": $1" "$E/received.jsonl" 2>/dev/null | grep -qF -- "$2"; }

@@ -42,10 +42,12 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatal("CREATE … ISOLATED LOGIN did not record isolate_auth")
 	}
 	var v struct {
-		Sandbox       bool `json:"sandbox"`
+		Sandbox struct {
+			Always bool `json:"always"`
+		} `json:"sandbox"`
 		IsolatedLogin bool `json:"isolated_login"`
 	}
-	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK a --json")), &v); err != nil || !v.IsolatedLogin || v.Sandbox {
+	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK a --json")), &v); err != nil || !v.IsolatedLogin || v.Sandbox.Always {
 		t.Fatalf("SHOW --json: %v %+v", err, v)
 	}
 

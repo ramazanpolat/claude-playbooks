@@ -3,11 +3,19 @@
 ```
 cpb APPLY playbook.cpb --dry-run
 cpb APPLY playbook.cpb
-cpb run --sandbox=openshell box                       # this folder is the workdir
-cpb run --sandbox=openshell --mount ~/notes:ro box    # one more directory, read-only
+cpb run box                                   # sandboxed by the playbook; this folder is the workdir
+cpb run --mount ~/notes:ro box                # one more directory, read-only
+cpb ALTER PLAYBOOK box UNSET SANDBOX          # launches on this machine again; the login stays isolated
 ```
 
-`--sandbox=openshell` runs Claude Code in an
+The playbook carries its own `[sandbox]` table. `SET SANDBOX` makes every
+launch sandboxed (and isolates the login, as `CREATE PLAYBOOK … SANDBOX`
+does); `SET SANDBOX backend=openshell allow_net=api.github.com` picks the
+backend and allows one more host, without changing that. `UNSET SANDBOX`
+turns the first off and `UNSET SANDBOX allow_net` forgets one setting.
+`SHOW CREATE` writes them back as the same statements.
+
+The `openshell` backend runs Claude Code in an
 [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox instead of a
 Docker Sandbox. It runs on a Linux host with Docker Engine 28+ and OpenShell
 0.1.x, set up once as the
@@ -20,7 +28,8 @@ What happens on the first launch:
   sandbox `cpb-box`. It mounts this folder and the playbook's directory at
   their own paths, and nothing else of the host.
 - The router at `localhost:8080` is reached as `host.openshell.internal:8080`,
-  and that host is the only one allowed besides Claude Code's own.
+  allowed on its own; `allow_net` adds `api.github.com`, and nothing else is
+  allowed besides Claude Code's own hosts.
 - An API key the `router` env set carries (`ANTHROPIC_AUTH_TOKEN` or
   `ANTHROPIC_API_KEY`) stays outside: OpenShell injects it into requests to
   that endpoint only, and the sandbox sees a placeholder.

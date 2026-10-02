@@ -110,6 +110,9 @@ pb-clause  := set-clause
             | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH   v3.23.0
             | SET STATUSLINE PREVIOUS      v3.25.0, the status line cpb replaced last
             | SET ISOLATED LOGIN | UNSET ISOLATED LOGIN   v3.23.0, see "Isolated login"
+            | SET SANDBOX | UNSET SANDBOX  every launch sandboxed (the login isolated too) | not; see "Sandbox"
+            | SET SANDBOX <key>=<value> ...   the [sandbox] table's own keys: SET SANDBOX backend=openshell
+            | UNSET SANDBOX <key> ...      forget a setting: UNSET SANDBOX host
             | SET MODEL '<model>' | UNSET MODEL
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   v3.22.0, "Model picker"
             | DROP MODEL '<id>'
@@ -218,6 +221,7 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … ALLOW / DENY / UNSET TOOL` | the playbook's `settings.json`, `permissions.allow` / `permissions.deny` |
 | `ALTER PLAYBOOK … SET / UNSET STATUSLINE`, `SET / UNSET MODEL` | the playbook's `settings.json`, `statusLine` / `model` |
 | `ALTER PLAYBOOK … ADD / DROP SKILL` | `<playbook>/skills/<name>` (a link or a copy) and the manifest's `[skills.<name>]` record |
+| `ALTER PLAYBOOK … SET / UNSET SANDBOX` | the playbook's `.playbook`, `[sandbox]` (bare `SET SANDBOX` also `isolate_auth = true`) |
 
 A key lives in exactly one of `set`, `refs`, `unset` within a layer; writing
 it to one removes it from the others.
@@ -295,6 +299,45 @@ ALTER PLAYBOOK <name> UNSET ISOLATED LOGIN
   it again changes nothing.
 - `ISOLATED` and `LOGIN` are read only in these positions, so they are not
   reserved words.
+
+## Sandbox (v4.0.0)
+
+A playbook's `[sandbox]` table says how its launches are sandboxed.
+`ALTER PLAYBOOK` writes it:
+
+```
+ALTER PLAYBOOK sre SET SANDBOX               -- every launch sandboxed (always = true); the login isolated too
+ALTER PLAYBOOK sre UNSET SANDBOX             -- always = false; the login stays isolated
+ALTER PLAYBOOK sre SET SANDBOX backend=openshell host=me@buildbox mounts=~/libs:ro,~/data
+ALTER PLAYBOOK sre UNSET SANDBOX host mounts
+```
+
+- **One meaning per form.** Bare `SET SANDBOX` is `always = true`, and it
+  isolates the login, as `CREATE PLAYBOOK … SANDBOX` does: a sandbox shares
+  nothing with `~/.claude`. `SET SANDBOX <key>=<value> …` sets only the keys
+  it names and never changes `always`; `SET SANDBOX always=true` is the bare
+  form spelled out. Bare `UNSET SANDBOX` is `always = false` and leaves the
+  login isolated (`UNSET ISOLATED LOGIN` shares it again). `UNSET SANDBOX
+  <key> …` forgets settings.
+- **The keys** are the table's own: `always`; `backend` (`sbx`, `openshell`);
+  `host` (`user@host`: the launch runs there, over ssh); `workdir`; `mounts`
+  (comma-separated, `:ro` for read-only); `allow_net` (comma-separated
+  hosts); `secrets` (`proxy`, `env`); `claude_version`; `share_skills`
+  (`true` or `false`). A value the table refuses is refused before anything
+  is written. They are not reserved words.
+- **Refusals.** Bare `SET SANDBOX` does not combine with `UNSET SANDBOX` or
+  with `UNSET ISOLATED LOGIN`, and a statement sets or unsets a key once. A
+  linked playbook's table is the target's, and a plain config directory has
+  no manifest.
+- **Reads.** `SHOW PLAYBOOK` prints `Sandbox: yes` or `no`, then the set keys
+  in parentheses. `--json` has `"sandbox"`, the table key for key (`always`,
+  then each setting, null or empty when unset), and `SELECT`'s `PLAYBOOKS`
+  has it as a JSON column. `EXPLAIN` says when every launch is sandboxed.
+  `SHOW CREATE` writes a bare `SET SANDBOX` for `always` and one `SET SANDBOX
+  <key>=<value> …` for the rest, and applying it again changes nothing.
+- A source's `[sandbox]` block is never adopted (`CREATE PLAYBOOK … FROM`
+  drops it with a note). A launch's own flags (`--sandbox[=BACKEND]`,
+  `--sandbox-host`, `--mount`, `--workdir`) apply on top, for that launch.
 
 ## Secrets (optional)
 
@@ -628,7 +671,8 @@ created empty; `Launcher:` reads `(none)` without one. `Description:`,
  "launcher": "w",
  "envs": ["router", "glm-5.3"],
  "vars": [<variable>, ...],
- "sandbox": false}
+ "sandbox": {"always": false, "backend": null, "host": null, "workdir": null, "mounts": [],
+             "allow_net": [], "secrets": null, "claude_version": null, "share_skills": false}}
 ```
 
 `description`, `homepage` and `author` are the manifest's, null when it has
