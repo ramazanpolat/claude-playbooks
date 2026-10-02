@@ -1,7 +1,8 @@
 # claude-playbooks own-arena suite: cpb play (v3.28.0), slice 1. A played
 # recipe is fetched once, checked against what it may hold, and planned
 # against a throwaway store: --check, --dry-run --json, --sha256, and the
-# template-directory check the website's CI runs. Local recipes only; the
+# template-directory check the website's CI runs. Slice 2 runs it and
+# cleans up on every way out; slice 3 runs it in a sandbox by default. Local recipes only; the
 # https fetch limits are unit-tested here and join this scenario with the
 # local TLS server in a later slice.
 
@@ -16,6 +17,7 @@ steps = [
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/claude-playbook" "$HOME/.local/bin/claude-playbook"',
   '''F="$HOME/playfx"; mkdir -p "$F/tpl" && printf '%s\n' "ALTER PLAYBOOK" "  USE ENV work" "  SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;" "ALTER DEFAULTS SET SECRET HELPER 'x';" > "$F/bad.cpb" && printf '%s\n' "-- title: Router" "-- description: GLM through a router." "" "ALTER PLAYBOOK" "  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1" "  SET MODEL 'glm-5.3';" > "$F/router.cpb" && cp "$F/router.cpb" "$F/tpl/router.cpb" && printf '%s\n' "-- title: Reviewer" "-- description: Reads code." "-- min-cpb: 3.28.0" "" "ALTER PLAYBOOK SET MODEL 'opus';" > "$F/tpl/code-reviewer.cpb" && printf '%s\n' code-reviewer router > "$F/tpl/index.txt"''',
   'claude-playbook CREATE ENV mine SET ANTHROPIC_BASE_URL=https://mine.example && claude-playbook ALTER DEFAULTS USE ENV mine',
+  '''mkdir -p "$HOME/stubsbx" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/sbx.log"' 'if [ "$1" = ls ] && [ "$2" = --json ]; then printf "%s" "{\"sandboxes\":[]}"; exit 0; fi' 'if [ "$1" = exec ]; then case "$*" in *"cat ~/.claude-playbook-sandbox"*) printf "%s" skills=private;; esac; fi' 'exit 0' > "$HOME/stubsbx/sbx" && chmod 755 "$HOME/stubsbx/sbx" && printf '%s\n' "ALTER PLAYBOOK SET VAR GH FROM 'keychain:pilot/gh';" > "$HOME/playfx/refs.cpb"''',
   '''F="$HOME/playfx"; printf '%s\n' "-- title: Plain" "-- description: A model." "" "ALTER PLAYBOOK SET MODEL 'claude-opus-5-5';" > "$F/plain.cpb" && mkdir -p "$HOME/sleepclaude" && printf '%s\n' '#!/bin/sh' 'echo "$CLAUDE_CONFIG_DIR" > "$HOME/play-cfg"' 'sleep 30' > "$HOME/sleepclaude/claude" && chmod 755 "$HOME/sleepclaude/claude"''',
 ]
 
@@ -52,7 +54,7 @@ contains = "play-dir-ok"
 # session, and after each the store is gone and cpb has exited. It starts
 # through python with INT and HUP at their defaults, in its own session: a
 # shell's `cmd &` would start it with SIGINT ignored, unlike a terminal.
-command = '''F="$HOME/playfx"; ok=0; for sig in INT HUP TERM; do rm -f "$HOME/play-cfg"; PATH="$HOME/sleepclaude:$PATH" python3 -c 'import os,signal,sys; [signal.signal(x, signal.SIG_DFL) for x in (signal.SIGINT, signal.SIGHUP)]; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' claude-playbook play --yes "$F/plain.cpb" > "$HOME/play-$sig.out" 2>&1 & pid=$!; i=0; while [ ! -s "$HOME/play-cfg" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; cfg=$(cat "$HOME/play-cfg" 2>/dev/null); [ -n "$cfg" ] && [ -d "$cfg" ] || { echo "$sig-no-session"; break; }; if [ $sig = TERM ]; then kill -TERM $pid; else python3 -c 'import os,signal,sys; os.killpg(int(sys.argv[1]), getattr(signal, "SIG"+sys.argv[2]))' $pid $sig; fi; i=0; while kill -0 $pid 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; if kill -0 $pid 2>/dev/null; then echo "$sig-cpb-still-running"; break; fi; if [ -e "$cfg" ]; then echo "$sig-left-$cfg"; break; fi; store=${cfg%/store/*}; if [ -e "$store" ]; then echo "$sig-left-store"; break; fi; ok=$((ok+1)); done; [ $ok = 3 ] && echo play-cleanup-ok'''
+command = '''F="$HOME/playfx"; ok=0; for sig in INT HUP TERM; do rm -f "$HOME/play-cfg"; PATH="$HOME/sleepclaude:$PATH" python3 -c 'import os,signal,sys; [signal.signal(x, signal.SIG_DFL) for x in (signal.SIGINT, signal.SIGHUP)]; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' claude-playbook play --yes --no-sandbox "$F/plain.cpb" > "$HOME/play-$sig.out" 2>&1 & pid=$!; i=0; while [ ! -s "$HOME/play-cfg" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; cfg=$(cat "$HOME/play-cfg" 2>/dev/null); [ -n "$cfg" ] && [ -d "$cfg" ] || { echo "$sig-no-session"; break; }; if [ $sig = TERM ]; then kill -TERM $pid; else python3 -c 'import os,signal,sys; os.killpg(int(sys.argv[1]), getattr(signal, "SIG"+sys.argv[2]))' $pid $sig; fi; i=0; while kill -0 $pid 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; if kill -0 $pid 2>/dev/null; then echo "$sig-cpb-still-running"; break; fi; if [ -e "$cfg" ]; then echo "$sig-left-$cfg"; break; fi; store=${cfg%/store/*}; if [ -e "$store" ]; then echo "$sig-left-store"; break; fi; ok=$((ok+1)); done; [ $ok = 3 ] && echo play-cleanup-ok'''
 contains = "play-cleanup-ok"
 
 [[verify.commands]]
@@ -60,5 +62,15 @@ contains = "play-cleanup-ok"
 # group: started from a script (not a group leader), `kill <cpb>` must end
 # the session and leave the script alive (a group-wide forward would have
 # killed the caller too), and the store is gone.
-command = '''F="$HOME/playfx"; rm -f "$HOME/play-cfg" "$HOME/caller-alive"; PATH="$HOME/sleepclaude:$PATH" sh -c 'claude-playbook play --yes "$1" > "$HOME/play-caller.out" 2>&1 & echo $! > "$HOME/cpb-pid"; wait; sleep 1; echo yes > "$HOME/caller-alive"' sh "$F/plain.cpb" & caller=$!; i=0; while [ ! -s "$HOME/play-cfg" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; cfg=$(cat "$HOME/play-cfg" 2>/dev/null); kill -TERM "$(cat "$HOME/cpb-pid")"; wait $caller; if [ "$(cat "$HOME/caller-alive" 2>/dev/null)" != yes ]; then echo caller-killed; elif [ -n "$cfg" ] && [ -e "$cfg" ]; then echo store-left; else echo play-term-caller-ok; fi'''
+command = '''F="$HOME/playfx"; rm -f "$HOME/play-cfg" "$HOME/caller-alive"; PATH="$HOME/sleepclaude:$PATH" sh -c 'claude-playbook play --yes --no-sandbox "$1" > "$HOME/play-caller.out" 2>&1 & echo $! > "$HOME/cpb-pid"; wait; sleep 1; echo yes > "$HOME/caller-alive"' sh "$F/plain.cpb" & caller=$!; i=0; while [ ! -s "$HOME/play-cfg" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; cfg=$(cat "$HOME/play-cfg" 2>/dev/null); kill -TERM "$(cat "$HOME/cpb-pid")"; wait $caller; if [ "$(cat "$HOME/caller-alive" 2>/dev/null)" != yes ]; then echo caller-killed; elif [ -n "$cfg" ] && [ -e "$cfg" ]; then echo store-left; else echo play-term-caller-ok; fi'''
 contains = "play-term-caller-ok"
+
+[[verify.commands]]
+# Slice 3: a play runs in a sandbox by default (a stub sbx records its
+# calls). The typed-host gate runs before any sandbox is created: a recipe
+# that moves the endpoint, unconfirmed, never reaches sbx (in a sandbox the
+# proxy would inject a key for that host; root, 2026-10-02). A recipe with a
+# secret reference is refused sandboxed, also before sbx. A plain recipe:
+# create, attach, remove, in that order, and the store is gone.
+command = '''F="$HOME/playfx"; export PATH="$HOME/stubsbx:$PATH"; rm -f "$HOME/sbx.log"; before=$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l); if claude-playbook play --yes "$F/router.cpb" > "$HOME/sb1.out" 2>&1; then echo moved-endpoint-ran; elif ! grep -q -- "--trust-endpoint router.example.net" "$HOME/sb1.out"; then echo gate-wrong; elif [ -e "$HOME/sbx.log" ]; then echo sbx-before-gate; elif claude-playbook play --yes --trust-secret keychain:pilot/gh "$F/refs.cpb" > "$HOME/sb2.out" 2>&1; then echo refs-sandboxed; elif ! grep -q -- "--no-sandbox" "$HOME/sb2.out" || [ -e "$HOME/sbx.log" ]; then echo refs-wrong; elif ! claude-playbook play --yes "$F/plain.cpb" > "$HOME/sb3.out" 2>&1; then echo sandboxed-failed; elif ! grep -q "Sandboxed (sbx)" "$HOME/sb3.out"; then echo no-sandbox-note; else python3 -c "import sys; c=open(sys.argv[1]).read(); a=c.find('create --name cpb-play-plain-'); b=c.find('exec -i'); r=c.find('rm -f cpb-play-plain-'); sys.exit(0 if 0<=a<b<r else 1)" "$HOME/sbx.log" && [ "$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l)" = "$before" ] && echo play-sandbox-ok; fi'''
+contains = "play-sandbox-ok"

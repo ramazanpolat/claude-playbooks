@@ -41,6 +41,18 @@ func errConfigDirOverrideSandbox() error {
 // sweep marker. Start then Wait is what Run does.
 var onLaunch func(*os.Process)
 
+// runAttached runs a session's command, telling onLaunch its process: a
+// host launch, or a sandbox backend's attach.
+func runAttached(c *exec.Cmd) error {
+	if err := c.Start(); err != nil {
+		return err
+	}
+	if onLaunch != nil {
+		onLaunch(c.Process)
+	}
+	return c.Wait()
+}
+
 func runRun(cmd *cobra.Command, args []string) error {
 	original := args
 	rest, err := takePlaybooksDirArg(args)
@@ -239,14 +251,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	c.Stderr = os.Stderr
 
 	since := time.Now()
-	err = c.Start()
-	if err == nil {
-		if onLaunch != nil {
-			onLaunch(c.Process)
-		}
-		err = c.Wait()
-	}
-	err = preserveExitCode(err)
+	err = preserveExitCode(runAttached(c))
 	// The exit line names the command that resumes this session in this
 	// playbook; a caller-supplied config dir is not the playbook's, so
 	// that launch gets none.

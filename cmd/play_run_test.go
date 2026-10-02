@@ -48,6 +48,7 @@ func playStores(t *testing.T) []string {
 const plainRecipe = "-- title: Plain\n-- description: A model.\n\nALTER PLAYBOOK SET MODEL 'claude-opus-5-5';\n"
 
 func TestPlayRun(t *testing.T) {
+	noSandboxHere(t)
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	t.Setenv("TMPDIR", t.TempDir()) // the throwaway stores land here, and nowhere else
@@ -80,7 +81,7 @@ func TestPlayRun(t *testing.T) {
 	if err != nil || args != "-p hi" || !strings.Contains(env["CLAUDE_CONFIG_DIR"], "cpb-play-") || !strings.Contains(env["CLAUDE_CONFIG_DIR"], "/play-plain-") {
 		t.Fatalf("--yes: %v, args %q, config %q\n%s", err, args, env["CLAUDE_CONFIG_DIR"], out)
 	}
-	if !strings.Contains(out, "No sandbox yet: this agent runs on your machine, as you.") || strings.Contains(stderr, "Resume this playbook's session") {
+	if !strings.Contains(out, "No sandbox available here (sbx, or OpenShell on Linux): this agent will run on your machine, as you.") || strings.Contains(stderr, "Resume this playbook's session") {
 		t.Fatalf("the preview, or a resume line for a removed playbook:\n%s\n%s", out, stderr)
 	}
 	if _, err := os.Stat(env["CLAUDE_CONFIG_DIR"]); !os.IsNotExist(err) || len(playStores(t)) != 0 {
@@ -213,5 +214,117 @@ func TestPlayConfirmCancelled(t *testing.T) {
 	captureStdout(t, func() { err = playConfirm(res, true) })
 	if err != errPlayCancelled {
 		t.Fatalf("a cancelled prompt: %v", err)
+	}
+}
+
+// noSandboxHere makes no backend available, for a play on this machine.
+func noSandboxHere(t *testing.T) {
+	t.Helper()
+	saved := playSandboxAvailable
+	playSandboxAvailable = func(string) error { return os.ErrNotExist }
+	t.Cleanup(func() { playSandboxAvailable = saved })
+}
+
+func playSandboxFlags(t *testing.T, flag string, off bool) {
+	t.Helper()
+	playSandboxFlag, playNoSandbox = flag, off
+	t.Cleanup(func() { playSandboxFlag, playNoSandbox = "", false })
+}
+
+// Where a play runs: a sandbox by default where a backend is available;
+// --no-sandbox said plainly; create-with: SANDBOX refused with none; a
+// recipe with secret references refused sandboxed (a sandboxed launch
+// cannot resolve them yet), never quietly run on the host.
+func TestChoosePlaySandbox(t *testing.T) {
+	plain := play.Check([]byte(plainRecipe))
+	wants := play.Check([]byte("-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n"))
+	refs := play.Check([]byte("ALTER PLAYBOOK SET VAR GH FROM 'keychain:pilot/gh';\n"))
+	saved := playSandboxAvailable
+	defer func() { playSandboxAvailable = saved }()
+	avail := map[string]bool{}
+	playSandboxAvailable = func(k string) error {
+		if avail[k] {
+			return nil
+		}
+		return os.ErrNotExist
+	}
+	for _, c := range []struct {
+		name      string
+		avail     []string
+		flag      string
+		off       bool
+		res       *play.Result
+		backend   string
+		note, err string
+	}{
+		{"sbx first", []string{"sbx", "openshell"}, "", false, plain, "sbx", "Sandboxed (sbx)", ""},
+		{"openshell when no sbx", []string{"openshell"}, "", false, plain, "openshell", "Sandboxed (openshell)", ""},
+		{"picked", []string{"sbx", "openshell"}, "openshell", false, plain, "openshell", "Sandboxed (openshell)", ""},
+		{"picked, missing", []string{"sbx"}, "openshell", false, plain, "", "", "--sandbox=openshell"},
+		{"none", nil, "", false, plain, "", "No sandbox available here", ""},
+		{"--no-sandbox", []string{"sbx"}, "", true, plain, "", "Sandbox off (--no-sandbox)", ""},
+		{"both flags", []string{"sbx"}, "sbx", true, plain, "", "", "together"},
+		{"wants, none", nil, "", false, wants, "", "", "create-with: SANDBOX"},
+		{"wants, --no-sandbox", nil, "", true, wants, "", "although the recipe asks for one", ""},
+		{"refs, sandboxed", []string{"sbx"}, "", false, refs, "", "", "keychain:pilot/gh"},
+		{"refs, --no-sandbox", []string{"sbx"}, "", true, refs, "", "Sandbox off", ""},
+		{"refs, none here", nil, "", false, refs, "", "No sandbox available here", ""},
+	} {
+		avail = map[string]bool{}
+		for _, k := range c.avail {
+			avail[k] = true
+		}
+		playSandboxFlags(t, c.flag, c.off)
+		sb, err := choosePlaySandbox(c.res)
+		if c.err != "" {
+			if err == nil || !strings.Contains(err.Error(), c.err) {
+				t.Errorf("%s: %v, want an error with %q", c.name, err, c.err)
+			}
+			continue
+		}
+		if err != nil || sb.Backend != c.backend || !strings.Contains(sb.Note, c.note) {
+			t.Errorf("%s: %+v %v, want %q %q", c.name, sb, err, c.backend, c.note)
+		}
+	}
+}
+
+// A sandboxed play: the sandbox is created only after every confirmation,
+// the session attaches to it, and it is removed with the store. A recipe
+// that moves the endpoint and is not confirmed never reaches sbx at all:
+// the proxy would inject a key for that host (root, 2026-10-02).
+func TestPlayRunSandboxed(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	t.Setenv("TMPDIR", t.TempDir())
+	log := stubSbx(t)
+	dir := t.TempDir()
+	plain := writeRecipe(t, dir, "plain.cpb", plainRecipe)
+	router := writeRecipe(t, dir, "router.cpb", routerRecipe)
+	playFlags(t, false, false, false, "")
+	playSandboxFlags(t, "", false)
+
+	// Unconfirmed endpoint: refused, and sbx never ran.
+	playRunFlags(t, true, nil, nil, nil)
+	var err error
+	captureStdout(t, func() { err = runPlay(playCmd, []string{router}) })
+	if err == nil || !strings.Contains(err.Error(), "--trust-endpoint router.example.net") {
+		t.Fatalf("unconfirmed endpoint: %v", err)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Fatalf("sbx ran before the endpoint was confirmed: %q", sbxCalls(t, log))
+	}
+
+	// A plain recipe, sandboxed by default: create, attach, remove.
+	out := captureStdout(t, func() { err = runPlay(playCmd, []string{plain}) })
+	if err != nil || !strings.Contains(out, "Sandboxed (sbx)") {
+		t.Fatalf("sandboxed: %v\n%s", err, out)
+	}
+	calls := strings.Join(sbxCalls(t, log), "\n")
+	create, attach, rm := strings.Index(calls, "create --name cpb-play-plain-"), strings.Index(calls, "exec -i"), strings.Index(calls, "rm -f cpb-play-plain-")
+	if create < 0 || attach < create || rm < attach {
+		t.Fatalf("create, attach, remove, in order: %q", calls)
+	}
+	if len(playStores(t)) != 0 {
+		t.Fatalf("left behind: %v", playStores(t))
 	}
 }
