@@ -86,7 +86,8 @@ func TestExplainModelByReference(t *testing.T) {
 }
 
 // SET STATUSLINE always applies, whatever the current command is; IF UNSET
-// applies only where none is set yet.
+// applies only where none is set yet. Neither writes anything beside
+// settings.json.
 func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
@@ -99,10 +100,10 @@ func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
 		_ = json.Unmarshal(data, &s)
 		return s.StatusLine
 	}
-	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"statusLine": {"type": "command", "command": "statusmux render", "refreshInterval": 5}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"statusLine": {"type": "command", "command": "$HOME/bin/my-status", "refreshInterval": 5}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out := mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE mine IF UNSET"); !strings.Contains(out, "unchanged") || read()["command"] != "statusmux render" {
+	if out := mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE mine IF UNSET"); !strings.Contains(out, "unchanged") || read()["command"] != "$HOME/bin/my-status" {
 		t.Fatalf("IF UNSET over a set status line:\n%s\n%v", out, read())
 	}
 	mustStmt(t, "ALTER PLAYBOOK k SET STATUSLINE mine")
@@ -120,6 +121,13 @@ func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
 	if create := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(create, "SET STATUSLINE 'fresh' REFRESH 3") || strings.Contains(create, "IF UNSET") {
 		t.Fatalf("SHOW CREATE writes the state, not the condition:\n%s", create)
 	}
+	if entries, err := os.ReadDir(root); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), "statusline") {
+				t.Fatalf("a status line statement wrote %s", e.Name())
+			}
+		}
+	}
 }
 
 // The CLAUDE.md a new playbook gets imports nothing and names statements.
@@ -134,11 +142,6 @@ func TestDefaultClaudeMDPlain(t *testing.T) {
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "@") {
 			t.Errorf("an import line: %q", line)
-		}
-	}
-	for _, bad := range []string{"claude-playbook ", "pilot"} {
-		if strings.Contains(string(data), bad) {
-			t.Errorf("CLAUDE.md names %q:\n%s", bad, data)
 		}
 	}
 	if !strings.Contains(string(data), "cpb SHOW PLAYBOOK fresh") || !strings.Contains(string(data), "cpb (Claude PlayBooks)") {

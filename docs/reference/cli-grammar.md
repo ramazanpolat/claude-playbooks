@@ -1,7 +1,7 @@
 # CLI grammar
 
 Status: **implemented, v3.27.0.**
-Decided with the pilot on 2026-09-25/27. Everything on this
+Everything on this
 page is built; a section specified before it is built is marked
 **planned**.
 
@@ -10,20 +10,20 @@ page is built; a section specified before it is built is marked
 The state-changing commands grew one at a time and read inconsistently:
 
 - two top-level commands for one idea (`env`, `env-profile`);
-- name before verb (`env kommander-idea use glm`), so the words don't say
+- name before verb (`env work use glm`), so the words don't say
   whether you are acting on a playbook or on a profile;
 - `env-profile x default` means *every playbook*, the opposite of what
   "a default for this playbook" suggests;
 - `unset` and `clear` look like synonyms and are not.
 
-The fix is one regular grammar, read and written like DDL: the pilot
-*commands* cpb.
+The fix is one regular grammar, read and written like DDL: you
+*command* cpb.
 
 ## Shape
 
 ```
 cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
-     ALTER    PLAYBOOK   k-idea   USE ENV evren-router  SET VAR FOO=1
+     ALTER    PLAYBOOK   work     USE ENV router  SET VAR FOO=1
 ```
 
 - Keywords are **case-insensitive**. Docs write them in capitals.
@@ -154,7 +154,7 @@ other; `SANDBOX` and `ISOLATED LOGIN` do not take `LINK`. The clauses of
 `DROP PLAYBOOK` asks for confirmation on a terminal, as `delete` does;
 `--yes` skips it.
 
-Two limits keep every statement whole-or-nothing (decided 2026-09-26):
+Two limits keep every statement whole-or-nothing:
 
 - `RENAME TO`, `ALIAS` and `NO ALIAS` are not combined with environment or
   variable clauses in one statement: a rename after an environment write
@@ -175,8 +175,8 @@ Two limits keep every statement whole-or-nothing (decided 2026-09-26):
   Each prints one stderr line naming the source and the keys, never a value.
   Before this, the first sync copied a shipped login over the machine's
   `~/.claude/.credentials.json`, so installing a source could switch the
-  pilot's account to the source's.
-- `LINK` deletes nothing in the pilot's directory. It renames a
+  account to the source's.
+- `LINK` deletes nothing in your directory. It renames a
   `.credentials.json` there to `.credentials.json.cpb-ignored-<stamp>`, and
   backs up `.claude.json` to `.claude.json.cpb-backup-<stamp>` before
   removing the same keys. A directory with `isolate_auth = true` keeps both.
@@ -198,7 +198,7 @@ without restating the rest.
 
 One rule keeps the verbs apart: **`DROP` acts on objects** (an ENV, a
 playbook) and **`UNSET` acts on variables**. So `DROP ENV
-evren-router` inside `ALTER PLAYBOOK` detaches that set, and `UNSET VAR FOO`
+router` inside `ALTER PLAYBOOK` detaches that set, and `UNSET VAR FOO`
 forgets the playbook's own `FOO`.
 
 `IF NOT EXISTS` / `IF EXISTS` turn "already there" / "not there" into a no-op
@@ -256,11 +256,11 @@ overridable, as today.
 its effective value, and the layer that decided it:
 
 ```
-ANTHROPIC_BASE_URL    http://tr0:20128/v1              <- ENV evren-router
-ANTHROPIC_AUTH_TOKEN  <from keychain:9router>          <- ENV evren-router
-ANTHROPIC_MODEL       glm-5.3                          <- PLAYBOOK kommander-idea
-HTTP_PROXY            (blocked)                        <- PLAYBOOK kommander-idea
-OPENAI_API_KEY        sk-a...9f2c (51 chars, plaintext) <- PLAYBOOK kommander-idea
+ANTHROPIC_BASE_URL    http://localhost:8080/v1              <- ENV router
+ANTHROPIC_AUTH_TOKEN  <from keychain:router-token>          <- ENV router
+ANTHROPIC_MODEL       glm-5.3                          <- PLAYBOOK work
+HTTP_PROXY            (blocked)                        <- PLAYBOOK work
+OPENAI_API_KEY        sk-a...9f2c (51 chars, plaintext) <- PLAYBOOK work
 FOO                   bar                              <- DEFAULTS (ENV claude-default)
 
 Secret helper: my-keychain-helper (from CPB_SECRET_HELPER)
@@ -321,11 +321,11 @@ ALTER PLAYBOOK <name> UNSET ISOLATED LOGIN
 
 Secret references are **optional**: cpb works fully without them, and
 nothing else in the grammar depends on them. They follow git's
-`credential.helper` pattern: cpb defines a small interface, and the pilot
-configures a program that implements it (for example a keychain helper).
+`credential.helper` pattern: cpb defines a small interface, and you
+configure a program that implements it (for example a keychain helper).
 cpb never names or discovers one.
 
-**Configuring the helper** (decided 2026-09-26):
+**Configuring the helper**:
 
 - `ALTER DEFAULTS SET SECRET HELPER '<command>'` stores it and
   `ALTER DEFAULTS UNSET SECRET HELPER` removes it. It appears in
@@ -360,13 +360,13 @@ with one line: "no secret helper configured (ALTER DEFAULTS SET SECRET HELPER
 …)". Literal values work as today.
 
 `FROM` also names a playbook's source in `CREATE PLAYBOOK`; the position
-disambiguates (decided 2026-09-25).
+disambiguates.
 
 - The value never appears in a file, in argv, or in any `SHOW`/`EXPLAIN`
   output.
 - A sandboxed launch of a playbook with references is refused in the first
   release, with a message saying so.
-- **Keys cpb reads itself never take a reference** (decided 2026-09-26):
+- **Keys cpb reads itself never take a reference**:
   today `CLAUDE_CODE_OAUTH_TOKEN`, whose value cpb's authentication handling
   reads to decide injection and credential quarantine. A reference hides the
   value by design, and "set, value unknown" would break that logic silently.
@@ -375,13 +375,13 @@ disambiguates (decided 2026-09-25).
   it makes the file invalid. The list lives in one place
   (`manifest.RefRefusedKeys`); a future key cpb reads joins it.
 
-**The grammar refuses a credential-looking literal** (ruled 2026-09-26): a
+**The grammar refuses a credential-looking literal**: a
 `SET [VAR] K=V` whose key looks like a credential (the rule `env` already
 uses to redact: `TOKEN`, `SECRET`, `PASSWORD`, `AUTH`, `*_KEY`, …) is
 refused, naming the key and never the value, and pointing at
 `SET K FROM '<ref>'`. A value that cannot be a secret is let through: empty,
 an integer, or `true`/`false`, so `SET VAR MAX_THINKING_TOKENS=8000` works.
-**`AS PLAINTEXT` stores one knowingly** (ruled 2026-09-26), for a pilot
+**`AS PLAINTEXT` stores one knowingly**, for a user
 without a secret helper: `SET VAR ANTHROPIC_AUTH_TOKEN=… AS PLAINTEXT`. It
 applies to every literal in its `SET` clause and never to a reference. It
 keeps cpb usable standalone, and it is loud where it matters: `EXPLAIN` marks
@@ -393,7 +393,7 @@ no `--reveal` in the new grammar.
 
 ## playbook.cpb: SHOW CREATE and APPLY
 
-Two senses of "playbook", kept apart (pilot, 2026-09-26):
+Two senses of "playbook", kept apart:
 
 - **`PLAYBOOK`**, an *installed playbook*: a Claude Code config directory cpb manages.
 - **a playbook file**, also *a playbook script* or *the agent's playbook*: a `.cpb` file of statements, conventionally `playbook.cpb`, that `APPLY` runs. `APPLY` accepts any file name.
@@ -406,23 +406,23 @@ keeps holding state, the file holds the recipe. It belongs in dotfiles or a
 devbox project, and moving a setup to another machine is one command.
 
 ```
--- playbook.cpb (macminim), from: cpb SHOW CREATE ALL > playbook.cpb
+-- playbook.cpb, from: cpb SHOW CREATE ALL > playbook.cpb
 
-CREATE OR REPLACE ENV evren-router
-  DESCRIBE 'GLM via 9router on tr0'
-  SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 ANTHROPIC_MODEL=glm-5.3
-  SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:9router-client';
+CREATE OR REPLACE ENV router
+  DESCRIBE 'GLM via a local router'
+  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
+  SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token';
 
 CREATE OR REPLACE ENV claude-default
   BLOCK HTTP_PROXY;
 
 ALTER DEFAULTS USE ENV claude-default;
 
-CREATE PLAYBOOK IF NOT EXISTS kommander-idea
-  FROM https://github.com/ramazanpolat/kommander-playbook BRANCH v3.12.2 ALIAS ki;
+CREATE PLAYBOOK IF NOT EXISTS work
+  FROM https://github.com/example/work-playbook BRANCH v1.2.0 ALIAS w;
 
-ALTER PLAYBOOK kommander-idea
-  USE ENV evren-router
+ALTER PLAYBOOK work
+  USE ENV router
   SET VAR MAX_THINKING_TOKENS=8000
   BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN;
 ```
@@ -450,7 +450,7 @@ File rules:
 - `SHOW CREATE ALL` orders statements: env sets by name, `DEFAULTS`,
   playbooks by name.
 
-`cpb APPLY <file> [<file> ...]` (several files decided 2026-09-26):
+`cpb APPLY <file> [<file> ...]`:
 
 1. Parses **every** file and validates every statement: syntax, names, the
    secret helper's check of each reference (against the helper the files
@@ -466,13 +466,11 @@ File rules:
    Because every statement `SHOW CREATE` emits is idempotent, running the
    fixed files again is the recovery.
 
-Decided with the pilot on 2026-09-25/26.
-
 `--dry-run` does step 1 and reports what step 2 would do, judging each
 statement against the files as they are plus what earlier statements, in
 any of the files, would have created.
 
-**Source drift is a warning, never an error** (decided 2026-09-26). When
+**Source drift is a warning, never an error**. When
 `CREATE PLAYBOOK IF NOT EXISTS x FROM <source> [BRANCH b] [SUBDIR d]` meets an
 existing `x` whose recorded source, branch or subdirectory differs, `APPLY`
 reports `PLAYBOOK x exists; source differs (installed <…>, file says <…>)`
@@ -481,9 +479,9 @@ warnings. The exit code stays 0 when that is the only issue: moving an
 install to another source is `DROP PLAYBOOK` and `CREATE PLAYBOOK`, a
 deliberate step.
 
-**A file never consents to `DROP PLAYBOOK`** (decided 2026-09-26). It is the
-one irreversible statement: it deletes the install directory, and for a
-Kommander install that includes `data/` (tasks and logs). So `APPLY <file>`
+**A file never consents to `DROP PLAYBOOK`**. It is the
+one irreversible statement: it deletes the install directory, with
+everything the playbook keeps there (its `data/`, for one that has some). So `APPLY <file>`
 refuses at validation, writing nothing, when any of its files contains a
 `DROP PLAYBOOK`, and lists each one as `file:line`, unless `--yes` is given;
 `--yes` covers the drops in all of them.
@@ -573,30 +571,30 @@ planned as empty.
 ## Examples
 
 ```
-cpb CREATE ENV evren-router SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 ANTHROPIC_MODEL=glm-5.3
-cpb ALTER ENV evren-router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:9router-client'
-cpb ALTER ENV evren-router UNSET ANTHROPIC_MODEL
-cpb ALTER PLAYBOOK kommander-idea USE ENV glm-5.3 deepseek-flash
-cpb ALTER PLAYBOOK kommander-idea ADD ENV claude-metu FIRST
-cpb ALTER PLAYBOOK kommander-idea ADD ENV evren-router AFTER glm-5.3
-cpb ALTER PLAYBOOK kommander-idea DROP ENV deepseek-flash
-cpb ALTER PLAYBOOK kommander-idea BLOCK VAR HTTP_PROXY
-cpb ALTER DEFAULTS USE ENV claude-default metu-proxy
+cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
+cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token'
+cpb ALTER ENV router UNSET ANTHROPIC_MODEL
+cpb ALTER PLAYBOOK work USE ENV glm-5.3 deepseek-flash
+cpb ALTER PLAYBOOK work ADD ENV claude-work FIRST
+cpb ALTER PLAYBOOK work ADD ENV router AFTER glm-5.3
+cpb ALTER PLAYBOOK work DROP ENV deepseek-flash
+cpb ALTER PLAYBOOK work BLOCK VAR HTTP_PROXY
+cpb ALTER DEFAULTS USE ENV claude-default corp-proxy
 cpb ALTER DEFAULTS SET SECRET HELPER 'my-keychain-helper'
-cpb CREATE PLAYBOOK kommander-x FROM https://github.com/ramazanpolat/kommander-playbook ALIAS kx
-cpb ALTER PLAYBOOK kommander-x ALIAS kxx
-cpb ALTER PLAYBOOK kommander-x RENAME TO kommander-lab
-cpb DROP PLAYBOOK kommander-lab
+cpb CREATE PLAYBOOK scratch FROM https://github.com/example/work-playbook ALIAS sc
+cpb ALTER PLAYBOOK scratch ALIAS scr
+cpb ALTER PLAYBOOK scratch RENAME TO lab
+cpb DROP PLAYBOOK lab
 cpb SHOW ENVS
-cpb EXPLAIN PLAYBOOK kommander-idea
+cpb EXPLAIN PLAYBOOK work
 cpb SHOW CREATE ALL > playbook.cpb
 cpb APPLY playbook.cpb --dry-run
-cpb ALTER PLAYBOOK kommander-idea ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth'
-cpb ALTER PLAYBOOK kommander-idea ALLOW TOOL 'Bash(kommander-helper *)' SET MODEL 'claude-opus-5-5'
-cpb ALTER PLAYBOOK kommander-idea SET STATUSLINE 'bash ~/bin/statusline.sh'
-cpb ALTER PLAYBOOK kommander-idea ADD SKILL release-notes FROM 'github:acme/skills' SUBDIR release-notes
-cpb APPLY kommander.cpb TO kommander-lab
-cpb APPLY kommander.cpb TO '~/.claude' --dry-run
+cpb ALTER PLAYBOOK work ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
+cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)' SET MODEL 'claude-opus-5-5'
+cpb ALTER PLAYBOOK work SET STATUSLINE 'bash ~/bin/statusline.sh'
+cpb ALTER PLAYBOOK work ADD SKILL release-notes FROM 'github:acme/skills' SUBDIR release-notes
+cpb APPLY agent.cpb TO lab
+cpb APPLY agent.cpb TO '~/.claude' --dry-run
 cpb "SELECT name, version FROM PLAYBOOKS"
 cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook"
 ```
@@ -606,10 +604,9 @@ applied in CI.
 
 ## Pre-grammar commands: a hidden fallback
 
-Decided with the pilot on 2026-09-26: the grammar release is **v3.20.0**
+The grammar release is **v3.20.0**
 and breaks nothing. The pre-grammar state-changing commands stay working as a
-fallback, in case the new code is buggy, and are removed in a later release
-the pilot names (that one is v4.0.0).
+fallback, in case the new code is buggy, and v4.0.0 removes them.
 
 - **Hidden:** `env`, `env-profile`, `create <name>`, `link`, `delete`,
   `rename`, `alias`, `dealias`, `list`, `info` are hidden from help and
@@ -685,7 +682,7 @@ A variable, wherever it appears, is one JSON object with exactly one of:
 
 ```
 {"key": "MODEL",   "value": "glm-5.3"}                       literal
-{"key": "TOKEN",   "ref": "keychain:9router"}                secret by reference
+{"key": "TOKEN",   "ref": "keychain:router-token"}                secret by reference
 {"key": "API_KEY", "redacted": true, "plaintext": true}      credential-looking literal: value never shown
 {"key": "HTTP_PROXY", "blocked": true}                       BLOCK
 ```
@@ -694,14 +691,14 @@ A variable, wherever it appears, is one JSON object with exactly one of:
 aligned; `Version:` keeps today's `info` spelling):
 
 ```
-Name:       kommander-idea
-Version:    3.12.2
-Path:       /Users/polat/.claude-playbooks/kommander-idea
-Source:     https://github.com/ramazanpolat/kommander-playbook (branch v3.12.2)
+Name:       work
+Version:    1.2.0
+Path:       /Users/me/.claude-playbooks/work
+Source:     https://github.com/example/work-playbook (branch v1.2.0)
 Launcher:   ki
-Env sets:   evren-router, glm-5.3
+Env sets:   router, glm-5.3
 Variables:  MAX_THINKING_TOKENS=8000
-            ANTHROPIC_AUTH_TOKEN <from keychain:9router>
+            ANTHROPIC_AUTH_TOKEN <from keychain:router-token>
             HTTP_PROXY (blocked)
 Sandbox:    no
 ```
@@ -712,12 +709,12 @@ created empty; `Launcher:` reads `(none)` without one.
 `--json`, one object:
 
 ```
-{"name": "kommander-idea", "version": "3.12.2",
- "path": "/Users/polat/.claude-playbooks/kommander-idea",
- "source": {"url": "https://github.com/ramazanpolat/kommander-playbook", "branch": "v3.12.2", "subdir": null},
+{"name": "work", "version": "1.2.0",
+ "path": "/Users/me/.claude-playbooks/work",
+ "source": {"url": "https://github.com/example/work-playbook", "branch": "v1.2.0", "subdir": null},
  "linked": null,
  "launcher": "ki",
- "envs": ["evren-router", "glm-5.3"],
+ "envs": ["router", "glm-5.3"],
  "vars": [<variable>, ...],
  "sandbox": false}
 ```
@@ -740,8 +737,8 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 `Default:` (yes/no), then `Variables:` as above. `--json`:
 
 ```
-{"name": "evren-router", "description": "GLM via 9router on tr0",
- "vars": [<variable>, ...], "used_by": ["kommander-idea"], "default": false}
+{"name": "router", "description": "GLM via a local router",
+ "vars": [<variable>, ...], "used_by": ["work"], "default": false}
 ```
 
 **`SHOW ENVS`**: human form, one line per set, columns
@@ -753,7 +750,7 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 `CPB_SECRET_HELPER`), or `(none)`. `--json`:
 
 ```
-{"envs": ["claude-default", "metu-proxy"],
+{"envs": ["claude-default", "corp-proxy"],
  "secret_helper": {"command": "my-keychain-helper", "from": "setting"}}
 ```
 
@@ -763,8 +760,8 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 `--json`:
 
 ```
-{"playbook": "kommander-idea",
- "vars": [{<variable>, "layer": {"kind": "ENV", "name": "evren-router"}}, ...],
+{"playbook": "work",
+ "vars": [{<variable>, "layer": {"kind": "ENV", "name": "router"}}, ...],
  "secret_helper": {"command": "...", "from": "setting"} | null}
 ```
 
@@ -772,8 +769,7 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 
 ## SELECT (v3.21.0)
 
-Decided with the pilot on 2026-09-26 (a first design was withdrawn the same
-day, then replaced by this one). `SELECT` queries the same state `SHOW`
+`SELECT` queries the same state `SHOW`
 prints, as tables, with two engines:
 
 ```
@@ -801,8 +797,7 @@ cpb "SELECT name FROM PLAYBOOKS WHERE version_tuple > [3, 10] ORDER BY name"   c
   `'FROM VARS'` in a string or a comment is not a table. One statement per query: text after a `;` is refused. Without ClickHouse the query is refused in one line: "this
   query needs ClickHouse (clickhouse local); install it, or pick columns
   only". One table per query.
-- **What a terminal and a pipe get** (v3.22.0; the pilot found raw TSV on a
-  terminal unreadable):
+- **What a terminal and a pipe get** (v3.22.0):
   - **On a terminal, with no `FORMAT` in the query,** cpb renders the result
     itself, the same way on both paths. For ClickHouse it asks
     `clickhouse local` for `JSONCompact` and reads the names and values
@@ -857,7 +852,7 @@ the one a launch uses. The manual form, piping `SHOW … --json` yourself, is in
 
 ### DESCRIBE
 
-v3.22.0 (the pilot: `cpb DESCRIBE playbooks` said "unknown command").
+v3.22.0.
 `DESCRIBE [TABLE] <table>`, or `DESC`, lists a `SELECT` table's columns and
 their types: the typed structure `clickhouse local` reads the rows with,
 plus the computed `version_tuple`. A table name is case-insensitive, as in
@@ -874,8 +869,7 @@ machine.
 
 ## INCLUDE
 
-Decided with the pilot on 2026-09-26; ships in v3.20.0 with "Plugins and
-the agent". A
+Built in v3.20.0, with "Plugins and the agent". A
 playbook file can pull in another, so one machine's file can share a base
 with the next:
 
@@ -896,7 +890,7 @@ statement := … | INCLUDE '<path>'
 - **Local regular files only.** A path is absolute, or relative to the
   directory of the file that includes it. It must name a regular file: a
   URL, a pipe, a device (`/dev/stdin`, `/dev/fd/…`) or a directory is
-  refused. A playbook file runs with the pilot's authority, so what it pulls
+  refused. A playbook file runs with your authority, so what it pulls
   in must be a file on this machine. A root file that is not itself a
   regular file (a pipe given to `APPLY`) may be applied, but may not
   `INCLUDE` a relative path, which would have nothing to resolve against.
@@ -928,35 +922,33 @@ the configured one otherwise. (The same rule applies to `APPLY` without
 
 **Not planned** in playbook files: variables, loops and conditionals. A
 playbook file stays a flat list of statements that reads the same every
-time; anything more needs the pilot's explicit approval first.
+time; anything more needs your explicit approval first.
 
 ## Plugins and the agent
 
-Decided with the pilot on 2026-09-26; ships in v3.20.0. The goal it serves: a playbook built by stacking playbook files,
-for example Kommander as a plugin and an agent on a bare playbook:
+Built in v3.20.0. The goal it serves: a playbook built by stacking playbook files,
+for example a reviewer agent from a plugin, on a bare playbook:
 
 ```
--- bare.cpb
-CREATE PLAYBOOK IF NOT EXISTS kommander NO ALIAS;
-ALTER PLAYBOOK kommander USE ENV glm-5.3;
+-- base.cpb
+CREATE PLAYBOOK IF NOT EXISTS reviewer NO ALIAS;
+ALTER PLAYBOOK reviewer USE ENV router;
 
--- kommander.cpb
-INCLUDE 'bare.cpb';
-ALTER PLAYBOOK kommander
-  ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook'
-  ADD PLUGIN kommander@kommander
-  SET AGENT 'kommander';
+-- agent.cpb
+INCLUDE 'base.cpb';
+ALTER PLAYBOOK reviewer
+  ADD MARKETPLACE team FROM 'github:example/team-plugins'
+  ADD PLUGIN reviewer@team
+  SET AGENT 'reviewer';
 
--- chaos.cpb
-INCLUDE 'kommander.cpb';
-ALTER PLAYBOOK kommander
-  ADD MARKETPLACE chaos FROM 'github:santiment/chaos'
-  ADD PLUGIN chaos@chaos;
+-- team.cpb
+INCLUDE 'agent.cpb';
+ALTER PLAYBOOK reviewer
+  ADD MARKETPLACE team-rules FROM 'github:example/team-rules'
+  ADD PLUGIN team@team-rules;
 ```
 
-**How the clauses act: through Claude Code's own CLI** (decided with the
-pilot on 2026-09-26, replacing an earlier cut that wrote `settings.json`
-itself). A playbook is a Claude Code config directory, so with
+**How the clauses act: through Claude Code's own CLI.** A playbook is a Claude Code config directory, so with
 `CLAUDE_CONFIG_DIR` set to it, Claude Code's *user* scope is that playbook.
 The marketplace and plugin clauses run `claude plugin …` there, with
 `--scope user`: the format of `settings.json` and of the plugin cache stays
@@ -990,7 +982,7 @@ a terminal, so Claude Code never prompts.
 A directory source is the marketplace root, the directory that holds
 `.claude-plugin/marketplace.json`. In a playbook file, a path starting with
 `./` or `../` resolves against the directory of that file, exactly as
-`INCLUDE` does (decided 2026-09-26), so a layer can ship its plugin beside
+`INCLUDE` does, so a layer can ship its plugin beside
 it; on the command line, and in a file read from a pipe, it is refused. Any
 other relative path is refused, and so is a URL carrying credentials. This is how a plugin is used from a local checkout
 before it is published. `--sparse` is not in the first cut. A git URL's
@@ -1043,7 +1035,7 @@ the commands it would run, and runs none.
 
 - `ADD PLUGIN p@m` is refused unless `m` is declared in this playbook, by
   its state or by an earlier clause. There is no exception for a
-  marketplace Claude Code knows by default (decided 2026-09-26): a plugin id
+  marketplace Claude Code knows by default: a plugin id
   always names its marketplace, so a playbook that uses the official one
   declares it
   (`ADD MARKETPLACE claude-plugins-official FROM 'github:anthropics/claude-plugins-official'`).
@@ -1052,11 +1044,11 @@ the commands it would run, and runs none.
 - `DROP PLUGIN` keeps the plugin's saved data (`--keep-data`): dropping
   detaches it, as `DROP ENV` detaches a set. Purging the data is not in the
   first cut.
-- **A marketplace-declared command is never accepted for the pilot.** A
+- **A marketplace-declared command is never accepted for you.** A
   plugin installed by running a command its marketplace declares (or whose
   archive is fetched through one) needs a confirmation. cpb never passes `-y`
   or `--accept-command`: the statement fails, shows the command and its
-  `sha256`, and gives the line the pilot runs by hand after reviewing it
+  `sha256`, and gives the line you run by hand after reviewing it
   (`CLAUDE_CONFIG_DIR=<playbook> claude plugin install p@m --accept-command <sha256>`).
   It is a supply-chain guard.
 - **Network.** `ADD MARKETPLACE` from git or GitHub, and `ADD PLUGIN`, fetch
@@ -1076,15 +1068,15 @@ the commands it would run, and runs none.
   does not reproduce such an entry: it writes a comment line
   (`-- PLUGIN p@m is false in settings.json; not written`).
 - A playbook file never runs a shell command: there is no `RUN` statement,
-  and none is planned (decided 2026-09-26). It would end dry runs,
+  and none is planned. It would end dry runs,
   validation before writing, `SHOW CREATE` and every safety rule above.
 
-**The agent** (verified 2026-09-26, nine `claude -p` runs). A plugin can
+**The agent.** A plugin can
 name an agent in its own `settings.json`, and two plugins that both do are
 resolved by load order, the last one winning. The `agent` of the user
 scope overrides every plugin, and a playbook's `settings.json` *is* its user
 scope, so `SET AGENT` is the deterministic pin. It accepts an agent's bare
-name (`kommander`) or its namespaced id (`kommander:kommander`); both
+name (`reviewer`) or its namespaced id (`reviewer:reviewer`); both
 resolve, and cpb stores what was typed. A layer above does not need `SET
 AGENT`: its plugin's SessionStart context stacks on top of the agent's.
 The agent's prompt replaces Claude Code's default system prompt; that is
@@ -1096,39 +1088,39 @@ the plugin's concern, not cpb's.
 and `Agent:` lines when the playbook has any. These reads take the
 playbook's `settings.json` as Claude Code wrote it and run nothing.
 `EXPLAIN PLAYBOOK` names the enabled plugins a launch starts with and the
-agent the playbook pins, `Agent: kommander (playbook settings)`; with no pin
+agent the playbook pins, `Agent: reviewer (playbook settings)`; with no pin
 and plugins enabled, it says that a plugin may name one (cpb does not read
 the plugins' own files). `SHOW CREATE` writes the clauses, so a
 playbook's plugins and agent travel in its playbook file. The fields are in
 `SHOW PLAYBOOK --json`, so the SQL recipe sees them.
 
 **INCLUDE** is specified in its own section and built in the same
-release, so the stacked files above run with one `cpb APPLY chaos.cpb`.
+release, so the stacked files above run with one `cpb APPLY team.cpb`.
 
 These clauses exist on `ALTER PLAYBOOK` only; there is no `ALTER DEFAULTS`
-form in the first cut (decided 2026-09-26).
+form in the first cut.
 
 ## Targets: recipes, USE PLAYBOOK and APPLY … TO (v3.21.0)
 
 Built (v3.21.0), `TO '<dir>'` included.
 
-Decided with the pilot on 2026-09-26: a playbook file can be a **recipe**,
+A playbook file can be a **recipe**,
 written once and applied to any playbook, or to a plain Claude Code config
 directory such as `~/.claude`.
 
 ```
--- kommander.cpb, a recipe: no playbook named in its statements
-INCLUDE 'bare.cpb';
+-- agent.cpb, a recipe: no playbook named in its statements
+INCLUDE 'base.cpb';
 ALTER PLAYBOOK
-  ADD MARKETPLACE kommander FROM '~/path/to/kommander-playbook'
-  ADD PLUGIN kommander@kommander
-  SET AGENT 'kommander'
-  ALLOW TOOL 'Bash(kommander-helper *)';
+  ADD MARKETPLACE team FROM './team-plugins'
+  ADD PLUGIN reviewer@team
+  SET AGENT 'reviewer'
+  ALLOW TOOL 'Bash(git diff *)';
 ```
 
 ```
-cpb APPLY kommander.cpb TO kommander-agent     # a playbook (created bare if missing)
-cpb APPLY kommander.cpb TO '~/.claude'         # a plain config directory
+cpb APPLY agent.cpb TO reviewer-agent          # a playbook (created bare if missing)
+cpb APPLY agent.cpb TO '~/.claude'             # a plain config directory
 ```
 
 ### The name is optional
@@ -1237,17 +1229,17 @@ always and names the backups it would make.
 
 ## An agent's configuration (v3.21.0)
 
-Decided with the pilot on 2026-09-26: a playbook file describes a Claude Code
+A playbook file describes a Claude Code
 agent completely, from its route to its tools. Four clause groups, on
 `ALTER PLAYBOOK` only, in the order they are built:
 
 ```
-ALTER PLAYBOOK kommander-agent
-  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:pilot/sentry-auth'
+ALTER PLAYBOOK reviewer-agent
+  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/data'
-  ALLOW TOOL 'Bash(kommander-helper *)'
+  ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Bash(rm -rf *)'
-  SET STATUSLINE '~/.claude-playbooks/kommander-agent/bin/statusline.sh'
+  SET STATUSLINE '~/.claude-playbooks/reviewer-agent/bin/statusline.sh'
   SET MODEL 'claude-opus-5-5'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
@@ -1312,7 +1304,7 @@ and, for a remote server, its request headers (`HEADER`). `DROP MCP SERVER
   its `FROM '<ref>'`. `EXPLAIN PLAYBOOK` lists the servers and the derived
   variables the launch supplies.
 - Not in the first cut: OAuth (`--client-id`, `--client-secret`, `claude mcp
-  login`: interactive, the pilot's to run), WebSocket servers, and the
+  login`: interactive, yours to run), WebSocket servers, and the
   `local` and `project` scopes.
 
 ### Tool permissions
@@ -1322,7 +1314,7 @@ Built (v3.21.0).
 `ALLOW TOOL '<rule>'` and `DENY TOOL '<rule>'` add rules to the playbook's
 `settings.json` `permissions.allow` / `permissions.deny`; `UNSET TOOL
 '<rule>'` removes a rule from either. A rule is Claude Code's own permission
-syntax, stored as typed (`'Bash(kommander-helper *)'`, `'Read(~/secrets/**)'`,
+syntax, stored as typed (`'Bash(git diff *)'`, `'Read(~/secrets/**)'`,
 `'mcp__sentry'`). Adding a rule to one list removes it from the other, so a
 rule is in at most one. Order and every rule cpb did not write are kept.
 Claude Code has no CLI for permissions, so cpb writes the key.
@@ -1330,8 +1322,8 @@ Claude Code has no CLI for permissions, so cpb writes the key.
 first cut.
 
 `SHOW CREATE` writes every rule; `EXPLAIN PLAYBOOK` shows
-`Tools: allow …; deny …`. Kommander as an agent needs one today:
-`ALLOW TOOL 'Bash(kommander-helper *)'`, which example 08 sets.
+`Tools: allow …; deny …`. An agent that runs a tool without asking needs
+one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
 
 ### Status line and model
 
@@ -1397,8 +1389,7 @@ Both are settings keys with no CLI.
 
 ### Model picker
 
-Built for v3.22.0. The pilot said "do it" on 2026-09-27; root confirmed
-the shape. The `/model` picker of a playbook, or of a plain config
+Built for v3.22.0. The `/model` picker of a playbook, or of a plain config
 directory (it is user scope), from settings.json `modelPicker` =
 `{options: [{model, label, description, behavesAs}], replaceBuiltInOptions}`:
 
@@ -1545,7 +1536,7 @@ variables, secret references, the login and the exit line.
   across all playbooks (or the one `FOR PLAYBOOK` names). It resumes the
   newest that is **not** live, and says first what it picked:
   ```
-  2 newer sessions are live (pids 7339, 47904); resuming 8ba14a71-… of kommander (last active 2 hours ago)
+  2 newer sessions are live (pids 7339, 47904); resuming 8ba14a71-… of work (last active 2 hours ago)
   ```
 - **`SESSION '<id>'`** finds the id in any playbook. An id found in more
   than one config dir is refused until `FOR PLAYBOOK` names one.

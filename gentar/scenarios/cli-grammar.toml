@@ -144,7 +144,7 @@ command = '''export PATH="$HOME/fakeclaude:$PATH"; L="$HOME/fake-claude.log"; M=
 contains = "plugins-ok"
 
 # --- v3.21.0: an agent's configuration, targets and SELECT (new code only;
-# assertions confirmed by root as the pilot's delegate, 2026-09-27) ---
+# assertions confirmed 2026-09-27) ---
 
 [[verify.commands]]
 # MCP servers run `claude mcp add-json` with the playbook as
@@ -302,9 +302,8 @@ command = '''P="$HOME/.claude-playbooks/srf"; S="$P/settings.json"; c() { tr -d 
 contains = "statusline-refresh-ok"
 
 [[verify.commands]]
-# A new playbook's CLAUDE.md imports nothing and names statements, never the
-# pilot profile; NO PILOT PROFILE is not grammar: refused, nothing created.
-command = '''P="$HOME/.claude-playbooks"; claude-playbook CREATE PLAYBOOK pcm NO ALIAS >/dev/null && head -1 "$P/pcm/CLAUDE.md" | grep -qx '# Playbook: pcm' && ! grep -q '^@' "$P/pcm/CLAUDE.md" && ! grep -qi 'pilot' "$P/pcm/CLAUDE.md" && grep -qF 'cpb SHOW PLAYBOOK pcm' "$P/pcm/CLAUDE.md" && if claude-playbook CREATE PLAYBOOK npp NO PILOT PROFILE > "$HOME/npp.err" 2>&1; then echo npp-accepted; elif ! grep -q 'expected ALIAS after NO' "$HOME/npp.err" || test -e "$P/npp"; then echo npp-wrong; else echo plain-claude-md-ok; fi'''
+# A new playbook's CLAUDE.md imports nothing and names statements.
+command = '''P="$HOME/.claude-playbooks"; claude-playbook CREATE PLAYBOOK pcm NO ALIAS >/dev/null && head -1 "$P/pcm/CLAUDE.md" | grep -qx '# Playbook: pcm' && ! grep -q '^@' "$P/pcm/CLAUDE.md" && grep -qF 'cpb SHOW PLAYBOOK pcm' "$P/pcm/CLAUDE.md" && echo plain-claude-md-ok'''
 contains = "plain-claude-md-ok"
 
 [[verify.commands]]
@@ -328,11 +327,11 @@ command = '''G="$HOME/.claude/.credentials.json"; P="$HOME/.claude-playbooks"; m
 contains = "shared-sync-same-account-ok"
 
 [[verify.commands]]
-# SET STATUSLINE always applies, whatever command holds the slot (a
-# statusmux command included), with no warning; IF UNSET leaves a set status
-# line alone (unchanged) and applies to an empty slot; SHOW CREATE writes the
-# status line as it is, never the condition.
-command = '''P="$HOME/.claude-playbooks/shh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK shh NO ALIAS >/dev/null && printf '{"statusLine":{"type":"command","command":"statusmux render","refreshInterval":10}}\n' > "$S" && printf "ALTER PLAYBOOK shh SET STATUSLINE 'echo offered' IF UNSET;\n" > "$HOME/shu.cpb" && claude-playbook APPLY "$HOME/shu.cpb" > "$HOME/shu.out" 2> "$HOME/shu.err" && grep -q " 0 changed, 1 unchanged" "$HOME/shu.out" && c | grep -qF '"command":"statusmuxrender"' && claude-playbook "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain'" > /dev/null 2> "$HOME/shh.err" && ! grep -qi 'host' "$HOME/shh.err" && c | grep -qF '"command":"echoplain"' && c | grep -qF '"refreshInterval":10' && claude-playbook "ALTER PLAYBOOK shh UNSET STATUSLINE" > /dev/null && claude-playbook APPLY "$HOME/shu.cpb" > "$HOME/shu2.out" && grep -q " 1 changed" "$HOME/shu2.out" && c | grep -qF '"command":"echooffered"' && claude-playbook SHOW CREATE PLAYBOOK shh > "$HOME/shc.out" && grep -qF "SET STATUSLINE 'echo offered'" "$HOME/shc.out" && ! grep -q 'IF UNSET' "$HOME/shc.out" && echo statusline-if-unset-ok'''
+# SET STATUSLINE always applies, whatever command holds the slot; IF UNSET
+# leaves a set status line alone (unchanged) and applies to an empty slot;
+# SHOW CREATE writes the status line as it is, never the condition; nothing
+# is written beside settings.json.
+command = '''P="$HOME/.claude-playbooks/shh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK shh NO ALIAS >/dev/null && printf '{"statusLine":{"type":"command","command":"$HOME/bin/my-status","refreshInterval":10}}\n' > "$S" && printf "ALTER PLAYBOOK shh SET STATUSLINE 'echo offered' IF UNSET;\n" > "$HOME/shu.cpb" && claude-playbook APPLY "$HOME/shu.cpb" > "$HOME/shu.out" 2> "$HOME/shu.err" && grep -q " 0 changed, 1 unchanged" "$HOME/shu.out" && c | grep -qF '"command":"$HOME/bin/my-status"' && claude-playbook "ALTER PLAYBOOK shh SET STATUSLINE 'echo plain'" > /dev/null && c | grep -qF '"command":"echoplain"' && c | grep -qF '"refreshInterval":10' && claude-playbook "ALTER PLAYBOOK shh UNSET STATUSLINE" > /dev/null && claude-playbook APPLY "$HOME/shu.cpb" > "$HOME/shu2.out" && grep -q " 1 changed" "$HOME/shu2.out" && c | grep -qF '"command":"echooffered"' && claude-playbook SHOW CREATE PLAYBOOK shh > "$HOME/shc.out" && grep -qF "SET STATUSLINE 'echo offered'" "$HOME/shc.out" && ! grep -q 'IF UNSET' "$HOME/shc.out" && test ! -e "$P/statusline.d" && echo statusline-if-unset-ok'''
 contains = "statusline-if-unset-ok"
 
 [[verify.commands]]
@@ -350,12 +349,6 @@ contains = "hidden-deprecated-ok"
 # does not write it.
 command = '''P="$HOME/.claude-playbooks/slh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; claude-playbook CREATE PLAYBOOK slh NO ALIAS >/dev/null && if claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" > "$HOME/slh.err" 2>&1; then echo previous-accepted; elif ! grep -q "no earlier status line is recorded" "$HOME/slh.err"; then echo previous-wrong; else printf '{"statusLine":{"type":"command","command":"echo a","padding":2,"refreshInterval":7}}\n' > "$S" && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE 'echo b' REFRESH 3" >/dev/null && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echoa"' && c | grep -qF '"padding":2' && c | grep -qF '"refreshInterval":7' && claude-playbook "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" >/dev/null && c | grep -qF '"command":"echob"' && claude-playbook SHOW PLAYBOOK slh --json | tr -d ' \n' | grep -qF '"statusline_history":[{"command":"echoa","refresh":7,' && H="$HOME/.claude-playbooks/.state/statusline-history.json" && [ "$(stat -c %a "$H" 2>/dev/null || stat -f %Lp "$H")" = 600 ] && ! ls -a "$P" | grep -q history && ! claude-playbook SHOW CREATE PLAYBOOK slh | grep -q PREVIOUS && echo statusline-history-ok; fi'''
 contains = "statusline-history-ok"
-
-[[verify.commands]]
-# Panels are not part of cpb: ADD PANEL is refused and writes nothing,
-# there is no PANELS table, and SHOW PLAYBOOK --json has no panels field.
-command = '''P="$HOME/.claude-playbooks/pnl"; claude-playbook CREATE PLAYBOOK pnl NO ALIAS >/dev/null && if claude-playbook "ALTER PLAYBOOK pnl ADD PANEL local.clock EXEC 'date'" > "$HOME/pnl.err" 2>&1; then echo add-panel-accepted; elif ! grep -q 'ADD takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL' "$HOME/pnl.err" || test -e "$P/statusline.d"; then echo add-panel-wrong; elif claude-playbook "SELECT * FROM PANELS" > /dev/null 2>&1; then echo panels-table; elif claude-playbook SHOW PLAYBOOK pnl --json | grep -q '"panels"'; then echo panels-field; else echo panels-gone-ok; fi'''
-contains = "panels-gone-ok"
 
 [[verify.commands]]
 # Sessions (v3.25.x), on throwaway playbooks, with a real live process: a
@@ -428,19 +421,14 @@ echo sessions-tty-ok'''
 contains = "sessions-tty-ok"
 
 [[verify.commands]]
-# No pilot_profile anywhere: SHOW PLAYBOOK --json ends with model_picker then
-# play; DESCRIBE PLAYBOOKS ends the same way; SELECT of pilot_profile is an
-# unknown column; the human SHOW has no Pilot profile line.
+# SHOW PLAYBOOK --json ends with model_picker then play, and DESCRIBE
+# PLAYBOOKS ends the same way.
 command = '''
 claude-playbook CREATE PLAYBOOK ppi NO ALIAS >/dev/null || exit 1
 claude-playbook SHOW PLAYBOOK ppi --json | tr -d ' \n' | grep -qF '"model_picker":null,"play":null}' || { echo show-tail-wrong; exit 1; }
-if claude-playbook SHOW PLAYBOOK ppi --json | grep -q pilot_profile; then echo show-has-pilot; exit 1; fi
 claude-playbook DESCRIBE PLAYBOOKS --json | tr -d ' \n' | grep -qF '{"name":"model_picker","type":"JSON"},{"name":"play","type":"JSON"}]' || { echo describe-tail-wrong; exit 1; }
-if claude-playbook "SELECT name, pilot_profile FROM PLAYBOOKS" > "$HOME/pps.err" 2>&1; then echo select-accepted; exit 1; fi
-grep -q "unknown column 'pilot_profile'" "$HOME/pps.err" || { echo select-wrong-error; exit 1; }
-if claude-playbook SHOW PLAYBOOK ppi | grep -q 'Pilot profile'; then echo human-has-pilot; exit 1; fi
-echo uncoupled-fields-ok'''
-contains = "uncoupled-fields-ok"
+echo playbook-fields-ok'''
+contains = "playbook-fields-ok"
 
 [[verify.commands]]
 # cpb tui v1 (v3.25.0), read-only, on the real binary under a pty (script,

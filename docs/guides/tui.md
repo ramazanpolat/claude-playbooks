@@ -14,14 +14,14 @@ cpb tui
 ```
  cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  NAME           LAUNCHER  ENV SETS  LOGIN     SESSIONS  MODEL
-▸ kommander-dev  kd        -         shared    1         claude-opus-5-5
-  router         k9        9router   isolated  1         glm-5.3
+  NAME    LAUNCHER  VERSION  ENV SETS  LOGIN     SESSIONS  MODEL
+▸ alpha   al        v1.2.0   -         shared    1         claude-opus-5-5
+  router  rt        -        proxy     isolated  1         glm-5.3
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
  enter open  s sessions  c SHOW CREATE  e export  y copy  / filter  q quit
-reads: cpb SHOW PLAYBOOKS --json
+reads: cpb SHOW PLAYBOOKS --json · cpb SHOW SESSIONS --json
 ```
 
 - **LOGIN** is the kind of login: `shared` with `~/.claude`, `isolated`, or
@@ -40,21 +40,21 @@ line, Model and Sessions. `←→` or `1`–`9` switch between them.
 ```
  cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
- router  (launcher k9 · ~/.claude-playbooks/router)
+ router  (launcher rt · ~/.claude-playbooks/router)
   Overview  Env [Vars] Plugins  MCP  Skills  Status line  Model  Sessions
 
   effective at launch, from EXPLAIN
-  KEY                   VALUE / REF               LAYER
-  X                     1                         defaults base
-  ANTHROPIC_BASE_URL    http://tr0:20128/v1       env 9router
-  ANTHROPIC_AUTH_TOKEN  FROM 'keychain:pilot/9r'  env 9router
-  OPENAI_API_KEY        (redacted, plaintext)     playbook
-  MY_FLAG               1                         playbook
+  KEY                   VALUE / REF                  LAYER
+  X                     1                            defaults base
+  ANTHROPIC_BASE_URL    http://localhost:8080/v1     env proxy
+  ANTHROPIC_AUTH_TOKEN  FROM 'keychain:proxy-token'  env proxy
+  OPENAI_API_KEY        (redacted, plaintext)        playbook
+  MY_FLAG               1                            playbook
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
  ←→/1-9 tab  c SHOW CREATE  e export .cpb  y copy  r refresh  esc back  q quit
-reads: cpb EXPLAIN PLAYBOOK router --json
+reads: cpb SHOW PLAYBOOK router --json · cpb EXPLAIN PLAYBOOK router --json
 ```
 
 - **Vars** shows the variables in effect at launch, with the layer each
@@ -70,9 +70,9 @@ reads: cpb EXPLAIN PLAYBOOK router --json
 ```
  cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
-  PLAYBOOK       PID    TTY      AGE  ACTIVE  MODEL            CWD
-▸ kommander-dev  47904  ttys039  9h   54s     claude-opus-5-5  ~/DEV/claude-pla…
-  router         43627  -        2d   28m     glm-5.3          ~/DEV/claude-pla…
+  PLAYBOOK  PID    TTY      KIND  AGE  ACTIVE  MODEL            CWD
+▸ alpha     47904  ttys039  int   9h   54s     claude-opus-5-5  ~/DEV/app
+  router    43627  -        bg    2d   28m     glm-5.3          ~/DEV/app
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago

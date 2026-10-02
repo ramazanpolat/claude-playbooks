@@ -60,7 +60,7 @@ An env set is a named group of variables, attached to one playbook or to all
 of them (`DEFAULTS`). `EXPLAIN` shows what a launch sets, and which layer set it.
 
 ```bash
-cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
+cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:8080/v1
 cpb CREATE PLAYBOOK glm ISOLATED LOGIN
 cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3
 cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY   # removed even if your shell exports it
@@ -74,7 +74,7 @@ new playbook's `CLAUDE.md` imports nothing. [Environment →](docs/guides/enviro
 
 With `--sandbox`, Claude Code runs in a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/)
 that sees your working directory and the playbook's own directory, and not
-your home, `~/.claude`, your shell's environment or your other playbooks. On Linux, `--sandbox=openshell` uses [NVIDIA OpenShell](docs/guides/sandbox.md#openshell-backend-experimental-linux) instead (experimental).
+your home, `~/.claude`, your shell's environment or your other playbooks. On Linux, `--sandbox=openshell` uses [NVIDIA OpenShell](docs/guides/sandbox.md#openshell-backend-linux) instead.
 
 ```bash
 cpb run --sandbox work                                         # this folder is the workdir
@@ -98,7 +98,7 @@ twice changes nothing.
 INCLUDE 'base.cpb';                                  -- shared layers stack
 ALTER PLAYBOOK
   ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/'
-      HEADER 'Authorization' FROM 'keychain:pilot/github-mcp'   -- a secret by reference
+      HEADER 'Authorization' FROM 'keychain:github-mcp'   -- a secret by reference
   ALLOW TOOL 'Bash(gh pr *)'  DENY TOOL 'Bash(git push *)'
   ADD SKILL review FROM 'https://github.com/me/skills' SUBDIR review
   SET MODEL 'claude-opus-5-5';
@@ -138,7 +138,7 @@ cpb "SELECT name, envs, sandbox FROM PLAYBOOKS"    # state as tables; add ClickH
 | | |
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
-| [Stack layers into an agent](docs/tutorials/stacked-agent.md) | bare -> Kommander -> a layer on top, as recipes |
+| [Stack layers into an agent](docs/tutorials/stacked-agent.md) | base -> an agent -> a team layer, as recipes |
 | [Examples 01-21](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI and `cpb play`, all applied in CI |
 | [Guides](docs/README.md) · [CLI grammar](docs/reference/cli-grammar.md) | how-tos for every area · `cpb <VERB> <OBJECT> <name> <clause> ...`, every statement and output format |
 | [SPEC-v4.md](SPEC-v4.md) · [Contributing](CONTRIBUTING.md) | the behavioral contract · development |

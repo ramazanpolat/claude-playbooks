@@ -414,7 +414,7 @@ func TestRunPrintsTheResumeLine(t *testing.T) {
 }
 
 func TestEncodeProjectDir(t *testing.T) {
-	if got := encodeProjectDir("/Users/polat/agent-realm/.worktrees/agentmux/root"); got != "-Users-polat-agent-realm--worktrees-agentmux-root" {
+	if got := encodeProjectDir("/Users/me/src/.worktrees/app/main"); got != "-Users-me-src--worktrees-app-main" {
 		t.Fatal(got)
 	}
 }

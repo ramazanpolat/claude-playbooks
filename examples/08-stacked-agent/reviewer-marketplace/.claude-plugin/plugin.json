@@ -1,0 +1,5 @@
+{
+  "name": "reviewer",
+  "version": "0.0.1",
+  "description": "One agent that reviews changes, for the stacking example."
+}

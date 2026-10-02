@@ -1,0 +1,8 @@
+-- team.cpb: a team's layer on top of the agent. Its plugin's SessionStart
+-- hook adds one line of context. It sets no agent, so the reviewer stays
+-- the main thread and the team's context stacks on top.
+INCLUDE 'agent.cpb';
+
+ALTER PLAYBOOK
+  ADD MARKETPLACE team-rules FROM './team-marketplace'
+  ADD PLUGIN team@team-rules;

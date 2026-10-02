@@ -42,11 +42,11 @@ cpb start --sandbox --delete /tmp/x   # a throwaway session in a throwaway sandb
 
 ## On another machine
 
-The sandbox can live on another machine. `cpb run --sandbox-host polat@cockpit0
+The sandbox can live on another machine. `cpb run --sandbox-host me@buildbox
 sre` runs the same launch there over ssh, where `cpb` and the playbook are
 installed and `sbx` is logged in (a Linux host with a headless keyring; a Mac
 keeps the sbx login in its Keychain, which an ssh session cannot open);
-`[sandbox] host = "polat@cockpit0"` in the manifest makes it the playbook's home
+`[sandbox] host = "me@buildbox"` in the manifest makes it the playbook's home
 for sandboxed launches. Everything about the sandbox, its login and its keys then
 lives on that host.
 
@@ -77,8 +77,8 @@ When a key does go in:
 
 The shared `sbx` skills store stays out as well. `--sbx` is a
 synonym for `--sandbox`; `--sandbox=BACKEND` picks the backend: `sbx`, the
-default, or the experimental `openshell` on Linux
-([below](#openshell-backend-experimental-linux)).
+default, or `openshell` on Linux
+([below](#openshell-backend-linux)).
 
 ## Lifetime and environment
 
@@ -104,7 +104,7 @@ mounts = ["~/shared-libs:ro"]       # extra host paths, :ro for read-only
 allow_net = ["internal.corp"]       # hosts allowed beyond the policy
 claude_version = "2.1.263"          # pin the Claude Code installed inside
 always = true                       # every launch sandboxed; --no-sandbox overrides one
-host = "polat@cockpit0"             # sandboxed launches run on that machine over ssh
+host = "me@buildbox"             # sandboxed launches run on that machine over ssh
 secrets = "env"                     # pass API keys as plain variables instead of proxy injection
 share_skills = true                 # mount sbx's shared skills store after all
 ```
@@ -116,13 +116,13 @@ and `cpb update` keeps yours.
 rejects a newer Claude Code's tool schemas: the sandbox keeps running the last
 version that works while the host moves on.
 
-## OpenShell backend (experimental, Linux)
+## OpenShell backend (Linux)
 
 `--sandbox=openshell` runs the session in [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell)
 instead of `sbx`: a container confined by Landlock and seccomp, with no network
 unless a rule allows it. It is for a Linux host with Docker Engine. On macOS use
-`sbx`, or `--sandbox-host` to a Linux machine. It is experimental: OpenShell is
-young (0.1.0 shipped on 2026-09-25), and `cpb` supports 0.1.2 up to any later 0.1.x.
+`sbx`, or `--sandbox-host` to a Linux machine. `cpb` supports OpenShell 0.1.2
+and any later 0.1.x.
 
 ```bash
 cpb run --sandbox=openshell sre                          # this folder is the workdir

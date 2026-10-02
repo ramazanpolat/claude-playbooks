@@ -1,0 +1,14 @@
+{
+  "name": "team-rules",
+  "owner": {
+    "name": "claude-playbooks examples"
+  },
+  "description": "A team layer: one plugin that adds one line of session context.",
+  "plugins": [
+    {
+      "name": "team",
+      "source": "./",
+      "description": "The team layer: a SessionStart hook that adds one line of context."
+    }
+  ]
+}

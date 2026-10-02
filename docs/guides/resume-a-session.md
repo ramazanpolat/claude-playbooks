@@ -9,8 +9,8 @@ a session belongs to and resumes it there.
 ```
 $ cpb sessions
 PLAYBOOK       PID    KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
-kommander-dev  47904  interactive  busy    9h   54s     claude-opus-5-5  08c4811b-3867-4f18-b08f-de6d1e07395f  /Users/me/DEV/app
-kommander-san  26218  interactive  idle    39m  35m     claude-opus-5-5  8ba14a71-15a8-45b9-bc3e-9db6c209f318  /Users/me/santiment
+work           47904  interactive  busy    9h   54s     claude-opus-5-5  08c4811b-3867-4f18-b08f-de6d1e07395f  /Users/me/DEV/app
+review         26218  interactive  idle    39m  35m     claude-opus-5-5  8ba14a71-15a8-45b9-bc3e-9db6c209f318  /Users/me/other-app
 ```
 
 `cpb sessions` is short for `cpb SHOW SESSIONS`.
@@ -32,7 +32,7 @@ In the project folder:
 
 ```
 $ cpb RESUME
-1 newer session is live (pid 47904); resuming d0a04774-d6ed-49f7-bb32-3c57962348fa of kommander-dev (last active 4 days ago)
+1 newer session is live (pid 47904); resuming d0a04774-d6ed-49f7-bb32-3c57962348fa of work (last active 4 days ago)
 ```
 
 - **A bare `RESUME`** takes the newest session of this folder that is not

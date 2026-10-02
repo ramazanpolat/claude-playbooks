@@ -2,7 +2,7 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   Env sets under every playbook:  1 base
-  Secret helper:                  with-secret  (from setting)
+  Secret helper:                  cpb-secret-file  (from setting)
 
 
 

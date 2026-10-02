@@ -102,8 +102,8 @@ file. Without one it is refused before anything is written.
   source clones it. Both need `claude` or `git` on `PATH` and, for a remote
   source, the network.
 - A `SET … FROM '<ref>'` that fails its check means the secret is not stored:
-  ask the human to store it (`with-secret --store <name>` or their helper's
-  equivalent). Never ask for the value.
+  ask the human to store it with their secret helper. Never ask for the
+  value.
 
 The statements and file rules:
 [docs/reference/cli-grammar.md](docs/reference/cli-grammar.md). Worked
@@ -156,7 +156,7 @@ fallback: [docs/guides/installation.md](docs/guides/installation.md), "Uninstall
 ## The OpenShell sandbox backend (maintainers)
 
 `--sandbox=openshell` is experimental and runs only on a Linux host with
-OpenShell 0.1.x (see [the sandbox guide](docs/guides/sandbox.md#openshell-backend-experimental-linux)).
+OpenShell 0.1.x (see [the sandbox guide](docs/guides/sandbox.md#openshell-backend-linux)).
 CI cannot run it. Two things keep it honest:
 
 - **Unit tests** (`cmd/sandbox_openshell_test.go`) put fake `openshell`,
@@ -166,8 +166,7 @@ CI cannot run it. Two things keep it honest:
   (`cmd/testdata/sbx-golden/`) passing unchanged: that test pins the whole
   sbx launch.
 - **The end-to-end run** (`tests/openshell-e2e.sh <claude-playbook binary>`) runs
-  on a disposable Linux host with OpenShell, such as the `testbed` VM, never on
-  a workstation. It uses dummy keys, restarts the gateway twice and restores it.
+  on a disposable Linux host with OpenShell, never on a workstation. It uses dummy keys, restarts the gateway twice and restores it.
   It must end `0 failed`, including the Claude Code TUI under the generated
   policy.
 
@@ -175,7 +174,7 @@ CI cannot run it. Two things keep it honest:
 `cmd/sandbox_openshell.go`):
 
 1. Change the constant, build the binary, and run `tests/openshell-e2e.sh` on
-   the testbed host. Every step must pass, including the TUI.
+   such a host. Every step must pass, including the TUI.
 2. Only then commit the new pin.
 3. Say it in the release notes: "OpenShell sandboxes: Claude Code A → B.
    Existing sandboxes keep A until `--sandbox-fresh`."
@@ -186,7 +185,7 @@ digest).
 
 ## Before any release
 
-No release without its docs. The pilot's rule (2026-09-26), verbatim:
+No release without its docs. The maintainer's rule (2026-09-26), verbatim:
 
 ```
 "1) a good readme, short, precise, represents a) what is it b) why it exists c) how it is used 2) a docs with full tutorials and some guides for some common operations 3) examples with smallest features/usages/utilities to full blown ones, each has their own readme.md files 4) an agent entry for installation and deployment, etc."
@@ -221,7 +220,7 @@ release:
       `gentar/policy.toml` `[phase2] max_age_days = 2` refuses one older
       than two days. A re-run is allowed only for an infrastructure failure
       (the judge unreachable, a provider refusing the key); a real red means
-      fix first, then a fresh pass. (The pilot's rule, 2026-09-29. It
+      fix first, then a fresh pass. (The maintainer's rule, 2026-09-29. It
       replaces "7 consecutive green nights".)
 - [ ] **No open security issue and no known data-loss bug.** Check
       `docs/known-issues/`.
@@ -254,7 +253,7 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
      equal the tag;
    - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`);
    - the reference's status line.
-4. **A green full arena phase 2 on that head.** Check the VM 142 bench is
+4. **A green full arena phase 2 on that head.** Check the arena bench is
    idle first, then dispatch `gentar-arena.yml` on the branch with no
    scenario. The run's head sha must be the exact commit you will tag, which
    is what the release gate checks. A new commit on the branch needs a new

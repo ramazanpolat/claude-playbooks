@@ -133,8 +133,8 @@ cpb auth status
 ```text
 NAME               MODE          STORE                                   EXPIRES   DAEMON  NOTE
 ~/.claude          shared-login  file                                    in 6h12m  -
-kommander          token         absent                                  -         -
-kommander-9router  own-login     symlink -> ~/.claude/.credentials.json  in 6h12m  -
+work               token         absent                                  -         -
+review             own-login     symlink -> ~/.claude/.credentials.json  in 6h12m  -
 personal           isolated      file                                    in 22m    -
 ```
 

@@ -1,0 +1,13 @@
+{
+  "name": "reviewers",
+  "owner": {
+    "name": "claude-playbooks examples"
+  },
+  "plugins": [
+    {
+      "name": "reviewer",
+      "source": "./",
+      "description": "One agent that reviews changes, for the stacking example."
+    }
+  ]
+}

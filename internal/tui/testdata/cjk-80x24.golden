@@ -1,8 +1,8 @@
  cpb  [1 Playbooks]  2 Sessions   3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
   NAME                              LAUNCHER  ENV SETS  LOGIN     SESSIONS
-▸ router                            k9        9router   isolated  1
-  中文プレイブック名前がとても長い  kd        -         shared    0
+▸ router                            rt        proxy     isolated  1
+  中文プレイブック名前がとても長い  al        -         shared    0
 
 
 

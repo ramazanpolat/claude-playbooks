@@ -158,8 +158,8 @@ A playbook is Claude Code's user scope, so its plugins and its main-thread agent
 are its own:
 
 ```bash
-cpb ALTER PLAYBOOK k ADD MARKETPLACE kommander FROM 'github:ramazanpolat/kommander-playbook' \
-    ADD PLUGIN kommander@kommander SET AGENT 'kommander'
+cpb ALTER PLAYBOOK k ADD MARKETPLACE team FROM 'github:example/team-plugins' \
+    ADD PLUGIN reviewer@team SET AGENT 'reviewer'
 ```
 
 The marketplace and plugin clauses run Claude Code's own `claude plugin …` with

@@ -4,7 +4,7 @@
 -- credentials a shell may export are blocked in it.
 CREATE OR REPLACE ENV router
   DESCRIBE 'A model router: requests leave Anthropic'
-  SET ANTHROPIC_BASE_URL=http://localhost:20128/v1 ANTHROPIC_MODEL=glm-5.3;
+  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3;
 
 CREATE PLAYBOOK IF NOT EXISTS routed NO ALIAS ISOLATED LOGIN;
 ALTER PLAYBOOK routed

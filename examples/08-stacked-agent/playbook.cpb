@@ -1,0 +1,6 @@
+-- playbook.cpb: which playbook the layers build. USE PLAYBOOK gives the
+-- recipes their target; a target that does not exist is created bare first
+-- (its launcher is its name). `cpb APPLY team.cpb TO <another>` builds the
+-- same agent under another name.
+USE PLAYBOOK reviewer-agent;
+INCLUDE 'team.cpb';

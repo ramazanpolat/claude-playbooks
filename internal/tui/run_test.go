@@ -97,7 +97,7 @@ func TestKeysThroughBubbletea(t *testing.T) {
 
 func fixtureOptions() Options {
 	return Options{Runner: fixture(), Now: func() time.Time { return now }, NoColor: true,
-		Home: "/home/p", Cwd: "/home/p/DEV/claude-playbooks", Poll: time.Hour}
+		Home: "/home/me", Cwd: "/home/me/DEV/app", Poll: time.Hour}
 }
 
 // q quits the real program.

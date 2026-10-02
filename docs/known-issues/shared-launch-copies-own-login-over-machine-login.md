@@ -87,7 +87,7 @@ though, and "newer" is only an mtime comparison. Any grant in a regular file
 wins over the machine's login if its mtime is later, and every shared
 playbook moves to that account from its next launch.
 
-## Reproduced (tr0, throwaway `HOME`, made-up stores, cpb at 9642295)
+## Reproduced (a Linux VM, throwaway `HOME`, made-up stores, cpb at 9642295)
 
 Each run starts with `~/.claude/.credentials.json` =
 `{"claudeAiOauth":{"accessToken":"PILOT-ACCOUNT"}}` and an mtime one hour
@@ -139,15 +139,13 @@ ago.
     unintended on its own. It becomes a hazard only in combination with the
     cases above.
 
-## Live exposure on the pilot's machine (checked read-only, 2026-09-27)
+## Checking a machine for exposure
 
-`cpb auth status` reports store kinds only, never values. It found no
-playbook in shared mode with a file store. The only file stores are
-`~/.claude` itself (the machine store) and `kommander`, `kommander-dev` and
-`kommander-san`. Those three are in **token** mode, where `LinkCredentials`
-never runs and the stored grant is quarantined at every launch. They would be
-exposed only if the machine token were removed while their file still held a
-grant.
+`cpb auth status` reports store kinds only, never values. A playbook is
+exposed only in shared mode with a file store. A playbook in **token** mode
+is not, because `LinkCredentials` never runs there and the stored grant is
+quarantined at every launch; it becomes exposed only if the machine token is
+removed while its file still holds a grant.
 
 ## Suggested fix
 

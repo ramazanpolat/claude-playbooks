@@ -42,15 +42,15 @@ func TestStatementEnvLifecycle(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 
-	out := mustStmt(t, "CREATE ENV glm SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 MODEL=glm-5.3")
+	out := mustStmt(t, "CREATE ENV glm SET ANTHROPIC_BASE_URL=http://buildbox:8080/v1 MODEL=glm-5.3")
 	if !strings.Contains(out, "Created ENV glm") || !strings.Contains(out, "set       MODEL") {
 		t.Fatalf("create report:\n%s", out)
 	}
-	if strings.Contains(out, "http://tr0") {
+	if strings.Contains(out, "http://buildbox") {
 		t.Fatalf("a value reached the report:\n%s", out)
 	}
 	p := readProfile(t, "glm")
-	if p.Set["MODEL"] != "glm-5.3" || p.Set["ANTHROPIC_BASE_URL"] != "http://tr0:20128/v1" {
+	if p.Set["MODEL"] != "glm-5.3" || p.Set["ANTHROPIC_BASE_URL"] != "http://buildbox:8080/v1" {
 		t.Fatalf("profile after create: %#v", p)
 	}
 

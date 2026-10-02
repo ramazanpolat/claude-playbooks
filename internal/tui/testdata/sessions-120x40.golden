@@ -1,8 +1,8 @@
  cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log                                                ? help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  PLAYBOOK       PID    TTY      KIND  STATUS  AGE  ACTIVE  MODEL            CWD
-▸ kommander-dev  47904  ttys039  int   busy    9h   54s     claude-opus-5-5  ~/DEV/claude-playbooks
-  router         43627  -        bg    idle    2d   28m     glm-5.3          ~/DEV/claude-playbooks
+  PLAYBOOK  PID    TTY      KIND  STATUS  AGE  ACTIVE  MODEL            CWD
+▸ alpha     47904  ttys039  int   busy    9h   54s     claude-opus-5-5  ~/DEV/app
+  router    43627  -        bg    idle    2d   28m     glm-5.3          ~/DEV/app
 
 
 

@@ -27,21 +27,21 @@ var validCases = []struct {
 	want Stmt
 }{
 	{"create env with vars",
-		w("CREATE ENV evren-router SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 ANTHROPIC_MODEL=glm-5.3"),
-		Stmt{Verb: Create, Object: Env, Name: "evren-router", Clauses: []Clause{
-			{Kind: SetVar, Vars: []Var{{Key: "ANTHROPIC_BASE_URL", Value: "http://tr0:20128/v1"}, {Key: "ANTHROPIC_MODEL", Value: "glm-5.3"}}}}}},
+		w("CREATE ENV router SET ANTHROPIC_BASE_URL=http://buildbox:8080/v1 ANTHROPIC_MODEL=glm-5.3"),
+		Stmt{Verb: Create, Object: Env, Name: "router", Clauses: []Clause{
+			{Kind: SetVar, Vars: []Var{{Key: "ANTHROPIC_BASE_URL", Value: "http://buildbox:8080/v1"}, {Key: "ANTHROPIC_MODEL", Value: "glm-5.3"}}}}}},
 	{"keywords in any case, secret by reference",
-		w("alter Env evren-router set ANTHROPIC_AUTH_TOKEN from keychain:pilot/9router-client"),
-		Stmt{Verb: Alter, Object: Env, Name: "evren-router", Clauses: []Clause{
-			{Kind: SetRef, Vars: []Var{{Key: "ANTHROPIC_AUTH_TOKEN", Ref: "keychain:pilot/9router-client"}}}}}},
+		w("alter Env router set ANTHROPIC_AUTH_TOKEN from keychain:router-token"),
+		Stmt{Verb: Alter, Object: Env, Name: "router", Clauses: []Clause{
+			{Kind: SetRef, Vars: []Var{{Key: "ANTHROPIC_AUTH_TOKEN", Ref: "keychain:router-token"}}}}}},
 	{"env unset",
-		w("ALTER ENV evren-router UNSET ANTHROPIC_MODEL"),
-		Stmt{Verb: Alter, Object: Env, Name: "evren-router", Clauses: []Clause{{Kind: UnsetVar, Keys: []string{"ANTHROPIC_MODEL"}}}}},
+		w("ALTER ENV router UNSET ANTHROPIC_MODEL"),
+		Stmt{Verb: Alter, Object: Env, Name: "router", Clauses: []Clause{{Kind: UnsetVar, Keys: []string{"ANTHROPIC_MODEL"}}}}},
 	{"env block with optional VAR, describe",
-		[]string{"ALTER", "ENV", "e", "BLOCK", "VAR", "HTTP_PROXY", "NO_PROXY", "DESCRIBE", "GLM via 9router"},
+		[]string{"ALTER", "ENV", "e", "BLOCK", "VAR", "HTTP_PROXY", "NO_PROXY", "DESCRIBE", "GLM via a local router"},
 		Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{
 			{Kind: BlockVar, Keys: []string{"HTTP_PROXY", "NO_PROXY"}},
-			{Kind: Describe, Arg: "GLM via 9router"}}}},
+			{Kind: Describe, Arg: "GLM via a local router"}}}},
 	{"env set with optional VAR",
 		w("ALTER ENV e SET VAR A=1"),
 		Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{{Kind: SetVar, Vars: []Var{{Key: "A", Value: "1"}}}}}},
@@ -52,14 +52,14 @@ var validCases = []struct {
 		w("ALTER ENV e SET A= B=x=y"),
 		Stmt{Verb: Alter, Object: Env, Name: "e", Clauses: []Clause{{Kind: SetVar, Vars: []Var{{Key: "A", Value: ""}, {Key: "B", Value: "x=y"}}}}}},
 	{"use env list",
-		w("ALTER PLAYBOOK kommander-idea USE ENV glm-5.3 deepseek-flash"),
-		Stmt{Verb: Alter, Object: Playbook, Name: "kommander-idea", Clauses: []Clause{{Kind: UseEnv, Names: []string{"glm-5.3", "deepseek-flash"}}}}},
+		w("ALTER PLAYBOOK work USE ENV glm-5.3 deepseek-flash"),
+		Stmt{Verb: Alter, Object: Playbook, Name: "work", Clauses: []Clause{{Kind: UseEnv, Names: []string{"glm-5.3", "deepseek-flash"}}}}},
 	{"add env first",
-		w("ALTER PLAYBOOK k ADD ENV claude-metu FIRST"),
-		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: AddEnv, Names: []string{"claude-metu"}, Where: First}}}},
+		w("ALTER PLAYBOOK k ADD ENV claude-work FIRST"),
+		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: AddEnv, Names: []string{"claude-work"}, Where: First}}}},
 	{"add env after",
-		w("ALTER PLAYBOOK k ADD ENV evren-router AFTER glm-5.3"),
-		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: AddEnv, Names: []string{"evren-router"}, Where: After, Anchor: "glm-5.3"}}}},
+		w("ALTER PLAYBOOK k ADD ENV router AFTER glm-5.3"),
+		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: AddEnv, Names: []string{"router"}, Where: After, Anchor: "glm-5.3"}}}},
 	{"add env defaults to last",
 		w("ALTER PLAYBOOK k ADD ENV x"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: AddEnv, Names: []string{"x"}, Where: Last}}}},
@@ -86,8 +86,8 @@ var validCases = []struct {
 		w("ALTER PLAYBOOK sandbox NO ALIAS"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "sandbox", Clauses: []Clause{{Kind: NoAlias}}}},
 	{"defaults use env",
-		w("ALTER DEFAULTS USE ENV claude-default metu-proxy"),
-		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: UseEnv, Names: []string{"claude-default", "metu-proxy"}}}}},
+		w("ALTER DEFAULTS USE ENV claude-default corp-proxy"),
+		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: UseEnv, Names: []string{"claude-default", "corp-proxy"}}}}},
 	{"defaults add before, drop",
 		w("ALTER DEFAULTS ADD ENV x BEFORE y DROP ENV z"),
 		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{
@@ -154,7 +154,7 @@ var validCases = []struct {
 		Stmt{Verb: Show, Object: All, ShowCreate: true, SkipSecrets: true}},
 	{"show create playbook, skipping secrets", w("show create playbook k --skip-secrets"),
 		Stmt{Verb: Show, Object: Playbook, Name: "k", ShowCreate: true, SkipSecrets: true}},
-	{"explain", w("EXPLAIN PLAYBOOK kommander-idea"), Stmt{Verb: Explain, Object: Playbook, Name: "kommander-idea"}},
+	{"explain", w("EXPLAIN PLAYBOOK work"), Stmt{Verb: Explain, Object: Playbook, Name: "work"}},
 	{"explain as json", w("explain playbook k --json"), Stmt{Verb: Explain, Object: Playbook, Name: "k", JSON: true}},
 	{"show playbooks as json", w("SHOW PLAYBOOKS --json"), Stmt{Verb: Show, Object: Playbooks, JSON: true}},
 	{"show env as json", w("SHOW ENV e --json"), Stmt{Verb: Show, Object: Env, Name: "e", JSON: true}},
@@ -352,23 +352,23 @@ func TestErrorPosition(t *testing.T) {
 }
 
 func TestParseFile(t *testing.T) {
-	src := `-- playbook.cpb (macminim), from: cpb SHOW CREATE ALL > playbook.cpb
+	src := `-- playbook.cpb (mymac), from: cpb SHOW CREATE ALL > playbook.cpb
 
-CREATE OR REPLACE ENV evren-router
-  DESCRIBE 'GLM via 9router on tr0'
-  SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 ANTHROPIC_MODEL=glm-5.3
-  SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/9router-client';
+CREATE OR REPLACE ENV router
+  DESCRIBE 'GLM via a local router'
+  SET ANTHROPIC_BASE_URL=http://buildbox:8080/v1 ANTHROPIC_MODEL=glm-5.3
+  SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token';
 
 CREATE OR REPLACE ENV claude-default
   BLOCK HTTP_PROXY;
 
 ALTER DEFAULTS USE ENV claude-default;
 
-CREATE PLAYBOOK IF NOT EXISTS kommander-idea
+CREATE PLAYBOOK IF NOT EXISTS work
   FROM https://github.com/ramazanpolat/kommander-playbook BRANCH v3.12.2 ALIAS ki;
 
-ALTER PLAYBOOK kommander-idea
-  USE ENV evren-router
+ALTER PLAYBOOK work
+  USE ENV router
   SET VAR MAX_THINKING_TOKENS=8000
   BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN;
 `
@@ -380,11 +380,11 @@ ALTER PLAYBOOK kommander-idea
 		t.Fatalf("got %d statements, want 5", len(stmts))
 	}
 	want := []string{
-		"CREATE OR REPLACE ENV evren-router DESCRIBE 'GLM via 9router on tr0' SET ANTHROPIC_BASE_URL=http://tr0:20128/v1 ANTHROPIC_MODEL=glm-5.3 SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:pilot/9router-client'",
+		"CREATE OR REPLACE ENV router DESCRIBE 'GLM via a local router' SET ANTHROPIC_BASE_URL=http://buildbox:8080/v1 ANTHROPIC_MODEL=glm-5.3 SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token'",
 		"CREATE OR REPLACE ENV claude-default BLOCK HTTP_PROXY",
 		"ALTER DEFAULTS USE ENV claude-default",
-		"CREATE PLAYBOOK IF NOT EXISTS kommander-idea FROM https://github.com/ramazanpolat/kommander-playbook BRANCH v3.12.2 ALIAS ki",
-		"ALTER PLAYBOOK kommander-idea USE ENV evren-router SET VAR MAX_THINKING_TOKENS=8000 BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN",
+		"CREATE PLAYBOOK IF NOT EXISTS work FROM https://github.com/ramazanpolat/kommander-playbook BRANCH v3.12.2 ALIAS ki",
+		"ALTER PLAYBOOK work USE ENV router SET VAR MAX_THINKING_TOKENS=8000 BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN",
 	}
 	for i, s := range stmts {
 		if got := s.String(); got != want[i] {

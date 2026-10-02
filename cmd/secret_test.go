@@ -132,7 +132,7 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 	helper, helperLog := fakeHelper(t)
 	claudeLog := stubClaude(t)
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
-	mustStmt(t, "CREATE ENV r SET BASE=http://tr0/v1")
+	mustStmt(t, "CREATE ENV r SET BASE=http://buildbox/v1")
 	mustStmt(t, "ALTER ENV r SET ANTHROPIC_AUTH_TOKEN FROM keychain:ok/router")
 	mustStmt(t, "ALTER PLAYBOOK router USE ENV r")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "stale-from-the-shell")
@@ -141,7 +141,7 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readLog(t, claudeLog)
-	if !strings.Contains(got, "ARGS --version") || !strings.Contains(got, "ANTHROPIC_AUTH_TOKEN=resolved:keychain:ok/router") || !strings.Contains(got, "BASE=http://tr0/v1") {
+	if !strings.Contains(got, "ARGS --version") || !strings.Contains(got, "ANTHROPIC_AUTH_TOKEN=resolved:keychain:ok/router") || !strings.Contains(got, "BASE=http://buildbox/v1") {
 		t.Fatalf("claude did not get the resolved value:\n%s", got)
 	}
 	if strings.Contains(got, "stale-from-the-shell") {
