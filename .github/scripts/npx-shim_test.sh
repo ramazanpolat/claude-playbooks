@@ -24,9 +24,11 @@ publish() {
 }
 latest() { printf '{\n  "tag_name": "%s",\n  "prerelease": false\n}\n' "$1" > "$store/latest"; }
 
-# The stub curl: downloads (-o FILE -w '%{http_code}') print the HTTP code,
-# with FAKE_HTTP forcing one; -f fetches (sums, the latest release) fail
-# with curl's exit 22 when the file is missing. Every URL is logged.
+# The stub curl: requests with -w '%{http_code}' (downloads, the latest
+# release) print the HTTP code, with FAKE_HTTP forcing one for every such
+# request and FAKE_LATEST_HTTP for the latest-release lookup alone; -f
+# fetches (sums) fail with curl's exit 22 when the file is missing. Every
+# URL is logged.
 mkdir -p "$t/stub"
 cat > "$t/stub/curl" <<'EOF'
 #!/bin/sh
@@ -42,8 +44,20 @@ case "$url" in
   *) exit 6 ;;
 esac
 if [ -n "$w" ]; then
-  if [ -n "${FAKE_HTTP:-}" ]; then printf '%s' "$FAKE_HTTP"; exit 0; fi
-  if [ -f "$f" ]; then cp "$f" "$out"; printf 200; else printf 'Not Found' > "$out"; printf 404; fi
+  # The body goes to -o FILE, or to stdout before the -w text, whose
+  # %{http_code} is the status.
+  code="" body=""
+  case "$url" in */releases/latest) code=${FAKE_LATEST_HTTP:-} ;; esac
+  [ -n "$code" ] || code=${FAKE_HTTP:-}
+  if [ -z "$code" ]; then
+    if [ -f "$f" ]; then code=200; body=$f; else code=404; fi
+  fi
+  if [ -n "$out" ]; then
+    if [ -n "$body" ]; then cp "$body" "$out"; else printf 'Not Found' > "$out"; fi
+  elif [ -n "$body" ]; then
+    cat "$body"
+  fi
+  printf "$(printf '%s' "$w" | sed "s/%{http_code}/$code/")"
   exit 0
 fi
 [ -f "$f" ] || exit 22
@@ -123,8 +137,30 @@ check "  it says why" err_has "(v3.26.0) cannot stand in"
 rm -f "$store/latest"
 run npm_package_version=3.26.0
 check "no fallback when the latest release cannot be read" [ $rc != 0 ]
-check "  it says why" err_has "was found to run instead (latest: none)"
+check "  it says why" err_has "cpb v3.26.0 is not published yet, and the newest release could not be looked up: HTTP 404 from https://api.github.com"
 latest v3.25.0
+
+# A rate-limited fallback lookup says so.
+run npm_package_version=3.26.0 FAKE_LATEST_HTTP=403
+check "a rate-limited fallback lookup refuses" [ $rc != 0 ]
+check "  naming the rate limit" err_has "Error: cpb v3.26.0 is not published yet, and the newest release could not be looked up: GitHub rate-limited this request (HTTP 403; unauthenticated requests share your IP). Try again later, or pin one: CPB_NPX_VERSION=vX.Y.Z"
+check "  and runs nothing" out_is ""
+
+# No version given: the latest release runs, and a lookup that fails says
+# why. 403 and 429 are a rate limit, not the network.
+run
+check "with no version, the latest release runs" out_is "cpb v3.25.0 --version"
+for c in 403 429; do
+  run FAKE_LATEST_HTTP=$c
+  check "a $c on the lookup refuses" [ $rc != 0 ]
+  check "  naming the rate limit" err_has "Error: GitHub rate-limited this request (HTTP $c; unauthenticated requests share your IP): pin a release to skip the lookup,"
+  check "  with the pin" err_has "CPB_NPX_VERSION=v4.0.0 npx github:"
+  check "  and not the network" no_err "internet connection"
+  check "  and runs nothing" out_is ""
+done
+run FAKE_LATEST_HTTP=500
+check "another status on the lookup names it" err_has "could not determine which release to fetch (HTTP 500 from https://api.github.com). Check your internet connection,"
+check "  and runs nothing" out_is ""
 
 # An explicit CPB_NPX_VERSION is the pilot's pin: a missing one is an error.
 run CPB_NPX_VERSION=v3.26.0

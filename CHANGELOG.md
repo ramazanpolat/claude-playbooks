@@ -34,6 +34,11 @@
   is installed. A `GITHUB_TOKEN` authenticates the lookup on GitHub's API
   only: it is passed to curl outside its command line, and no redirect is
   followed. `CPB_INSTALL_API_BASE` points the lookup elsewhere, for tests.
+- **The npx shim names a rate limit as one too.** It applies to its own
+  latest-release lookup, both for an unpinned run and for the stand-in
+  release when the package's version is not published yet. A 403 or 429
+  asks for a `CPB_NPX_VERSION` pin, or a retry. Any other status is given
+  as its code. `CPB_INSTALL_API_BASE` applies to the shim as well.
 
 ### Fixed
 

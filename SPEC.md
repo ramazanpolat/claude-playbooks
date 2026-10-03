@@ -2878,7 +2878,17 @@ Tag resolution, first match wins: `$CPB_NPX_VERSION`; else the package's own ver
 as `v<npm_package_version>` (so `npx github:<repo>#v4.0.0` runs that release, and
 `package.json`'s `version` is bumped with the release tag); else the latest
 release from the GitHub API. A tag that resolves to nothing is an error naming
-`CPB_NPX_VERSION` as the escape hatch.
+`CPB_NPX_VERSION` as the escape hatch. A lookup that fails says why, as
+`install.sh` does:
+- a 403 or 429 is `GitHub rate-limited this request (HTTP <code>;
+  unauthenticated requests share your IP)`, with the pin to set or a retry,
+  never the network;
+- another status gives its code;
+- a curl that fails, even after a status, is no answer.
+
+The error gives the same reason when the package's own version is not
+published yet and the newest release, which would stand in for it, cannot be
+looked up.
 
 The binary is `exec`'d with `argv[0]` set to its own path, so multicall dispatch
 behaves exactly as a direct invocation.
@@ -2906,7 +2916,7 @@ Read by the two shell scripts only; the Go binary reads none of them.
 | `CPB_INSTALL_DIR` | `install.sh` | Install directory, overriding the writability probe |
 | `CPB_INSTALL_DEFAULT_DIR` | `install.sh` | The directory that probe tests. Default `/usr/local/bin` |
 | `CPB_INSTALL_URL` | `install.sh` | Exact asset URL; suppresses checksum verification with a warning |
-| `CPB_INSTALL_API_BASE` | `install.sh` | Where the latest release is looked up. Default `https://api.github.com` |
+| `CPB_INSTALL_API_BASE` | both | Where the latest release is looked up. Default `https://api.github.com` |
 | `CPB_INSTALL_REPO`, `CPB_INSTALL_ASSET_PREFIX`, `CPB_INSTALL_DOWNLOAD_BASE` | both | Redirect at another repository, asset name (default `cpb`), or asset host |
 
 `CPB_INSTALL_REPO`, `CPB_INSTALL_ASSET_PREFIX`, `CPB_INSTALL_DOWNLOAD_BASE`,
