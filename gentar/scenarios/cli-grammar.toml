@@ -479,7 +479,7 @@ D=$(dirname "$(command -v cpb)"); F="$HOME/.claude-playbooks/urb/.playbook"
 cpb CREATE PLAYBOOK ura >/dev/null && cpb CREATE PLAYBOOK urb NO LAUNCHER >/dev/null || { echo ur-setup; exit 1; }
 printf 'bogus_key = 1\n' >> "$F"
 cpb SHOW PLAYBOOKS > "$HOME/ur.out" 2> "$HOME/ur.err"; rc=$?
-[ "$rc" = 1 ] && grep -q '^ura ' "$HOME/ur.out" && ! grep -q '^urb' "$HOME/ur.out" && [ "$(wc -l < "$HOME/ur.err")" = 1 ] && grep -qF "playbook \"urb\" is left out: unknown key \"bogus_key\" in $F:" "$HOME/ur.err" || { echo ur-list-wrong; cat "$HOME/ur.err"; exit 1; }
+[ "$rc" = 1 ] && grep -q '^ura ' "$HOME/ur.out" && ! grep -q '^urb' "$HOME/ur.out" && [ "$(wc -l < "$HOME/ur.err" | tr -d ' ')" = 1 ] && grep -qF "playbook \"urb\" is left out: unknown key \"bogus_key\" in $F:" "$HOME/ur.err" || { echo ur-list-wrong; cat "$HOME/ur.err"; exit 1; }
 J=$(cpb SHOW PLAYBOOKS --json 2>/dev/null | tr -d ' \n'); printf %s "$J" | grep -qF '"name":"ura"' && ! printf %s "$J" | grep -qF '"name":"urb"' || { echo ur-json-wrong; exit 1; }
 rm -f "$HOME/claude-env"; cpb run ura && test -f "$HOME/claude-env" || { echo ur-run-wrong; exit 1; }
 rm -f "$HOME/claude-env"; test -L "$D/ura" && "$D/ura" && test -f "$HOME/claude-env" || { echo ur-launcher-wrong; exit 1; }
