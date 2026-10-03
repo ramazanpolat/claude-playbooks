@@ -29,10 +29,11 @@
 - **`install.sh` names a rate limit as one.** When GitHub refuses the
   latest-release lookup with 403 or 429, the message says it was
   rate-limited and to set `CPB_INSTALL_VERSION`. Before, it blamed the
-  internet connection. Any other failure gives its HTTP status. A
-  `GITHUB_TOKEN` authenticates the lookup on GitHub's API, passed to curl
-  outside its command line. `CPB_INSTALL_API_BASE` points the lookup
-  elsewhere, for tests.
+  internet connection. Any other status is given as its HTTP code. A
+  transfer that fails, even after a status, counts as no answer, and nothing
+  is installed. A `GITHUB_TOKEN` authenticates the lookup on GitHub's API
+  only: it is passed to curl outside its command line, and no redirect is
+  followed. `CPB_INSTALL_API_BASE` points the lookup elsewhere, for tests.
 
 ### Fixed
 

@@ -2831,13 +2831,19 @@ latest release from the GitHub API. A lookup that fails says why, and installs n
 - **Any other status:** `could not determine the latest release (HTTP <code>
   from <API base>)`, with the hint to check the connection or set
   `CPB_INSTALL_VERSION`.
-- **No answer at all:** `could not reach <API base>`, with the same hint, after
-  curl's own reason.
+- **No complete answer** (no connection, or a transfer cut short, even after a
+  status arrived): `could not get an answer from <API base>`, with the same
+  hint, after curl's own reason.
 
 With `GITHUB_TOKEN` set, the lookup on `https://api.github.com` is
-authenticated. The token reaches curl on its standard input as a config line,
-never on its command line where `ps` shows it. It is not sent to an overridden
-API base.
+authenticated:
+
+- The token reaches curl on its standard input as a config line, never on its
+  command line where `ps` shows it.
+- That request follows no redirect, so the token reaches no other host.
+- It is not sent to an overridden API base.
+- A value with characters a GitHub token does not have is not sent. A note says
+  so without printing the value.
 
 Chooses the install directory as in the table
 above — the `/usr/local/bin` probe is a writability test, so an unprivileged run

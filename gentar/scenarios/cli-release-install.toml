@@ -39,20 +39,23 @@ export CPB_INSTALL_DOWNLOAD_BASE="http://127.0.0.1:$port/$dl"
 wait "$cpid"
 EOF
 chmod +x "$HOME/serve.sh"''',
-  # api.sh CODE CMD...: a stand-in for GitHub's releases/latest on a free
-  # loopback port, answering CODE (200 with tag v4.0.0-rc1, else an error
-  # body), for the length of CMD, with the API base pointed at it. Each
+  # api.sh MODE CMD...: a stand-in for GitHub's releases/latest on a free
+  # loopback port, for the length of CMD, with the API base pointed at it.
+  # MODE is a status (200 answers tag v4.0.0-rc1, others an error body) or
+  # "partial": a 200 whose body stops short of its Content-Length. Each
   # request's path and Authorization header (or "-") go to ~/api.log.
   '''cat > "$HOME/api.py" <<'PYEOF'
 import http.server, os, sys
-code = int(sys.argv[1])
+mode = sys.argv[1]
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         with open(os.path.expanduser("~/api.log"), "a") as f:
             f.write(self.path + "\t" + (self.headers.get("Authorization") or "-") + "\n")
+        code = 200 if mode == "partial" else int(mode)
         body = b'{"tag_name": "v4.0.0-rc1"}' if code == 200 else b'{"message": "API rate limit exceeded"}'
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body) + (500 if mode == "partial" else 0)))
         self.end_headers()
         self.wfile.write(body)
     def log_message(self, *a):
@@ -63,9 +66,9 @@ s.serve_forever()
 PYEOF
 cat > "$HOME/api.sh" <<'SHEOF'
 #!/bin/sh
-code=$1; shift
+mode=$1; shift
 log=$(mktemp)
-python3 -u "$HOME/api.py" "$code" >"$log" 2>&1 &
+python3 -u "$HOME/api.py" "$mode" >"$log" 2>&1 &
 pid=$!
 cpid=
 trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
@@ -108,17 +111,19 @@ contains = "mismatch-refused"
 
 # The latest-release lookup, through this checkout's install.sh (the
 # published rc1 predates it): a rate limit is named as one, any other
-# failure keeps a network message with the status, and a GITHUB_TOKEN
-# authenticates only GitHub's own API, never through curl's argv.
+# failure keeps a network message with the status, a failed transfer is no
+# answer, and a GITHUB_TOKEN authenticates only GitHub's own API, never
+# through curl's argv and never across a redirect.
 [[verify.commands]]
 # 403 and 429 are a rate limit, not the network; nothing is installed.
 command = '''for c in 403 429; do if "$HOME/api.sh" $c env CPB_INSTALL_DIR="$HOME/rl$c" sh "$WORKSPACE_DIR/install.sh" > "$HOME/rl$c.out" 2>&1; then echo "installed-on-$c"; exit 1; fi; grep -qF "GitHub rate-limited this request (HTTP $c; unauthenticated requests share your IP): set CPB_INSTALL_VERSION=<tag> to skip the lookup, or retry later." "$HOME/rl$c.out" && ! grep -q "internet connection" "$HOME/rl$c.out" && [ -z "$(ls -A "$HOME/rl$c" 2>/dev/null)" ] || { echo "wrong-$c"; cat "$HOME/rl$c.out"; exit 1; }; done; echo rate-limit-named'''
 contains = "rate-limit-named"
 
 [[verify.commands]]
-# Another status keeps a network message, with the status; an unreachable
-# host says it could not reach it.
-command = '''if "$HOME/api.sh" 500 env CPB_INSTALL_DIR="$HOME/e500" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e500.out" 2>&1; then echo installed-on-500; exit 1; fi; grep -q "could not determine the latest release (HTTP 500 from http://127.0.0.1:[0-9]*). Check your internet connection" "$HOME/e500.out" || { echo wrong-500; cat "$HOME/e500.out"; exit 1; }; if CPB_INSTALL_API_BASE=http://127.0.0.1:9 CPB_INSTALL_DIR="$HOME/e000" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e000.out" 2>&1; then echo installed-unreachable; exit 1; fi; grep -qF "could not reach http://127.0.0.1:9 to find the latest release" "$HOME/e000.out" && echo network-named || { echo wrong-000; cat "$HOME/e000.out"; exit 1; }'''
+# Another status keeps a network message, with the status. No answer at
+# all says so after curl's own reason, and so does a 200 cut short, whose
+# partial body names a tag: nothing is installed.
+command = '''if "$HOME/api.sh" 500 env CPB_INSTALL_DIR="$HOME/e500" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e500.out" 2>&1; then echo installed-on-500; exit 1; fi; grep -q "could not determine the latest release (HTTP 500 from http://127.0.0.1:[0-9]*). Check your internet connection" "$HOME/e500.out" || { echo wrong-500; cat "$HOME/e500.out"; exit 1; }; if CPB_INSTALL_API_BASE=http://127.0.0.1:9 CPB_INSTALL_DIR="$HOME/e000" sh "$WORKSPACE_DIR/install.sh" > "$HOME/e000.out" 2>&1; then echo installed-unreachable; exit 1; fi; grep -qF "could not get an answer from http://127.0.0.1:9 to find the latest release" "$HOME/e000.out" && grep -q "^curl: (" "$HOME/e000.out" || { echo wrong-000; cat "$HOME/e000.out"; exit 1; }; if "$HOME/api.sh" partial env CPB_INSTALL_DIR="$HOME/ecut" sh "$WORKSPACE_DIR/install.sh" > "$HOME/ecut.out" 2>&1; then echo installed-on-a-cut-transfer; exit 1; fi; grep -q "could not get an answer from http://127.0.0.1:[0-9]*" "$HOME/ecut.out" && ! grep -q "Installing cpb" "$HOME/ecut.out" && [ -z "$(ls -A "$HOME/ecut" 2>/dev/null)" ] && echo network-named || { echo wrong-cut; cat "$HOME/ecut.out"; exit 1; }'''
 contains = "network-named"
 
 [[verify.commands]]
@@ -128,7 +133,10 @@ command = '''if "$HOME/serve.sh" dlbad "$HOME/api.sh" 200 env CPB_INSTALL_DIR="$
 contains = "tag-from-api"
 
 [[verify.commands]]
-# GITHUB_TOKEN: on GitHub's API it reaches curl on stdin, never in its
-# arguments; on any other API base it is not sent at all.
-command = '''rm -f "$HOME/api.log"; GITHUB_TOKEN=arena-not-a-token "$HOME/api.sh" 403 env CPB_INSTALL_DIR="$HOME/tk" sh "$WORKSPACE_DIR/install.sh" > /dev/null 2>&1; grep -q "^/repos/.*/releases/latest	-$" "$HOME/api.log" && ! grep -q arena-not-a-token "$HOME/api.log" || { echo token-sent-elsewhere; cat "$HOME/api.log"; exit 1; }; GITHUB_TOKEN=arena-not-a-token PATH="$HOME/stubcurl:$PATH" CPB_INSTALL_DIR="$HOME/tk2" sh "$WORKSPACE_DIR/install.sh" > "$HOME/tk2.out" 2>&1; ! grep -q arena-not-a-token "$HOME/curl.args" && grep -qx 'header = "Authorization: Bearer arena-not-a-token"' "$HOME/curl.stdin" && grep -qx "https://api.github.com/repos/ramazanpolat/claude-playbooks/releases/latest" "$HOME/curl.args" && ! grep -q arena-not-a-token "$HOME/tk2.out" && echo token-on-stdin || { echo token-wrong; cat "$HOME/curl.args" "$HOME/tk2.out"; exit 1; }'''
+# GITHUB_TOKEN. On another API base it is not sent. On GitHub's API it
+# reaches curl as a config line on stdin, never in its arguments, with no
+# redirect followed; that exact line, replayed into the real curl, sends
+# the header. A value with characters a token does not have is not sent,
+# and is never printed.
+command = '''rm -f "$HOME/api.log"; GITHUB_TOKEN=arena-not-a-token "$HOME/api.sh" 403 env CPB_INSTALL_DIR="$HOME/tk" sh "$WORKSPACE_DIR/install.sh" > /dev/null 2>&1; grep -q "^/repos/.*/releases/latest	-$" "$HOME/api.log" && ! grep -q arena-not-a-token "$HOME/api.log" || { echo token-sent-elsewhere; cat "$HOME/api.log"; exit 1; }; GITHUB_TOKEN=arena-not-a-token PATH="$HOME/stubcurl:$PATH" CPB_INSTALL_DIR="$HOME/tk2" sh "$WORKSPACE_DIR/install.sh" > "$HOME/tk2.out" 2>&1 < /dev/null; ! grep -q arena-not-a-token "$HOME/curl.args" && ! grep -q '^-[A-Za-z]*L' "$HOME/curl.args" && grep -qx 'header = "Authorization: Bearer arena-not-a-token"' "$HOME/curl.stdin" && grep -qx "https://api.github.com/repos/ramazanpolat/claude-playbooks/releases/latest" "$HOME/curl.args" && ! grep -q arena-not-a-token "$HOME/tk2.out" || { echo token-wrong; cat "$HOME/curl.args" "$HOME/tk2.out"; exit 1; }; rm -f "$HOME/api.log"; "$HOME/api.sh" 200 sh -c 'curl -sS -K - -o /dev/null "$CPB_INSTALL_API_BASE/x" < "$HOME/curl.stdin"'; grep -q "	Bearer arena-not-a-token$" "$HOME/api.log" || { echo config-line-not-sent; cat "$HOME/api.log"; exit 1; }; GITHUB_TOKEN='arena"bad' PATH="$HOME/stubcurl:$PATH" CPB_INSTALL_DIR="$HOME/tk3" sh "$WORKSPACE_DIR/install.sh" > "$HOME/tk3.out" 2>&1 < /dev/null; grep -q "Note: GITHUB_TOKEN has characters a GitHub token does not; the lookup runs without it." "$HOME/tk3.out" && ! grep -q 'arena"bad' "$HOME/tk3.out" "$HOME/curl.args" "$HOME/curl.stdin" && echo token-on-stdin || { echo bad-token-wrong; cat "$HOME/tk3.out"; exit 1; }'''
 contains = "token-on-stdin"

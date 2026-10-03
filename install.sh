@@ -35,17 +35,30 @@ else
   # Fetch latest release tag. The status decides the message: GitHub
   # answers an unauthenticated request over its rate limit with 403 or
   # 429, and a shared IP (an office, a campus, a CI fleet) reaches it soon.
+  # A curl that fails (no answer, a transfer cut short) is no answer, even
+  # when it wrote a status first.
   echo "Fetching latest release..."
   API_URL="${API_BASE}/repos/${REPO}/releases/latest"
   BODY=$(mktemp "${TMPDIR:-/tmp}/cpb-latest.XXXXXX")
-  trap 'rm -f "$BODY"' EXIT HUP INT TERM
-  # The token goes to curl on stdin as a config line, never on its command
-  # line, where ps would show it.
+  trap 'rm -f "$BODY"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  TOKEN=""
   if [ -n "${GITHUB_TOKEN:-}" ] && [ "$API_BASE" = "https://api.github.com" ]; then
-    CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_TOKEN" \
-      | curl -sSL -K - -o "$BODY" -w '%{http_code}' "$API_URL") || CODE=${CODE:-000}
+    case "$GITHUB_TOKEN" in
+      *[!A-Za-z0-9_.-]*) echo "Note: GITHUB_TOKEN has characters a GitHub token does not; the lookup runs without it." ;;
+      *) TOKEN=$GITHUB_TOKEN ;;
+    esac
+  fi
+  if [ -n "$TOKEN" ]; then
+    # On stdin as a config line, never on curl's command line, where ps
+    # would show it; and no redirect is followed, so it reaches no other
+    # host.
+    CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" \
+      | curl -sS -K - -o "$BODY" -w '%{http_code}' "$API_URL") || CODE=000
   else
-    CODE=$(curl -sSL -o "$BODY" -w '%{http_code}' "$API_URL") || CODE=${CODE:-000}
+    CODE=$(curl -sSL -o "$BODY" -w '%{http_code}' "$API_URL") || CODE=000
   fi
   case "$CODE" in
     200)
@@ -56,7 +69,7 @@ else
       exit 1
       ;;
     000)
-      echo "Error: could not reach ${API_BASE} to find the latest release. Check your internet connection, or set CPB_INSTALL_VERSION=<tag> to skip the lookup."
+      echo "Error: could not get an answer from ${API_BASE} to find the latest release. Check your internet connection, or set CPB_INSTALL_VERSION=<tag> to skip the lookup."
       exit 1
       ;;
     *)
@@ -78,7 +91,12 @@ URL="${CPB_INSTALL_URL:-${DOWNLOAD_BASE_URL}/${LATEST}/${ASSET}}"
 
 echo "Installing cpb from ${ASSET} ${LATEST} (${OS}/${ARCH})..."
 TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb.XXXXXX")
-trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
+trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT
+# A signal ends the script; the EXIT trap then cleans up. A trap that only
+# cleaned up would let the script run on after Ctrl-C.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 curl -fsSL "$URL" -o "$TMP_FILE"
 
