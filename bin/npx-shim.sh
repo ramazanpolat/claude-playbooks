@@ -35,6 +35,7 @@ set -e
 REPO="${CPB_INSTALL_REPO:-ramazanpolat/claude-playbooks}"
 ASSET_PREFIX="${CPB_INSTALL_ASSET_PREFIX:-cpb}"
 DOWNLOAD_BASE_URL="${CPB_INSTALL_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/download}"
+API_BASE="${CPB_INSTALL_API_BASE:-https://api.github.com}"
 # Outside the playbooks root, which would list a directory there as a playbook.
 CACHE_ROOT="${CPB_NPX_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/cpb/npx}"
 INSTALL_DIR="${CPB_NPX_INSTALL_DIR:-$HOME/.local/bin}"
@@ -100,11 +101,30 @@ if [ "${CPB_NPX_BOOTSTRAP:-}" != "0" ]; then
   fi
 fi
 
-# The newest published, non-prerelease release's tag (GitHub's own notion,
-# as install.sh uses), or nothing.
-latest_tag() {
-  curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
-    | grep '"tag_name"' | head -1 | cut -d'"' -f4
+# latest_lookup sets LATEST_TAG to the newest published, non-prerelease
+# release's tag (GitHub's own notion, as install.sh uses), or to "" with
+# LATEST_CODE saying why: the HTTP status, or 000 for no answer. A curl that
+# fails (no answer, a transfer cut short) is no answer, even after a status.
+latest_lookup() {
+  LATEST_TAG=""
+  _b=$(mktemp "${TMPDIR:-/tmp}/cpb-latest.XXXXXX") || { LATEST_CODE=000; return 0; }
+  LATEST_CODE=$(curl -sSL -o "$_b" -w '%{http_code}' "${API_BASE}/repos/${REPO}/releases/latest") || LATEST_CODE=000
+  if [ "$LATEST_CODE" = 200 ]; then
+    LATEST_TAG=$(grep '"tag_name"' "$_b" | head -1 | cut -d'"' -f4)
+  fi
+  rm -f "$_b"
+}
+
+# lookup_why: why the lookup gave no tag. GitHub answers an unauthenticated
+# caller over its rate limit with 403 or 429, and a shared IP (an office, a
+# campus, a CI fleet) reaches it soon.
+lookup_why() {
+  case "$LATEST_CODE" in
+    403|429) echo "GitHub rate-limited this request (HTTP $LATEST_CODE; unauthenticated requests share your IP)" ;;
+    000) echo "no answer from ${API_BASE}" ;;
+    200) echo "no tag_name in the answer from ${API_BASE}" ;;
+    *) echo "HTTP $LATEST_CODE from ${API_BASE}" ;;
+  esac
 }
 
 # Resolve which release tag to fetch.
@@ -117,12 +137,21 @@ elif [ -n "${npm_package_version:-}" ] && [ "$npm_package_version" != "0.0.0" ];
   TAG="v$npm_package_version"
   TAG_FROM=package
 else
-  TAG=$(latest_tag) || TAG=""
+  latest_lookup
+  TAG=$LATEST_TAG
   TAG_FROM=latest
 fi
 if [ -z "$TAG" ]; then
-  echo "Error: could not determine which release to fetch. Check your internet connection," >&2
-  echo "or pin one explicitly: CPB_NPX_VERSION=v4.0.0 npx github:${REPO} ..." >&2
+  case "$LATEST_CODE" in
+    403|429)
+      echo "Error: $(lookup_why): pin a release to skip the lookup," >&2
+      echo "CPB_NPX_VERSION=v4.0.0 npx github:${REPO} ..., or retry later." >&2
+      ;;
+    *)
+      echo "Error: could not determine which release to fetch ($(lookup_why)). Check your internet connection," >&2
+      echo "or pin one explicitly: CPB_NPX_VERSION=v4.0.0 npx github:${REPO} ..." >&2
+      ;;
+  esac
   exit 1
 fi
 
@@ -207,8 +236,13 @@ download() {
 # A release named by the package but not published yet: the newest
 # published one, or nothing (and why, on stderr).
 fallback_tag() {
-  _new=$(latest_tag) || _new=""
+  latest_lookup
+  _new=$LATEST_TAG
   _major=${TAG#v}; _major=${_major%%.*}
+  if [ -z "$_new" ]; then
+    echo "Error: cpb ${TAG} is not published yet, and the newest release could not be looked up: $(lookup_why). Try again later, or pin one: CPB_NPX_VERSION=vX.Y.Z" >&2
+    return 1
+  fi
   if ! printf '%s\n' "$_new" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
     echo "Error: cpb ${TAG} is not published yet, and no published vX.Y.Z release was found to run instead (latest: ${_new:-none})." >&2
     return 1
