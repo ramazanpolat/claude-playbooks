@@ -196,20 +196,21 @@ func psStarts(pids []int) map[int]procInfo {
 var pidDomain = runtime.GOOS
 
 // sessionDirs is every config dir whose sessions are listed: the playbooks
-// and the plain directories in cpb's state. forName limits it to one
-// playbook (an unknown one is refused).
-func sessionDirs(forName string) ([]sessionDir, error) {
+// and the plain directories in cpb's state, and apart, the playbooks whose
+// manifests cannot be read. forName limits it to one playbook (an unknown or
+// unreadable one is refused).
+func sessionDirs(forName string) ([]sessionDir, []playbook.Unreadable, error) {
 	root := config.ResolvePlaybooksDir()
 	if forName != "" {
 		pb, err := playbook.Require(root, forName)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return []sessionDir{playbookSessionDir(pb)}, nil
+		return []sessionDir{playbookSessionDir(pb)}, nil, nil
 	}
-	pbs, err := playbook.Discover(root)
+	pbs, bad, err := playbook.Scan(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var dirs []sessionDir
 	for _, pb := range pbs {
@@ -219,7 +220,7 @@ func sessionDirs(forName string) ([]sessionDir, error) {
 	// answer without its plain directories would pass for a complete one.
 	st, err := readDirState()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var plain []string
 	for d := range st.Dirs {
@@ -229,7 +230,7 @@ func sessionDirs(forName string) ([]sessionDir, error) {
 	for _, d := range plain {
 		dirs = append(dirs, sessionDir{label: d, path: d})
 	}
-	return dirs, nil
+	return dirs, bad, nil
 }
 
 func playbookSessionDir(pb *playbook.Playbook) sessionDir {
@@ -455,29 +456,30 @@ func (s liveSession) json() sessionJSON {
 	return v
 }
 
-// liveSessions is SHOW SESSIONS' rows.
-func liveSessions(forName string) ([]sessionJSON, error) {
-	dirs, err := sessionDirs(forName)
+// liveSessions is SHOW SESSIONS' rows, and the playbooks it left out
+// because their manifests cannot be read.
+func liveSessions(forName string) ([]sessionJSON, []playbook.Unreadable, error) {
+	dirs, bad, err := sessionDirs(forName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows := []sessionJSON{}
 	for _, s := range readSessionFiles(dirs) {
 		rows = append(rows, s.json())
 	}
-	return rows, nil
+	return rows, bad, nil
 }
 
-func sessionRows() ([]any, error) {
-	rows, err := liveSessions("")
+func sessionRows() ([]any, []playbook.Unreadable, error) {
+	rows, bad, err := liveSessions("")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]any, len(rows))
 	for i, r := range rows {
 		out[i] = r
 	}
-	return out, nil
+	return out, bad, nil
 }
 
 // shortAge is a compact age for the human tables: 45s, 12m, 3h, 2d.
@@ -506,16 +508,19 @@ func ageOf(ts *string) string {
 }
 
 func showSessions(st *grammar.Stmt) error {
-	rows, err := liveSessions(st.For)
+	rows, bad, err := liveSessions(st.For)
 	if err != nil {
 		return err
 	}
 	if st.JSON {
-		return printJSON(rows)
+		if err := printJSON(rows); err != nil {
+			return err
+		}
+		return leftOut(bad)
 	}
 	if len(rows) == 0 {
 		fmt.Println("No live Claude Code sessions.")
-		return nil
+		return leftOut(bad)
 	}
 	t := newTable("PLAYBOOK", "PID", "TTY", "KIND", "STATUS", "AGE", "ACTIVE", "MODEL", "SESSION", "CWD").flexible(9)
 	for _, r := range rows {
@@ -523,5 +528,5 @@ func showSessions(st *grammar.Stmt) error {
 			ageOf(r.LastActive), deref(r.Model, "-"), r.SessionID, r.Cwd)
 	}
 	t.render(os.Stdout)
-	return nil
+	return leftOut(bad)
 }

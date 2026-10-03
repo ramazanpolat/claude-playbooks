@@ -15,20 +15,27 @@ import (
 
 // multicallPlaybook resolves argv[0] against the live playbook registry.
 // When the binary is invoked through a launcher symlink, the link's name is
-// a playbook name or manifest alias; the CLI's own names never dispatch. A
-// discovery failure is returned distinctly from a genuine missing name:
-// one broken .playbook elsewhere in the registry must not make every
-// launcher report itself as stale.
+// a playbook name or manifest alias; the CLI's own names never dispatch.
+// A playbook whose manifest cannot be read is contained: every other
+// launcher still resolves. Its own name is its read error, and a name no
+// readable playbook claims, while some cannot be read, is an error naming
+// them rather than a stale launcher: the owner may be one of them.
 func multicallPlaybook() (string, bool, error) {
 	base := filepath.Base(os.Args[0])
 	if launcher.ReservedNames[base] {
 		return "", false, nil
 	}
 	root := config.ResolvePlaybooksDir()
-	pbs, err := playbook.Discover(root)
+	pbs, bad, err := playbook.Scan(root)
 	if err != nil {
 		return "", false, fmt.Errorf("cannot resolve %q: reading the playbook registry failed: %w", base, err)
 	}
+	for _, u := range bad {
+		if u.Name == base {
+			return "", false, fmt.Errorf("cannot run %q: %w", base, u.Err)
+		}
+	}
+	// A directory name resolves first, so no manifest can take one over.
 	for _, pb := range pbs {
 		if pb.Name == base {
 			return pb.Name, true, nil
@@ -38,6 +45,9 @@ func multicallPlaybook() (string, bool, error) {
 		if pb.Manifest != nil && pb.Manifest.Launcher == base {
 			return pb.Name, true, nil
 		}
+	}
+	if len(bad) > 0 {
+		return "", false, fmt.Errorf("cannot resolve %q: no readable playbook claims it, and these cannot be read: %w", base, &playbook.UnreadableError{List: bad})
 	}
 	return "", false, nil
 }
@@ -55,24 +65,40 @@ func launcherNamesFor(pb *playbook.Playbook) []string {
 // commandNameOwner reports which other playbook (by name or alias) already
 // claims cmdName, if any. Launcher symlinks carry no ownership of their own
 // — the registry is the single source of truth — so collisions are checked
-// here rather than parsed out of files.
+// here rather than parsed out of files. It reads every manifest: one that
+// cannot be read may claim the name, so the check is refused, naming it.
 func commandNameOwner(cmdName, exceptName string) (*playbook.Playbook, error) {
-	root := config.ResolvePlaybooksDir()
-	pbs, err := playbook.Discover(root)
+	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
 	if err != nil {
 		return nil, err
 	}
+	return nameOwnerAmong(pbs, cmdName, exceptName), nil
+}
+
+// readableNameOwner is commandNameOwner over the playbooks whose manifests
+// read. It decides the fate of a launcher being given up (DROP): another
+// claim on that name in a manifest that cannot be read could only come from
+// a hand edit, which is not guarded against.
+func readableNameOwner(cmdName, exceptName string) (*playbook.Playbook, error) {
+	pbs, _, err := playbook.Scan(config.ResolvePlaybooksDir())
+	if err != nil {
+		return nil, err
+	}
+	return nameOwnerAmong(pbs, cmdName, exceptName), nil
+}
+
+func nameOwnerAmong(pbs []*playbook.Playbook, cmdName, exceptName string) *playbook.Playbook {
 	for _, pb := range pbs {
 		if pb.Name == exceptName {
 			continue
 		}
 		for _, n := range launcherNamesFor(pb) {
 			if n == cmdName {
-				return pb, nil
+				return pb
 			}
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 // preflightCommandNames errors when any candidate name already addresses
@@ -90,7 +116,7 @@ func preflightCommandNames(exceptName string, names ...string) error {
 			// Dispatch relies on the same discovery call: registering a
 			// name it cannot verify would advertise a command that cannot
 			// resolve.
-			return fmt.Errorf("cannot verify launcher name %q: %w", n, err)
+			return fmt.Errorf("cannot check launcher name %q against every playbook: %w", n, err)
 		}
 		if owner != nil {
 			return fmt.Errorf("launcher name %q already addresses playbook %q. Pick another name", n, owner.Name)

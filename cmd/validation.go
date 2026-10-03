@@ -45,7 +45,7 @@ func autocompletePlaybookNames(cmd *cobra.Command, args []string, toComplete str
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	playbooksDir := config.ResolvePlaybooksDir()
-	pbs, err := playbook.Discover(playbooksDir)
+	pbs, _, err := playbook.Scan(playbooksDir)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}

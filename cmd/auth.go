@@ -106,12 +106,13 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		}
 	}
 	var pbs []*playbook.Playbook
+	var bad []playbook.Unreadable
 	if len(args) == 0 {
-		all, err := playbook.Discover(playbooksDir)
+		all, unreadable, err := playbook.Scan(playbooksDir)
 		if err != nil {
 			return err
 		}
-		pbs = all
+		pbs, bad = all, unreadable
 	} else {
 		for _, name := range args {
 			pb, err := playbook.Require(playbooksDir, name)
@@ -133,10 +134,13 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 	if authStatusJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		if err := enc.Encode(rows); err != nil {
+			return err
+		}
+		return leftOut(bad)
 	}
 	printAuthTable(rows, now)
-	return nil
+	return leftOut(bad)
 }
 
 // askClaude runs `claude auth status --json` bound to dir. Errors are reported

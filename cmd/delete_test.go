@@ -832,7 +832,8 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 		t.Fatal("declined delete removed the launcher")
 	}
 
-	// discovery failure: the launcher is kept with a warning, not removed
+	// A sibling whose manifest cannot be read is contained: the playbook
+	// and its launcher go, and the sibling's own delete is its read error.
 	writePlaybook(t, root, "victim", nil)
 	if _, err := launcher.Write(config.LauncherDir, "victim"); err != nil {
 		t.Fatal(err)
@@ -844,9 +845,19 @@ func TestLauncherFateIsConsistentAndSafe(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(broken, manifest.FileName), []byte("name = [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_ = doDelete(deleteOpts{yes: true}, []string{"victim"}) // may refuse on the broken sibling; the launcher must survive either way
-	if _, exists, _ := launcher.Lookup(config.LauncherDir, "victim"); !exists {
-		t.Fatal("launcher removed although ownership could not be verified")
+	captureStdout(t, func() {
+		if err := doDelete(deleteOpts{yes: true}, []string{"victim"}); err != nil {
+			t.Fatalf("delete beside an unreadable sibling: %v", err)
+		}
+	})
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "victim"); exists {
+		t.Fatal("the launcher of a deleted playbook was kept over an unreadable sibling")
+	}
+	if err := doDelete(deleteOpts{yes: true}, []string{"broken"}); err == nil || !strings.Contains(err.Error(), "broken/.playbook") {
+		t.Fatalf("deleting the unreadable playbook: %v", err)
+	}
+	if _, err := os.Stat(broken); err != nil {
+		t.Fatalf("the unreadable playbook was removed: %v", err)
 	}
 	if err := os.RemoveAll(broken); err != nil {
 		t.Fatal(err)

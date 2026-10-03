@@ -140,6 +140,8 @@ func TestStatementLauncherIsOneOrNone(t *testing.T) {
 
 // DROP IF EXISTS is a no-op only when the playbook is not there; a registry
 // that cannot be read is an error.
+// A playbook whose manifest cannot be read is its read error, never
+// "nothing to drop"; a sibling's unreadable manifest does not matter.
 func TestStatementDropIfExistsKeepsDiscoveryErrors(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "target", &manifest.Manifest{})
@@ -149,10 +151,16 @@ func TestStatementDropIfExistsKeepsDiscoveryErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "broken", manifest.FileName), []byte("not = [toml"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stmt(t, "DROP PLAYBOOK IF EXISTS target --yes"); err == nil {
-		t.Fatal("a discovery error became nothing to drop")
+	if _, err := stmt(t, "DROP PLAYBOOK IF EXISTS broken --yes"); err == nil {
+		t.Fatal("a read error became nothing to drop")
 	}
-	if _, err := os.Stat(filepath.Join(root, "target")); err != nil {
-		t.Fatalf("target: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "broken")); err != nil {
+		t.Fatalf("broken: %v", err)
+	}
+	if _, err := stmt(t, "DROP PLAYBOOK IF EXISTS target --yes"); err != nil {
+		t.Fatalf("a readable playbook beside an unreadable one: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "target")); !os.IsNotExist(err) {
+		t.Fatalf("target was not dropped: %v", err)
 	}
 }

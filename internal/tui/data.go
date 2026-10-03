@@ -212,9 +212,19 @@ type State struct {
 	Defaults  Defaults
 }
 
+// PartialRead is a list read that printed the rows it could read and left
+// out playbooks whose manifests cannot be read, exiting 1: the rows are
+// kept, and the message (cpb's stderr) says which were left out.
+type PartialRead struct{ Msg string }
+
+func (p *PartialRead) Error() string { return p.Msg }
+
 func readJSON(r Runner, v any, args ...string) error {
 	out, err := r.Run(args...)
 	if err != nil {
+		if len(bytes.TrimSpace(out)) > 0 && json.Unmarshal(out, v) == nil {
+			return &PartialRead{Msg: strings.Join(strings.Fields(strings.ReplaceAll(err.Error(), "\n", "; ")), " ")}
+		}
 		return fmt.Errorf("cpb %s: %w", strings.Join(args, " "), err)
 	}
 	if err := json.Unmarshal(out, v); err != nil {
@@ -231,19 +241,36 @@ var (
 	readDefaults  = []string{"SHOW", "DEFAULTS", "--json"}
 )
 
+// loadState reads everything the screens show. A read that left playbooks
+// out keeps its rows; the state comes back with that PartialRead.
 func loadState(r Runner) (State, error) {
 	var s State
-	if err := readJSON(r, &s.Playbooks, readPlaybooks...); err != nil {
+	var partial *PartialRead
+	read := func(v any, args ...string) error {
+		err := readJSON(r, v, args...)
+		var p *PartialRead
+		if errors.As(err, &p) {
+			if partial == nil {
+				partial = p
+			}
+			return nil
+		}
+		return err
+	}
+	if err := read(&s.Playbooks, readPlaybooks...); err != nil {
 		return s, err
 	}
-	if err := readJSON(r, &s.Sessions, readSessions...); err != nil {
+	if err := read(&s.Sessions, readSessions...); err != nil {
 		return s, err
 	}
-	if err := readJSON(r, &s.Envs, readEnvs...); err != nil {
+	if err := read(&s.Envs, readEnvs...); err != nil {
 		return s, err
 	}
-	if err := readJSON(r, &s.Defaults, readDefaults...); err != nil {
+	if err := read(&s.Defaults, readDefaults...); err != nil {
 		return s, err
+	}
+	if partial != nil {
+		return s, partial
 	}
 	return s, nil
 }

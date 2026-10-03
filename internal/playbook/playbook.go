@@ -53,22 +53,69 @@ func (p *Playbook) Alias() string {
 	return ""
 }
 
+// Unreadable is a playbook directory whose manifest cannot be read. It is
+// contained: the other playbooks stay usable, and anything that names this
+// one gets Err, which says the file and the line.
+type Unreadable struct {
+	Name string // directory name under the playbooks root
+	Path string // absolute directory path
+	Err  error  // the manifest's read error
+}
+
+// UnreadableError is Discover's error when some manifest cannot be read:
+// each one's own error, in name order.
+type UnreadableError struct {
+	List []Unreadable
+}
+
+func (e *UnreadableError) Error() string {
+	msgs := make([]string, len(e.List))
+	for i, u := range e.List {
+		msgs[i] = u.Err.Error()
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// Scan returns the playbooks whose manifests read and, apart, the ones whose
+// manifests do not, each sorted by name. Only a root it cannot list is an
+// error. Lists use it: they show what they can and report the rest.
+func Scan(playbooksDir string) ([]*Playbook, []Unreadable, error) {
+	pbs, bad, err := discover(playbooksDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(pbs, func(i, j int) bool { return pbs[i].Name < pbs[j].Name })
+	sort.Slice(bad, func(i, j int) bool { return bad[i].Name < bad[j].Name })
+	return pbs, bad, nil
+}
+
 // Discover returns all playbooks under playbooksDir, sorted alphabetically
-// by name.
+// by name, or an *UnreadableError when any manifest cannot be read. It is
+// for what needs the whole registry: a launcher name checked against every
+// playbook, SHOW CREATE ALL.
 func Discover(playbooksDir string) ([]*Playbook, error) {
-	pbs, err := discover(playbooksDir)
+	pbs, bad, err := Scan(playbooksDir)
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(pbs, func(i, j int) bool { return pbs[i].Name < pbs[j].Name })
+	if len(bad) > 0 {
+		return nil, &UnreadableError{List: bad}
+	}
 	return pbs, nil
 }
 
-// Find resolves a playbook by name. Returns (nil, nil) when not found.
+// Find resolves a playbook by name. Returns (nil, nil) when not found. A
+// playbook whose manifest cannot be read is its read error; another
+// playbook's unreadable manifest does not matter.
 func Find(playbooksDir, name string) (*Playbook, error) {
-	all, err := Discover(playbooksDir)
+	all, bad, err := Scan(playbooksDir)
 	if err != nil {
 		return nil, err
+	}
+	for _, u := range bad {
+		if u.Name == name {
+			return nil, u.Err
+		}
 	}
 	for _, pb := range all {
 		if pb.Name == name {
@@ -92,15 +139,16 @@ func Require(playbooksDir, name string) (*Playbook, error) {
 
 // --- internals ---
 
-func discover(root string) ([]*Playbook, error) {
+func discover(root string) ([]*Playbook, []Unreadable, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var out []*Playbook
+	var bad []Unreadable
 	for _, e := range entries {
 		if !e.IsDir() && (e.Type()&os.ModeSymlink) == 0 {
 			continue
@@ -116,7 +164,8 @@ func discover(root string) ([]*Playbook, error) {
 		}
 		m, err := manifest.Read(path)
 		if err != nil {
-			return nil, err
+			bad = append(bad, Unreadable{Name: e.Name(), Path: path, Err: err})
+			continue
 		}
 		pb := &Playbook{
 			Name:     e.Name(),
@@ -130,5 +179,5 @@ func discover(root string) ([]*Playbook, error) {
 		}
 		out = append(out, pb)
 	}
-	return out, nil
+	return out, bad, nil
 }

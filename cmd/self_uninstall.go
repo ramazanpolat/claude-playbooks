@@ -65,9 +65,16 @@ func runSelfUninstall(cmd *cobra.Command, args []string) error {
 		execPath = "(unknown)"
 	}
 
+	// The playbooks root goes as a whole (step 2), so every playbook in it
+	// is read and shown first: a manifest that cannot be read refuses the
+	// uninstall, rather than a preview that leaves out what it deletes.
 	var pbs []*playbook.Playbook
-	if !selfUninstallBinaryOnly {
-		pbs, _ = playbook.Discover(playbooksDir)
+	if !selfUninstallBinaryOnly && !selfUninstallKeepData {
+		all, err := playbook.Discover(playbooksDir)
+		if err != nil {
+			return fmt.Errorf("nothing removed: self-uninstall deletes %s and cannot read every playbook in it: %w. Fix or remove that playbook first, or keep the playbooks with --keep-data or --binary-only", playbooksDir, err)
+		}
+		pbs = all
 	}
 
 	if !selfUninstallYes && !selfUninstallDryRun {

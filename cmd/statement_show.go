@@ -251,7 +251,7 @@ func readStatement(st *grammar.Stmt) error {
 		printPlaybook(v, values)
 		return nil
 	case st.Object == grammar.Playbooks:
-		pbs, err := playbook.Discover(playbooksDir)
+		pbs, bad, err := playbook.Scan(playbooksDir)
 		if err != nil {
 			return err
 		}
@@ -260,10 +260,13 @@ func readStatement(st *grammar.Stmt) error {
 			all = append(all, describePlaybook(pb))
 		}
 		if st.JSON {
-			return printJSON(all)
+			if err := printJSON(all); err != nil {
+				return err
+			}
+		} else {
+			printPlaybooks(all)
 		}
-		printPlaybooks(all)
-		return nil
+		return leftOut(bad)
 	case st.Object == grammar.Sessions:
 		return showSessions(st)
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
@@ -549,7 +552,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 			return err
 		}
 	}
-	users, err := profileUsers(playbooksDir)
+	users, bad, err := profileUsers(playbooksDir)
 	if err != nil {
 		return err
 	}
@@ -563,10 +566,14 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 		})
 	}
 	if st.JSON {
+		v := any(all)
 		if st.Object == grammar.Env {
-			return printJSON(all[0])
+			v = all[0]
 		}
-		return printJSON(all)
+		if err := printJSON(v); err != nil {
+			return err
+		}
+		return leftOut(bad)
 	}
 	if derr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: DEFAULTS cannot be read (%v); every launch is refused until ALTER DEFAULTS USE ENV … replaces it.\n", derr)
@@ -584,7 +591,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 			{"Default", yes},
 			{"Variables", strings.Join(humanVars(v.Vars, p.Set), "\n")},
 		})
-		return nil
+		return leftOut(bad)
 	}
 	t := newTable("NAME", "SET", "BLOCKED", "USED BY", "DESCRIPTION").flexible(4).rightAlign(1, 2)
 	for i, v := range all {
@@ -599,7 +606,7 @@ func showEnvs(playbooksDir, dir string, st *grammar.Stmt) error {
 		t.add(name, fmt.Sprint(len(profiles[i].Set)), fmt.Sprint(len(profiles[i].Block)), used, v.Description)
 	}
 	t.render(os.Stdout)
-	return nil
+	return leftOut(bad)
 }
 
 func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
@@ -894,11 +901,13 @@ func governingManifest(pb *playbook.Playbook) (*manifest.Manifest, string) {
 	return m, dir
 }
 
-// profileUsers maps each env set to the sorted playbooks that use it.
-func profileUsers(playbooksDir string) (map[string][]string, error) {
-	pbs, err := playbook.Discover(playbooksDir)
+// profileUsers maps each env set to the sorted playbooks that use it, and
+// returns apart the playbooks it could not read: any of them may use a set
+// too.
+func profileUsers(playbooksDir string) (map[string][]string, []playbook.Unreadable, error) {
+	pbs, bad, err := playbook.Scan(playbooksDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	users := map[string][]string{}
 	for _, pb := range pbs {
@@ -922,7 +931,7 @@ func profileUsers(playbooksDir string) (map[string][]string, error) {
 	for name := range users {
 		sort.Strings(users[name])
 	}
-	return users, nil
+	return users, bad, nil
 }
 
 // isRegistryDefault reports whether name is one of the registry defaults,

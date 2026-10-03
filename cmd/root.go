@@ -107,7 +107,7 @@ func init() {
 func runRoot(cmd *cobra.Command, args []string) error {
 	playbooksDir := config.ResolvePlaybooksDir()
 
-	pbs, err := playbook.Discover(playbooksDir)
+	pbs, bad, err := playbook.Scan(playbooksDir)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Printf("Playbooks directory: %s\n", playbooksDir)
 
-	if len(pbs) == 0 {
+	if len(pbs) == 0 && len(bad) == 0 {
 		fmt.Println("No playbooks installed yet. Get started with one of:")
 		fmt.Println()
 		fmt.Println("  # Your own, from scratch:")
@@ -178,7 +178,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Println("Run 'cpb --help' for all commands.")
 	printTUIHint()
-	return nil
+	return leftOut(bad)
 }
 
 // printTUIHint is bare cpb's last line on a terminal (v3.25.0). Off a

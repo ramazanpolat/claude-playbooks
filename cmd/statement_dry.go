@@ -227,10 +227,10 @@ func (r *stmtRun) recordDefaults(names []string) {
 // envUsers is profileUsers as the run sees it: a playbook whose env block
 // an earlier statement changed counts by that block, and a dropped one not
 // at all.
-func (r *stmtRun) envUsers(playbooksDir string) (map[string][]string, error) {
-	users, err := profileUsers(playbooksDir)
+func (r *stmtRun) envUsers(playbooksDir string) (map[string][]string, []playbook.Unreadable, error) {
+	users, bad, err := profileUsers(playbooksDir)
 	if err != nil || r.dry == nil {
-		return users, err
+		return users, bad, err
 	}
 	drop := func(pb string) {
 		for set, list := range users {
@@ -253,7 +253,7 @@ func (r *stmtRun) envUsers(playbooksDir string) (map[string][]string, error) {
 			}
 		}
 	}
-	return users, nil
+	return users, bad, nil
 }
 
 // mcpState is a playbook's MCP servers as the run sees them; a dry run

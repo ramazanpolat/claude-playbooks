@@ -595,3 +595,50 @@ func TestWideCharactersFitTheScreen(t *testing.T) {
 		}
 	}
 }
+
+// partialRunner answers key with its fixture output and an error, as cpb
+// does for a list that left out a playbook whose manifest cannot be read.
+type partialRunner struct {
+	*fakeRunner
+	key, msg string
+}
+
+func (p partialRunner) Run(args ...string) ([]byte, error) {
+	out, err := p.fakeRunner.Run(args...)
+	if strings.Join(args, " ") == p.key {
+		return out, errors.New(p.msg)
+	}
+	return out, err
+}
+
+// TestPartialRead: a read that left a playbook out keeps its rows, and the
+// status bar says which playbook was left out and why.
+func TestPartialRead(t *testing.T) {
+	r := partialRunner{fixture(), "SHOW PLAYBOOKS --json", `playbook "bad" is left out: unknown key "bogus_key" in /home/me/.claude-playbooks/bad/.playbook:2`}
+	st, err := loadState(r)
+	var p *PartialRead
+	if !errors.As(err, &p) || len(st.Playbooks) != 2 || len(st.Envs) != 2 || len(st.Sessions) != 2 {
+		t.Fatalf("%v: %d playbooks, %d envs, %d sessions", err, len(st.Playbooks), len(st.Envs), len(st.Sessions))
+	}
+	m := New(Options{Runner: r, Now: func() time.Time { return now }})
+	mm, _ := m.update(stateMsg{st, err})
+	if v := mm.render(); !strings.Contains(v, "alpha") || !strings.Contains(v, `playbook "bad" is left out`) || strings.Contains(v, "cpb could not be read") {
+		t.Fatal(v)
+	}
+	mm, _ = mm.update(sessionsMsg{st.Sessions[:1], &PartialRead{Msg: `playbook "late" is left out`}})
+	if len(mm.st.Sessions) != 1 {
+		t.Fatalf("a partial sessions read was dropped: %d", len(mm.st.Sessions))
+	}
+	if v := mm.render(); !strings.Contains(v, `playbook "late" is left out`) {
+		t.Fatalf("a poll that left a playbook out does not say so:\n%s", v)
+	}
+	mm, _ = mm.update(sessionsMsg{st.Sessions, nil})
+	if v := mm.render(); strings.Contains(v, "is left out") {
+		t.Fatalf("a clean poll kept the warning:\n%s", v)
+	}
+	mm.err = "an action failed"
+	mm, _ = mm.update(sessionsMsg{st.Sessions, nil})
+	if mm.err != "an action failed" {
+		t.Fatalf("a clean poll cleared another error: %q", mm.err)
+	}
+}

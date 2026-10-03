@@ -63,6 +63,7 @@ type Model struct {
 	st       State
 	loaded   bool
 	err      string
+	partial  bool // err is a read that left a playbook out, not a failure
 	msg      string
 	view     view
 	cursor   map[view]int
@@ -198,16 +199,31 @@ func (m Model) update(msg Msg) (Model, Cmd) {
 		}
 		return m, nil
 	case stateMsg:
-		if msg.err != nil {
+		// A read that left a playbook out still shows the rest, with the
+		// reason in the status bar.
+		var partial *PartialRead
+		if msg.err != nil && !errors.As(msg.err, &partial) {
 			m.err = msg.err.Error()
 			return m, nil
 		}
-		m.st, m.loaded, m.err, m.lastRead = msg.st, true, "", m.o.Now()
+		m.st, m.loaded, m.err, m.partial, m.lastRead = msg.st, true, "", false, m.o.Now()
+		if partial != nil {
+			m.err, m.partial = partial.Error(), true
+		}
 		m.clampCursors()
 		return m, nil
 	case sessionsMsg:
-		if msg.err == nil {
+		// The poll says so too when a playbook is left out, and a clean poll
+		// takes that warning back; any other error stays as it was.
+		var partial *PartialRead
+		if msg.err == nil || errors.As(msg.err, &partial) {
 			m.st.Sessions, m.lastRead = msg.s, m.o.Now()
+			switch {
+			case partial != nil:
+				m.err, m.partial = partial.Error(), true
+			case m.partial:
+				m.err, m.partial = "", false
+			}
 			m.clampCursors()
 		}
 		return m, nil

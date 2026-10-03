@@ -77,7 +77,7 @@ func doRename(o renameOpts, args []string) error {
 			continue
 		}
 		if owner, oerr := commandNameOwner(cand, oldName); oerr != nil {
-			return fmt.Errorf("cannot verify launcher name %q: %w", cand, oerr)
+			return fmt.Errorf("cannot check launcher name %q against every playbook: %w", cand, oerr)
 		} else if owner != nil {
 			return fmt.Errorf("launcher name %q already addresses playbook %q", cand, owner.Name)
 		}
