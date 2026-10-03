@@ -25,7 +25,7 @@ was refused. GitHub limits unauthenticated callers per IP, and an office,
 campus or CI network shares one. Name the release, which skips the lookup:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | CPB_INSTALL_VERSION=v4.0.0-rc1 sh
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | CPB_INSTALL_VERSION=v4.0.0-rc2 sh
 ```
 
 Where `GITHUB_TOKEN` is already in the environment (CI runners set one), the
@@ -89,7 +89,7 @@ claude-playbooks is a Nix flake, so a [devbox](https://www.jetify.com/devbox)
 project pins it like any other package:
 
 ```bash
-devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc1#cpb"
+devbox add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc2#cpb"
 devbox run -- cpb --version
 ```
 
@@ -101,7 +101,7 @@ one a `devbox run` command. A `devbox.json` like this:
 ```json
 {
   "packages": [
-    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc1#cpb",
+    "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc2#cpb",
     "claude-code@latest"
   ],
   "env": {
@@ -141,8 +141,8 @@ enables them for one command, or set `experimental-features = nix-command flakes
 in `nix.conf`:
 
 ```bash
-nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc1#cpb" -- --version
-nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc1#cpb"
+nix --extra-experimental-features 'nix-command flakes' run "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc2#cpb" -- --version
+nix --extra-experimental-features 'nix-command flakes' profile add "git+https://github.com/ramazanpolat/claude-playbooks?ref=refs/tags/v4.0.0-rc2#cpb"
 ```
 
 (`nix profile add` is the current name; older Nix versions call it `nix profile install`.)
@@ -151,7 +151,7 @@ devbox needs none of this: it enables flakes itself.
 ### Notes
 
 - **Use the `git+https:` form shown here.** The shorter
-  `github:ramazanpolat/claude-playbooks/v4.0.0-rc1#cpb` also works, but it
+  `github:ramazanpolat/claude-playbooks/v4.0.0-rc2#cpb` also works, but it
   is resolved through GitHub's API, which rate-limits unauthenticated callers per
   IP: behind a shared public IP, `nix` and `devbox` alike fail with HTTP 403. Use
   it only with a GitHub token configured for Nix (`access-tokens`) or on a
