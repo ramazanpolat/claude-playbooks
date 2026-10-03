@@ -97,6 +97,17 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	// secret reference must resolve, against the helper the files will have
 	// set by then (a file may set the helper and use it in one run).
 	var helper helperState
+	// A statement that claims a launcher name checks it against every
+	// playbook, and a manifest that cannot be read refuses that check: it
+	// refuses here, before anything is written.
+	if _, bad, serr := playbook.Scan(config.ResolvePlaybooksDir()); serr == nil && len(bad) > 0 {
+		for _, x := range stmts {
+			if claimsLauncherName(x.s) {
+				return refused(x.path, x.s.Pos.Line, fmt.Errorf("%s:%d (%s): cannot check its launcher name against every playbook: %w\nnothing was written",
+					x.file, x.s.Pos.Line, stmtHead(x.s), &playbook.UnreadableError{List: bad}))
+			}
+		}
+	}
 	envDir := envset.Dir(config.ResolvePlaybooksDir())
 	// Whether each env set exists at that point of the files: an earlier
 	// CREATE makes it, an earlier DROP removes it, and the disk says the rest.
@@ -533,9 +544,16 @@ func resolveTarget(t string) (string, error) {
 	if dir, err = filepath.EvalSymlinks(dir); err != nil {
 		return "", fmt.Errorf("no such directory")
 	}
-	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+	pbs, bad, err := playbook.Scan(config.ResolvePlaybooksDir())
 	if err != nil {
 		return "", err
+	}
+	// The directory of a playbook that cannot be read is that playbook:
+	// its read error, not a plain directory.
+	for _, u := range bad {
+		if r, err := filepath.EvalSymlinks(u.Path); err == nil && r == dir {
+			return "", u.Err
+		}
 	}
 	var names []string
 	for _, pb := range pbs {
@@ -556,4 +574,30 @@ func resolveTarget(t string) (string, error) {
 		return dirMark + dir, nil
 	}
 	return "", fmt.Errorf("the directory belongs to several playbooks (%s): name one, TO <playbook>", strings.Join(names, ", "))
+}
+
+// claimsLauncherName reports a statement that registers a name a launcher
+// answers to: a new playbook (its directory name, and its launcher), a
+// rename, or a launcher change. CREATE … IF NOT EXISTS on a playbook that
+// exists registers nothing.
+func claimsLauncherName(s *grammar.Stmt) bool {
+	if s.Dir != "" || s.Object != grammar.Playbook {
+		return false
+	}
+	switch s.Verb {
+	case grammar.Create:
+		if s.IfNotExists {
+			if pb, err := playbook.Find(config.ResolvePlaybooksDir(), s.Name); err == nil && pb != nil {
+				return false
+			}
+		}
+		return true
+	case grammar.Alter:
+		for _, c := range s.Clauses {
+			if c.Kind == grammar.RenameTo || c.Kind == grammar.Launcher {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -35,7 +35,7 @@ type selectTable struct {
 	columns   []string
 	structure string
 	comments  map[string]string
-	rows      func() ([]any, error)
+	rows      func() ([]any, []playbook.Unreadable, error)
 }
 
 // versionPattern is the leading numeric part of a version ("v3.12.3-rc1":
@@ -192,28 +192,28 @@ func versionTuple(v string) []uint64 {
 	return out
 }
 
-func playbookRows() ([]any, error) {
-	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+func playbookRows() ([]any, []playbook.Unreadable, error) {
+	pbs, bad, err := playbook.Scan(config.ResolvePlaybooksDir())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows := []any{}
 	for _, pb := range pbs {
 		rows = append(rows, describePlaybook(pb))
 	}
-	return rows, nil
+	return rows, bad, nil
 }
 
-func envRows() ([]any, error) {
+func envRows() ([]any, []playbook.Unreadable, error) {
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envset.Dir(playbooksDir)
 	profiles, err := envset.List(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	users, err := profileUsers(playbooksDir)
+	users, bad, err := profileUsers(playbooksDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defaults, _ := envset.Defaults(dir)
 	rows := []any{}
@@ -222,17 +222,17 @@ func envRows() ([]any, error) {
 			Vars: layerVars(p.Set, p.Refs, p.Block), UsedBy: nonNil(users[p.Name]),
 			Default: isRegistryDefault(dir, defaults, p.Name)})
 	}
-	return rows, nil
+	return rows, bad, nil
 }
 
 // varRows is one row per variable, per layer, per playbook: what EXPLAIN
 // shows for every layer, with effective marking the entry a launch uses.
-func varRows() ([]any, error) {
+func varRows() ([]any, []playbook.Unreadable, error) {
 	playbooksDir := config.ResolvePlaybooksDir()
 	dir := envset.Dir(playbooksDir)
-	pbs, err := playbook.Discover(playbooksDir)
+	pbs, bad, err := playbook.Scan(playbooksDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows := []any{}
 	for _, pb := range pbs {
@@ -258,20 +258,20 @@ func varRows() ([]any, error) {
 			rows = append(rows, varRowJSON{Playbook: pb.Name, varJSON: v, Effective: o.Effective})
 		}
 	}
-	return rows, nil
+	return rows, bad, nil
 }
 
-func defaultsRows() ([]any, error) {
+func defaultsRows() ([]any, []playbook.Unreadable, error) {
 	dir := envset.Dir(config.ResolvePlaybooksDir())
 	names, err := envset.Defaults(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	helper, err := helperInEffect(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return []any{defaultsJSON{Envs: nonNil(names), SecretHelper: helper}}, nil
+	return []any{defaultsJSON{Envs: nonNil(names), SecretHelper: helper}}, nil, nil
 }
 
 var builtinSelect = regexp.MustCompile(`(?is)^\s*SELECT\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+FROM\s+([A-Za-z_]+)\s*;?\s*$`)
@@ -517,10 +517,18 @@ func runSelect(q string, explain, asJSON bool) error {
 		fmt.Printf("engine: clickhouse local\ncommand: cpb SHOW … --json rows of %s | %s\n", p.table, shellCommand(append([]string{bin}, p.clickhouseArgs()...)))
 		return nil
 	}
-	rows, err := selectTables[p.table].rows()
+	rows, bad, err := selectTables[p.table].rows()
 	if err != nil {
 		return err
 	}
+	if err := selectOutput(p, rows, asJSON); err != nil {
+		return err
+	}
+	return leftOut(bad)
+}
+
+// selectOutput runs the query over rows and prints its result.
+func selectOutput(p *selectPlan, rows []any, asJSON bool) error {
 	if p.query == "" {
 		return printSelect(p.table, p.columns, rows, asJSON)
 	}

@@ -1,5 +1,36 @@
 # Changelog
 
+## [v4.0.0-rc2] -- unreleased
+
+### Changed
+
+- **A playbook whose manifest cannot be read no longer takes the others
+  down** (SPEC.md, *Unreadable manifests*). In rc1, one `.playbook` with a
+  key cpb does not define made every command fail, every launcher
+  included.
+  - Statements that name another playbook run, and so do their launchers.
+  - The unreadable playbook itself is refused with its read error (the file
+    and the line), and so is its launcher.
+  - Lists print what they can read, then one stderr line per playbook left
+    out (`playbook "<name>" is left out: …`), and exit 1. `--json` keeps
+    its shape. The lists are `SHOW PLAYBOOKS`, bare `cpb`, `SELECT`,
+    `SHOW ENV(S)`, `SHOW SESSIONS` and `cpb auth status`. The TUI shows the
+    rows, with the line in its status bar.
+  - Refused while a manifest cannot be read, naming the file:
+    - `SHOW CREATE ALL`;
+    - `DROP ENV`;
+    - every statement that claims a launcher name (`CREATE PLAYBOOK`,
+      `RENAME TO`, `LAUNCHER`, `cpb play --keep`). `APPLY` refuses a file
+      holding such a statement before it writes anything.
+  - A launcher name that no readable playbook claims is no longer reported
+    as stale when the owner may be the unreadable playbook.
+
+### Fixed
+
+- **`cpb self-uninstall` with a manifest it could not read** said it would
+  remove `0 playbook(s)` and then deleted the whole playbooks root. It now
+  refuses and removes nothing. `--keep-data` and `--binary-only` still run.
+
 ## [v4.0.0-rc1] -- 2026-10-03
 
 cpb v4 is one CLI with one grammar. It breaks v3 on purpose: names, files,

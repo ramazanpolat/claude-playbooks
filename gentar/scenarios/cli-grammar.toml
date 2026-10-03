@@ -22,6 +22,7 @@
 # v3.22.0: APPLY --dry-run --json, the model picker, the Claude Code minimum
 # for the plugin clauses, and DESCRIBE (29 assertions in all: 28 commands,
 # 1 file).
+# v4.0.0-rc2: a playbook whose manifest cannot be read is contained.
 
 [scenario]
 name = "cli-grammar"
@@ -465,3 +466,26 @@ contains = "tui-ok"
 # the login isolated.
 command = '''M="$HOME/.claude-playbooks/sbp/.playbook"; cpb CREATE PLAYBOOK sbp NO LAUNCHER >/dev/null && cpb ALTER PLAYBOOK sbp SET SANDBOX backend=sbx mounts=~/a:ro >/dev/null && grep -q 'backend = "sbx"' "$M" && ! grep -q 'always' "$M" && cpb ALTER PLAYBOOK sbp SET SANDBOX >/dev/null && grep -q 'always = true' "$M" && grep -q 'isolated_login = true' "$M" && cpb SHOW CREATE PLAYBOOK sbp > "$HOME/sbp.cpb" && grep -q 'SET SANDBOX backend=sbx mounts=~/a:ro' "$HOME/sbp.cpb" && cpb APPLY "$HOME/sbp.cpb" | grep -q '0 created, 0 changed' && cpb ALTER PLAYBOOK sbp UNSET SANDBOX >/dev/null && ! grep -q 'always = true' "$M" && grep -q 'isolated_login = true' "$M" && echo sandbox-settings-ok'''
 contains = "sandbox-settings-ok"
+
+[[verify.commands]]
+# An unreadable manifest is contained (v4.0.0-rc2): urb's .playbook gets a key
+# cpb does not define. SHOW PLAYBOOKS lists ura, says on stderr which it left
+# out (file and line), and exits 1; --json holds ura only; ura runs, by name
+# and through its launcher; urb itself is its read error; a launcher-name
+# claim and SHOW CREATE ALL are refused, naming the file. Cleaned up after,
+# so later checks see a readable registry.
+command = '''
+D=$(dirname "$(command -v cpb)"); F="$HOME/.claude-playbooks/urb/.playbook"
+cpb CREATE PLAYBOOK ura >/dev/null && cpb CREATE PLAYBOOK urb NO LAUNCHER >/dev/null || { echo ur-setup; exit 1; }
+printf 'bogus_key = 1\n' >> "$F"
+cpb SHOW PLAYBOOKS > "$HOME/ur.out" 2> "$HOME/ur.err"; rc=$?
+[ "$rc" = 1 ] && grep -q '^ura ' "$HOME/ur.out" && ! grep -q '^urb' "$HOME/ur.out" && [ "$(wc -l < "$HOME/ur.err")" = 1 ] && grep -qF "playbook \"urb\" is left out: unknown key \"bogus_key\" in $F:" "$HOME/ur.err" || { echo ur-list-wrong; cat "$HOME/ur.err"; exit 1; }
+J=$(cpb SHOW PLAYBOOKS --json 2>/dev/null | tr -d ' \n'); printf %s "$J" | grep -qF '"name":"ura"' && ! printf %s "$J" | grep -qF '"name":"urb"' || { echo ur-json-wrong; exit 1; }
+rm -f "$HOME/claude-env"; cpb run ura && test -f "$HOME/claude-env" || { echo ur-run-wrong; exit 1; }
+rm -f "$HOME/claude-env"; test -L "$D/ura" && "$D/ura" && test -f "$HOME/claude-env" || { echo ur-launcher-wrong; exit 1; }
+if cpb SHOW PLAYBOOK urb > /dev/null 2> "$HOME/ur.err"; then echo ur-bad-shown; exit 1; fi; grep -qF "$F:" "$HOME/ur.err" || { echo ur-bad-error; exit 1; }
+if cpb CREATE PLAYBOOK urc NO LAUNCHER > /dev/null 2> "$HOME/ur.err"; then echo ur-claim-accepted; exit 1; fi; grep -qF "$F:" "$HOME/ur.err" && ! test -e "$HOME/.claude-playbooks/urc" || { echo ur-claim-wrong; exit 1; }
+if cpb SHOW CREATE ALL > /dev/null 2> "$HOME/ur.err"; then echo ur-dump-accepted; exit 1; fi; grep -qF "$F:" "$HOME/ur.err" || { echo ur-dump-wrong; exit 1; }
+rm -rf "$HOME/.claude-playbooks/urb" && cpb DROP PLAYBOOK ura --yes > /dev/null && cpb SHOW PLAYBOOKS > /dev/null || { echo ur-cleanup; exit 1; }
+echo unreadable-ok'''
+contains = "unreadable-ok"

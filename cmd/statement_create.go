@@ -69,9 +69,11 @@ func showCreate(st *grammar.Stmt) error {
 		if b.text != "" {
 			blocks = append(blocks, b)
 		}
+		// ALL is every playbook, for APPLY to replay: a playbook that cannot
+		// be read refuses it, rather than a dump that leaves one out.
 		pbs, err := playbook.Discover(playbooksDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("SHOW CREATE ALL writes every playbook, and one cannot be read: %w", err)
 		}
 		for _, pb := range pbs {
 			b, err := createPlaybookBlock(pb)
@@ -324,8 +326,9 @@ func hasNameLauncher(name string) bool {
 		return false
 	}
 	// A launcher answers to its name; if another playbook claims the name
-	// as its alias, the launcher is not this playbook's default.
-	owner, err := commandNameOwner(name, name)
+	// as its alias, the launcher is not this playbook's default. A read: a
+	// manifest that cannot be read does not hide the launcher.
+	owner, err := readableNameOwner(name, name)
 	return err == nil && owner == nil
 }
 

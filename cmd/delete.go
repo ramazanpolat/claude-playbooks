@@ -160,7 +160,7 @@ func launcherClaimedByIdentity(dir, n, exceptName string) (string, error) {
 	if err != nil {
 		return "", nil // no link to protect
 	}
-	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+	pbs, _, err := playbook.Scan(config.ResolvePlaybooksDir())
 	if err != nil {
 		return "", err
 	}
@@ -201,9 +201,10 @@ type launcherPlan struct {
 // symlink and this tool only ever writes launchers for the default
 // registry root (launcherOpsAllowed), so a launcher named for a playbook
 // leaving that root is that playbook's, unless another playbook claims the
-// name. Discovery failing is not "unclaimed": the launcher is kept.
+// name. Discovery failing is not "unclaimed": the launcher is kept. A
+// manifest that cannot be read is not a claimant (readableNameOwner).
 func launcherFate(dir, n, playbookName string) launcherPlan {
-	owner, oerr := commandNameOwner(n, playbookName)
+	owner, oerr := readableNameOwner(n, playbookName)
 	if oerr != nil {
 		return launcherPlan{action: fateUnknown, err: oerr, prompt: "launcher kept; ownership could not be verified"}
 	}

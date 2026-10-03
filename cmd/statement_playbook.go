@@ -229,7 +229,7 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		// launcher leaves the playbook with the launcher it has.
 		owner, err := commandNameOwner(st.Name, st.Name)
 		if err != nil {
-			return fmt.Errorf("cannot verify launcher name %q: %w", st.Name, err)
+			return fmt.Errorf("cannot check launcher name %q against every playbook: %w", st.Name, err)
 		}
 		if owner != nil {
 			return fmt.Errorf("launcher name %q already addresses playbook %q; launcher %q kept", st.Name, owner.Name, pb.Alias())

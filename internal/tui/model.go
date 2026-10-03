@@ -198,15 +198,21 @@ func (m Model) update(msg Msg) (Model, Cmd) {
 		}
 		return m, nil
 	case stateMsg:
-		if msg.err != nil {
+		// A read that left a playbook out still shows the rest, with the
+		// reason in the status bar.
+		var partial *PartialRead
+		if msg.err != nil && !errors.As(msg.err, &partial) {
 			m.err = msg.err.Error()
 			return m, nil
 		}
 		m.st, m.loaded, m.err, m.lastRead = msg.st, true, "", m.o.Now()
+		if partial != nil {
+			m.err = partial.Error()
+		}
 		m.clampCursors()
 		return m, nil
 	case sessionsMsg:
-		if msg.err == nil {
+		if msg.err == nil || errors.As(msg.err, new(*PartialRead)) {
 			m.st.Sessions, m.lastRead = msg.s, m.o.Now()
 			m.clampCursors()
 		}

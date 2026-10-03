@@ -526,7 +526,7 @@ All output redacts credential-looking literals; no form prints the value.
 
 A playbook's **environment overrides** are the `[env]` block of its `.playbook` manifest, applied to the child `claude` process by `run`, `start`, and launcher dispatch. Statements write them (`ALTER PLAYBOOK <name> SET VAR`, `BLOCK VAR`, `UNSET VAR`, `USE ENV`, `ADD ENV`, `DROP ENV`; see *Statement grammar*) and read them (`SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK`, which shows the result at launch).
 
-**Writes** parse and validate the whole statement before taking the registry lock and rewriting the manifest (bootstrapping one for a flat playbook). A key lives in exactly one of `set`, `refs` and `block`, so writing it into one removes it from the others (see *Where each clause writes*); `UNSET VAR` forgets it from whichever holds it. `ADD ENV` places a set after checking it exists (`LAST` by default, or `FIRST`, `BEFORE <env>`, `AFTER <env>`, moving an attached one), `USE ENV` replaces the list, and `DROP ENV` detaches. An emptied block is dropped from the file. A launch refuses a config directory whose manifest, or one on the way up, cannot be read: it may ask for an isolated login or a sandbox (`<error>. cpb does not launch over a manifest it cannot read: it may ask for an isolated login or a sandbox`). Registry discovery refuses one already, for every command.
+**Writes** parse and validate the whole statement before taking the registry lock and rewriting the manifest (bootstrapping one for a flat playbook). A key lives in exactly one of `set`, `refs` and `block`, so writing it into one removes it from the others (see *Where each clause writes*); `UNSET VAR` forgets it from whichever holds it. `ADD ENV` places a set after checking it exists (`LAST` by default, or `FIRST`, `BEFORE <env>`, `AFTER <env>`, moving an attached one), `USE ENV` replaces the list, and `DROP ENV` detaches. An emptied block is dropped from the file. A launch refuses a config directory whose manifest, or one on the way up, cannot be read: it may ask for an isolated login or a sandbox (`<error>. cpb does not launch over a manifest it cannot read: it may ask for an isolated login or a sandbox`). A playbook whose own manifest cannot be read is refused by name already (*Unreadable manifests*).
 
 **Install-local.** `update` carries the live block forward and ignores the source's, assembling the final manifest in the staged tree *before* the overlay so a source-shipped block is never live, even transiently; `CREATE PLAYBOOK … FROM` drops a source-shipped block with a note, assembling the install in a dot-prefixed staging directory (invisible to discovery) and renaming it into the registry only once its manifest is sanitized. A local source directory is always staged into a private copy first (in the system temp dir, or the user cache dir when that lies inside the source), so neither command ever writes into the pilot's source. A published manifest must not be able to redirect an install's API endpoint or strip its authentication.
 
@@ -1405,7 +1405,8 @@ processes, `<config dir>/sessions/<pid>.json`, and removes it on exit.
 - **Which dirs.** cpb reads those files in the config dirs it knows: every
   playbook, and every plain directory in `.state/dirs.toml`. If that
   registry cannot be read, the statement fails rather than answer without
-  its directories.
+  its directories. A playbook whose manifest cannot be read is left out
+  and named on stderr, with exit 1 (*Unreadable manifests*).
 - **Live.** A session is live when its pid is alive **and** the process
   started when the file says. On Linux that is `/proc/<pid>/stat`'s
   starttime; elsewhere, `ps`'s lstart read in UTC. So a pid that was reused
@@ -2655,10 +2656,10 @@ preserve = ["settings.json"]
 | `sandbox.claude_version` | Optional Claude Code version (`2.1.263`) installed inside the sandbox at creation; empty runs the sandbox image's own. A playbook routed to a backend that rejects a newer Claude Code's tool schemas pins the last version that works. |
 | `play.ref`, `play.url`, `play.sha256`, `play.played_at` | Written by `cpb play --keep`: where the playbook's recipe came from. `ref` is what `cpb update <name>` resolves again (a template name, an https URL, a `github:` ref, or a local file's absolute path); `url` the address the bytes were read from (absent for a local file); `sha256` the recipe's; `played_at` when, in RFC 3339, UTC. The bytes themselves are kept as `.play/recipe.cpb` in the playbook. `cpb update <name>` rewrites both when it applies new bytes. See *`cpb play`*. |
 
-**Unknown keys are refused.** A key the manifest does not define is an error naming it and its line, `unknown key "<key>" in <path>:<line>`, one per key. The playbook does not launch, and registry discovery refuses it for every command. A manifest written for another version of cpb fails loudly instead of being read in part.
+**Unknown keys are refused.** A key the manifest does not define is an error naming it and its line, `unknown key "<key>" in <path>:<line>`, one per key. The playbook does not launch, and every statement that names it is refused with that error; the other playbooks are not affected (*Unreadable manifests*, below). A manifest written for another version of cpb fails loudly instead of being read in part.
 
 **Errors:**
-- Invalid TOML → `invalid .playbook at <path>: TOML syntax error at line <n> (content not shown)`. The parser's own message is never echoed: a manifest may hold credential values under `[env.set]`, and this error reaches the terminal from every command that discovers playbooks.
+- Invalid TOML → `invalid .playbook at <path>: TOML syntax error at line <n> (content not shown)`. The parser's own message is never echoed: a manifest may hold credential values under `[env.set]`, and this error reaches the terminal wherever the playbook is named or left out of a list.
 - `source.subdir`, `update.migrate` or any `update.preserve` entry escapes its root → `invalid .playbook at <path>: <field> must be a relative path below the playbook root`. One helper validates them all, so the field name is the only difference between them.
 - `source.subdir` names a path that does not exist, or is not a directory → `<field> "<value>" not found below <root>: <stat error>` / `<field> "<value>" is not a directory below <root>`. Raised when the path is resolved, so it carries the root it was resolved against rather than the manifest path.
 - An `env` key is not a valid variable name → `invalid .playbook at <path>: env.set: invalid environment variable name "<key>"`
@@ -2674,6 +2675,37 @@ preserve = ["settings.json"]
 - `sandbox.secrets` not `proxy` or `env` → `invalid .playbook at <path>: sandbox.secrets "<value>" must be "proxy" or "env"`
 - An `env.set` value contains a NUL byte → `invalid .playbook at <path>: env.set: value of <key> contains a NUL byte, which cannot be passed in an environment` (refused on write and on read; a NUL in an environment fails every launch). Any other value round-trips: control characters are written as TOML `\uXXXX` escapes.
 - An `env.sets` entry is not a valid env set name → `invalid .playbook at <path>: env.sets: invalid env set name "<name>": use letters, digits, dots, dashes, underscores`
+
+### Unreadable manifests
+
+A playbook whose `.playbook` cannot be read (an unknown key, invalid TOML, a
+value out of range, as above) is contained: the other playbooks work as if
+it were not there. Its read error names the file and the line, and is
+printed as it is.
+
+| Statement | With a playbook whose manifest cannot be read |
+|---|---|
+| One that names a readable playbook: `SHOW` / `EXPLAIN` / `SHOW CREATE PLAYBOOK`, `cpb run`, its launcher, `cpb update`, `ALTER PLAYBOOK` except a launcher change, `DROP PLAYBOOK` | runs as usual |
+| The same, naming the unreadable playbook; its launcher; `CREATE PLAYBOOK` of its name | refused with its read error |
+| A list: `SHOW PLAYBOOKS`, bare `cpb`, `SELECT` from `PLAYBOOKS`, `VARS`, `ENVS` or `SESSIONS`, `SHOW ENV` / `SHOW ENVS` (their `used_by`), `SHOW SESSIONS`, `cpb auth status` | prints what it can read, then one stderr line per playbook it left out, `playbook "<name>" is left out: <read error>`, and exits 1. `--json` keeps its shape: the readable rows only. The TUI shows the rows, with that line in its status bar. Shell completion offers the readable names. |
+| `SHOW CREATE ALL` | refused, naming the file: it promises every playbook, for `APPLY` to replay |
+| One that claims a launcher name: `CREATE PLAYBOOK` (with `FROM`, `LINK` or neither), `RENAME TO`, `LAUNCHER`, `cpb play --keep` | refused, naming the file: the unreadable manifest may record that name, and a second claim would reroute a command. `APPLY` refuses a file holding such a statement before anything is written. |
+| `DROP ENV` | refused, naming the file: the unreadable playbook may use the set |
+| `CREATE` / `ALTER ENV`, `ALTER DEFAULTS` | runs as usual |
+| `cpb self-uninstall` | refused, and nothing is removed: it deletes the playbooks root as a whole, and never one it could not read and show first. With `--keep-data` or `--binary-only` the playbooks stay, and it runs. |
+
+- **A launcher** resolves among the playbooks that read: a directory name
+  first, then a recorded `LAUNCHER`.
+- **The unreadable playbook's own launcher** is refused with its read error.
+- **A name no readable playbook claims**, while a manifest cannot be read, is
+  refused with that file's error, never reported as a stale launcher.
+- **Dropping a readable playbook** removes its launcher. A claim on the same
+  name in a manifest that cannot be read could only come from a hand edit.
+- **The guard on resuming a live session** still reads the unreadable
+  playbook's sessions.
+
+To recover, fix the file (the error gives the line) or remove the playbook.
+The next statement reads it again.
 
 ## Global flags and environment variables
 
@@ -2876,6 +2908,7 @@ A variable, wherever it appears, is one JSON object with exactly one of:
 ## Exit codes and error conventions
 
 - Exit code `0` on success, non-zero on failure. Cobra's default is `1` for user errors.
+- A list that leaves out a playbook whose manifest cannot be read prints what it read, names each one left out on stderr, and exits `1` (*Unreadable manifests*).
 - All errors go to stderr.
 - Messages are plain English, one line, no stack traces. Always suggest the next action where possible.
 

@@ -109,7 +109,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		// install.
 		owner, oerr := commandNameOwner(newAlias, pb.Name)
 		if oerr != nil {
-			return fmt.Errorf("cannot verify launcher name %q: %w", newAlias, oerr)
+			return fmt.Errorf("cannot check launcher name %q against every playbook: %w", newAlias, oerr)
 		}
 		if owner != nil {
 			return fmt.Errorf("launcher name %q already addresses playbook %q", newAlias, owner.Name)

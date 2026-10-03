@@ -239,9 +239,14 @@ func envStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return fmt.Errorf("no env set %q", st.Name)
 	}
-	users, err := r.envUsers(playbooksDir)
+	users, bad, err := r.envUsers(playbooksDir)
 	if err != nil {
 		return err
+	}
+	// A playbook that cannot be read may use the set: dropping it could
+	// leave that playbook naming a set that is gone.
+	if len(bad) > 0 {
+		return fmt.Errorf("cannot drop env set %q: a playbook that cannot be read may use it: %w", st.Name, &playbook.UnreadableError{List: bad})
 	}
 	if u := users[st.Name]; len(u) > 0 {
 		return fmt.Errorf("env set %q is used by %s: detach it first with ALTER PLAYBOOK <playbook> DROP ENV %s", st.Name, strings.Join(u, ", "), st.Name)

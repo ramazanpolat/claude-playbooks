@@ -156,9 +156,14 @@ func sameDir(a, b string) bool {
 // session id, whichever dir the launch binds: a transcript copied into
 // another dir is still the same live session.
 func liveByID() (map[string]*liveSession, error) {
-	dirs, err := sessionDirs("")
+	dirs, bad, err := sessionDirs("")
 	if err != nil {
 		return nil, err
+	}
+	// A playbook whose manifest cannot be read still has its session files:
+	// a session live there is live, and the guard must see it.
+	for _, u := range bad {
+		dirs = append(dirs, sessionDir{label: u.Name, path: u.Path})
 	}
 	m := map[string]*liveSession{}
 	for _, s := range readSessionFiles(dirs) {
