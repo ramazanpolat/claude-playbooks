@@ -14,10 +14,10 @@ agent = "shell"
 
 [oracle]
 steps = [
-  '''curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v4.0.0-rc1/install.sh -o "$HOME/install.sh"''',
-  '''CPB_INSTALL_VERSION=v4.0.0-rc1 CPB_INSTALL_DIR="$HOME/.local/bin" sh "$HOME/install.sh" > "$HOME/install.out" 2>&1''',
-  # dlbad/v4.0.0-rc1: an asset that does not match the SHA256SUMS beside it.
-  '''os=$(uname -s | tr '[:upper:]' '[:lower:]'); case $(uname -m) in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; esac; d="$HOME/fx/dlbad/v4.0.0-rc1"; mkdir -p "$d" && printf 'the published asset\n' > "$d/good" && (cd "$d" && { sha256sum good 2>/dev/null || shasum -a 256 good; } | sed "s/good\$/cpb-$os-$a/" > SHA256SUMS) && rm "$d/good" && printf 'not a binary\n' > "$d/cpb-$os-$a"''',
+  '''curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v4.0.0-rc2/install.sh -o "$HOME/install.sh"''',
+  '''CPB_INSTALL_VERSION=v4.0.0-rc2 CPB_INSTALL_DIR="$HOME/.local/bin" sh "$HOME/install.sh" > "$HOME/install.out" 2>&1''',
+  # dlbad/v4.0.0-rc2: an asset that does not match the SHA256SUMS beside it.
+  '''os=$(uname -s | tr '[:upper:]' '[:lower:]'); case $(uname -m) in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; esac; d="$HOME/fx/dlbad/v4.0.0-rc2"; mkdir -p "$d" && printf 'the published asset\n' > "$d/good" && (cd "$d" && { sha256sum good 2>/dev/null || shasum -a 256 good; } | sed "s/good\$/cpb-$os-$a/" > SHA256SUMS) && rm "$d/good" && printf 'not a binary\n' > "$d/cpb-$os-$a"''',
   # serve.sh DL CMD...: serve ~/fx on a free loopback port for the length of
   # CMD, with the download base pointed at ~/fx/DL. The server binds port 0
   # itself and reports what it got, so no port is picked and released for
@@ -41,7 +41,7 @@ EOF
 chmod +x "$HOME/serve.sh"''',
   # api.sh MODE CMD...: a stand-in for GitHub's releases/latest on a free
   # loopback port, for the length of CMD, with the API base pointed at it.
-  # MODE is a status (200 answers tag v4.0.0-rc1, others an error body) or
+  # MODE is a status (200 answers tag v4.0.0-rc2, others an error body) or
   # "partial": a 200 whose body stops short of its Content-Length. Each
   # request's path and Authorization header (or "-") go to ~/api.log.
   '''cat > "$HOME/api.py" <<'PYEOF'
@@ -52,7 +52,7 @@ class H(http.server.BaseHTTPRequestHandler):
         with open(os.path.expanduser("~/api.log"), "a") as f:
             f.write(self.path + "\t" + (self.headers.get("Authorization") or "-") + "\n")
         code = 200 if mode == "partial" else int(mode)
-        body = b'{"tag_name": "v4.0.0-rc1"}' if code == 200 else b'{"message": "API rate limit exceeded"}'
+        body = b'{"tag_name": "v4.0.0-rc2"}' if code == 200 else b'{"message": "API rate limit exceeded"}'
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body) + (500 if mode == "partial" else 0)))
@@ -91,7 +91,7 @@ path = "~/.local/bin/cpb"
 
 [[verify.commands]]
 command = "cpb --version"
-contains = "cpb version v4.0.0-rc1"
+contains = "cpb version v4.0.0-rc2"
 
 [[verify.commands]]
 # One regular file named cpb, and no second name: no claude-playbook, and no
@@ -106,11 +106,11 @@ contains = "sums-verified"
 
 [[verify.commands]]
 # An asset that does not match its sums aborts, and installs nothing.
-command = '''if "$HOME/serve.sh" dlbad env CPB_INSTALL_VERSION=v4.0.0-rc1 CPB_INSTALL_DIR="$HOME/bad" sh "$HOME/install.sh" > "$HOME/bad.out" 2>&1; then echo installed-a-mismatch; else grep -q "checksum mismatch for cpb-" "$HOME/bad.out" && [ -z "$(ls -A "$HOME/bad" 2>/dev/null)" ] && echo mismatch-refused; fi'''
+command = '''if "$HOME/serve.sh" dlbad env CPB_INSTALL_VERSION=v4.0.0-rc2 CPB_INSTALL_DIR="$HOME/bad" sh "$HOME/install.sh" > "$HOME/bad.out" 2>&1; then echo installed-a-mismatch; else grep -q "checksum mismatch for cpb-" "$HOME/bad.out" && [ -z "$(ls -A "$HOME/bad" 2>/dev/null)" ] && echo mismatch-refused; fi'''
 contains = "mismatch-refused"
 
-# The latest-release lookup, through this checkout's install.sh (the
-# published rc1 predates it): a rate limit is named as one, any other
+# The latest-release lookup, through this checkout's install.sh, so a change
+# to it is tested before it is published: a rate limit is named as one, any other
 # failure keeps a network message with the status, a failed transfer is no
 # answer, and a GITHUB_TOKEN authenticates only GitHub's own API, never
 # through curl's argv and never across a redirect.
@@ -129,7 +129,7 @@ contains = "network-named"
 [[verify.commands]]
 # A 200 answer's tag is the one installed (the download is the loopback
 # release whose asset does not match its sums, so it stops there).
-command = '''if "$HOME/serve.sh" dlbad "$HOME/api.sh" 200 env CPB_INSTALL_DIR="$HOME/ok200" sh "$WORKSPACE_DIR/install.sh" > "$HOME/ok200.out" 2>&1; then echo installed-a-mismatch; exit 1; fi; grep -q "Installing cpb from cpb-[a-z]*-[a-z0-9]* v4.0.0-rc1 " "$HOME/ok200.out" && grep -q "checksum mismatch for cpb-" "$HOME/ok200.out" && echo tag-from-api || { cat "$HOME/ok200.out"; exit 1; }'''
+command = '''if "$HOME/serve.sh" dlbad "$HOME/api.sh" 200 env CPB_INSTALL_DIR="$HOME/ok200" sh "$WORKSPACE_DIR/install.sh" > "$HOME/ok200.out" 2>&1; then echo installed-a-mismatch; exit 1; fi; grep -q "Installing cpb from cpb-[a-z]*-[a-z0-9]* v4.0.0-rc2 " "$HOME/ok200.out" && grep -q "checksum mismatch for cpb-" "$HOME/ok200.out" && echo tag-from-api || { cat "$HOME/ok200.out"; exit 1; }'''
 contains = "tag-from-api"
 
 [[verify.commands]]
