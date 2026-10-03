@@ -625,8 +625,20 @@ func TestPartialRead(t *testing.T) {
 	if v := mm.render(); !strings.Contains(v, "alpha") || !strings.Contains(v, `playbook "bad" is left out`) || strings.Contains(v, "cpb could not be read") {
 		t.Fatal(v)
 	}
-	mm, _ = mm.update(sessionsMsg{st.Sessions[:1], &PartialRead{Msg: "left out"}})
+	mm, _ = mm.update(sessionsMsg{st.Sessions[:1], &PartialRead{Msg: `playbook "late" is left out`}})
 	if len(mm.st.Sessions) != 1 {
 		t.Fatalf("a partial sessions read was dropped: %d", len(mm.st.Sessions))
+	}
+	if v := mm.render(); !strings.Contains(v, `playbook "late" is left out`) {
+		t.Fatalf("a poll that left a playbook out does not say so:\n%s", v)
+	}
+	mm, _ = mm.update(sessionsMsg{st.Sessions, nil})
+	if v := mm.render(); strings.Contains(v, "is left out") {
+		t.Fatalf("a clean poll kept the warning:\n%s", v)
+	}
+	mm.err = "an action failed"
+	mm, _ = mm.update(sessionsMsg{st.Sessions, nil})
+	if mm.err != "an action failed" {
+		t.Fatalf("a clean poll cleared another error: %q", mm.err)
 	}
 }
