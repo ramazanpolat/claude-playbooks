@@ -99,8 +99,12 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	var helper helperState
 	// A statement that claims a launcher name checks it against every
 	// playbook, and a manifest that cannot be read refuses that check: it
-	// refuses here, before anything is written.
-	if _, bad, serr := playbook.Scan(config.ResolvePlaybooksDir()); serr == nil && len(bad) > 0 {
+	// refuses here, before anything is written. So does DROP ENV, below.
+	_, unreadable, serr := playbook.Scan(config.ResolvePlaybooksDir())
+	if serr != nil {
+		unreadable = nil // the statements report a root they cannot read
+	}
+	if bad := unreadable; len(bad) > 0 {
 		for _, x := range stmts {
 			if claimsLauncherName(x.s) {
 				return refused(x.path, x.s.Pos.Line, fmt.Errorf("%s:%d (%s): cannot check its launcher name against every playbook: %w\nnothing was written",
@@ -130,6 +134,12 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 			continue
 		}
 		if s.Object == grammar.Env && s.Verb == grammar.Drop {
+			// A playbook that cannot be read may use the set: the drop
+			// would refuse, so the file does, before anything is written.
+			if len(unreadable) > 0 && existsNow(s.Name) {
+				return refused(x.path, s.Pos.Line, fmt.Errorf("%s:%d (%s): a playbook that cannot be read may use env set %q: %w\nnothing was written",
+					x.file, s.Pos.Line, stmtHead(s), s.Name, &playbook.UnreadableError{List: unreadable}))
+			}
 			envExists[s.Name] = false
 			continue
 		}

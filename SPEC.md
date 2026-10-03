@@ -2690,7 +2690,7 @@ printed as it is.
 | A list: `SHOW PLAYBOOKS`, bare `cpb`, `SELECT` from `PLAYBOOKS`, `VARS`, `ENVS` or `SESSIONS`, `SHOW ENV` / `SHOW ENVS` (their `used_by`), `SHOW SESSIONS`, `cpb auth status` | prints what it can read, then one stderr line per playbook it left out, `playbook "<name>" is left out: <read error>`, and exits 1. `--json` keeps its shape: the readable rows only. The TUI shows the rows, with that line in its status bar. Shell completion offers the readable names. |
 | `SHOW CREATE ALL` | refused, naming the file: it promises every playbook, for `APPLY` to replay |
 | One that claims a launcher name: `CREATE PLAYBOOK` (with `FROM`, `LINK` or neither), `RENAME TO`, `LAUNCHER`, `cpb play --keep` | refused, naming the file: the unreadable manifest may record that name, and a second claim would reroute a command. `APPLY` refuses a file holding such a statement before anything is written. |
-| `DROP ENV` | refused, naming the file: the unreadable playbook may use the set |
+| `DROP ENV` | refused, naming the file: the unreadable playbook may use the set. `APPLY` refuses a file that drops a set before anything is written. |
 | `CREATE` / `ALTER ENV`, `ALTER DEFAULTS` | runs as usual |
 | `cpb self-uninstall` | refused, and nothing is removed: it deletes the playbooks root as a whole, and never one it could not read and show first. With `--keep-data` or `--binary-only` the playbooks stay, and it runs. |
 

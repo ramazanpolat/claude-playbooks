@@ -212,6 +212,17 @@ func TestUnreadableManifestApply(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(envset.Dir(root), "g.toml")); !os.IsNotExist(err) {
 		t.Fatal("a statement ran before the refusal")
 	}
+	drop := writeCpb(t, dir, "drop.cpb", "CREATE ENV g SET D=4;\nDROP ENV e;\n")
+	if _, err := apply(t, drop); err == nil || !strings.Contains(err.Error(), "nothing was written") || !strings.Contains(err.Error(), badAt) {
+		t.Fatalf("DROP ENV: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(envset.Dir(root), "g.toml")); !os.IsNotExist(err) {
+		t.Fatal("a statement ran before the DROP ENV refusal")
+	}
+	gone := writeCpb(t, dir, "gone.cpb", "DROP ENV IF EXISTS nosuch;\n")
+	if _, err := apply(t, gone); err != nil {
+		t.Fatalf("DROP ENV IF EXISTS of a set that is not there: %v", err)
+	}
 	plain := writeCpb(t, dir, "plain.cpb", "ALTER PLAYBOOK good SET VAR E=5;\n")
 	if _, err := apply(t, plain); err != nil {
 		t.Fatalf("a file on the readable playbook: %v", err)

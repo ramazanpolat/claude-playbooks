@@ -20,8 +20,9 @@
     - `SHOW CREATE ALL`;
     - `DROP ENV`;
     - every statement that claims a launcher name (`CREATE PLAYBOOK`,
-      `RENAME TO`, `LAUNCHER`, `cpb play --keep`). `APPLY` refuses a file
-      holding such a statement before it writes anything.
+      `RENAME TO`, `LAUNCHER`, `cpb play --keep`).
+    `APPLY` refuses a file holding a claim or a `DROP ENV` before it writes
+    anything.
   - A launcher name that no readable playbook claims is no longer reported
     as stale when the owner may be the unreadable playbook.
 
