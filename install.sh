@@ -3,8 +3,12 @@ set -e
 
 # Every knob is a CPB_INSTALL_* variable: CPB_INSTALL_VERSION (a tag),
 # CPB_INSTALL_DIR, CPB_INSTALL_DEFAULT_DIR, CPB_INSTALL_REPO,
-# CPB_INSTALL_ASSET_PREFIX, CPB_INSTALL_DOWNLOAD_BASE, CPB_INSTALL_URL.
+# CPB_INSTALL_ASSET_PREFIX, CPB_INSTALL_DOWNLOAD_BASE, CPB_INSTALL_URL,
+# CPB_INSTALL_API_BASE (where the latest release is looked up). A
+# GITHUB_TOKEN in the environment authenticates that lookup on GitHub's own
+# API, never on another base.
 REPO="${CPB_INSTALL_REPO:-ramazanpolat/claude-playbooks}"
+API_BASE="${CPB_INSTALL_API_BASE:-https://api.github.com}"
 ASSET_PREFIX="${CPB_INSTALL_ASSET_PREFIX:-cpb}"
 DEFAULT_INSTALL_DIR="${CPB_INSTALL_DEFAULT_DIR:-/usr/local/bin}"
 
@@ -28,14 +32,57 @@ ASSET="${ASSET_PREFIX}-${OS}-${ARCH}"
 if [ -n "${CPB_INSTALL_VERSION:-}" ]; then
   LATEST="$CPB_INSTALL_VERSION"
 else
-  # Fetch latest release tag.
+  # Fetch latest release tag. The status decides the message: GitHub
+  # answers an unauthenticated request over its rate limit with 403 or
+  # 429, and a shared IP (an office, a campus, a CI fleet) reaches it soon.
+  # A curl that fails (no answer, a transfer cut short) is no answer, even
+  # when it wrote a status first.
   echo "Fetching latest release..."
-  LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+  API_URL="${API_BASE}/repos/${REPO}/releases/latest"
+  BODY=$(mktemp "${TMPDIR:-/tmp}/cpb-latest.XXXXXX")
+  trap 'rm -f "$BODY"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  TOKEN=""
+  if [ -n "${GITHUB_TOKEN:-}" ] && [ "$API_BASE" = "https://api.github.com" ]; then
+    case "$GITHUB_TOKEN" in
+      *[!A-Za-z0-9_.-]*) echo "Note: GITHUB_TOKEN has characters a GitHub token does not; the lookup runs without it." ;;
+      *) TOKEN=$GITHUB_TOKEN ;;
+    esac
+  fi
+  if [ -n "$TOKEN" ]; then
+    # On stdin as a config line, never on curl's command line, where ps
+    # would show it; and no redirect is followed, so it reaches no other
+    # host.
+    CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" \
+      | curl -sS -K - -o "$BODY" -w '%{http_code}' "$API_URL") || CODE=000
+  else
+    CODE=$(curl -sSL -o "$BODY" -w '%{http_code}' "$API_URL") || CODE=000
+  fi
+  case "$CODE" in
+    200)
+      LATEST=$(grep '"tag_name"' "$BODY" | head -1 | cut -d'"' -f4)
+      ;;
+    403|429)
+      echo "Error: GitHub rate-limited this request (HTTP $CODE; unauthenticated requests share your IP): set CPB_INSTALL_VERSION=<tag> to skip the lookup, or retry later."
+      exit 1
+      ;;
+    000)
+      echo "Error: could not get an answer from ${API_BASE} to find the latest release. Check your internet connection, or set CPB_INSTALL_VERSION=<tag> to skip the lookup."
+      exit 1
+      ;;
+    *)
+      echo "Error: could not determine the latest release (HTTP $CODE from ${API_BASE}). Check your internet connection, or set CPB_INSTALL_VERSION=<tag> to skip the lookup."
+      exit 1
+      ;;
+  esac
+  rm -f "$BODY"
+  trap - EXIT HUP INT TERM
 fi
 
 if [ -z "$LATEST" ]; then
-  echo "Error: could not determine latest release. Check your internet connection."
+  echo "Error: could not determine the latest release (no tag_name in the answer from ${API_BASE}). Set CPB_INSTALL_VERSION=<tag> to skip the lookup."
   exit 1
 fi
 
@@ -44,7 +91,12 @@ URL="${CPB_INSTALL_URL:-${DOWNLOAD_BASE_URL}/${LATEST}/${ASSET}}"
 
 echo "Installing cpb from ${ASSET} ${LATEST} (${OS}/${ARCH})..."
 TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb.XXXXXX")
-trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT HUP INT TERM
+trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT
+# A signal ends the script; the EXIT trap then cleans up. A trap that only
+# cleaned up would let the script run on after Ctrl-C.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 curl -fsSL "$URL" -o "$TMP_FILE"
 

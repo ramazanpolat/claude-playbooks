@@ -20,6 +20,18 @@ Verify:
 cpb --version
 ```
 
+If the script says `GitHub rate-limited this request`, the latest-release lookup
+was refused. GitHub limits unauthenticated callers per IP, and an office,
+campus or CI network shares one. Name the release, which skips the lookup:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | CPB_INSTALL_VERSION=v4.0.0-rc1 sh
+```
+
+Where `GITHUB_TOKEN` is already in the environment (CI runners set one), the
+script authenticates the lookup with it. It goes only to `api.github.com`, and
+never on curl's command line.
+
 Want a different command name? Use a shell alias (`alias pb=cpb`) or
 a hard link (`ln "$(command -v cpb)" ~/.local/bin/pb` — works for
 both install locations). Do not use a symlink: a symlink to the binary under any
