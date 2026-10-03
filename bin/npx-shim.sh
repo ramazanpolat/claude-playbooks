@@ -105,14 +105,16 @@ fi
 # release's tag (GitHub's own notion, as install.sh uses), or to "" with
 # LATEST_CODE saying why: the HTTP status, or 000 for no answer. A curl that
 # fails (no answer, a transfer cut short) is no answer, even after a status.
+# The small JSON answer is read from curl's output, with the status on its
+# last line: no temporary file to clean up.
 latest_lookup() {
   LATEST_TAG=""
-  _b=$(mktemp "${TMPDIR:-/tmp}/cpb-latest.XXXXXX") || { LATEST_CODE=000; return 0; }
-  LATEST_CODE=$(curl -sSL -o "$_b" -w '%{http_code}' "${API_BASE}/repos/${REPO}/releases/latest") || LATEST_CODE=000
+  _out=$(curl -sSL -w '\n%{http_code}' "${API_BASE}/repos/${REPO}/releases/latest") || _out=""
+  LATEST_CODE=$(printf '%s\n' "$_out" | tail -n 1)
+  case "$LATEST_CODE" in [0-9][0-9][0-9]) ;; *) LATEST_CODE=000 ;; esac
   if [ "$LATEST_CODE" = 200 ]; then
-    LATEST_TAG=$(grep '"tag_name"' "$_b" | head -1 | cut -d'"' -f4)
+    LATEST_TAG=$(printf '%s\n' "$_out" | sed '$d' | grep '"tag_name"' | head -1 | cut -d'"' -f4)
   fi
-  rm -f "$_b"
 }
 
 # lookup_why: why the lookup gave no tag. GitHub answers an unauthenticated

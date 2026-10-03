@@ -2886,8 +2886,9 @@ release from the GitHub API. A tag that resolves to nothing is an error naming
 - another status gives its code;
 - a curl that fails, even after a status, is no answer.
 
-The same reason ends the error when the package's own version is not published
-yet and the newest release, which would stand in for it, cannot be looked up.
+The error gives the same reason when the package's own version is not
+published yet and the newest release, which would stand in for it, cannot be
+looked up.
 
 The binary is `exec`'d with `argv[0]` set to its own path, so multicall dispatch
 behaves exactly as a direct invocation.

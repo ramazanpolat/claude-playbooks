@@ -44,9 +44,20 @@ case "$url" in
   *) exit 6 ;;
 esac
 if [ -n "$w" ]; then
-  case "$url" in */releases/latest) if [ -n "${FAKE_LATEST_HTTP:-}" ]; then printf '%s' "$FAKE_LATEST_HTTP"; exit 0; fi ;; esac
-  if [ -n "${FAKE_HTTP:-}" ]; then printf '%s' "$FAKE_HTTP"; exit 0; fi
-  if [ -f "$f" ]; then cp "$f" "$out"; printf 200; else printf 'Not Found' > "$out"; printf 404; fi
+  # The body goes to -o FILE, or to stdout before the -w text, whose
+  # %{http_code} is the status.
+  code="" body=""
+  case "$url" in */releases/latest) code=${FAKE_LATEST_HTTP:-} ;; esac
+  [ -n "$code" ] || code=${FAKE_HTTP:-}
+  if [ -z "$code" ]; then
+    if [ -f "$f" ]; then code=200; body=$f; else code=404; fi
+  fi
+  if [ -n "$out" ]; then
+    if [ -n "$body" ]; then cp "$body" "$out"; else printf 'Not Found' > "$out"; fi
+  elif [ -n "$body" ]; then
+    cat "$body"
+  fi
+  printf "$(printf '%s' "$w" | sed "s/%{http_code}/$code/")"
   exit 0
 fi
 [ -f "$f" ] || exit 22
@@ -132,7 +143,7 @@ latest v3.25.0
 # A rate-limited fallback lookup says so.
 run npm_package_version=3.26.0 FAKE_LATEST_HTTP=403
 check "a rate-limited fallback lookup refuses" [ $rc != 0 ]
-check "  naming the rate limit" err_has "the newest release could not be looked up: GitHub rate-limited this request (HTTP 403; unauthenticated requests share your IP)"
+check "  naming the rate limit" err_has "Error: cpb v3.26.0 is not published yet, and the newest release could not be looked up: GitHub rate-limited this request (HTTP 403; unauthenticated requests share your IP). Try again later, or pin one: CPB_NPX_VERSION=vX.Y.Z"
 check "  and runs nothing" out_is ""
 
 # No version given: the latest release runs, and a lookup that fails says
