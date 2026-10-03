@@ -2738,7 +2738,7 @@ These have no flag equivalent:
 | `CPB_CLICKHOUSE` | The `clickhouse` binary `SELECT` pipes a query to, instead of `clickhouse` or `ch` on `PATH` (see *SELECT*). |
 | `XDG_STATE_HOME` | Parent of the launcher receipt directory (`<XDG_STATE_HOME>/cpb/launchers`). Default `~/.local/state`. |
 | `CPB_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam. |
-| `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `self-update` makes, raising the anonymous rate limit. |
+| `GITHUB_TOKEN` | Sent as the bearer credential on the release-API requests `self-update` makes, and on `install.sh`'s latest-release lookup, raising the anonymous rate limit. Only to GitHub's own API: never to an overridden API base. |
 | `CPB_UPDATE_REPO`, `CPB_UPDATE_API_BASE`, `CPB_UPDATE_DOWNLOAD_BASE` | Redirect self-update at another repository, API, or asset host. Test seams. |
 
 A variable marked *test seam* exists so the suites can run without network or a real release.
@@ -2822,7 +2822,24 @@ where the previous one stood.
 ### `install.sh`
 
 Resolves the release tag from `$CPB_INSTALL_VERSION` when set, else the `tag_name` of the
-latest release from the GitHub API. Chooses the install directory as in the table
+latest release from the GitHub API. A lookup that fails says why, and installs nothing:
+
+- **HTTP 403 or 429**, GitHub's answer to an unauthenticated caller over its
+  rate limit, which a shared IP (an office, a campus, a CI fleet) reaches soon:
+  `GitHub rate-limited this request (HTTP <code>; unauthenticated requests share
+  your IP): set CPB_INSTALL_VERSION=<tag> to skip the lookup, or retry later.`
+- **Any other status:** `could not determine the latest release (HTTP <code>
+  from <API base>)`, with the hint to check the connection or set
+  `CPB_INSTALL_VERSION`.
+- **No answer at all:** `could not reach <API base>`, with the same hint, after
+  curl's own reason.
+
+With `GITHUB_TOKEN` set, the lookup on `https://api.github.com` is
+authenticated. The token reaches curl on its standard input as a config line,
+never on its command line where `ps` shows it. It is not sent to an overridden
+API base.
+
+Chooses the install directory as in the table
 above — the `/usr/local/bin` probe is a writability test, so an unprivileged run
 falls back to `~/.local/bin` rather than failing or escalating; the script never
 invokes `sudo`. It then reports the install path, warns when that directory is
@@ -2883,11 +2900,12 @@ Read by the two shell scripts only; the Go binary reads none of them.
 | `CPB_INSTALL_DIR` | `install.sh` | Install directory, overriding the writability probe |
 | `CPB_INSTALL_DEFAULT_DIR` | `install.sh` | The directory that probe tests. Default `/usr/local/bin` |
 | `CPB_INSTALL_URL` | `install.sh` | Exact asset URL; suppresses checksum verification with a warning |
+| `CPB_INSTALL_API_BASE` | `install.sh` | Where the latest release is looked up. Default `https://api.github.com` |
 | `CPB_INSTALL_REPO`, `CPB_INSTALL_ASSET_PREFIX`, `CPB_INSTALL_DOWNLOAD_BASE` | both | Redirect at another repository, asset name (default `cpb`), or asset host |
 
 `CPB_INSTALL_REPO`, `CPB_INSTALL_ASSET_PREFIX`, `CPB_INSTALL_DOWNLOAD_BASE`,
-`CPB_INSTALL_URL` and `CPB_INSTALL_DEFAULT_DIR` exist so the install suites can
-run against a local fixture server.
+`CPB_INSTALL_URL`, `CPB_INSTALL_API_BASE` and `CPB_INSTALL_DEFAULT_DIR` exist so
+the install suites can run against a local fixture server.
 
 ## Output
 

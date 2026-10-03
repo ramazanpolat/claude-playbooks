@@ -26,6 +26,14 @@
   - A launcher name that no readable playbook claims is no longer reported
     as stale when the owner may be the unreadable playbook.
 
+- **`install.sh` names a rate limit as one.** When GitHub refuses the
+  latest-release lookup with 403 or 429, the message says it was
+  rate-limited and to set `CPB_INSTALL_VERSION`. Before, it blamed the
+  internet connection. Any other failure gives its HTTP status. A
+  `GITHUB_TOKEN` authenticates the lookup on GitHub's API, passed to curl
+  outside its command line. `CPB_INSTALL_API_BASE` points the lookup
+  elsewhere, for tests.
+
 ### Fixed
 
 - **`cpb self-uninstall` with a manifest it could not read** said it would
