@@ -3,4 +3,4 @@
 # (.github/scripts/site-tree.sh). It moves only with the site, in a release
 # candidate's or a release's site pass: HEAD while that pass rides in the
 # release PR (the cpb being released), the release's tag after it.
-v4.0.0-rc1
+HEAD

@@ -65,7 +65,7 @@
 <span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK sre SANDBOX</span>                    <span class="comment"># every launch inside a microVM</span>
 <span class="cmd"><span class="prompt">$ </span>work</span>                                               <span class="comment"># Claude Code, bound to that playbook</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc1, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
       </div>
     </div>
   </section>
@@ -117,7 +117,7 @@
     <div class="term" data-verify="examples/01-first-playbook">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc1</div>
+        <div class="term-title">real run, v4.0.0-rc2</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK scratch</span>
@@ -139,7 +139,7 @@ Sandbox:    no</span>
 <span class="out">Removed launcher "scratch"
 Deleted playbook "scratch".</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc1, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
       </div>
     </div>
     <p>A throwaway session in a throwaway folder works the same way:
@@ -158,7 +158,7 @@ Deleted playbook "scratch".</span></code></pre>
     <div class="term" data-verify="README.md:59-68, examples/14-model-picker">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc1</div>
+        <div class="term-title">real run, v4.0.0-rc2</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1</span>
@@ -201,7 +201,7 @@ Agent: (none)
 Model: glm-5.3 (ANTHROPIC_MODEL); a launch's --model and /model still win
 Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc1, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
       </div>
     </div>
     <p><code class="inline">ISOLATED LOGIN</code> keeps your Anthropic login away from that
@@ -266,7 +266,7 @@ ALTER PLAYBOOK
     <div class="term">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc1</div>
+        <div class="term-title">real run, v4.0.0-rc2</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb APPLY reviewer.cpb TO reviewer --dry-run</span>
@@ -301,7 +301,7 @@ ALTER PLAYBOOK reviewer
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ADD SKILL review FROM '/home/you/skills-src/review';</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc1, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
       </div>
     </div>
     <p>Secrets are references, resolved at launch by your helper; <code class="inline">SHOW CREATE</code>
@@ -322,7 +322,7 @@ ALTER PLAYBOOK reviewer
     <div class="term" data-verify="examples/09-mcp-servers">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc1</div>
+        <div class="term-title">real run, v4.0.0-rc2</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'</span>
@@ -345,7 +345,7 @@ ALTER PLAYBOOK researcher
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth';</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc1, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
       </div>
     </div>
     <p>The value never appears in a file, in argv, or in any <code class="inline">SHOW</code>/<code class="inline">EXPLAIN</code>
@@ -365,7 +365,7 @@ ALTER PLAYBOOK researcher
     <div class="term" data-verify="examples/18-sessions, examples/13-select">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc1, with example 18's stand-in session</div>
+        <div class="term-title">real run, v4.0.0-rc2, with example 18's stand-in session</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb SHOW SESSIONS</span>
@@ -387,7 +387,7 @@ glm	ANTHROPIC_BASE_URL
 glm	ANTHROPIC_MODEL
 researcher	CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc1, testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
+        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
       </div>
     </div>
     <p><code class="inline">cpb run worker --continue</code> resumes the newest session in this folder,
@@ -489,9 +489,9 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh</span>
 <span class="cmd"><span class="prompt">$ </span>cpb --version</span>
-<span class="out">cpb version v4.0.0-rc1</span></code></pre>
+<span class="out">cpb version v4.0.0-rc2</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc1, testbed</span>
+        <span class="verified-tag">verified against v4.0.0-rc2, testbed</span>
       </div>
     </div>
     <p class="install-row">
