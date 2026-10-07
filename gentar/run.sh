@@ -371,6 +371,7 @@ judge_ready() {
 # the coordinator's forwarding warning then says the URL was dropped.
 if [ "$SWEEP" = 1 ]; then
   runnable=""
+  judged_skipped=""
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
@@ -380,10 +381,22 @@ if [ "$SWEEP" = 1 ]; then
       echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
     elif ! judge_ready "$f"; then
       echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+      judged_skipped="$judged_skipped $s"
     else
       runnable="$runnable $s"
     fi
   done
+  # Said once more, loudly, at the end: a phase 2 that skipped its judged
+  # suites can finish green without having run them (claude-playbooks-ac,
+  # from Codex on cockpit's re-pin). In Actions it is a warning annotation.
+  if [ -n "$judged_skipped" ]; then
+    n=$(echo $judged_skipped | wc -w | tr -d ' ')
+    msg="$n judged suite(s) skipped, TYPESAFE_API_KEY is not set:$judged_skipped (a green sweep did not run them)"
+    echo "sweep summary: $msg" >&2
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      echo "::warning title=judged suites skipped::$msg"
+    fi
+  fi
   [ -n "$runnable" ] || { echo "no runnable suites in gentar/scenarios" >&2; exit 2; }
   echo "sweep:$runnable" >&2
   set -- $runnable
@@ -409,7 +422,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.8.1}
+REF=${GENTAR_REF:-v0.9.3}
 
 # --review: has this repo outgrown its suites?
 #
@@ -589,13 +602,16 @@ mkdir "subjects/$SUBJECT"
 (cd "$REPO" && tar \
   --exclude=./.git --exclude=./gentar/.arena --exclude=./gentar/reports \
   -cf - .) | tar -xf - -C "subjects/$SUBJECT"
+# History, when the policy asks for it ([stage] git = true): a fresh .git
+# built by a local clone, so no credential and no remote path come along.
+python3 "$HERE/plan.py" stage-git "$REPO" "subjects/$SUBJECT"
 # A worktree's .git is a pointer file with a host-absolute path — dead
 # on the bench — so `git describe` there finds nothing. Freeze the
 # version HERE, where git works; scenarios read it instead of trusting
 # the bench's git.
 # --match 'v*': the workflow's keyword tags (`arena`, `arena-*`) are
-# floating triggers, and a bare `git describe --tags` returns whichever
-# tag is NEAREST — so moving `arena` onto a commit made the frozen version
+# floating triggers, and a describe without a --match pattern returns
+# whichever tag is NEAREST — so moving `arena` onto a commit made the frozen version
 # read "arena-3-g…" instead of the release it came from (claude-playbooks,
 # where the `arena` tag once shadowed a real v3.13.0).
 (cd "$REPO" && git describe --tags --always --dirty --match 'v*' 2>/dev/null || echo dev) \
@@ -638,6 +654,64 @@ mkdir "subjects/$SUBJECT"
 # until the trap's `down -v`.
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
+# Local bench mode (GENTAR_BENCH_HOST=local): the arena runs on the bench
+# host itself (a runner on that VM) and calls sbx directly, so there is no
+# ssh and no bench key. The engine's overlay mounts the host's sbx into the
+# coordinator and runs it as this user; an engine without it refuses.
+# The setting: the environment first (CI), else the arena's .env (a local
+# run edits gentar/.arena/.env), the way compose resolves it. Spaces and
+# quotes are tolerated; anything else is a host name.
+bench_host_setting() {
+  if [ -n "${GENTAR_BENCH_HOST:-}" ]; then printf '%s' "$GENTAR_BENCH_HOST"
+  elif [ -f "$ARENA/.env" ]; then sed -n 's/^GENTAR_BENCH_HOST=//p' "$ARENA/.env" | tail -1
+  fi | tr -d "\"' [:space:]"
+}
+LOCAL_BENCH=0
+[ "$(bench_host_setting)" = local ] && LOCAL_BENCH=1
+if [ "$LOCAL_BENCH" = 1 ]; then
+  export GENTAR_BENCH_HOST=local
+  # What compose mounts must exist and belong to this user already: a
+  # missing bind source is created by Docker as root, and sbx inside the
+  # coordinator could then not write its state. They exist once this user
+  # has run `sbx login`; refuse rather than create them.
+  SBX_PATH=$(command -v sbx 2>/dev/null || true)
+  if [ -z "$SBX_PATH" ]; then
+    echo "GENTAR_BENCH_HOST=local: no sbx on this host's PATH (install it and run sbx login as $(id -un))" >&2
+    exit 2
+  fi
+  for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
+    if [ ! -d "$d" ] || [ ! -O "$d" ]; then
+      echo "GENTAR_BENCH_HOST=local: $d is missing or not owned by $(id -un) — run sbx login as this user first" >&2
+      exit 2
+    fi
+  done
+  # sbx in the coordinator has no session bus: it reads the Docker login
+  # from files only. A login held in a desktop keyring (gnome-keyring) is
+  # invisible there, and every bench would fail at PREPARE IMAGE with "no
+  # default account profile set". sbx 0.39 and 0.45 keep each secret as a
+  # folder named by its base64 id; this one is docker/auth/metadata/hub/default.
+  SBX_AUTH="$HOME/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
+  SBX_PROFILE="$SBX_AUTH/ZG9ja2VyL2F1dGgvbWV0YWRhdGEvaHViL2RlZmF1bHQ="
+  if [ "${GENTAR_SBX_AUTH_CHECK:-on}" != off ] && ! ls "$SBX_PROFILE" 2>/dev/null | grep -q .; then
+    echo "GENTAR_BENCH_HOST=local: sbx has no login in files (no default account profile in $SBX_AUTH); a keyring login is invisible to the coordinator. Sign in once as $(id -un) with $ARENA/bin/sbx-file-login (GENTAR_SBX_AUTH_CHECK=off skips this check)" >&2
+    exit 2
+  fi
+  export GENTAR_LOCAL_SBX_BIN
+  GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH" 2>/dev/null || echo "$SBX_PATH")
+  if [ ! -f "$ARENA/compose.local-bench.yml" ]; then
+    echo "GENTAR_BENCH_HOST=local needs an engine with compose.local-bench.yml (GENTAR_REF $REF has none)" >&2
+    exit 2
+  fi
+  ARENA_FILES+=(-f compose.local-bench.yml)
+  export GENTAR_LOCAL_UID GENTAR_LOCAL_GID GENTAR_LOCAL_HOME GENTAR_BENCH_KEY_FILE
+  GENTAR_LOCAL_UID=$(id -u); GENTAR_LOCAL_GID=$(id -g); GENTAR_LOCAL_HOME=$HOME
+  GENTAR_BENCH_KEY_FILE=/dev/null     # the compose secret needs a file; there is no key
+  # Create the workspace root as this user before compose binds it: a
+  # missing bind source is created by Docker as root, and the coordinator
+  # (this user) could then not make a bench's workspace in it.
+  export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
+  mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+fi
 # Telemetry destination (optional; AGENTS.md decision 6): the arena's
 # collector forwards what the coordinator scrubbed to GENTAR_OTLP_EXPORT
 # with GENTAR_OTLP_KEY. Both or neither — half a destination is a refusal, not a
@@ -667,6 +741,7 @@ arena() { docker compose "${ARENA_FILES[@]}" -p "arena-$SUBJECT" "$@"; }
 # different, missing file. Same shape as the engine's own bin/arena, so
 # the two say the same thing. The path is printed, never the contents.
 require_bench_key() {
+  [ "${LOCAL_BENCH:-0}" = 1 ] && return 0    # local bench mode: no key
   local key
   # `compose config --format json` PRETTY-PRINTS, so "bench_ssh_key" and
   # its "file" land on different lines and a single-line sed match finds

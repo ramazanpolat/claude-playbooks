@@ -54,17 +54,52 @@ permissions:
   contents: read
 
 jobs:
-  plan:
+  # A GENTAR_CI_RUNNER that mentions `arena` is refused BEFORE any job is
+  # scheduled on it: `runs-on` would otherwise start plan on the bench runner
+  # and run the PR's own plan.py there before plan.py could refuse (Codex).
+  # contains() is case-insensitive, as runner labels are, and tests the raw
+  # text, so `Arena`, `ARENA` and a padded " arena" are all caught. This job
+  # fails the run loudly; plan and checks are skipped.
+  ci-runner-refused:
+    if: ${{ contains(vars.GENTAR_CI_RUNNER, 'arena') }}
     runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::GENTAR_CI_RUNNER names the arena label (or a label containing 'arena'): the plan and checks run pull request code and must never be scheduled on the bench runner"
+          exit 2
+
+  plan:
+    # GitHub-hosted by default. GENTAR_CI_RUNNER (a repository or
+    # organisation variable, JSON: ["self-hosted", "linux-ci"]) moves plan
+    # and checks to a self-hosted runner, for an organisation without hosted
+    # minutes or one that keeps CI in-house. Never the `arena` runner:
+    # plan.py refuses that label. The bench job below is unaffected.
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
+    # A fork's PR never reaches a self-hosted runner, not even to plan: with
+    # GENTAR_CI_RUNNER set, plan (and so everything after it) is skipped for
+    # it. Unset, forks keep the hosted checks as before.
+    if: >-
+      ${{ !contains(vars.GENTAR_CI_RUNNER, 'arena') &&
+      (!vars.GENTAR_CI_RUNNER || github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) }}
     outputs:
       checks: ${{ steps.plan.outputs.checks }}
       bench: ${{ steps.plan.outputs.bench }}
       suites: ${{ steps.plan.outputs.suites }}
       os: ${{ steps.plan.outputs.os }}
+      runner: ${{ steps.plan.outputs.runner }}
       setup_go: ${{ steps.plan.outputs.setup_go }}
       setup_node: ${{ steps.plan.outputs.setup_node }}
       setup_python: ${{ steps.plan.outputs.setup_python }}
     steps:
+      # Temp files go to this job's own temp dir, which the runner empties
+      # after every job. On a self-hosted runner /tmp is shared and never
+      # cleaned: a failing dry-run keeps its scratch homes there, and a
+      # suite's own mktemp steps add more (a runner LXC's tmpfs once filled
+      # 7.4 GB this way, 2026-10-07). Harmless on GitHub-hosted runners. The
+      # arena's lock and bench workspaces use fixed /tmp paths on purpose.
+      - name: temp files into the job's temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - id: plan
         # Event text reaches the planner through env, never pasted into
@@ -76,19 +111,30 @@ jobs:
           SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GENTAR_FLOOR: ${{ vars.GENTAR_FLOOR }}   # only read without a policy.toml
+          GENTAR_CI_RUNNER: ${{ vars.GENTAR_CI_RUNNER }}   # validated, and logged as runner=
 
   checks:
     needs: plan
-    if: needs.plan.outputs.checks == 'true'
+    if: needs.plan.outputs.checks == 'true' && !contains(vars.GENTAR_CI_RUNNER, 'arena')
     # [phase1] os: GitHub-hosted runners only (plan.py refuses anything
     # else). On macOS this is the dry-run on macOS userland — bash 3.2, BSD
-    # tools — not a macOS bench; that is gentar's tart tier.
+    # tools — not a macOS bench; that is gentar's tart tier. With
+    # GENTAR_CI_RUNNER set, the one runner it names instead (plan.py refuses
+    # macOS in [phase1] os then, rather than quietly running Linux).
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.plan.outputs.os) }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || matrix.os }}
     steps:
+      # Temp files go to this job's own temp dir, which the runner empties
+      # after every job. On a self-hosted runner /tmp is shared and never
+      # cleaned: a failing dry-run keeps its scratch homes there, and a
+      # suite's own mktemp steps add more (a runner LXC's tmpfs once filled
+      # 7.4 GB this way, 2026-10-07). Harmless on GitHub-hosted runners. The
+      # arena's lock and bench workspaces use fixed /tmp paths on purpose.
+      - name: temp files into the job's temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       # Toolchains the dry-run's prepare() needs, declared in the policy
       # ([phase1] setup); anything else goes in gentar/phase1-setup.sh.
@@ -111,7 +157,10 @@ jobs:
         # writable there. On a hosted runner they are, and an install a suite
         # runs would land in /usr/local/bin instead of ~/.local/bin — passing
         # or failing for the runner's reasons, not the bench's. After the
-        # toolchain setup above, which may still need them.
+        # toolchain setup above, which may still need them. Hosted runners
+        # only: on a persistent self-hosted runner this would change the
+        # host itself, and its unprivileged user cannot write there anyway.
+        if: runner.environment == 'github-hosted'
         run: |
           group=root; [ "$(uname)" = Darwin ] && group=wheel
           for d in /usr/local/bin /usr/local/sbin; do
@@ -172,6 +221,14 @@ jobs:
       TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
       GENTAR_OTLP_KEY: ${{ secrets.GENTAR_OTLP_KEY }}
     steps:
+      # Temp files go to this job's own temp dir, which the runner empties
+      # after every job. On a self-hosted runner /tmp is shared and never
+      # cleaned: a failing dry-run keeps its scratch homes there, and a
+      # suite's own mktemp steps add more (a runner LXC's tmpfs once filled
+      # 7.4 GB this way, 2026-10-07). Harmless on GitHub-hosted runners. The
+      # arena's lock and bench workspaces use fixed /tmp paths on purpose.
+      - name: temp files into the job's temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # .gentar-version floats via git describe
@@ -181,6 +238,11 @@ jobs:
           # Refuse BEFORE staging. A blank or whitespace-only secret would
           # still be written as a file of a byte or two, pass every
           # readability check here, and only be refused later by run.sh.
+          # Local bench mode: this runner IS the bench host, sbx is called
+          # directly, and there is no key, user or ssh at all.
+          if [ "$(printf '%s' "$GENTAR_BENCH_HOST" | tr -d '[:space:]')" = local ]; then
+            echo "bench: local (this runner's host; no ssh, no bench key)"
+          else
           if [ -z "$(printf '%s' "$BENCH_KEY" | tr -d '[:space:]')" ]; then
             echo "::error::repo secret BENCH_SSH_KEY is not set (or is blank)" >&2
             exit 2
@@ -197,13 +259,14 @@ jobs:
           done
           printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
           chmod 600 "$RUNNER_TEMP/bench_key"
+          fi
           if [ -n "$CLONE_KEY" ]; then
             printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key"
             chmod 600 "$RUNNER_TEMP/gentar_clone_key"
           fi
         env:
           BENCH_KEY: ${{ secrets.BENCH_SSH_KEY }}
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
           GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
           CLONE_KEY: ${{ secrets.GENTAR_CLONE_KEY }}
 
@@ -225,7 +288,7 @@ jobs:
           GENTAR_REF: ${{ github.event.inputs.gentar_ref || vars.GENTAR_REF }}
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
           # SECRETS rather than variables: a public repo's logs are public.
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
           GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
           GENTAR_CLONE_SSH_KEY: ${{ secrets.GENTAR_CLONE_KEY && format('{0}/gentar_clone_key', runner.temp) || '' }}
           GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
@@ -263,5 +326,5 @@ jobs:
         run: gentar/run.sh --down || true
         env:
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
           GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
