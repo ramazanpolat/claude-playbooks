@@ -197,12 +197,14 @@ release:
       `gh pr view <n> --comments` prints the reviews and the replies to check.
 
 **Nightlies are drift monitors (report on red).** Every night
-`arena-nightly` runs phase 2 on main; a dispatch with `ref` runs another ref.
-Not on a release tag: the kit's plan never gives a `v*` tag the bench, so a
-tag dispatch would be skipped and read as green.
-`arena-nightly` fails when a dispatched run's `arena / phase2` job is skipped
-or absent, naming the ref and plan's reason. A red is fixed like any bug.
-They gate nothing.
+`arena-nightly` runs phase 2 on main; a dispatch with `ref` runs another ref,
+a release tag included: since gentar v0.9.1 the kit's plan treats a dispatch
+on a tag ref as a dispatch, so it runs phase 2 on that release (a drift run).
+Before, it applied the tag-push rules and skipped it, and the run read as
+green (v3.25.0, 2026-09-30). `arena-nightly` fails when a dispatched run's
+`arena / phase2` job is skipped or absent, naming the ref and plan's reason,
+so a skip never reads as green. A red is fixed like any bug. They gate
+nothing.
 
 If any is missing, build it first; never tag without it.
 
