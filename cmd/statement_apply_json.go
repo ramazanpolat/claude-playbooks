@@ -83,6 +83,22 @@ type applyStmtJSON struct {
 	Reason    *string        `json:"reason"`
 	Warnings  []applyWarning `json:"warnings"`
 	Actions   []planAction   `json:"actions"`
+	// Overridden lists what folding dropped from this statement: a setting
+	// a later statement for the same target sets again, and where (SPEC.md,
+	// "A setting set more than once"). Absent when nothing was.
+	Overridden []applyOverride `json:"overridden,omitempty"`
+}
+
+// applyOverride is one dropped clause part: the clause and its key, never a
+// value, and the statement whose part replaces it.
+type applyOverride struct {
+	Clause string        `json:"clause"`
+	By     applyLocation `json:"by"`
+}
+
+type applyLocation struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
 }
 
 type applySummary struct {

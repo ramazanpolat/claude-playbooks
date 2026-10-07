@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **A setting set more than once is written once** (SPEC.md, *A setting set
+  more than once*). In a stack of files (a base recipe, then the child that
+  overrides it), `APPLY` used to write the base's value and then the
+  child's on every run. A stack never converged: each re-apply reported
+  changes, and the live configuration held the base's value in between.
+  - `APPLY` now drops a clause, or an entry of a list clause, whose key a
+    later statement for the same target replaces outright. That covers a
+    variable, a tool rule, the model, the agent, the status line and its
+    refresh, a sandbox setting, and `USE ENV`.
+  - The run and the plan name what was dropped and where it is set again,
+    and `--dry-run --json` adds `overridden` to the statement (a new field).
+  - A statement left with nothing to write is `unchanged`, so applying a
+    stack again reports `0 changed`.
+
 ## [v4.0.0-rc2] -- 2026-10-03
 
 ### Changed
