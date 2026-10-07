@@ -1189,8 +1189,9 @@ Variables:    ANTHROPIC_AUTH_TOKEN=<plaintext, 43 chars>
 
 The JSON forms (`SHOW … --json`, `EXPLAIN … --json`, `SELECT … --json`)
 carry no value for such a variable, only `redacted` and `plaintext`, and
-`SHOW CREATE` writes `<withheld>`. No form prints the resolved value, and a key that
-does not match the heuristic (`ANTHROPIC_BASE_URL` above) is never touched.
+`SHOW CREATE` writes `<withheld>`. No form prints the resolved value. A key that
+does not match the heuristic (`ANTHROPIC_BASE_URL` above) is shown as it is,
+except for a credential in a URL's userinfo, which is masked as above.
 
 ## SELECT
 
