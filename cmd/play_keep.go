@@ -433,6 +433,23 @@ func clauseUndo(c grammar.Clause) []undoItem {
 // new one no longer sets the same way, in an order that drops plugins
 // before their marketplace. nil when there is nothing to undo.
 func undoFor(name string, oldStmts, newStmts []*grammar.Stmt) *grammar.Stmt {
+	return undoStatement(name, undoClauses(oldStmts, newStmts))
+}
+
+// undoStatement is the undo clauses as one statement (oneStatement); nil
+// when there are none.
+func undoStatement(name string, undo []grammar.Clause) *grammar.Stmt {
+	if undo = oneStatement(undo); len(undo) == 0 {
+		return nil
+	}
+	return &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: name, Clauses: undo}
+}
+
+// undoClauses is what undoFor removes, one clause per key, before
+// oneStatement merges them: a caller that drops some (deferredStatusline)
+// does it here, so a clause oneStatement left out for another's sake is not
+// lost with it.
+func undoClauses(oldStmts, newStmts []*grammar.Stmt) []grammar.Clause {
 	sigs := map[string]string{}
 	for _, s := range newStmts {
 		for _, c := range s.Clauses {
@@ -459,11 +476,7 @@ func undoFor(name string, oldStmts, newStmts []*grammar.Stmt) *grammar.Stmt {
 			}
 		}
 	}
-	undo = append(undo, marketplaces...)
-	if len(undo) == 0 {
-		return nil
-	}
-	return &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: name, Clauses: oneStatement(undo)}
+	return append(undo, marketplaces...)
 }
 
 // oneStatement makes the undo clauses ones a single statement may hold, so

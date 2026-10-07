@@ -298,6 +298,14 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 	if _, err := grammar.ParseFile(u.Pretty() + ";"); err != nil {
 		t.Fatalf("the undo does not parse back: %v", err)
 	}
+	// One key set by two old statements is undone once (agy, #213): the
+	// merged UNSET SANDBOX never names a key twice.
+	twice := parse("ALTER PLAYBOOK SET SANDBOX workdir=/a;\nALTER PLAYBOOK SET SANDBOX workdir=/b host=h;\n")
+	if u := undoFor("kb", twice, nil); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET SANDBOX workdir host" {
+		t.Fatalf("a key set twice: %v", u)
+	} else if _, err := grammar.ParseFile(u.Pretty() + ";"); err != nil {
+		t.Fatalf("the undo does not parse back: %v", err)
+	}
 	// A status line and its refresh, both dropped: UNSET STATUSLINE alone,
 	// which a statement may hold (the pair is refused together).
 	sl := parse("ALTER PLAYBOOK SET STATUSLINE 'x';\nALTER PLAYBOOK SET STATUSLINE REFRESH 5;\n")
