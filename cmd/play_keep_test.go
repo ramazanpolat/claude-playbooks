@@ -274,9 +274,71 @@ func TestUndoFor(t *testing.T) {
 	}
 }
 
+// Env sets and sandbox settings are undone too: an env set by whether it is
+// attached (not where), a sandbox setting by its key, the bare SET SANDBOX
+// as always=true.
+func TestUndoForEnvAndSandbox(t *testing.T) {
+	parse := func(s string) []*grammar.Stmt {
+		st, err := grammar.ParseFile(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	old := parse("ALTER PLAYBOOK USE ENV a b SET SANDBOX;\nALTER PLAYBOOK SET SANDBOX backend=x workdir=/w ADD ENV c FIRST;\n")
+	moved := parse("ALTER PLAYBOOK USE ENV b a SET SANDBOX always=true;\nALTER PLAYBOOK SET SANDBOX backend=x ADD ENV c LAST;\n")
+	if u := undoFor("kb", old, moved); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET SANDBOX workdir" {
+		t.Fatalf("an order change or the keyed always undoes: %v", u)
+	}
+	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET SANDBOX backend=y;\n"))
+	want := "ALTER PLAYBOOK kb DROP ENV a DROP ENV b UNSET SANDBOX always backend workdir DROP ENV c"
+	if u == nil || u.String() != want {
+		t.Fatalf("undo:\n got %v\nwant %s", u, want)
+	}
+	if _, err := grammar.ParseFile(u.Pretty() + ";"); err != nil {
+		t.Fatalf("the undo does not parse back: %v", err)
+	}
+	// A status line and its refresh, both dropped: UNSET STATUSLINE alone,
+	// which a statement may hold (the pair is refused together).
+	sl := parse("ALTER PLAYBOOK SET STATUSLINE 'x';\nALTER PLAYBOOK SET STATUSLINE REFRESH 5;\n")
+	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET STATUSLINE" {
+		t.Fatalf("status line undo: %v", u)
+	}
+}
+
 func TestLineDiff(t *testing.T) {
 	got := strings.Join(lineDiff([]string{"a", "b", "c"}, []string{"a", "x", "c", "d"}), "|")
 	if got != "- b|+ x|+ d" { // what went, then what came
 		t.Fatalf("%q", got)
+	}
+}
+
+// A played recipe that drops both its status line and its refresh: the
+// undo is UNSET STATUSLINE alone, since a statement may not hold it beside
+// UNSET STATUSLINE REFRESH, and play parses its undo back from a file. The
+// update used to fail on that file.
+func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	t.Setenv("TMPDIR", t.TempDir())
+	stubClaude(t)
+	dir := t.TempDir()
+	p := writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1\n  SET STATUSLINE 'echo x';\nALTER PLAYBOOK\n  SET STATUSLINE REFRESH 5;\n")
+	playFlags(t, false, false, false, "")
+	playKeepFlags(t, true, "")
+	playRunFlags(t, true, nil, nil, nil)
+	var err error
+	if out := captureStdout(t, func() { err = runPlay(playCmd, []string{p}) }); err != nil {
+		t.Fatalf("--keep: %v\n%s", err, out)
+	}
+	if showPlaybook(t, "slr")["statusline"] != "echo x" {
+		t.Fatalf("kept status line: %v", showPlaybook(t, "slr")["statusline"])
+	}
+	writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1;\n")
+	if out := captureStdout(t, func() { err = playUpdateRun("slr") }); err != nil {
+		t.Fatalf("update: %v\n%s", err, out)
+	}
+	if v := showPlaybook(t, "slr"); v["statusline"] != nil || v["statusline_refresh"] != nil {
+		t.Fatalf("the dropped status line stayed: %v %v", v["statusline"], v["statusline_refresh"])
 	}
 }

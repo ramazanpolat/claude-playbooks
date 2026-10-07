@@ -279,7 +279,7 @@ func TestWithheldClause(t *testing.T) {
 		{Kind: grammar.AddMCP, Names: []string{"t"}, MCP: &grammar.MCP{Command: "run", Args: []string{"--db", "postgres://e:f@db.example/x"}}},
 		{Kind: grammar.AddSkill, Names: []string{"k"}, Skill: &grammar.Skill{From: "https://t0k@git.example/s.git"}},
 		{Kind: grammar.SetVar, Plaintext: true, Vars: []grammar.Var{{Key: "GITHUB_TOKEN", Value: "ghp_abcdefghij"}, {Key: "MODE", Value: "fast"}}},
-		{Kind: grammar.SetSandbox, Settings: []grammar.Var{{Key: "secrets", Value: "https://g:h@vault.example"}}},
+		{Kind: grammar.SetSandboxKeys, Settings: []grammar.Var{{Key: "secrets", Value: "https://g:h@vault.example"}}},
 	}
 	before := (&grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Recipe: true, Clauses: in}).String()
 	r := grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Recipe: true}
@@ -292,7 +292,7 @@ func TestWithheldClause(t *testing.T) {
 			t.Fatalf("%q survived: %s", secret, got)
 		}
 	}
-	for _, kept := range []string{"MODE=fast", "GITHUB_TOKEN=" + withheldMark, "withheld@git.example/o/r.git", "--db"} {
+	for _, kept := range []string{"MODE=fast", "GITHUB_TOKEN=" + withheldMark, "withheld@git.example/o/r.git", "--db", "secrets=" + withheldMark} {
 		if !strings.Contains(got, kept) {
 			t.Fatalf("%q is gone: %s", kept, got)
 		}
@@ -380,5 +380,35 @@ func TestUpdateNoRecordWithFlags(t *testing.T) {
 	err := runUpdate(updateCmd, []string{"bare"})
 	if err == nil || !strings.Contains(err.Error(), `"bare" has no [source], [play] or [apply] record`) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A base that stops attaching an env set, or stops setting a sandbox key,
+// takes them out of the playbook at cpb update; an env set the playbook
+// attached itself stays.
+func TestApplyRecordUndoesEnvAndSandbox(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "p", nil)
+	for _, line := range []string{"CREATE ENV route SET R=1", "CREATE ENV mine SET M=1", "ALTER PLAYBOOK p ADD ENV mine"} {
+		if _, err := quotedStmt(t, line); err != nil {
+			t.Fatalf("%s: %v", line, err)
+		}
+	}
+	dir := t.TempDir()
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  ADD ENV route\n  SET SANDBOX workdir=/srv/w share_skills=true;\n")
+	if out, err := apply(t, f, "TO", "p"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	v := describePlaybookByName(t, "p")
+	if strings.Join(v.Envs, " ") != "mine route" || v.Sandbox.Workdir == nil || !v.Sandbox.ShareSkills {
+		t.Fatalf("after APPLY: envs=%v sandbox=%+v", v.Envs, v.Sandbox)
+	}
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR X=1;\n")
+	if out, err := runUpdateFor(t, "p", false, false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	v = describePlaybookByName(t, "p")
+	if strings.Join(v.Envs, " ") != "mine" || v.Sandbox.Workdir != nil || v.Sandbox.ShareSkills {
+		t.Fatalf("after the update: envs=%v sandbox=%+v", v.Envs, v.Sandbox)
 	}
 }

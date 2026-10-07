@@ -535,3 +535,23 @@ printf %s "$J" | grep -qF '"allow":["Read"]' && printf %s "$J" | grep -qF '"key"
 cpb update apb > "$D/again.out" 2>&1 && grep -q " 0 created, 0 changed, 2 unchanged," "$D/again.out" || { echo arec-not-converged; cat "$D/again.out"; exit 1; }
 echo apply-record-ok'''
 contains = "apply-record-ok"
+
+[[verify.commands]]
+# cpb update undoes env sets and sandbox settings too (v4.0.0-rc3): a base
+# that stops attaching an env set, or stops setting a sandbox key, takes
+# them out of the playbook at cpb update; an env set the playbook attached
+# itself stays.
+command = '''
+D="$HOME/aundo"; mkdir -p "$D"
+cpb CREATE ENV uroute SET R=1 >/dev/null && cpb CREATE ENV umine SET M=1 >/dev/null && cpb CREATE PLAYBOOK upb NO LAUNCHER >/dev/null && cpb ALTER PLAYBOOK upb ADD ENV umine >/dev/null || { echo aundo-setup; exit 1; }
+printf "ALTER PLAYBOOK\n  ADD ENV uroute\n  SET SANDBOX workdir=/srv/w share_skills=true;\n" > "$D/base.cpb"
+cpb APPLY "$D/base.cpb" TO upb >/dev/null 2>&1 || { echo aundo-apply; exit 1; }
+J=$(cpb SHOW PLAYBOOK upb --json | tr -d ' \n')
+printf %s "$J" | grep -qF '"envs":["umine","uroute"]' && printf %s "$J" | grep -qF '"workdir":"/srv/w"' || { echo aundo-not-applied; printf %s "$J"; exit 1; }
+printf "ALTER PLAYBOOK\n  SET VAR X=1;\n" > "$D/base.cpb"
+cpb update upb > "$D/up.out" 2>&1 || { echo aundo-update; cat "$D/up.out"; exit 1; }
+J=$(cpb SHOW PLAYBOOK upb --json | tr -d ' \n')
+printf %s "$J" | grep -qF '"envs":["umine"]' || { echo aundo-env-kept; printf %s "$J"; exit 1; }
+printf %s "$J" | grep -qF '"workdir":null' && printf %s "$J" | grep -qF '"share_skills":false' || { echo aundo-sandbox-kept; printf %s "$J"; exit 1; }
+echo apply-undo-env-sandbox-ok'''
+contains = "apply-undo-env-sandbox-ok"

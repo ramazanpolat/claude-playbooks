@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -402,9 +403,29 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		return []u{{"statusline", one(c), grammar.Clause{Kind: grammar.UnsetStatusline}}}
 	case grammar.SetStatuslineRefresh:
 		return []u{{"refresh", one(c), grammar.Clause{Kind: grammar.UnsetStatuslineRefresh}}}
+	case grammar.UseEnv, grammar.AddEnv:
+		// Each env set it attached. Where a set sits in the list is the new
+		// statements' to say, so only whether one is attached counts.
+		var out []u
+		for _, n := range c.Names {
+			out = append(out, u{"env:" + n, "ENV " + n, grammar.Clause{Kind: grammar.DropEnv, Names: []string{n}}})
+		}
+		return out
+	case grammar.SetSandbox:
+		// The bare form is always=true: one key with the keyed form.
+		return clauseUndo(grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: []grammar.Var{{Key: "always", Value: "true"}}})
+	case grammar.SetSandboxKeys:
+		var out []u
+		for _, v := range c.Settings {
+			cc := c
+			cc.Settings = []grammar.Var{v}
+			out = append(out, u{"sandbox:" + v.Key, one(cc), grammar.Clause{Kind: grammar.UnsetSandboxKeys, Settings: []grammar.Var{{Key: v.Key}}}})
+		}
+		return out
 	}
-	// SET ISOLATED LOGIN and NO LAUNCHER: a login is never unset by an update,
-	// and the launcher is play's.
+	// SET ISOLATED LOGIN (and the login a SET SANDBOX isolates) and NO
+	// LAUNCHER: a login is never unset by an update, and the launcher is
+	// play's.
 	return nil
 }
 
@@ -442,7 +463,30 @@ func undoFor(name string, oldStmts, newStmts []*grammar.Stmt) *grammar.Stmt {
 	if len(undo) == 0 {
 		return nil
 	}
-	return &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: name, Clauses: undo}
+	return &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: name, Clauses: oneStatement(undo)}
+}
+
+// oneStatement makes the undo clauses ones a single statement may hold, so
+// the undo parses back (play stages it as a file): the sandbox keys in one
+// UNSET SANDBOX, and no UNSET STATUSLINE REFRESH beside UNSET STATUSLINE,
+// which removes the refresh with the status line.
+func oneStatement(undo []grammar.Clause) []grammar.Clause {
+	whole := slices.ContainsFunc(undo, func(c grammar.Clause) bool { return c.Kind == grammar.UnsetStatusline })
+	var out []grammar.Clause
+	sandbox := -1
+	for _, c := range undo {
+		switch {
+		case c.Kind == grammar.UnsetStatuslineRefresh && whole:
+			continue
+		case c.Kind == grammar.UnsetSandboxKeys && sandbox >= 0:
+			out[sandbox].Settings = append(out[sandbox].Settings, c.Settings...)
+			continue
+		case c.Kind == grammar.UnsetSandboxKeys:
+			sandbox = len(out)
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // recipeLines is a recipe's statement lines: no header, comments or blanks.

@@ -2502,10 +2502,13 @@ cpb update sre --yes       # off a terminal: runs a declared migrate step
   serves other bytes ("the tag moved"), the plan, and every confirmation
   again. Then one `ALTER PLAYBOOK` undoes what the old recipe set and the new
   one no longer sets the same way (`UNSET VAR`, `UNSET TOOL`, `DROP PLUGIN`,
-  `DROP MCP SERVER`, `DROP SKILL`, `DROP MODEL`, the `UNSET`s of
-  the agent, model, picker and status line; plugins before their
-  marketplace; a login is never unset), the new bytes are applied, and the
-  record is updated;
+  `DROP MCP SERVER`, `DROP SKILL`, `DROP MODEL`, `UNSET SANDBOX <key>` (a
+  bare `SET SANDBOX` is `always`), `DROP ENV` for an env set it attached,
+  the `UNSET`s of the agent, model, picker and status line, whose `UNSET
+  STATUSLINE` takes its refresh with it; plugins before their marketplace;
+  a login is never unset, not even the one a `SET SANDBOX` isolated; a
+  played recipe holds neither env sets nor sandbox settings, so for it those
+  two never arise), the new bytes are applied, and the record is updated;
 - a playbook with none of a `[play]`, a `[source]` and an `[apply]` record
   has nothing to update.
 
@@ -2520,8 +2523,11 @@ playbooks, and those that name their playbook, are not run:
   says the files wrote and they no longer write the same way: the clauses
   the update of a played playbook undoes, above. So a clause a base file
   dropped is removed from every playbook built on it, at that playbook's
-  update. Sandbox settings, env sets and the login are not undone, as there. A removal of a key the files still set is folded away (*A setting
-  set more than once*);
+  update: a dropped `USE ENV` stops routing that playbook through the set,
+  and a dropped sandbox setting stops widening what its sessions reach. Only
+  whether an env set is attached counts: where it sits in the list is the
+  files' to say. A removal of a key the files still set is folded away (*A
+  setting set more than once*);
 - then the statements run, and the record is rewritten;
 - `--dry-run` shows the diff and the plan and writes nothing. With `--json`
   the plan is `APPLY --dry-run --json`'s, the undo first, with the record's

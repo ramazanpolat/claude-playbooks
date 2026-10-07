@@ -26,6 +26,14 @@
 
 ### Changed
 
+- **`cpb update` undoes env sets and sandbox settings too** (SPEC.md,
+  *`cpb update <name>`*). Before an update, the undo now also drops an env
+  set the files no longer attach (`DROP ENV`) and unsets a sandbox setting
+  they no longer set (`UNSET SANDBOX <key>`; `always` for a bare `SET
+  SANDBOX`). A base that stops routing through an env set now stops routing
+  its children through it at their update. The login is still never unset.
+  A played recipe can hold neither `ENV` nor `SANDBOX` clauses, so for
+  play only the shared code moves.
 - **A setting set more than once is written once** (SPEC.md, *A setting set
   more than once*). In a stack of files (a base recipe, then the child that
   overrides it), `APPLY` used to write the base's value and then the
@@ -39,6 +47,13 @@
     and `--dry-run --json` adds `overridden` to the statement (a new field).
   - A statement left with nothing to write is `unchanged`, so applying a
     stack again reports `0 changed`.
+
+### Fixed
+
+- **A played playbook's update failed when the recipe dropped both
+  its status line and its refresh.** Its undo held `UNSET STATUSLINE` and
+  `UNSET STATUSLINE REFRESH`, which one statement may not combine. The undo
+  is now `UNSET STATUSLINE` alone, which removes the refresh too.
 
 ## [v4.0.0-rc2] -- 2026-10-03
 
