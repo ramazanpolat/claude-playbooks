@@ -29,3 +29,4 @@ record of why they are the rules. Newest last.
 | 2026-10-01 | A recipe may open with `-- key: value` header lines (`title`, `description`, `needs`, `create-with`), the template convention the site's templates use | cpb play |
 | 2026-10-02 | cpb names no other tool: the default `CLAUDE.md` imports nothing, and the clause, field and warning about imports, the status line host rule and panels leave cpb; `SET STATUSLINE … IF UNSET` offers a status line without imposing one | Objects, Status line and model |
 | 2026-10-02 | No release is marked stable or not stable | — |
+| 2026-10-07 | cpb depends on no integration: its extension points are generic (`SET VAR`, `USE ENV`, `ADD PLUGIN`, `INCLUDE`), it never interprets a variable or a plugin, and a CI lint keeps integration names out of its code, tests and docs | [Integrations](integrations.md) |

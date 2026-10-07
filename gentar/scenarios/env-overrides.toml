@@ -67,8 +67,8 @@ command = 'mkdir -p "$HOME/keepme"; cpb start "$HOME/keepme" -- --delete && test
 contains = "delete-boundary-ok"
 
 [[verify.commands]]
-# No output form prints any character of a credential-looking value
-# (oi-costume#1): a stored plaintext token, and one in an env set, are looked
+# No output form prints any character of a credential-looking value: a
+# stored plaintext token, and one in an env set, are looked
 # for whole and by their first and last 4 characters in SHOW, EXPLAIN,
 # SELECT (human and --json), SHOW CREATE and SHOW ENV. The human forms say
 # what it is and how long; an ordinary key alongside stays visible.

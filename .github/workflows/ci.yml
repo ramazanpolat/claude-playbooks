@@ -55,6 +55,12 @@ jobs:
           sh -n bin/npx-shim.sh
           sh -n .github/scripts/arena-nightly.sh
           sh -n .github/scripts/release-refs.sh
+          sh -n .github/scripts/no-integration-names.sh
+
+      # cpb depends on no integration (docs/design/integrations.md): its
+      # code, tests and docs name none.
+      - name: Integration names
+        run: sh .github/scripts/no-integration-names.sh
 
       # Which tag commits may be released, and what the npx check says as
       # tags appear, on a throwaway repository (both OSes: BSD tools too).

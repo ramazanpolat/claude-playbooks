@@ -41,6 +41,7 @@ Pages are grouped by what you came for:
 | | |
 |---|---|
 | [Design decisions](design/decisions.md) | the decisions behind the grammar, with when they were made |
+| [Integrations](design/integrations.md) | why cpb depends on no integration, and its generic extension points |
 | [Known issues](known-issues/) | limitations that are known and open |
 
 The behavioral contract is [`SPEC.md`](../SPEC.md) in the repository root;
