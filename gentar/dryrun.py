@@ -18,7 +18,8 @@ the isolation. Suites declaring `credentials` are skipped -- they need a real
 agent and a real key. Suites whose [driver] uses `pick` or `abort` turns, a judged `expect`, or a
 goal pilot come back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
 picker that never matched or a danger gate that never fired must not read as
-a pass.
+a pass. A suite with `bench_only = "<why>"` in [scenario] is UNVERIFIED too,
+with its reason, and is not run (GENTAR_DRYRUN_BENCH_ONLY=run runs it).
 
 The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
@@ -258,7 +259,14 @@ def sealed_path(home: str, hidden: set) -> str:
     return os.pathsep.join(out)
 
 def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
-    sc = TomlScenario(path)
+    # A suite that does not parse is a failure of that suite, reported, and
+    # the sweep goes on: a traceback here ended the whole sweep, and every
+    # later suite went unchecked (agy on #68).
+    try:
+        sc = TomlScenario(path)
+    except Exception as exc:
+        print(f"{path.name}: FAILURE (does not parse: {type(exc).__name__}: {exc})")
+        return 1
     if sc.credentials:
         print(f"{path.name}: SKIPPED (declares credentials; needs a real agent)")
         return 0
@@ -482,6 +490,31 @@ def needs_prepare(path: Path) -> bool:
     return any(s in step for step in steps for s in SKIP_STEP_SUBSTR)
 
 
+def bench_only_of(path: Path):
+    """(readable, declared, reason), read straight from the TOML before the
+    full schema check: a bench-only suite with an unrelated schema error
+    must still never be prepared (Codex on #68). `readable` is False when
+    the file is not TOML or its [scenario] is not a table: such a suite
+    fails in run_one whatever it declares, so it is never prepared either
+    (agy on #68). dryrun.py refuses at import time when it has no TOML
+    parser, so the import below cannot fail."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+    try:
+        with open(path, "rb") as fh:
+            sc = tomllib.load(fh).get("scenario", {})
+    except Exception:
+        return False, False, ""
+    if not isinstance(sc, dict):
+        return False, False, ""
+    if "bench_only" not in sc:
+        return True, False, ""
+    v = sc["bench_only"]
+    return True, True, (v.strip() if isinstance(v, str) else "")
+
+
 def template_of(path: Path):
     """The suite's template, or None when there is nothing to stage for:
     no template, a parse error (run_one reports it), or a suite declaring
@@ -526,7 +559,38 @@ def main() -> int:
         # step and needs your toolchain. The SUITE then runs sealed.
         env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
                    PATH=f"{bindir}:" + os.environ["PATH"])
-        if needs_prepare(p):
+        # A suite only a bench can prove says so, with its reason: reported
+        # UNVERIFIED (phase 1 accepts that; a plain dry-run does not), and
+        # never prepared or run here. GENTAR_DRYRUN_BENCH_ONLY=run runs it
+        # anyway, on a host that has what its reason names.
+        readable, declared, why = bench_only_of(p)
+        if declared and os.environ.get("GENTAR_DRYRUN_BENCH_ONLY") != "run":
+            # It must still parse, and say why: a schema error or an empty
+            # reason is a FAILURE here, never "unverified", or a broken suite
+            # would pass phase 1 behind the key.
+            try:
+                TomlScenario(p)
+                if not why:
+                    raise ValueError("bench_only names no reason")
+            except Exception as exc:
+                print(f"{p.name}: FAILURE (bench only, but the scenario does not parse: {exc})")
+                fails += 1
+                shutil.rmtree(home, ignore_errors=True)
+                continue
+            print(f"{p.name}: UNVERIFIED (bench only: {why})")
+            if os.environ.get("GENTAR_DRYRUN_UNVERIFIED") != "ok":
+                fails += 1
+            shutil.rmtree(home, ignore_errors=True)
+            continue
+        # A suite that does not parse (not TOML, no usable [scenario], a
+        # schema error) fails in run_one whatever it declares, so nothing is
+        # prepared for it (agy on #68).
+        try:
+            TomlScenario(p)
+            parses = True
+        except Exception:
+            parses = False
+        if readable and parses and needs_prepare(p):
             prepare(env)
         # A suite whose bench template supplies tools this host lacks: the
         # repo declares the template in hooks.TEMPLATES, with a stager that

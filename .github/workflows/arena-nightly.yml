@@ -2,18 +2,19 @@
 #
 # Lives outside the kit on purpose: gentar-arena.yml is a kit file that
 # `gentar/run.sh --check` compares byte for byte with the pinned engine's
-# copy, and gentar v0.8.0's kit has no schedule trigger. This workflow only
+# copy, and the kit (v0.9.3) has no schedule trigger. This workflow only
 # dispatches that workflow on a branch; with no scenario, the dispatch is
 # phase 2.
 #
 # Nightlies are drift monitors, not release gates (the pilot's rule of
 # 2026-09-29: a release needs a green full phase 2 on its exact tag commit).
 # Every night this runs phase 2 on the default branch, so drift in the bench
-# image, the agent CLI or a provider shows. Not on a release tag: the kit's
-# plan never gives a `v*` tag the bench (a release is gated by
-# release-gate.sh instead), so a tag dispatch is skipped and would read as
-# green; that happened to v3.25.0 on 2026-09-30. A red on main is fixed like
-# any bug. A manual dispatch with `ref` runs that ref instead.
+# image, the agent CLI or a provider shows. A manual dispatch with `ref` runs
+# that ref instead, a release tag included: since gentar v0.9.1 the kit's
+# plan treats a dispatch on a tag ref as a dispatch, so it runs phase 2 (a
+# drift run of that release). Before, it applied the tag-push rules, which
+# give a `v*` tag no bench, and the skipped run read as green: that happened
+# to v3.25.0 on 2026-09-30. A red on main is fixed like any bug.
 #
 # Each dispatched run is then checked: if its `arena / phase2` job is
 # skipped or absent, this job fails and names the ref and plan's reason

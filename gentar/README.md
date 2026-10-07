@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.8.1` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.9.3` |
 
 ## Quickstart (local)
 
@@ -141,11 +141,11 @@ workflow's first job asks it what this event should run.
 
 | Event | Runs |
 |---|---|
-| pull request | **phase 1**: bench-free checks on a GitHub-hosted runner (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
+| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
 | push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
-| dispatch (no suites), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
+| dispatch (no suites; on any ref, a release tag included: a drift run), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
 | `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
-| `v*` tag | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
+| `v*` tag pushed | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
 
 A fork's pull request never reaches the self-hosted runner, whatever the
 policy says: the bench job checks that from GitHub's own context. Try any
@@ -169,11 +169,29 @@ stranger can write. Set the **floor** to the cheap deterministic suites:
 they run whatever a PR declares, so a narrow pick never costs the guard
 rails.
 
+**Suites that need their bench template's tools.** A dry-run runs on the
+host, so a suite whose `template` bakes in a tool the host lacks (a CLI from
+a private repo, say) cannot pass it. Declare the template in `hooks.py`'s
+`TEMPLATES` with a stager that installs the REAL tool when it can: staged,
+the suite runs; not staged, it reports `UNVERIFIED (template …)` — named,
+never green by stub, never red by harness; a stager that raises is a
+failure. Undeclared templates run as before.
+
+**Suites only a bench can prove.** A suite that deploys a service through
+the bench's Docker (a database, say) cannot be dry-run on the host. Say so in
+the suite, with the reason: `bench_only = "<why>"` in `[scenario]`. The
+dry-run then reports `UNVERIFIED (bench only: <why>)` and does not run or
+prepare it; phase 1 (`--check`) accepts that, a plain dry-run does not, and
+the arena runs it like any other suite. `GENTAR_DRYRUN_BENCH_ONLY=run` runs it
+anyway on a host that has what the reason names. The reason is required:
+an unexplained skip is how checks rot.
+
 **Gating a release.** Make the first job of your release workflow
 
 ```yaml
   arena-gate:
-    runs-on: ubuntu-latest
+    # the same runner as the arena's plan/checks (GENTAR_CI_RUNNER, if set)
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
     permissions: { actions: read, contents: read }
     steps:
       - uses: actions/checkout@v4
@@ -349,6 +367,23 @@ The arena workflow is the kit's, byte for byte — `--check` compares it —
 and does what the run policy says (above). Its `plan` and `checks` jobs
 run on GitHub-hosted runners; only the `bench` job needs a self-hosted
 runner labeled `arena` with Docker + reach to the bench-host.
+
+**No GitHub-hosted minutes, or CI kept in-house?** Set the repository or
+organisation variable `GENTAR_CI_RUNNER` to a JSON runs-on value, e.g.
+`["self-hosted", "linux-ci"]`, and `plan` and `checks` run there instead
+(the plan output's `runner=` line says where). It needs `git`, `python3`
+and `bash`, plus `gh` for the release gate below. Three things change with it set:
+
+- a **fork's** pull request runs nothing at all, not even the checks: its
+  code never reaches a self-hosted runner;
+- `[phase1] os` may only list `ubuntu-latest` (macOS checks need a hosted
+  runner; `plan.py` refuses rather than quietly running Linux);
+- the value may not mention `arena` in any case, not even inside a longer
+  label: the checks run pull request code and the bench runner must never
+  get it. The workflow fails such a run before scheduling anything
+  (`ci-runner-refused`), because runner labels match regardless of case.
+
+The `bench` job is unaffected: it always runs on `arena`.
 GitHub-hosted runners cannot reach an internal bench-host. One-time
 setup, ~5 min on any always-on machine with Docker:
 
@@ -375,6 +410,15 @@ else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
 are absent are skipped and named, not run into a red refusal. It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
+
+**Git history in the bench.** The subject is staged without `.git`: on
+CI it holds the job's auth header. A suite that needs history (one that
+clones an older release tag to test an update) sets `[stage] git = true`
+in `gentar/policy.toml`. The kit then gives the staged copy a fresh `.git`
+from a local clone: every commit and tag, a new config, no remote. The
+engine refuses a subject whose git config still holds a credential. The
+checkout must be full (the kit workflow's bench job uses `fetch-depth: 0`);
+a shallow one is refused.
 
 **Credential grouping.** `credentials` lists *alternatives*. A provider that is
 a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
