@@ -64,9 +64,12 @@ func TestSettingsDryRunCarries(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "k")
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET MODEL 'a';\nALTER PLAYBOOK k UNSET MODEL;\nALTER PLAYBOOK k ALLOW TOOL 'x';\nALTER PLAYBOOK k UNSET TOOL 'x';\n")
+	// SET MODEL is set again by UNSET MODEL, so it is folded away and the
+	// playbook, which has no model, does not change; IF UNSET sees the
+	// status line the statement before it set in the dry run.
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET MODEL 'a';\nALTER PLAYBOOK k UNSET MODEL;\nALTER PLAYBOOK k SET STATUSLINE 'echo a';\nALTER PLAYBOOK k SET STATUSLINE 'echo b' IF UNSET;\n")
 	out, err := apply(t, path, "--dry-run")
-	if err != nil || !strings.Contains(out, "0 created, 4 changed, 0 unchanged") {
+	if err != nil || !strings.Contains(out, "0 created, 1 changed, 3 unchanged") {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
 }

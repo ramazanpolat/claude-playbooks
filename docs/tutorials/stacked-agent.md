@@ -76,7 +76,9 @@ cpb APPLY team.cpb TO reviewer-lab    # the same agent, under another name
 
 A file included twice runs once per target, and applying again changes
 nothing: cpb reads the playbook's plugin, settings and skill state first and
-runs only what is missing. A plugin that wants to run a command its
+runs only what is missing. A layer may set a key a layer below it already
+set, such as the model or a variable: only the last value is written, and
+the plan says which file wins. A plugin that wants to run a command its
 marketplace declares is never accepted for you; the statement fails and shows
 the command to review.
 

@@ -23,6 +23,7 @@
 # for the plugin clauses, and DESCRIBE (29 assertions in all: 28 commands,
 # 1 file).
 # v4.0.0-rc2: a playbook whose manifest cannot be read is contained.
+# Unreleased: a setting set more than once is written once, so a stack converges.
 
 [scenario]
 name = "cli-grammar"
@@ -489,3 +490,20 @@ if cpb SHOW CREATE ALL > /dev/null 2> "$HOME/ur.err"; then echo ur-dump-accepted
 rm -rf "$HOME/.claude-playbooks/urb" && cpb DROP PLAYBOOK ura --yes > /dev/null && cpb SHOW PLAYBOOKS > /dev/null || { echo ur-cleanup; exit 1; }
 echo unreadable-ok'''
 contains = "unreadable-ok"
+
+[[verify.commands]]
+# A setting set more than once is written once (unreleased): a base recipe
+# and a child that sets the same keys again converge (the second APPLY
+# changes nothing), the run names what was overridden and where, and the
+# child's values win.
+command = '''
+D="$HOME/fold"; mkdir -p "$D"
+printf "ALTER PLAYBOOK\n  SET VAR LEVEL=base\n  SET MODEL 'base-model';\n" > "$D/base.cpb"
+printf "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LEVEL=child\n  SET MODEL 'child-model';\n" > "$D/child.cpb"
+cpb CREATE PLAYBOOK fpb NO LAUNCHER >/dev/null || { echo fold-setup; exit 1; }
+cpb APPLY "$D/child.cpb" TO fpb > "$D/first.out" 2>&1 || { echo fold-first; cat "$D/first.out"; exit 1; }
+grep -qF "overridden: SET VAR LEVEL (set again at $D/child.cpb:2), SET MODEL (set again at $D/child.cpb:2)" "$D/first.out" || { echo fold-not-named; cat "$D/first.out"; exit 1; }
+cpb APPLY "$D/child.cpb" TO fpb > "$D/second.out" 2>&1 && grep -q " 0 created, 0 changed, 2 unchanged," "$D/second.out" || { echo fold-not-converged; cat "$D/second.out"; exit 1; }
+J=$(cpb SHOW PLAYBOOK fpb --json | tr -d ' \n'); printf %s "$J" | grep -qF '"model":"child-model"' && printf %s "$J" | grep -qF '"key":"LEVEL","value":"child"' || { echo fold-wrong-winner; exit 1; }
+echo fold-ok'''
+contains = "fold-ok"

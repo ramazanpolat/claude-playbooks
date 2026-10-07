@@ -1577,6 +1577,38 @@ File rules:
 statement against the files as they are plus what earlier statements, in
 any of the files, would have created.
 
+**A setting set more than once is written once.** A stack of files often
+sets one key of one target again: a base recipe, then the child that
+overrides it. Before step 2, `APPLY` drops each clause whose key a later
+statement for the same target replaces outright, so only the last value is
+written. For a list clause (variables, tool rules, sandbox settings), it
+drops only the replaced entries.
+
+| Key | Replaced outright by |
+|---|---|
+| a variable `K` | `SET VAR K=…`, `SET VAR K FROM …`, `BLOCK VAR K`, `UNSET VAR K` |
+| a tool rule `R` | `ALLOW TOOL R`, `DENY TOOL R`, `UNSET TOOL R` |
+| the model; the agent | `SET` / `UNSET MODEL`; `SET` / `UNSET AGENT` |
+| the status line; its refresh | `SET STATUSLINE '<command>'` (not `IF UNSET`), `UNSET STATUSLINE`; `SET` / `UNSET STATUSLINE REFRESH`, and `REFRESH` on `SET STATUSLINE` |
+| a sandbox setting `k` | `SET SANDBOX k=…`, `UNSET SANDBOX k` |
+| the env sets | `USE ENV` |
+
+- **A clause that depends on what it finds** replaces nothing: `SET
+  STATUSLINE … IF UNSET`, `ADD ENV` and `DROP ENV`. Neither does `SET
+  STATUSLINE PREVIOUS`, which reads the history that every earlier status
+  line writes, so no status line clause before it is dropped.
+- **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh.
+- **Every other clause is never dropped:** marketplaces, plugins, MCP
+  servers, skills, the model picker, the login, a bare `SET` / `UNSET
+  SANDBOX`.
+- **The report.** A statement left with nothing to write is reported
+  `unchanged`. The run and the plan name what was dropped and where it is set
+  again (`overridden: SET MODEL (set again at dev.cpb:3)`). `--dry-run
+  --json` lists the same in the statement's `overridden`. Values are never
+  shown.
+- **The effect:** a stack converges. Applying it again reports `0 changed`,
+  and the live configuration never holds a value that a later file replaces.
+
 **Source drift is a warning, never an error**. When
 `CREATE PLAYBOOK IF NOT EXISTS x FROM <source> [BRANCH b] [SUBDIR d]` meets an
 existing `x` whose recorded source, branch or subdirectory differs, `APPLY`
@@ -1644,6 +1676,7 @@ planned as empty.
   - `recipe` is true when TO or USE PLAYBOOK supplied the name.
   - `implicit` is true for the bare `CREATE PLAYBOOK` a missing target gets; its `file` and `line` are the recipe statement's.
   - `warnings` lists every warning the statement raised, each a warning object (below); empty when there is none.
+  - `overridden`, present only when something was dropped from the statement (see *A setting set more than once*), lists each part: `{"clause": "SET MODEL", "by": {"file", "line"}}`. `clause` names the clause and its key, never a value, and `by` locates the statement that sets the key again.
 - **Verdicts:** `created`, `changed`, `unchanged`, `dropped`, `refused`.
 - **Actions**: what a real run would do beyond the playbook's own manifest and env files, which the verdict covers.
   - Paths are absolute. A `./` source is resolved against its file.
@@ -1703,7 +1736,8 @@ statement := … | INCLUDE '<path>'
   checks `APPLY` makes before writing (parsing, secret references, the
   `DROP PLAYBOOK` confirmation) run over the whole expanded set: an error
   they find anywhere means nothing is written. Execution then follows
-  `APPLY`'s rule unchanged: statements in order, each atomic, stopping at
+  `APPLY`'s rule unchanged (a setting set more than once is written once,
+  see *A setting set more than once*): statements in order, each atomic, stopping at
   the first failure with what was applied reported; there is no rollback of
   what ran before. Reports locate each statement as `file:line`.
 - **File identity** is the fully resolved path (symlinks resolved, made

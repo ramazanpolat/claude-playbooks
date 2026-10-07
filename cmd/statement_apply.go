@@ -69,6 +69,10 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	if err != nil {
 		return usage(err)
 	}
+	// A setting set more than once for one target is written once, with
+	// the last value (SPEC.md, "A setting set more than once").
+	fold := foldStatements(stmts)
+	stmts = fold.stmts
 	// A plain config directory is not a playbook: applying to one is
 	// confirmed on a terminal, or by --yes, before anything runs.
 	if strings.HasPrefix(l.to, dirMark) && !st.DryRun && !st.Yes {
@@ -186,7 +190,7 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	}
 	counts := map[string]int{}
 	done := map[string]int{} // statements applied per file
-	for _, x := range stmts {
+	for i, x := range stmts {
 		s := x.s
 		r.outcome, r.note, r.warnings, r.actions = "", "", nil, nil
 		where := fmt.Sprintf("%s:%d", x.file, s.Pos.Line)
@@ -195,10 +199,31 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 			fmt.Printf("-- %s: %s\n", where, head)
 		}
 		entry := func(verdict string) applyStmtJSON {
-			return applyStmtJSON{File: x.path, Line: s.Pos.Line, Statement: head, Verb: string(s.Verb), Object: string(s.Object),
+			e := applyStmtJSON{File: x.path, Line: s.Pos.Line, Statement: head, Verb: string(s.Verb), Object: string(s.Object),
 				Target: stmtTarget(s), Recipe: x.recipe, Implicit: x.implicit, Verdict: verdict, Warnings: []applyWarning{}, Actions: nonNilActions(r.actions)}
+			for _, o := range fold.over[i] {
+				w := stmts[o.by]
+				e.Overridden = append(e.Overridden, applyOverride{Clause: o.what, By: applyLocation{File: w.path, Line: w.s.Pos.Line}})
+			}
+			return e
 		}
-		if err := execStatement(r, s); err != nil {
+		var err error
+		if fold.skip[i] {
+			r.outcome = outUnchanged // every clause is set again later: nothing to write
+		} else {
+			err = execStatement(r, s)
+		}
+		if len(fold.over[i]) > 0 {
+			note := overriddenNote(fold.over[i], stmts)
+			if r.note != "" {
+				note = r.note + "; " + note
+			}
+			r.note = note
+			if !st.DryRun && err == nil {
+				fmt.Println("  " + note)
+			}
+		}
+		if err != nil {
 			if st.DryRun {
 				if rep != nil {
 					e := entry(verdictRefused)

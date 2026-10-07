@@ -209,11 +209,12 @@ func TestPluginDryRunCarriesState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
-	// UNSET AGENT after SET AGENT changes something, and the renamed
-	// playbook still has the plugin to uninstall.
+	// SET AGENT is set again by UNSET AGENT, so it is folded away and the
+	// playbook, which has no agent, does not change; the renamed playbook
+	// still has the plugin to uninstall.
 	for _, want := range []string{
 		"would run: claude plugin uninstall toolkit@toolkit --scope user --keep-data --json",
-		"0 created, 4 changed, 0 unchanged, 0 dropped",
+		"0 created, 2 changed, 2 unchanged, 0 dropped",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run missing %q:\n%s", want, out)
