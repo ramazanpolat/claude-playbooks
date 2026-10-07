@@ -10,9 +10,9 @@ cd "$(dirname "$0")/../.."
 
 # The names, as extended regular expressions matched without case.
 names='pilot[-_. ]?profile
-oi[-_]costume
-oi[-_]wear
-statusmux
+oi[-_. ]?costume
+oi[-_. ]?wear
+status[-_. ]?mux
 kommander'
 
 pattern=$(printf '%s\n' "$names" | paste -sd '|' -)
