@@ -74,7 +74,7 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
 	want := strings.Join([]string{"local", "--input-format", "JSONEachRow", "--structure", selectTables["PLAYBOOKS"].structure,
 		"--date_time_input_format", "best_effort", "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0", "--output_format_json_quote_64bit_integers=0",
-		"-q", "SELECT name FROM (SELECT * EXCEPT (play), " + versionTupleSQL + " AS version_tuple, play FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
+		"-q", "SELECT name FROM (SELECT * EXCEPT (play, apply), " + versionTupleSQL + " AS version_tuple, play, apply FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
 	if string(args) != want {
 		t.Fatalf("args:\n%s\nwant:\n%s", args, want)
 	}

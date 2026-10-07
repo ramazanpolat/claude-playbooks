@@ -278,6 +278,26 @@ type Manifest struct {
 	// Play records where a kept played recipe came from, so `cpb update`
 	// can fetch it again (v4.0.0; docs/guides/play.md).
 	Play *Play `toml:"play,omitempty"`
+
+	// Apply records the files APPLY last applied to this playbook as a
+	// target, so `cpb update` can apply them again (SPEC.md, "cpb update").
+	Apply *Apply `toml:"apply,omitempty"`
+}
+
+// Apply is the [apply] record: the root files of the last APPLY that gave
+// this playbook name-less statements. What those statements wrote is kept
+// beside it, references only, in .apply/recipe.cpb.
+type Apply struct {
+	// Files are the files named on the command line, fully resolved, in
+	// order.
+	Files []string `toml:"files"`
+	// To is whether they were applied with TO this playbook; otherwise
+	// their USE PLAYBOOK lines named it.
+	To bool `toml:"to,omitempty"`
+	// SHA256 is the record's, .apply/recipe.cpb.
+	SHA256 string `toml:"sha256"`
+	// AppliedAt is when, in RFC 3339, UTC.
+	AppliedAt string `toml:"applied_at"`
 }
 
 // Play is the [play] record of a playbook `cpb play --keep` built.
@@ -698,6 +718,15 @@ func Write(dir string, m *Manifest) error {
 		}
 		fmt.Fprintf(&b, "sha256 = %s\n", QuoteTOML(m.Play.SHA256))
 		fmt.Fprintf(&b, "played_at = %s\n", QuoteTOML(m.Play.PlayedAt))
+	}
+	if m.Apply != nil {
+		b.WriteString("\n[apply]\n")
+		writeTOMLList(&b, "files", m.Apply.Files)
+		if m.Apply.To {
+			b.WriteString("to = true\n")
+		}
+		fmt.Fprintf(&b, "sha256 = %s\n", QuoteTOML(m.Apply.SHA256))
+		fmt.Fprintf(&b, "applied_at = %s\n", QuoteTOML(m.Apply.AppliedAt))
 	}
 	// Values under [env.set] can be bearer tokens or API keys, so a manifest
 	// carrying any is written private, like an env set. Existing files

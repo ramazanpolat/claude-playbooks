@@ -82,8 +82,11 @@ type playbookJSON struct {
 	Model             *string         `json:"model"`
 	ModelPicker       *pickerJSON     `json:"model_picker"`
 	// Play is the [play] record of a playbook `cpb play --keep` built, null
-	// for every other. Last.
+	// for every other.
 	Play *playRecordJSON `json:"play"`
+	// Apply is the [apply] record of a playbook an APPLY gave name-less
+	// statements, null for every other. Last.
+	Apply *applyRecordJSON `json:"apply"`
 }
 
 // sandboxJSON is a playbook's [sandbox] table: always, then each setting,
@@ -144,6 +147,13 @@ type playRecordJSON struct {
 	URL      string `json:"url"`
 	SHA256   string `json:"sha256"`
 	PlayedAt string `json:"played_at"`
+}
+
+type applyRecordJSON struct {
+	Files     []string `json:"files"`
+	To        bool     `json:"to"`
+	SHA256    string   `json:"sha256"`
+	AppliedAt string   `json:"applied_at"`
 }
 
 type envJSON struct {
@@ -297,6 +307,10 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	if pb.Manifest != nil && pb.Manifest.Play != nil {
 		p := pb.Manifest.Play
 		v.Play = &playRecordJSON{Ref: p.Ref, URL: p.URL, SHA256: p.SHA256, PlayedAt: p.PlayedAt}
+	}
+	if pb.Manifest != nil && pb.Manifest.Apply != nil {
+		a := pb.Manifest.Apply
+		v.Apply = &applyRecordJSON{Files: nonNil(a.Files), To: a.To, SHA256: a.SHA256, AppliedAt: a.AppliedAt}
 	}
 	// What the playbook's settings.json declares; an unreadable file shows
 	// none rather than failing the whole SHOW.
@@ -459,6 +473,9 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	}
 	if v.Play != nil {
 		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.PlayedAt, v.Name)})
+	}
+	if v.Apply != nil {
+		rows = append(rows, [2]string{"Applied from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", strings.Join(v.Apply.Files, ", "), shortSHA(v.Apply.SHA256), v.Apply.AppliedAt, v.Name)})
 	}
 	// Shown when the playbook has any, so the rest of the layout stays as
 	// it was for the playbooks that have none.

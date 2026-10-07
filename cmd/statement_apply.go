@@ -25,12 +25,18 @@ func runApply(st *grammar.Stmt) error {
 	if st.JSON {
 		return runApplyJSON(st)
 	}
-	return applyRun(st, nil)
+	return applyRunIn(st, nil, &applyScope{record: true})
 }
 
-// applyRun runs APPLY. rep, when set, collects the --json plan; errors are
-// classed for it (applyFailure), their text unchanged.
+// applyRun runs APPLY for cpb's own callers, which record nothing.
 func applyRun(st *grammar.Stmt, rep *applyReport) error {
+	return applyRunIn(st, rep, nil)
+}
+
+// applyRunIn runs APPLY. rep, when set, collects the --json plan; errors are
+// classed for it (applyFailure), their text unchanged. sc, when set, records
+// the run for cpb update, or narrows it to what cpb update runs.
+func applyRunIn(st *grammar.Stmt, rep *applyReport, sc *applyScope) error {
 	l := &applyLoader{seen: map[string]bool{}, seenFor: map[string]bool{}, total: map[string]int{}, pathOf: map[string]string{}}
 	if st.Target != "" {
 		name, err := resolveTarget(st.Target)
@@ -69,6 +75,12 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 	if err != nil {
 		return usage(err)
 	}
+	if sc != nil && sc.only != "" {
+		if stmts, err = sc.narrow(stmts); err != nil {
+			return usage(err)
+		}
+	}
+	all := stmts // as loaded, for the [apply] records
 	// A setting set more than once for one target is written once, with
 	// the last value (SPEC.md, "A setting set more than once").
 	fold := foldStatements(stmts)
@@ -194,6 +206,9 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		s := x.s
 		r.outcome, r.note, r.warnings, r.actions = "", "", nil, nil
 		where := fmt.Sprintf("%s:%d", x.file, s.Pos.Line)
+		if s.Pos.Line == 0 { // cpb update's undo, from no file
+			where = x.file
+		}
 		head := stmtHead(s)
 		if !st.DryRun {
 			fmt.Printf("-- %s: %s\n", where, head)
@@ -285,6 +300,9 @@ func applyRun(st *grammar.Stmt, rep *applyReport) error {
 		summary += fmt.Sprintf(", %d warning(s)", n)
 	}
 	fmt.Println(summary)
+	if sc != nil && sc.record && !st.DryRun {
+		return writeApplyRecords(st, l.to, all)
+	}
 	return nil
 }
 

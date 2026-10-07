@@ -48,7 +48,7 @@ var versionRe = regexp.MustCompile(versionPattern)
 
 // playbooksLateColumns are the PLAYBOOKS columns clickhouse-local's
 // SELECT * lists after the computed version_tuple, where they were appended.
-var playbooksLateColumns = []string{"play"}
+var playbooksLateColumns = []string{"play", "apply"}
 
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
@@ -57,11 +57,11 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
 		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "isolated_login",
-			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "play"},
+			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "play", "apply"},
 		structure: "name String, version Nullable(String), description Nullable(String), homepage Nullable(String), author Nullable(String), " +
 			"path String, last_used Nullable(DateTime64(3, 'UTC')), source JSON, migrate Nullable(String), linked Nullable(String), " +
 			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
-			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, play JSON",
+			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, play JSON, apply JSON",
 		comments: map[string]string{
 			"name":               "The playbook's name.",
 			"version":            "The manifest's version; null when it has none.",
@@ -91,6 +91,7 @@ var selectTables = map[string]selectTable{
 			"model":              "The playbook's default model (SET MODEL); null when unset.",
 			"model_picker":       "The model picker: mode (only or append) and options; null when unset.",
 			"play":               "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
+			"apply":              "The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other.",
 		},
 		rows: playbookRows,
 	},

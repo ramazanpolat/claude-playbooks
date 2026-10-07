@@ -184,6 +184,11 @@ itself, so layers stack; see
 
 ## Update
 
+A playbook built by `APPLY` (the files gave it name-less statements) updates
+from those files: `cpb update <name>` applies them again and removes what
+they no longer set (see [the `[apply]` record](../../SPEC.md#the-apply-record)).
+The rest of this section is about a playbook installed from a source.
+
 Update pulls the playbook from the source recorded in its `.playbook`:
 
 ```bash

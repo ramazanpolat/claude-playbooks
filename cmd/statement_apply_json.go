@@ -275,6 +275,11 @@ func usage(err error) error { return &applyFailure{code: 2, err: err} }
 // runApplyJSON runs APPLY with its human output sent to stderr, and prints
 // the plan as JSON on stdout, refusals included.
 func runApplyJSON(st *grammar.Stmt) error {
+	return runApplyJSONIn(st, nil)
+}
+
+// runApplyJSONIn is runApplyJSON narrowed as sc says (cpb update).
+func runApplyJSONIn(st *grammar.Stmt, sc *applyScope) error {
 	rep := &applyReport{Files: []string{}, Warnings: []applyWarning{}, Statements: []applyStmtJSON{}}
 	code := 0
 	var err error
@@ -283,7 +288,7 @@ func runApplyJSON(st *grammar.Stmt) error {
 	} else {
 		stdout := os.Stdout
 		os.Stdout = os.Stderr
-		err = applyRun(st, rep)
+		err = applyRunIn(st, rep, sc)
 		os.Stdout = stdout
 	}
 	if err != nil {

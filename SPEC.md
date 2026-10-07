@@ -1064,12 +1064,17 @@ a custom playbooks root, where cpb writes no launchers; a recorded
 `LAUNCHER` is reported wherever it is. `version` is the manifest's, null when it has none: cpb never
 writes a version nobody gave.
 
-**`play`** is the object's last field. It is the `[play]` record of a
+**`play`** is the `[play]` record of a
 playbook `cpb play --keep` built, and `null` for every other:
 `{"ref", "url", "sha256", "played_at"}`. `ref` is what `cpb update <name>`
 fetches again (a template name, a URL, a `github:` ref, or a local file's
 absolute path); `url` is empty for a local file; `played_at` is RFC 3339,
 UTC. The human form has a `Played from:` line.
+
+**`apply`** is the object's last field. It is the `[apply]` record of a
+playbook an `APPLY` gave name-less statements, and `null` for every other:
+`{"files", "to", "sha256", "applied_at"}` (see *The `[apply]` record*). The
+human form has an `Applied from:` line.
 
 ### SHOW PLAYBOOKS
 
@@ -1337,6 +1342,7 @@ code to the same lines):
 | `model` | `Nullable(String)` | The playbook's default model (SET MODEL); null when unset. |
 | `model_picker` | `JSON` | The model picker: mode (only or append) and options; null when unset. |
 | `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
+| `apply` | `JSON` | The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other. |
 
 **`ENVS`**
 
@@ -1880,6 +1886,44 @@ run says which files would be created rather than backed up. Applying to a
 directory that is not a playbook asks for confirmation on a terminal, and
 `--yes` gives it (as for `DROP PLAYBOOK`); without a terminal and without
 `--yes` it is refused before anything is written. `--dry-run` works as it does for a playbook and names the backups it would make.
+
+### The `[apply]` record
+
+An `APPLY` that gives a playbook name-less statements, by `TO` or by `USE
+PLAYBOOK`, records it in that playbook, so `cpb update <name>` can apply the
+files again and remove what they no longer set (see *`cpb update <name>`*):
+
+- `<playbook>/.apply/recipe.cpb` (mode 0600) holds what those statements
+  wrote: the playbook's name-less statements after the fold (*A setting set
+  more than once*), name-less again. **It holds references only.** A
+  credential-looking literal is kept as `<withheld>`, with its key, and a
+  URL's credential as `withheld@`, by the test `SHOW CREATE` withholds with.
+- The manifest gains:
+
+  ```toml
+  [apply]
+  files = ["/home/me/agents/reviewer.cpb"]   # the files named on the command line, fully resolved
+  to = true                                   # applied with TO this playbook; absent when USE PLAYBOOK named it
+  sha256 = "9c0e…41"                          # of .apply/recipe.cpb
+  applied_at = "2026-10-07T12:00:00Z"
+  ```
+
+Each such `APPLY` replaces the record. When it names other files, the run
+says so: `Note: cpb update <name> now applies <files> again (it applied
+<old files>).` Nothing is recorded:
+
+- by `--dry-run`;
+- for a statement that names its playbook (a machine's setup, `SHOW
+  CREATE`'s output): only a target's name-less statements are recorded;
+- for a directory target, which has no manifest;
+- for a playbook that updates from a `[play]` or `[source]` record. The run
+  says so: `Note: <name> updates from its [source], so this APPLY is not
+  recorded for cpb update.`;
+- when a file named on the command line is not a regular file (a pipe),
+  which cannot be read again. The run says so;
+- when the run fails part-way. The record stays as it was.
+
+`SHOW PLAYBOOK` shows the record: `Applied from:`, and `apply` in `--json`.
 
 ## Commands
 
@@ -2440,7 +2484,7 @@ When a long-lived token file exists, a trailing line names it and notes that its
 
 ### `cpb update <name>`
 
-Updates a playbook from where it came from: a playbook kept by `cpb play` (a `[play]` record) fetches its recorded recipe again (see *`cpb play`*); any other updates from the `[source]` metadata recorded in its `.playbook`. The CLI owns the update end to end.
+Updates a playbook from where it came from: a playbook kept by `cpb play` (a `[play]` record) fetches its recorded recipe again (see *`cpb play`*); one with `[source]` metadata in its `.playbook` updates from that source; one an `APPLY` gave name-less statements (an `[apply]` record) gets those files applied again. The CLI owns the update end to end.
 
 ```bash
 cpb update sre --dry-run   # versions and the migrate step; changes nothing
@@ -2448,7 +2492,7 @@ cpb update sre             # asks about a migrate step on a terminal
 cpb update sre --yes       # off a terminal: runs a declared migrate step
 ```
 
-`--json`, `--sha256`, `--trust-endpoint` and `--trust-secret` apply to a played playbook only, as for `cpb play`.
+`--sha256`, `--trust-endpoint` and `--trust-secret` apply to a played playbook only, as for `cpb play`. `--json`, with `--dry-run`, applies to a played or an applied one.
 
 **`cpb update <name>`** fetches a kept playbook's recorded ref again:
 - the same sha256: "`<name>` is unchanged", and nothing runs;
@@ -2460,8 +2504,30 @@ cpb update sre --yes       # off a terminal: runs a declared migrate step
   the agent, model, picker and status line; plugins before their
   marketplace; a login is never unset), the new bytes are applied, and the
   record is updated;
-- a playbook with neither a `[play]` nor a `[source]` record has nothing to
-  update.
+- a playbook with none of a `[play]`, a `[source]` and an `[apply]` record
+  has nothing to update.
+
+**`cpb update <name>` with an `[apply]` record** reads the recorded files
+again as `APPLY` would (`TO <name>` when the record has `to`), and runs only
+the name-less statements they give `<name>`. Statements for other
+playbooks, and those that name their playbook, are not run:
+- first the line diff from the record (`Changes since the last APPLY (sha256
+  <old> to <new>):`), or a line saying the files give it the statements they
+  gave it at the last `APPLY`;
+- then one `ALTER PLAYBOOK <name>`, listed as `undo`, removes what the record
+  says the files wrote and they no longer write the same way: the clauses
+  the update of a played playbook undoes, above. So a clause a base file
+  dropped is removed from every playbook built on it, at that playbook's
+  update. A removal of a key the files still set is folded away (*A setting
+  set more than once*);
+- then the statements run, and the record is rewritten;
+- `--dry-run` shows the diff and the plan and writes nothing. With `--json`
+  the plan is `APPLY --dry-run --json`'s, the undo first, with the record's
+  path as its `file` and `0` as its `line`. There is nothing to confirm, as
+  for `APPLY`;
+- files that no longer give `<name>` a name-less statement are refused
+  (`the recorded files give <name> no name-less statements now …`), and so
+  is a missing record file. Nothing is written.
 
 **Behaviour (`[source]`):**
 1. Resolve the named playbook and require `[source].repository` metadata.
@@ -2480,7 +2546,7 @@ cpb update sre --yes       # off a terminal: runs a declared migrate step
 **Errors:**
 - No name → `update takes one playbook name: cpb update <name> (cpb self-update updates cpb itself)`
 - Target not found → `unknown playbook "sre". `cpb SHOW PLAYBOOKS` lists them`
-- Neither record → `"sre" has no [source] or [play] record in .playbook; nothing to update from`
+- No record → `"sre" has no [source], [play] or [apply] record in .playbook; nothing to update from`
 - Linked install → `"sre" is linked; native update is disabled to avoid replacing its external source`
 - Subdir-selected install → `"sre" uses manifest subdir "...": native update requires a flat playbook`
 - A played-playbook flag on a `[source]` one → `--json applies to a playbook kept by cpb play; sre updates from its [source]`
@@ -2690,6 +2756,7 @@ preserve = ["settings.json"]
 | `sandbox.allow_net` | Optional list of hosts (domains, wildcards, CIDR ranges, no whitespace) allowed for this playbook's sandbox on top of the active sandbox policy, applied once when the sandbox is created. The host of an `ANTHROPIC_BASE_URL` the effective environment sets is allowed automatically. |
 | `sandbox.claude_version` | Optional Claude Code version (`2.1.263`) installed inside the sandbox at creation; empty runs the sandbox image's own. A playbook routed to a backend that rejects a newer Claude Code's tool schemas pins the last version that works. |
 | `play.ref`, `play.url`, `play.sha256`, `play.played_at` | Written by `cpb play --keep`: where the playbook's recipe came from. `ref` is what `cpb update <name>` resolves again (a template name, an https URL, a `github:` ref, or a local file's absolute path); `url` the address the bytes were read from (absent for a local file); `sha256` the recipe's; `played_at` when, in RFC 3339, UTC. The bytes themselves are kept as `.play/recipe.cpb` in the playbook. `cpb update <name>` rewrites both when it applies new bytes. See *`cpb play`*. |
+| `apply.files`, `apply.to`, `apply.sha256`, `apply.applied_at` | Written by `APPLY` for a playbook it gave name-less statements: the files named on the command line, fully resolved; `to` when they were applied with `TO` this playbook; `sha256` of `.apply/recipe.cpb`, which holds what the statements wrote, references only; `applied_at` when, in RFC 3339, UTC. `cpb update <name>` applies the files again and rewrites both. See *The `[apply]` record*. |
 
 **Unknown keys are refused.** A key the manifest does not define is an error naming it and its line, `unknown key "<key>" in <path>:<line>`, one per key. The playbook does not launch, and every statement that names it is refused with that error; the other playbooks are not affected (*Unreadable manifests*, below). A manifest written for another version of cpb fails loudly instead of being read in part.
 
@@ -2987,6 +3054,6 @@ Error: playbook "myrepo" already exists (write CREATE PLAYBOOK IF NOT EXISTS to 
 Error: unknown playbook "typo". `cpb SHOW PLAYBOOKS` lists them
 Error: 'claude' command not found. Install Claude Code first: https://claude.ai/download
 Error: source.subdir "playbooks/sre" not found below /tmp/stage: lstat /tmp/stage/playbooks: no such file or directory
-Error: "sre" has no [source] or [play] record in .playbook; nothing to update from
+Error: "sre" has no [source], [play] or [apply] record in .playbook; nothing to update from
 Error: invalid .playbook at ~/.claude-playbooks/foo/.playbook: TOML syntax error at line 3 (content not shown)
 ```

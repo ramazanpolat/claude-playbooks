@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cpb update` follows the files a playbook was applied from** (SPEC.md,
+  *The `[apply]` record*). A clause a base file dropped used to stay in every
+  playbook built on it until removed by hand.
+  - An `APPLY` that gives a playbook name-less statements (by `TO` or `USE
+    PLAYBOOK`) records the files in its manifest as `[apply]`, and what the
+    statements wrote in `.apply/recipe.cpb`. The record holds references
+    only: a credential-looking literal is kept as `<withheld>`.
+  - `cpb update <name>` reads the files again and runs only the statements
+    they give `<name>`. First, one `ALTER PLAYBOOK` removes what they wrote
+    last time and no longer write the same way: the same undo as a played
+    playbook's update. A status line `SET STATUSLINE … IF UNSET` offered is
+    removed only where the files wrote it. `--dry-run` shows the line diff
+    and the plan; `--json` gives the plan as `APPLY --dry-run --json` does.
+  - Not recorded: a dry run, a directory target, files from a pipe, a
+    statement that names its playbook, and a playbook that updates from
+    `[play]` or `[source]`.
+  - `SHOW PLAYBOOK` has an `Applied from:` line, and a new last field
+    `apply` in `--json`. `SELECT` has a new `apply` column. The error for a
+    playbook with nothing to update from now names `[apply]`.
+
 ### Changed
 
 - **A setting set more than once is written once** (SPEC.md, *A setting set
