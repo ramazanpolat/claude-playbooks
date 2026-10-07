@@ -1117,10 +1117,39 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 ```
 {"playbook": "work",
  "vars": [{<variable>, "layer": {"kind": "env", "name": "router"}}, ...],
- "secret_helper": {"command": "...", "from": "setting"} | null}
+ "secret_helper": {"command": "...", "from": "setting"} | null,
+ ...,
+ "route": {"base_url": "http://127.0.0.1:20128/v1" | null, "host": "127.0.0.1:20128" | null,
+           "models": {"default": "glm-5.3", "opus": "evren/glm-5.3"},
+           "auth": "none" | "token-set" | "oauth-login" | "unknown",
+           "egress": "anthropic" | "unknown"}}
 ```
 
 `layer.kind` is `defaults` (with `name` the env set), `env` or `playbook`.
+
+**`route`** (v4.0.0) says where a launch's requests go and how it
+authenticates, from non-secret values only. No reference is resolved and no
+credential is read to answer it.
+- **`base_url` and `host`:** the effective `ANTHROPIC_BASE_URL`, its userinfo
+  removed (absent, not masked). Both are `null` when it is unset (Anthropic's
+  own endpoint) or when a reference sets it.
+- **`models`:** `default` is the launch's model (`ANTHROPIC_MODEL`, else the
+  playbook's settings), plus one entry per `ANTHROPIC_DEFAULT_<NAME>_MODEL`,
+  lowercased.
+- **`auth`:**
+  - `token-set` when `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
+    `CLAUDE_CODE_OAUTH_TOKEN` is set (a value or a reference) and not blocked,
+    or a machine or playbook token is in effect;
+  - otherwise `oauth-login` when the login `auth status` reports is in the
+    store or in the Keychain;
+  - `unknown` when the Keychain could not be asked (never `none`);
+  - `none` otherwise.
+- **`egress`:** `anthropic` for `https://api.anthropic.com`, or no base URL
+  with neither Bedrock nor Vertex switched on. `unknown` otherwise; cpb names
+  no other class.
+
+An unreadable env set or manifest makes `EXPLAIN` fail with that error rather
+than answer.
 
 ### Redaction
 
@@ -2474,12 +2503,12 @@ cpb auth status --claude        # add 'claude auth status --json' per directory
 | `STORE` | What sits at `.credentials.json`: `symlink -> <target>`, `file`, `file (no grant)`, or `absent`. |
 | `EXPIRES` | The stored grant's `expiresAt` as `in 6h12m`, `expired`, `unknown`, or `-` when there is no grant. |
 | `DAEMON` | Claude Code's `daemon-auth-status.json`: `auth_required` when its `since` is at or after the current grant's refresh instant (`expiresAt` minus 4 minutes, the daemon's proactive-refresh lead) and the row is a stored-login mode, `<status> (stale)` otherwise (the file is never cleared on recovery; under a token mode the stored login is quarantined and unused; for an isolated playbook whose store is still a symlink to the shared one, the marker concerns a login the launch detaches, so it never counts against that playbook), `-` when absent. |
-| `NOTE` | `launch refused` (with a sanitized reason: no file content is ever echoed), `re-auth required`, `no login; stale account state, purged at launch` (an isolated playbook without a login of its own still carrying `oauthAccount` or cached feature flags; `--json` lists them under `stale_identity`), `stale account state, purged at launch (the shared login is detached at launch)` (the same, for an isolated playbook whose store is still a symlink to the shared one), `no login`, `grant expired (refreshes at launch if the refresh token is still valid)`, or empty. Token modes have no stored login to judge and show nothing. An explicitly empty token set by the manifest or an env set is `shared-login (token blocked)`, matching the launch decision. |
+| `NOTE` | `launch refused` (with a sanitized reason: no file content is ever echoed), `re-auth required`, `no login; stale account state, purged at launch` (an isolated playbook without a login of its own still carrying `oauthAccount` or cached feature flags; `--json` lists them under `stale_identity`), `stale account state, purged at launch (the shared login is detached at launch)` (the same, for an isolated playbook whose store is still a symlink to the shared one), `login in the Keychain (used at launch)` (no grant in the store, but Claude Code's Keychain item for this login exists: on macOS a login lives in the Keychain, under `Claude Code-credentials` for the machine and `Claude Code-credentials-<first 8 hex of sha256(CLAUDE_CONFIG_DIR)>` for a playbook, probed for presence only, never read), `login unknown (Keychain not readable)` (the probe could not answer), `no login`, `grant expired (refreshes at launch if the refresh token is still valid)`, or empty. Token modes have no stored login to judge and show nothing. An explicitly empty token set by the manifest or an env set is `shared-login (token blocked)`, matching the launch decision. |
 | `CLAUDE` | With `--claude`: `logged in, <subscription>`, `not logged in`, or `error: <reason>`. |
 
 When a long-lived token file exists, a trailing line names it and notes that its own expiry is not recorded anywhere.
 
-`--json` emits one object per row with the raw fields (`name`, `dir`, `mode`, `mode_error`, `token_blocked`, `isolated_login`, `store`, `store_target`, `has_grant`, `expires_at`, `expired`, `daemon_status`, `daemon_since`, `reauth_required`, `stale_identity` (when non-empty), `token_file`, and `claude` when requested: `logged_in`, `subscription_type`, `auth_method`, or `error`). Times are RFC 3339 in UTC. `reauth_required` is only ever true for a stored-login mode with a grant present whose `expiresAt` is known and a marker whose `since` is known; a marker that cannot be ordered against the grant is reported as stale.
+`--json` emits one object per row with the raw fields (`name`, `dir`, `mode`, `mode_error`, `token_blocked`, `isolated_login`, `store`, `store_target`, `has_grant`, `expires_at`, `expired`, `daemon_status`, `daemon_since`, `reauth_required`, `stale_identity` (when non-empty), `token_file`, `keychain` (`present`, `absent` or `unknown`, set only for a stored-login mode whose store holds no grant), and `claude` when requested: `logged_in`, `subscription_type`, `auth_method`, or `error`). Times are RFC 3339 in UTC. `reauth_required` is only ever true for a stored-login mode with a grant present whose `expiresAt` is known and a marker whose `since` is known; a marker that cannot be ordered against the grant is reported as stale.
 
 **Errors:**
 - Named playbook not found → `unknown playbook "x". `cpb SHOW PLAYBOOKS` lists them`

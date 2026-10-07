@@ -183,6 +183,9 @@ type explainJSON struct {
 	Tools        toolsJSON   `json:"tools"`
 	Model        *modelJSON  `json:"model"`
 	Agent        *agentJSON  `json:"agent"`
+	// Route is where a launch's requests go and how it authenticates, built
+	// from non-secret values only (v4.0.0, oi-costume#1).
+	Route routeJSON `json:"route"`
 }
 
 // agentJSON is the agent a launch starts as, when the playbook names one.
@@ -666,8 +669,9 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	}
 	plugins, agent := launchPlugins(pb)
 	if st.JSON {
+		model := launchModel(pb, vars)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
-			Tools: describePlaybook(pb).Tools, Model: launchModel(pb, vars)})
+			Tools: describePlaybook(pb).Tools, Model: model, Route: launchRoute(pb, origins, model)})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)

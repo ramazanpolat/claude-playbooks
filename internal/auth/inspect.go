@@ -80,6 +80,10 @@ type Report struct {
 	ReauthRequired bool `json:"reauth_required"`
 	// TokenFile is the machine-global token file when it exists and is non-empty.
 	TokenFile string `json:"token_file,omitempty"`
+	// Keychain is set for a stored-login launch whose file store holds no
+	// grant: whether Claude Code's Keychain item for it exists (macOS),
+	// probed for presence only. Empty when the store answered.
+	Keychain KeychainState `json:"keychain,omitempty"`
 }
 
 // MarshalJSON emits the report with expires_at and daemon_since present only
@@ -210,6 +214,9 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	} else {
 		r.Store = StoreAbsent
 	}
+	if r.usesStoredLogin() && !r.HasGrant {
+		r.Keychain = keychainLogin(configDir, r.Mode == ModeSharedLogin, raw)
+	}
 
 	// The pending removal is judged exactly as the launch will judge it:
 	// a symlinked (shared) store is detached first, so a grant reached only
@@ -279,11 +286,11 @@ func (r Report) NeedsAttention() string {
 	case r.ReauthRequired:
 		return "re-auth required"
 	case len(r.StaleIdentity) > 0 && !r.HasGrant:
-		return "no login; stale account state, purged at launch"
+		return r.noGrantNote() + "; stale account state, purged at launch"
 	case len(r.StaleIdentity) > 0:
 		return "stale account state, purged at launch (the shared login is detached at launch)"
 	case !r.HasGrant:
-		return "no login"
+		return r.noGrantNote()
 	case r.Expired:
 		return "grant expired (refreshes at launch if the refresh token is still valid)"
 	}
@@ -326,4 +333,17 @@ func GlobalDir() (string, error) {
 		return "", ErrNoGlobal
 	}
 	return d, nil
+}
+
+// noGrantNote says where the login is when the file store holds none: in
+// the Keychain, which the launch uses; unknown when it could not be asked;
+// else none at all.
+func (r Report) noGrantNote() string {
+	switch r.Keychain {
+	case KeychainPresent:
+		return "login in the Keychain (used at launch)"
+	case KeychainUnknown:
+		return "login unknown (Keychain not readable)"
+	}
+	return "no login"
 }
