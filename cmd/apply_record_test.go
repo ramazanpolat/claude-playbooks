@@ -332,3 +332,53 @@ func TestApplyRecordDeferredStatusline(t *testing.T) {
 		t.Fatalf("the status line the files wrote was kept: %v", *sl)
 	}
 }
+
+// A linked playbook's manifest belongs to its target: an APPLY that runs
+// there (only a lifecycle clause does) records nothing in it.
+func TestApplyRecordNotForLinked(t *testing.T) {
+	sandboxDefaultRoot(t)
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "CLAUDE.md"), []byte("# target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(target, &manifest.Manifest{Name: "target"}); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK lk NO LAUNCHER LINK '"+target+"'") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := writeCpb(t, t.TempDir(), "r.cpb", "ALTER PLAYBOOK NO LAUNCHER;\n")
+	out, err := apply(t, f, "TO", "lk")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Note: lk is linked, and its manifest belongs to the target, so this APPLY is not recorded for cpb update.") {
+		t.Fatalf("no note:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(target, filepath.Dir(applyRecordFile))); !os.IsNotExist(err) {
+		t.Fatalf("the record reached the link's target: %v", err)
+	}
+	if m, _ := manifest.Read(target); m != nil && m.Apply != nil {
+		t.Fatalf("the target's manifest got [apply]: %+v", m.Apply)
+	}
+}
+
+// A playbook with no record says so, whatever the flags (agy, #212): a
+// flag is not answered with "updates from its [source]".
+func TestUpdateNoRecordWithFlags(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "bare", nil)
+	if err := updateCmd.Flags().Set("sha256", "abc"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		updateSHA256 = ""
+		updateCmd.Flags().Lookup("sha256").Changed = false
+	})
+	err := runUpdate(updateCmd, []string{"bare"})
+	if err == nil || !strings.Contains(err.Error(), `"bare" has no [source], [play] or [apply] record`) {
+		t.Fatalf("err = %v", err)
+	}
+}

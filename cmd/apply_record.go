@@ -186,9 +186,10 @@ func (sc *applyScope) deferredStatusline(undo []grammar.Clause) []grammar.Clause
 
 // writeApplyRecords records, for each playbook the files gave name-less
 // statements, the files and what those statements wrote. A playbook that
-// updates from a [play] or [source] record is left to it, a directory has
-// no manifest, and files from a pipe cannot be read again: none is
-// recorded, the first and the last with a note.
+// updates from a [play] or [source] record is left to it, a linked
+// playbook's manifest belongs to its target, a directory has no manifest,
+// and files from a pipe cannot be read again: none is recorded, each but
+// the directory with a note.
 func writeApplyRecords(st *grammar.Stmt, to string, stmts []located) error {
 	var names []string
 	for _, x := range stmts {
@@ -221,6 +222,10 @@ func writeApplyRecords(st *grammar.Stmt, to string, stmts []located) error {
 		if pb == nil {
 			continue // dropped later in the files
 		}
+		if info, err := os.Lstat(pb.RootPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			fmt.Printf("Note: %s is linked, and its manifest belongs to the target, so this APPLY is not recorded for cpb update.\n", name)
+			continue
+		}
 		if m := pb.Manifest; m != nil && (m.Play != nil || (m.Source != nil && m.Source.Repository != "")) {
 			from := "[source]"
 			if m.Play != nil {
@@ -229,7 +234,8 @@ func writeApplyRecords(st *grammar.Stmt, to string, stmts []located) error {
 			fmt.Printf("Note: %s updates from its %s, so this APPLY is not recorded for cpb update.\n", name, from)
 			continue
 		}
-		if err := writeApplyRecord(pb, files, to != "", applyRecordText(targetStatements(stmts, name))); err != nil {
+		// Under TO, every name-less statement is the TO playbook's.
+		if err := writeApplyRecord(pb, files, to == name, applyRecordText(targetStatements(stmts, name))); err != nil {
 			return fmt.Errorf("applied, but the [apply] record of %s for cpb update was not written: %v", name, err)
 		}
 	}

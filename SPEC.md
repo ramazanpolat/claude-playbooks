@@ -1916,6 +1916,8 @@ says so: `Note: cpb update <name> now applies <files> again (it applied
 - for a statement that names its playbook (a machine's setup, `SHOW
   CREATE`'s output): only a target's name-less statements are recorded;
 - for a directory target, which has no manifest;
+- for a linked playbook (`CREATE PLAYBOOK … LINK`), whose manifest belongs
+  to its target. The run says so;
 - for a playbook that updates from a `[play]` or `[source]` record. The run
   says so: `Note: <name> updates from its [source], so this APPLY is not
   recorded for cpb update.`;
@@ -2518,7 +2520,7 @@ playbooks, and those that name their playbook, are not run:
   says the files wrote and they no longer write the same way: the clauses
   the update of a played playbook undoes, above. So a clause a base file
   dropped is removed from every playbook built on it, at that playbook's
-  update. A removal of a key the files still set is folded away (*A setting
+  update. Sandbox settings, env sets and the login are not undone, as there. A removal of a key the files still set is folded away (*A setting
   set more than once*);
 - then the statements run, and the record is rewritten;
 - `--dry-run` shows the diff and the plan and writes nothing. With `--json`

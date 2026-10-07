@@ -17,9 +17,9 @@
     playbook's update. A status line `SET STATUSLINE … IF UNSET` offered is
     removed only where the files wrote it. `--dry-run` shows the line diff
     and the plan; `--json` gives the plan as `APPLY --dry-run --json` does.
-  - Not recorded: a dry run, a directory target, files from a pipe, a
-    statement that names its playbook, and a playbook that updates from
-    `[play]` or `[source]`.
+  - Not recorded: a dry run, a directory target, a linked playbook, files
+    from a pipe, a statement that names its playbook, and a playbook that
+    updates from `[play]` or `[source]`.
   - `SHOW PLAYBOOK` has an `Applied from:` line, and a new last field
     `apply` in `--json`. `SELECT` has a new `apply` column. The error for a
     playbook with nothing to update from now names `[apply]`.

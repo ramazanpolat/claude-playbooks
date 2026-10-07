@@ -121,8 +121,10 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return applyUpdateRun(pb, updateDryRun, updateJSON)
 	}
 	if !played {
+		// Without a [source] either, runPlaybookUpdate says there is
+		// nothing to update from, whatever the flags.
 		for _, f := range []string{"json", "sha256", "trust-endpoint", "trust-secret"} {
-			if cmd.Flags().Changed(f) {
+			if sourced && cmd.Flags().Changed(f) {
 				return fmt.Errorf("--%s applies to a playbook kept by cpb play; %s updates from its [source]", f, name)
 			}
 		}
