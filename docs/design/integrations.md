@@ -17,8 +17,9 @@ tests and docs name none of them.
 ## What cpb does not do
 
 - **It never interprets a variable's meaning.** A value is passed through as
-  it was set. Redaction looks at the key's shape, never at what the value is
-  for.
+  it was set. Redaction looks at the shape of a key and of its value (a
+  credential-looking key, a URL that carries a password), never at what the
+  value is for.
 - **It never reads a plugin's contents.** It asks Claude Code to install the
   plugin, and reports what Claude Code records.
 - **`INCLUDE` copies a base's statements blindly.** They run as if written in

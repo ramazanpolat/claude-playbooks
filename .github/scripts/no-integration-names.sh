@@ -9,9 +9,9 @@ set -eu
 cd "$(dirname "$0")/../.."
 
 # The names, as extended regular expressions matched without case.
-names='pilot[-_.]?profile
+names='pilot[-_. ]?profile
 oi[-_]costume
-oi_wear
+oi[-_]wear
 statusmux
 kommander'
 
