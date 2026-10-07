@@ -50,7 +50,7 @@ var (
 
 var updateCmd = &cobra.Command{
 	Use:   "update <name>",
-	Short: "Update a playbook from its source, or a played one from its recipe",
+	Short: "Update a playbook from its source, its played recipe, or the files last applied to it",
 	Long: `Update a playbook from where it came from.
 
 A playbook created FROM a source ([source] in its .playbook) is fetched
@@ -63,6 +63,11 @@ A playbook kept by cpb play ([play]) fetches its recorded recipe again:
 the same bytes change nothing; others show the diff and the full preview,
 and need your confirmation (--trust-endpoint and --trust-secret without a
 terminal).
+
+A playbook an APPLY gave name-less statements ([apply]) gets those files
+applied again: only the statements they give it, after one ALTER
+PLAYBOOK that removes what they wrote last time and no longer write the
+same way. --dry-run shows the change and the plan.
 
 cpb self-update updates cpb itself.`,
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -78,7 +83,7 @@ cpb self-update updates cpb itself.`,
 func init() {
 	updateCmd.Flags().BoolVar(&updateDryRun, "dry-run", false, "show what the update would do, migrate step included, and change nothing")
 	updateCmd.Flags().BoolVar(&updateYes, "yes", false, "answer the yes without a terminal: run the migrate step; for a played playbook, never confirms an endpoint, a proxy, TLS or a secret")
-	updateCmd.Flags().BoolVar(&updateJSON, "json", false, "played playbook, with --dry-run: the plan as JSON")
+	updateCmd.Flags().BoolVar(&updateJSON, "json", false, "played or applied playbook, with --dry-run: the plan as JSON")
 	updateCmd.Flags().StringVar(&updateSHA256, "sha256", "", "played playbook: refuse any recipe whose sha256 is not this")
 	updateCmd.Flags().StringArrayVar(&updateTrustEndpoint, "trust-endpoint", nil, "played playbook, without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
 	updateCmd.Flags().StringArrayVar(&updateTrustSecret, "trust-secret", nil, "played playbook, without a terminal: confirm a secret reference; repeatable")
@@ -101,9 +106,25 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	played := pb.Manifest != nil && pb.Manifest.Play != nil
-	if !played {
-		for _, f := range []string{"json", "sha256", "trust-endpoint", "trust-secret"} {
+	sourced := pb.Manifest != nil && pb.Manifest.Source != nil && pb.Manifest.Source.Repository != ""
+	if !played && !sourced && pb.Manifest != nil && pb.Manifest.Apply != nil {
+		// The files APPLY last applied to it, applied again (SPEC.md, "The
+		// [apply] record").
+		for _, f := range []string{"sha256", "trust-endpoint", "trust-secret"} {
 			if cmd.Flags().Changed(f) {
+				return fmt.Errorf("--%s applies to a playbook kept by cpb play; %s applies its recorded files again", f, name)
+			}
+		}
+		if updateJSON && !updateDryRun {
+			return errors.New("--json goes with --dry-run")
+		}
+		return applyUpdateRun(pb, updateDryRun, updateJSON)
+	}
+	if !played {
+		// Without a [source] either, runPlaybookUpdate says there is
+		// nothing to update from, whatever the flags.
+		for _, f := range []string{"json", "sha256", "trust-endpoint", "trust-secret"} {
+			if sourced && cmd.Flags().Changed(f) {
 				return fmt.Errorf("--%s applies to a playbook kept by cpb play; %s updates from its [source]", f, name)
 			}
 		}
@@ -130,7 +151,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		return err
 	}
 	if pb.Manifest == nil || pb.Manifest.Source == nil || pb.Manifest.Source.Repository == "" {
-		return fmt.Errorf("%q has no [source] or [play] record in .playbook; nothing to update from", name)
+		return fmt.Errorf("%q has no [source], [play] or [apply] record in .playbook; nothing to update from", name)
 	}
 
 	root := pb.RootPath

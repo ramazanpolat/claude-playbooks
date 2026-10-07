@@ -82,6 +82,22 @@ the plan says which file wins. A plugin that wants to run a command its
 marketplace declares is never accepted for you; the statement fails and shows
 the command to review.
 
+## When a layer changes
+
+`APPLY` records, in each playbook it gave name-less statements, the files it
+applied and what they wrote (`.apply/recipe.cpb`, references only). So the
+playbook can follow its layers:
+
+```bash
+cpb update reviewer-agent --dry-run   # what changed in the layers, and the plan
+cpb update reviewer-agent             # apply the layers again
+```
+
+A clause a layer no longer has is removed. Drop `'Bash(git log *)'` from
+base.cpb, and each playbook built on it loses the rule at its next
+`cpb update`. The status line `IF UNSET` offered is removed only where the
+layers wrote it, never one you chose.
+
 ## Your own layer
 
 Copy team.cpb, point `ADD MARKETPLACE` at your plugin (a directory while you
