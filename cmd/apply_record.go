@@ -146,10 +146,10 @@ func (sc *applyScope) narrow(stmts []located) ([]located, error) {
 		}
 		fmt.Println()
 	}
-	if u := undoFor(sc.only, sc.old, newStmts); u != nil {
-		if u.Clauses = sc.deferredStatusline(u.Clauses); len(u.Clauses) > 0 {
-			keep = append([]located{{file: "undo", path: sc.oldPath, s: u}}, keep...)
-		}
+	// The deferred status line first: with its UNSET STATUSLINE gone, an
+	// UNSET STATUSLINE REFRESH beside it stays (Codex, #213).
+	if u := undoStatement(sc.only, sc.deferredStatusline(undoClauses(sc.old, newStmts))); u != nil {
+		keep = append([]located{{file: "undo", path: sc.oldPath, s: u}}, keep...)
 	}
 	return keep, nil
 }
