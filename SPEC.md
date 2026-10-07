@@ -439,7 +439,7 @@ ANTHROPIC_BASE_URL    http://localhost:8080/v1              <- ENV router
 ANTHROPIC_AUTH_TOKEN  <from keychain:router-token>          <- ENV router
 ANTHROPIC_MODEL       glm-5.3                          <- PLAYBOOK work
 HTTP_PROXY            (blocked)                        <- PLAYBOOK work
-OPENAI_API_KEY        sk-a...9f2c (51 chars, plaintext) <- PLAYBOOK work
+OPENAI_API_KEY        <plaintext, 51 chars>            <- PLAYBOOK work
 FOO                   bar                              <- DEFAULTS (ENV claude-default)
 
 Secret helper: my-keychain-helper (from CPB_SECRET_HELPER)
@@ -1175,22 +1175,23 @@ signature) is **not** covered: recognising one needs per-scheme parameter
 knowledge, and a list of parameter names would go stale the way a list of key
 names does.
 
-The length is stated
-outright rather than left to be inferred from a run of masking characters. A
-value keeps up to 4 characters at each end, scaled down as it shortens, and
-**at least 8 characters always stay hidden** -- so anything under 12
-characters is redacted whole rather than showing half of itself, which
-matters because `PASSWORD` is in scope and a human-chosen password is short
-and guessable enough that half of one is most of one:
+**No character of a credential is printed**, at any length: only its
+length, stated outright (`<redacted, N chars>`). A stored plaintext credential
+reads `<plaintext, N chars>` in `SHOW` and `EXPLAIN`. Up to v4.0.0-rc2 the
+first and last 4 characters were shown (`sk-a...7f2c (43 chars)`) to tell
+keys apart, but those are part of the secret in every scroll-back and
+transcript they land in; a key is told apart by its reference or its layer:
 
 ```
-  set    ANTHROPIC_AUTH_TOKEN=sk-a...7f2c (43 chars)
-  set    ANTHROPIC_BASE_URL=http://proxy:1/v1
+Variables:    ANTHROPIC_AUTH_TOKEN=<plaintext, 43 chars>
+              ANTHROPIC_BASE_URL=http://proxy:1/v1
 ```
 
-A value too short to leave that gap is redacted whole
-(`<redacted, N chars>`). No form prints the resolved value, and a key that
-does not match the heuristic (`ANTHROPIC_BASE_URL` above) is never touched.
+The JSON forms (`SHOW … --json`, `EXPLAIN … --json`, `SELECT … --json`)
+carry no value for such a variable, only `redacted` and `plaintext`, and
+`SHOW CREATE` writes `<withheld>`. No form prints the resolved value. A key that
+does not match the heuristic (`ANTHROPIC_BASE_URL` above) is shown as it is,
+except for a credential in a URL's userinfo, which is masked as above.
 
 ## SELECT
 

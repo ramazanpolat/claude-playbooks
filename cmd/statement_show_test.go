@@ -113,7 +113,7 @@ func TestShowPlaybookHuman(t *testing.T) {
 	for _, want := range []string{
 		"HTTP_PROXY (blocked)",
 		"MAX_THINKING_TOKENS=8000",
-		"chars, plaintext)",
+		"=<plaintext, ",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -228,7 +228,7 @@ func TestExplainPlaybook(t *testing.T) {
 	}
 	human := mustStmt(t, "EXPLAIN PLAYBOOK router")
 	noSecret(t, "EXPLAIN", human)
-	for _, want := range []string{"DEFAULTS (ENV base)", "ENV glm", "PLAYBOOK router", "(blocked)", "chars, plaintext)"} {
+	for _, want := range []string{"DEFAULTS (ENV base)", "ENV glm", "PLAYBOOK router", "(blocked)", "<plaintext, "} {
 		if !strings.Contains(human, want) {
 			t.Errorf("EXPLAIN missing %q:\n%s", want, human)
 		}
