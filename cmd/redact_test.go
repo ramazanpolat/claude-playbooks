@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -84,41 +85,19 @@ func TestLooksLikeSecretKey(t *testing.T) {
 }
 
 func TestRedactSecretValue(t *testing.T) {
-	if got := redactSecretValue("sk-abcdef0123456789fedcba9876543210"); got != "sk-a...3210 (35 chars)" {
-		t.Fatalf("long value redacted as %q", got)
-	}
-	if got := redactSecretValue("short1"); got != "<redacted, 6 chars>" {
-		t.Fatalf("short value redacted as %q", got)
-	}
-
+	// No character of the value, at any length: only the length, in runes.
 	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-	// At least 8 characters always stay hidden, so a short value is redacted
-	// whole rather than showing half of itself: a fixed keep=4 showed 8 of a
-	// 9-character value's 9, and even a scaled keep showed 4 of 8.
-	boundary := []struct {
-		n    int
-		want string
-	}{
-		{6, "<redacted, 6 chars>"},
-		{8, "<redacted, 8 chars>"},     // would have shown 4 of 8
-		{9, "<redacted, 9 chars>"},     // would have shown 4 of 9
-		{11, "<redacted, 11 chars>"},   // would have shown 4 of 11
-		{12, "01...ab (12 chars)"},     // shortest partial reveal: 4 shown, 8 hidden
-		{13, "01...bc (13 chars)"},     //
-		{16, "0123...cdef (16 chars)"}, // keep reaches its cap of 4 here
-		{20, "0123...ghij (20 chars)"}, //
-		{32, "0123...stuv (32 chars)"}, // real-token length: 8 shown, 24 hidden
-	}
-	for _, c := range boundary {
-		if got := redactSecretValue(alphabet[:c.n]); got != c.want {
-			t.Errorf("redactSecretValue(%d chars) = %q, want %q", c.n, got, c.want)
+	for _, n := range []int{1, 6, 8, 12, 16, 32, 36} {
+		v := alphabet[:n]
+		got := redactSecretValue(v)
+		if want := fmt.Sprintf("<redacted, %d chars>", n); got != want {
+			t.Errorf("redactSecretValue(%d chars) = %q, want %q", n, got, want)
 		}
 	}
-
-	// Runes, not bytes: slicing through a multi-byte character must never
-	// produce invalid UTF-8.
-	multiByte := strings.Repeat("é", 16)
-	if got := redactSecretValue(multiByte); got != "éééé...éééé (16 chars)" {
+	if got := redactSecretValue("sk-abcdef0123456789fedcba9876543210"); strings.Contains(got, "sk-a") || strings.Contains(got, "3210") || got != "<redacted, 35 chars>" {
+		t.Fatalf("a token redacted as %q", got)
+	}
+	if got := redactSecretValue(strings.Repeat("é", 16)); got != "<redacted, 16 chars>" {
 		t.Fatalf("multi-byte value redacted as %q", got)
 	}
 }
@@ -142,7 +121,7 @@ func TestDisplayEnvValueMasksURLCredentials(t *testing.T) {
 			name:  "userinfo with no colon is entirely the credential",
 			key:   "GIT_REMOTE",
 			value: "https://ghp_abcdefghijklmnop@github.com/org/repo",
-			want:  "https://ghp_...mnop (20 chars)@github.com/org/repo",
+			want:  "https://<redacted, 20 chars>@github.com/org/repo",
 		},
 		{
 			// What `git credential` writes: the token is the USERNAME and the
@@ -150,14 +129,14 @@ func TestDisplayEnvValueMasksURLCredentials(t *testing.T) {
 			name:  "token username with an empty password",
 			key:   "GIT_REMOTE",
 			value: "https://ghp_abcdefghijklmnop:@github.com/org/repo",
-			want:  "https://ghp_...mnop (20 chars):@github.com/org/repo",
+			want:  "https://<redacted, 20 chars>:@github.com/org/repo",
 		},
 		{
 			// GitHub's own documented form: the password is a fixed dummy.
 			name:  "token username with a dummy password",
 			key:   "GIT_REMOTE",
 			value: "https://ghp_abcdefghijklmnop:x-oauth-basic@github.com/o/r",
-			want:  "https://ghp_...mnop (20 chars):x-...ic (13 chars)@github.com/o/r",
+			want:  "https://<redacted, 20 chars>:<redacted, 13 chars>@github.com/o/r",
 		},
 		{
 			// No path before the query, so the "@" of an email parameter used

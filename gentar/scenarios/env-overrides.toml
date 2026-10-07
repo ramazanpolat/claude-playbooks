@@ -67,8 +67,10 @@ command = 'mkdir -p "$HOME/keepme"; cpb start "$HOME/keepme" -- --delete && test
 contains = "delete-boundary-ok"
 
 [[verify.commands]]
-# A credential-shaped value never appears in SHOW: the key's value is
-# masked to its first/last 4 characters plus a length, and an ordinary key
-# alongside it (FROM_MANIFEST) stays fully visible.
-command = '''cpb ALTER PLAYBOOK env-pb SET VAR THE_AUTH_TOKEN=abcdef0123456789fedcba9876543210 AS PLAINTEXT >/dev/null && OUT=$(cpb SHOW PLAYBOOK env-pb) && ! printf '%s' "$OUT" | grep -q abcdef0123456789fedcba9876543210 && printf '%s' "$OUT" | grep -qF "THE_AUTH_TOKEN=abcd...3210 (32 chars, plaintext)" && printf '%s' "$OUT" | grep -qF "FROM_MANIFEST=yes" && echo redact-ok'''
+# No output form prints any character of a credential-looking value
+# (oi-costume#1): a stored plaintext token, and one in an env set, are looked
+# for whole and by their first and last 4 characters in SHOW, EXPLAIN,
+# SELECT (human and --json), SHOW CREATE and SHOW ENV. The human forms say
+# what it is and how long; an ordinary key alongside stays visible.
+command = '''T=qx7K0123456789abcdef01234567w9Zp; U=Mb3Rfedcba9876543210fedcbaQ8vT; cpb ALTER PLAYBOOK env-pb SET VAR THE_AUTH_TOKEN=$T AS PLAINTEXT >/dev/null && cpb CREATE ENV leaky SET SERVICE_API_KEY=$U AS PLAINTEXT >/dev/null && OUT=$( { cpb SHOW PLAYBOOK env-pb; cpb SHOW PLAYBOOK env-pb --json; cpb EXPLAIN PLAYBOOK env-pb; cpb EXPLAIN PLAYBOOK env-pb --json; cpb "SELECT key, value, redacted FROM VARS"; cpb "SELECT key, value FROM VARS" --json; cpb SHOW CREATE PLAYBOOK env-pb; cpb SHOW CREATE ALL; cpb SHOW ENV leaky; cpb SHOW ENV leaky --json; cpb SHOW ENVS --json; } 2>&1 ); for s in $T qx7K w9Zp $U Mb3R Q8vT; do if printf '%s' "$OUT" | grep -qF "$s"; then echo "leaked: $s"; exit 1; fi; done; printf '%s' "$OUT" | grep -qF "THE_AUTH_TOKEN=<plaintext, 32 chars>" && printf '%s' "$OUT" | grep -qF "FROM_MANIFEST=yes" && echo redact-ok'''
 contains = "redact-ok"

@@ -166,8 +166,8 @@ be a secret passes: empty, an integer, or `true`/`false`, so
   its value.
 
 **Output never prints a credential.** `SHOW` and `EXPLAIN` mask credential-looking
-values, showing only the ends and the length (`sk-a...7f2c (43 chars)`); a value
-too short to hide 8 characters is masked whole. A credential inside a connection
+values: no character of them, only the length (`<plaintext, 43 chars>`). A
+credential inside a connection
 URL is masked too, both halves of `user:password`, since a git remote often
 carries the token as the user name:
 

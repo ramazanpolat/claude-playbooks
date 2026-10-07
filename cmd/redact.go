@@ -67,27 +67,11 @@ func maskUserinfoField(field string) string {
 	return redactSecretValue(field)
 }
 
-// redactSecretValue keeps a few characters at each end -- enough to tell
-// which credential is attached without disclosing it -- and states the
-// length outright rather than leaving it to be inferred from a masked run of
-// characters. At least minHidden characters always stay hidden, so anything
-// under 12 characters is redacted whole rather than showing half of itself:
-// PASSWORD is in scope above, and a human-chosen password is both short and
-// guessable enough that half of one is most of one. Runes, not bytes, so a
-// value is never sliced through a multi-byte character.
+// redactSecretValue prints no character of a credential, only its length:
+// "<redacted, 43 chars>". Showing the ends ("sk-a...7f2c") told which key was
+// attached, but it is still part of the secret, in every terminal scroll-back
+// and transcript it lands in; a key is told apart by its reference or its
+// layer instead. Runes, not bytes, so the length is the one a person counts.
 func redactSecretValue(value string) string {
-	const minHidden = 8
-	r := []rune(value)
-	n := len(r)
-	keep := n / 4
-	if keep > 4 {
-		keep = 4
-	}
-	if most := (n - minHidden) / 2; keep > most {
-		keep = most
-	}
-	if keep < 2 {
-		return fmt.Sprintf("<redacted, %d chars>", n)
-	}
-	return fmt.Sprintf("%s...%s (%d chars)", string(r[:keep]), string(r[n-keep:]), n)
+	return fmt.Sprintf("<redacted, %d chars>", len([]rune(value)))
 }

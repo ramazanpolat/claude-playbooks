@@ -392,8 +392,10 @@ func humanVar(v varJSON, value string) string {
 		return v.Key + " <from " + *v.Ref + ">"
 	case v.Redacted:
 		shown := displayEnvValue(v.Key, value)
-		if strings.HasSuffix(shown, " chars)") || strings.HasSuffix(shown, " chars>") {
-			return v.Key + "=" + shown[:len(shown)-1] + ", plaintext" + shown[len(shown)-1:]
+		// A whole value withheld says what it is: a plaintext credential of
+		// that length, and nothing of it.
+		if rest, ok := strings.CutPrefix(shown, "<redacted, "); ok && strings.HasSuffix(shown, ">") && !strings.Contains(rest, "<") {
+			return v.Key + "=<plaintext, " + rest
 		}
 		return v.Key + "=" + shown + " (plaintext)"
 	}
