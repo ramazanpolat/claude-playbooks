@@ -29,6 +29,10 @@ type foldPart struct {
 	index   int
 	what    string // the clause and its key, never a value: "SET VAR LOG_LEVEL"
 	effects []foldEffect
+	// withFirst: dropped only together with the clause's part 0 (UNSET
+	// STATUSLINE removes the whole status line, so its refresh part alone
+	// cannot be left out while its command part runs).
+	withFirst bool
 }
 
 // foldParts lists a clause's parts. A clause with no parts acts on nothing
@@ -40,15 +44,15 @@ func foldParts(c grammar.Clause) []foldPart {
 	switch c.Kind {
 	case grammar.SetVar, grammar.SetRef:
 		for i, v := range c.Vars {
-			out = append(out, foldPart{i, "SET VAR " + v.Key, []foldEffect{w("var:" + v.Key)}})
+			out = append(out, foldPart{index: i, what: "SET VAR " + v.Key, effects: []foldEffect{w("var:" + v.Key)}})
 		}
 	case grammar.BlockVar, grammar.UnsetVar:
 		for i, k := range c.Keys {
-			out = append(out, foldPart{i, string(c.Kind) + " VAR " + k, []foldEffect{w("var:" + k)}})
+			out = append(out, foldPart{index: i, what: string(c.Kind) + " VAR " + k, effects: []foldEffect{w("var:" + k)}})
 		}
 	case grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool:
 		for i, r := range c.Names {
-			out = append(out, foldPart{i, string(c.Kind) + " '" + r + "'", []foldEffect{w("tool:" + r)}})
+			out = append(out, foldPart{index: i, what: string(c.Kind) + " '" + r + "'", effects: []foldEffect{w("tool:" + r)}})
 		}
 	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys:
 		verb := "SET SANDBOX "
@@ -56,32 +60,37 @@ func foldParts(c grammar.Clause) []foldPart {
 			verb = "UNSET SANDBOX "
 		}
 		for i, v := range c.Settings {
-			out = append(out, foldPart{i, verb + v.Key, []foldEffect{w("sandbox:" + v.Key)}})
+			out = append(out, foldPart{index: i, what: verb + v.Key, effects: []foldEffect{w("sandbox:" + v.Key)}})
 		}
 	case grammar.SetModel, grammar.UnsetModel:
-		out = append(out, foldPart{-1, string(c.Kind), []foldEffect{w("model")}})
+		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("model")}})
 	case grammar.SetAgent, grammar.UnsetAgent:
-		out = append(out, foldPart{-1, string(c.Kind), []foldEffect{w("agent")}})
+		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("agent")}})
 	case grammar.SetStatusline:
-		e := m
-		if !c.IfUnset { // IF UNSET depends on whether a status line is set
-			e = w
+		switch {
+		case c.IfUnset: // depends on whether a status line is set
+			effects := []foldEffect{m("statusline")}
+			if c.Refresh > 0 {
+				effects = append(effects, m("statusline-refresh"))
+			}
+			out = append(out, foldPart{index: -1, what: string(c.Kind), effects: effects})
+		case c.Refresh > 0: // the command and the refresh, apart
+			out = append(out, foldPart{index: 0, what: "SET STATUSLINE", effects: []foldEffect{w("statusline")}},
+				foldPart{index: 1, what: "SET STATUSLINE REFRESH", effects: []foldEffect{w("statusline-refresh")}})
+		default:
+			out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline")}})
 		}
-		effects := []foldEffect{e("statusline")}
-		if c.Refresh > 0 {
-			effects = append(effects, e("statusline-refresh"))
-		}
-		out = append(out, foldPart{-1, string(c.Kind), effects})
 	case grammar.UnsetStatusline:
-		out = append(out, foldPart{-1, string(c.Kind), []foldEffect{w("statusline"), w("statusline-refresh")}})
+		out = append(out, foldPart{index: 0, what: "UNSET STATUSLINE", effects: []foldEffect{w("statusline")}},
+			foldPart{index: 1, what: "UNSET STATUSLINE REFRESH", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
 	case grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh:
-		out = append(out, foldPart{-1, string(c.Kind), []foldEffect{w("statusline-refresh")}})
+		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline-refresh")}})
 	case grammar.SetStatuslinePrevious: // reads the history every earlier one wrote (see foldStatements)
-		out = append(out, foldPart{-1, string(c.Kind), []foldEffect{m("statusline"), m("statusline-refresh")}})
+		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{m("statusline"), m("statusline-refresh")}})
 	case grammar.UseEnv:
-		out = append(out, foldPart{-1, "USE ENV", []foldEffect{w("envs")}})
+		out = append(out, foldPart{index: -1, what: "USE ENV", effects: []foldEffect{w("envs")}})
 	case grammar.AddEnv, grammar.DropEnv: // relative to the list as it stands
-		out = append(out, foldPart{-1, string(c.Kind), []foldEffect{m("envs")}})
+		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{m("envs")}})
 	}
 	return out
 }
@@ -128,10 +137,10 @@ type foldResult struct {
 func foldStatements(in []located) foldResult {
 	type partKey struct{ i, j, p int }
 	type occ struct {
-		part   partKey
-		key    string
-		write  bool
-		pinned bool // never dropped: a later PREVIOUS reads the history it writes
+		part  partKey
+		key   string
+		write bool
+		sl    bool // a status line key: a later live PREVIOUS keeps it
 	}
 	parts := make([][][]foldPart, len(in))
 	keyOf := make([]string, len(in))
@@ -150,26 +159,18 @@ func foldStatements(in []located) foldResult {
 			parts[i][j] = foldParts(c)
 		}
 	}
-	// SET STATUSLINE PREVIOUS restores from the history, which every
-	// earlier replacement of the target's status line adds to, not only
-	// the last: no status line clause before it is dropped.
-	lastPrevious := map[string]int{}
-	for i, x := range in {
-		for _, c := range x.s.Clauses {
-			if keyOf[i] != "" && c.Kind == grammar.SetStatuslinePrevious {
-				lastPrevious[keyOf[i]] = i
-			}
-		}
-	}
 	dead := map[partKey]bool{}
-	var all []occ // every effect, in run order
-	for i := range in {
+	previous := map[partKey]bool{}  // a SET STATUSLINE PREVIOUS
+	withFirst := map[partKey]bool{} // dropped only with the clause's part 0
+	var all []occ                   // every effect, in run order
+	for i, x := range in {
 		for j := range parts[i] {
 			for _, fp := range parts[i][j] {
+				pk := partKey{i, j, fp.index}
+				previous[pk] = x.s.Clauses[j].Kind == grammar.SetStatuslinePrevious
+				withFirst[pk] = fp.withFirst
 				for _, e := range fp.effects {
-					last, ok := lastPrevious[keyOf[i]]
-					pinned := ok && i < last && strings.HasPrefix(e.key, "statusline")
-					all = append(all, occ{partKey{i, j, fp.index}, keyOf[i] + e.key, e.write, pinned})
+					all = append(all, occ{pk, keyOf[i] + e.key, e.write, strings.HasPrefix(e.key, "statusline")})
 				}
 			}
 		}
@@ -180,6 +181,17 @@ func foldStatements(in []located) foldResult {
 		for _, o := range all {
 			if !dead[o.part] {
 				live = append(live, o)
+			}
+		}
+		// SET STATUSLINE PREVIOUS restores from the history, which every
+		// earlier replacement of the target's status line adds to, not only
+		// the last: while a PREVIOUS runs, no status line clause before it is
+		// dropped. Taken from the live clauses on every pass, so a PREVIOUS
+		// that is itself dropped keeps nothing.
+		lastPrevious := map[string]int{}
+		for _, o := range live {
+			if previous[o.part] {
+				lastPrevious[keyOf[o.part.i]] = o.part.i
 			}
 		}
 		// A part is dead when the next live occurrence of each of its keys
@@ -194,8 +206,15 @@ func foldStatements(in []located) foldResult {
 		}
 		verdict := map[partKey]bool{}
 		for k, o := range live {
-			d, ok := verdict[o.part]
-			verdict[o.part] = (d || !ok) && nextWrite[k] && !o.pinned
+			last, ok := lastPrevious[keyOf[o.part.i]]
+			pinned := o.sl && ok && o.part.i < last
+			d, seenPart := verdict[o.part]
+			verdict[o.part] = (d || !seenPart) && nextWrite[k] && !pinned
+		}
+		for p := range verdict {
+			if withFirst[p] {
+				verdict[p] = verdict[p] && (verdict[partKey{p.i, p.j, 0}] || dead[partKey{p.i, p.j, 0}])
+			}
 		}
 		for p, d := range verdict {
 			if d && !dead[p] {
@@ -269,6 +288,14 @@ func foldStatements(in []located) foldResult {
 func keepEntries(c grammar.Clause, keep []int) grammar.Clause {
 	out := c
 	switch c.Kind {
+	case grammar.SetStatusline: // one of the command (0) and the refresh (1)
+		if keep[0] == 0 {
+			out.Refresh = 0 // the command alone keeps the refresh it finds
+		} else {
+			out.Kind, out.Arg = grammar.SetStatuslineRefresh, ""
+		}
+	case grammar.UnsetStatusline: // the refresh only (see withFirst)
+		out.Kind = grammar.UnsetStatuslineRefresh
 	case grammar.SetVar, grammar.SetRef:
 		out.Vars = pick(c.Vars, keep)
 	case grammar.BlockVar, grammar.UnsetVar:

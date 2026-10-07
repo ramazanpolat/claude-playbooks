@@ -85,9 +85,18 @@ func TestFoldStatements(t *testing.T) {
 		{"PREVIOUS reads the whole history: every status line before it stays",
 			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;\nALTER PLAYBOOK p SET STATUSLINE 'c';\nALTER PLAYBOOK p SET STATUSLINE 'd';",
 			[]string{"SET STATUSLINE", "SET STATUSLINE", "SET STATUSLINE PREVIOUS", "- | SET STATUSLINE by 4", "SET STATUSLINE"}},
-		{"a refresh the later status line does not set stays",
+		{"a refresh the later status line does not set stays, alone",
 			"ALTER PLAYBOOK p SET STATUSLINE 'a' REFRESH 5;\nALTER PLAYBOOK p SET STATUSLINE 'b';",
-			[]string{"SET STATUSLINE", "SET STATUSLINE"}},
+			[]string{"SET STATUSLINE REFRESH | SET STATUSLINE by 1", "SET STATUSLINE"}},
+		{"UNSET STATUSLINE before a status line without a refresh: its refresh part stays",
+			"ALTER PLAYBOOK p UNSET STATUSLINE;\nALTER PLAYBOOK p SET STATUSLINE 'x';",
+			[]string{"UNSET STATUSLINE REFRESH | UNSET STATUSLINE by 1", "SET STATUSLINE"}},
+		{"each part names the statement that replaces it",
+			"ALTER PLAYBOOK p UNSET STATUSLINE;\nALTER PLAYBOOK p SET STATUSLINE REFRESH 10;\nALTER PLAYBOOK p SET STATUSLINE 'new';",
+			[]string{"- | UNSET STATUSLINE by 2 | UNSET STATUSLINE REFRESH by 1", "SET STATUSLINE REFRESH", "SET STATUSLINE"}},
+		{"a PREVIOUS that is itself replaced keeps nothing before it",
+			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;\nALTER PLAYBOOK p UNSET STATUSLINE;",
+			[]string{"- | SET STATUSLINE by 2", "- | SET STATUSLINE PREVIOUS by 2", "UNSET STATUSLINE"}},
 		{"a later status line with a refresh replaces both",
 			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b' REFRESH 5;",
 			[]string{"- | SET STATUSLINE by 1", "SET STATUSLINE"}},
@@ -114,6 +123,27 @@ func TestFoldStatements(t *testing.T) {
 	}
 }
 
+// TestFoldDirectoryTargets: a recipe applied TO a directory folds per
+// directory, apart from a playbook and from another directory.
+func TestFoldDirectoryTargets(t *testing.T) {
+	stmts, err := grammar.ParseFile("ALTER PLAYBOOK x SET MODEL 'a';\nALTER PLAYBOOK x SET MODEL 'b';\nALTER PLAYBOOK x SET MODEL 'c';\nALTER PLAYBOOK d SET MODEL 'e';\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs := []string{"/d1", "/d1", "/d2", ""}
+	in := make([]located, len(stmts))
+	for i, s := range stmts {
+		if dirs[i] != "" {
+			s.Name, s.Dir = "", dirs[i]
+		}
+		in[i] = located{file: "f.cpb", path: "/f.cpb", s: s}
+	}
+	res := foldStatements(in)
+	if !res.skip[0] || res.skip[1] || res.skip[2] || res.skip[3] || len(res.over[0]) != 1 || res.over[0][0].by != 1 {
+		t.Fatalf("skip=%v over=%v", res.skip, res.over)
+	}
+}
+
 // TestApplyFoldStackConverges: a base and a child that sets the same keys
 // again converge (the second APPLY changes nothing), the base's values are
 // never written (the status line's history never sees the base's), and the
@@ -124,6 +154,10 @@ func TestApplyFoldStackConverges(t *testing.T) {
 	dir := t.TempDir()
 	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info TEAM=one\n  SET MODEL 'base-model'\n  SET STATUSLINE 'echo base'\n  ALLOW TOOL 'Bash(x)';\n")
 	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug\n  SET MODEL 'child-model'\n  SET STATUSLINE 'echo child'\n  DENY TOOL 'Bash(x)';\n")
+	plan, err := apply(t, child, "TO", "p", "--dry-run")
+	if err != nil || !strings.Contains(plan, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2)") {
+		t.Fatalf("the plain plan does not name what is overridden: %v\n%s", err, plan)
+	}
 	first, err := apply(t, child, "TO", "p")
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +185,7 @@ func TestApplyFoldStackConverges(t *testing.T) {
 			t.Fatalf("the base's status line was written: %+v", v.StatuslineHistory)
 		}
 	}
-	plan := captureStdout(t, func() { _ = runStatement([]string{"APPLY", child, "TO", "p", "--dry-run", "--json"}) })
+	planJSON := captureStdout(t, func() { _ = runStatement([]string{"APPLY", child, "TO", "p", "--dry-run", "--json"}) })
 	var rep struct {
 		Statements []struct {
 			Line       int `json:"line"`
@@ -164,8 +198,8 @@ func TestApplyFoldStackConverges(t *testing.T) {
 			} `json:"overridden"`
 		} `json:"statements"`
 	}
-	if err := json.Unmarshal([]byte(plan), &rep); err != nil {
-		t.Fatalf("%v\n%s", err, plan)
+	if err := json.Unmarshal([]byte(planJSON), &rep); err != nil {
+		t.Fatalf("%v\n%s", err, planJSON)
 	}
 	var base []string
 	for _, s := range rep.Statements {
@@ -195,6 +229,20 @@ func TestApplyFoldFleetAndFlatRecipe(t *testing.T) {
 	}
 	if out, err := apply(t, fleet); err != nil || !strings.Contains(out, " 0 created, 0 changed, ") {
 		t.Fatalf("the fleet applied again must change nothing: %v\n%s", err, out)
+	}
+	// Each playbook folds on its own: a keeps the base's model, b the
+	// base's level.
+	a, b := describePlaybookByName(t, "a"), describePlaybookByName(t, "b")
+	level := func(v playbookJSON) string {
+		for _, x := range v.Vars {
+			if x.Key == "LEVEL" && x.Value != nil {
+				return *x.Value
+			}
+		}
+		return ""
+	}
+	if a.Model == nil || *a.Model != "base-model" || level(a) != "a" || b.Model == nil || *b.Model != "b-model" || level(b) != "base" {
+		t.Fatalf("targets folded into each other: a model=%v level=%s, b model=%v level=%s", a.Model, level(a), b.Model, level(b))
 	}
 	flat := writeCpb(t, dir, "flat.cpb", "ALTER PLAYBOOK SET MODEL 'first';\nALTER PLAYBOOK SET MODEL 'second';\n")
 	if _, err := apply(t, flat, "TO", "a"); err != nil {
