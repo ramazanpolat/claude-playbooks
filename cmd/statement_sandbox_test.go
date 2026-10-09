@@ -129,7 +129,7 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 			t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "SET ISOLATED LOGIN") || strings.Contains(strings.SplitN(text, ";", 2)[0], "SANDBOX") {
+	if strings.Contains(text, "login =") || strings.Contains(strings.SplitN(text, ";", 2)[0], "SANDBOX") {
 		t.Errorf("SHOW CREATE writes the sandbox in CREATE or repeats the isolation:\n%s", text)
 	}
 

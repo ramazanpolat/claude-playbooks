@@ -38,7 +38,7 @@ session.
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT` (this key never takes a reference: cpb reads it itself) | that token wins over the file; its own login removed |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET ISOLATED LOGIN` (or `CREATE PLAYBOOK <name> ISOLATED LOGIN`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `UNSET ISOLATED LOGIN` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> MODIFY SETTING login = 'isolated'` (or `CREATE PLAYBOOK <name> SETTINGS login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `MODIFY SETTING login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
 [env set](environment.md#env-sets-define-once-attach-to-many) shared by
@@ -82,7 +82,7 @@ what to do with that file by account:
   playbook's `.claude.json`, with a backup. The link comes back, and one line
   says so. The machine's login is never replaced by another account's.
   - To keep that account in that playbook, run `cpb ALTER PLAYBOOK <name>
-    SET ISOLATED LOGIN` and move the file back.
+    MODIFY SETTING login = 'isolated'` and move the file back.
 
 cpb also takes account state for a shared playbook only from the machine's
 own `~/.claude/.claude.json` or `~/.claude.json`, never from another

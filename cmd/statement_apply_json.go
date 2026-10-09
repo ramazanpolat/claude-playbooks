@@ -63,7 +63,7 @@ const (
 	// An ADD MARKETPLACE git source whose #ref looks like a commit, which
 	// Claude Code cannot clone (v3.27.0).
 	warnMarketplaceRefNotCloneable = "marketplace_ref_not_cloneable"
-	// SET ISOLATED LOGIN recorded, but the link to the shared login could
+	// login = 'isolated' recorded, but the link to the shared login could
 	// not be removed at once; the next launch removes it.
 	warnSharedLoginLinkKept = "shared_login_link_kept"
 )

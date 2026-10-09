@@ -38,8 +38,16 @@ cpb SHOW PLAYBOOKS --json > "$home/new-playbooks.json"
 newpbs=$(python3 -c 'import json,sys; [print(p["name"]) for p in json.load(open(sys.argv[1]))]' "$home/new-playbooks.json")
 if [ "$(echo $newpbs)" != "$(echo $pbs)" ]; then echo "the new binary lists [$newpbs], the old one [$pbs]"; exit 1; fi
 cpb SHOW CREATE ALL > "$home/new.cpb"
-if ! cmp -s "$home/old.cpb" "$home/new.cpb"; then echo "SHOW CREATE ALL differs:"; diff "$home/old.cpb" "$home/new.cpb" | head -20; exit 1; fi
-cpb APPLY "$entry" --yes > "$home/new-apply.out"
+# Rendered as the previous release renders the same state, where the grammar
+# changed on purpose since (examples/.ci/prev-syntax.py says what, and when
+# to delete it); any other difference fails.
+python3 "$ci/prev-syntax.py" render "$home/new.cpb" > "$home/new-as-prev.cpb"
+if ! cmp -s "$home/old.cpb" "$home/new-as-prev.cpb"; then echo "SHOW CREATE ALL differs:"; diff "$home/old.cpb" "$home/new-as-prev.cpb" | head -20; exit 1; fi
+# An example in the previous grammar is re-applied from a translated copy;
+# the others in place, where their relative paths were resolved.
+adir=$dir
+if grep -qs 'ISOLATED LOGIN' "$dir"/*.cpb; then python3 "$ci/prev-syntax.py" translate "$dir" "$home/ex"; adir="$home/ex"; fi
+(cd "$adir" && cpb APPLY "$entry" --yes) > "$home/new-apply.out"
 if ! grep -q " 0 created, 0 changed, " "$home/new-apply.out"; then echo "the new binary changed the old state:"; cat "$home/new-apply.out"; exit 1; fi
 cpb auth status --json > "$home/new-auth.json"
 if ! cmp -s "$home/old-auth.json" "$home/new-auth.json"; then echo "auth status differs:"; diff "$home/old-auth.json" "$home/new-auth.json" | head -20; exit 1; fi

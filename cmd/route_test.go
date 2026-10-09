@@ -61,7 +61,7 @@ func TestExplainRoute(t *testing.T) {
 	// A routed playbook with a key, a model map and a password in its URL.
 	helper, _ := fakeHelper(t)
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
-	mustStmt(t, "CREATE PLAYBOOK routed NO LAUNCHER ISOLATED LOGIN")
+	mustStmt(t, "CREATE PLAYBOOK routed NO LAUNCHER SETTINGS login=isolated")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_BASE_URL=http://user:s3cr3tpw@127.0.0.1:20128/v1 AS PLAINTEXT")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_AUTH_TOKEN FROM keychain:ok/router-token")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_MODEL=glm-5.3 ANTHROPIC_DEFAULT_OPUS_MODEL=evren/glm-5.3 ANTHROPIC_DEFAULT_HAIKU_MODEL=evren/qwen")
@@ -89,7 +89,7 @@ func TestExplainRoute(t *testing.T) {
 
 	// The login, as auth status reports it: a Keychain item is oauth-login,
 	// an unanswerable probe is unknown, never none.
-	mustStmt(t, "CREATE PLAYBOOK iso NO LAUNCHER ISOLATED LOGIN")
+	mustStmt(t, "CREATE PLAYBOOK iso NO LAUNCHER SETTINGS login=isolated")
 	stubKeychainProbe(t, auth.KeychainPresent)
 	if r := routeOf(t, "iso"); r.Auth != "oauth-login" {
 		t.Fatalf("a Keychain login: %+v", r)
@@ -144,7 +144,7 @@ func TestExplainRouteInherited(t *testing.T) {
 	// an isolated launch removes it, so it does not make the route token-set.
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "inherited-oauth-token")
-	mustStmt(t, "CREATE PLAYBOOK iso NO LAUNCHER ISOLATED LOGIN")
+	mustStmt(t, "CREATE PLAYBOOK iso NO LAUNCHER SETTINGS login=isolated")
 	if r := routeOf(t, "iso"); r.Auth != "none" {
 		t.Fatalf("an isolated launch strips the inherited OAuth token: %+v", r)
 	}

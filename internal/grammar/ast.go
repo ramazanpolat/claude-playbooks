@@ -60,12 +60,13 @@ const (
 	Link        Kind = "LINK"        // CREATE PLAYBOOK ... LINK <dir>
 	Sandbox     Kind = "SANDBOX"     // CREATE PLAYBOOK ... SANDBOX
 
-	// Isolated login (manifest isolated_login): the playbook shares no login
-	// with ~/.claude. CREATE PLAYBOOK ... ISOLATED LOGIN, or ALTER PLAYBOOK
-	// ... SET | UNSET ISOLATED LOGIN.
-	IsolatedLogin      Kind = "ISOLATED LOGIN"
-	SetIsolatedLogin   Kind = "SET ISOLATED LOGIN"
-	UnsetIsolatedLogin Kind = "UNSET ISOLATED LOGIN"
+	// Playbook settings, ClickHouse style (playbook_settings.go): CREATE
+	// PLAYBOOK ... SETTINGS k = 'v', ...; ALTER PLAYBOOK ... MODIFY SETTING
+	// k = 'v', ... and RESET SETTING k, ... (back to the default). Settings
+	// holds (Key, Value); RESET's values are empty.
+	PlaybookSettings Kind = "SETTINGS"
+	ModifySetting    Kind = "MODIFY SETTING"
+	ResetSetting     Kind = "RESET SETTING"
 
 	// The [sandbox] table (ALTER PLAYBOOK): bare SET SANDBOX is always =
 	// true and isolates the login, as CREATE … SANDBOX does; bare UNSET
@@ -210,8 +211,9 @@ type Clause struct {
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
 
 	// Settings: SET SANDBOX <key>=<value> ... (Key, Value) and UNSET SANDBOX
-	// <key> ... (Key only), the [sandbox] table's keys. Apart from Vars and
-	// Keys, which name variables.
+	// <key> ... (Key only), the [sandbox] table's keys; and the playbook
+	// settings of SETTINGS, MODIFY SETTING and RESET SETTING (Key only).
+	// Apart from Vars and Keys, which name variables.
 	Settings []Var
 
 	MCP   *MCP       // ADD MCP SERVER

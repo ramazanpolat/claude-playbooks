@@ -444,7 +444,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		// the target directory, so its environment is not changed here.
 		if info, lerr := os.Lstat(pb.RootPath); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
 			if pluginClauses(st.Clauses) || mcpClauses(st.Clauses) || skillClauses(st.Clauses) {
-				return fmt.Errorf("cannot change the plugins or MCP servers of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
+				return fmt.Errorf("cannot change the plugins, MCP servers or settings of %q: it is linked, and its %s belongs to the target", st.Name, settings.FileName)
 			}
 			return fmt.Errorf("cannot change the environment of %q: it is linked, and its %s is shared with the target. Edit the target's manifest directly if you really mean it", st.Name, manifest.FileName)
 		}
@@ -564,7 +564,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	sandboxChange := !reflect.DeepEqual(beforeSandbox, sandbox)
 	m.Sandbox = sandbox
 	lines = append(lines, sandboxLines...)
-	// ISOLATED LOGIN: isolated_login, in the same manifest write.
+	// The login setting: isolated_login, in the same manifest write.
 	nowIsolated, loginLines, err := r.planIsolatedLogin(st.Name, m, r.configDir(st.Name, pb), st.Clauses)
 	if err != nil {
 		return err

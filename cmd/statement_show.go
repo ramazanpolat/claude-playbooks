@@ -66,6 +66,9 @@ type playbookJSON struct {
 	// IsolatedLogin is isolated_login: no login shared with ~/.claude (a
 	// sandboxed playbook is always isolated).
 	IsolatedLogin bool `json:"isolated_login"`
+	// Settings are the playbook settings (SETTINGS, MODIFY SETTING), as
+	// they stand.
+	Settings settingsJSON `json:"settings"`
 
 	Marketplaces []marketplaceJSON `json:"marketplaces"`
 	Plugins      []pluginJSON      `json:"plugins"`
@@ -186,6 +189,14 @@ type explainJSON struct {
 	// Route is where a launch's requests go and how it authenticates, built
 	// from non-secret values and states only (v4.0.0).
 	Route routeJSON `json:"route"`
+	// Settings are the playbook settings the launch runs with.
+	Settings settingsJSON `json:"settings"`
+}
+
+// settingsJSON is the playbook settings, in SHOW CREATE's order.
+type settingsJSON struct {
+	Login  string `json:"login"`
+	Memory string `json:"memory"`
 }
 
 // agentJSON is the agent a launch starts as, when the playbook names one.
@@ -339,6 +350,8 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		}
 	}
 	v.Launcher = optStr(effectiveLauncher(pb))
+	v.Settings = settingsJSON{Login: "shared"}
+	v.Settings.Memory, _ = memoryStateOf(pb.Path)
 	m := pb.Manifest
 	if m == nil {
 		return v
@@ -353,6 +366,9 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v.Sandbox = describeSandbox(m.Sandbox)
 	// A sandbox never shares the machine's login, whatever the manifest says.
 	v.IsolatedLogin = m.IsolatedLogin || v.Sandbox.Always
+	if v.IsolatedLogin {
+		v.Settings.Login = "isolated"
+	}
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Sets)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
@@ -471,9 +487,12 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
 		{"Sandbox", sandbox},
 	}...)
+	login := "shared with ~/.claude"
 	if v.IsolatedLogin {
-		rows = append(rows, [2]string{"Login", "isolated (shares nothing with ~/.claude)"})
+		login = "isolated (shares nothing with ~/.claude)"
 	}
+	_, other := memoryStateOf(v.Path)
+	rows = append(rows, [2]string{"Login", login}, [2]string{"Memory", strings.TrimPrefix(memoryLine(v.Settings.Memory, other), "Memory: ")})
 	if v.Play != nil {
 		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.PlayedAt, v.Name)})
 	}
@@ -671,7 +690,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	if st.JSON {
 		model := launchModel(pb, vars)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
-			Tools: describePlaybook(pb).Tools, Model: model, Route: launchRoute(pb, origins, model)})
+			Tools: describePlaybook(pb).Tools, Model: model, Route: launchRoute(pb, origins, model), Settings: describePlaybook(pb).Settings})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -717,10 +736,11 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 	v := describePlaybook(pb)
 	switch {
 	case v.Sandbox.Always:
-		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, UNSET ISOLATED LOGIN shares it again")
+		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, MODIFY SETTING login = 'shared' shares it again")
 	case v.IsolatedLogin:
-		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (UNSET ISOLATED LOGIN shares it again)")
+		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (MODIFY SETTING login = 'shared' shares it again)")
 	}
+	fmt.Println(memoryLine(memoryStateOf(pb.Path)))
 }
 
 // helperInEffect is the configured secret helper for --json, nil if none.

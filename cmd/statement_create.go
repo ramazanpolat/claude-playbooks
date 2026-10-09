@@ -267,9 +267,11 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	}
 	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
 	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
-	// existing playbook too, where CREATE IF NOT EXISTS would not. An
-	// isolated login travels as SET ISOLATED LOGIN; SET SANDBOX already
-	// implies it. A linked playbook's manifest is the target's.
+	// existing playbook too, where CREATE IF NOT EXISTS would not. The
+	// settings travel the same way, as MODIFY SETTING: login only when
+	// isolated (SET SANDBOX already implies it), memory always, so a
+	// recipe never leans on a default. A linked playbook's manifest and
+	// settings.json are the target's.
 	sandboxed := v.Sandbox.Always && v.Linked == nil
 	var sandboxSettings []grammar.Var
 	if v.Linked == nil && m != nil && m.Sandbox != nil {
@@ -278,10 +280,10 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		}
 	}
 	isolated := v.IsolatedLogin && !sandboxed && v.Linked == nil
-	if env.Empty() && !isolated && !sandboxed && len(sandboxSettings) == 0 {
-		return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
-	}
 	if v.Linked != nil {
+		if env.Empty() {
+			return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
+		}
 		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName, withheld: withheldSource}, nil
 	}
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
@@ -296,9 +298,13 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		})
 		alter.Clauses = append(alter.Clauses, clauses...)
 	}
+	set := grammar.Clause{Kind: grammar.ModifySetting}
 	if isolated {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetIsolatedLogin})
+		set.Settings = append(set.Settings, grammar.Var{Key: "login", Value: "isolated"})
 	}
+	memory, _ := memoryStateOf(pb.Path)
+	set.Settings = append(set.Settings, grammar.Var{Key: "memory", Value: memory})
+	alter.Clauses = append(alter.Clauses, set)
 	if sandboxed {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})
 	}

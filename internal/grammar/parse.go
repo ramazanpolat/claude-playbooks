@@ -34,6 +34,7 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
+		"SETTINGS", "MODIFY", "RESET",
 	} {
 		keywords[w] = true
 	}
@@ -169,9 +170,9 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "MODIFY", "RESET"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "ISOLATED"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SETTINGS"}
 )
 
 var (
@@ -812,14 +813,21 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.pickerModel(c, w)
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
+	case "MODIFY", "RESET":
+		if p.kw("SETTING") == "" {
+			return nil, p.fail(w + " takes SETTING: " + w + " SETTING <key>" + map[string]string{"MODIFY": " = '<value>'", "RESET": ""}[w])
+		}
+		if w == "MODIFY" {
+			c.Kind = ModifySetting
+			return c, p.playbookSettings(c, "MODIFY SETTING", true)
+		}
+		c.Kind = ResetSetting
+		return c, p.playbookSettings(c, "RESET SETTING", false)
 	case "SET":
-		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
-		case "ISOLATED":
-			if p.kw("LOGIN") == "" {
-				return nil, p.fail("expected LOGIN after SET ISOLATED")
-			}
-			c.Kind = SetIsolatedLogin
-			return c, nil
+		if p.at("ISOLATED") {
+			return nil, p.fail(removedLogin)
+		}
+		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "SANDBOX") {
 		case "SANDBOX":
 			if p.atEnd() || p.isStarter() {
 				c.Kind = SetSandbox
@@ -872,7 +880,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Kind = SetModel
 			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
+			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL or SANDBOX")
 		}
 		return c, p.set(c)
 	case "ALLOW", "DENY":
@@ -895,13 +903,10 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
-		case "ISOLATED":
-			if p.kw("LOGIN") == "" {
-				return nil, p.fail("expected LOGIN after UNSET ISOLATED")
-			}
-			c.Kind = UnsetIsolatedLogin
-			return c, nil
+		if p.at("ISOLATED") {
+			return nil, p.fail(removedLogin)
+		}
+		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "SANDBOX") {
 		case "SANDBOX":
 			if p.atEnd() || p.isStarter() {
 				c.Kind = UnsetSandbox
@@ -939,7 +944,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Names = rules
 			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL or SANDBOX")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -1050,6 +1055,9 @@ func (p *parser) addEnvRest(c *Clause) *Error {
 
 func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	c := &Clause{Pos: p.pos()}
+	if p.at("ISOLATED") {
+		return nil, p.fail(removedLogin)
+	}
 	w := p.kw(createPlaybookStarters...)
 	switch w {
 	case "":
@@ -1074,12 +1082,9 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
-	case "ISOLATED":
-		if p.kw("LOGIN") == "" {
-			return nil, p.fail("expected LOGIN after ISOLATED")
-		}
-		c.Kind = IsolatedLogin
-		return c, nil
+	case "SETTINGS":
+		c.Kind = PlaybookSettings
+		return c, p.playbookSettings(c, "SETTINGS", true)
 	}
 	return nil, nil
 }
@@ -1242,7 +1247,7 @@ func validate(s *Stmt) *Error {
 	once := map[Kind]bool{
 		Description: true, UseEnv: true, RenameTo: true,
 		Launcher: true, NoLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
-		IsolatedLogin: true, SetIsolatedLogin: true, UnsetIsolatedLogin: true,
+		PlaybookSettings: true, ModifySetting: true, ResetSetting: true,
 		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
@@ -1255,10 +1260,14 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
 		}
 		for _, v := range c.Settings {
-			if settings[v.Key] {
-				return errAt(c.Pos, "sandbox."+v.Key+" appears twice; one statement changes a setting once")
+			name := "sandbox." + v.Key
+			if c.Kind == PlaybookSettings || c.Kind == ModifySetting || c.Kind == ResetSetting {
+				name = "setting " + v.Key
 			}
-			settings[v.Key] = true
+			if settings[name] {
+				return errAt(c.Pos, name+" appears twice; one statement changes a setting once")
+			}
+			settings[name] = true
 		}
 		seen[c.Kind] = c.Pos
 		var ks []string
@@ -1293,8 +1302,7 @@ func validate(s *Stmt) *Error {
 		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
 		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
-		{SetIsolatedLogin, UnsetIsolatedLogin},
-		{SetSandbox, UnsetSandbox}, {SetSandbox, UnsetIsolatedLogin},
+		{SetSandbox, UnsetSandbox},
 		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
 		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
 	for _, pr := range pairs {
@@ -1304,11 +1312,20 @@ func validate(s *Stmt) *Error {
 			return errAt(s.Pos, string(pr[0])+" and "+string(pr[1])+" cannot be combined")
 		}
 	}
+	// A sandbox shares no login with the machine, so it cannot be combined
+	// with login = 'shared' (RESET SETTING login is that too).
+	if login, ok := SettingValue(s.Clauses, "login"); ok && login == "shared" {
+		for _, k := range []Kind{SetSandbox, Sandbox} {
+			if pos, on := seen[k]; on {
+				return errAt(pos, string(k)+" isolates the login: it cannot be combined with login = 'shared'")
+			}
+		}
+	}
 	if s.Verb == Create && s.Object == Playbook {
 		_, from := seen[From]
 		_, link := seen[Link]
-		if pos, ok := seen[IsolatedLogin]; ok && link {
-			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolated_login there")
+		if pos, ok := seen[PlaybookSettings]; ok && link {
+			return errAt(pos, "SETTINGS does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
 		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {
