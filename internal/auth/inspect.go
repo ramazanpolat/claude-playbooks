@@ -80,6 +80,14 @@ type Report struct {
 	ReauthRequired bool `json:"reauth_required"`
 	// TokenFile is the machine-global token file when it exists and is non-empty.
 	TokenFile string `json:"token_file,omitempty"`
+	// Keychain is set for a stored-login launch whose file store holds no
+	// grant of its own: present when Claude Code's Keychain item for it
+	// exists (macOS), unknown when the probe could not answer; probed for
+	// presence only. Empty when the store answered or the item is absent.
+	Keychain KeychainState `json:"keychain,omitempty"`
+	// storeUnknown: the file store exists but could not be read or parsed,
+	// so it may hold a login (the launch leaves such a store alone).
+	storeUnknown bool
 }
 
 // MarshalJSON emits the report with expires_at and daemon_since present only
@@ -210,6 +218,20 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	} else {
 		r.Store = StoreAbsent
 	}
+	if r.Store != StoreAbsent && !r.HasGrant {
+		// Judged as the launch judges it: only a store KNOWN to hold no
+		// grant is none; one that cannot be read or parsed, or that the
+		// launch's own reading finds a grant in, is unknown.
+		absent, err := storeGrantAbsent(store)
+		r.storeUnknown = err != nil || !absent
+	}
+	if r.usesStoredLogin() && !r.ownGrant() {
+		// Only an answer that carries information is kept: absent is what
+		// no field already says (and all a probe off macOS can give).
+		if k := keychainLogin(configDir, r.Mode == ModeSharedLogin, raw); k != KeychainAbsent {
+			r.Keychain = k
+		}
+	}
 
 	// The pending removal is judged exactly as the launch will judge it:
 	// a symlinked (shared) store is detached first, so a grant reached only
@@ -279,11 +301,11 @@ func (r Report) NeedsAttention() string {
 	case r.ReauthRequired:
 		return "re-auth required"
 	case len(r.StaleIdentity) > 0 && !r.HasGrant:
-		return "no login; stale account state, purged at launch"
+		return r.noGrantNote() + "; stale account state, purged at launch"
 	case len(r.StaleIdentity) > 0:
 		return "stale account state, purged at launch (the shared login is detached at launch)"
 	case !r.HasGrant:
-		return "no login"
+		return r.noGrantNote()
 	case r.Expired:
 		return "grant expired (refreshes at launch if the refresh token is still valid)"
 	}
@@ -326,4 +348,37 @@ func GlobalDir() (string, error) {
 		return "", ErrNoGlobal
 	}
 	return d, nil
+}
+
+// noGrantNote says where the login is when the file store holds none: in
+// the Keychain, which the launch uses; unknown when the Keychain or the
+// store could not be read; else none at all.
+func (r Report) noGrantNote() string {
+	switch {
+	case r.Keychain == KeychainPresent:
+		return "login in the Keychain (used at launch)"
+	case r.Keychain == KeychainUnknown:
+		return "login unknown (Keychain not readable)"
+	case r.storeUnknownCounts():
+		return "login unknown (" + CredentialsFileName + " not readable)"
+	}
+	return "no login"
+}
+
+// detachedAtLaunch: an isolated playbook's store is still a link to the
+// shared one, which its next launch detaches before Claude Code starts.
+// Whatever that link reaches is not this playbook's login.
+func (r Report) detachedAtLaunch() bool {
+	return r.Mode == ModeIsolatedLogin && r.Store == StoreSymlink
+}
+
+// ownGrant: the file store holds a grant the launch will use.
+func (r Report) ownGrant() bool {
+	return r.HasGrant && !r.detachedAtLaunch()
+}
+
+// storeUnknownCounts: an unreadable store the launch will keep, so it may
+// still hold the login.
+func (r Report) storeUnknownCounts() bool {
+	return r.storeUnknown && !r.detachedAtLaunch()
 }

@@ -18,7 +18,7 @@ cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, laun
 cpb SHOW ENVS --json                 # env sets: name, description, vars, used_by, default
 cpb "SELECT name, envs FROM PLAYBOOKS" --json   # chosen columns, one table (anything beyond columns needs clickhouse-local)
 cpb SHOW DEFAULTS --json             # {"envs": [...], "secret_helper": {...} | null}
-cpb EXPLAIN PLAYBOOK <name> --json   # every variable a launch would change, with its layer
+cpb EXPLAIN PLAYBOOK <name> --json   # every variable a launch would change, with its layer, and its route: base URL, models, auth state, egress (never a secret)
 ```
 
 A variable is one object with exactly one of `value`, `ref`, `redacted` (with `plaintext`) or `blocked`. A credential's value is never printed in any form.

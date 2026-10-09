@@ -24,6 +24,9 @@ func TestMain(m *testing.M) {
 	findGenericPassword = func(string) ([]byte, error) {
 		return nil, errKeychainStubbed
 	}
+	// The presence probe too: absent unless a test says otherwise, so no
+	// test reaches a real Keychain (CI's macOS runner has one).
+	KeychainProbe = func(string, string) KeychainState { return KeychainAbsent }
 	// The FILE store is as real as the Keychain: a test that forgets to set a
 	// temporary HOME would read ~/.claude/.credentials.json and could link it
 	// into a fixture. The whole package runs under a scratch HOME, with the
