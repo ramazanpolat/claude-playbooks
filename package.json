@@ -6,9 +6,10 @@
     "type": "git",
     "url": "git+https://github.com/ramazanpolat/claude-playbooks.git"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "files": [
-    "bin/npx-shim.sh"
+    "bin/npx-shim.sh",
+    "NOTICE"
   ],
   "bin": {
     "cpb": "bin/npx-shim.sh"
