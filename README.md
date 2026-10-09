@@ -146,4 +146,4 @@ cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"   # state as tables; add 
 
 ## License
 
-MIT
+Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Relicensed from MIT to Apache-2.0 from the first release after v4.0.0-rc2; v4.0.0-rc2 and earlier releases keep their MIT licence.

@@ -163,6 +163,32 @@ TMP_FILE=""
 echo ""
 echo "Installed to $INSTALL_DIR/cpb"
 
+# The licence travels with the binary: the release's LICENSE and NOTICE go
+# to <prefix>/share/doc/cpb, <prefix> being the install directory's parent
+# (~/.local/share/doc/cpb for ~/.local/bin). A release without them, or a
+# directory that cannot be written, is a note, never a failed install: both
+# are also in the repository. A CPB_INSTALL_URL override names no release,
+# so there is nothing to fetch.
+if [ -z "${CPB_INSTALL_URL:-}" ]; then
+  DOC_DIR="$(dirname "$INSTALL_DIR")/share/doc/cpb"
+  doc_missing=""
+  for f in LICENSE NOTICE; do
+    TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb.XXXXXX")
+    if curl -fsSL "${DOWNLOAD_BASE_URL}/${LATEST}/$f" -o "$TMP_FILE" 2>/dev/null \
+      && chmod 644 "$TMP_FILE" && mkdir -p "$DOC_DIR" 2>/dev/null && mv "$TMP_FILE" "$DOC_DIR/$f" 2>/dev/null; then
+      TMP_FILE=""
+    else
+      rm -f "$TMP_FILE"; TMP_FILE=""
+      doc_missing="$doc_missing $f"
+    fi
+  done
+  if [ -z "$doc_missing" ]; then
+    echo "Licence: $DOC_DIR/LICENSE and NOTICE (Apache-2.0)"
+  else
+    echo "Note: could not place${doc_missing} in $DOC_DIR; see https://github.com/${REPO}/releases/tag/${LATEST}"
+  fi
+fi
+
 # Warn if install dir is not on PATH.
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
