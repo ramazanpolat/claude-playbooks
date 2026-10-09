@@ -26,13 +26,14 @@ func stubKeychainItems(t *testing.T, items map[string]KeychainState) *[]string {
 
 // The service name is Claude Code's (2.1.292): the machine name, "-", and
 // the first 8 hex digits of sha256 of CLAUDE_CONFIG_DIR exactly as passed.
-// The value below was confirmed present for a logged-in isolated playbook
-// on 2026-10-07 by a presence-only probe; a trailing "/" names another item.
+// The rule was confirmed on 2026-10-07 by a presence-only probe of a
+// logged-in isolated playbook; the path below is a neutral one, its digits
+// computed outside Go. A trailing "/" names another item.
 func TestConfigKeychainService(t *testing.T) {
-	if s, ok := configKeychainService("/Users/polat/.claude-playbooks/kommander-dev"); !ok || s != "Claude Code-credentials-95a60dda" {
+	if s, ok := configKeychainService("/Users/pilot/.claude-playbooks/work"); !ok || s != "Claude Code-credentials-1437e222" {
 		t.Fatalf("%q %v", s, ok)
 	}
-	if s, _ := configKeychainService("/Users/polat/.claude-playbooks/kommander-dev/"); s == "Claude Code-credentials-95a60dda" {
+	if s, _ := configKeychainService("/Users/pilot/.claude-playbooks/work/"); s == "Claude Code-credentials-1437e222" {
 		t.Fatal("a trailing slash is another item")
 	}
 	if _, ok := configKeychainService("/Users/çağ/.claude-playbooks/x"); ok {
@@ -91,7 +92,11 @@ func TestInspectKeychainLogin(t *testing.T) {
 	} {
 		stubKeychainItems(t, map[string]KeychainState{own: c.state})
 		r := Inspect("iso", dir, time.Now())
-		if r.Mode != ModeIsolatedLogin || r.Keychain != c.state || r.Login() != c.login || r.NeedsAttention() != c.note {
+		want := c.state
+		if want == KeychainAbsent {
+			want = "" // only present and unknown are kept
+		}
+		if r.Mode != ModeIsolatedLogin || r.Keychain != want || r.Login() != c.login || r.NeedsAttention() != c.note {
 			t.Errorf("%s: mode %s keychain %s login %q note %q", c.state, r.Mode, r.Keychain, r.Login(), r.NeedsAttention())
 		}
 	}

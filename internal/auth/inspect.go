@@ -81,8 +81,9 @@ type Report struct {
 	// TokenFile is the machine-global token file when it exists and is non-empty.
 	TokenFile string `json:"token_file,omitempty"`
 	// Keychain is set for a stored-login launch whose file store holds no
-	// grant: whether Claude Code's Keychain item for it exists (macOS),
-	// probed for presence only. Empty when the store answered.
+	// grant of its own: present when Claude Code's Keychain item for it
+	// exists (macOS), unknown when the probe could not answer; probed for
+	// presence only. Empty when the store answered or the item is absent.
 	Keychain KeychainState `json:"keychain,omitempty"`
 	// storeUnknown: the file store exists but could not be read or parsed,
 	// so it may hold a login (the launch leaves such a store alone).
@@ -225,7 +226,11 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		r.storeUnknown = err != nil || !absent
 	}
 	if r.usesStoredLogin() && !r.ownGrant() {
-		r.Keychain = keychainLogin(configDir, r.Mode == ModeSharedLogin, raw)
+		// Only an answer that carries information is kept: absent is what
+		// no field already says (and all a probe off macOS can give).
+		if k := keychainLogin(configDir, r.Mode == ModeSharedLogin, raw); k != KeychainAbsent {
+			r.Keychain = k
+		}
 	}
 
 	// The pending removal is judged exactly as the launch will judge it:

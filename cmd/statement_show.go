@@ -184,7 +184,7 @@ type explainJSON struct {
 	Model        *modelJSON  `json:"model"`
 	Agent        *agentJSON  `json:"agent"`
 	// Route is where a launch's requests go and how it authenticates, built
-	// from non-secret values only (v4.0.0, oi-costume#1).
+	// from non-secret values and states only (v4.0.0).
 	Route routeJSON `json:"route"`
 }
 
