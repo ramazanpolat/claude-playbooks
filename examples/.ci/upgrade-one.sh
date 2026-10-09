@@ -45,7 +45,10 @@ cpb auth status --json > "$home/new-auth.json"
 if ! cmp -s "$home/old-auth.json" "$home/new-auth.json"; then echo "auth status differs:"; diff "$home/old-auth.json" "$home/new-auth.json" | head -20; exit 1; fi
 for pb in $pbs; do
   cpb EXPLAIN PLAYBOOK "$pb" --json > "$home/new-explain-$pb.json"
-  if ! cmp -s "$home/old-explain-$pb.json" "$home/new-explain-$pb.json"; then echo "EXPLAIN $pb differs:"; diff "$home/old-explain-$pb.json" "$home/new-explain-$pb.json" | head -20; exit 1; fi
+  # Every key the old binary printed is compared; one the new binary adds is
+  # listed, not compared (examples/.ci/same-explain.py).
+  if ! python3 "$ci/same-explain.py" "$home/old-explain-$pb.json" "$home/new-explain-$pb.json" > "$home/explain-cmp"; then echo "EXPLAIN $pb differs:"; cat "$home/explain-cmp"; exit 1; fi
+  cat "$home/explain-cmp" >> "$home/explain-added"
 done
 for pb in $pbs; do
   # A playbook sandboxed on every launch needs sbx, which this job does not

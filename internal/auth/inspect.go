@@ -84,6 +84,9 @@ type Report struct {
 	// grant: whether Claude Code's Keychain item for it exists (macOS),
 	// probed for presence only. Empty when the store answered.
 	Keychain KeychainState `json:"keychain,omitempty"`
+	// storeUnknown: the file store exists but could not be read or parsed,
+	// so it may hold a login (the launch leaves such a store alone).
+	storeUnknown bool
 }
 
 // MarshalJSON emits the report with expires_at and daemon_since present only
@@ -214,7 +217,14 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	} else {
 		r.Store = StoreAbsent
 	}
-	if r.usesStoredLogin() && !r.HasGrant {
+	if r.Store != StoreAbsent && !r.HasGrant {
+		// Judged as the launch judges it: only a store KNOWN to hold no
+		// grant is none; one that cannot be read or parsed, or that the
+		// launch's own reading finds a grant in, is unknown.
+		absent, err := storeGrantAbsent(store)
+		r.storeUnknown = err != nil || !absent
+	}
+	if r.usesStoredLogin() && !r.ownGrant() {
 		r.Keychain = keychainLogin(configDir, r.Mode == ModeSharedLogin, raw)
 	}
 
@@ -336,14 +346,34 @@ func GlobalDir() (string, error) {
 }
 
 // noGrantNote says where the login is when the file store holds none: in
-// the Keychain, which the launch uses; unknown when it could not be asked;
-// else none at all.
+// the Keychain, which the launch uses; unknown when the Keychain or the
+// store could not be read; else none at all.
 func (r Report) noGrantNote() string {
-	switch r.Keychain {
-	case KeychainPresent:
+	switch {
+	case r.Keychain == KeychainPresent:
 		return "login in the Keychain (used at launch)"
-	case KeychainUnknown:
+	case r.Keychain == KeychainUnknown:
 		return "login unknown (Keychain not readable)"
+	case r.storeUnknownCounts():
+		return "login unknown (" + CredentialsFileName + " not readable)"
 	}
 	return "no login"
+}
+
+// detachedAtLaunch: an isolated playbook's store is still a link to the
+// shared one, which its next launch detaches before Claude Code starts.
+// Whatever that link reaches is not this playbook's login.
+func (r Report) detachedAtLaunch() bool {
+	return r.Mode == ModeIsolatedLogin && r.Store == StoreSymlink
+}
+
+// ownGrant: the file store holds a grant the launch will use.
+func (r Report) ownGrant() bool {
+	return r.HasGrant && !r.detachedAtLaunch()
+}
+
+// storeUnknownCounts: an unreadable store the launch will keep, so it may
+// still hold the login.
+func (r Report) storeUnknownCounts() bool {
+	return r.storeUnknown && !r.detachedAtLaunch()
 }

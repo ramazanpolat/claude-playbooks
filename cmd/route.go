@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -11,9 +12,11 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// routeJSON is EXPLAIN's route: where a launch's requests go and how it
-// authenticates, from non-secret values only. No reference is resolved and
-// no credential is read to answer it.
+// routeJSON is EXPLAIN's route: where a launch from this environment sends
+// its requests and how it authenticates. It carries non-secret values and
+// states only. No reference is resolved and no secret helper runs. The login
+// is judged by the same in-process reading of the stores that auth status
+// does, so the two agree; no value, and no part of one, reaches the output.
 type routeJSON struct {
 	// BaseURL is the effective ANTHROPIC_BASE_URL with any userinfo removed
 	// (not masked: absent); null when unset (Anthropic's own endpoint) or
@@ -44,11 +47,45 @@ var routeTokenVars = map[string]bool{
 	auth.OAuthTokenEnv:     true,
 }
 
+// routeInherited is what a launch keeps from the environment it starts in:
+// every route variable no layer sets or blocks. CLAUDE_CODE_OAUTH_TOKEN is
+// left to the login report, which already decides it the way the launch
+// does (an isolated launch removes an inherited one).
+func routeInherited(origins []envset.Origin, environ []string) []envset.Origin {
+	covered := map[string]bool{}
+	for _, o := range origins {
+		covered[o.Key] = true
+	}
+	var out []envset.Origin
+	for _, kv := range environ {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || covered[k] || k == auth.OAuthTokenEnv {
+			continue
+		}
+		switch {
+		case k == "ANTHROPIC_BASE_URL", k == "ANTHROPIC_MODEL", routeTokenVars[k],
+			k == "CLAUDE_CODE_USE_BEDROCK", k == "CLAUDE_CODE_USE_VERTEX", defaultModelVar.MatchString(k):
+			covered[k] = true // the first entry is the one a lookup sees
+			out = append(out, envset.Origin{Key: k, Value: v})
+		}
+	}
+	return out
+}
+
 func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSON) routeJSON {
 	r := routeJSON{Models: map[string]string{}, Auth: "none", Egress: "anthropic"}
 	if model != nil && model.Name != "" {
 		r.Models["default"] = model.Name
 	}
+	inherited := routeInherited(origins, os.Environ())
+	for _, o := range inherited {
+		// An inherited model wins over the playbook's settings, as it does
+		// in Claude Code; a layer that sets or blocks it is already in model.
+		if o.Key == "ANTHROPIC_MODEL" && o.Value != "" {
+			r.Models["default"] = o.Value
+		}
+	}
+	origins = append(append([]envset.Origin{}, origins...), inherited...)
 	tokenSet := false
 	cloud := false
 	baseFromRef := false

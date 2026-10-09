@@ -115,19 +115,21 @@ func keychainLogin(configDir string, shared, machine bool) KeychainState {
 }
 
 // Login is where a stored-login launch would find its login: "store" (the
-// file store, or its link, holds a grant), "keychain" (the Keychain does),
-// "none", or "unknown" when the Keychain could not be asked. A token launch
+// file store, or its link, holds a grant the launch keeps), "keychain" (the
+// Keychain does), "none", or "unknown" when the Keychain or the store could
+// not be read. An isolated playbook's link to the shared store is detached
+// at launch, so a grant reached through it does not count. A token launch
 // has no stored login to report: "".
 func (r Report) Login() string {
 	if !r.usesStoredLogin() {
 		return ""
 	}
 	switch {
-	case r.HasGrant:
+	case r.ownGrant():
 		return "store"
 	case r.Keychain == KeychainPresent:
 		return "keychain"
-	case r.Keychain == KeychainUnknown:
+	case r.Keychain == KeychainUnknown, r.storeUnknownCounts():
 		return "unknown"
 	}
 	return "none"

@@ -5,7 +5,9 @@
 # the old one did:
 #   - SHOW CREATE ALL is byte-identical from both binaries;
 #   - re-applying the example with the new binary changes nothing;
-#   - EXPLAIN --json of every playbook (what a launch sets) is identical;
+#   - EXPLAIN --json of every playbook (what a launch sets) is identical in
+#     every key the old release printed; a key the new release adds is
+#     listed on the example's line, not compared;
 #   - auth status --json is identical;
 #   - every playbook launches (the stand-in claude records the launch),
 #     except one sandboxed on every launch: there is no sbx here, and the
@@ -42,7 +44,9 @@ for dir in "$src"/[0-9][0-9]-*/; do
   case $rc in
     0) skipped=""
        [ -f "$home/launch-skipped" ] && skipped="; launch skipped for $(tr '\n' ' ' < "$home/launch-skipped" | sed 's/ $//'): sandboxed on every launch, and no sbx here"
-       echo "ok    $name ($(cat "$home/count") playbooks$skipped)"; ran=$((ran + 1)) ;;
+       added=""
+       [ -s "$home/explain-added" ] && added="; EXPLAIN adds $(sort -u "$home/explain-added" | tr '\n' ' ' | sed 's/ $//')"
+       echo "ok    $name ($(cat "$home/count") playbooks$skipped$added)"; ran=$((ran + 1)) ;;
     3) echo "skip  $name (the old release refuses it)" ;;
     *) echo "FAIL  $name"; sed 's/^/      /' "$home/log" | tail -30; fail=1 ;;
   esac

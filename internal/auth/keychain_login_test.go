@@ -104,3 +104,84 @@ func TestInspectKeychainLogin(t *testing.T) {
 		t.Fatalf("a file grant: login %q, probes %v", r.Login(), *asked)
 	}
 }
+
+// A store that exists but cannot be parsed may hold a login (the launch
+// keeps it): the login is unknown, never none. A store known to hold no
+// grant is none.
+func TestInspectUnreadableStore(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	dir := filepath.Join(root, "iso")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte("isolated_login = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubKeychainItems(t, nil)
+	store := filepath.Join(dir, CredentialsFileName)
+	for _, c := range []struct {
+		content, login, note string
+	}{
+		{"{not json", "unknown", "login unknown (" + CredentialsFileName + " not readable)"},
+		{`{"claudeAiOauth":{"accessToken":"x","expiresAt":"soon"}}`, "unknown", "login unknown (" + CredentialsFileName + " not readable)"},
+		{`{}`, "none", "no login"},
+		{"", "none", "no login"},
+	} {
+		if err := os.WriteFile(store, []byte(c.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r := Inspect("iso", dir, time.Now())
+		if r.Login() != c.login || r.NeedsAttention() != c.note {
+			t.Errorf("store %q: login %q note %q, want %q %q", c.content, r.Login(), r.NeedsAttention(), c.login, c.note)
+		}
+	}
+}
+
+// An isolated playbook whose store is still a link to the shared one: the
+// launch detaches it first, so the grant behind the link is not its login.
+// Its own Keychain item is asked instead, and the shared one never is.
+func TestInspectIsolatedSharedLink(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_PLAYBOOKS_DIR", root)
+	shared := filepath.Join(t.TempDir(), CredentialsFileName)
+	if err := os.WriteFile(shared, []byte(`{"claudeAiOauth":{"accessToken":"x","expiresAt":0}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "iso")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".playbook"), []byte("isolated_login = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(dir, CredentialsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	own, _ := configKeychainService(dir)
+	for _, c := range []struct {
+		state KeychainState
+		login string
+	}{
+		{KeychainAbsent, "none"},
+		{KeychainPresent, "keychain"},
+		{KeychainUnknown, "unknown"},
+	} {
+		asked := stubKeychainItems(t, map[string]KeychainState{own: c.state})
+		r := Inspect("iso", dir, time.Now())
+		if r.Mode != ModeIsolatedLogin || r.Store != StoreSymlink || r.Login() != c.login {
+			t.Errorf("%s: mode %s store %s login %q, want %q", c.state, r.Mode, r.Store, r.Login(), c.login)
+		}
+		if len(*asked) != 1 || (*asked)[0] != own {
+			t.Errorf("%s: probes %v, want only the playbook's own item", c.state, *asked)
+		}
+	}
+	// A dangling link is detached too: not unknown, nothing behind it counts.
+	if err := os.Remove(shared); err != nil {
+		t.Fatal(err)
+	}
+	stubKeychainItems(t, nil)
+	if r := Inspect("iso", dir, time.Now()); r.Login() != "none" {
+		t.Errorf("a dangling shared link: login %q, want none", r.Login())
+	}
+}

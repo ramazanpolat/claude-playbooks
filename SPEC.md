@@ -1127,22 +1127,36 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 
 `layer.kind` is `defaults` (with `name` the env set), `env` or `playbook`.
 
-**`route`** (v4.0.0) says where a launch's requests go and how it
-authenticates, from non-secret values only. No reference is resolved and no
-credential is read to answer it.
+**`route`** (v4.0.0) says where a launch from this environment sends its
+requests and how it authenticates. It carries non-secret values and states
+only: no reference is resolved, no secret helper runs, and no value or part
+of one is printed. The login is judged by the same in-process reading of the
+stores that `auth status` does, so the two agree.
+- **The environment counts.** A launch starts from the environment it is run
+  in, so a route variable exported there and not set or blocked by any layer
+  is part of the route (`ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`,
+  `ANTHROPIC_DEFAULT_<NAME>_MODEL`, `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, the Bedrock and Vertex switches). Run EXPLAIN in
+  the environment the launch will use.
 - **`base_url` and `host`:** the effective `ANTHROPIC_BASE_URL`, its userinfo
   removed (absent, not masked). Both are `null` when it is unset (Anthropic's
   own endpoint) or when a reference sets it.
-- **`models`:** `default` is the launch's model (`ANTHROPIC_MODEL`, else the
-  playbook's settings), plus one entry per `ANTHROPIC_DEFAULT_<NAME>_MODEL`,
-  lowercased.
+- **`models`:** `default` is the launch's model (`ANTHROPIC_MODEL`, from a
+  layer or else the environment, else the playbook's settings), plus one
+  entry per `ANTHROPIC_DEFAULT_<NAME>_MODEL`, lowercased. The top-level
+  `model` describes the playbook's own choice and does not read the
+  environment.
 - **`auth`:**
   - `token-set` when `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
     `CLAUDE_CODE_OAUTH_TOKEN` is set (a value or a reference) and not blocked,
     or a machine or playbook token is in effect;
   - otherwise `oauth-login` when the login `auth status` reports is in the
-    store or in the Keychain;
-  - `unknown` when the Keychain could not be asked (never `none`);
+    store or in the Keychain. An isolated playbook's store that is still a
+    link to the shared one is detached at its next launch, so a grant reached
+    through that link does not count;
+  - `unknown` when the Keychain could not be asked, or the store exists but
+    cannot be read or parsed (the launch keeps such a store, which may hold a
+    login). Never `none`;
   - `none` otherwise.
 - **`egress`:** `anthropic` for `https://api.anthropic.com`, or no base URL
   with neither Bedrock nor Vertex switched on. `unknown` otherwise; cpb names
@@ -2503,7 +2517,7 @@ cpb auth status --claude        # add 'claude auth status --json' per directory
 | `STORE` | What sits at `.credentials.json`: `symlink -> <target>`, `file`, `file (no grant)`, or `absent`. |
 | `EXPIRES` | The stored grant's `expiresAt` as `in 6h12m`, `expired`, `unknown`, or `-` when there is no grant. |
 | `DAEMON` | Claude Code's `daemon-auth-status.json`: `auth_required` when its `since` is at or after the current grant's refresh instant (`expiresAt` minus 4 minutes, the daemon's proactive-refresh lead) and the row is a stored-login mode, `<status> (stale)` otherwise (the file is never cleared on recovery; under a token mode the stored login is quarantined and unused; for an isolated playbook whose store is still a symlink to the shared one, the marker concerns a login the launch detaches, so it never counts against that playbook), `-` when absent. |
-| `NOTE` | `launch refused` (with a sanitized reason: no file content is ever echoed), `re-auth required`, `no login; stale account state, purged at launch` (an isolated playbook without a login of its own still carrying `oauthAccount` or cached feature flags; `--json` lists them under `stale_identity`), `stale account state, purged at launch (the shared login is detached at launch)` (the same, for an isolated playbook whose store is still a symlink to the shared one), `login in the Keychain (used at launch)` (no grant in the store, but Claude Code's Keychain item for this login exists: on macOS a login lives in the Keychain, under `Claude Code-credentials` for the machine and `Claude Code-credentials-<first 8 hex of sha256(CLAUDE_CONFIG_DIR)>` for a playbook, probed for presence only, never read), `login unknown (Keychain not readable)` (the probe could not answer), `no login`, `grant expired (refreshes at launch if the refresh token is still valid)`, or empty. Token modes have no stored login to judge and show nothing. An explicitly empty token set by the manifest or an env set is `shared-login (token blocked)`, matching the launch decision. |
+| `NOTE` | `launch refused` (with a sanitized reason: no file content is ever echoed), `re-auth required`, `no login; stale account state, purged at launch` (an isolated playbook without a login of its own still carrying `oauthAccount` or cached feature flags; `--json` lists them under `stale_identity`), `stale account state, purged at launch (the shared login is detached at launch)` (the same, for an isolated playbook whose store is still a symlink to the shared one), `login in the Keychain (used at launch)` (no grant in the store, but Claude Code's Keychain item for this login exists: on macOS a login lives in the Keychain, under `Claude Code-credentials` for the machine and `Claude Code-credentials-<first 8 hex of sha256(CLAUDE_CONFIG_DIR)>` for a playbook, probed for presence only, never read), `login unknown (Keychain not readable)` (the probe could not answer), `login unknown (.credentials.json not readable)` (the store exists but cannot be read or parsed; the launch keeps it, and it may hold a login), `no login`, `grant expired (refreshes at launch if the refresh token is still valid)`, or empty. Token modes have no stored login to judge and show nothing. An explicitly empty token set by the manifest or an env set is `shared-login (token blocked)`, matching the launch decision. |
 | `CLAUDE` | With `--claude`: `logged in, <subscription>`, `not logged in`, or `error: <reason>`. |
 
 When a long-lived token file exists, a trailing line names it and notes that its own expiry is not recorded anywhere.
