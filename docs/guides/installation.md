@@ -11,7 +11,9 @@ curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/
 
 The script detects your OS and architecture, downloads the right binary from the
 latest GitHub Release, verifies it against the release's `SHA256SUMS`, and
-installs it to `/usr/local/bin` (or `~/.local/bin` if that's not writable). Linux
+installs it to `/usr/local/bin` (or `~/.local/bin` if that's not writable). The
+release's `LICENSE` and `NOTICE` (Apache-2.0) go beside it, to
+`<prefix>/share/doc/cpb` (`~/.local/share/doc/cpb` for `~/.local/bin`). Linux
 and macOS, amd64/arm64 (no native Windows — WSL works).
 
 Verify:

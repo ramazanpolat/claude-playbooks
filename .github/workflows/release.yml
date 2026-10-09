@@ -98,12 +98,16 @@ jobs:
           GOOS=darwin  GOARCH=amd64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/cpb-darwin-amd64  .
           GOOS=linux   GOARCH=amd64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/cpb-linux-amd64   .
           GOOS=linux   GOARCH=arm64 go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=${{ github.ref_name }}" -o dist/cpb-linux-arm64   .
+          # The licence travels with the binaries (Apache-2.0 4(a), 4(d)):
+          # LICENSE and NOTICE are assets of every release, and install.sh
+          # puts them beside the install.
+          cp LICENSE NOTICE dist/
 
       - name: Generate checksums
         if: steps.release_gate.outputs.release == 'true'
         run: |
           cd dist
-          sha256sum cpb-* > SHA256SUMS
+          sha256sum cpb-* LICENSE NOTICE > SHA256SUMS
           cat SHA256SUMS
 
       - uses: actions/upload-artifact@v4
