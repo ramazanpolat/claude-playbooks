@@ -56,11 +56,11 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
-		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "isolated_login",
+		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "login", "memory",
 			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "statusline_refresh", "statusline_history", "model", "model_picker", "play", "apply"},
 		structure: "name String, version Nullable(String), description Nullable(String), homepage Nullable(String), author Nullable(String), " +
 			"path String, last_used Nullable(DateTime64(3, 'UTC')), source JSON, migrate Nullable(String), linked Nullable(String), " +
-			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, isolated_login Bool, marketplaces Array(JSON), plugins Array(JSON), " +
+			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, login String, memory String, marketplaces Array(JSON), plugins Array(JSON), " +
 			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline Nullable(String), statusline_refresh Nullable(UInt32), statusline_history Array(JSON), model Nullable(String), model_picker JSON, play JSON, apply JSON",
 		comments: map[string]string{
 			"name":               "The playbook's name.",
@@ -78,7 +78,8 @@ var selectTables = map[string]selectTable{
 			"envs":               "The env sets the playbook uses, in order.",
 			"vars":               "The playbook's own variables, each a value, a reference, a redacted credential or a block.",
 			"sandbox":            "The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills.",
-			"isolated_login":     "True when the playbook shares no login with the machine; true for a sandboxed playbook too.",
+			"login":              "The login property: isolated when the playbook shares no login with the machine (a sandboxed playbook too), else shared.",
+			"memory":             "The memory property: isolated when ~/.claude's CLAUDE.md and rules do not load into the playbook, else shared.",
 			"marketplaces":       "The plugin marketplaces in the playbook's settings: name, source.",
 			"plugins":            "The plugins in the playbook's settings: id, enabled.",
 			"agent":              "The agent the playbook pins (SET AGENT); null when unset.",

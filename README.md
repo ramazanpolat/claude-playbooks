@@ -12,14 +12,14 @@ anywhere:
 
 | Layer | What each playbook gets | How |
 |---|---|---|
-| **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills. Your `~/.claude` never moves. | every playbook, always |
+| **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills; `~/.claude`'s own `CLAUDE.md` and rules stay out of it. Your `~/.claude` never moves. | every playbook (`memory = 'isolated'`, the default) |
 | **Environment** | its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is. | `USE ENV`, `SET VAR`, `BLOCK VAR` |
-| **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `ISOLATED LOGIN` |
+| **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `SET login = 'isolated'` |
 | **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SANDBOX`, or `--sandbox` on any launch |
 
 ```bash
 cpb CREATE PLAYBOOK work                           # a playbook, and a `work` command that opens it
-cpb CREATE PLAYBOOK side ISOLATED LOGIN            # a second account, running beside the first
+cpb CREATE PLAYBOOK side SET login=isolated   # a second account, running beside the first
 cpb CREATE PLAYBOOK sre SANDBOX                    # every launch inside a microVM
 work                                               # Claude Code, bound to that playbook
 ```
@@ -61,14 +61,14 @@ of them (`DEFAULTS`). `EXPLAIN` shows what a launch sets, and which layer set it
 
 ```bash
 cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:8080/v1
-cpb CREATE PLAYBOOK glm ISOLATED LOGIN
+cpb CREATE PLAYBOOK glm SET login=isolated
 cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3
 cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY   # removed even if your shell exports it
 cpb EXPLAIN PLAYBOOK glm
 ```
 
-`ISOLATED LOGIN` keeps your Anthropic login away from that provider, and a
-new playbook's `CLAUDE.md` imports nothing. [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
+`login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook
+keeps `~/.claude`'s `CLAUDE.md` out (`memory = 'isolated'`) and its own imports nothing. [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
 

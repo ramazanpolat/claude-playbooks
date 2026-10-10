@@ -269,3 +269,23 @@ export PATH="$HOME/.claude-playbooks/experiment/bin:$PATH"   # in ~/.zshrc
 A playbook's `CLAUDE.md` is loaded as standing instructions at the start of every
 session in it. It is separate from a project's `CLAUDE.md`, and both are loaded:
 the playbook's says *how you work*, the project's *what you are working on*.
+
+### The machine's own CLAUDE.md
+
+Claude Code also loads project memory from every directory above the one it
+starts in, and `~/.claude`, your machine's own configuration, is one of them.
+Without a guard, `~/.claude/CLAUDE.md` and `~/.claude/rules/` would load into
+every playbook you run under your home directory. A new playbook has the
+guard: its `memory` setting is `'isolated'`.
+
+```bash
+cpb EXPLAIN PLAYBOOK work                                   # Memory: isolated …
+cpb ALTER PLAYBOOK work SET memory = 'shared'   # let them load
+cpb ALTER PLAYBOOK work DELETE memory            # back to 'isolated'
+cpb "SELECT name, settings FROM PLAYBOOKS"                  # which playbooks load them
+```
+
+A playbook created before the setting existed loads them until you run
+`SET memory = 'isolated'` in it; nothing is changed for you. The
+setting stops the loading, not reading: an agent can still open those files
+with its Read tool. Reference: [Playbook properties](../../SPEC.md#playbook-properties).

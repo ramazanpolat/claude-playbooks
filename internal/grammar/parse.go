@@ -34,6 +34,7 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
+		"DELETE",
 	} {
 		keywords[w] = true
 	}
@@ -108,7 +109,9 @@ func ParseLine(src string) (*Stmt, error) {
 	if len(groups) != 1 {
 		return nil, &Error{Pos: Pos{Word: 1}, Msg: "one quoted argument holds exactly one statement"}
 	}
-	s, err := newParser(groups[0], false).statement()
+	p := newParser(groups[0], false)
+	p.lexed = true
+	s, err := p.statement()
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +133,7 @@ func ParseFile(src string) ([]*Stmt, error) {
 	)
 	for _, g := range groups {
 		p := newParser(g, true)
+		p.lexed = true
 		s, err := p.statement()
 		if err != nil {
 			errs = append(errs, err)
@@ -169,9 +173,9 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "DELETE"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "ISOLATED"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SET", "DELETE"}
 )
 
 var (
@@ -191,6 +195,10 @@ type parser struct {
 	i    int
 	end  Pos
 	file bool
+	// lexed: the tokens came through the playbook-file lexer (a file, or a
+	// statement given as one quoted argument), so Token.Quoted is known. On
+	// the command line the shell has removed the quotes.
+	lexed bool
 
 	tried   []string // what was acceptable at position triedAt
 	triedAt int
@@ -812,14 +820,14 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.pickerModel(c, w)
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
+	case "DELETE":
+		c.Kind = DeleteProperties
+		return c, p.playbookProperties(c, "DELETE", false)
 	case "SET":
-		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
-		case "ISOLATED":
-			if p.kw("LOGIN") == "" {
-				return nil, p.fail("expected LOGIN after SET ISOLATED")
-			}
-			c.Kind = SetIsolatedLogin
-			return c, nil
+		if p.at("ISOLATED") {
+			return nil, p.fail(removedLogin)
+		}
+		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "SANDBOX") {
 		case "SANDBOX":
 			if p.atEnd() || p.isStarter() {
 				c.Kind = SetSandbox
@@ -872,7 +880,15 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Kind = SetModel
 			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
+			// Not a clause keyword: the playbook's properties, k = 'v', ….
+			// Another keyword here (SET SECRET HELPER) is a clause of
+			// another object, never a property.
+			if p.atEnd() || p.isStarter() || (!p.toks[p.i].Quoted && IsKeyword(p.toks[p.i].Text)) {
+				p.note(PlaybookPropertyKeys()...)
+				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, SANDBOX or properties: <key> = '<value>' (" + strings.Join(PlaybookPropertyKeys(), ", ") + ")")
+			}
+			c.Kind = SetProperties
+			return c, p.playbookProperties(c, "SET", true)
 		}
 		return c, p.set(c)
 	case "ALLOW", "DENY":
@@ -895,13 +911,10 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX") {
-		case "ISOLATED":
-			if p.kw("LOGIN") == "" {
-				return nil, p.fail("expected LOGIN after UNSET ISOLATED")
-			}
-			c.Kind = UnsetIsolatedLogin
-			return c, nil
+		if p.at("ISOLATED") {
+			return nil, p.fail(removedUnsetLogin)
+		}
+		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "SANDBOX") {
 		case "SANDBOX":
 			if p.atEnd() || p.isStarter() {
 				c.Kind = UnsetSandbox
@@ -939,7 +952,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Names = rules
 			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL, ISOLATED LOGIN or SANDBOX")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL or SANDBOX")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -1050,6 +1063,9 @@ func (p *parser) addEnvRest(c *Clause) *Error {
 
 func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	c := &Clause{Pos: p.pos()}
+	if p.at("ISOLATED") {
+		return nil, p.fail(removedLogin)
+	}
 	w := p.kw(createPlaybookStarters...)
 	switch w {
 	case "":
@@ -1074,12 +1090,11 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
-	case "ISOLATED":
-		if p.kw("LOGIN") == "" {
-			return nil, p.fail("expected LOGIN after ISOLATED")
-		}
-		c.Kind = IsolatedLogin
-		return c, nil
+	case "SET":
+		c.Kind = SetProperties
+		return c, p.playbookProperties(c, "SET", true)
+	case "DELETE":
+		return nil, p.fail("CREATE starts every property at its default; DELETE is for ALTER PLAYBOOK")
 	}
 	return nil, nil
 }
@@ -1242,7 +1257,6 @@ func validate(s *Stmt) *Error {
 	once := map[Kind]bool{
 		Description: true, UseEnv: true, RenameTo: true,
 		Launcher: true, NoLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
-		IsolatedLogin: true, SetIsolatedLogin: true, UnsetIsolatedLogin: true,
 		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
@@ -1255,10 +1269,20 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
 		}
 		for _, v := range c.Settings {
-			if settings[v.Key] {
-				return errAt(c.Pos, "sandbox."+v.Key+" appears twice; one statement changes a setting once")
+			// A property may be set or deleted in several SET and DELETE
+			// clauses, but each key once.
+			if c.Kind == SetProperties || c.Kind == DeleteProperties {
+				if settings["property "+v.Key] {
+					return errAt(c.Pos, v.Key+" is named twice in one statement")
+				}
+				settings["property "+v.Key] = true
+				continue
 			}
-			settings[v.Key] = true
+			name := "sandbox." + v.Key
+			if settings[name] {
+				return errAt(c.Pos, name+" appears twice; one statement changes a setting once")
+			}
+			settings[name] = true
 		}
 		seen[c.Kind] = c.Pos
 		var ks []string
@@ -1293,8 +1317,7 @@ func validate(s *Stmt) *Error {
 		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
 		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
-		{SetIsolatedLogin, UnsetIsolatedLogin},
-		{SetSandbox, UnsetSandbox}, {SetSandbox, UnsetIsolatedLogin},
+		{SetSandbox, UnsetSandbox},
 		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
 		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
 	for _, pr := range pairs {
@@ -1304,11 +1327,20 @@ func validate(s *Stmt) *Error {
 			return errAt(s.Pos, string(pr[0])+" and "+string(pr[1])+" cannot be combined")
 		}
 	}
+	// A sandbox shares no login with the machine, so it cannot be combined
+	// with login = 'shared' (DELETE login is that too).
+	if login, ok := PropertyValue(s.Clauses, "login"); ok && login == "shared" {
+		for _, k := range []Kind{SetSandbox, Sandbox} {
+			if pos, on := seen[k]; on {
+				return errAt(pos, string(k)+" isolates the login: it cannot be combined with login = 'shared'")
+			}
+		}
+	}
 	if s.Verb == Create && s.Object == Playbook {
 		_, from := seen[From]
 		_, link := seen[Link]
-		if pos, ok := seen[IsolatedLogin]; ok && link {
-			return errAt(pos, "ISOLATED LOGIN does not apply to LINK: a linked playbook's manifest belongs to the target; set isolated_login there")
+		if pos, ok := seen[SetProperties]; ok && link {
+			return errAt(pos, "SET ("+strings.Join(PlaybookPropertyKeys(), ", ")+") does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
 		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {

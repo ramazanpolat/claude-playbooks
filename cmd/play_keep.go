@@ -164,11 +164,11 @@ func keepBlocked(defaults, keep, own map[string]bool) []string {
 func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK %s", name)
-	if res.Endpoint != "" {
-		b.WriteString(" ISOLATED LOGIN")
-	}
 	if sandboxed {
 		b.WriteString(" SANDBOX")
+	}
+	if res.Endpoint != "" {
+		b.WriteString(" SET login = 'isolated'")
 	}
 	b.WriteString(";\n")
 	if res.Endpoint != "" && len(blocked) > 0 {
@@ -423,9 +423,9 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		}
 		return out
 	}
-	// SET ISOLATED LOGIN (and the login a SET SANDBOX isolates) and NO
-	// LAUNCHER: a login is never unset by an update, and the launcher is
-	// play's.
+	// SET login / memory (the login and the memory isolated; the login a
+	// SET SANDBOX isolates) and NO LAUNCHER: a property is never relaxed by
+	// an update, and the launcher is play's.
 	return nil
 }
 
@@ -628,7 +628,7 @@ func playUpdateRun(name string) error {
 	}
 	var setup strings.Builder
 	if res.Endpoint != "" {
-		fmt.Fprintf(&setup, "ALTER PLAYBOOK %s SET ISOLATED LOGIN", name)
+		fmt.Fprintf(&setup, "ALTER PLAYBOOK %s SET login = 'isolated'", name)
 		if blocked := keepBlocked(defKeys, keep, recipeKeys(rec.Bytes)); len(blocked) > 0 {
 			fmt.Fprintf(&setup, " BLOCK VAR %s", strings.Join(blocked, " "))
 		}

@@ -176,7 +176,7 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 		t.Fatalf("keep a moved endpoint: %v\n%s", err, out)
 	}
 	v := showPlaybook(t, "router")
-	if v["isolated_login"] != true {
+	if v["login"] != "isolated" {
 		t.Fatalf("not isolated: %v", v)
 	}
 	m, err := manifest.Read(v["path"].(string))

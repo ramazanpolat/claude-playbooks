@@ -44,7 +44,8 @@ ALTER PLAYBOOK k UNSET SANDBOX UNSET SANDBOX host mounts;`)
 		"ALTER PLAYBOOK k SET SANDBOX backend;":                        "SET SANDBOX takes <key>=<value>",
 		"ALTER PLAYBOOK k SET SANDBOX host=a UNSET SANDBOX host;":      "sandbox.host appears twice",
 		"ALTER PLAYBOOK k SET SANDBOX UNSET SANDBOX;":                  "cannot be combined",
-		"ALTER PLAYBOOK k SET SANDBOX UNSET ISOLATED LOGIN;":           "cannot be combined",
+		"ALTER PLAYBOOK k SET SANDBOX SET login = 'shared';":           "cannot be combined",
+		"ALTER PLAYBOOK k SET SANDBOX DELETE login;":                   "cannot be combined",
 		"ALTER PLAYBOOK k SET SANDBOX host=a SET SANDBOX backend=sbx;": "appears twice",
 	} {
 		if _, err := ParseFile(src); err == nil || !strings.Contains(err.Error(), want) {

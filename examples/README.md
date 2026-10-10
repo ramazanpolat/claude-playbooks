@@ -39,3 +39,4 @@ helper, `cpb-secret-file`, which examples 04 and 09 use.
 | [19-tui](19-tui/) | what `cpb tui` shows, and the statements behind each screen |
 | [20-sandbox](20-sandbox/) | a playbook that always runs in a Docker Sandbox: its `[sandbox]` settings, written and unset |
 | [21-play](21-play/) | `cpb play`: check, plan, run, keep and update someone else's recipe |
+| [22-isolated-memory](22-isolated-memory/) | the `memory` setting: `~/.claude`'s `CLAUDE.md` and rules kept out of a playbook |

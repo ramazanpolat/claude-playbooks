@@ -8,6 +8,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // Each playbook lifecycle statement fills an options struct from its
@@ -30,6 +31,9 @@ func lifecycle(st *grammar.Stmt) bool {
 type createOptions struct {
 	from, branch, subdir, link, alias string
 	noAlias, sandbox, isolatedLogin   bool
+	// memory: the memory property, 'isolated' unless SET says otherwise;
+	// a LINK has none (its settings.json is the target's).
+	memory string
 }
 
 func createOptionsOf(st *grammar.Stmt) createOptions {
@@ -50,9 +54,16 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			o.noAlias = true
 		case grammar.Sandbox:
 			o.sandbox = true
-		case grammar.IsolatedLogin:
-			o.isolatedLogin = true
 		}
+	}
+	login, _ := grammar.PropertyValue(st.Clauses, "login")
+	o.isolatedLogin = login == "isolated"
+	o.memory = grammar.PlaybookPropertyDefault("memory")
+	if v, ok := grammar.PropertyValue(st.Clauses, "memory"); ok {
+		o.memory = v
+	}
+	if o.link != "" {
+		o.memory = ""
 	}
 	return o
 }
@@ -100,6 +111,14 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		r.recordPlaybook(st.Name, true)
 		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
+		if o.memory == "isolated" && r.dry != nil {
+			// The settings.json CREATE writes, so a later SET memory in the
+			// same file plans against it.
+			sf := &settings.File{Root: settings.NewObject()}
+			if _, _, err := applyMemory(sf, o.memory); err == nil {
+				r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
+			}
+		}
 		if r.dry != nil {
 			r.dry.isolated[st.Name] = o.sandbox || o.isolatedLogin
 			r.dry.sandboxed[st.Name] = o.sandbox
@@ -115,7 +134,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case o.from != "":
 		return doInstall(installOpts{name: st.Name, branch: o.branch, subdir: o.subdir,
-			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{o.from})
+			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, memory: o.memory}, []string{o.from})
 
 	case o.link != "":
 		if o.sandbox {
@@ -123,7 +142,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return doLink(linkOpts{name: st.Name, launcher: o.alias, noLauncher: o.noAlias}, []string{o.link})
 	}
-	return doCreate(createOpts{launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin}, []string{st.Name})
+	return doCreate(createOpts{launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, memory: o.memory}, []string{st.Name})
 }
 
 func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {

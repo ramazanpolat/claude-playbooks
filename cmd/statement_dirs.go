@@ -39,12 +39,10 @@ var dirRefusals = map[grammar.Kind]string{
 	grammar.Launcher:   "the directory has no launcher",
 	grammar.NoLauncher: "the directory has no launcher",
 
-	grammar.SetIsolatedLogin:   "isolated_login is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetIsolatedLogin: "isolated_login is recorded in a playbook's manifest, which the directory does not have",
-	grammar.SetSandbox:         "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
-	grammar.SetSandboxKeys:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetSandboxKeys:   "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetSandbox:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.SetSandboxKeys:   "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
+	grammar.UnsetSandboxKeys: "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 }
 
 // validateDirClauses refuses, with its reason, a clause that cannot apply
@@ -55,6 +53,15 @@ func validateDirClauses(st *grammar.Stmt) error {
 	for _, c := range st.Clauses {
 		if why, refused := dirRefusals[c.Kind]; refused {
 			return fmt.Errorf("%s cannot apply to %s: %s", c.Kind, dir, why)
+		}
+		if c.Kind == grammar.SetProperties || c.Kind == grammar.DeleteProperties {
+			if _, ok := grammar.PropertyValue([]grammar.Clause{c}, "login"); ok {
+				verb := "SET"
+				if c.Kind == grammar.DeleteProperties {
+					verb = "DELETE"
+				}
+				return fmt.Errorf("%s login cannot apply to %s: the login is recorded in a playbook's manifest, which the directory does not have", verb, dir)
+			}
 		}
 		if c.Kind == grammar.AddMCP {
 			for _, v := range append(append([]grammar.Var(nil), c.MCP.Env...), c.MCP.Headers...) {

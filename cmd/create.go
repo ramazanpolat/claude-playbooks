@@ -18,6 +18,9 @@ type createOpts struct {
 	noLauncher    bool
 	sandbox       bool
 	isolatedLogin bool // isolated_login = true without a sandbox
+	// memory: 'isolated' writes the claudeMdExcludes entry that keeps
+	// ~/.claude's CLAUDE.md and rules out; 'shared' and "" write nothing.
+	memory string
 }
 
 func doCreate(o createOpts, args []string) error {
@@ -87,7 +90,14 @@ func doCreate(o createOpts, args []string) error {
 		}
 		if err := manifest.Write(dest, m); err != nil {
 			os.RemoveAll(dest)
-			return fmt.Errorf("cannot record the sandbox or login setting in the manifest: %w", err)
+			return fmt.Errorf("cannot record the sandbox or login property in the manifest: %w", err)
+		}
+	}
+
+	if o.memory == "isolated" {
+		if err := writeMemory(dest, o.memory); err != nil {
+			os.RemoveAll(dest)
+			return fmt.Errorf("cannot record the memory setting in settings.json: %w", err)
 		}
 	}
 

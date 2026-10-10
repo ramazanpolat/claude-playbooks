@@ -4,4 +4,4 @@ if grep -q '^@' "$p/routed/CLAUDE.md"; then echo "CLAUDE.md imports something"; 
 # The route comes from the env set, the login is the playbook's own, and the
 # Anthropic credentials are blocked.
 cpb EXPLAIN PLAYBOOK routed | grep -q 'ANTHROPIC_BASE_URL'
-cpb SHOW PLAYBOOK routed --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["isolated_login"] and v["envs"] == ["router"], v; assert {x["key"] for x in v["vars"] if x.get("blocked")} >= {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"}, v["vars"]'
+cpb SHOW PLAYBOOK routed --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["login"] == "isolated" and v["envs"] == ["router"], v; assert {x["key"] for x in v["vars"] if x.get("blocked")} >= {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"}, v["vars"]'

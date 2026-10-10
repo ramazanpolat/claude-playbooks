@@ -106,12 +106,11 @@ func (r *Result) statement(s *grammar.Stmt) {
 
 // Clauses a played recipe may not hold, with the reason.
 var refusedClauses = map[grammar.Kind]string{
-	grammar.UseEnv:             "it would attach your env sets, and your keys, to someone else's playbook",
-	grammar.AddEnv:             "it would attach your env sets, and your keys, to someone else's playbook",
-	grammar.DropEnv:            "it would detach your env sets: " + onlyThisPlaybook,
-	grammar.UnsetIsolatedLogin: "the login is play's decision, not the recipe's",
-	grammar.RenameTo:           "the name is play's decision, not the recipe's",
-	grammar.Launcher:           "the launcher is play's decision, not the recipe's",
+	grammar.UseEnv:   "it would attach your env sets, and your keys, to someone else's playbook",
+	grammar.AddEnv:   "it would attach your env sets, and your keys, to someone else's playbook",
+	grammar.DropEnv:  "it would detach your env sets: " + onlyThisPlaybook,
+	grammar.RenameTo: "the name is play's decision, not the recipe's",
+	grammar.Launcher: "the launcher is play's decision, not the recipe's",
 }
 
 func (r *Result) clause(c grammar.Clause) {
@@ -135,8 +134,21 @@ func (r *Result) clause(c grammar.Clause) {
 	case grammar.AddPlugin:
 		r.risk(line, RiskThirdPartyCode, kind+" "+c.Names[0], "a plugin can carry hooks (shell commands run on events) and commands", "")
 	case grammar.SetAgent, grammar.SetModel, grammar.AddModel, grammar.SetModelPicker,
-		grammar.DenyTool, grammar.SetStatuslineRefresh, grammar.BlockVar, grammar.SetIsolatedLogin, grammar.NoLauncher:
+		grammar.DenyTool, grammar.SetStatuslineRefresh, grammar.BlockVar, grammar.NoLauncher:
 		// configuration only
+	case grammar.SetProperties:
+		// A recipe may isolate more, never less: the login and the memory
+		// of ~/.claude stay apart unless play itself shares them.
+		for _, v := range c.Settings {
+			if v.Value == "shared" {
+				r.refuse(line, "SET "+v.Key+" = 'shared'", "sharing the "+v.Key+" is play's decision, not the recipe's")
+				return
+			}
+		}
+	case grammar.DeleteProperties:
+		// A new playbook already has every default; DELETE only undoes.
+		r.refuse(line, "DELETE "+c.Settings[0].Key, "nothing to undo on a new playbook")
+		return
 	case grammar.AllowTool:
 		for _, rule := range c.Names {
 			if why := wideAllow(rule); why != "" {

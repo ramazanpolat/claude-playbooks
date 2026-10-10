@@ -111,7 +111,7 @@ func TestExpectPlugins(t *testing.T) {
 		want []string
 	}{
 		{w("ALTER PLAYBOOK k ADD"), []string{"ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL"}},
-		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "AGENT", "STATUSLINE", "MODEL", "ISOLATED", "SANDBOX"}},
+		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "AGENT", "STATUSLINE", "MODEL", "SANDBOX", "login", "memory"}},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m"), []string{"FROM"}},
 	}
 	for _, tc := range cases {

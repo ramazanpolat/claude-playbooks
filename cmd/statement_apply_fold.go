@@ -62,6 +62,14 @@ func foldParts(c grammar.Clause) []foldPart {
 		for i, v := range c.Settings {
 			out = append(out, foldPart{index: i, what: verb + v.Key, effects: []foldEffect{w("sandbox:" + v.Key)}})
 		}
+	case grammar.SetProperties, grammar.DeleteProperties:
+		verb := "SET "
+		if c.Kind == grammar.DeleteProperties {
+			verb = "DELETE "
+		}
+		for i, v := range c.Settings {
+			out = append(out, foldPart{index: i, what: verb + v.Key, effects: []foldEffect{w("property:" + v.Key)}})
+		}
 	case grammar.SetModel, grammar.UnsetModel:
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("model")}})
 	case grammar.SetAgent, grammar.UnsetAgent:
@@ -302,7 +310,7 @@ func keepEntries(c grammar.Clause, keep []int) grammar.Clause {
 		out.Keys = pick(c.Keys, keep)
 	case grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool:
 		out.Names = pick(c.Names, keep)
-	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys:
+	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys, grammar.SetProperties, grammar.DeleteProperties:
 		out.Settings = pick(c.Settings, keep)
 	}
 	return out

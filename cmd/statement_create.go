@@ -54,7 +54,16 @@ func showCreate(st *grammar.Stmt) error {
 			return err
 		}
 		blocks = append(blocks, b)
-	default: // ALL: env sets, DEFAULTS, playbooks, so each statement finds what it names
+	default: // ALL: the secret helper, env sets, DEFAULTS, playbooks, so each statement finds what it names
+		helper, defaults, err := createDefaultsBlocks(dir)
+		if err != nil {
+			return err
+		}
+		// The helper comes first: APPLY checks each reference against the
+		// helper an earlier statement sets, and env sets carry references.
+		if helper.text != "" {
+			blocks = append(blocks, helper)
+		}
 		profiles, err := envset.List(dir)
 		if err != nil {
 			return err
@@ -62,12 +71,8 @@ func showCreate(st *grammar.Stmt) error {
 		for _, p := range profiles {
 			blocks = append(blocks, createEnvBlock(p))
 		}
-		b, err := createDefaultsBlock(dir)
-		if err != nil {
-			return err
-		}
-		if b.text != "" {
-			blocks = append(blocks, b)
+		if defaults.text != "" {
+			blocks = append(blocks, defaults)
 		}
 		// ALL is every playbook, for APPLY to replay: a playbook that cannot
 		// be read refuses it, rather than a dump that leaves one out.
@@ -154,25 +159,26 @@ func createEnvBlock(p *envset.Set) createBlock {
 	return createBlock{text: joinComments(comments, st.Pretty()+";"), withheld: len(comments) / 2}
 }
 
-func createDefaultsBlock(dir string) (createBlock, error) {
+// createDefaultsBlocks is DEFAULTS as two statements: the secret helper,
+// which goes before the env sets whose references it resolves, and the env
+// sets DEFAULTS uses, which go after them. Either is empty when unset.
+func createDefaultsBlocks(dir string) (helper, defaults createBlock, err error) {
 	names, err := envset.Defaults(dir)
 	if err != nil {
-		return createBlock{}, fmt.Errorf("DEFAULTS cannot be read: %w", err)
+		return createBlock{}, createBlock{}, fmt.Errorf("DEFAULTS cannot be read: %w", err)
 	}
-	st := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Defaults}
 	if len(names) > 0 {
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: names})
+		st := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Defaults, Clauses: []grammar.Clause{{Kind: grammar.UseEnv, Names: names}}}
+		defaults = createBlock{text: st.Pretty() + ";"}
 	}
 	// Only the stored setting: CPB_SECRET_HELPER belongs to one process.
 	if data, err := os.ReadFile(filepath.Join(dir, envset.SecretHelperFile)); err == nil {
 		if cmd := strings.TrimSpace(string(data)); cmd != "" {
-			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetHelper, Arg: cmd})
+			st := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Defaults, Clauses: []grammar.Clause{{Kind: grammar.SetHelper, Arg: cmd}}}
+			helper = createBlock{text: st.Pretty() + ";"}
 		}
 	}
-	if len(st.Clauses) == 0 {
-		return createBlock{}, nil
-	}
-	return createBlock{text: st.Pretty() + ";"}, nil
+	return helper, defaults, nil
 }
 
 func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
@@ -267,9 +273,11 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	}
 	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
 	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
-	// existing playbook too, where CREATE IF NOT EXISTS would not. An
-	// isolated login travels as SET ISOLATED LOGIN; SET SANDBOX already
-	// implies it. A linked playbook's manifest is the target's.
+	// existing playbook too, where CREATE IF NOT EXISTS would not. The
+	// properties travel the same way, as SET login = …, memory = …: both
+	// always, so a recipe never leans on a default (a sandboxed playbook's
+	// login is isolated). A linked playbook's manifest and settings.json
+	// are the target's.
 	sandboxed := v.Sandbox.Always && v.Linked == nil
 	var sandboxSettings []grammar.Var
 	if v.Linked == nil && m != nil && m.Sandbox != nil {
@@ -277,11 +285,11 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
 		}
 	}
-	isolated := v.IsolatedLogin && !sandboxed && v.Linked == nil
-	if env.Empty() && !isolated && !sandboxed && len(sandboxSettings) == 0 {
-		return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
-	}
+	isolated := v.IsolatedLogin || sandboxed
 	if v.Linked != nil {
+		if env.Empty() {
+			return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
+		}
 		return createBlock{text: text + "\n-- the environment of a linked playbook lives in the target's " + manifest.FileName, withheld: withheldSource}, nil
 	}
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
@@ -296,9 +304,14 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		})
 		alter.Clauses = append(alter.Clauses, clauses...)
 	}
+	login := "shared"
 	if isolated {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetIsolatedLogin})
+		login = "isolated"
 	}
+	set := grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}}}
+	memory, _ := memoryStateOf(pb.Path)
+	set.Settings = append(set.Settings, grammar.Var{Key: "memory", Value: memory})
+	alter.Clauses = append(alter.Clauses, set)
 	if sandboxed {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})
 	}

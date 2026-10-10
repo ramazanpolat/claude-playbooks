@@ -76,7 +76,7 @@ func setAsideOwnLogin(targetDir string) error {
 	if accountUUID(state+".cpb-backup-"+stamp) == "" || machineAccountUUID(targetDir) == "" {
 		why = "a login that cannot be confirmed as the machine's account"
 	}
-	Notice(fmt.Sprintf("%s held %s; kept it as %s and linked the machine's login. To keep that account there: ALTER PLAYBOOK <name> SET ISOLATED LOGIN, then move the file back",
+	Notice(fmt.Sprintf("%s held %s; kept it as %s and linked the machine's login. To keep that account there: ALTER PLAYBOOK <name> SET login = 'isolated', then move the file back",
 		targetDir, why, filepath.Base(kept)))
 	return nil
 }
