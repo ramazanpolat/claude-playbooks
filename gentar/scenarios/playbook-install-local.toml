@@ -33,7 +33,9 @@ command = 'cpb SHOW PLAYBOOKS | grep -F fixture-pb'
 contains = "fixture-pb"
 
 [[verify.commands]]
-command = 'diff -r "$HOME/fixture-src" "$HOME/.claude-playbooks/fixture-pb" >/dev/null && echo faithful'
+# Faithful apart from settings.json, where CREATE writes the memory
+# setting's one entry (memory = 'isolated', a new playbook's default).
+command = '''diff -r -x settings.json "$HOME/fixture-src" "$HOME/.claude-playbooks/fixture-pb" >/dev/null && python3 -c 'import json,os,sys; v=json.load(open(sys.argv[1])); assert v == {"claudeMdExcludes": [os.path.expanduser("~/.claude") + "/**"]}, v' "$HOME/.claude-playbooks/fixture-pb/settings.json" && echo faithful'''
 contains = "faithful"
 
 [[verify.commands]]
