@@ -133,9 +133,10 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
 
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
             | LINK <dir>                                    develop in place
-property   := <key> = <value>             launcher, login, memory, model, agent, sandbox.<key>
+property   := <key> = <value>             launcher, login, memory, model, agent, sandbox.<key>,
+                                           statusline, statusline_refresh, model_picker.mode
                                            see "Playbook properties"
-value      := '<string>' | true | false | [ '<string>', ... ]
+value      := '<string>' | <integer> | true | false | [ '<string>', ... ]
 
 env-clause := SET [VAR] <key>=<value> ... [AS PLAINTEXT]
                                            literal values; AS PLAINTEXT: see Secrets
@@ -175,7 +176,6 @@ pb-clause  := set-clause
             | REVERT STATUSLINE            the status line cpb replaced last
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   see "Model picker"
             | DROP MODEL '<id>'
-            | SET model_picker.mode = 'only' | SET model_picker.mode = 'append' | DELETE model_picker
             | ADD SKILL <name> FROM '<dir>'
             | ADD SKILL <name> FROM <git-url> [BRANCH <ref>] [SUBDIR <dir>]
             | DROP SKILL <name>
