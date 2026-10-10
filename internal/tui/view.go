@@ -369,7 +369,10 @@ func (m Model) listBody() []string {
 	case vDefaults:
 		helper := "(none)"
 		if hp := m.st.Defaults.SecretHelper; hp != nil {
-			helper = hp.Command + "  (from " + hp.From + ")"
+			helper = *hp
+			if from := m.st.Defaults.SecretHelperFrom; from != nil {
+				helper += "  (from " + *from + ")"
+			}
 		}
 		envs := "(none)"
 		if len(m.st.Defaults.Envs) > 0 {

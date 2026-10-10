@@ -193,12 +193,12 @@ type EnvSet struct {
 	Default     bool     `json:"default"`
 }
 
+// Defaults is SHOW DEFAULTS --json: its env sets and its property,
+// secret_helper, with where it is set beside it.
 type Defaults struct {
-	Envs         []string `json:"envs"`
-	SecretHelper *struct {
-		Command string `json:"command"`
-		From    string `json:"from"`
-	} `json:"secret_helper"`
+	Envs             []string `json:"envs"`
+	SecretHelper     *string  `json:"secret_helper"`
+	SecretHelperFrom *string  `json:"secret_helper_from"`
 }
 
 type Explain struct {
