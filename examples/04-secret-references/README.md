@@ -17,6 +17,6 @@ yourself, as `.setup` does with a placeholder.
   resolve is refused, and nothing is stored.
 - A credential-looking literal (`SET TOKEN=…`) is refused unless you write
   `AS PLAINTEXT`, and `SHOW CREATE` never prints one.
-- `ALTER DEFAULTS UNSET SECRET HELPER` removes the helper. Launching a
+- `ALTER DEFAULTS DELETE secret_helper` removes the helper. Launching a
   playbook whose layers still hold a reference is then refused in one line,
   "no secret helper configured".

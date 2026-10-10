@@ -64,7 +64,7 @@ cpb's: it opens the session in the playbook, where the transcript lives.
 
 ## Limits
 
-- **Sandboxed playbooks** (`--sandbox`, `SET SANDBOX`) keep their sessions
+- **Sandboxed playbooks** (`--sandbox`, `sandbox.always = true`) keep their sessions
   inside the sandbox. `--resume` and `--continue` go to the claude in there.
   cpb cannot see those sessions, so it does not check them, and says so.
 - **The format.** The session files are Claude Code's, and undocumented.

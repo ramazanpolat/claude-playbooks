@@ -30,17 +30,16 @@ import (
 
 // dirRefusals names why each refused clause cannot apply to a directory.
 var dirRefusals = map[grammar.Kind]string{
-	grammar.SetRef:     "a secret reference is resolved by cpb's launcher, which never runs for this directory",
-	grammar.BlockVar:   "removing a variable at launch is the launcher's job",
-	grammar.UseEnv:     "env sets are layered by the launcher",
-	grammar.AddEnv:     "env sets are layered by the launcher",
-	grammar.DropEnv:    "env sets are layered by the launcher",
-	grammar.RenameTo:   "the directory is not in the registry",
-	grammar.Launcher:   "the directory has no launcher",
-	grammar.NoLauncher: "the directory has no launcher",
+	grammar.SetRef:          "a secret reference is resolved by cpb's launcher, which never runs for this directory",
+	grammar.BlockVar:        "removing a variable at launch is the launcher's job",
+	grammar.UseEnv:          "env sets are layered by the launcher",
+	grammar.AddEnv:          "env sets are layered by the launcher",
+	grammar.DropEnv:         "env sets are layered by the launcher",
+	grammar.RenameTo:        "the directory is not in the registry",
+	grammar.Launcher:        "the directory has no launcher",
+	grammar.NoLauncher:      "the directory has no launcher",
+	grammar.DefaultLauncher: "the directory has no launcher",
 
-	grammar.SetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetSandbox:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.SetSandboxKeys:   "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.UnsetSandboxKeys: "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 }
@@ -50,7 +49,7 @@ var dirRefusals = map[grammar.Kind]string{
 // anything is written.
 func validateDirClauses(st *grammar.Stmt) error {
 	dir := st.Dir
-	for _, c := range st.Clauses {
+	for _, c := range grammar.Flatten(st.Clauses) {
 		if why, refused := dirRefusals[c.Kind]; refused {
 			return fmt.Errorf("%s cannot apply to %s: %s", c.Kind, dir, why)
 		}
@@ -80,6 +79,10 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	dir := st.Dir
 	key := dirMark + dir
+	st, err := r.resolveIfUnsetDir(st, key)
+	if err != nil {
+		return err
+	}
 	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err

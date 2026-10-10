@@ -3,7 +3,7 @@ grep -qx 'isolated_login = true' "$p/other-account/.playbook"
 grep -qx 'isolated_login = true' "$p/scratch/.playbook"
 cpb SHOW PLAYBOOK scratch --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["login"] == "isolated" and v["sandbox"]["always"] is False, v'
 cpb EXPLAIN PLAYBOOK scratch | grep -q '^Login: isolated'
-cpb SHOW CREATE PLAYBOOK scratch | grep -qx "  SET login = 'isolated', memory = 'isolated';"
+cpb SHOW CREATE PLAYBOOK scratch | grep -q "login = 'isolated', memory = 'isolated', sandbox.always = false;"
 # A login of its own blocks 'shared': a shared launch would copy it over the
 # machine's login. (A made-up store, not a real grant.)
 printf '{"claudeAiOauth":{"accessToken":"example-not-a-token"}}' > "$p/scratch/.credentials.json"

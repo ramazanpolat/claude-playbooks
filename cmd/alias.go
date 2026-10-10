@@ -11,8 +11,8 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// launcherOpts carries ALTER PLAYBOOK … LAUNCHER / NO LAUNCHER. No state is shared
-// between two calls.
+// launcherOpts carries the launcher property: a name, none (the empty
+// launcher) or DELETE launcher. No state is shared between two calls.
 type launcherOpts struct {
 	remove bool
 }
@@ -45,7 +45,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		linked = true
 	}
 
-	// NO LAUNCHER
+	// launcher = ''
 	if o.remove {
 		old := pb.Alias()
 		if old == "" {
@@ -81,7 +81,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 			if _, _, foreign := launcher.Lookup(ldir, name); !foreign {
 				if _, err := os.Lstat(filepath.Join(ldir, name)); err != nil {
-					fmt.Printf("Playbook %q now has no launcher. Restore one with: cpb ALTER PLAYBOOK %s LAUNCHER %s\n", name, name, name)
+					fmt.Printf("Playbook %q now has no launcher. Restore one with: cpb ALTER PLAYBOOK %s DELETE launcher\n", name, name)
 				}
 			}
 		}

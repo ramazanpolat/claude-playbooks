@@ -1,4 +1,4 @@
 -- A playbook to hold sessions. SHOW SESSIONS reads them and the launch
 -- resumes them; neither has a place in a playbook file, so this one only
 -- creates it.
-CREATE PLAYBOOK IF NOT EXISTS worker NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS worker SET launcher = '';

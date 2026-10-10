@@ -15,7 +15,7 @@ Type "# each playbook = a fully isolated Claude Code instance" Sleep 800ms Enter
 Sleep 400ms
 Type "cpb CREATE PLAYBOOK writer" Sleep 300ms Enter
 Sleep 1.4s
-Type "cpb CREATE PLAYBOOK sre LAUNCHER ops" Sleep 300ms Enter
+Type "cpb CREATE PLAYBOOK sre SET launcher = 'ops'" Sleep 300ms Enter
 Sleep 1.4s
 Type "cpb SHOW PLAYBOOKS" Sleep 300ms Enter
 Sleep 1.8s

@@ -81,6 +81,11 @@ func doLink(o linkOpts, args []string) error {
 	// Preflight launcher names BEFORE the symlink joins the registry (the
 	// link name registers even under --no-alias, and the target manifest's
 	// alias registers without any flag).
+	// launcher = '<its own name>' is the default launcher, which the
+	// target need not record (SHOW CREATE writes the launcher explicitly).
+	if o.launcher == name && (m == nil || m.Launcher == "") {
+		o.launcher = ""
+	}
 	effectiveAlias := o.launcher
 	if effectiveAlias == "" && m != nil {
 		effectiveAlias = m.Launcher
@@ -103,7 +108,7 @@ func doLink(o linkOpts, args []string) error {
 	// one where none existed — could break or reroute those registrations,
 	// so it is refused.
 	if o.launcher != "" && m != nil && m.Launcher != o.launcher {
-		return fmt.Errorf("target's %s is shared state (launcher %q); LAUNCHER %s would change it for every registration of this target. Use the manifest's launcher or edit the target's %s directly", manifest.FileName, m.Launcher, o.launcher, manifest.FileName)
+		return fmt.Errorf("target's %s is shared state (launcher %q); launcher = '%s' would change it for every registration of this target. Use the manifest's launcher or edit the target's %s directly", manifest.FileName, m.Launcher, o.launcher, manifest.FileName)
 	}
 
 	// A linked directory is the pilot's own, so nothing in it is deleted: a

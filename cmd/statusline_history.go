@@ -16,7 +16,7 @@ import (
 )
 
 // The status line history: every status line a cpb statement replaces or
-// removes, kept so SET STATUSLINE PREVIOUS can put it back. It lives in
+// removes, kept so REVERT STATUSLINE can put it back. It lives in
 // cpb's own state, <playbooks root>/.state/statusline-history.json, keyed by
 // the config directory, so it works for playbooks and plain directories
 // alike and never touches a playbook's own files. It is state, not
@@ -96,13 +96,13 @@ func (r *stmtRun) commitSLHistory(key string, h []slEntry) error {
 // slPlan is what one statement does to a directory's status line history.
 type slPlan struct {
 	key     string
-	restore *settings.Object // SET STATUSLINE PREVIOUS: the object put back
+	restore *settings.Object // REVERT STATUSLINE: the object put back
 	base    []slEntry        // the history with that entry taken off
 	after   []slEntry        // the history once the statement is done
 	changed bool             // after differs from what was recorded
 }
 
-// planSLHistory resolves SET STATUSLINE PREVIOUS against a directory's
+// planSLHistory resolves REVERT STATUSLINE against a directory's
 // history. It is refused when there is nothing to go back to.
 func (r *stmtRun) planSLHistory(key, target string, clauses []grammar.Clause) (*slPlan, error) {
 	h, err := r.slHistory(key)
@@ -115,10 +115,10 @@ func (r *stmtRun) planSLHistory(key, target string, clauses []grammar.Clause) (*
 			continue
 		}
 		if len(h) == 0 {
-			return nil, fmt.Errorf("SET STATUSLINE PREVIOUS: no earlier status line is recorded for %s (cpb records one each time a statement replaces or removes it)", target)
+			return nil, fmt.Errorf("REVERT STATUSLINE: no earlier status line is recorded for %s (cpb records one each time a statement replaces or removes it)", target)
 		}
 		if p.restore, err = settings.ParseObject(h[0].StatusLine); err != nil {
-			return nil, fmt.Errorf("SET STATUSLINE PREVIOUS: the recorded status line cannot be read: %w", err)
+			return nil, fmt.Errorf("REVERT STATUSLINE: the recorded status line cannot be read: %w", err)
 		}
 		p.base = slices.Clone(h[1:])
 	}

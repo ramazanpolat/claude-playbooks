@@ -26,7 +26,7 @@ path = "~/.local/bin/cpb"
 
 [[verify.commands]]
 # The registry entry is a SYMLINK, not a copy.
-command = 'cpb CREATE PLAYBOOK linked LINK "$HOME/external" NO LAUNCHER && test -L "$HOME/.claude-playbooks/linked" && echo linked'
+command = 'cpb CREATE PLAYBOOK linked LINK "$HOME/external" SET launcher="" && test -L "$HOME/.claude-playbooks/linked" && echo linked'
 contains = "linked"
 
 [[verify.commands]]

@@ -77,20 +77,26 @@ type playbookJSON struct {
 	MCPServers   []mcpServerJSON   `json:"mcp_servers"`
 	Tools        toolsJSON         `json:"tools"`
 	Skills       []skillJSON       `json:"skills"`
-	Statusline   *string           `json:"statusline"`
-	// StatuslineRefresh is statusLine.refreshInterval, whole seconds.
-	StatuslineRefresh *int `json:"statusline_refresh"`
-	// StatuslineHistory is what SET STATUSLINE PREVIOUS can go back to,
-	// newest first (v3.25.0).
-	StatuslineHistory []slHistoryJSON `json:"statusline_history"`
-	Model             *string         `json:"model"`
-	ModelPicker       *pickerJSON     `json:"model_picker"`
+	// Statusline is the status line: statusline.command and
+	// statusline.refresh are its properties, each its field.
+	Statusline  statuslineJSON `json:"statusline"`
+	Model       *string        `json:"model"`
+	ModelPicker *pickerJSON    `json:"model_picker"`
 	// Play is the [play] record of a playbook `cpb play --keep` built, null
 	// for every other.
 	Play *playRecordJSON `json:"play"`
 	// Apply is the [apply] record of a playbook an APPLY gave name-less
 	// statements, null for every other. Last.
 	Apply *applyRecordJSON `json:"apply"`
+}
+
+// statuslineJSON is a playbook's status line (settings.json statusLine):
+// the command, its refresh in whole seconds (statusLine.refreshInterval),
+// and what REVERT STATUSLINE can go back to, newest first (v3.25.0).
+type statuslineJSON struct {
+	Command *string         `json:"command"`
+	Refresh *int            `json:"refresh"`
+	History []slHistoryJSON `json:"history"`
 }
 
 // sandboxJSON is a playbook's [sandbox] table: always, then each setting,
@@ -108,7 +114,7 @@ type sandboxJSON struct {
 }
 
 // settings is every set key but always, as <key>=<value>, in the [sandbox]
-// table's order: what SET SANDBOX writes.
+// table's order: what SET sandbox.<key> writes.
 func (v sandboxJSON) settings() []string {
 	var out []string
 	add := func(k string, s *string) {
@@ -173,9 +179,20 @@ type helperJSON struct {
 	From    string `json:"from"`
 }
 
+// defaultsJSON is DEFAULTS: its env sets and its property, secret_helper,
+// the command in effect, with where it comes from beside it.
 type defaultsJSON struct {
-	Envs         []string    `json:"envs"`
-	SecretHelper *helperJSON `json:"secret_helper"`
+	Envs             []string `json:"envs"`
+	SecretHelper     *string  `json:"secret_helper"`
+	SecretHelperFrom *string  `json:"secret_helper_from"`
+}
+
+func defaultsOf(names []string, h *helperJSON) defaultsJSON {
+	v := defaultsJSON{Envs: nonNil(names)}
+	if h != nil {
+		v.SecretHelper, v.SecretHelperFrom = &h.Command, &h.From
+	}
+	return v
 }
 
 type explainJSON struct {
@@ -234,7 +251,7 @@ func printLaunchPlugins(plugins []string, agent *agentJSON) {
 // effectiveLauncher is the command that runs pb, the one a pilot types: the
 // launcher its manifest records (LAUNCHER), else the launcher named after
 // the playbook when it is in place (CREATE PLAYBOOK writes it unless told
-// NO LAUNCHER; its only record is the link itself), "" for none. A recorded
+// the empty launcher; its only record is the link itself), "" for none. A recorded
 // launcher is reported as recorded, as SHOW CREATE writes it back.
 func effectiveLauncher(pb *playbook.Playbook) string {
 	if pb.Manifest != nil && pb.Manifest.Launcher != "" {
@@ -300,7 +317,7 @@ func readStatement(st *grammar.Stmt) error {
 		if err != nil {
 			return err
 		}
-		v := defaultsJSON{Envs: nonNil(names), SecretHelper: helper}
+		v := defaultsOf(names, helper)
 		if st.JSON {
 			return printJSON(v)
 		}
@@ -328,11 +345,11 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		if mps, plugins, agent, err := pluginState(sf.Root); err == nil {
 			v.Marketplaces, v.Plugins, v.Agent = mps, plugins, agent
 		}
-		v.Tools, v.Statusline, v.Model = settingsExtras(sf.Root)
+		v.Tools, v.Statusline.Command, v.Model = settingsExtras(sf.Root)
 		v.ModelPicker = readPicker(sf.Root)
-		v.StatuslineRefresh = statuslineRefresh(sf.Root)
+		v.Statusline.Refresh = statuslineRefresh(sf.Root)
 	}
-	v.StatuslineHistory = describeSLHistory(pb.Path)
+	v.Statusline.History = describeSLHistory(pb.Path)
 	if !pb.LastUsed.IsZero() {
 		v.LastUsed = strPtr(rfc3339(pb.LastUsed))
 	}
@@ -483,7 +500,9 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		{"Variables", strings.Join(humanVars(v.Vars, values), "\n")},
 		{"Sandbox", sandbox},
 	}...)
-	login := "shared with ~/.claude"
+	// The default is marked: login and memory share their two values, and
+	// their defaults are opposite.
+	login := "shared with ~/.claude (default)"
 	if v.IsolatedLogin {
 		login = "isolated (shares nothing with ~/.claude)"
 	}
@@ -500,7 +519,7 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	if len(v.Tools.Allow)+len(v.Tools.Deny) > 0 {
 		rows = append(rows, [2]string{"Tools", toolsLine(v.Tools)})
 	}
-	if v.Statusline != nil {
+	if v.Statusline.Command != nil {
 		rows = append(rows, [2]string{"Status line", statuslineLine(v)})
 	}
 	if v.Model != nil {
@@ -733,7 +752,7 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 	v := describePlaybook(pb)
 	switch {
 	case v.Sandbox.Always:
-		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, SET login = 'shared' shares it again")
+		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (sandbox.always = true); SET sandbox.always = false keeps the login isolated, SET login = 'shared' shares it again")
 	case v.IsolatedLogin:
 		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}
@@ -898,23 +917,23 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	if v.ModelPicker != nil {
 		fmt.Printf("Model picker: %s\n", pickerLine(v.ModelPicker))
 	}
-	if v.Statusline != nil {
+	if v.Statusline.Command != nil {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
 	}
-	if n := len(v.StatuslineHistory); n > 0 {
-		fmt.Printf("Status line history: %d earlier (SET STATUSLINE PREVIOUS restores %s)\n", n, v.StatuslineHistory[0].Command)
+	if n := len(v.Statusline.History); n > 0 {
+		fmt.Printf("Status line history: %d earlier (REVERT STATUSLINE restores %s)\n", n, v.Statusline.History[0].Command)
 	}
 }
 
 // statuslineLine is the status line command, and its refresh when set.
 func statuslineLine(v playbookJSON) string {
-	if v.Statusline == nil {
+	if v.Statusline.Command == nil {
 		return ""
 	}
-	if v.StatuslineRefresh != nil {
-		return fmt.Sprintf("%s (refreshes every %d s)", *v.Statusline, *v.StatuslineRefresh)
+	if v.Statusline.Refresh != nil {
+		return fmt.Sprintf("%s (refreshes every %d s)", *v.Statusline.Command, *v.Statusline.Refresh)
 	}
-	return *v.Statusline
+	return *v.Statusline.Command
 }
 
 // shortSHA is the first 12 hex digits of a sha256, as the preview names it.

@@ -31,14 +31,18 @@ profile works as it does on the host.
 To make a playbook sandboxed every time, say so once:
 
 ```bash
-cpb CREATE PLAYBOOK sre SANDBOX       # [sandbox] always = true, isolated_login = true
-cpb CREATE PLAYBOOK ops FROM <src> SANDBOX   # the same, for one from a source
-cpb ALTER PLAYBOOK dev SET SANDBOX    # the same, for a playbook you have
-sre -p "run the tests"                # sandboxed, no flag needed
-sre --no-sandbox                      # this launch on the host; cpb says so on stderr
-cpb ALTER PLAYBOOK sre UNSET SANDBOX  # back on the host; the login stays isolated
-cpb start --sandbox --delete /tmp/x   # a throwaway session in a throwaway sandbox
+cpb CREATE PLAYBOOK sre SET sandbox.always = true, login = isolated              # [sandbox] always = true, isolated_login = true
+cpb CREATE PLAYBOOK ops FROM <src> SET sandbox.always = true, login = isolated   # the same, for one from a source
+cpb ALTER PLAYBOOK dev SET sandbox.always = true, login = isolated               # the same, for a playbook you have
+sre -p "run the tests"                          # sandboxed, no flag needed
+sre --no-sandbox                                # this launch on the host; cpb says so on stderr
+cpb ALTER PLAYBOOK sre SET sandbox.always = false   # back on the host; the login stays isolated
+cpb start --sandbox --delete /tmp/x             # a throwaway session in a throwaway sandbox
 ```
+
+A sandbox shares no login with your machine, so `sandbox.always = true` needs
+`login = 'isolated'`: in the same statement, or already. It never isolates the
+login on its own.
 
 `--no-sandbox` is the only override, and it is never silent.
 
@@ -94,12 +98,14 @@ the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
 ## Manifest block
 
 A playbook describes its sandbox in the `[sandbox]` table of its manifest.
-`SET SANDBOX <key>=<value>` writes it key by key and `UNSET SANDBOX <key>`
-forgets one, so you never edit the file:
+`SET sandbox.<key> = <value>` writes it key by key, `DELETE sandbox.<key>`
+forgets one and `DELETE sandbox` the whole table, so you never edit the file.
+A list is `['a', 'b']`; on the command line, quote a statement that holds one,
+since zsh reads `[ ]` as a pattern:
 
 ```bash
-cpb ALTER PLAYBOOK dev SET SANDBOX host=me@buildbox mounts=~/shared-libs:ro allow_net=internal.corp
-cpb ALTER PLAYBOOK dev UNSET SANDBOX host
+cpb "ALTER PLAYBOOK dev SET sandbox.host = 'me@buildbox', sandbox.mounts = ['~/shared-libs:ro'], sandbox.allow_net = ['internal.corp']"
+cpb ALTER PLAYBOOK dev DELETE sandbox.host
 cpb SHOW PLAYBOOK dev                 # Sandbox: yes (mounts=~/shared-libs:ro, allow_net=internal.corp)
 ```
 
@@ -119,7 +125,7 @@ share_skills = true                 # mount sbx's shared skills store after all
 
 The block is install-local: `CREATE PLAYBOOK … FROM` never adopts one shipped
 by a source, and `cpb update` keeps yours. `SHOW CREATE` writes it back as `SET
-SANDBOX` statements. See [Sandbox](../../SPEC.md#sandbox) in
+sandbox.<key> = …` pairs. See [Sandbox](../../SPEC.md#sandbox) in
 the reference.
 
 `claude_version` matters for a playbook routed to a third-party backend that

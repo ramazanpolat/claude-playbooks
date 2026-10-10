@@ -76,7 +76,7 @@ func playRefs(res *play.Result) []string {
 func keepSandboxNote(sandboxed bool, res *play.Result) string {
 	switch {
 	case sandboxed:
-		return "Sandboxed: every launch of it runs in a sandbox (CREATE PLAYBOOK … SANDBOX)."
+		return "Sandboxed: every launch of it runs in a sandbox (sandbox.always = true)."
 	case res.Header.WantsSandbox():
 		return "Not sandboxed (--no-sandbox), although the recipe asks for one: it will run on your machine, as you."
 	}
@@ -164,10 +164,11 @@ func keepBlocked(defaults, keep, own map[string]bool) []string {
 func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK %s", name)
-	if sandboxed {
-		b.WriteString(" SANDBOX")
-	}
-	if res.Endpoint != "" {
+	// A sandbox needs the login isolated, and so does a moved endpoint.
+	switch {
+	case sandboxed:
+		b.WriteString(" SET sandbox.always = true, login = 'isolated'")
+	case res.Endpoint != "":
 		b.WriteString(" SET login = 'isolated'")
 	}
 	b.WriteString(";\n")
@@ -398,7 +399,7 @@ func clauseUndo(c grammar.Clause) []undoItem {
 	case grammar.SetModel:
 		return []u{{"setmodel", one(c), grammar.Clause{Kind: grammar.UnsetModel}}}
 	case grammar.SetModelPicker:
-		return []u{{"picker", one(c), grammar.Clause{Kind: grammar.UnsetModelPicker}}}
+		return []u{{"picker", one(c), grammar.Clause{Kind: grammar.UnsetModelPickerMode}}}
 	case grammar.SetStatusline:
 		return []u{{"statusline", one(c), grammar.Clause{Kind: grammar.UnsetStatusline}}}
 	case grammar.SetStatuslineRefresh:
@@ -411,9 +412,14 @@ func clauseUndo(c grammar.Clause) []undoItem {
 			out = append(out, u{"env:" + n, "ENV " + n, grammar.Clause{Kind: grammar.DropEnv, Names: []string{n}}})
 		}
 		return out
-	case grammar.SetSandbox:
-		// The bare form is always=true: one key with the keyed form.
-		return clauseUndo(grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: []grammar.Var{{Key: "always", Value: "true"}}})
+	case grammar.SetIfUnset:
+		// What the list sets when it applies; deferredIfUnset keeps the
+		// undo only where the playbook still holds the list's value.
+		var out []u
+		for _, g := range c.Group {
+			out = append(out, clauseUndo(g)...)
+		}
+		return out
 	case grammar.SetSandboxKeys:
 		var out []u
 		for _, v := range c.Settings {
@@ -424,7 +430,7 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		return out
 	}
 	// SET login / memory (the login and the memory isolated; the login a
-	// SET SANDBOX isolates) and NO LAUNCHER: a property is never relaxed by
+	// sandbox needs) and launcher = '': a property is never relaxed by
 	// an update, and the launcher is play's.
 	return nil
 }
@@ -481,8 +487,8 @@ func undoClauses(oldStmts, newStmts []*grammar.Stmt) []grammar.Clause {
 
 // oneStatement makes the undo clauses ones a single statement may hold, so
 // the undo parses back (play stages it as a file): the sandbox keys in one
-// UNSET SANDBOX, and no UNSET STATUSLINE REFRESH beside UNSET STATUSLINE,
-// which removes the refresh with the status line.
+// DELETE, and no DELETE statusline.refresh beside DELETE statusline, which
+// removes the refresh with the status line.
 func oneStatement(undo []grammar.Clause) []grammar.Clause {
 	whole := slices.ContainsFunc(undo, func(c grammar.Clause) bool { return c.Kind == grammar.UnsetStatusline })
 	var out []grammar.Clause

@@ -43,8 +43,8 @@ func playbookVars(t *testing.T, name string) map[string]string {
 	return vars
 }
 
-const keepV1 = "-- title: Keeper\n-- description: Kept.\n\nALTER PLAYBOOK\n  SET VAR FOO=1 EDITOR=vim\n  SET MODEL 'claude-opus-5-5';\n"
-const keepV2 = "-- title: Keeper\n-- description: Kept, v2.\n\nALTER PLAYBOOK\n  SET VAR BAR=2 EDITOR=vim\n  SET MODEL 'claude-sonnet-5';\n"
+const keepV1 = "-- title: Keeper\n-- description: Kept.\n\nALTER PLAYBOOK\n  SET VAR FOO=1 EDITOR=vim\n  SET model = 'claude-opus-5-5';\n"
+const keepV2 = "-- title: Keeper\n-- description: Kept, v2.\n\nALTER PLAYBOOK\n  SET VAR BAR=2 EDITOR=vim\n  SET model = 'claude-sonnet-5';\n"
 
 // --keep: the preview and the yes, then a playbook in the pilot's store with
 // a launcher, the exact bytes and the [play]
@@ -141,7 +141,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 
 	// A playbook neither played nor created FROM a source has nothing to
 	// update.
-	mustStmt(t, "CREATE PLAYBOOK plain NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK plain SET launcher = ''")
 	if err := runUpdate(updateCmd, []string{"plain"}); err == nil || !strings.Contains(err.Error(), "nothing to update from") {
 		t.Fatalf("update of an unplayed playbook: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 		t.Fatal("a dry run kept a playbook")
 	}
 
-	boxed := writeRecipe(t, dir, "boxed.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n")
+	boxed := writeRecipe(t, dir, "boxed.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET model = 'm';\n")
 	refs := writeRecipe(t, dir, "refs.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';\n")
 	playFlags(t, false, false, false, "")
 	playKeepFlags(t, true, "")
@@ -259,11 +259,11 @@ func TestUndoFor(t *testing.T) {
 		}
 		return st
 	}
-	old := parse("ALTER PLAYBOOK\n  ADD MARKETPLACE m FROM 'github:acme/plugins'\n  ADD PLUGIN p@m\n  SET VAR A=1 B=2\n  ALLOW TOOL 'Read'\n  SET MODEL 'x';\n")
+	old := parse("ALTER PLAYBOOK\n  ADD MARKETPLACE m FROM 'github:acme/plugins'\n  ADD PLUGIN p@m\n  SET VAR A=1 B=2\n  ALLOW TOOL 'Read'\n  SET model = 'x';\n")
 	if u := undoFor("kb", old, old); u != nil {
 		t.Fatalf("the same recipe undoes %s", u.String())
 	}
-	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET VAR A=1 B=3 SET MODEL 'x';\n"))
+	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET VAR A=1 B=3 SET model = 'x';\n"))
 	got := u.String()
 	want := "ALTER PLAYBOOK kb DROP PLUGIN p@m UNSET VAR B UNSET TOOL 'Read' DROP MARKETPLACE m"
 	if got != want {
@@ -285,13 +285,13 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 		}
 		return st
 	}
-	old := parse("ALTER PLAYBOOK USE ENV a b SET SANDBOX;\nALTER PLAYBOOK SET SANDBOX backend=x workdir=/w ADD ENV c FIRST;\n")
-	moved := parse("ALTER PLAYBOOK USE ENV b a SET SANDBOX always=true;\nALTER PLAYBOOK SET SANDBOX backend=x ADD ENV c LAST;\n")
-	if u := undoFor("kb", old, moved); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET SANDBOX workdir" {
-		t.Fatalf("an order change or the keyed always undoes: %v", u)
+	old := parse("ALTER PLAYBOOK USE ENV a b SET sandbox.always = true;\nALTER PLAYBOOK SET sandbox.backend = 'x', sandbox.workdir = '/w' ADD ENV c FIRST;\n")
+	moved := parse("ALTER PLAYBOOK USE ENV b a SET sandbox.always = true;\nALTER PLAYBOOK SET sandbox.backend = 'x' ADD ENV c LAST;\n")
+	if u := undoFor("kb", old, moved); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE sandbox.workdir" {
+		t.Fatalf("an order change undoes: %v", u)
 	}
-	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET SANDBOX backend=y;\n"))
-	want := "ALTER PLAYBOOK kb DROP ENV a DROP ENV b UNSET SANDBOX always backend workdir DROP ENV c"
+	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET sandbox.backend = 'y';\n"))
+	want := "ALTER PLAYBOOK kb DROP ENV a DROP ENV b DELETE sandbox.always, sandbox.backend, sandbox.workdir DROP ENV c"
 	if u == nil || u.String() != want {
 		t.Fatalf("undo:\n got %v\nwant %s", u, want)
 	}
@@ -299,17 +299,17 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 		t.Fatalf("the undo does not parse back: %v", err)
 	}
 	// One key set by two old statements is undone once (agy, #213): the
-	// merged UNSET SANDBOX never names a key twice.
-	twice := parse("ALTER PLAYBOOK SET SANDBOX workdir=/a;\nALTER PLAYBOOK SET SANDBOX workdir=/b host=h;\n")
-	if u := undoFor("kb", twice, nil); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET SANDBOX workdir host" {
+	// merged DELETE never names a key twice.
+	twice := parse("ALTER PLAYBOOK SET sandbox.workdir = '/a';\nALTER PLAYBOOK SET sandbox.workdir = '/b', sandbox.host = 'h';\n")
+	if u := undoFor("kb", twice, nil); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE sandbox.workdir, sandbox.host" {
 		t.Fatalf("a key set twice: %v", u)
 	} else if _, err := grammar.ParseFile(u.Pretty() + ";"); err != nil {
 		t.Fatalf("the undo does not parse back: %v", err)
 	}
-	// A status line and its refresh, both dropped: UNSET STATUSLINE alone,
+	// A status line and its refresh, both dropped: DELETE statusline alone,
 	// which a statement may hold (the pair is refused together).
-	sl := parse("ALTER PLAYBOOK SET STATUSLINE 'x';\nALTER PLAYBOOK SET STATUSLINE REFRESH 5;\n")
-	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET STATUSLINE" {
+	sl := parse("ALTER PLAYBOOK SET statusline.command = 'x';\nALTER PLAYBOOK SET statusline.refresh = 5;\n")
+	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE statusline" {
 		t.Fatalf("status line undo: %v", u)
 	}
 }
@@ -322,8 +322,8 @@ func TestLineDiff(t *testing.T) {
 }
 
 // A played recipe that drops both its status line and its refresh: the
-// undo is UNSET STATUSLINE alone, since a statement may not hold it beside
-// UNSET STATUSLINE REFRESH, and play parses its undo back from a file. The
+// undo is DELETE statusline alone, since a statement may not hold it beside
+// DELETE statusline.refresh, and play parses its undo back from a file. The
 // update used to fail on that file.
 func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	resetCommandTestState(t)
@@ -331,7 +331,7 @@ func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	stubClaude(t)
 	dir := t.TempDir()
-	p := writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1\n  SET STATUSLINE 'echo x';\nALTER PLAYBOOK\n  SET STATUSLINE REFRESH 5;\n")
+	p := writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1\n  SET statusline.command = 'echo x';\nALTER PLAYBOOK\n  SET statusline.refresh = 5;\n")
 	playFlags(t, false, false, false, "")
 	playKeepFlags(t, true, "")
 	playRunFlags(t, true, nil, nil, nil)
@@ -339,14 +339,14 @@ func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	if out := captureStdout(t, func() { err = runPlay(playCmd, []string{p}) }); err != nil {
 		t.Fatalf("--keep: %v\n%s", err, out)
 	}
-	if showPlaybook(t, "slr")["statusline"] != "echo x" {
+	if sl, _ := showPlaybook(t, "slr")["statusline"].(map[string]any); sl["command"] != "echo x" {
 		t.Fatalf("kept status line: %v", showPlaybook(t, "slr")["statusline"])
 	}
 	writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1;\n")
 	if out := captureStdout(t, func() { err = playUpdateRun("slr") }); err != nil {
 		t.Fatalf("update: %v\n%s", err, out)
 	}
-	if v := showPlaybook(t, "slr"); v["statusline"] != nil || v["statusline_refresh"] != nil {
-		t.Fatalf("the dropped status line stayed: %v %v", v["statusline"], v["statusline_refresh"])
+	if sl, _ := showPlaybook(t, "slr")["statusline"].(map[string]any); sl["command"] != nil || sl["refresh"] != nil {
+		t.Fatalf("the dropped status line stayed: %v", sl)
 	}
 }

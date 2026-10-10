@@ -13,9 +13,9 @@ else. They are written into the playbook's `settings.json` as
 
 - `ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']` adds a row, or updates the one with that id in place. `BEHAVES AS` tells Claude Code which model's behaviour to assume for an id it does not know, such as a router's.
 - `DROP MODEL '<id>'` removes a row.
-- `SET MODEL PICKER ONLY` shows these rows only; `APPEND` adds them after the built-in ones. `UNSET MODEL PICKER` removes the picker.
+- `SET model_picker.mode = 'only'` shows these rows only; `'append'` adds them after the built-in ones. `DELETE model_picker` (or `model_picker.mode`) puts the mode back to Claude Code's default, appending; the rows are a collection, which `DROP MODEL` empties, and a picker left empty goes.
 
 Rows and keys cpb did not write are kept. The same recipe works on a plain
 config directory (`APPLY … TO '~/.claude'`), since the picker is a user
 setting. The model a session starts with is a separate clause:
-`SET MODEL '<id>'` ([example 10](../10-tools-statusline-model/)).
+`SET model = '<id>'` ([example 10](../10-tools-statusline-model/)).

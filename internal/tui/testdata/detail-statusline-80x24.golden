@@ -5,7 +5,7 @@
 
   Command         $HOME/bin/my-status
   Refresh         10 s
-  History         1 (SET STATUSLINE PREVIOUS puts back the newest)
+  History         1 (REVERT STATUSLINE puts back the newest)
 
 
 

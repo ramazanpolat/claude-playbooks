@@ -17,7 +17,7 @@ func TestApplyToPlainDirectory(t *testing.T) {
 	}
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	skill := makeSkill(t, filepath.Join(dir, "notes"))
-	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(toolkit-helper *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
+	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(toolkit-helper *)'\n  SET model = 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
 
 	// Not a terminal and no --yes: refused before anything is written.
 	if _, err := apply(t, recipe, "TO", cfg); err == nil || !strings.Contains(err.Error(), "--yes") {
@@ -80,8 +80,8 @@ func TestPlainDirectoryRefusals(t *testing.T) {
 		"ALTER PLAYBOOK USE ENV e;":                   "env sets are layered by the launcher",
 		"ALTER PLAYBOOK BLOCK VAR K;":                 "launcher's job",
 		"ALTER PLAYBOOK SET login = 'isolated';":      "the login is recorded in a playbook's manifest",
-		"ALTER PLAYBOOK SET SANDBOX;":                 "[sandbox] is recorded in a playbook's manifest",
-		"ALTER PLAYBOOK UNSET SANDBOX host;":          "[sandbox] is recorded in a playbook's manifest",
+		"ALTER PLAYBOOK SET sandbox.always = false;":  "[sandbox] is recorded in a playbook's manifest",
+		"ALTER PLAYBOOK DELETE sandbox.host;":         "[sandbox] is recorded in a playbook's manifest",
 		"ALTER PLAYBOOK ADD MCP SERVER s URL 'https://x.example/mcp' HEADER 'Authorization' FROM 'keychain:x';": "only cpb's launcher resolves",
 	} {
 		f := writeCpb(t, dir, "r.cpb", text+"\n")
@@ -104,7 +104,7 @@ func TestPlainDirectoryBackupsAndSkillRecords(t *testing.T) {
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	makeSkill(t, filepath.Join(dir, "notes"))
 
-	twice := writeCpb(t, dir, "twice.cpb", "ALTER PLAYBOOK SET MODEL 'a';\nALTER PLAYBOOK SET MODEL 'b';\n")
+	twice := writeCpb(t, dir, "twice.cpb", "ALTER PLAYBOOK SET model = 'a';\nALTER PLAYBOOK SET model = 'b';\n")
 	out, err := apply(t, twice, "TO", cfg, "--dry-run")
 	if err != nil || strings.Count(out, "back up "+filepath.Join(cfg, "settings.json")) != 1 {
 		t.Fatalf("dry run backs up once: %v\n%s", err, out)

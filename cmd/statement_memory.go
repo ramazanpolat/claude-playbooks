@@ -146,7 +146,7 @@ func writeMemory(dir, value string) error {
 // memoryLine is SHOW's and EXPLAIN's line for the memory property.
 func memoryLine(state, other string) string {
 	if state == "isolated" {
-		return "Memory: isolated: ~/.claude's CLAUDE.md and rules are not loaded (SET memory = 'shared' loads them)"
+		return "Memory: isolated (default): ~/.claude's CLAUDE.md and rules are not loaded (SET memory = 'shared' loads them)"
 	}
 	line := "Memory: shared: ~/.claude's CLAUDE.md and rules load into it (SET memory = 'isolated' keeps them out)"
 	if other != "" {

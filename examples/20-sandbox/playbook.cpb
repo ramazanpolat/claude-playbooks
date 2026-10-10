@@ -1,8 +1,9 @@
 -- A playbook whose every launch runs in a Docker Sandbox (sbx), with one more
 -- host allowed out and one more directory mounted, read-only.
-CREATE PLAYBOOK IF NOT EXISTS box NO LAUNCHER;
--- SET SANDBOX on its own sandboxes every launch, and isolates the login; the
--- keyed form sets the [sandbox] table's own keys.
+CREATE PLAYBOOK IF NOT EXISTS box SET launcher = '';
+-- sandbox.always = true sandboxes every launch; a sandbox shares no login
+-- with the machine, so the login is isolated too. The other sandbox.<key>
+-- properties are the [sandbox] table's own keys.
 ALTER PLAYBOOK box
-  SET SANDBOX
-  SET SANDBOX backend=sbx mounts=~/shared-libs:ro allow_net=api.github.com;
+  SET sandbox.always = true, login = 'isolated'
+  SET sandbox.backend = 'sbx', sandbox.mounts = ['~/shared-libs:ro'], sandbox.allow_net = ['api.github.com'];

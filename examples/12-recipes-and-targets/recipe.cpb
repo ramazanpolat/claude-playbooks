@@ -2,4 +2,4 @@
 -- decided when the file is applied (TO, or a USE PLAYBOOK line).
 ALTER PLAYBOOK
   ALLOW TOOL 'Bash(make *)'
-  SET MODEL 'claude-sonnet-5';
+  SET model = 'claude-sonnet-5';

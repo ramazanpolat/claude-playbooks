@@ -40,7 +40,7 @@ func TestMemorySetting(t *testing.T) {
 	entry := filepath.Join(home, ".claude") + "/**"
 	root := config.ResolvePlaybooksDir()
 
-	mustStmt(t, "CREATE PLAYBOOK m NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK m SET launcher = ''")
 	dir := filepath.Join(root, "m")
 	if got := excludesOf(t, dir); !slices.Equal(got, []string{entry}) {
 		t.Fatalf("a new playbook: claudeMdExcludes %q, want [%s]", got, entry)
@@ -52,7 +52,7 @@ func TestMemorySetting(t *testing.T) {
 	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK m --json")), &v); err != nil || v.Login != "shared" || v.Memory != "isolated" {
 		t.Fatalf("SHOW --json: %v %+v", err, v)
 	}
-	if out := mustStmt(t, "SHOW PLAYBOOK m"); !strings.Contains(out, "isolated: ~/.claude's CLAUDE.md and rules are not loaded") {
+	if out := mustStmt(t, "SHOW PLAYBOOK m"); !strings.Contains(out, "isolated (default): ~/.claude's CLAUDE.md and rules are not loaded") {
 		t.Fatalf("SHOW:\n%s", out)
 	}
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK m"); !strings.Contains(out, "Memory: isolated") {
@@ -67,7 +67,7 @@ func TestMemorySetting(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK m")
-	if !strings.Contains(created, "ALTER PLAYBOOK m\n  SET login = 'shared', memory = 'isolated';") {
+	if !strings.Contains(created, "CREATE PLAYBOOK IF NOT EXISTS m\n  SET launcher = '', login = 'shared', memory = 'isolated', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -88,7 +88,7 @@ func TestMemorySetting(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "settings.json")); !strings.Contains(string(data), `"model": "opus"`) {
 		t.Fatalf("settings.json lost a key:\n%s", data)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "SET login = 'shared', memory = 'shared';") {
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "login = 'shared', memory = 'shared', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE of a shared playbook:\n%s", out)
 	}
 	mustStmt(t, "ALTER PLAYBOOK m DELETE memory")
@@ -100,7 +100,7 @@ func TestMemorySetting(t *testing.T) {
 	}
 
 	// The last entry going removes the key.
-	mustStmt(t, "CREATE PLAYBOOK s NO LAUNCHER SET memory=shared")
+	mustStmt(t, "CREATE PLAYBOOK s SET launcher = '' SET memory=shared")
 	if got := excludesOf(t, filepath.Join(root, "s")); got != nil {
 		t.Fatalf("SET memory = 'shared': %q", got)
 	}
@@ -138,7 +138,7 @@ func TestMemorySetting(t *testing.T) {
 func TestMemorySettingDryRun(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	f := writePlaybookFile(t, "CREATE PLAYBOOK d NO LAUNCHER;\nALTER PLAYBOOK d SET memory = 'isolated';\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK d SET launcher = '';\nALTER PLAYBOOK d SET memory = 'isolated';\n")
 	out, err := apply(t, f, "--dry-run")
 	if err != nil || !strings.Contains(out, "1 created, 0 changed, 1 unchanged") {
 		t.Fatalf("dry run:\n%v\n%s", err, out)

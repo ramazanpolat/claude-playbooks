@@ -1,6 +1,6 @@
 s="$HOME/.claude-playbooks/greeter/settings.json"
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["agent"]=="greeter"' "$s"
-cpb ALTER PLAYBOOK greeter UNSET AGENT
+cpb ALTER PLAYBOOK greeter DELETE agent
 python3 -c 'import json,sys; assert "agent" not in json.load(open(sys.argv[1]))' "$s"
 cpb ALTER PLAYBOOK greeter DROP PLUGIN greet@hello DROP MARKETPLACE hello
 cpb SHOW PLAYBOOK greeter --json | python3 -c 'import json,sys; p=json.load(sys.stdin); assert p["plugins"]==[] and p["marketplaces"]==[], p'

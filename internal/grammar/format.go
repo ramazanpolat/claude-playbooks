@@ -14,7 +14,7 @@ func (s *Stmt) String() string {
 	// VAR is required inside ALTER PLAYBOOK and optional in an env set,
 	// where the canonical form leaves it out.
 	varWord := s.Object == Playbook
-	for _, c := range s.Clauses {
+	for _, c := range mergedClauses(s.Clauses) {
 		w = append(w, c.words(varWord)...)
 	}
 	return strings.Join(w, " ")
@@ -26,11 +26,68 @@ func (s *Stmt) Pretty() string {
 	var b strings.Builder
 	b.WriteString(strings.Join(s.headWords(), " "))
 	varWord := s.Object == Playbook
-	for _, c := range s.Clauses {
+	for _, c := range mergedClauses(s.Clauses) {
 		b.WriteString("\n  ")
 		b.WriteString(strings.Join(c.words(varWord), " "))
 	}
 	return b.String()
+}
+
+// mergedClauses renders side by side property clauses as one list: the SET
+// pairs of clauses in a row as one SET, their DELETE keys as one DELETE,
+// as written. Each clause stays what it is: the merged clause only renders.
+func mergedClauses(in []Clause) []Clause {
+	var out []Clause
+	for _, c := range in {
+		if n := len(out); n > 0 {
+			last := &out[n-1]
+			switch {
+			case c.pairWords() != nil && last.Kind == mergedSet:
+				last.Group = append(last.Group, c)
+				continue
+			case c.pairWords() != nil && last.pairWords() != nil:
+				*last = Clause{Kind: mergedSet, Group: []Clause{*last, c}}
+				continue
+			case c.deleteKeys() != nil && last.Kind == mergedDelete:
+				last.Group = append(last.Group, c)
+				continue
+			case c.deleteKeys() != nil && last.deleteKeys() != nil:
+				*last = Clause{Kind: mergedDelete, Group: []Clause{*last, c}}
+				continue
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// mergedSet and mergedDelete are the lists mergedClauses renders; never
+// parsed, never run.
+const (
+	mergedSet    Kind = "SET <pairs>"
+	mergedDelete Kind = "DELETE <keys>"
+)
+
+// deleteKeys lists the keys a DELETE clause names, without DELETE: nil for
+// any other clause.
+func (c *Clause) deleteKeys() []string {
+	switch c.Kind {
+	case DeleteProperties:
+		var keys []string
+		for _, v := range c.Settings {
+			keys = append(keys, v.Key)
+		}
+		return keys
+	case UnsetSandboxKeys:
+		var keys []string
+		for _, v := range c.Settings {
+			keys = append(keys, "sandbox."+v.Key)
+		}
+		return keys
+	case DefaultLauncher, UnsetModel, UnsetAgent, UnsetStatusline, UnsetStatuslineRefresh, UnsetModelPickerMode, UnsetHelper:
+		return strings.Fields(string(c.Kind))[1:]
+	}
+	return nil
 }
 
 func (s *Stmt) headWords() []string {
@@ -141,37 +198,49 @@ func (c *Clause) words(varWord bool) []string {
 			w = append(w, string(c.Where), quoteWord(c.Anchor))
 		}
 		return w
-	case SetHelper:
-		return []string{"SET", "SECRET", "HELPER", quote(c.Arg)}
 	case AddMarketplace:
 		return []string{"ADD", "MARKETPLACE", quoteWord(c.Names[0]), "FROM", quote(c.Arg)}
 	case DropMarketplace, AddPlugin, DropPlugin:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Names[0]))
-	case SetAgent:
-		return []string{"SET", "AGENT", quote(c.Arg)}
 	case AllowTool, DenyTool, UnsetTool:
 		w := strings.Fields(string(c.Kind))
 		for _, r := range c.Names {
 			w = append(w, quote(r))
 		}
 		return w
-	case SetStatusline:
-		w := []string{"SET", "STATUSLINE", quote(c.Arg)}
-		if c.Refresh > 0 {
-			w = append(w, "REFRESH", strconv.Itoa(c.Refresh))
-		}
-		if c.IfUnset {
+	case SetStatusline, SetStatuslineRefresh, SetModel, Launcher, NoLauncher, SetAgent, SetHelper,
+		SetModelPicker, SetSandboxKeys, SetProperties:
+		return append([]string{"SET"}, c.pairWords()...)
+	case mergedSet, SetIfUnset:
+		// One SET IF UNSET, whatever clauses its pairs became: it applies
+		// whole or not at all.
+		w := []string{"SET"}
+		if c.Kind == SetIfUnset {
 			w = append(w, "IF", "UNSET")
 		}
+		for i, g := range c.Group {
+			pw := g.pairWords()
+			if i < len(c.Group)-1 {
+				pw[len(pw)-1] += ","
+			}
+			w = append(w, pw...)
+		}
 		return w
-	case SetStatuslineRefresh:
-		return []string{"SET", "STATUSLINE", "REFRESH", strconv.Itoa(c.Refresh)}
-	case SetModel:
-		return append(strings.Fields(string(c.Kind)), quote(c.Arg))
+	case mergedDelete:
+		var keys []string
+		for _, g := range c.Group {
+			keys = append(keys, g.deleteKeys()...)
+		}
+		w := []string{"DELETE"}
+		for i, k := range keys {
+			if i < len(keys)-1 {
+				k += ","
+			}
+			w = append(w, k)
+		}
+		return w
 	case DropSkill:
 		return []string{"DROP", "SKILL", quoteWord(c.Names[0])}
-	case SetModelPicker:
-		return []string{"SET", "MODEL", "PICKER", c.Arg}
 	case DropModel:
 		return []string{"DROP", "MODEL", quote(c.Names[0])}
 	case AddModel:
@@ -229,27 +298,55 @@ func (c *Clause) words(varWord bool) []string {
 			}
 		}
 		return w
-	case RenameTo, Launcher, From, Branch, Subdir, Link:
+	case RenameTo, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	case SetSandboxKeys:
-		w := []string{"SET", "SANDBOX"}
-		for _, v := range c.Settings {
-			w = append(w, v.Key+"="+quoteValue(v.Value))
-		}
-		return w
-	case SetProperties:
-		return append([]string{"SET"}, propertyWords(c, true)...)
 	case DeleteProperties:
 		return append([]string{"DELETE"}, propertyWords(c, false)...)
 	case UnsetSandboxKeys:
-		w := []string{"UNSET", "SANDBOX"}
-		for _, v := range c.Settings {
-			w = append(w, v.Key)
+		w := []string{"DELETE"}
+		for i, v := range c.Settings {
+			k := "sandbox." + v.Key
+			if i < len(c.Settings)-1 {
+				k += ","
+			}
+			w = append(w, k)
 		}
 		return w
-	default: // SetStatuslinePrevious, NoAlias, Sandbox, SetSandbox, UnsetSandbox, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
+	default: // SetStatuslinePrevious, DefaultLauncher, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPickerMode: no argument
 		return strings.Fields(string(c.Kind))
 	}
+}
+
+// pairWords renders the k = v pairs a property clause stands for, without
+// SET: what SET and SET IF UNSET write.
+func (c *Clause) pairWords() []string {
+	pair := func(k, v string) []string { return []string{k, "=", v} }
+	switch c.Kind {
+	case SetStatusline:
+		if c.Refresh > 0 {
+			return append(pair("statusline.command", quote(c.Arg)+","), pair("statusline.refresh", strconv.Itoa(c.Refresh))...)
+		}
+		return pair("statusline.command", quote(c.Arg))
+	case SetStatuslineRefresh:
+		return pair("statusline.refresh", strconv.Itoa(c.Refresh))
+	case SetModel:
+		return pair("model", quote(c.Arg))
+	case Launcher:
+		return pair("launcher", quote(c.Arg))
+	case NoLauncher:
+		return pair("launcher", "''")
+	case SetAgent:
+		return pair("agent", quote(c.Arg))
+	case SetHelper:
+		return pair("secret_helper", quote(c.Arg))
+	case SetModelPicker:
+		return pair("model_picker.mode", quote(strings.ToLower(c.Arg)))
+	case SetSandboxKeys:
+		return sandboxWords(c)
+	case SetProperties:
+		return propertyWords(c, true)
+	}
+	return nil
 }
 
 // quote wraps s in single quotes, doubling any inside.

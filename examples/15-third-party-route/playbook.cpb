@@ -6,7 +6,7 @@ CREATE OR REPLACE ENV router
   DESCRIPTION 'A model router: requests leave Anthropic'
   SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3;
 
-CREATE PLAYBOOK IF NOT EXISTS routed NO LAUNCHER SET login = 'isolated';
+CREATE PLAYBOOK IF NOT EXISTS routed SET launcher = '' SET login = 'isolated';
 ALTER PLAYBOOK routed
   USE ENV router
   BLOCK VAR ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;

@@ -369,7 +369,10 @@ func (m Model) listBody() []string {
 	case vDefaults:
 		helper := "(none)"
 		if hp := m.st.Defaults.SecretHelper; hp != nil {
-			helper = hp.Command + "  (from " + hp.From + ")"
+			helper = *hp
+			if from := m.st.Defaults.SecretHelperFrom; from != nil {
+				helper += "  (from " + *from + ")"
+			}
 		}
 		envs := "(none)"
 		if len(m.st.Defaults.Envs) > 0 {
@@ -536,13 +539,13 @@ func (m Model) tabBody(p Playbook, tab string) []string {
 		return m.table([]string{"NAME", "MODE", "FROM"}, rows, 2, -1, h)
 	case "Status line":
 		refresh := "-"
-		if p.StatuslineRefresh != nil {
-			refresh = strconv.Itoa(*p.StatuslineRefresh) + " s"
+		if p.Statusline.Refresh != nil {
+			refresh = strconv.Itoa(*p.Statusline.Refresh) + " s"
 		}
 		out := []string{
-			kv("Command", orDash(deref(p.Statusline))),
+			kv("Command", orDash(deref(p.Statusline.Command))),
 			kv("Refresh", refresh),
-			kv("History", fmt.Sprintf("%d (SET STATUSLINE PREVIOUS puts back the newest)", len(p.StatuslineHistory))),
+			kv("History", fmt.Sprintf("%d (REVERT STATUSLINE puts back the newest)", len(p.Statusline.History))),
 		}
 		return out
 	case "Model":

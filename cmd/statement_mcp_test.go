@@ -67,7 +67,7 @@ func TestMCPServerLifecycle(t *testing.T) {
 	helper, _ := fakeHelper(t)
 	calls := fakeMCP(t)
 	root := seedFlatPlaybook(t, "k")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 
 	add := "ALTER PLAYBOOK k ADD MCP SERVER files COMMAND npx ARGS -y server-fs VAR LOG_LEVEL=debug VAR API_TOKEN FROM keychain:ok/fs"
 	mustStmt(t, add)
@@ -124,7 +124,7 @@ func TestMCPDryRunAndRefCheck(t *testing.T) {
 	helper, _ := fakeHelper(t)
 	calls := fakeMCP(t)
 	root := seedFlatPlaybook(t, "k")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	path := writePlaybookFile(t, "ALTER PLAYBOOK k ADD MCP SERVER web URL 'https://mcp.example.com/mcp' HEADER 'Authorization' FROM 'keychain:ok/web';\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil || !strings.Contains(out, "would run: claude mcp add-json web --scope user") || len(*calls) != 0 {
@@ -157,7 +157,7 @@ func TestMCPApplyPreflightAndOrder(t *testing.T) {
 	helper, _ := fakeHelper(t)
 	calls := fakeMCP(t)
 	root := seedFlatPlaybook(t, "k")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	bad := writePlaybookFile(t, "ALTER PLAYBOOK k SET VAR A=1;\nALTER PLAYBOOK k ADD MCP SERVER web URL 'https://x.example/mcp' HEADER 'Authorization' FROM 'keychain:gone';\n")
 	if _, err := apply(t, bad); err == nil || !strings.Contains(err.Error(), "nothing was written") {
 		t.Fatalf("preflight: %v", err)

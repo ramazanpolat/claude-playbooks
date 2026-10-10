@@ -1,5 +1,5 @@
--- A status line offered, not imposed. SET STATUSLINE always applies;
+-- A status line offered, not imposed. SET statusline always applies;
 -- IF UNSET applies only where no status line is set yet, so a recipe can
 -- offer a bar without replacing the one you chose.
-CREATE PLAYBOOK IF NOT EXISTS barred NO LAUNCHER;
-ALTER PLAYBOOK barred SET STATUSLINE 'date +%H:%M' REFRESH 10 IF UNSET;
+CREATE PLAYBOOK IF NOT EXISTS barred SET launcher = '';
+ALTER PLAYBOOK barred SET IF UNSET statusline.command = 'date +%H:%M', statusline.refresh = 10;

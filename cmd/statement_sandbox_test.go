@@ -25,56 +25,56 @@ func sandboxOf(t *testing.T, name string) *manifest.Sandbox {
 	return m.Sandbox
 }
 
-// Bare SET SANDBOX is always = true and isolates the login, as CREATE …
-// SANDBOX does; the keyed form sets only the keys it names, always never;
-// always=true as a key is the same as the bare form; UNSET SANDBOX turns
-// always off and leaves the login isolated.
+// The sandbox.<key> properties set only the keys they name; always is one
+// of them and changes nothing else: sandbox.always = true needs the login
+// isolated, already or in the same statement, and false leaves it isolated.
 func TestSetSandboxForms(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
 
-	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX backend=sbx host=me@buildbox mounts=~/libs:ro,~/data")
+	mustStmt(t, "ALTER PLAYBOOK p SET sandbox.backend = sbx, sandbox.host = me@buildbox, sandbox.mounts = [~/libs:ro,~/data]")
 	sb := sandboxOf(t, "p")
 	if sb == nil || sb.Always || sb.Backend != "sbx" || sb.Host != "me@buildbox" || !reflect.DeepEqual(sb.Mounts, []string{"~/libs:ro", "~/data"}) {
-		t.Fatalf("keyed SET SANDBOX: %#v", sb)
+		t.Fatalf("SET sandbox.<key>: %#v", sb)
 	}
 	if isolateAuthOf(t, "p") {
-		t.Fatal("keyed SET SANDBOX isolated the login")
+		t.Fatal("SET sandbox.<key> isolated the login")
 	}
 
-	out := mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX")
+	// always = true on a shared login is refused, and writes nothing.
+	if err := stmtErr(t, "ALTER PLAYBOOK p SET sandbox.always = true"); err == nil || !strings.Contains(err.Error(), "SET sandbox.always = true, login = 'isolated'") {
+		t.Fatalf("sandbox.always on a shared login: %v", err)
+	}
+	if sb := sandboxOf(t, "p"); sb.Always || isolateAuthOf(t, "p") {
+		t.Fatalf("the refused statement wrote: %#v", sb)
+	}
+	out := mustStmt(t, "ALTER PLAYBOOK p SET sandbox.always = true, login = isolated")
 	if sb := sandboxOf(t, "p"); !sb.Always || sb.Backend != "sbx" || !isolateAuthOf(t, "p") {
-		t.Fatalf("bare SET SANDBOX: %#v isolated=%v", sb, isolateAuthOf(t, "p"))
+		t.Fatalf("SET sandbox.always = true, login = 'isolated': %#v isolated=%v", sb, isolateAuthOf(t, "p"))
 	}
 	if !strings.Contains(out, "login     isolated") {
-		t.Errorf("bare SET SANDBOX does not say it isolates the login:\n%s", out)
+		t.Errorf("the login line is missing:\n%s", out)
 	}
 
-	if out := mustStmt(t, "EXPLAIN PLAYBOOK p"); !strings.Contains(out, "every launch runs in a sandbox, with an isolated login") || !strings.Contains(out, "UNSET SANDBOX keeps the login isolated") || strings.Contains(out, "Login:") {
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK p"); !strings.Contains(out, "every launch runs in a sandbox, with an isolated login") || !strings.Contains(out, "SET sandbox.always = false keeps the login isolated") || strings.Contains(out, "Login:") {
 		t.Errorf("EXPLAIN of a sandboxed playbook: the Sandbox line says the login, and no Login line repeats it:\n%s", out)
 	}
 
-	mustStmt(t, "ALTER PLAYBOOK p UNSET SANDBOX")
+	mustStmt(t, "ALTER PLAYBOOK p SET sandbox.always = false")
 	if sb := sandboxOf(t, "p"); sb.Always || sb.Backend != "sbx" || !isolateAuthOf(t, "p") {
-		t.Fatalf("UNSET SANDBOX: %#v isolated=%v", sb, isolateAuthOf(t, "p"))
+		t.Fatalf("sandbox.always = false: %#v isolated=%v", sb, isolateAuthOf(t, "p"))
 	}
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK p"); !strings.Contains(out, "Login: isolated") {
-		t.Errorf("EXPLAIN after UNSET SANDBOX:\n%s", out)
+		t.Errorf("EXPLAIN after sandbox.always = false:\n%s", out)
 	}
 
-	mustStmt(t, "CREATE PLAYBOOK q NO LAUNCHER")
-	mustStmt(t, "ALTER PLAYBOOK q SET SANDBOX always=true")
-	if sb := sandboxOf(t, "q"); sb == nil || !sb.Always || !isolateAuthOf(t, "q") {
-		t.Fatalf("SET SANDBOX always=true: %#v isolated=%v", sb, isolateAuthOf(t, "q"))
-	}
-
-	mustStmt(t, "ALTER PLAYBOOK p UNSET SANDBOX host mounts backend")
+	mustStmt(t, "ALTER PLAYBOOK p DELETE sandbox.host, sandbox.mounts, sandbox.backend")
 	if sb := sandboxOf(t, "p"); sb != nil {
-		t.Fatalf("UNSET SANDBOX of every key left %#v", sb)
+		t.Fatalf("DELETE of every key left %#v", sb)
 	}
-	if out := mustStmt(t, "ALTER PLAYBOOK p UNSET SANDBOX"); !strings.Contains(out, "unchanged") {
-		t.Errorf("UNSET SANDBOX with nothing set: %s", out)
+	if out := mustStmt(t, "ALTER PLAYBOOK p DELETE sandbox"); !strings.Contains(out, "unchanged") {
+		t.Errorf("DELETE sandbox with nothing set: %s", out)
 	}
 }
 
@@ -82,15 +82,15 @@ func TestSetSandboxForms(t *testing.T) {
 func TestSetSandboxRefusesBadValues(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
-	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX host=me@buildbox")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
+	mustStmt(t, "ALTER PLAYBOOK p SET sandbox.host = me@buildbox")
 	before, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "p", manifest.FileName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, line := range []string{
-		"ALTER PLAYBOOK p SET SANDBOX secrets=bogus",
-		"ALTER PLAYBOOK p SET SANDBOX backend=nope",
+		"ALTER PLAYBOOK p SET sandbox.secrets = bogus",
+		"ALTER PLAYBOOK p SET sandbox.backend = nope",
 	} {
 		if err := stmtErr(t, line); err == nil {
 			t.Errorf("%s: accepted", line)
@@ -98,18 +98,18 @@ func TestSetSandboxRefusesBadValues(t *testing.T) {
 	}
 	after, _ := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "p", manifest.FileName))
 	if string(after) != string(before) {
-		t.Fatalf("a refused SET SANDBOX wrote the manifest:\n%s", after)
+		t.Fatalf("a refused SET sandbox.<key> wrote the manifest:\n%s", after)
 	}
 }
 
 // SHOW PLAYBOOK has the table as one object and on its Sandbox line; SHOW
-// CREATE writes it as a bare SET SANDBOX and one SET SANDBOX <key>=<value>,
-// which APPLY puts back as it was.
+// CREATE writes it as SET sandbox.always = …, sandbox.<key> = …, which
+// APPLY puts back as it was.
 func TestSandboxShowAndRoundTrip(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
-	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
+	mustStmt(t, "ALTER PLAYBOOK p SET sandbox.always = true, login = isolated, sandbox.backend = sbx, sandbox.allow_net = [api.example.com:443], sandbox.share_skills = true")
 
 	sb, _ := showPlaybook(t, "p")["sandbox"].(map[string]any)
 	if sb["always"] != true || sb["backend"] != "sbx" || sb["host"] != nil || sb["share_skills"] != true ||
@@ -124,13 +124,10 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	}
 
 	text := mustStmt(t, "SHOW CREATE PLAYBOOK p")
-	for _, want := range []string{"SET login = 'isolated', memory = 'isolated'\n", "SET SANDBOX\n", "SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(strings.SplitN(text, ";", 2)[0], "SANDBOX") {
-		t.Errorf("SHOW CREATE writes the sandbox in CREATE:\n%s", text)
+	// The properties travel on the CREATE, which converges on a playbook
+	// that exists.
+	if want := "CREATE PLAYBOOK IF NOT EXISTS p\n  SET launcher = '', login = 'isolated', memory = 'isolated', sandbox.always = true, sandbox.backend = 'sbx', sandbox.allow_net = ['api.example.com:443'], sandbox.share_skills = true;"; !strings.Contains(text, want) {
+		t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 	}
 
 	want := sandboxOf(t, "p")
@@ -150,15 +147,15 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	}
 }
 
-// A dry run says what SET SANDBOX would do and writes nothing; a linked
+// A dry run says what SET sandbox.<key> would do and writes nothing; a linked
 // playbook's [sandbox] is the target's (a plain directory's refusal is in
 // TestPlainDirectoryRefusals).
 func TestSetSandboxDryRunAndRefusals(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
 	file := filepath.Join(t.TempDir(), "s.cpb")
-	if err := os.WriteFile(file, []byte("ALTER PLAYBOOK p SET SANDBOX SET SANDBOX host=me@buildbox;\n"), 0o644); err != nil {
+	if err := os.WriteFile(file, []byte("ALTER PLAYBOOK p SET sandbox.always = true, login = 'isolated', sandbox.host = 'me@buildbox';\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if out := mustStmt(t, "APPLY "+file+" --dry-run"); !strings.Contains(out, "1 changed") {
@@ -175,7 +172,7 @@ func TestSetSandboxDryRunAndRefusals(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(config.ResolvePlaybooksDir(), "ext")); err != nil {
 		t.Fatal(err)
 	}
-	if err := stmtErr(t, "ALTER PLAYBOOK ext SET SANDBOX host=me@buildbox"); err == nil || !strings.Contains(err.Error(), "linked") {
+	if err := stmtErr(t, "ALTER PLAYBOOK ext SET sandbox.host = me@buildbox"); err == nil || !strings.Contains(err.Error(), "linked") {
 		t.Errorf("linked: %v", err)
 	}
 }

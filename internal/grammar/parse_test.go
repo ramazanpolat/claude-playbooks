@@ -14,6 +14,9 @@ func strip(s *Stmt) *Stmt {
 	out.Clauses = nil
 	for _, c := range s.Clauses {
 		c.Pos = Pos{}
+		if c.Group != nil {
+			c.Group = strip(&Stmt{Clauses: c.Group}).Clauses
+		}
 		out.Clauses = append(out.Clauses, c)
 	}
 	return &out
@@ -74,16 +77,16 @@ var validCases = []struct {
 		w("ALTER PLAYBOOK k SET VAR TOKEN FROM op://Vault/item/field"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: SetRef, Vars: []Var{{Key: "TOKEN", Ref: "op://Vault/item/field"}}}}}},
 	{"rename and alias",
-		w("ALTER PLAYBOOK k RENAME TO toolkit-lab LAUNCHER kl"),
+		w("ALTER PLAYBOOK k RENAME TO toolkit-lab SET launcher = 'kl'"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: RenameTo, Arg: "toolkit-lab"}, {Kind: Launcher, Arg: "kl"}}}},
 	{"dotted launcher",
-		w("ALTER PLAYBOOK k LAUNCHER k.san"),
+		w("ALTER PLAYBOOK k SET launcher = 'k.san'"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: Launcher, Arg: "k.san"}}}},
 	{"no alias",
-		w("ALTER PLAYBOOK k NO LAUNCHER"),
+		w("ALTER PLAYBOOK k SET launcher = ''"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "k", Clauses: []Clause{{Kind: NoLauncher}}}},
 	{"existing playbook named like a keyword",
-		w("ALTER PLAYBOOK sandbox NO LAUNCHER"),
+		w("ALTER PLAYBOOK sandbox SET launcher = ''"),
 		Stmt{Verb: Alter, Object: Playbook, Name: "sandbox", Clauses: []Clause{{Kind: NoLauncher}}}},
 	{"defaults use env",
 		w("ALTER DEFAULTS USE ENV claude-default corp-proxy"),
@@ -93,25 +96,27 @@ var validCases = []struct {
 		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{
 			{Kind: AddEnv, Names: []string{"x"}, Where: Before, Anchor: "y"}, {Kind: DropEnv, Names: []string{"z"}}}}},
 	{"defaults secret helper",
-		w("ALTER DEFAULTS SET SECRET HELPER my-keychain-helper"),
+		w("ALTER DEFAULTS SET secret_helper = my-keychain-helper"),
 		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: SetHelper, Arg: "my-keychain-helper"}}}},
 	{"defaults unset helper with an env list",
-		w("alter defaults unset secret helper use env a"),
+		w("alter defaults delete secret_helper use env a"),
 		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: UnsetHelper}, {Kind: UseEnv, Names: []string{"a"}}}}},
 	{"create playbook from source with alias",
-		w("CREATE PLAYBOOK toolkit-x FROM https://github.com/example/toolkit LAUNCHER kx"),
+		w("CREATE PLAYBOOK toolkit-x FROM https://github.com/example/toolkit SET launcher = 'kx'"),
 		Stmt{Verb: Create, Object: Playbook, Name: "toolkit-x", Clauses: []Clause{
 			{Kind: From, Arg: "https://github.com/example/toolkit"}, {Kind: Launcher, Arg: "kx"}}}},
 	{"create playbook if not exists with every option",
-		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist NO LAUNCHER SANDBOX"),
+		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist SET launcher = '', sandbox.always = true, login = isolated"),
 		Stmt{Verb: Create, Object: Playbook, Name: "second", IfNotExists: true, Clauses: []Clause{
-			{Kind: From, Arg: "repo"}, {Kind: Branch, Arg: "v0.5.0"}, {Kind: Subdir, Arg: "dist"}, {Kind: NoLauncher}, {Kind: Sandbox}}}},
+			{Kind: From, Arg: "repo"}, {Kind: Branch, Arg: "v0.5.0"}, {Kind: Subdir, Arg: "dist"},
+			{Kind: NoLauncher}, {Kind: SetSandboxKeys, Settings: []Var{{Key: "always", Value: "true"}}},
+			{Kind: SetProperties, Settings: []Var{{Key: "login", Value: "isolated"}}}}}},
 	{"keyword-shaped arguments are values, not names",
 		w("CREATE PLAYBOOK x FROM link SUBDIR env BRANCH all"),
 		Stmt{Verb: Create, Object: Playbook, Name: "x", Clauses: []Clause{
 			{Kind: From, Arg: "link"}, {Kind: Subdir, Arg: "env"}, {Kind: Branch, Arg: "all"}}}},
 	{"a keyword-shaped secret helper",
-		w("ALTER DEFAULTS SET SECRET HELPER env"),
+		w("ALTER DEFAULTS SET secret_helper = env"),
 		Stmt{Verb: Alter, Object: Defaults, Clauses: []Clause{{Kind: SetHelper, Arg: "env"}}}},
 	{"create playbook link",
 		w("CREATE PLAYBOOK my-dev LINK ~/DEV/my-playbook"),
@@ -196,7 +201,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("FOO"), "not a statement"},
 		{w("CREATE"), "CREATE needs an object"},
 		{w("CREATE PLAYBOOK"), "missing <playbook>"},
-		{w("CREATE PLAYBOOK sandbox"), `"sandbox" is a keyword and cannot name a playbook`},
+		{w("CREATE PLAYBOOK branch"), `"branch" is a keyword and cannot name a playbook`},
 		{w("CREATE ENV use"), `"use" is a keyword and cannot name an env set`},
 		{w("CREATE OR REPLACE PLAYBOOK x"), "OR REPLACE applies to ENV only"},
 		{w("CREATE OR REPLACE ENV IF NOT EXISTS e"), "cannot be combined"},
@@ -216,7 +221,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("SHOW FOOS"), "SHOW needs an object"},
 		{w("ALTER PLAYBOOK k USE ENV"), "USE ENV needs at least one <env>"},
 		{w("ALTER PLAYBOOK k USE ENV a USE ENV b"), "USE ENV appears twice"},
-		{w("ALTER PLAYBOOK k LAUNCHER a NO LAUNCHER"), "LAUNCHER and NO LAUNCHER cannot be combined"},
+		{w("ALTER PLAYBOOK k SET launcher = 'a', launcher = ''"), "launcher is named twice in one statement"},
 		{w("ALTER PLAYBOOK k SET VAR A=1 BLOCK VAR A"), "A appears twice"},
 		{w("ALTER PLAYBOOK k SET VAR A=1 A=2"), "A appears twice"},
 		{w("ALTER PLAYBOOK k USE ENV a DROP ENV a"), "env set a appears twice"},
@@ -225,20 +230,29 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER PLAYBOOK k ADD ENV a BEFORE"), "missing <env>"},
 		{w("ALTER PLAYBOOK k RENAME kx"), "expected TO after RENAME"},
 		{w("ALTER PLAYBOOK k RENAME TO use"), "is a keyword"},
-		{w("ALTER PLAYBOOK k LAUNCHER"), "LAUNCHER needs <name>"},
-		{w("ALTER PLAYBOOK k LAUNCHER set"), `"set" is a keyword and cannot name a launcher`},
-		{w("ALTER PLAYBOOK k LAUNCHER a/b"), "invalid launcher name"},
-		{w("ALTER PLAYBOOK k LAUNCHER cpb"), "invalid launcher name"},
+		{w("ALTER PLAYBOOK k LAUNCHER"), "LAUNCHER is a property now: SET launcher = '<name>'"},
+		{w("ALTER PLAYBOOK k LAUNCHER kl"), "LAUNCHER is a property now: SET launcher = '<name>'"},
+		{w("ALTER PLAYBOOK k SET launcher = 'set'"), "a launcher name is never a keyword"},
+		{w("ALTER PLAYBOOK k SET launcher = 'a/b'"), "invalid launcher name"},
+		{w("ALTER PLAYBOOK k SET launcher = 'cpb'"), "invalid launcher name"},
 		{w("CREATE PLAYBOOK ../outside"), "invalid playbook name"},
 		{w("CREATE PLAYBOOK a.b"), "invalid playbook name"},
 		{[]string{"ALTER", "PLAYBOOK", "old", "RENAME", "TO", "bad name"}, "invalid playbook name"},
-		{w("ALTER PLAYBOOK k NO"), "expected LAUNCHER after NO"},
-		{w("ALTER DEFAULTS SET VAR A=1"), "SET inside ALTER DEFAULTS takes SECRET HELPER"},
-		{w("ALTER DEFAULTS UNSET SECRET"), "UNSET inside ALTER DEFAULTS takes SECRET HELPER"},
-		{w("ALTER DEFAULTS SET SECRET HELPER"), "SET SECRET HELPER needs '<command>'"},
-		{[]string{"ALTER", "DEFAULTS", "SET", "SECRET", "HELPER", "helper --flag"}, "one command"},
-		{w("ALTER DEFAULTS SET SECRET HELPER h UNSET SECRET HELPER"), "cannot be combined"},
-		{w("ALTER PLAYBOOK k SET SECRET HELPER h"), "SET inside ALTER PLAYBOOK takes VAR"},
+		{w("ALTER PLAYBOOK k NO"), "NO LAUNCHER is a property now: SET launcher = ''"},
+		{w("ALTER PLAYBOOK k SET AGENT a"), "SET AGENT is a property now: SET agent = '<agent>'"},
+		{w("ALTER PLAYBOOK k UNSET AGENT"), "UNSET AGENT is gone: DELETE agent"},
+		{w("ALTER PLAYBOOK k SET MODEL m"), "SET MODEL is a property now: SET model = '<model>'"},
+		{w("ALTER PLAYBOOK k UNSET MODEL"), "UNSET MODEL is gone: DELETE model"},
+		{w("ALTER DEFAULTS SET VAR A=1"), "VAR is not a DEFAULTS property (secret_helper)"},
+		{w("ALTER DEFAULTS UNSET SECRET"), "UNSET SECRET HELPER is gone: DELETE secret_helper"},
+		{w("ALTER DEFAULTS SET SECRET HELPER"), "SET SECRET HELPER is a property now: SET secret_helper = '<command>'"},
+		{[]string{"ALTER", "DEFAULTS", "SET", "secret_helper", "=", "helper --flag"}, "one command"},
+		{w("ALTER DEFAULTS SET secret_helper = h DELETE secret_helper"), "secret_helper is named twice"},
+		{w("ALTER PLAYBOOK k SET secret_helper = h"), "not a playbook property"},
+		{w("ALTER PLAYBOOK k SET STATUSLINE x"), "SET STATUSLINE is a property now"},
+		{w("ALTER PLAYBOOK k SET STATUSLINE PREVIOUS"), "REVERT STATUSLINE"},
+		{w("ALTER PLAYBOOK k UNSET STATUSLINE REFRESH"), "DELETE statusline.refresh"},
+		{w("ALTER PLAYBOOK k UNSET MODEL PICKER"), "DELETE model_picker"},
 		{w("ALTER DEFAULTS USE FOO x"), "USE takes ENV"},
 		{w("ALTER ENV e SET"), "SET needs <key>=<value> or <key> FROM '<ref>'"},
 		{w("ALTER ENV e SET 1BAD=x"), "invalid variable name before '='"},
@@ -271,8 +285,9 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("CREATE PLAYBOOK x FROM a LINK b"), "FROM and LINK cannot be combined"},
 		{w("CREATE PLAYBOOK x LINK d BRANCH main"), "BRANCH needs FROM <source>"},
 		{w("CREATE PLAYBOOK x LINK d SUBDIR s"), "SUBDIR needs FROM <source>"},
-		{w("CREATE PLAYBOOK x LAUNCHER a NO LAUNCHER"), "LAUNCHER and NO LAUNCHER cannot be combined"},
-		{w("CREATE PLAYBOOK x SANDBOX SANDBOX"), "SANDBOX appears twice"},
+		{w("CREATE PLAYBOOK x SET launcher = 'a', launcher = ''"), "launcher is named twice in one statement"},
+		{w("CREATE PLAYBOOK x NO LAUNCHER"), "NO LAUNCHER is a property now: SET launcher = ''"},
+		{w("CREATE PLAYBOOK x SANDBOX"), "SANDBOX is a property now"},
 		{w("DROP ENV e --yes"), `unexpected word`},
 		{w("ALTER ENV e SET ANTHROPIC_AUTH_TOKEN=abc"), "ANTHROPIC_AUTH_TOKEN looks like a credential"},
 		{w("ALTER ENV e SET A=1 ANTHROPIC_AUTH_TOKEN=abc"), "add AS PLAINTEXT"},
@@ -317,6 +332,9 @@ func TestErrorsNeverEchoSecrets(t *testing.T) {
 		{"ALTER", "ENV", "op://vault/" + secret, "SET", "A=1"},
 		{"CREATE", "PLAYBOOK", secret + "/x"},
 		{"ALTER", "PLAYBOOK", "k", "LAUNCHER", secret + "/x"},
+		{"ALTER", "PLAYBOOK", "k", "SET", "launcher", "=", secret + "/x"},
+		{"ALTER", "PLAYBOOK", "k", "SET", "agent=" + secret + "/x"},
+		{"ALTER", "PLAYBOOK", "k", "SET", "model", "=", secret + " x"},
 	}
 	for _, args := range cases {
 		_, err := ParseArgs(args)
@@ -364,7 +382,7 @@ CREATE OR REPLACE ENV claude-default
 ALTER DEFAULTS USE ENV claude-default;
 
 CREATE PLAYBOOK IF NOT EXISTS work
-  FROM https://github.com/example/toolkit BRANCH v3.12.2 LAUNCHER ki;
+  FROM https://github.com/example/toolkit BRANCH v3.12.2 SET launcher = 'ki';
 
 ALTER PLAYBOOK work
   USE ENV router
@@ -382,7 +400,7 @@ ALTER PLAYBOOK work
 		"CREATE OR REPLACE ENV router DESCRIPTION 'GLM via a local router' SET ANTHROPIC_BASE_URL=http://buildbox:8080/v1 ANTHROPIC_MODEL=glm-5.3 SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token'",
 		"CREATE OR REPLACE ENV claude-default BLOCK HTTP_PROXY",
 		"ALTER DEFAULTS USE ENV claude-default",
-		"CREATE PLAYBOOK IF NOT EXISTS work FROM https://github.com/example/toolkit BRANCH v3.12.2 LAUNCHER ki",
+		"CREATE PLAYBOOK IF NOT EXISTS work FROM https://github.com/example/toolkit BRANCH v3.12.2 SET launcher = 'ki'",
 		"ALTER PLAYBOOK work USE ENV router SET VAR MAX_THINKING_TOKENS=8000 BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN",
 	}
 	for i, s := range stmts {
@@ -396,7 +414,7 @@ ALTER PLAYBOOK work
 }
 
 func TestParseFileQuotedKeywords(t *testing.T) {
-	stmts, err := ParseFile(`ALTER ENV e BLOCK 'SET' A; ALTER PLAYBOOK 'use' NO LAUNCHER`)
+	stmts, err := ParseFile(`ALTER ENV e BLOCK 'SET' A; ALTER PLAYBOOK 'use' SET launcher = ''`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,8 +470,7 @@ func TestExpect(t *testing.T) {
 		{w("ALTER ENV e SET A=1"), append([]string{"<key>=<value>", "AS"}, envStarters...)},
 		{w("ALTER ENV e SET A=1 AS"), []string{"PLAINTEXT"}},
 		{w("ALTER DEFAULTS"), defaultsStarters},
-		{w("ALTER DEFAULTS SET"), []string{"SECRET"}},
-		{w("ALTER DEFAULTS SET SECRET HELPER"), []string{"'<command>'"}},
+		{w("ALTER DEFAULTS SET"), []string{"secret_helper"}},
 		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "SESSIONS", "--json"}},
 		{w("SHOW SESSIONS"), []string{"FOR", "--json"}},
 		{w("APPLY f"), []string{"<file>", "--dry-run", "--yes", "--json"}},
@@ -475,22 +492,22 @@ func TestExpect(t *testing.T) {
 
 func TestIsStatement(t *testing.T) {
 	for args, want := range map[string]bool{
-		"":                             false,
-		"create work":                  true, // refused by the parser: CREATE needs PLAYBOOK or ENV
-		"create":                       true,
-		"create playbook x":            true,
-		"CREATE ENV e":                 true,
-		"create or replace env e":      true,
-		"alter playbook k NO LAUNCHER": true,
-		"drop playbook k":              true,
-		"show envs":                    true,
-		"explain playbook k":           true,
-		"apply playbook.cpb":           true,
-		"DESCRIBE playbooks":           true,
-		"desc vars":                    true,
-		"env k set A=1":                false,
-		"install https://x":            false,
-		"list":                         false,
+		"":                                   false,
+		"create work":                        true, // refused by the parser: CREATE needs PLAYBOOK or ENV
+		"create":                             true,
+		"create playbook x":                  true,
+		"CREATE ENV e":                       true,
+		"create or replace env e":            true,
+		"alter playbook k SET launcher = ''": true,
+		"drop playbook k":                    true,
+		"show envs":                          true,
+		"explain playbook k":                 true,
+		"apply playbook.cpb":                 true,
+		"DESCRIBE playbooks":                 true,
+		"desc vars":                          true,
+		"env k set A=1":                      false,
+		"install https://x":                  false,
+		"list":                               false,
 	} {
 		if got := IsStatement(w(args)); got != want {
 			t.Errorf("IsStatement(%q) = %v, want %v", args, got, want)
@@ -499,9 +516,26 @@ func TestIsStatement(t *testing.T) {
 }
 
 func TestKeywordsAreReserved(t *testing.T) {
-	for _, k := range []string{"playbook", "ENV", "Defaults", "sandbox", "all", "router", "--dry-run"} {
+	for _, k := range []string{"playbook", "ENV", "Defaults", "branch", "all", "router", "--dry-run"} {
 		if got := IsKeyword(k); got != (k != "--dry-run" && k != "router") {
 			t.Errorf("IsKeyword(%q) = %v", k, got)
+		}
+	}
+	// The words of removed clauses only trigger their hints: a name, a
+	// launcher or a model id may be one.
+	for _, k := range []string{"launcher", "no", "sandbox", "agent", "secret", "helper", "picker", "only", "append", "refresh"} {
+		if IsKeyword(k) {
+			t.Errorf("IsKeyword(%q): a removed clause's word is reserved", k)
+		}
+	}
+	for _, src := range []string{"CREATE PLAYBOOK sandbox;", "CREATE PLAYBOOK no SET launcher = 'launcher';", "ALTER PLAYBOOK only SET model = 'picker';"} {
+		st, err := ParseFile(src)
+		if err != nil {
+			t.Errorf("%s: %v", src, err)
+			continue
+		}
+		if again, err := ParseFile(st[0].String() + ";"); err != nil || !reflect.DeepEqual(strip(again[0]), strip(st[0])) {
+			t.Errorf("%s: round trip %v %s", src, err, st[0].String())
 		}
 	}
 }

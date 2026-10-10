@@ -33,7 +33,7 @@ CREATE OR REPLACE ENV glm
   DESCRIPTION 'GLM via the router'
   SET BASE=http://buildbox:8080/v1 MODEL=glm-5.3;
 ALTER DEFAULTS USE ENV glm;
-CREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS work SET launcher = '';
 ALTER PLAYBOOK work
   USE ENV glm
   SET VAR MAX_THINKING_TOKENS=8000
@@ -87,7 +87,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 	if out, err := apply(t, writePlaybookFile(t, scratchPlaybook)); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "ALTER PLAYBOOK work SET VAR API_TOKEN FROM keychain:ok/work")
 	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 
@@ -95,12 +95,12 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 	// The helper first: an env set's references are checked against the
 	// helper an earlier statement sets, so on a fresh machine it must come
 	// before them.
-	h, e := strings.Index(dump, "ALTER DEFAULTS\n  SET SECRET HELPER '"+helper+"';"), strings.Index(dump, "CREATE OR REPLACE ENV glm")
+	h, e := strings.Index(dump, "ALTER DEFAULTS\n  SET secret_helper = '"+helper+"';"), strings.Index(dump, "CREATE OR REPLACE ENV glm")
 	if h < 0 || e < 0 || h > e {
 		t.Errorf("SHOW CREATE ALL does not set the helper before the env sets:\n%s", dump)
 	}
 	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm;",
-		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  LAUNCHER s;",
+		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  SET launcher = 's', login = 'shared', memory = 'shared', sandbox.always = false;",
 		"SET VAR API_TOKEN FROM 'keychain:ok/work'"} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("SHOW CREATE ALL missing %q:\n%s", want, dump)
@@ -247,7 +247,7 @@ func TestApplySeveralFiles(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	base := writePlaybookFile(t, "CREATE OR REPLACE ENV base SET A=1;\n")
-	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
+	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work SET launcher = '';\n")
 	broken := writePlaybookFile(t, "CREATE ENV other;\nALTER ENV other FOO;\n")
 
 	// A later file that does not parse: nothing from the first is written.
@@ -296,7 +296,7 @@ func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	helper, _ := fakeHelper(t)
-	path := writePlaybookFile(t, "ALTER DEFAULTS SET SECRET HELPER '"+helper+"';\nCREATE OR REPLACE ENV r;\nALTER ENV r SET TOKEN FROM 'keychain:ok/r';\n")
+	path := writePlaybookFile(t, "ALTER DEFAULTS SET secret_helper = '"+helper+"';\nCREATE OR REPLACE ENV r;\nALTER ENV r SET TOKEN FROM 'keychain:ok/r';\n")
 	if out, err := apply(t, path, "--dry-run"); err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
@@ -351,7 +351,7 @@ func TestApplyDryRunSeesEarlierChanges(t *testing.T) {
 func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 	sandboxDefaultRoot(t)
 	helper, _ := fakeHelper(t)
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "CREATE ENV r")
 	path := writePlaybookFile(t, "DROP ENV r;\nCREATE ENV IF NOT EXISTS r SET TOKEN FROM 'keychain:gone';\n")
 	if _, err := apply(t, path); err == nil || !strings.Contains(err.Error(), "nothing was written") {
@@ -363,7 +363,7 @@ func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 }
 
 // SHOW CREATE never prints a source URL's credentials, and keeps the
-// default launcher (named after the playbook) instead of writing NO LAUNCHER.
+// default launcher (named after the playbook) instead of writing an empty launcher (none).
 func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
@@ -375,12 +375,12 @@ func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	}
 
 	mustStmt(t, "CREATE PLAYBOOK named")
-	mustStmt(t, "CREATE PLAYBOOK bare NO LAUNCHER")
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "NO LAUNCHER") {
-		t.Errorf("the default launcher became NO LAUNCHER:\n%s", out)
+	mustStmt(t, "CREATE PLAYBOOK bare SET launcher = ''")
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "SET launcher = ''") {
+		t.Errorf("the default launcher became SET launcher = '':\n%s", out)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "NO LAUNCHER") {
-		t.Errorf("a playbook with no launcher lost NO LAUNCHER:\n%s", out)
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "SET launcher = ''") {
+		t.Errorf("a playbook with no launcher lost SET launcher = '':\n%s", out)
 	}
 }
 

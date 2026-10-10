@@ -9,5 +9,5 @@ grep -qx 'ANTHROPIC_AUTH_TOKEN=placeholder-router-token' "$p/.fake-claude/launch
 if cpb ALTER ENV router SET OTHER_TOKEN FROM 'file:missing' 2> "$HOME/missing.err"; then echo "an unresolvable reference was stored"; exit 1; fi
 grep -q 'no file for its reference' "$HOME/missing.err"
 # No helper: the reference stays, and nothing can resolve it.
-cpb ALTER DEFAULTS UNSET SECRET HELPER
+cpb ALTER DEFAULTS DELETE secret_helper
 cpb SHOW DEFAULTS --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["secret_helper"] is None, d'

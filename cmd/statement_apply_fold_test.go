@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,6 +18,13 @@ import (
 // dropped, with the index of the statement that replaces it.
 func foldText(t *testing.T, src string) []string {
 	t.Helper()
+	return foldTextExisting(t, src)
+}
+
+// foldTextExisting is foldText with the named playbooks existing before
+// anything runs.
+func foldTextExisting(t *testing.T, src string, existing ...string) []string {
+	t.Helper()
 	stmts, err := grammar.ParseFile(src)
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +33,7 @@ func foldText(t *testing.T, src string) []string {
 	for i, s := range stmts {
 		in[i] = located{file: "f.cpb", path: "/f.cpb", s: s}
 	}
-	res := foldStatements(in)
+	res := foldStatements(in, func(name string) bool { return slices.Contains(existing, name) })
 	out := make([]string, len(in))
 	for i, x := range res.stmts {
 		var runs []string
@@ -69,49 +77,58 @@ func TestFoldStatements(t *testing.T) {
 			"ALTER PLAYBOOK p ALLOW TOOL 'X' 'Y';\nALTER PLAYBOOK p DENY TOOL 'X';",
 			[]string{"ALLOW TOOL Y | ALLOW TOOL 'X' by 1", "DENY TOOL X"}},
 		{"the model, with an unfoldable clause beside it",
-			"ALTER PLAYBOOK p ADD PLUGIN x@m SET MODEL 'a';\nALTER PLAYBOOK p SET MODEL 'b';",
-			[]string{"ADD PLUGIN x@m | SET MODEL by 1", "SET MODEL"}},
+			"ALTER PLAYBOOK p ADD PLUGIN x@m SET model = 'a';\nALTER PLAYBOOK p SET model = 'b';",
+			[]string{"ADD PLUGIN x@m | SET model by 1", "SET model"}},
 		{"IF UNSET after a status line depends on it: both kept",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b' IF UNSET;",
-			[]string{"SET STATUSLINE", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p SET IF UNSET statusline.command = 'b';",
+			[]string{"SET statusline.command", "SET IF UNSET"}},
 		{"IF UNSET before a status line is replaced",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a' IF UNSET;\nALTER PLAYBOOK p SET STATUSLINE 'b';",
-			[]string{"- | SET STATUSLINE by 1", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET IF UNSET statusline.command = 'a';\nALTER PLAYBOOK p SET statusline.command = 'b';",
+			[]string{"- | SET IF UNSET by 1", "SET statusline.command"}},
 		{"PREVIOUS reads what came before it",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;",
-			[]string{"SET STATUSLINE", "SET STATUSLINE PREVIOUS"}},
+			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p REVERT STATUSLINE;",
+			[]string{"SET statusline.command", "REVERT STATUSLINE"}},
 		// PREVIOUS restores the refresh too, which the later lines without
 		// REFRESH keep: it stays.
 		{"PREVIOUS reads the whole history: every status line before it stays",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;\nALTER PLAYBOOK p SET STATUSLINE 'c';\nALTER PLAYBOOK p SET STATUSLINE 'd';",
-			[]string{"SET STATUSLINE", "SET STATUSLINE", "SET STATUSLINE PREVIOUS", "- | SET STATUSLINE by 4", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p SET statusline.command = 'b';\nALTER PLAYBOOK p REVERT STATUSLINE;\nALTER PLAYBOOK p SET statusline.command = 'c';\nALTER PLAYBOOK p SET statusline.command = 'd';",
+			[]string{"SET statusline.command", "SET statusline.command", "REVERT STATUSLINE", "- | SET statusline.command by 4", "SET statusline.command"}},
 		{"a refresh the later status line does not set stays, alone",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a' REFRESH 5;\nALTER PLAYBOOK p SET STATUSLINE 'b';",
-			[]string{"SET STATUSLINE REFRESH | SET STATUSLINE by 1", "SET STATUSLINE"}},
-		{"UNSET STATUSLINE before a status line without a refresh: its refresh part stays",
-			"ALTER PLAYBOOK p UNSET STATUSLINE;\nALTER PLAYBOOK p SET STATUSLINE 'x';",
-			[]string{"UNSET STATUSLINE REFRESH | UNSET STATUSLINE by 1", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline.command = 'a', statusline.refresh = 5;\nALTER PLAYBOOK p SET statusline.command = 'b';",
+			[]string{"SET statusline.refresh | SET statusline.command by 1", "SET statusline.command"}},
+		{"DELETE statusline before a status line without a refresh: its refresh part stays",
+			"ALTER PLAYBOOK p DELETE statusline;\nALTER PLAYBOOK p SET statusline.command = 'x';",
+			[]string{"DELETE statusline.refresh | DELETE statusline by 1", "SET statusline.command"}},
 		{"each part names the statement that replaces it",
-			"ALTER PLAYBOOK p UNSET STATUSLINE;\nALTER PLAYBOOK p SET STATUSLINE REFRESH 10;\nALTER PLAYBOOK p SET STATUSLINE 'new';",
-			[]string{"- | UNSET STATUSLINE by 2 | UNSET STATUSLINE REFRESH by 1", "SET STATUSLINE REFRESH", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p DELETE statusline;\nALTER PLAYBOOK p SET statusline.refresh = 10;\nALTER PLAYBOOK p SET statusline.command = 'new';",
+			[]string{"- | DELETE statusline by 2 | DELETE statusline.refresh by 1", "SET statusline.refresh", "SET statusline.command"}},
 		{"a PREVIOUS that is itself replaced keeps nothing before it",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;\nALTER PLAYBOOK p UNSET STATUSLINE;",
-			[]string{"- | SET STATUSLINE by 2", "- | SET STATUSLINE PREVIOUS by 2", "UNSET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p REVERT STATUSLINE;\nALTER PLAYBOOK p DELETE statusline;",
+			[]string{"- | SET statusline.command by 2", "- | REVERT STATUSLINE by 2", "DELETE statusline"}},
 		{"a later status line with a refresh replaces both",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b' REFRESH 5;",
-			[]string{"- | SET STATUSLINE by 1", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p SET statusline.command = 'b', statusline.refresh = 5;",
+			[]string{"- | SET statusline.command by 1", "SET statusline.command"}},
+		{"SET IF UNSET is dropped only when every key it names is written later",
+			"ALTER PLAYBOOK p SET IF UNSET model = 'a', agent = 'x';\nALTER PLAYBOOK p SET model = 'b';",
+			[]string{"SET IF UNSET", "SET model"}},
+		{"SET IF UNSET whose every key is written later",
+			"ALTER PLAYBOOK p SET IF UNSET model = 'a', agent = 'x';\nALTER PLAYBOOK p SET model = 'b' SET agent = 'y';",
+			[]string{"- | SET IF UNSET by 1", "SET model; SET agent"}},
+		{"a write before SET IF UNSET is read by it: both kept",
+			"ALTER PLAYBOOK p SET model = 'a';\nALTER PLAYBOOK p SET IF UNSET model = 'b', agent = 'x';",
+			[]string{"SET model", "SET IF UNSET"}},
 		{"ADD ENV builds on USE ENV; a second USE ENV replaces both",
 			"ALTER PLAYBOOK p USE ENV a;\nALTER PLAYBOOK p ADD ENV b;\nALTER PLAYBOOK p USE ENV c;",
 			[]string{"- | USE ENV by 2", "- | ADD ENV by 2", "USE ENV c"}},
 		{"sandbox settings, one unset later",
-			"ALTER PLAYBOOK p SET SANDBOX backend=sbx host=h;\nALTER PLAYBOOK p UNSET SANDBOX host;",
-			[]string{"SET SANDBOX <key>=<value> backend | SET SANDBOX host by 1", "UNSET SANDBOX <key> host"}},
+			"ALTER PLAYBOOK p SET sandbox.backend = 'sbx', sandbox.host = 'h';\nALTER PLAYBOOK p DELETE sandbox.host;",
+			[]string{"SET sandbox.<key> backend | SET sandbox.host by 1", "DELETE sandbox.<key> host"}},
 		{"two targets do not fold into each other",
-			"ALTER PLAYBOOK p SET MODEL 'a';\nALTER PLAYBOOK q SET MODEL 'b';",
-			[]string{"SET MODEL", "SET MODEL"}},
+			"ALTER PLAYBOOK p SET model = 'a';\nALTER PLAYBOOK q SET model = 'b';",
+			[]string{"SET model", "SET model"}},
 		{"a playbook dropped and created again starts afresh",
-			"ALTER PLAYBOOK p SET MODEL 'a';\nDROP PLAYBOOK p;\nCREATE PLAYBOOK p;\nALTER PLAYBOOK p SET MODEL 'b';",
-			[]string{"SET MODEL", "", "", "SET MODEL"}},
+			"ALTER PLAYBOOK p SET model = 'a';\nDROP PLAYBOOK p;\nCREATE PLAYBOOK p;\nALTER PLAYBOOK p SET model = 'b';",
+			[]string{"SET model", "", "", "SET model"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -123,10 +140,34 @@ func TestFoldStatements(t *testing.T) {
 	}
 }
 
+// CREATE PLAYBOOK IF NOT EXISTS on a playbook that exists applies its SET
+// list as an ALTER would, so its pairs fold as an ALTER's; on one that does
+// not, it creates, and starts the target afresh.
+func TestFoldConvergingCreate(t *testing.T) {
+	src := "CREATE PLAYBOOK IF NOT EXISTS p FROM 'https://x/y' SET launcher = 'pp', model = 'a';\nALTER PLAYBOOK p SET model = 'b';"
+	if got, want := foldTextExisting(t, src, "p"), []string{"FROM; SET launcher | SET model by 1", "SET model"}; !slices.Equal(got, want) {
+		t.Errorf("existing: got %q, want %q", got, want)
+	}
+	if got, want := foldTextExisting(t, src), []string{"FROM; SET launcher; SET model", "SET model"}; !slices.Equal(got, want) {
+		t.Errorf("new: got %q, want %q", got, want)
+	}
+	// Earlier writes do not fold into a CREATE that converges: it reads as
+	// a later ALTER, and wins.
+	src = "ALTER PLAYBOOK p SET model = 'a';\nCREATE PLAYBOOK IF NOT EXISTS p SET model = 'b';"
+	if got, want := foldTextExisting(t, src, "p"), []string{"- | SET model by 1", "SET model"}; !slices.Equal(got, want) {
+		t.Errorf("earlier ALTER: got %q, want %q", got, want)
+	}
+	// After a DROP, the CREATE creates, whatever was there before.
+	src = "DROP PLAYBOOK p;\nCREATE PLAYBOOK IF NOT EXISTS p SET model = 'a';\nALTER PLAYBOOK p SET model = 'b';"
+	if got, want := foldTextExisting(t, src, "p"), []string{"", "SET model", "SET model"}; !slices.Equal(got, want) {
+		t.Errorf("after a DROP: got %q, want %q", got, want)
+	}
+}
+
 // TestFoldDirectoryTargets: a recipe applied TO a directory folds per
 // directory, apart from a playbook and from another directory.
 func TestFoldDirectoryTargets(t *testing.T) {
-	stmts, err := grammar.ParseFile("ALTER PLAYBOOK x SET MODEL 'a';\nALTER PLAYBOOK x SET MODEL 'b';\nALTER PLAYBOOK x SET MODEL 'c';\nALTER PLAYBOOK d SET MODEL 'e';\n")
+	stmts, err := grammar.ParseFile("ALTER PLAYBOOK x SET model = 'a';\nALTER PLAYBOOK x SET model = 'b';\nALTER PLAYBOOK x SET model = 'c';\nALTER PLAYBOOK d SET model = 'e';\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +179,7 @@ func TestFoldDirectoryTargets(t *testing.T) {
 		}
 		in[i] = located{file: "f.cpb", path: "/f.cpb", s: s}
 	}
-	res := foldStatements(in)
+	res := foldStatements(in, nil)
 	if !res.skip[0] || res.skip[1] || res.skip[2] || res.skip[3] || len(res.over[0]) != 1 || res.over[0][0].by != 1 {
 		t.Fatalf("skip=%v over=%v", res.skip, res.over)
 	}
@@ -152,8 +193,8 @@ func TestApplyFoldStackConverges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "p", nil)
 	dir := t.TempDir()
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info TEAM=one\n  SET MODEL 'base-model'\n  SET STATUSLINE 'echo base'\n  ALLOW TOOL 'Bash(x)';\n")
-	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug\n  SET MODEL 'child-model'\n  SET STATUSLINE 'echo child'\n  DENY TOOL 'Bash(x)';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info TEAM=one\n  SET model = 'base-model'\n  SET statusline.command = 'echo base'\n  ALLOW TOOL 'Bash(x)';\n")
+	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug\n  SET model = 'child-model'\n  SET statusline.command = 'echo child'\n  DENY TOOL 'Bash(x)';\n")
 	plan, err := apply(t, child, "TO", "p", "--dry-run")
 	if err != nil || !strings.Contains(plan, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2)") {
 		t.Fatalf("the plain plan does not name what is overridden: %v\n%s", err, plan)
@@ -162,7 +203,7 @@ func TestApplyFoldStackConverges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(first, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2), SET MODEL (set again at "+child+":2)") {
+	if !strings.Contains(first, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2), SET model (set again at "+child+":2)") {
 		t.Fatalf("the run does not name what was overridden:\n%s", first)
 	}
 	second, err := apply(t, child, "TO", "p")
@@ -177,12 +218,12 @@ func TestApplyFoldStackConverges(t *testing.T) {
 		}
 	}
 	if vars["LOG_LEVEL"] != "debug" || vars["TEAM"] != "one" || v.Model == nil || *v.Model != "child-model" ||
-		len(v.Tools.Allow) != 0 || len(v.Tools.Deny) != 1 || v.Statusline == nil || *v.Statusline != "echo child" {
-		t.Fatalf("the child does not win: %+v model=%v allow=%v deny=%v statusline=%v", vars, v.Model, v.Tools.Allow, v.Tools.Deny, v.Statusline)
+		len(v.Tools.Allow) != 0 || len(v.Tools.Deny) != 1 || v.Statusline.Command == nil || *v.Statusline.Command != "echo child" {
+		t.Fatalf("the child does not win: %+v model=%v allow=%v deny=%v statusline.command=%v", vars, v.Model, v.Tools.Allow, v.Tools.Deny, v.Statusline.Command)
 	}
-	for _, h := range v.StatuslineHistory {
+	for _, h := range v.Statusline.History {
 		if h.Command == "echo base" {
-			t.Fatalf("the base's status line was written: %+v", v.StatuslineHistory)
+			t.Fatalf("the base's status line was written: %+v", v.Statusline.History)
 		}
 	}
 	planJSON := captureStdout(t, func() { _ = runStatement([]string{"APPLY", child, "TO", "p", "--dry-run", "--json"}) })
@@ -207,7 +248,7 @@ func TestApplyFoldStackConverges(t *testing.T) {
 			base = append(base, o.Clause+"@"+filepath.Base(o.By.File)+":"+strconv.Itoa(o.By.Line))
 		}
 	}
-	want := "SET VAR LOG_LEVEL@child.cpb:2 SET MODEL@child.cpb:2 SET STATUSLINE@child.cpb:2 ALLOW TOOL 'Bash(x)'@child.cpb:2"
+	want := "SET VAR LOG_LEVEL@child.cpb:2 SET model@child.cpb:2 SET statusline.command@child.cpb:2 ALLOW TOOL 'Bash(x)'@child.cpb:2"
 	if strings.Join(base, " ") != want {
 		t.Fatalf("the plan's overridden entries:\n got %s\nwant %s", strings.Join(base, " "), want)
 	}
@@ -220,9 +261,9 @@ func TestApplyFoldFleetAndFlatRecipe(t *testing.T) {
 	writePlaybook(t, root, "a", nil)
 	writePlaybook(t, root, "b", nil)
 	dir := t.TempDir()
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET VAR LEVEL=base SET MODEL 'base-model';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET VAR LEVEL=base SET model = 'base-model';\n")
 	writeCpb(t, dir, "a.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK SET VAR LEVEL=a;\n")
-	writeCpb(t, dir, "b.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK SET MODEL 'b-model';\n")
+	writeCpb(t, dir, "b.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK SET model = 'b-model';\n")
 	fleet := writeCpb(t, dir, "fleet.cpb", "USE PLAYBOOK a;\nINCLUDE 'a.cpb';\nUSE PLAYBOOK b;\nINCLUDE 'b.cpb';\n")
 	if _, err := apply(t, fleet); err != nil {
 		t.Fatal(err)
@@ -244,7 +285,7 @@ func TestApplyFoldFleetAndFlatRecipe(t *testing.T) {
 	if a.Model == nil || *a.Model != "base-model" || level(a) != "a" || b.Model == nil || *b.Model != "b-model" || level(b) != "base" {
 		t.Fatalf("targets folded into each other: a model=%v level=%s, b model=%v level=%s", a.Model, level(a), b.Model, level(b))
 	}
-	flat := writeCpb(t, dir, "flat.cpb", "ALTER PLAYBOOK SET MODEL 'first';\nALTER PLAYBOOK SET MODEL 'second';\n")
+	flat := writeCpb(t, dir, "flat.cpb", "ALTER PLAYBOOK SET model = 'first';\nALTER PLAYBOOK SET model = 'second';\n")
 	if _, err := apply(t, flat, "TO", "a"); err != nil {
 		t.Fatal(err)
 	}

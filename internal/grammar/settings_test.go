@@ -11,8 +11,8 @@ func TestParseSettingsClauses(t *testing.T) {
   ALLOW TOOL 'Bash(toolkit-helper *)' 'mcp__sentry'
   DENY TOOL 'Bash(rm -rf *)'
   UNSET TOOL 'Read(~/x)'
-  SET STATUSLINE '~/bin/status.sh --short'
-  SET MODEL 'claude-opus-5-5';`)
+  SET statusline.command = '~/bin/status.sh --short'
+  SET model = 'claude-opus-5-5';`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,15 +26,15 @@ func TestParseSettingsClauses(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(strip(again[0]), strip(stmts[0])) {
 		t.Fatalf("round trip: %v\n%s", err, stmts[0].String())
 	}
-	for _, src := range []string{"ALTER PLAYBOOK k UNSET STATUSLINE UNSET MODEL;"} {
+	for _, src := range []string{"ALTER PLAYBOOK k DELETE statusline DELETE model;"} {
 		if _, err := ParseFile(src); err != nil {
 			t.Errorf("%s: %v", src, err)
 		}
 	}
 	for src, want := range map[string]string{
 		"ALTER PLAYBOOK k ALLOW 'x';":                    "ALLOW takes TOOL",
-		"ALTER PLAYBOOK k SET MODEL 'a b';":              "SET MODEL needs",
-		"ALTER PLAYBOOK k SET MODEL m UNSET MODEL;":      "cannot be combined",
+		"ALTER PLAYBOOK k SET model = 'a b';":            "model takes a model id",
+		"ALTER PLAYBOOK k SET model = 'm' DELETE model;": "model is named twice in one statement",
 		"ALTER PLAYBOOK k ALLOW TOOL 'x' DENY TOOL 'x';": "tool rule x appears twice",
 	} {
 		if _, err := ParseFile(src); err == nil || !strings.Contains(err.Error(), want) {

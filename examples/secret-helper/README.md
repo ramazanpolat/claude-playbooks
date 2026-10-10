@@ -14,7 +14,7 @@ cp cpb-secret-file ~/.local/bin/
 mkdir -p ~/.config/cpb-secrets && chmod 700 ~/.config/cpb-secrets
 (umask 077 && read -r v && printf '%s' "$v" > ~/.config/cpb-secrets/router-token)
 
-cpb ALTER DEFAULTS SET SECRET HELPER cpb-secret-file
+cpb ALTER DEFAULTS SET secret_helper = cpb-secret-file
 cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token'
 ```
 

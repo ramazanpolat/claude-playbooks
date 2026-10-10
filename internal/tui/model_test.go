@@ -47,8 +47,8 @@ func (f *fakeRunner) Run(args ...string) ([]byte, error) {
 // The fixture is what cpb's --json prints: a credential is already
 // redacted (no value), a reference is a reference.
 const fixturePlaybooks = `[
- {"name":"alpha","version":"v1.2.0","path":"/home/me/.claude-playbooks/alpha","source":{"url":"https://github.com/example/work-playbook","branch":"v1.2.0","subdir":null},"linked":null,"launcher":"al","envs":[],"vars":[],"sandbox":{"always":false},"login":"shared","memory":"isolated","marketplaces":[],"plugins":[],"agent":null,"mcp_servers":[],"tools":{"allow":["Bash(git:*)"],"deny":[]},"skills":[],"statusline":"$HOME/bin/my-status","statusline_refresh":10,"statusline_history":[{"command":"echo old","refresh":null,"replaced_at":"2026-09-27T10:00:00Z"}],"model":"claude-opus-5-5","model_picker":null},
- {"name":"router","version":null,"path":"/home/me/.claude-playbooks/router","source":null,"linked":null,"launcher":"rt","envs":["proxy"],"vars":[{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true},{"key":"MY_FLAG","value":"1"}],"sandbox":{"always":false},"login":"isolated","memory":"isolated","marketplaces":[{"name":"team","source":{"source":"github","repo":"x/y"}}],"plugins":[{"id":"reviewer@team","enabled":true}],"agent":"reviewer:reviewer","mcp_servers":[{"name":"sentry","transport":"http","url":"https://mcp.sentry.dev/mcp","env":[],"headers":[{"key":"Authorization","ref":"keychain:sentry"}]}],"tools":{"allow":[],"deny":[]},"skills":[{"name":"notes","source":"/home/me/notes","branch":null,"subdir":null,"mode":"link"}],"statusline":null,"statusline_refresh":null,"statusline_history":[],"model":"glm-5.3","model_picker":{"mode":"append","options":[{"model":"glm-5.3","label":"GLM","description":null,"behaves_as":null}]}}
+ {"name":"alpha","version":"v1.2.0","path":"/home/me/.claude-playbooks/alpha","source":{"url":"https://github.com/example/work-playbook","branch":"v1.2.0","subdir":null},"linked":null,"launcher":"al","envs":[],"vars":[],"sandbox":{"always":false},"login":"shared","memory":"isolated","marketplaces":[],"plugins":[],"agent":null,"mcp_servers":[],"tools":{"allow":["Bash(git:*)"],"deny":[]},"skills":[],"statusline":{"command":"$HOME/bin/my-status","refresh":10,"history":[{"command":"echo old","refresh":null,"replaced_at":"2026-09-27T10:00:00Z"}]},"model":"claude-opus-5-5","model_picker":null},
+ {"name":"router","version":null,"path":"/home/me/.claude-playbooks/router","source":null,"linked":null,"launcher":"rt","envs":["proxy"],"vars":[{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true},{"key":"MY_FLAG","value":"1"}],"sandbox":{"always":false},"login":"isolated","memory":"isolated","marketplaces":[{"name":"team","source":{"source":"github","repo":"x/y"}}],"plugins":[{"id":"reviewer@team","enabled":true}],"agent":"reviewer:reviewer","mcp_servers":[{"name":"sentry","transport":"http","url":"https://mcp.sentry.dev/mcp","env":[],"headers":[{"key":"Authorization","ref":"keychain:sentry"}]}],"tools":{"allow":[],"deny":[]},"skills":[{"name":"notes","source":"/home/me/notes","branch":null,"subdir":null,"mode":"link"}],"statusline":{"command":null,"refresh":null,"history":[]},"model":"glm-5.3","model_picker":{"mode":"append","options":[{"model":"glm-5.3","label":"GLM","description":null,"behaves_as":null}]}}
 ]`
 
 const fixtureSessions = `[
@@ -61,11 +61,11 @@ const fixtureEnvs = `[
  {"name":"base","description":"","vars":[{"key":"X","value":"1"}],"used_by":[],"default":true}
 ]`
 
-const fixtureDefaults = `{"envs":["base"],"secret_helper":{"command":"cpb-secret-file","from":"setting"}}`
+const fixtureDefaults = `{"envs":["base"],"secret_helper":"cpb-secret-file","secret_helper_from":"setting"}`
 
 const fixtureExplain = `{"playbook":"router","vars":[{"key":"X","value":"1","layer":{"kind":"defaults","name":"base"}},{"key":"ANTHROPIC_BASE_URL","value":"http://localhost:8080/v1","layer":{"kind":"env","name":"proxy"}},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:proxy-token","layer":{"kind":"env","name":"proxy"}},{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true,"layer":{"kind":"playbook"}},{"key":"MY_FLAG","value":"1","layer":{"kind":"playbook"}}],"secret_helper":null}`
 
-const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router LAUNCHER rt;\nALTER PLAYBOOK router USE ENV proxy SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
+const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router SET launcher = 'rt';\nALTER PLAYBOOK router USE ENV proxy SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
 
 func fixture() *fakeRunner {
 	f := &fakeRunner{out: map[string]string{
@@ -76,7 +76,7 @@ func fixture() *fakeRunner {
 		"EXPLAIN PLAYBOOK router --json":             fixtureExplain,
 		"SHOW CREATE PLAYBOOK router --skip-secrets": fixtureCreate,
 		"SHOW CREATE ENV proxy --skip-secrets":       "CREATE ENV IF NOT EXISTS proxy SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:proxy-token';\n",
-		"SHOW CREATE PLAYBOOK alpha --skip-secrets":  "CREATE PLAYBOOK IF NOT EXISTS alpha LAUNCHER al;\n",
+		"SHOW CREATE PLAYBOOK alpha --skip-secrets":  "CREATE PLAYBOOK IF NOT EXISTS alpha SET launcher = 'al';\n",
 	}}
 	singular(f, fixturePlaybooks)
 	return f

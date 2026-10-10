@@ -78,7 +78,7 @@ jobs:
           # there, not that there was nowhere to write.
           mkdir -p fix "$HOME/.local/bin"; printf 'name = "fx"\n' > fix/.playbook; printf '# fx\n' > fix/CLAUDE.md
           before=$(ls -A "$HOME/.local/bin" | sort)
-          out=$(devbox run -- env CPB_PLAYBOOKS_DIR="$P/pb" cpb CREATE PLAYBOOK fx FROM "$P/fix" LAUNCHER fxcmd 2>&1)
+          out=$(devbox run -- env CPB_PLAYBOOKS_DIR="$P/pb" cpb CREATE PLAYBOOK fx FROM "$P/fix" SET launcher = fxcmd 2>&1)
           echo "$out"
           echo "$out" | grep -q 'launchers are managed only for the default playbooks root'
           devbox run -- env CPB_PLAYBOOKS_DIR="$P/pb" cpb SHOW PLAYBOOK fx | grep -q "^Path: *$P/pb/fx"
@@ -102,5 +102,7 @@ jobs:
           for args in "self-update" "self-update --force"; do
             if out=$(devbox run -- cpb $args 2>&1); then echo "::error::'$args' did not refuse"; echo "$out"; exit 1; fi
             echo "$out" | grep -q 'managed by Nix' || { echo "::error::'$args' refused without naming Nix"; echo "$out"; exit 1; }
-            if echo "$out" | grep -qi -e sudo -e 'up to date'; then echo "::error::'$args' mentions sudo or 'up to date'"; echo "$out"; exit 1; fi
+            # Whole words, the temp path left out: a random directory name
+            # (tmp.mSJ9VsUdOi) once matched "sudo" case-insensitively.
+            if echo "$out" | sed "s|$P||g" | grep -qiw -e sudo -e 'up to date'; then echo "::error::'$args' mentions sudo or 'up to date'"; echo "$out"; exit 1; fi
           done

@@ -52,7 +52,7 @@ func TestApplyRecordUpdateRemovesDropped(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "p", nil)
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR TEAM=one LOG_LEVEL=info\n  SET MODEL 'base-model'\n  ALLOW TOOL 'Bash(x)' 'Read';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR TEAM=one LOG_LEVEL=info\n  SET model = 'base-model'\n  ALLOW TOOL 'Bash(x)' 'Read';\n")
 	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug;\n")
 	if _, err := apply(t, child, "TO", "p"); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestApplyRecordUpdateRemovesDropped(t *testing.T) {
 		t.Fatalf("the record is not the folded statements:\n%s", text)
 	}
 
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info\n  SET MODEL 'base-model'\n  ALLOW TOOL 'Read';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info\n  SET model = 'base-model'\n  ALLOW TOOL 'Read';\n")
 	plan, err := runUpdateFor(t, "p", true, false)
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestWithheldClause(t *testing.T) {
 			t.Fatalf("%q survived: %s", secret, got)
 		}
 	}
-	for _, kept := range []string{"MODE=fast", "GITHUB_TOKEN=" + withheldMark, "withheld@git.example/o/r.git", "--db", "secrets=" + withheldMark} {
+	for _, kept := range []string{"MODE=fast", "GITHUB_TOKEN=" + withheldMark, "withheld@git.example/o/r.git", "--db", "sandbox.secrets = '" + withheldMark + "'"} {
 		if !strings.Contains(got, kept) {
 			t.Fatalf("%q is gone: %s", kept, got)
 		}
@@ -302,18 +302,18 @@ func TestWithheldClause(t *testing.T) {
 	}
 }
 
-// A base's SET STATUSLINE … IF UNSET defers to a status line the playbook
+// A base's SET IF UNSET statusline.command = '…' defers to a status line the playbook
 // has: when the base drops it, cpb update removes it only where the files
 // wrote it.
 func TestApplyRecordDeferredStatusline(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "own", nil)
 	writePlaybook(t, root, "fresh", nil)
-	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "STATUSLINE", "echo mine"}); err != nil {
+	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline.command", "=", "echo mine"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET STATUSLINE 'echo base' IF UNSET\n  SET VAR X=1;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline.command = 'echo base'\n  SET VAR X=1;\n")
 	for _, n := range []string{"own", "fresh"} {
 		if out, err := apply(t, f, "TO", n); err != nil {
 			t.Fatalf("%v\n%s", err, out)
@@ -325,10 +325,10 @@ func TestApplyRecordDeferredStatusline(t *testing.T) {
 			t.Fatalf("%v\n%s", err, out)
 		}
 	}
-	if sl := describePlaybookByName(t, "own").Statusline; sl == nil || *sl != "echo mine" {
+	if sl := describePlaybookByName(t, "own").Statusline.Command; sl == nil || *sl != "echo mine" {
 		t.Fatalf("the playbook's own status line was removed: %v", sl)
 	}
-	if sl := describePlaybookByName(t, "fresh").Statusline; sl != nil {
+	if sl := describePlaybookByName(t, "fresh").Statusline.Command; sl != nil {
 		t.Fatalf("the status line the files wrote was kept: %v", *sl)
 	}
 }
@@ -339,23 +339,23 @@ func TestApplyRecordDeferredStatusline(t *testing.T) {
 func TestApplyRecordDeferredStatuslineKeepsRefreshUndo(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "own", nil)
-	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "STATUSLINE", "echo mine"}); err != nil {
+	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline.command", "=", "echo mine"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET STATUSLINE 'echo base' IF UNSET\n  SET VAR X=1;\nALTER PLAYBOOK\n  SET STATUSLINE REFRESH 5;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline.command = 'echo base'\n  SET VAR X=1;\nALTER PLAYBOOK\n  SET statusline.refresh = 5;\n")
 	if out, err := apply(t, f, "TO", "own"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if v := describePlaybookByName(t, "own"); v.Statusline == nil || *v.Statusline != "echo mine" || v.StatuslineRefresh == nil || *v.StatuslineRefresh != 5 {
-		t.Fatalf("after APPLY: %v %v", v.Statusline, v.StatuslineRefresh)
+	if v := describePlaybookByName(t, "own"); v.Statusline.Command == nil || *v.Statusline.Command != "echo mine" || v.Statusline.Refresh == nil || *v.Statusline.Refresh != 5 {
+		t.Fatalf("after APPLY: %v %v", v.Statusline.Command, v.Statusline.Refresh)
 	}
 	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR X=1;\n")
 	if out, err := runUpdateFor(t, "own", false, false); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if v := describePlaybookByName(t, "own"); v.Statusline == nil || *v.Statusline != "echo mine" || v.StatuslineRefresh != nil {
-		t.Fatalf("after the update: command %v, refresh %v (want echo mine, none)", v.Statusline, v.StatuslineRefresh)
+	if v := describePlaybookByName(t, "own"); v.Statusline.Command == nil || *v.Statusline.Command != "echo mine" || v.Statusline.Refresh != nil {
+		t.Fatalf("after the update: command %v, refresh %v (want echo mine, none)", v.Statusline.Command, v.Statusline.Refresh)
 	}
 }
 
@@ -371,11 +371,11 @@ func TestApplyRecordNotForLinked(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK lk NO LAUNCHER LINK '"+target+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK lk SET launcher = '' LINK '"+target+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := writeCpb(t, t.TempDir(), "r.cpb", "ALTER PLAYBOOK NO LAUNCHER;\n")
+	f := writeCpb(t, t.TempDir(), "r.cpb", "ALTER PLAYBOOK SET launcher = '';\n")
 	out, err := apply(t, f, "TO", "lk")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -421,7 +421,7 @@ func TestApplyRecordUndoesEnvAndSandbox(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  ADD ENV route\n  SET SANDBOX workdir=/srv/w share_skills=true;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  ADD ENV route\n  SET sandbox.workdir = '/srv/w', sandbox.share_skills = true;\n")
 	if out, err := apply(t, f, "TO", "p"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -440,17 +440,17 @@ func TestApplyRecordUndoesEnvAndSandbox(t *testing.T) {
 }
 
 // One sandbox key changes and another is dropped (agy, #213): the fold
-// drops only the changed key from the merged UNSET SANDBOX, so the dropped
+// drops only the changed key from the merged DELETE, so the dropped
 // one is still unset.
 func TestApplyRecordSandboxKeyChangedAndDropped(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "p", nil)
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET SANDBOX workdir=/srv/w host=box;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET sandbox.workdir = '/srv/w', sandbox.host = 'box';\n")
 	if out, err := apply(t, f, "TO", "p"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET SANDBOX workdir=/srv/x;\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET sandbox.workdir = '/srv/x';\n")
 	out, err := runUpdateFor(t, "p", false, false)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -459,7 +459,7 @@ func TestApplyRecordSandboxKeyChangedAndDropped(t *testing.T) {
 	if sb.Host != nil || sb.Workdir == nil || *sb.Workdir != "/srv/x" {
 		t.Fatalf("after the update: host=%v workdir=%v\n%s", sb.Host, sb.Workdir, out)
 	}
-	if !strings.Contains(out, "overridden: UNSET SANDBOX workdir") {
+	if !strings.Contains(out, "overridden: DELETE sandbox.workdir") {
 		t.Fatalf("the fold did not name the changed key alone:\n%s", out)
 	}
 }

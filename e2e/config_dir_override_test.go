@@ -508,7 +508,7 @@ func TestMigrationRunnerDoesNotLeakOverride(t *testing.T) {
 		dumpEnv + "=" + filepath.Join(work, "envdump"),
 		securityLogEnv + "=" + filepath.Join(work, "security.log"),
 	}
-	install := exec.Command(binPath, "--playbooks-dir", root, "CREATE", "PLAYBOOK", "pb", "FROM", src, "NO", "LAUNCHER")
+	install := exec.Command(binPath, "--playbooks-dir", root, "CREATE", "PLAYBOOK", "pb", "FROM", src, "SET", "launcher", "=", "")
 	install.Env = base
 	if out, err := install.CombinedOutput(); err != nil {
 		t.Fatalf("install: %v\n%s", err, out)

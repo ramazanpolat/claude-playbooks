@@ -55,9 +55,9 @@ func foldParts(c grammar.Clause) []foldPart {
 			out = append(out, foldPart{index: i, what: string(c.Kind) + " '" + r + "'", effects: []foldEffect{w("tool:" + r)}})
 		}
 	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys:
-		verb := "SET SANDBOX "
+		verb := "SET sandbox."
 		if c.Kind == grammar.UnsetSandboxKeys {
-			verb = "UNSET SANDBOX "
+			verb = "DELETE sandbox."
 		}
 		for i, v := range c.Settings {
 			out = append(out, foldPart{index: i, what: verb + v.Key, effects: []foldEffect{w("sandbox:" + v.Key)}})
@@ -74,23 +74,31 @@ func foldParts(c grammar.Clause) []foldPart {
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("model")}})
 	case grammar.SetAgent, grammar.UnsetAgent:
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("agent")}})
-	case grammar.SetStatusline:
-		switch {
-		case c.IfUnset: // depends on whether a status line is set
-			effects := []foldEffect{m("statusline")}
-			if c.Refresh > 0 {
-				effects = append(effects, m("statusline-refresh"))
+	case grammar.SetIfUnset:
+		// Whole or not at all, and only where none of its keys is set: it
+		// reads every key it names, and is dropped only when each is
+		// written again later.
+		var effects []foldEffect
+		for _, g := range c.Group {
+			for _, fp := range foldParts(g) {
+				for _, e := range fp.effects {
+					effects = append(effects, m(e.key))
+				}
 			}
+		}
+		if len(effects) > 0 {
 			out = append(out, foldPart{index: -1, what: string(c.Kind), effects: effects})
-		case c.Refresh > 0: // the command and the refresh, apart
-			out = append(out, foldPart{index: 0, what: "SET STATUSLINE", effects: []foldEffect{w("statusline")}},
-				foldPart{index: 1, what: "SET STATUSLINE REFRESH", effects: []foldEffect{w("statusline-refresh")}})
-		default:
+		}
+	case grammar.SetStatusline:
+		if c.Refresh > 0 { // the command and the refresh, apart
+			out = append(out, foldPart{index: 0, what: "SET statusline.command", effects: []foldEffect{w("statusline")}},
+				foldPart{index: 1, what: "SET statusline.refresh", effects: []foldEffect{w("statusline-refresh")}})
+		} else {
 			out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline")}})
 		}
 	case grammar.UnsetStatusline:
-		out = append(out, foldPart{index: 0, what: "UNSET STATUSLINE", effects: []foldEffect{w("statusline")}},
-			foldPart{index: 1, what: "UNSET STATUSLINE REFRESH", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
+		out = append(out, foldPart{index: 0, what: "DELETE statusline", effects: []foldEffect{w("statusline")}},
+			foldPart{index: 1, what: "DELETE statusline.refresh", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
 	case grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh:
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline-refresh")}})
 	case grammar.SetStatuslinePrevious: // reads the history every earlier one wrote (see foldStatements)
@@ -141,8 +149,11 @@ type foldResult struct {
 
 // foldStatements drops every part whose key is written again later,
 // unconditionally, for the same target. It repeats until nothing changes:
-// a write a dropped dependant needed is then dropped too.
-func foldStatements(in []located) foldResult {
+// a write a dropped dependant needed is then dropped too. exists reports a
+// playbook that exists before anything runs (nil: none does): CREATE
+// PLAYBOOK IF NOT EXISTS on it applies its SET list as an ALTER would, so
+// its parts fold as an ALTER's, and it starts nothing afresh.
+func foldStatements(in []located, exists func(name string) bool) foldResult {
 	type partKey struct{ i, j, p int }
 	type occ struct {
 		part  partKey
@@ -155,6 +166,10 @@ func foldStatements(in []located) foldResult {
 	epoch := map[string]int{}
 	for i, x := range in {
 		t, barriers := foldTarget(x.s)
+		if s := x.s; s.Verb == grammar.Create && s.Object == grammar.Playbook && s.IfNotExists && s.Dir == "" &&
+			exists != nil && epoch["pb:"+s.Name] == 0 && exists(s.Name) {
+			t, barriers = "pb:"+s.Name, nil
+		}
 		for _, b := range barriers {
 			epoch[b]++
 		}
@@ -168,7 +183,7 @@ func foldStatements(in []located) foldResult {
 		}
 	}
 	dead := map[partKey]bool{}
-	previous := map[partKey]bool{}  // a SET STATUSLINE PREVIOUS
+	previous := map[partKey]bool{}  // a REVERT STATUSLINE
 	withFirst := map[partKey]bool{} // dropped only with the clause's part 0
 	var all []occ                   // every effect, in run order
 	for i, x := range in {
@@ -191,7 +206,7 @@ func foldStatements(in []located) foldResult {
 				live = append(live, o)
 			}
 		}
-		// SET STATUSLINE PREVIOUS restores from the history, which every
+		// REVERT STATUSLINE restores from the history, which every
 		// earlier replacement of the target's status line adds to, not only
 		// the last: while a PREVIOUS runs, no status line clause before it is
 		// dropped. Taken from the live clauses on every pass, so a PREVIOUS

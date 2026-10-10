@@ -12,7 +12,13 @@ assert mp["options"][1] == {"model": "glm-5.3-flash", "label": "GLM 5.3 Flash", 
 PY
 cpb EXPLAIN PLAYBOOK router-agent | grep -q 'Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)'
 # Back to the built-in rows plus these, one row fewer, then no picker at all.
-cpb "ALTER PLAYBOOK router-agent SET MODEL PICKER APPEND DROP MODEL 'glm-5.3-flash'"
+cpb "ALTER PLAYBOOK router-agent SET model_picker.mode = 'append' DROP MODEL 'glm-5.3-flash'"
 python3 -c 'import json,sys; mp=json.load(open(sys.argv[1]))["modelPicker"]; assert mp["replaceBuiltInOptions"] is False and len(mp["options"])==1, mp' "$s"
-cpb "ALTER PLAYBOOK router-agent UNSET MODEL PICKER"
+# The mode back to its default (Claude Code appends): the key goes, the rows stay.
+cpb ALTER PLAYBOOK router-agent DELETE model_picker.mode
+python3 -c 'import json,sys; mp=json.load(open(sys.argv[1]))["modelPicker"]; assert "replaceBuiltInOptions" not in mp and len(mp["options"])==1, mp' "$s"
+# DELETE model_picker is the mode too: the rows are a collection, which DROP
+# MODEL empties, and a picker left empty goes.
+cpb "ALTER PLAYBOOK router-agent DELETE model_picker" | grep -q unchanged
+cpb "ALTER PLAYBOOK router-agent DROP MODEL 'glm-5.3'"
 python3 -c 'import json,sys; assert "modelPicker" not in json.load(open(sys.argv[1]))' "$s"

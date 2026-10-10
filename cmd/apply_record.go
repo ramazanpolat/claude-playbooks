@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
-	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // The [apply] record (SPEC.md, "The [apply] record"): for each playbook an
@@ -56,7 +56,7 @@ func targetStatements(stmts []located, name string) []located {
 // statements after the fold, name-less again, with every credential-looking
 // literal withheld as SHOW CREATE withholds it.
 func applyRecordText(stmts []located) []byte {
-	fold := foldStatements(stmts)
+	fold := foldStatements(stmts, nil) // name-less ALTERs only: no CREATE
 	var b strings.Builder
 	b.WriteString("-- What the last APPLY wrote to this playbook, for cpb update. Credential-looking literals are withheld.\n")
 	for i, x := range fold.stmts {
@@ -146,42 +146,48 @@ func (sc *applyScope) narrow(stmts []located) ([]located, error) {
 		}
 		fmt.Println()
 	}
-	// The deferred status line first: with its UNSET STATUSLINE gone, an
-	// UNSET STATUSLINE REFRESH beside it stays (Codex, #213).
-	if u := undoStatement(sc.only, sc.deferredStatusline(undoClauses(sc.old, newStmts))); u != nil {
+	// The deferred SET IF UNSET lists first: with a DELETE statusline gone,
+	// a DELETE statusline.refresh beside it stays (Codex, #213).
+	if u := undoStatement(sc.only, sc.deferredIfUnset(undoClauses(sc.old, newStmts))); u != nil {
 		keep = append([]located{{file: "undo", path: sc.oldPath, s: u}}, keep...)
 	}
 	return keep, nil
 }
 
-// deferredStatusline drops the undo's UNSET STATUSLINE when the record's
-// status line is SET … IF UNSET and the playbook's status line is another
-// command: the clause deferred to a status line the playbook had, which
-// the files never wrote, so their dropping it takes nothing away.
-func (sc *applyScope) deferredStatusline(undo []grammar.Clause) []grammar.Clause {
-	var old *grammar.Clause
+// deferredIfUnset drops the undo of a SET IF UNSET list in the record that
+// the playbook does not hold: one of its keys has another value, so the
+// list deferred to values the playbook had, which the files never wrote,
+// and their dropping it takes nothing away.
+func (sc *applyScope) deferredIfUnset(undo []grammar.Clause) []grammar.Clause {
+	var drop []grammar.Clause
 	for _, s := range sc.old {
-		for i := range s.Clauses {
-			if s.Clauses[i].Kind == grammar.SetStatusline && old == nil {
-				old = &s.Clauses[i] // the one undoFor undoes
+		for _, c := range s.Clauses {
+			if c.Kind != grammar.SetIfUnset {
+				continue
+			}
+			want := ifUnsetValues(c.Group)
+			keys := make([]string, 0, len(want))
+			for k := range want {
+				keys = append(keys, k)
+			}
+			live := livePropertyValues(sc.only, keys)
+			held := true
+			for k, v := range want {
+				if live[k] != v {
+					held = false
+				}
+			}
+			if held {
+				continue
+			}
+			for _, x := range clauseUndo(c) {
+				drop = append(drop, x.undo)
 			}
 		}
 	}
-	if old == nil || !old.IfUnset {
-		return undo
-	}
-	live := ""
-	if pb, err := playbook.Find(config.ResolvePlaybooksDir(), sc.only); err == nil && pb != nil {
-		if sf, err := settings.Load(pb.Path); err == nil {
-			if _, sl, _ := settingsExtras(sf.Root); sl != nil {
-				live = *sl
-			}
-		}
-	}
-	if live == old.Arg {
-		return undo
-	}
-	return slices.DeleteFunc(undo, func(c grammar.Clause) bool { return c.Kind == grammar.UnsetStatusline })
+	return slices.DeleteFunc(undo, func(u grammar.Clause) bool {
+		return slices.ContainsFunc(drop, func(d grammar.Clause) bool { return reflect.DeepEqual(d, u) })
+	})
 }
 
 // writeApplyRecords records, for each playbook the files gave name-less

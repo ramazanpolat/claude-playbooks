@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -201,10 +202,34 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	case v.Launcher != nil:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: *v.Launcher})
 	case hasNameLauncher(pb.Name):
-		// The default launcher, named after the playbook: no clause
-		// creates it again.
+		// The default launcher, named after the playbook, written out:
+		// a recipe never leans on a default.
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: pb.Name})
 	default:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoLauncher})
+	}
+	// The properties SHOW CREATE always writes, so a recipe never leans on
+	// a default: login and memory, and sandbox.always with the table's
+	// other set keys (a sandboxed playbook's login is isolated). On the
+	// CREATE, which applies them to a playbook that exists too (CREATE IF
+	// NOT EXISTS converges). A linked playbook's manifest and settings.json
+	// are the target's.
+	sandboxed := v.Sandbox.Always && v.Linked == nil
+	if v.Linked == nil {
+		login := "shared"
+		if v.IsolatedLogin || sandboxed {
+			login = "isolated"
+		}
+		memory, _ := memoryStateOf(pb.Path)
+		sandboxSettings := []grammar.Var{{Key: "always", Value: strconv.FormatBool(sandboxed)}}
+		if m != nil && m.Sandbox != nil {
+			for _, kv := range m.Sandbox.Settings() {
+				sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
+			}
+		}
+		st.Clauses = append(st.Clauses,
+			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "memory", Value: memory}}},
+			grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
 	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole
@@ -271,21 +296,6 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			}
 		}
 	}
-	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
-	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
-	// existing playbook too, where CREATE IF NOT EXISTS would not. The
-	// properties travel the same way, as SET login = …, memory = …: both
-	// always, so a recipe never leans on a default (a sandboxed playbook's
-	// login is isolated). A linked playbook's manifest and settings.json
-	// are the target's.
-	sandboxed := v.Sandbox.Always && v.Linked == nil
-	var sandboxSettings []grammar.Var
-	if v.Linked == nil && m != nil && m.Sandbox != nil {
-		for _, kv := range m.Sandbox.Settings() {
-			sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
-		}
-	}
-	isolated := v.IsolatedLogin || sandboxed
 	if v.Linked != nil {
 		if env.Empty() {
 			return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
@@ -303,20 +313,6 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
 		})
 		alter.Clauses = append(alter.Clauses, clauses...)
-	}
-	login := "shared"
-	if isolated {
-		login = "isolated"
-	}
-	set := grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}}}
-	memory, _ := memoryStateOf(pb.Path)
-	set.Settings = append(set.Settings, grammar.Var{Key: "memory", Value: memory})
-	alter.Clauses = append(alter.Clauses, set)
-	if sandboxed {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})
-	}
-	if len(sandboxSettings) > 0 {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
 	}
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"

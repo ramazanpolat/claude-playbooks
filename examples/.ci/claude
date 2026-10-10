@@ -4,6 +4,29 @@
 # config directory, and records any other launch. No network, no model.
 st="$CLAUDE_CONFIG_DIR/.fake-claude"
 mkdir -p "$st"
+# settings() records the plugin state where Claude Code records it, in the
+# playbook's settings.json (extraKnownMarketplaces, enabledPlugins), keeping
+# every other key, so SHOW and SHOW CREATE read it as they read Claude Code's.
+settings() {
+  python3 - "$st" "$CLAUDE_CONFIG_DIR/settings.json" <<'PYEOF'
+import json, sys
+st, path = sys.argv[1], sys.argv[2]
+def load(p, empty):
+    try:
+        return json.load(open(p))
+    except FileNotFoundError:
+        return empty
+root = load(path, {})
+markets = {m["name"]: {"source": {k: v for k, v in m.items() if k != "name"}} for m in load(st + "/markets.json", [])}
+plugins = {p["id"]: p["enabled"] for p in load(st + "/plugins.json", [])}
+for key, value in (("extraKnownMarketplaces", markets), ("enabledPlugins", plugins)):
+    if value:
+        root[key] = value
+    else:
+        root.pop(key, None)
+json.dump(root, open(path, "w"), indent=2)
+PYEOF
+}
 case "$*" in
   "plugin marketplace list --json") cat "$st/markets.json" 2>/dev/null || echo "[]" ;;
   "plugin list --json") cat "$st/plugins.json" 2>/dev/null || echo "[]" ;;
@@ -26,11 +49,13 @@ case "$*" in
       esac
     fi
     old=$(cat "$st/markets.json" 2>/dev/null || echo "[]")
-    if [ "$old" = "[]" ]; then echo "[$entry]"; else echo "${old%]},$entry]"; fi > "$st/markets.json" ;;
+    if [ "$old" = "[]" ]; then echo "[$entry]"; else echo "${old%]},$entry]"; fi > "$st/markets.json"
+    settings ;;
   "plugin install "*)
     old=$(cat "$st/plugins.json" 2>/dev/null || echo "[]")
     entry="{\"id\":\"$3\",\"scope\":\"user\",\"enabled\":true}"
     if [ "$old" = "[]" ]; then echo "[$entry]"; else echo "${old%]},$entry]"; fi > "$st/plugins.json"
+    settings
     echo '{"command":"install","outcome":"ok"}' ;;
   "plugin uninstall "*|"plugin marketplace remove "*)
     # Forget the plugin (by id) or the marketplace (by name).
@@ -49,7 +74,7 @@ json.dump([i for i in items if i.get(key) != value], open(path, "w"))
 if args[1] == "uninstall":
     print('{"command":"uninstall","outcome":"ok"}')
 PYEOF
-    ;;
+    settings ;;
   "mcp add-json "*|"mcp remove "*)
     # The servers live where Claude Code keeps them: .claude.json mcpServers.
     python3 - "$CLAUDE_CONFIG_DIR/.claude.json" "$@" <<'PYEOF'

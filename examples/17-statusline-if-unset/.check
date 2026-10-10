@@ -1,11 +1,19 @@
 s="$HOME/.claude-playbooks/barred/settings.json"
 # A new playbook has no status line, so IF UNSET applied.
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s == {"type": "command", "command": "date +%H:%M", "refreshInterval": 10}, s' "$s"
-# Your own bar: a plain SET STATUSLINE always applies.
-cpb "ALTER PLAYBOOK barred SET STATUSLINE 'echo mine'"
+# Your own bar: a plain SET statusline always applies.
+cpb "ALTER PLAYBOOK barred SET statusline.command = 'echo mine'"
 # Offering again changes nothing now: the slot is set.
-cpb "ALTER PLAYBOOK barred SET STATUSLINE 'date +%H:%M' REFRESH 10 IF UNSET" | grep -q 'unchanged'
+cpb "ALTER PLAYBOOK barred SET IF UNSET statusline.command = 'date +%H:%M', statusline.refresh = 10" | grep -q 'unchanged'
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s["command"] == "echo mine", s' "$s"
 # SHOW CREATE writes the status line as it is, not the condition.
-cpb SHOW CREATE PLAYBOOK barred | grep -q "SET STATUSLINE 'echo mine' REFRESH 10"
+cpb SHOW CREATE PLAYBOOK barred | grep -q "SET statusline.command = 'echo mine', statusline.refresh = 10"
 if cpb SHOW CREATE PLAYBOOK barred | grep -q 'IF UNSET'; then echo "SHOW CREATE wrote IF UNSET"; exit 1; fi
+# Any property, whole or not at all: with a model set, neither key changes,
+# and the line names the key that was set.
+cpb "ALTER PLAYBOOK barred SET model = 'mine'" > /dev/null
+cpb "ALTER PLAYBOOK barred SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'" | grep -q 'model is set; SET IF UNSET changed nothing'
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"] == "mine" and "agent" not in s, s' "$s"
+cpb "ALTER PLAYBOOK barred DELETE model" > /dev/null
+cpb "ALTER PLAYBOOK barred SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'" > /dev/null
+python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"] == "claude-opus-5-5" and s["agent"] == "reviewer", s' "$s"

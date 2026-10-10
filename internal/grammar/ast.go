@@ -52,13 +52,15 @@ const (
 	AddEnv      Kind = "ADD ENV"     // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
 	DropEnv     Kind = "DROP ENV"    // DROP ENV a b ...
 	RenameTo    Kind = "RENAME TO"   // RENAME TO n
-	Launcher    Kind = "LAUNCHER"    // LAUNCHER <name>
-	NoLauncher  Kind = "NO LAUNCHER" // NO LAUNCHER
-	From        Kind = "FROM"        // CREATE PLAYBOOK ... FROM <source>
-	Branch      Kind = "BRANCH"      // CREATE PLAYBOOK ... BRANCH <ref>
-	Subdir      Kind = "SUBDIR"      // CREATE PLAYBOOK ... SUBDIR <dir>
-	Link        Kind = "LINK"        // CREATE PLAYBOOK ... LINK <dir>
-	Sandbox     Kind = "SANDBOX"     // CREATE PLAYBOOK ... SANDBOX
+	// The launcher property: SET launcher = '<name>', SET launcher = ''
+	// (none), DELETE launcher (back to the playbook's name).
+	Launcher        Kind = "SET launcher"
+	NoLauncher      Kind = "SET launcher = ''"
+	DefaultLauncher Kind = "DELETE launcher"
+	From            Kind = "FROM"   // CREATE PLAYBOOK ... FROM <source>
+	Branch          Kind = "BRANCH" // CREATE PLAYBOOK ... BRANCH <ref>
+	Subdir          Kind = "SUBDIR" // CREATE PLAYBOOK ... SUBDIR <dir>
+	Link            Kind = "LINK"   // CREATE PLAYBOOK ... LINK <dir>
 
 	// Playbook properties (properties.go): CREATE PLAYBOOK ... SET k = 'v',
 	// ... gives the starting values, ALTER PLAYBOOK ... SET k = 'v', ...
@@ -67,18 +69,15 @@ const (
 	SetProperties    Kind = "SET <key> = <value>"
 	DeleteProperties Kind = "DELETE <key>"
 
-	// The [sandbox] table (ALTER PLAYBOOK): bare SET SANDBOX is always =
-	// true and isolates the login, as CREATE … SANDBOX does; bare UNSET
-	// SANDBOX is always = false and leaves the login as it is. The keyed
-	// forms name the table's own keys (Settings) and never touch always
-	// unless they name it.
-	SetSandbox       Kind = "SET SANDBOX"
-	UnsetSandbox     Kind = "UNSET SANDBOX"
-	SetSandboxKeys   Kind = "SET SANDBOX <key>=<value>"
-	UnsetSandboxKeys Kind = "UNSET SANDBOX <key>"
+	// The [sandbox] table's keys, the sandbox.<key> properties: SET
+	// sandbox.<key> = <value> (Settings, the value as manifest.Sandbox.SetKey
+	// takes it, a list comma-joined) and DELETE sandbox.<key> (Key only).
+	// always is one key like the others; it changes nothing else.
+	SetSandboxKeys   Kind = "SET sandbox.<key>"
+	UnsetSandboxKeys Kind = "DELETE sandbox.<key>"
 
-	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
-	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
+	SetHelper   Kind = "SET secret_helper"    // ALTER DEFAULTS SET secret_helper = '<command>'
+	UnsetHelper Kind = "DELETE secret_helper" // ALTER DEFAULTS DELETE secret_helper
 
 	// Plugins and the agent (ALTER PLAYBOOK only): they write the playbook's
 	// settings.json, never the manifest.
@@ -86,8 +85,8 @@ const (
 	DropMarketplace Kind = "DROP MARKETPLACE" // DROP MARKETPLACE m
 	AddPlugin       Kind = "ADD PLUGIN"       // ADD PLUGIN p@m
 	DropPlugin      Kind = "DROP PLUGIN"      // DROP PLUGIN p@m
-	SetAgent        Kind = "SET AGENT"        // SET AGENT '<agent>'
-	UnsetAgent      Kind = "UNSET AGENT"      // UNSET AGENT
+	SetAgent        Kind = "SET agent"        // SET agent = '<agent>'
+	UnsetAgent      Kind = "DELETE agent"     // DELETE agent
 
 	// MCP servers (ALTER PLAYBOOK only): claude mcp add-json / remove.
 	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, VAR …, HEADER …
@@ -95,13 +94,13 @@ const (
 
 	// Tool permissions, status line and model (ALTER PLAYBOOK only): keys
 	// of the playbook's settings.json, which Claude Code has no CLI for.
-	AllowTool       Kind = "ALLOW TOOL"       // ALLOW TOOL '<rule>' ...
-	DenyTool        Kind = "DENY TOOL"        // DENY TOOL '<rule>' ...
-	UnsetTool       Kind = "UNSET TOOL"       // UNSET TOOL '<rule>' ...
-	SetStatusline   Kind = "SET STATUSLINE"   // SET STATUSLINE '<command>'
-	UnsetStatusline Kind = "UNSET STATUSLINE" // UNSET STATUSLINE
-	SetModel        Kind = "SET MODEL"        // SET MODEL '<model>'
-	UnsetModel      Kind = "UNSET MODEL"      // UNSET MODEL
+	AllowTool       Kind = "ALLOW TOOL"             // ALLOW TOOL '<rule>' ...
+	DenyTool        Kind = "DENY TOOL"              // DENY TOOL '<rule>' ...
+	UnsetTool       Kind = "UNSET TOOL"             // UNSET TOOL '<rule>' ...
+	SetStatusline   Kind = "SET statusline.command" // SET statusline.command = '<command>'[, statusline.refresh = <n>]
+	UnsetStatusline Kind = "DELETE statusline"      // DELETE statusline (or statusline.command): the whole status line
+	SetModel        Kind = "SET model"              // SET model = '<model>'
+	UnsetModel      Kind = "DELETE model"           // DELETE model
 
 	// Skills (ALTER PLAYBOOK only): <config>/skills/<name>.
 	AddSkill  Kind = "ADD SKILL"  // ADD SKILL n FROM <source> [BRANCH <ref>] [SUBDIR <dir>]
@@ -109,16 +108,21 @@ const (
 
 	// The model picker (v3.22.0): settings.json modelPicker.
 	// The status line's refresh (v3.23.0): statusLine.refreshInterval.
-	SetStatuslineRefresh   Kind = "SET STATUSLINE REFRESH" // SET STATUSLINE REFRESH <n>
-	UnsetStatuslineRefresh Kind = "UNSET STATUSLINE REFRESH"
-	// SetStatuslinePrevious: SET STATUSLINE PREVIOUS, the status line cpb
+	SetStatuslineRefresh   Kind = "SET statusline.refresh" // SET statusline.refresh = <n>
+	UnsetStatuslineRefresh Kind = "DELETE statusline.refresh"
+	// SetStatuslinePrevious: REVERT STATUSLINE, the status line cpb
 	// replaced last, from its history.
-	SetStatuslinePrevious Kind = "SET STATUSLINE PREVIOUS"
+	SetStatuslinePrevious Kind = "REVERT STATUSLINE"
 
-	AddModel         Kind = "ADD MODEL"          // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
-	DropModel        Kind = "DROP MODEL"         // DROP MODEL '<id>'
-	SetModelPicker   Kind = "SET MODEL PICKER"   // SET MODEL PICKER ONLY | APPEND
-	UnsetModelPicker Kind = "UNSET MODEL PICKER" // UNSET MODEL PICKER
+	AddModel             Kind = "ADD MODEL"                // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
+	DropModel            Kind = "DROP MODEL"               // DROP MODEL '<id>'
+	SetModelPicker       Kind = "SET model_picker.mode"    // SET model_picker.mode = 'only' | 'append' (Arg ONLY or APPEND)
+	UnsetModelPickerMode Kind = "DELETE model_picker.mode" // DELETE model_picker[.mode]: the mode only; DROP MODEL removes rows
+
+	// SetIfUnset: SET IF UNSET k = v, …, whose pairs are the clauses in
+	// Group. It applies whole, and only when none of its keys is set (each
+	// at the value DELETE gives it); else it changes nothing.
+	SetIfUnset Kind = "SET IF UNSET"
 )
 
 // Skill is where an ADD SKILL takes a skill from: a directory (linked) or a
@@ -209,21 +213,22 @@ type Clause struct {
 
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
 
-	// Settings: SET SANDBOX <key>=<value> ... (Key, Value) and UNSET SANDBOX
-	// <key> ... (Key only), the [sandbox] table's keys; and the playbook
-	// properties of SET <key> = <value> and DELETE <key> (Key only).
-	// Apart from Vars and Keys, which name variables.
+	// Settings: the [sandbox] keys of SET sandbox.<key> = <value> (Key,
+	// Value) and DELETE sandbox.<key> (Key only); and the playbook
+	// properties of SET <key> = <value> and DELETE <key> (Key only). Apart
+	// from Vars and Keys, which name variables.
 	Settings []Var
 
 	MCP   *MCP       // ADD MCP SERVER
 	Skill *Skill     // ADD SKILL
 	Row   *PickerRow // ADD MODEL
-	// Refresh: SET STATUSLINE … REFRESH <n> and SET STATUSLINE REFRESH <n>,
-	// whole seconds (0: not given).
+	// Refresh: statusline.refresh, whole seconds (0: not given).
 	Refresh int
-	// IfUnset: SET STATUSLINE … IF UNSET, which applies only to a config
-	// dir with no status line yet.
+	// IfUnset marks the SET IF UNSET list as parsed, before
+	// desugarProperties makes it a SetIfUnset clause; Group holds that
+	// clause's pairs, as the clauses they became.
 	IfUnset bool
+	Group   []Clause
 
 	Pos Pos
 }

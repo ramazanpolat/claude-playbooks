@@ -10,8 +10,8 @@ ALTER PLAYBOOK reviewer
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Read(~/.ssh/**)'
-  SET STATUSLINE 'bash ~/bin/statusline.sh'
-  SET MODEL 'claude-opus-5-5'
+  SET statusline.command = 'bash ~/bin/statusline.sh'
+  SET model = 'claude-opus-5-5'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
 
@@ -37,9 +37,9 @@ session at launch. A header's reference resolves to the whole value
 
 ```
 ALLOW TOOL '<rule>' ...     DENY TOOL '<rule>' ...     UNSET TOOL '<rule>' ...
-SET STATUSLINE '<command>' [REFRESH <n>]   UNSET STATUSLINE
-SET STATUSLINE REFRESH <n>   UNSET STATUSLINE REFRESH   SET STATUSLINE PREVIOUS
-SET MODEL '<model>'         UNSET MODEL
+SET statusline.command = '<command>'[, statusline.refresh = <n>]   DELETE statusline
+SET statusline.refresh = <n>   DELETE statusline.refresh   REVERT STATUSLINE
+SET model = '<model>'         DELETE model
 ```
 
 These are `settings.json` keys with no CLI, so cpb writes them into the
@@ -49,21 +49,24 @@ model is the playbook's default and the weakest choice: `ANTHROPIC_MODEL`,
 `--model` and `/model` all win over it, and `EXPLAIN PLAYBOOK` says which
 one decides. Example: [10](../../examples/10-tools-statusline-model/).
 
-`SET STATUSLINE` always applies. A recipe that offers a status line without
-replacing one you chose writes `SET STATUSLINE '<command>' IF UNSET`, which
-applies only where no status line is set yet; see
-[example 17](../../examples/17-statusline-if-unset/).
+`SET statusline.command = …` always applies. A recipe that offers a status
+line without replacing one you chose writes `SET IF UNSET
+statusline.command = '<command>'`, which applies only where no status line is
+set yet; see [example 17](../../examples/17-statusline-if-unset/). `SET IF
+UNSET` takes any property, and applies whole or not at all: `SET IF UNSET
+model = 'claude-opus-5-5', agent = 'reviewer'` changes neither on a playbook
+that has a model, and says so.
 
 ## The model picker
 
 ```
 ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
 DROP MODEL '<id>'
-SET MODEL PICKER ONLY | APPEND      UNSET MODEL PICKER
+SET model_picker.mode = 'only' | 'append'    DELETE model_picker.mode
 ```
 
 These are the rows `/model` offers in a session, written to `settings.json`
-`modelPicker`. `ONLY` shows these rows alone, and `APPEND` adds them after
+`modelPicker`. `'only'` shows these rows alone, and `'append'` adds them after
 the built-in ones. `BEHAVES AS` names the model whose behaviour Claude Code
 should assume for an id it does not know (a router's model, say). A row
 is keyed by its model id, and rows cpb did not write are kept. Claude Code
