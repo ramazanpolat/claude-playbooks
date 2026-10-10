@@ -2,17 +2,17 @@ p="$HOME/.claude-playbooks"
 entry="$HOME/.claude/**"
 # isolated: one claudeMdExcludes entry, this machine's home, absolute.
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == [sys.argv[2]], v' "$p/focused/settings.json" "$entry"
-cpb SHOW PLAYBOOK focused --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["settings"] == {"login": "shared", "memory": "isolated"}, v'
+cpb SHOW PLAYBOOK focused --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["login"] == "shared" and v["memory"] == "isolated", v'
 cpb EXPLAIN PLAYBOOK focused | grep -q '^Memory: isolated'
-cpb SHOW CREATE PLAYBOOK focused | grep -qx "  MODIFY SETTING memory = 'isolated';"
+cpb SHOW CREATE PLAYBOOK focused | grep -qx "  SET login = 'shared', memory = 'isolated';"
 # shared: nothing written.
 if grep -qs claudeMdExcludes "$p/familiar/settings.json"; then echo "familiar excludes"; exit 1; fi
-cpb SHOW CREATE PLAYBOOK familiar | grep -qx "  MODIFY SETTING memory = 'shared';"
-# MODIFY and RESET move only cpb's entry; the rest of the list is yours.
+cpb SHOW CREATE PLAYBOOK familiar | grep -qx "  SET login = 'shared', memory = 'shared';"
+# SET and DELETE move only cpb's entry; the rest of the list is yours.
 printf '{"claudeMdExcludes": ["/opt/notes/**"]}\n' > "$p/familiar/settings.json"
-cpb "ALTER PLAYBOOK familiar MODIFY SETTING memory = 'isolated'" > /dev/null
+cpb "ALTER PLAYBOOK familiar SET memory = 'isolated'" > /dev/null
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == ["/opt/notes/**", sys.argv[2]], v' "$p/familiar/settings.json" "$entry"
-cpb "ALTER PLAYBOOK familiar MODIFY SETTING memory = 'shared'" > /dev/null
+cpb "ALTER PLAYBOOK familiar SET memory = 'shared'" > /dev/null
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == ["/opt/notes/**"], v' "$p/familiar/settings.json"
-cpb ALTER PLAYBOOK focused RESET SETTING memory | grep -q unchanged
-cpb "SELECT name, settings FROM PLAYBOOKS" --json | python3 -c 'import json,sys; v={r["name"]: r["settings"]["memory"] for r in json.load(sys.stdin)}; assert v == {"familiar": "shared", "focused": "isolated"}, v'
+cpb ALTER PLAYBOOK focused DELETE memory | grep -q unchanged
+cpb "SELECT name, memory FROM PLAYBOOKS" --json | python3 -c 'import json,sys; v={r["name"]: r["memory"] for r in json.load(sys.stdin)}; assert v == {"familiar": "shared", "focused": "isolated"}, v'

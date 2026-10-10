@@ -60,13 +60,12 @@ const (
 	Link        Kind = "LINK"        // CREATE PLAYBOOK ... LINK <dir>
 	Sandbox     Kind = "SANDBOX"     // CREATE PLAYBOOK ... SANDBOX
 
-	// Playbook settings, ClickHouse style (playbook_settings.go): CREATE
-	// PLAYBOOK ... SETTINGS k = 'v', ...; ALTER PLAYBOOK ... MODIFY SETTING
-	// k = 'v', ... and RESET SETTING k, ... (back to the default). Settings
-	// holds (Key, Value); RESET's values are empty.
-	PlaybookSettings Kind = "SETTINGS"
-	ModifySetting    Kind = "MODIFY SETTING"
-	ResetSetting     Kind = "RESET SETTING"
+	// Playbook properties (properties.go): CREATE PLAYBOOK ... SET k = 'v',
+	// ... gives the starting values, ALTER PLAYBOOK ... SET k = 'v', ...
+	// changes them, and ALTER PLAYBOOK ... DELETE k, ... puts them back to
+	// the default. Settings holds (Key, Value); DELETE's values are empty.
+	SetProperties    Kind = "SET <key> = <value>"
+	DeleteProperties Kind = "DELETE <key>"
 
 	// The [sandbox] table (ALTER PLAYBOOK): bare SET SANDBOX is always =
 	// true and isolates the login, as CREATE … SANDBOX does; bare UNSET
@@ -212,7 +211,7 @@ type Clause struct {
 
 	// Settings: SET SANDBOX <key>=<value> ... (Key, Value) and UNSET SANDBOX
 	// <key> ... (Key only), the [sandbox] table's keys; and the playbook
-	// settings of SETTINGS, MODIFY SETTING and RESET SETTING (Key only).
+	// properties of SET <key> = <value> and DELETE <key> (Key only).
 	// Apart from Vars and Keys, which name variables.
 	Settings []Var
 

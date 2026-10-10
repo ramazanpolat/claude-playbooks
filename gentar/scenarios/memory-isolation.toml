@@ -1,4 +1,4 @@
-# claude-playbooks own-arena suite: the memory setting through the real
+# claude-playbooks own-arena suite: the memory property through the real
 # claude (v4.0.0-rc3). Bench only: whether ~/.claude/CLAUDE.md reaches a
 # request is Claude Code's own behaviour, which the dry-run's stub claude
 # cannot show.
@@ -18,13 +18,13 @@ steps = [
 
 
 [[verify.commands]]
-# The memory setting, end to end through the real claude (v4.0.0-rc3): a
+# The memory property, end to end through the real claude (v4.0.0-rc3): a
 # marker in ~/.claude/CLAUDE.md reaches a launch of a playbook made with
-# SETTINGS memory = 'shared' and never one made with the default
+# SET memory = 'shared' and never one made with the default
 # ('isolated'). Both launch from a directory under $HOME, where Claude Code's
 # ancestor walk meets ~/.claude. The requests go to a stub API on loopback
 # that records them and answers 400: no real request, and the key is a dummy.
-command = '''mkdir -p "$HOME/.claude" "$HOME/work" && printf 'MARKER-MACHINE-MEMORY-7Q\n' > "$HOME/.claude/CLAUDE.md" && cpb CREATE PLAYBOOK mem-iso NO LAUNCHER >/dev/null && cpb CREATE PLAYBOOK mem-shared NO LAUNCHER SETTINGS memory=shared >/dev/null || { echo setup-failed; exit 1; }
+command = '''mkdir -p "$HOME/.claude" "$HOME/work" && printf 'MARKER-MACHINE-MEMORY-7Q\n' > "$HOME/.claude/CLAUDE.md" && cpb CREATE PLAYBOOK mem-iso NO LAUNCHER >/dev/null && cpb CREATE PLAYBOOK mem-shared NO LAUNCHER SET memory=shared >/dev/null || { echo setup-failed; exit 1; }
 cat > "$HOME/stub.py" <<'EOF'
 import http.server, os, sys
 out = sys.argv[1]

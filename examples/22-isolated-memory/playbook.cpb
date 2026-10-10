@@ -5,4 +5,4 @@
 CREATE PLAYBOOK IF NOT EXISTS focused NO LAUNCHER;
 
 -- One that wants the machine's memory says so.
-CREATE PLAYBOOK IF NOT EXISTS familiar NO LAUNCHER SETTINGS memory = 'shared';
+CREATE PLAYBOOK IF NOT EXISTS familiar NO LAUNCHER SET memory = 'shared';

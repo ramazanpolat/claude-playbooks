@@ -39,7 +39,7 @@ func TestPlaySetup(t *testing.T) {
 		t.Fatalf("plain: %q", plain)
 	}
 	moved := playSetup("play-x-000000", play.Check([]byte(routerRecipe)))
-	for _, want := range []string{"NO LAUNCHER SETTINGS login = 'isolated';", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
+	for _, want := range []string{"NO LAUNCHER SET login = 'isolated';", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
 		if !strings.Contains(moved, want) {
 			t.Errorf("endpoint moved: %q lacks %q", moved, want)
 		}

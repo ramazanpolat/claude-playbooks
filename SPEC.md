@@ -84,7 +84,7 @@ tools' profiles.
 **A playbook routed away from Anthropic** sends every request to its
 `ANTHROPIC_BASE_URL`, with what its `CLAUDE.md` holds. The `CLAUDE.md` that
 `CREATE PLAYBOOK` writes imports nothing; whatever you add to it, `@` imports
-included, goes along. `SETTINGS login = 'isolated'` keeps such a playbook's
+included, goes along. `SET login = 'isolated'` keeps such a playbook's
 login apart, `memory = 'isolated'` (the default) keeps `~/.claude`'s memory
 out of it, and `BLOCK VAR` keeps your Anthropic credentials out of its launches
 ([example 15](examples/15-third-party-route/)).
@@ -126,7 +126,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX] [SETTINGS setting, ...]
+            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [launcher] [SANDBOX] [SET property, ...]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -134,8 +134,8 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
             | LINK <dir>                                    develop in place
 launcher   := LAUNCHER <launcher> | NO LAUNCHER                   default: the name
-setting    := <key> = '<value>'           login = 'shared' | 'isolated', memory = 'isolated' | 'shared'
-                                           see "Playbook settings"
+property   := <key> = '<value>'           login = 'shared' | 'isolated', memory = 'isolated' | 'shared'
+                                           see "Playbook properties"
 
 env-clause := SET [VAR] <key>=<value> ... [AS PLAINTEXT]
                                            literal values; AS PLAINTEXT: see Secrets
@@ -176,8 +176,8 @@ pb-clause  := set-clause
             | SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET] | UNSET STATUSLINE
             | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH
             | SET STATUSLINE PREVIOUS      the status line cpb replaced last
-            | MODIFY SETTING setting, ...  see "Playbook settings"
-            | RESET SETTING <key>, ...     back to the default
+            | SET property, ...            change properties; see "Playbook properties"
+            | DELETE <key>, ...            back to the default
             | SET SANDBOX | UNSET SANDBOX  every launch sandboxed (the login isolated too) | not; see "Sandbox"
             | SET SANDBOX <key>=<value> ...   the [sandbox] table's own keys: SET SANDBOX backend=sbx
             | UNSET SANDBOX <key> ...      forget a setting: UNSET SANDBOX host
@@ -205,8 +205,8 @@ read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
 and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
 and `BRANCH` / `SUBDIR` only with `FROM`; `LAUNCHER` and `NO LAUNCHER` exclude each
-other; `SANDBOX` and `SETTINGS` do not take `LINK`. The clauses of
-`origin`, `launcher`, `SANDBOX` and `SETTINGS` may come in any order.
+other; `SANDBOX` and `SET` do not take `LINK`. The clauses of
+`origin`, `launcher`, `SANDBOX` and `SET` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal; `--yes` skips it.
 
 Two limits keep every statement whole-or-nothing:
@@ -271,8 +271,8 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … SET / UNSET STATUSLINE`, `SET / UNSET MODEL` | the playbook's `settings.json`, `statusLine` / `model` |
 | `ALTER PLAYBOOK … ADD / DROP SKILL` | `<playbook>/skills/<name>` (a link or a copy) and the manifest's `[skills.<name>]` record |
 | `ALTER PLAYBOOK … SET / UNSET SANDBOX` | the playbook's `.playbook`, `[sandbox]` (bare `SET SANDBOX` also `isolated_login = true`) |
-| `ALTER PLAYBOOK … MODIFY / RESET SETTING login` | the playbook's `.playbook`, `isolated_login` |
-| `ALTER PLAYBOOK … MODIFY / RESET SETTING memory` | the playbook's `settings.json`, one `claudeMdExcludes` entry |
+| `ALTER PLAYBOOK … SET login` / `DELETE login` | the playbook's `.playbook`, `isolated_login` |
+| `ALTER PLAYBOOK … SET memory` / `DELETE memory` | the playbook's `settings.json`, one `claudeMdExcludes` entry |
 
 A key lives in exactly one of `set`, `refs`, `block` within a layer; writing
 it to one removes it from the others.
@@ -315,11 +315,11 @@ applied in CI.
 
 ### `CREATE PLAYBOOK <name>`
 
-Creates `<root>/<name>/` with a `CLAUDE.md` that says what a playbook is and imports nothing (replace it with the playbook's own instructions), links the machine's login (see *Authentication preparation*), and registers a launcher named `<name>`, or the one `LAUNCHER <launcher>` names, recorded as the manifest's `launcher`. `NO LAUNCHER` registers none and prints `cpb run <name>` instead. `SETTINGS login = 'isolated'` writes `isolated_login = true` before the login is linked, so the playbook shares none; the `memory` setting, `'isolated'` unless `SETTINGS` says `'shared'`, writes its `claudeMdExcludes` entry; `SANDBOX` writes `[sandbox] always = true` with it. A name that is taken refuses (`playbook "<name>" already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)`); `IF NOT EXISTS` leaves an existing playbook unchanged. The launcher names are checked before the directory exists, under the registry lock (see *Launchers*).
+Creates `<root>/<name>/` with a `CLAUDE.md` that says what a playbook is and imports nothing (replace it with the playbook's own instructions), links the machine's login (see *Authentication preparation*), and registers a launcher named `<name>`, or the one `LAUNCHER <launcher>` names, recorded as the manifest's `launcher`. `NO LAUNCHER` registers none and prints `cpb run <name>` instead. `SET login = 'isolated'` writes `isolated_login = true` before the login is linked, so the playbook shares none; the `memory` property, `'isolated'` unless `SET` says `'shared'`, writes its `claudeMdExcludes` entry; `SANDBOX` writes `[sandbox] always = true` with it. A name that is taken refuses (`playbook "<name>" already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)`); `IF NOT EXISTS` leaves an existing playbook unchanged, its `SET` list included. The launcher names are checked before the directory exists, under the registry lock (see *Launchers*).
 
 ### `CREATE PLAYBOOK <name> LINK <dir>`
 
-Registers a directory in place: `<root>/<name>` becomes a symlink to `<dir>`, and nothing is copied. The directory must have a `.playbook`; a statement never prompts for one. The launcher is `LAUNCHER <launcher>`, else the target manifest's `launcher`, else `<name>`. A launcher that differs from the target manifest's is refused: that manifest is shared with every registry that links the directory, so it is the target's state, and statements that write it are refused too (see *Environment overrides*). A login the directory carries is set aside before the credential sync, unless the directory is isolated (`isolated_login = true` keeps its own). Nothing in the directory is deleted, and `DROP PLAYBOOK` removes only the link. `SANDBOX` and `SETTINGS` do not take `LINK`.
+Registers a directory in place: `<root>/<name>` becomes a symlink to `<dir>`, and nothing is copied. The directory must have a `.playbook`; a statement never prompts for one. The launcher is `LAUNCHER <launcher>`, else the target manifest's `launcher`, else `<name>`. A launcher that differs from the target manifest's is refused: that manifest is shared with every registry that links the directory, so it is the target's state, and statements that write it are refused too (see *Environment overrides*). A login the directory carries is set aside before the credential sync, unless the directory is isolated (`isolated_login = true` keeps its own). Nothing in the directory is deleted, and `DROP PLAYBOOK` removes only the link. `SANDBOX` and `SET` do not take `LINK`.
 
 ### `CREATE PLAYBOOK <name> FROM <source>`
 
@@ -354,8 +354,8 @@ cpb CREATE PLAYBOOK sre FROM https://github.com/user/repo/tree/main/playbooks/sr
 | `LAUNCHER <launcher>` | Custom launcher command name for the installed playbook |
 | `NO LAUNCHER` | Skip launcher creation |
 | `SANDBOX` | Set `[sandbox] always = true` and `isolated_login = true` on the installed manifest: every launch is sandboxed and the playbook authenticates on its own. A `[sandbox]` block shipped by the source is never adopted, with or without this clause (`Note: ignoring the [sandbox] block shipped in the source's .playbook; sandbox settings are install-local ...`). |
-| `SETTINGS login = 'isolated'` | Set `isolated_login = true` without a sandbox |
-| `SETTINGS memory = 'shared'` | Leave `~/.claude`'s memory loading into the install (by default, `'isolated'` writes the `claudeMdExcludes` entry into its `settings.json`) |
+| `SET login = 'isolated'` | Set `isolated_login = true` without a sandbox |
+| `SET memory = 'shared'` | Leave `~/.claude`'s memory loading into the install (by default, `'isolated'` writes the `claudeMdExcludes` entry into its `settings.json`) |
 
 **Steps (no `SUBDIR`):**
 1. Stage the source (Git URL → `git clone --depth=1`, with `BRANCH <ref>` if given, into a temp dir; local path → read in place) so its `.playbook` can be consulted.
@@ -547,48 +547,57 @@ A playbook's **environment overrides** are the `[env]` block of its `.playbook` 
 
 Linked playbooks: the manifest is the LINK TARGET's shared state, so mutations are refused — edit the target's manifest directly if you really mean it.
 
-### Playbook settings
+### Playbook properties
 
-A playbook has settings, written the way ClickHouse writes a table's:
-`key = 'value'` pairs, comma-separated.
+A property is a value the playbook keeps that can change after it is
+created. Properties are `key = 'value'` pairs: `CREATE PLAYBOOK … SET` gives
+the starting values, `ALTER PLAYBOOK … SET` changes them, and `DELETE`
+puts a key back to its default. What is fixed at creation (`FROM`,
+`BRANCH`, `SUBDIR`, `LINK`) stays a keyword clause of `CREATE`.
 
 ```
-CREATE PLAYBOOK <name> … SETTINGS login = 'isolated', memory = 'shared'
-ALTER PLAYBOOK <name> MODIFY SETTING memory = 'isolated'
-ALTER PLAYBOOK <name> RESET SETTING login, memory       -- back to the defaults
+CREATE PLAYBOOK <name> … SET login = 'isolated', memory = 'shared'
+ALTER PLAYBOOK <name> SET memory = 'isolated'
+ALTER PLAYBOOK <name> DELETE login, memory       -- back to the defaults
 ```
 
-| Setting | Values (default first) | What it is |
+| Key | Values (default first) | What it is |
 |---|---|---|
 | `login` | `'shared'`, `'isolated'` | Whether the playbook shares the machine's login (the manifest's `isolated_login`) |
 | `memory` | `'isolated'`, `'shared'` | Whether `~/.claude`'s `CLAUDE.md` and `rules/` load into it (one `claudeMdExcludes` entry in its `settings.json`) |
 
-- **The form.** A setting is one word (`memory='shared'`) or three
-  (`memory = 'shared'`). Values may be quoted or not: on a command line the
-  shell removes the quotes anyway, and `SHOW CREATE` writes them quoted. A
-  statement sets a key once. A key or value outside the table is refused
-  with the allowed ones.
-- **Defaults.** `RESET SETTING` restores the default. A new playbook gets
-  every default `SETTINGS` does not name, so a new playbook's memory is
-  isolated. An existing playbook keeps what it has: nothing is migrated.
+- **The form.** A pair is one word (`memory='shared'`) or three
+  (`memory = 'shared'`); pairs are separated by commas, which may be left
+  out. In a playbook file, and in a statement given as one quoted argument,
+  a value is quoted (`login takes a quoted string: login = 'isolated'`); on
+  the command line the shell has already removed the quotes, so
+  `cpb ALTER PLAYBOOK x SET login = isolated` works. Keys match in any case.
+  A key or value outside the table is refused with the allowed ones; a key
+  shaped like a variable gets `a variable is SET VAR <KEY>=<value>`.
+- **One statement names a key once.** `SET` and `DELETE` may appear
+  together and more than once (`SET login = 'isolated' DELETE memory`), each
+  key in one of them.
+- **Defaults.** `DELETE` restores the default, and is for `ALTER` only. A
+  new playbook gets every default its `SET` does not name, so a new
+  playbook's memory is isolated. An existing playbook keeps what it has:
+  nothing is migrated. `CREATE PLAYBOOK IF NOT EXISTS` on a playbook that
+  exists changes nothing, its `SET` list included.
 - **Reads.** `SHOW PLAYBOOK` prints `Login` and `Memory` rows, `EXPLAIN` a
-  `Memory:` line (and a `Login:` line when it is isolated). `SHOW PLAYBOOK
-  --json` and `EXPLAIN --json` have `"settings": {"login", "memory"}`, and
-  `SELECT`'s `PLAYBOOKS` has a `settings` column. `SHOW CREATE` writes
-  `MODIFY SETTING` in the playbook's `ALTER`: `login` when it is isolated
-  and the playbook is not sandboxed (`SET SANDBOX` already isolates it), and
-  `memory` always, so a recipe never leans on a default. Applying it again
-  changes nothing.
-- **Refusals.** `SETTINGS` does not apply to `LINK`, where the manifest and
+  `Memory:` line (and a `Login:` line when it is isolated). Each key is its
+  field: `SHOW PLAYBOOK --json` and `EXPLAIN --json` have `"login"` and
+  `"memory"`, and `SELECT`'s `PLAYBOOKS` has `login` and `memory` columns.
+  `SHOW CREATE` writes both keys in the playbook's `ALTER` (`SET login =
+  '…', memory = '…'`), always, so a recipe never leans on a default.
+  Applying it again changes nothing.
+- **Refusals.** `SET` does not apply to `LINK`, where the manifest and
   `settings.json` are the target's. `SANDBOX` and `SET SANDBOX` do not
-  combine with `login = 'shared'` (nor with `RESET SETTING login`).
-- **Words.** `SETTINGS`, `MODIFY` and `RESET` are reserved words. `SETTING`,
-  the keys and the values are read only in these positions and are not.
+  combine with `login = 'shared'` (nor with `DELETE login`).
+- **Words.** `DELETE` is a reserved word. The keys and the values are read
+  only after `SET` and `DELETE` and are not.
 - **Removed.** `ISOLATED LOGIN` (v4.0.0-rc1 and rc2) is gone: `CREATE
-  PLAYBOOK … ISOLATED LOGIN` is `SETTINGS login = 'isolated'`, `SET ISOLATED
-  LOGIN` is `MODIFY SETTING login = 'isolated'`, and `UNSET ISOLATED LOGIN`
-  is `MODIFY SETTING login = 'shared'`. The old forms are refused with that
-  hint.
+  PLAYBOOK … ISOLATED LOGIN` and `SET ISOLATED LOGIN` are `SET login =
+  'isolated'`, and `UNSET ISOLATED LOGIN` is `SET login = 'shared'`. The old
+  forms are refused with that hint.
 
 #### login
 
@@ -621,9 +630,8 @@ manifest's `isolated_login = true` (see the authentication guide).
   isolated playbook is `isolated-login`.
 - **Refusals.** It does not apply to a plain config directory, which has no
   manifest.
-- **Reads.** `SHOW PLAYBOOK --json` also keeps `isolated_login` (a bool, true
-  for a sandboxed playbook too), and `SELECT`'s `PLAYBOOKS` an
-  `isolated_login` column.
+- **Reads.** `SHOW PLAYBOOK --json` has `"login": "isolated"` for a
+  sandboxed playbook too, and so does `SELECT`'s `login` column.
 
 #### memory
 
@@ -641,7 +649,7 @@ playbook run anywhere under `$HOME`. `memory = 'isolated'` keeps them out.
 - **Read back, not recorded twice.** A playbook is isolated exactly when its
   `claudeMdExcludes` holds this machine's entry. An entry for another
   home's `~/.claude` (a copy from another machine) excludes nothing here;
-  `SHOW PLAYBOOK` says so, and `MODIFY SETTING memory = 'isolated'` writes
+  `SHOW PLAYBOOK` says so, and `SET memory = 'isolated'` writes
   this machine's.
 - **Refusals.** Never on `~/.claude` itself or a directory inside it, where
   the exclude would hide that install's own memory. `LINK`: the
@@ -675,7 +683,7 @@ ALTER PLAYBOOK sre UNSET SANDBOX host mounts
   nothing with `~/.claude`. `SET SANDBOX <key>=<value> …` sets only the keys
   it names and never changes `always`; `SET SANDBOX always=true` is the bare
   form spelled out. Bare `UNSET SANDBOX` is `always = false` and leaves the
-  login isolated (`MODIFY SETTING login = 'shared'` shares it again). `UNSET SANDBOX
+  login isolated (`SET login = 'shared'` shares it again). `UNSET SANDBOX
   <key> …` forgets settings.
 - **The keys** are the table's own: `always`; `backend` (`sbx`);
   `host` (`user@host`: the launch runs there, over ssh); `workdir`; `mounts`
@@ -1452,8 +1460,8 @@ code to the same lines):
 | `envs` | `Array(String)` | The env sets the playbook uses, in order. |
 | `vars` | `Array(JSON)` | The playbook's own variables, each a value, a reference, a redacted credential or a block. |
 | `sandbox` | `JSON` | The [sandbox] table, key for key: always, backend, host, workdir, mounts, allow_net, secrets, claude_version, share_skills. |
-| `isolated_login` | `Bool` | True when the playbook shares no login with the machine; true for a sandboxed playbook too. |
-| `settings` | `JSON` | The playbook settings: login ('shared' or 'isolated') and memory ('isolated' or 'shared': whether ~/.claude's CLAUDE.md and rules load into it). |
+| `login` | `String` | The login property: isolated when the playbook shares no login with the machine (a sandboxed playbook too), else shared. |
+| `memory` | `String` | The memory property: isolated when ~/.claude's CLAUDE.md and rules do not load into the playbook, else shared. |
 | `marketplaces` | `Array(JSON)` | The plugin marketplaces in the playbook's settings: name, source. |
 | `plugins` | `Array(JSON)` | The plugins in the playbook's settings: id, enabled. |
 | `agent` | `Nullable(String)` | The agent the playbook pins (SET AGENT); null when unset. |
@@ -1684,8 +1692,9 @@ File rules:
   list), so applying a file twice changes nothing the second time.
 - **Machine-specific parts stay explicit.** `LINK <dir>` and `SANDBOX` are
   emitted as they are; a `LINK` path missing on the target fails validation.
-- `SHOW CREATE ALL` orders statements: env sets by name, `DEFAULTS`,
-  playbooks by name.
+- `SHOW CREATE ALL` orders statements: the secret helper first (`APPLY`
+  checks each reference against the helper an earlier statement sets), env
+  sets by name, the env sets `DEFAULTS` uses, playbooks by name.
 
 `cpb APPLY <file> [<file> ...]`:
 
@@ -1721,6 +1730,7 @@ drops only the replaced entries.
 | the model; the agent | `SET` / `UNSET MODEL`; `SET` / `UNSET AGENT` |
 | the status line; its refresh | `SET STATUSLINE '<command>'` (not `IF UNSET`), `UNSET STATUSLINE`; `SET` / `UNSET STATUSLINE REFRESH`, and `REFRESH` on `SET STATUSLINE` |
 | a sandbox setting `k` | `SET SANDBOX k=…`, `UNSET SANDBOX k` |
+| a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`; a `CREATE`'s starting values are never dropped |
 | the env sets | `USE ENV` |
 
 - **A clause that depends on what it finds** replaces nothing: `SET
@@ -1729,8 +1739,7 @@ drops only the replaced entries.
   line writes, so no status line clause before it is dropped.
 - **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh.
 - **Every other clause is never dropped:** marketplaces, plugins, MCP
-  servers, skills, the model picker, the login, a bare `SET` / `UNSET
-  SANDBOX`.
+  servers, skills, the model picker, a bare `SET` / `UNSET SANDBOX`.
 - **The report.** A statement left with nothing to write is reported
   `unchanged`. The run and the plan name what was dropped and where it is set
   again (`overridden: SET MODEL (set again at dev.cpb:3)`). `--dry-run
@@ -1997,7 +2006,7 @@ Refused, each with its reason:
   layered by the launcher.
 - `RENAME TO`, `LAUNCHER`, `NO LAUNCHER`, `SANDBOX`: the directory is not in the
   registry and has no launcher.
-- `MODIFY / RESET SETTING login`: `isolated_login` is recorded in a
+- `SET login` / `DELETE login`: `isolated_login` is recorded in a
   playbook's manifest, which the directory does not have. `memory` applies:
   it is a key of the directory's `settings.json` (never `~/.claude` itself).
 
@@ -2061,7 +2070,7 @@ Every launch (`run`, `start`, launcher dispatch) prepares the config directory's
 1. **Isolation wins.** If the nearest manifest walking up from the config directory has `isolated_login = true`, or `CPB_ISOLATED_LOGIN=true` is set: detach a symlinked `.credentials.json` (the target file survives), sync no account metadata, strip `CLAUDE_CODE_OAUTH_TOKEN` and the plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) from the child environment. A `CLAUDE_CODE_OAUTH_TOKEN` the playbook's own flattened `[env]` sets is honoured as its own token: injected, with the stored `claudeAiOauth` grant quarantined as on the token path. When the isolated playbook holds no login of its own (no grant in its store) and its block sets no token, the Anthropic account state in its `.claude.json` is removed as well: `oauthAccount`, `cachedGrowthBookFeatures`, `cachedGrowthBookFeaturesAt`, `cachedExperimentFeatures`, `cachedExperimentData`, `passesEligibilityCache`, `cachedExtraUsageDisabledReason`. Rationale: Claude Code enables its claude.ai-hosted tools (Artifact and friends) from those cached flags regardless of `ANTHROPIC_BASE_URL`, so a playbook routed to another backend that once ran as the global account keeps sending them; since Claude Code 2.1.265 the Artifact tool's schema is rejected by at least one such backend (GLM, `400` code `1210`) and every interactive turn fails. A playbook that logs in on its own regenerates the state, so nothing of value is lost; an unreadable `.claude.json` leaves it in place and is reported as an advisory warning. `auth status` shows the pending removal as `no login; stale account state, purged at launch`, judged as the launch will see it: a grant reached only through a symlinked shared store does not count, since isolation detaches that link first (`stale account state, purged at launch (the shared login is detached at launch)`). A store that cannot be read or parsed leaves the state in place with an advisory warning, since it may hold a login. The rewrite keeps the file's owner permissions masked to `0600`, never widening a read-only state file.
 2. **Token active?** True when the flattened `[env]` sets `CLAUDE_CODE_OAUTH_TOKEN` to a non-empty value, else when the process environment carries it, else when `~/.config/claude-code/oauth-token` (overridable via `CPB_OAUTH_TOKEN_FILE`) is non-empty; false when the flattened `[env]` unsets it, regardless of the rest.
 3. **Token path.** The plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) are appended from the global account's store only when the token IS the machine-global one, read from the token file by this launch, and only for the descriptors the shell did not already export: an explicit export is the pilot's deliberate act and outranks what is inferred from disk (a Team seat needs exactly that, its real `subscriptionType` is not a value the picker accepts). A token the flattened `[env]` block supplies (`playbook-token`) belongs to some other account, so the global descriptors are neither appended nor inherited (the block may set its own); a token inherited from the shell is of unknown provenance, so nothing is appended and whatever descriptors the shell exported beside it pass through unchanged. Then: quarantine the playbook's stored `claudeAiOauth` grant (other keys such as `mcpOAuth` survive; a symlinked store is detached, never written through; the global store is never quarantined — identity is decided with symlinks resolved and `os.SameFile` for the directory and for the credentials file itself, so `start <symlink-to-~/.claude>`, a linked registration of it, or a config directory whose store is the target of a symlinked `~/.claude/.credentials.json` are all recognised as the global store), sync non-secret account metadata into `.claude.json` so an interactive start presents as logged in, and inject the token (replacing any inherited entry); the descriptor rule above then applies. Rationale: under token auth Claude Code never refreshes a stored grant, and its 401-recovery path adopts a differing stored `accessToken` over the environment token; an expired stored grant would replace a working token with a dead one.
-4. **No-token path.** `SyncCredentials`: the playbook's `.credentials.json` becomes a symlink to the global `~/.claude/.credentials.json`, so `/login` in any playbook is visible to all, and Claude Code refreshes the shared grant itself. A target that is the global directory by identity, or whose store is the global file itself, is left untouched. A regular file there (Claude Code writes its store by rename, so a refresh or `/login` in a shared playbook leaves one) is judged before the link replaces it. A file with no account grant never overwrites the global store. A grant-bearing file becomes the machine's login when there is none, and is copied over it when it is the machine's own account and newer. Any other login, or one that cannot be confirmed as the machine's account, is set aside: renamed to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>`, its account state backed up to `.claude.json.cpb-backup-<…>` and removed, with one stderr line naming the kept file and `ALTER PLAYBOOK <name> MODIFY SETTING login = 'isolated'` as the way to keep that account there. Nothing is deleted.
+4. **No-token path.** `SyncCredentials`: the playbook's `.credentials.json` becomes a symlink to the global `~/.claude/.credentials.json`, so `/login` in any playbook is visible to all, and Claude Code refreshes the shared grant itself. A target that is the global directory by identity, or whose store is the global file itself, is left untouched. A regular file there (Claude Code writes its store by rename, so a refresh or `/login` in a shared playbook leaves one) is judged before the link replaces it. A file with no account grant never overwrites the global store. A grant-bearing file becomes the machine's login when there is none, and is copied over it when it is the machine's own account and newer. Any other login, or one that cannot be confirmed as the machine's account, is set aside: renamed to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>`, its account state backed up to `.claude.json.cpb-backup-<…>` and removed, with one stderr line naming the kept file and `ALTER PLAYBOOK <name> SET login = 'isolated'` as the way to keep that account there. Nothing is deleted.
 
 Before any of this, a launch refuses while a manifest on the config directory's way up cannot be read, sandboxed or not: it may ask for an isolated login or a sandbox (`<error>. cpb does not launch over a manifest it cannot read: it may ask for an isolated login or a sandbox`). Every preparation failure is advisory (a warning, then launch) except an env set that cannot be resolved, which refuses the launch before step 1. Raw `claude` invocations bypass this entirely.
 
@@ -2289,7 +2298,7 @@ PLAYBOOK` statements: a recipe. These clauses are allowed:
 - `SET MODEL`, `ADD MODEL`, `SET MODEL PICKER`;
 - `ADD SKILL` from a git source;
 - `SET VAR` (not a credential), `SET VAR … FROM '<ref>'`, `BLOCK VAR`;
-- `MODIFY SETTING … = 'isolated'`, `NO LAUNCHER`.
+- `SET … = 'isolated'`, `NO LAUNCHER`.
 
 Refused, each with its line and reason:
 - **anything outside the one playbook `play` makes:** `INCLUDE`, `USE
@@ -2303,9 +2312,9 @@ Refused, each with its line and reason:
 - **an MCP server URL carrying credentials** (`https://user:token@…`);
 - **a local directory source** for a marketplace or a skill, and a skill from
   `http://` or `file://`;
-- **`MODIFY SETTING … = 'shared'`, `RESET SETTING`, `RENAME TO`, `LAUNCHER`,
-  `NO LAUNCHER`:** play decides these; a recipe may isolate more, never less;
-- **`DROP …` and `UNSET …`:** nothing to undo on a new playbook.
+- **`SET … = 'shared'`, `RENAME TO`, `LAUNCHER`, `NO LAUNCHER`:** play
+  decides these; a recipe may isolate more, never less;
+- **`DROP …`, `UNSET …` and `DELETE …`:** nothing to undo on a new playbook.
 
 **Risks.** The preview marks each risky clause with a code. The codes are a
 closed set: `runs_program`, `third_party_code`, `sends_data`,
@@ -2326,7 +2335,7 @@ preview, `confirm` in JSON):
 Any other `*_URL`, `*_HOST`, `*_ENDPOINT` or `*_BASE_URL` is flagged
 `sends_data`, not typed.
 
-A recipe that moves the model endpoint is planned with `SETTINGS login = 'isolated'` and
+A recipe that moves the model endpoint is planned with `SET login = 'isolated'` and
 a `BLOCK VAR` of your credentials: `ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`,
@@ -2356,7 +2365,7 @@ store**, a fresh temp directory with only your secret helper setting copied.
 So your `DEFAULTS` and env sets never layer into a played recipe, and
 nothing is written to your store. The plan is `APPLY`'s, for two files:
 - a setup file: `CREATE PLAYBOOK IF NOT EXISTS play-<name>-<6 hex> NO
-  LAUNCHER`, with `SETTINGS login = 'isolated'` and the `BLOCK VAR` above when
+  LAUNCHER`, with `SET login = 'isolated'` and the `BLOCK VAR` above when
   the endpoint moves;
 - the recipe.
 

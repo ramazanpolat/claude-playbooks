@@ -237,12 +237,10 @@ func (c *Clause) words(varWord bool) []string {
 			w = append(w, v.Key+"="+quoteValue(v.Value))
 		}
 		return w
-	case PlaybookSettings:
-		return append([]string{"SETTINGS"}, settingWords(c, true)...)
-	case ModifySetting:
-		return append([]string{"MODIFY", "SETTING"}, settingWords(c, true)...)
-	case ResetSetting:
-		return append([]string{"RESET", "SETTING"}, settingWords(c, false)...)
+	case SetProperties:
+		return append([]string{"SET"}, propertyWords(c, true)...)
+	case DeleteProperties:
+		return append([]string{"DELETE"}, propertyWords(c, false)...)
 	case UnsetSandboxKeys:
 		w := []string{"UNSET", "SANDBOX"}
 		for _, v := range c.Settings {

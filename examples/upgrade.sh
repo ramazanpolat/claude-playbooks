@@ -3,8 +3,12 @@
 # apply is applied with it, in a throwaway HOME with a made-up machine login,
 # then the NEW binary takes over the same state and must read it exactly as
 # the old one did:
-#   - SHOW CREATE ALL is byte-identical from both binaries;
-#   - re-applying the example with the new binary changes nothing;
+#   - the new binary's SHOW CREATE ALL applies to that state unchanged, and
+#     rebuilds the same state in a fresh HOME (examples/.ci/state.py); the
+#     text is not compared, since the grammar may change between releases;
+#   - re-applying the example with the new binary changes nothing, unless
+#     the new grammar refuses a form it dropped, with that form's hint (the
+#     example's line lists it);
 #   - EXPLAIN --json of every playbook (what a launch sets) is identical in
 #     every key the old release printed; a key the new release adds is
 #     listed on the example's line, not compared;
@@ -46,7 +50,9 @@ for dir in "$src"/[0-9][0-9]-*/; do
        [ -f "$home/launch-skipped" ] && skipped="; launch skipped for $(tr '\n' ' ' < "$home/launch-skipped" | sed 's/ $//'): sandboxed on every launch, and no sbx here"
        added=""
        [ -s "$home/explain-added" ] && added="; EXPLAIN adds $(sort -u "$home/explain-added" | tr '\n' ' ' | sed 's/ $//')"
-       echo "ok    $name ($(cat "$home/count") playbooks$skipped$added)"; ran=$((ran + 1)) ;;
+       dropped=""
+       [ -s "$home/grammar-dropped" ] && dropped="; old grammar refused with its hint: $(tr '\n' ';' < "$home/grammar-dropped" | sed 's/;$//')"
+       echo "ok    $name ($(cat "$home/count") playbooks$skipped$added$dropped)"; ran=$((ran + 1)) ;;
     3) echo "skip  $name (the old release refuses it)" ;;
     *) echo "FAIL  $name"; sed 's/^/      /' "$home/log" | tail -30; fail=1 ;;
   esac

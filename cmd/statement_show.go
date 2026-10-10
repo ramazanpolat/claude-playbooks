@@ -64,11 +64,12 @@ type playbookJSON struct {
 	// Sandbox is the [sandbox] table, key for key.
 	Sandbox sandboxJSON `json:"sandbox"`
 	// IsolatedLogin is isolated_login: no login shared with ~/.claude (a
-	// sandboxed playbook is always isolated).
-	IsolatedLogin bool `json:"isolated_login"`
-	// Settings are the playbook settings (SETTINGS, MODIFY SETTING), as
-	// they stand.
-	Settings settingsJSON `json:"settings"`
+	// sandboxed playbook is always isolated). --json says it as Login.
+	IsolatedLogin bool `json:"-"`
+	// Login and Memory are the playbook's properties (SET login, SET
+	// memory) as they stand: each key is its field.
+	Login  string `json:"login"`
+	Memory string `json:"memory"`
 
 	Marketplaces []marketplaceJSON `json:"marketplaces"`
 	Plugins      []pluginJSON      `json:"plugins"`
@@ -189,12 +190,7 @@ type explainJSON struct {
 	// Route is where a launch's requests go and how it authenticates, built
 	// from non-secret values and states only (v4.0.0).
 	Route routeJSON `json:"route"`
-	// Settings are the playbook settings the launch runs with.
-	Settings settingsJSON `json:"settings"`
-}
-
-// settingsJSON is the playbook settings, in SHOW CREATE's order.
-type settingsJSON struct {
+	// Login and Memory are the playbook properties the launch runs with.
 	Login  string `json:"login"`
 	Memory string `json:"memory"`
 }
@@ -350,8 +346,8 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		}
 	}
 	v.Launcher = optStr(effectiveLauncher(pb))
-	v.Settings = settingsJSON{Login: "shared"}
-	v.Settings.Memory, _ = memoryStateOf(pb.Path)
+	v.Login = "shared"
+	v.Memory, _ = memoryStateOf(pb.Path)
 	m := pb.Manifest
 	if m == nil {
 		return v
@@ -367,7 +363,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	// A sandbox never shares the machine's login, whatever the manifest says.
 	v.IsolatedLogin = m.IsolatedLogin || v.Sandbox.Always
 	if v.IsolatedLogin {
-		v.Settings.Login = "isolated"
+		v.Login = "isolated"
 	}
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Sets)
@@ -492,7 +488,7 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 		login = "isolated (shares nothing with ~/.claude)"
 	}
 	_, other := memoryStateOf(v.Path)
-	rows = append(rows, [2]string{"Login", login}, [2]string{"Memory", strings.TrimPrefix(memoryLine(v.Settings.Memory, other), "Memory: ")})
+	rows = append(rows, [2]string{"Login", login}, [2]string{"Memory", strings.TrimPrefix(memoryLine(v.Memory, other), "Memory: ")})
 	if v.Play != nil {
 		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.PlayedAt, v.Name)})
 	}
@@ -689,8 +685,9 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 	plugins, agent := launchPlugins(pb)
 	if st.JSON {
 		model := launchModel(pb, vars)
+		pv := describePlaybook(pb)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
-			Tools: describePlaybook(pb).Tools, Model: model, Route: launchRoute(pb, origins, model), Settings: describePlaybook(pb).Settings})
+			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, Memory: pv.Memory})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -736,9 +733,9 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 	v := describePlaybook(pb)
 	switch {
 	case v.Sandbox.Always:
-		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, MODIFY SETTING login = 'shared' shares it again")
+		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, SET login = 'shared' shares it again")
 	case v.IsolatedLogin:
-		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (MODIFY SETTING login = 'shared' shares it again)")
+		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}
 	fmt.Println(memoryLine(memoryStateOf(pb.Path)))
 }

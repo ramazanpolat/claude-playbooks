@@ -26,7 +26,7 @@ type installOpts struct {
 	noLauncher bool
 	sandbox    bool
 	// isolatedLogin: isolated_login = true without a sandbox (CREATE
-	// PLAYBOOK … FROM … SETTINGS login = 'isolated').
+	// PLAYBOOK … FROM … SET login = 'isolated').
 	isolatedLogin bool
 	// memory: 'isolated' writes the claudeMdExcludes entry into the
 	// install's settings.json (kept across updates, which preserve it).

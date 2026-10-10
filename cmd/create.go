@@ -90,7 +90,7 @@ func doCreate(o createOpts, args []string) error {
 		}
 		if err := manifest.Write(dest, m); err != nil {
 			os.RemoveAll(dest)
-			return fmt.Errorf("cannot record the sandbox or login setting in the manifest: %w", err)
+			return fmt.Errorf("cannot record the sandbox or login property in the manifest: %w", err)
 		}
 	}
 

@@ -12,7 +12,7 @@ provider), every request the playbook makes goes there, with whatever its
 
 - The `CLAUDE.md` that `CREATE PLAYBOOK` writes imports nothing. Anything you
   add to it, `@` imports included, goes to the router with every request.
-- `SETTINGS login = 'isolated'` gives the playbook a login of its own, so a
+- `SET login = 'isolated'` gives the playbook a login of its own, so a
   `/login` in it never lands in the machine's shared login
   ([example 16](../16-isolated-login/)).
 - Its `memory` setting is `'isolated'`, a new playbook's default, so the

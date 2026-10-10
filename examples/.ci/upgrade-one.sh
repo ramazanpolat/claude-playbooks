@@ -38,17 +38,40 @@ cpb SHOW PLAYBOOKS --json > "$home/new-playbooks.json"
 newpbs=$(python3 -c 'import json,sys; [print(p["name"]) for p in json.load(open(sys.argv[1]))]' "$home/new-playbooks.json")
 if [ "$(echo $newpbs)" != "$(echo $pbs)" ]; then echo "the new binary lists [$newpbs], the old one [$pbs]"; exit 1; fi
 cpb SHOW CREATE ALL > "$home/new.cpb"
-# Rendered as the previous release renders the same state, where the grammar
-# changed on purpose since (examples/.ci/prev-syntax.py says what, and when
-# to delete it); any other difference fails.
-python3 "$ci/prev-syntax.py" render "$home/new.cpb" > "$home/new-as-prev.cpb"
-if ! cmp -s "$home/old.cpb" "$home/new-as-prev.cpb"; then echo "SHOW CREATE ALL differs:"; diff "$home/old.cpb" "$home/new-as-prev.cpb" | head -20; exit 1; fi
-# An example in the previous grammar is re-applied from a translated copy;
-# the others in place, where their relative paths were resolved.
-adir=$dir
-if grep -qs 'ISOLATED LOGIN' "$dir"/*.cpb; then python3 "$ci/prev-syntax.py" translate "$dir" "$home/ex"; adir="$home/ex"; fi
-(cd "$adir" && cpb APPLY "$entry" --yes) > "$home/new-apply.out"
-if ! grep -q " 0 created, 0 changed, " "$home/new-apply.out"; then echo "the new binary changed the old state:"; cat "$home/new-apply.out"; exit 1; fi
+# The grammar may change between releases (v4 has no transition code while it
+# is pre-release), so the old release's SHOW CREATE text is not compared. The
+# state is. The new binary's own description of the old state:
+# 1. applies to that state unchanged;
+cpb APPLY "$home/new.cpb" --yes > "$home/new-apply.out"
+if ! grep -q " 0 created, 0 changed, " "$home/new-apply.out"; then echo "the new binary's SHOW CREATE changed the old state:"; cat "$home/new-apply.out"; exit 1; fi
+# 2. the example, as the old release wrote it, re-applies unchanged too,
+#    unless the new grammar refuses a form it dropped, with that form's hint
+#    (listed on the example's line); any other refusal fails;
+if (cd "$dir" && cpb APPLY "$entry" --dry-run) > "$home/new-dry.out" 2>&1; then
+  (cd "$dir" && cpb APPLY "$entry" --yes) > "$home/new-apply-example.out"
+  if ! grep -q " 0 created, 0 changed, " "$home/new-apply-example.out"; then echo "the new binary changed the old state:"; cat "$home/new-apply-example.out"; exit 1; fi
+elif grep -Eq ' is (a property now|gone): ' "$home/new-dry.out"; then
+  grep -Eo '[A-Z][A-Z ]* is (a property now|gone)' "$home/new-dry.out" | sort -u > "$home/grammar-dropped"
+else
+  echo "the new binary refuses the old example:"; cat "$home/new-dry.out"; exit 1
+fi
+# 3. rebuilds the same state in a fresh HOME (examples/.ci/state.py says what
+#    is compared, and what is not).
+h2=$(mktemp -d)
+trap 'rm -rf "$h2"' EXIT
+mkdir -p "$h2/bin" "$h2/.claude"
+cp "$home/machine.before" "$h2/.claude/.credentials.json"
+cp "$home/state.before" "$h2/.claude.json"
+ln -s "$new" "$h2/bin/cpb"
+(
+  export HOME="$h2" PATH="$ci:$ci/../secret-helper:$h2/bin:$PATH"
+  cd "$dir"
+  if [ -f .setup ]; then sh -e .setup; fi
+  cpb APPLY "$home/new.cpb" --yes > "$h2/apply.out"
+)
+python3 "$ci/state.py" "$home" > "$home/state-old.json"
+python3 "$ci/state.py" "$h2" > "$home/state-new.json"
+if ! cmp -s "$home/state-old.json" "$home/state-new.json"; then echo "the new binary's SHOW CREATE ALL does not rebuild the old state:"; diff "$home/state-old.json" "$home/state-new.json" | head -40; exit 1; fi
 cpb auth status --json > "$home/new-auth.json"
 if ! cmp -s "$home/old-auth.json" "$home/new-auth.json"; then echo "auth status differs:"; diff "$home/old-auth.json" "$home/new-auth.json" | head -20; exit 1; fi
 for pb in $pbs; do

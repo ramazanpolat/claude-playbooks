@@ -37,16 +37,16 @@ ALTER PLAYBOOK k UNSET SANDBOX UNSET SANDBOX host mounts;`)
 		t.Errorf("a variable and a setting of one name: %v", err)
 	}
 	for src, want := range map[string]string{
-		"ALTER PLAYBOOK k SET SANDBOX nope=1;":                          "nope is not a [sandbox] key",
-		"ALTER PLAYBOOK k UNSET SANDBOX nope;":                          "nope is not a [sandbox] key",
-		"ALTER PLAYBOOK k SET SANDBOX share_skills=yes;":                "sandbox.share_skills takes true or false",
-		"ALTER PLAYBOOK k SET SANDBOX host=;":                           "UNSET SANDBOX host clears it",
-		"ALTER PLAYBOOK k SET SANDBOX backend;":                         "SET SANDBOX takes <key>=<value>",
-		"ALTER PLAYBOOK k SET SANDBOX host=a UNSET SANDBOX host;":       "sandbox.host appears twice",
-		"ALTER PLAYBOOK k SET SANDBOX UNSET SANDBOX;":                   "cannot be combined",
-		"ALTER PLAYBOOK k SET SANDBOX MODIFY SETTING login = 'shared';": "cannot be combined",
-		"ALTER PLAYBOOK k SET SANDBOX RESET SETTING login;":             "cannot be combined",
-		"ALTER PLAYBOOK k SET SANDBOX host=a SET SANDBOX backend=sbx;":  "appears twice",
+		"ALTER PLAYBOOK k SET SANDBOX nope=1;":                         "nope is not a [sandbox] key",
+		"ALTER PLAYBOOK k UNSET SANDBOX nope;":                         "nope is not a [sandbox] key",
+		"ALTER PLAYBOOK k SET SANDBOX share_skills=yes;":               "sandbox.share_skills takes true or false",
+		"ALTER PLAYBOOK k SET SANDBOX host=;":                          "UNSET SANDBOX host clears it",
+		"ALTER PLAYBOOK k SET SANDBOX backend;":                        "SET SANDBOX takes <key>=<value>",
+		"ALTER PLAYBOOK k SET SANDBOX host=a UNSET SANDBOX host;":      "sandbox.host appears twice",
+		"ALTER PLAYBOOK k SET SANDBOX UNSET SANDBOX;":                  "cannot be combined",
+		"ALTER PLAYBOOK k SET SANDBOX SET login = 'shared';":           "cannot be combined",
+		"ALTER PLAYBOOK k SET SANDBOX DELETE login;":                   "cannot be combined",
+		"ALTER PLAYBOOK k SET SANDBOX host=a SET SANDBOX backend=sbx;": "appears twice",
 	} {
 		if _, err := ParseFile(src); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", src, err, want)

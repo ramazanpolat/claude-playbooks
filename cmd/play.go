@@ -322,7 +322,7 @@ func playSetupKeeping(name string, res *play.Result, keep map[string]bool) strin
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO LAUNCHER", name)
 	if res.Endpoint != "" {
-		b.WriteString(" SETTINGS login = 'isolated'")
+		b.WriteString(" SET login = 'isolated'")
 	}
 	b.WriteString(";\n")
 	if res.Endpoint != "" {

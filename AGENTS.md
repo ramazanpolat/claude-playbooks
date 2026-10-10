@@ -20,7 +20,7 @@ preparing a release, read [Before any release](#before-any-release) first.
   `~/.claude-playbooks/`, and any login (`/login`, `claude setup-token`):
   those need a person.
 - **A playbook for a non-Anthropic route, or a throwaway,** is created
-  `CREATE PLAYBOOK <name> SETTINGS login = 'isolated'`. Without it, a
+  `CREATE PLAYBOOK <name> SET login = 'isolated'`. Without it, a
   `/login` in it writes through to the machine's login. Keep its `memory`
   setting `'isolated'` (the default): `~/.claude`'s `CLAUDE.md` then stays out. Its CLAUDE.md goes to
   that provider with every request: never add imports to it, and if an

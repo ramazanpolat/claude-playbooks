@@ -4,9 +4,13 @@
 
 ### Added
 
-- **Playbook settings, ClickHouse style** (SPEC.md, *Playbook settings*):
-  `CREATE PLAYBOOK … SETTINGS login = 'isolated', memory = 'shared'`,
-  `ALTER PLAYBOOK … MODIFY SETTING …` and `RESET SETTING …`. Two settings:
+- **Playbook properties** (SPEC.md, *Playbook properties*): what can change
+  after a playbook is created is a `key = 'value'` pair.
+  `CREATE PLAYBOOK … SET login = 'isolated', memory = 'shared'` gives the
+  starting values, `ALTER PLAYBOOK … SET …` changes them, and
+  `ALTER PLAYBOOK … DELETE login, memory` puts them back to the default.
+  What is fixed at creation (`FROM`, `BRANCH`, `SUBDIR`, `LINK`) stays a
+  keyword clause of `CREATE`. Two properties for now:
   - `login` (`'shared'`, `'isolated'`) is what `ISOLATED LOGIN` was.
   - `memory` (`'isolated'`, `'shared'`) is new. Claude Code loads project
     memory from every ancestor of the working directory, so `~/.claude`'s
@@ -14,11 +18,15 @@
     `$HOME`. `'isolated'` keeps them out with one `claudeMdExcludes` entry
     in the playbook's `settings.json`, which every launch path reads. **A
     new playbook is isolated by default**; an existing one keeps loading
-    them until `MODIFY SETTING memory = 'isolated'` (nothing is migrated).
-  - `SHOW`, `EXPLAIN` and their `--json` (`"settings"`) report them,
-    `SELECT`'s `PLAYBOOKS` has a `settings` column, and `SHOW CREATE` writes
-    `MODIFY SETTING` (memory always, so a recipe never leans on a default).
-    `cpb play` keeps both isolated: a recipe may isolate more, never less.
+    them until `SET memory = 'isolated'` (nothing is migrated).
+  - In a playbook file a value is quoted (`login = 'isolated'`); on the
+    command line the shell removes the quotes, so `SET login = isolated`
+    works there.
+  - Each key is its field: `SHOW PLAYBOOK --json` and `EXPLAIN --json` have
+    `"login"` and `"memory"`, and `SELECT`'s `PLAYBOOKS` has `login` and
+    `memory` columns. `SHOW CREATE` writes `SET login = …, memory = …`, both
+    always, so a recipe never leans on a default. `cpb play` keeps both
+    isolated: a recipe may isolate more, never less.
 - **`EXPLAIN PLAYBOOK --json` gains `route`** (#209): where a launch from
   this environment sends its requests (base URL, host, models), an
   authentication state (`none`, `token-set`, `oauth-login`, `unknown`) and an
@@ -47,10 +55,13 @@
 
 ### Changed
 
-- **`ISOLATED LOGIN` is gone** for `SETTINGS login = 'isolated'` (CREATE)
-  and `MODIFY SETTING login = 'isolated' | 'shared'` (ALTER). A recipe from
-  rc1 or rc2 that says `ISOLATED LOGIN` is refused with that hint; edit the
-  line. State on disk is unchanged (`isolated_login` in the manifest).
+- **`ISOLATED LOGIN` is gone** for `SET login = 'isolated'` (CREATE and
+  ALTER), and `UNSET ISOLATED LOGIN` for `SET login = 'shared'`. A recipe
+  from rc1 or rc2 that says `ISOLATED LOGIN` is refused with that hint; edit
+  the line. State on disk is unchanged (`isolated_login` in the manifest).
+- **`SHOW PLAYBOOK --json` and `SELECT`: `isolated_login` (a bool) is now
+  `login`** (`"shared"` or `"isolated"`, `"isolated"` for a sandboxed
+  playbook too), beside the new `memory`.
 
 - **`cpb update` undoes env sets and sandbox settings too** (SPEC.md,
   *`cpb update <name>`*). Before an update, the undo now also drops an env

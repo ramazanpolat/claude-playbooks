@@ -13,10 +13,10 @@ logs in all of them. An **isolated login** shares nothing: no link, no
 machine-wide token, no leftover account record. The playbook is logged in
 only if you run `/login` in it.
 
-- `CREATE PLAYBOOK … SETTINGS login = 'isolated'` makes a new one isolated.
-  `ALTER PLAYBOOK … MODIFY SETTING login = 'isolated'` isolates an existing
+- `CREATE PLAYBOOK … SET login = 'isolated'` makes a new one isolated.
+  `ALTER PLAYBOOK … SET login = 'isolated'` isolates an existing
   one and removes its link to the shared login at once.
-- `MODIFY SETTING login = 'shared'` shares the machine's login again from the
+- `SET login = 'shared'` shares the machine's login again from the
   next launch. It is refused while the playbook holds a login of its own, because
   a shared launch would take it out of use: another account's login is set
   aside, and the same account's is copied over the machine's. Run
@@ -28,4 +28,4 @@ only if you run `/login` in it.
 
 It is `isolated_login = true` in the playbook's `.playbook`
 ([authentication guide](../../docs/guides/authentication.md)).
-Reference: [Playbook settings](../../SPEC.md#playbook-settings).
+Reference: [Playbook properties](../../SPEC.md#playbook-properties).

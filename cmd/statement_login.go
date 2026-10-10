@@ -31,8 +31,8 @@ func (r *stmtRun) sandboxed(name string, m *manifest.Manifest) bool {
 	return m != nil && m.Sandbox != nil && m.Sandbox.Always
 }
 
-// planIsolatedLogin decides the login setting (MODIFY SETTING login, and
-// RESET SETTING login, which is 'shared'). 'shared' is refused where
+// planIsolatedLogin decides the login property (SET login, and DELETE
+// login, which is 'shared'). 'shared' is refused where
 // sharing would be wrong: a sandboxed playbook never shares a login,
 // and a playbook holding a login of its own would have it copied over the
 // machine's login in ~/.claude by the next shared launch (LinkCredentials
@@ -40,7 +40,7 @@ func (r *stmtRun) sandboxed(name string, m *manifest.Manifest) bool {
 func (r *stmtRun) planIsolatedLogin(name string, m *manifest.Manifest, cfg string, clauses []grammar.Clause) (bool, []string, error) {
 	before := r.isolated(name, m)
 	after := before
-	switch v, _ := grammar.SettingValue(clauses, "login"); v {
+	switch v, _ := grammar.PropertyValue(clauses, "login"); v {
 	case "isolated":
 		after = true
 	case "shared":
@@ -66,7 +66,7 @@ func (r *stmtRun) planIsolatedLogin(name string, m *manifest.Manifest, cfg strin
 // planSandbox applies SET / UNSET SANDBOX to a copy of the [sandbox] block.
 // Bare SET SANDBOX (or always=true) is always = true, and isolate reports
 // that the login must be isolated, as CREATE … SANDBOX does; bare UNSET
-// SANDBOX is always = false and leaves the login as it is (MODIFY SETTING
+// SANDBOX is always = false and leaves the login as it is (SET
 // login = 'shared' shares it again). The keyed forms change only the keys they name.
 func planSandbox(cur *manifest.Sandbox, clauses []grammar.Clause) (sb *manifest.Sandbox, isolate bool, lines []string, err error) {
 	sb = cloneSandbox(cur)

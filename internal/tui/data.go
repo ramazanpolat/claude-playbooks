@@ -115,7 +115,8 @@ type Playbook struct {
 	Sandbox  struct {
 		Always bool `json:"always"`
 	} `json:"sandbox"`
-	IsolatedLogin bool `json:"isolated_login"`
+	// LoginProperty is the login property: "isolated" or "shared".
+	LoginProperty string `json:"login"`
 	Marketplaces  []struct {
 		Name string `json:"name"`
 	} `json:"marketplaces"`
@@ -161,7 +162,7 @@ func (p Playbook) Login() string {
 	switch {
 	case p.Sandbox.Always:
 		return "sandbox"
-	case p.IsolatedLogin:
+	case p.LoginProperty == "isolated":
 		return "isolated"
 	}
 	return "shared"

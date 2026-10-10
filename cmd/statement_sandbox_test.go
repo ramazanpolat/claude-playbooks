@@ -119,18 +119,18 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	if out := mustStmt(t, "SHOW PLAYBOOK p"); !strings.Contains(out, "yes (backend=sbx, allow_net=api.example.com:443, share_skills=true)") {
 		t.Errorf("SHOW PLAYBOOK Sandbox line:\n%s", out)
 	}
-	if v := showPlaybook(t, "p")["isolated_login"]; v != true {
-		t.Errorf("isolated_login = %v", v)
+	if v := showPlaybook(t, "p")["login"]; v != "isolated" {
+		t.Errorf("login = %v", v)
 	}
 
 	text := mustStmt(t, "SHOW CREATE PLAYBOOK p")
-	for _, want := range []string{"SET SANDBOX\n", "SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true"} {
+	for _, want := range []string{"SET login = 'isolated', memory = 'isolated'\n", "SET SANDBOX\n", "SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "login =") || strings.Contains(strings.SplitN(text, ";", 2)[0], "SANDBOX") {
-		t.Errorf("SHOW CREATE writes the sandbox in CREATE or repeats the isolation:\n%s", text)
+	if strings.Contains(strings.SplitN(text, ";", 2)[0], "SANDBOX") {
+		t.Errorf("SHOW CREATE writes the sandbox in CREATE:\n%s", text)
 	}
 
 	want := sandboxOf(t, "p")

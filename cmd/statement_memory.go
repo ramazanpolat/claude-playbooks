@@ -11,7 +11,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
-// The memory setting. Claude Code walks from the working directory up
+// The memory property. Claude Code walks from the working directory up
 // through its ancestors loading project memory, and $HOME/.claude, the bare
 // install, is one of them: its CLAUDE.md and rules/ load into every
 // playbook run under $HOME (measured on Claude Code 2.1.296). memory =
@@ -78,7 +78,7 @@ func memoryState(root *settings.Object) (state, other string) {
 	return state, other
 }
 
-// memoryStateOf reads the memory setting of a config directory.
+// memoryStateOf reads the memory property of a config directory.
 func memoryStateOf(dir string) (state, other string) {
 	sf, err := settings.Load(dir)
 	if err != nil {
@@ -131,7 +131,7 @@ func applyMemory(f *settings.File, value string) (line string, changed bool, err
 }
 
 // writeMemory applies the memory setting to dir's settings.json and writes
-// it when it changed: CREATE's default and its SETTINGS memory.
+// it when it changed: CREATE's default and its SET memory.
 func writeMemory(dir, value string) error {
 	sf, err := settings.Load(dir)
 	if err != nil {
@@ -143,12 +143,12 @@ func writeMemory(dir, value string) error {
 	return sf.Write()
 }
 
-// memoryLine is SHOW's and EXPLAIN's line for the memory setting.
+// memoryLine is SHOW's and EXPLAIN's line for the memory property.
 func memoryLine(state, other string) string {
 	if state == "isolated" {
-		return "Memory: isolated: ~/.claude's CLAUDE.md and rules are not loaded (MODIFY SETTING memory = 'shared' loads them)"
+		return "Memory: isolated: ~/.claude's CLAUDE.md and rules are not loaded (SET memory = 'shared' loads them)"
 	}
-	line := "Memory: shared: ~/.claude's CLAUDE.md and rules load into it (MODIFY SETTING memory = 'isolated' keeps them out)"
+	line := "Memory: shared: ~/.claude's CLAUDE.md and rules load into it (SET memory = 'isolated' keeps them out)"
 	if other != "" {
 		line += "; its settings.json excludes " + other + ", another home's, which excludes nothing here"
 	}

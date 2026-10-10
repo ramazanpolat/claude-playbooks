@@ -207,7 +207,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER"), "ALTER needs an object"},
 		{w("ALTER PLAYBOOK k"), "ALTER PLAYBOOK needs at least one clause"},
 		{w("ALTER DEFAULTS"), "ALTER DEFAULTS needs at least one clause"},
-		{w("ALTER PLAYBOOK k SET A=1"), "SET inside ALTER PLAYBOOK takes VAR"},
+		{w("ALTER PLAYBOOK k SET A=1"), "A is not a playbook property; a variable is SET VAR A=<value>"},
 		{w("ALTER PLAYBOOK k BLOCK A"), "BLOCK inside ALTER PLAYBOOK takes VAR"},
 		{w("ALTER PLAYBOOK k UNSET A"), "UNSET inside ALTER PLAYBOOK takes VAR"},
 		{w("ALTER PLAYBOOK k FOO"), `unexpected "FOO"`},

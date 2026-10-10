@@ -31,8 +31,8 @@ func lifecycle(st *grammar.Stmt) bool {
 type createOptions struct {
 	from, branch, subdir, link, alias string
 	noAlias, sandbox, isolatedLogin   bool
-	// memory: the memory setting, 'isolated' unless SETTINGS says
-	// otherwise; a LINK has none (its settings.json is the target's).
+	// memory: the memory property, 'isolated' unless SET says otherwise;
+	// a LINK has none (its settings.json is the target's).
 	memory string
 }
 
@@ -56,10 +56,10 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			o.sandbox = true
 		}
 	}
-	login, _ := grammar.SettingValue(st.Clauses, "login")
+	login, _ := grammar.PropertyValue(st.Clauses, "login")
 	o.isolatedLogin = login == "isolated"
-	o.memory = grammar.PlaybookSettingDefault("memory")
-	if v, ok := grammar.SettingValue(st.Clauses, "memory"); ok {
+	o.memory = grammar.PlaybookPropertyDefault("memory")
+	if v, ok := grammar.PropertyValue(st.Clauses, "memory"); ok {
 		o.memory = v
 	}
 	if o.link != "" {
@@ -112,8 +112,8 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		r.recordPlaybook(st.Name, true)
 		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
 		if o.memory == "isolated" && r.dry != nil {
-			// The settings.json CREATE writes, so a later MODIFY SETTING in
-			// the same file plans against it.
+			// The settings.json CREATE writes, so a later SET memory in the
+			// same file plans against it.
 			sf := &settings.File{Root: settings.NewObject()}
 			if _, _, err := applyMemory(sf, o.memory); err == nil {
 				r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()

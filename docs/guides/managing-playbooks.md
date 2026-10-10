@@ -280,12 +280,12 @@ guard: its `memory` setting is `'isolated'`.
 
 ```bash
 cpb EXPLAIN PLAYBOOK work                                   # Memory: isolated …
-cpb ALTER PLAYBOOK work MODIFY SETTING memory = 'shared'    # let them load
-cpb ALTER PLAYBOOK work RESET SETTING memory                # back to 'isolated'
+cpb ALTER PLAYBOOK work SET memory = 'shared'   # let them load
+cpb ALTER PLAYBOOK work DELETE memory            # back to 'isolated'
 cpb "SELECT name, settings FROM PLAYBOOKS"                  # which playbooks load them
 ```
 
 A playbook created before the setting existed loads them until you run
-`MODIFY SETTING memory = 'isolated'` in it; nothing is changed for you. The
+`SET memory = 'isolated'` in it; nothing is changed for you. The
 setting stops the loading, not reading: an agent can still open those files
-with its Read tool. Reference: [Playbook settings](../../SPEC.md#playbook-settings).
+with its Read tool. Reference: [Playbook properties](../../SPEC.md#playbook-properties).

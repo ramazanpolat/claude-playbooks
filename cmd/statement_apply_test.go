@@ -92,7 +92,14 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 
 	dump := mustStmt(t, "SHOW CREATE ALL")
-	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm\n  SET SECRET HELPER '" + helper + "';",
+	// The helper first: an env set's references are checked against the
+	// helper an earlier statement sets, so on a fresh machine it must come
+	// before them.
+	h, e := strings.Index(dump, "ALTER DEFAULTS\n  SET SECRET HELPER '"+helper+"';"), strings.Index(dump, "CREATE OR REPLACE ENV glm")
+	if h < 0 || e < 0 || h > e {
+		t.Errorf("SHOW CREATE ALL does not set the helper before the env sets:\n%s", dump)
+	}
+	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm;",
 		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  LAUNCHER s;",
 		"SET VAR API_TOKEN FROM 'keychain:ok/work'"} {
 		if !strings.Contains(dump, want) {

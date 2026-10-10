@@ -34,7 +34,7 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
-		"SETTINGS", "MODIFY", "RESET",
+		"DELETE",
 	} {
 		keywords[w] = true
 	}
@@ -109,7 +109,9 @@ func ParseLine(src string) (*Stmt, error) {
 	if len(groups) != 1 {
 		return nil, &Error{Pos: Pos{Word: 1}, Msg: "one quoted argument holds exactly one statement"}
 	}
-	s, err := newParser(groups[0], false).statement()
+	p := newParser(groups[0], false)
+	p.lexed = true
+	s, err := p.statement()
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +133,7 @@ func ParseFile(src string) ([]*Stmt, error) {
 	)
 	for _, g := range groups {
 		p := newParser(g, true)
+		p.lexed = true
 		s, err := p.statement()
 		if err != nil {
 			errs = append(errs, err)
@@ -170,9 +173,9 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "MODIFY", "RESET"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "DELETE"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SETTINGS"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SET", "DELETE"}
 )
 
 var (
@@ -192,6 +195,10 @@ type parser struct {
 	i    int
 	end  Pos
 	file bool
+	// lexed: the tokens came through the playbook-file lexer (a file, or a
+	// statement given as one quoted argument), so Token.Quoted is known. On
+	// the command line the shell has removed the quotes.
+	lexed bool
 
 	tried   []string // what was acceptable at position triedAt
 	triedAt int
@@ -813,16 +820,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.pickerModel(c, w)
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
-	case "MODIFY", "RESET":
-		if p.kw("SETTING") == "" {
-			return nil, p.fail(w + " takes SETTING: " + w + " SETTING <key>" + map[string]string{"MODIFY": " = '<value>'", "RESET": ""}[w])
-		}
-		if w == "MODIFY" {
-			c.Kind = ModifySetting
-			return c, p.playbookSettings(c, "MODIFY SETTING", true)
-		}
-		c.Kind = ResetSetting
-		return c, p.playbookSettings(c, "RESET SETTING", false)
+	case "DELETE":
+		c.Kind = DeleteProperties
+		return c, p.playbookProperties(c, "DELETE", false)
 	case "SET":
 		if p.at("ISOLATED") {
 			return nil, p.fail(removedLogin)
@@ -880,7 +880,15 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Kind = SetModel
 			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
 		case "":
-			return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL or SANDBOX")
+			// Not a clause keyword: the playbook's properties, k = 'v', ….
+			// Another keyword here (SET SECRET HELPER) is a clause of
+			// another object, never a property.
+			if p.atEnd() || p.isStarter() || (!p.toks[p.i].Quoted && IsKeyword(p.toks[p.i].Text)) {
+				p.note(PlaybookPropertyKeys()...)
+				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, SANDBOX or properties: <key> = '<value>' (" + strings.Join(PlaybookPropertyKeys(), ", ") + ")")
+			}
+			c.Kind = SetProperties
+			return c, p.playbookProperties(c, "SET", true)
 		}
 		return c, p.set(c)
 	case "ALLOW", "DENY":
@@ -904,7 +912,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		return c, err
 	case "UNSET":
 		if p.at("ISOLATED") {
-			return nil, p.fail(removedLogin)
+			return nil, p.fail(removedUnsetLogin)
 		}
 		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "SANDBOX") {
 		case "SANDBOX":
@@ -1082,9 +1090,11 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
-	case "SETTINGS":
-		c.Kind = PlaybookSettings
-		return c, p.playbookSettings(c, "SETTINGS", true)
+	case "SET":
+		c.Kind = SetProperties
+		return c, p.playbookProperties(c, "SET", true)
+	case "DELETE":
+		return nil, p.fail("CREATE starts every property at its default; DELETE is for ALTER PLAYBOOK")
 	}
 	return nil, nil
 }
@@ -1247,7 +1257,6 @@ func validate(s *Stmt) *Error {
 	once := map[Kind]bool{
 		Description: true, UseEnv: true, RenameTo: true,
 		Launcher: true, NoLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
-		PlaybookSettings: true, ModifySetting: true, ResetSetting: true,
 		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
@@ -1260,10 +1269,16 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
 		}
 		for _, v := range c.Settings {
-			name := "sandbox." + v.Key
-			if c.Kind == PlaybookSettings || c.Kind == ModifySetting || c.Kind == ResetSetting {
-				name = "setting " + v.Key
+			// A property may be set or deleted in several SET and DELETE
+			// clauses, but each key once.
+			if c.Kind == SetProperties || c.Kind == DeleteProperties {
+				if settings["property "+v.Key] {
+					return errAt(c.Pos, v.Key+" is named twice in one statement")
+				}
+				settings["property "+v.Key] = true
+				continue
 			}
+			name := "sandbox." + v.Key
 			if settings[name] {
 				return errAt(c.Pos, name+" appears twice; one statement changes a setting once")
 			}
@@ -1313,8 +1328,8 @@ func validate(s *Stmt) *Error {
 		}
 	}
 	// A sandbox shares no login with the machine, so it cannot be combined
-	// with login = 'shared' (RESET SETTING login is that too).
-	if login, ok := SettingValue(s.Clauses, "login"); ok && login == "shared" {
+	// with login = 'shared' (DELETE login is that too).
+	if login, ok := PropertyValue(s.Clauses, "login"); ok && login == "shared" {
 		for _, k := range []Kind{SetSandbox, Sandbox} {
 			if pos, on := seen[k]; on {
 				return errAt(pos, string(k)+" isolates the login: it cannot be combined with login = 'shared'")
@@ -1324,8 +1339,8 @@ func validate(s *Stmt) *Error {
 	if s.Verb == Create && s.Object == Playbook {
 		_, from := seen[From]
 		_, link := seen[Link]
-		if pos, ok := seen[PlaybookSettings]; ok && link {
-			return errAt(pos, "SETTINGS does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
+		if pos, ok := seen[SetProperties]; ok && link {
+			return errAt(pos, "SET ("+strings.Join(PlaybookPropertyKeys(), ", ")+") does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
 		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {
