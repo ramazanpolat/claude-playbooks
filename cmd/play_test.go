@@ -26,7 +26,7 @@ func writeRecipe(t *testing.T, dir, name, text string) string {
 	return p
 }
 
-const routerRecipe = "-- title: Router\n-- description: GLM through a router.\n\nALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1\n  SET MODEL 'glm-5.3';\n"
+const routerRecipe = "-- title: Router\n-- description: GLM through a router.\n\nALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1\n  SET model = 'glm-5.3';\n"
 
 // The playbook play writes first: no launcher;
 // and when the endpoint moves, a login of its own and the credentials a
@@ -34,12 +34,12 @@ const routerRecipe = "-- title: Router\n-- description: GLM through a router.\n\
 // never its value).
 func TestPlaySetup(t *testing.T) {
 	t.Setenv("MY_SECRET_TOKEN", "do-not-print")
-	plain := playSetup("play-x-000000", play.Check([]byte("ALTER PLAYBOOK SET MODEL 'm';\n")))
-	if plain != "CREATE PLAYBOOK IF NOT EXISTS play-x-000000 NO LAUNCHER;\n" {
+	plain := playSetup("play-x-000000", play.Check([]byte("ALTER PLAYBOOK SET model = 'm';\n")))
+	if plain != "CREATE PLAYBOOK IF NOT EXISTS play-x-000000 SET launcher = '';\n" {
 		t.Fatalf("plain: %q", plain)
 	}
 	moved := playSetup("play-x-000000", play.Check([]byte(routerRecipe)))
-	for _, want := range []string{"NO LAUNCHER SET login = 'isolated';", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
+	for _, want := range []string{"SET launcher = '', login = 'isolated';", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
 		if !strings.Contains(moved, want) {
 			t.Errorf("endpoint moved: %q lacks %q", moved, want)
 		}
@@ -128,7 +128,7 @@ func TestPlayCheckDir(t *testing.T) {
 	aliasTestHome(t)
 	dir := t.TempDir()
 	writeRecipe(t, dir, "router.cpb", routerRecipe)
-	writeRecipe(t, dir, "code-reviewer.cpb", "-- title: Reviewer\n-- description: Reads code.\n-- min-cpb: 3.28.0\n\nALTER PLAYBOOK SET MODEL 'opus';\n")
+	writeRecipe(t, dir, "code-reviewer.cpb", "-- title: Reviewer\n-- description: Reads code.\n-- min-cpb: 3.28.0\n\nALTER PLAYBOOK SET model = 'opus';\n")
 	writeRecipe(t, dir, "index.txt", "code-reviewer\nrouter\n")
 	playFlags(t, true, false, false, "")
 	var err error
@@ -137,7 +137,7 @@ func TestPlayCheckDir(t *testing.T) {
 		t.Fatalf("a good directory: %v\n%s", err, out)
 	}
 	writeRecipe(t, dir, "index.txt", "router\ncode-reviewer\n")
-	writeRecipe(t, dir, "untitled.cpb", "-- colour: blue\n-- min-cpb: soon\nALTER PLAYBOOK SET MODEL 'x';\n")
+	writeRecipe(t, dir, "untitled.cpb", "-- colour: blue\n-- min-cpb: soon\nALTER PLAYBOOK SET model = 'x';\n")
 	out = captureStdout(t, func() { err = runPlay(playCmd, []string{dir}) })
 	for _, want := range []string{"FAIL index.txt", "FAIL untitled.cpb", "needs -- title: and -- description:", "unknown key colour", `min-cpb "soon"`} {
 		if !strings.Contains(out, want) {

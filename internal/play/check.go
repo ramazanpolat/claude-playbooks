@@ -106,11 +106,12 @@ func (r *Result) statement(s *grammar.Stmt) {
 
 // Clauses a played recipe may not hold, with the reason.
 var refusedClauses = map[grammar.Kind]string{
-	grammar.UseEnv:   "it would attach your env sets, and your keys, to someone else's playbook",
-	grammar.AddEnv:   "it would attach your env sets, and your keys, to someone else's playbook",
-	grammar.DropEnv:  "it would detach your env sets: " + onlyThisPlaybook,
-	grammar.RenameTo: "the name is play's decision, not the recipe's",
-	grammar.Launcher: "the launcher is play's decision, not the recipe's",
+	grammar.UseEnv:          "it would attach your env sets, and your keys, to someone else's playbook",
+	grammar.AddEnv:          "it would attach your env sets, and your keys, to someone else's playbook",
+	grammar.DropEnv:         "it would detach your env sets: " + onlyThisPlaybook,
+	grammar.RenameTo:        "the name is play's decision, not the recipe's",
+	grammar.Launcher:        "the launcher is play's decision, not the recipe's",
+	grammar.DefaultLauncher: "the launcher is play's decision, not the recipe's",
 }
 
 func (r *Result) clause(c grammar.Clause) {
@@ -171,7 +172,7 @@ func (r *Result) clause(c grammar.Clause) {
 				"your secret "+v.Ref+" → the playbook's environment as "+v.Key+", which every tool and MCP server can read", v.Ref)
 		}
 	default:
-		if strings.HasPrefix(kind, "DROP ") || strings.HasPrefix(kind, "UNSET ") {
+		if strings.HasPrefix(kind, "DROP ") || strings.HasPrefix(kind, "UNSET ") || strings.HasPrefix(kind, "DELETE ") {
 			r.refuse(line, kind, "nothing to undo on a new playbook")
 			return
 		}

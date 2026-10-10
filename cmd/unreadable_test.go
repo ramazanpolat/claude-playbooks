@@ -75,7 +75,7 @@ func TestUnreadableManifestIsContained(t *testing.T) {
 		{"SHOW CREATE ALL", refused, badAt},
 		{"CREATE PLAYBOOK fresh", refused, badAt},
 		{"ALTER PLAYBOOK good RENAME TO other", refused, badAt},
-		{"ALTER PLAYBOOK good LAUNCHER g2", refused, badAt},
+		{"ALTER PLAYBOOK good SET launcher = 'g2'", refused, badAt},
 		{"DROP ENV e", refused, badAt},
 		// No playbook read.
 		{"CREATE ENV f SET C=3", works, ""},

@@ -1,9 +1,15 @@
 # The lifecycle clauses the README names, on the command line.
-cpb CREATE PLAYBOOK boxed NO LAUNCHER SANDBOX
+cpb CREATE PLAYBOOK boxed SET launcher = '' SANDBOX
 cpb SHOW PLAYBOOK boxed --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["sandbox"]["always"] is True'
 cpb ALTER PLAYBOOK boxed RENAME TO boxed-lab
 cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"name": "boxed-lab"'
+# The launcher is a property: another command, then back to the default,
+# the playbook's own name.
+cpb ALTER PLAYBOOK boxed-lab SET launcher = 'bx'
+cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"launcher": "bx"'
+cpb ALTER PLAYBOOK boxed-lab DELETE launcher
+cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"launcher": "boxed-lab"'
 dev=$(mktemp -d)
 printf 'name = "dev"\nversion = "0.1.0"\n' > "$dev/.playbook"
-cpb CREATE PLAYBOOK dev LINK "$dev" NO LAUNCHER
+cpb CREATE PLAYBOOK dev LINK "$dev" SET launcher = ''
 cpb SHOW PLAYBOOK dev --json | grep -q "\"linked\": \"$dev\""

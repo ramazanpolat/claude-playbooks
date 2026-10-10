@@ -32,7 +32,7 @@ func sandboxOf(t *testing.T, name string) *manifest.Sandbox {
 func TestSetSandboxForms(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
 
 	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX backend=sbx host=me@buildbox mounts=~/libs:ro,~/data")
 	sb := sandboxOf(t, "p")
@@ -63,7 +63,7 @@ func TestSetSandboxForms(t *testing.T) {
 		t.Errorf("EXPLAIN after UNSET SANDBOX:\n%s", out)
 	}
 
-	mustStmt(t, "CREATE PLAYBOOK q NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK q SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK q SET SANDBOX always=true")
 	if sb := sandboxOf(t, "q"); sb == nil || !sb.Always || !isolateAuthOf(t, "q") {
 		t.Fatalf("SET SANDBOX always=true: %#v isolated=%v", sb, isolateAuthOf(t, "q"))
@@ -82,7 +82,7 @@ func TestSetSandboxForms(t *testing.T) {
 func TestSetSandboxRefusesBadValues(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX host=me@buildbox")
 	before, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "p", manifest.FileName))
 	if err != nil {
@@ -108,7 +108,7 @@ func TestSetSandboxRefusesBadValues(t *testing.T) {
 func TestSandboxShowAndRoundTrip(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK p SET SANDBOX SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true")
 
 	sb, _ := showPlaybook(t, "p")["sandbox"].(map[string]any)
@@ -156,7 +156,7 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 func TestSetSandboxDryRunAndRefusals(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK p NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK p SET launcher = ''")
 	file := filepath.Join(t.TempDir(), "s.cpb")
 	if err := os.WriteFile(file, []byte("ALTER PLAYBOOK p SET SANDBOX SET SANDBOX host=me@buildbox;\n"), 0o644); err != nil {
 		t.Fatal(err)

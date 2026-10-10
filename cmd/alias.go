@@ -81,7 +81,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 			if _, _, foreign := launcher.Lookup(ldir, name); !foreign {
 				if _, err := os.Lstat(filepath.Join(ldir, name)); err != nil {
-					fmt.Printf("Playbook %q now has no launcher. Restore one with: cpb ALTER PLAYBOOK %s LAUNCHER %s\n", name, name, name)
+					fmt.Printf("Playbook %q now has no launcher. Restore one with: cpb ALTER PLAYBOOK %s DELETE launcher\n", name, name)
 				}
 			}
 		}

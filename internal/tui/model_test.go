@@ -65,7 +65,7 @@ const fixtureDefaults = `{"envs":["base"],"secret_helper":{"command":"cpb-secret
 
 const fixtureExplain = `{"playbook":"router","vars":[{"key":"X","value":"1","layer":{"kind":"defaults","name":"base"}},{"key":"ANTHROPIC_BASE_URL","value":"http://localhost:8080/v1","layer":{"kind":"env","name":"proxy"}},{"key":"ANTHROPIC_AUTH_TOKEN","ref":"keychain:proxy-token","layer":{"kind":"env","name":"proxy"}},{"key":"OPENAI_API_KEY","redacted":true,"plaintext":true,"layer":{"kind":"playbook"}},{"key":"MY_FLAG","value":"1","layer":{"kind":"playbook"}}],"secret_helper":null}`
 
-const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router LAUNCHER rt;\nALTER PLAYBOOK router USE ENV proxy SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
+const fixtureCreate = "-- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets\nCREATE PLAYBOOK IF NOT EXISTS router SET launcher = 'rt';\nALTER PLAYBOOK router USE ENV proxy SET VAR MY_FLAG=1;\n-- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)\n"
 
 func fixture() *fakeRunner {
 	f := &fakeRunner{out: map[string]string{
@@ -76,7 +76,7 @@ func fixture() *fakeRunner {
 		"EXPLAIN PLAYBOOK router --json":             fixtureExplain,
 		"SHOW CREATE PLAYBOOK router --skip-secrets": fixtureCreate,
 		"SHOW CREATE ENV proxy --skip-secrets":       "CREATE ENV IF NOT EXISTS proxy SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:proxy-token';\n",
-		"SHOW CREATE PLAYBOOK alpha --skip-secrets":  "CREATE PLAYBOOK IF NOT EXISTS alpha LAUNCHER al;\n",
+		"SHOW CREATE PLAYBOOK alpha --skip-secrets":  "CREATE PLAYBOOK IF NOT EXISTS alpha SET launcher = 'al';\n",
 	}}
 	singular(f, fixturePlaybooks)
 	return f

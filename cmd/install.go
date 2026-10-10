@@ -104,6 +104,11 @@ func doInstall(o installOpts, args []string) error {
 	// silently re-route an existing command. The target name joins the
 	// registry even under --no-alias, and an imported manifest's alias
 	// registers without any flag.
+	// launcher = '<its own name>' is the default launcher, nothing to
+	// record, unless the source's manifest names another one to override.
+	if o.launcher == targetName && (mPre == nil || mPre.Launcher == "" || mPre.Launcher == targetName) {
+		o.launcher = ""
+	}
 	effectiveAlias := o.launcher
 	if effectiveAlias == "" && mPre != nil {
 		effectiveAlias = mPre.Launcher

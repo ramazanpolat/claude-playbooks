@@ -15,7 +15,7 @@ marketplace can also come from `'github:<owner>/<repo>'`, pinned to a branch
 or tag as `'github:<owner>/<repo>#v1.2.0'` (or `@v1.2.0`), or from a git URL
 with an optional `#<ref>`. Claude Code clones a marketplace by branch or tag,
 so a commit SHA is refused: tag the commit instead.
-`SET AGENT` pins the main-thread agent; `UNSET AGENT` removes the pin. A plugin that runs a command its
+`SET AGENT` pins the main-thread agent; `DELETE agent` removes the pin. A plugin that runs a command its
 marketplace declares is never accepted for you: the statement fails and shows
 the command to review and confirm by hand.
 Example 08 stacks this into layers.

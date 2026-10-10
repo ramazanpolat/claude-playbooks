@@ -16,7 +16,7 @@ cpb "ALTER PLAYBOOK reviewer SET STATUSLINE 'echo other'"
 cpb "ALTER PLAYBOOK reviewer SET STATUSLINE PREVIOUS"
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s["command"] == "echo reviewer", s' "$HOME/.claude-playbooks/reviewer/settings.json"
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s == {"type": "command", "command": "echo reviewer"}, s' "$HOME/.claude-playbooks/reviewer/settings.json"
-cpb "ALTER PLAYBOOK reviewer UNSET TOOL 'Read(~/.ssh/**)' UNSET STATUSLINE UNSET MODEL"
+cpb "ALTER PLAYBOOK reviewer UNSET TOOL 'Read(~/.ssh/**)' UNSET STATUSLINE DELETE model"
 python3 - "$HOME/.claude-playbooks/reviewer/settings.json" <<'PY'
 import json, sys
 s = json.load(open(sys.argv[1]))

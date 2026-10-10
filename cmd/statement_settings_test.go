@@ -18,7 +18,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(orig), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(toolkit-helper*) DENY TOOL Read(*) SET STATUSLINE ~/bin/status.sh SET MODEL claude-opus-5-5"
+	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(toolkit-helper*) DENY TOOL Read(*) SET STATUSLINE ~/bin/status.sh SET model = 'claude-opus-5-5'"
 	mustStmt(t, stmtText)
 	var s struct {
 		Permissions map[string][]string `json:"permissions"`
@@ -41,7 +41,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 		t.Fatalf("a repeat changed something:\n%s", out)
 	}
 	create := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	for _, want := range []string{"ALLOW TOOL 'Bash(toolkit-helper*)'", "DENY TOOL 'Read(*)'", "SET STATUSLINE '~/bin/status.sh'", "SET MODEL 'claude-opus-5-5'"} {
+	for _, want := range []string{"ALLOW TOOL 'Bash(toolkit-helper*)'", "DENY TOOL 'Read(*)'", "SET STATUSLINE '~/bin/status.sh'", "SET model = 'claude-opus-5-5'"} {
 		if !strings.Contains(create, want) {
 			t.Errorf("SHOW CREATE missing %q:\n%s", want, create)
 		}
@@ -52,7 +52,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 		!strings.Contains(out, "Tools: allow Bash(toolkit-helper*); deny Read(*)") {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
-	mustStmt(t, "ALTER PLAYBOOK k UNSET TOOL Read(*) UNSET STATUSLINE UNSET MODEL")
+	mustStmt(t, "ALTER PLAYBOOK k UNSET TOOL Read(*) UNSET STATUSLINE DELETE model")
 	data, _ = os.ReadFile(filepath.Join(root, "settings.json"))
 	if strings.Contains(string(data), "Read(*)") || strings.Contains(string(data), "statusLine") || strings.Contains(string(data), `"model"`) {
 		t.Fatalf("after UNSET: %s", data)
@@ -64,10 +64,10 @@ func TestSettingsDryRunCarries(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "k")
-	// SET MODEL is set again by UNSET MODEL, so it is folded away and the
+	// SET model is set again by DELETE model, so it is folded away and the
 	// playbook, which has no model, does not change; IF UNSET sees the
 	// status line the statement before it set in the dry run.
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET MODEL 'a';\nALTER PLAYBOOK k UNSET MODEL;\nALTER PLAYBOOK k SET STATUSLINE 'echo a';\nALTER PLAYBOOK k SET STATUSLINE 'echo b' IF UNSET;\n")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET model = 'a';\nALTER PLAYBOOK k DELETE model;\nALTER PLAYBOOK k SET STATUSLINE 'echo a';\nALTER PLAYBOOK k SET STATUSLINE 'echo b' IF UNSET;\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil || !strings.Contains(out, "0 created, 1 changed, 3 unchanged") {
 		t.Fatalf("dry run: %v\n%s", err, out)
@@ -82,7 +82,7 @@ func TestExplainModelByReference(t *testing.T) {
 	helper, _ := fakeHelper(t)
 	seedFlatPlaybook(t, "k")
 	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
-	mustStmt(t, "ALTER PLAYBOOK k SET MODEL claude-opus-5-5 SET VAR ANTHROPIC_MODEL FROM keychain:ok/model")
+	mustStmt(t, "ALTER PLAYBOOK k SET model = 'claude-opus-5-5' SET VAR ANTHROPIC_MODEL FROM keychain:ok/model")
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Model: (by reference) (ANTHROPIC_MODEL); the settings model claude-opus-5-5 is overridden") {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
@@ -137,7 +137,7 @@ func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
 func TestDefaultClaudeMDPlain(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	mustStmt(t, "CREATE PLAYBOOK fresh NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK fresh SET launcher = ''")
 	data, err := os.ReadFile(filepath.Join(config.ResolvePlaybooksDir(), "fresh", "CLAUDE.md"))
 	if err != nil {
 		t.Fatal(err)

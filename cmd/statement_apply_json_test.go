@@ -63,7 +63,7 @@ func TestApplyJSONPlan(t *testing.T) {
 	t.Setenv("CPB_PLAYBOOKS_DIR", store)
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	writeCpb(t, dir, "base.cpb", "CREATE OR REPLACE ENV router SET BASE=http://router.invalid;\n")
-	main := writeCpb(t, dir, "main.cpb", "INCLUDE 'base.cpb';\nUSE PLAYBOOK other;\nALTER PLAYBOOK USE ENV router;\nCREATE PLAYBOOK IF NOT EXISTS named NO LAUNCHER;\n")
+	main := writeCpb(t, dir, "main.cpb", "INCLUDE 'base.cpb';\nUSE PLAYBOOK other;\nALTER PLAYBOOK USE ENV router;\nCREATE PLAYBOOK IF NOT EXISTS named SET launcher = '';\n")
 	before := treeOf(t, home)
 
 	rep, _, code := applyJSON(t, main, "TO", "fresh", "--dry-run", "--json")
@@ -274,7 +274,7 @@ func TestApplyJSONRefusals(t *testing.T) {
 func TestApplyJSONFetch(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	f := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS gitpb FROM https://git.example/x.git BRANCH v1 NO LAUNCHER;\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS gitpb FROM https://git.example/x.git BRANCH v1 SET launcher = '';\n")
 	rep, out, code := applyJSON(t, f, "--dry-run", "--json")
 	if code != 0 {
 		t.Fatalf("code %d\n%s", code, out)
@@ -296,7 +296,7 @@ func TestApplyJSONParseErrorAndLocalFetch(t *testing.T) {
 		t.Fatalf("parse error: code %d, %v", code, rep)
 	}
 	missing := filepath.Join(t.TempDir(), "not-yet")
-	f := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS localpb FROM "+missing+" NO LAUNCHER;\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS localpb FROM "+missing+" SET launcher = '';\n")
 	rep, out, code := applyJSON(t, f, "--dry-run", "--json")
 	if code != 0 {
 		t.Fatalf("code %d\n%s", code, out)

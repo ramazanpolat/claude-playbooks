@@ -320,9 +320,9 @@ func playSetup(name string, res *play.Result) string { return playSetupKeeping(n
 // BLOCK: the ones an --env-set set the pilot attached provides.
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO LAUNCHER", name)
+	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s SET launcher = ''", name)
 	if res.Endpoint != "" {
-		b.WriteString(" SET login = 'isolated'")
+		b.WriteString(", login = 'isolated'")
 	}
 	b.WriteString(";\n")
 	if res.Endpoint != "" {

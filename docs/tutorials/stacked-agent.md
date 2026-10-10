@@ -13,7 +13,7 @@ in three layers and one entry file. Everything it uses is in the repository.
 
 ```
 ALTER PLAYBOOK
-  SET MODEL 'claude-sonnet-5-5'
+  SET model = 'claude-sonnet-5-5'
   ALLOW TOOL 'Bash(git diff *)' 'Bash(git log *)';
 ```
 
@@ -27,7 +27,7 @@ INCLUDE 'base.cpb';
 ALTER PLAYBOOK
   ADD MARKETPLACE reviewers FROM './reviewer-marketplace'
   ADD PLUGIN reviewer@reviewers
-  SET AGENT 'reviewer'
+  SET agent = 'reviewer'
   SET STATUSLINE 'echo reviewer' REFRESH 10 IF UNSET;
 ```
 

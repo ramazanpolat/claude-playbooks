@@ -45,7 +45,7 @@ func playStores(t *testing.T) []string {
 	return dirs
 }
 
-const plainRecipe = "-- title: Plain\n-- description: A model.\n\nALTER PLAYBOOK SET MODEL 'claude-opus-5-5';\n"
+const plainRecipe = "-- title: Plain\n-- description: A model.\n\nALTER PLAYBOOK SET model = 'claude-opus-5-5';\n"
 
 func TestPlayRun(t *testing.T) {
 	noSandboxHere(t)
@@ -239,7 +239,7 @@ func playSandboxFlags(t *testing.T, flag string, off bool) {
 // and each reference is still typed to confirm it.
 func TestChoosePlaySandbox(t *testing.T) {
 	plain := play.Check([]byte(plainRecipe))
-	wants := play.Check([]byte("-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n"))
+	wants := play.Check([]byte("-- create-with: SANDBOX\n\nALTER PLAYBOOK SET model = 'm';\n"))
 	refs := play.Check([]byte("ALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';\n"))
 	saved := playSandboxAvailable
 	defer func() { playSandboxAvailable = saved }()

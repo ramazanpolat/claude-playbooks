@@ -29,7 +29,7 @@ served = {"mutate": 0}
 
 def recipe(model):
     return ("-- title: Fetched\n-- description: Served over https.\n\n"
-            "ALTER PLAYBOOK SET MODEL '%s';\n" % model).encode()
+            "ALTER PLAYBOOK SET model = '%s';\n" % model).encode()
 
 
 class H(http.server.BaseHTTPRequestHandler):

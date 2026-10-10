@@ -21,7 +21,7 @@ import (
 func lifecycle(st *grammar.Stmt) bool {
 	for _, c := range st.Clauses {
 		switch c.Kind {
-		case grammar.RenameTo, grammar.Launcher, grammar.NoLauncher:
+		case grammar.RenameTo, grammar.Launcher, grammar.NoLauncher, grammar.DefaultLauncher:
 			return true
 		}
 	}
@@ -68,7 +68,28 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 	return o
 }
 
+// createPlaybookStatement creates a playbook. CREATE … SET is "create, then
+// ALTER … SET", in one step: the manifest's properties (login, memory, the
+// launcher) are written by the creation itself, before the login is linked
+// and the launcher registered; the settings.json properties (model, agent)
+// then by an ALTER of the new playbook, within the same statement. On an
+// existing playbook, IF NOT EXISTS changes nothing, its SET list included.
 func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
+	var after []grammar.Clause
+	for _, c := range st.Clauses {
+		if c.Kind == grammar.SetModel || c.Kind == grammar.SetAgent {
+			after = append(after, c)
+		}
+	}
+	if err := createPlaybookOnly(r, st); err != nil || len(after) == 0 || r.outcome != outCreated {
+		return err
+	}
+	err := playbookStatement(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: after})
+	r.outcome = outCreated
+	return err
+}
+
+func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 	pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
 	if err != nil { // discovery failed: whether it exists is unknown
 		return err
@@ -180,10 +201,11 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	return doDelete(deleteOpts{yes: st.Yes || r.yes}, []string{st.Name})
 }
 
-// alterPlaybookLifecycle carries out RENAME TO, LAUNCHER and NO LAUNCHER. They
-// are not combined with environment clauses: a rename after an environment
-// write could not be undone as one step, so the statement would not apply
-// whole or not at all.
+// alterPlaybookLifecycle carries out RENAME TO and the launcher (SET
+// launcher = '<name>', SET launcher = ”, DELETE launcher). They are not
+// combined with other clauses: a rename after an environment write could not
+// be undone as one step, so the statement would not apply whole or not at
+// all.
 func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 	var rename, alias string
 	noAlias := false
@@ -193,10 +215,19 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 			rename = c.Arg
 		case grammar.Launcher:
 			alias = c.Arg
+		case grammar.DefaultLauncher:
+			// Back to the default: the launcher named after the playbook
+			// (after a rename, the new name).
+			alias = st.Name
+			for _, rc := range st.Clauses {
+				if rc.Kind == grammar.RenameTo {
+					alias = rc.Arg
+				}
+			}
 		case grammar.NoLauncher:
 			noAlias = true
 		default:
-			return fmt.Errorf("RENAME TO, LAUNCHER and NO LAUNCHER cannot be combined with %s in one statement: use two statements", c.Kind)
+			return fmt.Errorf("RENAME TO and the launcher cannot be combined with %s in one statement: use two statements", c.Kind)
 		}
 	}
 	r.outcome = outChanged

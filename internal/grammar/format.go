@@ -148,7 +148,7 @@ func (c *Clause) words(varWord bool) []string {
 	case DropMarketplace, AddPlugin, DropPlugin:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Names[0]))
 	case SetAgent:
-		return []string{"SET", "AGENT", quote(c.Arg)}
+		return []string{"SET", "agent", "=", quote(c.Arg)}
 	case AllowTool, DenyTool, UnsetTool:
 		w := strings.Fields(string(c.Kind))
 		for _, r := range c.Names {
@@ -167,7 +167,9 @@ func (c *Clause) words(varWord bool) []string {
 	case SetStatuslineRefresh:
 		return []string{"SET", "STATUSLINE", "REFRESH", strconv.Itoa(c.Refresh)}
 	case SetModel:
-		return append(strings.Fields(string(c.Kind)), quote(c.Arg))
+		return []string{"SET", "model", "=", quote(c.Arg)}
+	case Launcher:
+		return []string{"SET", "launcher", "=", quote(c.Arg)}
 	case DropSkill:
 		return []string{"DROP", "SKILL", quoteWord(c.Names[0])}
 	case SetModelPicker:
@@ -229,7 +231,7 @@ func (c *Clause) words(varWord bool) []string {
 			}
 		}
 		return w
-	case RenameTo, Launcher, From, Branch, Subdir, Link:
+	case RenameTo, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
 	case SetSandboxKeys:
 		w := []string{"SET", "SANDBOX"}

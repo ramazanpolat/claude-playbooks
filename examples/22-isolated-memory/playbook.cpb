@@ -2,7 +2,7 @@
 -- directory, and ~/.claude is one: without this setting, the machine's own
 -- ~/.claude/CLAUDE.md and rules would load into every playbook under $HOME.
 -- A new playbook keeps them out (memory = 'isolated', the default).
-CREATE PLAYBOOK IF NOT EXISTS focused NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS focused SET launcher = '';
 
 -- One that wants the machine's memory says so.
-CREATE PLAYBOOK IF NOT EXISTS familiar NO LAUNCHER SET memory = 'shared';
+CREATE PLAYBOOK IF NOT EXISTS familiar SET launcher = '' SET memory = 'shared';

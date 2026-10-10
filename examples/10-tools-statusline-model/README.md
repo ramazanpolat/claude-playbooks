@@ -21,7 +21,7 @@ write:
   REFRESH <n>` and `UNSET STATUSLINE REFRESH` change only the interval.
   `SET STATUSLINE PREVIOUS` puts back the status line a statement replaced
   last (cpb keeps a short history of them).
-- `SET MODEL '<model>'` is the playbook's default model and the weakest
+- `SET model = '<model>'` is the playbook's default model and the weakest
   choice: `ANTHROPIC_MODEL` from an env set, `--model` at launch and `/model`
   in a session all win over it. `EXPLAIN PLAYBOOK` says which one decides.
-  `UNSET MODEL` removes it.
+  `DELETE model` removes it.

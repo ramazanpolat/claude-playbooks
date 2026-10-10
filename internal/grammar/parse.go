@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -351,22 +350,6 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	return nil
 }
 
-func (p *parser) launcher() (string, *Error) {
-	if p.atEnd() {
-		p.note("<launcher>")
-		return "", p.fail("LAUNCHER needs <name>")
-	}
-	t := p.toks[p.i]
-	if IsKeyword(t.Text) {
-		return "", errAt(t.Pos, fmt.Sprintf("%q is a keyword and cannot name a launcher", t.Text))
-	}
-	if launcher.ValidateName(t.Text) != nil {
-		return "", errAt(t.Pos, "invalid launcher name: one word, with no path separator or whitespace (cpb is reserved)")
-	}
-	p.i++
-	return t.Text, nil
-}
-
 // list reads one or more items up to the next clause starter. An unquoted
 // trailing comma is a separator and is dropped; a lone comma is skipped.
 func (p *parser) list(what, placeholder string, check func(Token) *Error) ([]string, *Error) {
@@ -456,6 +439,9 @@ func (p *parser) statement() (*Stmt, *Error) {
 	}
 	if err == nil && !p.atEnd() {
 		err = p.unexpected()
+	}
+	if err == nil {
+		s.Clauses, err = desugarProperties(s.Clauses)
 	}
 	if err == nil {
 		err = validate(s)
@@ -824,10 +810,18 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Kind = DeleteProperties
 		return c, p.playbookProperties(c, "DELETE", false)
 	case "SET":
-		if p.at("ISOLATED") {
+		switch {
+		case p.atProperty():
+			// k = 'v', …: a property whose key may share a word with a
+			// clause keyword (model, SET MODEL PICKER).
+			c.Kind = SetProperties
+			return c, p.playbookProperties(c, "SET", true)
+		case p.at("ISOLATED"):
 			return nil, p.fail(removedLogin)
+		case p.at("AGENT"):
+			return nil, p.fail(removedSetAgent)
 		}
-		switch p.kw("VAR", "AGENT", "STATUSLINE", "MODEL", "SANDBOX") {
+		switch p.kw("VAR", "STATUSLINE", "MODEL", "SANDBOX") {
 		case "SANDBOX":
 			if p.atEnd() || p.isStarter() {
 				c.Kind = SetSandbox
@@ -835,8 +829,6 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			}
 			c.Kind = SetSandboxKeys
 			return c, p.sandboxSettings(c)
-		case "AGENT":
-			return c, p.agent(c)
 		case "STATUSLINE":
 			if p.kw("PREVIOUS") != "" {
 				c.Kind = SetStatuslinePrevious
@@ -877,15 +869,14 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 				}
 				return c, nil
 			}
-			c.Kind = SetModel
-			return c, p.oneWord(c, "SET MODEL", "'<model>'", true)
+			return nil, p.fail(removedSetModel)
 		case "":
 			// Not a clause keyword: the playbook's properties, k = 'v', ….
 			// Another keyword here (SET SECRET HELPER) is a clause of
 			// another object, never a property.
 			if p.atEnd() || p.isStarter() || (!p.toks[p.i].Quoted && IsKeyword(p.toks[p.i].Text)) {
 				p.note(PlaybookPropertyKeys()...)
-				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, SANDBOX or properties: <key> = '<value>' (" + strings.Join(PlaybookPropertyKeys(), ", ") + ")")
+				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, STATUSLINE, MODEL PICKER, SANDBOX or properties: <key> = '<value>' (" + strings.Join(PlaybookPropertyKeys(), ", ") + ")")
 			}
 			c.Kind = SetProperties
 			return c, p.playbookProperties(c, "SET", true)
@@ -911,10 +902,13 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Keys = keys
 		return c, err
 	case "UNSET":
-		if p.at("ISOLATED") {
+		switch {
+		case p.at("ISOLATED"):
 			return nil, p.fail(removedUnsetLogin)
+		case p.at("AGENT"):
+			return nil, p.fail(removedUnsetAgent)
 		}
-		switch p.kw("VAR", "AGENT", "TOOL", "STATUSLINE", "MODEL", "SANDBOX") {
+		switch p.kw("VAR", "TOOL", "STATUSLINE", "MODEL", "SANDBOX") {
 		case "SANDBOX":
 			if p.atEnd() || p.isStarter() {
 				c.Kind = UnsetSandbox
@@ -931,9 +925,6 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 				c.Settings = append(c.Settings, Var{Key: k})
 			}
 			return c, err
-		case "AGENT":
-			c.Kind = UnsetAgent
-			return c, nil
 		case "STATUSLINE":
 			c.Kind = UnsetStatusline
 			if p.kw("REFRESH") != "" {
@@ -941,10 +932,10 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			}
 			return c, nil
 		case "MODEL":
-			c.Kind = UnsetModel
-			if p.kw("PICKER") != "" {
-				c.Kind = UnsetModelPicker
+			if p.kw("PICKER") == "" {
+				return nil, p.fail(removedUnsetModel)
 			}
+			c.Kind = UnsetModelPicker
 			return c, nil
 		case "TOOL":
 			c.Kind = UnsetTool
@@ -967,16 +958,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		c.Arg = name
 		return c, err
 	case "LAUNCHER":
-		c.Kind = Launcher
-		name, err := p.launcher()
-		c.Arg = name
-		return c, err
+		return nil, errAt(c.Pos, removedLauncher)
 	case "NO":
-		if p.kw("LAUNCHER") == "" {
-			return nil, p.fail("expected LAUNCHER after NO")
-		}
-		c.Kind = NoLauncher
-		return c, nil
+		return nil, errAt(c.Pos, removedNoLauncher)
 	}
 	return nil, nil
 }
@@ -1077,16 +1061,9 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		c.Arg = t.Text
 		return c, err
 	case "LAUNCHER":
-		c.Kind = Launcher
-		name, err := p.launcher()
-		c.Arg = name
-		return c, err
+		return nil, errAt(c.Pos, removedLauncher)
 	case "NO":
-		if p.kw("LAUNCHER") == "" {
-			return nil, p.fail("expected LAUNCHER after NO")
-		}
-		c.Kind = NoLauncher
-		return c, nil
+		return nil, errAt(c.Pos, removedNoLauncher)
 	case "SANDBOX":
 		c.Kind = Sandbox
 		return c, nil
@@ -1256,7 +1233,7 @@ func validate(s *Stmt) *Error {
 	envs := map[string]bool{}
 	once := map[Kind]bool{
 		Description: true, UseEnv: true, RenameTo: true,
-		Launcher: true, NoLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
+		Launcher: true, NoLauncher: true, DefaultLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
 		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
@@ -1339,8 +1316,18 @@ func validate(s *Stmt) *Error {
 	if s.Verb == Create && s.Object == Playbook {
 		_, from := seen[From]
 		_, link := seen[Link]
-		if pos, ok := seen[SetProperties]; ok && link {
-			return errAt(pos, "SET ("+strings.Join(PlaybookPropertyKeys(), ", ")+") does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
+		// A linked playbook's manifest and settings.json are the target's:
+		// of the properties, only its launcher is this registry's.
+		if link {
+			for _, c := range s.Clauses {
+				key := map[Kind]string{SetModel: "model", SetAgent: "agent"}[c.Kind]
+				if c.Kind == SetProperties {
+					key = c.Settings[0].Key
+				}
+				if key != "" {
+					return errAt(c.Pos, key+" does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
+				}
+			}
 		}
 		for _, k := range []Kind{Branch, Subdir} {
 			if pos, ok := seen[k]; ok && !from {
@@ -1420,19 +1407,6 @@ var agentPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)?$`)
 
 // agent reads the rest of SET AGENT '<agent>': a bare agent name or a
 // plugin-namespaced one, stored as typed.
-func (p *parser) agent(c *Clause) *Error {
-	c.Kind = SetAgent
-	t, err := p.take("SET AGENT", "'<agent>'")
-	if err != nil {
-		return err
-	}
-	if !agentPattern.MatchString(t.Text) {
-		return errAt(t.Pos, "an agent is <name> or <plugin>:<name>, letters, digits, dots, dashes and underscores")
-	}
-	c.Arg = t.Text
-	return nil
-}
-
 // ValidAgent reports whether SET AGENT accepts a: <name> or <plugin>:<name>.
 func ValidAgent(a string) bool { return agentPattern.MatchString(a) }
 

@@ -17,7 +17,7 @@ func TestParsePlaybookProperties(t *testing.T) {
 		"CREATE PLAYBOOK x SET login = 'isolated' , memory = 'shared';",
 		"CREATE PLAYBOOK x SET login ='isolated', memory= 'Shared';",
 		"CREATE PLAYBOOK x SET LOGIN = 'isolated', Memory = 'shared';",
-		"CREATE PLAYBOOK x NO LAUNCHER SET login = 'isolated', memory = 'shared';",
+		"CREATE PLAYBOOK x SET launcher = '' SET login = 'isolated', memory = 'shared';",
 	} {
 		st, err := ParseFile(src)
 		if err != nil {
@@ -56,7 +56,7 @@ func TestParsePlaybookProperties(t *testing.T) {
 		t.Errorf("DELETE: %+v", c)
 	}
 	// SET and DELETE together, and the old clauses beside them.
-	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x SET login = isolated DELETE memory SET MODEL m"))
+	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x SET login = isolated DELETE memory SET model = 'm'"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,10 +78,10 @@ func TestParsePlaybookProperties(t *testing.T) {
 // SHOW CREATE writes properties quoted, and they parse back the same.
 func TestFormatPlaybookProperties(t *testing.T) {
 	for src, canon := range map[string]string{
-		"CREATE PLAYBOOK x NO LAUNCHER SET login='isolated' memory='shared'": "CREATE PLAYBOOK x NO LAUNCHER SET login = 'isolated', memory = 'shared'",
-		"ALTER PLAYBOOK x SET memory = 'isolated'":                           "ALTER PLAYBOOK x SET memory = 'isolated'",
-		"ALTER PLAYBOOK x DELETE login, memory":                              "ALTER PLAYBOOK x DELETE login, memory",
-		"ALTER PLAYBOOK x DELETE login memory":                               "ALTER PLAYBOOK x DELETE login, memory",
+		"CREATE PLAYBOOK x SET launcher = '' SET login='isolated' memory='shared'": "CREATE PLAYBOOK x SET launcher = '' SET login = 'isolated', memory = 'shared'",
+		"ALTER PLAYBOOK x SET memory = 'isolated'":                                 "ALTER PLAYBOOK x SET memory = 'isolated'",
+		"ALTER PLAYBOOK x DELETE login, memory":                                    "ALTER PLAYBOOK x DELETE login, memory",
+		"ALTER PLAYBOOK x DELETE login memory":                                     "ALTER PLAYBOOK x DELETE login, memory",
 	} {
 		st, err := ParseLine(src)
 		if err != nil {
@@ -113,21 +113,21 @@ func TestFormatPlaybookProperties(t *testing.T) {
 
 func TestPlaybookPropertyErrors(t *testing.T) {
 	for src, want := range map[string]string{
-		"CREATE PLAYBOOK x SET;":                                        "SET takes <key> = '<value>' (login, memory)",
-		"CREATE PLAYBOOK x SET colour = 'blue';":                        "colour is not a playbook property (login, memory)",
+		"CREATE PLAYBOOK x SET;":                                        "SET takes <key> = '<value>' (launcher, login, memory, model, agent)",
+		"CREATE PLAYBOOK x SET colour = 'blue';":                        "colour is not a playbook property (launcher, login, memory, model, agent)",
 		"CREATE PLAYBOOK x SET memory = 'sealed';":                      "memory takes 'isolated' or 'shared'",
 		"CREATE PLAYBOOK x SET memory;":                                 "SET takes <key> = '<value>'",
 		"CREATE PLAYBOOK x SET memory = ;":                              "needs a value",
 		"CREATE PLAYBOOK x DELETE memory;":                              "DELETE is for ALTER PLAYBOOK",
-		"ALTER PLAYBOOK x SET;":                                         "SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, SANDBOX or properties",
+		"ALTER PLAYBOOK x SET;":                                         "SET inside ALTER PLAYBOOK takes VAR, STATUSLINE, MODEL PICKER, SANDBOX or properties",
 		"ALTER PLAYBOOK x SET memory = 'shared', memory = 'isolated';":  "memory is named twice in one statement",
 		"ALTER PLAYBOOK x SET memory = 'shared' DELETE memory;":         "memory is named twice in one statement",
 		"ALTER PLAYBOOK x SET login = 'shared' SET login = 'isolated';": "login is named twice in one statement",
-		"ALTER PLAYBOOK x DELETE;":                                      "DELETE takes <key> (login, memory)",
+		"ALTER PLAYBOOK x DELETE;":                                      "DELETE takes <key> (launcher, login, memory, model, agent)",
 		"ALTER PLAYBOOK x DELETE colour;":                               "colour is not a playbook property",
 		"ALTER PLAYBOOK x SET FOO=1;":                                   "FOO is not a playbook property; a variable is SET VAR FOO=<value>",
 		"CREATE PLAYBOOK x SANDBOX SET login = 'shared';":               "SANDBOX isolates the login",
-		"CREATE PLAYBOOK x LINK /tmp/d SET memory = 'shared';":          "SET (login, memory) does not apply to LINK",
+		"CREATE PLAYBOOK x LINK /tmp/d SET memory = 'shared';":          "memory does not apply to LINK",
 		// In a file a value is quoted, as SHOW CREATE writes it.
 		"CREATE PLAYBOOK x SET login = isolated;": "login takes a quoted string: login = 'isolated'",
 		"ALTER PLAYBOOK x SET memory=shared;":     "memory takes a quoted string: memory = 'shared'",
@@ -158,7 +158,7 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 
 func TestExpectPlaybookProperties(t *testing.T) {
 	w := strings.Fields
-	if got := Expect(w("ALTER PLAYBOOK k DELETE")); !reflect.DeepEqual(got, []string{"login", "memory"}) {
+	if got := Expect(w("ALTER PLAYBOOK k DELETE")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent"}) {
 		t.Errorf("ALTER PLAYBOOK k DELETE offers %q", got)
 	}
 	if got := Expect(w("ALTER PLAYBOOK k SET")); !contains(got, "VAR") || !contains(got, "login") || !contains(got, "memory") {
@@ -167,7 +167,7 @@ func TestExpectPlaybookProperties(t *testing.T) {
 	if got := Expect(w("CREATE PLAYBOOK k")); !contains(got, "SET") || contains(got, "ISOLATED") || contains(got, "SETTINGS") {
 		t.Errorf("CREATE PLAYBOOK k offers %q", got)
 	}
-	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"login", "memory"}) {
+	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent"}) {
 		t.Errorf("CREATE PLAYBOOK k SET offers %q", got)
 	}
 }

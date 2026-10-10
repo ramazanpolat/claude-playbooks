@@ -43,8 +43,8 @@ func playbookVars(t *testing.T, name string) map[string]string {
 	return vars
 }
 
-const keepV1 = "-- title: Keeper\n-- description: Kept.\n\nALTER PLAYBOOK\n  SET VAR FOO=1 EDITOR=vim\n  SET MODEL 'claude-opus-5-5';\n"
-const keepV2 = "-- title: Keeper\n-- description: Kept, v2.\n\nALTER PLAYBOOK\n  SET VAR BAR=2 EDITOR=vim\n  SET MODEL 'claude-sonnet-5';\n"
+const keepV1 = "-- title: Keeper\n-- description: Kept.\n\nALTER PLAYBOOK\n  SET VAR FOO=1 EDITOR=vim\n  SET model = 'claude-opus-5-5';\n"
+const keepV2 = "-- title: Keeper\n-- description: Kept, v2.\n\nALTER PLAYBOOK\n  SET VAR BAR=2 EDITOR=vim\n  SET model = 'claude-sonnet-5';\n"
 
 // --keep: the preview and the yes, then a playbook in the pilot's store with
 // a launcher, the exact bytes and the [play]
@@ -141,7 +141,7 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 
 	// A playbook neither played nor created FROM a source has nothing to
 	// update.
-	mustStmt(t, "CREATE PLAYBOOK plain NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK plain SET launcher = ''")
 	if err := runUpdate(updateCmd, []string{"plain"}); err == nil || !strings.Contains(err.Error(), "nothing to update from") {
 		t.Fatalf("update of an unplayed playbook: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestPlayKeepDryRunAndSandbox(t *testing.T) {
 		t.Fatal("a dry run kept a playbook")
 	}
 
-	boxed := writeRecipe(t, dir, "boxed.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET MODEL 'm';\n")
+	boxed := writeRecipe(t, dir, "boxed.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET model = 'm';\n")
 	refs := writeRecipe(t, dir, "refs.cpb", "-- create-with: SANDBOX\n\nALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';\n")
 	playFlags(t, false, false, false, "")
 	playKeepFlags(t, true, "")
@@ -259,11 +259,11 @@ func TestUndoFor(t *testing.T) {
 		}
 		return st
 	}
-	old := parse("ALTER PLAYBOOK\n  ADD MARKETPLACE m FROM 'github:acme/plugins'\n  ADD PLUGIN p@m\n  SET VAR A=1 B=2\n  ALLOW TOOL 'Read'\n  SET MODEL 'x';\n")
+	old := parse("ALTER PLAYBOOK\n  ADD MARKETPLACE m FROM 'github:acme/plugins'\n  ADD PLUGIN p@m\n  SET VAR A=1 B=2\n  ALLOW TOOL 'Read'\n  SET model = 'x';\n")
 	if u := undoFor("kb", old, old); u != nil {
 		t.Fatalf("the same recipe undoes %s", u.String())
 	}
-	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET VAR A=1 B=3 SET MODEL 'x';\n"))
+	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET VAR A=1 B=3 SET model = 'x';\n"))
 	got := u.String()
 	want := "ALTER PLAYBOOK kb DROP PLUGIN p@m UNSET VAR B UNSET TOOL 'Read' DROP MARKETPLACE m"
 	if got != want {

@@ -10,7 +10,7 @@ func sp(s string) *string { return &s }
 
 func TestParseModelPicker(t *testing.T) {
 	st, err := ParseLine("ALTER PLAYBOOK k ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' DESCRIPTION 'fast, via the router' BEHAVES AS 'claude-sonnet-5' " +
-		"ADD MODEL 'glm-5.3' DROP MODEL 'old-model' SET MODEL PICKER ONLY SET MODEL 'glm-5.3'")
+		"ADD MODEL 'glm-5.3' DROP MODEL 'old-model' SET MODEL PICKER ONLY SET model = 'glm-5.3'")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,10 +35,10 @@ func TestParseModelPicker(t *testing.T) {
 	if st, err := ParseArgs(w("ALTER PLAYBOOK k UNSET MODEL PICKER")); err != nil || st.Clauses[0].Kind != UnsetModelPicker {
 		t.Errorf("UNSET MODEL PICKER: %v %+v", err, st)
 	}
-	if st, err := ParseArgs(w("ALTER PLAYBOOK k UNSET MODEL")); err != nil || st.Clauses[0].Kind != UnsetModel {
-		t.Errorf("UNSET MODEL: %v %+v", err, st)
+	if st, err := ParseArgs(w("ALTER PLAYBOOK k DELETE model")); err != nil || st.Clauses[0].Kind != UnsetModel {
+		t.Errorf("DELETE model: %v %+v", err, st)
 	}
-	if st, err := ParseLine("ALTER PLAYBOOK k SET MODEL 'picker'"); err != nil || st.Clauses[0].Kind != SetModel {
+	if st, err := ParseLine("ALTER PLAYBOOK k SET model = 'picker'"); err != nil || st.Clauses[0].Kind != SetModel {
 		t.Errorf("a quoted model id named picker: %v %+v", err, st)
 	}
 }

@@ -101,7 +101,7 @@ ALTER PLAYBOOK
       HEADER 'Authorization' FROM 'keychain:github-mcp'   -- a secret by reference
   ALLOW TOOL 'Bash(gh pr *)'  DENY TOOL 'Bash(git push *)'
   ADD SKILL review FROM 'https://github.com/me/skills' SUBDIR review
-  SET MODEL 'claude-opus-5-5';
+  SET model = 'claude-opus-5-5';
 ```
 
 ```bash

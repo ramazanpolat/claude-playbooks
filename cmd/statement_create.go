@@ -201,8 +201,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	case v.Launcher != nil:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: *v.Launcher})
 	case hasNameLauncher(pb.Name):
-		// The default launcher, named after the playbook: no clause
-		// creates it again.
+		// The default launcher, named after the playbook, written out:
+		// a recipe never leans on a default.
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: pb.Name})
 	default:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoLauncher})
 	}

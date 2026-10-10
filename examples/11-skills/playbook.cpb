@@ -1,7 +1,7 @@
 -- A skill from a directory beside this file. A directory is linked, so an
 -- edit to release-notes/SKILL.md reaches the next session without another
 -- APPLY. A git source is cloned and copied instead (see the README).
-CREATE PLAYBOOK IF NOT EXISTS writer NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS writer SET launcher = '';
 
 ALTER PLAYBOOK writer
   ADD SKILL release-notes FROM './release-notes';

@@ -55,6 +55,26 @@
 
 ### Changed
 
+- **The launcher, the model and the agent are properties** (SPEC.md,
+  *Playbook properties*), beside `login` and `memory`:
+  `CREATE PLAYBOOK x SET launcher = 'w', model = 'claude-opus-5-5'`,
+  `ALTER PLAYBOOK x SET agent = 'reviewer'`, `ALTER PLAYBOOK x DELETE
+  launcher, model`.
+  - `launcher = ''` is no launcher; `DELETE launcher` puts back the default,
+    the playbook's own name; `launcher = '<its name>'` is that default and
+    records nothing.
+  - `CREATE … SET model = …, agent = …` writes them into the new playbook's
+    `settings.json` in the same statement.
+  - `LAUNCHER <name>`, `NO LAUNCHER`, `SET MODEL '<model>'`, `UNSET MODEL`,
+    `SET AGENT '<agent>'` and `UNSET AGENT` are refused with a one-line hint
+    to the property. `SET MODEL PICKER` and `ADD` / `DROP MODEL` are
+    unchanged.
+  - `SHOW CREATE` writes the launcher in the `CREATE`, the default spelled
+    out (`SET launcher = '<name>'`), and `SET model = …` / `SET agent = …`.
+- **The examples' stand-in claude records plugins in `settings.json`**, as
+  Claude Code does, so `SHOW CREATE` writes their plugin clauses and the
+  upgrade check compares them.
+
 - **`ISOLATED LOGIN` is gone** for `SET login = 'isolated'` (CREATE and
   ALTER), and `UNSET ISOLATED LOGIN` for `SET login = 'shared'`. A recipe
   from rc1 or rc2 that says `ISOLATED LOGIN` is refused with that hint; edit

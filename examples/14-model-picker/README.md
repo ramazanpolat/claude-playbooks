@@ -18,4 +18,4 @@ else. They are written into the playbook's `settings.json` as
 Rows and keys cpb did not write are kept. The same recipe works on a plain
 config directory (`APPLY … TO '~/.claude'`), since the picker is a user
 setting. The model a session starts with is a separate clause:
-`SET MODEL '<id>'` ([example 10](../10-tools-statusline-model/)).
+`SET model = '<id>'` ([example 10](../10-tools-statusline-model/)).

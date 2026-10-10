@@ -52,13 +52,16 @@ const (
 	AddEnv      Kind = "ADD ENV"     // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
 	DropEnv     Kind = "DROP ENV"    // DROP ENV a b ...
 	RenameTo    Kind = "RENAME TO"   // RENAME TO n
-	Launcher    Kind = "LAUNCHER"    // LAUNCHER <name>
-	NoLauncher  Kind = "NO LAUNCHER" // NO LAUNCHER
-	From        Kind = "FROM"        // CREATE PLAYBOOK ... FROM <source>
-	Branch      Kind = "BRANCH"      // CREATE PLAYBOOK ... BRANCH <ref>
-	Subdir      Kind = "SUBDIR"      // CREATE PLAYBOOK ... SUBDIR <dir>
-	Link        Kind = "LINK"        // CREATE PLAYBOOK ... LINK <dir>
-	Sandbox     Kind = "SANDBOX"     // CREATE PLAYBOOK ... SANDBOX
+	// The launcher property: SET launcher = '<name>', SET launcher = ''
+	// (none), DELETE launcher (back to the playbook's name).
+	Launcher        Kind = "SET launcher"
+	NoLauncher      Kind = "SET launcher = ''"
+	DefaultLauncher Kind = "DELETE launcher"
+	From            Kind = "FROM"    // CREATE PLAYBOOK ... FROM <source>
+	Branch          Kind = "BRANCH"  // CREATE PLAYBOOK ... BRANCH <ref>
+	Subdir          Kind = "SUBDIR"  // CREATE PLAYBOOK ... SUBDIR <dir>
+	Link            Kind = "LINK"    // CREATE PLAYBOOK ... LINK <dir>
+	Sandbox         Kind = "SANDBOX" // CREATE PLAYBOOK ... SANDBOX
 
 	// Playbook properties (properties.go): CREATE PLAYBOOK ... SET k = 'v',
 	// ... gives the starting values, ALTER PLAYBOOK ... SET k = 'v', ...
@@ -86,8 +89,8 @@ const (
 	DropMarketplace Kind = "DROP MARKETPLACE" // DROP MARKETPLACE m
 	AddPlugin       Kind = "ADD PLUGIN"       // ADD PLUGIN p@m
 	DropPlugin      Kind = "DROP PLUGIN"      // DROP PLUGIN p@m
-	SetAgent        Kind = "SET AGENT"        // SET AGENT '<agent>'
-	UnsetAgent      Kind = "UNSET AGENT"      // UNSET AGENT
+	SetAgent        Kind = "SET agent"        // SET agent = '<agent>'
+	UnsetAgent      Kind = "DELETE agent"     // DELETE agent
 
 	// MCP servers (ALTER PLAYBOOK only): claude mcp add-json / remove.
 	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, VAR …, HEADER …
@@ -100,8 +103,8 @@ const (
 	UnsetTool       Kind = "UNSET TOOL"       // UNSET TOOL '<rule>' ...
 	SetStatusline   Kind = "SET STATUSLINE"   // SET STATUSLINE '<command>'
 	UnsetStatusline Kind = "UNSET STATUSLINE" // UNSET STATUSLINE
-	SetModel        Kind = "SET MODEL"        // SET MODEL '<model>'
-	UnsetModel      Kind = "UNSET MODEL"      // UNSET MODEL
+	SetModel        Kind = "SET model"        // SET model = '<model>'
+	UnsetModel      Kind = "DELETE model"     // DELETE model
 
 	// Skills (ALTER PLAYBOOK only): <config>/skills/<name>.
 	AddSkill  Kind = "ADD SKILL"  // ADD SKILL n FROM <source> [BRANCH <ref>] [SUBDIR <dir>]

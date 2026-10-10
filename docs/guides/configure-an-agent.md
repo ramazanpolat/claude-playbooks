@@ -11,7 +11,7 @@ ALTER PLAYBOOK reviewer
   ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Read(~/.ssh/**)'
   SET STATUSLINE 'bash ~/bin/statusline.sh'
-  SET MODEL 'claude-opus-5-5'
+  SET model = 'claude-opus-5-5'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
 
@@ -39,7 +39,7 @@ session at launch. A header's reference resolves to the whole value
 ALLOW TOOL '<rule>' ...     DENY TOOL '<rule>' ...     UNSET TOOL '<rule>' ...
 SET STATUSLINE '<command>' [REFRESH <n>]   UNSET STATUSLINE
 SET STATUSLINE REFRESH <n>   UNSET STATUSLINE REFRESH   SET STATUSLINE PREVIOUS
-SET MODEL '<model>'         UNSET MODEL
+SET model = '<model>'         DELETE model
 ```
 
 These are `settings.json` keys with no CLI, so cpb writes them into the

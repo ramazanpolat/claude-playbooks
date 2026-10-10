@@ -35,6 +35,11 @@ func doCreate(o createOpts, args []string) error {
 	if err := validateTopLevelName("playbook name", name); err != nil {
 		return err
 	}
+	// launcher = '<its own name>' is the default launcher: nothing to
+	// record (SHOW CREATE writes the launcher explicitly).
+	if o.launcher == name {
+		o.launcher = ""
+	}
 
 	playbooksDir := config.ResolvePlaybooksDir()
 	if err := os.MkdirAll(playbooksDir, 0755); err != nil {

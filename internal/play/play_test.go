@@ -74,7 +74,7 @@ func fetchServer(t *testing.T, h http.HandlerFunc) (*httptest.Server, *http.Clie
 }
 
 func TestFetch(t *testing.T) {
-	body := "-- title: T\n\nALTER PLAYBOOK SET MODEL 'opus';\n"
+	body := "-- title: T\n\nALTER PLAYBOOK SET model = 'opus';\n"
 	var agent string
 	srv, c := fetchServer(t, func(w http.ResponseWriter, r *http.Request) {
 		agent = r.Header.Get("User-Agent")
@@ -143,7 +143,7 @@ func TestFetch(t *testing.T) {
 func TestReadLocal(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "r.cpb")
-	os.WriteFile(p, []byte("ALTER PLAYBOOK SET MODEL 'opus';\n"), 0o600)
+	os.WriteFile(p, []byte("ALTER PLAYBOOK SET model = 'opus';\n"), 0o600)
 	if rec, err := ReadLocal(p); err != nil || rec.Path != p || rec.URL != "" {
 		t.Fatalf("local: %+v %v", rec, err)
 	}
@@ -154,7 +154,7 @@ func TestReadLocal(t *testing.T) {
 }
 
 func TestHeader(t *testing.T) {
-	h := ParseHeader([]byte("-- title: Code reviewer\n-- description: Reads code.\n-- needs: a helper for keychain:x\n-- create-with: SANDBOX\n-- min-cpb: 3.28.0\n-- colour: blue\n\n-- title: not header\nALTER PLAYBOOK SET MODEL 'x';\n"))
+	h := ParseHeader([]byte("-- title: Code reviewer\n-- description: Reads code.\n-- needs: a helper for keychain:x\n-- create-with: SANDBOX\n-- min-cpb: 3.28.0\n-- colour: blue\n\n-- title: not header\nALTER PLAYBOOK SET model = 'x';\n"))
 	if h.Title != "Code reviewer" || h.Description != "Reads code." || h.Needs != "a helper for keychain:x" || !h.WantsSandbox() || h.MinCPB != "3.28.0" || len(h.Unknown) != 1 || h.Unknown[0] != "colour" {
 		t.Fatalf("header: %+v", h)
 	}
@@ -174,10 +174,10 @@ func TestHeader(t *testing.T) {
 func TestCheckRefusals(t *testing.T) {
 	for src, want := range map[string]string{
 		"INCLUDE 'base.cpb';":                                                      "INCLUDE",
-		"USE PLAYBOOK x;\nALTER PLAYBOOK SET MODEL 'm';":                           "USE PLAYBOOK",
+		"USE PLAYBOOK x;\nALTER PLAYBOOK SET model = 'm';":                         "USE PLAYBOOK",
 		"CREATE ENV e SET A=1;":                                                    "env sets or DEFAULTS",
 		"ALTER DEFAULTS SET SECRET HELPER 'h';":                                    "env sets or DEFAULTS",
-		"ALTER PLAYBOOK named SET MODEL 'm';":                                      "write it as a recipe",
+		"ALTER PLAYBOOK named SET model = 'm';":                                    "write it as a recipe",
 		"CREATE PLAYBOOK p;":                                                       "write it as a recipe",
 		"DROP PLAYBOOK p;":                                                         "write it as a recipe",
 		"ALTER PLAYBOOK USE ENV work;":                                             "your env sets, and your keys",
@@ -187,7 +187,7 @@ func TestCheckRefusals(t *testing.T) {
 		"ALTER PLAYBOOK DELETE login;":                                             "nothing to undo",
 		"ALTER PLAYBOOK RENAME TO x;":                                              "play's decision",
 		"ALTER PLAYBOOK DROP PLUGIN p@m;":                                          "nothing to undo",
-		"ALTER PLAYBOOK UNSET MODEL;":                                              "nothing to undo",
+		"ALTER PLAYBOOK DELETE model;":                                             "nothing to undo",
 		"ALTER PLAYBOOK ADD MARKETPLACE m FROM '/opt/mkt';":                        "points into your filesystem",
 		"ALTER PLAYBOOK ADD MARKETPLACE m FROM './mkt';":                           "points into your filesystem",
 		"ALTER PLAYBOOK ADD SKILL s FROM '~/skills/s';":                            "points into your filesystem",
@@ -214,12 +214,12 @@ func TestCheckRefusals(t *testing.T) {
 	// MAX_THINKING_TOKENS=8000 is not a secret (the grammar's own rule: an
 	// integer, a boolean or empty cannot be one); found on the website's
 	// daily-driver template.
-	ok := "-- title: ok\n\nALTER PLAYBOOK\n  SET MODEL 'claude-opus-5-5'\n  SET AGENT 'reviewer'\n  DENY TOOL 'Bash(git push *)'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(kubectl get *)'\n  SET login = 'isolated', memory = 'isolated'\n  BLOCK VAR AWS_PROFILE\n  SET VAR EDITOR=vi MAX_THINKING_TOKENS=8000 DISABLE_AUTH=true;\n"
+	ok := "-- title: ok\n\nALTER PLAYBOOK\n  SET model = 'claude-opus-5-5'\n  SET agent = 'reviewer'\n  DENY TOOL 'Bash(git push *)'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(kubectl get *)'\n  SET login = 'isolated', memory = 'isolated'\n  BLOCK VAR AWS_PROFILE\n  SET VAR EDITOR=vi MAX_THINKING_TOKENS=8000 DISABLE_AUTH=true;\n"
 	if r := Check([]byte(ok)); len(r.Refused) != 0 || len(r.Risks) != 0 {
 		t.Fatalf("a clean recipe: refused %+v, risks %+v", r.Refused, r.Risks)
 	}
 	// The line is the clause's.
-	r := Check([]byte("ALTER PLAYBOOK\n  SET MODEL 'm'\n  USE ENV work;\n"))
+	r := Check([]byte("ALTER PLAYBOOK\n  SET model = 'm'\n  USE ENV work;\n"))
 	if len(r.Refused) != 1 || r.Refused[0].Line != 3 {
 		t.Fatalf("line: %+v", r.Refused)
 	}
@@ -322,12 +322,12 @@ func TestWideAllow(t *testing.T) {
 	}
 }
 
-// NO LAUNCHER is harmless in a recipe (play makes no launcher anyway).
+// SET launcher = ” is harmless in a recipe (play makes no launcher anyway).
 func TestCheckNoAlias(t *testing.T) {
-	if r := Check([]byte("ALTER PLAYBOOK NO LAUNCHER SET MODEL 'm';\n")); len(r.Refused) != 0 {
-		t.Fatalf("NO LAUNCHER: %+v", r.Refused)
+	if r := Check([]byte("ALTER PLAYBOOK SET launcher = '' SET model = 'm';\n")); len(r.Refused) != 0 {
+		t.Fatalf("SET launcher = '': %+v", r.Refused)
 	}
-	if r := Check([]byte("ALTER PLAYBOOK LAUNCHER x;\n")); len(r.Refused) != 1 {
+	if r := Check([]byte("ALTER PLAYBOOK SET launcher = 'x';\n")); len(r.Refused) != 1 {
 		t.Fatalf("LAUNCHER: %+v", r.Refused)
 	}
 }

@@ -1,6 +1,6 @@
 -- A playbook whose every launch runs in a Docker Sandbox (sbx), with one more
 -- host allowed out and one more directory mounted, read-only.
-CREATE PLAYBOOK IF NOT EXISTS box NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS box SET launcher = '';
 -- SET SANDBOX on its own sandboxes every launch, and isolates the login; the
 -- keyed form sets the [sandbox] table's own keys.
 ALTER PLAYBOOK box

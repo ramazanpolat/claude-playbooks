@@ -80,7 +80,7 @@ func TestPluginClausesRunClaudePlugin(t *testing.T) {
 	log := fakeClaude(t)
 	root := seedFlatPlaybook(t, "k")
 
-	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit SET AGENT toolkit")
+	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit SET agent = 'toolkit'")
 	got := runs(t, log)
 	want := []string{
 		"|plugin marketplace add example/toolkit --scope user",
@@ -101,7 +101,7 @@ func TestPluginClausesRunClaudePlugin(t *testing.T) {
 	}
 
 	// Already true: nothing runs, and the statement is unchanged.
-	out := mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit SET AGENT toolkit")
+	out := mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit SET agent = 'toolkit'")
 	if n := len(runs(t, log)); n != 2 || !strings.Contains(out, "unchanged") {
 		t.Fatalf("a repeat ran commands (%d) or changed: %s", n, out)
 	}
@@ -120,7 +120,7 @@ func TestPluginClausesRunClaudePlugin(t *testing.T) {
 		t.Errorf("a marketplace-declared command was not shown for the pilot: %v", err)
 	}
 
-	mustStmt(t, "ALTER PLAYBOOK k DROP PLUGIN toolkit@toolkit DROP MARKETPLACE toolkit UNSET AGENT")
+	mustStmt(t, "ALTER PLAYBOOK k DROP PLUGIN toolkit@toolkit DROP MARKETPLACE toolkit DELETE agent")
 	got = runs(t, log)
 	tail := got[len(got)-2:]
 	if !strings.HasSuffix(tail[0], "|plugin uninstall toolkit@toolkit --scope user --keep-data --json") ||
@@ -185,7 +185,7 @@ func TestShowPluginsAndAgent(t *testing.T) {
 	out = mustStmt(t, "SHOW CREATE PLAYBOOK k")
 	for _, want := range []string{
 		"-- PLUGIN old@toolkit is false in settings.json; not written",
-		"ALTER PLAYBOOK k\n  ADD MARKETPLACE toolkit FROM 'github:example/toolkit'\n  ADD PLUGIN toolkit@toolkit\n  SET AGENT 'toolkit';",
+		"ALTER PLAYBOOK k\n  ADD MARKETPLACE toolkit FROM 'github:example/toolkit'\n  ADD PLUGIN toolkit@toolkit\n  SET agent = 'toolkit';",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("SHOW CREATE missing %q:\n%s", want, out)
@@ -202,14 +202,14 @@ func TestPluginDryRunCarriesState(t *testing.T) {
 	sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	log := fakeClaude(t)
-	mustStmt(t, "CREATE PLAYBOOK k NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK k SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit")
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET AGENT 'x';\nALTER PLAYBOOK k UNSET AGENT;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN toolkit@toolkit;\n")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET agent = 'x';\nALTER PLAYBOOK k DELETE agent;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN toolkit@toolkit;\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
-	// SET AGENT is set again by UNSET AGENT, so it is folded away and the
+	// SET agent is set again by DELETE agent, so it is folded away and the
 	// playbook, which has no agent, does not change; the renamed playbook
 	// still has the plugin to uninstall.
 	for _, want := range []string{

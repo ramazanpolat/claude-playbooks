@@ -40,7 +40,7 @@ func TestMemorySetting(t *testing.T) {
 	entry := filepath.Join(home, ".claude") + "/**"
 	root := config.ResolvePlaybooksDir()
 
-	mustStmt(t, "CREATE PLAYBOOK m NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK m SET launcher = ''")
 	dir := filepath.Join(root, "m")
 	if got := excludesOf(t, dir); !slices.Equal(got, []string{entry}) {
 		t.Fatalf("a new playbook: claudeMdExcludes %q, want [%s]", got, entry)
@@ -100,7 +100,7 @@ func TestMemorySetting(t *testing.T) {
 	}
 
 	// The last entry going removes the key.
-	mustStmt(t, "CREATE PLAYBOOK s NO LAUNCHER SET memory=shared")
+	mustStmt(t, "CREATE PLAYBOOK s SET launcher = '' SET memory=shared")
 	if got := excludesOf(t, filepath.Join(root, "s")); got != nil {
 		t.Fatalf("SET memory = 'shared': %q", got)
 	}
@@ -138,7 +138,7 @@ func TestMemorySetting(t *testing.T) {
 func TestMemorySettingDryRun(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	f := writePlaybookFile(t, "CREATE PLAYBOOK d NO LAUNCHER;\nALTER PLAYBOOK d SET memory = 'isolated';\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK d SET launcher = '';\nALTER PLAYBOOK d SET memory = 'isolated';\n")
 	out, err := apply(t, f, "--dry-run")
 	if err != nil || !strings.Contains(out, "1 created, 0 changed, 1 unchanged") {
 		t.Fatalf("dry run:\n%v\n%s", err, out)

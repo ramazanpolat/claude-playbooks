@@ -1,7 +1,7 @@
 -- The /model picker of one playbook: its own rows, in place of the
 -- built-in ones. Written into the playbook's settings.json (modelPicker);
 -- rows and keys cpb did not write are kept.
-CREATE PLAYBOOK IF NOT EXISTS router-agent NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS router-agent SET launcher = '';
 
 ALTER PLAYBOOK router-agent
   ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'

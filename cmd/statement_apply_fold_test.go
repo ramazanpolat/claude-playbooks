@@ -69,8 +69,8 @@ func TestFoldStatements(t *testing.T) {
 			"ALTER PLAYBOOK p ALLOW TOOL 'X' 'Y';\nALTER PLAYBOOK p DENY TOOL 'X';",
 			[]string{"ALLOW TOOL Y | ALLOW TOOL 'X' by 1", "DENY TOOL X"}},
 		{"the model, with an unfoldable clause beside it",
-			"ALTER PLAYBOOK p ADD PLUGIN x@m SET MODEL 'a';\nALTER PLAYBOOK p SET MODEL 'b';",
-			[]string{"ADD PLUGIN x@m | SET MODEL by 1", "SET MODEL"}},
+			"ALTER PLAYBOOK p ADD PLUGIN x@m SET model = 'a';\nALTER PLAYBOOK p SET model = 'b';",
+			[]string{"ADD PLUGIN x@m | SET model by 1", "SET model"}},
 		{"IF UNSET after a status line depends on it: both kept",
 			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b' IF UNSET;",
 			[]string{"SET STATUSLINE", "SET STATUSLINE"}},
@@ -107,11 +107,11 @@ func TestFoldStatements(t *testing.T) {
 			"ALTER PLAYBOOK p SET SANDBOX backend=sbx host=h;\nALTER PLAYBOOK p UNSET SANDBOX host;",
 			[]string{"SET SANDBOX <key>=<value> backend | SET SANDBOX host by 1", "UNSET SANDBOX <key> host"}},
 		{"two targets do not fold into each other",
-			"ALTER PLAYBOOK p SET MODEL 'a';\nALTER PLAYBOOK q SET MODEL 'b';",
-			[]string{"SET MODEL", "SET MODEL"}},
+			"ALTER PLAYBOOK p SET model = 'a';\nALTER PLAYBOOK q SET model = 'b';",
+			[]string{"SET model", "SET model"}},
 		{"a playbook dropped and created again starts afresh",
-			"ALTER PLAYBOOK p SET MODEL 'a';\nDROP PLAYBOOK p;\nCREATE PLAYBOOK p;\nALTER PLAYBOOK p SET MODEL 'b';",
-			[]string{"SET MODEL", "", "", "SET MODEL"}},
+			"ALTER PLAYBOOK p SET model = 'a';\nDROP PLAYBOOK p;\nCREATE PLAYBOOK p;\nALTER PLAYBOOK p SET model = 'b';",
+			[]string{"SET model", "", "", "SET model"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestFoldStatements(t *testing.T) {
 // TestFoldDirectoryTargets: a recipe applied TO a directory folds per
 // directory, apart from a playbook and from another directory.
 func TestFoldDirectoryTargets(t *testing.T) {
-	stmts, err := grammar.ParseFile("ALTER PLAYBOOK x SET MODEL 'a';\nALTER PLAYBOOK x SET MODEL 'b';\nALTER PLAYBOOK x SET MODEL 'c';\nALTER PLAYBOOK d SET MODEL 'e';\n")
+	stmts, err := grammar.ParseFile("ALTER PLAYBOOK x SET model = 'a';\nALTER PLAYBOOK x SET model = 'b';\nALTER PLAYBOOK x SET model = 'c';\nALTER PLAYBOOK d SET model = 'e';\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,8 +152,8 @@ func TestApplyFoldStackConverges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "p", nil)
 	dir := t.TempDir()
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info TEAM=one\n  SET MODEL 'base-model'\n  SET STATUSLINE 'echo base'\n  ALLOW TOOL 'Bash(x)';\n")
-	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug\n  SET MODEL 'child-model'\n  SET STATUSLINE 'echo child'\n  DENY TOOL 'Bash(x)';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info TEAM=one\n  SET model = 'base-model'\n  SET STATUSLINE 'echo base'\n  ALLOW TOOL 'Bash(x)';\n")
+	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug\n  SET model = 'child-model'\n  SET STATUSLINE 'echo child'\n  DENY TOOL 'Bash(x)';\n")
 	plan, err := apply(t, child, "TO", "p", "--dry-run")
 	if err != nil || !strings.Contains(plan, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2)") {
 		t.Fatalf("the plain plan does not name what is overridden: %v\n%s", err, plan)
@@ -162,7 +162,7 @@ func TestApplyFoldStackConverges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(first, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2), SET MODEL (set again at "+child+":2)") {
+	if !strings.Contains(first, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2), SET model (set again at "+child+":2)") {
 		t.Fatalf("the run does not name what was overridden:\n%s", first)
 	}
 	second, err := apply(t, child, "TO", "p")
@@ -207,7 +207,7 @@ func TestApplyFoldStackConverges(t *testing.T) {
 			base = append(base, o.Clause+"@"+filepath.Base(o.By.File)+":"+strconv.Itoa(o.By.Line))
 		}
 	}
-	want := "SET VAR LOG_LEVEL@child.cpb:2 SET MODEL@child.cpb:2 SET STATUSLINE@child.cpb:2 ALLOW TOOL 'Bash(x)'@child.cpb:2"
+	want := "SET VAR LOG_LEVEL@child.cpb:2 SET model@child.cpb:2 SET STATUSLINE@child.cpb:2 ALLOW TOOL 'Bash(x)'@child.cpb:2"
 	if strings.Join(base, " ") != want {
 		t.Fatalf("the plan's overridden entries:\n got %s\nwant %s", strings.Join(base, " "), want)
 	}
@@ -220,9 +220,9 @@ func TestApplyFoldFleetAndFlatRecipe(t *testing.T) {
 	writePlaybook(t, root, "a", nil)
 	writePlaybook(t, root, "b", nil)
 	dir := t.TempDir()
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET VAR LEVEL=base SET MODEL 'base-model';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET VAR LEVEL=base SET model = 'base-model';\n")
 	writeCpb(t, dir, "a.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK SET VAR LEVEL=a;\n")
-	writeCpb(t, dir, "b.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK SET MODEL 'b-model';\n")
+	writeCpb(t, dir, "b.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK SET model = 'b-model';\n")
 	fleet := writeCpb(t, dir, "fleet.cpb", "USE PLAYBOOK a;\nINCLUDE 'a.cpb';\nUSE PLAYBOOK b;\nINCLUDE 'b.cpb';\n")
 	if _, err := apply(t, fleet); err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestApplyFoldFleetAndFlatRecipe(t *testing.T) {
 	if a.Model == nil || *a.Model != "base-model" || level(a) != "a" || b.Model == nil || *b.Model != "b-model" || level(b) != "base" {
 		t.Fatalf("targets folded into each other: a model=%v level=%s, b model=%v level=%s", a.Model, level(a), b.Model, level(b))
 	}
-	flat := writeCpb(t, dir, "flat.cpb", "ALTER PLAYBOOK SET MODEL 'first';\nALTER PLAYBOOK SET MODEL 'second';\n")
+	flat := writeCpb(t, dir, "flat.cpb", "ALTER PLAYBOOK SET model = 'first';\nALTER PLAYBOOK SET model = 'second';\n")
 	if _, err := apply(t, flat, "TO", "a"); err != nil {
 		t.Fatal(err)
 	}

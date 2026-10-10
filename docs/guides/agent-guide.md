@@ -67,10 +67,10 @@ cpb start /tmp/scratch-$$ -p "..." --delete    # directory created, then removed
 Statements never prompt, with two exceptions: `DROP PLAYBOOK`, and `APPLY … TO '<dir>'` to a config directory that is not a playbook, ask on a terminal, so pass `--yes`.
 
 ```bash
-cpb CREATE PLAYBOOK IF NOT EXISTS <name> NO LAUNCHER            # no launcher; run via `run <name>`
+cpb CREATE PLAYBOOK IF NOT EXISTS <name> SET launcher = ''            # no launcher; run via `run <name>`
 cpb CREATE PLAYBOOK <name> LAUNCHER <cmd>
-cpb CREATE PLAYBOOK <name> FROM <git-url> BRANCH <ref> SUBDIR <path> NO LAUNCHER
-cpb CREATE PLAYBOOK <name> LINK <dir> NO LAUNCHER              # the target needs a .playbook first
+cpb CREATE PLAYBOOK <name> FROM <git-url> BRANCH <ref> SUBDIR <path> SET launcher = ''
+cpb CREATE PLAYBOOK <name> LINK <dir> SET launcher = ''              # the target needs a .playbook first
 cpb ALTER PLAYBOOK <name> RENAME TO <new>
 cpb DROP PLAYBOOK IF EXISTS <name> --yes
 cpb update <name> --yes                                     # from [source]; settings.json, data/, [env] survive; --yes runs a declared migrate step
@@ -110,7 +110,7 @@ Point the whole registry at a scratch root to test without touching the pilot's 
 
 ```bash
 export CPB_PLAYBOOKS_DIR=/tmp/pb-$$              # or --playbooks-dir before the verb
-cpb CREATE PLAYBOOK demo NO LAUNCHER
+cpb CREATE PLAYBOOK demo SET launcher = ''
 cpb run demo --version
 rm -rf /tmp/pb-$$
 ```
@@ -125,7 +125,7 @@ Before a statement, only `--playbooks-dir` and `--launcher-dir` are accepted. `r
 cpb run --sandbox --workdir "$REPO" demo -p "run the tests"      # sandbox cpb-demo, created on first use
 cpb run --sandbox --sandbox-fresh --clone --workdir "$REPO" demo -p "..."   # new sandbox on a private clone
 cpb run --sandbox --mount /data:ro demo                          # extra read-only mount
-cpb CREATE PLAYBOOK demo SANDBOX NO LAUNCHER                        # [sandbox] always = true + isolated_login = true
+cpb CREATE PLAYBOOK demo SANDBOX SET launcher = ''                        # [sandbox] always = true + isolated_login = true
 cpb run --no-sandbox demo -p "..."                               # host launch; stderr says the manifest was overridden
 ```
 

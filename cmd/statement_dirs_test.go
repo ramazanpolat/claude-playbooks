@@ -17,7 +17,7 @@ func TestApplyToPlainDirectory(t *testing.T) {
 	}
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	skill := makeSkill(t, filepath.Join(dir, "notes"))
-	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(toolkit-helper *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
+	recipe := writeCpb(t, dir, "agent.cpb", "ALTER PLAYBOOK\n  ALLOW TOOL 'Bash(toolkit-helper *)'\n  SET model = 'claude-opus-5-5'\n  SET VAR FOO=bar\n  ADD SKILL notes FROM './notes';\n")
 
 	// Not a terminal and no --yes: refused before anything is written.
 	if _, err := apply(t, recipe, "TO", cfg); err == nil || !strings.Contains(err.Error(), "--yes") {
@@ -104,7 +104,7 @@ func TestPlainDirectoryBackupsAndSkillRecords(t *testing.T) {
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	makeSkill(t, filepath.Join(dir, "notes"))
 
-	twice := writeCpb(t, dir, "twice.cpb", "ALTER PLAYBOOK SET MODEL 'a';\nALTER PLAYBOOK SET MODEL 'b';\n")
+	twice := writeCpb(t, dir, "twice.cpb", "ALTER PLAYBOOK SET model = 'a';\nALTER PLAYBOOK SET model = 'b';\n")
 	out, err := apply(t, twice, "TO", cfg, "--dry-run")
 	if err != nil || strings.Count(out, "back up "+filepath.Join(cfg, "settings.json")) != 1 {
 		t.Fatalf("dry run backs up once: %v\n%s", err, out)

@@ -52,7 +52,7 @@ func TestApplyRecordUpdateRemovesDropped(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "p", nil)
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR TEAM=one LOG_LEVEL=info\n  SET MODEL 'base-model'\n  ALLOW TOOL 'Bash(x)' 'Read';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR TEAM=one LOG_LEVEL=info\n  SET model = 'base-model'\n  ALLOW TOOL 'Bash(x)' 'Read';\n")
 	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug;\n")
 	if _, err := apply(t, child, "TO", "p"); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestApplyRecordUpdateRemovesDropped(t *testing.T) {
 		t.Fatalf("the record is not the folded statements:\n%s", text)
 	}
 
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info\n  SET MODEL 'base-model'\n  ALLOW TOOL 'Read';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info\n  SET model = 'base-model'\n  ALLOW TOOL 'Read';\n")
 	plan, err := runUpdateFor(t, "p", true, false)
 	if err != nil {
 		t.Fatal(err)
@@ -371,11 +371,11 @@ func TestApplyRecordNotForLinked(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK lk NO LAUNCHER LINK '"+target+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK lk SET launcher = '' LINK '"+target+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := writeCpb(t, t.TempDir(), "r.cpb", "ALTER PLAYBOOK NO LAUNCHER;\n")
+	f := writeCpb(t, t.TempDir(), "r.cpb", "ALTER PLAYBOOK SET launcher = '';\n")
 	out, err := apply(t, f, "TO", "lk")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)

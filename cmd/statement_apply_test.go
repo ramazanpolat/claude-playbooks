@@ -33,7 +33,7 @@ CREATE OR REPLACE ENV glm
   DESCRIPTION 'GLM via the router'
   SET BASE=http://buildbox:8080/v1 MODEL=glm-5.3;
 ALTER DEFAULTS USE ENV glm;
-CREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS work SET launcher = '';
 ALTER PLAYBOOK work
   USE ENV glm
   SET VAR MAX_THINKING_TOKENS=8000
@@ -100,7 +100,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 		t.Errorf("SHOW CREATE ALL does not set the helper before the env sets:\n%s", dump)
 	}
 	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm;",
-		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  LAUNCHER s;",
+		"CREATE PLAYBOOK IF NOT EXISTS src\n  FROM https://example.com/s.git\n  BRANCH v1\n  SET launcher = 's';",
 		"SET VAR API_TOKEN FROM 'keychain:ok/work'"} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("SHOW CREATE ALL missing %q:\n%s", want, dump)
@@ -247,7 +247,7 @@ func TestApplySeveralFiles(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	base := writePlaybookFile(t, "CREATE OR REPLACE ENV base SET A=1;\n")
-	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work NO LAUNCHER;\n")
+	machine := writePlaybookFile(t, "ALTER DEFAULTS USE ENV base;\nCREATE PLAYBOOK IF NOT EXISTS work SET launcher = '';\n")
 	broken := writePlaybookFile(t, "CREATE ENV other;\nALTER ENV other FOO;\n")
 
 	// A later file that does not parse: nothing from the first is written.
@@ -363,7 +363,7 @@ func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 }
 
 // SHOW CREATE never prints a source URL's credentials, and keeps the
-// default launcher (named after the playbook) instead of writing NO LAUNCHER.
+// default launcher (named after the playbook) instead of writing SET launcher = ”.
 func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
@@ -375,12 +375,12 @@ func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	}
 
 	mustStmt(t, "CREATE PLAYBOOK named")
-	mustStmt(t, "CREATE PLAYBOOK bare NO LAUNCHER")
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "NO LAUNCHER") {
-		t.Errorf("the default launcher became NO LAUNCHER:\n%s", out)
+	mustStmt(t, "CREATE PLAYBOOK bare SET launcher = ''")
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK named"); strings.Contains(out, "SET launcher = ''") {
+		t.Errorf("the default launcher became SET launcher = '':\n%s", out)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "NO LAUNCHER") {
-		t.Errorf("a playbook with no launcher lost NO LAUNCHER:\n%s", out)
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK bare"); !strings.Contains(out, "SET launcher = ''") {
+		t.Errorf("a playbook with no launcher lost SET launcher = '':\n%s", out)
 	}
 }
 
