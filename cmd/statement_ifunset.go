@@ -33,6 +33,35 @@ func (r *stmtRun) resolveIfUnset(st *grammar.Stmt) (*grammar.Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.applyIfUnset(st, "PLAYBOOK "+st.Name, live), nil
+}
+
+// resolveIfUnsetDir is resolveIfUnset for a statement applied TO a plain
+// config directory: its settings.json is all it has.
+func (r *stmtRun) resolveIfUnsetDir(st *grammar.Stmt, key string) (*grammar.Stmt, error) {
+	if !hasIfUnset(st.Clauses) {
+		return st, nil
+	}
+	root := settings.NewObject()
+	if r.dry != nil && r.dry.settings[key] != nil {
+		o, err := settings.ParseObject(r.dry.settings[key])
+		if err != nil {
+			return nil, err
+		}
+		root = o
+	} else {
+		sf, err := settings.Load(st.Dir)
+		if err != nil {
+			return nil, err
+		}
+		root = sf.Root
+	}
+	return r.applyIfUnset(st, st.Dir, func(k string) (string, bool) { return settingsProperty(root, k) }), nil
+}
+
+// applyIfUnset replaces each SET IF UNSET by its pairs, or leaves it out
+// when one of its keys is set, saying which; what names the target.
+func (r *stmtRun) applyIfUnset(st *grammar.Stmt, what string, live func(string) (string, bool)) *grammar.Stmt {
 	out := *st
 	out.Clauses = nil
 	for _, c := range st.Clauses {
@@ -41,7 +70,7 @@ func (r *stmtRun) resolveIfUnset(st *grammar.Stmt) (*grammar.Stmt, error) {
 			continue
 		}
 		if key := setKeyOf(st.Name, c.Group, live); key != "" {
-			msg := "PLAYBOOK " + st.Name + ": " + key + " is set; SET IF UNSET changed nothing"
+			msg := what + ": " + key + " is set; SET IF UNSET changed nothing"
 			r.say(msg, nil)
 			if r.dryRun {
 				r.note = strings.TrimPrefix(r.note+"; ", "; ") + key + " is set, so SET IF UNSET is skipped"
@@ -50,7 +79,7 @@ func (r *stmtRun) resolveIfUnset(st *grammar.Stmt) (*grammar.Stmt, error) {
 		}
 		out.Clauses = append(out.Clauses, c.Group...)
 	}
-	return &out, nil
+	return &out
 }
 
 func hasIfUnset(clauses []grammar.Clause) bool {
@@ -200,50 +229,59 @@ func (r *stmtRun) propertyReader(name string, pb *playbook.Playbook) (func(key s
 				return "isolated", true
 			}
 			return "shared", true
-		case "memory":
-			v, _ := memoryState(root)
-			return v, true
-		case "model":
-			var s string
-			ok, err := root.Get(keyModel, &s)
-			return s, ok && err == nil
-		case "agent":
-			var s string
-			ok, err := root.Get(keyAgent, &s)
-			return s, ok && err == nil
-		case "statusline.command":
-			if _, sl, _ := settingsExtras(root); sl != nil {
-				return *sl, true
-			}
-			return "", false
-		case "statusline.refresh":
-			if n := statuslineRefresh(root); n != nil {
-				return strconv.Itoa(*n), true
-			}
-			return "", false
-		case "model_picker.mode":
-			mp, err := root.Object(keyModelPicker)
-			if err != nil || !mp.Has("replaceBuiltInOptions") {
-				return "", false
-			}
-			var only bool
-			_, _ = mp.Get("replaceBuiltInOptions", &only)
-			if only {
-				return "only", true
-			}
-			return "append", true
 		case "sandbox.always":
 			return strconv.FormatBool(r.sandboxed(name, m)), true
 		}
-		if k, ok := strings.CutPrefix(key, "sandbox."); ok && m != nil {
-			for _, kv := range m.Sandbox.Settings() {
-				if kv[0] == k {
-					return kv[1], true
+		if k, ok := strings.CutPrefix(key, "sandbox."); ok {
+			if m != nil {
+				for _, kv := range m.Sandbox.Settings() {
+					if kv[0] == k {
+						return kv[1], true
+					}
 				}
 			}
+			return "", false
 		}
-		return "", false
+		return settingsProperty(root, key)
 	}, nil
+}
+
+// settingsProperty reads a property settings.json holds: the memory, the
+// model, the agent, the status line and the picker mode.
+func settingsProperty(root *settings.Object, key string) (string, bool) {
+	switch key {
+	case "memory":
+		v, _ := memoryState(root)
+		return v, true
+	case "model":
+		var s string
+		ok, err := root.Get(keyModel, &s)
+		return s, ok && err == nil
+	case "agent":
+		var s string
+		ok, err := root.Get(keyAgent, &s)
+		return s, ok && err == nil
+	case "statusline.command":
+		if _, sl, _ := settingsExtras(root); sl != nil {
+			return *sl, true
+		}
+	case "statusline.refresh":
+		if n := statuslineRefresh(root); n != nil {
+			return strconv.Itoa(*n), true
+		}
+	case "model_picker.mode":
+		mp, err := root.Object(keyModelPicker)
+		if err != nil || !mp.Has("replaceBuiltInOptions") {
+			return "", false
+		}
+		var only bool
+		_, _ = mp.Get("replaceBuiltInOptions", &only)
+		if only {
+			return "only", true
+		}
+		return "append", true
+	}
+	return "", false
 }
 
 // livePropertyValues reads the given keys of a playbook on disk, for an

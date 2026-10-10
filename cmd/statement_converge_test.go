@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -198,5 +199,25 @@ func TestDeleteModelPickerKeepsRows(t *testing.T) {
 	mp, _ := settingsOf(t, filepath.Join(root, "mp"))["modelPicker"].(map[string]any)
 	if mp == nil || mp["replaceBuiltInOptions"] != nil || len(mp["options"].([]any)) != 1 {
 		t.Fatalf("modelPicker: %v", mp)
+	}
+}
+
+// SET IF UNSET in a recipe applied TO a plain config directory judges the
+// directory's settings.json.
+func TestSetIfUnsetToDirectory(t *testing.T) {
+	sandboxDefaultRoot(t)
+	cfg, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{"model": "mine"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	recipe := writeCpb(t, dir, "r.cpb", "ALTER PLAYBOOK\n  SET IF UNSET model = 'r', statusline.command = 'echo r';\nALTER PLAYBOOK\n  SET IF UNSET statusline.command = 'echo s';\n")
+	out, err := apply(t, recipe, "TO", cfg, "--yes")
+	if err != nil || !strings.Contains(out, cfg+": model is set; SET IF UNSET changed nothing") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	s := settingsOf(t, cfg)
+	if sl, _ := s["statusLine"].(map[string]any); s["model"] != "mine" || sl["command"] != "echo s" {
+		t.Fatalf("settings: %v", s)
 	}
 }

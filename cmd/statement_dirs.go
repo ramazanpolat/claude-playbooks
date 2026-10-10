@@ -49,7 +49,7 @@ var dirRefusals = map[grammar.Kind]string{
 // anything is written.
 func validateDirClauses(st *grammar.Stmt) error {
 	dir := st.Dir
-	for _, c := range st.Clauses {
+	for _, c := range grammar.Flatten(st.Clauses) {
 		if why, refused := dirRefusals[c.Kind]; refused {
 			return fmt.Errorf("%s cannot apply to %s: %s", c.Kind, dir, why)
 		}
@@ -79,6 +79,10 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	dir := st.Dir
 	key := dirMark + dir
+	st, err := r.resolveIfUnsetDir(st, key)
+	if err != nil {
+		return err
+	}
 	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err

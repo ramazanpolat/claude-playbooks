@@ -184,6 +184,8 @@ func TestCheckRefusals(t *testing.T) {
 		"ALTER PLAYBOOK ADD ENV work;":                                             "your env sets, and your keys",
 		"ALTER PLAYBOOK SET login = 'shared';":                                     "play's decision",
 		"ALTER PLAYBOOK SET memory = 'shared';":                                    "play's decision",
+		"ALTER PLAYBOOK SET IF UNSET login = 'shared', model = 'm';":               "play's decision",
+		"ALTER PLAYBOOK SET IF UNSET launcher = 'x';":                              "play's decision",
 		"ALTER PLAYBOOK DELETE login;":                                             "nothing to undo",
 		"ALTER PLAYBOOK RENAME TO x;":                                              "play's decision",
 		"ALTER PLAYBOOK DROP PLUGIN p@m;":                                          "nothing to undo",
@@ -217,6 +219,12 @@ func TestCheckRefusals(t *testing.T) {
 	ok := "-- title: ok\n\nALTER PLAYBOOK\n  SET model = 'claude-opus-5-5'\n  SET agent = 'reviewer'\n  DENY TOOL 'Bash(git push *)'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(kubectl get *)'\n  SET login = 'isolated', memory = 'isolated'\n  BLOCK VAR AWS_PROFILE\n  SET VAR EDITOR=vi MAX_THINKING_TOKENS=8000 DISABLE_AUTH=true;\n"
 	if r := Check([]byte(ok)); len(r.Refused) != 0 || len(r.Risks) != 0 {
 		t.Fatalf("a clean recipe: refused %+v, risks %+v", r.Refused, r.Risks)
+	}
+	// SET IF UNSET is judged pair by pair: a status line it offers is a
+	// risk, as one set outright is.
+	r0 := Check([]byte("ALTER PLAYBOOK\n  SET IF UNSET statusline.command = 'bash sl.sh', model = 'm';\n"))
+	if len(r0.Refused) != 0 || riskCodes(r0)[RiskRunsProgram] != 1 {
+		t.Fatalf("SET IF UNSET: refused %+v, risks %+v", r0.Refused, r0.Risks)
 	}
 	// The line is the clause's.
 	r := Check([]byte("ALTER PLAYBOOK\n  SET model = 'm'\n  USE ENV work;\n"))

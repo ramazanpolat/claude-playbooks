@@ -121,6 +121,12 @@ func (r *Result) clause(c grammar.Clause) {
 		return
 	}
 	switch c.Kind {
+	case grammar.SetIfUnset:
+		// A new playbook has none of its keys set, so the list applies:
+		// each pair is judged as if set outright.
+		for _, g := range c.Group {
+			r.clause(g)
+		}
 	case grammar.AddMarketplace:
 		src, err := grammar.MarketplaceSource(c.Arg)
 		switch {

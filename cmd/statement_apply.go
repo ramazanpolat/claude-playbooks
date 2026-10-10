@@ -652,7 +652,7 @@ func claimsLauncherName(s *grammar.Stmt) bool {
 		}
 		return true
 	case grammar.Alter:
-		for _, c := range s.Clauses {
+		for _, c := range grammar.Flatten(s.Clauses) { // a SET IF UNSET may give the launcher
 			if c.Kind == grammar.RenameTo || c.Kind == grammar.Launcher || c.Kind == grammar.DefaultLauncher {
 				return true
 			}
