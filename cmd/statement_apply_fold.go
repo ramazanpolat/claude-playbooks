@@ -150,9 +150,9 @@ type foldResult struct {
 // foldStatements drops every part whose key is written again later,
 // unconditionally, for the same target. It repeats until nothing changes:
 // a write a dropped dependant needed is then dropped too. exists reports a
-// playbook that exists before anything runs (nil: none does): CREATE
-// PLAYBOOK IF NOT EXISTS on it applies its SET list as an ALTER would, so
-// its parts fold as an ALTER's, and it starts nothing afresh.
+// playbook that exists before anything runs (nil: none does): CREATE OR
+// ALTER PLAYBOOK on it applies its SET list as an ALTER would, so its parts
+// fold as an ALTER's, and it starts nothing afresh.
 func foldStatements(in []located, exists func(name string) bool) foldResult {
 	type partKey struct{ i, j, p int }
 	type occ struct {
@@ -166,7 +166,7 @@ func foldStatements(in []located, exists func(name string) bool) foldResult {
 	epoch := map[string]int{}
 	for i, x := range in {
 		t, barriers := foldTarget(x.s)
-		if s := x.s; s.Verb == grammar.Create && s.Object == grammar.Playbook && s.IfNotExists && s.Dir == "" &&
+		if s := x.s; s.Verb == grammar.Create && s.Object == grammar.Playbook && s.OrAlter && s.Dir == "" &&
 			exists != nil && epoch["pb:"+s.Name] == 0 && exists(s.Name) {
 			t, barriers = "pb:"+s.Name, nil
 		}

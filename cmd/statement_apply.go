@@ -636,18 +636,19 @@ func resolveTarget(t string) (string, error) {
 // claimsLauncherName reports a statement that registers a name a launcher
 // answers to: a new playbook (its directory name, and its launcher), a
 // rename, or a launcher change. CREATE … IF NOT EXISTS on a playbook that
-// exists registers only the launcher its SET list gives.
+// exists registers nothing, CREATE OR ALTER only the launcher its SET list
+// gives.
 func claimsLauncherName(s *grammar.Stmt) bool {
 	if s.Dir != "" || s.Object != grammar.Playbook {
 		return false
 	}
 	switch s.Verb {
 	case grammar.Create:
-		// On a playbook that exists, only a launcher in the SET list
-		// registers a name (the empty launcher removes one).
-		if s.IfNotExists {
+		// On a playbook that exists, IF NOT EXISTS registers nothing, and
+		// OR ALTER only a launcher its SET list gives.
+		if s.IfNotExists || s.OrAlter {
 			if pb, err := playbook.Find(config.ResolvePlaybooksDir(), s.Name); err == nil && pb != nil {
-				return slices.ContainsFunc(s.Clauses, func(c grammar.Clause) bool { return c.Kind == grammar.Launcher })
+				return s.OrAlter && slices.ContainsFunc(s.Clauses, func(c grammar.Clause) bool { return c.Kind == grammar.Launcher })
 			}
 		}
 		return true

@@ -28,7 +28,7 @@ cpb CREATE PLAYBOOK backend SET launcher = 'be'          # the launcher is `be`
 cpb CREATE PLAYBOOK scratch SET launcher = ''          # no launcher
 cpb CREATE PLAYBOOK boxed SET sandbox.always = true, login = isolated   # always sandboxed, with its own login
 cpb CREATE PLAYBOOK IF NOT EXISTS experiment  # a no-op when it exists
-cpb CREATE PLAYBOOK IF NOT EXISTS experiment SET memory = shared   # exists: applies the SET list, as ALTER would
+cpb CREATE OR ALTER PLAYBOOK experiment SET memory = shared   # creates, or applies the SET list as ALTER would
 ```
 
 Run it without the launcher, passing Claude Code flags after the name:

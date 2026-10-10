@@ -8,12 +8,13 @@ cpb APPLY playbook.cpb                 # again: 0 created, 0 changed
 ```
 
 `SHOW CREATE` writes only forms that are safe to repeat (`CREATE OR REPLACE
-ENV`, `CREATE PLAYBOOK IF NOT EXISTS`, `USE ENV` with the full list), so the
-file converges instead of piling up. `CREATE PLAYBOOK IF NOT EXISTS … SET …`
+ENV`, `CREATE OR ALTER PLAYBOOK`, `USE ENV` with the full list), so the
+file converges instead of piling up. `CREATE OR ALTER PLAYBOOK … SET …`
 creates the playbook with those properties, or, when it exists, applies the
 `SET` list as `ALTER PLAYBOOK … SET` would; what is fixed at creation (`FROM`,
 `BRANCH`, `SUBDIR`, `LINK`) is only compared, and a different source is a
-warning. `SHOW CREATE` writes the launcher, login, memory and sandbox on the
+warning. `CREATE PLAYBOOK IF NOT EXISTS` leaves a playbook that exists as it
+is. `SHOW CREATE` writes the launcher, login, memory and sandbox on the
 `CREATE`, so one statement brings a playbook back to them. Credential-looking literals are written
 as comments and make it exit non-zero until you store them by reference
 (`--skip-secrets` accepts the output without them). `APPLY` validates every

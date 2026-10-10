@@ -140,11 +140,11 @@ func TestFoldStatements(t *testing.T) {
 	}
 }
 
-// CREATE PLAYBOOK IF NOT EXISTS on a playbook that exists applies its SET
-// list as an ALTER would, so its pairs fold as an ALTER's; on one that does
-// not, it creates, and starts the target afresh.
+// CREATE OR ALTER PLAYBOOK on a playbook that exists applies its SET list as
+// an ALTER would, so its pairs fold as an ALTER's; on one that does not, it
+// creates, and starts the target afresh. IF NOT EXISTS never folds.
 func TestFoldConvergingCreate(t *testing.T) {
-	src := "CREATE PLAYBOOK IF NOT EXISTS p FROM 'https://x/y' SET launcher = 'pp', model = 'a';\nALTER PLAYBOOK p SET model = 'b';"
+	src := "CREATE OR ALTER PLAYBOOK p FROM 'https://x/y' SET launcher = 'pp', model = 'a';\nALTER PLAYBOOK p SET model = 'b';"
 	if got, want := foldTextExisting(t, src, "p"), []string{"FROM; SET launcher | SET model by 1", "SET model"}; !slices.Equal(got, want) {
 		t.Errorf("existing: got %q, want %q", got, want)
 	}
@@ -153,12 +153,15 @@ func TestFoldConvergingCreate(t *testing.T) {
 	}
 	// Earlier writes do not fold into a CREATE that converges: it reads as
 	// a later ALTER, and wins.
-	src = "ALTER PLAYBOOK p SET model = 'a';\nCREATE PLAYBOOK IF NOT EXISTS p SET model = 'b';"
+	if got, want := foldTextExisting(t, "CREATE PLAYBOOK IF NOT EXISTS p SET model = 'a';\nALTER PLAYBOOK p SET model = 'b';", "p"), []string{"SET model", "SET model"}; !slices.Equal(got, want) {
+		t.Errorf("IF NOT EXISTS: got %q, want %q", got, want)
+	}
+	src = "ALTER PLAYBOOK p SET model = 'a';\nCREATE OR ALTER PLAYBOOK p SET model = 'b';"
 	if got, want := foldTextExisting(t, src, "p"), []string{"- | SET model by 1", "SET model"}; !slices.Equal(got, want) {
 		t.Errorf("earlier ALTER: got %q, want %q", got, want)
 	}
 	// After a DROP, the CREATE creates, whatever was there before.
-	src = "DROP PLAYBOOK p;\nCREATE PLAYBOOK IF NOT EXISTS p SET model = 'a';\nALTER PLAYBOOK p SET model = 'b';"
+	src = "DROP PLAYBOOK p;\nCREATE OR ALTER PLAYBOOK p SET model = 'a';\nALTER PLAYBOOK p SET model = 'b';"
 	if got, want := foldTextExisting(t, src, "p"), []string{"", "SET model", "SET model"}; !slices.Equal(got, want) {
 		t.Errorf("after a DROP: got %q, want %q", got, want)
 	}

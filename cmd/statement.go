@@ -129,7 +129,7 @@ type stmtRun struct {
 	// backedUp marks the files of plain config directories a run already
 	// backed up (TO '<dir>'): each is backed up once, before its first write.
 	backedUp map[string]bool
-	// exists: the ALTER being run is CREATE IF NOT EXISTS's SET list on a
+	// exists: the ALTER being run is CREATE OR ALTER's SET list on a
 	// playbook that exists, so "unchanged" says that it exists.
 	exists bool
 }

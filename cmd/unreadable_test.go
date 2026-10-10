@@ -53,7 +53,7 @@ func TestUnreadableManifestIsContained(t *testing.T) {
 		{"SHOW PLAYBOOK good", works, "good"},
 		{"SHOW PLAYBOOK good --json", works, `"launcher": "good"`},
 		{"EXPLAIN PLAYBOOK good", works, "ENV e"},
-		{"SHOW CREATE PLAYBOOK good", works, "CREATE PLAYBOOK IF NOT EXISTS good"},
+		{"SHOW CREATE PLAYBOOK good", works, "CREATE OR ALTER PLAYBOOK good"},
 		{"ALTER PLAYBOOK good SET VAR B=2", works, ""},
 		// Named, on the unreadable one: its read error.
 		{"SHOW PLAYBOOK bad", refused, badAt},

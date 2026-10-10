@@ -11,10 +11,10 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// CREATE PLAYBOOK IF NOT EXISTS on a playbook that exists applies its SET
-// list as ALTER … SET would, launcher included, and applied again changes
-// nothing. A dry run plans it and writes nothing.
-func TestCreateIfNotExistsConverges(t *testing.T) {
+// CREATE OR ALTER PLAYBOOK on a playbook that exists applies its SET list as
+// ALTER … SET would, launcher included, and applied again changes nothing.
+// A dry run plans it and writes nothing. IF NOT EXISTS leaves it as it is.
+func TestCreateOrAlterConverges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	has := func(cmd string) bool {
@@ -23,8 +23,14 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 	}
 	mustStmt(t, "CREATE PLAYBOOK cv SET launcher = 'cv1', model = 'a'")
 
-	file := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv\n  SET launcher = 'cv2', memory = 'shared', model = 'b', statusline.command = 'echo cv';\n")
+	// IF NOT EXISTS: the playbook exists, so nothing changes, its SET list
+	// included.
+	skip := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv SET launcher = 'cv2', model = 'b';\n")
 	before := snapshot(t, root)
+	if out, err := apply(t, skip); err != nil || !strings.Contains(out, "0 created, 0 changed, 1 unchanged") || snapshot(t, root) != before {
+		t.Fatalf("IF NOT EXISTS changed something: %v\n%s", err, out)
+	}
+	file := writePlaybookFile(t, "CREATE OR ALTER PLAYBOOK cv\n  SET launcher = 'cv2', memory = 'shared', model = 'b', statusline.command = 'echo cv';\n")
 	out, err := apply(t, file, "--dry-run")
 	if err != nil || !strings.Contains(out, "0 created, 1 changed, 0 unchanged") {
 		t.Fatalf("dry run: %v\n%s", err, out)
@@ -53,13 +59,13 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 		t.Fatalf("dry run again: %v\n%s", err, out)
 	}
 	// A CREATE with no SET list leaves it as it is.
-	if out := mustStmt(t, "CREATE PLAYBOOK IF NOT EXISTS cv"); !strings.Contains(out, "PLAYBOOK cv already exists; unchanged") {
+	if out := mustStmt(t, "CREATE OR ALTER PLAYBOOK cv"); !strings.Contains(out, "PLAYBOOK cv already exists; unchanged") {
 		t.Fatalf("no SET list:\n%s", out)
 	}
 	// SHOW CREATE is one converging statement per property list: applied to
 	// the playbook it describes, it changes nothing.
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK cv")
-	if !strings.Contains(created, "CREATE PLAYBOOK IF NOT EXISTS cv\n  SET launcher = 'cv2', login = 'shared', memory = 'shared', sandbox.always = false;") {
+	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK cv\n  SET launcher = 'cv2', login = 'shared', memory = 'shared', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -67,7 +73,7 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 	}
 	// What the playbook has but the list leaves out stays: converging is
 	// SET, never a reset.
-	if out, err := apply(t, writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv SET memory = 'isolated';\n")); err != nil || !strings.Contains(out, "0 created, 1 changed") {
+	if out, err := apply(t, writePlaybookFile(t, "CREATE OR ALTER PLAYBOOK cv SET memory = 'isolated';\n")); err != nil || !strings.Contains(out, "0 created, 1 changed") {
 		t.Fatalf("memory back: %v\n%s", err, out)
 	}
 	if s := settingsOf(t, filepath.Join(root, "cv")); s["model"] != "b" {
@@ -76,7 +82,7 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 	// The launcher the list gives where the playbook has another: a launcher
 	// change, which refuses a name another playbook answers to.
 	mustStmt(t, "CREATE PLAYBOOK other SET launcher = 'taken'")
-	if _, err := apply(t, writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv SET launcher = 'taken';\n")); err == nil || !strings.Contains(err.Error(), "taken") {
+	if _, err := apply(t, writePlaybookFile(t, "CREATE OR ALTER PLAYBOOK cv SET launcher = 'taken';\n")); err == nil || !strings.Contains(err.Error(), "taken") {
 		t.Fatalf("a taken launcher: %v", err)
 	}
 }

@@ -9,8 +9,7 @@ cpb DROP PLAYBOOK scratch --yes # gone, launcher and all
 
 The playbook is a directory with its own `CLAUDE.md`, `settings.json`, hooks,
 history and MCP servers; your `~/.claude` is untouched. Applying the file again
-changes nothing: `CREATE PLAYBOOK IF NOT EXISTS` never re-creates, and its
-`SET` list, applied to the playbook that exists, finds nothing to change.
+changes nothing: `CREATE PLAYBOOK IF NOT EXISTS` never re-creates.
 The same statement works on the command line: `cpb CREATE PLAYBOOK scratch`.
 
 Later, on the command line: `cpb ALTER PLAYBOOK scratch RENAME TO sandbox-lab`

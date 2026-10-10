@@ -67,7 +67,7 @@ func TestMemorySetting(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK m")
-	if !strings.Contains(created, "CREATE PLAYBOOK IF NOT EXISTS m\n  SET launcher = '', login = 'shared', memory = 'isolated', sandbox.always = false;") {
+	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK m\n  SET launcher = '', login = 'shared', memory = 'isolated', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {

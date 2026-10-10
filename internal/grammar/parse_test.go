@@ -105,6 +105,10 @@ var validCases = []struct {
 		w("CREATE PLAYBOOK toolkit-x FROM https://github.com/example/toolkit SET launcher = 'kx'"),
 		Stmt{Verb: Create, Object: Playbook, Name: "toolkit-x", Clauses: []Clause{
 			{Kind: From, Arg: "https://github.com/example/toolkit"}, {Kind: Launcher, Arg: "kx"}}}},
+	{"create or alter playbook",
+		w("CREATE OR ALTER PLAYBOOK p FROM repo SET model = m"),
+		Stmt{Verb: Create, Object: Playbook, Name: "p", OrAlter: true, Clauses: []Clause{
+			{Kind: From, Arg: "repo"}, {Kind: SetModel, Arg: "m"}}}},
 	{"create playbook if not exists with every option",
 		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist SET launcher = '', sandbox.always = true, login = isolated"),
 		Stmt{Verb: Create, Object: Playbook, Name: "second", IfNotExists: true, Clauses: []Clause{
@@ -202,10 +206,13 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("CREATE"), "CREATE needs an object"},
 		{w("CREATE PLAYBOOK"), "missing <playbook>"},
 		{w("CREATE PLAYBOOK branch"), `"branch" is a keyword and cannot name a playbook`},
+		{w("CREATE OR ALTER ENV e"), "OR ALTER applies to PLAYBOOK only"},
+		{w("CREATE OR ALTER PLAYBOOK IF NOT EXISTS p"), "OR ALTER and IF NOT EXISTS cannot be combined"},
+		{w("CREATE OR REPLACE PLAYBOOK p"), "CREATE OR ALTER PLAYBOOK applies the SET list"},
 		{w("CREATE ENV use"), `"use" is a keyword and cannot name an env set`},
 		{w("CREATE OR REPLACE PLAYBOOK x"), "OR REPLACE applies to ENV only"},
 		{w("CREATE OR REPLACE ENV IF NOT EXISTS e"), "cannot be combined"},
-		{w("CREATE OR ENV e"), "expected REPLACE after OR"},
+		{w("CREATE OR ENV e"), "expected REPLACE or ALTER after OR"},
 		{w("CREATE ENV IF e"), "expected NOT EXISTS after IF"},
 		{w("CREATE ENV bad/name"), "invalid env set name"},
 		{w("CREATE ENV e UNSET A"), "nothing to forget"},

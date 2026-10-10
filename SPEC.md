@@ -126,7 +126,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...]
+            | CREATE [OR ALTER] PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -195,7 +195,8 @@ read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> 
 ```
 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
-and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
+(an env set) or `OR ALTER` (a playbook) cannot be combined with `IF NOT
+EXISTS`; a playbook has one origin, `FROM` or `LINK`,
 and `BRANCH` / `SUBDIR` only with `FROM`; of the properties `LINK` takes
 only `launcher`. The clauses of `origin` and `SET` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal; `--yes` skips it.
@@ -227,13 +228,13 @@ forgets the playbook's own `FOO`.
 `IF NOT EXISTS` / `IF EXISTS` turn "already there" / "not there" into a no-op
 instead of an error; they sit before the name, as in ClickHouse.
 `CREATE OR REPLACE ENV` replaces the set's whole content.
-`CREATE PLAYBOOK IF NOT EXISTS` never re-clones an existing playbook, but it
-converges: on a playbook that exists, its `SET` list is applied as `ALTER
-PLAYBOOK … SET` would (the properties, then the launcher, each only where it
-differs), so the statement applied again changes nothing. What is fixed at
-creation (`FROM`, `BRANCH`, `SUBDIR`, `LINK`) is only compared; a different
-source is a warning (*Drift*). Without a `SET` list it leaves the playbook as
-it is.
+`CREATE PLAYBOOK IF NOT EXISTS` never re-clones an existing playbook, and
+leaves it as it is, its `SET` list included. `CREATE OR ALTER PLAYBOOK`
+converges: it creates the playbook, or, on one that exists, applies its `SET`
+list as `ALTER PLAYBOOK … SET` would (the properties, then the launcher,
+each only where it differs), so the statement applied again changes
+nothing. Either way, what is fixed at creation (`FROM`, `BRANCH`, `SUBDIR`,
+`LINK`) is only compared; a different source is a warning (*Drift*).
 
 `DROP ENV` is refused while a playbook or `DEFAULTS` uses the set; the error
 lists the users.
@@ -598,9 +599,10 @@ secret_helper = '<command>'`, `DELETE secret_helper`; see *Secrets*).
 - **Defaults.** `DELETE` restores the default, and is for `ALTER` only. A
   new playbook gets every default its `SET` does not name, so a new
   playbook's memory is isolated. An existing playbook keeps what it has:
-  nothing is migrated. `CREATE PLAYBOOK IF NOT EXISTS` on a playbook that
-  exists applies its `SET` list, each pair only where it differs, and
-  leaves every key the list does not name as it is.
+  nothing is migrated. `CREATE OR ALTER PLAYBOOK` on a playbook that exists
+  applies its `SET` list, each pair only where it differs, and leaves every
+  key the list does not name as it is; `CREATE PLAYBOOK IF NOT EXISTS`
+  changes nothing.
 - **`SET IF UNSET`** takes any property, and applies whole or not at all:
   only when none of the keys it names is set, a key being unset at the
   value `DELETE` gives it (no value at all for `model`, `sandbox.host` and
@@ -1735,7 +1737,7 @@ CREATE OR REPLACE ENV claude-default
 
 ALTER DEFAULTS USE ENV claude-default;
 
-CREATE PLAYBOOK IF NOT EXISTS work
+CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
   SET launcher = 'w', login = 'shared', memory = 'isolated', sandbox.always = false;
@@ -1762,7 +1764,7 @@ File rules:
   non-zero, unless `--skip-secrets` is given. Plain text never travels in a
   playbook file.
 - **Idempotent.** `SHOW CREATE` emits only idempotent forms (`CREATE OR
-  REPLACE ENV`, `CREATE PLAYBOOK IF NOT EXISTS … SET …`, which converges,
+  REPLACE ENV`, `CREATE OR ALTER PLAYBOOK … SET …`, which converges,
   `USE ENV` with the full list), so applying a file twice changes nothing
   the second time.
 - **Machine-specific parts stay explicit.** `LINK <dir>` and the sandbox are
@@ -1805,7 +1807,7 @@ drops only the replaced entries.
 | the model; the agent | `SET` / `DELETE model`; `SET` / `DELETE agent` |
 | the status line; its refresh | `SET statusline.command = '<command>'`, `DELETE statusline`; `SET` / `DELETE statusline.refresh`, and `statusline.refresh` beside `statusline.command` |
 | a sandbox setting `k` (`always` included) | `SET sandbox.k = …`, `DELETE sandbox.k`, `DELETE sandbox` |
-| a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`, or in the `SET` list of a `CREATE PLAYBOOK IF NOT EXISTS` whose playbook exists before the run (it applies as an `ALTER` would); a `CREATE` that creates is never dropped from |
+| a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`, or in the `SET` list of a `CREATE OR ALTER PLAYBOOK` whose playbook exists before the run (it applies as an `ALTER` would); a `CREATE` that creates is never dropped from |
 | the env sets | `USE ENV` |
 
 - **A clause that depends on what it finds** replaces nothing: `SET IF
@@ -1814,7 +1816,7 @@ drops only the replaced entries.
   `REVERT STATUSLINE`, which reads the history that every earlier status line
   writes, so no status line clause before it is dropped.
 - **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh,
-  except a `CREATE PLAYBOOK IF NOT EXISTS` on a playbook that exists before
+  except a `CREATE OR ALTER PLAYBOOK` on a playbook that exists before
   the run: its `SET` list folds as an `ALTER`'s.
 - **Every other clause is never dropped:** marketplaces, plugins, MCP
   servers, skills, the model picker.
@@ -1827,10 +1829,11 @@ drops only the replaced entries.
   and the live configuration never holds a value that a later file replaces.
 
 **Source drift is a warning, never an error**. When
-`CREATE PLAYBOOK IF NOT EXISTS x FROM <source> [BRANCH b] [SUBDIR d]` meets an
-existing `x` whose recorded source, branch or subdirectory differs, `APPLY`
-reports `PLAYBOOK x exists; source differs (installed <…>, file says <…>)`
-and changes no source (its `SET` list still applies); `--dry-run` shows it
+`CREATE PLAYBOOK IF NOT EXISTS x FROM <source> [BRANCH b] [SUBDIR d]` (or
+`CREATE OR ALTER PLAYBOOK x FROM …`) meets an existing `x` whose recorded
+source, branch or subdirectory differs, `APPLY` reports `PLAYBOOK x exists;
+source differs (installed <…>, file says <…>)` and changes no source (an
+`OR ALTER`'s `SET` list still applies); `--dry-run` shows it
 too, and the summary counts the warnings. The exit code stays 0 when that is the only issue: moving an
 install to another source is `DROP PLAYBOOK` and `CREATE PLAYBOOK`, a
 deliberate step.

@@ -172,6 +172,7 @@ type Stmt struct {
 
 	ShowCreate  bool // SHOW CREATE ...
 	OrReplace   bool // CREATE OR REPLACE ENV
+	OrAlter     bool // CREATE OR ALTER PLAYBOOK: its SET list converges on a playbook that exists
 	IfNotExists bool // CREATE ... IF NOT EXISTS
 	IfExists    bool // DROP ... IF EXISTS
 

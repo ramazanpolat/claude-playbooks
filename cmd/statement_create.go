@@ -183,7 +183,7 @@ func createDefaultsBlocks(dir string) (helper, defaults createBlock, err error) 
 }
 
 func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
-	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook, Name: pb.Name, IfNotExists: true}
+	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook, Name: pb.Name, OrAlter: true}
 	v := describePlaybook(pb)
 	m := pb.Manifest
 	switch {
@@ -211,8 +211,8 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	// The properties SHOW CREATE always writes, so a recipe never leans on
 	// a default: login and memory, and sandbox.always with the table's
 	// other set keys (a sandboxed playbook's login is isolated). On the
-	// CREATE, which applies them to a playbook that exists too (CREATE IF
-	// NOT EXISTS converges). A linked playbook's manifest and settings.json
+	// CREATE, which applies them to a playbook that exists too (CREATE OR
+	// ALTER converges). A linked playbook's manifest and settings.json
 	// are the target's.
 	sandboxed := v.Sandbox.Always && v.Linked == nil
 	if v.Linked == nil {

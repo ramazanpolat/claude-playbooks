@@ -460,10 +460,14 @@ func (p *parser) statement() (*Stmt, *Error) {
 
 func (p *parser) create(s *Stmt) *Error {
 	if p.kw("OR") != "" {
-		if p.kw("REPLACE") == "" {
-			return p.fail("expected REPLACE after OR")
+		switch p.kw("REPLACE", "ALTER") {
+		case "":
+			return p.fail("expected REPLACE or ALTER after OR")
+		case "REPLACE":
+			s.OrReplace = true
+		case "ALTER":
+			s.OrAlter = true
 		}
-		s.OrReplace = true
 	}
 	switch p.kw("PLAYBOOK", "ENV") {
 	case "":
@@ -474,13 +478,19 @@ func (p *parser) create(s *Stmt) *Error {
 		s.Object = Env
 	}
 	if s.OrReplace && s.Object == Playbook {
-		return errAt(s.Pos, "OR REPLACE applies to ENV only: a playbook is never re-created in place")
+		return errAt(s.Pos, "OR REPLACE applies to ENV only: a playbook is never re-created in place; CREATE OR ALTER PLAYBOOK applies the SET list to one that exists")
+	}
+	if s.OrAlter && s.Object == Env {
+		return errAt(s.Pos, "OR ALTER applies to PLAYBOOK only: CREATE OR REPLACE ENV states a set whole")
 	}
 	if err := p.ifNotExists(s); err != nil {
 		return err
 	}
 	if s.OrReplace && s.IfNotExists {
 		return errAt(s.Pos, "OR REPLACE and IF NOT EXISTS cannot be combined")
+	}
+	if s.OrAlter && s.IfNotExists {
+		return errAt(s.Pos, "OR ALTER and IF NOT EXISTS cannot be combined: OR ALTER keeps a playbook that exists, and applies its SET list")
 	}
 	name, err := p.name(s.Object, true)
 	if err != nil {

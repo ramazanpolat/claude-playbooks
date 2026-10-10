@@ -97,6 +97,9 @@ func (s *Stmt) headWords() []string {
 		if s.OrReplace {
 			w = append(w, "OR", "REPLACE")
 		}
+		if s.OrAlter {
+			w = append(w, "OR", "ALTER")
+		}
 		w = append(w, string(s.Object))
 		if s.IfNotExists {
 			w = append(w, "IF", "NOT", "EXISTS")

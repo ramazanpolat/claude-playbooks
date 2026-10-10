@@ -56,15 +56,16 @@
 
 ### Changed
 
-- **`CREATE PLAYBOOK IF NOT EXISTS … SET …` converges** (SPEC.md, *Grammar*,
-  *Playbook properties*): on a playbook that exists it applies its `SET`
-  list as `ALTER PLAYBOOK … SET` would (the properties, then the launcher,
-  each only where it differs), where it used to change nothing. `FROM`,
-  `BRANCH`, `SUBDIR` and `LINK` are only compared, and a different source
-  stays a warning. Applied again, it changes nothing. `APPLY` folds its
-  pairs as an `ALTER`'s when the playbook exists before the run, and `SHOW
-  CREATE` writes the launcher, login, memory and sandbox on the `CREATE`:
-  one converging statement.
+- **`CREATE OR ALTER PLAYBOOK … SET …` converges** (SPEC.md, *Grammar*,
+  *Playbook properties*): it creates the playbook, or, on one that exists,
+  applies its `SET` list as `ALTER PLAYBOOK … SET` would (the properties,
+  then the launcher, each only where it differs). `FROM`, `BRANCH`, `SUBDIR`
+  and `LINK` are only compared, and a different source stays a warning.
+  Applied again, it changes nothing. `CREATE PLAYBOOK IF NOT EXISTS` keeps
+  SQL's meaning: on a playbook that exists it changes nothing. `APPLY` folds
+  an `OR ALTER`'s pairs as an `ALTER`'s when the playbook exists before the
+  run, and `SHOW CREATE` writes `CREATE OR ALTER PLAYBOOK` with the launcher,
+  login, memory and sandbox: one converging statement.
 - **`SET IF UNSET` takes any property** and applies whole or not at all:
   only when none of the keys it names is set (each at the value `DELETE`
   gives it); otherwise it changes nothing and prints `PLAYBOOK x: <key> is

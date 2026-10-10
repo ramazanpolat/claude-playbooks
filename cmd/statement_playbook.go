@@ -77,17 +77,23 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 // sandbox.always are written by the creation itself, before the login is
 // linked and the launcher registered; the rest (model, agent, the status
 // line, the other sandbox keys) then by an ALTER of the new playbook, within
-// the same statement. On an existing playbook, IF NOT EXISTS applies the SET
-// list as an ALTER (convergePlaybook): what is fixed at creation is only
-// compared.
+// the same statement. On an existing playbook, CREATE OR ALTER applies the
+// SET list as an ALTER (convergePlaybook), and IF NOT EXISTS changes
+// nothing; what is fixed at creation is only compared.
 func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
-	if st.IfNotExists {
+	if st.OrAlter || st.IfNotExists {
 		pb, exists, err := r.findPlaybook(st.Name)
 		if err != nil {
 			return err
 		}
-		if exists {
+		switch {
+		case exists && st.OrAlter:
 			return convergePlaybook(r, st, pb)
+		case exists:
+			warnDrift(r, st, pb)
+			r.outcome = outUnchanged
+			r.say("PLAYBOOK "+st.Name+" already exists; unchanged", nil)
+			return nil
 		}
 	}
 	var after []grammar.Clause
@@ -139,27 +145,14 @@ func (r *stmtRun) findPlaybook(name string) (pb *playbook.Playbook, exists bool,
 	return pb, exists, nil
 }
 
-// convergePlaybook is CREATE PLAYBOOK IF NOT EXISTS on a playbook that
-// exists: its SET list is applied as ALTER … SET, the properties first and
-// then the launcher (which stands alone, as in ALTER), each only where it
-// differs, so a statement applied again changes nothing. FROM, BRANCH,
-// SUBDIR and LINK are fixed at creation: a source that differs is a warning,
-// never a change.
+// convergePlaybook is CREATE OR ALTER PLAYBOOK on a playbook that exists:
+// its SET list is applied as ALTER … SET, the properties first and then the
+// launcher (which stands alone, as in ALTER), each only where it differs,
+// so a statement applied again changes nothing. FROM, BRANCH, SUBDIR and
+// LINK are fixed at creation: a source that differs is a warning, never a
+// change.
 func convergePlaybook(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) error {
-	o := createOptionsOf(st)
-	// Drift: the file names another source than the install records.
-	if pb != nil && o.from != "" {
-		var have string
-		if m := pb.Manifest; m != nil && m.Source != nil {
-			have = describeSource(m.Source.Repository, m.Source.Branch, m.Source.Subdir)
-		}
-		if want := describeSource(o.from, o.branch, o.subdir); have != want {
-			if have == "" {
-				have = "no recorded source"
-			}
-			r.warn(warnSourceDrift, fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want))
-		}
-	}
+	warnDrift(r, st, pb)
 	var props, launch []grammar.Clause
 	for _, c := range st.Clauses {
 		switch c.Kind {
@@ -193,6 +186,25 @@ func convergePlaybook(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) error
 		r.say("PLAYBOOK "+st.Name+" already exists; unchanged", nil)
 	}
 	return nil
+}
+
+// warnDrift warns when a CREATE names another source than the install
+// records: a warning, never an error, and the source is never changed.
+func warnDrift(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) {
+	o := createOptionsOf(st)
+	if pb == nil || o.from == "" {
+		return
+	}
+	var have string
+	if m := pb.Manifest; m != nil && m.Source != nil {
+		have = describeSource(m.Source.Repository, m.Source.Branch, m.Source.Subdir)
+	}
+	if want := describeSource(o.from, o.branch, o.subdir); have != want {
+		if have == "" {
+			have = "no recorded source"
+		}
+		r.warn(warnSourceDrift, fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want))
+	}
 }
 
 // launcherWanted is the launcher a launcher clause gives: a command name,
@@ -235,7 +247,7 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 	o := createOptionsOf(st)
 	if r.dryRun {
 		if exists {
-			return fmt.Errorf("playbook %q already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)", st.Name)
+			return fmt.Errorf("playbook %q already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it, or CREATE OR ALTER PLAYBOOK to apply the SET list to it)", st.Name)
 		}
 		if o.link != "" {
 			if abs, err := filepath.Abs(o.link); err != nil || !manifest.Exists(abs) {
