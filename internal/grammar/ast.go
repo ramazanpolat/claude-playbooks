@@ -94,13 +94,13 @@ const (
 
 	// Tool permissions, status line and model (ALTER PLAYBOOK only): keys
 	// of the playbook's settings.json, which Claude Code has no CLI for.
-	AllowTool       Kind = "ALLOW TOOL"        // ALLOW TOOL '<rule>' ...
-	DenyTool        Kind = "DENY TOOL"         // DENY TOOL '<rule>' ...
-	UnsetTool       Kind = "UNSET TOOL"        // UNSET TOOL '<rule>' ...
-	SetStatusline   Kind = "SET statusline"    // SET [IF UNSET] statusline = '<command>'[, statusline_refresh = <n>]
-	UnsetStatusline Kind = "DELETE statusline" // DELETE statusline
-	SetModel        Kind = "SET model"         // SET model = '<model>'
-	UnsetModel      Kind = "DELETE model"      // DELETE model
+	AllowTool       Kind = "ALLOW TOOL"             // ALLOW TOOL '<rule>' ...
+	DenyTool        Kind = "DENY TOOL"              // DENY TOOL '<rule>' ...
+	UnsetTool       Kind = "UNSET TOOL"             // UNSET TOOL '<rule>' ...
+	SetStatusline   Kind = "SET statusline.command" // SET statusline.command = '<command>'[, statusline.refresh = <n>]
+	UnsetStatusline Kind = "DELETE statusline"      // DELETE statusline (or statusline.command): the whole status line
+	SetModel        Kind = "SET model"              // SET model = '<model>'
+	UnsetModel      Kind = "DELETE model"           // DELETE model
 
 	// Skills (ALTER PLAYBOOK only): <config>/skills/<name>.
 	AddSkill  Kind = "ADD SKILL"  // ADD SKILL n FROM <source> [BRANCH <ref>] [SUBDIR <dir>]
@@ -108,8 +108,8 @@ const (
 
 	// The model picker (v3.22.0): settings.json modelPicker.
 	// The status line's refresh (v3.23.0): statusLine.refreshInterval.
-	SetStatuslineRefresh   Kind = "SET statusline_refresh" // SET statusline_refresh = <n>
-	UnsetStatuslineRefresh Kind = "DELETE statusline_refresh"
+	SetStatuslineRefresh   Kind = "SET statusline.refresh" // SET statusline.refresh = <n>
+	UnsetStatuslineRefresh Kind = "DELETE statusline.refresh"
 	// SetStatuslinePrevious: REVERT STATUSLINE, the status line cpb
 	// replaced last, from its history.
 	SetStatuslinePrevious Kind = "REVERT STATUSLINE"
@@ -117,8 +117,12 @@ const (
 	AddModel             Kind = "ADD MODEL"                // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
 	DropModel            Kind = "DROP MODEL"               // DROP MODEL '<id>'
 	SetModelPicker       Kind = "SET model_picker.mode"    // SET model_picker.mode = 'only' | 'append' (Arg ONLY or APPEND)
-	UnsetModelPicker     Kind = "DELETE model_picker"      // DELETE model_picker: the whole picker, rows too
-	UnsetModelPickerMode Kind = "DELETE model_picker.mode" // DELETE model_picker.mode: the mode only
+	UnsetModelPickerMode Kind = "DELETE model_picker.mode" // DELETE model_picker[.mode]: the mode only; DROP MODEL removes rows
+
+	// SetIfUnset: SET IF UNSET k = v, …, whose pairs are the clauses in
+	// Group. It applies whole, and only when none of its keys is set (each
+	// at the value DELETE gives it); else it changes nothing.
+	SetIfUnset Kind = "SET IF UNSET"
 )
 
 // Skill is where an ADD SKILL takes a skill from: a directory (linked) or a
@@ -218,12 +222,13 @@ type Clause struct {
 	MCP   *MCP       // ADD MCP SERVER
 	Skill *Skill     // ADD SKILL
 	Row   *PickerRow // ADD MODEL
-	// Refresh: SET STATUSLINE … REFRESH <n> and SET STATUSLINE REFRESH <n>,
-	// whole seconds (0: not given).
+	// Refresh: statusline.refresh, whole seconds (0: not given).
 	Refresh int
-	// IfUnset: SET IF UNSET statusline = …, which applies only to a config
-	// dir with no status line yet.
+	// IfUnset marks the SET IF UNSET list as parsed, before
+	// desugarProperties makes it a SetIfUnset clause; Group holds that
+	// clause's pairs, as the clauses they became.
 	IfUnset bool
+	Group   []Clause
 
 	Pos Pos
 }

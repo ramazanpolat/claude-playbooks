@@ -11,7 +11,7 @@ func TestParseSettingsClauses(t *testing.T) {
   ALLOW TOOL 'Bash(toolkit-helper *)' 'mcp__sentry'
   DENY TOOL 'Bash(rm -rf *)'
   UNSET TOOL 'Read(~/x)'
-  SET statusline = '~/bin/status.sh --short'
+  SET statusline.command = '~/bin/status.sh --short'
   SET model = 'claude-opus-5-5';`)
 	if err != nil {
 		t.Fatal(err)

@@ -30,7 +30,7 @@ nothing. Both marketplaces are directories beside the files:
   reviewer's prompt is the main thread's system prompt.
 - `ALLOW TOOL` lets the agent run `git diff` and `git log` without asking.
   A plugin cannot grant permissions, so the playbook does.
-- `SET IF UNSET statusline = '…'` offers a status line without replacing one you
+- `SET IF UNSET statusline.command = '…'` offers a status line without replacing one you
   set yourself ([example 17](../17-statusline-if-unset/)).
 - The team plugin's SessionStart hook adds its line of context. It sets no
   agent, so the reviewer stays the main thread and both layers reach the

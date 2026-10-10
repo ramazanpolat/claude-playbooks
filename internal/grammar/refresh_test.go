@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseStatuslineRefresh(t *testing.T) {
-	st, err := ParseLine("ALTER PLAYBOOK k SET statusline = 'bash sl.sh', statusline_refresh = 10")
+	st, err := ParseLine("ALTER PLAYBOOK k SET statusline.command = 'bash sl.sh', statusline.refresh = 10")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,14 +19,14 @@ func TestParseStatuslineRefresh(t *testing.T) {
 		t.Fatalf("round trip %q: %v", st.String(), err)
 	}
 	for line, want := range map[string]Clause{
-		"ALTER PLAYBOOK k SET statusline_refresh = 5":                            {Kind: SetStatuslineRefresh, Refresh: 5},
-		"ALTER PLAYBOOK k DELETE statusline_refresh":                             {Kind: UnsetStatuslineRefresh},
-		"ALTER PLAYBOOK k DELETE statusline":                                     {Kind: UnsetStatusline},
-		"ALTER PLAYBOOK k SET statusline = 'x'":                                  {Kind: SetStatusline, Arg: "x"},
-		"ALTER PLAYBOOK k SET statusline = 'refresh'":                            {Kind: SetStatusline, Arg: "refresh"},
-		"ALTER PLAYBOOK k SET IF UNSET statusline = 'x'":                         {Kind: SetStatusline, Arg: "x", IfUnset: true},
-		"ALTER PLAYBOOK k SET IF UNSET statusline = 'x', statusline_refresh = 5": {Kind: SetStatusline, Arg: "x", Refresh: 5, IfUnset: true},
-		"ALTER PLAYBOOK k SET statusline = 'x' SET statusline_refresh = 5":       {Kind: SetStatusline, Arg: "x", Refresh: 5},
+		"ALTER PLAYBOOK k SET statusline.refresh = 5":                                    {Kind: SetStatuslineRefresh, Refresh: 5},
+		"ALTER PLAYBOOK k DELETE statusline.refresh":                                     {Kind: UnsetStatuslineRefresh},
+		"ALTER PLAYBOOK k DELETE statusline":                                             {Kind: UnsetStatusline},
+		"ALTER PLAYBOOK k SET statusline.command = 'x'":                                  {Kind: SetStatusline, Arg: "x"},
+		"ALTER PLAYBOOK k SET statusline.command = 'refresh'":                            {Kind: SetStatusline, Arg: "refresh"},
+		"ALTER PLAYBOOK k SET IF UNSET statusline.command = 'x'":                         {Kind: SetIfUnset, Group: []Clause{{Kind: SetStatusline, Arg: "x"}}},
+		"ALTER PLAYBOOK k SET IF UNSET statusline.command = 'x', statusline.refresh = 5": {Kind: SetIfUnset, Group: []Clause{{Kind: SetStatusline, Arg: "x", Refresh: 5}}},
+		"ALTER PLAYBOOK k SET statusline.command = 'x' SET statusline.refresh = 5":       {Kind: SetStatusline, Arg: "x", Refresh: 5},
 	} {
 		st, err := ParseLine(line)
 		if err != nil || !reflect.DeepEqual(strip(st).Clauses, []Clause{want}) {
@@ -37,14 +37,15 @@ func TestParseStatuslineRefresh(t *testing.T) {
 
 func TestStatuslineRefreshErrors(t *testing.T) {
 	for line, want := range map[string]string{
-		"ALTER PLAYBOOK k SET statusline_refresh = 0":                               "at least 1",
-		"ALTER PLAYBOOK k SET statusline_refresh = 10s":                             "with no unit",
-		"ALTER PLAYBOOK k SET statusline_refresh = -3":                              "whole number",
-		"ALTER PLAYBOOK k SET statusline = 'x', statusline_refresh = 2.5":           "whole number",
-		"ALTER PLAYBOOK k SET statusline_refresh = 5 DELETE statusline_refresh":     "statusline_refresh is named twice",
-		"ALTER PLAYBOOK k SET statusline_refresh = 5 SET statusline_refresh = 6":    "statusline_refresh is named twice",
-		"ALTER PLAYBOOK k SET statusline = 'x' SET IF UNSET statusline_refresh = 5": "IF UNSET applies to both",
-		"ALTER PLAYBOOK k DELETE statusline DELETE statusline_refresh":              "cannot be combined",
+		"ALTER PLAYBOOK k SET statusline.refresh = 0":                             "at least 1",
+		"ALTER PLAYBOOK k SET statusline.refresh = 10s":                           "with no unit",
+		"ALTER PLAYBOOK k SET statusline.refresh = -3":                            "whole number",
+		"ALTER PLAYBOOK k SET statusline.command = 'x', statusline.refresh = 2.5": "whole number",
+		"ALTER PLAYBOOK k SET statusline.refresh = 5 DELETE statusline.refresh":   "statusline.refresh is named twice",
+		"ALTER PLAYBOOK k SET statusline.refresh = 5 SET statusline.refresh = 6":  "statusline.refresh is named twice",
+		"ALTER PLAYBOOK k DELETE statusline DELETE statusline.refresh":            "statusline.refresh is named twice",
+		"ALTER PLAYBOOK k DELETE statusline.command, statusline":                  "statusline is named twice",
+		"ALTER PLAYBOOK k SET statusline = 'x'":                                   "statusline is a table",
 	} {
 		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", line, err, want)
@@ -52,13 +53,14 @@ func TestStatuslineRefreshErrors(t *testing.T) {
 	}
 }
 
-// IF UNSET round-trips, and IF takes only UNSET.
+// SET IF UNSET takes any property, as one clause that applies whole or not
+// at all; it round-trips, and IF takes only UNSET.
 func TestStatuslineIfUnset(t *testing.T) {
-	st, err := ParseLine("ALTER PLAYBOOK k SET IF UNSET statusline = 'bash sl.sh', statusline_refresh = 10")
+	st, err := ParseLine("ALTER PLAYBOOK k SET IF UNSET statusline.command = 'bash sl.sh', statusline.refresh = 10")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := st.String(); !strings.Contains(got, "SET IF UNSET statusline = 'bash sl.sh', statusline_refresh = 10") {
+	if got := st.String(); !strings.Contains(got, "SET IF UNSET statusline.command = 'bash sl.sh', statusline.refresh = 10") {
 		t.Fatalf("format: %s", got)
 	}
 	again, err := ParseFile(st.String())
@@ -66,13 +68,29 @@ func TestStatuslineIfUnset(t *testing.T) {
 		t.Fatalf("round trip %q: %v", st.String(), err)
 	}
 	for line, want := range map[string]string{
-		"ALTER PLAYBOOK k SET statusline = 'x' IF UNSET":       "IF UNSET goes right after SET",
-		"ALTER PLAYBOOK k SET IF statusline = 'x'":             "expected UNSET after IF",
-		"ALTER PLAYBOOK k SET IF UNSET model = 'm'":            "IF UNSET takes the status line",
-		"ALTER PLAYBOOK k SET IF UNSET statusline_refresh = 5": "IF UNSET takes the status line",
+		"ALTER PLAYBOOK k SET statusline.command = 'x' IF UNSET": "IF UNSET goes right after SET",
+		"ALTER PLAYBOOK k SET IF statusline.command = 'x'":       "expected UNSET after IF",
+		"ALTER PLAYBOOK k SET IF UNSET model = 'm', model = 'n'": "model is named twice",
+		"ALTER PLAYBOOK k SET IF UNSET model = 'm' DELETE model": "model is named twice",
 	} {
 		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", line, err, want)
+		}
+	}
+	for _, line := range []string{
+		"ALTER PLAYBOOK k SET IF UNSET model = 'm', agent = 'a', sandbox.host = 'me@box', memory = 'shared'",
+		"ALTER PLAYBOOK k SET IF UNSET statusline.refresh = 5 SET VAR A=1 SET IF UNSET launcher = 'kk'",
+	} {
+		st, err := ParseLine(line)
+		if err != nil {
+			t.Fatalf("%s: %v", line, err)
+		}
+		if st.Clauses[0].Kind != SetIfUnset || len(st.Clauses[0].Group) == 0 {
+			t.Errorf("%s: %+v", line, st.Clauses)
+		}
+		again, err := ParseFile(st.String())
+		if err != nil || !reflect.DeepEqual(strip(again[0]), strip(st)) {
+			t.Errorf("round trip %q: %v", st.String(), err)
 		}
 	}
 }

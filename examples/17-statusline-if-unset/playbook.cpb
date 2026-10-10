@@ -2,4 +2,4 @@
 -- IF UNSET applies only where no status line is set yet, so a recipe can
 -- offer a bar without replacing the one you chose.
 CREATE PLAYBOOK IF NOT EXISTS barred SET launcher = '';
-ALTER PLAYBOOK barred SET IF UNSET statusline = 'date +%H:%M', statusline_refresh = 10;
+ALTER PLAYBOOK barred SET IF UNSET statusline.command = 'date +%H:%M', statusline.refresh = 10;

@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -26,14 +25,18 @@ func init() {
 		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "DEFAULTS", "ALL",
 		"SET", "VAR", "FROM", "BLOCK", "UNSET", "DESCRIBE",
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
-		"RENAME", "TO", "LAUNCHER", "NO",
-		"BRANCH", "SUBDIR", "LINK", "SANDBOX",
-		"SECRET", "HELPER", "AS", "PLAINTEXT",
-		"INCLUDE", "MARKETPLACE", "PLUGIN", "AGENT",
+		"RENAME", "TO",
+		"BRANCH", "SUBDIR", "LINK",
+		"AS", "PLAINTEXT",
+		"INCLUDE", "MARKETPLACE", "PLUGIN",
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
-		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
+		"LABEL", "DESCRIPTION", "BEHAVES",
 		"DELETE", "REVERT",
+		// The words of removed clauses (LAUNCHER, NO LAUNCHER, SANDBOX, SET
+		// AGENT, SET SECRET HELPER, MODEL PICKER ONLY|APPEND, REFRESH) are
+		// not reserved: they only trigger the hint that names the new form,
+		// so a name or a launcher may be one of them.
 	} {
 		keywords[w] = true
 	}
@@ -172,9 +175,9 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "DELETE", "REVERT"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "DELETE", "REVERT"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET", "DELETE"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SET", "DELETE"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "DELETE"}
 )
 
 var (
@@ -785,6 +788,9 @@ func (p *parser) envClause() (*Clause, *Error) {
 
 func (p *parser) playbookClause() (*Clause, *Error) {
 	c := &Clause{Pos: p.pos()}
+	if hint := removedClauseHint(p); hint != "" {
+		return nil, p.fail(hint)
+	}
 	switch w := p.kw(alterPlaybookStarters...); w {
 	case "":
 		return nil, p.unexpected()
@@ -819,10 +825,15 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			// clause keyword (model, ADD MODEL).
 			c.Kind = SetProperties
 			return c, p.playbookProperties(c, "SET", true)
+		case p.atVarPair():
+			// SET MODEL=glm-5.3: a variable that lost its VAR, never the
+			// model property (keys are lowercase).
+			k, _, _ := strings.Cut(p.toks[p.i].Text, "=")
+			return nil, p.fail(k + " is not a playbook property; a variable is SET VAR " + k + "=<value>")
 		case p.at("IF"):
 			p.i++
 			if p.kw("UNSET") == "" {
-				return nil, p.fail("expected UNSET after IF: SET IF UNSET statusline = '<command>'")
+				return nil, p.fail("expected UNSET after IF: SET IF UNSET <key> = '<value>', …")
 			}
 			c.Kind, c.IfUnset = SetProperties, true
 			return c, p.playbookProperties(c, "SET IF UNSET", true)
@@ -931,10 +942,6 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		name, err := p.name(Playbook, true)
 		c.Arg = name
 		return c, err
-	case "LAUNCHER":
-		return nil, errAt(c.Pos, removedLauncher)
-	case "NO":
-		return nil, errAt(c.Pos, removedNoLauncher)
 	}
 	return nil, nil
 }
@@ -1017,8 +1024,8 @@ func (p *parser) addEnvRest(c *Clause) *Error {
 
 func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	c := &Clause{Pos: p.pos()}
-	if p.at("ISOLATED") {
-		return nil, p.fail(removedLogin)
+	if hint := removedClauseHint(p); hint != "" {
+		return nil, p.fail(hint)
 	}
 	w := p.kw(createPlaybookStarters...)
 	switch w {
@@ -1030,12 +1037,6 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		t, err := p.take(w, ph)
 		c.Arg = t.Text
 		return c, err
-	case "LAUNCHER":
-		return nil, errAt(c.Pos, removedLauncher)
-	case "NO":
-		return nil, errAt(c.Pos, removedNoLauncher)
-	case "SANDBOX":
-		return nil, errAt(c.Pos, removedSandbox)
 	case "SET":
 		c.Kind = SetProperties
 		return c, p.playbookProperties(c, "SET", true)
@@ -1109,6 +1110,19 @@ func (p *parser) set(c *Clause) *Error {
 }
 
 // at reports whether the next token is the unquoted keyword w.
+// atVarPair reports a variable's K=V (or K = V) where a property pair
+// belongs: a key in capitals, then =.
+func (p *parser) atVarPair() bool {
+	if p.atEnd() || p.toks[p.i].Quoted {
+		return false
+	}
+	k, _, cut := strings.Cut(p.toks[p.i].Text, "=")
+	if !isVarName(k) {
+		return false
+	}
+	return cut || (p.i+1 < len(p.toks) && strings.HasPrefix(p.toks[p.i+1].Text, "="))
+}
+
 func (p *parser) at(w string) bool {
 	return !p.atEnd() && !p.toks[p.i].Quoted && strings.EqualFold(p.toks[p.i].Text, w)
 }
@@ -1176,11 +1190,11 @@ func validate(s *Stmt) *Error {
 		Launcher: true, NoLauncher: true, DefaultLauncher: true, From: true, Branch: true, Subdir: true, Link: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
-		SetModelPicker: true, UnsetModelPicker: true,
+		SetModelPicker: true, UnsetModelPickerMode: true,
 		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true, SetStatuslinePrevious: true,
 	}
 	settings := map[string]bool{}
-	for _, c := range s.Clauses {
+	for _, c := range Flatten(s.Clauses) {
 		if _, dup := seen[c.Kind]; dup && once[c.Kind] {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
 		}
@@ -1229,15 +1243,19 @@ func validate(s *Stmt) *Error {
 		}
 	}
 	pairs := [][2]Kind{{Launcher, NoLauncher}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
-		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPicker},
-		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
+		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPickerMode},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
 		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
 		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
 		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
+	// Pairs are judged clause by clause: a SET IF UNSET is one clause, and
+	// its pairs never conflict with each other (mergeStatusline).
+	top := map[Kind]bool{}
+	for _, c := range s.Clauses {
+		top[c.Kind] = true
+	}
 	for _, pr := range pairs {
-		_, a := seen[pr[0]]
-		_, b := seen[pr[1]]
+		a, b := top[pr[0]], top[pr[1]]
 		if a && b {
 			return errAt(s.Pos, string(pr[0])+" and "+string(pr[1])+" cannot be combined")
 		}
@@ -1246,8 +1264,8 @@ func validate(s *Stmt) *Error {
 	// needs login = 'isolated', which it never sets on its own. A CREATE
 	// says so in the same statement; an ALTER is checked against the
 	// playbook too, when it runs.
-	if pos, on := sandboxAlwaysOn(s.Clauses); on {
-		login, ok := PropertyValue(s.Clauses, "login")
+	if pos, on := sandboxAlwaysOn(Flatten(s.Clauses)); on {
+		login, ok := PropertyValue(Flatten(s.Clauses), "login")
 		switch {
 		case ok && login == "shared":
 			return errAt(pos, "sandbox.always = true cannot be combined with login = 'shared': a sandbox shares no login with the machine")
@@ -1635,20 +1653,6 @@ func (p *parser) toolRules(what string) ([]string, *Error) {
 		}
 		return nil
 	})
-}
-
-// refreshSeconds reads the <n> of REFRESH: a whole number of seconds, at
-// least 1, with no unit.
-func (p *parser) refreshSeconds() (int, *Error) {
-	t, err := p.take("REFRESH", "<seconds>")
-	if err != nil {
-		return 0, err
-	}
-	n, cerr := strconv.Atoi(t.Text)
-	if cerr != nil || n < 1 || strings.TrimLeft(t.Text, "0123456789") != "" {
-		return 0, errAt(t.Pos, "REFRESH takes a whole number of seconds, at least 1, with no unit: REFRESH 10")
-	}
-	return n, nil
 }
 
 // pickerModel reads the rest of ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION

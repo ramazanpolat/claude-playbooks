@@ -399,7 +399,7 @@ func clauseUndo(c grammar.Clause) []undoItem {
 	case grammar.SetModel:
 		return []u{{"setmodel", one(c), grammar.Clause{Kind: grammar.UnsetModel}}}
 	case grammar.SetModelPicker:
-		return []u{{"picker", one(c), grammar.Clause{Kind: grammar.UnsetModelPicker}}}
+		return []u{{"picker", one(c), grammar.Clause{Kind: grammar.UnsetModelPickerMode}}}
 	case grammar.SetStatusline:
 		return []u{{"statusline", one(c), grammar.Clause{Kind: grammar.UnsetStatusline}}}
 	case grammar.SetStatuslineRefresh:
@@ -410,6 +410,14 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		var out []u
 		for _, n := range c.Names {
 			out = append(out, u{"env:" + n, "ENV " + n, grammar.Clause{Kind: grammar.DropEnv, Names: []string{n}}})
+		}
+		return out
+	case grammar.SetIfUnset:
+		// What the list sets when it applies; deferredIfUnset keeps the
+		// undo only where the playbook still holds the list's value.
+		var out []u
+		for _, g := range c.Group {
+			out = append(out, clauseUndo(g)...)
 		}
 		return out
 	case grammar.SetSandboxKeys:
@@ -479,7 +487,7 @@ func undoClauses(oldStmts, newStmts []*grammar.Stmt) []grammar.Clause {
 
 // oneStatement makes the undo clauses ones a single statement may hold, so
 // the undo parses back (play stages it as a file): the sandbox keys in one
-// DELETE, and no DELETE statusline_refresh beside DELETE statusline, which
+// DELETE, and no DELETE statusline.refresh beside DELETE statusline, which
 // removes the refresh with the status line.
 func oneStatement(undo []grammar.Clause) []grammar.Clause {
 	whole := slices.ContainsFunc(undo, func(c grammar.Clause) bool { return c.Kind == grammar.UnsetStatusline })

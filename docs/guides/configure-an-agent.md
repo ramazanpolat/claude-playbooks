@@ -10,7 +10,7 @@ ALTER PLAYBOOK reviewer
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Read(~/.ssh/**)'
-  SET statusline = 'bash ~/bin/statusline.sh'
+  SET statusline.command = 'bash ~/bin/statusline.sh'
   SET model = 'claude-opus-5-5'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
@@ -37,8 +37,8 @@ session at launch. A header's reference resolves to the whole value
 
 ```
 ALLOW TOOL '<rule>' ...     DENY TOOL '<rule>' ...     UNSET TOOL '<rule>' ...
-SET statusline = '<command>'[, statusline_refresh = <n>]   DELETE statusline
-SET statusline_refresh = <n>   DELETE statusline_refresh   REVERT STATUSLINE
+SET statusline.command = '<command>'[, statusline.refresh = <n>]   DELETE statusline
+SET statusline.refresh = <n>   DELETE statusline.refresh   REVERT STATUSLINE
 SET model = '<model>'         DELETE model
 ```
 
@@ -50,7 +50,7 @@ model is the playbook's default and the weakest choice: `ANTHROPIC_MODEL`,
 one decides. Example: [10](../../examples/10-tools-statusline-model/).
 
 `SET STATUSLINE` always applies. A recipe that offers a status line without
-replacing one you chose writes `SET IF UNSET statusline = '<command>'`, which
+replacing one you chose writes `SET IF UNSET statusline.command = '<command>'`, which
 applies only where no status line is set yet; see
 [example 17](../../examples/17-statusline-if-unset/).
 

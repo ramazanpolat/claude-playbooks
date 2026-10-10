@@ -75,16 +75,27 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 // createPlaybookStatement creates a playbook. CREATE … SET is "create, then
 // ALTER … SET", in one step: the login, the memory, the launcher and
 // sandbox.always are written by the creation itself, before the login is
-// linked and the launcher registered; the rest (model, agent, the other
-// sandbox keys) then by an ALTER of the new playbook, within the same
-// statement. On an
-// existing playbook, IF NOT EXISTS changes nothing, its SET list included.
+// linked and the launcher registered; the rest (model, agent, the status
+// line, the other sandbox keys) then by an ALTER of the new playbook, within
+// the same statement. On an existing playbook, IF NOT EXISTS applies the SET
+// list as an ALTER (convergePlaybook): what is fixed at creation is only
+// compared.
 func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
+	if st.IfNotExists {
+		pb, exists, err := r.findPlaybook(st.Name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return convergePlaybook(r, st, pb)
+		}
+	}
 	var after []grammar.Clause
 	for _, c := range st.Clauses {
 		switch c.Kind {
-		case grammar.SetModel, grammar.SetAgent:
-			after = append(after, c)
+		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link,
+			grammar.Launcher, grammar.NoLauncher, grammar.SetProperties:
+			// the creation's own: login and memory are SetProperties
 		case grammar.SetSandboxKeys:
 			// always is the creation's (with the isolated login); the other
 			// keys are an ALTER of the new playbook.
@@ -98,6 +109,8 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 			if len(rest.Settings) > 0 {
 				after = append(after, rest)
 			}
+		default:
+			after = append(after, c)
 		}
 	}
 	if err := createPlaybookOnly(r, st); err != nil || len(after) == 0 || r.outcome != outCreated {
@@ -108,38 +121,118 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	return err
 }
 
-func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
-	pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
+// findPlaybook finds a playbook as the run sees it: on disk, or created or
+// dropped by an earlier statement of a dry run (pb nil, exists true: created
+// earlier, not on disk yet).
+func (r *stmtRun) findPlaybook(name string) (pb *playbook.Playbook, exists bool, err error) {
+	pb, err = playbook.Find(config.ResolvePlaybooksDir(), name)
 	if err != nil { // discovery failed: whether it exists is unknown
-		return err
+		return nil, false, err
 	}
-	exists := pb != nil
-	if known, alive := r.playbookState(st.Name); known {
+	exists = pb != nil
+	if known, alive := r.playbookState(name); known {
 		exists = alive
 		if !alive {
 			pb = nil // dropped earlier in this dry run
 		}
 	}
+	return pb, exists, nil
+}
+
+// convergePlaybook is CREATE PLAYBOOK IF NOT EXISTS on a playbook that
+// exists: its SET list is applied as ALTER … SET, the properties first and
+// then the launcher (which stands alone, as in ALTER), each only where it
+// differs, so a statement applied again changes nothing. FROM, BRANCH,
+// SUBDIR and LINK are fixed at creation: a source that differs is a warning,
+// never a change.
+func convergePlaybook(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) error {
 	o := createOptionsOf(st)
-	if exists && st.IfNotExists {
-		r.outcome = outUnchanged
-		r.say("PLAYBOOK "+st.Name+" already exists; unchanged", nil)
-		// Drift: the file names another source than the install records.
-		// A warning, never an error, and nothing changes.
-		if pb != nil && o.from != "" {
-			var have string
-			if m := pb.Manifest; m != nil && m.Source != nil {
-				have = describeSource(m.Source.Repository, m.Source.Branch, m.Source.Subdir)
-			}
-			if want := describeSource(o.from, o.branch, o.subdir); have != want {
-				if have == "" {
-					have = "no recorded source"
-				}
-				r.warn(warnSourceDrift, fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want))
-			}
+	// Drift: the file names another source than the install records.
+	if pb != nil && o.from != "" {
+		var have string
+		if m := pb.Manifest; m != nil && m.Source != nil {
+			have = describeSource(m.Source.Repository, m.Source.Branch, m.Source.Subdir)
 		}
-		return nil
+		if want := describeSource(o.from, o.branch, o.subdir); have != want {
+			if have == "" {
+				have = "no recorded source"
+			}
+			r.warn(warnSourceDrift, fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want))
+		}
 	}
+	var props, launch []grammar.Clause
+	for _, c := range st.Clauses {
+		switch c.Kind {
+		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link:
+		case grammar.Launcher, grammar.NoLauncher:
+			if launcherOpsAllowed() && launcherWanted(st.Name, c) != r.launcherOf(st.Name, pb) {
+				launch = append(launch, c)
+			}
+		default:
+			props = append(props, c)
+		}
+	}
+	outcome := outUnchanged
+	if len(props) > 0 {
+		r.exists = true
+		err := playbookStatement(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: props})
+		r.exists = false
+		if err != nil {
+			return err
+		}
+		outcome = r.outcome
+	}
+	if len(launch) > 0 {
+		if err := alterPlaybookLifecycle(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: launch}); err != nil {
+			return err
+		}
+		outcome = outChanged
+	}
+	r.outcome = outcome
+	if outcome == outUnchanged && len(props) == 0 {
+		r.say("PLAYBOOK "+st.Name+" already exists; unchanged", nil)
+	}
+	return nil
+}
+
+// launcherWanted is the launcher a launcher clause gives: a command name,
+// or "" for none.
+func launcherWanted(name string, c grammar.Clause) string {
+	switch c.Kind {
+	case grammar.NoLauncher:
+		return ""
+	case grammar.DefaultLauncher:
+		return name
+	}
+	return c.Arg
+}
+
+// launcherOf is the launcher a playbook has as the run sees it: its alias,
+// the launcher named after it, or "" for none. A playbook an earlier
+// statement of a dry run created has the one that statement gave it.
+func (r *stmtRun) launcherOf(name string, pb *playbook.Playbook) string {
+	if r.dry != nil {
+		if l, ok := r.dry.launchers[name]; ok {
+			return l
+		}
+	}
+	switch {
+	case pb == nil:
+		return name // created earlier in this dry run: the default
+	case pb.Alias() != "":
+		return pb.Alias()
+	case hasNameLauncher(name):
+		return name
+	}
+	return ""
+}
+
+func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
+	_, exists, err := r.findPlaybook(st.Name)
+	if err != nil {
+		return err
+	}
+	o := createOptionsOf(st)
 	if r.dryRun {
 		if exists {
 			return fmt.Errorf("playbook %q already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)", st.Name)
@@ -151,6 +244,16 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 		}
 		r.recordPlaybook(st.Name, true)
 		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
+		if r.dry != nil {
+			switch {
+			case o.noAlias:
+				r.dry.launchers[st.Name] = ""
+			case o.alias != "":
+				r.dry.launchers[st.Name] = o.alias
+			default:
+				r.dry.launchers[st.Name] = st.Name
+			}
+		}
 		if o.memory == "isolated" && r.dry != nil {
 			// The settings.json CREATE writes, so a later SET memory in the
 			// same file plans against it.
@@ -253,6 +356,7 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 	if r.dryRun {
 		known, alive := r.playbookState(st.Name)
 		var disk *manifest.Env
+		var onDisk *playbook.Playbook
 		cfg := ""
 		if !known {
 			pb, err := playbook.Require(config.ResolvePlaybooksDir(), st.Name)
@@ -262,14 +366,31 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 			if pb.Manifest != nil {
 				disk = pb.Manifest.Env
 			}
-			cfg = pb.Path
+			cfg, onDisk = pb.Path, pb
 		} else if !alive {
 			return fmt.Errorf("unknown playbook %q (dropped earlier in the file)", st.Name)
 		}
+		// The launcher later statements see: the one given, else the one
+		// it had, renamed with the playbook when it was the default.
+		was := r.launcherOf(st.Name, onDisk)
+		target := st.Name
 		if rename != "" { // later statements of the file address the new name, with its environment and plugins
 			env := r.playbookEnv(st.Name, disk)
 			r.renamePlaybook(st.Name, rename, cfg)
 			r.recordPlaybookEnv(rename, env)
+			target = rename
+		}
+		if r.dry != nil {
+			switch {
+			case noAlias:
+				r.dry.launchers[target] = ""
+			case alias != "":
+				r.dry.launchers[target] = alias
+			case was == st.Name:
+				r.dry.launchers[target] = target
+			default:
+				r.dry.launchers[target] = was
+			}
 		}
 		return nil
 	}

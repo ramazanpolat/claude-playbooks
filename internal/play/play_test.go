@@ -240,7 +240,7 @@ func TestCheckRisks(t *testing.T) {
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'files-server'
   ADD MCP SERVER gh URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
   ALLOW TOOL 'Bash' 'Bash(python3 *)' 'Write(~/**)' 'WebFetch' 'Bash(gh pr view *)'
-  SET statusline = 'bash ~/bin/sl.sh'
+  SET statusline.command = 'bash ~/bin/sl.sh'
   ADD SKILL review FROM 'https://github.com/acme/skills' SUBDIR review
   SET VAR SENTRY_URL=https://sentry.example.com/1 OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com
   SET VAR GH_TOKEN FROM 'keychain:gh';

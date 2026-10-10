@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -83,7 +84,10 @@ func applyRunIn(st *grammar.Stmt, rep *applyReport, sc *applyScope) error {
 	all := stmts // as loaded, for the [apply] records
 	// A setting set more than once for one target is written once, with
 	// the last value (SPEC.md, "A setting set more than once").
-	fold := foldStatements(stmts)
+	fold := foldStatements(stmts, func(name string) bool {
+		pb, err := playbook.Find(config.ResolvePlaybooksDir(), name)
+		return err == nil && pb != nil
+	})
 	stmts = fold.stmts
 	// A plain config directory is not a playbook: applying to one is
 	// confirmed on a terminal, or by --yes, before anything runs.
@@ -632,16 +636,18 @@ func resolveTarget(t string) (string, error) {
 // claimsLauncherName reports a statement that registers a name a launcher
 // answers to: a new playbook (its directory name, and its launcher), a
 // rename, or a launcher change. CREATE … IF NOT EXISTS on a playbook that
-// exists registers nothing.
+// exists registers only the launcher its SET list gives.
 func claimsLauncherName(s *grammar.Stmt) bool {
 	if s.Dir != "" || s.Object != grammar.Playbook {
 		return false
 	}
 	switch s.Verb {
 	case grammar.Create:
+		// On a playbook that exists, only a launcher in the SET list
+		// registers a name (the empty launcher removes one).
 		if s.IfNotExists {
 			if pb, err := playbook.Find(config.ResolvePlaybooksDir(), s.Name); err == nil && pb != nil {
-				return false
+				return slices.ContainsFunc(s.Clauses, func(c grammar.Clause) bool { return c.Kind == grammar.Launcher })
 			}
 		}
 		return true

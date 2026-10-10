@@ -57,12 +57,12 @@
 
 - **The status line, the model picker's mode and the secret helper are
   properties** (SPEC.md, *Status line and model*, *Model picker*,
-  *Secrets*): `SET statusline = '<command>', statusline_refresh = 10`,
-  `DELETE statusline`, `DELETE statusline_refresh`; `SET model_picker.mode =
+  *Secrets*): `SET statusline.command = '<command>', statusline.refresh = 10`,
+  `DELETE statusline`, `DELETE statusline.refresh`; `SET model_picker.mode =
   'only'`, `DELETE model_picker.mode`, `DELETE model_picker` (the whole
   picker); `ALTER DEFAULTS SET secret_helper = '<command>'`, `DELETE
   secret_helper`.
-  - `SET IF UNSET statusline = …` offers a status line without replacing
+  - `SET IF UNSET statusline.command = …` offers a status line without replacing
     one; it takes the status line only (as `IF UNSET` did) and goes right
     after `SET`.
   - `REVERT STATUSLINE` puts back the status line cpb replaced last (was

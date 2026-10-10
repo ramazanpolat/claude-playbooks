@@ -124,13 +124,10 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	}
 
 	text := mustStmt(t, "SHOW CREATE PLAYBOOK p")
-	for _, want := range []string{"SET login = 'isolated', memory = 'isolated'\n", "SET sandbox.always = true, sandbox.backend = 'sbx', sandbox.allow_net = ['api.example.com:443'], sandbox.share_skills = true;"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(strings.SplitN(text, ";", 2)[0], "sandbox") {
-		t.Errorf("SHOW CREATE writes the sandbox in CREATE:\n%s", text)
+	// The properties travel on the CREATE, which converges on a playbook
+	// that exists.
+	if want := "CREATE PLAYBOOK IF NOT EXISTS p\n  SET launcher = '', login = 'isolated', memory = 'isolated', sandbox.always = true, sandbox.backend = 'sbx', sandbox.allow_net = ['api.example.com:443'], sandbox.share_skills = true;"; !strings.Contains(text, want) {
+		t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 	}
 
 	want := sandboxOf(t, "p")

@@ -308,7 +308,7 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 	}
 	// A status line and its refresh, both dropped: DELETE statusline alone,
 	// which a statement may hold (the pair is refused together).
-	sl := parse("ALTER PLAYBOOK SET statusline = 'x';\nALTER PLAYBOOK SET statusline_refresh = 5;\n")
+	sl := parse("ALTER PLAYBOOK SET statusline.command = 'x';\nALTER PLAYBOOK SET statusline.refresh = 5;\n")
 	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE statusline" {
 		t.Fatalf("status line undo: %v", u)
 	}
@@ -323,7 +323,7 @@ func TestLineDiff(t *testing.T) {
 
 // A played recipe that drops both its status line and its refresh: the
 // undo is DELETE statusline alone, since a statement may not hold it beside
-// DELETE statusline_refresh, and play parses its undo back from a file. The
+// DELETE statusline.refresh, and play parses its undo back from a file. The
 // update used to fail on that file.
 func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	resetCommandTestState(t)
@@ -331,7 +331,7 @@ func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	stubClaude(t)
 	dir := t.TempDir()
-	p := writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1\n  SET statusline = 'echo x';\nALTER PLAYBOOK\n  SET statusline_refresh = 5;\n")
+	p := writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1\n  SET statusline.command = 'echo x';\nALTER PLAYBOOK\n  SET statusline.refresh = 5;\n")
 	playFlags(t, false, false, false, "")
 	playKeepFlags(t, true, "")
 	playRunFlags(t, true, nil, nil, nil)
@@ -339,14 +339,14 @@ func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	if out := captureStdout(t, func() { err = runPlay(playCmd, []string{p}) }); err != nil {
 		t.Fatalf("--keep: %v\n%s", err, out)
 	}
-	if showPlaybook(t, "slr")["statusline"] != "echo x" {
+	if sl, _ := showPlaybook(t, "slr")["statusline"].(map[string]any); sl["command"] != "echo x" {
 		t.Fatalf("kept status line: %v", showPlaybook(t, "slr")["statusline"])
 	}
 	writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1;\n")
 	if out := captureStdout(t, func() { err = playUpdateRun("slr") }); err != nil {
 		t.Fatalf("update: %v\n%s", err, out)
 	}
-	if v := showPlaybook(t, "slr"); v["statusline"] != nil || v["statusline_refresh"] != nil {
-		t.Fatalf("the dropped status line stayed: %v %v", v["statusline"], v["statusline_refresh"])
+	if sl, _ := showPlaybook(t, "slr")["statusline"].(map[string]any); sl["command"] != nil || sl["refresh"] != nil {
+		t.Fatalf("the dropped status line stayed: %v", sl)
 	}
 }

@@ -2,10 +2,10 @@ s="$HOME/.claude-playbooks/barred/settings.json"
 # A new playbook has no status line, so IF UNSET applied.
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s == {"type": "command", "command": "date +%H:%M", "refreshInterval": 10}, s' "$s"
 # Your own bar: a plain SET statusline always applies.
-cpb "ALTER PLAYBOOK barred SET statusline = 'echo mine'"
+cpb "ALTER PLAYBOOK barred SET statusline.command = 'echo mine'"
 # Offering again changes nothing now: the slot is set.
-cpb "ALTER PLAYBOOK barred SET IF UNSET statusline = 'date +%H:%M', statusline_refresh = 10" | grep -q 'unchanged'
+cpb "ALTER PLAYBOOK barred SET IF UNSET statusline.command = 'date +%H:%M', statusline.refresh = 10" | grep -q 'unchanged'
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["statusLine"]; assert s["command"] == "echo mine", s' "$s"
 # SHOW CREATE writes the status line as it is, not the condition.
-cpb SHOW CREATE PLAYBOOK barred | grep -q "SET statusline = 'echo mine', statusline_refresh = 10"
+cpb SHOW CREATE PLAYBOOK barred | grep -q "SET statusline.command = 'echo mine', statusline.refresh = 10"
 if cpb SHOW CREATE PLAYBOOK barred | grep -q 'IF UNSET'; then echo "SHOW CREATE wrote IF UNSET"; exit 1; fi

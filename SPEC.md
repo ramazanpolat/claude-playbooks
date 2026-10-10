@@ -134,7 +134,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, memory, model, agent, sandbox.<key>,
-                                           statusline, statusline_refresh, model_picker.mode
+                                           statusline, statusline.refresh, model_picker.mode
                                            see "Playbook properties"
 value      := '<string>' | <integer> | true | false | [ '<string>', ... ]
 
@@ -291,7 +291,7 @@ cpb SHOW CREATE ALL > playbook.cpb
 cpb APPLY playbook.cpb --dry-run
 cpb ALTER PLAYBOOK work ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
 cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)' SET model = 'claude-opus-5-5'
-cpb ALTER PLAYBOOK work SET statusline = 'bash ~/bin/statusline.sh'
+cpb ALTER PLAYBOOK work SET statusline.command = 'bash ~/bin/statusline.sh'
 cpb ALTER PLAYBOOK work ADD SKILL release-notes FROM 'github:acme/skills' SUBDIR release-notes
 cpb APPLY agent.cpb TO lab
 cpb APPLY agent.cpb TO '~/.claude' --dry-run
@@ -561,7 +561,7 @@ ALTER PLAYBOOK <name> DELETE login, memory       -- back to the defaults
 | `agent` | `<name>` or `<plugin>:<name>` | none | The agent the main session runs as, `settings.json` `agent` (see *Plugins and the agent*) |
 | `sandbox.<key>` | per key (see *Sandbox*) | per key | The `[sandbox]` table, key for key; `DELETE sandbox` resets it |
 | `statusline` | a command | none | The status line, `settings.json` `statusLine.command` (see *Status line and model*) |
-| `statusline_refresh` | whole seconds, at least 1, bare | none | `statusLine.refreshInterval` |
+| `statusline.refresh` | whole seconds, at least 1, bare | none | `statusLine.refreshInterval` |
 | `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `DELETE model_picker` removes the picker, rows too |
 
 `DEFAULTS` has one property, `secret_helper` (`ALTER DEFAULTS SET
@@ -610,7 +610,7 @@ secret_helper = '<command>'`, `DELETE secret_helper`; see *Secrets*).
   '<model>'`, `DELETE model`), `SET AGENT '<agent>'` and `UNSET AGENT`
   (`SET agent = '<agent>'`, `DELETE agent`), the `SANDBOX` forms
   (`sandbox.<key>`), `SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET]`
-  (`SET [IF UNSET] statusline = '<command>', statusline_refresh = <n>`),
+  (`SET [IF UNSET] statusline.command = '<command>', statusline.refresh = <n>`),
   `SET STATUSLINE PREVIOUS` (`REVERT STATUSLINE`), `UNSET STATUSLINE
   [REFRESH]` (`DELETE statusline[_refresh]`), `SET MODEL PICKER ONLY |
   APPEND` and `UNSET MODEL PICKER` (`SET model_picker.mode = …`, `DELETE
@@ -906,7 +906,7 @@ ALTER PLAYBOOK reviewer-agent
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/data'
   ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Bash(rm -rf *)'
-  SET statusline = '~/.claude-playbooks/reviewer-agent/bin/statusline.sh'
+  SET statusline.command = '~/.claude-playbooks/reviewer-agent/bin/statusline.sh'
   SET model = 'claude-opus-5-5'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
@@ -989,37 +989,37 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
 
 ### Status line and model
 
-- `SET statusline = '<command>'` writes `statusLine = {"type": "command",
+- `SET statusline.command = '<command>'` writes `statusLine = {"type": "command",
   "command": "<command>"}`, keeping any other field of an existing
   `statusLine` (such as `padding`); `DELETE statusline` removes it. It always
   applies, whatever command the slot holds.
-- **`SET IF UNSET`**: `SET IF UNSET statusline = '<command>'[,
-  statusline_refresh = <n>]` applies only where no `statusLine` is set yet,
+- **`SET IF UNSET`**: `SET IF UNSET statusline.command = '<command>'[,
+  statusline.refresh = <n>]` applies only where no `statusLine` is set yet,
   and otherwise reports unchanged. A recipe that offers a status line uses
   it, so applying the recipe leaves a status line you chose in place. `SHOW
   CREATE` writes the status line as it is, never the condition
   ([example 17](examples/17-statusline-if-unset/)). `IF UNSET` takes the
   status line only, and goes right after `SET`.
-- **`statusline_refresh`** sets `statusLine.refreshInterval`, in whole
+- **`statusline.refresh`** sets `statusLine.refreshInterval`, in whole
   seconds:
-  - `SET statusline = '<command>', statusline_refresh = <n>` sets both the
+  - `SET statusline.command = '<command>', statusline.refresh = <n>` sets both the
     command and the interval; in one statement they are one `statusLine`.
-  - `SET statusline_refresh = <n>` alone sets only the interval, and is
-    refused when there is no command status line ("statusline_refresh needs
+  - `SET statusline.refresh = <n>` alone sets only the interval, and is
+    refused when there is no command status line ("statusline.refresh needs
     a status line"), since an interval alone means nothing to Claude Code.
-  - `DELETE statusline_refresh` removes only the interval; `DELETE
+  - `DELETE statusline.refresh` removes only the interval; `DELETE
     statusline` still removes the whole status line.
   - `<n>` is a whole number, at least 1, with no unit and no quotes (`10`, not
     `10s`).
-  - **`SET statusline = '<command>'` without `statusline_refresh` keeps an
+  - **`SET statusline.command = '<command>'` without `statusline.refresh` keeps an
     existing `refreshInterval`**, as it keeps `padding`. `SHOW CREATE` writes
-    it back as `SET statusline = '<command>', statusline_refresh = <n>`, so it
+    it back as `SET statusline.command = '<command>', statusline.refresh = <n>`, so it
     round-trips.
   - Why it matters: without `refreshInterval`, Claude Code (verified on
     2.1.283) does not re-render the status line while a session is idle.
     Anything that rides on renders stops, a heartbeat for example.
-  - `SHOW PLAYBOOK --json` has `"statusline_refresh": <n> | null` beside `statusline`, the command. `SELECT`'s `PLAYBOOKS` has a
-    `statusline_refresh` column. `SHOW` and `EXPLAIN` print `Status line:
+  - `SHOW PLAYBOOK --json` has `"statusline.refresh": <n> | null` beside `statusline`, the command. `SELECT`'s `PLAYBOOKS` has a
+    `statusline.refresh` column. `SHOW` and `EXPLAIN` print `Status line:
     <command> (refreshes every <n> s)`. It is valid on a plain config
     directory too.
 - **History and `REVERT STATUSLINE`.** Every time a
@@ -1029,7 +1029,7 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
   - `REVERT STATUSLINE` puts the newest one back and keeps the current
     one in its place, so a second `REVERT STATUSLINE` returns to where you
     were.
-  - A change of `statusline_refresh` alone is not history.
+  - A change of `statusline.refresh` alone is not history.
   - With nothing recorded, `REVERT STATUSLINE` is refused: "no earlier status
     line is recorded".
   - The history is cpb's own state:
@@ -1037,7 +1037,7 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
     the config directory. At most 10 entries are kept per directory. A
     change made outside cpb (`/statusline`, another tool, a hand edit)
     is recorded the next time a cpb statement replaces it.
-  - `SHOW PLAYBOOK --json` has `statusline_history`: `[{"command",
+  - `SHOW PLAYBOOK --json` has `statusline.history`: `[{"command",
     "refresh", "replaced_at"}]`, newest first. `SELECT`'s `PLAYBOOKS` has
     the same column. `EXPLAIN` prints `Status line history: N earlier
     (REVERT STATUSLINE restores <command>)`.
@@ -1495,9 +1495,7 @@ code to the same lines):
 | `mcp_servers` | `Array(JSON)` | The MCP servers: name, transport, command and args or url, env and headers as variables. |
 | `tools` | `JSON` | The tool permission rules: allow, deny. |
 | `skills` | `Array(JSON)` | The skills cpb recorded: name, source, branch, subdir, mode. |
-| `statusline` | `Nullable(String)` | The status line command; null for none. |
-| `statusline_refresh` | `Nullable(UInt32)` | How often the status line refreshes, in whole seconds; null when unset. |
-| `statusline_history` | `Array(JSON)` | The status lines REVERT STATUSLINE can go back to, newest first: command, refresh, replaced_at. |
+| `statusline` | `JSON` | The status line: command (null for none), refresh in whole seconds (null when unset), and history, the status lines REVERT STATUSLINE can go back to, newest first: command, refresh, replaced_at. |
 | `model` | `Nullable(String)` | The playbook's default model (SET model); null when unset. |
 | `model_picker` | `JSON` | The model picker: mode (only or append) and options; null when unset. |
 | `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
@@ -1756,13 +1754,13 @@ drops only the replaced entries.
 | a variable `K` | `SET VAR K=…`, `SET VAR K FROM …`, `BLOCK VAR K`, `UNSET VAR K` |
 | a tool rule `R` | `ALLOW TOOL R`, `DENY TOOL R`, `UNSET TOOL R` |
 | the model; the agent | `SET` / `DELETE model`; `SET` / `DELETE agent` |
-| the status line; its refresh | `SET statusline = '<command>'` (not `IF UNSET`), `DELETE statusline`; `SET` / `DELETE statusline_refresh`, and `statusline_refresh` beside `statusline` |
+| the status line; its refresh | `SET statusline.command = '<command>'` (not `IF UNSET`), `DELETE statusline`; `SET` / `DELETE statusline.refresh`, and `statusline.refresh` beside `statusline` |
 | a sandbox setting `k` (`always` included) | `SET sandbox.k = …`, `DELETE sandbox.k`, `DELETE sandbox` |
 | a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`; a `CREATE`'s starting values are never dropped |
 | the env sets | `USE ENV` |
 
 - **A clause that depends on what it finds** replaces nothing: `SET IF
-  UNSET statusline = …`, `ADD ENV` and `DROP ENV`. Neither does `REVERT
+  UNSET statusline.command = …`, `ADD ENV` and `DROP ENV`. Neither does `REVERT
   STATUSLINE`, which reads the history that every earlier status line
   writes, so no status line clause before it is dropped.
 - **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh.

@@ -111,7 +111,7 @@ func TestExpectPlugins(t *testing.T) {
 		want []string
 	}{
 		{w("ALTER PLAYBOOK k ADD"), []string{"ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL"}},
-		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline", "statusline_refresh", "model_picker.mode"}},
+		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m"), []string{"FROM"}},
 	}
 	for _, tc := range cases {

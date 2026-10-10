@@ -35,7 +35,7 @@ type playbookProperty struct {
 	// sandbox names the [sandbox] key a sandbox.<key> property is: its
 	// pairs become SetSandboxKeys and UnsetSandboxKeys clauses.
 	sandbox string
-	// table marks a table's name (sandbox, model_picker): DELETE resets
+	// table marks a table's name (sandbox, statusline, model_picker): DELETE resets
 	// every key of it, and SET does not take it. tableDel is the clause its
 	// DELETE becomes (the sandbox's is every [sandbox] key).
 	table    bool
@@ -80,14 +80,17 @@ var playbookPropertyTable = []playbookProperty{
 	{key: "sandbox.claude_version", kind: kindString, check: checkSandboxValue, sandbox: "claude_version", placeholder: "<version>"},
 	{key: "sandbox.share_skills", kind: kindBool, sandbox: "share_skills"},
 	{key: "sandbox", table: true},
-	// statusline: the status line's command (settings.json statusLine);
-	// statusline_refresh: how often it re-renders, in whole seconds.
-	{key: "statusline", kind: kindString, check: checkStatusline, set: SetStatusline, del: UnsetStatusline, placeholder: "<command>"},
-	{key: "statusline_refresh", kind: kindInt, set: SetStatuslineRefresh, del: UnsetStatuslineRefresh},
+	// The status line (settings.json statusLine): its command, and how
+	// often it re-renders, in whole seconds. DELETE statusline (or
+	// statusline.command) removes it, the refresh with it.
+	{key: "statusline.command", kind: kindString, check: checkStatusline, set: SetStatusline, del: UnsetStatusline, placeholder: "<command>"},
+	{key: "statusline.refresh", kind: kindInt, set: SetStatuslineRefresh, del: UnsetStatuslineRefresh},
+	{key: "statusline", table: true, tableDel: UnsetStatusline},
 	// model_picker.mode: the /model picker shows its rows only, or after
-	// the built-in ones; DELETE model_picker removes the picker, rows too.
+	// the built-in ones. DELETE model_picker is the mode too: the rows are
+	// a collection, which DROP MODEL empties.
 	{key: "model_picker.mode", kind: kindEnum, values: []string{"append", "only"}, set: SetModelPicker, del: UnsetModelPickerMode},
-	{key: "model_picker", table: true, tableDel: UnsetModelPicker},
+	{key: "model_picker", table: true, tableDel: UnsetModelPickerMode},
 }
 
 // defaultsPropertyTable is DEFAULTS' one property: the secret helper.
@@ -97,7 +100,7 @@ var defaultsPropertyTable = []playbookProperty{
 
 func checkStatusline(v string) string {
 	if v == "" || strings.ContainsAny(v, "\r\n") {
-		return "statusline takes a command (DELETE statusline removes it)"
+		return "statusline.command takes a command (DELETE statusline removes it)"
 	}
 	return ""
 }
@@ -144,11 +147,12 @@ func checkAgent(v string) string {
 	return ""
 }
 
-// propertyIn finds a property of one object's table by key, in any case,
-// as keywords match.
+// propertyIn finds a property of one object's table by key. Keys are
+// lowercase and match exactly, so a variable's name (MODEL, LOGIN) is never
+// read as a property.
 func propertyIn(table []playbookProperty, key string) (*playbookProperty, bool) {
 	for i := range table {
-		if strings.EqualFold(table[i].key, key) {
+		if table[i].key == key {
 			return &table[i], true
 		}
 	}
@@ -276,38 +280,44 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 			out = append(out, c)
 			continue
 		}
-		rest := c
-		rest.Settings = nil
-		var free []Clause
-		sandbox := Clause{Pos: c.Pos, Kind: SetSandboxKeys}
+		// The pairs become clauses in the order written: login and memory
+		// side by side stay one SET (or DELETE) clause, sandbox keys side
+		// by side one sandbox clause, so the statement renders back as
+		// written (mergedClauses).
+		var pairs []Clause
+		into := func(kind Kind, v Var) {
+			if n := len(pairs); n > 0 && pairs[n-1].Kind == kind && (kind == SetProperties || kind == DeleteProperties || kind == SetSandboxKeys || kind == UnsetSandboxKeys) {
+				pairs[n-1].Settings = append(pairs[n-1].Settings, v)
+				return
+			}
+			pairs = append(pairs, Clause{Pos: c.Pos, Kind: kind, Settings: []Var{v}})
+		}
+		sandboxKind := SetSandboxKeys
 		if c.Kind == DeleteProperties {
-			sandbox.Kind = UnsetSandboxKeys
+			sandboxKind = UnsetSandboxKeys
 		}
 		for _, v := range c.Settings {
 			if err := named(c.Pos, v.Key); err != nil {
 				return nil, err
 			}
 			pr, _ := propertyOf(v.Key)
-			if c.IfUnset && pr.set != SetStatusline && pr.set != SetStatuslineRefresh {
-				return nil, errAt(c.Pos, "IF UNSET takes the status line: SET IF UNSET statusline = '<command>'[, statusline_refresh = <n>]")
-			}
 			switch {
 			case pr.table && pr.tableDel == "":
 				for _, k := range manifest.SandboxKeys {
-					sandbox.Settings = append(sandbox.Settings, Var{Key: k})
+					into(UnsetSandboxKeys, Var{Key: k})
 				}
 				continue
 			case pr.table:
-				free = append(free, Clause{Pos: c.Pos, Kind: pr.tableDel})
+				pairs = append(pairs, Clause{Pos: c.Pos, Kind: pr.tableDel})
 				continue
 			case pr.sandbox != "":
-				sandbox.Settings = append(sandbox.Settings, Var{Key: pr.sandbox, Value: v.Value})
+				into(sandboxKind, Var{Key: pr.sandbox, Value: v.Value})
 				continue
 			case pr.set == "":
-				rest.Settings = append(rest.Settings, v) // login, memory
+				into(c.Kind, v) // login, memory
 				continue
 			}
-			k := Clause{Pos: c.Pos, IfUnset: c.IfUnset}
+			k := Clause{Pos: c.Pos}
 			switch {
 			case c.Kind == DeleteProperties:
 				k.Kind = pr.del
@@ -321,22 +331,55 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 			default:
 				k.Kind, k.Arg = pr.set, v.Value
 			}
-			free = append(free, k)
+			pairs = append(pairs, k)
 		}
-		if len(rest.Settings) > 0 {
-			out = append(out, rest)
+		if !c.IfUnset {
+			out = append(out, pairs...)
+			continue
 		}
-		out = append(out, free...)
-		if len(sandbox.Settings) > 0 {
-			out = append(out, sandbox)
+		// SET IF UNSET: one clause, which applies whole or not at all.
+		group, err := mergeStatusline(pairs)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, Clause{Kind: SetIfUnset, Group: group, Pos: c.Pos})
 	}
-	return mergeStatusline(out)
+	return mergeStatusline(joinAdjacent(out))
 }
 
-// mergeStatusline makes statusline and statusline_refresh, set in one
-// statement, one clause: the command and its refresh are one statusLine.
-// IF UNSET applies to both or neither, so it needs the command.
+// joinAdjacent makes property clauses of one kind side by side one clause
+// (SET login = 'isolated' SET memory = 'shared' is one SET list), so a
+// statement parses to the same clauses as its rendering (mergedClauses).
+func joinAdjacent(in []Clause) []Clause {
+	var out []Clause
+	for _, c := range in {
+		if n := len(out); n > 0 && out[n-1].Kind == c.Kind {
+			switch c.Kind {
+			case SetProperties, DeleteProperties, SetSandboxKeys, UnsetSandboxKeys:
+				out[n-1].Settings = append(slices.Clone(out[n-1].Settings), c.Settings...)
+				continue
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// Flatten lists the clauses with each SET IF UNSET's pairs in its place.
+func Flatten(clauses []Clause) []Clause {
+	var out []Clause
+	for _, c := range clauses {
+		if c.Kind == SetIfUnset {
+			out = append(out, c.Group...)
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// mergeStatusline makes statusline.command and statusline.refresh, set in
+// one list, one clause: the command and its refresh are one statusLine.
 func mergeStatusline(in []Clause) ([]Clause, *Error) {
 	line, refresh := -1, -1
 	for i, c := range in {
@@ -347,14 +390,8 @@ func mergeStatusline(in []Clause) ([]Clause, *Error) {
 			refresh = i
 		}
 	}
-	if refresh >= 0 && in[refresh].IfUnset && line < 0 {
-		return nil, errAt(in[refresh].Pos, "IF UNSET takes the status line: SET IF UNSET statusline = '<command>'[, statusline_refresh = <n>]")
-	}
 	if line < 0 || refresh < 0 {
 		return in, nil
-	}
-	if in[line].IfUnset != in[refresh].IfUnset {
-		return nil, errAt(in[refresh].Pos, "statusline and statusline_refresh go in one SET (IF UNSET applies to both)")
 	}
 	in[line].Refresh = in[refresh].Refresh
 	return slices.Delete(in, refresh, refresh+1), nil
@@ -411,16 +448,18 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 			p.i++
 			continue
 		}
-		k, v, vq := t.Text, "", false
+		// vt is the word the value came from: whether it was quoted, and
+		// whether a comma after its quotes separates it from the next pair.
+		k, v, vt := t.Text, "", t
 		p.i++
 		if withValues {
 			if kk, vv, ok := strings.Cut(t.Text, "="); ok {
-				k, v, vq = kk, vv, t.Quoted
+				k, v = kk, vv
 				// k= 'v': the value is the next word, unless the quotes
 				// were in this one (k='', an empty value) or the next word
 				// is not a value (the end, a clause, another pair).
 				if v == "" && !t.Quoted && !p.atEnd() && !p.isStarter() && !p.atProperty() && p.toks[p.i].Text != "," {
-					v, vq = p.toks[p.i].Text, p.toks[p.i].Quoted
+					v, vt = p.toks[p.i].Text, p.toks[p.i]
 					p.i++
 				}
 			} else {
@@ -432,64 +471,62 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 					if p.atEnd() || p.isStarter() {
 						return errAt(t.Pos, k+" needs a value: "+k+" = '<value>'")
 					}
-					v, vq = p.toks[p.i].Text, p.toks[p.i].Quoted
+					v, vt = p.toks[p.i].Text, p.toks[p.i]
 					p.i++
 				case strings.HasPrefix(p.toks[p.i].Text, "="): // k ='v'
-					v, vq = p.toks[p.i].Text[1:], p.toks[p.i].Quoted
+					v, vt = p.toks[p.i].Text[1:], p.toks[p.i]
 					p.i++
 				default:
 					return p.notAPair(t, what, form, keys)
 				}
 			}
 		}
-		k = strings.ToLower(strings.TrimSuffix(k, ","))
+		k = strings.TrimSuffix(k, ",")
 		pr, ok := propertyIn(p.props(), k)
 		if !ok {
 			return p.notAProperty(t, k, keys)
+		}
+		// A comma after the value separates it from the next pair; a comma
+		// inside quotes is the value's own. On the command line the shell
+		// has removed the quotes, so a trailing comma is a separator.
+		raw := v // a list reads its own words
+		if !vt.Quoted || vt.Comma {
+			v = strings.TrimSuffix(v, ",")
+		}
+		v = unquoteArg(v)
+		// A one-word value reads the same quoted or not, in a file and on the
+		// command line; a value with a space or a comma is quoted (SHOW
+		// CREATE writes every string quoted).
+		if p.lexed && !vt.Quoted && pr.kind != kindList && strings.Contains(v, ",") {
+			return errAt(t.Pos, k+": a value with a comma is quoted: "+k+" = '<value>'")
 		}
 		switch {
 		case !withValues:
 		case pr.table:
 			return errAt(t.Pos, k+" is a table: SET "+k+".<key> = …, or DELETE "+k+" to reset it")
 		case pr.kind == kindList:
-			items, err := p.listValue(t, k, v, vq)
+			items, err := p.listValue(t, k, raw, vt)
 			if err != nil {
 				return err
 			}
 			v = strings.Join(items, ",")
 		case pr.kind == kindInt:
-			v = strings.TrimSuffix(v, ",")
 			if n, err := strconv.Atoi(v); err != nil || n < 1 {
 				return errAt(t.Pos, k+" takes a whole number of seconds, at least 1, with no unit")
 			}
-			if p.lexed && vq {
-				return errAt(t.Pos, k+" takes a number, unquoted: "+k+" = "+v)
-			}
 		case pr.kind == kindBool:
-			lv := strings.ToLower(strings.TrimSuffix(v, ","))
-			if lv != "true" && lv != "false" {
+			v = strings.ToLower(v)
+			if v != "true" && v != "false" {
 				return errAt(t.Pos, k+" takes true or false")
 			}
-			if p.lexed && vq {
-				return errAt(t.Pos, k+" takes true or false, unquoted: "+k+" = "+lv)
-			}
-			v = lv
 		case pr.kind == kindEnum:
-			lv := strings.ToLower(unquoteArg(strings.TrimSuffix(v, ",")))
-			if !slices.Contains(pr.values, lv) {
+			v = strings.ToLower(v)
+			if !slices.Contains(pr.values, v) {
 				return errAt(t.Pos, k+" takes '"+strings.Join(pr.values, "' or '")+"'")
 			}
-			if p.lexed && !vq {
-				return errAt(t.Pos, k+" takes a quoted string: "+k+" = '"+lv+"'")
-			}
-			v = lv
 		default:
-			v = unquoteArg(strings.TrimSuffix(v, ","))
 			if why := pr.check(v); why != "" {
 				return errAt(t.Pos, why)
-			}
-			if p.lexed && !vq {
-				return errAt(t.Pos, k+" takes a quoted string: "+k+" = '"+pr.placeholder+"'")
 			}
 		}
 		c.Settings = append(c.Settings, Var{Key: k, Value: v})
@@ -507,45 +544,47 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 	return nil
 }
 
-// listValue reads a list, ['a', 'b'], which may run over several words;
-// first is the word it starts in. In a playbook file each item is quoted;
-// on the command line the list is one argument the pilot quoted whole, since
-// zsh reads [ ] as a pattern and bash may replace the word with a file name.
-func (p *parser) listValue(t Token, k, first string, firstQuoted bool) ([]string, *Error) {
-	hint := k + " takes a list: ['a', 'b']; on the command line quote the statement (zsh reads [ ] as a pattern)"
-	text, bare := first, !firstQuoted && hasItemText(first)
-	if !strings.HasPrefix(text, "[") {
-		return nil, errAt(t.Pos, hint)
+// listValue reads a list: ['a', 'b'], which may run over several words
+// (first is the word it starts in), or 'a,b', the items comma-joined in one
+// word, which needs no [ ] on the command line (zsh reads [ ] as a pattern,
+// and bash may replace the word with a file name). An item never holds a
+// comma; SHOW CREATE writes the [ ] form.
+func (p *parser) listValue(t Token, k, first string, ft Token) ([]string, *Error) {
+	hint := k + " takes a list: ['a', 'b'], or 'a,b'"
+	split := func(text string) ([]string, *Error) {
+		var items []string
+		for _, item := range strings.Split(text, ",") {
+			item = unquoteArg(strings.TrimSpace(item))
+			if strings.ContainsAny(item, "\r\n") {
+				return nil, errAt(t.Pos, hint)
+			}
+			if item != "" {
+				items = append(items, item)
+			}
+		}
+		return items, nil
 	}
+	if !strings.HasPrefix(first, "[") {
+		if !ft.Quoted || ft.Comma {
+			first = strings.TrimSuffix(first, ",")
+		}
+		items, err := split(unquoteArg(first))
+		if err == nil && len(items) == 0 {
+			return nil, errAt(t.Pos, hint+"; DELETE "+k+" empties it")
+		}
+		return items, err
+	}
+	text := first
 	for !strings.HasSuffix(strings.TrimSuffix(text, ","), "]") {
 		if p.atEnd() {
 			return nil, errAt(t.Pos, hint)
 		}
-		n := p.toks[p.i]
+		text += " " + p.toks[p.i].Text
 		p.i++
-		text += " " + n.Text
-		bare = bare || (!n.Quoted && hasItemText(n.Text))
-	}
-	if p.lexed && bare {
-		return nil, errAt(t.Pos, k+" takes a list of quoted strings: "+k+" = ['a', 'b']")
 	}
 	text = strings.TrimSuffix(text, ",")
-	var items []string
-	for _, item := range strings.Split(text[1:len(text)-1], ",") {
-		item = unquoteArg(strings.TrimSpace(item))
-		if strings.ContainsAny(item, "\r\n") {
-			return nil, errAt(t.Pos, hint)
-		}
-		if item != "" {
-			items = append(items, item)
-		}
-	}
-	return items, nil
+	return split(text[1 : len(text)-1])
 }
-
-// hasItemText reports a word that holds more than a list's brackets and
-// commas.
-func hasItemText(w string) bool { return strings.Trim(w, "[], ") != "" }
 
 // notAPair is the error for a word where a pair belongs.
 func (p *parser) notAPair(t Token, what, form, keys string) *Error {
@@ -564,17 +603,30 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 	if p.defaults {
 		object = "a DEFAULTS property"
 	}
+	if !t.Quoted && word == t.Text {
+		if hint := removedWordHint(word); hint != "" {
+			return errAt(t.Pos, hint)
+		}
+	}
 	switch {
 	case !t.Quoted && strings.EqualFold(word, "IF"):
-		return errAt(t.Pos, "IF UNSET goes right after SET: SET IF UNSET statusline = '<command>'")
+		return errAt(t.Pos, "IF UNSET goes right after SET: SET IF UNSET <key> = '<value>', …")
+	case !p.defaults && isVarName(word):
+		return errAt(t.Pos, word+" is not a playbook property; a variable is SET VAR "+word+"=<value>")
 	case !t.Quoted && IsKeyword(word):
 		return errAt(t.Pos, word+" is not "+object+" ("+keys+")")
-	case !p.defaults && keyPattern.MatchString(word) && strings.ToUpper(word) == word && strings.ToLower(word) != word:
-		return errAt(t.Pos, word+" is not a playbook property; a variable is SET VAR "+word+"=<value>")
+	case safeWord.MatchString(k) && func() bool { _, ok := propertyIn(p.props(), strings.ToLower(k)); return ok }():
+		return errAt(t.Pos, "property keys are lowercase: "+strings.ToLower(k))
 	case safeWord.MatchString(k), sandboxKeyWord.MatchString(k):
 		return errAt(t.Pos, k+" is not "+object+" ("+keys+")")
 	}
 	return errAt(t.Pos, "not "+object+" ("+keys+")")
+}
+
+// isVarName reports a word shaped like an environment variable (FOO,
+// MAX_TOKENS): all capitals, so never a property key, which is lowercase.
+func isVarName(w string) bool {
+	return keyPattern.MatchString(w) && strings.ToUpper(w) == w && strings.ToLower(w) != w
 }
 
 // sandboxKeyWord is a mistyped sandbox.<key>, safe to quote back.
@@ -652,6 +704,33 @@ func sandboxWords(c *Clause) []string {
 	return w
 }
 
+// removedWordHint is the hint for a word that began a clause the
+// properties replaced (LAUNCHER, NO LAUNCHER, SANDBOX, ISOLATED LOGIN).
+// The words are not reserved, so a name may be one; where a clause starts,
+// they still say what to write instead.
+func removedWordHint(w string) string {
+	switch strings.ToUpper(w) {
+	case "LAUNCHER":
+		return removedLauncher
+	case "NO":
+		return removedNoLauncher
+	case "SANDBOX":
+		return removedSandbox
+	case "ISOLATED":
+		return removedLogin
+	}
+	return ""
+}
+
+// removedClauseHint is removedWordHint for the next word, where a clause
+// starts.
+func removedClauseHint(p *parser) string {
+	if p.atEnd() || p.toks[p.i].Quoted {
+		return ""
+	}
+	return removedWordHint(p.toks[p.i].Text)
+}
+
 // The clauses the properties replaced say what to write instead. Nothing
 // old is accepted.
 const (
@@ -669,13 +748,13 @@ const (
 	removedUnsetBox   = "UNSET SANDBOX is gone: SET sandbox.always = false"
 	removedUnsetKey   = "UNSET SANDBOX <key> is gone: DELETE sandbox.<key>"
 
-	removedStatusline      = "SET STATUSLINE is a property now: SET statusline = '<command>'[, statusline_refresh = <n>] (SET IF UNSET … for IF UNSET)"
-	removedRefresh         = "SET STATUSLINE REFRESH is a property now: SET statusline_refresh = <n>"
+	removedStatusline      = "SET STATUSLINE is a property now: SET statusline.command = '<command>'[, statusline.refresh = <n>] (SET IF UNSET … for IF UNSET)"
+	removedRefresh         = "SET STATUSLINE REFRESH is a property now: SET statusline.refresh = <n>"
 	removedPrevious        = "SET STATUSLINE PREVIOUS is gone: REVERT STATUSLINE"
 	removedUnsetStatusline = "UNSET STATUSLINE is gone: DELETE statusline"
-	removedUnsetRefresh    = "UNSET STATUSLINE REFRESH is gone: DELETE statusline_refresh"
+	removedUnsetRefresh    = "UNSET STATUSLINE REFRESH is gone: DELETE statusline.refresh"
 	removedPicker          = "SET MODEL PICKER is a property now: SET model_picker.mode = 'only' | 'append'"
-	removedUnsetPicker     = "UNSET MODEL PICKER is gone: DELETE model_picker"
+	removedUnsetPicker     = "UNSET MODEL PICKER is gone: DELETE model_picker.mode, and DROP MODEL for its rows"
 	removedSetHelper       = "SET SECRET HELPER is a property now: SET secret_helper = '<command>'"
 	removedUnsetHelper     = "UNSET SECRET HELPER is gone: DELETE secret_helper"
 )

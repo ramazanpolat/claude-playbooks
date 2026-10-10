@@ -56,12 +56,6 @@ func rowModel(o *settings.Object) string {
 
 // applyPicker applies one picker clause to a settings root.
 func applyPicker(root *settings.Object, c grammar.Clause) ([]string, bool, error) {
-	if c.Kind == grammar.UnsetModelPicker {
-		if root.Delete(keyModelPicker) {
-			return []string{"unset     model picker"}, true, nil
-		}
-		return nil, false, nil
-	}
 	mp, err := root.Object(keyModelPicker)
 	if err != nil {
 		return nil, false, err

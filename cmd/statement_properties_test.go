@@ -31,8 +31,10 @@ func TestLauncherModelAgentProperties(t *testing.T) {
 		t.Fatalf("CREATE … SET model, agent: %v", s)
 	}
 
-	// DELETE launcher: back to the playbook's own name.
-	mustStmt(t, "ALTER PLAYBOOK pp DELETE launcher")
+	// DELETE launcher: back to the playbook's own name, which it prints.
+	if out := mustStmt(t, "ALTER PLAYBOOK pp DELETE launcher"); !strings.Contains(out, "Launcher: pp") {
+		t.Fatalf("DELETE launcher does not name the launcher it wrote:\n%s", out)
+	}
 	if has("p2") || !has("pp") {
 		t.Fatalf("DELETE launcher: p2=%v pp=%v", has("p2"), has("pp"))
 	}

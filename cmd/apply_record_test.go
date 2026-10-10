@@ -302,18 +302,18 @@ func TestWithheldClause(t *testing.T) {
 	}
 }
 
-// A base's SET IF UNSET statusline = '…' defers to a status line the playbook
+// A base's SET IF UNSET statusline.command = '…' defers to a status line the playbook
 // has: when the base drops it, cpb update removes it only where the files
 // wrote it.
 func TestApplyRecordDeferredStatusline(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "own", nil)
 	writePlaybook(t, root, "fresh", nil)
-	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline", "=", "echo mine"}); err != nil {
+	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline.command", "=", "echo mine"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline = 'echo base'\n  SET VAR X=1;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline.command = 'echo base'\n  SET VAR X=1;\n")
 	for _, n := range []string{"own", "fresh"} {
 		if out, err := apply(t, f, "TO", n); err != nil {
 			t.Fatalf("%v\n%s", err, out)
@@ -325,10 +325,10 @@ func TestApplyRecordDeferredStatusline(t *testing.T) {
 			t.Fatalf("%v\n%s", err, out)
 		}
 	}
-	if sl := describePlaybookByName(t, "own").Statusline; sl == nil || *sl != "echo mine" {
+	if sl := describePlaybookByName(t, "own").Statusline.Command; sl == nil || *sl != "echo mine" {
 		t.Fatalf("the playbook's own status line was removed: %v", sl)
 	}
-	if sl := describePlaybookByName(t, "fresh").Statusline; sl != nil {
+	if sl := describePlaybookByName(t, "fresh").Statusline.Command; sl != nil {
 		t.Fatalf("the status line the files wrote was kept: %v", *sl)
 	}
 }
@@ -339,23 +339,23 @@ func TestApplyRecordDeferredStatusline(t *testing.T) {
 func TestApplyRecordDeferredStatuslineKeepsRefreshUndo(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "own", nil)
-	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline", "=", "echo mine"}); err != nil {
+	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline.command", "=", "echo mine"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline = 'echo base'\n  SET VAR X=1;\nALTER PLAYBOOK\n  SET statusline_refresh = 5;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline.command = 'echo base'\n  SET VAR X=1;\nALTER PLAYBOOK\n  SET statusline.refresh = 5;\n")
 	if out, err := apply(t, f, "TO", "own"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if v := describePlaybookByName(t, "own"); v.Statusline == nil || *v.Statusline != "echo mine" || v.StatuslineRefresh == nil || *v.StatuslineRefresh != 5 {
-		t.Fatalf("after APPLY: %v %v", v.Statusline, v.StatuslineRefresh)
+	if v := describePlaybookByName(t, "own"); v.Statusline.Command == nil || *v.Statusline.Command != "echo mine" || v.Statusline.Refresh == nil || *v.Statusline.Refresh != 5 {
+		t.Fatalf("after APPLY: %v %v", v.Statusline.Command, v.Statusline.Refresh)
 	}
 	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR X=1;\n")
 	if out, err := runUpdateFor(t, "own", false, false); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if v := describePlaybookByName(t, "own"); v.Statusline == nil || *v.Statusline != "echo mine" || v.StatuslineRefresh != nil {
-		t.Fatalf("after the update: command %v, refresh %v (want echo mine, none)", v.Statusline, v.StatuslineRefresh)
+	if v := describePlaybookByName(t, "own"); v.Statusline.Command == nil || *v.Statusline.Command != "echo mine" || v.Statusline.Refresh != nil {
+		t.Fatalf("after the update: command %v, refresh %v (want echo mine, none)", v.Statusline.Command, v.Statusline.Refresh)
 	}
 }
 

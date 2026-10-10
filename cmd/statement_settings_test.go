@@ -18,7 +18,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(orig), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(toolkit-helper*) DENY TOOL Read(*) SET statusline = '~/bin/status.sh' SET model = 'claude-opus-5-5'"
+	stmtText := "ALTER PLAYBOOK k ALLOW TOOL Bash(toolkit-helper*) DENY TOOL Read(*) SET statusline.command = '~/bin/status.sh' SET model = 'claude-opus-5-5'"
 	mustStmt(t, stmtText)
 	var s struct {
 		Permissions map[string][]string `json:"permissions"`
@@ -41,7 +41,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 		t.Fatalf("a repeat changed something:\n%s", out)
 	}
 	create := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	for _, want := range []string{"ALLOW TOOL 'Bash(toolkit-helper*)'", "DENY TOOL 'Read(*)'", "SET statusline = '~/bin/status.sh'", "SET model = 'claude-opus-5-5'"} {
+	for _, want := range []string{"ALLOW TOOL 'Bash(toolkit-helper*)'", "DENY TOOL 'Read(*)'", "SET statusline.command = '~/bin/status.sh'", "model = 'claude-opus-5-5'"} {
 		if !strings.Contains(create, want) {
 			t.Errorf("SHOW CREATE missing %q:\n%s", want, create)
 		}
@@ -67,7 +67,7 @@ func TestSettingsDryRunCarries(t *testing.T) {
 	// SET model is set again by DELETE model, so it is folded away and the
 	// playbook, which has no model, does not change; IF UNSET sees the
 	// status line the statement before it set in the dry run.
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET model = 'a';\nALTER PLAYBOOK k DELETE model;\nALTER PLAYBOOK k SET statusline = 'echo a';\nALTER PLAYBOOK k SET IF UNSET statusline = 'echo b';\n")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET model = 'a';\nALTER PLAYBOOK k DELETE model;\nALTER PLAYBOOK k SET statusline.command = 'echo a';\nALTER PLAYBOOK k SET IF UNSET statusline.command = 'echo b';\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil || !strings.Contains(out, "0 created, 1 changed, 3 unchanged") {
 		t.Fatalf("dry run: %v\n%s", err, out)
@@ -106,22 +106,22 @@ func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"statusLine": {"type": "command", "command": "$HOME/bin/my-status", "refreshInterval": 5}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out := mustStmt(t, "ALTER PLAYBOOK k SET IF UNSET statusline = 'mine'"); !strings.Contains(out, "unchanged") || read()["command"] != "$HOME/bin/my-status" {
+	if out := mustStmt(t, "ALTER PLAYBOOK k SET IF UNSET statusline.command = 'mine'"); !strings.Contains(out, "unchanged") || read()["command"] != "$HOME/bin/my-status" {
 		t.Fatalf("IF UNSET over a set status line:\n%s\n%v", out, read())
 	}
-	mustStmt(t, "ALTER PLAYBOOK k SET statusline = 'mine'")
+	mustStmt(t, "ALTER PLAYBOOK k SET statusline.command = 'mine'")
 	if sl := read(); sl["command"] != "mine" || sl["refreshInterval"] != float64(5) {
 		t.Fatalf("SET statusline did not apply: %v", sl)
 	}
 	mustStmt(t, "ALTER PLAYBOOK k DELETE statusline")
-	mustStmt(t, "ALTER PLAYBOOK k SET IF UNSET statusline = 'fresh', statusline_refresh = 3")
+	mustStmt(t, "ALTER PLAYBOOK k SET IF UNSET statusline.command = 'fresh', statusline.refresh = 3")
 	if sl := read(); sl["command"] != "fresh" || sl["refreshInterval"] != float64(3) {
 		t.Fatalf("IF UNSET on an empty slot: %v", sl)
 	}
-	if out := mustStmt(t, "ALTER PLAYBOOK k SET IF UNSET statusline = 'fresh', statusline_refresh = 3"); !strings.Contains(out, "unchanged") {
+	if out := mustStmt(t, "ALTER PLAYBOOK k SET IF UNSET statusline.command = 'fresh', statusline.refresh = 3"); !strings.Contains(out, "unchanged") {
 		t.Fatalf("a repeat changed something:\n%s", out)
 	}
-	if create := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(create, "SET statusline = 'fresh', statusline_refresh = 3") || strings.Contains(create, "IF UNSET") {
+	if create := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(create, "SET statusline.command = 'fresh', statusline.refresh = 3") || strings.Contains(create, "IF UNSET") {
 		t.Fatalf("SHOW CREATE writes the state, not the condition:\n%s", create)
 	}
 	if entries, err := os.ReadDir(root); err == nil {

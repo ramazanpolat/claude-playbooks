@@ -32,8 +32,13 @@ func TestParseModelPicker(t *testing.T) {
 	if !reflect.DeepEqual(strip(again[0]), strip(st)) {
 		t.Errorf("round trip changed the statement: %s", st.String())
 	}
-	if st, err := ParseArgs(w("ALTER PLAYBOOK k DELETE model_picker")); err != nil || st.Clauses[0].Kind != UnsetModelPicker {
-		t.Errorf("DELETE model_picker: %v %+v", err, st)
+	// DELETE model_picker is the mode: rows are a collection, which ADD
+	// MODEL and DROP MODEL change, in the same statement too.
+	if st, err := ParseLine("ALTER PLAYBOOK k ADD MODEL 'a' DELETE model_picker"); err != nil || st.Clauses[1].Kind != UnsetModelPickerMode {
+		t.Errorf("ADD MODEL with DELETE model_picker: %v %+v", err, st)
+	}
+	if st, err := ParseArgs(w("ALTER PLAYBOOK k DELETE model_picker")); err != nil || st.Clauses[0].Kind != UnsetModelPickerMode {
+		t.Errorf("DELETE model_picker is the mode: %v %+v", err, st)
 	}
 	if st, err := ParseArgs(w("ALTER PLAYBOOK k DELETE model")); err != nil || st.Clauses[0].Kind != UnsetModel {
 		t.Errorf("DELETE model: %v %+v", err, st)
@@ -48,8 +53,6 @@ func TestModelPickerErrors(t *testing.T) {
 		"ALTER PLAYBOOK k ADD MODEL 'a' BEHAVES 'b'":                          "BEHAVES takes AS",
 		"ALTER PLAYBOOK k ADD MODEL 'a' LABEL 'x' LABEL 'y'":                  "LABEL appears twice",
 		"ALTER PLAYBOOK k SET MODEL PICKER":                                   "SET model_picker.mode = 'only' | 'append'",
-		"ALTER PLAYBOOK k ADD MODEL 'a' DELETE model_picker":                  "cannot be combined",
-		"ALTER PLAYBOOK k DROP MODEL 'a' DELETE model_picker":                 "cannot be combined",
 		"ALTER PLAYBOOK k ADD MODEL 'a' DROP MODEL 'a'":                       "model a appears twice",
 		"ALTER PLAYBOOK k SET model_picker.mode = 'only' DELETE model_picker": "model_picker is named twice",
 		"ALTER PLAYBOOK k ADD MODEL 'a b'":                                    "needs '<id>'",

@@ -28,7 +28,7 @@ ALTER PLAYBOOK
   ADD MARKETPLACE reviewers FROM './reviewer-marketplace'
   ADD PLUGIN reviewer@reviewers
   SET agent = 'reviewer'
-  SET IF UNSET statusline = 'echo reviewer', statusline_refresh = 10;
+  SET IF UNSET statusline.command = 'echo reviewer', statusline.refresh = 10;
 ```
 
 `ADD MARKETPLACE` and `ADD PLUGIN` run `claude plugin marketplace add` and

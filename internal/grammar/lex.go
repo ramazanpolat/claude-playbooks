@@ -13,7 +13,10 @@ type Token struct {
 	// a name that collides with one. Words from argv are never Quoted: the
 	// shell has already removed the quotes, so there is nothing to record.
 	Quoted bool
-	Pos    Pos
+	// Comma reports that the word ends in a comma outside quotes: 'a', is
+	// "a" and a separator, where 'a,' is a value that ends in a comma.
+	Comma bool
+	Pos   Pos
 }
 
 // Pos locates a token: a line and column in a playbook file, or a word number
@@ -86,7 +89,7 @@ func lexFile(src string) ([][]Token, error) {
 		// A word: runs until unquoted whitespace, ';' or the end.
 		start := Pos{Line: line, Col: col + 1}
 		var b strings.Builder
-		quoted := false
+		quoted, comma := false, false
 		for i < len(rs) {
 			r = rs[i]
 			if r == ' ' || r == '\t' || r == '\r' || r == '\n' || r == ';' {
@@ -94,10 +97,12 @@ func lexFile(src string) ([][]Token, error) {
 			}
 			if r != '\'' && r != '"' {
 				b.WriteRune(r)
+				comma = r == ','
 				col++
 				i++
 				continue
 			}
+			comma = false
 			q, qpos := r, Pos{Line: line, Col: col + 1}
 			quoted = true
 			col++
@@ -129,7 +134,7 @@ func lexFile(src string) ([][]Token, error) {
 				return nil, &Error{Pos: qpos, Msg: "unterminated quote"}
 			}
 		}
-		cur = append(cur, Token{Text: b.String(), Quoted: quoted, Pos: start})
+		cur = append(cur, Token{Text: b.String(), Quoted: quoted, Comma: comma, Pos: start})
 	}
 	if len(cur) > 0 {
 		stmts = append(stmts, cur)

@@ -129,6 +129,9 @@ type stmtRun struct {
 	// backedUp marks the files of plain config directories a run already
 	// backed up (TO '<dir>'): each is backed up once, before its first write.
 	backedUp map[string]bool
+	// exists: the ALTER being run is CREATE IF NOT EXISTS's SET list on a
+	// playbook that exists, so "unchanged" says that it exists.
+	exists bool
 }
 
 // stmtWarning is one warning a statement raises, with its code for APPLY
@@ -174,6 +177,11 @@ func execStatement(r *stmtRun, st *grammar.Stmt) error {
 	case st.Verb == grammar.Drop && st.Object == grammar.Playbook:
 		return dropPlaybookStatement(r, st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Playbook:
+		// SET IF UNSET first: what applies of it may be the launcher.
+		st, err := r.resolveIfUnset(st)
+		if err != nil {
+			return err
+		}
 		if lifecycle(st) {
 			return alterPlaybookLifecycle(r, st)
 		}
@@ -625,7 +633,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && len(steps) == 0 {
 		r.outcome = outUnchanged
-		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
+		head := "PLAYBOOK " + st.Name + " unchanged"
+		if r.exists {
+			head = "PLAYBOOK " + st.Name + " already exists; unchanged"
+		}
+		r.say(head, pluginLines)
 		return nil
 	}
 	r.outcome = outChanged

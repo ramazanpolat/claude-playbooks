@@ -84,7 +84,7 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	if !strings.Contains(created, "ALTER PLAYBOOK k\n  SET login = 'isolated', memory = 'shared'\n  SET sandbox.always = false;") {
+	if !strings.Contains(created, "CREATE PLAYBOOK IF NOT EXISTS k\n  SET launcher = '', login = 'isolated', memory = 'shared', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -115,7 +115,7 @@ func TestIsolatedLogin(t *testing.T) {
 	if isolateAuthOf(t, "k") {
 		t.Fatal("login = 'shared' left isolated_login")
 	}
-	if created := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(created, "SET login = 'shared', memory = 'shared'") {
+	if created := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(created, "login = 'shared', memory = 'shared'") {
 		t.Fatalf("SHOW CREATE after login = 'shared':\n%s", created)
 	}
 
@@ -125,7 +125,7 @@ func TestIsolatedLogin(t *testing.T) {
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK s DELETE login"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("DELETE login on a sandboxed playbook: %v", err)
 	}
-	if created := mustStmt(t, "SHOW CREATE PLAYBOOK s"); !strings.Contains(created, "SET login = 'isolated', memory = 'isolated'") {
+	if created := mustStmt(t, "SHOW CREATE PLAYBOOK s"); !strings.Contains(created, "login = 'isolated', memory = 'isolated', sandbox.always = true") {
 		t.Fatalf("SHOW CREATE of a sandboxed playbook:\n%s", created)
 	}
 

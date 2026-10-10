@@ -14,6 +14,9 @@ func strip(s *Stmt) *Stmt {
 	out.Clauses = nil
 	for _, c := range s.Clauses {
 		c.Pos = Pos{}
+		if c.Group != nil {
+			c.Group = strip(&Stmt{Clauses: c.Group}).Clauses
+		}
 		out.Clauses = append(out.Clauses, c)
 	}
 	return &out
@@ -106,8 +109,8 @@ var validCases = []struct {
 		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist SET launcher = '', sandbox.always = true, login = isolated"),
 		Stmt{Verb: Create, Object: Playbook, Name: "second", IfNotExists: true, Clauses: []Clause{
 			{Kind: From, Arg: "repo"}, {Kind: Branch, Arg: "v0.5.0"}, {Kind: Subdir, Arg: "dist"},
-			{Kind: SetProperties, Settings: []Var{{Key: "login", Value: "isolated"}}}, {Kind: NoLauncher},
-			{Kind: SetSandboxKeys, Settings: []Var{{Key: "always", Value: "true"}}}}}},
+			{Kind: NoLauncher}, {Kind: SetSandboxKeys, Settings: []Var{{Key: "always", Value: "true"}}},
+			{Kind: SetProperties, Settings: []Var{{Key: "login", Value: "isolated"}}}}}},
 	{"keyword-shaped arguments are values, not names",
 		w("CREATE PLAYBOOK x FROM link SUBDIR env BRANCH all"),
 		Stmt{Verb: Create, Object: Playbook, Name: "x", Clauses: []Clause{
@@ -198,7 +201,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("FOO"), "not a statement"},
 		{w("CREATE"), "CREATE needs an object"},
 		{w("CREATE PLAYBOOK"), "missing <playbook>"},
-		{w("CREATE PLAYBOOK sandbox"), `"sandbox" is a keyword and cannot name a playbook`},
+		{w("CREATE PLAYBOOK branch"), `"branch" is a keyword and cannot name a playbook`},
 		{w("CREATE ENV use"), `"use" is a keyword and cannot name an env set`},
 		{w("CREATE OR REPLACE PLAYBOOK x"), "OR REPLACE applies to ENV only"},
 		{w("CREATE OR REPLACE ENV IF NOT EXISTS e"), "cannot be combined"},
@@ -248,7 +251,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER PLAYBOOK k SET secret_helper = h"), "not a playbook property"},
 		{w("ALTER PLAYBOOK k SET STATUSLINE x"), "SET STATUSLINE is a property now"},
 		{w("ALTER PLAYBOOK k SET STATUSLINE PREVIOUS"), "REVERT STATUSLINE"},
-		{w("ALTER PLAYBOOK k UNSET STATUSLINE REFRESH"), "DELETE statusline_refresh"},
+		{w("ALTER PLAYBOOK k UNSET STATUSLINE REFRESH"), "DELETE statusline.refresh"},
 		{w("ALTER PLAYBOOK k UNSET MODEL PICKER"), "DELETE model_picker"},
 		{w("ALTER DEFAULTS USE FOO x"), "USE takes ENV"},
 		{w("ALTER ENV e SET"), "SET needs <key>=<value> or <key> FROM '<ref>'"},
@@ -513,9 +516,26 @@ func TestIsStatement(t *testing.T) {
 }
 
 func TestKeywordsAreReserved(t *testing.T) {
-	for _, k := range []string{"playbook", "ENV", "Defaults", "sandbox", "all", "router", "--dry-run"} {
+	for _, k := range []string{"playbook", "ENV", "Defaults", "branch", "all", "router", "--dry-run"} {
 		if got := IsKeyword(k); got != (k != "--dry-run" && k != "router") {
 			t.Errorf("IsKeyword(%q) = %v", k, got)
+		}
+	}
+	// The words of removed clauses only trigger their hints: a name, a
+	// launcher or a model id may be one.
+	for _, k := range []string{"launcher", "no", "sandbox", "agent", "secret", "helper", "picker", "only", "append", "refresh"} {
+		if IsKeyword(k) {
+			t.Errorf("IsKeyword(%q): a removed clause's word is reserved", k)
+		}
+	}
+	for _, src := range []string{"CREATE PLAYBOOK sandbox;", "CREATE PLAYBOOK no SET launcher = 'launcher';", "ALTER PLAYBOOK only SET model = 'picker';"} {
+		st, err := ParseFile(src)
+		if err != nil {
+			t.Errorf("%s: %v", src, err)
+			continue
+		}
+		if again, err := ParseFile(st[0].String() + ";"); err != nil || !reflect.DeepEqual(strip(again[0]), strip(st[0])) {
+			t.Errorf("%s: round trip %v %s", src, err, st[0].String())
 		}
 	}
 }

@@ -142,11 +142,13 @@ type Playbook struct {
 		Source string `json:"source"`
 		Mode   string `json:"mode"`
 	} `json:"skills"`
-	Statusline        *string `json:"statusline"`
-	StatuslineRefresh *int    `json:"statusline_refresh"`
-	StatuslineHistory []struct {
-		Command string `json:"command"`
-	} `json:"statusline_history"`
+	Statusline struct {
+		Command *string `json:"command"`
+		Refresh *int    `json:"refresh"`
+		History []struct {
+			Command string `json:"command"`
+		} `json:"history"`
+	} `json:"statusline"`
 	Model       *string `json:"model"`
 	ModelPicker *struct {
 		Mode    string `json:"mode"`
