@@ -102,5 +102,7 @@ jobs:
           for args in "self-update" "self-update --force"; do
             if out=$(devbox run -- cpb $args 2>&1); then echo "::error::'$args' did not refuse"; echo "$out"; exit 1; fi
             echo "$out" | grep -q 'managed by Nix' || { echo "::error::'$args' refused without naming Nix"; echo "$out"; exit 1; }
-            if echo "$out" | grep -qi -e sudo -e 'up to date'; then echo "::error::'$args' mentions sudo or 'up to date'"; echo "$out"; exit 1; fi
+            # Whole words, the temp path left out: a random directory name
+            # (tmp.mSJ9VsUdOi) once matched "sudo" case-insensitively.
+            if echo "$out" | sed "s|$P||g" | grep -qiw -e sudo -e 'up to date'; then echo "::error::'$args' mentions sudo or 'up to date'"; echo "$out"; exit 1; fi
           done
