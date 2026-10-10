@@ -306,8 +306,8 @@ contains = "plain-claude-md-ok"
 # at once, leaving the store intact; SHOW --json and a SHOW CREATE round trip
 # read it; 'shared' is refused while the playbook holds a login of its own
 # (nothing touched), goes through once logged out, and a launch links the
-# shared store again; DELETE login ('shared') is refused on SANDBOX.
-command = '''P="$HOME/.claude-playbooks"; G="$HOME/.claude/.credentials.json"; mkdir -p "$HOME/.claude" && printf '{"claudeAiOauth":{"accessToken":"arena-shared"}}' > "$G" && cpb CREATE PLAYBOOK iso SET launcher = '' >/dev/null && test -L "$P/iso/.credentials.json" && cpb ALTER PLAYBOOK iso SET login=isolated >/dev/null && grep -qx 'isolated_login = true' "$P/iso/.playbook" && ! test -e "$P/iso/.credentials.json" && ! test -L "$P/iso/.credentials.json" && grep -q arena-shared "$G" && cpb SHOW PLAYBOOK iso --json | tr -d ' \n' | grep -qF '"login":"isolated"' && cpb SHOW CREATE PLAYBOOK iso > "$HOME/iso.cpb" && grep -qxF "  SET login = 'isolated', memory = 'isolated';" "$HOME/iso.cpb" && cpb APPLY "$HOME/iso.cpb" | grep -q " 0 created, 0 changed," && printf '{"claudeAiOauth":{"accessToken":"arena-own"}}' > "$P/iso/.credentials.json" && if cpb ALTER PLAYBOOK iso SET login=shared > "$HOME/iso.err" 2>&1; then echo own-login-unset-accepted; elif ! grep -q 'has a login of its own' "$HOME/iso.err" || ! grep -q arena-own "$P/iso/.credentials.json" || ! grep -qx 'isolated_login = true' "$P/iso/.playbook"; then echo own-login-wrong; else rm "$P/iso/.credentials.json" && cpb ALTER PLAYBOOK iso SET login=shared >/dev/null && ! grep -q isolated_login "$P/iso/.playbook" && { cpb run iso >/dev/null 2>&1 || true; } && test -L "$P/iso/.credentials.json" && cpb CREATE PLAYBOOK isb SET launcher = '' SANDBOX >/dev/null && if cpb ALTER PLAYBOOK isb DELETE login > "$HOME/isb.err" 2>&1; then echo sandbox-unset-accepted; else grep -q 'always runs in a sandbox' "$HOME/isb.err" && grep -q arena-shared "$G" && echo isolated-login-ok; fi; fi'''
+# shared store again; DELETE login ('shared') is refused on a sandboxed one.
+command = '''P="$HOME/.claude-playbooks"; G="$HOME/.claude/.credentials.json"; mkdir -p "$HOME/.claude" && printf '{"claudeAiOauth":{"accessToken":"arena-shared"}}' > "$G" && cpb CREATE PLAYBOOK iso SET launcher = '' >/dev/null && test -L "$P/iso/.credentials.json" && cpb ALTER PLAYBOOK iso SET login=isolated >/dev/null && grep -qx 'isolated_login = true' "$P/iso/.playbook" && ! test -e "$P/iso/.credentials.json" && ! test -L "$P/iso/.credentials.json" && grep -q arena-shared "$G" && cpb SHOW PLAYBOOK iso --json | tr -d ' \n' | grep -qF '"login":"isolated"' && cpb SHOW CREATE PLAYBOOK iso > "$HOME/iso.cpb" && grep -qxF "  SET login = 'isolated', memory = 'isolated';" "$HOME/iso.cpb" && cpb APPLY "$HOME/iso.cpb" | grep -q " 0 created, 0 changed," && printf '{"claudeAiOauth":{"accessToken":"arena-own"}}' > "$P/iso/.credentials.json" && if cpb ALTER PLAYBOOK iso SET login=shared > "$HOME/iso.err" 2>&1; then echo own-login-unset-accepted; elif ! grep -q 'has a login of its own' "$HOME/iso.err" || ! grep -q arena-own "$P/iso/.credentials.json" || ! grep -qx 'isolated_login = true' "$P/iso/.playbook"; then echo own-login-wrong; else rm "$P/iso/.credentials.json" && cpb ALTER PLAYBOOK iso SET login=shared >/dev/null && ! grep -q isolated_login "$P/iso/.playbook" && { cpb run iso >/dev/null 2>&1 || true; } && test -L "$P/iso/.credentials.json" && cpb CREATE PLAYBOOK isb SET launcher = '', sandbox.always = true, login = 'isolated' >/dev/null && if cpb ALTER PLAYBOOK isb DELETE login > "$HOME/isb.err" 2>&1; then echo sandbox-unset-accepted; else grep -q 'always runs in a sandbox' "$HOME/isb.err" && grep -q arena-shared "$G" && echo isolated-login-ok; fi; fi'''
 contains = "isolated-login-ok"
 
 [[verify.commands]]
@@ -462,11 +462,11 @@ echo tui-ok'''
 contains = "tui-ok"
 
 [[verify.commands]]
-# SET SANDBOX (v4.0.0): the keyed form sets only its keys; bare SET SANDBOX is
-# always = true and isolates the login; SHOW CREATE writes both forms back,
-# and applying it changes nothing; UNSET SANDBOX turns always off and keeps
-# the login isolated.
-command = '''M="$HOME/.claude-playbooks/sbp/.playbook"; cpb CREATE PLAYBOOK sbp SET launcher = '' >/dev/null && cpb ALTER PLAYBOOK sbp SET SANDBOX backend=sbx mounts=~/a:ro >/dev/null && grep -q 'backend = "sbx"' "$M" && ! grep -q 'always' "$M" && cpb ALTER PLAYBOOK sbp SET SANDBOX >/dev/null && grep -q 'always = true' "$M" && grep -q 'isolated_login = true' "$M" && cpb SHOW CREATE PLAYBOOK sbp > "$HOME/sbp.cpb" && grep -q 'SET SANDBOX backend=sbx mounts=~/a:ro' "$HOME/sbp.cpb" && cpb APPLY "$HOME/sbp.cpb" | grep -q '0 created, 0 changed' && cpb ALTER PLAYBOOK sbp UNSET SANDBOX >/dev/null && ! grep -q 'always = true' "$M" && grep -q 'isolated_login = true' "$M" && echo sandbox-settings-ok'''
+# The sandbox.<key> properties (v4.0.0): each sets only its key; always = true
+# needs the login isolated (refused on a shared one, accepted with login =
+# 'isolated'); SHOW CREATE writes them back, and applying it changes nothing;
+# sandbox.always = false keeps the login isolated.
+command = '''M="$HOME/.claude-playbooks/sbp/.playbook"; cpb CREATE PLAYBOOK sbp SET launcher = '' >/dev/null && cpb "ALTER PLAYBOOK sbp SET sandbox.backend = 'sbx', sandbox.mounts = ['~/a:ro']" >/dev/null && grep -q 'backend = "sbx"' "$M" && ! grep -q 'always' "$M" && if cpb ALTER PLAYBOOK sbp SET sandbox.always = true >/dev/null 2>&1; then echo sandbox-shared-login-accepted; exit 1; fi && cpb ALTER PLAYBOOK sbp SET sandbox.always = true, login = isolated >/dev/null && grep -q 'always = true' "$M" && grep -q 'isolated_login = true' "$M" && cpb SHOW CREATE PLAYBOOK sbp > "$HOME/sbp.cpb" && grep -qF "sandbox.backend = 'sbx', sandbox.mounts = ['~/a:ro']" "$HOME/sbp.cpb" && cpb APPLY "$HOME/sbp.cpb" | grep -q '0 created, 0 changed' && cpb ALTER PLAYBOOK sbp SET sandbox.always = false >/dev/null && ! grep -q 'always = true' "$M" && grep -q 'isolated_login = true' "$M" && echo sandbox-settings-ok'''
 contains = "sandbox-settings-ok"
 
 [[verify.commands]]
@@ -545,7 +545,7 @@ contains = "apply-record-ok"
 command = '''
 D="$HOME/aundo"; mkdir -p "$D"
 cpb CREATE ENV uroute SET R=1 >/dev/null && cpb CREATE ENV umine SET M=1 >/dev/null && cpb CREATE PLAYBOOK upb SET launcher = '' >/dev/null && cpb ALTER PLAYBOOK upb ADD ENV umine >/dev/null || { echo aundo-setup; exit 1; }
-printf "ALTER PLAYBOOK\n  ADD ENV uroute\n  SET SANDBOX workdir=/srv/w share_skills=true;\n" > "$D/base.cpb"
+printf "ALTER PLAYBOOK\n  ADD ENV uroute\n  SET sandbox.workdir = '/srv/w', sandbox.share_skills = true;\n" > "$D/base.cpb"
 cpb APPLY "$D/base.cpb" TO upb >/dev/null 2>&1 || { echo aundo-apply; exit 1; }
 J=$(cpb SHOW PLAYBOOK upb --json | tr -d ' \n')
 printf %s "$J" | grep -qF '"envs":["umine","uroute"]' && printf %s "$J" | grep -qF '"workdir":"/srv/w"' || { echo aundo-not-applied; printf %s "$J"; exit 1; }

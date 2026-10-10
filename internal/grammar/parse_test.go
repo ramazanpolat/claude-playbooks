@@ -103,9 +103,11 @@ var validCases = []struct {
 		Stmt{Verb: Create, Object: Playbook, Name: "toolkit-x", Clauses: []Clause{
 			{Kind: From, Arg: "https://github.com/example/toolkit"}, {Kind: Launcher, Arg: "kx"}}}},
 	{"create playbook if not exists with every option",
-		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist SET launcher = '' SANDBOX"),
+		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist SET launcher = '', sandbox.always = true, login = isolated"),
 		Stmt{Verb: Create, Object: Playbook, Name: "second", IfNotExists: true, Clauses: []Clause{
-			{Kind: From, Arg: "repo"}, {Kind: Branch, Arg: "v0.5.0"}, {Kind: Subdir, Arg: "dist"}, {Kind: NoLauncher}, {Kind: Sandbox}}}},
+			{Kind: From, Arg: "repo"}, {Kind: Branch, Arg: "v0.5.0"}, {Kind: Subdir, Arg: "dist"},
+			{Kind: SetProperties, Settings: []Var{{Key: "login", Value: "isolated"}}}, {Kind: NoLauncher},
+			{Kind: SetSandboxKeys, Settings: []Var{{Key: "always", Value: "true"}}}}}},
 	{"keyword-shaped arguments are values, not names",
 		w("CREATE PLAYBOOK x FROM link SUBDIR env BRANCH all"),
 		Stmt{Verb: Create, Object: Playbook, Name: "x", Clauses: []Clause{
@@ -278,7 +280,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("CREATE PLAYBOOK x LINK d SUBDIR s"), "SUBDIR needs FROM <source>"},
 		{w("CREATE PLAYBOOK x SET launcher = 'a', launcher = ''"), "launcher is named twice in one statement"},
 		{w("CREATE PLAYBOOK x NO LAUNCHER"), "NO LAUNCHER is a property now: SET launcher = ''"},
-		{w("CREATE PLAYBOOK x SANDBOX SANDBOX"), "SANDBOX appears twice"},
+		{w("CREATE PLAYBOOK x SANDBOX"), "SANDBOX is a property now"},
 		{w("DROP ENV e --yes"), `unexpected word`},
 		{w("ALTER ENV e SET ANTHROPIC_AUTH_TOKEN=abc"), "ANTHROPIC_AUTH_TOKEN looks like a credential"},
 		{w("ALTER ENV e SET A=1 ANTHROPIC_AUTH_TOKEN=abc"), "add AS PLAINTEXT"},

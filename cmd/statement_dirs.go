@@ -40,8 +40,6 @@ var dirRefusals = map[grammar.Kind]string{
 	grammar.NoLauncher:      "the directory has no launcher",
 	grammar.DefaultLauncher: "the directory has no launcher",
 
-	grammar.SetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetSandbox:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.SetSandboxKeys:   "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.UnsetSandboxKeys: "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 }

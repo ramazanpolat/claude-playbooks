@@ -52,8 +52,12 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			o.alias = c.Arg
 		case grammar.NoLauncher:
 			o.noAlias = true
-		case grammar.Sandbox:
-			o.sandbox = true
+		case grammar.SetSandboxKeys:
+			for _, v := range c.Settings {
+				if v.Key == "always" && v.Value == "true" {
+					o.sandbox = true
+				}
+			}
 		}
 	}
 	login, _ := grammar.PropertyValue(st.Clauses, "login")
@@ -69,16 +73,31 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 }
 
 // createPlaybookStatement creates a playbook. CREATE … SET is "create, then
-// ALTER … SET", in one step: the manifest's properties (login, memory, the
-// launcher) are written by the creation itself, before the login is linked
-// and the launcher registered; the settings.json properties (model, agent)
-// then by an ALTER of the new playbook, within the same statement. On an
+// ALTER … SET", in one step: the login, the memory, the launcher and
+// sandbox.always are written by the creation itself, before the login is
+// linked and the launcher registered; the rest (model, agent, the other
+// sandbox keys) then by an ALTER of the new playbook, within the same
+// statement. On an
 // existing playbook, IF NOT EXISTS changes nothing, its SET list included.
 func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	var after []grammar.Clause
 	for _, c := range st.Clauses {
-		if c.Kind == grammar.SetModel || c.Kind == grammar.SetAgent {
+		switch c.Kind {
+		case grammar.SetModel, grammar.SetAgent:
 			after = append(after, c)
+		case grammar.SetSandboxKeys:
+			// always is the creation's (with the isolated login); the other
+			// keys are an ALTER of the new playbook.
+			rest := c
+			rest.Settings = nil
+			for _, v := range c.Settings {
+				if v.Key != "always" {
+					rest.Settings = append(rest.Settings, v)
+				}
+			}
+			if len(rest.Settings) > 0 {
+				after = append(after, rest)
+			}
 		}
 	}
 	if err := createPlaybookOnly(r, st); err != nil || len(after) == 0 || r.outcome != outCreated {

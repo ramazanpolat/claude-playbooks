@@ -126,15 +126,16 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [SANDBOX] [SET property, ...]
+            | CREATE PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
 
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
             | LINK <dir>                                    develop in place
-property   := <key> = '<value>'           launcher, login, memory, model, agent
+property   := <key> = <value>             launcher, login, memory, model, agent, sandbox.<key>
                                            see "Playbook properties"
+value      := '<string>' | true | false | [ '<string>', ... ]
 
 env-clause := SET [VAR] <key>=<value> ... [AS PLAINTEXT]
                                            literal values; AS PLAINTEXT: see Secrets
@@ -173,9 +174,6 @@ pb-clause  := set-clause
             | SET STATUSLINE PREVIOUS      the status line cpb replaced last
             | SET property, ...            change properties; see "Playbook properties"
             | DELETE <key>, ...            back to the default
-            | SET SANDBOX | UNSET SANDBOX  every launch sandboxed (the login isolated too) | not; see "Sandbox"
-            | SET SANDBOX <key>=<value> ...   the [sandbox] table's own keys: SET SANDBOX backend=sbx
-            | UNSET SANDBOX <key> ...      forget a setting: UNSET SANDBOX host
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   see "Model picker"
             | DROP MODEL '<id>'
             | SET MODEL PICKER ONLY | SET MODEL PICKER APPEND | UNSET MODEL PICKER
@@ -198,9 +196,8 @@ read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> 
 
 The alternatives are exclusive, and the parser enforces them: `OR REPLACE`
 and `IF NOT EXISTS` cannot be combined; a playbook has one origin, `FROM` or `LINK`,
-and `BRANCH` / `SUBDIR` only with `FROM`; `SANDBOX` does not take `LINK`, and
-of the properties `LINK` takes only `launcher`. The clauses of `origin`,
-`SANDBOX` and `SET` may come in any order.
+and `BRANCH` / `SUBDIR` only with `FROM`; of the properties `LINK` takes
+only `launcher`. The clauses of `origin` and `SET` may come in any order.
 `DROP PLAYBOOK` asks for confirmation on a terminal; `--yes` skips it.
 
 Two limits keep every statement whole-or-nothing:
@@ -211,7 +208,7 @@ Two limits keep every statement whole-or-nothing:
   launcher = '<launcher>'` is one statement; the environment change is a
   second.
 - `CREATE PLAYBOOK … LINK <dir>` needs the target to have a `.playbook`: a
-  statement never prompts for one. `SANDBOX` does not apply to `LINK`,
+  statement never prompts for one. The sandbox does not apply to `LINK`,
   whose manifest belongs to the target.
 
 Inside `ALTER ENV` the word `VAR` is optional (`SET FOO=1`): the object
@@ -265,7 +262,7 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … ALLOW / DENY / UNSET TOOL` | the playbook's `settings.json`, `permissions.allow` / `permissions.deny` |
 | `ALTER PLAYBOOK … SET / UNSET STATUSLINE`, `SET / DELETE model` | the playbook's `settings.json`, `statusLine` / `model` |
 | `ALTER PLAYBOOK … ADD / DROP SKILL` | `<playbook>/skills/<name>` (a link or a copy) and the manifest's `[skills.<name>]` record |
-| `ALTER PLAYBOOK … SET / UNSET SANDBOX` | the playbook's `.playbook`, `[sandbox]` (bare `SET SANDBOX` also `isolated_login = true`) |
+| `ALTER PLAYBOOK … SET` / `DELETE sandbox.<key>` | the playbook's `.playbook`, `[sandbox]` |
 | `ALTER PLAYBOOK … SET login` / `DELETE login` | the playbook's `.playbook`, `isolated_login` |
 | `ALTER PLAYBOOK … SET memory` / `DELETE memory` | the playbook's `settings.json`, one `claudeMdExcludes` entry |
 
@@ -310,11 +307,11 @@ applied in CI.
 
 ### `CREATE PLAYBOOK <name>`
 
-Creates `<root>/<name>/` with a `CLAUDE.md` that says what a playbook is and imports nothing (replace it with the playbook's own instructions), links the machine's login (see *Authentication preparation*), and registers a launcher named `<name>`, or the one `SET launcher = '<launcher>'` names, recorded as the manifest's `launcher` (`launcher = '<name>'` is the default and records nothing). `SET launcher = ''` registers none and prints `cpb run <name>` instead. `SET model = …` and `SET agent = …` are written into the new playbook's `settings.json` in the same statement, as an `ALTER` of it would. `SET login = 'isolated'` writes `isolated_login = true` before the login is linked, so the playbook shares none; the `memory` property, `'isolated'` unless `SET` says `'shared'`, writes its `claudeMdExcludes` entry; `SANDBOX` writes `[sandbox] always = true` with it. A name that is taken refuses (`playbook "<name>" already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)`); `IF NOT EXISTS` leaves an existing playbook unchanged, its `SET` list included. The launcher names are checked before the directory exists, under the registry lock (see *Launchers*).
+Creates `<root>/<name>/` with a `CLAUDE.md` that says what a playbook is and imports nothing (replace it with the playbook's own instructions), links the machine's login (see *Authentication preparation*), and registers a launcher named `<name>`, or the one `SET launcher = '<launcher>'` names, recorded as the manifest's `launcher` (`launcher = '<name>'` is the default and records nothing). `SET launcher = ''` registers none and prints `cpb run <name>` instead. `SET model = …` and `SET agent = …` are written into the new playbook's `settings.json` in the same statement, as an `ALTER` of it would. `SET login = 'isolated'` writes `isolated_login = true` before the login is linked, so the playbook shares none; the `memory` property, `'isolated'` unless `SET` says `'shared'`, writes its `claudeMdExcludes` entry, and `SET sandbox.always = true` writes `[sandbox] always = true` (it needs `login = 'isolated'` in the same `SET`). A name that is taken refuses (`playbook "<name>" already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it)`); `IF NOT EXISTS` leaves an existing playbook unchanged, its `SET` list included. The launcher names are checked before the directory exists, under the registry lock (see *Launchers*).
 
 ### `CREATE PLAYBOOK <name> LINK <dir>`
 
-Registers a directory in place: `<root>/<name>` becomes a symlink to `<dir>`, and nothing is copied. The directory must have a `.playbook`; a statement never prompts for one. The launcher is `SET launcher = '<launcher>'`, else the target manifest's `launcher`, else `<name>`. A launcher that differs from the target manifest's is refused: that manifest is shared with every registry that links the directory, so it is the target's state, and statements that write it are refused too (see *Environment overrides*). A login the directory carries is set aside before the credential sync, unless the directory is isolated (`isolated_login = true` keeps its own). Nothing in the directory is deleted, and `DROP PLAYBOOK` removes only the link. `SANDBOX` does not take `LINK`, and of the properties only `launcher` does.
+Registers a directory in place: `<root>/<name>` becomes a symlink to `<dir>`, and nothing is copied. The directory must have a `.playbook`; a statement never prompts for one. The launcher is `SET launcher = '<launcher>'`, else the target manifest's `launcher`, else `<name>`. A launcher that differs from the target manifest's is refused: that manifest is shared with every registry that links the directory, so it is the target's state, and statements that write it are refused too (see *Environment overrides*). A login the directory carries is set aside before the credential sync, unless the directory is isolated (`isolated_login = true` keeps its own). Nothing in the directory is deleted, and `DROP PLAYBOOK` removes only the link. Of the properties, `LINK` takes only `launcher`.
 
 ### `CREATE PLAYBOOK <name> FROM <source>`
 
@@ -348,7 +345,7 @@ cpb CREATE PLAYBOOK sre FROM https://github.com/user/repo/tree/main/playbooks/sr
 | `BRANCH <ref>` | Git URL only: clone this branch/tag/ref instead of the default branch |
 | `SET launcher = '<launcher>'` | Custom launcher command name for the installed playbook |
 | `SET launcher = ''` | Skip launcher creation |
-| `SANDBOX` | Set `[sandbox] always = true` and `isolated_login = true` on the installed manifest: every launch is sandboxed and the playbook authenticates on its own. A `[sandbox]` block shipped by the source is never adopted, with or without this clause (`Note: ignoring the [sandbox] block shipped in the source's .playbook; sandbox settings are install-local ...`). |
+| `SET sandbox.always = true, login = 'isolated'` | Set `[sandbox] always = true` and `isolated_login = true` on the installed manifest: every launch is sandboxed and the playbook authenticates on its own. The other `sandbox.<key>` properties are written into the installed manifest in the same statement. A `[sandbox]` block shipped by the source is never adopted, with or without this clause (`Note: ignoring the [sandbox] block shipped in the source's .playbook; sandbox settings are install-local ...`). |
 | `SET login = 'isolated'` | Set `isolated_login = true` without a sandbox |
 | `SET memory = 'shared'` | Leave `~/.claude`'s memory loading into the install (by default, `'isolated'` writes the `claudeMdExcludes` entry into its `settings.json`) |
 
@@ -591,8 +588,9 @@ ALTER PLAYBOOK <name> DELETE login, memory       -- back to the defaults
   again changes nothing.
 - **Refusals.** Of the properties, `LINK` takes only `launcher`, and only the
   target manifest's: the manifest and `settings.json` are the target's.
-  `SANDBOX` and `SET SANDBOX` do not combine with `login = 'shared'` (nor
-  with `DELETE login`). A launcher name is never a keyword. `RENAME TO` and
+  `sandbox.always = true` does not combine with `login = 'shared'` (nor
+  with `DELETE login`), and needs `login = 'isolated'`, already or in the
+  same statement. A launcher name is never a keyword. `RENAME TO` and
   the launcher are not combined with other clauses in one statement.
 - **Words.** `DELETE` is a reserved word. The keys and the values are read
   only after `SET` and `DELETE` and are not, though `model` and `agent` are
@@ -624,8 +622,8 @@ manifest's `isolated_login = true` (see the authentication guide).
   playbook's own login, is kept.
 - **`login = 'shared'`** removes it. The next launch links the shared store
   again. It is refused in two cases, each with its reason:
-  - The playbook always runs in a sandbox. `SANDBOX` implies an isolated
-    login.
+  - The playbook always runs in a sandbox (`sandbox.always = true`), which
+    needs an isolated login.
   - The playbook holds a login of its own: a `.credentials.json` file
     carrying an account grant. A shared launch would take it out of use.
     A shared launch sets another account's login aside. The same account's
@@ -675,39 +673,42 @@ playbook run anywhere under `$HOME`. `memory = 'isolated'` keeps them out.
 
 ### Sandbox
 
-A playbook's `[sandbox]` table says how its launches are sandboxed.
-`ALTER PLAYBOOK` writes it:
+A playbook's `[sandbox]` table says how its launches are sandboxed. Its keys
+are the `sandbox.<key>` properties:
 
 ```
-ALTER PLAYBOOK sre SET SANDBOX               -- every launch sandboxed (always = true); the login isolated too
-ALTER PLAYBOOK sre UNSET SANDBOX             -- always = false; the login stays isolated
-ALTER PLAYBOOK sre SET SANDBOX backend=sbx host=me@buildbox mounts=~/libs:ro,~/data
-ALTER PLAYBOOK sre UNSET SANDBOX host mounts
+ALTER PLAYBOOK sre SET sandbox.always = true, login = 'isolated'   -- every launch sandboxed
+ALTER PLAYBOOK sre SET sandbox.always = false                        -- not; the login stays isolated
+ALTER PLAYBOOK sre SET sandbox.backend = 'sbx', sandbox.host = 'me@buildbox', sandbox.mounts = ['~/libs:ro', '~/data']
+ALTER PLAYBOOK sre DELETE sandbox.host, sandbox.mounts
+ALTER PLAYBOOK sre DELETE sandbox                                    -- the whole table
 ```
 
-- **One meaning per form.** Bare `SET SANDBOX` is `always = true`, and it
-  isolates the login, as `CREATE PLAYBOOK … SANDBOX` does: a sandbox shares
-  nothing with `~/.claude`. `SET SANDBOX <key>=<value> …` sets only the keys
-  it names and never changes `always`; `SET SANDBOX always=true` is the bare
-  form spelled out. Bare `UNSET SANDBOX` is `always = false` and leaves the
-  login isolated (`SET login = 'shared'` shares it again). `UNSET SANDBOX
-  <key> …` forgets settings.
-- **The keys** are the table's own: `always`; `backend` (`sbx`);
-  `host` (`user@host`: the launch runs there, over ssh); `workdir`; `mounts`
-  (comma-separated, `:ro` for read-only); `allow_net` (comma-separated
-  hosts); `secrets` (`proxy`, `env`); `claude_version`; `share_skills`
-  (`true` or `false`). A value the table refuses is refused before anything
-  is written. They are not reserved words.
-- **Refusals.** Bare `SET SANDBOX` does not combine with `UNSET SANDBOX` or
-  with `login = 'shared'`, and a statement sets or unsets a key once. A
-  linked playbook's table is the target's, and a plain config directory has
-  no manifest.
+- **One key, one meaning.** Each `sandbox.<key>` sets only its key, and
+  `always` is one key like the others: it changes nothing else. A sandbox
+  shares nothing with `~/.claude`, so `sandbox.always = true` needs the login
+  isolated, already or by `login = 'isolated'` in the same statement; it is
+  refused otherwise ("a sandboxed playbook's login is isolated: SET
+  sandbox.always = true, login = 'isolated'"). `sandbox.always = false`
+  leaves the login isolated (`SET login = 'shared'` shares it again).
+  `DELETE sandbox.<key>` forgets a setting, and `DELETE sandbox` every one.
+- **The keys** are the table's own, each with its type:
+  `sandbox.always` and `sandbox.share_skills` (`true` or `false`, bare);
+  `sandbox.backend` (`'sbx'`); `sandbox.host` (`'user@host'`: the launch runs
+  there, over ssh); `sandbox.workdir`; `sandbox.mounts` (a list, `:ro` for
+  read-only); `sandbox.allow_net` (a list of hosts); `sandbox.secrets`
+  (`'proxy'` or `'env'`); `sandbox.claude_version`. A list is `['a', 'b']`; on
+  the command line, quote a statement that holds one, since zsh reads `[ ]`
+  as a pattern. A value the table refuses is refused before anything is
+  written.
+- **Refusals.** A statement names a key once. A linked playbook's table is
+  the target's, and a plain config directory has no manifest.
 - **Reads.** `SHOW PLAYBOOK` prints `Sandbox: yes` or `no`, then the set keys
   in parentheses. `--json` has `"sandbox"`, the table key for key (`always`,
   then each setting, null or empty when unset), and `SELECT`'s `PLAYBOOKS`
   has it as a JSON column. `EXPLAIN` says when every launch is sandboxed.
-  `SHOW CREATE` writes a bare `SET SANDBOX` for `always` and one `SET SANDBOX
-  <key>=<value> …` for the rest, and applying it again changes nothing.
+  `SHOW CREATE` writes `SET sandbox.always = …` (always) with the table's
+  other set keys, and applying it again changes nothing.
 - A source's `[sandbox]` block is never adopted (`CREATE PLAYBOOK … FROM`
   drops it with a note). A launch's own flags (`--sandbox[=BACKEND]`,
   `--sandbox-host`, `--mount`, `--workdir`) apply on top, for that launch.
@@ -1697,7 +1698,7 @@ File rules:
 - **Idempotent.** `SHOW CREATE` emits only idempotent forms (`CREATE OR
   REPLACE ENV`, `CREATE PLAYBOOK IF NOT EXISTS …`, `USE ENV` with the full
   list), so applying a file twice changes nothing the second time.
-- **Machine-specific parts stay explicit.** `LINK <dir>` and `SANDBOX` are
+- **Machine-specific parts stay explicit.** `LINK <dir>` and the sandbox are
   emitted as they are; a `LINK` path missing on the target fails validation.
 - `SHOW CREATE ALL` orders statements: the secret helper first (`APPLY`
   checks each reference against the helper an earlier statement sets), env
@@ -1736,7 +1737,7 @@ drops only the replaced entries.
 | a tool rule `R` | `ALLOW TOOL R`, `DENY TOOL R`, `UNSET TOOL R` |
 | the model; the agent | `SET` / `DELETE model`; `SET` / `DELETE agent` |
 | the status line; its refresh | `SET STATUSLINE '<command>'` (not `IF UNSET`), `UNSET STATUSLINE`; `SET` / `UNSET STATUSLINE REFRESH`, and `REFRESH` on `SET STATUSLINE` |
-| a sandbox setting `k` | `SET SANDBOX k=…`, `UNSET SANDBOX k` |
+| a sandbox setting `k` (`always` included) | `SET sandbox.k = …`, `DELETE sandbox.k`, `DELETE sandbox` |
 | a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`; a `CREATE`'s starting values are never dropped |
 | the env sets | `USE ENV` |
 
@@ -1746,7 +1747,7 @@ drops only the replaced entries.
   line writes, so no status line clause before it is dropped.
 - **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh.
 - **Every other clause is never dropped:** marketplaces, plugins, MCP
-  servers, skills, the model picker, a bare `SET` / `UNSET SANDBOX`.
+  servers, skills, the model picker.
 - **The report.** A statement left with nothing to write is reported
   `unchanged`. The run and the plan name what was dropped and where it is set
   again (`overridden: SET model (set again at dev.cpb:3)`). `--dry-run
@@ -2011,7 +2012,7 @@ Refused, each with its reason:
 - `BLOCK VAR`: removing a variable at launch is the launcher's job.
 - `USE / ADD / DROP ENV`, and `ALTER DEFAULTS`: env sets and `DEFAULTS` are
   layered by the launcher.
-- `RENAME TO`, `SET launcher` / `DELETE launcher`, `SANDBOX`: the directory is not in the
+- `RENAME TO`, `SET launcher` / `DELETE launcher`, `sandbox.<key>`: the directory is not in the
   registry and has no launcher.
 - `SET login` / `DELETE login`: `isolated_login` is recorded in a
   playbook's manifest, which the directory does not have. `memory` applies:
@@ -2164,7 +2165,7 @@ cpb run --sandbox --sandbox-fresh sre                  # recreate the sandbox fi
 
 The flags belong to the same leading runs as the launch flags, in any order among them; `--sandbox-fresh`, `--clone`, `--workdir` and `--mount` without a sandbox (no flag and no `always`, or `--no-sandbox`) refuse the launch. `--workdir` and `--mount` values may be `~`-prefixed.
 
-**Always sandboxed.** A manifest with `[sandbox] always = true` sandboxes every launch of the playbook without a flag: `run`, and launcher dispatch (`sre -p "..."`). `--no-sandbox` overrides it for one launch, loudly (above); there is no environment variable or setting that overrides it silently. `CREATE PLAYBOOK … SANDBOX` writes the key together with `isolated_login = true`, because the machine login cannot follow a playbook into its sandbox (below). The backend comes from `--sandbox=BACKEND`, else `[sandbox].backend`, else `sbx`; the launch logic talks to it through one seam (list, create, allow network, shell, attach, remove), so a further backend is an implementation, not a redesign. `[sandbox]` is install-local, like `[env]`: `CREATE PLAYBOOK … FROM` never adopts a source-shipped block (it would mount host paths or widen the network), dropping it with a note, and `update` preserves the live one.
+**Always sandboxed.** A manifest with `[sandbox] always = true` sandboxes every launch of the playbook without a flag: `run`, and launcher dispatch (`sre -p "..."`). `--no-sandbox` overrides it for one launch, loudly (above); there is no environment variable or setting that overrides it silently. `SET sandbox.always = true` needs `isolated_login = true` (`login = 'isolated'`), because the machine login cannot follow a playbook into its sandbox (below). The backend comes from `--sandbox=BACKEND`, else `[sandbox].backend`, else `sbx`; the launch logic talks to it through one seam (list, create, allow network, shell, attach, remove), so a further backend is an implementation, not a redesign. `[sandbox]` is install-local, like `[env]`: `CREATE PLAYBOOK … FROM` never adopts a source-shipped block (it would mount host paths or widen the network), dropping it with a note, and `update` preserves the live one.
 
 Procedure: resolve the environment exactly as an unsandboxed launch would (DEFAULTS, the env sets, the block, launch flags, the authentication decision including quarantine and identity purge of the playbook's own store, which the sandbox then reads through the mount; the config directory is made absolute first, so a relative `--playbooks-dir` cannot leak a relative `CLAUDE_CONFIG_DIR`), then reduce it to the variables the sandbox receives: the keys the effective block and launch flags **set**, plus `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER` and `CLAUDE_CONFIG_DIR` when the launch decided them. Nothing else of the host environment enters the sandbox. **A shared login does not enter it either:** when the store is still a symlink after preparation and the environment carries no `CLAUDE_CODE_OAUTH_TOKEN` (the shared-login path; a token launch authenticates with the token, and the link it may leave behind, one to a grantless store, holds nothing to adopt), its target `~/.claude` is not mounted and `sbx` mounts directories only, so the link would dangle inside and Claude Code would be logged out. A missing store on a non-isolated target (a fresh directory or playbook on a machine without a login) is the same shape with nothing to link to yet, and is treated the same way. The link is re-pointed (or created) instead, at a **sandbox-local** file: `<sandbox home>/.cpb-logins/<sandbox name>/.credentials.json` (`/home/agent/...` under `sbx`), whose directory the attach command creates inside before `claude` starts. `/login` inside writes through the link into the sandbox, where the grant persists with the sandbox (and goes with `--sandbox-fresh`) and never reaches the host. The account state the host sync copied in (`oauthAccount`, cached flags) is purged as for an isolated playbook, and `Shared login stays on the host: playbook "<name>" authenticates on its own inside the sandbox (run /login once there; the login lives in the sandbox)` is printed on stderr. When the session returns, or the launch is refused anywhere before the attach (a mount check, a failed create, a key the proxy could not register), the launch runs the credential sync again, which replaces any link that is not the shared one with the shared one and copies nothing, so the host sees the shared link as before; the next sandboxed launch re-points it again and the sandbox login is still there. While a sandboxed session is live (or after a launch that never returned) the host store link dangles, which every host command tolerates: `update` preserves it as it is, `DROP PLAYBOOK` removes it, `auth status` shows `shared-login` with the sandbox target and `no login`, and the next host launch repairs it. A sandboxed **token** launch that finds the store linked to a sandbox login detaches the link first (on the host the quarantine saw a dangling link and nothing to detach, but inside it would resolve to the earlier grant, which Claude Code's 401 recovery adopts over a token), exactly as the quarantine detaches a shared link with a grant. The machine's own config directory (`~/.claude`, by identity) is never sandboxed: it holds the machine login as a regular store, and mounting it would hand that login to the sandbox; `start --sandbox ~/.claude` is refused before any preparation. Nor may any mount contain it: the working directory, the root, and every extra mount (read-only or not) are refused when the machine config directory, the machine credentials store at its resolved location (the store may be a symlink into another directory), the long-lived token file, or the registry's env sets directory (`<playbooks root>/.env-sets`, the secret store proxy injection keeps out of the sandbox) exists below them, decided by filesystem identity along the credential's ancestors (so `/`, a differently cased spelling, or any alias of the directory counts), so `--workdir ~`, `start --sandbox ~`, `--mount ~:ro` and `--mount /:ro` all refuse (`sandbox mount <path> contains the machine's Claude config directory <dir>: the machine login would enter the sandbox. Mount a narrower directory`). Every refusal happens before the backend is called. The login must never land as a regular file on the mount: the host sync promotes a newer regular grant-bearing store into the machine store, which is exactly what a sandbox login must not do. The machine login is never read, copied or moved. Every path that crosses into the sandbox is absolute and symlink-resolved (the target is what exists at that path inside): the working directory, the playbook root, the extra mounts (a missing one refuses the launch), and `CLAUDE_CONFIG_DIR` itself, which inside the sandbox names the resolved config directory, so a linked registry entry (`CREATE PLAYBOOK … LINK`) mounts and addresses its target. The root is not mounted again when it lies inside the working directory, and a config directory outside the mounted root is mounted on its own. `sbx ls -q` decides whether `cpb-<name>` exists; `--sandbox-fresh` removes it (`sbx rm -f`); a sandbox that is reused is inspected first (`sbx ls --json`, its `workspaces`): mounts are creation-time, so the existing mounts must cover every path this launch needs, by containment (a working directory below an existing mount is covered; a different one would not exist inside) and pass the same guards as new mounts (the machine-login and env-sets guard, and in proxy mode the manifest-key guard over the existing, possibly wider, mounts), else the launch refuses and names `--sandbox-fresh` (`sandbox cpb-<name> was created with mounts ...; this launch also needs ..., which a reused sandbox cannot add. Recreate it with --sandbox-fresh` / `sandbox cpb-<name> mounts <path>, which contains <what>: the machine login would be inside. Recreate it with --sandbox-fresh`); a missing sandbox is created with `sbx create --name cpb-<name> [--clone] claude <workdir> <playbook root> <extra mounts...>`. A service on this machine is a special case: inside the sandbox `localhost` is the sandbox itself, so an `ANTHROPIC_BASE_URL` at `localhost`, `127.0.0.1` or `::1` is rewritten for the sandbox to the backend's host alias (`host.docker.internal` under `sbx`), scheme, port and path kept, with `ANTHROPIC_BASE_URL names this machine: inside the sandbox it is <url>` on stderr; and the backend's policy and secret store know that service as `localhost` whatever name the sandbox used (verified on `sbx` 0.38.0: an allow rule or a secret for `host.docker.internal` never matches, one for `localhost` does), so allow rules and secret registrations for the host alias, `localhost`, `127.0.0.1` or `::1` are spelled `localhost`, in `[sandbox].allow_net` too. After creation, and only then, every host in `[sandbox].allow_net` and the host of `ANTHROPIC_BASE_URL` (when the effective environment sets one) is allowed for that sandbox (`sbx policy allow network --sandbox cpb-<name> <host>`; a failure is a warning, the launch continues), and a `[sandbox].claude_version` pin installs that Claude Code inside the sandbox through the official installer (a failure is a warning; the image's own version runs). **Remote sandbox host.** `sbx` drives only the machine it runs on, so "the host the sandbox runs on" is the host where `cpb` runs. With `--sandbox-host USER@HOST` (or the manifest's `[sandbox] host`, used whenever the launch is sandboxed) the whole launch is forwarded there over ssh, as the same subcommand rebuilt from what the launch parser consumed (never from the raw text, so `claude`'s own arguments travel verbatim and nothing in them is mistaken for a flag): `ssh [-t] -- USER@HOST 'env CPB_CMD=<base64> sh -c '"'"'eval "$(printf %s "$CPB_CMD" | base64 --decode)"'"'"''`, where the decoded text is `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" exec cpb run [--playbooks-dir=D] --sandbox[=BACKEND] [--sandbox-fresh] [--clone] [--workdir=W] [--mount=M]... [--env-set=P | --env=K=V | --block=K]... NAME [claude args...]` (`start` likewise, with `--delete` before the path). The transport exists because ssh hands the text to the remote user's login shell, whose family is unknown (tcsh breaks POSIX single quotes on a newline and expands `!`) and whose non-interactive PATH lacks `~/.local/bin`: the outer text is plain words every shell family passes through untouched, only POSIX `sh` parses the command, `sh`'s stdin is the ssh channel and its exit status is `cpb`'s (`exec`), and the PATH is widened inside with the installer's and the package managers' directories. `base64 --decode` is GNU and BSD alike, every value flag in its inline form so a value that looks like a flag stays a value there too (a value that is exactly `--` travels as two words, since a standalone `--` is where the registry scan stops on both sides; every `--workdir` occurrence is forwarded in order, the last winning there as here), every argument single-quoted into the one command string ssh hands the remote shell, the launch flags forwarded as typed and unevaluated (no env file is read for a remote launch, whether the host comes from the flag or from the manifest: the flags are evaluated only once the launch is known to be local), `-t` only when this process has a terminal on both ends, ssh's own options ended by `--` before the destination. The host is validated like the manifest key (no whitespace, no slash, no leading dash: `--sandbox-host "<value>" must be an ssh destination such as user@host`). `--sandbox` is always present, so the remote launch is sandboxed there whatever its manifest says; the remote host's own registry, env sets, manifest and secrets apply, and the sandbox, its login and its proxy mappings live there. Requirements on the remote: `cpb` in `~/.local/bin` (the installer's default), `/opt/homebrew/bin`, `/usr/local/bin`, or on the PATH an ssh session gets, a credential store `sbx` can read from a non-interactive ssh session (a Linux host with a headless keyring unlocked at boot; a macOS host keeps the Hub session in the login Keychain, which an ssh session cannot read until `security unlock-keychain` runs, so `sbx` fails there with `cannot prompt the user for password`), the playbook installed there (for `start`, the path is a path there; a directory manifest naming a host forwards a sandboxed `start` the same way, and `--delete` then acts there), `sbx` logged in. With the flag, the playbook need not be registered here at all. A `--playbooks-dir` travels as given, a path on that host. Refused: `--env-file` (a local file, refused by name; it is never opened), and `--sandbox-host` together with `--no-sandbox`; `--no-sandbox` on a playbook whose manifest names a host runs it here, on this host. Printed first: `Sandbox on USER@HOST: cpb run ...`. The exit status is the remote launch's.
 
@@ -2397,7 +2398,7 @@ then a blank line. The keys:
 - `title`, `description` and `needs`, shown in the preview;
 - `create-with`: advisory create-time flags. `SANDBOX` makes the play
   sandboxed: refused where no backend is available, unless `--no-sandbox`;
-  a kept playbook is created `SANDBOX`;
+  a kept playbook is created with `sandbox.always = true, login = 'isolated'`;
 - `min-cpb`, as `X.Y.Z`: an older cpb refuses ("this recipe needs cpb X.Y.Z
   or later").
 
@@ -2472,8 +2473,8 @@ playbook is gone.
 **`--keep [--as <name>]`** shows the same preview and asks the same
 confirmations, then builds the recipe as a playbook in **your** store, and
 runs no session:
-- `CREATE PLAYBOOK <name>`, with a launcher; `ISOLATED
-  LOGIN` when the endpoint moves; `SANDBOX` when the header asks for it or
+- `CREATE PLAYBOOK <name>`, with a launcher; `SET login = 'isolated'` when
+  the endpoint moves; `sandbox.always = true` with it when the header asks for it or
   `--sandbox` is given (`--no-sandbox` overrides the header). A recipe with a
   secret reference cannot be kept sandboxed;
 - `<name>` is `--as`, or the template's or file's name. A name that exists
@@ -2643,11 +2644,11 @@ cpb update sre --yes       # off a terminal: runs a declared migrate step
   serves other bytes ("the tag moved"), the plan, and every confirmation
   again. Then one `ALTER PLAYBOOK` undoes what the old recipe set and the new
   one no longer sets the same way (`UNSET VAR`, `UNSET TOOL`, `DROP PLUGIN`,
-  `DROP MCP SERVER`, `DROP SKILL`, `DROP MODEL`, `UNSET SANDBOX <key>` (a
-  bare `SET SANDBOX` is `always`), `DROP ENV` for an env set it attached,
-  the `UNSET`s of the agent, model, picker and status line, whose `UNSET
+  `DROP MCP SERVER`, `DROP SKILL`, `DROP MODEL`, `DELETE sandbox.<key>`
+  (`always` included), `DROP ENV` for an env set it attached,
+  `DELETE agent` and `DELETE model`, the `UNSET`s of the picker and status line, whose `UNSET
   STATUSLINE` takes its refresh with it; plugins before their marketplace;
-  a login is never unset, not even the one a `SET SANDBOX` isolated; a
+  a login is never unset, not even the one a sandbox needed; a
   played recipe holds neither env sets nor sandbox settings, so for it those
   two never arise), the new bytes are applied, and the record is updated;
 - a playbook with none of a `[play]`, a `[source]` and an `[apply]` record
@@ -2895,7 +2896,7 @@ preserve = ["settings.json"]
 | `source.subdir` | Optional source-relative directory selected during native update. Must remain physically below the fetched source, including through symlinks. |
 | `update.preserve` | Optional list of install-local paths that survive an update even when the source ships its own copy. Each must be relative to and physically below the playbook root. `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json` are always preserved and need not be listed. |
 | `update.migrate` | Optional migrate step: a script, relative to and physically below the playbook root, that `update` runs after the new files are in place (`<script> <from-version> <to-version> <install-dir>`), once agreed to (`--yes`, or a yes on a terminal). Without it no migration runs. Read from the source being updated to. |
-| `sandbox.always` | When true, every launch of this playbook is sandboxed (`run`, launcher dispatch; `start` for a directory carrying the manifest); `--no-sandbox` overrides one launch, loudly. Install-local: `CREATE PLAYBOOK … SANDBOX` writes it with `isolated_login = true`; never adopted from a source; preserved by `update`. |
+| `sandbox.always` | When true, every launch of this playbook is sandboxed (`run`, launcher dispatch; `start` for a directory carrying the manifest); `--no-sandbox` overrides one launch, loudly. Install-local: `SET sandbox.always = true` writes it, with `isolated_login = true` (`login = 'isolated'`) beside it; never adopted from a source; preserved by `update`. |
 | `sandbox.host` | Optional ssh destination (`user@host`; ports and jump hosts through `~/.ssh/config`) where sandboxed launches of this playbook run, with `cpb` and the playbook installed there. `--sandbox-host` overrides it for one launch. Install-local. |
 | `sandbox.backend` | Optional sandbox implementation name; `sbx` (Docker Sandboxes), the only one. `--sandbox=BACKEND` overrides it for one launch. Install-local. |
 | `sandbox.share_skills` | When true, the backend's shared skills store is mounted into the sandbox (what `sbx` does on its own). Default false: `sbx create` gets `--no-share-skills`, so a sandbox cannot plant a skill a later sandbox runs. Creation-time. |

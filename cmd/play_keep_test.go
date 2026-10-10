@@ -285,13 +285,13 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 		}
 		return st
 	}
-	old := parse("ALTER PLAYBOOK USE ENV a b SET SANDBOX;\nALTER PLAYBOOK SET SANDBOX backend=x workdir=/w ADD ENV c FIRST;\n")
-	moved := parse("ALTER PLAYBOOK USE ENV b a SET SANDBOX always=true;\nALTER PLAYBOOK SET SANDBOX backend=x ADD ENV c LAST;\n")
-	if u := undoFor("kb", old, moved); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET SANDBOX workdir" {
-		t.Fatalf("an order change or the keyed always undoes: %v", u)
+	old := parse("ALTER PLAYBOOK USE ENV a b SET sandbox.always = true;\nALTER PLAYBOOK SET sandbox.backend = 'x', sandbox.workdir = '/w' ADD ENV c FIRST;\n")
+	moved := parse("ALTER PLAYBOOK USE ENV b a SET sandbox.always = true;\nALTER PLAYBOOK SET sandbox.backend = 'x' ADD ENV c LAST;\n")
+	if u := undoFor("kb", old, moved); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE sandbox.workdir" {
+		t.Fatalf("an order change undoes: %v", u)
 	}
-	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET SANDBOX backend=y;\n"))
-	want := "ALTER PLAYBOOK kb DROP ENV a DROP ENV b UNSET SANDBOX always backend workdir DROP ENV c"
+	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET sandbox.backend = 'y';\n"))
+	want := "ALTER PLAYBOOK kb DROP ENV a DROP ENV b DELETE sandbox.always, sandbox.backend, sandbox.workdir DROP ENV c"
 	if u == nil || u.String() != want {
 		t.Fatalf("undo:\n got %v\nwant %s", u, want)
 	}
@@ -299,9 +299,9 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 		t.Fatalf("the undo does not parse back: %v", err)
 	}
 	// One key set by two old statements is undone once (agy, #213): the
-	// merged UNSET SANDBOX never names a key twice.
-	twice := parse("ALTER PLAYBOOK SET SANDBOX workdir=/a;\nALTER PLAYBOOK SET SANDBOX workdir=/b host=h;\n")
-	if u := undoFor("kb", twice, nil); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET SANDBOX workdir host" {
+	// merged DELETE never names a key twice.
+	twice := parse("ALTER PLAYBOOK SET sandbox.workdir = '/a';\nALTER PLAYBOOK SET sandbox.workdir = '/b', sandbox.host = 'h';\n")
+	if u := undoFor("kb", twice, nil); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE sandbox.workdir, sandbox.host" {
 		t.Fatalf("a key set twice: %v", u)
 	} else if _, err := grammar.ParseFile(u.Pretty() + ";"); err != nil {
 		t.Fatalf("the undo does not parse back: %v", err)

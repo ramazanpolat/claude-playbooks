@@ -76,7 +76,7 @@ func playRefs(res *play.Result) []string {
 func keepSandboxNote(sandboxed bool, res *play.Result) string {
 	switch {
 	case sandboxed:
-		return "Sandboxed: every launch of it runs in a sandbox (CREATE PLAYBOOK … SANDBOX)."
+		return "Sandboxed: every launch of it runs in a sandbox (sandbox.always = true)."
 	case res.Header.WantsSandbox():
 		return "Not sandboxed (--no-sandbox), although the recipe asks for one: it will run on your machine, as you."
 	}
@@ -164,10 +164,11 @@ func keepBlocked(defaults, keep, own map[string]bool) []string {
 func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK %s", name)
-	if sandboxed {
-		b.WriteString(" SANDBOX")
-	}
-	if res.Endpoint != "" {
+	// A sandbox needs the login isolated, and so does a moved endpoint.
+	switch {
+	case sandboxed:
+		b.WriteString(" SET sandbox.always = true, login = 'isolated'")
+	case res.Endpoint != "":
 		b.WriteString(" SET login = 'isolated'")
 	}
 	b.WriteString(";\n")
@@ -411,9 +412,6 @@ func clauseUndo(c grammar.Clause) []undoItem {
 			out = append(out, u{"env:" + n, "ENV " + n, grammar.Clause{Kind: grammar.DropEnv, Names: []string{n}}})
 		}
 		return out
-	case grammar.SetSandbox:
-		// The bare form is always=true: one key with the keyed form.
-		return clauseUndo(grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: []grammar.Var{{Key: "always", Value: "true"}}})
 	case grammar.SetSandboxKeys:
 		var out []u
 		for _, v := range c.Settings {

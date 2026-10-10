@@ -55,9 +55,9 @@ func foldParts(c grammar.Clause) []foldPart {
 			out = append(out, foldPart{index: i, what: string(c.Kind) + " '" + r + "'", effects: []foldEffect{w("tool:" + r)}})
 		}
 	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys:
-		verb := "SET SANDBOX "
+		verb := "SET sandbox."
 		if c.Kind == grammar.UnsetSandboxKeys {
-			verb = "UNSET SANDBOX "
+			verb = "DELETE sandbox."
 		}
 		for i, v := range c.Settings {
 			out = append(out, foldPart{index: i, what: verb + v.Key, effects: []foldEffect{w("sandbox:" + v.Key)}})

@@ -733,7 +733,7 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 	v := describePlaybook(pb)
 	switch {
 	case v.Sandbox.Always:
-		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (SET SANDBOX); UNSET SANDBOX keeps the login isolated, SET login = 'shared' shares it again")
+		fmt.Println("Sandbox: every launch runs in a sandbox, with an isolated login (sandbox.always = true); SET sandbox.always = false keeps the login isolated, SET login = 'shared' shares it again")
 	case v.IsolatedLogin:
 		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}

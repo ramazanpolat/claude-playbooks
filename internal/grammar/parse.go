@@ -820,15 +820,13 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return nil, p.fail(removedLogin)
 		case p.at("AGENT"):
 			return nil, p.fail(removedSetAgent)
-		}
-		switch p.kw("VAR", "STATUSLINE", "MODEL", "SANDBOX") {
-		case "SANDBOX":
-			if p.atEnd() || p.isStarter() {
-				c.Kind = SetSandbox
-				return c, nil
+		case p.at("SANDBOX"):
+			if p.i++; p.atEnd() || p.isStarter() {
+				return nil, errAt(c.Pos, removedSetSandbox)
 			}
-			c.Kind = SetSandboxKeys
-			return c, p.sandboxSettings(c)
+			return nil, errAt(c.Pos, removedSandboxKey)
+		}
+		switch p.kw("VAR", "STATUSLINE", "MODEL") {
 		case "STATUSLINE":
 			if p.kw("PREVIOUS") != "" {
 				c.Kind = SetStatuslinePrevious
@@ -876,7 +874,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			// another object, never a property.
 			if p.atEnd() || p.isStarter() || (!p.toks[p.i].Quoted && IsKeyword(p.toks[p.i].Text)) {
 				p.note(PlaybookPropertyKeys()...)
-				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, STATUSLINE, MODEL PICKER, SANDBOX or properties: <key> = '<value>' (" + strings.Join(PlaybookPropertyKeys(), ", ") + ")")
+				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, STATUSLINE, MODEL PICKER or properties: <key> = '<value>' (" + propertyKeysShown() + ")")
 			}
 			c.Kind = SetProperties
 			return c, p.playbookProperties(c, "SET", true)
@@ -907,24 +905,13 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return nil, p.fail(removedUnsetLogin)
 		case p.at("AGENT"):
 			return nil, p.fail(removedUnsetAgent)
+		case p.at("SANDBOX"):
+			if p.i++; p.atEnd() || p.isStarter() {
+				return nil, errAt(c.Pos, removedUnsetBox)
+			}
+			return nil, errAt(c.Pos, removedUnsetKey)
 		}
-		switch p.kw("VAR", "TOOL", "STATUSLINE", "MODEL", "SANDBOX") {
-		case "SANDBOX":
-			if p.atEnd() || p.isStarter() {
-				c.Kind = UnsetSandbox
-				return c, nil
-			}
-			c.Kind = UnsetSandboxKeys
-			keys, err := p.list("UNSET SANDBOX", "<key>", func(t Token) *Error {
-				if !manifest.IsSandboxKey(t.Text) {
-					return errAt(t.Pos, t.Text+" is not a [sandbox] key ("+strings.Join(manifest.SandboxKeys, ", ")+")")
-				}
-				return nil
-			})
-			for _, k := range keys {
-				c.Settings = append(c.Settings, Var{Key: k})
-			}
-			return c, err
+		switch p.kw("VAR", "TOOL", "STATUSLINE", "MODEL") {
 		case "STATUSLINE":
 			c.Kind = UnsetStatusline
 			if p.kw("REFRESH") != "" {
@@ -1065,8 +1052,7 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "NO":
 		return nil, errAt(c.Pos, removedNoLauncher)
 	case "SANDBOX":
-		c.Kind = Sandbox
-		return c, nil
+		return nil, errAt(c.Pos, removedSandbox)
 	case "SET":
 		c.Kind = SetProperties
 		return c, p.playbookProperties(c, "SET", true)
@@ -1078,35 +1064,6 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 
 // set reads the body of SET [VAR]: a list of K=V, or one K FROM '<ref>'.
 // Nothing here echoes a value or a reference, nor a token that may be one.
-// sandboxSettings is SET SANDBOX's <key>=<value> ...: the [sandbox] table's
-// own keys. A flag (always, share_skills) takes true or false; mounts and
-// allow_net take a comma-separated list.
-func (p *parser) sandboxSettings(c *Clause) *Error {
-	keys := strings.Join(manifest.SandboxKeys, ", ")
-	for !p.atEnd() && !p.isStarter() {
-		t := p.toks[p.i]
-		k, v, ok := strings.Cut(t.Text, "=")
-		if !ok {
-			return errAt(t.Pos, "SET SANDBOX takes <key>=<value> ("+keys+")")
-		}
-		if !manifest.IsSandboxKey(k) {
-			return errAt(t.Pos, k+" is not a [sandbox] key ("+keys+")")
-		}
-		if v == "" {
-			return errAt(t.Pos, "sandbox."+k+" needs a value; UNSET SANDBOX "+k+" clears it")
-		}
-		if manifest.SandboxFlag(k) && v != "true" && v != "false" {
-			return errAt(t.Pos, "sandbox."+k+" takes true or false")
-		}
-		c.Settings = append(c.Settings, Var{Key: k, Value: v})
-		p.i++
-		p.quiet = true
-	}
-	p.note("<key>=<value>")
-	p.note(p.starters...)
-	return nil
-}
-
 func (p *parser) set(c *Clause) *Error {
 	if p.atEnd() || p.isStarter() {
 		p.note("<key>=<value>", "<key>")
@@ -1233,8 +1190,7 @@ func validate(s *Stmt) *Error {
 	envs := map[string]bool{}
 	once := map[Kind]bool{
 		Description: true, UseEnv: true, RenameTo: true,
-		Launcher: true, NoLauncher: true, DefaultLauncher: true, From: true, Branch: true, Subdir: true, Link: true, Sandbox: true,
-		SetSandbox: true, UnsetSandbox: true, SetSandboxKeys: true, UnsetSandboxKeys: true,
+		Launcher: true, NoLauncher: true, DefaultLauncher: true, From: true, Branch: true, Subdir: true, Link: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPicker: true,
@@ -1294,7 +1250,6 @@ func validate(s *Stmt) *Error {
 		{AddModel, UnsetModelPicker}, {DropModel, UnsetModelPicker},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
 		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
-		{SetSandbox, UnsetSandbox},
 		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
 		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
 	for _, pr := range pairs {
@@ -1304,13 +1259,17 @@ func validate(s *Stmt) *Error {
 			return errAt(s.Pos, string(pr[0])+" and "+string(pr[1])+" cannot be combined")
 		}
 	}
-	// A sandbox shares no login with the machine, so it cannot be combined
-	// with login = 'shared' (DELETE login is that too).
-	if login, ok := PropertyValue(s.Clauses, "login"); ok && login == "shared" {
-		for _, k := range []Kind{SetSandbox, Sandbox} {
-			if pos, on := seen[k]; on {
-				return errAt(pos, string(k)+" isolates the login: it cannot be combined with login = 'shared'")
-			}
+	// A sandbox shares no login with the machine: sandbox.always = true
+	// needs login = 'isolated', which it never sets on its own. A CREATE
+	// says so in the same statement; an ALTER is checked against the
+	// playbook too, when it runs.
+	if pos, on := sandboxAlwaysOn(s.Clauses); on {
+		login, ok := PropertyValue(s.Clauses, "login")
+		switch {
+		case ok && login == "shared":
+			return errAt(pos, "sandbox.always = true cannot be combined with login = 'shared': a sandbox shares no login with the machine")
+		case s.Verb == Create && login != "isolated":
+			return errAt(pos, "a sandboxed playbook's login is isolated: SET sandbox.always = true, login = 'isolated'")
 		}
 	}
 	if s.Verb == Create && s.Object == Playbook {
@@ -1321,8 +1280,11 @@ func validate(s *Stmt) *Error {
 		if link {
 			for _, c := range s.Clauses {
 				key := map[Kind]string{SetModel: "model", SetAgent: "agent"}[c.Kind]
-				if c.Kind == SetProperties {
+				switch c.Kind {
+				case SetProperties:
 					key = c.Settings[0].Key
+				case SetSandboxKeys:
+					key = "sandbox." + c.Settings[0].Key
 				}
 				if key != "" {
 					return errAt(c.Pos, key+" does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")

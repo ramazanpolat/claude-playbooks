@@ -63,31 +63,25 @@ func (r *stmtRun) planIsolatedLogin(name string, m *manifest.Manifest, cfg strin
 	return after, lines, nil
 }
 
-// planSandbox applies SET / UNSET SANDBOX to a copy of the [sandbox] block.
-// Bare SET SANDBOX (or always=true) is always = true, and isolate reports
-// that the login must be isolated, as CREATE … SANDBOX does; bare UNSET
-// SANDBOX is always = false and leaves the login as it is (SET
-// login = 'shared' shares it again). The keyed forms change only the keys they name.
-func planSandbox(cur *manifest.Sandbox, clauses []grammar.Clause) (sb *manifest.Sandbox, isolate bool, lines []string, err error) {
+// planSandbox applies SET and DELETE sandbox.<key> to a copy of the
+// [sandbox] block. Each changes only the keys it names; always is one of
+// them. alwaysOn reports a statement that sets sandbox.always = true, which
+// needs an isolated login: the caller checks it, since a sandbox never
+// isolates the login on its own.
+func planSandbox(cur *manifest.Sandbox, clauses []grammar.Clause) (sb *manifest.Sandbox, alwaysOn bool, lines []string, err error) {
 	sb = cloneSandbox(cur)
 	if sb == nil {
 		sb = &manifest.Sandbox{}
 	}
 	for _, c := range clauses {
 		switch c.Kind {
-		case grammar.SetSandbox:
-			sb.Always, isolate = true, true
-			lines = append(lines, "sandbox   always: every launch runs in a sandbox")
-		case grammar.UnsetSandbox:
-			sb.Always = false
-			lines = append(lines, "sandbox   not always: a launch runs on this machine unless it asks for --sandbox; the login stays isolated")
 		case grammar.SetSandboxKeys:
 			for _, v := range c.Settings {
 				if err := sb.SetKey(v.Key, v.Value); err != nil {
 					return nil, false, nil, err
 				}
 				if v.Key == "always" && v.Value == "true" {
-					isolate = true
+					alwaysOn = true
 				}
 				lines = append(lines, "sandbox   "+v.Key+"="+v.Value)
 			}
@@ -103,7 +97,7 @@ func planSandbox(cur *manifest.Sandbox, clauses []grammar.Clause) (sb *manifest.
 	if sb.Empty() {
 		sb = nil
 	}
-	return sb, isolate, lines, nil
+	return sb, alwaysOn, lines, nil
 }
 
 // cloneSandbox is a deep copy of a [sandbox] block.

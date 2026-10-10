@@ -158,7 +158,7 @@ func doInstall(o installOpts, args []string) error {
 	if !mPre.Sandbox.Empty() {
 		// [sandbox] is install-local too: a published manifest must not be
 		// able to mount host paths or widen the sandbox's network.
-		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: CREATE PLAYBOOK … SANDBOX, or edit the installed manifest\n", manifest.FileName)
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: ALTER PLAYBOOK <name> SET sandbox.<key> = …, or edit the installed manifest\n", manifest.FileName)
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}

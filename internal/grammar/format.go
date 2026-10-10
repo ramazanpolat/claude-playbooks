@@ -234,22 +234,22 @@ func (c *Clause) words(varWord bool) []string {
 	case RenameTo, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
 	case SetSandboxKeys:
-		w := []string{"SET", "SANDBOX"}
-		for _, v := range c.Settings {
-			w = append(w, v.Key+"="+quoteValue(v.Value))
-		}
-		return w
+		return append([]string{"SET"}, sandboxWords(c)...)
 	case SetProperties:
 		return append([]string{"SET"}, propertyWords(c, true)...)
 	case DeleteProperties:
 		return append([]string{"DELETE"}, propertyWords(c, false)...)
 	case UnsetSandboxKeys:
-		w := []string{"UNSET", "SANDBOX"}
-		for _, v := range c.Settings {
-			w = append(w, v.Key)
+		w := []string{"DELETE"}
+		for i, v := range c.Settings {
+			k := "sandbox." + v.Key
+			if i < len(c.Settings)-1 {
+				k += ","
+			}
+			w = append(w, k)
 		}
 		return w
-	default: // SetStatuslinePrevious, NoAlias, Sandbox, SetSandbox, UnsetSandbox, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
+	default: // SetStatuslinePrevious, NoLauncher, DefaultLauncher, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPicker: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

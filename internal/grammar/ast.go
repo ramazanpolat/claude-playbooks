@@ -57,11 +57,10 @@ const (
 	Launcher        Kind = "SET launcher"
 	NoLauncher      Kind = "SET launcher = ''"
 	DefaultLauncher Kind = "DELETE launcher"
-	From            Kind = "FROM"    // CREATE PLAYBOOK ... FROM <source>
-	Branch          Kind = "BRANCH"  // CREATE PLAYBOOK ... BRANCH <ref>
-	Subdir          Kind = "SUBDIR"  // CREATE PLAYBOOK ... SUBDIR <dir>
-	Link            Kind = "LINK"    // CREATE PLAYBOOK ... LINK <dir>
-	Sandbox         Kind = "SANDBOX" // CREATE PLAYBOOK ... SANDBOX
+	From            Kind = "FROM"   // CREATE PLAYBOOK ... FROM <source>
+	Branch          Kind = "BRANCH" // CREATE PLAYBOOK ... BRANCH <ref>
+	Subdir          Kind = "SUBDIR" // CREATE PLAYBOOK ... SUBDIR <dir>
+	Link            Kind = "LINK"   // CREATE PLAYBOOK ... LINK <dir>
 
 	// Playbook properties (properties.go): CREATE PLAYBOOK ... SET k = 'v',
 	// ... gives the starting values, ALTER PLAYBOOK ... SET k = 'v', ...
@@ -70,15 +69,12 @@ const (
 	SetProperties    Kind = "SET <key> = <value>"
 	DeleteProperties Kind = "DELETE <key>"
 
-	// The [sandbox] table (ALTER PLAYBOOK): bare SET SANDBOX is always =
-	// true and isolates the login, as CREATE … SANDBOX does; bare UNSET
-	// SANDBOX is always = false and leaves the login as it is. The keyed
-	// forms name the table's own keys (Settings) and never touch always
-	// unless they name it.
-	SetSandbox       Kind = "SET SANDBOX"
-	UnsetSandbox     Kind = "UNSET SANDBOX"
-	SetSandboxKeys   Kind = "SET SANDBOX <key>=<value>"
-	UnsetSandboxKeys Kind = "UNSET SANDBOX <key>"
+	// The [sandbox] table's keys, the sandbox.<key> properties: SET
+	// sandbox.<key> = <value> (Settings, the value as manifest.Sandbox.SetKey
+	// takes it, a list comma-joined) and DELETE sandbox.<key> (Key only).
+	// always is one key like the others; it changes nothing else.
+	SetSandboxKeys   Kind = "SET sandbox.<key>"
+	UnsetSandboxKeys Kind = "DELETE sandbox.<key>"
 
 	SetHelper   Kind = "SET SECRET HELPER"   // ALTER DEFAULTS SET SECRET HELPER '<command>'
 	UnsetHelper Kind = "UNSET SECRET HELPER" // ALTER DEFAULTS UNSET SECRET HELPER
@@ -212,10 +208,10 @@ type Clause struct {
 
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
 
-	// Settings: SET SANDBOX <key>=<value> ... (Key, Value) and UNSET SANDBOX
-	// <key> ... (Key only), the [sandbox] table's keys; and the playbook
-	// properties of SET <key> = <value> and DELETE <key> (Key only).
-	// Apart from Vars and Keys, which name variables.
+	// Settings: the [sandbox] keys of SET sandbox.<key> = <value> (Key,
+	// Value) and DELETE sandbox.<key> (Key only); and the playbook
+	// properties of SET <key> = <value> and DELETE <key> (Key only). Apart
+	// from Vars and Keys, which name variables.
 	Settings []Var
 
 	MCP   *MCP       // ADD MCP SERVER

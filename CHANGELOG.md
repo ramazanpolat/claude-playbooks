@@ -55,6 +55,21 @@
 
 ### Changed
 
+- **The sandbox is the `sandbox.<key>` properties** (SPEC.md, *Sandbox*):
+  `SET sandbox.always = true, login = 'isolated'`, `SET sandbox.backend =
+  'sbx', sandbox.mounts = ['~/libs:ro']`, `DELETE sandbox.host`, and `DELETE
+  sandbox` for the whole table. Values are typed: `true` / `false` bare,
+  lists as `['a', 'b']`, strings quoted.
+  - `sandbox.always` is one key like the others and **no longer isolates the
+    login on its own**: `sandbox.always = true` needs `login = 'isolated'`,
+    already or in the same statement, and is refused otherwise with that
+    fix. `SHOW CREATE` writes both.
+  - `CREATE PLAYBOOK … SANDBOX`, `SET SANDBOX`, `SET SANDBOX <key>=<value>`,
+    `UNSET SANDBOX` and `UNSET SANDBOX <key>` are refused with a one-line
+    hint. A recipe's `create-with: SANDBOX` header is unchanged.
+  - `SHOW CREATE` writes `SET sandbox.always = …` always, with the table's
+    other set keys.
+
 - **The launcher, the model and the agent are properties** (SPEC.md,
   *Playbook properties*), beside `login` and `memory`:
   `CREATE PLAYBOOK x SET launcher = 'w', model = 'claude-opus-5-5'`,

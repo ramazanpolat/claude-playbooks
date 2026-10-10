@@ -125,7 +125,7 @@ Before a statement, only `--playbooks-dir` and `--launcher-dir` are accepted. `r
 cpb run --sandbox --workdir "$REPO" demo -p "run the tests"      # sandbox cpb-demo, created on first use
 cpb run --sandbox --sandbox-fresh --clone --workdir "$REPO" demo -p "..."   # new sandbox on a private clone
 cpb run --sandbox --mount /data:ro demo                          # extra read-only mount
-cpb CREATE PLAYBOOK demo SANDBOX SET launcher = ''                        # [sandbox] always = true + isolated_login = true
+cpb CREATE PLAYBOOK demo SET launcher = '', sandbox.always = true, login = isolated   # [sandbox] always = true + isolated_login = true
 cpb run --no-sandbox demo -p "..."                               # host launch; stderr says the manifest was overridden
 ```
 

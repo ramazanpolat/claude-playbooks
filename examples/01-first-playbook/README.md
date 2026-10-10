@@ -15,7 +15,8 @@ The same statement works on the command line: `cpb CREATE PLAYBOOK scratch`.
 Later, on the command line: `cpb ALTER PLAYBOOK scratch RENAME TO sandbox-lab`
 renames it and its command, `cpb ALTER PLAYBOOK scratch SET launcher = sc`
 gives it another command (`SET launcher = ''` none, `DELETE launcher` its
-name again), `cpb CREATE PLAYBOOK boxed SANDBOX` makes one
+name again), `cpb CREATE PLAYBOOK boxed SET sandbox.always = true, login = isolated`
+makes one
 that always runs inside a Docker Sandbox
 ([Sandboxed sessions](../../docs/guides/sandbox.md)), and
 `cpb CREATE PLAYBOOK dev LINK <dir>` registers a directory you develop in

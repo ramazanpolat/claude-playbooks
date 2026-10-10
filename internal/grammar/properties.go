@@ -1,9 +1,12 @@
 package grammar
 
 import (
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // A playbook property: a value the playbook keeps that can change after it
@@ -13,9 +16,12 @@ import (
 // BRANCH, SUBDIR, LINK) stays a keyword clause of CREATE.
 type playbookProperty struct {
 	key string
+	// kind is the value's type: one of values, a string check judges,
+	// true or false, or a list of strings (['a', 'b']).
+	kind valueKind
 	// values are an enumerated property's values, its default first: the
 	// one DELETE restores and a new playbook gets when its CREATE does not
-	// name the key. Nil for a free value, which check judges.
+	// name the key.
 	values []string
 	// check judges a free value: "" when it is valid, else why not. It
 	// never quotes the value back, which might be anything.
@@ -25,13 +31,28 @@ type playbookProperty struct {
 	set, del Kind
 	// placeholder spells a free value in a hint.
 	placeholder string
+	// sandbox names the [sandbox] key a sandbox.<key> property is: its
+	// pairs become SetSandboxKeys and UnsetSandboxKeys clauses.
+	sandbox string
+	// table marks a table's name (sandbox): DELETE resets every key of it,
+	// and SET does not take it.
+	table bool
 }
+
+type valueKind int
+
+const (
+	kindEnum valueKind = iota
+	kindString
+	kindBool
+	kindList
+)
 
 // The properties, in the order SHOW CREATE writes them.
 var playbookPropertyTable = []playbookProperty{
 	// launcher: the command that runs the playbook; '' for none. DELETE
 	// puts back its default, the playbook's own name.
-	{key: "launcher", check: checkLauncher, set: Launcher, del: DefaultLauncher, placeholder: "<name>"},
+	{key: "launcher", kind: kindString, check: checkLauncher, set: Launcher, del: DefaultLauncher, placeholder: "<name>"},
 	// login: shared links the machine's login; isolated shares nothing
 	// (the manifest's isolated_login).
 	{key: "login", values: []string{"shared", "isolated"}},
@@ -40,9 +61,28 @@ var playbookPropertyTable = []playbookProperty{
 	// as Claude Code's ancestor walk does for any directory under $HOME.
 	{key: "memory", values: []string{"isolated", "shared"}},
 	// model: the playbook's default model (settings.json model).
-	{key: "model", check: checkModel, set: SetModel, del: UnsetModel, placeholder: "<model>"},
+	{key: "model", kind: kindString, check: checkModel, set: SetModel, del: UnsetModel, placeholder: "<model>"},
 	// agent: the agent the main session runs as (settings.json agent).
-	{key: "agent", check: checkAgent, set: SetAgent, del: UnsetAgent, placeholder: "<agent>"},
+	{key: "agent", kind: kindString, check: checkAgent, set: SetAgent, del: UnsetAgent, placeholder: "<agent>"},
+	// The [sandbox] table, key for key (manifest.SandboxKeys): always
+	// sandboxes every launch; the rest say how.
+	{key: "sandbox.always", kind: kindBool, sandbox: "always"},
+	{key: "sandbox.backend", kind: kindString, check: checkSandboxValue, sandbox: "backend", placeholder: "<backend>"},
+	{key: "sandbox.host", kind: kindString, check: checkSandboxValue, sandbox: "host", placeholder: "<user@host>"},
+	{key: "sandbox.workdir", kind: kindString, check: checkSandboxValue, sandbox: "workdir", placeholder: "<dir>"},
+	{key: "sandbox.mounts", kind: kindList, sandbox: "mounts"},
+	{key: "sandbox.allow_net", kind: kindList, sandbox: "allow_net"},
+	{key: "sandbox.secrets", kind: kindEnum, values: []string{"proxy", "env"}, sandbox: "secrets"},
+	{key: "sandbox.claude_version", kind: kindString, check: checkSandboxValue, sandbox: "claude_version", placeholder: "<version>"},
+	{key: "sandbox.share_skills", kind: kindBool, sandbox: "share_skills"},
+	{key: "sandbox", table: true},
+}
+
+func checkSandboxValue(v string) string {
+	if v == "" || strings.ContainsAny(v, "\r\n") {
+		return "a sandbox setting takes a value (DELETE sandbox.<key> clears it)"
+	}
+	return ""
 }
 
 func checkLauncher(v string) string {
@@ -83,11 +123,31 @@ func propertyOf(key string) (*playbookProperty, bool) {
 
 // PlaybookPropertyKeys lists the playbook properties in SHOW CREATE's order.
 func PlaybookPropertyKeys() []string {
-	keys := make([]string, len(playbookPropertyTable))
-	for i, s := range playbookPropertyTable {
-		keys[i] = s.key
+	var keys []string
+	for _, s := range playbookPropertyTable {
+		if !s.table {
+			keys = append(keys, s.key)
+		}
 	}
 	return keys
+}
+
+// propertyKeysShown is the key list a message names: the table's keys as
+// one sandbox.<key>.
+func propertyKeysShown() string {
+	var keys []string
+	for _, s := range playbookPropertyTable {
+		switch {
+		case s.table:
+		case s.sandbox != "":
+			if !slices.Contains(keys, "sandbox.<key>") {
+				keys = append(keys, "sandbox.<key>")
+			}
+		default:
+			keys = append(keys, s.key)
+		}
+	}
+	return strings.Join(keys, ", ")
 }
 
 // PlaybookPropertyValues returns the values an enumerated property takes,
@@ -142,6 +202,16 @@ func PropertyValue(clauses []Clause, key string) (string, bool) {
 // in one statement, in one clause or across several, is refused here.
 func desugarProperties(in []Clause) ([]Clause, *Error) {
 	seen := map[string]bool{}
+	named := func(pos Pos, key string) *Error {
+		// The sandbox table and one of its keys are the same key twice.
+		dup := seen[key] || (key == "sandbox" && slices.ContainsFunc(manifest.SandboxKeys, func(k string) bool { return seen["sandbox."+k] })) ||
+			(strings.HasPrefix(key, "sandbox.") && seen["sandbox"])
+		if dup {
+			return errAt(pos, key+" is named twice in one statement")
+		}
+		seen[key] = true
+		return nil
+	}
 	var out []Clause
 	for _, c := range in {
 		if c.Kind != SetProperties && c.Kind != DeleteProperties {
@@ -151,13 +221,25 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 		rest := c
 		rest.Settings = nil
 		var free []Clause
+		sandbox := Clause{Pos: c.Pos, Kind: SetSandboxKeys}
+		if c.Kind == DeleteProperties {
+			sandbox.Kind = UnsetSandboxKeys
+		}
 		for _, v := range c.Settings {
-			if seen[v.Key] {
-				return nil, errAt(c.Pos, v.Key+" is named twice in one statement")
+			if err := named(c.Pos, v.Key); err != nil {
+				return nil, err
 			}
-			seen[v.Key] = true
 			pr, _ := propertyOf(v.Key)
-			if pr.values != nil {
+			switch {
+			case pr.table:
+				for _, k := range manifest.SandboxKeys {
+					sandbox.Settings = append(sandbox.Settings, Var{Key: k})
+				}
+				continue
+			case pr.sandbox != "":
+				sandbox.Settings = append(sandbox.Settings, Var{Key: pr.sandbox, Value: v.Value})
+				continue
+			case pr.kind == kindEnum:
 				rest.Settings = append(rest.Settings, v)
 				continue
 			}
@@ -176,6 +258,9 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 			out = append(out, rest)
 		}
 		out = append(out, free...)
+		if len(sandbox.Settings) > 0 {
+			out = append(out, sandbox)
+		}
 	}
 	return out, nil
 }
@@ -218,7 +303,7 @@ func (p *parser) atProperty() bool {
 // argument, a value is quoted, as SHOW CREATE writes it; on the command line
 // the shell has removed the quotes, so a bare word is the value.
 func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Error {
-	keys := strings.Join(PlaybookPropertyKeys(), ", ")
+	keys := propertyKeysShown()
 	form := "<key> = '<value>'"
 	if !withValues {
 		form = "<key>"
@@ -263,22 +348,32 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 			}
 		}
 		k = strings.ToLower(strings.TrimSuffix(k, ","))
-		v = unquoteArg(strings.TrimSuffix(v, ","))
 		pr, ok := propertyOf(k)
 		if !ok {
 			return p.notAProperty(t, k, keys)
 		}
 		switch {
 		case !withValues:
-		case pr.values != nil:
-			lv := strings.ToLower(v)
-			found := false
-			for _, want := range pr.values {
-				if lv == want {
-					found = true
-				}
+		case pr.table:
+			return errAt(t.Pos, k+" is a table: SET "+k+".<key> = …, or DELETE "+k+" to reset it")
+		case pr.kind == kindList:
+			items, err := p.listValue(t, k, v, vq)
+			if err != nil {
+				return err
 			}
-			if !found {
+			v = strings.Join(items, ",")
+		case pr.kind == kindBool:
+			lv := strings.ToLower(strings.TrimSuffix(v, ","))
+			if lv != "true" && lv != "false" {
+				return errAt(t.Pos, k+" takes true or false")
+			}
+			if p.lexed && vq {
+				return errAt(t.Pos, k+" takes true or false, unquoted: "+k+" = "+lv)
+			}
+			v = lv
+		case pr.kind == kindEnum:
+			lv := strings.ToLower(unquoteArg(strings.TrimSuffix(v, ",")))
+			if !slices.Contains(pr.values, lv) {
 				return errAt(t.Pos, k+" takes '"+strings.Join(pr.values, "' or '")+"'")
 			}
 			if p.lexed && !vq {
@@ -286,6 +381,7 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 			}
 			v = lv
 		default:
+			v = unquoteArg(strings.TrimSuffix(v, ","))
 			if why := pr.check(v); why != "" {
 				return errAt(t.Pos, why)
 			}
@@ -304,6 +400,46 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 	return nil
 }
 
+// listValue reads a list, ['a', 'b'], which may run over several words;
+// first is the word it starts in. In a playbook file each item is quoted;
+// on the command line the list is one argument the pilot quoted whole, since
+// zsh reads [ ] as a pattern and bash may replace the word with a file name.
+func (p *parser) listValue(t Token, k, first string, firstQuoted bool) ([]string, *Error) {
+	hint := k + " takes a list: ['a', 'b']; on the command line quote the statement (zsh reads [ ] as a pattern)"
+	text, bare := first, !firstQuoted && hasItemText(first)
+	if !strings.HasPrefix(text, "[") {
+		return nil, errAt(t.Pos, hint)
+	}
+	for !strings.HasSuffix(strings.TrimSuffix(text, ","), "]") {
+		if p.atEnd() {
+			return nil, errAt(t.Pos, hint)
+		}
+		n := p.toks[p.i]
+		p.i++
+		text += " " + n.Text
+		bare = bare || (!n.Quoted && hasItemText(n.Text))
+	}
+	if p.lexed && bare {
+		return nil, errAt(t.Pos, k+" takes a list of quoted strings: "+k+" = ['a', 'b']")
+	}
+	text = strings.TrimSuffix(text, ",")
+	var items []string
+	for _, item := range strings.Split(text[1:len(text)-1], ",") {
+		item = unquoteArg(strings.TrimSpace(item))
+		if strings.ContainsAny(item, "\r\n") {
+			return nil, errAt(t.Pos, hint)
+		}
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+// hasItemText reports a word that holds more than a list's brackets and
+// commas.
+func hasItemText(w string) bool { return strings.Trim(w, "[], ") != "" }
+
 // notAPair is the error for a word where a pair belongs.
 func (p *parser) notAPair(t Token, what, form, keys string) *Error {
 	if _, ok := propertyOf(strings.TrimSuffix(t.Text, ",")); !ok {
@@ -320,11 +456,14 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 	switch {
 	case keyPattern.MatchString(word) && strings.ToUpper(word) == word && strings.ToLower(word) != word:
 		return errAt(t.Pos, word+" is not a playbook property; a variable is SET VAR "+word+"=<value>")
-	case safeWord.MatchString(k):
+	case safeWord.MatchString(k), sandboxKeyWord.MatchString(k):
 		return errAt(t.Pos, k+" is not a playbook property ("+keys+")")
 	}
 	return errAt(t.Pos, "not a playbook property ("+keys+")")
 }
+
+// sandboxKeyWord is a mistyped sandbox.<key>, safe to quote back.
+var sandboxKeyWord = regexp.MustCompile(`^sandbox\.[a-z_]{1,24}$`)
 
 // unquoteArg removes one pair of quotes a command-line word kept: a shell
 // passes memory='shared' through as one word when it is quoted whole
@@ -358,6 +497,46 @@ func propertyWords(c *Clause, withValues bool) []string {
 	return w
 }
 
+// sandboxAlwaysOn reports a clause that sets sandbox.always = true.
+func sandboxAlwaysOn(clauses []Clause) (Pos, bool) {
+	for _, c := range clauses {
+		if c.Kind == SetSandboxKeys {
+			for _, v := range c.Settings {
+				if v.Key == "always" && v.Value == "true" {
+					return c.Pos, true
+				}
+			}
+		}
+	}
+	return Pos{}, false
+}
+
+// sandboxWords renders SET sandbox.<key> = <value>, … with each value in
+// its type: true or false bare, a list as ['a', 'b'], a string quoted.
+func sandboxWords(c *Clause) []string {
+	var w []string
+	for i, v := range c.Settings {
+		val := quote(v.Value)
+		switch pr, _ := propertyOf("sandbox." + v.Key); pr.kind {
+		case kindBool:
+			val = v.Value
+		case kindList:
+			var items []string
+			for _, item := range strings.Split(v.Value, ",") {
+				if item != "" {
+					items = append(items, quote(item))
+				}
+			}
+			val = "[" + strings.Join(items, ", ") + "]"
+		}
+		if i < len(c.Settings)-1 {
+			val += ","
+		}
+		w = append(w, "sandbox."+v.Key, "=", val)
+	}
+	return w
+}
+
 // The clauses the properties replaced say what to write instead. Nothing
 // old is accepted.
 const (
@@ -369,4 +548,9 @@ const (
 	removedUnsetModel = "UNSET MODEL is gone: DELETE model"
 	removedSetAgent   = "SET AGENT is a property now: SET agent = '<agent>'"
 	removedUnsetAgent = "UNSET AGENT is gone: DELETE agent"
+	removedSandbox    = "SANDBOX is a property now: SET sandbox.always = true, login = 'isolated'"
+	removedSetSandbox = "SET SANDBOX is a property now: SET sandbox.always = true, login = 'isolated'"
+	removedSandboxKey = "SET SANDBOX <key>=<value> is a property now: SET sandbox.<key> = '<value>'"
+	removedUnsetBox   = "UNSET SANDBOX is gone: SET sandbox.always = false"
+	removedUnsetKey   = "UNSET SANDBOX <key> is gone: DELETE sandbox.<key>"
 )

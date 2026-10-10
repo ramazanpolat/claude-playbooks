@@ -67,7 +67,7 @@ func TestMemorySetting(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK m")
-	if !strings.Contains(created, "ALTER PLAYBOOK m\n  SET login = 'shared', memory = 'isolated';") {
+	if !strings.Contains(created, "ALTER PLAYBOOK m\n  SET login = 'shared', memory = 'isolated'\n  SET sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -88,7 +88,7 @@ func TestMemorySetting(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "settings.json")); !strings.Contains(string(data), `"model": "opus"`) {
 		t.Fatalf("settings.json lost a key:\n%s", data)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "SET login = 'shared', memory = 'shared';") {
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "SET login = 'shared', memory = 'shared'\n") {
 		t.Fatalf("SHOW CREATE of a shared playbook:\n%s", out)
 	}
 	mustStmt(t, "ALTER PLAYBOOK m DELETE memory")

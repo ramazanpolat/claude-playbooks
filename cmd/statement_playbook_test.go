@@ -16,7 +16,7 @@ func TestStatementCreateAndDropPlaybook(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 
-	mustStmt(t, "CREATE PLAYBOOK fresh SET launcher = 'fr' SANDBOX")
+	mustStmt(t, "CREATE PLAYBOOK fresh SET launcher = 'fr', sandbox.always = true, login = isolated")
 	m, err := manifest.Read(filepath.Join(root, "fresh"))
 	if err != nil || m == nil || m.Launcher != "fr" || m.Sandbox == nil || !m.Sandbox.Always {
 		t.Fatalf("created manifest: %#v %v", m, err)
@@ -67,7 +67,7 @@ func TestStatementCreatePlaybookLink(t *testing.T) {
 	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare); err == nil || !strings.Contains(err.Error(), "add one to the target first") {
 		t.Fatalf("LINK without a manifest must name the way out: %v", err)
 	}
-	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare+" SANDBOX"); err == nil || !strings.Contains(err.Error(), "SANDBOX does not apply to LINK") {
+	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare+" SET sandbox.backend = sbx"); err == nil || !strings.Contains(err.Error(), "sandbox.backend does not apply to LINK") {
 		t.Fatalf("LINK with SANDBOX: %v", err)
 	}
 	if err := manifest.Write(bare, &manifest.Manifest{Name: "dev"}); err != nil {

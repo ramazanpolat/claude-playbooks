@@ -162,7 +162,7 @@ Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with c
   playbook, and the preview names them. When the recipe moves the endpoint,
   their keys are blocked in it ("will NOT follow it to …") unless you attach
   a set with `--env-set`.
-- A recipe that asks for a sandbox is kept as a `SANDBOX` playbook
+- A recipe that asks for a sandbox is kept as a sandboxed playbook (`sandbox.always = true`)
   (`--no-sandbox` overrides that).
 - The exact bytes are kept in the playbook (`.play/recipe.cpb`) and the
   manifest records where they came from. `cpb SHOW PLAYBOOK reviewer` shows

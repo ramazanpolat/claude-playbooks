@@ -552,12 +552,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
-	// SANDBOX: the [sandbox] block, in the same manifest write. Planned
-	// first: bare SET SANDBOX also isolates the login.
+	// The [sandbox] block, in the same manifest write.
 	wasIsolated := r.isolated(st.Name, m)
 	wasSandboxed := r.sandboxed(st.Name, m)
 	beforeSandbox := cloneSandbox(m.Sandbox)
-	sandbox, isolate, sandboxLines, err := planSandbox(m.Sandbox, st.Clauses)
+	sandbox, alwaysOn, sandboxLines, err := planSandbox(m.Sandbox, st.Clauses)
 	if err != nil {
 		return err
 	}
@@ -569,9 +568,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
-	if isolate && !nowIsolated {
-		nowIsolated = true
-		loginLines = append(loginLines, "login     isolated: a sandbox shares nothing with ~/.claude; /login once in it")
+	// A sandbox shares nothing with ~/.claude: sandbox.always = true needs
+	// the login isolated, already or by this statement. It never isolates
+	// it on its own.
+	if alwaysOn && !nowIsolated {
+		return fmt.Errorf("PLAYBOOK %s: a sandboxed playbook's login is isolated: SET sandbox.always = true, login = 'isolated'", st.Name)
 	}
 	loginChange := nowIsolated != wasIsolated
 	m.IsolatedLogin = nowIsolated

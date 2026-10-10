@@ -84,7 +84,7 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	if !strings.Contains(created, "ALTER PLAYBOOK k\n  SET login = 'isolated', memory = 'shared';") {
+	if !strings.Contains(created, "ALTER PLAYBOOK k\n  SET login = 'isolated', memory = 'shared'\n  SET sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -119,9 +119,9 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatalf("SHOW CREATE after login = 'shared':\n%s", created)
 	}
 
-	// A sandboxed playbook is isolated by SANDBOX: UNSET is refused and
+	// A sandboxed playbook is isolated: sharing its login is refused and
 	// SHOW CREATE does not repeat it.
-	mustStmt(t, "CREATE PLAYBOOK s SET launcher = '' SANDBOX")
+	mustStmt(t, "CREATE PLAYBOOK s SET launcher = '', sandbox.always = true, login = isolated")
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK s DELETE login"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("DELETE login on a sandboxed playbook: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestIsolatedLogin(t *testing.T) {
 func TestIsolatedLoginDryRun(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	f := writePlaybookFile(t, "CREATE PLAYBOOK d SET launcher = '' SANDBOX;\nALTER PLAYBOOK d SET login = 'shared';\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK d SET launcher = '', sandbox.always = true, login = 'isolated';\nALTER PLAYBOOK d SET login = 'shared';\n")
 	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("dry run, UNSET on a sandboxed playbook: %v", err)
 	}

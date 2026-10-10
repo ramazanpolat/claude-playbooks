@@ -15,12 +15,12 @@ anywhere:
 | **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills; `~/.claude`'s own `CLAUDE.md` and rules stay out of it. Your `~/.claude` never moves. | every playbook (`memory = 'isolated'`, the default) |
 | **Environment** | its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is. | `USE ENV`, `SET VAR`, `BLOCK VAR` |
 | **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `SET login = 'isolated'` |
-| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SANDBOX`, or `--sandbox` on any launch |
+| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SET sandbox.always = true`, or `--sandbox` on any launch |
 
 ```bash
 cpb CREATE PLAYBOOK work                           # a playbook, and a `work` command that opens it
 cpb CREATE PLAYBOOK side SET login=isolated   # a second account, running beside the first
-cpb CREATE PLAYBOOK sre SANDBOX                    # every launch inside a microVM
+cpb CREATE PLAYBOOK sre SET sandbox.always = true, login = isolated   # every launch inside a microVM
 work                                               # Claude Code, bound to that playbook
 ```
 
@@ -85,7 +85,7 @@ cpb run --sandbox-host me@buildbox work                        # the same launch
 
 By default your backend API keys stay on the host: the sandbox sees a
 placeholder that a host-side proxy swaps for the real key, for that endpoint
-only ([when a key does go in](docs/guides/sandbox.md#secrets)). A `SANDBOX` playbook is sandboxed on every launch. Needs `sbx`. [Sandbox →](docs/guides/sandbox.md)
+only ([when a key does go in](docs/guides/sandbox.md#secrets)). A playbook with `sandbox.always = true` is sandboxed on every launch. Needs `sbx`. [Sandbox →](docs/guides/sandbox.md)
 
 ### Put the whole setup in a file
 

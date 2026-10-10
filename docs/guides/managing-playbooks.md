@@ -26,7 +26,7 @@ every shell, with no rc-file edit.
 ```bash
 cpb CREATE PLAYBOOK backend SET launcher = 'be'          # the launcher is `be`
 cpb CREATE PLAYBOOK scratch SET launcher = ''          # no launcher
-cpb CREATE PLAYBOOK boxed SANDBOX             # always sandboxed, with its own login
+cpb CREATE PLAYBOOK boxed SET sandbox.always = true, login = isolated   # always sandboxed, with its own login
 cpb CREATE PLAYBOOK IF NOT EXISTS experiment  # a no-op when it exists
 ```
 

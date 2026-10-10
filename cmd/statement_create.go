@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -272,15 +273,14 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			}
 		}
 	}
-	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
-	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
-	// existing playbook too, where CREATE IF NOT EXISTS would not. The
-	// properties travel the same way, as SET login = …, memory = …: both
-	// always, so a recipe never leans on a default (a sandboxed playbook's
-	// login is isolated). A linked playbook's manifest and settings.json
-	// are the target's.
+	// The properties travel in an ALTER, which applies to an existing
+	// playbook too, where CREATE IF NOT EXISTS would not: SET login = …,
+	// memory = …, both always, and SET sandbox.always = …, always, with the
+	// table's other set keys, so a recipe never leans on a default (a
+	// sandboxed playbook's login is isolated). A linked playbook's manifest
+	// and settings.json are the target's.
 	sandboxed := v.Sandbox.Always && v.Linked == nil
-	var sandboxSettings []grammar.Var
+	sandboxSettings := []grammar.Var{{Key: "always", Value: strconv.FormatBool(sandboxed)}}
 	if v.Linked == nil && m != nil && m.Sandbox != nil {
 		for _, kv := range m.Sandbox.Settings() {
 			sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
@@ -312,13 +312,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	set := grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}}}
 	memory, _ := memoryStateOf(pb.Path)
 	set.Settings = append(set.Settings, grammar.Var{Key: "memory", Value: memory})
-	alter.Clauses = append(alter.Clauses, set)
-	if sandboxed {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})
-	}
-	if len(sandboxSettings) > 0 {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
-	}
+	alter.Clauses = append(alter.Clauses, set, grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}

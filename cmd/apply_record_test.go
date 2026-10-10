@@ -292,7 +292,7 @@ func TestWithheldClause(t *testing.T) {
 			t.Fatalf("%q survived: %s", secret, got)
 		}
 	}
-	for _, kept := range []string{"MODE=fast", "GITHUB_TOKEN=" + withheldMark, "withheld@git.example/o/r.git", "--db", "secrets=" + withheldMark} {
+	for _, kept := range []string{"MODE=fast", "GITHUB_TOKEN=" + withheldMark, "withheld@git.example/o/r.git", "--db", "sandbox.secrets = '" + withheldMark + "'"} {
 		if !strings.Contains(got, kept) {
 			t.Fatalf("%q is gone: %s", kept, got)
 		}
@@ -421,7 +421,7 @@ func TestApplyRecordUndoesEnvAndSandbox(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  ADD ENV route\n  SET SANDBOX workdir=/srv/w share_skills=true;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  ADD ENV route\n  SET sandbox.workdir = '/srv/w', sandbox.share_skills = true;\n")
 	if out, err := apply(t, f, "TO", "p"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -440,17 +440,17 @@ func TestApplyRecordUndoesEnvAndSandbox(t *testing.T) {
 }
 
 // One sandbox key changes and another is dropped (agy, #213): the fold
-// drops only the changed key from the merged UNSET SANDBOX, so the dropped
+// drops only the changed key from the merged DELETE, so the dropped
 // one is still unset.
 func TestApplyRecordSandboxKeyChangedAndDropped(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "p", nil)
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET SANDBOX workdir=/srv/w host=box;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET sandbox.workdir = '/srv/w', sandbox.host = 'box';\n")
 	if out, err := apply(t, f, "TO", "p"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET SANDBOX workdir=/srv/x;\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK SET sandbox.workdir = '/srv/x';\n")
 	out, err := runUpdateFor(t, "p", false, false)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -459,7 +459,7 @@ func TestApplyRecordSandboxKeyChangedAndDropped(t *testing.T) {
 	if sb.Host != nil || sb.Workdir == nil || *sb.Workdir != "/srv/x" {
 		t.Fatalf("after the update: host=%v workdir=%v\n%s", sb.Host, sb.Workdir, out)
 	}
-	if !strings.Contains(out, "overridden: UNSET SANDBOX workdir") {
+	if !strings.Contains(out, "overridden: DELETE sandbox.workdir") {
 		t.Fatalf("the fold did not name the changed key alone:\n%s", out)
 	}
 }
