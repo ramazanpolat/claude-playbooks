@@ -49,21 +49,24 @@ model is the playbook's default and the weakest choice: `ANTHROPIC_MODEL`,
 `--model` and `/model` all win over it, and `EXPLAIN PLAYBOOK` says which
 one decides. Example: [10](../../examples/10-tools-statusline-model/).
 
-`SET STATUSLINE` always applies. A recipe that offers a status line without
-replacing one you chose writes `SET IF UNSET statusline.command = '<command>'`, which
-applies only where no status line is set yet; see
-[example 17](../../examples/17-statusline-if-unset/).
+`SET statusline.command = …` always applies. A recipe that offers a status
+line without replacing one you chose writes `SET IF UNSET
+statusline.command = '<command>'`, which applies only where no status line is
+set yet; see [example 17](../../examples/17-statusline-if-unset/). `SET IF
+UNSET` takes any property, and applies whole or not at all: `SET IF UNSET
+model = 'claude-opus-5-5', agent = 'reviewer'` changes neither on a playbook
+that has a model, and says so.
 
 ## The model picker
 
 ```
 ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
 DROP MODEL '<id>'
-SET model_picker.mode = 'only' | APPEND      DELETE model_picker
+SET model_picker.mode = 'only' | 'append'    DELETE model_picker.mode
 ```
 
 These are the rows `/model` offers in a session, written to `settings.json`
-`modelPicker`. `ONLY` shows these rows alone, and `APPEND` adds them after
+`modelPicker`. `'only'` shows these rows alone, and `'append'` adds them after
 the built-in ones. `BEHAVES AS` names the model whose behaviour Claude Code
 should assume for an id it does not know (a router's model, say). A row
 is keyed by its model id, and rows cpb did not write are kept. Claude Code

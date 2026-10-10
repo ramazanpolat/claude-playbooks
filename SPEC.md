@@ -134,9 +134,10 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, memory, model, agent, sandbox.<key>,
-                                           statusline, statusline.refresh, model_picker.mode
+                                           statusline.command, statusline.refresh, model_picker.mode
                                            see "Playbook properties"
-value      := '<string>' | <integer> | true | false | [ '<string>', ... ]
+value      := '<string>' | <word> | <integer> | true | false | [ '<string>', ... ] | '<item>,<item>'
+                                           a one-word value bare or quoted; a list also comma-joined
 
 env-clause := SET [VAR] <key>=<value> ... [AS PLAINTEXT]
                                            literal values; AS PLAINTEXT: see Secrets
@@ -171,7 +172,7 @@ pb-clause  := set-clause
             | DENY TOOL '<rule>' ...       settings.json permissions.deny
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
             | SET property, ...            change properties; see "Playbook properties"
-            | SET IF UNSET property, ...   only where none of them is set (the status line)
+            | SET IF UNSET property, ...   whole, and only where none of them is set
             | DELETE <key>, ...            back to the default
             | REVERT STATUSLINE            the status line cpb replaced last
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   see "Model picker"
@@ -226,7 +227,13 @@ forgets the playbook's own `FOO`.
 `IF NOT EXISTS` / `IF EXISTS` turn "already there" / "not there" into a no-op
 instead of an error; they sit before the name, as in ClickHouse.
 `CREATE OR REPLACE ENV` replaces the set's whole content.
-`CREATE PLAYBOOK IF NOT EXISTS` never re-clones an existing playbook.
+`CREATE PLAYBOOK IF NOT EXISTS` never re-clones an existing playbook, but it
+converges: on a playbook that exists, its `SET` list is applied as `ALTER
+PLAYBOOK … SET` would (the properties, then the launcher, each only where it
+differs), so the statement applied again changes nothing. What is fixed at
+creation (`FROM`, `BRANCH`, `SUBDIR`, `LINK`) is only compared; a different
+source is a warning (*Drift*). Without a `SET` list it leaves the playbook as
+it is.
 
 `DROP ENV` is refused while a playbook or `DEFAULTS` uses the set; the error
 lists the users.
@@ -560,21 +567,31 @@ ALTER PLAYBOOK <name> DELETE login, memory       -- back to the defaults
 | `model` | a model id | none | The playbook's default model, `settings.json` `model` (see *Status line and model*) |
 | `agent` | `<name>` or `<plugin>:<name>` | none | The agent the main session runs as, `settings.json` `agent` (see *Plugins and the agent*) |
 | `sandbox.<key>` | per key (see *Sandbox*) | per key | The `[sandbox]` table, key for key; `DELETE sandbox` resets it |
-| `statusline` | a command | none | The status line, `settings.json` `statusLine.command` (see *Status line and model*) |
-| `statusline.refresh` | whole seconds, at least 1, bare | none | `statusLine.refreshInterval` |
-| `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `DELETE model_picker` removes the picker, rows too |
+| `statusline.command` | a command | none | The status line, `settings.json` `statusLine.command` (see *Status line and model*); `DELETE statusline` (or `statusline.command`) removes it, its refresh with it |
+| `statusline.refresh` | whole seconds, at least 1 | none | `statusLine.refreshInterval` |
+| `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `DELETE model_picker` is the mode too: the rows are a collection, which `DROP MODEL` empties |
 
 `DEFAULTS` has one property, `secret_helper` (`ALTER DEFAULTS SET
 secret_helper = '<command>'`, `DELETE secret_helper`; see *Secrets*).
 
 - **The form.** A pair is one word (`memory='shared'`) or three
   (`memory = 'shared'`); pairs are separated by commas, which may be left
-  out. In a playbook file, and in a statement given as one quoted argument,
-  a value is quoted (`login takes a quoted string: login = 'isolated'`); on
-  the command line the shell has already removed the quotes, so
-  `cpb ALTER PLAYBOOK x SET login = isolated` works. Keys match in any case.
-  A key or value outside the table is refused with the allowed ones; a key
-  shaped like a variable gets `a variable is SET VAR <KEY>=<value>`.
+  out. A one-word value reads the same quoted or bare, in a playbook file,
+  in a statement given as one quoted argument, and on the command line
+  (`login = isolated`, `statusline.refresh = '10'`, `sandbox.always =
+  'true'`); a value with a space or a comma is quoted, and `SHOW CREATE`
+  writes every string quoted. A comma inside the quotes is the value's own
+  (`'cmd a,b,'`); one after them separates the next pair.
+- **Keys are lowercase**, and match exactly: a key in capitals is a
+  variable's name, so `SET MODEL=glm-5.3` (a variable that lost its `VAR`)
+  is refused with `a variable is SET VAR MODEL=<value>`, never read as the
+  model; `Memory` is told `property keys are lowercase: memory`. A key or
+  value outside the table is refused with the allowed ones.
+- **Lists** (`sandbox.mounts`, `sandbox.allow_net`) are written `['a', 'b']`,
+  which may run over several words, or comma-joined in one word, `'a,b'`
+  (on the command line too: `sandbox.mounts = ~/libs:ro,~/data` needs no
+  `[ ]`, which zsh reads as a pattern). An item never holds a comma. A list
+  is set whole; `SHOW CREATE` writes the `[ ]` form.
 - **One statement names a key once.** `SET` and `DELETE` may appear
   together and more than once (`SET login = 'isolated' DELETE memory`), each
   key in one of them.
@@ -582,16 +599,37 @@ secret_helper = '<command>'`, `DELETE secret_helper`; see *Secrets*).
   new playbook gets every default its `SET` does not name, so a new
   playbook's memory is isolated. An existing playbook keeps what it has:
   nothing is migrated. `CREATE PLAYBOOK IF NOT EXISTS` on a playbook that
-  exists changes nothing, its `SET` list included.
-- **Reads.** `SHOW PLAYBOOK` prints `Login` and `Memory` rows, `EXPLAIN` a
+  exists applies its `SET` list, each pair only where it differs, and
+  leaves every key the list does not name as it is.
+- **`SET IF UNSET`** takes any property, and applies whole or not at all:
+  only when none of the keys it names is set, a key being unset at the
+  value `DELETE` gives it (no value at all for `model`, `sandbox.host` and
+  the like; `'shared'` for `login`, the playbook's own name for
+  `launcher`, `false` for `sandbox.always`). Otherwise it changes nothing
+  and prints which key was set. A recipe uses it to offer values without
+  replacing the ones a playbook has:
+
+  ```
+  ALTER PLAYBOOK reviewer SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'
+  -- on a playbook with a model of its own:
+  --   PLAYBOOK reviewer: model is set; SET IF UNSET changed nothing
+  -- agent stays unset too: the list is one
+  ```
+
+  The condition goes right after `SET`, and each `SET IF UNSET` in a
+  statement is judged on its own. `SHOW CREATE` writes the values a
+  playbook has, never the condition.
+- **Reads.** `SHOW PLAYBOOK` prints `Login` and `Memory` rows, the default
+  marked `(default)` (their defaults are opposite), and `EXPLAIN` a
   `Memory:` line (and a `Login:` line when it is isolated). Each key is its
   field: `SHOW PLAYBOOK --json` and `EXPLAIN --json` have `"login"` and
   `"memory"`, and `SELECT`'s `PLAYBOOKS` has `login` and `memory` columns.
-  `SHOW CREATE` writes the launcher in the playbook's `CREATE`, always, its
-  default spelled out (`SET launcher = '<name>'`); `login` and `memory` in
-  its `ALTER` (`SET login = '…', memory = '…'`), always; `model` and
-  `agent` when set. A recipe never leans on a default, and applying it
-  again changes nothing.
+  `SHOW CREATE` writes the playbook's `CREATE` with one `SET` list: the
+  launcher, its default spelled out (`launcher = '<name>'`), `login`,
+  `memory` and `sandbox.always`, always, and the sandbox keys that are set;
+  `model`, `agent`, the status line and the picker mode follow in the
+  `ALTER` that adds the plugins, when set (an agent may be a plugin's). A
+  recipe never leans on a default, and applying it again changes nothing.
 - **Refusals.** Of the properties, `LINK` takes only `launcher`, and only the
   target manifest's: the manifest and `settings.json` are the target's.
   `sandbox.always = true` does not combine with `login = 'shared'` (nor
@@ -599,9 +637,12 @@ secret_helper = '<command>'`, `DELETE secret_helper`; see *Secrets*).
   same statement. A launcher name is never a keyword. `RENAME TO` and
   the launcher are not combined with other clauses in one statement.
 - **Words.** `DELETE` is a reserved word. The keys and the values are read
-  only after `SET` and `DELETE` and are not, though `model` and `agent` are
-  also spelled as keywords elsewhere (`ADD MODEL`, `REVERT STATUSLINE`): a
-  key followed by `=` is a property.
+  only after `SET` and `DELETE` and are not reserved, though `model` is also
+  spelled as a keyword elsewhere (`ADD MODEL`): a key followed by `=` is a
+  property. The words of the removed clauses below (`LAUNCHER`, `NO`,
+  `SANDBOX`, `AGENT`, `SECRET`, `HELPER`, `PICKER`, `ONLY`, `APPEND`,
+  `REFRESH`) are not reserved either: where a clause starts they still give
+  the hint, and anywhere else a name, a launcher or a value may be one.
 - **Removed.** These v4.0.0-rc1 and rc2 forms are gone, each refused with a
   hint to the property: `ISOLATED LOGIN` and `SET ISOLATED LOGIN` (`SET
   login = 'isolated'`), `UNSET ISOLATED LOGIN` (`SET login = 'shared'`),
@@ -612,10 +653,10 @@ secret_helper = '<command>'`, `DELETE secret_helper`; see *Secrets*).
   (`sandbox.<key>`), `SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET]`
   (`SET [IF UNSET] statusline.command = '<command>', statusline.refresh = <n>`),
   `SET STATUSLINE PREVIOUS` (`REVERT STATUSLINE`), `UNSET STATUSLINE
-  [REFRESH]` (`DELETE statusline[_refresh]`), `SET MODEL PICKER ONLY |
-  APPEND` and `UNSET MODEL PICKER` (`SET model_picker.mode = …`, `DELETE
-  model_picker`), and `SET` / `UNSET SECRET HELPER` (`SET secret_helper =
-  …`, `DELETE secret_helper`).
+  [REFRESH]` (`DELETE statusline`, `DELETE statusline.refresh`), `SET MODEL
+  PICKER ONLY | APPEND` and `UNSET MODEL PICKER` (`SET model_picker.mode =
+  …`, `DELETE model_picker.mode` and `DROP MODEL`), and `SET` / `UNSET
+  SECRET HELPER` (`SET secret_helper = …`, `DELETE secret_helper`).
 
 #### login
 
@@ -989,17 +1030,21 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
 
 ### Status line and model
 
+The status line is a table of two properties, `statusline.command` and
+`statusline.refresh`; `DELETE statusline` resets it.
+
 - `SET statusline.command = '<command>'` writes `statusLine = {"type": "command",
   "command": "<command>"}`, keeping any other field of an existing
-  `statusLine` (such as `padding`); `DELETE statusline` removes it. It always
-  applies, whatever command the slot holds.
+  `statusLine` (such as `padding`); `DELETE statusline` (or `DELETE
+  statusline.command`) removes it, its refresh with it. It always applies,
+  whatever command the slot holds.
 - **`SET IF UNSET`**: `SET IF UNSET statusline.command = '<command>'[,
-  statusline.refresh = <n>]` applies only where no `statusLine` is set yet,
-  and otherwise reports unchanged. A recipe that offers a status line uses
-  it, so applying the recipe leaves a status line you chose in place. `SHOW
-  CREATE` writes the status line as it is, never the condition
-  ([example 17](examples/17-statusline-if-unset/)). `IF UNSET` takes the
-  status line only, and goes right after `SET`.
+  statusline.refresh = <n>]` applies only where neither is set yet, and
+  otherwise changes nothing and says which key was set. A recipe that offers
+  a status line uses it, so applying the recipe leaves a status line you
+  chose in place. `SHOW CREATE` writes the status line as it is, never the
+  condition ([example 17](examples/17-statusline-if-unset/)). `SET IF UNSET`
+  takes any property (*Playbook properties*).
 - **`statusline.refresh`** sets `statusLine.refreshInterval`, in whole
   seconds:
   - `SET statusline.command = '<command>', statusline.refresh = <n>` sets both the
@@ -1009,8 +1054,8 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
     a status line"), since an interval alone means nothing to Claude Code.
   - `DELETE statusline.refresh` removes only the interval; `DELETE
     statusline` still removes the whole status line.
-  - `<n>` is a whole number, at least 1, with no unit and no quotes (`10`, not
-    `10s`).
+  - `<n>` is a whole number, at least 1, with no unit (`10`, not `10s`);
+    `SHOW CREATE` writes it bare.
   - **`SET statusline.command = '<command>'` without `statusline.refresh` keeps an
     existing `refreshInterval`**, as it keeps `padding`. `SHOW CREATE` writes
     it back as `SET statusline.command = '<command>', statusline.refresh = <n>`, so it
@@ -1018,10 +1063,11 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
   - Why it matters: without `refreshInterval`, Claude Code (verified on
     2.1.283) does not re-render the status line while a session is idle.
     Anything that rides on renders stops, a heartbeat for example.
-  - `SHOW PLAYBOOK --json` has `"statusline.refresh": <n> | null` beside `statusline`, the command. `SELECT`'s `PLAYBOOKS` has a
-    `statusline.refresh` column. `SHOW` and `EXPLAIN` print `Status line:
-    <command> (refreshes every <n> s)`. It is valid on a plain config
-    directory too.
+  - `SHOW PLAYBOOK --json` has `"statusline": {"command": <command> | null,
+    "refresh": <n> | null, "history": [...]}`, each property its field, and
+    `SELECT`'s `PLAYBOOKS` has a `statusline` JSON column. `SHOW` and
+    `EXPLAIN` print `Status line: <command> (refreshes every <n> s)`. It is
+    valid on a plain config directory too.
 - **History and `REVERT STATUSLINE`.** Every time a
   statement replaces the status line's command, or removes the status line,
   cpb keeps the whole `statusLine` object it replaced (`padding`,
@@ -1038,8 +1084,8 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
     change made outside cpb (`/statusline`, another tool, a hand edit)
     is recorded the next time a cpb statement replaces it.
   - `SHOW PLAYBOOK --json` has `statusline.history`: `[{"command",
-    "refresh", "replaced_at"}]`, newest first. `SELECT`'s `PLAYBOOKS` has
-    the same column. `EXPLAIN` prints `Status line history: N earlier
+    "refresh", "replaced_at"}]`, newest first, inside the `statusline`
+    object (`SELECT`'s `statusline` column too). `EXPLAIN` prints `Status line history: N earlier
     (REVERT STATUSLINE restores <command>)`.
   - `SHOW CREATE` never writes it, since it is state and not configuration.
   - It is valid on a plain config directory, and it is refused together with
@@ -1069,7 +1115,7 @@ ALTER PLAYBOOK router-agent
   - A field given is written: `label`, `description`, `behavesAs`.
 - `DROP MODEL '<id>'` removes that row, and is refused when there is no such row. Dropping the last row removes `options`.
 - `SET model_picker.mode = 'only'` shows these rows only (`replaceBuiltInOptions: true`), and `'append'` adds them after the built-in ones (`false`). `DELETE model_picker.mode` removes the key, and Claude Code appends.
-- `DELETE model_picker` removes `modelPicker` whole, rows included.
+- `DELETE model_picker` is `DELETE model_picker.mode`: the rows are a collection, which `DROP MODEL` empties. A picker left with neither rows nor a mode is removed.
 - **Rows no clause names are kept**, whatever wrote them, and so is a field cpb does not know. A key is written only when a clause gives it, so a playbook with only `ADD MODEL` rows has a `settings.json` holding just `modelPicker`.
 - **Reads:**
   - `SHOW PLAYBOOK --json` has `"model_picker": null | {"mode": "only" | "append", "options": [{"model", "label", "description", "behaves_as"}]}`, with `mode` "append" unless `replaceBuiltInOptions` is true.
@@ -1690,7 +1736,9 @@ CREATE OR REPLACE ENV claude-default
 ALTER DEFAULTS USE ENV claude-default;
 
 CREATE PLAYBOOK IF NOT EXISTS work
-  FROM https://github.com/example/work-playbook BRANCH v1.2.0 SET launcher = 'w';
+  FROM https://github.com/example/work-playbook
+  BRANCH v1.2.0
+  SET launcher = 'w', login = 'shared', memory = 'isolated', sandbox.always = false;
 
 ALTER PLAYBOOK work
   USE ENV router
@@ -1714,8 +1762,9 @@ File rules:
   non-zero, unless `--skip-secrets` is given. Plain text never travels in a
   playbook file.
 - **Idempotent.** `SHOW CREATE` emits only idempotent forms (`CREATE OR
-  REPLACE ENV`, `CREATE PLAYBOOK IF NOT EXISTS …`, `USE ENV` with the full
-  list), so applying a file twice changes nothing the second time.
+  REPLACE ENV`, `CREATE PLAYBOOK IF NOT EXISTS … SET …`, which converges,
+  `USE ENV` with the full list), so applying a file twice changes nothing
+  the second time.
 - **Machine-specific parts stay explicit.** `LINK <dir>` and the sandbox are
   emitted as they are; a `LINK` path missing on the target fails validation.
 - `SHOW CREATE ALL` orders statements: the secret helper first (`APPLY`
@@ -1754,16 +1803,19 @@ drops only the replaced entries.
 | a variable `K` | `SET VAR K=…`, `SET VAR K FROM …`, `BLOCK VAR K`, `UNSET VAR K` |
 | a tool rule `R` | `ALLOW TOOL R`, `DENY TOOL R`, `UNSET TOOL R` |
 | the model; the agent | `SET` / `DELETE model`; `SET` / `DELETE agent` |
-| the status line; its refresh | `SET statusline.command = '<command>'` (not `IF UNSET`), `DELETE statusline`; `SET` / `DELETE statusline.refresh`, and `statusline.refresh` beside `statusline` |
+| the status line; its refresh | `SET statusline.command = '<command>'`, `DELETE statusline`; `SET` / `DELETE statusline.refresh`, and `statusline.refresh` beside `statusline.command` |
 | a sandbox setting `k` (`always` included) | `SET sandbox.k = …`, `DELETE sandbox.k`, `DELETE sandbox` |
-| a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`; a `CREATE`'s starting values are never dropped |
+| a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`, or in the `SET` list of a `CREATE PLAYBOOK IF NOT EXISTS` whose playbook exists before the run (it applies as an `ALTER` would); a `CREATE` that creates is never dropped from |
 | the env sets | `USE ENV` |
 
 - **A clause that depends on what it finds** replaces nothing: `SET IF
-  UNSET statusline.command = …`, `ADD ENV` and `DROP ENV`. Neither does `REVERT
-  STATUSLINE`, which reads the history that every earlier status line
+  UNSET …`, `ADD ENV` and `DROP ENV`. A `SET IF UNSET` is one clause, and is
+  dropped only when every key it names is written again later. Neither does
+  `REVERT STATUSLINE`, which reads the history that every earlier status line
   writes, so no status line clause before it is dropped.
-- **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh.
+- **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh,
+  except a `CREATE PLAYBOOK IF NOT EXISTS` on a playbook that exists before
+  the run: its `SET` list folds as an `ALTER`'s.
 - **Every other clause is never dropped:** marketplaces, plugins, MCP
   servers, skills, the model picker.
 - **The report.** A statement left with nothing to write is reported
@@ -1778,8 +1830,8 @@ drops only the replaced entries.
 `CREATE PLAYBOOK IF NOT EXISTS x FROM <source> [BRANCH b] [SUBDIR d]` meets an
 existing `x` whose recorded source, branch or subdirectory differs, `APPLY`
 reports `PLAYBOOK x exists; source differs (installed <…>, file says <…>)`
-and changes nothing; `--dry-run` shows it too, and the summary counts the
-warnings. The exit code stays 0 when that is the only issue: moving an
+and changes no source (its `SET` list still applies); `--dry-run` shows it
+too, and the summary counts the warnings. The exit code stays 0 when that is the only issue: moving an
 install to another source is `DROP PLAYBOOK` and `CREATE PLAYBOOK`, a
 deliberate step.
 

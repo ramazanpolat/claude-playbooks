@@ -77,7 +77,7 @@ cpb update <name> --yes                                     # from [source]; set
 cpb update <name> --dry-run                                 # versions and the migrate step, touches nothing
 ```
 
-`IF NOT EXISTS` / `IF EXISTS` make a statement safe to repeat: "already there" and "not there" become no-ops. Name collisions are hard errors before anything is copied (`command name "x" already addresses playbook "y"`). A statement applies whole or not at all, and a non-zero exit means nothing changed, with one exception: the plugin, MCP server and skill clauses run in clause order (`claude plugin`, `claude mcp`, files under `skills/`), and the error names what already ran (running the statement again finishes it).
+`IF NOT EXISTS` / `IF EXISTS` make a statement safe to repeat: "already there" and "not there" become no-ops, except that `CREATE PLAYBOOK IF NOT EXISTS … SET …` on a playbook that exists applies its `SET` list (it converges: applied again, it changes nothing). Name collisions are hard errors before anything is copied (`command name "x" already addresses playbook "y"`). A statement applies whole or not at all, and a non-zero exit means nothing changed, with one exception: the plugin, MCP server and skill clauses run in clause order (`claude plugin`, `claude mcp`, files under `skills/`), and the error names what already ran (running the statement again finishes it).
 
 ## Keep a whole setup in one file
 
