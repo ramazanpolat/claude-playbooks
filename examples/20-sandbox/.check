@@ -4,7 +4,7 @@ if cpb run box -p hi > "$HOME/sbx.out" 2>&1; then echo "launched without sbx"; e
 grep -q "'sbx' (Docker Sandboxes) not found" "$HOME/sbx.out"
 # The [sandbox] table is the playbook's, and SHOW CREATE writes it back.
 cpb SHOW CREATE PLAYBOOK box > "$HOME/box.cpb"
-grep -q "SET sandbox.always = true, sandbox.backend = 'sbx', sandbox.mounts = \['~/shared-libs:ro'\], sandbox.allow_net = \['api.github.com'\]" "$HOME/box.cpb"
+grep -q "login = 'isolated', memory = 'isolated', sandbox.always = true, sandbox.backend = 'sbx', sandbox.mounts = \['~/shared-libs:ro'\], sandbox.allow_net = \['api.github.com'\]" "$HOME/box.cpb"
 cpb SHOW PLAYBOOK box --json > "$HOME/box.json"
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); s=v["sandbox"]; assert s["always"] is True and s["backend"] == "sbx" and s["allow_net"] == ["api.github.com"] and v["login"] == "isolated", v' "$HOME/box.json"
 # sandbox.always = false turns always off and leaves the login isolated;

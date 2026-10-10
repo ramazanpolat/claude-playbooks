@@ -4,10 +4,10 @@ entry="$HOME/.claude/**"
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == [sys.argv[2]], v' "$p/focused/settings.json" "$entry"
 cpb SHOW PLAYBOOK focused --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["login"] == "shared" and v["memory"] == "isolated", v'
 cpb EXPLAIN PLAYBOOK focused | grep -q '^Memory: isolated'
-cpb SHOW CREATE PLAYBOOK focused | grep -qx "  SET login = 'shared', memory = 'isolated'"
+cpb SHOW CREATE PLAYBOOK focused | grep -q "login = 'shared', memory = 'isolated', sandbox.always = false;"
 # shared: nothing written.
 if grep -qs claudeMdExcludes "$p/familiar/settings.json"; then echo "familiar excludes"; exit 1; fi
-cpb SHOW CREATE PLAYBOOK familiar | grep -qx "  SET login = 'shared', memory = 'shared'"
+cpb SHOW CREATE PLAYBOOK familiar | grep -q "login = 'shared', memory = 'shared', sandbox.always = false;"
 # SET and DELETE move only cpb's entry; the rest of the list is yours.
 printf '{"claudeMdExcludes": ["/opt/notes/**"]}\n' > "$p/familiar/settings.json"
 cpb "ALTER PLAYBOOK familiar SET memory = 'isolated'" > /dev/null

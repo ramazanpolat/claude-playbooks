@@ -17,5 +17,8 @@ python3 -c 'import json,sys; mp=json.load(open(sys.argv[1]))["modelPicker"]; ass
 # The mode back to its default (Claude Code appends): the key goes, the rows stay.
 cpb ALTER PLAYBOOK router-agent DELETE model_picker.mode
 python3 -c 'import json,sys; mp=json.load(open(sys.argv[1]))["modelPicker"]; assert "replaceBuiltInOptions" not in mp and len(mp["options"])==1, mp' "$s"
-cpb "ALTER PLAYBOOK router-agent DELETE model_picker"
+# DELETE model_picker is the mode too: the rows are a collection, which DROP
+# MODEL empties, and a picker left empty goes.
+cpb "ALTER PLAYBOOK router-agent DELETE model_picker" | grep -q unchanged
+cpb "ALTER PLAYBOOK router-agent DROP MODEL 'glm-5.3'"
 python3 -c 'import json,sys; assert "modelPicker" not in json.load(open(sys.argv[1]))' "$s"

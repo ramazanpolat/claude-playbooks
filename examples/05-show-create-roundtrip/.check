@@ -1,0 +1,10 @@
+# CREATE PLAYBOOK IF NOT EXISTS converges: on a playbook that exists it
+# applies its SET list, and applied again it changes nothing.
+f="$HOME/memory.cpb"
+printf "CREATE PLAYBOOK IF NOT EXISTS notes SET launcher = '', memory = 'shared';\n" > "$f"
+cpb APPLY "$f" | grep -q '0 created, 1 changed, 0 unchanged'
+cpb SHOW PLAYBOOK notes --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["memory"] == "shared", v'
+cpb APPLY "$f" | grep -q '0 created, 0 changed, 1 unchanged'
+# SHOW CREATE writes the properties on the CREATE: one converging statement.
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^  SET launcher = '', login = 'shared', memory = 'shared', sandbox.always = false;"
+rm -f "$f"
