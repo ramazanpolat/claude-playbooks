@@ -14,12 +14,12 @@ write:
   rules (`permissions.allow` / `permissions.deny`), as typed. A rule is in at
   most one list: allowing a denied rule moves it. `UNSET TOOL '<rule>'`
   removes it from either.
-- `SET STATUSLINE '<command>'` sets `statusLine` to that command, keeping any
-  other field of an existing one (such as `padding`). `UNSET STATUSLINE`
+- `SET statusline = '<command>'` sets `statusLine` to that command, keeping any
+  other field of an existing one (such as `padding`). `DELETE statusline`
   removes it. `REFRESH 10` also re-renders it every 10 seconds while the
   session is idle, which Claude Code does not do without it. `SET STATUSLINE
-  REFRESH <n>` and `UNSET STATUSLINE REFRESH` change only the interval.
-  `SET STATUSLINE PREVIOUS` puts back the status line a statement replaced
+  REFRESH <n>` and `DELETE statusline_refresh` change only the interval.
+  `REVERT STATUSLINE` puts back the status line a statement replaced
   last (cpb keeps a short history of them).
 - `SET model = '<model>'` is the playbook's default model and the weakest
   choice: `ANTHROPIC_MODEL` from an env set, `--model` at launch and `/model`

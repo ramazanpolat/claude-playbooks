@@ -21,7 +21,7 @@ import (
 // agent"). The marketplace and plugin clauses delegate to Claude Code's own
 // CLI, `claude plugin …`, run with CLAUDE_CONFIG_DIR set to the playbook, so
 // its user scope is that playbook: the format of settings.json and the
-// plugin cache stay Claude Code's to own. SET AGENT has no CLI and is the
+// plugin cache stay Claude Code's to own. The agent has no CLI and is the
 // one key cpb writes itself. Reads (SHOW, EXPLAIN, SHOW CREATE) read
 // settings.json, so showing a playbook runs nothing.
 
@@ -55,7 +55,7 @@ func pluginClauses(clauses []grammar.Clause) bool {
 			grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool,
 			grammar.SetStatusline, grammar.UnsetStatusline, grammar.SetModel, grammar.UnsetModel,
 			grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh, grammar.SetStatuslinePrevious,
-			grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
+			grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker, grammar.UnsetModelPickerMode:
 			return true
 		case grammar.SetProperties, grammar.DeleteProperties:
 			// memory is a key of settings.json; login is the manifest's.
@@ -583,7 +583,7 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 			_, _ = sl.Get("command", &cmd)
 			_, _ = sl.Get(keyRefreshInterval, &refresh)
 			if typ != "command" || cmd == "" {
-				return nil, false, fmt.Errorf("SET STATUSLINE REFRESH needs a status line: SET STATUSLINE '<cmd>' REFRESH %d", c.Refresh)
+				return nil, false, fmt.Errorf("statusline_refresh needs a status line: SET statusline = '<cmd>', statusline_refresh = %d", c.Refresh)
 			}
 			if refresh == c.Refresh {
 				continue
@@ -604,7 +604,7 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 			}
 		case grammar.UnsetStatusline:
 			unset(keyStatusline, "statusline")
-		case grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
+		case grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker, grammar.UnsetModelPickerMode:
 			l, ch, err := applyPicker(f.Root, c)
 			if err != nil {
 				return nil, false, err

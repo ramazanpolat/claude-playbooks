@@ -221,7 +221,7 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 }
 
 // alterPlaybookLifecycle carries out RENAME TO and the launcher (SET
-// launcher = '<name>', SET launcher = ”, DELETE launcher). They are not
+// launcher = '<name>', the empty launcher, DELETE launcher). They are not
 // combined with other clauses: a rename after an environment write could not
 // be undone as one step, so the statement would not apply whole or not at
 // all.
@@ -281,7 +281,7 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		return err
 	}
 	if noAlias {
-		// A playbook has one launcher: its alias, or its name. NO LAUNCHER
+		// A playbook has one launcher: its alias, or its name. launcher = ''
 		// removes whichever it is (the hidden dealias clears an alias only).
 		if pb.Alias() != "" {
 			if err := doLauncher(launcherOpts{remove: true}, []string{st.Name}); err != nil {

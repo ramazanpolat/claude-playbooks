@@ -69,7 +69,7 @@ func TestSetFromChecksTheReference(t *testing.T) {
 	aliasTestHome(t)
 	helper, log := fakeHelper(t)
 	root := seedFlatPlaybook(t, "router")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "CREATE ENV e SET TOKEN=literal AS PLAINTEXT")
 
 	out := mustStmt(t, "ALTER ENV e SET TOKEN FROM keychain:ok/router")
@@ -104,7 +104,7 @@ func TestOAuthTokenReferenceRefusedAtEveryLayer(t *testing.T) {
 	aliasTestHome(t)
 	helper, _ := fakeHelper(t)
 	root := seedFlatPlaybook(t, "router")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "CREATE ENV e")
 	for _, line := range []string{
 		"ALTER ENV e SET CLAUDE_CODE_OAUTH_TOKEN FROM keychain:ok/x",
@@ -131,7 +131,7 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 	writePlaybook(t, root, "router", &manifest.Manifest{IsolatedLogin: true})
 	helper, helperLog := fakeHelper(t)
 	claudeLog := stubClaude(t)
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "CREATE ENV r SET BASE=http://buildbox/v1")
 	mustStmt(t, "ALTER ENV r SET ANTHROPIC_AUTH_TOKEN FROM keychain:ok/router")
 	mustStmt(t, "ALTER PLAYBOOK router USE ENV r")
@@ -152,7 +152,7 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 	}
 
 	// Without a helper the launch is refused, and claude never runs.
-	mustStmt(t, "ALTER DEFAULTS UNSET SECRET HELPER")
+	mustStmt(t, "ALTER DEFAULTS DELETE secret_helper")
 	os.Remove(claudeLog)
 	err := runRun(nil, []string{"router", "--version"})
 	if err == nil || !strings.Contains(err.Error(), "no secret helper configured") || !strings.Contains(err.Error(), "ANTHROPIC_AUTH_TOKEN") {
@@ -174,7 +174,7 @@ func TestSandboxedLaunchRefusesReferences(t *testing.T) {
 	writePlaybook(t, root, "boxed", &manifest.Manifest{IsolatedLogin: true, Sandbox: &manifest.Sandbox{Always: true}})
 	helper, _ := fakeHelper(t)
 	stubSbx(t)
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "ALTER PLAYBOOK boxed SET VAR API_TOKEN FROM keychain:ok/x")
 	err := runRun(nil, []string{"--workdir", t.TempDir(), "boxed", "--version"})
 	if err == nil || !strings.Contains(err.Error(), "cannot resolve them yet") {
@@ -187,7 +187,7 @@ func TestShowAndExplainReferences(t *testing.T) {
 	aliasTestHome(t)
 	helper, _ := fakeHelper(t)
 	seedFlatPlaybook(t, "router")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "ALTER PLAYBOOK router SET VAR API_TOKEN FROM keychain:ok/x")
 
 	var pb struct {
@@ -224,7 +224,7 @@ func TestSetVarAndReferences(t *testing.T) {
 	aliasTestHome(t)
 	helper, _ := fakeHelper(t)
 	root := seedFlatPlaybook(t, "router")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "ALTER PLAYBOOK router SET VAR A_TOKEN FROM keychain:ok/a SET VAR B_TOKEN FROM keychain:ok/b")
 	mustStmt(t, "ALTER PLAYBOOK router SET VAR OTHER=1")
 	if e := readEnv(t, root); e.Refs["A_TOKEN"] != "keychain:ok/a" || e.Refs["B_TOKEN"] != "keychain:ok/b" {
@@ -252,7 +252,7 @@ func TestCheckHelperEnvAndIfNotExists(t *testing.T) {
 	t.Setenv("HELPER_LOG", log)
 	t.Setenv(envset.SecretHelperEnv, "")
 	t.Setenv("TOKEN", "stale-shell-value")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 
 	mustStmt(t, "CREATE ENV e SET TOKEN FROM keychain:x")
 	if got := readLog(t, log); got != "TOKEN=unset\n" {

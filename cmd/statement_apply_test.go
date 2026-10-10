@@ -87,7 +87,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 	if out, err := apply(t, writePlaybookFile(t, scratchPlaybook)); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "ALTER PLAYBOOK work SET VAR API_TOKEN FROM keychain:ok/work")
 	writePlaybook(t, root, "src", &manifest.Manifest{Launcher: "s", Source: &manifest.Source{Repository: "https://example.com/s.git", Branch: "v1"}})
 
@@ -95,7 +95,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 	// The helper first: an env set's references are checked against the
 	// helper an earlier statement sets, so on a fresh machine it must come
 	// before them.
-	h, e := strings.Index(dump, "ALTER DEFAULTS\n  SET SECRET HELPER '"+helper+"';"), strings.Index(dump, "CREATE OR REPLACE ENV glm")
+	h, e := strings.Index(dump, "ALTER DEFAULTS\n  SET secret_helper = '"+helper+"';"), strings.Index(dump, "CREATE OR REPLACE ENV glm")
 	if h < 0 || e < 0 || h > e {
 		t.Errorf("SHOW CREATE ALL does not set the helper before the env sets:\n%s", dump)
 	}
@@ -296,7 +296,7 @@ func TestApplySetsAndUsesTheHelperInOneRun(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	helper, _ := fakeHelper(t)
-	path := writePlaybookFile(t, "ALTER DEFAULTS SET SECRET HELPER '"+helper+"';\nCREATE OR REPLACE ENV r;\nALTER ENV r SET TOKEN FROM 'keychain:ok/r';\n")
+	path := writePlaybookFile(t, "ALTER DEFAULTS SET secret_helper = '"+helper+"';\nCREATE OR REPLACE ENV r;\nALTER ENV r SET TOKEN FROM 'keychain:ok/r';\n")
 	if out, err := apply(t, path, "--dry-run"); err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
@@ -351,7 +351,7 @@ func TestApplyDryRunSeesEarlierChanges(t *testing.T) {
 func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 	sandboxDefaultRoot(t)
 	helper, _ := fakeHelper(t)
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "CREATE ENV r")
 	path := writePlaybookFile(t, "DROP ENV r;\nCREATE ENV IF NOT EXISTS r SET TOKEN FROM 'keychain:gone';\n")
 	if _, err := apply(t, path); err == nil || !strings.Contains(err.Error(), "nothing was written") {
@@ -363,7 +363,7 @@ func TestApplyPrescanFollowsEarlierDrops(t *testing.T) {
 }
 
 // SHOW CREATE never prints a source URL's credentials, and keeps the
-// default launcher (named after the playbook) instead of writing SET launcher = ”.
+// default launcher (named after the playbook) instead of writing an empty launcher (none).
 func TestShowCreateSourceCredentialsAndDefaultLauncher(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))

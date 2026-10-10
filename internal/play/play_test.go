@@ -176,7 +176,7 @@ func TestCheckRefusals(t *testing.T) {
 		"INCLUDE 'base.cpb';":                                                      "INCLUDE",
 		"USE PLAYBOOK x;\nALTER PLAYBOOK SET model = 'm';":                         "USE PLAYBOOK",
 		"CREATE ENV e SET A=1;":                                                    "env sets or DEFAULTS",
-		"ALTER DEFAULTS SET SECRET HELPER 'h';":                                    "env sets or DEFAULTS",
+		"ALTER DEFAULTS SET secret_helper = 'h';":                                  "env sets or DEFAULTS",
 		"ALTER PLAYBOOK named SET model = 'm';":                                    "write it as a recipe",
 		"CREATE PLAYBOOK p;":                                                       "write it as a recipe",
 		"DROP PLAYBOOK p;":                                                         "write it as a recipe",
@@ -194,7 +194,7 @@ func TestCheckRefusals(t *testing.T) {
 		"ALTER PLAYBOOK ADD SKILL s FROM file:///tmp/repo;":                        "https, git@ or github: only",
 		"ALTER PLAYBOOK SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;":                    "even AS PLAINTEXT",
 		"ALTER PLAYBOOK SET VAR API_KEY=abc AS PLAINTEXT;":                         "even AS PLAINTEXT",
-		"ALTER PLAYBOOK SET STATUSLINE PREVIOUS;":                                  "not in a played recipe",
+		"ALTER PLAYBOOK REVERT STATUSLINE;":                                        "not in a played recipe",
 		"ALTER PLAYBOOK ADD MCP SERVER s URL 'https://u:tok@mcp.example.com/sse';": "URL carrying credentials",
 		"ALTER PLAYBOOK SET MODEL":                                                 "the file",
 		"":                                                                         "no statements",
@@ -240,7 +240,7 @@ func TestCheckRisks(t *testing.T) {
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' 'files-server'
   ADD MCP SERVER gh URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
   ALLOW TOOL 'Bash' 'Bash(python3 *)' 'Write(~/**)' 'WebFetch' 'Bash(gh pr view *)'
-  SET STATUSLINE 'bash ~/bin/sl.sh'
+  SET statusline = 'bash ~/bin/sl.sh'
   ADD SKILL review FROM 'https://github.com/acme/skills' SUBDIR review
   SET VAR SENTRY_URL=https://sentry.example.com/1 OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com
   SET VAR GH_TOKEN FROM 'keychain:gh';
@@ -322,7 +322,7 @@ func TestWideAllow(t *testing.T) {
 	}
 }
 
-// SET launcher = ” is harmless in a recipe (play makes no launcher anyway).
+// The empty launcher is harmless in a recipe (play makes no launcher anyway).
 func TestCheckNoAlias(t *testing.T) {
 	if r := Check([]byte("ALTER PLAYBOOK SET launcher = '' SET model = 'm';\n")); len(r.Refused) != 0 {
 		t.Fatalf("SET launcher = '': %+v", r.Refused)

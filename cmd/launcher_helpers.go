@@ -79,8 +79,9 @@ func defaultPlaybooksRoot() string {
 	return filepath.Join(home, ".claude-playbooks")
 }
 
-// checkLauncherConflict guards every registering statement's LAUNCHER and
-// NO LAUNCHER: given together, the launcher it asks for would be ambiguous.
+// checkLauncherConflict guards every registering statement's launcher and
+// the empty launcher (none): given together, the launcher it asks for would
+// be ambiguous.
 func checkLauncherConflict(launcher string, noLauncher bool) error {
 	if noLauncher && launcher != "" {
 		return fmt.Errorf("launcher = '' (none) and a launcher name cannot be used together")

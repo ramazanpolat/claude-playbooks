@@ -113,17 +113,17 @@ func TestFormatPlaybookProperties(t *testing.T) {
 
 func TestPlaybookPropertyErrors(t *testing.T) {
 	for src, want := range map[string]string{
-		"CREATE PLAYBOOK x SET;":                                         "SET takes <key> = '<value>' (launcher, login, memory, model, agent, sandbox.<key>)",
-		"CREATE PLAYBOOK x SET colour = 'blue';":                         "colour is not a playbook property (launcher, login, memory, model, agent, sandbox.<key>)",
+		"CREATE PLAYBOOK x SET;":                                         "SET takes <key> = '<value>' (launcher, login, memory, model, agent, sandbox.<key>, statusline, statusline_refresh, model_picker.mode)",
+		"CREATE PLAYBOOK x SET colour = 'blue';":                         "colour is not a playbook property (launcher, login, memory, model, agent, sandbox.<key>, statusline, statusline_refresh, model_picker.mode)",
 		"CREATE PLAYBOOK x SET memory = 'sealed';":                       "memory takes 'isolated' or 'shared'",
 		"CREATE PLAYBOOK x SET memory;":                                  "SET takes <key> = '<value>'",
 		"CREATE PLAYBOOK x SET memory = ;":                               "needs a value",
 		"CREATE PLAYBOOK x DELETE memory;":                               "DELETE is for ALTER PLAYBOOK",
-		"ALTER PLAYBOOK x SET;":                                          "SET inside ALTER PLAYBOOK takes VAR, STATUSLINE, MODEL PICKER or properties",
+		"ALTER PLAYBOOK x SET;":                                          "SET inside ALTER PLAYBOOK takes VAR or properties",
 		"ALTER PLAYBOOK x SET memory = 'shared', memory = 'isolated';":   "memory is named twice in one statement",
 		"ALTER PLAYBOOK x SET memory = 'shared' DELETE memory;":          "memory is named twice in one statement",
 		"ALTER PLAYBOOK x SET login = 'shared' SET login = 'isolated';":  "login is named twice in one statement",
-		"ALTER PLAYBOOK x DELETE;":                                       "DELETE takes <key> (launcher, login, memory, model, agent, sandbox.<key>)",
+		"ALTER PLAYBOOK x DELETE;":                                       "DELETE takes <key> (launcher, login, memory, model, agent, sandbox.<key>, statusline, statusline_refresh, model_picker.mode)",
 		"ALTER PLAYBOOK x DELETE colour;":                                "colour is not a playbook property",
 		"ALTER PLAYBOOK x SET FOO=1;":                                    "FOO is not a playbook property; a variable is SET VAR FOO=<value>",
 		"CREATE PLAYBOOK x SET sandbox.always = true, login = 'shared';": "cannot be combined with login = 'shared'",
@@ -158,7 +158,7 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 
 func TestExpectPlaybookProperties(t *testing.T) {
 	w := strings.Fields
-	if got := Expect(w("ALTER PLAYBOOK k DELETE")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills"}) {
+	if got := Expect(w("ALTER PLAYBOOK k DELETE")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline", "statusline_refresh", "model_picker.mode"}) {
 		t.Errorf("ALTER PLAYBOOK k DELETE offers %q", got)
 	}
 	if got := Expect(w("ALTER PLAYBOOK k SET")); !contains(got, "VAR") || !contains(got, "login") || !contains(got, "memory") {
@@ -167,7 +167,7 @@ func TestExpectPlaybookProperties(t *testing.T) {
 	if got := Expect(w("CREATE PLAYBOOK k")); !contains(got, "SET") || contains(got, "ISOLATED") || contains(got, "SETTINGS") {
 		t.Errorf("CREATE PLAYBOOK k offers %q", got)
 	}
-	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills"}) {
+	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline", "statusline_refresh", "model_picker.mode"}) {
 		t.Errorf("CREATE PLAYBOOK k SET offers %q", got)
 	}
 }

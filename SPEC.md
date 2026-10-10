@@ -150,8 +150,8 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
             | DROP ENV <env> ...           detach
 
 defaults-clause := set-clause
-            | SET SECRET HELPER '<command>' the secret helper (see Secrets)
-            | UNSET SECRET HELPER
+            | SET secret_helper = '<command>'   the secret helper (see Secrets)
+            | DELETE secret_helper
 
 pb-clause  := set-clause
             | SET VAR <key>=<value> ... [AS PLAINTEXT]
@@ -169,14 +169,13 @@ pb-clause  := set-clause
             | ALLOW TOOL '<rule>' ...      settings.json permissions.allow
             | DENY TOOL '<rule>' ...       settings.json permissions.deny
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
-            | SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET] | UNSET STATUSLINE
-            | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH
-            | SET STATUSLINE PREVIOUS      the status line cpb replaced last
             | SET property, ...            change properties; see "Playbook properties"
+            | SET IF UNSET property, ...   only where none of them is set (the status line)
             | DELETE <key>, ...            back to the default
+            | REVERT STATUSLINE            the status line cpb replaced last
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   see "Model picker"
             | DROP MODEL '<id>'
-            | SET MODEL PICKER ONLY | SET MODEL PICKER APPEND | UNSET MODEL PICKER
+            | SET model_picker.mode = 'only' | SET model_picker.mode = 'append' | DELETE model_picker
             | ADD SKILL <name> FROM '<dir>'
             | ADD SKILL <name> FROM <git-url> [BRANCH <ref>] [SUBDIR <dir>]
             | DROP SKILL <name>
@@ -254,13 +253,13 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … BLOCK VAR K` | `.playbook` `[env] block = [...]` |
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
 | `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-sets/.defaults`, one set name per line, in order |
-| `ALTER DEFAULTS SET / UNSET SECRET HELPER` | `<root>/.env-sets/.secret-helper`, one line: the command |
+| `ALTER DEFAULTS SET / DELETE secret_helper` | `<root>/.env-sets/.secret-helper`, one line: the command |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `SET launcher` / `DELETE launcher` | the playbook dir, the registry and the launcher |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
 | `ALTER PLAYBOOK … SET / DELETE agent` | the playbook's `settings.json`, `agent` |
 | `ALTER PLAYBOOK … ADD / DROP MCP SERVER` | nothing directly: runs `claude mcp add-json / remove --scope user` for the playbook; a reference also writes the playbook's `[env.refs]` (see "An agent's configuration") |
 | `ALTER PLAYBOOK … ALLOW / DENY / UNSET TOOL` | the playbook's `settings.json`, `permissions.allow` / `permissions.deny` |
-| `ALTER PLAYBOOK … SET / UNSET STATUSLINE`, `SET / DELETE model` | the playbook's `settings.json`, `statusLine` / `model` |
+| `ALTER PLAYBOOK … SET / DELETE statusline`, `SET / DELETE model` | the playbook's `settings.json`, `statusLine` / `model` |
 | `ALTER PLAYBOOK … ADD / DROP SKILL` | `<playbook>/skills/<name>` (a link or a copy) and the manifest's `[skills.<name>]` record |
 | `ALTER PLAYBOOK … SET` / `DELETE sandbox.<key>` | the playbook's `.playbook`, `[sandbox]` |
 | `ALTER PLAYBOOK … SET login` / `DELETE login` | the playbook's `.playbook`, `isolated_login` |
@@ -281,7 +280,7 @@ cpb ALTER PLAYBOOK work ADD ENV router AFTER glm-5.3
 cpb ALTER PLAYBOOK work DROP ENV deepseek-flash
 cpb ALTER PLAYBOOK work BLOCK VAR HTTP_PROXY
 cpb ALTER DEFAULTS USE ENV claude-default corp-proxy
-cpb ALTER DEFAULTS SET SECRET HELPER 'my-keychain-helper'
+cpb ALTER DEFAULTS SET secret_helper = 'my-keychain-helper'
 cpb CREATE PLAYBOOK scratch FROM https://github.com/example/work-playbook SET launcher = 'sc'
 cpb ALTER PLAYBOOK scratch SET launcher = 'scr'
 cpb ALTER PLAYBOOK scratch RENAME TO lab
@@ -292,7 +291,7 @@ cpb SHOW CREATE ALL > playbook.cpb
 cpb APPLY playbook.cpb --dry-run
 cpb ALTER PLAYBOOK work ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
 cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)' SET model = 'claude-opus-5-5'
-cpb ALTER PLAYBOOK work SET STATUSLINE 'bash ~/bin/statusline.sh'
+cpb ALTER PLAYBOOK work SET statusline = 'bash ~/bin/statusline.sh'
 cpb ALTER PLAYBOOK work ADD SKILL release-notes FROM 'github:acme/skills' SUBDIR release-notes
 cpb APPLY agent.cpb TO lab
 cpb APPLY agent.cpb TO '~/.claude' --dry-run
@@ -466,8 +465,8 @@ cpb never names or discovers one.
 
 **Configuring the helper**:
 
-- `ALTER DEFAULTS SET SECRET HELPER '<command>'` stores it and
-  `ALTER DEFAULTS UNSET SECRET HELPER` removes it. It appears in
+- `ALTER DEFAULTS SET secret_helper = '<command>'` stores it and
+  `ALTER DEFAULTS DELETE secret_helper` removes it. It appears in
   `SHOW DEFAULTS` and in `SHOW CREATE ALL`.
 - `CPB_SECRET_HELPER=<command>` in the environment overrides the stored
   setting for that process (devbox projects, tests). `EXPLAIN PLAYBOOK`
@@ -495,7 +494,7 @@ the helper's business.
 
 **Without a configured helper**, cpb stays fully usable. `SET … FROM` is
 refused, and so is launching a playbook whose layers hold a reference, each
-with one line: "no secret helper configured (ALTER DEFAULTS SET SECRET HELPER
+with one line: "no secret helper configured (ALTER DEFAULTS SET secret_helper =
 …)". Literal values work without one.
 
 `FROM` also names a playbook's source in `CREATE PLAYBOOK`; the position
@@ -560,6 +559,13 @@ ALTER PLAYBOOK <name> DELETE login, memory       -- back to the defaults
 | `memory` | `'isolated'`, `'shared'` | `'isolated'` | Whether `~/.claude`'s `CLAUDE.md` and `rules/` load into it (one `claudeMdExcludes` entry in its `settings.json`) |
 | `model` | a model id | none | The playbook's default model, `settings.json` `model` (see *Status line and model*) |
 | `agent` | `<name>` or `<plugin>:<name>` | none | The agent the main session runs as, `settings.json` `agent` (see *Plugins and the agent*) |
+| `sandbox.<key>` | per key (see *Sandbox*) | per key | The `[sandbox]` table, key for key; `DELETE sandbox` resets it |
+| `statusline` | a command | none | The status line, `settings.json` `statusLine.command` (see *Status line and model*) |
+| `statusline_refresh` | whole seconds, at least 1, bare | none | `statusLine.refreshInterval` |
+| `model_picker.mode` | `'append'`, `'only'` | none (Claude Code appends) | `modelPicker.replaceBuiltInOptions` (see *Model picker*); `DELETE model_picker` removes the picker, rows too |
+
+`DEFAULTS` has one property, `secret_helper` (`ALTER DEFAULTS SET
+secret_helper = '<command>'`, `DELETE secret_helper`; see *Secrets*).
 
 - **The form.** A pair is one word (`memory='shared'`) or three
   (`memory = 'shared'`); pairs are separated by commas, which may be left
@@ -594,7 +600,7 @@ ALTER PLAYBOOK <name> DELETE login, memory       -- back to the defaults
   the launcher are not combined with other clauses in one statement.
 - **Words.** `DELETE` is a reserved word. The keys and the values are read
   only after `SET` and `DELETE` and are not, though `model` and `agent` are
-  also spelled as keywords elsewhere (`ADD MODEL`, `SET MODEL PICKER`): a
+  also spelled as keywords elsewhere (`ADD MODEL`, `REVERT STATUSLINE`): a
   key followed by `=` is a property.
 - **Removed.** These v4.0.0-rc1 and rc2 forms are gone, each refused with a
   hint to the property: `ISOLATED LOGIN` and `SET ISOLATED LOGIN` (`SET
@@ -602,7 +608,14 @@ ALTER PLAYBOOK <name> DELETE login, memory       -- back to the defaults
   `LAUNCHER <name>` (`SET launcher = '<name>'`), `NO LAUNCHER` (`SET
   launcher = ''`), `SET MODEL '<model>'` and `UNSET MODEL` (`SET model =
   '<model>'`, `DELETE model`), `SET AGENT '<agent>'` and `UNSET AGENT`
-  (`SET agent = '<agent>'`, `DELETE agent`).
+  (`SET agent = '<agent>'`, `DELETE agent`), the `SANDBOX` forms
+  (`sandbox.<key>`), `SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET]`
+  (`SET [IF UNSET] statusline = '<command>', statusline_refresh = <n>`),
+  `SET STATUSLINE PREVIOUS` (`REVERT STATUSLINE`), `UNSET STATUSLINE
+  [REFRESH]` (`DELETE statusline[_refresh]`), `SET MODEL PICKER ONLY |
+  APPEND` and `UNSET MODEL PICKER` (`SET model_picker.mode = …`, `DELETE
+  model_picker`), and `SET` / `UNSET SECRET HELPER` (`SET secret_helper =
+  …`, `DELETE secret_helper`).
 
 #### login
 
@@ -893,7 +906,7 @@ ALTER PLAYBOOK reviewer-agent
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/data'
   ALLOW TOOL 'Bash(git diff *)'
   DENY TOOL 'Bash(rm -rf *)'
-  SET STATUSLINE '~/.claude-playbooks/reviewer-agent/bin/statusline.sh'
+  SET statusline = '~/.claude-playbooks/reviewer-agent/bin/statusline.sh'
   SET model = 'claude-opus-5-5'
   ADD SKILL release-notes FROM '~/src/skills/release-notes';
 ```
@@ -976,28 +989,32 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
 
 ### Status line and model
 
-- `SET STATUSLINE '<command>'` writes `statusLine = {"type": "command",
+- `SET statusline = '<command>'` writes `statusLine = {"type": "command",
   "command": "<command>"}`, keeping any other field of an existing
-  `statusLine` (such as `padding`); `UNSET STATUSLINE` removes it. It always
+  `statusLine` (such as `padding`); `DELETE statusline` removes it. It always
   applies, whatever command the slot holds.
-- **`IF UNSET`**: `SET STATUSLINE '<command>' [REFRESH <n>] IF UNSET`
-  applies only where no `statusLine` is set yet, and otherwise reports
-  unchanged. A recipe that offers a status line uses it, so applying the
-  recipe leaves a status line you chose in place. `SHOW CREATE` writes the
-  status line as it is, never the condition
-  ([example 17](examples/17-statusline-if-unset/)).
-- **REFRESH** sets `statusLine.refreshInterval`, in whole seconds:
-  - `SET STATUSLINE '<command>' REFRESH <n>` sets both the command and the
-    interval.
-  - `SET STATUSLINE REFRESH <n>` sets only the interval, and is refused when
-    there is no command status line ("SET STATUSLINE REFRESH needs a status
-    line"), since an interval alone means nothing to Claude Code.
-  - `UNSET STATUSLINE REFRESH` removes only the interval; `UNSET STATUSLINE`
-    still removes the whole status line.
-  - `<n>` is a whole number, at least 1, with no unit (`10`, not `10s`).
-  - **`SET STATUSLINE '<command>'` without REFRESH keeps an existing
-    `refreshInterval`**, as it keeps `padding`. `SHOW CREATE` writes it back
-    as `SET STATUSLINE '<command>' REFRESH <n>`, so it round-trips.
+- **`SET IF UNSET`**: `SET IF UNSET statusline = '<command>'[,
+  statusline_refresh = <n>]` applies only where no `statusLine` is set yet,
+  and otherwise reports unchanged. A recipe that offers a status line uses
+  it, so applying the recipe leaves a status line you chose in place. `SHOW
+  CREATE` writes the status line as it is, never the condition
+  ([example 17](examples/17-statusline-if-unset/)). `IF UNSET` takes the
+  status line only, and goes right after `SET`.
+- **`statusline_refresh`** sets `statusLine.refreshInterval`, in whole
+  seconds:
+  - `SET statusline = '<command>', statusline_refresh = <n>` sets both the
+    command and the interval; in one statement they are one `statusLine`.
+  - `SET statusline_refresh = <n>` alone sets only the interval, and is
+    refused when there is no command status line ("statusline_refresh needs
+    a status line"), since an interval alone means nothing to Claude Code.
+  - `DELETE statusline_refresh` removes only the interval; `DELETE
+    statusline` still removes the whole status line.
+  - `<n>` is a whole number, at least 1, with no unit and no quotes (`10`, not
+    `10s`).
+  - **`SET statusline = '<command>'` without `statusline_refresh` keeps an
+    existing `refreshInterval`**, as it keeps `padding`. `SHOW CREATE` writes
+    it back as `SET statusline = '<command>', statusline_refresh = <n>`, so it
+    round-trips.
   - Why it matters: without `refreshInterval`, Claude Code (verified on
     2.1.283) does not re-render the status line while a session is idle.
     Anything that rides on renders stops, a heartbeat for example.
@@ -1005,15 +1022,16 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
     `statusline_refresh` column. `SHOW` and `EXPLAIN` print `Status line:
     <command> (refreshes every <n> s)`. It is valid on a plain config
     directory too.
-- **History and `SET STATUSLINE PREVIOUS`.** Every time a
+- **History and `REVERT STATUSLINE`.** Every time a
   statement replaces the status line's command, or removes the status line,
   cpb keeps the whole `statusLine` object it replaced (`padding`,
   `refreshInterval` and all).
-  - `SET STATUSLINE PREVIOUS` puts the newest one back and keeps the current
-    one in its place, so a second `PREVIOUS` returns to where you were.
-  - A `REFRESH`-only change is not history.
-  - With nothing recorded, `PREVIOUS` is refused: "no earlier status line is
-    recorded".
+  - `REVERT STATUSLINE` puts the newest one back and keeps the current
+    one in its place, so a second `REVERT STATUSLINE` returns to where you
+    were.
+  - A change of `statusline_refresh` alone is not history.
+  - With nothing recorded, `REVERT STATUSLINE` is refused: "no earlier status
+    line is recorded".
   - The history is cpb's own state:
     `<playbooks root>/.state/statusline-history.json` (mode 0600), keyed by
     the config directory. At most 10 entries are kept per directory. A
@@ -1021,8 +1039,8 @@ one, as example 08's `ALLOW TOOL 'Bash(git diff *)'`.
     is recorded the next time a cpb statement replaces it.
   - `SHOW PLAYBOOK --json` has `statusline_history`: `[{"command",
     "refresh", "replaced_at"}]`, newest first. `SELECT`'s `PLAYBOOKS` has
-    the same column. `EXPLAIN` prints `Status line history: N earlier (SET
-    STATUSLINE PREVIOUS restores <command>)`.
+    the same column. `EXPLAIN` prints `Status line history: N earlier
+    (REVERT STATUSLINE restores <command>)`.
   - `SHOW CREATE` never writes it, since it is state and not configuration.
   - It is valid on a plain config directory, and it is refused together with
     another status line clause in one statement.
@@ -1043,15 +1061,15 @@ directory (it is user scope), from settings.json `modelPicker` =
 ALTER PLAYBOOK router-agent
   ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'
   ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
-  SET MODEL PICKER ONLY;
+  SET model_picker.mode = 'only';
 ```
 
 - `ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']` adds a row, or updates the row with that model id in place.
   - A field left out keeps what the row has.
   - A field given is written: `label`, `description`, `behavesAs`.
 - `DROP MODEL '<id>'` removes that row, and is refused when there is no such row. Dropping the last row removes `options`.
-- `SET MODEL PICKER ONLY` shows these rows only (`replaceBuiltInOptions: true`), and `APPEND` adds them after the built-in ones (`false`). Without either, Claude Code appends.
-- `UNSET MODEL PICKER` removes `modelPicker` whole.
+- `SET model_picker.mode = 'only'` shows these rows only (`replaceBuiltInOptions: true`), and `'append'` adds them after the built-in ones (`false`). `DELETE model_picker.mode` removes the key, and Claude Code appends.
+- `DELETE model_picker` removes `modelPicker` whole, rows included.
 - **Rows no clause names are kept**, whatever wrote them, and so is a field cpb does not know. A key is written only when a clause gives it, so a playbook with only `ADD MODEL` rows has a `settings.json` holding just `modelPicker`.
 - **Reads:**
   - `SHOW PLAYBOOK --json` has `"model_picker": null | {"mode": "only" | "append", "options": [{"model", "label", "description", "behaves_as"}]}`, with `mode` "append" unless `replaceBuiltInOptions` is true.
@@ -1059,7 +1077,7 @@ ALTER PLAYBOOK router-agent
   - `SHOW CREATE` writes the clauses back.
   - `SELECT`'s `PLAYBOOKS` has a `model_picker` column.
 - **Claude Code versions:** `modelPicker` is read from Claude Code 2.1.242, and `behavesAs` from 2.1.257. cpb writes the key either way and does not check the version.
-- `SET model = '<model>'` (the `model` key, above) is a property. After `SET MODEL`, `PICKER` begins this clause; a model id is quoted.
+- `SET model = '<model>'` (the `model` key, above) is a separate property from `model_picker.mode`; a model id is quoted.
 
 ### Skills
 
@@ -1200,10 +1218,11 @@ playbook sorted by name, columns `NAME VERSION LAUNCHER ENV SETS SOURCE`
 
 ```
 {"envs": ["claude-default", "corp-proxy"],
- "secret_helper": {"command": "my-keychain-helper", "from": "setting"}}
+ "secret_helper": "my-keychain-helper", "secret_helper_from": "setting"}
 ```
 
-(`secret_helper` is null when none is configured.)
+(`secret_helper` and `secret_helper_from` are null when none is configured.
+Each key is its field: `SET secret_helper` is `secret_helper`.)
 
 ### EXPLAIN PLAYBOOK
 
@@ -1478,7 +1497,7 @@ code to the same lines):
 | `skills` | `Array(JSON)` | The skills cpb recorded: name, source, branch, subdir, mode. |
 | `statusline` | `Nullable(String)` | The status line command; null for none. |
 | `statusline_refresh` | `Nullable(UInt32)` | How often the status line refreshes, in whole seconds; null when unset. |
-| `statusline_history` | `Array(JSON)` | The status lines SET STATUSLINE PREVIOUS can go back to, newest first: command, refresh, replaced_at. |
+| `statusline_history` | `Array(JSON)` | The status lines REVERT STATUSLINE can go back to, newest first: command, refresh, replaced_at. |
 | `model` | `Nullable(String)` | The playbook's default model (SET model); null when unset. |
 | `model_picker` | `JSON` | The model picker: mode (only or append) and options; null when unset. |
 | `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
@@ -1533,7 +1552,8 @@ code to the same lines):
 | Column | Type | Comment |
 |---|---|---|
 | `envs` | `Array(String)` | The env sets every launch applies first, in order. |
-| `secret_helper` | `JSON` | The command that resolves secret references, and where it is set (setting or CPB_SECRET_HELPER); null when none is configured. |
+| `secret_helper` | `Nullable(String)` | The command that resolves secret references (SET secret_helper); null when none is configured. |
+| `secret_helper_from` | `Nullable(String)` | Where the secret helper is set: setting or CPB_SECRET_HELPER; null when none is configured. |
 
 ## SHOW SESSIONS
 
@@ -1736,15 +1756,15 @@ drops only the replaced entries.
 | a variable `K` | `SET VAR K=…`, `SET VAR K FROM …`, `BLOCK VAR K`, `UNSET VAR K` |
 | a tool rule `R` | `ALLOW TOOL R`, `DENY TOOL R`, `UNSET TOOL R` |
 | the model; the agent | `SET` / `DELETE model`; `SET` / `DELETE agent` |
-| the status line; its refresh | `SET STATUSLINE '<command>'` (not `IF UNSET`), `UNSET STATUSLINE`; `SET` / `UNSET STATUSLINE REFRESH`, and `REFRESH` on `SET STATUSLINE` |
+| the status line; its refresh | `SET statusline = '<command>'` (not `IF UNSET`), `DELETE statusline`; `SET` / `DELETE statusline_refresh`, and `statusline_refresh` beside `statusline` |
 | a sandbox setting `k` (`always` included) | `SET sandbox.k = …`, `DELETE sandbox.k`, `DELETE sandbox` |
 | a property `k` (`login`, `memory`) | `SET k = …`, `DELETE k` in an `ALTER`; a `CREATE`'s starting values are never dropped |
 | the env sets | `USE ENV` |
 
-- **A clause that depends on what it finds** replaces nothing: `SET
-  STATUSLINE … IF UNSET`, `ADD ENV` and `DROP ENV`. Neither does `SET
-  STATUSLINE PREVIOUS`, which reads the history that every earlier status
-  line writes, so no status line clause before it is dropped.
+- **A clause that depends on what it finds** replaces nothing: `SET IF
+  UNSET statusline = …`, `ADD ENV` and `DROP ENV`. Neither does `REVERT
+  STATUSLINE`, which reads the history that every earlier status line
+  writes, so no status line clause before it is dropped.
 - **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh.
 - **Every other clause is never dropped:** marketplaces, plugins, MCP
   servers, skills, the model picker.
@@ -1897,7 +1917,7 @@ statement := … | INCLUDE '<path>'
 **Secret references and a helper set in the same run.** A playbook file may
 set the secret helper and use it: the reference check that runs before
 anything is written uses, for each `SET … FROM`, the helper an earlier
-`ALTER DEFAULTS SET SECRET HELPER` of the expanded set would configure, and
+`ALTER DEFAULTS SET secret_helper` of the expanded set would configure, and
 the configured one otherwise. (The same rule applies to `APPLY` without
 `INCLUDE`.)
 
@@ -1999,7 +2019,7 @@ nothing of cpb runs at that directory's launches:
 | Allowed | How |
 |---|---|
 | `ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | `claude plugin …` with `CLAUDE_CONFIG_DIR=<dir>`, as for a playbook |
-| `SET / DELETE agent`, `ALLOW / DENY / UNSET TOOL`, `SET / UNSET STATUSLINE`, `SET / DELETE model` | the directory's `settings.json`, as for a playbook |
+| `SET / DELETE agent`, `ALLOW / DENY / UNSET TOOL`, `SET / DELETE statusline`, `SET / DELETE model` | the directory's `settings.json`, as for a playbook |
 | `ADD / DROP MCP SERVER` without credentials | `claude mcp … --scope user` with `CLAUDE_CONFIG_DIR=<dir>`; a credential needs a reference, which a plain directory cannot resolve, so a server that needs one is refused there |
 | `ADD / DROP SKILL` | `<dir>/skills/<name>`; the record lives in cpb's own state, `<playbooks root>/.state/dirs.toml`, keyed by the directory's absolute path, never inside the directory |
 | `SET VAR K=V ...` / `UNSET VAR K ...` | the `env` map of the directory's `settings.json` (Claude Code's own per-install variables); a credential-looking literal still needs `AS PLAINTEXT` |
@@ -2302,8 +2322,8 @@ PLAYBOOK` statements: a recipe. These clauses are allowed:
 - `ADD MARKETPLACE`, `ADD PLUGIN`, `SET agent`;
 - `ADD MCP SERVER`;
 - `ALLOW TOOL`, `DENY TOOL`;
-- `SET STATUSLINE`;
-- `SET MODEL`, `ADD MODEL`, `SET MODEL PICKER`;
+- `SET statusline`;
+- `SET model`, `ADD MODEL`, `SET model_picker.mode`;
 - `ADD SKILL` from a git source;
 - `SET VAR` (not a credential), `SET VAR … FROM '<ref>'`, `BLOCK VAR`;
 - `SET … = 'isolated'`, `SET launcher = ''`.
@@ -2646,8 +2666,8 @@ cpb update sre --yes       # off a terminal: runs a declared migrate step
   one no longer sets the same way (`UNSET VAR`, `UNSET TOOL`, `DROP PLUGIN`,
   `DROP MCP SERVER`, `DROP SKILL`, `DROP MODEL`, `DELETE sandbox.<key>`
   (`always` included), `DROP ENV` for an env set it attached,
-  `DELETE agent` and `DELETE model`, the `UNSET`s of the picker and status line, whose `UNSET
-  STATUSLINE` takes its refresh with it; plugins before their marketplace;
+  `DELETE agent` and `DELETE model`, `DELETE model_picker`, `DELETE statusline`, which takes its refresh with
+  it; plugins before their marketplace;
   a login is never unset, not even the one a sandbox needed; a
   played recipe holds neither env sets nor sandbox settings, so for it those
   two never arise), the new bytes are applied, and the record is updated;
@@ -2849,7 +2869,7 @@ them: cpb tui`. Off a terminal, the output is the listing above, without that li
 
 ### The filesystem is the source of truth
 
-There is no index of playbooks and no database. The state cpb reads and writes is: the playbooks root (each playbook directory with its optional `.playbook` manifest, where its launcher is recorded; `.env-sets/`, the shared env sets and DEFAULTS; and `.state/`, cpb's own records about what it does not own: `dirs.toml` for the plain config directories statements target, `statusline-history.json` for the status lines `SET STATUSLINE` replaced), the launcher directory (symlinks to the binary that serve as per-playbook commands), the launcher receipt (`<state>/cpb/launchers`, `$XDG_STATE_HOME` or `~/.local/state`: one line per launcher cpb wrote), and a flock lock file in the user cache dir (`<cache>/cpb/registry.lock`, falling back to `<tmp>/cpb-registry-<uid>.lock` when no cache directory can be resolved or created; used only to serialize concurrent mutations — it holds no data). Discovery reads the directories themselves, so a change the pilot makes with `mv`, `rm`, or a text editor is what cpb sees on its next invocation.
+There is no index of playbooks and no database. The state cpb reads and writes is: the playbooks root (each playbook directory with its optional `.playbook` manifest, where its launcher is recorded; `.env-sets/`, the shared env sets and DEFAULTS; and `.state/`, cpb's own records about what it does not own: `dirs.toml` for the plain config directories statements target, `statusline-history.json` for the status lines `SET statusline` replaced), the launcher directory (symlinks to the binary that serve as per-playbook commands), the launcher receipt (`<state>/cpb/launchers`, `$XDG_STATE_HOME` or `~/.local/state`: one line per launcher cpb wrote), and a flock lock file in the user cache dir (`<cache>/cpb/registry.lock`, falling back to `<tmp>/cpb-registry-<uid>.lock` when no cache directory can be resolved or created; used only to serialize concurrent mutations — it holds no data). Discovery reads the directories themselves, so a change the pilot makes with `mv`, `rm`, or a text editor is what cpb sees on its next invocation.
 
 ### Playbook manifest
 
@@ -2986,7 +3006,7 @@ These have no flag equivalent:
 | `CPB_ISOLATED_LOGIN=true` | Forces the isolation branch of the authentication decision for this launch, as `isolated_login = true` in the manifest does. |
 | `CPB_OAUTH_TOKEN_FILE` | Overrides the long-lived token file read in step 2 of the authentication decision. Default `~/.config/claude-code/oauth-token`. |
 | `CPB_CONFIG_DIR` | The config directory `run` and launcher dispatch bind, in place of the playbook's install directory. Absolute or `~`-prefixed; empty means unset; never created. Consumed -- stripped from the child's environment after every layer. A **reserved key**: a manifest, env set, `--env` or `--env-file` that declares it is refused. Refused together with a sandboxed launch. A bare inherited `CLAUDE_CONFIG_DIR` is discarded. See *Caller-supplied config directory*. |
-| `CPB_SECRET_HELPER` | The secret helper command for this process, over the one `ALTER DEFAULTS SET SECRET HELPER` stored (see *Secrets (optional)*). |
+| `CPB_SECRET_HELPER` | The secret helper command for this process, over the one `ALTER DEFAULTS SET secret_helper` stored (see *Secrets (optional)*). |
 | `CPB_CLICKHOUSE` | The `clickhouse` binary `SELECT` pipes a query to, instead of `clickhouse` or `ch` on `PATH` (see *SELECT*). |
 | `XDG_STATE_HOME` | Parent of the launcher receipt directory (`<XDG_STATE_HOME>/cpb/launchers`). Default `~/.local/state`. |
 | `CPB_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam. |

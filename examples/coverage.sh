@@ -15,8 +15,8 @@ for f in $(find examples -name .check -o -name .setup); do sed 's/#.*$//' "$f"; 
 kinds=$(sed -n 's/^[[:space:]]*[A-Za-z]* *Kind = "\([^"]*\)".*/\1/p' internal/grammar/ast.go)
 [ -n "$kinds" ] || { echo "no clause kinds found in internal/grammar/ast.go"; exit 1; }
 fail=0
-for k in $(printf '%s\n' "$kinds" | tr ' ' '_'); do
-  k=$(printf '%s' "$k" | tr '_' ' ')
+# One kind per line, read whole: a kind holds spaces and underscores.
+while IFS= read -r k; do
   case "$k" in
     # The kinds whose value is not their keywords: SET [VAR] K FROM is split
     # by an operand, the sandbox.<key> forms take the table's own keys, and
@@ -30,6 +30,8 @@ for k in $(printf '%s\n' "$kinds" | tr ' ' '_'); do
   esac
   grep -Eq "$re" SPEC.md || { echo "no reference entry: $k"; fail=1; }
   grep -Eq "$re" "$run" || { echo "no example CI runs: $k"; fail=1; }
-done
+done <<EOF
+$kinds
+EOF
 [ $fail = 0 ] && echo "every clause has a reference entry and an example CI runs"
 exit $fail

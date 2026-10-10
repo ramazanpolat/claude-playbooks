@@ -128,7 +128,7 @@ func TestApplyJSONActionsAndSecrets(t *testing.T) {
 	fakeMCP(t)
 	helper, _ := fakeHelper(t)
 	root := seedFlatPlaybook(t, "k")
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	mkt := filepath.Join(dir, "mkt")
 	if err := os.MkdirAll(filepath.Join(mkt, ".claude-plugin"), 0o755); err != nil {
@@ -240,7 +240,7 @@ func TestApplyJSONRefusals(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	helper, _ := fakeHelper(t)
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 
 	f := writePlaybookFile(t, "CREATE OR REPLACE ENV e SET A=1;\nALTER PLAYBOOK ghost SET VAR B=1;\nCREATE OR REPLACE ENV later;\n")
 	rep, _, code := applyJSON(t, f, "--dry-run", "--json")

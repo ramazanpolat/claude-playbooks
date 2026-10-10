@@ -11,8 +11,8 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// launcherOpts carries ALTER PLAYBOOK … LAUNCHER / NO LAUNCHER. No state is shared
-// between two calls.
+// launcherOpts carries the launcher property: a name, none (the empty
+// launcher) or DELETE launcher. No state is shared between two calls.
 type launcherOpts struct {
 	remove bool
 }
@@ -45,7 +45,7 @@ func doLauncher(o launcherOpts, args []string) error {
 		linked = true
 	}
 
-	// NO LAUNCHER
+	// launcher = ''
 	if o.remove {
 		old := pb.Alias()
 		if old == "" {

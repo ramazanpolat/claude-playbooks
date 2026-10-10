@@ -72,34 +72,34 @@ func TestFoldStatements(t *testing.T) {
 			"ALTER PLAYBOOK p ADD PLUGIN x@m SET model = 'a';\nALTER PLAYBOOK p SET model = 'b';",
 			[]string{"ADD PLUGIN x@m | SET model by 1", "SET model"}},
 		{"IF UNSET after a status line depends on it: both kept",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b' IF UNSET;",
-			[]string{"SET STATUSLINE", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline = 'a';\nALTER PLAYBOOK p SET IF UNSET statusline = 'b';",
+			[]string{"SET statusline", "SET statusline"}},
 		{"IF UNSET before a status line is replaced",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a' IF UNSET;\nALTER PLAYBOOK p SET STATUSLINE 'b';",
-			[]string{"- | SET STATUSLINE by 1", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET IF UNSET statusline = 'a';\nALTER PLAYBOOK p SET statusline = 'b';",
+			[]string{"- | SET statusline by 1", "SET statusline"}},
 		{"PREVIOUS reads what came before it",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;",
-			[]string{"SET STATUSLINE", "SET STATUSLINE PREVIOUS"}},
+			"ALTER PLAYBOOK p SET statusline = 'a';\nALTER PLAYBOOK p REVERT STATUSLINE;",
+			[]string{"SET statusline", "REVERT STATUSLINE"}},
 		// PREVIOUS restores the refresh too, which the later lines without
 		// REFRESH keep: it stays.
 		{"PREVIOUS reads the whole history: every status line before it stays",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;\nALTER PLAYBOOK p SET STATUSLINE 'c';\nALTER PLAYBOOK p SET STATUSLINE 'd';",
-			[]string{"SET STATUSLINE", "SET STATUSLINE", "SET STATUSLINE PREVIOUS", "- | SET STATUSLINE by 4", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline = 'a';\nALTER PLAYBOOK p SET statusline = 'b';\nALTER PLAYBOOK p REVERT STATUSLINE;\nALTER PLAYBOOK p SET statusline = 'c';\nALTER PLAYBOOK p SET statusline = 'd';",
+			[]string{"SET statusline", "SET statusline", "REVERT STATUSLINE", "- | SET statusline by 4", "SET statusline"}},
 		{"a refresh the later status line does not set stays, alone",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a' REFRESH 5;\nALTER PLAYBOOK p SET STATUSLINE 'b';",
-			[]string{"SET STATUSLINE REFRESH | SET STATUSLINE by 1", "SET STATUSLINE"}},
-		{"UNSET STATUSLINE before a status line without a refresh: its refresh part stays",
-			"ALTER PLAYBOOK p UNSET STATUSLINE;\nALTER PLAYBOOK p SET STATUSLINE 'x';",
-			[]string{"UNSET STATUSLINE REFRESH | UNSET STATUSLINE by 1", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline = 'a', statusline_refresh = 5;\nALTER PLAYBOOK p SET statusline = 'b';",
+			[]string{"SET statusline_refresh | SET statusline by 1", "SET statusline"}},
+		{"DELETE statusline before a status line without a refresh: its refresh part stays",
+			"ALTER PLAYBOOK p DELETE statusline;\nALTER PLAYBOOK p SET statusline = 'x';",
+			[]string{"DELETE statusline_refresh | DELETE statusline by 1", "SET statusline"}},
 		{"each part names the statement that replaces it",
-			"ALTER PLAYBOOK p UNSET STATUSLINE;\nALTER PLAYBOOK p SET STATUSLINE REFRESH 10;\nALTER PLAYBOOK p SET STATUSLINE 'new';",
-			[]string{"- | UNSET STATUSLINE by 2 | UNSET STATUSLINE REFRESH by 1", "SET STATUSLINE REFRESH", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p DELETE statusline;\nALTER PLAYBOOK p SET statusline_refresh = 10;\nALTER PLAYBOOK p SET statusline = 'new';",
+			[]string{"- | DELETE statusline by 2 | DELETE statusline_refresh by 1", "SET statusline_refresh", "SET statusline"}},
 		{"a PREVIOUS that is itself replaced keeps nothing before it",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE PREVIOUS;\nALTER PLAYBOOK p UNSET STATUSLINE;",
-			[]string{"- | SET STATUSLINE by 2", "- | SET STATUSLINE PREVIOUS by 2", "UNSET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline = 'a';\nALTER PLAYBOOK p REVERT STATUSLINE;\nALTER PLAYBOOK p DELETE statusline;",
+			[]string{"- | SET statusline by 2", "- | REVERT STATUSLINE by 2", "DELETE statusline"}},
 		{"a later status line with a refresh replaces both",
-			"ALTER PLAYBOOK p SET STATUSLINE 'a';\nALTER PLAYBOOK p SET STATUSLINE 'b' REFRESH 5;",
-			[]string{"- | SET STATUSLINE by 1", "SET STATUSLINE"}},
+			"ALTER PLAYBOOK p SET statusline = 'a';\nALTER PLAYBOOK p SET statusline = 'b', statusline_refresh = 5;",
+			[]string{"- | SET statusline by 1", "SET statusline"}},
 		{"ADD ENV builds on USE ENV; a second USE ENV replaces both",
 			"ALTER PLAYBOOK p USE ENV a;\nALTER PLAYBOOK p ADD ENV b;\nALTER PLAYBOOK p USE ENV c;",
 			[]string{"- | USE ENV by 2", "- | ADD ENV by 2", "USE ENV c"}},
@@ -152,8 +152,8 @@ func TestApplyFoldStackConverges(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "p", nil)
 	dir := t.TempDir()
-	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info TEAM=one\n  SET model = 'base-model'\n  SET STATUSLINE 'echo base'\n  ALLOW TOOL 'Bash(x)';\n")
-	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug\n  SET model = 'child-model'\n  SET STATUSLINE 'echo child'\n  DENY TOOL 'Bash(x)';\n")
+	writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET VAR LOG_LEVEL=info TEAM=one\n  SET model = 'base-model'\n  SET statusline = 'echo base'\n  ALLOW TOOL 'Bash(x)';\n")
+	child := writeCpb(t, dir, "child.cpb", "INCLUDE 'base.cpb';\nALTER PLAYBOOK\n  SET VAR LOG_LEVEL=debug\n  SET model = 'child-model'\n  SET statusline = 'echo child'\n  DENY TOOL 'Bash(x)';\n")
 	plan, err := apply(t, child, "TO", "p", "--dry-run")
 	if err != nil || !strings.Contains(plan, "overridden: SET VAR LOG_LEVEL (set again at "+child+":2)") {
 		t.Fatalf("the plain plan does not name what is overridden: %v\n%s", err, plan)
@@ -207,7 +207,7 @@ func TestApplyFoldStackConverges(t *testing.T) {
 			base = append(base, o.Clause+"@"+filepath.Base(o.By.File)+":"+strconv.Itoa(o.By.Line))
 		}
 	}
-	want := "SET VAR LOG_LEVEL@child.cpb:2 SET model@child.cpb:2 SET STATUSLINE@child.cpb:2 ALLOW TOOL 'Bash(x)'@child.cpb:2"
+	want := "SET VAR LOG_LEVEL@child.cpb:2 SET model@child.cpb:2 SET statusline@child.cpb:2 ALLOW TOOL 'Bash(x)'@child.cpb:2"
 	if strings.Join(base, " ") != want {
 		t.Fatalf("the plan's overridden entries:\n got %s\nwant %s", strings.Join(base, " "), want)
 	}

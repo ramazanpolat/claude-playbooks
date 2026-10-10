@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// REFRESH writes statusLine.refreshInterval; SET STATUSLINE without REFRESH
-// keeps it (as it keeps padding); SET STATUSLINE REFRESH alone needs a
-// status line; UNSET STATUSLINE REFRESH removes only the interval. SHOW,
+// statusline_refresh writes statusLine.refreshInterval; SET statusline
+// without it keeps it (as it keeps padding); statusline_refresh alone needs
+// a status line; DELETE statusline_refresh removes only the interval. SHOW,
 // EXPLAIN, SHOW CREATE (round trip) and SELECT show it.
 func TestStatuslineRefresh(t *testing.T) {
 	resetCommandTestState(t)
@@ -20,16 +20,16 @@ func TestStatuslineRefresh(t *testing.T) {
 		m, _ := settingsOf(t, root)["statusLine"].(map[string]any)
 		return m
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET STATUSLINE REFRESH 5"); err == nil || !strings.Contains(err.Error(), "needs a status line") {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET statusline_refresh = 5"); err == nil || !strings.Contains(err.Error(), "needs a status line") {
 		t.Fatalf("an interval without a command: %v", err)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET STATUSLINE 'bash sl.sh' REFRESH 10"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET statusline = 'bash sl.sh', statusline_refresh = 10"); err != nil {
 		t.Fatal(err)
 	}
 	if m := sl(); m["command"] != "bash sl.sh" || m["refreshInterval"] != float64(10) {
 		t.Fatalf("SET … REFRESH: %v", m)
 	}
-	if out, err := quotedStmt(t, "ALTER PLAYBOOK k SET STATUSLINE 'bash sl.sh' REFRESH 10"); err != nil || !strings.Contains(out, "unchanged") {
+	if out, err := quotedStmt(t, "ALTER PLAYBOOK k SET statusline = 'bash sl.sh', statusline_refresh = 10"); err != nil || !strings.Contains(out, "unchanged") {
 		t.Fatalf("a repeat changed something: %v\n%s", err, out)
 	}
 	// A new command without REFRESH keeps the interval, and padding.
@@ -37,7 +37,7 @@ func TestStatuslineRefresh(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET STATUSLINE 'bash other.sh'"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET statusline = 'bash other.sh'"); err != nil {
 		t.Fatal(err)
 	}
 	if m := sl(); m["command"] != "bash other.sh" || m["refreshInterval"] != float64(10) || m["padding"] != float64(2) {
@@ -55,7 +55,7 @@ func TestStatuslineRefresh(t *testing.T) {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	if !strings.Contains(created, "SET STATUSLINE 'bash other.sh' REFRESH 10") {
+	if !strings.Contains(created, "SET statusline = 'bash other.sh', statusline_refresh = 10") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -66,17 +66,17 @@ func TestStatuslineRefresh(t *testing.T) {
 	if json.Unmarshal([]byte(js), &rows) != nil || len(rows) != 1 || rows[0]["statusline_refresh"] != float64(10) {
 		t.Fatalf("SELECT: %s", js)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET STATUSLINE REFRESH 30"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET statusline_refresh = 30"); err != nil {
 		t.Fatal(err)
 	}
 	if m := sl(); m["refreshInterval"] != float64(30) || m["command"] != "bash other.sh" {
 		t.Fatalf("REFRESH alone: %v", m)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k UNSET STATUSLINE REFRESH"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k DELETE statusline_refresh"); err != nil {
 		t.Fatal(err)
 	}
 	if m := sl(); m["refreshInterval"] != nil || m["command"] != "bash other.sh" || m["padding"] != float64(2) {
-		t.Fatalf("UNSET STATUSLINE REFRESH: %v", m)
+		t.Fatalf("DELETE statusline_refresh: %v", m)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestStatuslineRefreshDirTarget(t *testing.T) {
 	sandboxDefaultRoot(t)
 	cfg, _ := filepath.EvalSymlinks(t.TempDir())
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	recipe := writeCpb(t, dir, "sl.cpb", "ALTER PLAYBOOK SET STATUSLINE 'bash sl.sh' REFRESH 10;\n")
+	recipe := writeCpb(t, dir, "sl.cpb", "ALTER PLAYBOOK SET statusline = 'bash sl.sh', statusline_refresh = 10;\n")
 	if out, err := apply(t, recipe, "TO", cfg, "--yes"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}

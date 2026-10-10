@@ -422,7 +422,7 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		return out
 	}
 	// SET login / memory (the login and the memory isolated; the login a
-	// SET SANDBOX isolates) and NO LAUNCHER: a property is never relaxed by
+	// sandbox needs) and launcher = '': a property is never relaxed by
 	// an update, and the launcher is play's.
 	return nil
 }
@@ -479,8 +479,8 @@ func undoClauses(oldStmts, newStmts []*grammar.Stmt) []grammar.Clause {
 
 // oneStatement makes the undo clauses ones a single statement may hold, so
 // the undo parses back (play stages it as a file): the sandbox keys in one
-// UNSET SANDBOX, and no UNSET STATUSLINE REFRESH beside UNSET STATUSLINE,
-// which removes the refresh with the status line.
+// DELETE, and no DELETE statusline_refresh beside DELETE statusline, which
+// removes the refresh with the status line.
 func oneStatement(undo []grammar.Clause) []grammar.Clause {
 	whole := slices.ContainsFunc(undo, func(c grammar.Clause) bool { return c.Kind == grammar.UnsetStatusline })
 	var out []grammar.Clause

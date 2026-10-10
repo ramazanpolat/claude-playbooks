@@ -11,7 +11,7 @@ func TestParseSettingsClauses(t *testing.T) {
   ALLOW TOOL 'Bash(toolkit-helper *)' 'mcp__sentry'
   DENY TOOL 'Bash(rm -rf *)'
   UNSET TOOL 'Read(~/x)'
-  SET STATUSLINE '~/bin/status.sh --short'
+  SET statusline = '~/bin/status.sh --short'
   SET model = 'claude-opus-5-5';`)
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +26,7 @@ func TestParseSettingsClauses(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(strip(again[0]), strip(stmts[0])) {
 		t.Fatalf("round trip: %v\n%s", err, stmts[0].String())
 	}
-	for _, src := range []string{"ALTER PLAYBOOK k UNSET STATUSLINE DELETE model;"} {
+	for _, src := range []string{"ALTER PLAYBOOK k DELETE statusline DELETE model;"} {
 		if _, err := ParseFile(src); err != nil {
 			t.Errorf("%s: %v", src, err)
 		}

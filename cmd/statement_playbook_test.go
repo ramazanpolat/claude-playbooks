@@ -110,8 +110,9 @@ func TestStatementRenameAndAlias(t *testing.T) {
 	}
 }
 
-// A playbook has one launcher, its alias or its name. SET launcher = ” removes the
-// name launcher too; LAUNCHER <its name> retires the alias it replaces.
+// A playbook has one launcher, its alias or its name. The empty launcher
+// removes the name launcher too; launcher = '<its name>' retires the alias
+// it replaces.
 func TestStatementLauncherIsOneOrNone(t *testing.T) {
 	sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))

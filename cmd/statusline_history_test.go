@@ -9,7 +9,7 @@ import (
 )
 
 // The status line history: every replaced or removed status line is kept
-// (whole object: padding and refreshInterval too); SET STATUSLINE PREVIOUS
+// (whole object: padding and refreshInterval too); REVERT STATUSLINE
 // restores the newest and pushes the current one, so twice toggles back;
 // REFRESH-only changes are not history; with no history PREVIOUS is refused;
 // SHOW --json and EXPLAIN read it; SHOW CREATE never writes it.
@@ -21,7 +21,7 @@ func TestStatuslineHistoryAndPrevious(t *testing.T) {
 		m, _ := settingsOf(t, root)["statusLine"].(map[string]any)
 		return m
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET STATUSLINE PREVIOUS"); err == nil || !strings.Contains(err.Error(), "no earlier status line is recorded") {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k REVERT STATUSLINE"); err == nil || !strings.Contains(err.Error(), "no earlier status line is recorded") {
 		t.Fatalf("PREVIOUS with no history: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"statusLine":{"type":"command","command":"bash a.sh","padding":2,"refreshInterval":7}}`), 0o600); err != nil {
@@ -35,8 +35,8 @@ func TestStatuslineHistoryAndPrevious(t *testing.T) {
 		}
 		return out
 	}
-	mustQuoted("ALTER PLAYBOOK k SET STATUSLINE 'bash b.sh' REFRESH 3")
-	mustQuoted("ALTER PLAYBOOK k SET STATUSLINE REFRESH 5") // not history
+	mustQuoted("ALTER PLAYBOOK k SET statusline = 'bash b.sh', statusline_refresh = 3")
+	mustQuoted("ALTER PLAYBOOK k SET statusline_refresh = 5") // not history
 	var v struct {
 		History []struct {
 			Command string `json:"command"`
@@ -46,22 +46,22 @@ func TestStatuslineHistoryAndPrevious(t *testing.T) {
 	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK k --json")), &v); err != nil || len(v.History) != 1 || v.History[0].Command != "bash a.sh" || v.History[0].Refresh == nil || *v.History[0].Refresh != 7 {
 		t.Fatalf("history after one replacement: %v %+v", err, v)
 	}
-	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Status line history: 1 earlier (SET STATUSLINE PREVIOUS restores bash a.sh)") {
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK k"); !strings.Contains(out, "Status line history: 1 earlier (REVERT STATUSLINE restores bash a.sh)") {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
 	// PREVIOUS restores the whole object (padding, interval) ...
-	mustQuoted("ALTER PLAYBOOK k SET STATUSLINE PREVIOUS")
+	mustQuoted("ALTER PLAYBOOK k REVERT STATUSLINE")
 	if m := sl(); m["command"] != "bash a.sh" || m["padding"] != float64(2) || m["refreshInterval"] != float64(7) {
 		t.Fatalf("PREVIOUS: %v", m)
 	}
 	// ... and twice toggles back.
-	mustQuoted("ALTER PLAYBOOK k SET STATUSLINE PREVIOUS")
+	mustQuoted("ALTER PLAYBOOK k REVERT STATUSLINE")
 	if m := sl(); m["command"] != "bash b.sh" || m["refreshInterval"] != float64(5) {
 		t.Fatalf("PREVIOUS twice: %v", m)
 	}
 	// UNSET is history too; PREVIOUS brings it back.
-	mustQuoted("ALTER PLAYBOOK k UNSET STATUSLINE")
-	mustQuoted("ALTER PLAYBOOK k SET STATUSLINE PREVIOUS")
+	mustQuoted("ALTER PLAYBOOK k DELETE statusline")
+	mustQuoted("ALTER PLAYBOOK k REVERT STATUSLINE")
 	if m := sl(); m["command"] != "bash b.sh" {
 		t.Fatalf("PREVIOUS after UNSET: %v", m)
 	}
@@ -69,8 +69,8 @@ func TestStatuslineHistoryAndPrevious(t *testing.T) {
 		t.Fatalf("SHOW CREATE wrote history:\n%s", created)
 	}
 	for line, want := range map[string]string{
-		"ALTER PLAYBOOK k SET STATUSLINE PREVIOUS SET STATUSLINE 'x'": "cannot be combined",
-		"ALTER PLAYBOOK k SET STATUSLINE PREVIOUS UNSET STATUSLINE":   "cannot be combined",
+		"ALTER PLAYBOOK k REVERT STATUSLINE SET statusline = 'x'": "cannot be combined",
+		"ALTER PLAYBOOK k REVERT STATUSLINE DELETE statusline":    "cannot be combined",
 	} {
 		if _, err := quotedStmt(t, line); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v", line, err)
@@ -89,7 +89,7 @@ func TestStatuslineHistoryIsCapped(t *testing.T) {
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "k")
 	for i := 0; i < slHistoryMax+3; i++ {
-		if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET STATUSLINE 'echo "+string(rune('a'+i))+"'"); err != nil {
+		if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET statusline = 'echo "+string(rune('a'+i))+"'"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,14 +111,14 @@ func TestStatuslineHistoryDryRun(t *testing.T) {
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "k")
 	mustStmt(t, "CREATE ENV noop SET A=1") // something unrelated on disk
-	f := writePlaybookFile(t, "ALTER PLAYBOOK k SET STATUSLINE 'echo a';\nALTER PLAYBOOK k SET STATUSLINE 'echo b';\nALTER PLAYBOOK k SET STATUSLINE PREVIOUS;\n")
+	f := writePlaybookFile(t, "ALTER PLAYBOOK k SET statusline = 'echo a';\nALTER PLAYBOOK k SET statusline = 'echo b';\nALTER PLAYBOOK k REVERT STATUSLINE;\n")
 	if out, err := apply(t, f, "--dry-run"); err != nil || !strings.Contains(out, "3 changed") {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude-playbooks", ".state", "statusline-history.json")); !os.IsNotExist(err) {
 		t.Fatalf("the dry run wrote history: %v", err)
 	}
-	f = writePlaybookFile(t, "ALTER PLAYBOOK k SET STATUSLINE PREVIOUS;\n")
+	f = writePlaybookFile(t, "ALTER PLAYBOOK k REVERT STATUSLINE;\n")
 	if _, err := apply(t, f, "--dry-run"); err == nil {
 		t.Fatal("dry run PREVIOUS with no history was accepted")
 	}
@@ -132,7 +132,7 @@ func TestStatuslineHistoryOnDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{"statusLine":{"type":"command","command":"echo old"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"ALTER PLAYBOOK SET STATUSLINE 'echo new';\n", "ALTER PLAYBOOK SET STATUSLINE PREVIOUS;\n"} {
+	for _, text := range []string{"ALTER PLAYBOOK SET statusline = 'echo new';\n", "ALTER PLAYBOOK REVERT STATUSLINE;\n"} {
 		var err error
 		captureStderr(t, func() { _, err = apply(t, writePlaybookFile(t, text), "TO", cfg, "--yes") })
 		if err != nil {

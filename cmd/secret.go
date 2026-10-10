@@ -25,7 +25,7 @@ import (
 // cpb never fetches a value: there is no call that returns one. References
 // travel on argv, values never do.
 
-var errNoHelper = errors.New("no secret helper configured (ALTER DEFAULTS SET SECRET HELPER '<command>', or CPB_SECRET_HELPER)")
+var errNoHelper = errors.New("no secret helper configured (ALTER DEFAULTS SET secret_helper = '<command>', or CPB_SECRET_HELPER)")
 
 // lookHelper finds a helper named without a path. A variable so tests stay
 // hermetic, as lookPilot was.
@@ -56,7 +56,7 @@ func resolveHelper() (*envset.Helper, string, error) {
 // before the file ran. Unset means "whatever is configured now".
 type helperState struct {
 	set bool
-	h   *envset.Helper // nil after UNSET SECRET HELPER
+	h   *envset.Helper // nil after DELETE secret_helper
 }
 
 // after returns the state once c has run. CPB_SECRET_HELPER still wins over

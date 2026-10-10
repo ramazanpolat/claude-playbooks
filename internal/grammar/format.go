@@ -142,7 +142,7 @@ func (c *Clause) words(varWord bool) []string {
 		}
 		return w
 	case SetHelper:
-		return []string{"SET", "SECRET", "HELPER", quote(c.Arg)}
+		return []string{"SET", "secret_helper", "=", quote(c.Arg)}
 	case AddMarketplace:
 		return []string{"ADD", "MARKETPLACE", quoteWord(c.Names[0]), "FROM", quote(c.Arg)}
 	case DropMarketplace, AddPlugin, DropPlugin:
@@ -156,16 +156,16 @@ func (c *Clause) words(varWord bool) []string {
 		}
 		return w
 	case SetStatusline:
-		w := []string{"SET", "STATUSLINE", quote(c.Arg)}
-		if c.Refresh > 0 {
-			w = append(w, "REFRESH", strconv.Itoa(c.Refresh))
-		}
+		w := []string{"SET"}
 		if c.IfUnset {
 			w = append(w, "IF", "UNSET")
 		}
-		return w
+		if c.Refresh > 0 {
+			return append(w, "statusline", "=", quote(c.Arg)+",", "statusline_refresh", "=", strconv.Itoa(c.Refresh))
+		}
+		return append(w, "statusline", "=", quote(c.Arg))
 	case SetStatuslineRefresh:
-		return []string{"SET", "STATUSLINE", "REFRESH", strconv.Itoa(c.Refresh)}
+		return []string{"SET", "statusline_refresh", "=", strconv.Itoa(c.Refresh)}
 	case SetModel:
 		return []string{"SET", "model", "=", quote(c.Arg)}
 	case Launcher:
@@ -173,7 +173,7 @@ func (c *Clause) words(varWord bool) []string {
 	case DropSkill:
 		return []string{"DROP", "SKILL", quoteWord(c.Names[0])}
 	case SetModelPicker:
-		return []string{"SET", "MODEL", "PICKER", c.Arg}
+		return []string{"SET", "model_picker.mode", "=", quote(strings.ToLower(c.Arg))}
 	case DropModel:
 		return []string{"DROP", "MODEL", quote(c.Names[0])}
 	case AddModel:

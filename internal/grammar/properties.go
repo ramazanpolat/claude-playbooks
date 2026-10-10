@@ -3,6 +3,7 @@ package grammar
 import (
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
@@ -34,9 +35,11 @@ type playbookProperty struct {
 	// sandbox names the [sandbox] key a sandbox.<key> property is: its
 	// pairs become SetSandboxKeys and UnsetSandboxKeys clauses.
 	sandbox string
-	// table marks a table's name (sandbox): DELETE resets every key of it,
-	// and SET does not take it.
-	table bool
+	// table marks a table's name (sandbox, model_picker): DELETE resets
+	// every key of it, and SET does not take it. tableDel is the clause its
+	// DELETE becomes (the sandbox's is every [sandbox] key).
+	table    bool
+	tableDel Kind
 }
 
 type valueKind int
@@ -46,6 +49,7 @@ const (
 	kindString
 	kindBool
 	kindList
+	kindInt
 )
 
 // The properties, in the order SHOW CREATE writes them.
@@ -76,6 +80,35 @@ var playbookPropertyTable = []playbookProperty{
 	{key: "sandbox.claude_version", kind: kindString, check: checkSandboxValue, sandbox: "claude_version", placeholder: "<version>"},
 	{key: "sandbox.share_skills", kind: kindBool, sandbox: "share_skills"},
 	{key: "sandbox", table: true},
+	// statusline: the status line's command (settings.json statusLine);
+	// statusline_refresh: how often it re-renders, in whole seconds.
+	{key: "statusline", kind: kindString, check: checkStatusline, set: SetStatusline, del: UnsetStatusline, placeholder: "<command>"},
+	{key: "statusline_refresh", kind: kindInt, set: SetStatuslineRefresh, del: UnsetStatuslineRefresh},
+	// model_picker.mode: the /model picker shows its rows only, or after
+	// the built-in ones; DELETE model_picker removes the picker, rows too.
+	{key: "model_picker.mode", kind: kindEnum, values: []string{"append", "only"}, set: SetModelPicker, del: UnsetModelPickerMode},
+	{key: "model_picker", table: true, tableDel: UnsetModelPicker},
+}
+
+// defaultsPropertyTable is DEFAULTS' one property: the secret helper.
+var defaultsPropertyTable = []playbookProperty{
+	{key: "secret_helper", kind: kindString, check: checkHelper, set: SetHelper, del: UnsetHelper, placeholder: "<command>"},
+}
+
+func checkStatusline(v string) string {
+	if v == "" || strings.ContainsAny(v, "\r\n") {
+		return "statusline takes a command (DELETE statusline removes it)"
+	}
+	return ""
+}
+
+// One command, exec'd with an argument vector and never through a shell:
+// anything with whitespace would be read as arguments.
+func checkHelper(v string) string {
+	if v == "" || strings.ContainsAny(v, " \t\r\n") {
+		return "the secret helper is one command (a name on PATH or an absolute path), without arguments"
+	}
+	return ""
 }
 
 func checkSandboxValue(v string) string {
@@ -111,14 +144,32 @@ func checkAgent(v string) string {
 	return ""
 }
 
-// propertyOf finds a property by key, in any case, as keywords match.
-func propertyOf(key string) (*playbookProperty, bool) {
-	for i := range playbookPropertyTable {
-		if strings.EqualFold(playbookPropertyTable[i].key, key) {
-			return &playbookPropertyTable[i], true
+// propertyIn finds a property of one object's table by key, in any case,
+// as keywords match.
+func propertyIn(table []playbookProperty, key string) (*playbookProperty, bool) {
+	for i := range table {
+		if strings.EqualFold(table[i].key, key) {
+			return &table[i], true
 		}
 	}
 	return nil, false
+}
+
+// propertyOf finds a property of any object: the keys are distinct.
+func propertyOf(key string) (*playbookProperty, bool) {
+	if pr, ok := propertyIn(playbookPropertyTable, key); ok {
+		return pr, true
+	}
+	return propertyIn(defaultsPropertyTable, key)
+}
+
+// props is the table of the object the parser reads: a playbook's unless
+// the statement is ALTER DEFAULTS.
+func (p *parser) props() []playbookProperty {
+	if p.defaults {
+		return defaultsPropertyTable
+	}
+	return playbookPropertyTable
 }
 
 // PlaybookPropertyKeys lists the playbook properties in SHOW CREATE's order.
@@ -132,11 +183,11 @@ func PlaybookPropertyKeys() []string {
 	return keys
 }
 
-// propertyKeysShown is the key list a message names: the table's keys as
-// one sandbox.<key>.
-func propertyKeysShown() string {
+// propertyKeysShown is the key list a message names: the sandbox table's
+// keys as one sandbox.<key>.
+func propertyKeysShown(table []playbookProperty) string {
 	var keys []string
-	for _, s := range playbookPropertyTable {
+	for _, s := range table {
 		switch {
 		case s.table:
 		case s.sandbox != "":
@@ -196,16 +247,23 @@ func PropertyValue(clauses []Clause, key string) (string, bool) {
 }
 
 // desugarProperties turns each pair of a free property into the clause the
-// commands already carry out: SET launcher = 'k' is a Launcher clause (”
-// is NoLauncher), SET model = 'm' a SetModel, DELETE agent an UnsetAgent.
+// commands already carry out: SET launcher = 'k' is a Launcher clause (the
+// empty launcher a NoLauncher), SET model = 'm' a SetModel, DELETE agent an
+// UnsetAgent.
 // login and memory stay in their SET and DELETE clauses. A key named twice
 // in one statement, in one clause or across several, is refused here.
 func desugarProperties(in []Clause) ([]Clause, *Error) {
 	seen := map[string]bool{}
 	named := func(pos Pos, key string) *Error {
-		// The sandbox table and one of its keys are the same key twice.
-		dup := seen[key] || (key == "sandbox" && slices.ContainsFunc(manifest.SandboxKeys, func(k string) bool { return seen["sandbox."+k] })) ||
-			(strings.HasPrefix(key, "sandbox.") && seen["sandbox"])
+		// A table (sandbox, model_picker) and one of its keys are the
+		// same key twice.
+		table, _, dotted := strings.Cut(key, ".")
+		dup := seen[key] || (dotted && seen[table])
+		for k := range seen {
+			if strings.HasPrefix(k, key+".") {
+				dup = true
+			}
+		}
 		if dup {
 			return errAt(pos, key+" is named twice in one statement")
 		}
@@ -230,25 +288,36 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 				return nil, err
 			}
 			pr, _ := propertyOf(v.Key)
+			if c.IfUnset && pr.set != SetStatusline && pr.set != SetStatuslineRefresh {
+				return nil, errAt(c.Pos, "IF UNSET takes the status line: SET IF UNSET statusline = '<command>'[, statusline_refresh = <n>]")
+			}
 			switch {
-			case pr.table:
+			case pr.table && pr.tableDel == "":
 				for _, k := range manifest.SandboxKeys {
 					sandbox.Settings = append(sandbox.Settings, Var{Key: k})
 				}
 				continue
+			case pr.table:
+				free = append(free, Clause{Pos: c.Pos, Kind: pr.tableDel})
+				continue
 			case pr.sandbox != "":
 				sandbox.Settings = append(sandbox.Settings, Var{Key: pr.sandbox, Value: v.Value})
 				continue
-			case pr.kind == kindEnum:
-				rest.Settings = append(rest.Settings, v)
+			case pr.set == "":
+				rest.Settings = append(rest.Settings, v) // login, memory
 				continue
 			}
-			k := Clause{Pos: c.Pos}
+			k := Clause{Pos: c.Pos, IfUnset: c.IfUnset}
 			switch {
 			case c.Kind == DeleteProperties:
 				k.Kind = pr.del
 			case pr.set == Launcher && v.Value == "":
 				k.Kind = NoLauncher
+			case pr.kind == kindInt:
+				k.Kind = pr.set
+				k.Refresh, _ = strconv.Atoi(v.Value)
+			case pr.set == SetModelPicker:
+				k.Kind, k.Arg = pr.set, strings.ToUpper(v.Value)
 			default:
 				k.Kind, k.Arg = pr.set, v.Value
 			}
@@ -262,7 +331,33 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 			out = append(out, sandbox)
 		}
 	}
-	return out, nil
+	return mergeStatusline(out)
+}
+
+// mergeStatusline makes statusline and statusline_refresh, set in one
+// statement, one clause: the command and its refresh are one statusLine.
+// IF UNSET applies to both or neither, so it needs the command.
+func mergeStatusline(in []Clause) ([]Clause, *Error) {
+	line, refresh := -1, -1
+	for i, c := range in {
+		switch c.Kind {
+		case SetStatusline:
+			line = i
+		case SetStatuslineRefresh:
+			refresh = i
+		}
+	}
+	if refresh >= 0 && in[refresh].IfUnset && line < 0 {
+		return nil, errAt(in[refresh].Pos, "IF UNSET takes the status line: SET IF UNSET statusline = '<command>'[, statusline_refresh = <n>]")
+	}
+	if line < 0 || refresh < 0 {
+		return in, nil
+	}
+	if in[line].IfUnset != in[refresh].IfUnset {
+		return nil, errAt(in[refresh].Pos, "statusline and statusline_refresh go in one SET (IF UNSET applies to both)")
+	}
+	in[line].Refresh = in[refresh].Refresh
+	return slices.Delete(in, refresh, refresh+1), nil
 }
 
 // atPropertyKey reports a property where a list item is expected: a pair
@@ -274,7 +369,7 @@ func (p *parser) atPropertyKey(withValues bool) bool {
 	if p.atEnd() || p.toks[p.i].Quoted {
 		return false
 	}
-	_, ok := propertyOf(strings.TrimSuffix(p.toks[p.i].Text, ","))
+	_, ok := propertyIn(p.props(), strings.TrimSuffix(p.toks[p.i].Text, ","))
 	return ok
 }
 
@@ -287,7 +382,7 @@ func (p *parser) atProperty() bool {
 	}
 	t := p.toks[p.i]
 	k, _, cut := strings.Cut(t.Text, "=")
-	if _, ok := propertyOf(k); !ok {
+	if _, ok := propertyIn(p.props(), k); !ok {
 		return false
 	}
 	if cut {
@@ -303,7 +398,7 @@ func (p *parser) atProperty() bool {
 // argument, a value is quoted, as SHOW CREATE writes it; on the command line
 // the shell has removed the quotes, so a bare word is the value.
 func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Error {
-	keys := propertyKeysShown()
+	keys := propertyKeysShown(p.props())
 	form := "<key> = '<value>'"
 	if !withValues {
 		form = "<key>"
@@ -348,7 +443,7 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 			}
 		}
 		k = strings.ToLower(strings.TrimSuffix(k, ","))
-		pr, ok := propertyOf(k)
+		pr, ok := propertyIn(p.props(), k)
 		if !ok {
 			return p.notAProperty(t, k, keys)
 		}
@@ -362,6 +457,14 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 				return err
 			}
 			v = strings.Join(items, ",")
+		case pr.kind == kindInt:
+			v = strings.TrimSuffix(v, ",")
+			if n, err := strconv.Atoi(v); err != nil || n < 1 {
+				return errAt(t.Pos, k+" takes a whole number of seconds, at least 1, with no unit")
+			}
+			if p.lexed && vq {
+				return errAt(t.Pos, k+" takes a number, unquoted: "+k+" = "+v)
+			}
 		case pr.kind == kindBool:
 			lv := strings.ToLower(strings.TrimSuffix(v, ","))
 			if lv != "true" && lv != "false" {
@@ -393,7 +496,11 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 		p.quiet = true
 	}
 	if len(c.Settings) == 0 {
-		p.note(PlaybookPropertyKeys()...)
+		for _, pr := range p.props() {
+			if !pr.table {
+				p.note(pr.key)
+			}
+		}
 		return p.fail(what + " takes " + form + " (" + keys + ")")
 	}
 	p.note(p.starters...)
@@ -442,7 +549,7 @@ func hasItemText(w string) bool { return strings.Trim(w, "[], ") != "" }
 
 // notAPair is the error for a word where a pair belongs.
 func (p *parser) notAPair(t Token, what, form, keys string) *Error {
-	if _, ok := propertyOf(strings.TrimSuffix(t.Text, ",")); !ok {
+	if _, ok := propertyIn(p.props(), strings.TrimSuffix(t.Text, ",")); !ok {
 		return p.notAProperty(t, strings.TrimSuffix(t.Text, ","), keys)
 	}
 	return errAt(t.Pos, what+" takes "+form+" ("+keys+")")
@@ -453,13 +560,21 @@ func (p *parser) notAPair(t Token, what, form, keys string) *Error {
 // might be a pasted value is shown by position only.
 func (p *parser) notAProperty(t Token, k, keys string) *Error {
 	word, _, _ := strings.Cut(t.Text, "=")
+	object := "a playbook property"
+	if p.defaults {
+		object = "a DEFAULTS property"
+	}
 	switch {
-	case keyPattern.MatchString(word) && strings.ToUpper(word) == word && strings.ToLower(word) != word:
+	case !t.Quoted && strings.EqualFold(word, "IF"):
+		return errAt(t.Pos, "IF UNSET goes right after SET: SET IF UNSET statusline = '<command>'")
+	case !t.Quoted && IsKeyword(word):
+		return errAt(t.Pos, word+" is not "+object+" ("+keys+")")
+	case !p.defaults && keyPattern.MatchString(word) && strings.ToUpper(word) == word && strings.ToLower(word) != word:
 		return errAt(t.Pos, word+" is not a playbook property; a variable is SET VAR "+word+"=<value>")
 	case safeWord.MatchString(k), sandboxKeyWord.MatchString(k):
-		return errAt(t.Pos, k+" is not a playbook property ("+keys+")")
+		return errAt(t.Pos, k+" is not "+object+" ("+keys+")")
 	}
-	return errAt(t.Pos, "not a playbook property ("+keys+")")
+	return errAt(t.Pos, "not "+object+" ("+keys+")")
 }
 
 // sandboxKeyWord is a mistyped sandbox.<key>, safe to quote back.
@@ -553,4 +668,14 @@ const (
 	removedSandboxKey = "SET SANDBOX <key>=<value> is a property now: SET sandbox.<key> = '<value>'"
 	removedUnsetBox   = "UNSET SANDBOX is gone: SET sandbox.always = false"
 	removedUnsetKey   = "UNSET SANDBOX <key> is gone: DELETE sandbox.<key>"
+
+	removedStatusline      = "SET STATUSLINE is a property now: SET statusline = '<command>'[, statusline_refresh = <n>] (SET IF UNSET … for IF UNSET)"
+	removedRefresh         = "SET STATUSLINE REFRESH is a property now: SET statusline_refresh = <n>"
+	removedPrevious        = "SET STATUSLINE PREVIOUS is gone: REVERT STATUSLINE"
+	removedUnsetStatusline = "UNSET STATUSLINE is gone: DELETE statusline"
+	removedUnsetRefresh    = "UNSET STATUSLINE REFRESH is gone: DELETE statusline_refresh"
+	removedPicker          = "SET MODEL PICKER is a property now: SET model_picker.mode = 'only' | 'append'"
+	removedUnsetPicker     = "UNSET MODEL PICKER is gone: DELETE model_picker"
+	removedSetHelper       = "SET SECRET HELPER is a property now: SET secret_helper = '<command>'"
+	removedUnsetHelper     = "UNSET SECRET HELPER is gone: DELETE secret_helper"
 )

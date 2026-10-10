@@ -306,10 +306,10 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 	} else if _, err := grammar.ParseFile(u.Pretty() + ";"); err != nil {
 		t.Fatalf("the undo does not parse back: %v", err)
 	}
-	// A status line and its refresh, both dropped: UNSET STATUSLINE alone,
+	// A status line and its refresh, both dropped: DELETE statusline alone,
 	// which a statement may hold (the pair is refused together).
-	sl := parse("ALTER PLAYBOOK SET STATUSLINE 'x';\nALTER PLAYBOOK SET STATUSLINE REFRESH 5;\n")
-	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb UNSET STATUSLINE" {
+	sl := parse("ALTER PLAYBOOK SET statusline = 'x';\nALTER PLAYBOOK SET statusline_refresh = 5;\n")
+	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE statusline" {
 		t.Fatalf("status line undo: %v", u)
 	}
 }
@@ -322,8 +322,8 @@ func TestLineDiff(t *testing.T) {
 }
 
 // A played recipe that drops both its status line and its refresh: the
-// undo is UNSET STATUSLINE alone, since a statement may not hold it beside
-// UNSET STATUSLINE REFRESH, and play parses its undo back from a file. The
+// undo is DELETE statusline alone, since a statement may not hold it beside
+// DELETE statusline_refresh, and play parses its undo back from a file. The
 // update used to fail on that file.
 func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	resetCommandTestState(t)
@@ -331,7 +331,7 @@ func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	stubClaude(t)
 	dir := t.TempDir()
-	p := writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1\n  SET STATUSLINE 'echo x';\nALTER PLAYBOOK\n  SET STATUSLINE REFRESH 5;\n")
+	p := writeRecipe(t, dir, "slr.cpb", "-- title: Slr\n\nALTER PLAYBOOK\n  SET VAR FOO=1\n  SET statusline = 'echo x';\nALTER PLAYBOOK\n  SET statusline_refresh = 5;\n")
 	playFlags(t, false, false, false, "")
 	playKeepFlags(t, true, "")
 	playRunFlags(t, true, nil, nil, nil)

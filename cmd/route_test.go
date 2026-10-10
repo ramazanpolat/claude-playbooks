@@ -60,7 +60,7 @@ func TestExplainRoute(t *testing.T) {
 
 	// A routed playbook with a key, a model map and a password in its URL.
 	helper, _ := fakeHelper(t)
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "CREATE PLAYBOOK routed SET launcher = '' SET login=isolated")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_BASE_URL=http://user:s3cr3tpw@127.0.0.1:20128/v1 AS PLAINTEXT")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_AUTH_TOKEN FROM keychain:ok/router-token")

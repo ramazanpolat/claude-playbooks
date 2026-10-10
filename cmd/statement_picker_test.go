@@ -73,12 +73,12 @@ func TestModelPickerRows(t *testing.T) {
 }
 
 // ONLY / APPEND, the reads (SHOW --json, EXPLAIN), SHOW CREATE re-applying
-// unchanged, DROP of the last row, UNSET MODEL PICKER.
+// unchanged, DROP of the last row, DELETE model_picker.
 func TestModelPickerModeAndReads(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	root := seedFlatPlaybook(t, "k")
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' SET MODEL PICKER ONLY"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' SET model_picker.mode = 'only'"); err != nil {
 		t.Fatal(err)
 	}
 	if mp := settingsOf(t, root)["modelPicker"].(map[string]any); mp["replaceBuiltInOptions"] != true {
@@ -95,24 +95,24 @@ func TestModelPickerModeAndReads(t *testing.T) {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	if !strings.Contains(created, "ADD MODEL 'glm-5.3' LABEL 'GLM 5.3'") || !strings.Contains(created, "SET MODEL PICKER ONLY") {
+	if !strings.Contains(created, "ADD MODEL 'glm-5.3' LABEL 'GLM 5.3'") || !strings.Contains(created, "SET model_picker.mode = 'only'") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	f := writePlaybookFile(t, created)
 	if out, err := apply(t, f); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
 		t.Fatalf("SHOW CREATE did not re-apply unchanged: %v\n%s", err, out)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET MODEL PICKER APPEND DROP MODEL 'glm-5.3'"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k SET model_picker.mode = 'append' DROP MODEL 'glm-5.3'"); err != nil {
 		t.Fatal(err)
 	}
 	if mp := settingsOf(t, root)["modelPicker"].(map[string]any); mp["replaceBuiltInOptions"] != false || mp["options"] != nil {
 		t.Fatalf("APPEND and the last row dropped: %v", mp)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k UNSET MODEL PICKER"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k DELETE model_picker"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := settingsOf(t, root)["modelPicker"]; ok {
-		t.Fatal("UNSET MODEL PICKER left the key")
+		t.Fatal("DELETE model_picker left the key")
 	}
 }
 
@@ -124,7 +124,7 @@ func TestModelPickerDirTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	recipe := writeCpb(t, dir, "picker.cpb", "ALTER PLAYBOOK ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' SET MODEL PICKER APPEND;\n")
+	recipe := writeCpb(t, dir, "picker.cpb", "ALTER PLAYBOOK ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' SET model_picker.mode = 'append';\n")
 	if out, err := apply(t, recipe, "TO", cfg, "--yes"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}

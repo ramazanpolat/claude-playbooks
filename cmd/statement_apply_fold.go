@@ -83,14 +83,14 @@ func foldParts(c grammar.Clause) []foldPart {
 			}
 			out = append(out, foldPart{index: -1, what: string(c.Kind), effects: effects})
 		case c.Refresh > 0: // the command and the refresh, apart
-			out = append(out, foldPart{index: 0, what: "SET STATUSLINE", effects: []foldEffect{w("statusline")}},
-				foldPart{index: 1, what: "SET STATUSLINE REFRESH", effects: []foldEffect{w("statusline-refresh")}})
+			out = append(out, foldPart{index: 0, what: "SET statusline", effects: []foldEffect{w("statusline")}},
+				foldPart{index: 1, what: "SET statusline_refresh", effects: []foldEffect{w("statusline-refresh")}})
 		default:
 			out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline")}})
 		}
 	case grammar.UnsetStatusline:
-		out = append(out, foldPart{index: 0, what: "UNSET STATUSLINE", effects: []foldEffect{w("statusline")}},
-			foldPart{index: 1, what: "UNSET STATUSLINE REFRESH", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
+		out = append(out, foldPart{index: 0, what: "DELETE statusline", effects: []foldEffect{w("statusline")}},
+			foldPart{index: 1, what: "DELETE statusline_refresh", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
 	case grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh:
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline-refresh")}})
 	case grammar.SetStatuslinePrevious: // reads the history every earlier one wrote (see foldStatements)
@@ -168,7 +168,7 @@ func foldStatements(in []located) foldResult {
 		}
 	}
 	dead := map[partKey]bool{}
-	previous := map[partKey]bool{}  // a SET STATUSLINE PREVIOUS
+	previous := map[partKey]bool{}  // a REVERT STATUSLINE
 	withFirst := map[partKey]bool{} // dropped only with the clause's part 0
 	var all []occ                   // every effect, in run order
 	for i, x := range in {
@@ -191,7 +191,7 @@ func foldStatements(in []located) foldResult {
 				live = append(live, o)
 			}
 		}
-		// SET STATUSLINE PREVIOUS restores from the history, which every
+		// REVERT STATUSLINE restores from the history, which every
 		// earlier replacement of the target's status line adds to, not only
 		// the last: while a PREVIOUS runs, no status line clause before it is
 		// dropped. Taken from the live clauses on every pass, so a PREVIOUS

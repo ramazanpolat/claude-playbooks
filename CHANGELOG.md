@@ -55,6 +55,27 @@
 
 ### Changed
 
+- **The status line, the model picker's mode and the secret helper are
+  properties** (SPEC.md, *Status line and model*, *Model picker*,
+  *Secrets*): `SET statusline = '<command>', statusline_refresh = 10`,
+  `DELETE statusline`, `DELETE statusline_refresh`; `SET model_picker.mode =
+  'only'`, `DELETE model_picker.mode`, `DELETE model_picker` (the whole
+  picker); `ALTER DEFAULTS SET secret_helper = '<command>'`, `DELETE
+  secret_helper`.
+  - `SET IF UNSET statusline = …` offers a status line without replacing
+    one; it takes the status line only (as `IF UNSET` did) and goes right
+    after `SET`.
+  - `REVERT STATUSLINE` puts back the status line cpb replaced last (was
+    `SET STATUSLINE PREVIOUS`).
+  - The old `SET` / `UNSET STATUSLINE [REFRESH]`, `SET STATUSLINE PREVIOUS`,
+    `SET` / `UNSET MODEL PICKER` and `SET` / `UNSET SECRET HELPER` forms are
+    refused with a one-line hint. `ADD` / `DROP MODEL` are unchanged.
+  - **`SHOW DEFAULTS --json` and `SELECT … FROM DEFAULTS`**: `secret_helper`
+    is now the command (a string or null) and `secret_helper_from` says
+    where it is set, in place of the `{command, from}` object.
+  - `examples/coverage.sh` read a clause kind with an underscore as two
+    words; it reads each kind whole now.
+
 - **The sandbox is the `sandbox.<key>` properties** (SPEC.md, *Sandbox*):
   `SET sandbox.always = true, login = 'isolated'`, `SET sandbox.backend =
   'sbx', sandbox.mounts = ['~/libs:ro']`, `DELETE sandbox.host`, and `DELETE

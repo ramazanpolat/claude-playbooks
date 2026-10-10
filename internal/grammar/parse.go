@@ -33,7 +33,7 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
-		"DELETE",
+		"DELETE", "REVERT",
 	} {
 		keywords[w] = true
 	}
@@ -172,8 +172,8 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "DELETE"}
-	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "DELETE", "REVERT"}
+	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET", "DELETE"}
 	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SET", "DELETE"}
 )
 
@@ -198,6 +198,9 @@ type parser struct {
 	// statement given as one quoted argument), so Token.Quoted is known. On
 	// the command line the shell has removed the quotes.
 	lexed bool
+	// defaults: an ALTER DEFAULTS statement, whose properties are its own
+	// (secret_helper).
+	defaults bool
 
 	tried   []string // what was acceptable at position triedAt
 	triedAt int
@@ -813,9 +816,16 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		switch {
 		case p.atProperty():
 			// k = 'v', …: a property whose key may share a word with a
-			// clause keyword (model, SET MODEL PICKER).
+			// clause keyword (model, ADD MODEL).
 			c.Kind = SetProperties
 			return c, p.playbookProperties(c, "SET", true)
+		case p.at("IF"):
+			p.i++
+			if p.kw("UNSET") == "" {
+				return nil, p.fail("expected UNSET after IF: SET IF UNSET statusline = '<command>'")
+			}
+			c.Kind, c.IfUnset = SetProperties, true
+			return c, p.playbookProperties(c, "SET IF UNSET", true)
 		case p.at("ISOLATED"):
 			return nil, p.fail(removedLogin)
 		case p.at("AGENT"):
@@ -825,56 +835,29 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 				return nil, errAt(c.Pos, removedSetSandbox)
 			}
 			return nil, errAt(c.Pos, removedSandboxKey)
+		case p.at("STATUSLINE"):
+			p.i++
+			switch {
+			case p.at("PREVIOUS"):
+				return nil, errAt(c.Pos, removedPrevious)
+			case p.at("REFRESH"):
+				return nil, errAt(c.Pos, removedRefresh)
+			}
+			return nil, errAt(c.Pos, removedStatusline)
+		case p.at("MODEL"):
+			if p.i++; p.at("PICKER") {
+				return nil, errAt(c.Pos, removedPicker)
+			}
+			return nil, errAt(c.Pos, removedSetModel)
 		}
-		switch p.kw("VAR", "STATUSLINE", "MODEL") {
-		case "STATUSLINE":
-			if p.kw("PREVIOUS") != "" {
-				c.Kind = SetStatuslinePrevious
-				return c, nil
-			}
-			if p.kw("REFRESH") != "" {
-				c.Kind = SetStatuslineRefresh
-				n, err := p.refreshSeconds()
-				c.Refresh = n
-				return c, err
-			}
-			c.Kind = SetStatusline
-			if err := p.oneWord(c, "SET STATUSLINE", "'<command>'", false); err != nil {
-				return c, err
-			}
-			if p.kw("REFRESH") != "" {
-				n, err := p.refreshSeconds()
-				c.Refresh = n
-				if err != nil {
-					return c, err
-				}
-			}
-			if p.kw("IF") != "" {
-				if p.kw("UNSET") == "" {
-					return c, p.fail("expected UNSET after IF: SET STATUSLINE '<command>' IF UNSET")
-				}
-				c.IfUnset = true
-			}
-			return c, nil
-		case "MODEL":
-			if p.kw("PICKER") != "" {
-				c.Kind = SetModelPicker
-				switch m := p.kw("ONLY", "APPEND"); m {
-				case "":
-					return nil, p.fail("SET MODEL PICKER takes ONLY (the picker shows these rows only) or APPEND (after the built-in ones)")
-				default:
-					c.Arg = m
-				}
-				return c, nil
-			}
-			return nil, p.fail(removedSetModel)
+		switch p.kw("VAR") {
 		case "":
 			// Not a clause keyword: the playbook's properties, k = 'v', ….
 			// Another keyword here (SET SECRET HELPER) is a clause of
 			// another object, never a property.
 			if p.atEnd() || p.isStarter() || (!p.toks[p.i].Quoted && IsKeyword(p.toks[p.i].Text)) {
 				p.note(PlaybookPropertyKeys()...)
-				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR, STATUSLINE, MODEL PICKER or properties: <key> = '<value>' (" + propertyKeysShown() + ")")
+				return nil, p.fail("SET inside ALTER PLAYBOOK takes VAR or properties: <key> = '<value>' (" + propertyKeysShown(playbookPropertyTable) + ")")
 			}
 			c.Kind = SetProperties
 			return c, p.playbookProperties(c, "SET", true)
@@ -910,32 +893,36 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 				return nil, errAt(c.Pos, removedUnsetBox)
 			}
 			return nil, errAt(c.Pos, removedUnsetKey)
+		case p.at("STATUSLINE"):
+			if p.i++; p.at("REFRESH") {
+				return nil, errAt(c.Pos, removedUnsetRefresh)
+			}
+			return nil, errAt(c.Pos, removedUnsetStatusline)
+		case p.at("MODEL"):
+			if p.i++; p.at("PICKER") {
+				return nil, errAt(c.Pos, removedUnsetPicker)
+			}
+			return nil, errAt(c.Pos, removedUnsetModel)
 		}
-		switch p.kw("VAR", "TOOL", "STATUSLINE", "MODEL") {
-		case "STATUSLINE":
-			c.Kind = UnsetStatusline
-			if p.kw("REFRESH") != "" {
-				c.Kind = UnsetStatuslineRefresh
-			}
-			return c, nil
-		case "MODEL":
-			if p.kw("PICKER") == "" {
-				return nil, p.fail(removedUnsetModel)
-			}
-			c.Kind = UnsetModelPicker
-			return c, nil
+		switch p.kw("VAR", "TOOL") {
 		case "TOOL":
 			c.Kind = UnsetTool
 			rules, err := p.toolRules("UNSET TOOL")
 			c.Names = rules
 			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR, AGENT, TOOL, STATUSLINE, MODEL or SANDBOX")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR or TOOL; a property is DELETE <key>")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
 		c.Keys = keys
 		return c, err
+	case "REVERT":
+		if p.kw("STATUSLINE") == "" {
+			return nil, p.fail("REVERT takes STATUSLINE: REVERT STATUSLINE puts back the status line cpb replaced last")
+		}
+		c.Kind = SetStatuslinePrevious
+		return c, nil
 	case "RENAME":
 		if p.kw("TO") == "" {
 			return nil, p.fail("expected TO after RENAME")
@@ -961,26 +948,22 @@ func (p *parser) defaultsClause() (*Clause, *Error) {
 		return c, p.envList(c, w)
 	case "ADD":
 		return c, p.addEnv(c)
-	case "SET", "UNSET":
-		if p.kw("SECRET") == "" || p.kw("HELPER") == "" {
-			return nil, p.fail(w + " inside ALTER DEFAULTS takes SECRET HELPER: " + w + " SECRET HELPER")
+	case "SET":
+		if p.at("SECRET") {
+			return nil, errAt(c.Pos, removedSetHelper)
 		}
-		if w == "UNSET" {
-			c.Kind = UnsetHelper
-			return c, nil
+		p.defaults = true
+		c.Kind = SetProperties
+		return c, p.playbookProperties(c, "SET inside ALTER DEFAULTS", true)
+	case "UNSET":
+		if p.at("SECRET") {
+			return nil, errAt(c.Pos, removedUnsetHelper)
 		}
-		c.Kind = SetHelper
-		t, err := p.take("SET SECRET HELPER", "'<command>'")
-		if err != nil {
-			return nil, err
-		}
-		// One command, exec'd with an argument vector and never through a
-		// shell: anything with whitespace would be read as arguments.
-		if t.Text == "" || strings.ContainsAny(t.Text, " \t\r\n") {
-			return nil, errAt(t.Pos, "the secret helper is one command (a name on PATH or an absolute path), without arguments")
-		}
-		c.Arg = t.Text
-		return c, nil
+		return nil, p.fail("UNSET inside ALTER DEFAULTS is gone: DELETE secret_helper")
+	case "DELETE":
+		p.defaults = true
+		c.Kind = DeleteProperties
+		return c, p.playbookProperties(c, "DELETE", false)
 	}
 	return nil, nil
 }

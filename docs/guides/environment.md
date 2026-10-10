@@ -150,7 +150,7 @@ be a secret passes: empty, an integer, or `true`/`false`, so
 
 - **By reference**, when a secret helper is configured:
   ```bash
-  cpb ALTER DEFAULTS SET SECRET HELPER my-keychain-helper   # one command, no arguments
+  cpb ALTER DEFAULTS SET secret_helper = my-keychain-helper   # one command, no arguments
   cpb ALTER ENV glm SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token'
   ```
   cpb stores the reference (`[refs]` in the set, `[env.refs]` in a manifest)

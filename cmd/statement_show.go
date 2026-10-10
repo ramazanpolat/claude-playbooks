@@ -80,7 +80,7 @@ type playbookJSON struct {
 	Statusline   *string           `json:"statusline"`
 	// StatuslineRefresh is statusLine.refreshInterval, whole seconds.
 	StatuslineRefresh *int `json:"statusline_refresh"`
-	// StatuslineHistory is what SET STATUSLINE PREVIOUS can go back to,
+	// StatuslineHistory is what REVERT STATUSLINE can go back to,
 	// newest first (v3.25.0).
 	StatuslineHistory []slHistoryJSON `json:"statusline_history"`
 	Model             *string         `json:"model"`
@@ -108,7 +108,7 @@ type sandboxJSON struct {
 }
 
 // settings is every set key but always, as <key>=<value>, in the [sandbox]
-// table's order: what SET SANDBOX writes.
+// table's order: what SET sandbox.<key> writes.
 func (v sandboxJSON) settings() []string {
 	var out []string
 	add := func(k string, s *string) {
@@ -173,9 +173,20 @@ type helperJSON struct {
 	From    string `json:"from"`
 }
 
+// defaultsJSON is DEFAULTS: its env sets and its property, secret_helper,
+// the command in effect, with where it comes from beside it.
 type defaultsJSON struct {
-	Envs         []string    `json:"envs"`
-	SecretHelper *helperJSON `json:"secret_helper"`
+	Envs             []string `json:"envs"`
+	SecretHelper     *string  `json:"secret_helper"`
+	SecretHelperFrom *string  `json:"secret_helper_from"`
+}
+
+func defaultsOf(names []string, h *helperJSON) defaultsJSON {
+	v := defaultsJSON{Envs: nonNil(names)}
+	if h != nil {
+		v.SecretHelper, v.SecretHelperFrom = &h.Command, &h.From
+	}
+	return v
 }
 
 type explainJSON struct {
@@ -234,7 +245,7 @@ func printLaunchPlugins(plugins []string, agent *agentJSON) {
 // effectiveLauncher is the command that runs pb, the one a pilot types: the
 // launcher its manifest records (LAUNCHER), else the launcher named after
 // the playbook when it is in place (CREATE PLAYBOOK writes it unless told
-// NO LAUNCHER; its only record is the link itself), "" for none. A recorded
+// the empty launcher; its only record is the link itself), "" for none. A recorded
 // launcher is reported as recorded, as SHOW CREATE writes it back.
 func effectiveLauncher(pb *playbook.Playbook) string {
 	if pb.Manifest != nil && pb.Manifest.Launcher != "" {
@@ -300,7 +311,7 @@ func readStatement(st *grammar.Stmt) error {
 		if err != nil {
 			return err
 		}
-		v := defaultsJSON{Envs: nonNil(names), SecretHelper: helper}
+		v := defaultsOf(names, helper)
 		if st.JSON {
 			return printJSON(v)
 		}
@@ -902,7 +913,7 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
 	}
 	if n := len(v.StatuslineHistory); n > 0 {
-		fmt.Printf("Status line history: %d earlier (SET STATUSLINE PREVIOUS restores %s)\n", n, v.StatuslineHistory[0].Command)
+		fmt.Printf("Status line history: %d earlier (REVERT STATUSLINE restores %s)\n", n, v.StatuslineHistory[0].Command)
 	}
 }
 

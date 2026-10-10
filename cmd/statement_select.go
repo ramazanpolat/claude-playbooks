@@ -88,7 +88,7 @@ var selectTables = map[string]selectTable{
 			"skills":             "The skills cpb recorded: name, source, branch, subdir, mode.",
 			"statusline":         "The status line command; null for none.",
 			"statusline_refresh": "How often the status line refreshes, in whole seconds; null when unset.",
-			"statusline_history": "The status lines SET STATUSLINE PREVIOUS can go back to, newest first: command, refresh, replaced_at.",
+			"statusline_history": "The status lines REVERT STATUSLINE can go back to, newest first: command, refresh, replaced_at.",
 			"model":              "The playbook's default model (SET model); null when unset.",
 			"model_picker":       "The model picker: mode (only or append) and options; null when unset.",
 			"play":               "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
@@ -150,11 +150,12 @@ var selectTables = map[string]selectTable{
 		rows: sessionRows,
 	},
 	"DEFAULTS": {
-		columns:   []string{"envs", "secret_helper"},
-		structure: "envs Array(String), secret_helper JSON",
+		columns:   []string{"envs", "secret_helper", "secret_helper_from"},
+		structure: "envs Array(String), secret_helper Nullable(String), secret_helper_from Nullable(String)",
 		comments: map[string]string{
-			"envs":          "The env sets every launch applies first, in order.",
-			"secret_helper": "The command that resolves secret references, and where it is set (setting or CPB_SECRET_HELPER); null when none is configured.",
+			"envs":               "The env sets every launch applies first, in order.",
+			"secret_helper":      "The command that resolves secret references (SET secret_helper); null when none is configured.",
+			"secret_helper_from": "Where the secret helper is set: setting or CPB_SECRET_HELPER; null when none is configured.",
 		},
 		rows: defaultsRows,
 	},
@@ -273,7 +274,7 @@ func defaultsRows() ([]any, []playbook.Unreadable, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return []any{defaultsJSON{Envs: nonNil(names), SecretHelper: helper}}, nil, nil
+	return []any{defaultsOf(names, helper)}, nil, nil
 }
 
 var builtinSelect = regexp.MustCompile(`(?is)^\s*SELECT\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+FROM\s+([A-Za-z_]+)\s*;?\s*$`)

@@ -9,4 +9,4 @@ cpb SHOW PLAYBOOKS --json | python3 -c 'import json,sys; p={x["name"]: x for x i
 cpb EXPLAIN PLAYBOOK browsed --json | python3 -c 'import json,sys; v={x["key"]: x for x in json.load(sys.stdin)["vars"]}; assert v["ANTHROPIC_BASE_URL"]["layer"]["name"] == "proxy", v'
 cpb SHOW ENVS --json | python3 -c 'import json,sys; e={x["name"]: x for x in json.load(sys.stdin)}; assert e["proxy"]["used_by"] == ["browsed"], e'
 cpb SHOW SESSIONS --json | python3 -c 'import json,sys; assert json.load(sys.stdin) == []'
-cpb SHOW CREATE PLAYBOOK browsed --skip-secrets | grep -q "SET STATUSLINE 'echo browsed' REFRESH 10"
+cpb SHOW CREATE PLAYBOOK browsed --skip-secrets | grep -q "SET statusline = 'echo browsed', statusline_refresh = 10"

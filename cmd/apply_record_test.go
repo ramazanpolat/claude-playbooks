@@ -302,18 +302,18 @@ func TestWithheldClause(t *testing.T) {
 	}
 }
 
-// A base's SET STATUSLINE … IF UNSET defers to a status line the playbook
+// A base's SET IF UNSET statusline = '…' defers to a status line the playbook
 // has: when the base drops it, cpb update removes it only where the files
 // wrote it.
 func TestApplyRecordDeferredStatusline(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "own", nil)
 	writePlaybook(t, root, "fresh", nil)
-	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "STATUSLINE", "echo mine"}); err != nil {
+	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline", "=", "echo mine"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET STATUSLINE 'echo base' IF UNSET\n  SET VAR X=1;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline = 'echo base'\n  SET VAR X=1;\n")
 	for _, n := range []string{"own", "fresh"} {
 		if out, err := apply(t, f, "TO", n); err != nil {
 			t.Fatalf("%v\n%s", err, out)
@@ -339,11 +339,11 @@ func TestApplyRecordDeferredStatusline(t *testing.T) {
 func TestApplyRecordDeferredStatuslineKeepsRefreshUndo(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	writePlaybook(t, root, "own", nil)
-	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "STATUSLINE", "echo mine"}); err != nil {
+	if err := runStatement([]string{"ALTER", "PLAYBOOK", "own", "SET", "statusline", "=", "echo mine"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET STATUSLINE 'echo base' IF UNSET\n  SET VAR X=1;\nALTER PLAYBOOK\n  SET STATUSLINE REFRESH 5;\n")
+	f := writeCpb(t, dir, "base.cpb", "ALTER PLAYBOOK\n  SET IF UNSET statusline = 'echo base'\n  SET VAR X=1;\nALTER PLAYBOOK\n  SET statusline_refresh = 5;\n")
 	if out, err := apply(t, f, "TO", "own"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
