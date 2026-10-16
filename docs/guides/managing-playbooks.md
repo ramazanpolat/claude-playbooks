@@ -281,7 +281,7 @@ guard: its `global_instructions` setting is `'excluded'`.
 ```bash
 cpb EXPLAIN PLAYBOOK work                                        # Global instructions: excluded …
 cpb ALTER PLAYBOOK work SET global_instructions = 'inherited'    # let them load
-cpb ALTER PLAYBOOK work DELETE global_instructions               # back to 'excluded'
+cpb ALTER PLAYBOOK work RESET global_instructions                # back to 'excluded'
 cpb "SELECT name, global_instructions FROM PLAYBOOKS"            # which playbooks load them
 ```
 

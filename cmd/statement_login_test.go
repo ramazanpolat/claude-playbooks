@@ -122,8 +122,8 @@ func TestIsolatedLogin(t *testing.T) {
 	// A sandboxed playbook is isolated by SANDBOX: UNSET is refused and
 	// SHOW CREATE does not repeat it.
 	mustStmt(t, "CREATE PLAYBOOK s NO LAUNCHER SANDBOX")
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK s DELETE login"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
-		t.Fatalf("DELETE login on a sandboxed playbook: %v", err)
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK s RESET login"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
+		t.Fatalf("RESET login on a sandboxed playbook: %v", err)
 	}
 	if created := mustStmt(t, "SHOW CREATE PLAYBOOK s"); !strings.Contains(created, "SET login = 'isolated', global_instructions = 'excluded'") {
 		t.Fatalf("SHOW CREATE of a sandboxed playbook:\n%s", created)
@@ -131,7 +131,7 @@ func TestIsolatedLogin(t *testing.T) {
 
 	for line, want := range map[string]string{
 		"CREATE PLAYBOOK c LINK /x SET login = 'isolated'":              "does not apply to LINK",
-		"ALTER PLAYBOOK k SET login = 'isolated' DELETE login":          "login is named twice in one statement",
+		"ALTER PLAYBOOK k SET login = 'isolated' RESET login":           "login is named twice in one statement",
 		"ALTER PLAYBOOK k SET ISOLATED LOGIN":                           "ISOLATED LOGIN is a property now: SET login = 'isolated'",
 		"CREATE PLAYBOOK c SET login = 'isolated' SET login = 'shared'": "login is named twice in one statement",
 	} {
