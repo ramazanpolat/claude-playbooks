@@ -13,7 +13,7 @@ file converges instead of piling up. `CREATE PLAYBOOK IF NOT EXISTS … SET …`
 creates the playbook with those properties, or, when it exists, applies the
 `SET` list as `ALTER PLAYBOOK … SET` would; what is fixed at creation (`FROM`,
 `BRANCH`, `SUBDIR`, `LINK`) is only compared, and a different source is a
-warning. `SHOW CREATE` writes the launcher, login, memory and sandbox on the
+warning. `SHOW CREATE` writes the launcher, login, global instructions and sandbox on the
 `CREATE`, so one statement brings a playbook back to them. Credential-looking literals are written
 as comments and make it exit non-zero until you store them by reference
 (`--skip-secrets` accepts the output without them). `APPLY` validates every

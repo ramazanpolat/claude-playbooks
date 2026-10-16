@@ -287,11 +287,11 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 	}
 	old := parse("ALTER PLAYBOOK USE ENV a b SET sandbox.always = true;\nALTER PLAYBOOK SET sandbox.backend = 'x', sandbox.workdir = '/w' ADD ENV c FIRST;\n")
 	moved := parse("ALTER PLAYBOOK USE ENV b a SET sandbox.always = true;\nALTER PLAYBOOK SET sandbox.backend = 'x' ADD ENV c LAST;\n")
-	if u := undoFor("kb", old, moved); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE sandbox.workdir" {
+	if u := undoFor("kb", old, moved); u == nil || u.String() != "ALTER PLAYBOOK kb RESET sandbox.workdir" {
 		t.Fatalf("an order change undoes: %v", u)
 	}
 	u := undoFor("kb", old, parse("ALTER PLAYBOOK SET sandbox.backend = 'y';\n"))
-	want := "ALTER PLAYBOOK kb DROP ENV a DROP ENV b DELETE sandbox.always, sandbox.backend, sandbox.workdir DROP ENV c"
+	want := "ALTER PLAYBOOK kb DROP ENV a DROP ENV b RESET sandbox.always, sandbox.backend, sandbox.workdir DROP ENV c"
 	if u == nil || u.String() != want {
 		t.Fatalf("undo:\n got %v\nwant %s", u, want)
 	}
@@ -299,17 +299,17 @@ func TestUndoForEnvAndSandbox(t *testing.T) {
 		t.Fatalf("the undo does not parse back: %v", err)
 	}
 	// One key set by two old statements is undone once (agy, #213): the
-	// merged DELETE never names a key twice.
+	// merged RESET never names a key twice.
 	twice := parse("ALTER PLAYBOOK SET sandbox.workdir = '/a';\nALTER PLAYBOOK SET sandbox.workdir = '/b', sandbox.host = 'h';\n")
-	if u := undoFor("kb", twice, nil); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE sandbox.workdir, sandbox.host" {
+	if u := undoFor("kb", twice, nil); u == nil || u.String() != "ALTER PLAYBOOK kb RESET sandbox.workdir, sandbox.host" {
 		t.Fatalf("a key set twice: %v", u)
 	} else if _, err := grammar.ParseFile(u.Pretty() + ";"); err != nil {
 		t.Fatalf("the undo does not parse back: %v", err)
 	}
-	// A status line and its refresh, both dropped: DELETE statusline alone,
+	// A status line and its refresh, both dropped: RESET statusline alone,
 	// which a statement may hold (the pair is refused together).
 	sl := parse("ALTER PLAYBOOK SET statusline.command = 'x';\nALTER PLAYBOOK SET statusline.refresh = 5;\n")
-	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb DELETE statusline" {
+	if u := undoFor("kb", sl, nil); u == nil || u.String() != "ALTER PLAYBOOK kb RESET statusline" {
 		t.Fatalf("status line undo: %v", u)
 	}
 }
@@ -322,8 +322,8 @@ func TestLineDiff(t *testing.T) {
 }
 
 // A played recipe that drops both its status line and its refresh: the
-// undo is DELETE statusline alone, since a statement may not hold it beside
-// DELETE statusline.refresh, and play parses its undo back from a file. The
+// undo is RESET statusline alone, since a statement may not hold it beside
+// RESET statusline.refresh, and play parses its undo back from a file. The
 // update used to fail on that file.
 func TestPlayUpdateDropsStatuslineAndRefresh(t *testing.T) {
 	resetCommandTestState(t)

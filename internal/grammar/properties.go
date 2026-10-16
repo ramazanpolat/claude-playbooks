@@ -12,7 +12,7 @@ import (
 
 // A playbook property: a value the playbook keeps that can change after it
 // is created. CREATE PLAYBOOK … SET k = 'v', … gives the starting values,
-// ALTER PLAYBOOK … SET k = 'v', … changes them, and ALTER PLAYBOOK … DELETE
+// ALTER PLAYBOOK … SET k = 'v', … changes them, and ALTER PLAYBOOK … RESET
 // k, … puts them back to the default. What is fixed at creation (FROM,
 // BRANCH, SUBDIR, LINK) stays a keyword clause of CREATE.
 type playbookProperty struct {
@@ -21,13 +21,13 @@ type playbookProperty struct {
 	// true or false, or a list of strings (['a', 'b']).
 	kind valueKind
 	// values are an enumerated property's values, its default first: the
-	// one DELETE restores and a new playbook gets when its CREATE does not
+	// one RESET restores and a new playbook gets when its CREATE does not
 	// name the key.
 	values []string
 	// check judges a free value: "" when it is valid, else why not. It
 	// never quotes the value back, which might be anything.
 	check func(string) string
-	// set and del are the clauses a free property's SET and DELETE become
+	// set and del are the clauses a free property's SET and RESET become
 	// (desugarProperties): the ones the commands already carry out.
 	set, del Kind
 	// placeholder spells a free value in a hint.
@@ -35,9 +35,9 @@ type playbookProperty struct {
 	// sandbox names the [sandbox] key a sandbox.<key> property is: its
 	// pairs become SetSandboxKeys and UnsetSandboxKeys clauses.
 	sandbox string
-	// table marks a table's name (sandbox, statusline, model_picker): DELETE resets
+	// table marks a table's name (sandbox, statusline, model_picker): RESET resets
 	// every key of it, and SET does not take it. tableDel is the clause its
-	// DELETE becomes (the sandbox's is every [sandbox] key).
+	// RESET becomes (the sandbox's is every [sandbox] key).
 	table    bool
 	tableDel Kind
 }
@@ -54,16 +54,17 @@ const (
 
 // The properties, in the order SHOW CREATE writes them.
 var playbookPropertyTable = []playbookProperty{
-	// launcher: the command that runs the playbook; '' for none. DELETE
+	// launcher: the command that runs the playbook; '' for none. RESET
 	// puts back its default, the playbook's own name.
 	{key: "launcher", kind: kindString, check: checkLauncher, set: Launcher, del: DefaultLauncher, placeholder: "<name>"},
 	// login: shared links the machine's login; isolated shares nothing
 	// (the manifest's isolated_login).
 	{key: "login", values: []string{"shared", "isolated"}},
-	// memory: isolated keeps ~/.claude's CLAUDE.md and rules out of the
-	// playbook (claudeMdExcludes in its settings.json); shared loads them,
-	// as Claude Code's ancestor walk does for any directory under $HOME.
-	{key: "memory", values: []string{"isolated", "shared"}},
+	// global_instructions: excluded keeps ~/.claude's CLAUDE.md and rules
+	// out of the playbook (claudeMdExcludes in its settings.json); inherited
+	// loads them, as Claude Code's ancestor walk does for any directory
+	// under $HOME.
+	{key: "global_instructions", values: []string{"excluded", "inherited"}},
 	// model: the playbook's default model (settings.json model).
 	{key: "model", kind: kindString, check: checkModel, set: SetModel, del: UnsetModel, placeholder: "<model>"},
 	// agent: the agent the main session runs as (settings.json agent).
@@ -81,13 +82,13 @@ var playbookPropertyTable = []playbookProperty{
 	{key: "sandbox.share_skills", kind: kindBool, sandbox: "share_skills"},
 	{key: "sandbox", table: true},
 	// The status line (settings.json statusLine): its command, and how
-	// often it re-renders, in whole seconds. DELETE statusline (or
+	// often it re-renders, in whole seconds. RESET statusline (or
 	// statusline.command) removes it, the refresh with it.
 	{key: "statusline.command", kind: kindString, check: checkStatusline, set: SetStatusline, del: UnsetStatusline, placeholder: "<command>"},
 	{key: "statusline.refresh", kind: kindInt, set: SetStatuslineRefresh, del: UnsetStatuslineRefresh},
 	{key: "statusline", table: true, tableDel: UnsetStatusline},
 	// model_picker.mode: the /model picker shows its rows only, or after
-	// the built-in ones. DELETE model_picker is the mode too: the rows are
+	// the built-in ones. RESET model_picker is the mode too: the rows are
 	// a collection, which DROP MODEL empties.
 	{key: "model_picker.mode", kind: kindEnum, values: []string{"append", "only"}, set: SetModelPicker, del: UnsetModelPickerMode},
 	{key: "model_picker", table: true, tableDel: UnsetModelPickerMode},
@@ -100,7 +101,7 @@ var defaultsPropertyTable = []playbookProperty{
 
 func checkStatusline(v string) string {
 	if v == "" || strings.ContainsAny(v, "\r\n") {
-		return "statusline.command takes a command (DELETE statusline removes it)"
+		return "statusline.command takes a command (RESET statusline removes it)"
 	}
 	return ""
 }
@@ -116,7 +117,7 @@ func checkHelper(v string) string {
 
 func checkSandboxValue(v string) string {
 	if v == "" || strings.ContainsAny(v, "\r\n") {
-		return "a sandbox setting takes a value (DELETE sandbox.<key> clears it)"
+		return "a sandbox setting takes a value (RESET sandbox.<key> clears it)"
 	}
 	return ""
 }
@@ -135,7 +136,7 @@ func checkLauncher(v string) string {
 
 func checkModel(v string) string {
 	if v == "" || strings.ContainsAny(v, " \t\r\n") {
-		return "model takes a model id, one word (DELETE model removes it)"
+		return "model takes a model id, one word (RESET model removes it)"
 	}
 	return ""
 }
@@ -216,7 +217,7 @@ func PlaybookPropertyValues(key string) (values []string, ok bool) {
 	return pr.values, true
 }
 
-// PlaybookPropertyDefault is the value DELETE restores to an enumerated
+// PlaybookPropertyDefault is the value RESET restores to an enumerated
 // property.
 func PlaybookPropertyDefault(key string) string {
 	v, _ := PlaybookPropertyValues(key)
@@ -227,7 +228,7 @@ func PlaybookPropertyDefault(key string) string {
 }
 
 // PropertyValue returns the value a clause list gives an enumerated key
-// through SET or DELETE (DELETE gives the default), and whether any clause
+// through SET or RESET (RESET gives the default), and whether any clause
 // names it. A free property's pairs are their own clauses after parsing
 // (desugarProperties).
 func PropertyValue(clauses []Clause, key string) (string, bool) {
@@ -239,7 +240,7 @@ func PropertyValue(clauses []Clause, key string) (string, bool) {
 					return v.Value, true
 				}
 			}
-		case DeleteProperties:
+		case ResetProperties:
 			for _, v := range c.Settings {
 				if v.Key == key {
 					return PlaybookPropertyDefault(key), true
@@ -252,9 +253,9 @@ func PropertyValue(clauses []Clause, key string) (string, bool) {
 
 // desugarProperties turns each pair of a free property into the clause the
 // commands already carry out: SET launcher = 'k' is a Launcher clause (the
-// empty launcher a NoLauncher), SET model = 'm' a SetModel, DELETE agent an
+// empty launcher a NoLauncher), SET model = 'm' a SetModel, RESET agent an
 // UnsetAgent.
-// login and memory stay in their SET and DELETE clauses. A key named twice
+// login and global_instructions stay in their SET and RESET clauses. A key named twice
 // in one statement, in one clause or across several, is refused here.
 func desugarProperties(in []Clause) ([]Clause, *Error) {
 	seen := map[string]bool{}
@@ -276,24 +277,24 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 	}
 	var out []Clause
 	for _, c := range in {
-		if c.Kind != SetProperties && c.Kind != DeleteProperties {
+		if c.Kind != SetProperties && c.Kind != ResetProperties {
 			out = append(out, c)
 			continue
 		}
-		// The pairs become clauses in the order written: login and memory
-		// side by side stay one SET (or DELETE) clause, sandbox keys side
-		// by side one sandbox clause, so the statement renders back as
-		// written (mergedClauses).
+		// The pairs become clauses in the order written: login and
+		// global_instructions side by side stay one SET (or RESET) clause,
+		// sandbox keys side by side one sandbox clause, so the statement
+		// renders back as written (mergedClauses).
 		var pairs []Clause
 		into := func(kind Kind, v Var) {
-			if n := len(pairs); n > 0 && pairs[n-1].Kind == kind && (kind == SetProperties || kind == DeleteProperties || kind == SetSandboxKeys || kind == UnsetSandboxKeys) {
+			if n := len(pairs); n > 0 && pairs[n-1].Kind == kind && (kind == SetProperties || kind == ResetProperties || kind == SetSandboxKeys || kind == UnsetSandboxKeys) {
 				pairs[n-1].Settings = append(pairs[n-1].Settings, v)
 				return
 			}
 			pairs = append(pairs, Clause{Pos: c.Pos, Kind: kind, Settings: []Var{v}})
 		}
 		sandboxKind := SetSandboxKeys
-		if c.Kind == DeleteProperties {
+		if c.Kind == ResetProperties {
 			sandboxKind = UnsetSandboxKeys
 		}
 		for _, v := range c.Settings {
@@ -314,12 +315,12 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 				into(sandboxKind, Var{Key: pr.sandbox, Value: v.Value})
 				continue
 			case pr.set == "":
-				into(c.Kind, v) // login, memory
+				into(c.Kind, v) // login, global_instructions
 				continue
 			}
 			k := Clause{Pos: c.Pos}
 			switch {
-			case c.Kind == DeleteProperties:
+			case c.Kind == ResetProperties:
 				k.Kind = pr.del
 			case pr.set == Launcher && v.Value == "":
 				k.Kind = NoLauncher
@@ -348,14 +349,14 @@ func desugarProperties(in []Clause) ([]Clause, *Error) {
 }
 
 // joinAdjacent makes property clauses of one kind side by side one clause
-// (SET login = 'isolated' SET memory = 'shared' is one SET list), so a
+// (SET login = 'isolated' SET global_instructions = 'inherited' is one SET list), so a
 // statement parses to the same clauses as its rendering (mergedClauses).
 func joinAdjacent(in []Clause) []Clause {
 	var out []Clause
 	for _, c := range in {
 		if n := len(out); n > 0 && out[n-1].Kind == c.Kind {
 			switch c.Kind {
-			case SetProperties, DeleteProperties, SetSandboxKeys, UnsetSandboxKeys:
+			case SetProperties, ResetProperties, SetSandboxKeys, UnsetSandboxKeys:
 				out[n-1].Settings = append(slices.Clone(out[n-1].Settings), c.Settings...)
 				continue
 			}
@@ -398,7 +399,7 @@ func mergeStatusline(in []Clause) ([]Clause, *Error) {
 }
 
 // atPropertyKey reports a property where a list item is expected: a pair
-// for SET, a key for DELETE.
+// for SET, a key for RESET.
 func (p *parser) atPropertyKey(withValues bool) bool {
 	if withValues {
 		return p.atProperty()
@@ -428,7 +429,7 @@ func (p *parser) atProperty() bool {
 	return p.i+1 < len(p.toks) && strings.HasPrefix(p.toks[p.i+1].Text, "=")
 }
 
-// playbookProperties reads the body of SET (k = 'v', …) or of DELETE (k, …).
+// playbookProperties reads the body of SET (k = 'v', …) or of RESET (k, …).
 // A pair is one word (k=v, k='v') or three (k = 'v'); items are separated
 // by commas, a word's trailing one or a comma of its own, and the comma may
 // be left out. In a playbook file, and in a statement given as one quoted
@@ -441,7 +442,7 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 		form = "<key>"
 	}
 	// A key may share a word with a clause keyword (launcher, model): a
-	// pair, or under DELETE a key, is read as one before it ends the list.
+	// pair, or under RESET a key, is read as one before it ends the list.
 	for !p.atEnd() && (!p.isStarter() || p.atPropertyKey(withValues)) {
 		t := p.toks[p.i]
 		if t.Text == "," && !t.Quoted {
@@ -503,7 +504,7 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 		switch {
 		case !withValues:
 		case pr.table:
-			return errAt(t.Pos, k+" is a table: SET "+k+".<key> = …, or DELETE "+k+" to reset it")
+			return errAt(t.Pos, k+" is a table: SET "+k+".<key> = …, or RESET "+k+" to reset it")
 		case pr.kind == kindList:
 			items, err := p.listValue(t, k, raw, vt)
 			if err != nil {
@@ -570,7 +571,7 @@ func (p *parser) listValue(t Token, k, first string, ft Token) ([]string, *Error
 		}
 		items, err := split(unquoteArg(first))
 		if err == nil && len(items) == 0 {
-			return nil, errAt(t.Pos, hint+"; DELETE "+k+" empties it")
+			return nil, errAt(t.Pos, hint+"; RESET "+k+" empties it")
 		}
 		return items, err
 	}
@@ -615,7 +616,7 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 		return errAt(t.Pos, word+" is not a playbook property; a variable is SET VAR "+word+"=<value>")
 	case !t.Quoted && IsKeyword(word):
 		return errAt(t.Pos, word+" is not "+object+" ("+keys+")")
-	case safeWord.MatchString(k) && func() bool { _, ok := propertyIn(p.props(), strings.ToLower(k)); return ok }():
+	case mixedCaseKey.MatchString(k) && func() bool { _, ok := propertyIn(p.props(), strings.ToLower(k)); return ok }():
 		return errAt(t.Pos, "property keys are lowercase: "+strings.ToLower(k))
 	case safeWord.MatchString(k), sandboxKeyWord.MatchString(k):
 		return errAt(t.Pos, k+" is not "+object+" ("+keys+")")
@@ -629,12 +630,16 @@ func isVarName(w string) bool {
 	return keyPattern.MatchString(w) && strings.ToUpper(w) == w && strings.ToLower(w) != w
 }
 
+// mixedCaseKey is a property key typed in other case (Login,
+// Global_Instructions): letters and underscores, safe to quote back.
+var mixedCaseKey = regexp.MustCompile(`^[A-Za-z][A-Za-z_]{0,31}$`)
+
 // sandboxKeyWord is a mistyped sandbox.<key>, safe to quote back.
 var sandboxKeyWord = regexp.MustCompile(`^sandbox\.[a-z_]{1,24}$`)
 
 // unquoteArg removes one pair of quotes a command-line word kept: a shell
-// passes memory='shared' through as one word when it is quoted whole
-// ("memory='shared'"). Property values never hold a quote of their own.
+// passes global_instructions='inherited' through as one word when it is quoted whole
+// ("global_instructions='inherited'"). Property values never hold a quote of their own.
 func unquoteArg(v string) string {
 	if len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
 		return v[1 : len(v)-1]
@@ -739,22 +744,22 @@ const (
 	removedLauncher   = "LAUNCHER is a property now: SET launcher = '<name>'"
 	removedNoLauncher = "NO LAUNCHER is a property now: SET launcher = ''"
 	removedSetModel   = "SET MODEL is a property now: SET model = '<model>'"
-	removedUnsetModel = "UNSET MODEL is gone: DELETE model"
+	removedUnsetModel = "UNSET MODEL is gone: RESET model"
 	removedSetAgent   = "SET AGENT is a property now: SET agent = '<agent>'"
-	removedUnsetAgent = "UNSET AGENT is gone: DELETE agent"
+	removedUnsetAgent = "UNSET AGENT is gone: RESET agent"
 	removedSandbox    = "SANDBOX is a property now: SET sandbox.always = true, login = 'isolated'"
 	removedSetSandbox = "SET SANDBOX is a property now: SET sandbox.always = true, login = 'isolated'"
 	removedSandboxKey = "SET SANDBOX <key>=<value> is a property now: SET sandbox.<key> = '<value>'"
 	removedUnsetBox   = "UNSET SANDBOX is gone: SET sandbox.always = false"
-	removedUnsetKey   = "UNSET SANDBOX <key> is gone: DELETE sandbox.<key>"
+	removedUnsetKey   = "UNSET SANDBOX <key> is gone: RESET sandbox.<key>"
 
 	removedStatusline      = "SET STATUSLINE is a property now: SET statusline.command = '<command>'[, statusline.refresh = <n>] (SET IF UNSET … for IF UNSET)"
 	removedRefresh         = "SET STATUSLINE REFRESH is a property now: SET statusline.refresh = <n>"
 	removedPrevious        = "SET STATUSLINE PREVIOUS is gone: REVERT STATUSLINE"
-	removedUnsetStatusline = "UNSET STATUSLINE is gone: DELETE statusline"
-	removedUnsetRefresh    = "UNSET STATUSLINE REFRESH is gone: DELETE statusline.refresh"
+	removedUnsetStatusline = "UNSET STATUSLINE is gone: RESET statusline"
+	removedUnsetRefresh    = "UNSET STATUSLINE REFRESH is gone: RESET statusline.refresh"
 	removedPicker          = "SET MODEL PICKER is a property now: SET model_picker.mode = 'only' | 'append'"
-	removedUnsetPicker     = "UNSET MODEL PICKER is gone: DELETE model_picker.mode, and DROP MODEL for its rows"
+	removedUnsetPicker     = "UNSET MODEL PICKER is gone: RESET model_picker.mode, and DROP MODEL for its rows"
 	removedSetHelper       = "SET SECRET HELPER is a property now: SET secret_helper = '<command>'"
-	removedUnsetHelper     = "UNSET SECRET HELPER is gone: DELETE secret_helper"
+	removedUnsetHelper     = "UNSET SECRET HELPER is gone: RESET secret_helper"
 )

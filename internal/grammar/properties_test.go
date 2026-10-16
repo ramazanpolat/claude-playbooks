@@ -10,16 +10,16 @@ import (
 // comma-separated or not; a one-word value quoted or bare, in a file and on
 // the command line alike.
 func TestParsePlaybookProperties(t *testing.T) {
-	want := []Var{{Key: "login", Value: "isolated"}, {Key: "memory", Value: "shared"}}
+	want := []Var{{Key: "login", Value: "isolated"}, {Key: "global_instructions", Value: "inherited"}}
 	for _, src := range []string{
-		"CREATE PLAYBOOK x SET login = 'isolated', memory = 'shared';",
-		"CREATE PLAYBOOK x SET login='isolated', memory='shared';",
-		"CREATE PLAYBOOK x SET login='isolated' memory='shared';",
-		"CREATE PLAYBOOK x SET login = 'isolated' , memory = 'shared';",
-		"CREATE PLAYBOOK x SET login ='isolated', memory= 'Shared';",
-		"CREATE PLAYBOOK x SET login = isolated, memory = shared;",
-		"CREATE PLAYBOOK x SET login = \"isolated\", memory = 'shared';",
-		"CREATE PLAYBOOK x SET launcher = '' SET login = 'isolated', memory = 'shared';",
+		"CREATE PLAYBOOK x SET login = 'isolated', global_instructions = 'inherited';",
+		"CREATE PLAYBOOK x SET login='isolated', global_instructions='inherited';",
+		"CREATE PLAYBOOK x SET login='isolated' global_instructions='inherited';",
+		"CREATE PLAYBOOK x SET login = 'isolated' , global_instructions = 'inherited';",
+		"CREATE PLAYBOOK x SET login ='isolated', global_instructions= 'Inherited';",
+		"CREATE PLAYBOOK x SET login = isolated, global_instructions = inherited;",
+		"CREATE PLAYBOOK x SET login = \"isolated\", global_instructions = 'inherited';",
+		"CREATE PLAYBOOK x SET launcher = '' SET login = 'isolated', global_instructions = 'inherited';",
 	} {
 		st, err := ParseFile(src)
 		if err != nil {
@@ -31,11 +31,11 @@ func TestParsePlaybookProperties(t *testing.T) {
 		}
 	}
 	// From argv: the shell has removed the quotes.
-	st, err := ParseArgs(strings.Fields("ALTER PLAYBOOK x SET memory = isolated, login = shared SET VAR A=1"))
+	st, err := ParseArgs(strings.Fields("ALTER PLAYBOOK x SET global_instructions = excluded, login = shared SET VAR A=1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := st.Clauses[0]; c.Kind != SetProperties || !reflect.DeepEqual(c.Settings, []Var{{Key: "memory", Value: "isolated"}, {Key: "login", Value: "shared"}}) {
+	if c := st.Clauses[0]; c.Kind != SetProperties || !reflect.DeepEqual(c.Settings, []Var{{Key: "global_instructions", Value: "excluded"}, {Key: "login", Value: "shared"}}) {
 		t.Errorf("SET from argv: %+v", c)
 	}
 	if st.Clauses[1].Kind != SetVar {
@@ -46,30 +46,30 @@ func TestParsePlaybookProperties(t *testing.T) {
 		t.Fatalf("login=isolated from argv: %v %+v", err, st)
 	}
 	// A word quoted whole by the shell keeps its inner quotes.
-	st, err = ParseArgs([]string{"ALTER", "PLAYBOOK", "x", "SET", "memory='shared'"})
-	if err != nil || st.Clauses[0].Settings[0].Value != "shared" {
-		t.Fatalf("memory='shared' as one argv word: %v %+v", err, st)
+	st, err = ParseArgs([]string{"ALTER", "PLAYBOOK", "x", "SET", "global_instructions='inherited'"})
+	if err != nil || st.Clauses[0].Settings[0].Value != "inherited" {
+		t.Fatalf("global_instructions='inherited' as one argv word: %v %+v", err, st)
 	}
-	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x DELETE memory, login"))
+	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x RESET global_instructions, login"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := st.Clauses[0]; c.Kind != DeleteProperties || len(c.Settings) != 2 || c.Settings[0].Key != "memory" || c.Settings[1].Key != "login" {
-		t.Errorf("DELETE: %+v", c)
+	if c := st.Clauses[0]; c.Kind != ResetProperties || len(c.Settings) != 2 || c.Settings[0].Key != "global_instructions" || c.Settings[1].Key != "login" {
+		t.Errorf("RESET: %+v", c)
 	}
-	// SET and DELETE together, and the old clauses beside them.
-	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x SET login = isolated DELETE memory SET model = 'm'"))
+	// SET and RESET together, and the old clauses beside them.
+	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x SET login = isolated RESET global_instructions SET model = 'm'"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k := []Kind{st.Clauses[0].Kind, st.Clauses[1].Kind, st.Clauses[2].Kind}; !reflect.DeepEqual(k, []Kind{SetProperties, DeleteProperties, SetModel}) {
+	if k := []Kind{st.Clauses[0].Kind, st.Clauses[1].Kind, st.Clauses[2].Kind}; !reflect.DeepEqual(k, []Kind{SetProperties, ResetProperties, SetModel}) {
 		t.Errorf("clauses: %v", k)
 	}
-	if v, ok := PropertyValue(st.Clauses, "memory"); !ok || v != "isolated" {
-		t.Errorf("DELETE memory gives the default: %q %v", v, ok)
+	if v, ok := PropertyValue(st.Clauses, "global_instructions"); !ok || v != "excluded" {
+		t.Errorf("RESET global_instructions gives the default: %q %v", v, ok)
 	}
-	// A recipe: ALTER PLAYBOOK with no name takes SET and DELETE first.
-	for _, src := range []string{"ALTER PLAYBOOK SET memory = 'shared';", "ALTER PLAYBOOK DELETE memory;"} {
+	// A recipe: ALTER PLAYBOOK with no name takes SET and RESET first.
+	for _, src := range []string{"ALTER PLAYBOOK SET global_instructions = 'inherited';", "ALTER PLAYBOOK RESET global_instructions;"} {
 		st, err := ParseFile(src)
 		if err != nil || st[0].Name != "" {
 			t.Errorf("%s: %v %+v", src, err, st)
@@ -80,13 +80,13 @@ func TestParsePlaybookProperties(t *testing.T) {
 // SHOW CREATE writes properties quoted, and they parse back the same.
 func TestFormatPlaybookProperties(t *testing.T) {
 	for src, canon := range map[string]string{
-		"CREATE PLAYBOOK x SET launcher = '' SET login='isolated' memory='shared'":         "CREATE PLAYBOOK x SET launcher = '', login = 'isolated', memory = 'shared'",
-		"ALTER PLAYBOOK x SET memory = 'isolated'":                                         "ALTER PLAYBOOK x SET memory = 'isolated'",
-		"ALTER PLAYBOOK x DELETE login, memory":                                            "ALTER PLAYBOOK x DELETE login, memory",
-		"ALTER PLAYBOOK x DELETE login memory":                                             "ALTER PLAYBOOK x DELETE login, memory",
-		"ALTER PLAYBOOK x DELETE model, agent, sandbox.host, launcher":                     "ALTER PLAYBOOK x DELETE model, agent, sandbox.host, launcher",
-		"ALTER PLAYBOOK x SET model = m SET login = shared SET sandbox.host = h":           "ALTER PLAYBOOK x SET model = 'm', login = 'shared', sandbox.host = 'h'",
-		"ALTER PLAYBOOK x SET login = isolated, model = m, memory = shared ADD PLUGIN p@m": "ALTER PLAYBOOK x SET login = 'isolated', model = 'm', memory = 'shared' ADD PLUGIN p@m",
+		"CREATE PLAYBOOK x SET launcher = '' SET login='isolated' global_instructions='inherited'":         "CREATE PLAYBOOK x SET launcher = '', login = 'isolated', global_instructions = 'inherited'",
+		"ALTER PLAYBOOK x SET global_instructions = 'excluded'":                                            "ALTER PLAYBOOK x SET global_instructions = 'excluded'",
+		"ALTER PLAYBOOK x RESET login, global_instructions":                                                "ALTER PLAYBOOK x RESET login, global_instructions",
+		"ALTER PLAYBOOK x RESET login global_instructions":                                                 "ALTER PLAYBOOK x RESET login, global_instructions",
+		"ALTER PLAYBOOK x RESET model, agent, sandbox.host, launcher":                                      "ALTER PLAYBOOK x RESET model, agent, sandbox.host, launcher",
+		"ALTER PLAYBOOK x SET model = m SET login = shared SET sandbox.host = h":                           "ALTER PLAYBOOK x SET model = 'm', login = 'shared', sandbox.host = 'h'",
+		"ALTER PLAYBOOK x SET login = isolated, model = m, global_instructions = inherited ADD PLUGIN p@m": "ALTER PLAYBOOK x SET login = 'isolated', model = 'm', global_instructions = 'inherited' ADD PLUGIN p@m",
 	} {
 		st, err := ParseLine(src)
 		if err != nil {
@@ -118,27 +118,27 @@ func TestFormatPlaybookProperties(t *testing.T) {
 
 func TestPlaybookPropertyErrors(t *testing.T) {
 	for src, want := range map[string]string{
-		"CREATE PLAYBOOK x SET;":                                         "SET takes <key> = '<value>' (launcher, login, memory, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
-		"CREATE PLAYBOOK x SET colour = 'blue';":                         "colour is not a playbook property (launcher, login, memory, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
-		"CREATE PLAYBOOK x SET memory = 'sealed';":                       "memory takes 'isolated' or 'shared'",
-		"CREATE PLAYBOOK x SET memory;":                                  "SET takes <key> = '<value>'",
-		"CREATE PLAYBOOK x SET memory = ;":                               "needs a value",
-		"CREATE PLAYBOOK x DELETE memory;":                               "DELETE is for ALTER PLAYBOOK",
-		"ALTER PLAYBOOK x SET;":                                          "SET inside ALTER PLAYBOOK takes VAR or properties",
-		"ALTER PLAYBOOK x SET memory = 'shared', memory = 'isolated';":   "memory is named twice in one statement",
-		"ALTER PLAYBOOK x SET memory = 'shared' DELETE memory;":          "memory is named twice in one statement",
-		"ALTER PLAYBOOK x SET login = 'shared' SET login = 'isolated';":  "login is named twice in one statement",
-		"ALTER PLAYBOOK x DELETE;":                                       "DELETE takes <key> (launcher, login, memory, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
-		"ALTER PLAYBOOK x DELETE colour;":                                "colour is not a playbook property",
-		"ALTER PLAYBOOK x SET FOO=1;":                                    "FOO is not a playbook property; a variable is SET VAR FOO=<value>",
-		"CREATE PLAYBOOK x SET sandbox.always = true, login = 'shared';": "cannot be combined with login = 'shared'",
-		"CREATE PLAYBOOK x LINK /tmp/d SET memory = 'shared';":           "memory does not apply to LINK",
+		"CREATE PLAYBOOK x SET;":                                                                    "SET takes <key> = '<value>' (launcher, login, global_instructions, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
+		"CREATE PLAYBOOK x SET colour = 'blue';":                                                    "colour is not a playbook property (launcher, login, global_instructions, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
+		"CREATE PLAYBOOK x SET global_instructions = 'sealed';":                                     "global_instructions takes 'excluded' or 'inherited'",
+		"CREATE PLAYBOOK x SET global_instructions;":                                                "SET takes <key> = '<value>'",
+		"CREATE PLAYBOOK x SET global_instructions = ;":                                             "needs a value",
+		"CREATE PLAYBOOK x RESET global_instructions;":                                              "RESET is for ALTER PLAYBOOK",
+		"ALTER PLAYBOOK x SET;":                                                                     "SET inside ALTER PLAYBOOK takes VAR or properties",
+		"ALTER PLAYBOOK x SET global_instructions = 'inherited', global_instructions = 'excluded';": "global_instructions is named twice in one statement",
+		"ALTER PLAYBOOK x SET global_instructions = 'inherited' RESET global_instructions;":         "global_instructions is named twice in one statement",
+		"ALTER PLAYBOOK x SET login = 'shared' SET login = 'isolated';":                             "login is named twice in one statement",
+		"ALTER PLAYBOOK x RESET;":                                                                   "RESET takes <key> (launcher, login, global_instructions, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
+		"ALTER PLAYBOOK x RESET colour;":                                                            "colour is not a playbook property",
+		"ALTER PLAYBOOK x SET FOO=1;":                                                               "FOO is not a playbook property; a variable is SET VAR FOO=<value>",
+		"CREATE PLAYBOOK x SET sandbox.always = true, login = 'shared';":                            "cannot be combined with login = 'shared'",
+		"CREATE PLAYBOOK x LINK /tmp/d SET global_instructions = 'inherited';":                      "global_instructions does not apply to LINK",
 		// Keys are lowercase: a key in capitals is a variable's name, and
 		// one in mixed case is told the key's spelling.
-		"CREATE PLAYBOOK x SET LOGIN = 'isolated';": "LOGIN is not a playbook property; a variable is SET VAR LOGIN=<value>",
-		"ALTER PLAYBOOK x SET MODEL=glm-5.3;":       "MODEL is not a playbook property; a variable is SET VAR MODEL=<value>",
-		"ALTER PLAYBOOK x SET MODEL = glm-5.3;":     "MODEL is not a playbook property; a variable is SET VAR MODEL=<value>",
-		"CREATE PLAYBOOK x SET Memory = 'shared';":  "property keys are lowercase: memory",
+		"CREATE PLAYBOOK x SET LOGIN = 'isolated';":                "LOGIN is not a playbook property; a variable is SET VAR LOGIN=<value>",
+		"ALTER PLAYBOOK x SET MODEL=glm-5.3;":                      "MODEL is not a playbook property; a variable is SET VAR MODEL=<value>",
+		"ALTER PLAYBOOK x SET MODEL = glm-5.3;":                    "MODEL is not a playbook property; a variable is SET VAR MODEL=<value>",
+		"CREATE PLAYBOOK x SET Global_Instructions = 'inherited';": "property keys are lowercase: global_instructions",
 		// A bare value is one word without a comma.
 		"ALTER PLAYBOOK x SET model = a,b;": "model: a value with a comma is quoted",
 		// The forms the properties replaced say what to write instead.
@@ -152,10 +152,10 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 	}
 	// A bare one-word value reads the same in the one-argument form (the
 	// file lexer) and on argv: one grammar.
-	if _, err := ParseLine("ALTER PLAYBOOK x SET memory = shared"); err != nil {
+	if _, err := ParseLine("ALTER PLAYBOOK x SET global_instructions = inherited"); err != nil {
 		t.Errorf("one quoted argument, bare value: %v", err)
 	}
-	if _, err := ParseArgs(strings.Fields("ALTER PLAYBOOK x SET memory = shared")); err != nil {
+	if _, err := ParseArgs(strings.Fields("ALTER PLAYBOOK x SET global_instructions = inherited")); err != nil {
 		t.Errorf("argv, bare value: %v", err)
 	}
 	// SET MODEL=glm-5.3 on argv, a variable without its VAR, is refused,
@@ -175,7 +175,7 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 		}
 	}
 	// The ClickHouse-settings words of the draft are not grammar.
-	for _, src := range []string{"CREATE PLAYBOOK x SETTINGS memory = 'shared';", "ALTER PLAYBOOK x MODIFY SETTING memory = 'shared';", "ALTER PLAYBOOK x RESET SETTING memory;"} {
+	for _, src := range []string{"CREATE PLAYBOOK x SETTINGS global_instructions = 'inherited';", "ALTER PLAYBOOK x MODIFY SETTING global_instructions = 'inherited';", "ALTER PLAYBOOK x RESET SETTING global_instructions;"} {
 		if _, err := ParseFile(src); err == nil {
 			t.Errorf("%s parses", src)
 		}
@@ -184,16 +184,16 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 
 func TestExpectPlaybookProperties(t *testing.T) {
 	w := strings.Fields
-	if got := Expect(w("ALTER PLAYBOOK k DELETE")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
-		t.Errorf("ALTER PLAYBOOK k DELETE offers %q", got)
+	if got := Expect(w("ALTER PLAYBOOK k RESET")); !reflect.DeepEqual(got, []string{"launcher", "login", "global_instructions", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
+		t.Errorf("ALTER PLAYBOOK k RESET offers %q", got)
 	}
-	if got := Expect(w("ALTER PLAYBOOK k SET")); !contains(got, "VAR") || !contains(got, "login") || !contains(got, "memory") {
+	if got := Expect(w("ALTER PLAYBOOK k SET")); !contains(got, "VAR") || !contains(got, "login") || !contains(got, "global_instructions") {
 		t.Errorf("ALTER PLAYBOOK k SET offers %q", got)
 	}
 	if got := Expect(w("CREATE PLAYBOOK k")); !contains(got, "SET") || contains(got, "ISOLATED") || contains(got, "SETTINGS") {
 		t.Errorf("CREATE PLAYBOOK k offers %q", got)
 	}
-	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
+	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"launcher", "login", "global_instructions", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
 		t.Errorf("CREATE PLAYBOOK k SET offers %q", got)
 	}
 }

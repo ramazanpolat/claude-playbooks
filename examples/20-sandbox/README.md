@@ -25,7 +25,7 @@ On the command line, quote a statement with a list in it: zsh reads `[ ]` as
 a pattern (`cpb "ALTER PLAYBOOK box SET sandbox.mounts = ['~/a:ro']"`).
 
 `SET sandbox.always = false` turns "always" off again (the login stays
-isolated), `DELETE sandbox.<key>` forgets one setting, and `DELETE sandbox`
+isolated), `RESET sandbox.<key>` forgets one setting, and `RESET sandbox`
 the whole table. The settings live in the playbook's `.playbook`, and `SHOW
 CREATE` writes them back as statements.
 

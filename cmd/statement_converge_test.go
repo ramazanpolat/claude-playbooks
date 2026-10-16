@@ -23,7 +23,7 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 	}
 	mustStmt(t, "CREATE PLAYBOOK cv SET launcher = 'cv1', model = 'a'")
 
-	file := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv\n  SET launcher = 'cv2', memory = 'shared', model = 'b', statusline.command = 'echo cv';\n")
+	file := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv\n  SET launcher = 'cv2', global_instructions = 'inherited', model = 'b', statusline.command = 'echo cv';\n")
 	before := snapshot(t, root)
 	out, err := apply(t, file, "--dry-run")
 	if err != nil || !strings.Contains(out, "0 created, 1 changed, 0 unchanged") {
@@ -39,8 +39,8 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 	if s["model"] != "b" || s["statusLine"] == nil {
 		t.Fatalf("the SET list was not applied: %v", s)
 	}
-	if v := showPlaybook(t, "cv"); v["memory"] != "shared" {
-		t.Fatalf("memory = %v", v["memory"])
+	if v := showPlaybook(t, "cv"); v["global_instructions"] != "inherited" {
+		t.Fatalf("global_instructions = %v", v["global_instructions"])
 	}
 	if has("cv1") || !has("cv2") {
 		t.Fatalf("launcher: cv1=%v cv2=%v", has("cv1"), has("cv2"))
@@ -59,7 +59,7 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 	// SHOW CREATE is one converging statement per property list: applied to
 	// the playbook it describes, it changes nothing.
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK cv")
-	if !strings.Contains(created, "CREATE PLAYBOOK IF NOT EXISTS cv\n  SET launcher = 'cv2', login = 'shared', memory = 'shared', sandbox.always = false;") {
+	if !strings.Contains(created, "CREATE PLAYBOOK IF NOT EXISTS cv\n  SET launcher = 'cv2', login = 'shared', global_instructions = 'inherited', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -67,8 +67,8 @@ func TestCreateIfNotExistsConverges(t *testing.T) {
 	}
 	// What the playbook has but the list leaves out stays: converging is
 	// SET, never a reset.
-	if out, err := apply(t, writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv SET memory = 'isolated';\n")); err != nil || !strings.Contains(out, "0 created, 1 changed") {
-		t.Fatalf("memory back: %v\n%s", err, out)
+	if out, err := apply(t, writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS cv SET global_instructions = 'excluded';\n")); err != nil || !strings.Contains(out, "0 created, 1 changed") {
+		t.Fatalf("global_instructions back: %v\n%s", err, out)
 	}
 	if s := settingsOf(t, filepath.Join(root, "cv")); s["model"] != "b" {
 		t.Fatalf("a key the list left out changed: %v", s)
@@ -99,7 +99,7 @@ func TestCreateSetListOnNewPlaybook(t *testing.T) {
 }
 
 // SET IF UNSET applies whole, and only when none of its keys is set (each
-// at the value DELETE gives it); else it changes nothing and says which key
+// at the value RESET gives it); else it changes nothing and says which key
 // was set.
 func TestSetIfUnsetAppliesWhole(t *testing.T) {
 	root := sandboxDefaultRoot(t)
@@ -141,7 +141,7 @@ func TestSetIfUnsetAppliesWhole(t *testing.T) {
 	if out, _ := quotedStmt(t, "ALTER PLAYBOOK iu SET IF UNSET launcher = 'iu2'"); !strings.Contains(out, "launcher is set") {
 		t.Fatalf("launcher '' is set:\n%s", out)
 	}
-	mustStmt(t, "ALTER PLAYBOOK iu DELETE launcher")
+	mustStmt(t, "ALTER PLAYBOOK iu RESET launcher")
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK iu SET IF UNSET launcher = 'iu2'"); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestSetIfUnsetAppliesWhole(t *testing.T) {
 		t.Fatal("SET IF UNSET launcher did not write it")
 	}
 	// A dry run judges by what earlier statements would leave.
-	file := writePlaybookFile(t, "ALTER PLAYBOOK iu DELETE model;\nALTER PLAYBOOK iu SET IF UNSET model = 'y';\nALTER PLAYBOOK iu SET IF UNSET model = 'z';\n")
+	file := writePlaybookFile(t, "ALTER PLAYBOOK iu RESET model;\nALTER PLAYBOOK iu SET IF UNSET model = 'y';\nALTER PLAYBOOK iu SET IF UNSET model = 'z';\n")
 	if out, err := apply(t, file, "--dry-run"); err != nil || !strings.Contains(out, "0 created, 2 changed, 1 unchanged") {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
@@ -187,7 +187,7 @@ func TestApplyRecordDeferredIfUnset(t *testing.T) {
 	}
 }
 
-// DELETE model_picker is the mode: the rows are a collection, which DROP
+// RESET model_picker is the mode: the rows are a collection, which DROP
 // MODEL empties.
 func TestDeleteModelPickerKeepsRows(t *testing.T) {
 	root := sandboxDefaultRoot(t)
@@ -195,7 +195,7 @@ func TestDeleteModelPickerKeepsRows(t *testing.T) {
 	if _, err := quotedStmt(t, "ALTER PLAYBOOK mp ADD MODEL 'glm-5.3' SET model_picker.mode = 'only'"); err != nil {
 		t.Fatal(err)
 	}
-	mustStmt(t, "ALTER PLAYBOOK mp DELETE model_picker")
+	mustStmt(t, "ALTER PLAYBOOK mp RESET model_picker")
 	mp, _ := settingsOf(t, filepath.Join(root, "mp"))["modelPicker"].(map[string]any)
 	if mp == nil || mp["replaceBuiltInOptions"] != nil || len(mp["options"].([]any)) != 1 {
 		t.Fatalf("modelPicker: %v", mp)

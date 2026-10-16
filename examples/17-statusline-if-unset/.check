@@ -14,6 +14,6 @@ if cpb SHOW CREATE PLAYBOOK barred | grep -q 'IF UNSET'; then echo "SHOW CREATE 
 cpb "ALTER PLAYBOOK barred SET model = 'mine'" > /dev/null
 cpb "ALTER PLAYBOOK barred SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'" | grep -q 'model is set; SET IF UNSET changed nothing'
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"] == "mine" and "agent" not in s, s' "$s"
-cpb "ALTER PLAYBOOK barred DELETE model" > /dev/null
+cpb "ALTER PLAYBOOK barred RESET model" > /dev/null
 cpb "ALTER PLAYBOOK barred SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'" > /dev/null
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"] == "claude-opus-5-5" and s["agent"] == "reviewer", s' "$s"

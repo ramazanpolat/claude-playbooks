@@ -31,9 +31,10 @@ func lifecycle(st *grammar.Stmt) bool {
 type createOptions struct {
 	from, branch, subdir, link, alias string
 	noAlias, sandbox, isolatedLogin   bool
-	// memory: the memory property, 'isolated' unless SET says otherwise;
-	// a LINK has none (its settings.json is the target's).
-	memory string
+	// globalInstructions: the global_instructions property, 'excluded'
+	// unless SET says otherwise; a LINK has none (its settings.json is the
+	// target's).
+	globalInstructions string
 }
 
 func createOptionsOf(st *grammar.Stmt) createOptions {
@@ -62,18 +63,18 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 	}
 	login, _ := grammar.PropertyValue(st.Clauses, "login")
 	o.isolatedLogin = login == "isolated"
-	o.memory = grammar.PlaybookPropertyDefault("memory")
-	if v, ok := grammar.PropertyValue(st.Clauses, "memory"); ok {
-		o.memory = v
+	o.globalInstructions = grammar.PlaybookPropertyDefault("global_instructions")
+	if v, ok := grammar.PropertyValue(st.Clauses, "global_instructions"); ok {
+		o.globalInstructions = v
 	}
 	if o.link != "" {
-		o.memory = ""
+		o.globalInstructions = ""
 	}
 	return o
 }
 
 // createPlaybookStatement creates a playbook. CREATE … SET is "create, then
-// ALTER … SET", in one step: the login, the memory, the launcher and
+// ALTER … SET", in one step: the login, the global instructions, the launcher and
 // sandbox.always are written by the creation itself, before the login is
 // linked and the launcher registered; the rest (model, agent, the status
 // line, the other sandbox keys) then by an ALTER of the new playbook, within
@@ -95,7 +96,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		switch c.Kind {
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link,
 			grammar.Launcher, grammar.NoLauncher, grammar.SetProperties:
-			// the creation's own: login and memory are SetProperties
+			// the creation's own: login and global_instructions are SetProperties
 		case grammar.SetSandboxKeys:
 			// always is the creation's (with the isolated login); the other
 			// keys are an ALTER of the new playbook.
@@ -254,11 +255,11 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 				r.dry.launchers[st.Name] = st.Name
 			}
 		}
-		if o.memory == "isolated" && r.dry != nil {
-			// The settings.json CREATE writes, so a later SET memory in the
+		if o.globalInstructions == "excluded" && r.dry != nil {
+			// The settings.json CREATE writes, so a later SET global_instructions in the
 			// same file plans against it.
 			sf := &settings.File{Root: settings.NewObject()}
-			if _, _, err := applyMemory(sf, o.memory); err == nil {
+			if _, _, err := applyGlobalInstructions(sf, o.globalInstructions); err == nil {
 				r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
 			}
 		}
@@ -277,7 +278,7 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case o.from != "":
 		return doInstall(installOpts{name: st.Name, branch: o.branch, subdir: o.subdir,
-			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, memory: o.memory}, []string{o.from})
+			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, globalInstructions: o.globalInstructions}, []string{o.from})
 
 	case o.link != "":
 		if o.sandbox {
@@ -285,7 +286,7 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return doLink(linkOpts{name: st.Name, launcher: o.alias, noLauncher: o.noAlias}, []string{o.link})
 	}
-	return doCreate(createOpts{launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, memory: o.memory}, []string{st.Name})
+	return doCreate(createOpts{launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, globalInstructions: o.globalInstructions}, []string{st.Name})
 }
 
 func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
@@ -324,7 +325,7 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 }
 
 // alterPlaybookLifecycle carries out RENAME TO and the launcher (SET
-// launcher = '<name>', the empty launcher, DELETE launcher). They are not
+// launcher = '<name>', the empty launcher, RESET launcher). They are not
 // combined with other clauses: a rename after an environment write could not
 // be undone as one step, so the statement would not apply whole or not at
 // all.

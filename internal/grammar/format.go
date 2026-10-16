@@ -34,7 +34,7 @@ func (s *Stmt) Pretty() string {
 }
 
 // mergedClauses renders side by side property clauses as one list: the SET
-// pairs of clauses in a row as one SET, their DELETE keys as one DELETE,
+// pairs of clauses in a row as one SET, their RESET keys as one RESET,
 // as written. Each clause stays what it is: the merged clause only renders.
 func mergedClauses(in []Clause) []Clause {
 	var out []Clause
@@ -65,14 +65,14 @@ func mergedClauses(in []Clause) []Clause {
 // parsed, never run.
 const (
 	mergedSet    Kind = "SET <pairs>"
-	mergedDelete Kind = "DELETE <keys>"
+	mergedDelete Kind = "RESET <keys>"
 )
 
-// deleteKeys lists the keys a DELETE clause names, without DELETE: nil for
+// deleteKeys lists the keys a RESET clause names, without RESET: nil for
 // any other clause.
 func (c *Clause) deleteKeys() []string {
 	switch c.Kind {
-	case DeleteProperties:
+	case ResetProperties:
 		var keys []string
 		for _, v := range c.Settings {
 			keys = append(keys, v.Key)
@@ -231,7 +231,7 @@ func (c *Clause) words(varWord bool) []string {
 		for _, g := range c.Group {
 			keys = append(keys, g.deleteKeys()...)
 		}
-		w := []string{"DELETE"}
+		w := []string{"RESET"}
 		for i, k := range keys {
 			if i < len(keys)-1 {
 				k += ","
@@ -300,10 +300,10 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case RenameTo, From, Branch, Subdir, Link:
 		return append(strings.Fields(string(c.Kind)), quoteWord(c.Arg))
-	case DeleteProperties:
-		return append([]string{"DELETE"}, propertyWords(c, false)...)
+	case ResetProperties:
+		return append([]string{"RESET"}, propertyWords(c, false)...)
 	case UnsetSandboxKeys:
-		w := []string{"DELETE"}
+		w := []string{"RESET"}
 		for i, v := range c.Settings {
 			k := "sandbox." + v.Key
 			if i < len(c.Settings)-1 {

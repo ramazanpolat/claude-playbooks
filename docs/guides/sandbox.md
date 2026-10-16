@@ -98,14 +98,14 @@ the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
 ## Manifest block
 
 A playbook describes its sandbox in the `[sandbox]` table of its manifest.
-`SET sandbox.<key> = <value>` writes it key by key, `DELETE sandbox.<key>`
-forgets one and `DELETE sandbox` the whole table, so you never edit the file.
+`SET sandbox.<key> = <value>` writes it key by key, `RESET sandbox.<key>`
+forgets one and `RESET sandbox` the whole table, so you never edit the file.
 A list is `['a', 'b']`; on the command line, quote a statement that holds one,
 since zsh reads `[ ]` as a pattern:
 
 ```bash
 cpb "ALTER PLAYBOOK dev SET sandbox.host = 'me@buildbox', sandbox.mounts = ['~/shared-libs:ro'], sandbox.allow_net = ['internal.corp']"
-cpb ALTER PLAYBOOK dev DELETE sandbox.host
+cpb ALTER PLAYBOOK dev RESET sandbox.host
 cpb SHOW PLAYBOOK dev                 # Sandbox: yes (mounts=~/shared-libs:ro, allow_net=internal.corp)
 ```
 

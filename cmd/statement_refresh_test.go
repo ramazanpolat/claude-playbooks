@@ -10,7 +10,7 @@ import (
 
 // statusline.refresh writes statusLine.refreshInterval; SET statusline
 // without it keeps it (as it keeps padding); statusline.refresh alone needs
-// a status line; DELETE statusline.refresh removes only the interval. SHOW,
+// a status line; RESET statusline.refresh removes only the interval. SHOW,
 // EXPLAIN, SHOW CREATE (round trip) and SELECT show it.
 func TestStatuslineRefresh(t *testing.T) {
 	resetCommandTestState(t)
@@ -77,11 +77,11 @@ func TestStatuslineRefresh(t *testing.T) {
 	if m := sl(); m["refreshInterval"] != float64(30) || m["command"] != "bash other.sh" {
 		t.Fatalf("REFRESH alone: %v", m)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k DELETE statusline.refresh"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k RESET statusline.refresh"); err != nil {
 		t.Fatal(err)
 	}
 	if m := sl(); m["refreshInterval"] != nil || m["command"] != "bash other.sh" || m["padding"] != float64(2) {
-		t.Fatalf("DELETE statusline.refresh: %v", m)
+		t.Fatalf("RESET statusline.refresh: %v", m)
 	}
 }
 

@@ -146,8 +146,8 @@ func (sc *applyScope) narrow(stmts []located) ([]located, error) {
 		}
 		fmt.Println()
 	}
-	// The deferred SET IF UNSET lists first: with a DELETE statusline gone,
-	// a DELETE statusline.refresh beside it stays (Codex, #213).
+	// The deferred SET IF UNSET lists first: with a RESET statusline gone,
+	// a RESET statusline.refresh beside it stays (Codex, #213).
 	if u := undoStatement(sc.only, sc.deferredIfUnset(undoClauses(sc.old, newStmts))); u != nil {
 		keep = append([]located{{file: "undo", path: sc.oldPath, s: u}}, keep...)
 	}

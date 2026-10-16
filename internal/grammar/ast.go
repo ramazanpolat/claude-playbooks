@@ -53,10 +53,10 @@ const (
 	DropEnv     Kind = "DROP ENV"    // DROP ENV a b ...
 	RenameTo    Kind = "RENAME TO"   // RENAME TO n
 	// The launcher property: SET launcher = '<name>', SET launcher = ''
-	// (none), DELETE launcher (back to the playbook's name).
+	// (none), RESET launcher (back to the playbook's name).
 	Launcher        Kind = "SET launcher"
 	NoLauncher      Kind = "SET launcher = ''"
-	DefaultLauncher Kind = "DELETE launcher"
+	DefaultLauncher Kind = "RESET launcher"
 	From            Kind = "FROM"   // CREATE PLAYBOOK ... FROM <source>
 	Branch          Kind = "BRANCH" // CREATE PLAYBOOK ... BRANCH <ref>
 	Subdir          Kind = "SUBDIR" // CREATE PLAYBOOK ... SUBDIR <dir>
@@ -64,20 +64,20 @@ const (
 
 	// Playbook properties (properties.go): CREATE PLAYBOOK ... SET k = 'v',
 	// ... gives the starting values, ALTER PLAYBOOK ... SET k = 'v', ...
-	// changes them, and ALTER PLAYBOOK ... DELETE k, ... puts them back to
-	// the default. Settings holds (Key, Value); DELETE's values are empty.
-	SetProperties    Kind = "SET <key> = <value>"
-	DeleteProperties Kind = "DELETE <key>"
+	// changes them, and ALTER PLAYBOOK ... RESET k, ... puts them back to
+	// the default. Settings holds (Key, Value); RESET's values are empty.
+	SetProperties   Kind = "SET <key> = <value>"
+	ResetProperties Kind = "RESET <key>"
 
 	// The [sandbox] table's keys, the sandbox.<key> properties: SET
 	// sandbox.<key> = <value> (Settings, the value as manifest.Sandbox.SetKey
-	// takes it, a list comma-joined) and DELETE sandbox.<key> (Key only).
+	// takes it, a list comma-joined) and RESET sandbox.<key> (Key only).
 	// always is one key like the others; it changes nothing else.
 	SetSandboxKeys   Kind = "SET sandbox.<key>"
-	UnsetSandboxKeys Kind = "DELETE sandbox.<key>"
+	UnsetSandboxKeys Kind = "RESET sandbox.<key>"
 
-	SetHelper   Kind = "SET secret_helper"    // ALTER DEFAULTS SET secret_helper = '<command>'
-	UnsetHelper Kind = "DELETE secret_helper" // ALTER DEFAULTS DELETE secret_helper
+	SetHelper   Kind = "SET secret_helper"   // ALTER DEFAULTS SET secret_helper = '<command>'
+	UnsetHelper Kind = "RESET secret_helper" // ALTER DEFAULTS RESET secret_helper
 
 	// Plugins and the agent (ALTER PLAYBOOK only): they write the playbook's
 	// settings.json, never the manifest.
@@ -86,7 +86,7 @@ const (
 	AddPlugin       Kind = "ADD PLUGIN"       // ADD PLUGIN p@m
 	DropPlugin      Kind = "DROP PLUGIN"      // DROP PLUGIN p@m
 	SetAgent        Kind = "SET agent"        // SET agent = '<agent>'
-	UnsetAgent      Kind = "DELETE agent"     // DELETE agent
+	UnsetAgent      Kind = "RESET agent"      // RESET agent
 
 	// MCP servers (ALTER PLAYBOOK only): claude mcp add-json / remove.
 	AddMCP  Kind = "ADD MCP SERVER"  // ADD MCP SERVER n COMMAND … | URL …, VAR …, HEADER …
@@ -98,9 +98,9 @@ const (
 	DenyTool        Kind = "DENY TOOL"              // DENY TOOL '<rule>' ...
 	UnsetTool       Kind = "UNSET TOOL"             // UNSET TOOL '<rule>' ...
 	SetStatusline   Kind = "SET statusline.command" // SET statusline.command = '<command>'[, statusline.refresh = <n>]
-	UnsetStatusline Kind = "DELETE statusline"      // DELETE statusline (or statusline.command): the whole status line
+	UnsetStatusline Kind = "RESET statusline"       // RESET statusline (or statusline.command): the whole status line
 	SetModel        Kind = "SET model"              // SET model = '<model>'
-	UnsetModel      Kind = "DELETE model"           // DELETE model
+	UnsetModel      Kind = "RESET model"            // RESET model
 
 	// Skills (ALTER PLAYBOOK only): <config>/skills/<name>.
 	AddSkill  Kind = "ADD SKILL"  // ADD SKILL n FROM <source> [BRANCH <ref>] [SUBDIR <dir>]
@@ -109,19 +109,19 @@ const (
 	// The model picker (v3.22.0): settings.json modelPicker.
 	// The status line's refresh (v3.23.0): statusLine.refreshInterval.
 	SetStatuslineRefresh   Kind = "SET statusline.refresh" // SET statusline.refresh = <n>
-	UnsetStatuslineRefresh Kind = "DELETE statusline.refresh"
+	UnsetStatuslineRefresh Kind = "RESET statusline.refresh"
 	// SetStatuslinePrevious: REVERT STATUSLINE, the status line cpb
 	// replaced last, from its history.
 	SetStatuslinePrevious Kind = "REVERT STATUSLINE"
 
-	AddModel             Kind = "ADD MODEL"                // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
-	DropModel            Kind = "DROP MODEL"               // DROP MODEL '<id>'
-	SetModelPicker       Kind = "SET model_picker.mode"    // SET model_picker.mode = 'only' | 'append' (Arg ONLY or APPEND)
-	UnsetModelPickerMode Kind = "DELETE model_picker.mode" // DELETE model_picker[.mode]: the mode only; DROP MODEL removes rows
+	AddModel             Kind = "ADD MODEL"               // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
+	DropModel            Kind = "DROP MODEL"              // DROP MODEL '<id>'
+	SetModelPicker       Kind = "SET model_picker.mode"   // SET model_picker.mode = 'only' | 'append' (Arg ONLY or APPEND)
+	UnsetModelPickerMode Kind = "RESET model_picker.mode" // RESET model_picker[.mode]: the mode only; DROP MODEL removes rows
 
 	// SetIfUnset: SET IF UNSET k = v, …, whose pairs are the clauses in
 	// Group. It applies whole, and only when none of its keys is set (each
-	// at the value DELETE gives it); else it changes nothing.
+	// at the value RESET gives it); else it changes nothing.
 	SetIfUnset Kind = "SET IF UNSET"
 )
 
@@ -214,8 +214,8 @@ type Clause struct {
 	Plaintext bool // SET ... AS PLAINTEXT: credential-looking literals stored knowingly
 
 	// Settings: the [sandbox] keys of SET sandbox.<key> = <value> (Key,
-	// Value) and DELETE sandbox.<key> (Key only); and the playbook
-	// properties of SET <key> = <value> and DELETE <key> (Key only). Apart
+	// Value) and RESET sandbox.<key> (Key only); and the playbook
+	// properties of SET <key> = <value> and RESET <key> (Key only). Apart
 	// from Vars and Keys, which name variables.
 	Settings []Var
 

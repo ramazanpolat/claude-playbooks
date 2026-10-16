@@ -209,7 +209,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoLauncher})
 	}
 	// The properties SHOW CREATE always writes, so a recipe never leans on
-	// a default: login and memory, and sandbox.always with the table's
+	// a default: login and global_instructions, and sandbox.always with the table's
 	// other set keys (a sandboxed playbook's login is isolated). On the
 	// CREATE, which applies them to a playbook that exists too (CREATE IF
 	// NOT EXISTS converges). A linked playbook's manifest and settings.json
@@ -220,7 +220,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		if v.IsolatedLogin || sandboxed {
 			login = "isolated"
 		}
-		memory, _ := memoryStateOf(pb.Path)
+		global, _ := globalInstructionsStateOf(pb.Path)
 		sandboxSettings := []grammar.Var{{Key: "always", Value: strconv.FormatBool(sandboxed)}}
 		if m != nil && m.Sandbox != nil {
 			for _, kv := range m.Sandbox.Settings() {
@@ -228,7 +228,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			}
 		}
 		st.Clauses = append(st.Clauses,
-			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "memory", Value: memory}}},
+			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}},
 			grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
 	}
 	text := st.Pretty() + ";"

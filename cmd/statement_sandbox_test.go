@@ -69,12 +69,12 @@ func TestSetSandboxForms(t *testing.T) {
 		t.Errorf("EXPLAIN after sandbox.always = false:\n%s", out)
 	}
 
-	mustStmt(t, "ALTER PLAYBOOK p DELETE sandbox.host, sandbox.mounts, sandbox.backend")
+	mustStmt(t, "ALTER PLAYBOOK p RESET sandbox.host, sandbox.mounts, sandbox.backend")
 	if sb := sandboxOf(t, "p"); sb != nil {
-		t.Fatalf("DELETE of every key left %#v", sb)
+		t.Fatalf("RESET of every key left %#v", sb)
 	}
-	if out := mustStmt(t, "ALTER PLAYBOOK p DELETE sandbox"); !strings.Contains(out, "unchanged") {
-		t.Errorf("DELETE sandbox with nothing set: %s", out)
+	if out := mustStmt(t, "ALTER PLAYBOOK p RESET sandbox"); !strings.Contains(out, "unchanged") {
+		t.Errorf("RESET sandbox with nothing set: %s", out)
 	}
 }
 
@@ -126,7 +126,7 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	text := mustStmt(t, "SHOW CREATE PLAYBOOK p")
 	// The properties travel on the CREATE, which converges on a playbook
 	// that exists.
-	if want := "CREATE PLAYBOOK IF NOT EXISTS p\n  SET launcher = '', login = 'isolated', memory = 'isolated', sandbox.always = true, sandbox.backend = 'sbx', sandbox.allow_net = ['api.example.com:443'], sandbox.share_skills = true;"; !strings.Contains(text, want) {
+	if want := "CREATE PLAYBOOK IF NOT EXISTS p\n  SET launcher = '', login = 'isolated', global_instructions = 'excluded', sandbox.always = true, sandbox.backend = 'sbx', sandbox.allow_net = ['api.example.com:443'], sandbox.share_skills = true;"; !strings.Contains(text, want) {
 		t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 	}
 

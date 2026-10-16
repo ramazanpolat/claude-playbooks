@@ -152,7 +152,7 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 	}
 
 	// Without a helper the launch is refused, and claude never runs.
-	mustStmt(t, "ALTER DEFAULTS DELETE secret_helper")
+	mustStmt(t, "ALTER DEFAULTS RESET secret_helper")
 	os.Remove(claudeLog)
 	err := runRun(nil, []string{"router", "--version"})
 	if err == nil || !strings.Contains(err.Error(), "no secret helper configured") || !strings.Contains(err.Error(), "ANTHROPIC_AUTH_TOKEN") {

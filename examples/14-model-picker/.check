@@ -2,7 +2,7 @@ s="$HOME/.claude-playbooks/router-agent/settings.json"
 python3 - "$s" <<'PY'
 import json, sys
 s = json.load(open(sys.argv[1]))
-# only the key the clauses give, beside CREATE's memory setting (claudeMdExcludes)
+# only the key the clauses give, beside CREATE's global_instructions setting (claudeMdExcludes)
 assert list(s) == ["claudeMdExcludes", "modelPicker"], s
 mp = s["modelPicker"]
 assert mp["replaceBuiltInOptions"] is True, mp
@@ -15,10 +15,10 @@ cpb EXPLAIN PLAYBOOK router-agent | grep -q 'Model picker: only: glm-5.3 (GLM 5.
 cpb "ALTER PLAYBOOK router-agent SET model_picker.mode = 'append' DROP MODEL 'glm-5.3-flash'"
 python3 -c 'import json,sys; mp=json.load(open(sys.argv[1]))["modelPicker"]; assert mp["replaceBuiltInOptions"] is False and len(mp["options"])==1, mp' "$s"
 # The mode back to its default (Claude Code appends): the key goes, the rows stay.
-cpb ALTER PLAYBOOK router-agent DELETE model_picker.mode
+cpb ALTER PLAYBOOK router-agent RESET model_picker.mode
 python3 -c 'import json,sys; mp=json.load(open(sys.argv[1]))["modelPicker"]; assert "replaceBuiltInOptions" not in mp and len(mp["options"])==1, mp' "$s"
-# DELETE model_picker is the mode too: the rows are a collection, which DROP
+# RESET model_picker is the mode too: the rows are a collection, which DROP
 # MODEL empties, and a picker left empty goes.
-cpb "ALTER PLAYBOOK router-agent DELETE model_picker" | grep -q unchanged
+cpb "ALTER PLAYBOOK router-agent RESET model_picker" | grep -q unchanged
 cpb "ALTER PLAYBOOK router-agent DROP MODEL 'glm-5.3'"
 python3 -c 'import json,sys; assert "modelPicker" not in json.load(open(sys.argv[1]))' "$s"

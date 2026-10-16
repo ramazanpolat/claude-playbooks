@@ -17,7 +17,7 @@ one slot for it.
   uses it, so applying the recipe to a playbook whose status line you chose
   leaves yours in place.
 - `SET IF UNSET` takes any property, and applies whole or not at all: only
-  when none of the keys it names is set (each at the value `DELETE` gives
+  when none of the keys it names is set (each at the value `RESET` gives
   it). Otherwise it changes nothing and says which key was set:
   `SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'` leaves both
   alone on a playbook that has a model.

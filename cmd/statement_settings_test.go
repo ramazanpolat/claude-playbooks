@@ -52,7 +52,7 @@ func TestToolsStatuslineModel(t *testing.T) {
 		!strings.Contains(out, "Tools: allow Bash(toolkit-helper*); deny Read(*)") {
 		t.Fatalf("EXPLAIN:\n%s", out)
 	}
-	mustStmt(t, "ALTER PLAYBOOK k UNSET TOOL Read(*) DELETE statusline DELETE model")
+	mustStmt(t, "ALTER PLAYBOOK k UNSET TOOL Read(*) RESET statusline RESET model")
 	data, _ = os.ReadFile(filepath.Join(root, "settings.json"))
 	if strings.Contains(string(data), "Read(*)") || strings.Contains(string(data), "statusLine") || strings.Contains(string(data), `"model"`) {
 		t.Fatalf("after UNSET: %s", data)
@@ -64,10 +64,10 @@ func TestSettingsDryRunCarries(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	seedFlatPlaybook(t, "k")
-	// SET model is set again by DELETE model, so it is folded away and the
+	// SET model is set again by RESET model, so it is folded away and the
 	// playbook, which has no model, does not change; IF UNSET sees the
 	// status line the statement before it set in the dry run.
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET model = 'a';\nALTER PLAYBOOK k DELETE model;\nALTER PLAYBOOK k SET statusline.command = 'echo a';\nALTER PLAYBOOK k SET IF UNSET statusline.command = 'echo b';\n")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET model = 'a';\nALTER PLAYBOOK k RESET model;\nALTER PLAYBOOK k SET statusline.command = 'echo a';\nALTER PLAYBOOK k SET IF UNSET statusline.command = 'echo b';\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil || !strings.Contains(out, "0 created, 1 changed, 3 unchanged") {
 		t.Fatalf("dry run: %v\n%s", err, out)
@@ -113,7 +113,7 @@ func TestStatuslineAlwaysAndIfUnset(t *testing.T) {
 	if sl := read(); sl["command"] != "mine" || sl["refreshInterval"] != float64(5) {
 		t.Fatalf("SET statusline did not apply: %v", sl)
 	}
-	mustStmt(t, "ALTER PLAYBOOK k DELETE statusline")
+	mustStmt(t, "ALTER PLAYBOOK k RESET statusline")
 	mustStmt(t, "ALTER PLAYBOOK k SET IF UNSET statusline.command = 'fresh', statusline.refresh = 3")
 	if sl := read(); sl["command"] != "fresh" || sl["refreshInterval"] != float64(3) {
 		t.Fatalf("IF UNSET on an empty slot: %v", sl)

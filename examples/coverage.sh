@@ -23,9 +23,9 @@ while IFS= read -r k; do
     # the property forms take a playbook property's key.
     "SET FROM") re='(^|[^A-Z])SET[[:space:]]+(VAR[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]+FROM([^A-Z]|$)' ;;
     "SET sandbox.<key>") re='(^|[^a-z_.])sandbox\.[a-z_]+[[:space:]]*=' ;;
-    "DELETE sandbox.<key>") re='(^|[^A-Z])DELETE[[:space:]]+sandbox\.[a-z_]+' ;;
+    "RESET sandbox.<key>") re='(^|[^A-Z])RESET[[:space:]]+sandbox\.[a-z_]+' ;;
     "SET <key> = <value>") re='(^|[^A-Z])SET[[:space:]]+[a-z_]+[[:space:]]*=' ;;
-    "DELETE <key>") re='(^|[^A-Z])DELETE[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
+    "RESET <key>") re='(^|[^A-Z])RESET[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
     *) re="(^|[^A-Z])$(printf '%s' "$k" | sed 's/ /[[:space:]]+/g')([^A-Z]|$)" ;;
   esac
   grep -Eq "$re" SPEC.md || { echo "no reference entry: $k"; fail=1; }

@@ -183,13 +183,13 @@ func TestCheckRefusals(t *testing.T) {
 		"ALTER PLAYBOOK USE ENV work;":                                             "your env sets, and your keys",
 		"ALTER PLAYBOOK ADD ENV work;":                                             "your env sets, and your keys",
 		"ALTER PLAYBOOK SET login = 'shared';":                                     "play's decision",
-		"ALTER PLAYBOOK SET memory = 'shared';":                                    "play's decision",
+		"ALTER PLAYBOOK SET global_instructions = 'inherited';":                    "play's decision",
 		"ALTER PLAYBOOK SET IF UNSET login = 'shared', model = 'm';":               "play's decision",
 		"ALTER PLAYBOOK SET IF UNSET launcher = 'x';":                              "play's decision",
-		"ALTER PLAYBOOK DELETE login;":                                             "nothing to undo",
+		"ALTER PLAYBOOK RESET login;":                                              "nothing to undo",
 		"ALTER PLAYBOOK RENAME TO x;":                                              "play's decision",
 		"ALTER PLAYBOOK DROP PLUGIN p@m;":                                          "nothing to undo",
-		"ALTER PLAYBOOK DELETE model;":                                             "nothing to undo",
+		"ALTER PLAYBOOK RESET model;":                                              "nothing to undo",
 		"ALTER PLAYBOOK ADD MARKETPLACE m FROM '/opt/mkt';":                        "points into your filesystem",
 		"ALTER PLAYBOOK ADD MARKETPLACE m FROM './mkt';":                           "points into your filesystem",
 		"ALTER PLAYBOOK ADD SKILL s FROM '~/skills/s';":                            "points into your filesystem",
@@ -216,7 +216,7 @@ func TestCheckRefusals(t *testing.T) {
 	// MAX_THINKING_TOKENS=8000 is not a secret (the grammar's own rule: an
 	// integer, a boolean or empty cannot be one); found on the website's
 	// daily-driver template.
-	ok := "-- title: ok\n\nALTER PLAYBOOK\n  SET model = 'claude-opus-5-5'\n  SET agent = 'reviewer'\n  DENY TOOL 'Bash(git push *)'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(kubectl get *)'\n  SET login = 'isolated', memory = 'isolated'\n  BLOCK VAR AWS_PROFILE\n  SET VAR EDITOR=vi MAX_THINKING_TOKENS=8000 DISABLE_AUTH=true;\n"
+	ok := "-- title: ok\n\nALTER PLAYBOOK\n  SET model = 'claude-opus-5-5'\n  SET agent = 'reviewer'\n  DENY TOOL 'Bash(git push *)'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(kubectl get *)'\n  SET login = 'isolated', global_instructions = 'excluded'\n  BLOCK VAR AWS_PROFILE\n  SET VAR EDITOR=vi MAX_THINKING_TOKENS=8000 DISABLE_AUTH=true;\n"
 	if r := Check([]byte(ok)); len(r.Refused) != 0 || len(r.Risks) != 0 {
 		t.Fatalf("a clean recipe: refused %+v, risks %+v", r.Refused, r.Risks)
 	}

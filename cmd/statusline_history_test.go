@@ -62,7 +62,7 @@ func TestStatuslineHistoryAndPrevious(t *testing.T) {
 		t.Fatalf("PREVIOUS twice: %v", m)
 	}
 	// UNSET is history too; PREVIOUS brings it back.
-	mustQuoted("ALTER PLAYBOOK k DELETE statusline")
+	mustQuoted("ALTER PLAYBOOK k RESET statusline")
 	mustQuoted("ALTER PLAYBOOK k REVERT STATUSLINE")
 	if m := sl(); m["command"] != "bash b.sh" {
 		t.Fatalf("PREVIOUS after UNSET: %v", m)
@@ -72,7 +72,7 @@ func TestStatuslineHistoryAndPrevious(t *testing.T) {
 	}
 	for line, want := range map[string]string{
 		"ALTER PLAYBOOK k REVERT STATUSLINE SET statusline.command = 'x'": "cannot be combined",
-		"ALTER PLAYBOOK k REVERT STATUSLINE DELETE statusline":            "cannot be combined",
+		"ALTER PLAYBOOK k REVERT STATUSLINE RESET statusline":             "cannot be combined",
 	} {
 		if _, err := quotedStmt(t, line); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v", line, err)
