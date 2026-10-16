@@ -124,7 +124,7 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	}
 
 	text := mustStmt(t, "SHOW CREATE PLAYBOOK p")
-	for _, want := range []string{"SET login = 'isolated', memory = 'isolated'\n", "SET SANDBOX\n", "SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true"} {
+	for _, want := range []string{"SET login = 'isolated', global_instructions = 'excluded'\n", "SET SANDBOX\n", "SET SANDBOX backend=sbx allow_net=api.example.com:443 share_skills=true"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 		}

@@ -58,8 +58,9 @@ func pluginClauses(clauses []grammar.Clause) bool {
 			grammar.AddModel, grammar.DropModel, grammar.SetModelPicker, grammar.UnsetModelPicker:
 			return true
 		case grammar.SetProperties, grammar.DeleteProperties:
-			// memory is a key of settings.json; login is the manifest's.
-			if _, ok := grammar.PropertyValue([]grammar.Clause{c}, "memory"); ok {
+			// global_instructions is a key of settings.json; login is the
+			// manifest's.
+			if _, ok := grammar.PropertyValue([]grammar.Clause{c}, "global_instructions"); ok {
 				return true
 			}
 		}
@@ -526,8 +527,8 @@ func applySettings(f *settings.File, clauses []grammar.Clause) ([]string, bool, 
 		case grammar.UnsetAgent:
 			unset(keyAgent, "agent")
 		case grammar.SetProperties, grammar.DeleteProperties:
-			if v, ok := grammar.PropertyValue([]grammar.Clause{c}, "memory"); ok {
-				line, ch, err := applyMemory(f, v)
+			if v, ok := grammar.PropertyValue([]grammar.Clause{c}, "global_instructions"); ok {
+				line, ch, err := applyGlobalInstructions(f, v)
 				if err != nil {
 					return nil, false, err
 				}

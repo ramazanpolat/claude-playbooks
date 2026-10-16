@@ -19,10 +19,11 @@ var playbookPropertyTable = []playbookProperty{
 	// login: shared links the machine's login; isolated shares nothing
 	// (the manifest's isolated_login).
 	{"login", []string{"shared", "isolated"}},
-	// memory: isolated keeps ~/.claude's CLAUDE.md and rules out of the
-	// playbook (claudeMdExcludes in its settings.json); shared loads them,
-	// as Claude Code's ancestor walk does for any directory under $HOME.
-	{"memory", []string{"isolated", "shared"}},
+	// global_instructions: excluded keeps ~/.claude's CLAUDE.md and rules
+	// out of the playbook (claudeMdExcludes in its settings.json); inherited
+	// loads them, as Claude Code's ancestor walk does for any directory
+	// under $HOME.
+	{"global_instructions", []string{"excluded", "inherited"}},
 }
 
 // PlaybookPropertyKeys lists the playbook properties in SHOW CREATE's order.
@@ -182,8 +183,8 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 }
 
 // unquoteArg removes one pair of quotes a command-line word kept: a shell
-// passes memory='shared' through as one word when it is quoted whole
-// ("memory='shared'"). Property values never hold a quote of their own.
+// passes global_instructions='inherited' through as one word when it is quoted whole
+// ("global_instructions='inherited'"). Property values never hold a quote of their own.
 func unquoteArg(v string) string {
 	if len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
 		return v[1 : len(v)-1]
