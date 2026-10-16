@@ -47,6 +47,10 @@ type dryState struct {
 	// slHistory, per config directory key: the status line history as
 	// earlier statements would leave it.
 	slHistory map[string][]slEntry
+
+	// launchers, per playbook: the launcher earlier statements would leave
+	// it (a command name, or "" for none); absent: as on disk.
+	launchers map[string]string
 }
 
 func newDryState() *dryState {
@@ -64,6 +68,7 @@ func newDryState() *dryState {
 		isolated:     map[string]bool{},
 		sandboxed:    map[string]bool{},
 		slHistory:    map[string][]slEntry{},
+		launchers:    map[string]string{},
 	}
 }
 
@@ -118,6 +123,7 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.skillKnown, name)
 		delete(r.dry.isolated, name)
 		delete(r.dry.sandboxed, name)
+		delete(r.dry.launchers, name)
 	}
 }
 

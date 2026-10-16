@@ -45,7 +45,7 @@ func installLauncher(cmdName, playbookName, configDir string) {
 	path, err := launcher.Write(dir, cmdName)
 	if errors.Is(err, launcher.ErrTaken) {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Register a different launcher with: cpb ALTER PLAYBOOK %s LAUNCHER <name> — rename the playbook (and its launcher) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
+		fmt.Fprintf(os.Stderr, "Register a different launcher with: cpb ALTER PLAYBOOK %s SET launcher = <name> — rename the playbook (and its launcher) with: cpb ALTER PLAYBOOK %s RENAME TO <new-name> — or remove the conflicting file.\n", shell.QuoteArg(playbookName), shell.QuoteArg(playbookName))
 		manual()
 		return
 	}
@@ -79,11 +79,12 @@ func defaultPlaybooksRoot() string {
 	return filepath.Join(home, ".claude-playbooks")
 }
 
-// checkLauncherConflict guards every registering statement's LAUNCHER and
-// NO LAUNCHER: given together, the launcher it asks for would be ambiguous.
+// checkLauncherConflict guards every registering statement's launcher and
+// the empty launcher (none): given together, the launcher it asks for would
+// be ambiguous.
 func checkLauncherConflict(launcher string, noLauncher bool) error {
 	if noLauncher && launcher != "" {
-		return fmt.Errorf("NO LAUNCHER and LAUNCHER cannot be used together")
+		return fmt.Errorf("launcher = '' (none) and a launcher name cannot be used together")
 	}
 	return nil
 }
@@ -106,7 +107,7 @@ func resolveLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string
 		name = fallbackName
 	}
 	if err := launcher.ValidateName(name); err != nil {
-		return "", fmt.Errorf("%w (add NO LAUNCHER to %s without a launcher)", err, verb)
+		return "", fmt.Errorf("%w (add SET launcher = '' to %s without a launcher)", err, verb)
 	}
 	return name, nil
 }

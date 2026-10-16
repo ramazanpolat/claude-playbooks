@@ -1,7 +1,7 @@
  cpb   1 Playbooks   2 Sessions   3 Env sets   4 Defaults   5 Log                                                ? help
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 -- playbook.cpb, from: cpb SHOW CREATE PLAYBOOK router --skip-secrets                                                   
-CREATE PLAYBOOK IF NOT EXISTS router LAUNCHER rt;                                                                       
+CREATE PLAYBOOK IF NOT EXISTS router SET launcher = 'rt';                                                               
 ALTER PLAYBOOK router USE ENV proxy SET VAR MY_FLAG=1;                                                                  
 -- OPENAI_API_KEY: a credential literal, skipped (--skip-secrets)                                                       
                                                                                                                         

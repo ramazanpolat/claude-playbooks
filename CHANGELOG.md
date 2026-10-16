@@ -1,5 +1,113 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`CREATE OR ALTER PLAYBOOK … SET …` converges** (SPEC.md, *Grammar*,
+  *Playbook properties*): it creates the playbook, or, on one that exists,
+  applies its `SET` list as `ALTER PLAYBOOK … SET` would (the properties,
+  then the launcher, each only where it differs). `FROM`, `BRANCH`, `SUBDIR`
+  and `LINK` are only compared, and a different source stays a warning.
+  Applied again, it changes nothing. `CREATE PLAYBOOK IF NOT EXISTS` keeps
+  SQL's meaning: on a playbook that exists it changes nothing. `APPLY` folds
+  an `OR ALTER`'s pairs as an `ALTER`'s when the playbook exists before the
+  run, and `SHOW CREATE` writes `CREATE OR ALTER PLAYBOOK` with the launcher,
+  login, global_instructions and sandbox: one converging statement.
+- **`SET IF UNSET` takes any property** and applies whole or not at all:
+  only when none of the keys it names is set (each at the value `RESET`
+  gives it); otherwise it changes nothing and prints `PLAYBOOK x: <key> is
+  set; SET IF UNSET changed nothing`. `APPLY` folds it as one clause.
+- **Property keys are lowercase and exact.** `SET MODEL=glm-5.3`, a variable
+  that lost its `VAR`, used to set the model property from the command
+  line; it is refused now with `a variable is SET VAR MODEL=<value>`.
+- **A list property also takes its items comma-joined**: `sandbox.mounts =
+  ~/libs:ro,~/data` needs no `[ ]`, which zsh reads as a pattern. An item
+  never holds a comma; `SHOW CREATE` writes `['a', 'b']`.
+- **The status line is a table**: `statusline.command` and
+  `statusline.refresh` (were `statusline` and `statusline_refresh`), and
+  `RESET statusline` for both. `SHOW PLAYBOOK --json` and `SELECT` have one
+  `statusline` object, `{command, refresh, history}`, in place of the
+  `statusline`, `statusline_refresh` and `statusline_history` fields.
+- **`RESET model_picker` is the mode**: the rows are a collection, which
+  `DROP MODEL` empties; it used to remove the rows too.
+- **The words of removed clauses are no longer reserved** (`LAUNCHER`, `NO`,
+  `SANDBOX`, `AGENT`, `SECRET`, `HELPER`, `PICKER`, `ONLY`, `APPEND`,
+  `REFRESH`): where a clause starts they still give the hint, and elsewhere a
+  name, a launcher or a value may be one.
+- **Adjacent property clauses render as one list**: `SHOW CREATE` and the
+  plans write `SET a = 1, b = 2` and `RESET a, b`, which parse back to the
+  same clauses.
+
+- **The status line, the model picker's mode and the secret helper are
+  properties** (SPEC.md, *Status line and model*, *Model picker*,
+  *Secrets*): `SET statusline.command = '<command>', statusline.refresh = 10`,
+  `RESET statusline`, `RESET statusline.refresh`; `SET model_picker.mode =
+  'only'`, `RESET model_picker.mode`; `ALTER DEFAULTS SET secret_helper =
+  '<command>'`, `RESET secret_helper`.
+  - `SET IF UNSET statusline.command = …` offers a status line without
+    replacing one; the condition goes right after `SET`.
+  - `REVERT STATUSLINE` puts back the status line cpb replaced last (was
+    `SET STATUSLINE PREVIOUS`).
+  - The old `SET` / `UNSET STATUSLINE [REFRESH]`, `SET STATUSLINE PREVIOUS`,
+    `SET` / `UNSET MODEL PICKER` and `SET` / `UNSET SECRET HELPER` forms are
+    refused with a one-line hint. `ADD` / `DROP MODEL` are unchanged.
+  - **`SHOW DEFAULTS --json` and `SELECT … FROM DEFAULTS`**: `secret_helper`
+    is now the command (a string or null) and `secret_helper_from` says
+    where it is set, in place of the `{command, from}` object.
+  - `examples/coverage.sh` read a clause kind with an underscore as two
+    words; it reads each kind whole now.
+
+- **The sandbox is the `sandbox.<key>` properties** (SPEC.md, *Sandbox*):
+  `SET sandbox.always = true, login = 'isolated'`, `SET sandbox.backend =
+  'sbx', sandbox.mounts = ['~/libs:ro']`, `RESET sandbox.host`, and `RESET
+  sandbox` for the whole table. Values are typed: `true` / `false`, lists as
+  `['a', 'b']` or `'a,b'`, strings.
+  - `sandbox.always` is one key like the others and **no longer isolates the
+    login on its own**: `sandbox.always = true` needs `login = 'isolated'`,
+    already or in the same statement, and is refused otherwise with that
+    fix. `SHOW CREATE` writes both.
+  - `CREATE PLAYBOOK … SANDBOX`, `SET SANDBOX`, `SET SANDBOX <key>=<value>`,
+    `UNSET SANDBOX` and `UNSET SANDBOX <key>` are refused with a one-line
+    hint. A recipe's `create-with: SANDBOX` header is unchanged.
+  - `SHOW CREATE` writes `sandbox.always = …` always, with the table's other
+    set keys, on the `CREATE`.
+
+- **The launcher, the model and the agent are properties** (SPEC.md,
+  *Playbook properties*), beside `login` and `global_instructions`:
+  `CREATE PLAYBOOK x SET launcher = 'w', model = 'claude-opus-5-5'`,
+  `ALTER PLAYBOOK x SET agent = 'reviewer'`, `ALTER PLAYBOOK x RESET
+  launcher, model`.
+  - `launcher = ''` is no launcher; `RESET launcher` puts back the default,
+    the playbook's own name; `launcher = '<its name>'` is that default and
+    records nothing.
+  - `CREATE … SET model = …, agent = …` writes them into the new playbook's
+    `settings.json` in the same statement.
+  - `LAUNCHER <name>`, `NO LAUNCHER`, `SET MODEL '<model>'`, `UNSET MODEL`,
+    `SET AGENT '<agent>'` and `UNSET AGENT` are refused with a one-line hint
+    to the property. `SET MODEL PICKER` and `ADD` / `DROP MODEL` are
+    unchanged.
+  - `SHOW CREATE` writes the launcher in the `CREATE`, the default spelled
+    out (`SET launcher = '<name>'`), and `SET model = …` / `SET agent = …`.
+- **The examples' stand-in claude records plugins in `settings.json`**, as
+  Claude Code does, so `SHOW CREATE` writes their plugin clauses and the
+  upgrade check compares them.
+
+- **A one-word value reads the same quoted or bare**, in a file and on the
+  command line (`login = isolated`); a value with a space or a comma is
+  quoted. Keys are lowercase.
+- **`SHOW CREATE` writes the properties on the playbook's `CREATE`**
+  (`login = …, global_instructions = …`, always), and `SHOW PLAYBOOK` marks
+  the default value `(default)`.
+- **The `[apply]` undo follows `SET IF UNSET`**: what a `SET IF UNSET` list
+  offered is removed only where the playbook still holds the list's values.
+
+### Fixed
+
+- **A comma inside a quoted property value was dropped** when it ended the
+  value (`statusline.command = 'cmd a,b,'` lost its last comma). A comma
+  after the quotes separates the next pair; one inside is the value's own.
+
 ## [v4.0.0-rc3] -- 2026-10-16
 
 ### Upgrading from rc2

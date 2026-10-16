@@ -1,0 +1,14 @@
+# CREATE OR ALTER PLAYBOOK converges: on a playbook that exists it applies
+# its SET list, and applied again it changes nothing. IF NOT EXISTS would
+# leave it as it is.
+f="$HOME/notes.cpb"
+printf "CREATE PLAYBOOK IF NOT EXISTS notes SET launcher = '', global_instructions = 'inherited';\n" > "$f"
+cpb APPLY "$f" | grep -q '0 created, 0 changed, 1 unchanged'
+printf "CREATE OR ALTER PLAYBOOK notes SET launcher = '', global_instructions = 'inherited';\n" > "$f"
+cpb APPLY "$f" | grep -q '0 created, 1 changed, 0 unchanged'
+cpb SHOW PLAYBOOK notes --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["global_instructions"] == "inherited", v'
+cpb APPLY "$f" | grep -q '0 created, 0 changed, 1 unchanged'
+# SHOW CREATE writes the properties on the CREATE: one converging statement.
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^CREATE OR ALTER PLAYBOOK notes$"
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^  SET launcher = '', login = 'shared', global_instructions = 'inherited', sandbox.always = false;"
+rm -f "$f"

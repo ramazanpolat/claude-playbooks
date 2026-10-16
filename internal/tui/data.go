@@ -142,11 +142,13 @@ type Playbook struct {
 		Source string `json:"source"`
 		Mode   string `json:"mode"`
 	} `json:"skills"`
-	Statusline        *string `json:"statusline"`
-	StatuslineRefresh *int    `json:"statusline_refresh"`
-	StatuslineHistory []struct {
-		Command string `json:"command"`
-	} `json:"statusline_history"`
+	Statusline struct {
+		Command *string `json:"command"`
+		Refresh *int    `json:"refresh"`
+		History []struct {
+			Command string `json:"command"`
+		} `json:"history"`
+	} `json:"statusline"`
 	Model       *string `json:"model"`
 	ModelPicker *struct {
 		Mode    string `json:"mode"`
@@ -193,12 +195,12 @@ type EnvSet struct {
 	Default     bool     `json:"default"`
 }
 
+// Defaults is SHOW DEFAULTS --json: its env sets and its property,
+// secret_helper, with where it is set beside it.
 type Defaults struct {
-	Envs         []string `json:"envs"`
-	SecretHelper *struct {
-		Command string `json:"command"`
-		From    string `json:"from"`
-	} `json:"secret_helper"`
+	Envs             []string `json:"envs"`
+	SecretHelper     *string  `json:"secret_helper"`
+	SecretHelperFrom *string  `json:"secret_helper_from"`
 }
 
 type Explain struct {

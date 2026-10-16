@@ -150,7 +150,7 @@ func writeGlobalInstructions(dir, value string) error {
 // global_instructions property.
 func globalInstructionsLine(state, other string) string {
 	if state == "excluded" {
-		return "Global instructions: excluded: ~/.claude's CLAUDE.md and rules are not loaded (SET global_instructions = 'inherited' loads them)"
+		return "Global instructions: excluded (default): ~/.claude's CLAUDE.md and rules are not loaded (SET global_instructions = 'inherited' loads them)"
 	}
 	line := "Global instructions: inherited: ~/.claude's CLAUDE.md and rules load into it (SET global_instructions = 'excluded' keeps them out)"
 	if other != "" {

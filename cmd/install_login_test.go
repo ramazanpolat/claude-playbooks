@@ -109,7 +109,7 @@ func TestInstallNeverCarriesLogin(t *testing.T) {
 	src := filepath.Join(home, "src")
 	writeSource(t, src)
 	var err error
-	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK x NO LAUNCHER FROM '"+src+"'") })
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK x SET launcher = '' FROM '"+src+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestInstallNeverCarriesLogin(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK y NO LAUNCHER FROM 'file://"+repo+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK y SET launcher = '' FROM 'file://"+repo+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestInstallDropsShippedCredentialsLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK z NO LAUNCHER FROM '"+src+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK z SET launcher = '' FROM '"+src+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestLinkSetsAsideCarriedLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK l NO LAUNCHER LINK '"+dir+"'") })
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK l SET launcher = '' LINK '"+dir+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestLinkSetsAsideCarriedLogin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(iso, ".playbook"), []byte("name = \"iso\"\nisolated_login = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK li NO LAUNCHER LINK '"+iso+"'") })
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK li SET launcher = '' LINK '"+iso+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestInstallDropsLinkedStateFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK w NO LAUNCHER FROM '"+src+"'") })
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK w SET launcher = '' FROM '"+src+"'") })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestLinkedForeignCredentialsLinkIsNeverCopied(t *testing.T) {
 			t.Fatal(err)
 		}
 		var err error
-		captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK "+c.name+" NO LAUNCHER LINK '"+dir+"'") })
+		captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK "+c.name+" SET launcher = '' LINK '"+dir+"'") })
 		if err != nil {
 			t.Fatal(err)
 		}

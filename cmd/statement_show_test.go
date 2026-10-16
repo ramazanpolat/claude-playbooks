@@ -292,8 +292,8 @@ func TestShowPlaybookLauncherIsTheCommand(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	mustStmt(t, "CREATE PLAYBOOK writer")
-	mustStmt(t, "CREATE PLAYBOOK sre LAUNCHER ops")
-	mustStmt(t, "CREATE PLAYBOOK quiet NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK sre SET launcher = 'ops'")
+	mustStmt(t, "CREATE PLAYBOOK quiet SET launcher = ''")
 	var rows []struct {
 		Name     string  `json:"name"`
 		Launcher *string `json:"launcher"`
@@ -346,7 +346,7 @@ func TestShowPlaybookLauncherIsTheCommand(t *testing.T) {
 		return v.Launcher
 	}
 	// The default launcher's only record is the link: removed by hand, it is
-	// not a command any more. A recorded LAUNCHER stays reported, as SHOW
+	// not a command any more. A recorded launcher stays reported, as SHOW
 	// CREATE writes it back.
 	if err := os.Remove(filepath.Join(config.LauncherDir, "writer")); err != nil {
 		t.Fatal(err)
@@ -371,7 +371,7 @@ func TestShowPlaybookLauncherIsTheCommand(t *testing.T) {
 	}
 	config.PlaybooksDir = other
 	mustStmt(t, "CREATE PLAYBOOK near")
-	mustStmt(t, "CREATE PLAYBOOK far LAUNCHER faraway")
+	mustStmt(t, "CREATE PLAYBOOK far SET launcher = 'faraway'")
 	if l := launcherOf("near"); l != nil {
 		t.Errorf("a playbook under a custom root: launcher %q, want null", *l)
 	}

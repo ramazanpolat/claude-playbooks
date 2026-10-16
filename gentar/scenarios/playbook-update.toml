@@ -45,7 +45,7 @@ path = "~/.local/bin/cpb"
 
 [[verify.commands]]
 # Create it, then make it updatable: a local source records no [source].
-command = '''cpb CREATE PLAYBOOK pb FROM "$HOME/src" NO LAUNCHER && printf '%s\n' 'name = "pb"' 'version = "1.0.0"' '' '[source]' "repository = \"$HOME/src\"" > "$HOME/.claude-playbooks/pb/.playbook" && echo installed'''
+command = '''cpb CREATE PLAYBOOK pb FROM "$HOME/src" SET launcher = '' && printf '%s\n' 'name = "pb"' 'version = "1.0.0"' '' '[source]' "repository = \"$HOME/src\"" > "$HOME/.claude-playbooks/pb/.playbook" && echo installed'''
 
 [[verify.commands]]
 # A local file the source knows nothing about, and one it DOES ship. Both

@@ -104,6 +104,11 @@ func doInstall(o installOpts, args []string) error {
 	// silently re-route an existing command. The target name joins the
 	// registry even under --no-alias, and an imported manifest's alias
 	// registers without any flag.
+	// launcher = '<its own name>' is the default launcher, nothing to
+	// record, unless the source's manifest names another one to override.
+	if o.launcher == targetName && (mPre == nil || mPre.Launcher == "" || mPre.Launcher == targetName) {
+		o.launcher = ""
+	}
 	effectiveAlias := o.launcher
 	if effectiveAlias == "" && mPre != nil {
 		effectiveAlias = mPre.Launcher
@@ -153,7 +158,7 @@ func doInstall(o installOpts, args []string) error {
 	if !mPre.Sandbox.Empty() {
 		// [sandbox] is install-local too: a published manifest must not be
 		// able to mount host paths or widen the sandbox's network.
-		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: CREATE PLAYBOOK … SANDBOX, or edit the installed manifest\n", manifest.FileName)
+		fmt.Fprintf(os.Stderr, "Note: ignoring the [sandbox] block shipped in the source's %s; sandbox settings are install-local. Set them with: ALTER PLAYBOOK <name> SET sandbox.<key> = …, or edit the installed manifest\n", manifest.FileName)
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}

@@ -40,7 +40,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 	entry := filepath.Join(home, ".claude") + "/**"
 	root := config.ResolvePlaybooksDir()
 
-	mustStmt(t, "CREATE PLAYBOOK m NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK m SET launcher = ''")
 	dir := filepath.Join(root, "m")
 	if got := excludesOf(t, dir); !slices.Equal(got, []string{entry}) {
 		t.Fatalf("a new playbook: claudeMdExcludes %q, want [%s]", got, entry)
@@ -52,7 +52,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 	if err := json.Unmarshal([]byte(mustStmt(t, "SHOW PLAYBOOK m --json")), &v); err != nil || v.Login != "shared" || v.GlobalInstructions != "excluded" {
 		t.Fatalf("SHOW --json: %v %+v", err, v)
 	}
-	if out := mustStmt(t, "SHOW PLAYBOOK m"); !strings.Contains(out, "excluded: ~/.claude's CLAUDE.md and rules are not loaded") {
+	if out := mustStmt(t, "SHOW PLAYBOOK m"); !strings.Contains(out, "excluded (default): ~/.claude's CLAUDE.md and rules are not loaded") {
 		t.Fatalf("SHOW:\n%s", out)
 	}
 	if out := mustStmt(t, "EXPLAIN PLAYBOOK m"); !strings.Contains(out, "Global instructions: excluded") {
@@ -67,7 +67,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK m")
-	if !strings.Contains(created, "ALTER PLAYBOOK m\n  SET login = 'shared', global_instructions = 'excluded';") {
+	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK m\n  SET launcher = '', login = 'shared', global_instructions = 'excluded', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -88,7 +88,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "settings.json")); !strings.Contains(string(data), `"model": "opus"`) {
 		t.Fatalf("settings.json lost a key:\n%s", data)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "SET login = 'shared', global_instructions = 'inherited';") {
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "login = 'shared', global_instructions = 'inherited', sandbox.always = false;") {
 		t.Fatalf("SHOW CREATE of a shared playbook:\n%s", out)
 	}
 	mustStmt(t, "ALTER PLAYBOOK m RESET global_instructions")
@@ -100,7 +100,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 	}
 
 	// The last entry going removes the key.
-	mustStmt(t, "CREATE PLAYBOOK s NO LAUNCHER SET global_instructions=inherited")
+	mustStmt(t, "CREATE PLAYBOOK s SET launcher = '' SET global_instructions=inherited")
 	if got := excludesOf(t, filepath.Join(root, "s")); got != nil {
 		t.Fatalf("SET global_instructions = 'inherited': %q", got)
 	}
@@ -138,7 +138,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 func TestGlobalInstructionsSettingDryRun(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
-	f := writePlaybookFile(t, "CREATE PLAYBOOK d NO LAUNCHER;\nALTER PLAYBOOK d SET global_instructions = 'excluded';\n")
+	f := writePlaybookFile(t, "CREATE PLAYBOOK d SET launcher = '';\nALTER PLAYBOOK d SET global_instructions = 'excluded';\n")
 	out, err := apply(t, f, "--dry-run")
 	if err != nil || !strings.Contains(out, "1 created, 0 changed, 1 unchanged") {
 		t.Fatalf("dry run:\n%v\n%s", err, out)

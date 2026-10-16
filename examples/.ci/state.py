@@ -16,13 +16,10 @@ Left out, each for a reason:
   playbook, so applying it records neither);
 - cpb's .state/ (the status line history): state, not configuration, which
   SHOW CREATE never writes;
-- the stand-in claude's plugin state (.fake-claude/): Claude Code records
-  marketplaces and plugins in settings.json, which is compared and which
-  SHOW CREATE reads, but the stand-in keeps them in files of its own, which
-  SHOW CREATE cannot see;
 - what a launch leaves behind (the stand-in's launch-env).
 An empty settings.json reads as none: a key added and removed again leaves
-"{}" where there was no file.
+"{}" where there was no file. Marketplaces and plugins are compared in
+settings.json, where Claude Code and the stand-in claude record them.
 """
 import hashlib
 import json

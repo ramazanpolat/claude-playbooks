@@ -1,10 +1,10 @@
 -- A token by reference: the file holds where the secret lives, never the
 -- secret. The helper resolves it at launch and hands it to claude only.
-ALTER DEFAULTS SET SECRET HELPER 'cpb-secret-file';
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
 
 CREATE OR REPLACE ENV router
   SET ANTHROPIC_BASE_URL=http://localhost:8080/v1
   SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token';
 
-CREATE PLAYBOOK IF NOT EXISTS routed NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS routed SET launcher = '';
 ALTER PLAYBOOK routed USE ENV router;

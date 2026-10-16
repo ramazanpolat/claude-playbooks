@@ -51,7 +51,7 @@ func TestExplainRoute(t *testing.T) {
 	aliasTestHome(t)
 	clearRouteEnv(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	mustStmt(t, "CREATE PLAYBOOK plain NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK plain SET launcher = ''")
 	stubKeychainProbe(t, auth.KeychainAbsent)
 	r := routeOf(t, "plain")
 	if r.BaseURL != nil || r.Host != nil || r.Egress != "anthropic" || r.Auth != "none" || len(r.Models) != 0 {
@@ -60,8 +60,8 @@ func TestExplainRoute(t *testing.T) {
 
 	// A routed playbook with a key, a model map and a password in its URL.
 	helper, _ := fakeHelper(t)
-	mustStmt(t, "ALTER DEFAULTS SET SECRET HELPER "+helper)
-	mustStmt(t, "CREATE PLAYBOOK routed NO LAUNCHER SET login=isolated")
+	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
+	mustStmt(t, "CREATE PLAYBOOK routed SET launcher = '' SET login=isolated")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_BASE_URL=http://user:s3cr3tpw@127.0.0.1:20128/v1 AS PLAINTEXT")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_AUTH_TOKEN FROM keychain:ok/router-token")
 	mustStmt(t, "ALTER PLAYBOOK routed SET VAR ANTHROPIC_MODEL=glm-5.3 ANTHROPIC_DEFAULT_OPUS_MODEL=evren/glm-5.3 ANTHROPIC_DEFAULT_HAIKU_MODEL=evren/qwen")
@@ -77,7 +77,7 @@ func TestExplainRoute(t *testing.T) {
 	}
 
 	// Anthropic's own endpoint over https is anthropic; a Bedrock switch is not.
-	mustStmt(t, "CREATE PLAYBOOK direct NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK direct SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK direct SET VAR ANTHROPIC_BASE_URL=https://api.anthropic.com")
 	if r := routeOf(t, "direct"); r.Egress != "anthropic" {
 		t.Fatalf("api.anthropic.com: %+v", r)
@@ -89,7 +89,7 @@ func TestExplainRoute(t *testing.T) {
 
 	// The login, as auth status reports it: a Keychain item is oauth-login,
 	// an unanswerable probe is unknown, never none.
-	mustStmt(t, "CREATE PLAYBOOK iso NO LAUNCHER SET login=isolated")
+	mustStmt(t, "CREATE PLAYBOOK iso SET launcher = '' SET login=isolated")
 	stubKeychainProbe(t, auth.KeychainPresent)
 	if r := routeOf(t, "iso"); r.Auth != "oauth-login" {
 		t.Fatalf("a Keychain login: %+v", r)
@@ -113,7 +113,7 @@ func TestExplainRouteInherited(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-inherited-0123456789")
 	t.Setenv("ANTHROPIC_MODEL", "proxy-model")
 	t.Setenv("ANTHROPIC_DEFAULT_SONNET_MODEL", "proxy-sonnet")
-	mustStmt(t, "CREATE PLAYBOOK plain NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK plain SET launcher = ''")
 	out := mustStmt(t, "EXPLAIN PLAYBOOK plain --json")
 	for _, leak := range []string{"sk-inherited", "0123456789", "pw-inherited"} {
 		if strings.Contains(out, leak) {
@@ -127,14 +127,14 @@ func TestExplainRouteInherited(t *testing.T) {
 	}
 
 	// Blocked by the playbook: the launch removes them, so the route is Anthropic's.
-	mustStmt(t, "CREATE PLAYBOOK guarded NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK guarded SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK guarded BLOCK VAR ANTHROPIC_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL")
 	if r := routeOf(t, "guarded"); r.BaseURL != nil || r.Egress != "anthropic" || r.Auth != "none" || len(r.Models) != 0 {
 		t.Fatalf("blocked inherited variables: %+v", r)
 	}
 
 	// Set by a layer: the layer's value wins over the inherited one.
-	mustStmt(t, "CREATE PLAYBOOK direct NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK direct SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK direct SET VAR ANTHROPIC_BASE_URL=https://api.anthropic.com")
 	if r := routeOf(t, "direct"); r.Host == nil || *r.Host != "api.anthropic.com" || r.Egress != "anthropic" {
 		t.Fatalf("a layer over an inherited base URL: %+v", r)
@@ -144,7 +144,7 @@ func TestExplainRouteInherited(t *testing.T) {
 	// an isolated launch removes it, so it does not make the route token-set.
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "inherited-oauth-token")
-	mustStmt(t, "CREATE PLAYBOOK iso NO LAUNCHER SET login=isolated")
+	mustStmt(t, "CREATE PLAYBOOK iso SET launcher = '' SET login=isolated")
 	if r := routeOf(t, "iso"); r.Auth != "none" {
 		t.Fatalf("an isolated launch strips the inherited OAuth token: %+v", r)
 	}

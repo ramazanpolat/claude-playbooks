@@ -24,7 +24,7 @@ steps = [
 # ('excluded'). Both launch from a directory under $HOME, where Claude Code's
 # ancestor walk meets ~/.claude. The requests go to a stub API on loopback
 # that records them and answers 400: no real request, and the key is a dummy.
-command = '''mkdir -p "$HOME/.claude" "$HOME/work" && printf 'MARKER-MACHINE-INSTRUCTIONS-7Q\n' > "$HOME/.claude/CLAUDE.md" && cpb CREATE PLAYBOOK gi-excluded NO LAUNCHER >/dev/null && cpb CREATE PLAYBOOK gi-inherited NO LAUNCHER SET global_instructions=inherited >/dev/null || { echo setup-failed; exit 1; }
+command = '''mkdir -p "$HOME/.claude" "$HOME/work" && printf 'MARKER-MACHINE-INSTRUCTIONS-7Q\n' > "$HOME/.claude/CLAUDE.md" && cpb CREATE PLAYBOOK gi-excluded SET launcher = '' >/dev/null && cpb CREATE PLAYBOOK gi-inherited SET launcher = '' SET global_instructions=inherited >/dev/null || { echo setup-failed; exit 1; }
 cat > "$HOME/stub.py" <<'EOF'
 import http.server, os, sys
 out = sys.argv[1]
