@@ -21,8 +21,8 @@ preparing a release, read [Before any release](#before-any-release) first.
   those need a person.
 - **A playbook for a non-Anthropic route, or a throwaway,** is created
   `CREATE PLAYBOOK <name> SET login = 'isolated'`. Without it, a
-  `/login` in it writes through to the machine's login. Keep its `memory`
-  setting `'isolated'` (the default): `~/.claude`'s `CLAUDE.md` then stays out. Its CLAUDE.md goes to
+  `/login` in it writes through to the machine's login. Keep its `global_instructions`
+  setting `'excluded'` (the default): `~/.claude`'s `CLAUDE.md` then stays out. Its CLAUDE.md goes to
   that provider with every request: never add imports to it, and if an
   existing playbook's CLAUDE.md imports files, report it to the human rather
   than editing it yourself.

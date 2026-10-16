@@ -1,10 +1,10 @@
-# claude-playbooks own-arena suite: the memory property through the real
+# claude-playbooks own-arena suite: the global_instructions property through the real
 # claude (v4.0.0-rc3). Bench only: whether ~/.claude/CLAUDE.md reaches a
 # request is Claude Code's own behaviour, which the dry-run's stub claude
 # cannot show.
 
 [scenario]
-name = "memory-isolation"
+name = "global-instructions"
 subject = "claude-playbooks"
 agent = "shell"
 template = "gentar-bench-v1"
@@ -18,13 +18,13 @@ steps = [
 
 
 [[verify.commands]]
-# The memory property, end to end through the real claude (v4.0.0-rc3): a
+# The global_instructions property, end to end through the real claude (v4.0.0-rc3): a
 # marker in ~/.claude/CLAUDE.md reaches a launch of a playbook made with
-# SET memory = 'shared' and never one made with the default
-# ('isolated'). Both launch from a directory under $HOME, where Claude Code's
+# SET global_instructions = 'inherited' and never one made with the default
+# ('excluded'). Both launch from a directory under $HOME, where Claude Code's
 # ancestor walk meets ~/.claude. The requests go to a stub API on loopback
 # that records them and answers 400: no real request, and the key is a dummy.
-command = '''mkdir -p "$HOME/.claude" "$HOME/work" && printf 'MARKER-MACHINE-MEMORY-7Q\n' > "$HOME/.claude/CLAUDE.md" && cpb CREATE PLAYBOOK mem-iso NO LAUNCHER >/dev/null && cpb CREATE PLAYBOOK mem-shared NO LAUNCHER SET memory=shared >/dev/null || { echo setup-failed; exit 1; }
+command = '''mkdir -p "$HOME/.claude" "$HOME/work" && printf 'MARKER-MACHINE-INSTRUCTIONS-7Q\n' > "$HOME/.claude/CLAUDE.md" && cpb CREATE PLAYBOOK gi-excluded NO LAUNCHER >/dev/null && cpb CREATE PLAYBOOK gi-inherited NO LAUNCHER SET global_instructions=inherited >/dev/null || { echo setup-failed; exit 1; }
 cat > "$HOME/stub.py" <<'EOF'
 import http.server, os, sys
 out = sys.argv[1]
@@ -50,11 +50,11 @@ python3 -u "$HOME/stub.py" "$HOME/req" > "$HOME/stub.port" 2>&1 & pid=$!
 trap 'kill $pid 2>/dev/null' EXIT
 i=0; while ! grep -qE '^[0-9]+$' "$HOME/stub.port" && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done
 port=$(head -1 "$HOME/stub.port")
-for pb in mem-iso mem-shared; do
+for pb in gi-excluded gi-inherited; do
   rm -f "$HOME"/req/*
   (cd "$HOME/work" && ANTHROPIC_BASE_URL="http://127.0.0.1:$port" ANTHROPIC_API_KEY=sk-arena-dummy-not-a-key CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 timeout 120 cpb run $pb -p hi < /dev/null > /dev/null 2>&1)
   ls "$HOME/req" | grep -q . || { echo "no-request-from-$pb"; exit 1; }
-  if grep -rqF MARKER-MACHINE-MEMORY-7Q "$HOME/req"; then echo "$pb:loaded"; else echo "$pb:absent"; fi
-done > "$HOME/mem.out"
-grep -qx 'mem-iso:absent' "$HOME/mem.out" && grep -qx 'mem-shared:loaded' "$HOME/mem.out" && echo memory-setting-ok || cat "$HOME/mem.out"'''
-contains = "memory-setting-ok"
+  if grep -rqF MARKER-MACHINE-INSTRUCTIONS-7Q "$HOME/req"; then echo "$pb:loaded"; else echo "$pb:absent"; fi
+done > "$HOME/gi.out"
+grep -qx 'gi-excluded:absent' "$HOME/gi.out" && grep -qx 'gi-inherited:loaded' "$HOME/gi.out" && echo global-instructions-ok || cat "$HOME/gi.out"'''
+contains = "global-instructions-ok"

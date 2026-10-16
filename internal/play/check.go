@@ -137,11 +137,15 @@ func (r *Result) clause(c grammar.Clause) {
 		grammar.DenyTool, grammar.SetStatuslineRefresh, grammar.BlockVar, grammar.NoLauncher:
 		// configuration only
 	case grammar.SetProperties:
-		// A recipe may isolate more, never less: the login and the memory
-		// of ~/.claude stay apart unless play itself shares them.
+		// A recipe may isolate more, never less: the login and ~/.claude's
+		// instructions stay apart unless play itself lets them in.
 		for _, v := range c.Settings {
-			if v.Value == "shared" {
+			switch v.Value {
+			case "shared":
 				r.refuse(line, "SET "+v.Key+" = 'shared'", "sharing the "+v.Key+" is play's decision, not the recipe's")
+				return
+			case "inherited":
+				r.refuse(line, "SET "+v.Key+" = 'inherited'", "letting ~/.claude's CLAUDE.md and rules in is play's decision, not the recipe's")
 				return
 			}
 		}

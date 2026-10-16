@@ -274,7 +274,7 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
 	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
 	// existing playbook too, where CREATE IF NOT EXISTS would not. The
-	// properties travel the same way, as SET login = …, memory = …: both
+	// properties travel the same way, as SET login = …, global_instructions = …: both
 	// always, so a recipe never leans on a default (a sandboxed playbook's
 	// login is isolated). A linked playbook's manifest and settings.json
 	// are the target's.
@@ -309,8 +309,8 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		login = "isolated"
 	}
 	set := grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}}}
-	memory, _ := memoryStateOf(pb.Path)
-	set.Settings = append(set.Settings, grammar.Var{Key: "memory", Value: memory})
+	global, _ := globalInstructionsStateOf(pb.Path)
+	set.Settings = append(set.Settings, grammar.Var{Key: "global_instructions", Value: global})
 	alter.Clauses = append(alter.Clauses, set)
 	if sandboxed {
 		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})

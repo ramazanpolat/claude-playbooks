@@ -31,9 +31,10 @@ func lifecycle(st *grammar.Stmt) bool {
 type createOptions struct {
 	from, branch, subdir, link, alias string
 	noAlias, sandbox, isolatedLogin   bool
-	// memory: the memory property, 'isolated' unless SET says otherwise;
-	// a LINK has none (its settings.json is the target's).
-	memory string
+	// globalInstructions: the global_instructions property, 'excluded'
+	// unless SET says otherwise; a LINK has none (its settings.json is the
+	// target's).
+	globalInstructions string
 }
 
 func createOptionsOf(st *grammar.Stmt) createOptions {
@@ -58,12 +59,12 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 	}
 	login, _ := grammar.PropertyValue(st.Clauses, "login")
 	o.isolatedLogin = login == "isolated"
-	o.memory = grammar.PlaybookPropertyDefault("memory")
-	if v, ok := grammar.PropertyValue(st.Clauses, "memory"); ok {
-		o.memory = v
+	o.globalInstructions = grammar.PlaybookPropertyDefault("global_instructions")
+	if v, ok := grammar.PropertyValue(st.Clauses, "global_instructions"); ok {
+		o.globalInstructions = v
 	}
 	if o.link != "" {
-		o.memory = ""
+		o.globalInstructions = ""
 	}
 	return o
 }
@@ -111,11 +112,11 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		r.recordPlaybook(st.Name, true)
 		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
-		if o.memory == "isolated" && r.dry != nil {
-			// The settings.json CREATE writes, so a later SET memory in the
-			// same file plans against it.
+		if o.globalInstructions == "excluded" && r.dry != nil {
+			// The settings.json CREATE writes, so a later SET
+			// global_instructions in the same file plans against it.
 			sf := &settings.File{Root: settings.NewObject()}
-			if _, _, err := applyMemory(sf, o.memory); err == nil {
+			if _, _, err := applyGlobalInstructions(sf, o.globalInstructions); err == nil {
 				r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
 			}
 		}
@@ -134,7 +135,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case o.from != "":
 		return doInstall(installOpts{name: st.Name, branch: o.branch, subdir: o.subdir,
-			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, memory: o.memory}, []string{o.from})
+			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, globalInstructions: o.globalInstructions}, []string{o.from})
 
 	case o.link != "":
 		if o.sandbox {
@@ -142,7 +143,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return doLink(linkOpts{name: st.Name, launcher: o.alias, noLauncher: o.noAlias}, []string{o.link})
 	}
-	return doCreate(createOpts{launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, memory: o.memory}, []string{st.Name})
+	return doCreate(createOpts{launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, globalInstructions: o.globalInstructions}, []string{st.Name})
 }
 
 func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {

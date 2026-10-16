@@ -2,7 +2,7 @@ s="$HOME/.claude-playbooks/router-agent/settings.json"
 python3 - "$s" <<'PY'
 import json, sys
 s = json.load(open(sys.argv[1]))
-# only the key the clauses give, beside CREATE's memory setting (claudeMdExcludes)
+# only the key the clauses give, beside CREATE's global_instructions setting (claudeMdExcludes)
 assert list(s) == ["claudeMdExcludes", "modelPicker"], s
 mp = s["modelPicker"]
 assert mp["replaceBuiltInOptions"] is True, mp

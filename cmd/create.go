@@ -18,9 +18,9 @@ type createOpts struct {
 	noLauncher    bool
 	sandbox       bool
 	isolatedLogin bool // isolated_login = true without a sandbox
-	// memory: 'isolated' writes the claudeMdExcludes entry that keeps
-	// ~/.claude's CLAUDE.md and rules out; 'shared' and "" write nothing.
-	memory string
+	// globalInstructions: 'excluded' writes the claudeMdExcludes entry that keeps
+	// ~/.claude's CLAUDE.md and rules out; 'inherited' and "" write nothing.
+	globalInstructions string
 }
 
 func doCreate(o createOpts, args []string) error {
@@ -94,10 +94,10 @@ func doCreate(o createOpts, args []string) error {
 		}
 	}
 
-	if o.memory == "isolated" {
-		if err := writeMemory(dest, o.memory); err != nil {
+	if o.globalInstructions == "excluded" {
+		if err := writeGlobalInstructions(dest, o.globalInstructions); err != nil {
 			os.RemoveAll(dest)
-			return fmt.Errorf("cannot record the memory setting in settings.json: %w", err)
+			return fmt.Errorf("cannot record the global_instructions setting in settings.json: %w", err)
 		}
 	}
 

@@ -423,8 +423,8 @@ func clauseUndo(c grammar.Clause) []undoItem {
 		}
 		return out
 	}
-	// SET login / memory (the login and the memory isolated; the login a
-	// SET SANDBOX isolates) and NO LAUNCHER: a property is never relaxed by
+	// SET login / global_instructions (the login isolated and the global
+	// instructions excluded; the login a SET SANDBOX isolates) and NO LAUNCHER: a property is never relaxed by
 	// an update, and the launcher is play's.
 	return nil
 }
