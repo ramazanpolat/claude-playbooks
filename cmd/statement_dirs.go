@@ -54,11 +54,11 @@ func validateDirClauses(st *grammar.Stmt) error {
 		if why, refused := dirRefusals[c.Kind]; refused {
 			return fmt.Errorf("%s cannot apply to %s: %s", c.Kind, dir, why)
 		}
-		if c.Kind == grammar.SetProperties || c.Kind == grammar.DeleteProperties {
+		if c.Kind == grammar.SetProperties || c.Kind == grammar.ResetProperties {
 			if _, ok := grammar.PropertyValue([]grammar.Clause{c}, "login"); ok {
 				verb := "SET"
-				if c.Kind == grammar.DeleteProperties {
-					verb = "DELETE"
+				if c.Kind == grammar.ResetProperties {
+					verb = "RESET"
 				}
 				return fmt.Errorf("%s login cannot apply to %s: the login is recorded in a playbook's manifest, which the directory does not have", verb, dir)
 			}

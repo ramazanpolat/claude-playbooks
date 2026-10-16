@@ -149,9 +149,9 @@ func (r *Result) clause(c grammar.Clause) {
 				return
 			}
 		}
-	case grammar.DeleteProperties:
-		// A new playbook already has every default; DELETE only undoes.
-		r.refuse(line, "DELETE "+c.Settings[0].Key, "nothing to undo on a new playbook")
+	case grammar.ResetProperties:
+		// A new playbook already has every default; RESET only undoes.
+		r.refuse(line, "RESET "+c.Settings[0].Key, "nothing to undo on a new playbook")
 		return
 	case grammar.AllowTool:
 		for _, rule := range c.Names {

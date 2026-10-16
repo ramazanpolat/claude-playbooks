@@ -177,7 +177,7 @@ pb-clause  := set-clause
             | SET STATUSLINE REFRESH <n> | UNSET STATUSLINE REFRESH
             | SET STATUSLINE PREVIOUS      the status line cpb replaced last
             | SET property, ...            change properties; see "Playbook properties"
-            | DELETE <key>, ...            back to the default
+            | RESET <key>, ...             back to the default
             | SET SANDBOX | UNSET SANDBOX  every launch sandboxed (the login isolated too) | not; see "Sandbox"
             | SET SANDBOX <key>=<value> ...   the [sandbox] table's own keys: SET SANDBOX backend=sbx
             | UNSET SANDBOX <key> ...      forget a setting: UNSET SANDBOX host
@@ -271,8 +271,8 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … SET / UNSET STATUSLINE`, `SET / UNSET MODEL` | the playbook's `settings.json`, `statusLine` / `model` |
 | `ALTER PLAYBOOK … ADD / DROP SKILL` | `<playbook>/skills/<name>` (a link or a copy) and the manifest's `[skills.<name>]` record |
 | `ALTER PLAYBOOK … SET / UNSET SANDBOX` | the playbook's `.playbook`, `[sandbox]` (bare `SET SANDBOX` also `isolated_login = true`) |
-| `ALTER PLAYBOOK … SET login` / `DELETE login` | the playbook's `.playbook`, `isolated_login` |
-| `ALTER PLAYBOOK … SET global_instructions` / `DELETE global_instructions` | the playbook's `settings.json`, one `claudeMdExcludes` entry |
+| `ALTER PLAYBOOK … SET login` / `RESET login` | the playbook's `.playbook`, `isolated_login` |
+| `ALTER PLAYBOOK … SET global_instructions` / `RESET global_instructions` | the playbook's `settings.json`, one `claudeMdExcludes` entry |
 
 A key lives in exactly one of `set`, `refs`, `block` within a layer; writing
 it to one removes it from the others.
@@ -551,14 +551,14 @@ Linked playbooks: the manifest is the LINK TARGET's shared state, so mutations a
 
 A property is a value the playbook keeps that can change after it is
 created. Properties are `key = 'value'` pairs: `CREATE PLAYBOOK … SET` gives
-the starting values, `ALTER PLAYBOOK … SET` changes them, and `DELETE`
+the starting values, `ALTER PLAYBOOK … SET` changes them, and `RESET`
 puts a key back to its default. What is fixed at creation (`FROM`,
 `BRANCH`, `SUBDIR`, `LINK`) stays a keyword clause of `CREATE`.
 
 ```
 CREATE PLAYBOOK <name> … SET login = 'isolated', global_instructions = 'inherited'
 ALTER PLAYBOOK <name> SET global_instructions = 'excluded'
-ALTER PLAYBOOK <name> DELETE login, global_instructions   -- back to the defaults
+ALTER PLAYBOOK <name> RESET login, global_instructions   -- back to the defaults
 ```
 
 | Key | Values (default first) | What it is |
@@ -574,10 +574,10 @@ ALTER PLAYBOOK <name> DELETE login, global_instructions   -- back to the default
   `cpb ALTER PLAYBOOK x SET login = isolated` works. Keys match in any case.
   A key or value outside the table is refused with the allowed ones; a key
   shaped like a variable gets `a variable is SET VAR <KEY>=<value>`.
-- **One statement names a key once.** `SET` and `DELETE` may appear
-  together and more than once (`SET login = 'isolated' DELETE global_instructions`), each
+- **One statement names a key once.** `SET` and `RESET` may appear
+  together and more than once (`SET login = 'isolated' RESET global_instructions`), each
   key in one of them.
-- **Defaults.** `DELETE` restores the default, and is for `ALTER` only. A
+- **Defaults.** `RESET` restores the default, and is for `ALTER` only. A
   new playbook gets every default its `SET` does not name, so a new
   playbook's global instructions are excluded. An existing playbook keeps what it has:
   nothing is migrated. `CREATE PLAYBOOK IF NOT EXISTS` on a playbook that
@@ -593,9 +593,9 @@ ALTER PLAYBOOK <name> DELETE login, global_instructions   -- back to the default
   Applying it again changes nothing.
 - **Refusals.** `SET` does not apply to `LINK`, where the manifest and
   `settings.json` are the target's. `SANDBOX` and `SET SANDBOX` do not
-  combine with `login = 'shared'` (nor with `DELETE login`).
-- **Words.** `DELETE` is a reserved word. The keys and the values are read
-  only after `SET` and `DELETE` and are not.
+  combine with `login = 'shared'` (nor with `RESET login`).
+- **Words.** `RESET` is a reserved word. The keys and the values are read
+  only after `SET` and `RESET` and are not.
 - **Removed.** `ISOLATED LOGIN` (v4.0.0-rc1 and rc2) is gone: `CREATE
   PLAYBOOK … ISOLATED LOGIN` and `SET ISOLATED LOGIN` are `SET login =
   'isolated'`, and `UNSET ISOLATED LOGIN` is `SET login = 'shared'`. The old
@@ -1734,7 +1734,7 @@ drops only the replaced entries.
 | the model; the agent | `SET` / `UNSET MODEL`; `SET` / `UNSET AGENT` |
 | the status line; its refresh | `SET STATUSLINE '<command>'` (not `IF UNSET`), `UNSET STATUSLINE`; `SET` / `UNSET STATUSLINE REFRESH`, and `REFRESH` on `SET STATUSLINE` |
 | a sandbox setting `k` | `SET SANDBOX k=…`, `UNSET SANDBOX k` |
-| a property `k` (`login`, `global_instructions`) | `SET k = …`, `DELETE k` in an `ALTER`; a `CREATE`'s starting values are never dropped |
+| a property `k` (`login`, `global_instructions`) | `SET k = …`, `RESET k` in an `ALTER`; a `CREATE`'s starting values are never dropped |
 | the env sets | `USE ENV` |
 
 - **A clause that depends on what it finds** replaces nothing: `SET
@@ -2010,7 +2010,7 @@ Refused, each with its reason:
   layered by the launcher.
 - `RENAME TO`, `LAUNCHER`, `NO LAUNCHER`, `SANDBOX`: the directory is not in the
   registry and has no launcher.
-- `SET login` / `DELETE login`: `isolated_login` is recorded in a
+- `SET login` / `RESET login`: `isolated_login` is recorded in a
   playbook's manifest, which the directory does not have. `global_instructions` applies:
   it is a key of the directory's `settings.json` (never `~/.claude` itself).
 
@@ -2318,7 +2318,7 @@ Refused, each with its line and reason:
   `http://` or `file://`;
 - **`SET login = 'shared'`, `SET global_instructions = 'inherited'`, `RENAME TO`, `LAUNCHER`, `NO LAUNCHER`:** play
   decides these; a recipe may isolate more, never less;
-- **`DROP …`, `UNSET …` and `DELETE …`:** nothing to undo on a new playbook.
+- **`DROP …`, `UNSET …` and `RESET …`:** nothing to undo on a new playbook.
 
 **Risks.** The preview marks each risky clause with a code. The codes are a
 closed set: `runs_program`, `third_party_code`, `sends_data`,

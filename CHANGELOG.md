@@ -8,7 +8,7 @@
   after a playbook is created is a `key = 'value'` pair.
   `CREATE PLAYBOOK … SET login = 'isolated', global_instructions = 'inherited'`
   gives the starting values, `ALTER PLAYBOOK … SET …` changes them, and
-  `ALTER PLAYBOOK … DELETE login, global_instructions` puts them back to the
+  `ALTER PLAYBOOK … RESET login, global_instructions` puts them back to the
   default.
   What is fixed at creation (`FROM`, `BRANCH`, `SUBDIR`, `LINK`) stays a
   keyword clause of `CREATE`. Two properties for now:

@@ -48,26 +48,26 @@ func TestParsePlaybookProperties(t *testing.T) {
 	if err != nil || st.Clauses[0].Settings[0].Value != "inherited" {
 		t.Fatalf("global_instructions='inherited' as one argv word: %v %+v", err, st)
 	}
-	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x DELETE global_instructions, login"))
+	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x RESET global_instructions, login"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := st.Clauses[0]; c.Kind != DeleteProperties || len(c.Settings) != 2 || c.Settings[0].Key != "global_instructions" || c.Settings[1].Key != "login" {
-		t.Errorf("DELETE: %+v", c)
+	if c := st.Clauses[0]; c.Kind != ResetProperties || len(c.Settings) != 2 || c.Settings[0].Key != "global_instructions" || c.Settings[1].Key != "login" {
+		t.Errorf("RESET: %+v", c)
 	}
-	// SET and DELETE together, and the old clauses beside them.
-	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x SET login = isolated DELETE global_instructions SET MODEL m"))
+	// SET and RESET together, and the old clauses beside them.
+	st, err = ParseArgs(strings.Fields("ALTER PLAYBOOK x SET login = isolated RESET global_instructions SET MODEL m"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k := []Kind{st.Clauses[0].Kind, st.Clauses[1].Kind, st.Clauses[2].Kind}; !reflect.DeepEqual(k, []Kind{SetProperties, DeleteProperties, SetModel}) {
+	if k := []Kind{st.Clauses[0].Kind, st.Clauses[1].Kind, st.Clauses[2].Kind}; !reflect.DeepEqual(k, []Kind{SetProperties, ResetProperties, SetModel}) {
 		t.Errorf("clauses: %v", k)
 	}
 	if v, ok := PropertyValue(st.Clauses, "global_instructions"); !ok || v != "excluded" {
-		t.Errorf("DELETE global_instructions gives the default: %q %v", v, ok)
+		t.Errorf("RESET global_instructions gives the default: %q %v", v, ok)
 	}
-	// A recipe: ALTER PLAYBOOK with no name takes SET and DELETE first.
-	for _, src := range []string{"ALTER PLAYBOOK SET global_instructions = 'inherited';", "ALTER PLAYBOOK DELETE global_instructions;"} {
+	// A recipe: ALTER PLAYBOOK with no name takes SET and RESET first.
+	for _, src := range []string{"ALTER PLAYBOOK SET global_instructions = 'inherited';", "ALTER PLAYBOOK RESET global_instructions;"} {
 		st, err := ParseFile(src)
 		if err != nil || st[0].Name != "" {
 			t.Errorf("%s: %v %+v", src, err, st)
@@ -80,8 +80,8 @@ func TestFormatPlaybookProperties(t *testing.T) {
 	for src, canon := range map[string]string{
 		"CREATE PLAYBOOK x NO LAUNCHER SET login='isolated' global_instructions='inherited'": "CREATE PLAYBOOK x NO LAUNCHER SET login = 'isolated', global_instructions = 'inherited'",
 		"ALTER PLAYBOOK x SET global_instructions = 'excluded'":                              "ALTER PLAYBOOK x SET global_instructions = 'excluded'",
-		"ALTER PLAYBOOK x DELETE login, global_instructions":                                 "ALTER PLAYBOOK x DELETE login, global_instructions",
-		"ALTER PLAYBOOK x DELETE login global_instructions":                                  "ALTER PLAYBOOK x DELETE login, global_instructions",
+		"ALTER PLAYBOOK x RESET login, global_instructions":                                  "ALTER PLAYBOOK x RESET login, global_instructions",
+		"ALTER PLAYBOOK x RESET login global_instructions":                                   "ALTER PLAYBOOK x RESET login, global_instructions",
 	} {
 		st, err := ParseLine(src)
 		if err != nil {
@@ -118,13 +118,13 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 		"CREATE PLAYBOOK x SET global_instructions = 'sealed';":                                     "global_instructions takes 'excluded' or 'inherited'",
 		"CREATE PLAYBOOK x SET global_instructions;":                                                "SET takes <key> = '<value>'",
 		"CREATE PLAYBOOK x SET global_instructions = ;":                                             "needs a value",
-		"CREATE PLAYBOOK x DELETE global_instructions;":                                             "DELETE is for ALTER PLAYBOOK",
+		"CREATE PLAYBOOK x RESET global_instructions;":                                              "RESET is for ALTER PLAYBOOK",
 		"ALTER PLAYBOOK x SET;":                                                                     "SET inside ALTER PLAYBOOK takes VAR, AGENT, STATUSLINE, MODEL, SANDBOX or properties",
 		"ALTER PLAYBOOK x SET global_instructions = 'inherited', global_instructions = 'excluded';": "global_instructions is named twice in one statement",
-		"ALTER PLAYBOOK x SET global_instructions = 'inherited' DELETE global_instructions;":        "global_instructions is named twice in one statement",
+		"ALTER PLAYBOOK x SET global_instructions = 'inherited' RESET global_instructions;":         "global_instructions is named twice in one statement",
 		"ALTER PLAYBOOK x SET login = 'shared' SET login = 'isolated';":                             "login is named twice in one statement",
-		"ALTER PLAYBOOK x DELETE;":                                                                  "DELETE takes <key> (login, global_instructions)",
-		"ALTER PLAYBOOK x DELETE colour;":                                                           "colour is not a playbook property",
+		"ALTER PLAYBOOK x RESET;":                                                                   "RESET takes <key> (login, global_instructions)",
+		"ALTER PLAYBOOK x RESET colour;":                                                            "colour is not a playbook property",
 		"ALTER PLAYBOOK x SET FOO=1;":                                                               "FOO is not a playbook property; a variable is SET VAR FOO=<value>",
 		"CREATE PLAYBOOK x SANDBOX SET login = 'shared';":                                           "SANDBOX isolates the login",
 		"CREATE PLAYBOOK x LINK /tmp/d SET global_instructions = 'inherited';":                      "SET (login, global_instructions) does not apply to LINK",
@@ -158,8 +158,8 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 
 func TestExpectPlaybookProperties(t *testing.T) {
 	w := strings.Fields
-	if got := Expect(w("ALTER PLAYBOOK k DELETE")); !reflect.DeepEqual(got, []string{"login", "global_instructions"}) {
-		t.Errorf("ALTER PLAYBOOK k DELETE offers %q", got)
+	if got := Expect(w("ALTER PLAYBOOK k RESET")); !reflect.DeepEqual(got, []string{"login", "global_instructions"}) {
+		t.Errorf("ALTER PLAYBOOK k RESET offers %q", got)
 	}
 	if got := Expect(w("ALTER PLAYBOOK k SET")); !contains(got, "VAR") || !contains(got, "login") || !contains(got, "global_instructions") {
 		t.Errorf("ALTER PLAYBOOK k SET offers %q", got)

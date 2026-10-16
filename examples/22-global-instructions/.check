@@ -8,11 +8,11 @@ cpb SHOW CREATE PLAYBOOK focused | grep -qx "  SET login = 'shared', global_inst
 # inherited: nothing written.
 if grep -qs claudeMdExcludes "$p/familiar/settings.json"; then echo "familiar excludes"; exit 1; fi
 cpb SHOW CREATE PLAYBOOK familiar | grep -qx "  SET login = 'shared', global_instructions = 'inherited';"
-# SET and DELETE move only cpb's entry; the rest of the list is yours.
+# SET and RESET move only cpb's entry; the rest of the list is yours.
 printf '{"claudeMdExcludes": ["/opt/notes/**"]}\n' > "$p/familiar/settings.json"
 cpb "ALTER PLAYBOOK familiar SET global_instructions = 'excluded'" > /dev/null
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == ["/opt/notes/**", sys.argv[2]], v' "$p/familiar/settings.json" "$entry"
 cpb "ALTER PLAYBOOK familiar SET global_instructions = 'inherited'" > /dev/null
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == ["/opt/notes/**"], v' "$p/familiar/settings.json"
-cpb ALTER PLAYBOOK focused DELETE global_instructions | grep -q unchanged
+cpb ALTER PLAYBOOK focused RESET global_instructions | grep -q unchanged
 cpb "SELECT name, global_instructions FROM PLAYBOOKS" --json | python3 -c 'import json,sys; v={r["name"]: r["global_instructions"] for r in json.load(sys.stdin)}; assert v == {"familiar": "inherited", "focused": "excluded"}, v'

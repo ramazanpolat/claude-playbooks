@@ -17,7 +17,7 @@ into every playbook you run anywhere under your home directory.
   `claudeMdExcludes: ["<your home>/.claude/**"]`, which every launch reads,
   `cpb run` and a plain `CLAUDE_CONFIG_DIR=… claude` alike.
 - `SET global_instructions = 'inherited'` at `CREATE`, or later, lets them
-  load. `DELETE global_instructions` goes back to the default. Only cpb's own
+  load. `RESET global_instructions` goes back to the default. Only cpb's own
   entry moves; other `claudeMdExcludes` entries are yours and stay.
 - The project's own `CLAUDE.md` loads either way: "global" means the
   machine-wide instructions in `~/.claude`.

@@ -62,10 +62,10 @@ const (
 
 	// Playbook properties (properties.go): CREATE PLAYBOOK ... SET k = 'v',
 	// ... gives the starting values, ALTER PLAYBOOK ... SET k = 'v', ...
-	// changes them, and ALTER PLAYBOOK ... DELETE k, ... puts them back to
-	// the default. Settings holds (Key, Value); DELETE's values are empty.
-	SetProperties    Kind = "SET <key> = <value>"
-	DeleteProperties Kind = "DELETE <key>"
+	// changes them, and ALTER PLAYBOOK ... RESET k, ... puts them back to
+	// the default. Settings holds (Key, Value); RESET's values are empty.
+	SetProperties   Kind = "SET <key> = <value>"
+	ResetProperties Kind = "RESET <key>"
 
 	// The [sandbox] table (ALTER PLAYBOOK): bare SET SANDBOX is always =
 	// true and isolates the login, as CREATE … SANDBOX does; bare UNSET
@@ -211,7 +211,7 @@ type Clause struct {
 
 	// Settings: SET SANDBOX <key>=<value> ... (Key, Value) and UNSET SANDBOX
 	// <key> ... (Key only), the [sandbox] table's keys; and the playbook
-	// properties of SET <key> = <value> and DELETE <key> (Key only).
+	// properties of SET <key> = <value> and RESET <key> (Key only).
 	// Apart from Vars and Keys, which name variables.
 	Settings []Var
 

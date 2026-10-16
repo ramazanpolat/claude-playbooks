@@ -31,7 +31,7 @@ func excludesOf(t *testing.T, dir string) []string {
 
 // The global_instructions property: a new playbook keeps ~/.claude's CLAUDE.md and rules
 // out (one absolute claudeMdExcludes entry in its settings.json); SET and
-// DELETE move it and keep every other entry; SHOW,
+// RESET move it and keep every other entry; SHOW,
 // EXPLAIN, SELECT and SHOW CREATE read it back from the file.
 func TestGlobalInstructionsSetting(t *testing.T) {
 	resetCommandTestState(t)
@@ -91,9 +91,9 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "SET login = 'shared', global_instructions = 'inherited';") {
 		t.Fatalf("SHOW CREATE of a shared playbook:\n%s", out)
 	}
-	mustStmt(t, "ALTER PLAYBOOK m DELETE global_instructions")
+	mustStmt(t, "ALTER PLAYBOOK m RESET global_instructions")
 	if got := excludesOf(t, dir); !slices.Equal(got, []string{"/opt/notes/**", entry}) {
-		t.Fatalf("DELETE global_instructions (back to 'excluded'): %q", got)
+		t.Fatalf("RESET global_instructions (back to 'excluded'): %q", got)
 	}
 	if out := mustStmt(t, "ALTER PLAYBOOK m SET global_instructions=excluded"); !strings.Contains(out, "unchanged") {
 		t.Fatalf("a repeat:\n%s", out)
