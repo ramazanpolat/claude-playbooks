@@ -1,6 +1,25 @@
 # Changelog
 
-## [Unreleased]
+## [v4.0.0-rc3] -- 2026-10-16
+
+### Upgrading from rc2
+
+- **`ISOLATED LOGIN` is refused.** A recipe from rc1 or rc2 that says
+  `ISOLATED LOGIN` or `UNSET ISOLATED LOGIN` stops with a one-line hint:
+  write `SET login = 'isolated'`, or `RESET login` for the shared login. A playbook on
+  disk needs nothing: its manifest keeps `isolated_login`.
+- **JSON: `isolated_login` is gone.** `SHOW PLAYBOOK --json` and `SELECT`
+  give `login` (`"shared"` or `"isolated"`) and `global_instructions` in place of the
+  `isolated_login` bool. A script that read `isolated_login` now reads
+  `login == "isolated"`.
+- **The licence is Apache-2.0.** From this release on, cpb is under the
+  Apache License 2.0, with a `NOTICE` file. Every release carries `LICENSE`
+  and `NOTICE` beside its binaries, `install.sh` places them in
+  `<prefix>/share/doc/cpb`, and the npm package carries `NOTICE`.
+  v4.0.0-rc2 and earlier releases keep their MIT licence.
+- **A new playbook leaves `~/.claude`'s own CLAUDE.md and rules out**
+  (`global_instructions = 'excluded'` is the default; see *Added*). An
+  existing playbook is not changed.
 
 ### Added
 
@@ -58,6 +77,12 @@
 
 ### Changed
 
+- **No output prints a character of a credential** (#208; SPEC.md,
+  *Redaction*). A masked value used to keep up to four characters at each
+  end (`sk-a...9f2c (51 chars, plaintext)`). It now prints only its length,
+  `<redacted, N chars>`, a URL's userinfo included, and `SHOW` and `EXPLAIN`
+  read a stored plaintext credential as `<plaintext, N chars>`. The JSON
+  forms and `SHOW CREATE` already printed no value.
 - **`ISOLATED LOGIN` is gone** for `SET login = 'isolated'` (CREATE and
   ALTER), and `UNSET ISOLATED LOGIN` for `SET login = 'shared'`. A recipe
   from rc1 or rc2 that says `ISOLATED LOGIN` is refused with that hint; edit
