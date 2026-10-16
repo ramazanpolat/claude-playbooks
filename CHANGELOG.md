@@ -1,15 +1,15 @@
 # Changelog
 
-## [v4.0.0-rc3] -- 2026-10-11
+## [v4.0.0-rc3] -- 2026-10-16
 
 ### Upgrading from rc2
 
 - **`ISOLATED LOGIN` is refused.** A recipe from rc1 or rc2 that says
   `ISOLATED LOGIN` or `UNSET ISOLATED LOGIN` stops with a one-line hint:
-  write `SET login = 'isolated'` or `SET login = 'shared'`. A playbook on
+  write `SET login = 'isolated'`, or `RESET login` for the shared login. A playbook on
   disk needs nothing: its manifest keeps `isolated_login`.
 - **JSON: `isolated_login` is gone.** `SHOW PLAYBOOK --json` and `SELECT`
-  give `login` (`"shared"` or `"isolated"`) and `memory` in place of the
+  give `login` (`"shared"` or `"isolated"`) and `global_instructions` in place of the
   `isolated_login` bool. A script that read `isolated_login` now reads
   `login == "isolated"`.
 - **The licence is Apache-2.0.** From this release on, cpb is under the
@@ -17,8 +17,9 @@
   and `NOTICE` beside its binaries, `install.sh` places them in
   `<prefix>/share/doc/cpb`, and the npm package carries `NOTICE`.
   v4.0.0-rc2 and earlier releases keep their MIT licence.
-- **A new playbook leaves `~/.claude`'s memory out** (`memory = 'isolated'`
-  is the default; see *Added*). An existing playbook is not changed.
+- **A new playbook leaves `~/.claude`'s own CLAUDE.md and rules out**
+  (`global_instructions = 'excluded'` is the default; see *Added*). An
+  existing playbook is not changed.
 
 ### Added
 
