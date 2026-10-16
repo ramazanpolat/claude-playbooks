@@ -11,4 +11,4 @@ ALTER PLAYBOOK
   ADD MODEL 'glm-5.3' LABEL 'GLM 5.3'
   ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
   SET MODEL PICKER ONLY
-  SET ISOLATED LOGIN;
+  SET login = 'isolated';

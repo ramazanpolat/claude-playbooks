@@ -11,4 +11,4 @@ ALTER PLAYBOOK
   ADD SKILL algorithmic-art FROM 'github:anthropics/skills' SUBDIR 'skills/algorithmic-art'
   SET MODEL 'claude-sonnet-5-5'
   SET VAR DISABLE_TELEMETRY=1
-  SET ISOLATED LOGIN;
+  SET login = 'isolated';
