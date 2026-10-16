@@ -32,7 +32,7 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"LABEL", "DESCRIPTION", "BEHAVES",
-		"DELETE", "REVERT",
+		"RESET", "REVERT",
 		// The words of removed clauses (LAUNCHER, NO LAUNCHER, SANDBOX, SET
 		// AGENT, SET SECRET HELPER, MODEL PICKER ONLY|APPEND, REFRESH) are
 		// not reserved: they only trigger the hint that names the new form,
@@ -175,9 +175,9 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "DELETE", "REVERT"}
-	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET", "DELETE"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "DELETE"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "RESET", "REVERT"}
+	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET", "RESET"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "RESET"}
 )
 
 var (
@@ -825,9 +825,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.pickerModel(c, w)
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
-	case "DELETE":
-		c.Kind = DeleteProperties
-		return c, p.playbookProperties(c, "DELETE", false)
+	case "RESET":
+		c.Kind = ResetProperties
+		return c, p.playbookProperties(c, "RESET", false)
 	case "SET":
 		switch {
 		case p.atProperty():
@@ -932,7 +932,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			c.Names = rules
 			return c, err
 		case "":
-			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR or TOOL; a property is DELETE <key>")
+			return nil, p.fail("UNSET inside ALTER PLAYBOOK takes VAR or TOOL; a property is RESET <key>")
 		}
 		c.Kind = UnsetVar
 		keys, err := p.keys("UNSET VAR")
@@ -976,11 +976,11 @@ func (p *parser) defaultsClause() (*Clause, *Error) {
 		if p.at("SECRET") {
 			return nil, errAt(c.Pos, removedUnsetHelper)
 		}
-		return nil, p.fail("UNSET inside ALTER DEFAULTS is gone: DELETE secret_helper")
-	case "DELETE":
+		return nil, p.fail("UNSET inside ALTER DEFAULTS is gone: RESET secret_helper")
+	case "RESET":
 		p.defaults = true
-		c.Kind = DeleteProperties
-		return c, p.playbookProperties(c, "DELETE", false)
+		c.Kind = ResetProperties
+		return c, p.playbookProperties(c, "RESET", false)
 	}
 	return nil, nil
 }
@@ -1050,8 +1050,8 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "SET":
 		c.Kind = SetProperties
 		return c, p.playbookProperties(c, "SET", true)
-	case "DELETE":
-		return nil, p.fail("CREATE starts every property at its default; DELETE is for ALTER PLAYBOOK")
+	case "RESET":
+		return nil, p.fail("CREATE starts every property at its default; RESET is for ALTER PLAYBOOK")
 	}
 	return nil, nil
 }
@@ -1209,9 +1209,9 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
 		}
 		for _, v := range c.Settings {
-			// A property may be set or deleted in several SET and DELETE
+			// A property may be set or deleted in several SET and RESET
 			// clauses, but each key once.
-			if c.Kind == SetProperties || c.Kind == DeleteProperties {
+			if c.Kind == SetProperties || c.Kind == ResetProperties {
 				if settings["property "+v.Key] {
 					return errAt(c.Pos, v.Key+" is named twice in one statement")
 				}

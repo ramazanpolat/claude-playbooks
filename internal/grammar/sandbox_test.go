@@ -14,8 +14,8 @@ func TestParseSandboxProperties(t *testing.T) {
   SET sandbox.backend = 'sbx', sandbox.host = 'me@buildbox', sandbox.mounts = ['~/libs:ro', '~/data'],
       sandbox.allow_net = ['api.example.com:443'], sandbox.secrets = 'env', sandbox.claude_version = '2.1.0',
       sandbox.share_skills = true, sandbox.workdir = '~/my proj';
-ALTER PLAYBOOK k SET sandbox.always = false DELETE sandbox.host, sandbox.mounts;
-ALTER PLAYBOOK k DELETE sandbox;`)
+ALTER PLAYBOOK k SET sandbox.always = false RESET sandbox.host, sandbox.mounts;
+ALTER PLAYBOOK k RESET sandbox;`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,10 +29,10 @@ ALTER PLAYBOOK k DELETE sandbox;`)
 	}
 	u := stmts[1].Clauses
 	if u[0].Kind != SetSandboxKeys || u[1].Kind != UnsetSandboxKeys || !reflect.DeepEqual(u[1].Settings, []Var{{Key: "host"}, {Key: "mounts"}}) {
-		t.Fatalf("DELETE: %+v", u)
+		t.Fatalf("RESET: %+v", u)
 	}
 	if d := stmts[2].Clauses[0]; d.Kind != UnsetSandboxKeys || len(d.Settings) != 9 {
-		t.Fatalf("DELETE sandbox resets the table: %+v", d)
+		t.Fatalf("RESET sandbox resets the table: %+v", d)
 	}
 	for _, s := range stmts {
 		again, err := ParseFile(s.Pretty() + ";")
@@ -90,22 +90,22 @@ ALTER PLAYBOOK k DELETE sandbox;`)
 	for src, want := range map[string]string{
 		"ALTER PLAYBOOK k SET sandbox.nope = '1';":                      "sandbox.nope is not a playbook property",
 		"ALTER PLAYBOOK k SET sandbox.share_skills = 'yes';":            "sandbox.share_skills takes true or false",
-		"ALTER PLAYBOOK k SET sandbox.host = '';":                       "DELETE sandbox.<key> clears it",
+		"ALTER PLAYBOOK k SET sandbox.host = '';":                       "RESET sandbox.<key> clears it",
 		"ALTER PLAYBOOK k SET sandbox.mounts = '';":                     "sandbox.mounts takes a list",
 		"ALTER PLAYBOOK k SET sandbox.mounts = [~/a;":                   "sandbox.mounts takes a list",
 		"ALTER PLAYBOOK k SET sandbox.secrets = 'all';":                 "sandbox.secrets takes 'proxy' or 'env'",
-		"ALTER PLAYBOOK k SET sandbox.host = 'a' DELETE sandbox.host;":  "sandbox.host is named twice",
-		"ALTER PLAYBOOK k SET sandbox.host = 'a' DELETE sandbox;":       "sandbox is named twice",
+		"ALTER PLAYBOOK k SET sandbox.host = 'a' RESET sandbox.host;":   "sandbox.host is named twice",
+		"ALTER PLAYBOOK k SET sandbox.host = 'a' RESET sandbox;":        "sandbox is named twice",
 		"ALTER PLAYBOOK k SET sandbox = true;":                          "sandbox is a table",
 		"ALTER PLAYBOOK k SET sandbox.always = true, login = 'shared';": "cannot be combined with login = 'shared'",
-		"ALTER PLAYBOOK k SET sandbox.always = true DELETE login;":      "cannot be combined with login = 'shared'",
+		"ALTER PLAYBOOK k SET sandbox.always = true RESET login;":       "cannot be combined with login = 'shared'",
 		"CREATE PLAYBOOK k SET sandbox.always = true;":                  "a sandboxed playbook's login is isolated",
 		"CREATE PLAYBOOK k LINK /d SET sandbox.backend = 'sbx';":        "sandbox.backend does not apply to LINK",
 		"CREATE PLAYBOOK k SANDBOX;":                                    "SANDBOX is a property now: SET sandbox.always = true, login = 'isolated'",
 		"ALTER PLAYBOOK k SET SANDBOX;":                                 "SET SANDBOX is a property now",
 		"ALTER PLAYBOOK k SET SANDBOX backend=sbx;":                     "SET sandbox.<key> = '<value>'",
 		"ALTER PLAYBOOK k UNSET SANDBOX;":                               "SET sandbox.always = false",
-		"ALTER PLAYBOOK k UNSET SANDBOX host;":                          "DELETE sandbox.<key>",
+		"ALTER PLAYBOOK k UNSET SANDBOX host;":                          "RESET sandbox.<key>",
 	} {
 		if _, err := ParseFile(src); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", src, err, want)

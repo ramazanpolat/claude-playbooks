@@ -73,7 +73,7 @@ func TestModelPickerRows(t *testing.T) {
 }
 
 // ONLY / APPEND, the reads (SHOW --json, EXPLAIN), SHOW CREATE re-applying
-// unchanged, DROP of the last row, DELETE model_picker.
+// unchanged, DROP of the last row, RESET model_picker.
 func TestModelPickerModeAndReads(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
@@ -108,11 +108,11 @@ func TestModelPickerModeAndReads(t *testing.T) {
 	if mp := settingsOf(t, root)["modelPicker"].(map[string]any); mp["replaceBuiltInOptions"] != false || mp["options"] != nil {
 		t.Fatalf("APPEND and the last row dropped: %v", mp)
 	}
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK k DELETE model_picker"); err != nil {
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK k RESET model_picker"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := settingsOf(t, root)["modelPicker"]; ok {
-		t.Fatal("DELETE model_picker left the key")
+		t.Fatal("RESET model_picker left the key")
 	}
 }
 

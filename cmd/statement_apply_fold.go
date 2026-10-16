@@ -57,15 +57,15 @@ func foldParts(c grammar.Clause) []foldPart {
 	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys:
 		verb := "SET sandbox."
 		if c.Kind == grammar.UnsetSandboxKeys {
-			verb = "DELETE sandbox."
+			verb = "RESET sandbox."
 		}
 		for i, v := range c.Settings {
 			out = append(out, foldPart{index: i, what: verb + v.Key, effects: []foldEffect{w("sandbox:" + v.Key)}})
 		}
-	case grammar.SetProperties, grammar.DeleteProperties:
+	case grammar.SetProperties, grammar.ResetProperties:
 		verb := "SET "
-		if c.Kind == grammar.DeleteProperties {
-			verb = "DELETE "
+		if c.Kind == grammar.ResetProperties {
+			verb = "RESET "
 		}
 		for i, v := range c.Settings {
 			out = append(out, foldPart{index: i, what: verb + v.Key, effects: []foldEffect{w("property:" + v.Key)}})
@@ -97,8 +97,8 @@ func foldParts(c grammar.Clause) []foldPart {
 			out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline")}})
 		}
 	case grammar.UnsetStatusline:
-		out = append(out, foldPart{index: 0, what: "DELETE statusline", effects: []foldEffect{w("statusline")}},
-			foldPart{index: 1, what: "DELETE statusline.refresh", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
+		out = append(out, foldPart{index: 0, what: "RESET statusline", effects: []foldEffect{w("statusline")}},
+			foldPart{index: 1, what: "RESET statusline.refresh", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
 	case grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh:
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline-refresh")}})
 	case grammar.SetStatuslinePrevious: // reads the history every earlier one wrote (see foldStatements)
@@ -325,7 +325,7 @@ func keepEntries(c grammar.Clause, keep []int) grammar.Clause {
 		out.Keys = pick(c.Keys, keep)
 	case grammar.AllowTool, grammar.DenyTool, grammar.UnsetTool:
 		out.Names = pick(c.Names, keep)
-	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys, grammar.SetProperties, grammar.DeleteProperties:
+	case grammar.SetSandboxKeys, grammar.UnsetSandboxKeys, grammar.SetProperties, grammar.ResetProperties:
 		out.Settings = pick(c.Settings, keep)
 	}
 	return out

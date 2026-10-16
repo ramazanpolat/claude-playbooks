@@ -120,7 +120,7 @@ func TestPluginClausesRunClaudePlugin(t *testing.T) {
 		t.Errorf("a marketplace-declared command was not shown for the pilot: %v", err)
 	}
 
-	mustStmt(t, "ALTER PLAYBOOK k DROP PLUGIN toolkit@toolkit DROP MARKETPLACE toolkit DELETE agent")
+	mustStmt(t, "ALTER PLAYBOOK k DROP PLUGIN toolkit@toolkit DROP MARKETPLACE toolkit RESET agent")
 	got = runs(t, log)
 	tail := got[len(got)-2:]
 	if !strings.HasSuffix(tail[0], "|plugin uninstall toolkit@toolkit --scope user --keep-data --json") ||
@@ -204,12 +204,12 @@ func TestPluginDryRunCarriesState(t *testing.T) {
 	log := fakeClaude(t)
 	mustStmt(t, "CREATE PLAYBOOK k SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK k ADD MARKETPLACE toolkit FROM github:example/toolkit ADD PLUGIN toolkit@toolkit")
-	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET agent = 'x';\nALTER PLAYBOOK k DELETE agent;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN toolkit@toolkit;\n")
+	path := writePlaybookFile(t, "ALTER PLAYBOOK k SET agent = 'x';\nALTER PLAYBOOK k RESET agent;\nALTER PLAYBOOK k RENAME TO k2;\nALTER PLAYBOOK k2 DROP PLUGIN toolkit@toolkit;\n")
 	out, err := apply(t, path, "--dry-run")
 	if err != nil {
 		t.Fatalf("dry run: %v\n%s", err, out)
 	}
-	// SET agent is set again by DELETE agent, so it is folded away and the
+	// SET agent is set again by RESET agent, so it is folded away and the
 	// playbook, which has no agent, does not change; the renamed playbook
 	// still has the plugin to uninstall.
 	for _, want := range []string{

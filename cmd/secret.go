@@ -56,7 +56,7 @@ func resolveHelper() (*envset.Helper, string, error) {
 // before the file ran. Unset means "whatever is configured now".
 type helperState struct {
 	set bool
-	h   *envset.Helper // nil after DELETE secret_helper
+	h   *envset.Helper // nil after RESET secret_helper
 }
 
 // after returns the state once c has run. CPB_SECRET_HELPER still wins over

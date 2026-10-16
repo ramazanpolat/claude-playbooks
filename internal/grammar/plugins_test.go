@@ -36,8 +36,8 @@ func TestParsePluginClauses(t *testing.T) {
 	if !reflect.DeepEqual(strip(again[0]), strip(st)) {
 		t.Errorf("round trip changed the statement: %s", st.String())
 	}
-	if _, err := ParseArgs(w("ALTER PLAYBOOK k DELETE agent")); err != nil {
-		t.Errorf("DELETE agent: %v", err)
+	if _, err := ParseArgs(w("ALTER PLAYBOOK k RESET agent")); err != nil {
+		t.Errorf("RESET agent: %v", err)
 	}
 }
 
@@ -52,7 +52,7 @@ func TestParsePluginErrors(t *testing.T) {
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m FROM https://user:tok@example.com/r.git"), "carrying credentials"},
 		{w("ALTER PLAYBOOK k ADD PLUGIN noat"), "<plugin>@<marketplace>"},
 		{w("ALTER PLAYBOOK k ADD PLUGIN a@b ADD PLUGIN a@b"), "plugin a@b appears twice"},
-		{w("ALTER PLAYBOOK k SET agent = 'a' DELETE agent"), "agent is named twice in one statement"},
+		{w("ALTER PLAYBOOK k SET agent = 'a' RESET agent"), "agent is named twice in one statement"},
 		{w("ALTER PLAYBOOK k SET agent = 'a'/b"), "an agent is <name> or <plugin>:<name>"},
 		{w("ALTER PLAYBOOK k ADD FOO"), "ADD takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL"},
 		{w("ALTER DEFAULTS ADD PLUGIN a@b"), "ADD takes ENV"},
@@ -111,7 +111,7 @@ func TestExpectPlugins(t *testing.T) {
 		want []string
 	}{
 		{w("ALTER PLAYBOOK k ADD"), []string{"ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL"}},
-		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "launcher", "login", "memory", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}},
+		{w("ALTER PLAYBOOK k SET"), []string{"VAR", "launcher", "login", "global_instructions", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}},
 		{w("ALTER PLAYBOOK k ADD MARKETPLACE m"), []string{"FROM"}},
 	}
 	for _, tc := range cases {

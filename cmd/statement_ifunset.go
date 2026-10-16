@@ -13,7 +13,7 @@ import (
 
 // SET IF UNSET k = v, … (SPEC.md, "Playbook properties"): the list applies
 // whole, and only when none of its keys is set, each key at the value
-// DELETE gives it. Otherwise it changes nothing and says which key was set.
+// RESET gives it. Otherwise it changes nothing and says which key was set.
 
 // resolveIfUnset is the statement with each SET IF UNSET either replaced by
 // its pairs (none of its keys is set) or left out (one is). A statement
@@ -175,7 +175,7 @@ func ifUnsetValues(group []grammar.Clause) map[string]string {
 	return out
 }
 
-// propertyDefault is the value DELETE gives a key, when it has one: the
+// propertyDefault is the value RESET gives a key, when it has one: the
 // playbook's own name for the launcher, the first value of an enumerated
 // key, false for a switch. A key with none (model, sandbox.host) is unset
 // when it has no value at all.
@@ -246,12 +246,13 @@ func (r *stmtRun) propertyReader(name string, pb *playbook.Playbook) (func(key s
 	}, nil
 }
 
-// settingsProperty reads a property settings.json holds: the memory, the
+// settingsProperty reads a property settings.json holds: the global
+// instructions, the
 // model, the agent, the status line and the picker mode.
 func settingsProperty(root *settings.Object, key string) (string, bool) {
 	switch key {
-	case "memory":
-		v, _ := memoryState(root)
+	case "global_instructions":
+		v, _ := globalInstructionsState(root)
 		return v, true
 	case "model":
 		var s string

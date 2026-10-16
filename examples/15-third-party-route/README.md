@@ -15,9 +15,9 @@ provider), every request the playbook makes goes there, with whatever its
 - `SET login = 'isolated'` gives the playbook a login of its own, so a
   `/login` in it never lands in the machine's shared login
   ([example 16](../16-isolated-login/)).
-- Its `memory` setting is `'isolated'`, a new playbook's default, so the
+- Its `global_instructions` setting is `'excluded'`, a new playbook's default, so the
   machine's `~/.claude/CLAUDE.md` and rules do not go along either
-  ([example 22](../22-isolated-memory/)).
+  ([example 22](../22-global-instructions/)).
 - `BLOCK VAR ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN` keeps the Anthropic
   credentials your shell may export out of its launches. The router's own key
   belongs in the env set, by reference ([example 04](../04-secret-references/)).

@@ -20,8 +20,8 @@ func TestParseStatuslineRefresh(t *testing.T) {
 	}
 	for line, want := range map[string]Clause{
 		"ALTER PLAYBOOK k SET statusline.refresh = 5":                                    {Kind: SetStatuslineRefresh, Refresh: 5},
-		"ALTER PLAYBOOK k DELETE statusline.refresh":                                     {Kind: UnsetStatuslineRefresh},
-		"ALTER PLAYBOOK k DELETE statusline":                                             {Kind: UnsetStatusline},
+		"ALTER PLAYBOOK k RESET statusline.refresh":                                      {Kind: UnsetStatuslineRefresh},
+		"ALTER PLAYBOOK k RESET statusline":                                              {Kind: UnsetStatusline},
 		"ALTER PLAYBOOK k SET statusline.command = 'x'":                                  {Kind: SetStatusline, Arg: "x"},
 		"ALTER PLAYBOOK k SET statusline.command = 'refresh'":                            {Kind: SetStatusline, Arg: "refresh"},
 		"ALTER PLAYBOOK k SET IF UNSET statusline.command = 'x'":                         {Kind: SetIfUnset, Group: []Clause{{Kind: SetStatusline, Arg: "x"}}},
@@ -41,10 +41,10 @@ func TestStatuslineRefreshErrors(t *testing.T) {
 		"ALTER PLAYBOOK k SET statusline.refresh = 10s":                           "with no unit",
 		"ALTER PLAYBOOK k SET statusline.refresh = -3":                            "whole number",
 		"ALTER PLAYBOOK k SET statusline.command = 'x', statusline.refresh = 2.5": "whole number",
-		"ALTER PLAYBOOK k SET statusline.refresh = 5 DELETE statusline.refresh":   "statusline.refresh is named twice",
+		"ALTER PLAYBOOK k SET statusline.refresh = 5 RESET statusline.refresh":    "statusline.refresh is named twice",
 		"ALTER PLAYBOOK k SET statusline.refresh = 5 SET statusline.refresh = 6":  "statusline.refresh is named twice",
-		"ALTER PLAYBOOK k DELETE statusline DELETE statusline.refresh":            "statusline.refresh is named twice",
-		"ALTER PLAYBOOK k DELETE statusline.command, statusline":                  "statusline is named twice",
+		"ALTER PLAYBOOK k RESET statusline RESET statusline.refresh":              "statusline.refresh is named twice",
+		"ALTER PLAYBOOK k RESET statusline.command, statusline":                   "statusline is named twice",
 		"ALTER PLAYBOOK k SET statusline = 'x'":                                   "statusline is a table",
 	} {
 		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), want) {
@@ -71,14 +71,14 @@ func TestStatuslineIfUnset(t *testing.T) {
 		"ALTER PLAYBOOK k SET statusline.command = 'x' IF UNSET": "IF UNSET goes right after SET",
 		"ALTER PLAYBOOK k SET IF statusline.command = 'x'":       "expected UNSET after IF",
 		"ALTER PLAYBOOK k SET IF UNSET model = 'm', model = 'n'": "model is named twice",
-		"ALTER PLAYBOOK k SET IF UNSET model = 'm' DELETE model": "model is named twice",
+		"ALTER PLAYBOOK k SET IF UNSET model = 'm' RESET model":  "model is named twice",
 	} {
 		if _, err := ParseLine(line); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", line, err, want)
 		}
 	}
 	for _, line := range []string{
-		"ALTER PLAYBOOK k SET IF UNSET model = 'm', agent = 'a', sandbox.host = 'me@box', memory = 'shared'",
+		"ALTER PLAYBOOK k SET IF UNSET model = 'm', agent = 'a', sandbox.host = 'me@box', global_instructions = 'inherited'",
 		"ALTER PLAYBOOK k SET IF UNSET statusline.refresh = 5 SET VAR A=1 SET IF UNSET launcher = 'kk'",
 	} {
 		st, err := ParseLine(line)

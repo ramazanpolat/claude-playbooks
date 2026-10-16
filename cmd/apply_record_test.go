@@ -440,7 +440,7 @@ func TestApplyRecordUndoesEnvAndSandbox(t *testing.T) {
 }
 
 // One sandbox key changes and another is dropped (agy, #213): the fold
-// drops only the changed key from the merged DELETE, so the dropped
+// drops only the changed key from the merged RESET, so the dropped
 // one is still unset.
 func TestApplyRecordSandboxKeyChangedAndDropped(t *testing.T) {
 	root := sandboxDefaultRoot(t)
@@ -459,7 +459,7 @@ func TestApplyRecordSandboxKeyChangedAndDropped(t *testing.T) {
 	if sb.Host != nil || sb.Workdir == nil || *sb.Workdir != "/srv/x" {
 		t.Fatalf("after the update: host=%v workdir=%v\n%s", sb.Host, sb.Workdir, out)
 	}
-	if !strings.Contains(out, "overridden: DELETE sandbox.workdir") {
+	if !strings.Contains(out, "overridden: RESET sandbox.workdir") {
 		t.Fatalf("the fold did not name the changed key alone:\n%s", out)
 	}
 }

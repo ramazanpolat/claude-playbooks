@@ -14,7 +14,7 @@ creates the playbook with those properties, or, when it exists, applies the
 `SET` list as `ALTER PLAYBOOK … SET` would; what is fixed at creation (`FROM`,
 `BRANCH`, `SUBDIR`, `LINK`) is only compared, and a different source is a
 warning. `CREATE PLAYBOOK IF NOT EXISTS` leaves a playbook that exists as it
-is. `SHOW CREATE` writes the launcher, login, memory and sandbox on the
+is. `SHOW CREATE` writes the launcher, login, global instructions and sandbox on the
 `CREATE`, so one statement brings a playbook back to them. Credential-looking literals are written
 as comments and make it exit non-zero until you store them by reference
 (`--skip-secrets` accepts the output without them). `APPLY` validates every

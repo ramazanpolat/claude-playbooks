@@ -12,7 +12,7 @@ import (
 
 // The launcher, the model and the agent are properties: CREATE … SET gives
 // them in one step (the settings.json ones by an ALTER of the new playbook,
-// within the statement), ALTER … SET changes them, and DELETE puts them back
+// within the statement), ALTER … SET changes them, and RESET puts them back
 // to the default.
 func TestLauncherModelAgentProperties(t *testing.T) {
 	root := sandboxDefaultRoot(t)
@@ -31,25 +31,25 @@ func TestLauncherModelAgentProperties(t *testing.T) {
 		t.Fatalf("CREATE … SET model, agent: %v", s)
 	}
 
-	// DELETE launcher: back to the playbook's own name, which it prints.
-	if out := mustStmt(t, "ALTER PLAYBOOK pp DELETE launcher"); !strings.Contains(out, "Launcher: pp") {
-		t.Fatalf("DELETE launcher does not name the launcher it wrote:\n%s", out)
+	// RESET launcher: back to the playbook's own name, which it prints.
+	if out := mustStmt(t, "ALTER PLAYBOOK pp RESET launcher"); !strings.Contains(out, "Launcher: pp") {
+		t.Fatalf("RESET launcher does not name the launcher it wrote:\n%s", out)
 	}
 	if has("p2") || !has("pp") {
-		t.Fatalf("DELETE launcher: p2=%v pp=%v", has("p2"), has("pp"))
+		t.Fatalf("RESET launcher: p2=%v pp=%v", has("p2"), has("pp"))
 	}
 	if m, _ := manifest.Read(filepath.Join(root, "pp")); m != nil && m.Launcher != "" {
-		t.Fatalf("DELETE launcher left %q recorded", m.Launcher)
+		t.Fatalf("RESET launcher left %q recorded", m.Launcher)
 	}
 
-	// DELETE model, agent: the keys go.
-	mustStmt(t, "ALTER PLAYBOOK pp DELETE model, agent")
+	// RESET model, agent: the keys go.
+	mustStmt(t, "ALTER PLAYBOOK pp RESET model, agent")
 	s = settingsOf(t, filepath.Join(root, "pp"))
 	if _, ok := s["model"]; ok {
-		t.Fatalf("DELETE model: %v", s)
+		t.Fatalf("RESET model: %v", s)
 	}
 	if _, ok := s["agent"]; ok {
-		t.Fatalf("DELETE agent: %v", s)
+		t.Fatalf("RESET agent: %v", s)
 	}
 
 	// launcher = '<its own name>' is the default: nothing recorded.
@@ -81,9 +81,9 @@ func TestLauncherModelAgentProperties(t *testing.T) {
 func TestLinkRefusesSettingsProperties(t *testing.T) {
 	sandboxDefaultRoot(t)
 	for line, want := range map[string]string{
-		"CREATE PLAYBOOK l LINK /x SET model = 'm'":       "model does not apply to LINK",
-		"CREATE PLAYBOOK l LINK /x SET agent = 'a'":       "agent does not apply to LINK",
-		"CREATE PLAYBOOK l LINK /x SET memory = 'shared'": "memory does not apply to LINK",
+		"CREATE PLAYBOOK l LINK /x SET model = 'm'":                       "model does not apply to LINK",
+		"CREATE PLAYBOOK l LINK /x SET agent = 'a'":                       "agent does not apply to LINK",
+		"CREATE PLAYBOOK l LINK /x SET global_instructions = 'inherited'": "global_instructions does not apply to LINK",
 	} {
 		if _, err := quotedStmt(t, line); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", line, err, want)

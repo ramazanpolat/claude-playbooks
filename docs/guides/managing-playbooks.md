@@ -28,7 +28,7 @@ cpb CREATE PLAYBOOK backend SET launcher = 'be'          # the launcher is `be`
 cpb CREATE PLAYBOOK scratch SET launcher = ''          # no launcher
 cpb CREATE PLAYBOOK boxed SET sandbox.always = true, login = isolated   # always sandboxed, with its own login
 cpb CREATE PLAYBOOK IF NOT EXISTS experiment  # a no-op when it exists
-cpb CREATE OR ALTER PLAYBOOK experiment SET memory = shared   # creates, or applies the SET list as ALTER would
+cpb CREATE OR ALTER PLAYBOOK experiment SET global_instructions = inherited   # creates, or applies the SET list as ALTER would
 ```
 
 Run it without the launcher, passing Claude Code flags after the name:
@@ -273,20 +273,20 @@ the playbook's says *how you work*, the project's *what you are working on*.
 
 ### The machine's own CLAUDE.md
 
-Claude Code also loads project memory from every directory above the one it
+Claude Code also loads the CLAUDE.md of every directory above the one it
 starts in, and `~/.claude`, your machine's own configuration, is one of them.
 Without a guard, `~/.claude/CLAUDE.md` and `~/.claude/rules/` would load into
 every playbook you run under your home directory. A new playbook has the
-guard: its `memory` setting is `'isolated'`.
+guard: its `global_instructions` setting is `'excluded'`.
 
 ```bash
-cpb EXPLAIN PLAYBOOK work                                   # Memory: isolated …
-cpb ALTER PLAYBOOK work SET memory = 'shared'   # let them load
-cpb ALTER PLAYBOOK work DELETE memory            # back to 'isolated'
-cpb "SELECT name, settings FROM PLAYBOOKS"                  # which playbooks load them
+cpb EXPLAIN PLAYBOOK work                                        # Global instructions: excluded …
+cpb ALTER PLAYBOOK work SET global_instructions = 'inherited'    # let them load
+cpb ALTER PLAYBOOK work RESET global_instructions                # back to 'excluded'
+cpb "SELECT name, global_instructions FROM PLAYBOOKS"            # which playbooks load them
 ```
 
 A playbook created before the setting existed loads them until you run
-`SET memory = 'isolated'` in it; nothing is changed for you. The
+`SET global_instructions = 'excluded'` in it; nothing is changed for you. The
 setting stops the loading, not reading: an agent can still open those files
 with its Read tool. Reference: [Playbook properties](../../SPEC.md#playbook-properties).

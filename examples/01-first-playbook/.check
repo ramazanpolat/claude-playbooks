@@ -7,7 +7,7 @@ cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"name": "boxed-lab"'
 # the playbook's own name.
 cpb ALTER PLAYBOOK boxed-lab SET launcher = 'bx'
 cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"launcher": "bx"'
-cpb ALTER PLAYBOOK boxed-lab DELETE launcher
+cpb ALTER PLAYBOOK boxed-lab RESET launcher
 cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"launcher": "boxed-lab"'
 dev=$(mktemp -d)
 printf 'name = "dev"\nversion = "0.1.0"\n' > "$dev/.playbook"

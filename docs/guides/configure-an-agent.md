@@ -37,9 +37,9 @@ session at launch. A header's reference resolves to the whole value
 
 ```
 ALLOW TOOL '<rule>' ...     DENY TOOL '<rule>' ...     UNSET TOOL '<rule>' ...
-SET statusline.command = '<command>'[, statusline.refresh = <n>]   DELETE statusline
-SET statusline.refresh = <n>   DELETE statusline.refresh   REVERT STATUSLINE
-SET model = '<model>'         DELETE model
+SET statusline.command = '<command>'[, statusline.refresh = <n>]   RESET statusline
+SET statusline.refresh = <n>   RESET statusline.refresh   REVERT STATUSLINE
+SET model = '<model>'         RESET model
 ```
 
 These are `settings.json` keys with no CLI, so cpb writes them into the
@@ -62,7 +62,7 @@ that has a model, and says so.
 ```
 ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']
 DROP MODEL '<id>'
-SET model_picker.mode = 'only' | 'append'    DELETE model_picker.mode
+SET model_picker.mode = 'only' | 'append'    RESET model_picker.mode
 ```
 
 These are the rows `/model` offers in a session, written to `settings.json`

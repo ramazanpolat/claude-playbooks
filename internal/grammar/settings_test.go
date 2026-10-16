@@ -26,7 +26,7 @@ func TestParseSettingsClauses(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(strip(again[0]), strip(stmts[0])) {
 		t.Fatalf("round trip: %v\n%s", err, stmts[0].String())
 	}
-	for _, src := range []string{"ALTER PLAYBOOK k DELETE statusline DELETE model;"} {
+	for _, src := range []string{"ALTER PLAYBOOK k RESET statusline RESET model;"} {
 		if _, err := ParseFile(src); err != nil {
 			t.Errorf("%s: %v", src, err)
 		}
@@ -34,7 +34,7 @@ func TestParseSettingsClauses(t *testing.T) {
 	for src, want := range map[string]string{
 		"ALTER PLAYBOOK k ALLOW 'x';":                    "ALLOW takes TOOL",
 		"ALTER PLAYBOOK k SET model = 'a b';":            "model takes a model id",
-		"ALTER PLAYBOOK k SET model = 'm' DELETE model;": "model is named twice in one statement",
+		"ALTER PLAYBOOK k SET model = 'm' RESET model;":  "model is named twice in one statement",
 		"ALTER PLAYBOOK k ALLOW TOOL 'x' DENY TOOL 'x';": "tool rule x appears twice",
 	} {
 		if _, err := ParseFile(src); err == nil || !strings.Contains(err.Error(), want) {
