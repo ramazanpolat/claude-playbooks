@@ -239,8 +239,8 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case SetProperties:
 		return append([]string{"SET"}, propertyWords(c, true)...)
-	case DeleteProperties:
-		return append([]string{"DELETE"}, propertyWords(c, false)...)
+	case ResetProperties:
+		return append([]string{"RESET"}, propertyWords(c, false)...)
 	case UnsetSandboxKeys:
 		w := []string{"UNSET", "SANDBOX"}
 		for _, v := range c.Settings {

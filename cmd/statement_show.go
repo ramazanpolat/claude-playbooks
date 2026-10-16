@@ -66,10 +66,10 @@ type playbookJSON struct {
 	// IsolatedLogin is isolated_login: no login shared with ~/.claude (a
 	// sandboxed playbook is always isolated). --json says it as Login.
 	IsolatedLogin bool `json:"-"`
-	// Login and Memory are the playbook's properties (SET login, SET
-	// memory) as they stand: each key is its field.
-	Login  string `json:"login"`
-	Memory string `json:"memory"`
+	// Login and GlobalInstructions are the playbook's properties (SET
+	// login, SET global_instructions) as they stand: each key is its field.
+	Login              string `json:"login"`
+	GlobalInstructions string `json:"global_instructions"`
 
 	Marketplaces []marketplaceJSON `json:"marketplaces"`
 	Plugins      []pluginJSON      `json:"plugins"`
@@ -190,9 +190,10 @@ type explainJSON struct {
 	// Route is where a launch's requests go and how it authenticates, built
 	// from non-secret values and states only (v4.0.0).
 	Route routeJSON `json:"route"`
-	// Login and Memory are the playbook properties the launch runs with.
-	Login  string `json:"login"`
-	Memory string `json:"memory"`
+	// Login and GlobalInstructions are the playbook properties the launch
+	// runs with.
+	Login              string `json:"login"`
+	GlobalInstructions string `json:"global_instructions"`
 }
 
 // agentJSON is the agent a launch starts as, when the playbook names one.
@@ -347,7 +348,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	v.Launcher = optStr(effectiveLauncher(pb))
 	v.Login = "shared"
-	v.Memory, _ = memoryStateOf(pb.Path)
+	v.GlobalInstructions, _ = globalInstructionsStateOf(pb.Path)
 	m := pb.Manifest
 	if m == nil {
 		return v
@@ -487,8 +488,8 @@ func printPlaybook(v playbookJSON, values map[string]string) {
 	if v.IsolatedLogin {
 		login = "isolated (shares nothing with ~/.claude)"
 	}
-	_, other := memoryStateOf(v.Path)
-	rows = append(rows, [2]string{"Login", login}, [2]string{"Memory", strings.TrimPrefix(memoryLine(v.Memory, other), "Memory: ")})
+	_, other := globalInstructionsStateOf(v.Path)
+	rows = append(rows, [2]string{"Login", login}, [2]string{"Global instructions", strings.TrimPrefix(globalInstructionsLine(v.GlobalInstructions, other), "Global instructions: ")})
 	if v.Play != nil {
 		rows = append(rows, [2]string{"Played from", fmt.Sprintf("%s (sha256 %s, %s; cpb update %s)", v.Play.Ref, shortSHA(v.Play.SHA256), v.Play.PlayedAt, v.Name)})
 	}
@@ -687,7 +688,7 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		model := launchModel(pb, vars)
 		pv := describePlaybook(pb)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
-			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, Memory: pv.Memory})
+			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -737,7 +738,7 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 	case v.IsolatedLogin:
 		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}
-	fmt.Println(memoryLine(memoryStateOf(pb.Path)))
+	fmt.Println(globalInstructionsLine(globalInstructionsStateOf(pb.Path)))
 }
 
 // helperInEffect is the configured secret helper for --json, nil if none.

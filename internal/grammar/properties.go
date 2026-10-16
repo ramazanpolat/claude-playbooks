@@ -4,10 +4,10 @@ import "strings"
 
 // A playbook property: a value the playbook keeps that can change after it
 // is created. CREATE PLAYBOOK … SET k = 'v', … gives the starting values,
-// ALTER PLAYBOOK … SET k = 'v', … changes them, and ALTER PLAYBOOK … DELETE
+// ALTER PLAYBOOK … SET k = 'v', … changes them, and ALTER PLAYBOOK … RESET
 // k, … puts them back to the default. What is fixed at creation (FROM,
 // BRANCH, SUBDIR, LINK) stays a keyword clause of CREATE. Values[0] is the
-// default: the one DELETE restores and a new playbook gets when its CREATE
+// default: the one RESET restores and a new playbook gets when its CREATE
 // does not name the key.
 type playbookProperty struct {
 	key    string
@@ -19,10 +19,11 @@ var playbookPropertyTable = []playbookProperty{
 	// login: shared links the machine's login; isolated shares nothing
 	// (the manifest's isolated_login).
 	{"login", []string{"shared", "isolated"}},
-	// memory: isolated keeps ~/.claude's CLAUDE.md and rules out of the
-	// playbook (claudeMdExcludes in its settings.json); shared loads them,
-	// as Claude Code's ancestor walk does for any directory under $HOME.
-	{"memory", []string{"isolated", "shared"}},
+	// global_instructions: excluded keeps ~/.claude's CLAUDE.md and rules
+	// out of the playbook (claudeMdExcludes in its settings.json); inherited
+	// loads them, as Claude Code's ancestor walk does for any directory
+	// under $HOME.
+	{"global_instructions", []string{"excluded", "inherited"}},
 }
 
 // PlaybookPropertyKeys lists the playbook properties in SHOW CREATE's order.
@@ -46,7 +47,7 @@ func PlaybookPropertyValues(key string) (values []string, ok bool) {
 	return nil, false
 }
 
-// PlaybookPropertyDefault is the value DELETE restores.
+// PlaybookPropertyDefault is the value RESET restores.
 func PlaybookPropertyDefault(key string) string {
 	v, _ := PlaybookPropertyValues(key)
 	if len(v) == 0 {
@@ -56,7 +57,7 @@ func PlaybookPropertyDefault(key string) string {
 }
 
 // PropertyValue returns the value a clause list gives key through SET or
-// DELETE (DELETE gives the default), and whether any clause names it.
+// RESET (RESET gives the default), and whether any clause names it.
 func PropertyValue(clauses []Clause, key string) (string, bool) {
 	for _, c := range clauses {
 		switch c.Kind {
@@ -66,7 +67,7 @@ func PropertyValue(clauses []Clause, key string) (string, bool) {
 					return v.Value, true
 				}
 			}
-		case DeleteProperties:
+		case ResetProperties:
 			for _, v := range c.Settings {
 				if v.Key == key {
 					return PlaybookPropertyDefault(key), true
@@ -77,7 +78,7 @@ func PropertyValue(clauses []Clause, key string) (string, bool) {
 	return "", false
 }
 
-// playbookProperties reads the body of SET (k = 'v', …) or of DELETE (k, …).
+// playbookProperties reads the body of SET (k = 'v', …) or of RESET (k, …).
 // A pair is one word (k=v, k='v') or three (k = 'v'); items are separated
 // by commas, a word's trailing one or a comma of its own, and the comma may
 // be left out. In a playbook file, and in a statement given as one quoted
@@ -182,8 +183,8 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 }
 
 // unquoteArg removes one pair of quotes a command-line word kept: a shell
-// passes memory='shared' through as one word when it is quoted whole
-// ("memory='shared'"). Property values never hold a quote of their own.
+// passes global_instructions='inherited' through as one word when it is quoted whole
+// ("global_instructions='inherited'"). Property values never hold a quote of their own.
 func unquoteArg(v string) string {
 	if len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
 		return v[1 : len(v)-1]

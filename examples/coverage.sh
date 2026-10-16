@@ -25,7 +25,7 @@ for k in $(printf '%s\n' "$kinds" | tr ' ' '_'); do
     "SET SANDBOX <key>=<value>") re='(^|[^A-Z])SET[[:space:]]+SANDBOX[[:space:]]+[a-z_]+=' ;;
     "UNSET SANDBOX <key>") re='(^|[^A-Z])UNSET[[:space:]]+SANDBOX[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
     "SET <key> = <value>") re='(^|[^A-Z])SET[[:space:]]+[a-z_]+[[:space:]]*=' ;;
-    "DELETE <key>") re='(^|[^A-Z])DELETE[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
+    "RESET <key>") re='(^|[^A-Z])RESET[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
     *) re="(^|[^A-Z])$(printf '%s' "$k" | sed 's/ /[[:space:]]+/g')([^A-Z]|$)" ;;
   esac
   grep -Eq "$re" SPEC.md || { echo "no reference entry: $k"; fail=1; }

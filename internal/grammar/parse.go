@@ -34,7 +34,7 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"PICKER", "ONLY", "APPEND", "LABEL", "DESCRIPTION", "BEHAVES", "REFRESH",
-		"DELETE",
+		"RESET",
 	} {
 		keywords[w] = true
 	}
@@ -173,9 +173,9 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "DELETE"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "LAUNCHER", "NO", "ALLOW", "DENY", "RESET"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SET", "DELETE"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "LAUNCHER", "NO", "SANDBOX", "SET", "RESET"}
 )
 
 var (
@@ -820,9 +820,9 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.pickerModel(c, w)
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
-	case "DELETE":
-		c.Kind = DeleteProperties
-		return c, p.playbookProperties(c, "DELETE", false)
+	case "RESET":
+		c.Kind = ResetProperties
+		return c, p.playbookProperties(c, "RESET", false)
 	case "SET":
 		if p.at("ISOLATED") {
 			return nil, p.fail(removedLogin)
@@ -1093,8 +1093,8 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "SET":
 		c.Kind = SetProperties
 		return c, p.playbookProperties(c, "SET", true)
-	case "DELETE":
-		return nil, p.fail("CREATE starts every property at its default; DELETE is for ALTER PLAYBOOK")
+	case "RESET":
+		return nil, p.fail("CREATE starts every property at its default; RESET is for ALTER PLAYBOOK")
 	}
 	return nil, nil
 }
@@ -1269,9 +1269,9 @@ func validate(s *Stmt) *Error {
 			return errAt(c.Pos, string(c.Kind)+" appears twice")
 		}
 		for _, v := range c.Settings {
-			// A property may be set or deleted in several SET and DELETE
+			// A property may be set or reset in several SET and RESET
 			// clauses, but each key once.
-			if c.Kind == SetProperties || c.Kind == DeleteProperties {
+			if c.Kind == SetProperties || c.Kind == ResetProperties {
 				if settings["property "+v.Key] {
 					return errAt(c.Pos, v.Key+" is named twice in one statement")
 				}
@@ -1328,7 +1328,7 @@ func validate(s *Stmt) *Error {
 		}
 	}
 	// A sandbox shares no login with the machine, so it cannot be combined
-	// with login = 'shared' (DELETE login is that too).
+	// with login = 'shared' (RESET login is that too).
 	if login, ok := PropertyValue(s.Clauses, "login"); ok && login == "shared" {
 		for _, k := range []Kind{SetSandbox, Sandbox} {
 			if pos, on := seen[k]; on {

@@ -121,11 +121,11 @@ func TestShowPlaybookManifestFields(t *testing.T) {
 
 	out := mustStmt(t, "SHOW PLAYBOOK rich")
 	for _, want := range []string{
-		"Version:      1.2.3",
-		"Description:  A rich playbook",
-		"Homepage:     https://example.com",
-		"Author:       Tester",
-		"Launcher:     ri",
+		"Version:              1.2.3",
+		"Description:          A rich playbook",
+		"Homepage:             https://example.com",
+		"Author:               Tester",
+		"Launcher:             ri",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("SHOW PLAYBOOK missing %q, got:\n%s", want, out)

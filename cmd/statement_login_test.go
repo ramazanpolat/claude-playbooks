@@ -84,7 +84,7 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	if !strings.Contains(created, "ALTER PLAYBOOK k\n  SET login = 'isolated', memory = 'shared';") {
+	if !strings.Contains(created, "ALTER PLAYBOOK k\n  SET login = 'isolated', global_instructions = 'inherited';") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -115,23 +115,23 @@ func TestIsolatedLogin(t *testing.T) {
 	if isolateAuthOf(t, "k") {
 		t.Fatal("login = 'shared' left isolated_login")
 	}
-	if created := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(created, "SET login = 'shared', memory = 'shared'") {
+	if created := mustStmt(t, "SHOW CREATE PLAYBOOK k"); !strings.Contains(created, "SET login = 'shared', global_instructions = 'inherited'") {
 		t.Fatalf("SHOW CREATE after login = 'shared':\n%s", created)
 	}
 
 	// A sandboxed playbook is isolated by SANDBOX: UNSET is refused and
 	// SHOW CREATE does not repeat it.
 	mustStmt(t, "CREATE PLAYBOOK s NO LAUNCHER SANDBOX")
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK s DELETE login"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
-		t.Fatalf("DELETE login on a sandboxed playbook: %v", err)
+	if _, err := quotedStmt(t, "ALTER PLAYBOOK s RESET login"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
+		t.Fatalf("RESET login on a sandboxed playbook: %v", err)
 	}
-	if created := mustStmt(t, "SHOW CREATE PLAYBOOK s"); !strings.Contains(created, "SET login = 'isolated', memory = 'isolated'") {
+	if created := mustStmt(t, "SHOW CREATE PLAYBOOK s"); !strings.Contains(created, "SET login = 'isolated', global_instructions = 'excluded'") {
 		t.Fatalf("SHOW CREATE of a sandboxed playbook:\n%s", created)
 	}
 
 	for line, want := range map[string]string{
 		"CREATE PLAYBOOK c LINK /x SET login = 'isolated'":              "does not apply to LINK",
-		"ALTER PLAYBOOK k SET login = 'isolated' DELETE login":          "login is named twice in one statement",
+		"ALTER PLAYBOOK k SET login = 'isolated' RESET login":           "login is named twice in one statement",
 		"ALTER PLAYBOOK k SET ISOLATED LOGIN":                           "ISOLATED LOGIN is a property now: SET login = 'isolated'",
 		"CREATE PLAYBOOK c SET login = 'isolated' SET login = 'shared'": "login is named twice in one statement",
 	} {
@@ -150,7 +150,7 @@ func TestIsolatedLoginDryRun(t *testing.T) {
 	if _, err := apply(t, f, "--dry-run"); err == nil || !strings.Contains(err.Error(), "always runs in a sandbox") {
 		t.Fatalf("dry run, UNSET on a sandboxed playbook: %v", err)
 	}
-	f = writePlaybookFile(t, "CREATE PLAYBOOK e NO LAUNCHER;\nALTER PLAYBOOK e SET login = 'isolated';\nALTER PLAYBOOK e SET memory = 'isolated';\n")
+	f = writePlaybookFile(t, "CREATE PLAYBOOK e NO LAUNCHER;\nALTER PLAYBOOK e SET login = 'isolated';\nALTER PLAYBOOK e SET global_instructions = 'excluded';\n")
 	out, err := apply(t, f, "--dry-run")
 	if err != nil || !strings.Contains(out, "1 created, 1 changed, 1 unchanged") {
 		t.Fatalf("dry run:\n%v\n%s", err, out)

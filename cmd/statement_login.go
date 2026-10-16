@@ -31,7 +31,7 @@ func (r *stmtRun) sandboxed(name string, m *manifest.Manifest) bool {
 	return m != nil && m.Sandbox != nil && m.Sandbox.Always
 }
 
-// planIsolatedLogin decides the login property (SET login, and DELETE
+// planIsolatedLogin decides the login property (SET login, and RESET
 // login, which is 'shared'). 'shared' is refused where
 // sharing would be wrong: a sandboxed playbook never shares a login,
 // and a playbook holding a login of its own would have it copied over the

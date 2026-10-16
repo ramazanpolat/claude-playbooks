@@ -28,9 +28,9 @@ type installOpts struct {
 	// isolatedLogin: isolated_login = true without a sandbox (CREATE
 	// PLAYBOOK … FROM … SET login = 'isolated').
 	isolatedLogin bool
-	// memory: 'isolated' writes the claudeMdExcludes entry into the
+	// globalInstructions: 'excluded' writes the claudeMdExcludes entry into the
 	// install's settings.json (kept across updates, which preserve it).
-	memory string
+	globalInstructions string
 }
 
 func doInstall(o installOpts, args []string) error {
@@ -202,10 +202,10 @@ func doInstall(o installOpts, args []string) error {
 		os.RemoveAll(stage)
 		return err
 	}
-	if o.memory == "isolated" {
-		if err := writeMemory(stage, o.memory); err != nil {
+	if o.globalInstructions == "excluded" {
+		if err := writeGlobalInstructions(stage, o.globalInstructions); err != nil {
 			os.RemoveAll(stage)
-			return fmt.Errorf("cannot record the memory setting in settings.json: %w", err)
+			return fmt.Errorf("cannot record the global_instructions setting in settings.json: %w", err)
 		}
 	}
 	if err := os.Rename(stage, dest); err != nil {

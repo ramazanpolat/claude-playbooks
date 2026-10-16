@@ -1,0 +1,8 @@
+-- Claude Code loads the CLAUDE.md of every ancestor of the working
+-- directory, and ~/.claude is one: without this setting, the machine's own
+-- ~/.claude/CLAUDE.md and rules would load into every playbook under $HOME.
+-- A new playbook keeps them out (global_instructions = 'excluded', the default).
+CREATE PLAYBOOK IF NOT EXISTS focused NO LAUNCHER;
+
+-- One that wants the machine's instructions says so.
+CREATE PLAYBOOK IF NOT EXISTS familiar NO LAUNCHER SET global_instructions = 'inherited';
