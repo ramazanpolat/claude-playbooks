@@ -204,11 +204,13 @@ only `launcher`. The clauses of `origin` and `SET` may come in any order.
 
 Two limits keep every statement whole-or-nothing:
 
-- `RENAME TO` and the launcher (`SET launcher = …`, `RESET launcher`) are
-  not combined with other clauses in one statement: a rename after an
-  environment write could not be undone as one step. `RENAME TO <name> SET
-  launcher = '<launcher>'` is one statement; the environment change is a
-  second.
+- `RENAME TO` is not combined with other clauses in one statement, except
+  the launcher: a rename after an environment write could not be undone as
+  one step. `RENAME TO <name> SET launcher = '<launcher>'` is one statement;
+  the environment change is a second. The launcher itself is an ordinary
+  key: `SET launcher = 's', model = 'x'` is one statement. Its name is
+  checked before anything is written, and it changes last, only where it
+  differs.
 - `CREATE PLAYBOOK … LINK <dir>` needs the target to have a `.playbook`: a
   statement never prompts for one. The sandbox does not apply to `LINK`,
   whose manifest belongs to the target.
@@ -661,8 +663,9 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   target manifest's: the manifest and `settings.json` are the target's.
   `sandbox.always = true` does not combine with `login = 'shared'` (nor
   with `RESET login`), and needs `login = 'isolated'`, already or in the
-  same statement. A launcher name is never a keyword. `RENAME TO` and
-  the launcher are not combined with other clauses in one statement.
+  same statement. A launcher name is never a keyword. `RENAME TO` is not
+  combined with other clauses, except the launcher; the launcher combines
+  with any other key.
 - **Words.** `RESET` is a reserved word. The keys and the values are read
   only after `SET` and `RESET` and are not reserved, though `model` is also
   spelled as a keyword elsewhere (`ADD MODEL`): a key followed by `=` is a

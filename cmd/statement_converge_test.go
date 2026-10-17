@@ -151,6 +151,39 @@ func TestCreateUseEnv(t *testing.T) {
 	}
 }
 
+// The launcher is an ordinary key (D1): it combines with any other in one
+// ALTER. A taken name refuses the whole statement before anything is
+// written; RENAME TO stays a statement of its own.
+func TestLauncherWithOtherKeys(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	has := func(cmd string) bool {
+		_, exists, _ := launcher.Lookup(config.LauncherDir, cmd)
+		return exists
+	}
+	mustStmt(t, "CREATE PLAYBOOK lk SET launcher = 'lk1'")
+	mustStmt(t, "CREATE PLAYBOOK other SET launcher = 'taken'")
+
+	mustStmt(t, "ALTER PLAYBOOK lk SET launcher = 'lk2', model = 'a'")
+	if s := settingsOf(t, filepath.Join(root, "lk")); s["model"] != "a" || has("lk1") || !has("lk2") {
+		t.Fatalf("model %v, lk1=%v lk2=%v", s["model"], has("lk1"), has("lk2"))
+	}
+	// The same launcher again: only the model changes.
+	mustStmt(t, "ALTER PLAYBOOK lk SET model = 'b', launcher = 'lk2'")
+	if s := settingsOf(t, filepath.Join(root, "lk")); s["model"] != "b" || !has("lk2") {
+		t.Fatalf("model %v, lk2=%v", s["model"], has("lk2"))
+	}
+	if err := stmtErr(t, "ALTER PLAYBOOK lk SET launcher = 'taken', model = 'c'"); err == nil || !strings.Contains(err.Error(), "taken") {
+		t.Fatalf("a taken launcher: %v", err)
+	}
+	if s := settingsOf(t, filepath.Join(root, "lk")); s["model"] != "b" || !has("lk2") {
+		t.Fatalf("a refused statement wrote something: model %v, lk2=%v", s["model"], has("lk2"))
+	}
+	if err := stmtErr(t, "ALTER PLAYBOOK lk RENAME TO lk3 SET model = 'c'"); err == nil || !strings.Contains(err.Error(), "RENAME TO is a statement of its own") {
+		t.Fatalf("RENAME TO with another key: %v", err)
+	}
+}
+
 // SET IF UNSET applies whole, and only when none of its keys is set (each
 // at the value RESET gives it); else it changes nothing and says which key
 // was set.

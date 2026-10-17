@@ -143,8 +143,10 @@ cpb DROP PLAYBOOK experiment              # asks for confirmation on a terminal
 cpb DROP PLAYBOOK IF EXISTS awesome --yes
 ```
 
-`RENAME TO`, `LAUNCHER` and `SET launcher = ''` are not combined with environment clauses in
-one statement: use two, so each applies whole or not at all.
+`RENAME TO` is not combined with other clauses in one statement, except the
+launcher: use two, so each applies whole or not at all. The launcher itself is
+an ordinary key, so `ALTER PLAYBOOK lab SET launcher = 'l', model = 'claude-opus-5-5'`
+is one statement; the launcher name is checked before anything is written.
 
 ## Plugins and the agent
 

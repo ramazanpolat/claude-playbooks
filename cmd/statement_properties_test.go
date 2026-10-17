@@ -70,9 +70,10 @@ func TestLauncherModelAgentProperties(t *testing.T) {
 		t.Fatalf("SHOW CREATE did not re-apply unchanged: %v\n%s", err, out)
 	}
 
-	// The launcher stands alone, as RENAME TO does.
-	if _, err := stmt(t, "ALTER PLAYBOOK qq SET launcher = 'q3' SET model = 'm'"); err == nil || !strings.Contains(err.Error(), "use two statements") {
-		t.Fatalf("launcher with another clause: %v", err)
+	// The launcher combines with another key (D1); RENAME TO stands alone.
+	mustStmt(t, "ALTER PLAYBOOK qq SET launcher = 'q3' SET model = 'm'")
+	if _, err := stmt(t, "ALTER PLAYBOOK qq RENAME TO qr SET model = 'n'"); err == nil || !strings.Contains(err.Error(), "use two statements") {
+		t.Fatalf("RENAME TO with another clause: %v", err)
 	}
 }
 

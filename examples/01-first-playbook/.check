@@ -7,6 +7,9 @@ cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"name": "boxed-lab"'
 # the playbook's own name.
 cpb ALTER PLAYBOOK boxed-lab SET launcher = 'bx'
 cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"launcher": "bx"'
+# The launcher is an ordinary key: it combines with any other in one SET.
+cpb ALTER PLAYBOOK boxed-lab SET launcher = 'bx2', model = 'claude-opus-5-5'
+cpb SHOW PLAYBOOK boxed-lab --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["launcher"] == "bx2" and v["model"] == "claude-opus-5-5", v'
 cpb ALTER PLAYBOOK boxed-lab RESET launcher
 cpb SHOW PLAYBOOK boxed-lab --json | grep -q '"launcher": "boxed-lab"'
 dev=$(mktemp -d)

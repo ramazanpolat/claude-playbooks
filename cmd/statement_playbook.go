@@ -348,11 +348,70 @@ func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	return doDelete(deleteOpts{yes: st.Yes || r.yes}, []string{st.Name})
 }
 
+// launcherWithOthers reports an ALTER PLAYBOOK that changes the launcher
+// together with other clauses, and renames nothing: the launcher is an
+// ordinary key (D1). RENAME TO stays a statement of its own.
+func launcherWithOthers(st *grammar.Stmt) bool {
+	launch, other := false, false
+	for _, c := range st.Clauses {
+		switch c.Kind {
+		case grammar.RenameTo:
+			return false
+		case grammar.Launcher, grammar.NoLauncher, grammar.DefaultLauncher:
+			launch = true
+		default:
+			other = true
+		}
+	}
+	return launch && other
+}
+
+// alterPlaybookWithLauncher is an ALTER PLAYBOOK whose SET list holds the
+// launcher beside other keys. The launcher name is checked before anything
+// is written; then the other clauses apply as one ALTER, and the launcher
+// changes last, only where it differs, as CREATE OR ALTER does.
+func alterPlaybookWithLauncher(r *stmtRun, st *grammar.Stmt) error {
+	var props, launch []grammar.Clause
+	for _, c := range st.Clauses {
+		switch c.Kind {
+		case grammar.Launcher, grammar.NoLauncher, grammar.DefaultLauncher:
+			launch = append(launch, c)
+		default:
+			props = append(props, c)
+		}
+	}
+	pb, exists, err := r.findPlaybook(st.Name)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", st.Name)
+	}
+	want := launcherWanted(st.Name, launch[0])
+	differs := launcherOpsAllowed() && want != r.launcherOf(st.Name, pb)
+	if differs && want != "" {
+		if err := preflightCommandNames(st.Name, want); err != nil {
+			return err
+		}
+	}
+	if err := playbookStatement(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: props}); err != nil {
+		return err
+	}
+	if !differs {
+		return nil
+	}
+	if err := alterPlaybookLifecycle(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: launch}); err != nil {
+		return err
+	}
+	r.outcome = outChanged
+	return nil
+}
+
 // alterPlaybookLifecycle carries out RENAME TO and the launcher (SET
-// launcher = '<name>', the empty launcher, RESET launcher). They are not
-// combined with other clauses: a rename after an environment write could not
-// be undone as one step, so the statement would not apply whole or not at
-// all.
+// launcher = '<name>', the empty launcher, RESET launcher). RENAME TO is
+// not combined with other clauses (only with the launcher): a rename after
+// an environment write could not be undone as one step, so the statement
+// would not apply whole or not at all.
 func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 	var rename, alias string
 	noAlias := false
@@ -374,7 +433,7 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		case grammar.NoLauncher:
 			noAlias = true
 		default:
-			return fmt.Errorf("RENAME TO and the launcher cannot be combined with %s in one statement: use two statements", c.Kind)
+			return fmt.Errorf("RENAME TO is a statement of its own (with SET launcher at most), not combined with %s: use two statements", c.Kind)
 		}
 	}
 	r.outcome = outChanged

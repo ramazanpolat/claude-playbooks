@@ -183,6 +183,9 @@ func execStatement(r *stmtRun, st *grammar.Stmt) error {
 			return err
 		}
 		if lifecycle(st) {
+			if launcherWithOthers(st) {
+				return alterPlaybookWithLauncher(r, st)
+			}
 			return alterPlaybookLifecycle(r, st)
 		}
 		return playbookStatement(r, st)

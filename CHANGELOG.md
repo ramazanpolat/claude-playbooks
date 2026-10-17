@@ -18,6 +18,11 @@
   statement without `USE ENV` keeps it. `ADD`, `DROP` and `REPLACE ENV` stay
   in `ALTER`. `SHOW CREATE` now writes `USE ENV` on the `CREATE`, not in
   the `ALTER` after it.
+- **The launcher is an ordinary key** (SPEC.md, *Grammar*): `ALTER PLAYBOOK
+  … SET launcher = 's', model = 'x'` is one statement, as it already was in
+  `CREATE`. The launcher name is checked before anything is written, and it
+  changes last, only where it differs. Only `RENAME TO` stays a statement of
+  its own (with `SET launcher` at most).
 
 ### Changed
 
