@@ -105,7 +105,7 @@ func foldParts(c grammar.Clause) []foldPart {
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{m("statusline"), m("statusline-refresh")}})
 	case grammar.UseEnv:
 		out = append(out, foldPart{index: -1, what: "USE ENV", effects: []foldEffect{w("envs")}})
-	case grammar.AddEnv, grammar.DropEnv: // relative to the list as it stands
+	case grammar.AddEnv, grammar.DropEnv, grammar.ReplaceEnv: // relative to the list as it stands
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{m("envs")}})
 	}
 	return out

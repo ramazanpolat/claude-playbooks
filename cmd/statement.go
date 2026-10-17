@@ -346,7 +346,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		// Removing needs no profile to be readable, which matters exactly
 		// when one is broken; adding checks every name.
 		for _, c := range listClauses {
-			if c.Kind == grammar.UseEnv || c.Kind == grammar.AddEnv {
+			if c.Kind == grammar.UseEnv || c.Kind == grammar.AddEnv || c.Kind == grammar.ReplaceEnv {
 				write = envset.WriteDefaults
 			}
 		}
@@ -808,6 +808,27 @@ func (r *stmtRun) applyEnvList(dir string, list []string, clauses []grammar.Clau
 				out = append(out, n)
 			}
 			changed = true
+		case grammar.ReplaceEnv:
+			// REPLACE ENV old WITH new keeps old's position. Run twice, it
+			// changes nothing the second time (old gone, new attached).
+			old, repl := c.Names[0], c.Names[1]
+			if err := r.requireEnv(dir, repl); err != nil {
+				return nil, nil, err
+			}
+			oldAt, newAt := slices.Index(out, old), slices.Index(out, repl)
+			switch {
+			case old == repl && oldAt >= 0:
+				lines = append(lines, fmt.Sprintf("%s is attached; unchanged", old))
+			case oldAt >= 0 && newAt < 0:
+				out[oldAt] = repl
+				changed = true
+			case oldAt >= 0:
+				return nil, nil, fmt.Errorf("REPLACE ENV %s WITH %s: %s is already attached; DROP ENV %s, or state the list with USE ENV", old, repl, repl, old)
+			case newAt >= 0:
+				lines = append(lines, fmt.Sprintf("%s is not attached and %s already is; unchanged", old, repl))
+			default:
+				return nil, nil, fmt.Errorf("REPLACE ENV %s WITH %s: %s is not attached; ADD ENV %s attaches it", old, repl, old, repl)
+			}
 		case grammar.DropEnv:
 			for _, n := range c.Names {
 				if !slices.Contains(out, n) {

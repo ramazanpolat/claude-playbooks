@@ -412,6 +412,10 @@ func clauseUndo(c grammar.Clause) []undoItem {
 			out = append(out, u{"env:" + n, "ENV " + n, grammar.Clause{Kind: grammar.DropEnv, Names: []string{n}}})
 		}
 		return out
+	case grammar.ReplaceEnv:
+		// The set it attached; the one it detached is not put back.
+		n := c.Names[1]
+		return []u{{"env:" + n, "ENV " + n, grammar.Clause{Kind: grammar.DropEnv, Names: []string{n}}}}
 	case grammar.SetIfUnset:
 		// What the list sets when it applies; deferredIfUnset keeps the
 		// undo only where the playbook still holds the list's value.

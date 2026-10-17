@@ -51,6 +51,7 @@ const (
 	UseEnv      Kind = "USE ENV"     // USE ENV a b ...
 	AddEnv      Kind = "ADD ENV"     // ADD ENV a [FIRST | LAST | BEFORE b | AFTER b]
 	DropEnv     Kind = "DROP ENV"    // DROP ENV a b ...
+	ReplaceEnv  Kind = "REPLACE ENV" // REPLACE ENV old WITH new: Names is [old, new]
 	RenameTo    Kind = "RENAME TO"   // RENAME TO n
 	// The launcher property: SET launcher = '<name>', SET launcher = ''
 	// (none), RESET launcher (back to the playbook's name).

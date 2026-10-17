@@ -150,6 +150,7 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
             | ADD ENV <env> [FIRST | LAST | BEFORE <env> | AFTER <env>]
                                            insert one (default LAST)
             | DROP ENV <env> ...           detach
+            | REPLACE ENV <old> WITH <new> swap one set, keeping its position
 
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
@@ -220,6 +221,22 @@ Order matters for env sets: a later set overrides an earlier one. `USE ENV a b`
 states the whole list, so it is the idempotent form; `ADD ENV` places one set
 without restating the rest.
 
+`REPLACE ENV <old> WITH <new>`, in `ALTER PLAYBOOK` and `ALTER DEFAULTS`,
+swaps one set for another at old's position: switching a playbook from one
+account's env set to another's is one clause. Run twice, it changes nothing:
+
+| old | new | result |
+|---|---|---|
+| attached | the same set | no change |
+| attached | not attached | replaced at old's position |
+| attached | attached elsewhere | an error: drop one, or state the list with `USE ENV` |
+| not attached | attached | no change (already switched) |
+| not attached | not attached | an error: `ADD ENV` attaches a set |
+| any | no such env set | an error naming it |
+
+A recipe states `USE ENV`; `REPLACE ENV` is for typing at the prompt, and
+`SHOW CREATE` never writes it (it writes the whole `USE ENV` list).
+
 One rule keeps the verbs apart: **`DROP` acts on objects** (an ENV, a
 playbook) and **`UNSET` acts on variables**. So `DROP ENV
 router` inside `ALTER PLAYBOOK` detaches that set, and `UNSET VAR FOO`
@@ -255,12 +272,12 @@ stores commands; files store the result.
 | Clause | Writes |
 |---|---|
 | `CREATE / ALTER / DROP ENV` | `<root>/.env-sets/<name>.toml`: `description`, `[set]`, `[refs]`, `block` |
-| `ALTER PLAYBOOK … USE / ADD / DROP ENV` | the playbook's `.playbook`, `[env] sets = [...]` |
+| `ALTER PLAYBOOK … USE / ADD / DROP / REPLACE ENV` | the playbook's `.playbook`, `[env] sets = [...]` |
 | `ALTER PLAYBOOK … SET VAR K=V` | `.playbook` `[env.set]` |
 | `ALTER PLAYBOOK … SET VAR K FROM '<ref>'` | `.playbook` `[env.refs]` |
 | `ALTER PLAYBOOK … BLOCK VAR K` | `.playbook` `[env] block = [...]` |
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
-| `ALTER DEFAULTS … USE / ADD / DROP ENV` | `<root>/.env-sets/.defaults`, one set name per line, in order |
+| `ALTER DEFAULTS … USE / ADD / DROP / REPLACE ENV` | `<root>/.env-sets/.defaults`, one set name per line, in order |
 | `ALTER DEFAULTS SET / RESET secret_helper` | `<root>/.env-sets/.secret-helper`, one line: the command |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `SET launcher` / `RESET launcher` | the playbook dir, the registry and the launcher |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
@@ -286,6 +303,7 @@ cpb ALTER PLAYBOOK work USE ENV glm-5.3 deepseek-flash
 cpb ALTER PLAYBOOK work ADD ENV claude-work FIRST
 cpb ALTER PLAYBOOK work ADD ENV router AFTER glm-5.3
 cpb ALTER PLAYBOOK work DROP ENV deepseek-flash
+cpb ALTER PLAYBOOK work REPLACE ENV glm-5.3 WITH glm-5.3-flash
 cpb ALTER PLAYBOOK work BLOCK VAR HTTP_PROXY
 cpb ALTER DEFAULTS USE ENV claude-default corp-proxy
 cpb ALTER DEFAULTS SET secret_helper = 'my-keychain-helper'
@@ -2386,8 +2404,8 @@ PLAYBOOK` statements: a recipe. These clauses are allowed:
 Refused, each with its line and reason:
 - **anything outside the one playbook `play` makes:** `INCLUDE`, `USE
   PLAYBOOK`, an env set or `DEFAULTS` statement, a named or created playbook;
-- **`USE ENV` and `ADD ENV`:** they would attach your env sets, and your
-  keys;
+- **`USE ENV`, `ADD ENV` and `REPLACE ENV`:** they would attach your env
+  sets, and your keys;
 - **a credential-looking literal, even `AS PLAINTEXT`:** a shared recipe
   carries no secret, only a reference. This is the grammar's own rule, so a
   value that cannot be a secret passes: empty, an integer, `true` or

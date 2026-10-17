@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`REPLACE ENV <old> WITH <new>`** (SPEC.md, *Grammar*), in `ALTER
+  PLAYBOOK` and `ALTER DEFAULTS`: one env set swapped for another at the
+  same position, so switching a playbook's account is one clause. Run again,
+  it changes nothing. New attached elsewhere, neither attached, or an
+  unknown new set is an error, and nothing is written. `SHOW CREATE` writes
+  the whole `USE ENV` list, never `REPLACE`; a played recipe may not hold it.
+  `WITH` is a reserved word.
+
 ### Changed
 
 - **`CREATE OR ALTER PLAYBOOK … SET …` converges** (SPEC.md, *Grammar*,

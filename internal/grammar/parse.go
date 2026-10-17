@@ -25,7 +25,7 @@ func init() {
 		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "DEFAULTS", "ALL",
 		"SET", "VAR", "FROM", "BLOCK", "UNSET", "DESCRIBE",
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
-		"RENAME", "TO",
+		"RENAME", "TO", "WITH",
 		"BRANCH", "SUBDIR", "LINK",
 		"AS", "PLAINTEXT",
 		"INCLUDE", "MARKETPLACE", "PLUGIN",
@@ -175,8 +175,8 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "RESET", "REVERT"}
-	defaultsStarters       = []string{"USE", "ADD", "DROP", "SET", "UNSET", "RESET"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "RESET", "REVERT"}
+	defaultsStarters       = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "UNSET", "RESET"}
 	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "RESET"}
 )
 
@@ -825,6 +825,8 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 			return c, p.pickerModel(c, w)
 		}
 		return nil, p.fail(w + " takes ENV, MARKETPLACE, PLUGIN, MCP SERVER, SKILL or MODEL")
+	case "REPLACE":
+		return c, p.replaceEnv(c)
 	case "RESET":
 		c.Kind = ResetProperties
 		return c, p.playbookProperties(c, "RESET", false)
@@ -965,6 +967,8 @@ func (p *parser) defaultsClause() (*Clause, *Error) {
 		return c, p.envList(c, w)
 	case "ADD":
 		return c, p.addEnv(c)
+	case "REPLACE":
+		return c, p.replaceEnv(c)
 	case "SET":
 		if p.at("SECRET") {
 			return nil, errAt(c.Pos, removedSetHelper)
@@ -1029,6 +1033,28 @@ func (p *parser) addEnvRest(c *Clause) *Error {
 		}
 		c.Anchor = anchor
 	}
+	return nil
+}
+
+// replaceEnv reads the rest of REPLACE ENV <old> WITH <new>: one env set
+// swapped for another at the same position in the list.
+func (p *parser) replaceEnv(c *Clause) *Error {
+	if p.kw("ENV") == "" {
+		return p.fail("REPLACE takes ENV: REPLACE ENV <old> WITH <new>")
+	}
+	c.Kind = ReplaceEnv
+	old, err := p.name(Env, false)
+	if err != nil {
+		return err
+	}
+	if p.kw("WITH") == "" {
+		return p.fail("expected WITH after REPLACE ENV " + old + ": REPLACE ENV <old> WITH <new>")
+	}
+	repl, err := p.name(Env, false)
+	if err != nil {
+		return err
+	}
+	c.Names = []string{old, repl}
 	return nil
 }
 
@@ -1235,7 +1261,11 @@ func validate(s *Stmt) *Error {
 			}
 			keys[k] = true
 		}
-		for _, n := range c.Names {
+		names := c.Names
+		if c.Kind == ReplaceEnv && names[0] == names[1] {
+			names = names[:1] // REPLACE ENV a WITH a: no change, not a repetition
+		}
+		for _, n := range names {
 			what := map[Kind]string{AddMarketplace: "marketplace", DropMarketplace: "marketplace",
 				AddPlugin: "plugin", DropPlugin: "plugin", AddMCP: "MCP server", DropMCP: "MCP server",
 				AllowTool: "tool rule", DenyTool: "tool rule", UnsetTool: "tool rule",

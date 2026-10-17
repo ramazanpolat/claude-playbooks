@@ -192,6 +192,8 @@ func (c *Clause) words(varWord bool) []string {
 			w = append(w, quoteWord(n))
 		}
 		return w
+	case ReplaceEnv:
+		return []string{"REPLACE", "ENV", quoteWord(c.Names[0]), "WITH", quoteWord(c.Names[1])}
 	case AddEnv:
 		w := []string{"ADD", "ENV", quoteWord(c.Names[0])}
 		switch c.Where {

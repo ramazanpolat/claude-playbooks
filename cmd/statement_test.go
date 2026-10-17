@@ -211,6 +211,79 @@ func TestStatementPlaybookEnvList(t *testing.T) {
 	}
 }
 
+// REPLACE ENV old WITH new keeps old's position, and the six cases of
+// the consensus (B3) decide what it does.
+func TestStatementReplaceEnv(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	root := seedFlatPlaybook(t, "sre")
+	for _, n := range []string{"corp", "acct-work", "acct-personal", "debug"} {
+		mustStmt(t, "CREATE ENV "+n)
+	}
+	sets := func() []string {
+		if e := readEnv(t, root); e != nil {
+			return e.Sets
+		}
+		return nil
+	}
+	mustStmt(t, "ALTER PLAYBOOK sre USE ENV corp acct-work debug")
+
+	// old attached, new not: replaced in place.
+	out := mustStmt(t, "ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal")
+	if got := sets(); !reflect.DeepEqual(got, []string{"corp", "acct-personal", "debug"}) {
+		t.Fatalf("replaced in place: %q", got)
+	}
+	if !strings.Contains(out, "env sets  corp, acct-personal, debug") {
+		t.Fatalf("report:\n%s", out)
+	}
+	// Run again: old not attached, new attached: no change.
+	if out := mustStmt(t, "ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal"); !strings.Contains(out, "unchanged") {
+		t.Fatalf("second run: %s", out)
+	}
+	// old attached, new == old: no change.
+	if out := mustStmt(t, "ALTER PLAYBOOK sre REPLACE ENV corp WITH corp"); !strings.Contains(out, "unchanged") {
+		t.Fatalf("same set: %s", out)
+	}
+	before := sets()
+	for bad, want := range map[string]string{
+		// old attached, new attached elsewhere.
+		"ALTER PLAYBOOK sre REPLACE ENV corp WITH debug": "debug is already attached",
+		// neither attached.
+		"ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-work": "acct-work is not attached",
+		// unknown new set.
+		"ALTER PLAYBOOK sre REPLACE ENV corp WITH ghost": `no env set "ghost"`,
+		// the whole statement or nothing.
+		"ALTER PLAYBOOK sre SET VAR OK=1 REPLACE ENV corp WITH debug": "debug is already attached",
+	} {
+		if err := stmtErr(t, bad); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: %v (want %q)", bad, err, want)
+		}
+		if got := sets(); !reflect.DeepEqual(got, before) {
+			t.Fatalf("%s wrote %q", bad, got)
+		}
+	}
+	if _, ok := readEnv(t, root).Set["OK"]; ok {
+		t.Fatal("a refused statement applied its other clause")
+	}
+
+	// SHOW CREATE writes the whole list, never REPLACE.
+	show := mustStmt(t, "SHOW CREATE PLAYBOOK sre")
+	if strings.Contains(show, "REPLACE ENV") || !strings.Contains(show, "USE ENV corp acct-personal debug") {
+		t.Fatalf("SHOW CREATE:\n%s", show)
+	}
+
+	// DEFAULTS too.
+	dir := envset.Dir(config.ResolvePlaybooksDir())
+	mustStmt(t, "ALTER DEFAULTS USE ENV corp debug")
+	mustStmt(t, "ALTER DEFAULTS REPLACE ENV corp WITH acct-work")
+	if d, err := envset.Defaults(dir); err != nil || strings.Join(d, ",") != "acct-work,debug" {
+		t.Fatalf("DEFAULTS after REPLACE: %q %v", d, err)
+	}
+	if err := stmtErr(t, "ALTER DEFAULTS REPLACE ENV corp WITH ghost"); err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("unknown set in DEFAULTS: %v", err)
+	}
+}
+
 func TestStatementPlaybookVars(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)

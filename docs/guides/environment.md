@@ -93,6 +93,7 @@ imports nothing ([example 15](../../examples/15-third-party-route/)).
 cpb ALTER PLAYBOOK router USE ENV glm                 # the whole list, in order
 cpb ALTER PLAYBOOK router ADD ENV team FIRST          # insert one: FIRST, LAST (default), BEFORE x, AFTER x
 cpb ALTER PLAYBOOK router DROP ENV team               # detach
+cpb ALTER PLAYBOOK router REPLACE ENV glm WITH glm-flash   # swap one, same position
 cpb ALTER PLAYBOOK router SET VAR ANTHROPIC_DEFAULT_OPUS_MODEL=glm/glm-5.4   # own entry on top
 ```
 
@@ -106,7 +107,9 @@ ANTHROPIC_DEFAULT_OPUS_MODEL = "glm/glm-5.4"
 
 Sets apply in the order listed, later ones overriding earlier; the playbook's
 own entries apply last. `USE ENV` states the whole list, so it is the form to
-repeat safely; `ADD ENV` places one set without restating the rest.
+repeat safely; `ADD ENV` places one set without restating the rest;
+`REPLACE ENV old WITH new` swaps one set in place (run again, it changes
+nothing). Recipes state `USE ENV`; `SHOW CREATE` never writes `REPLACE`.
 
 Manage the sets:
 

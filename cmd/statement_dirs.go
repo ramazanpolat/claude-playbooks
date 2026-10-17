@@ -35,6 +35,7 @@ var dirRefusals = map[grammar.Kind]string{
 	grammar.UseEnv:          "env sets are layered by the launcher",
 	grammar.AddEnv:          "env sets are layered by the launcher",
 	grammar.DropEnv:         "env sets are layered by the launcher",
+	grammar.ReplaceEnv:      "env sets are layered by the launcher",
 	grammar.RenameTo:        "the directory is not in the registry",
 	grammar.Launcher:        "the directory has no launcher",
 	grammar.NoLauncher:      "the directory has no launcher",

@@ -109,6 +109,7 @@ var refusedClauses = map[grammar.Kind]string{
 	grammar.UseEnv:          "it would attach your env sets, and your keys, to someone else's playbook",
 	grammar.AddEnv:          "it would attach your env sets, and your keys, to someone else's playbook",
 	grammar.DropEnv:         "it would detach your env sets: " + onlyThisPlaybook,
+	grammar.ReplaceEnv:      "it would attach your env sets, and your keys, to someone else's playbook",
 	grammar.RenameTo:        "the name is play's decision, not the recipe's",
 	grammar.Launcher:        "the launcher is play's decision, not the recipe's",
 	grammar.DefaultLauncher: "the launcher is play's decision, not the recipe's",
