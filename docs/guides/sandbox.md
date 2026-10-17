@@ -1,4 +1,6 @@
-# Sandboxed sessions
+# Sandboxed sessions (experimental)
+
+Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
 
 `cpb` isolates a playbook's config directory and its environment. `--sandbox`
 adds the third boundary: the process itself. The playbook's Claude Code runs
@@ -125,7 +127,7 @@ share_skills = true                 # mount sbx's shared skills store after all
 
 The block is install-local: `CREATE PLAYBOOK … FROM` never adopts one shipped
 by a source, and `cpb update` keeps yours. `SHOW CREATE` writes it back as `SET
-sandbox.<key> = …` pairs. See [Sandbox](../../SPEC.md#sandbox) in
+sandbox.<key> = …` pairs. See [Sandbox](../../SPEC.md#sandbox-experimental) in
 the reference.
 
 `claude_version` matters for a playbook routed to a third-party backend that

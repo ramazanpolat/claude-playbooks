@@ -15,7 +15,7 @@ anywhere:
 | **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills; `~/.claude`'s own `CLAUDE.md` and rules stay out of it. Your `~/.claude` never moves. | every playbook (`global_instructions = 'excluded'`, the default) |
 | **Environment** | its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is. | `USE ENV`, `SET VAR`, `BLOCK VAR` |
 | **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `SET login = 'isolated'` |
-| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SET sandbox.always = true`, or `--sandbox` on any launch |
+| **Process** (experimental) | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SET sandbox.always = true`, or `--sandbox` on any launch |
 
 ```bash
 cpb CREATE PLAYBOOK work                           # a playbook, and a `work` command that opens it
@@ -72,6 +72,7 @@ keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its
 
 ### Let an agent loose without letting it near your machine
 
+Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
 With `--sandbox`, Claude Code runs in a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/)
 that sees your working directory and the playbook's own directory, and not
 your home, `~/.claude`, your shell's environment or your other playbooks.

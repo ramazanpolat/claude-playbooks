@@ -34,7 +34,7 @@ or a local file (./x.cpb). A played recipe changes nothing on your machine but
 the playbook play makes: no env sets, no DEFAULTS and no plaintext secrets, and
 its CLAUDE.md imports nothing.
 
-It runs in a sandbox (sbx) where one is available, and
+It runs in a sandbox (sbx, experimental) where one is available, and
 says so when none is; --no-sandbox runs it on this machine, as you. A recipe
 whose header asks for a sandbox (-- create-with: SANDBOX) is refused where none
 is available. A recipe that reads a secret reference cannot run sandboxed

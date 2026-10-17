@@ -1,5 +1,7 @@
 # 20: a playbook that always runs in a sandbox
 
+Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
+
 ```
 cpb APPLY playbook.cpb --dry-run
 cpb APPLY playbook.cpb

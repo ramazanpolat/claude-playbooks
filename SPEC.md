@@ -780,7 +780,9 @@ keeps them out. ("Global" means the machine-wide instructions in
   entry. An older Claude Code that does not know `claudeMdExcludes` ignores
   it.
 
-### Sandbox
+### Sandbox (experimental)
+
+Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
 
 A playbook's `[sandbox]` table says how its launches are sandboxed. Its keys
 are the `sandbox.<key>` properties:
@@ -2271,7 +2273,7 @@ Flag parsing is disabled so arbitrary `claude` flags pass through. The global `-
 
 **Resume guard.** There is no resume command: `--resume` and `--continue` are `claude`'s flags and pass through. Before `claude` starts, a local launch refuses to resume a session that is live, or one that ran in another folder; the rules and messages are in *SHOW SESSIONS*.
 
-**Sandboxed launch.** With `--sandbox`, the playbook's Claude Code runs inside a Docker Sandbox: a microVM with its own kernel, filesystem, Docker daemon and network stack, driven through the `sbx` CLI (v0.38.0 or newer, installed and logged in by the pilot; `run` refuses with an install hint when it is not on PATH, and surfaces `sbx`'s own "not authenticated" failure). Only what is mounted crosses the boundary: the working directory, the playbook's own root directory (its `CLAUDE_CONFIG_DIR`, so the sandboxed Claude Code reads and writes the same playbook state), the manifest's `[sandbox].mounts`, and `--mount` entries, all at their host absolute paths. The host's `~/.claude`, the rest of the home directory, the shell environment and every other playbook stay outside.
+**Sandboxed launch (experimental).** Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice. With `--sandbox`, the playbook's Claude Code runs inside a Docker Sandbox: a microVM with its own kernel, filesystem, Docker daemon and network stack, driven through the `sbx` CLI (v0.38.0 or newer, installed and logged in by the pilot; `run` refuses with an install hint when it is not on PATH, and surfaces `sbx`'s own "not authenticated" failure). Only what is mounted crosses the boundary: the working directory, the playbook's own root directory (its `CLAUDE_CONFIG_DIR`, so the sandboxed Claude Code reads and writes the same playbook state), the manifest's `[sandbox].mounts`, and `--mount` entries, all at their host absolute paths. The host's `~/.claude`, the rest of the home directory, the shell environment and every other playbook stay outside.
 
 ```bash
 cpb run --sandbox sre                                  # cwd is the workdir
@@ -2328,7 +2330,7 @@ Launcher dispatch forwards to `run`, so `sre --sandbox -p "..."` launches inside
 
 Starts an ad-hoc Claude Code session at any directory. Creates the directory if it doesn't exist. No playbook registration, no `.playbook` file, no discovery — just set `CLAUDE_CONFIG_DIR` and run. The throwaway-experiment command. It never appears in `SHOW PLAYBOOKS`; `CREATE PLAYBOOK … LINK` registers a directory that should.
 
-**Sandboxed start.** `start` takes the same sandbox flags as `run` (`--sandbox[=BACKEND]`, `--no-sandbox`, `--sandbox-fresh`, `--clone`, `--workdir`, `--mount`), in the same leading positions as `--delete` and the launch flags. The sandbox is `cpbstart-<directory basename>` (the prefix differs from a registered playbook's `cpb-` before the first hyphen, so no playbook name can produce it; `cpb-start-<x>` would collide with playbooks `start-x` and `start_x`); the directory is the mounted config root; a `.playbook` in the directory supplies `[sandbox]` (`always` and the defaults). Everything else is as under `run`, the shared-login detach included. With `--sandbox`, `--delete` removes the sandbox when the session ends (a failure is a warning), then the directory; a launch refused before a session attached (the machine config directory, a mount carrying the machine login, a missing backend) removes nothing.
+**Sandboxed start (experimental).** `start` takes the same sandbox flags as `run` (`--sandbox[=BACKEND]`, `--no-sandbox`, `--sandbox-fresh`, `--clone`, `--workdir`, `--mount`), in the same leading positions as `--delete` and the launch flags. The sandbox is `cpbstart-<directory basename>` (the prefix differs from a registered playbook's `cpb-` before the first hyphen, so no playbook name can produce it; `cpb-start-<x>` would collide with playbooks `start-x` and `start_x`); the directory is the mounted config root; a `.playbook` in the directory supplies `[sandbox]` (`always` and the defaults). Everything else is as under `run`, the shared-login detach included. With `--sandbox`, `--delete` removes the sandbox when the session ends (a failure is a warning), then the directory; a launch refused before a session attached (the machine config directory, a mount carrying the machine login, a missing backend) removes nothing.
 
 ```bash
 cpb start --sandbox --workdir ~/proj /tmp/scratch -p "..."

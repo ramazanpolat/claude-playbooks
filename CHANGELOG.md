@@ -47,6 +47,7 @@
 
 ### Changed
 
+- **The sandbox is marked experimental** in SPEC, README, the guides and `--help`: it works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner. Nothing changes at launch.
 - **`CREATE OR ALTER PLAYBOOK … SET …` converges** (SPEC.md, *Grammar*,
   *Playbook properties*): it creates the playbook, or, on one that exists,
   applies its `SET` list as `ALTER PLAYBOOK … SET` would (the properties,
