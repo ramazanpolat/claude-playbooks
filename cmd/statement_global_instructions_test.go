@@ -131,6 +131,21 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 	if got := excludesOf(t, machine); got != nil {
 		t.Fatalf("a refused global_instructions setting wrote ~/.claude: %q", got)
 	}
+	// D4: refused before anything in the run is written, RESET included,
+	// and by identity: a symlink to ~/.claude is ~/.claude.
+	link := filepath.Join(t.TempDir(), "claude-link")
+	if err := os.Symlink(machine, link); err != nil {
+		t.Fatal(err)
+	}
+	f2 := writePlaybookFile(t, "ALTER PLAYBOOK SET model = 'first';\nALTER PLAYBOOK RESET global_instructions;\n")
+	for _, target := range []string{machine, link} {
+		if _, err := apply(t, f2, "TO", target, "--yes"); err == nil || !strings.Contains(err.Error(), "the machine's own Claude Code configuration") {
+			t.Fatalf("RESET global_instructions on %s: %v", target, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(machine, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("a refused file wrote ~/.claude's settings.json: %v", err)
+	}
 }
 
 // A dry run sees the settings.json CREATE writes: SHOW CREATE's own

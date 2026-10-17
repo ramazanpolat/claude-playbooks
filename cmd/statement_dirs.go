@@ -55,6 +55,12 @@ func validateDirClauses(st *grammar.Stmt) error {
 			return fmt.Errorf("%s cannot apply to %s: %s", c.Kind, dir, why)
 		}
 		if c.Kind == grammar.SetProperties || c.Kind == grammar.ResetProperties {
+			// D4: on the machine's own ~/.claude the exclude would hide
+			// bare claude's own CLAUDE.md and rules. Refused before anything
+			// in the run is written.
+			if v, ok := grammar.PropertyValue([]grammar.Clause{c}, "global_instructions"); ok && inMachineConfig(dir) {
+				return fmt.Errorf("global_instructions = '%s' cannot apply to %s: it is the machine's own Claude Code configuration, and its CLAUDE.md is its own instructions", v, dir)
+			}
 			if _, ok := grammar.PropertyValue([]grammar.Clause{c}, "login"); ok {
 				verb := "SET"
 				if c.Kind == grammar.ResetProperties {

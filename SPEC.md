@@ -771,7 +771,11 @@ keeps them out. ("Global" means the machine-wide instructions in
   the bare install's too; a playbook that should not see it adds its own
   `claudeMdExcludes` entry.
 - **A plain directory** (`APPLY … TO '<dir>'`) takes `global_instructions` too, since it
-  is a key of its `settings.json`.
+  is a key of its `settings.json`, except the machine's own `~/.claude`
+  (decided by filesystem identity, so a symlink to it is it too): there the
+  exclude would hide bare claude's own `CLAUDE.md` and rules. `SET` and
+  `RESET global_instructions` are refused for it while `APPLY` validates the
+  files, before anything is written.
 - **Versions.** Measured on Claude Code 2.1.234 and 2.1.296: both honour the
   entry. An older Claude Code that does not know `claudeMdExcludes` ignores
   it.

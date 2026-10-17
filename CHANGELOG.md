@@ -39,6 +39,11 @@
   unset, so an explicit `login = 'shared'` read as unset. `SET IF UNSET` is
   now accepted in `CREATE OR ALTER PLAYBOOK` too (applied on a new
   playbook, judged on one that exists).
+- **`global_instructions` on `APPLY … TO ~/.claude` is refused before
+  anything is written** (SPEC.md, *TO a plain config directory*), `SET` and
+  `RESET` alike, and `~/.claude` is recognized by filesystem identity (a
+  symlink to it, a case variant). The check now runs while `APPLY`
+  validates the files.
 
 ### Changed
 
