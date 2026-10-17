@@ -1,6 +1,62 @@
 # Changelog
 
-## [Unreleased]
+## [v4.0.0-rc4] -- 2026-10-18
+
+### Upgrading from rc3
+
+- **The remaining rc3 clause forms are refused**, each with a one-line hint
+  naming the property that replaces it. A playbook on disk needs nothing:
+  its manifest and `settings.json` keep the same keys. A recipe or a
+  `SHOW CREATE` file written by rc3 stops at the first such line:
+  - `LAUNCHER <name>` / `NO LAUNCHER`: `SET launcher = '<name>'` /
+    `SET launcher = ''`;
+  - `SET MODEL '<model>'` / `UNSET MODEL`, `SET AGENT '<agent>'` /
+    `UNSET AGENT`: `SET model = …`, `SET agent = …`, `RESET model`,
+    `RESET agent`;
+  - `SANDBOX`, `SET SANDBOX`, `SET SANDBOX <key>=<value>`, `UNSET SANDBOX`,
+    `UNSET SANDBOX <key>`: `SET sandbox.always = true, login = 'isolated'`,
+    `SET sandbox.<key> = …`, `SET sandbox.always = false`,
+    `RESET sandbox.<key>`;
+  - `SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET]`,
+    `SET STATUSLINE REFRESH <n>`, `UNSET STATUSLINE [REFRESH]`:
+    `SET [IF UNSET] statusline.command = …, statusline.refresh = <n>`,
+    `RESET statusline`, `RESET statusline.refresh`;
+  - `SET STATUSLINE PREVIOUS`: gone with the status line history; set the
+    command again;
+  - `SET MODEL PICKER ONLY|APPEND` / `UNSET MODEL PICKER`:
+    `SET model_picker.mode = …`, `RESET model_picker.mode`;
+  - `ALTER DEFAULTS SET SECRET HELPER '<command>'` / `UNSET SECRET HELPER`:
+    `ALTER DEFAULTS SET secret_helper = …`, `RESET secret_helper`.
+  Regenerate a machine's file with `cpb SHOW CREATE ALL`, or edit the lines
+  the hints name.
+- **`SET MODEL=<value>` on the command line is refused**: it used to set the
+  model property, being a variable that lost its `VAR`. Write
+  `SET VAR MODEL=<value>` for the variable or `SET model = …` for the
+  property.
+- **`sandbox.always = true` needs `login = 'isolated'`**, already set or in
+  the same statement; it no longer isolates the login on its own.
+- **`SET IF UNSET` refuses `launcher`, `login`, `global_instructions`,
+  `sandbox.always`, `sandbox.share_skills` and `sandbox.secrets`**: those
+  keys always hold a value.
+- **JSON and `SELECT`:**
+  - `SHOW PLAYBOOK --json` and `SELECT … FROM PLAYBOOKS` give one
+    `statusline` object, `{command, refresh}`, in place of the `statusline`,
+    `statusline_refresh` and `statusline_history` fields.
+  - `SHOW DEFAULTS --json` and `SELECT … FROM DEFAULTS` give
+    `secret_helper` as the command (a string or null) and
+    `secret_helper_from`, in place of the `{command, from}` object.
+- **`SHOW CREATE` writes a different shape**: `CREATE OR ALTER PLAYBOOK`
+  with the launcher (`RESET launcher` for the default), `login`,
+  `global_instructions`, the sandbox keys and the whole `USE ENV` list
+  (`USE ENV ''` for none) on the `CREATE`, and a
+  `RESET` for every property that is not set (`RESET sandbox` in place of
+  `sandbox.always = false`). Applying it twice changes nothing, and it puts
+  back a model or an env set added elsewhere.
+- **The status line history is no longer kept.** cpb no longer writes or
+  reads `<playbooks root>/.state/statusline-history.json`; a leftover one
+  can be deleted. `REVERT STATUSLINE` (never released) is not a clause.
+- **`WITH` is a reserved word** (`REPLACE ENV <old> WITH <new>`): a new
+  playbook or env set cannot be named `with` unquoted.
 
 ### Added
 
@@ -25,7 +81,8 @@
   its own (with `SET launcher` at most).
 - **Exact convergence** (SPEC.md, *Playbook properties*, *SHOW CREATE and
   APPLY*): `RESET` is accepted in `CREATE OR ALTER PLAYBOOK` (a no-op on a
-  new playbook), and `SHOW CREATE` writes `RESET` for every property that
+  new empty playbook; on one installed `FROM` a source it acts on the
+  installed copy), and `SHOW CREATE` writes `RESET` for every property that
   is not set (`RESET sandbox` when the table is empty, replacing
   `sandbox.always = false`) and the whole env list, `USE ENV ''` for none.
   So a playbook's own `SHOW CREATE` puts back a model, a status line or an
@@ -37,8 +94,9 @@
   `login`, `global_instructions`, `sandbox.always`, `sandbox.share_skills`
   and `sandbox.secrets` are refused with a one-line reason: they are never
   unset, so an explicit `login = 'shared'` read as unset. `SET IF UNSET` is
-  now accepted in `CREATE OR ALTER PLAYBOOK` too (applied on a new
-  playbook, judged on one that exists).
+  now accepted in `CREATE OR ALTER PLAYBOOK` too (judged after the
+  creation on a new playbook, so a source's `settings.json` counts, and
+  on one that exists as it stands).
 - **`global_instructions` on `APPLY … TO ~/.claude` is refused before
   anything is written** (SPEC.md, *TO a plain config directory*), `SET` and
   `RESET` alike, and `~/.claude` is recognized by filesystem identity (a
@@ -72,7 +130,7 @@
 - **The status line is a table**: `statusline.command` and
   `statusline.refresh` (were `statusline` and `statusline_refresh`), and
   `RESET statusline` for both. `SHOW PLAYBOOK --json` and `SELECT` have one
-  `statusline` object, `{command, refresh, history}`, in place of the
+  `statusline` object, `{command, refresh}`, in place of the
   `statusline`, `statusline_refresh` and `statusline_history` fields.
 - **`RESET model_picker` is the mode**: the rows are a collection, which
   `DROP MODEL` empties; it used to remove the rows too.
