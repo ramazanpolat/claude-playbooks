@@ -65,7 +65,7 @@ func TestCreateOrAlterConverges(t *testing.T) {
 	// SHOW CREATE is one converging statement per property list: applied to
 	// the playbook it describes, it changes nothing.
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK cv")
-	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK cv\n  SET launcher = 'cv2', login = 'shared', global_instructions = 'inherited', sandbox.always = false;") {
+	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK cv\n  SET launcher = 'cv2', login = 'shared', global_instructions = 'inherited'\n  RESET sandbox, agent, statusline.refresh, model_picker.mode\n  USE ENV '';") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -181,6 +181,46 @@ func TestLauncherWithOtherKeys(t *testing.T) {
 	}
 	if err := stmtErr(t, "ALTER PLAYBOOK lk RENAME TO lk3 SET model = 'c'"); err == nil || !strings.Contains(err.Error(), "RENAME TO is a statement of its own") {
 		t.Fatalf("RENAME TO with another key: %v", err)
+	}
+}
+
+// D2, exact convergence: a playbook's own SHOW CREATE puts back every
+// property and its env list, so a model or an env set added elsewhere is
+// undone; collections (tool rules here) stay additive.
+func TestShowCreateConvergesExactly(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	mustStmt(t, "CREATE ENV extra")
+	mustStmt(t, "CREATE PLAYBOOK ex SET launcher = ''")
+	file := writePlaybookFile(t, mustStmt(t, "SHOW CREATE PLAYBOOK ex"))
+	if out, err := apply(t, file); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
+		t.Fatalf("own SHOW CREATE: %v\n%s", err, out)
+	}
+	mustStmt(t, "ALTER PLAYBOOK ex SET model = 'm', statusline.command = 'true' USE ENV extra")
+	mustStmt(t, "ALTER PLAYBOOK ex ALLOW TOOL 'Bash(ls)'")
+	if out, err := apply(t, file); err != nil || !strings.Contains(out, "0 created, 1 changed") {
+		t.Fatalf("converge back: %v\n%s", err, out)
+	}
+	s := settingsOf(t, filepath.Join(root, "ex"))
+	if _, ok := s["model"]; ok {
+		t.Fatalf("the model survived: %v", s)
+	}
+	if _, ok := s["statusLine"]; ok {
+		t.Fatalf("the status line survived: %v", s)
+	}
+	if e := readEnv(t, filepath.Join(root, "ex")); e != nil && len(e.Sets) > 0 {
+		t.Fatalf("the env set survived: %q", e.Sets)
+	}
+	if perms, _ := s["permissions"].(map[string]any); perms == nil || len(perms["allow"].([]any)) != 1 {
+		t.Fatalf("a collection is additive, the tool rule stays: %v", s)
+	}
+	if out, err := apply(t, file); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
+		t.Fatalf("again: %v\n%s", err, out)
+	}
+	// RESET in CREATE OR ALTER is a no-op on a new playbook.
+	mustStmt(t, "CREATE OR ALTER PLAYBOOK ex2 SET launcher = '' RESET model, sandbox USE ENV ''")
+	if _, err := os.Stat(filepath.Join(root, "ex2")); err != nil {
+		t.Fatalf("CREATE OR ALTER with RESET did not create: %v", err)
 	}
 }
 

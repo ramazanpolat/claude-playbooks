@@ -126,7 +126,8 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE [OR ALTER] PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...] [USE ENV <env> ...]
+            | CREATE [OR ALTER] PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...] [RESET key, ...] [USE ENV <env> ...]
+                                           RESET: OR ALTER only, a no-op on a new playbook
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -151,6 +152,7 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
                                            insert one (default LAST)
             | DROP ENV <env> ...           detach
             | REPLACE ENV <old> WITH <new> swap one set, keeping its position
+                                           USE ENV '' states the empty list
 
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
@@ -623,12 +625,14 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
 - **One statement names a key once.** `SET` and `RESET` may appear
   together and more than once (`SET login = 'isolated' RESET global_instructions`), each
   key in one of them.
-- **Defaults.** `RESET` restores the default, and is for `ALTER` only. A
+- **Defaults.** `RESET` restores the default, in `ALTER` and in `CREATE OR
+  ALTER`, where it is a no-op on a new playbook (`CREATE PLAYBOOK` and `IF
+  NOT EXISTS` refuse it: a new playbook starts at the defaults). A
   new playbook gets every default its `SET` does not name, so a new
   playbook's global instructions are excluded. An existing playbook keeps what it has:
   nothing is migrated. `CREATE OR ALTER PLAYBOOK` on a playbook that exists
-  applies its `SET` list, each pair only where it differs, and leaves every
-  key the list does not name as it is; `CREATE PLAYBOOK IF NOT EXISTS`
+  applies its `SET` and `RESET` lists, each key only where it differs, and
+  leaves every key they do not name as it is; `CREATE PLAYBOOK IF NOT EXISTS`
   changes nothing.
 - **`SET IF UNSET`** takes any property, and applies whole or not at all:
   only when none of the keys it names is set, a key being unset at the
@@ -653,12 +657,19 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   line (and a `Login:` line when it is isolated). Each key is its
   field: `SHOW PLAYBOOK --json` and `EXPLAIN --json` have `"login"` and
   `"global_instructions"`, and `SELECT`'s `PLAYBOOKS` has `login` and `global_instructions` columns.
-  `SHOW CREATE` writes the playbook's `CREATE` with one `SET` list: the
-  launcher, its default spelled out (`launcher = '<name>'`), `login`,
-  `global_instructions` and `sandbox.always`, always, and the sandbox keys that are set;
-  `model`, `agent`, the status line and the picker mode follow in the
-  `ALTER` that adds the plugins, when set (an agent may be a plugin's). A
-  recipe never leans on a default, and applying it again changes nothing.
+  `SHOW CREATE` writes the playbook's `CREATE` so that it converges
+  exactly: a `SET` list with the launcher, its default spelled out
+  (`launcher = '<name>'`), `login` and `global_instructions`, always, and
+  `sandbox.always` with the sandbox keys that are set; then a `RESET` list
+  with every property that is not set (`RESET sandbox` when nothing in the
+  table is, the model, the agent, the status line or only its refresh, the
+  picker mode); then the whole env list, `USE ENV ''` for none. `model`,
+  `agent`, the status line and the picker mode that are set follow in the
+  `ALTER` that adds the plugins (an agent may be a plugin's). Applied to the
+  playbook it describes, it changes nothing; applied after a key was set or
+  an env set attached elsewhere, it puts the playbook back. Collections
+  (plugins, MCP servers, tool rules, picker rows, skills) are additive: a
+  member added elsewhere stays.
 - **Refusals.** Of the properties, `LINK` takes only `launcher`, and only the
   target manifest's: the manifest and `settings.json` are the target's.
   `sandbox.always = true` does not combine with `login = 'shared'` (nor
@@ -1770,7 +1781,8 @@ ALTER DEFAULTS USE ENV claude-default;
 CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
-  SET launcher = 'w', login = 'shared', global_instructions = 'excluded', sandbox.always = false
+  SET launcher = 'w', login = 'shared', global_instructions = 'excluded'
+  RESET sandbox, model, agent, statusline, model_picker.mode
   USE ENV router;
 
 ALTER PLAYBOOK work
@@ -1793,10 +1805,11 @@ File rules:
   `ALTER PLAYBOOK <name> SET VAR K FROM '<ref>'`), and exits
   non-zero, unless `--skip-secrets` is given. Plain text never travels in a
   playbook file.
-- **Idempotent.** `SHOW CREATE` emits only idempotent forms (`CREATE OR
-  REPLACE ENV`, `CREATE OR ALTER PLAYBOOK … SET …`, which converges,
-  `USE ENV` with the full list), so applying a file twice changes nothing
-  the second time.
+- **Idempotent and exact.** `SHOW CREATE` emits only idempotent forms
+  (`CREATE OR REPLACE ENV`, `CREATE OR ALTER PLAYBOOK … SET … RESET …`,
+  which converges, `USE ENV` with the full list, `''` for none), so applying
+  a file twice changes nothing the second time, and a playbook's properties
+  and env list come back exactly as written. Collections stay additive.
 - **Machine-specific parts stay explicit.** `LINK <dir>` and the sandbox are
   emitted as they are; a `LINK` path missing on the target fails validation.
 - `SHOW CREATE ALL` orders statements: the secret helper first (`APPLY`

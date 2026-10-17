@@ -502,7 +502,17 @@ func (p *parser) create(s *Stmt) *Error {
 		return p.clauses(s, p.envClause, 0)
 	}
 	p.starters = createPlaybookStarters
-	return p.clauses(s, p.createPlaybookClause, 0)
+	if err := p.clauses(s, p.createPlaybookClause, 0); err != nil {
+		return err
+	}
+	if !s.OrAlter {
+		for _, c := range s.Clauses {
+			if c.Kind == ResetProperties {
+				return errAt(c.Pos, "CREATE starts every property at its default; RESET is for ALTER PLAYBOOK and CREATE OR ALTER PLAYBOOK")
+			}
+		}
+	}
+	return nil
 }
 
 func (p *parser) ifNotExists(s *Stmt) *Error {
@@ -1002,6 +1012,18 @@ func (p *parser) envListRest(c *Clause, verb string) *Error {
 	if verb == "DROP" {
 		c.Kind = DropEnv
 	}
+	// USE ENV '': the explicit empty list, as launcher = '' is no launcher.
+	// On the command line '' reaches cpb as an empty word, or as the two
+	// quotes themselves when they were quoted again; no set name has quotes.
+	if verb == "USE" && !p.atEnd() && (p.toks[p.i].Text == "" || (!p.toks[p.i].Quoted && p.toks[p.i].Text == "''")) {
+		p.i++
+		p.quiet = true
+		if !p.atEnd() && !p.isStarter() {
+			return p.fail("USE ENV '' is the empty list and takes no other set")
+		}
+		c.Names = nil
+		return nil
+	}
 	names, err := p.envNames(verb + " ENV")
 	c.Names = names
 	return err
@@ -1080,7 +1102,11 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		c.Kind = SetProperties
 		return c, p.playbookProperties(c, "SET", true)
 	case "RESET":
-		return nil, p.fail("CREATE starts every property at its default; RESET is for ALTER PLAYBOOK")
+		// Only CREATE OR ALTER takes RESET (create checks): on a playbook
+		// that exists it puts keys back to the default, on a new one it is
+		// a no-op, so SHOW CREATE can state every key.
+		c.Kind = ResetProperties
+		return c, p.playbookProperties(c, "RESET", false)
 	case "USE":
 		// The whole list, as USE ENV states it in ALTER. ADD, DROP and
 		// REPLACE ENV edit a list that exists: they end it here, so they
@@ -1337,6 +1363,9 @@ func validate(s *Stmt) *Error {
 			for _, c := range s.Clauses {
 				if c.Kind == UseEnv {
 					return errAt(c.Pos, "USE ENV does not apply to LINK: a linked playbook's manifest belongs to the target")
+				}
+				if keys := c.deleteKeys(); keys != nil && c.Kind != DefaultLauncher {
+					return errAt(c.Pos, keys[0]+" does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
 				}
 				key := map[Kind]string{SetModel: "model", SetAgent: "agent"}[c.Kind]
 				switch c.Kind {

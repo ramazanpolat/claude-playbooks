@@ -100,6 +100,9 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	var after []grammar.Clause
 	for _, c := range st.Clauses {
+		if isReset(c) {
+			continue // RESET on a new playbook: every key starts at its default
+		}
 		switch c.Kind {
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link,
 			grammar.Launcher, grammar.NoLauncher, grammar.SetProperties:
@@ -140,6 +143,17 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	return err
 }
 
+// isReset reports a clause that puts a property back to its default: what
+// RESET k parses to.
+func isReset(c grammar.Clause) bool {
+	switch c.Kind {
+	case grammar.ResetProperties, grammar.DefaultLauncher, grammar.UnsetModel, grammar.UnsetAgent,
+		grammar.UnsetStatusline, grammar.UnsetStatuslineRefresh, grammar.UnsetModelPickerMode, grammar.UnsetSandboxKeys:
+		return true
+	}
+	return false
+}
+
 // findPlaybook finds a playbook as the run sees it: on disk, or created or
 // dropped by an earlier statement of a dry run (pb nil, exists true: created
 // earlier, not on disk yet).
@@ -170,7 +184,7 @@ func convergePlaybook(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) error
 	for _, c := range st.Clauses {
 		switch c.Kind {
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link:
-		case grammar.Launcher, grammar.NoLauncher:
+		case grammar.Launcher, grammar.NoLauncher, grammar.DefaultLauncher:
 			if launcherOpsAllowed() && launcherWanted(st.Name, c) != r.launcherOf(st.Name, pb) {
 				launch = append(launch, c)
 			}

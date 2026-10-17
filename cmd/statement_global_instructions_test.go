@@ -67,7 +67,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK m")
-	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK m\n  SET launcher = '', login = 'shared', global_instructions = 'excluded', sandbox.always = false;") {
+	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK m\n  SET launcher = '', login = 'shared', global_instructions = 'excluded'\n  RESET sandbox,") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
@@ -88,7 +88,7 @@ func TestGlobalInstructionsSetting(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "settings.json")); !strings.Contains(string(data), `"model": "opus"`) {
 		t.Fatalf("settings.json lost a key:\n%s", data)
 	}
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "login = 'shared', global_instructions = 'inherited', sandbox.always = false;") {
+	if out := mustStmt(t, "SHOW CREATE PLAYBOOK m"); !strings.Contains(out, "login = 'shared', global_instructions = 'inherited'\n  RESET sandbox,") {
 		t.Fatalf("SHOW CREATE of a shared playbook:\n%s", out)
 	}
 	mustStmt(t, "ALTER PLAYBOOK m RESET global_instructions")

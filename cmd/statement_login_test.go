@@ -84,7 +84,7 @@ func TestIsolatedLogin(t *testing.T) {
 		t.Fatalf("SELECT: %s", js)
 	}
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK k")
-	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK k\n  SET launcher = '', login = 'isolated', global_instructions = 'inherited', sandbox.always = false;") {
+	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK k\n  SET launcher = '', login = 'isolated', global_instructions = 'inherited'\n  RESET sandbox,") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {

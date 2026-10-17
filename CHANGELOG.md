@@ -23,6 +23,14 @@
   `CREATE`. The launcher name is checked before anything is written, and it
   changes last, only where it differs. Only `RENAME TO` stays a statement of
   its own (with `SET launcher` at most).
+- **Exact convergence** (SPEC.md, *Playbook properties*, *SHOW CREATE and
+  APPLY*): `RESET` is accepted in `CREATE OR ALTER PLAYBOOK` (a no-op on a
+  new playbook), and `SHOW CREATE` writes `RESET` for every property that
+  is not set (`RESET sandbox` when the table is empty, replacing
+  `sandbox.always = false`) and the whole env list, `USE ENV ''` for none.
+  So a playbook's own `SHOW CREATE` puts back a model, a status line or an
+  env set added elsewhere. Collections stay additive. `USE ENV ''` is the
+  explicit empty list in `ALTER PLAYBOOK`, `ALTER DEFAULTS` and `CREATE`.
 
 ### Changed
 

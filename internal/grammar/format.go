@@ -3,6 +3,8 @@ package grammar
 import (
 	"strconv"
 	"strings"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // String renders the statement in canonical form: keywords in capitals, one
@@ -79,6 +81,9 @@ func (c *Clause) deleteKeys() []string {
 		}
 		return keys
 	case UnsetSandboxKeys:
+		if wholeSandbox(c) {
+			return []string{"sandbox"}
+		}
 		var keys []string
 		for _, v := range c.Settings {
 			keys = append(keys, "sandbox."+v.Key)
@@ -188,6 +193,9 @@ func (c *Clause) words(varWord bool) []string {
 		return []string{"DESCRIPTION", quote(c.Arg)}
 	case UseEnv, DropEnv:
 		w := strings.Fields(string(c.Kind))
+		if c.Kind == UseEnv && len(c.Names) == 0 {
+			return append(w, "''") // the explicit empty list
+		}
 		for _, n := range c.Names {
 			w = append(w, quoteWord(n))
 		}
@@ -308,6 +316,9 @@ func (c *Clause) words(varWord bool) []string {
 	case ResetProperties:
 		return append([]string{"RESET"}, propertyWords(c, false)...)
 	case UnsetSandboxKeys:
+		if wholeSandbox(c) {
+			return []string{"RESET", "sandbox"}
+		}
 		w := []string{"RESET"}
 		for i, v := range c.Settings {
 			k := "sandbox." + v.Key
@@ -352,6 +363,20 @@ func (c *Clause) pairWords() []string {
 		return propertyWords(c, true)
 	}
 	return nil
+}
+
+// wholeSandbox reports a RESET of every [sandbox] key, in the table's
+// order: what RESET sandbox parses to, so it renders back as that.
+func wholeSandbox(c *Clause) bool {
+	if len(c.Settings) != len(manifest.SandboxKeys) {
+		return false
+	}
+	for i, k := range manifest.SandboxKeys {
+		if c.Settings[i].Key != k {
+			return false
+		}
+	}
+	return true
 }
 
 // quote wraps s in single quotes, doubling any inside.

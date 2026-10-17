@@ -126,7 +126,7 @@ func TestSandboxShowAndRoundTrip(t *testing.T) {
 	text := mustStmt(t, "SHOW CREATE PLAYBOOK p")
 	// The properties travel on the CREATE, which converges on a playbook
 	// that exists.
-	if want := "CREATE OR ALTER PLAYBOOK p\n  SET launcher = '', login = 'isolated', global_instructions = 'excluded', sandbox.always = true, sandbox.backend = 'sbx', sandbox.allow_net = ['api.example.com:443'], sandbox.share_skills = true;"; !strings.Contains(text, want) {
+	if want := "CREATE OR ALTER PLAYBOOK p\n  SET launcher = '', login = 'isolated', global_instructions = 'excluded', sandbox.always = true, sandbox.backend = 'sbx', sandbox.allow_net = ['api.example.com:443'], sandbox.share_skills = true\n  RESET sandbox.host, sandbox.workdir, sandbox.mounts, sandbox.secrets, sandbox.claude_version, model, agent, statusline, model_picker.mode\n  USE ENV '';"; !strings.Contains(text, want) {
 		t.Errorf("SHOW CREATE lacks %q:\n%s", want, text)
 	}
 

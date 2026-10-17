@@ -221,20 +221,23 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			login = "isolated"
 		}
 		global, _ := globalInstructionsStateOf(pb.Path)
-		sandboxSettings := []grammar.Var{{Key: "always", Value: strconv.FormatBool(sandboxed)}}
-		if m != nil && m.Sandbox != nil {
-			for _, kv := range m.Sandbox.Settings() {
-				sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
-			}
-		}
 		st.Clauses = append(st.Clauses,
-			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}},
-			grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
-		// The env sets it attaches, the whole list, on the CREATE too: one
-		// converging statement states them.
-		if m != nil && m.Env != nil && len(m.Env.Sets) > 0 {
-			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: m.Env.Sets})
+			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}})
+		// Exact convergence (D2): every key that is not set is RESET, so
+		// the statement brings a playbook back to exactly this, and the
+		// whole env list is stated, '' for none. Collections (plugins,
+		// tools, MCP servers, models, skills) stay additive.
+		st.Clauses = append(st.Clauses, sandboxCreateClauses(m, sandboxed)...)
+		sf, err := settings.Load(pb.Path)
+		if err != nil {
+			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %w", pb.Name, err)
 		}
+		st.Clauses = append(st.Clauses, settingsResetClauses(sf.Root)...)
+		var sets []string
+		if m != nil && m.Env != nil {
+			sets = m.Env.Sets
+		}
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: sets})
 	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole
@@ -320,6 +323,69 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		text += "\n\n" + alter.Pretty() + ";"
 	}
 	return withPlugins(createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource}), nil
+}
+
+// sandboxCreateClauses is the [sandbox] table as SHOW CREATE states it:
+// RESET sandbox when nothing in it is set, else sandbox.always and the keys
+// that are set, and RESET for the keys that are not.
+func sandboxCreateClauses(m *manifest.Manifest, sandboxed bool) []grammar.Clause {
+	set := map[string]string{}
+	if m != nil && m.Sandbox != nil {
+		for _, kv := range m.Sandbox.Settings() {
+			set[kv[0]] = kv[1]
+		}
+	}
+	all := grammar.Clause{Kind: grammar.UnsetSandboxKeys}
+	for _, k := range manifest.SandboxKeys {
+		all.Settings = append(all.Settings, grammar.Var{Key: k})
+	}
+	if !sandboxed && len(set) == 0 {
+		return []grammar.Clause{all}
+	}
+	on := grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: []grammar.Var{{Key: "always", Value: strconv.FormatBool(sandboxed)}}}
+	off := grammar.Clause{Kind: grammar.UnsetSandboxKeys}
+	for _, k := range manifest.SandboxKeys {
+		if k == "always" {
+			continue
+		}
+		if v, ok := set[k]; ok {
+			on.Settings = append(on.Settings, grammar.Var{Key: k, Value: v})
+		} else {
+			off.Settings = append(off.Settings, grammar.Var{Key: k})
+		}
+	}
+	if len(off.Settings) == 0 {
+		return []grammar.Clause{on}
+	}
+	return []grammar.Clause{on, off}
+}
+
+// settingsResetClauses RESETs the settings.json properties a playbook does
+// not set: the model, the agent, the status line (or only its refresh, when
+// a command status line has none) and the picker mode. A key that is set is
+// written by the plugins ALTER, or left out when the grammar cannot write
+// it, and is never reset.
+func settingsResetClauses(root *settings.Object) []grammar.Clause {
+	var out []grammar.Clause
+	if !root.Has(keyModel) {
+		out = append(out, grammar.Clause{Kind: grammar.UnsetModel})
+	}
+	if !root.Has(keyAgent) {
+		out = append(out, grammar.Clause{Kind: grammar.UnsetAgent})
+	}
+	_, command, _ := settingsExtras(root)
+	switch {
+	case !root.Has(keyStatusline):
+		out = append(out, grammar.Clause{Kind: grammar.UnsetStatusline})
+	case command != nil:
+		if sl, err := root.Object(keyStatusline); err == nil && !sl.Has(keyRefreshInterval) {
+			out = append(out, grammar.Clause{Kind: grammar.UnsetStatuslineRefresh})
+		}
+	}
+	if mp, err := root.Object(keyModelPicker); !root.Has(keyModelPicker) || (err == nil && !mp.Has("replaceBuiltInOptions")) {
+		out = append(out, grammar.Clause{Kind: grammar.UnsetModelPickerMode})
+	}
+	return out
 }
 
 // hasNameLauncher reports whether the launcher named after a playbook is
