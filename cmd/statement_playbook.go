@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
+	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
@@ -98,13 +100,23 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 			return nil
 		}
 	}
+	o := createOptionsOf(st)
 	var after []grammar.Clause
 	for _, c := range st.Clauses {
 		if isReset(c) {
-			continue // RESET on a new playbook: every key starts at its default
+			// RESET on a new playbook: an empty one starts at every default,
+			// but one installed FROM a source carries the source's
+			// settings.json, so the RESET applies after the install. The
+			// launcher is the creation's own.
+			if o.from != "" && c.Kind != grammar.DefaultLauncher {
+				after = append(after, c)
+			}
+			continue
 		}
 		if c.Kind == grammar.SetIfUnset {
-			after = append(after, c.Group...) // on a new playbook no key is set
+			// Judged after the creation, against what it installed: a
+			// source's settings.json may already set the key.
+			after = append(after, c)
 			continue
 		}
 		switch c.Kind {
@@ -139,10 +151,28 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 	}
+	// The keys the ALTER after the creation writes are checked before
+	// anything is created: a value that ALTER would refuse (sandbox.backend
+	// = bogus, a relative sandbox.workdir) refuses the CREATE whole.
+	if _, _, _, err := planSandbox(nil, grammar.Flatten(after)); err != nil {
+		return err
+	}
 	if err := createPlaybookOnly(r, st); err != nil || len(after) == 0 || r.outcome != outCreated {
 		return err
 	}
-	err := playbookStatement(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: after})
+	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: after}
+	alter, err := r.resolveIfUnset(alter)
+	if err == nil && len(alter.Clauses) > 0 {
+		err = playbookStatement(r, alter)
+	}
+	if err != nil && !r.dryRun {
+		// The statement applies whole or not at all: the playbook this
+		// statement created is removed again.
+		if derr := doDelete(deleteOpts{yes: true}, []string{st.Name}); derr != nil {
+			return fmt.Errorf("%w (the new playbook %q could not be removed again: %v)", err, st.Name, derr)
+		}
+		return fmt.Errorf("%w; nothing was created", err)
+	}
 	r.outcome = outCreated
 	return err
 }
@@ -189,11 +219,18 @@ func convergePlaybook(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) error
 		switch c.Kind {
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link:
 		case grammar.Launcher, grammar.NoLauncher, grammar.DefaultLauncher:
-			if launcherOpsAllowed() && launcherWanted(st.Name, c) != r.launcherOf(st.Name, pb) {
+			if r.launcherDiffers(st.Name, pb, c) {
 				launch = append(launch, c)
 			}
 		default:
 			props = append(props, c)
+		}
+	}
+	// Whole or nothing: every check that can refuse the launcher runs
+	// before the properties are written.
+	if len(launch) > 0 {
+		if err := r.preflightLauncher(st.Name, pb, launch[0]); err != nil {
+			return err
 		}
 	}
 	outcome := outUnchanged
@@ -314,6 +351,11 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 		if r.dry != nil {
 			r.dry.isolated[st.Name] = o.sandbox || o.isolatedLogin
 			r.dry.sandboxed[st.Name] = o.sandbox
+			if o.sandbox { // a new playbook's [sandbox] block holds always alone
+				r.dry.sandboxes[st.Name] = &manifest.Sandbox{Always: true}
+			} else {
+				r.dry.sandboxes[st.Name] = nil
+			}
 		}
 		r.outcome = outCreated
 		if o.from != "" {
@@ -411,10 +453,11 @@ func alterPlaybookWithLauncher(r *stmtRun, st *grammar.Stmt) error {
 	if !exists {
 		return fmt.Errorf("unknown playbook %q. `cpb SHOW PLAYBOOKS` lists them", st.Name)
 	}
-	want := launcherWanted(st.Name, launch[0])
-	differs := launcherOpsAllowed() && want != r.launcherOf(st.Name, pb)
-	if differs && want != "" {
-		if err := preflightCommandNames(st.Name, want); err != nil {
+	differs := r.launcherDiffers(st.Name, pb, launch[0])
+	if differs {
+		// Whole or nothing: every check that can refuse the launcher runs
+		// before the other clauses write anything.
+		if err := r.preflightLauncher(st.Name, pb, launch[0]); err != nil {
 			return err
 		}
 	}
@@ -429,6 +472,102 @@ func alterPlaybookWithLauncher(r *stmtRun, st *grammar.Stmt) error {
 	}
 	r.outcome = outChanged
 	return nil
+}
+
+// launcherDiffers reports a launcher clause that would change the playbook.
+// On the default root that is the launcher command itself. Under another
+// root (--playbooks-dir) cpb manages no launchers (SPEC, "Launchers":
+// default root only), so only the alias the manifest records counts: the
+// default and the empty launcher both mean no alias there.
+func (r *stmtRun) launcherDiffers(name string, pb *playbook.Playbook, c grammar.Clause) bool {
+	if launcherOpsAllowed() {
+		return launcherWanted(name, c) != r.launcherOf(name, pb)
+	}
+	want := launcherWanted(name, c)
+	if want == name {
+		want = ""
+	}
+	return want != r.recordedAlias(name, pb)
+}
+
+// recordedAlias is the alias a playbook's manifest records as the run sees
+// it, "" for none (the launcher is its name, or it has none).
+func (r *stmtRun) recordedAlias(name string, pb *playbook.Playbook) string {
+	if r.dry != nil {
+		if l, ok := r.dry.launchers[name]; ok {
+			if l == name {
+				return ""
+			}
+			return l
+		}
+	}
+	if pb == nil {
+		return ""
+	}
+	return pb.Alias()
+}
+
+// preflightLauncher runs every check that can refuse a launcher change,
+// before anything is written: the name is valid, no other playbook answers
+// to it, no file cpb did not write sits on it, and a linked target's shared
+// manifest is not touched. These are the refusals doLauncher and
+// alterPlaybookLifecycle would give later, read-only and in advance.
+func (r *stmtRun) preflightLauncher(name string, pb *playbook.Playbook, c grammar.Clause) error {
+	want := launcherWanted(name, c)
+	if pb == nil { // created earlier in this dry run: only the registry can refuse
+		if want != "" && want != name {
+			return preflightCommandNames(name, want)
+		}
+		return nil
+	}
+	linked := false
+	if info, err := os.Lstat(pb.RootPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		linked = true
+	}
+	foreign := func(n string) error {
+		if !launcherOpsAllowed() {
+			return nil
+		}
+		if ldir, err := config.ResolveLauncherDir(); err == nil {
+			if _, _, f := launcher.Lookup(ldir, n); f {
+				return fmt.Errorf("launcher name %q is taken by a file cpb did not generate", n)
+			}
+		}
+		return nil
+	}
+	old := pb.Alias()
+	switch {
+	case want == "":
+		if linked && old != "" {
+			return fmt.Errorf("cannot clear launcher %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", old, manifest.FileName)
+		}
+		return nil
+	case want == name:
+		owner, err := commandNameOwner(name, name)
+		if err != nil {
+			return fmt.Errorf("cannot check launcher name %q against every playbook: %w", name, err)
+		}
+		if owner != nil {
+			return fmt.Errorf("launcher name %q already addresses playbook %q", name, owner.Name)
+		}
+		if linked && old != "" {
+			return fmt.Errorf("cannot clear launcher %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", old, manifest.FileName)
+		}
+		return foreign(name)
+	}
+	if linked && want != old {
+		return fmt.Errorf("cannot set launcher %q on a linked target's shared %s (current launcher %q). Edit the target's manifest directly if you really mean it", want, manifest.FileName, old)
+	}
+	if err := launcher.ValidateName(want); err != nil {
+		return err
+	}
+	if want == old {
+		return nil
+	}
+	if err := preflightCommandNames(pb.Name, want); err != nil {
+		return err
+	}
+	return foreign(want)
 }
 
 // alterPlaybookLifecycle carries out RENAME TO and the launcher (SET

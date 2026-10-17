@@ -204,6 +204,8 @@ type parser struct {
 	// defaults: an ALTER DEFAULTS statement, whose properties are its own
 	// (secret_helper).
 	defaults bool
+	// creating: a CREATE PLAYBOOK statement, which has no SET VAR.
+	creating bool
 
 	tried   []string // what was acceptable at position triedAt
 	triedAt int
@@ -415,6 +417,7 @@ func (p *parser) statement() (*Stmt, *Error) {
 		return nil, p.fail("not a statement")
 	case "CREATE":
 		s.Verb = Create
+		p.creating = true
 		err = p.create(s)
 	case "ALTER":
 		s.Verb = Alter
@@ -1364,14 +1367,17 @@ func validate(s *Stmt) *Error {
 		// A linked playbook's manifest and settings.json are the target's:
 		// of the properties, only its launcher is this registry's.
 		if link {
-			for _, c := range s.Clauses {
+			// Flatten: a property inside SET IF UNSET is refused like one
+			// outside it, before anything is linked.
+			for _, c := range Flatten(s.Clauses) {
 				if c.Kind == UseEnv {
 					return errAt(c.Pos, "USE ENV does not apply to LINK: a linked playbook's manifest belongs to the target")
 				}
 				if keys := c.deleteKeys(); keys != nil && c.Kind != DefaultLauncher {
 					return errAt(c.Pos, keys[0]+" does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
 				}
-				key := map[Kind]string{SetModel: "model", SetAgent: "agent"}[c.Kind]
+				key := map[Kind]string{SetModel: "model", SetAgent: "agent", SetStatusline: "statusline.command",
+					SetStatuslineRefresh: "statusline.refresh", SetModelPicker: "model_picker.mode"}[c.Kind]
 				switch c.Kind {
 				case SetProperties:
 					key = c.Settings[0].Key

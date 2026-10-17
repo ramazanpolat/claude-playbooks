@@ -137,8 +137,22 @@
     `SET AGENT '<agent>'` and `UNSET AGENT` are refused with a one-line hint
     to the property. `SET MODEL PICKER` and `ADD` / `DROP MODEL` are
     unchanged.
-  - `SHOW CREATE` writes the launcher in the `CREATE`, the default spelled
-    out (`SET launcher = '<name>'`), and `SET model = …` / `SET agent = …`.
+  - `SHOW CREATE` writes the launcher in the `CREATE` (the default as
+    `RESET launcher`, since a playbook's name may be a keyword), and `SET
+    model = …` / `SET agent = …`.
+- **Whole or nothing, everywhere a statement mixes steps.** A launcher beside
+  other keys is checked (taken by another playbook, a file cpb did not
+  write, a linked target) before any key is written, in `ALTER` and `CREATE
+  OR ALTER`; a `CREATE`'s `SET` list is checked before the directory exists,
+  and a later failure removes the playbook the statement created; `LINK`
+  refuses a property inside `SET IF UNSET` before linking. On a new
+  playbook installed `FROM` a source, `RESET` and `SET IF UNSET` act on the
+  installed copy. Under a `--playbooks-dir` root a launcher change is
+  recorded as the alias with a note, alone or beside other keys. A
+  credential inside `SET IF UNSET` is withheld from the `APPLY` record, a
+  dry run judges `SET IF UNSET` against the sandbox keys its earlier
+  statements set, and a hint never names a form the statement refuses
+  (`ALTER DEFAULTS`, `CREATE`'s `SET LOGIN`).
 - **The examples' stand-in claude records plugins in `settings.json`**, as
   Claude Code does, so `SHOW CREATE` writes their plugin clauses and the
   upgrade check compares them.

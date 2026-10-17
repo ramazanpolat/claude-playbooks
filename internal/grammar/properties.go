@@ -631,14 +631,26 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 	if p.defaults {
 		object = "a DEFAULTS property"
 	}
-	if !t.Quoted && word == t.Text {
+	// A hint names only a form the statement at hand accepts: the removed
+	// playbook words and SET IF UNSET mean nothing to DEFAULTS, and a
+	// CREATE has no SET VAR.
+	if !p.defaults && !t.Quoted && word == t.Text {
 		if hint := removedWordHint(word); hint != "" {
 			return errAt(t.Pos, hint)
 		}
 	}
 	switch {
+	case !t.Quoted && strings.EqualFold(word, "IF") && p.defaults:
+		return errAt(t.Pos, "SET IF UNSET is for playbook properties; DEFAULTS takes SET secret_helper = '<command>'")
 	case !t.Quoted && strings.EqualFold(word, "IF"):
 		return errAt(t.Pos, "IF UNSET goes right after SET: SET IF UNSET <key> = '<value>', …")
+	case !p.defaults && isVarName(word) && p.creating:
+		// CREATE has no SET VAR: a capitalised property is told its
+		// spelling, anything else that variables come after the CREATE.
+		if _, ok := propertyIn(p.props(), strings.ToLower(word)); ok {
+			return errAt(t.Pos, "property keys are lowercase: "+strings.ToLower(word))
+		}
+		return errAt(t.Pos, word+" is not a playbook property ("+keys+"); a variable is set by a separate statement after the CREATE: ALTER PLAYBOOK <name> SET VAR "+word+"=<value>")
 	case !p.defaults && isVarName(word):
 		return errAt(t.Pos, word+" is not a playbook property; a variable is SET VAR "+word+"=<value>")
 	case !t.Quoted && IsKeyword(word):

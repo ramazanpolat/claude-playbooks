@@ -135,7 +135,9 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 		"CREATE PLAYBOOK x LINK /tmp/d SET global_instructions = 'inherited';":                      "global_instructions does not apply to LINK",
 		// Keys are lowercase: a key in capitals is a variable's name, and
 		// one in mixed case is told the key's spelling.
-		"CREATE PLAYBOOK x SET LOGIN = 'isolated';":                "LOGIN is not a playbook property; a variable is SET VAR LOGIN=<value>",
+		// CREATE has no SET VAR, so its hint never names it.
+		"CREATE PLAYBOOK x SET LOGIN = 'isolated';":                "property keys are lowercase: login",
+		"CREATE PLAYBOOK x SET FOO = 'bar';":                       "a variable is set by a separate statement after the CREATE",
 		"ALTER PLAYBOOK x SET MODEL=glm-5.3;":                      "MODEL is not a playbook property; a variable is SET VAR MODEL=<value>",
 		"ALTER PLAYBOOK x SET MODEL = glm-5.3;":                    "MODEL is not a playbook property; a variable is SET VAR MODEL=<value>",
 		"CREATE PLAYBOOK x SET Global_Instructions = 'inherited';": "property keys are lowercase: global_instructions",

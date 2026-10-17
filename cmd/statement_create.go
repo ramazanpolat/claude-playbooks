@@ -199,12 +199,16 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		}
 	}
 	switch {
-	case v.Launcher != nil:
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: *v.Launcher})
-	case hasNameLauncher(pb.Name):
-		// The default launcher, named after the playbook, written out:
-		// a recipe never leans on a default.
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: pb.Name})
+	case pb.Alias() != "" && pb.Alias() != pb.Name:
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: pb.Alias()})
+	case hasNameLauncher(pb.Name) || !launcherOpsAllowed():
+		// The default launcher, named after the playbook, as RESET launcher
+		// (D2: a key at its default is RESET), never as SET launcher =
+		// '<name>': a playbook's name may be a keyword ('server', or one
+		// named with before WITH was reserved), which is no launcher value.
+		// Under a --playbooks-dir root cpb manages no launchers, so no alias
+		// is the default there.
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.DefaultLauncher})
 	default:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoLauncher})
 	}

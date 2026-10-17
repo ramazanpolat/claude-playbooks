@@ -127,7 +127,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
             | CREATE [OR ALTER] PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...] [RESET key, ...] [USE ENV <env> ...]
-                                           RESET: OR ALTER only, a no-op on a new playbook
+                                           RESET: OR ALTER only; on a new playbook, it acts on what FROM installed
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -615,7 +615,11 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
 - **Keys are lowercase**, and match exactly: a key in capitals is a
   variable's name, so `SET MODEL=glm-5.3` (a variable that lost its `VAR`)
   is refused with `a variable is SET VAR MODEL=<value>`, never read as the
-  model; `Global_Instructions` is told `property keys are lowercase: global_instructions`. A key or
+  model. A `CREATE` has no `SET VAR`, so there a key in capitals is told
+  its lowercase spelling when it is a property (`SET LOGIN = …`: `property
+  keys are lowercase: login`), and otherwise that a variable is set by an
+  `ALTER PLAYBOOK` after the `CREATE`. Under `ALTER DEFAULTS` no hint names
+  a playbook form. A hint never names a form the statement at hand refuses; `Global_Instructions` is told `property keys are lowercase: global_instructions`. A key or
   value outside the table is refused with the allowed ones.
 - **Lists** (`sandbox.mounts`, `sandbox.allow_net`) are written `['a', 'b']`,
   which may run over several words, or comma-joined in one word, `'a,b'`
@@ -626,8 +630,11 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   together and more than once (`SET login = 'isolated' RESET global_instructions`), each
   key in one of them.
 - **Defaults.** `RESET` restores the default, in `ALTER` and in `CREATE OR
-  ALTER`, where it is a no-op on a new playbook (`CREATE PLAYBOOK` and `IF
-  NOT EXISTS` refuse it: a new playbook starts at the defaults). A
+  ALTER` (`CREATE PLAYBOOK` and `IF NOT EXISTS` refuse it: a new playbook
+  starts at the defaults). On a new playbook it is a no-op, except after
+  `FROM`: an install brings the source's `settings.json`, so the `RESET`
+  applies to the installed copy, and `SHOW CREATE`'s `… FROM … RESET model`
+  re-applies to no model, then to `0 changed`. A
   new playbook gets every default its `SET` does not name, so a new
   playbook's global instructions are excluded. An existing playbook keeps what it has:
   nothing is migrated. `CREATE OR ALTER PLAYBOOK` on a playbook that exists
@@ -643,8 +650,9 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   so an explicit choice of the default would read as unset (`SET IF UNSET
   takes only keys whose default is no value …: login defaults to 'shared',
   so it is never unset; use SET`). It is accepted in `ALTER PLAYBOOK` and in
-  `CREATE OR ALTER PLAYBOOK` (applied on a new playbook, judged on one that
-  exists), not in `CREATE PLAYBOOK`. It applies whole or not at all: only
+  `CREATE OR ALTER PLAYBOOK` (judged on the playbook as it is: on a new
+  one, after the creation, so a key a `FROM` source's `settings.json` sets
+  is set), not in `CREATE PLAYBOOK`. It applies whole or not at all: only
   when none of the keys it names is set. Otherwise it changes nothing and
   prints which key was set. A recipe uses it to offer values without
   replacing the ones a playbook has:
@@ -665,8 +673,10 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   field: `SHOW PLAYBOOK --json` and `EXPLAIN --json` have `"login"` and
   `"global_instructions"`, and `SELECT`'s `PLAYBOOKS` has `login` and `global_instructions` columns.
   `SHOW CREATE` writes the playbook's `CREATE` so that it converges
-  exactly: a `SET` list with the launcher, its default spelled out
-  (`launcher = '<name>'`), `login` and `global_instructions`, always, and
+  exactly: the launcher (`SET launcher = '<alias>'`, `SET launcher = ''`
+  for none, or `RESET launcher` for the default: a playbook's name may be a
+  keyword, which is no launcher value), then a `SET` list with `login` and
+  `global_instructions`, always, and
   `sandbox.always` with the sandbox keys that are set; then a `RESET` list
   with every property that is not set (`RESET sandbox` when nothing in the
   table is, the model, the agent, the status line or only its refresh, the
@@ -683,7 +693,18 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   with `RESET login`), and needs `login = 'isolated'`, already or in the
   same statement. A launcher name is never a keyword. `RENAME TO` is not
   combined with other clauses, except the launcher; the launcher combines
-  with any other key.
+  with any other key, and the statement stays whole or nothing: every check
+  that can refuse the launcher (another playbook answers to the name, a
+  file cpb did not write sits on it, a linked target's shared manifest)
+  runs before any key is written, in `ALTER` and in `CREATE OR ALTER`. A
+  `CREATE`'s `SET` list is checked whole before the directory exists (a
+  value the follow-on step would refuse, such as `sandbox.backend =
+  'bogus'`, refuses the `CREATE`), and should a later step still fail, the
+  playbook the statement created is removed again. Under a
+  `--playbooks-dir` root, where cpb manages no launchers (*Launchers*), a
+  launcher change is recorded as the manifest's alias with a note, the same
+  whether it stands alone or beside other keys, and `CREATE OR ALTER`
+  converges that alias.
 - **Words.** `RESET` is a reserved word. The keys and the values are read
   only after `SET` and `RESET` and are not reserved, though `model` is also
   spelled as a keyword elsewhere (`ADD MODEL`): a key followed by `=` is a

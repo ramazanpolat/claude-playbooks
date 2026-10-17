@@ -43,6 +43,9 @@ type dryState struct {
 	// always as earlier statements would leave them.
 	isolated  map[string]bool
 	sandboxed map[string]bool
+	// sandboxes, per playbook: the [sandbox] block earlier statements would
+	// leave (nil: none); absent: as on disk.
+	sandboxes map[string]*manifest.Sandbox
 
 	// launchers, per playbook: the launcher earlier statements would leave
 	// it (a command name, or "" for none); absent: as on disk.
@@ -51,6 +54,7 @@ type dryState struct {
 
 func newDryState() *dryState {
 	return &dryState{
+		sandboxes:    map[string]*manifest.Sandbox{},
 		profiles:     map[string]*envset.Set{},
 		playbooks:    map[string]bool{},
 		pbEnvs:       map[string]*manifest.Env{},
@@ -139,6 +143,7 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	sk, skok := r.dry.skillKnown[from]
 	iso, isook := r.dry.isolated[from]
 	sbx, sbxok := r.dry.sandboxed[from]
+	sbk, sbkok := r.dry.sandboxes[from]
 	// A playbook on disk carries its login setting under its new name: the
 	// directory it keeps says what it is.
 	if cfg != "" && !(isook && sbxok) {
@@ -173,6 +178,9 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	if sbxok {
 		r.dry.sandboxed[to] = sbx
+	}
+	if sbkok {
+		r.dry.sandboxes[to] = sbk
 	}
 	if aok {
 		r.dry.settings[to] = a

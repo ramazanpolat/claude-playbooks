@@ -61,10 +61,12 @@ func TestLauncherModelAgentProperties(t *testing.T) {
 		t.Fatal("the default launcher was not written")
 	}
 
-	// SHOW CREATE writes the default launcher out, and the round trip holds.
+	// SHOW CREATE writes the default launcher as RESET launcher (D2: a key
+	// at its default is RESET; a name may be a keyword, which is no launcher
+	// value), and the round trip holds.
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK qq")
-	if !strings.Contains(created, "SET launcher = 'qq'") {
-		t.Fatalf("SHOW CREATE does not write the default launcher:\n%s", created)
+	if !strings.Contains(created, "RESET launcher") || strings.Contains(created, "launcher = 'qq'") {
+		t.Fatalf("SHOW CREATE does not write the default launcher as RESET launcher:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
 		t.Fatalf("SHOW CREATE did not re-apply unchanged: %v\n%s", err, out)

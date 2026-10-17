@@ -95,6 +95,13 @@ func withheldClause(c grammar.Clause) grammar.Clause {
 	c.Vars = vars(c.Vars)
 	c.Settings = vars(c.Settings)
 	c.Arg = urlWithheld(c.Arg)
+	if c.Group != nil { // SET IF UNSET: its pairs are clauses of their own
+		group := make([]grammar.Clause, len(c.Group))
+		for i, g := range c.Group {
+			group[i] = withheldClause(g)
+		}
+		c.Group = group
+	}
 	if c.MCP != nil {
 		m := *c.MCP
 		m.Command, m.URL = urlWithheld(m.Command), urlWithheld(m.URL)

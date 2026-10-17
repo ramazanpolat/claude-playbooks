@@ -233,8 +233,19 @@ func (r *stmtRun) propertyReader(name string, pb *playbook.Playbook) (func(key s
 			return strconv.FormatBool(r.sandboxed(name, m)), true
 		}
 		if k, ok := strings.CutPrefix(key, "sandbox."); ok {
+			sb := (*manifest.Sandbox)(nil)
 			if m != nil {
-				for _, kv := range m.Sandbox.Settings() {
+				sb = m.Sandbox
+			}
+			if r.dry != nil {
+				// A dry run's earlier statements count: the block they would
+				// leave, not the one on disk.
+				if planned, known := r.dry.sandboxes[name]; known {
+					sb = planned
+				}
+			}
+			if sb != nil {
+				for _, kv := range sb.Settings() {
 					if kv[0] == k {
 						return kv[1], true
 					}

@@ -558,6 +558,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	// The [sandbox] block, in the same manifest write.
 	wasIsolated := r.isolated(st.Name, m)
 	wasSandboxed := r.sandboxed(st.Name, m)
+	if r.dry != nil {
+		// What earlier statements of the dry run left, not the disk.
+		if sb, ok := r.dry.sandboxes[st.Name]; ok {
+			m.Sandbox = cloneSandbox(sb)
+		}
+	}
 	beforeSandbox := cloneSandbox(m.Sandbox)
 	sandbox, alwaysOn, sandboxLines, err := planSandbox(m.Sandbox, st.Clauses)
 	if err != nil {
@@ -643,6 +649,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if nowSandboxed := sandbox != nil && sandbox.Always; nowSandboxed != wasSandboxed && r.dry != nil {
 			r.dry.sandboxed[st.Name] = nowSandboxed
+		}
+		if sandboxChange && r.dry != nil {
+			r.dry.sandboxes[st.Name] = cloneSandbox(sandbox)
 		}
 		if mcp != nil {
 			finishMCP()
