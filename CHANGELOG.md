@@ -31,6 +31,14 @@
   So a playbook's own `SHOW CREATE` puts back a model, a status line or an
   env set added elsewhere. Collections stay additive. `USE ENV ''` is the
   explicit empty list in `ALTER PLAYBOOK`, `ALTER DEFAULTS` and `CREATE`.
+- **`SET IF UNSET` takes only keys whose default is no value** (SPEC.md,
+  *Playbook properties*): `model`, `agent`, `statusline.*`,
+  `model_picker.mode` and the sandbox keys without a default. `launcher`,
+  `login`, `global_instructions`, `sandbox.always`, `sandbox.share_skills`
+  and `sandbox.secrets` are refused with a one-line reason: they are never
+  unset, so an explicit `login = 'shared'` read as unset. `SET IF UNSET` is
+  now accepted in `CREATE OR ALTER PLAYBOOK` too (applied on a new
+  playbook, judged on one that exists).
 
 ### Changed
 
@@ -44,9 +52,9 @@
   an `OR ALTER`'s pairs as an `ALTER`'s when the playbook exists before the
   run, and `SHOW CREATE` writes `CREATE OR ALTER PLAYBOOK` with the launcher,
   login, global_instructions and sandbox: one converging statement.
-- **`SET IF UNSET` takes any property** and applies whole or not at all:
-  only when none of the keys it names is set (each at the value `RESET`
-  gives it); otherwise it changes nothing and prints `PLAYBOOK x: <key> is
+- **`SET IF UNSET` takes any property whose default is no value** (see
+  below) and applies whole or not at all: only when none of the keys it
+  names is set; otherwise it changes nothing and prints `PLAYBOOK x: <key> is
   set; SET IF UNSET changed nothing`. `APPLY` folds it as one clause.
 - **Property keys are lowercase and exact.** `SET MODEL=glm-5.3`, a variable
   that lost its `VAR`, used to set the model property from the command

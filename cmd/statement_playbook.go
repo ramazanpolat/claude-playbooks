@@ -103,6 +103,10 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if isReset(c) {
 			continue // RESET on a new playbook: every key starts at its default
 		}
+		if c.Kind == grammar.SetIfUnset {
+			after = append(after, c.Group...) // on a new playbook no key is set
+			continue
+		}
 		switch c.Kind {
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link,
 			grammar.Launcher, grammar.NoLauncher, grammar.SetProperties:
@@ -194,13 +198,19 @@ func convergePlaybook(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) error
 	}
 	outcome := outUnchanged
 	if len(props) > 0 {
-		r.exists = true
-		err := playbookStatement(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: props})
-		r.exists = false
+		alter, err := r.resolveIfUnset(&grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: props})
 		if err != nil {
 			return err
 		}
-		outcome = r.outcome
+		if len(alter.Clauses) > 0 {
+			r.exists = true
+			err = playbookStatement(r, alter)
+			r.exists = false
+			if err != nil {
+				return err
+			}
+			outcome = r.outcome
+		}
 	}
 	if len(launch) > 0 {
 		if err := alterPlaybookLifecycle(r, &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: st.Name, Pos: st.Pos, Clauses: launch}); err != nil {

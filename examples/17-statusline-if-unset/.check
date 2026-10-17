@@ -17,3 +17,8 @@ python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"] =
 cpb "ALTER PLAYBOOK barred RESET model" > /dev/null
 cpb "ALTER PLAYBOOK barred SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'" > /dev/null
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["model"] == "claude-opus-5-5" and s["agent"] == "reviewer", s' "$s"
+# A key whose default is a value is never unset, so SET IF UNSET refuses it.
+if cpb "ALTER PLAYBOOK barred SET IF UNSET login = 'isolated'" 2> "$HOME/iu.err"; then echo "SET IF UNSET login accepted"; exit 1; fi
+grep -q 'never unset; use SET' "$HOME/iu.err"
+# CREATE OR ALTER takes it too: on a playbook that exists it is judged.
+cpb "CREATE OR ALTER PLAYBOOK barred SET IF UNSET model = 'other'" | grep -q 'model is set'

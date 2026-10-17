@@ -507,8 +507,11 @@ func (p *parser) create(s *Stmt) *Error {
 	}
 	if !s.OrAlter {
 		for _, c := range s.Clauses {
-			if c.Kind == ResetProperties {
+			switch {
+			case c.Kind == ResetProperties:
 				return errAt(c.Pos, "CREATE starts every property at its default; RESET is for ALTER PLAYBOOK and CREATE OR ALTER PLAYBOOK")
+			case c.IfUnset:
+				return errAt(c.Pos, "a new playbook has every key unset, so SET is what CREATE takes; SET IF UNSET is for ALTER PLAYBOOK and CREATE OR ALTER PLAYBOOK")
 			}
 		}
 	}
@@ -858,7 +861,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 				return nil, p.fail("expected UNSET after IF: SET IF UNSET <key> = '<value>', …")
 			}
 			c.Kind, c.IfUnset = SetProperties, true
-			return c, p.playbookProperties(c, "SET IF UNSET", true)
+			return c, p.ifUnsetProperties(c)
 		case p.at("ISOLATED"):
 			return nil, p.fail(removedLogin)
 		case p.at("AGENT"):
@@ -1099,6 +1102,15 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		c.Arg = t.Text
 		return c, err
 	case "SET":
+		if p.at("IF") {
+			// SET IF UNSET: CREATE OR ALTER only (create checks).
+			p.i++
+			if p.kw("UNSET") == "" {
+				return nil, p.fail("expected UNSET after IF: SET IF UNSET <key> = '<value>', …")
+			}
+			c.Kind, c.IfUnset = SetProperties, true
+			return c, p.ifUnsetProperties(c)
+		}
 		c.Kind = SetProperties
 		return c, p.playbookProperties(c, "SET", true)
 	case "RESET":

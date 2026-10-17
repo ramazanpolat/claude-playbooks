@@ -53,7 +53,10 @@ one decides. Example: [10](../../examples/10-tools-statusline-model/).
 line without replacing one you chose writes `SET IF UNSET
 statusline.command = '<command>'`, which applies only where no status line is
 set yet; see [example 17](../../examples/17-statusline-if-unset/). `SET IF
-UNSET` takes any property, and applies whole or not at all: `SET IF UNSET
+UNSET` takes the keys whose default is no value (`model`, `agent`, the status
+line, the picker mode, the sandbox keys without a default; not `launcher`,
+`login` or `global_instructions`, which are never unset), and applies whole or
+not at all: `SET IF UNSET
 model = 'claude-opus-5-5', agent = 'reviewer'` changes neither on a playbook
 that has a model, and says so.
 

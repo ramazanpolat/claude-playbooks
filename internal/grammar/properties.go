@@ -148,6 +148,33 @@ func checkAgent(v string) string {
 	return ""
 }
 
+// ifUnsetRefused are the keys whose default is a value, with that value:
+// such a key is never unset, so SET IF UNSET would always skip, or always
+// apply over an explicit choice of the default (D3). SET IF UNSET takes
+// only keys whose default is "no value".
+var ifUnsetRefused = map[string]string{
+	"launcher":             "the playbook's name",
+	"login":                "'shared'",
+	"global_instructions":  "'excluded'",
+	"sandbox.always":       "false",
+	"sandbox.share_skills": "false",
+	"sandbox.secrets":      "'proxy'",
+}
+
+// ifUnsetProperties reads a SET IF UNSET list and refuses a key whose
+// default is a value.
+func (p *parser) ifUnsetProperties(c *Clause) *Error {
+	if err := p.playbookProperties(c, "SET IF UNSET", true); err != nil {
+		return err
+	}
+	for _, v := range c.Settings {
+		if def, refused := ifUnsetRefused[v.Key]; refused {
+			return errAt(c.Pos, "SET IF UNSET takes only keys whose default is no value (model, agent, statusline.*, model_picker.mode, sandbox.<key> without a default): "+v.Key+" defaults to "+def+", so it is never unset; use SET")
+		}
+	}
+	return nil
+}
+
 // propertyIn finds a property of one object's table by key. Keys are
 // lowercase and match exactly, so a variable's name (MODEL, LOGIN) is never
 // read as a property.

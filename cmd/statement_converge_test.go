@@ -254,25 +254,24 @@ func TestSetIfUnsetAppliesWhole(t *testing.T) {
 	if out, _ := quotedStmt(t, "ALTER PLAYBOOK iu SET IF UNSET statusline.command = 'echo other'"); !strings.Contains(out, "statusline.command is set") {
 		t.Fatalf("again:\n%s", out)
 	}
-	// An enumerated key is unset at its default: login is 'shared' until
-	// set.
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK iu SET IF UNSET login = 'isolated'"); err != nil {
-		t.Fatal(err)
+	// D3: a key whose default is a value is never unset, so SET IF UNSET
+	// refuses it.
+	for _, key := range []string{"login = 'isolated'", "launcher = 'iu2'", "global_instructions = 'inherited'", "sandbox.always = false"} {
+		if _, err := quotedStmt(t, "ALTER PLAYBOOK iu SET IF UNSET "+key); err == nil || !strings.Contains(err.Error(), "never unset; use SET") {
+			t.Fatalf("SET IF UNSET %s: %v", key, err)
+		}
 	}
-	if v := showPlaybook(t, "iu"); v["login"] != "isolated" {
-		t.Fatalf("login = %v", v["login"])
+	// CREATE OR ALTER takes SET IF UNSET too: applied on a new playbook,
+	// judged on one that exists.
+	mustStmt(t, "CREATE OR ALTER PLAYBOOK iu2 SET launcher = '' SET IF UNSET model = 'n'")
+	if s := settingsOf(t, filepath.Join(root, "iu2")); s["model"] != "n" {
+		t.Fatalf("SET IF UNSET on a new playbook: %v", s)
 	}
-	// The launcher is unset at its default, the playbook's own name; a
-	// playbook with none has it set.
-	if out, _ := quotedStmt(t, "ALTER PLAYBOOK iu SET IF UNSET launcher = 'iu2'"); !strings.Contains(out, "launcher is set") {
-		t.Fatalf("launcher '' is set:\n%s", out)
+	if out := mustStmt(t, "CREATE OR ALTER PLAYBOOK iu2 SET IF UNSET model = 'o'"); !strings.Contains(out, "model is set") {
+		t.Fatalf("SET IF UNSET on an existing playbook:\n%s", out)
 	}
-	mustStmt(t, "ALTER PLAYBOOK iu RESET launcher")
-	if _, err := quotedStmt(t, "ALTER PLAYBOOK iu SET IF UNSET launcher = 'iu2'"); err != nil {
-		t.Fatal(err)
-	}
-	if _, exists, _ := launcher.Lookup(config.LauncherDir, "iu2"); !exists {
-		t.Fatal("SET IF UNSET launcher did not write it")
+	if err := stmtErr(t, "CREATE PLAYBOOK iu3 SET IF UNSET model = 'o'"); err == nil || !strings.Contains(err.Error(), "SET IF UNSET is for ALTER PLAYBOOK and CREATE OR ALTER PLAYBOOK") {
+		t.Fatalf("SET IF UNSET in a plain CREATE: %v", err)
 	}
 	// A dry run judges by what earlier statements would leave.
 	file := writePlaybookFile(t, "ALTER PLAYBOOK iu RESET model;\nALTER PLAYBOOK iu SET IF UNSET model = 'y';\nALTER PLAYBOOK iu SET IF UNSET model = 'z';\n")

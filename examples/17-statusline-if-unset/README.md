@@ -16,9 +16,12 @@ one slot for it.
   applies only where no status line is set yet. A recipe that offers a bar
   uses it, so applying the recipe to a playbook whose status line you chose
   leaves yours in place.
-- `SET IF UNSET` takes any property, and applies whole or not at all: only
-  when none of the keys it names is set (each at the value `RESET` gives
-  it). Otherwise it changes nothing and says which key was set:
+- `SET IF UNSET` takes the keys whose default is no value (`model`,
+  `agent`, `statusline.*`, `model_picker.mode`, the `sandbox.<key>`s without
+  a default), in `ALTER` and in `CREATE OR ALTER`. `launcher`, `login`,
+  `global_instructions` and the sandbox keys with a default are refused: they
+  are never unset. It applies whole or not at all: only when none of the
+  keys it names is set. Otherwise it changes nothing and says which key was set:
   `SET IF UNSET model = 'claude-opus-5-5', agent = 'reviewer'` leaves both
   alone on a playbook that has a model.
 - `SHOW CREATE` writes the status line the playbook has, never the condition.

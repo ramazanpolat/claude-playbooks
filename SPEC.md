@@ -175,7 +175,8 @@ pb-clause  := set-clause
             | DENY TOOL '<rule>' ...       settings.json permissions.deny
             | UNSET TOOL '<rule>' ...      forget a rule, allowed or denied
             | SET property, ...            change properties; see "Playbook properties"
-            | SET IF UNSET property, ...   whole, and only where none of them is set
+            | SET IF UNSET property, ...   whole, and only where none of them is set;
+                                           keys whose default is no value; also in CREATE OR ALTER
             | RESET <key>, ...            back to the default
             | REVERT STATUSLINE            the status line cpb replaced last
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   see "Model picker"
@@ -634,12 +635,19 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   applies its `SET` and `RESET` lists, each key only where it differs, and
   leaves every key they do not name as it is; `CREATE PLAYBOOK IF NOT EXISTS`
   changes nothing.
-- **`SET IF UNSET`** takes any property, and applies whole or not at all:
-  only when none of the keys it names is set, a key being unset at the
-  value `RESET` gives it (no value at all for `model`, `sandbox.host` and
-  the like; `'shared'` for `login`, the playbook's own name for
-  `launcher`, `false` for `sandbox.always`). Otherwise it changes nothing
-  and prints which key was set. A recipe uses it to offer values without
+- **`SET IF UNSET`** takes the keys whose default is no value: `model`,
+  `agent`, `statusline.command`, `statusline.refresh`, `model_picker.mode`,
+  and the `sandbox.<key>`s without a default (`backend`, `host`, `workdir`,
+  `mounts`, `allow_net`, `claude_version`). A key whose default is a value
+  (`launcher`, `login`, `global_instructions`, `sandbox.always`,
+  `sandbox.share_skills`, `sandbox.secrets`) is refused: it is never unset,
+  so an explicit choice of the default would read as unset (`SET IF UNSET
+  takes only keys whose default is no value …: login defaults to 'shared',
+  so it is never unset; use SET`). It is accepted in `ALTER PLAYBOOK` and in
+  `CREATE OR ALTER PLAYBOOK` (applied on a new playbook, judged on one that
+  exists), not in `CREATE PLAYBOOK`. It applies whole or not at all: only
+  when none of the keys it names is set. Otherwise it changes nothing and
+  prints which key was set. A recipe uses it to offer values without
   replacing the ones a playbook has:
 
   ```
@@ -1087,7 +1095,7 @@ The status line is a table of two properties, `statusline.command` and
   a status line uses it, so applying the recipe leaves a status line you
   chose in place. `SHOW CREATE` writes the status line as it is, never the
   condition ([example 17](examples/17-statusline-if-unset/)). `SET IF UNSET`
-  takes any property (*Playbook properties*).
+  takes every key whose default is no value (*Playbook properties*).
 - **`statusline.refresh`** sets `statusLine.refreshInterval`, in whole
   seconds:
   - `SET statusline.command = '<command>', statusline.refresh = <n>` sets both the

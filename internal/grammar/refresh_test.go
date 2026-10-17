@@ -78,8 +78,9 @@ func TestStatuslineIfUnset(t *testing.T) {
 		}
 	}
 	for _, line := range []string{
-		"ALTER PLAYBOOK k SET IF UNSET model = 'm', agent = 'a', sandbox.host = 'me@box', global_instructions = 'inherited'",
-		"ALTER PLAYBOOK k SET IF UNSET statusline.refresh = 5 SET VAR A=1 SET IF UNSET launcher = 'kk'",
+		"ALTER PLAYBOOK k SET IF UNSET model = 'm', agent = 'a', sandbox.host = 'me@box', sandbox.mounts = ['~/a']",
+		"ALTER PLAYBOOK k SET IF UNSET statusline.refresh = 5 SET VAR A=1 SET IF UNSET model_picker.mode = 'only'",
+		"CREATE OR ALTER PLAYBOOK k SET IF UNSET model = 'm' SET login = 'isolated'",
 	} {
 		st, err := ParseLine(line)
 		if err != nil {
