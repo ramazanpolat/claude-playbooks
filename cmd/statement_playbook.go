@@ -42,6 +42,7 @@ type createOptions struct {
 
 func createOptionsOf(st *grammar.Stmt) createOptions {
 	var o createOptions
+	defaultLauncher := false
 	for _, c := range st.Clauses {
 		switch c.Kind {
 		case grammar.From:
@@ -56,6 +57,8 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			o.alias = c.Arg
 		case grammar.NoLauncher:
 			o.noAlias = true
+		case grammar.DefaultLauncher:
+			defaultLauncher = true
 		case grammar.SetSandboxKeys:
 			for _, v := range c.Settings {
 				if v.Key == "always" && v.Value == "true" {
@@ -72,6 +75,12 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 	}
 	if o.link != "" {
 		o.globalInstructions = ""
+	}
+	// RESET launcher is the playbook's own name. On an install FROM a
+	// source it is said out loud: the source's manifest may name another
+	// launcher, which an install would otherwise adopt.
+	if defaultLauncher && o.from != "" && o.alias == "" && !o.noAlias {
+		o.alias = st.Name
 	}
 	return o
 }

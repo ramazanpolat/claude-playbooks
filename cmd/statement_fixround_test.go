@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -129,17 +130,12 @@ func TestCreateRefusesBadSandboxValueFirst(t *testing.T) {
 func TestFromInstallResetAndIfUnset(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
-	src := t.TempDir()
-	if err := os.WriteFile(filepath.Join(src, "settings.json"), []byte(`{"model": "x"}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(src, "CLAUDE.md"), []byte("# src\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// A git source, so the install records [source] and SHOW CREATE writes FROM.
+	src := gitSource(t, map[string]string{"settings.json": `{"model": "x"}` + "\n", "CLAUDE.md": "# src\n"})
 	mustStmt(t, "CREATE PLAYBOOK fr FROM "+src+" SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK fr RESET model")
 	file := writePlaybookFile(t, mustStmt(t, "SHOW CREATE PLAYBOOK fr"))
-	if !strings.Contains(readFile(t, file), "RESET") {
+	if !strings.Contains(readFile(t, file), "FROM") || !strings.Contains(readFile(t, file), "RESET") {
 		t.Fatalf("SHOW CREATE does not reset the model:\n%s", readFile(t, file))
 	}
 	mustStmt(t, "DROP PLAYBOOK fr --yes")
@@ -181,6 +177,31 @@ func TestShowCreateKeywordNamedPlaybook(t *testing.T) {
 	}
 	if out, err := apply(t, file); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
 		t.Fatalf("SHOW CREATE ALL does not re-apply: %v\n%s", err, out)
+	}
+}
+
+// RESET launcher on a new playbook installed FROM a source is the
+// playbook's own name, never the launcher the source's manifest names: the
+// SHOW CREATE of a playbook whose launcher is its name rebuilds it so.
+func TestFromInstallResetLauncherIsTheName(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	src := gitSource(t, map[string]string{".playbook": "name = \"src\"\nlauncher = \"src-l\"\n", "CLAUDE.md": "# src\n"})
+	mustStmt(t, "CREATE PLAYBOOK fz FROM "+src+" SET launcher = 'fz'")
+	file := writePlaybookFile(t, mustStmt(t, "SHOW CREATE PLAYBOOK fz"))
+	mustStmt(t, "DROP PLAYBOOK fz --yes")
+	if out, err := apply(t, file); err != nil || !strings.Contains(out, "1 created") {
+		t.Fatalf("APPLY: %v\n%s", err, out)
+	}
+	pb, err := playbook.Require(root, "fz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := pb.Alias(); a != "" && a != "fz" {
+		t.Fatalf("the rebuilt playbook took the source's launcher %q", a)
+	}
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "src-l"); exists {
+		t.Fatal("the source's launcher was written")
 	}
 }
 
@@ -235,6 +256,26 @@ func TestLauncherUnderCustomRoot(t *testing.T) {
 	if out, err := apply(t, f); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
 		t.Fatalf("again: %v\n%s", err, out)
 	}
+}
+
+// gitSource is a one-commit git repository holding files, as a file:// URL:
+// an install from it records [source], as one from GitHub does.
+func gitSource(t *testing.T, files map[string]string) string {
+	t.Helper()
+	repo := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return "file://" + repo
 }
 
 func readFile(t *testing.T, path string) string {
