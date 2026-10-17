@@ -177,7 +177,7 @@ var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
 	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "RESET", "REVERT"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "UNSET", "RESET"}
-	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "RESET"}
+	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "RESET", "USE"}
 )
 
 var (
@@ -1063,6 +1063,9 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	if hint := removedClauseHint(p); hint != "" {
 		return nil, p.fail(hint)
 	}
+	if (p.at("ADD") || p.at("DROP") || p.at("REPLACE")) && p.i+1 < len(p.toks) && strings.EqualFold(p.toks[p.i+1].Text, "ENV") {
+		return nil, p.fail(strings.ToUpper(p.toks[p.i].Text) + " ENV is for ALTER PLAYBOOK; CREATE takes the whole list: USE ENV <env> ...")
+	}
 	w := p.kw(createPlaybookStarters...)
 	switch w {
 	case "":
@@ -1078,6 +1081,18 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		return c, p.playbookProperties(c, "SET", true)
 	case "RESET":
 		return nil, p.fail("CREATE starts every property at its default; RESET is for ALTER PLAYBOOK")
+	case "USE":
+		// The whole list, as USE ENV states it in ALTER. ADD, DROP and
+		// REPLACE ENV edit a list that exists: they end it here, so they
+		// are refused by name rather than read as env set names.
+		saved := p.starters
+		p.starters = append(slices.Clone(saved), "ADD", "DROP", "REPLACE")
+		err := p.envList(c, w)
+		p.starters = saved
+		if err == nil && (p.at("ADD") || p.at("DROP") || p.at("REPLACE")) {
+			err = p.fail(strings.ToUpper(p.toks[p.i].Text) + " ENV is for ALTER PLAYBOOK; CREATE takes the whole list: USE ENV <env> ...")
+		}
+		return c, err
 	}
 	return nil, nil
 }
@@ -1320,6 +1335,9 @@ func validate(s *Stmt) *Error {
 		// of the properties, only its launcher is this registry's.
 		if link {
 			for _, c := range s.Clauses {
+				if c.Kind == UseEnv {
+					return errAt(c.Pos, "USE ENV does not apply to LINK: a linked playbook's manifest belongs to the target")
+				}
 				key := map[Kind]string{SetModel: "model", SetAgent: "agent"}[c.Kind]
 				switch c.Kind {
 				case SetProperties:

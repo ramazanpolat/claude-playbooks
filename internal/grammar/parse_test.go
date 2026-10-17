@@ -118,6 +118,17 @@ var validCases = []struct {
 		w("CREATE OR ALTER PLAYBOOK p FROM repo SET model = m"),
 		Stmt{Verb: Create, Object: Playbook, Name: "p", OrAlter: true, Clauses: []Clause{
 			{Kind: From, Arg: "repo"}, {Kind: SetModel, Arg: "m"}}}},
+	{"create or alter playbook with its env sets",
+		w("CREATE OR ALTER PLAYBOOK sre FROM repo SET login = isolated USE ENV acct-work corp"),
+		Stmt{Verb: Create, Object: Playbook, Name: "sre", OrAlter: true, Clauses: []Clause{
+			{Kind: From, Arg: "repo"},
+			{Kind: SetProperties, Settings: []Var{{Key: "login", Value: "isolated"}}},
+			{Kind: UseEnv, Names: []string{"acct-work", "corp"}}}}},
+	{"create playbook with env sets before its SET list",
+		w("CREATE PLAYBOOK glm USE ENV router SET login = isolated"),
+		Stmt{Verb: Create, Object: Playbook, Name: "glm", Clauses: []Clause{
+			{Kind: UseEnv, Names: []string{"router"}},
+			{Kind: SetProperties, Settings: []Var{{Key: "login", Value: "isolated"}}}}}},
 	{"create playbook if not exists with every option",
 		w("CREATE PLAYBOOK IF NOT EXISTS second FROM repo BRANCH v0.5.0 SUBDIR dist SET launcher = '', sandbox.always = true, login = isolated"),
 		Stmt{Verb: Create, Object: Playbook, Name: "second", IfNotExists: true, Clauses: []Clause{
@@ -218,6 +229,12 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("CREATE OR ALTER ENV e"), "OR ALTER applies to PLAYBOOK only"},
 		{w("CREATE OR ALTER PLAYBOOK IF NOT EXISTS p"), "OR ALTER and IF NOT EXISTS cannot be combined"},
 		{w("CREATE OR REPLACE PLAYBOOK p"), "CREATE OR ALTER PLAYBOOK applies the SET list"},
+		{w("CREATE PLAYBOOK p ADD ENV a"), "ADD ENV is for ALTER PLAYBOOK; CREATE takes the whole list"},
+		{w("CREATE OR ALTER PLAYBOOK p USE ENV a DROP ENV b"), "DROP ENV is for ALTER PLAYBOOK; CREATE takes the whole list"},
+		{w("CREATE PLAYBOOK p USE ENV a REPLACE ENV a WITH b"), "REPLACE ENV is for ALTER PLAYBOOK"},
+		{w("CREATE PLAYBOOK p USE ENV a USE ENV b"), "USE ENV appears twice"},
+		{w("CREATE PLAYBOOK p USE ENV"), "USE ENV needs at least one <env>"},
+		{w("CREATE PLAYBOOK p LINK /x USE ENV a"), "USE ENV does not apply to LINK"},
 		{w("CREATE ENV use"), `"use" is a keyword and cannot name an env set`},
 		{w("CREATE OR REPLACE PLAYBOOK x"), "OR REPLACE applies to ENV only"},
 		{w("CREATE OR REPLACE ENV IF NOT EXISTS e"), "cannot be combined"},
@@ -320,7 +337,6 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("CREATE ENV e SET DB_PASSWORD=hunter2"), "needs a secret helper"},
 		{w("CREATE PLAYBOOK x FROM"), "FROM needs <source>"},
 		{w("CREATE PLAYBOOK x FROM a FROM b"), "FROM appears twice"},
-		{w("CREATE PLAYBOOK x USE ENV a"), `unexpected "USE"`},
 	}
 	for _, tc := range cases {
 		_, err := ParseArgs(tc.args)

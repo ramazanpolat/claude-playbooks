@@ -230,6 +230,11 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		st.Clauses = append(st.Clauses,
 			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}},
 			grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
+		// The env sets it attaches, the whole list, on the CREATE too: one
+		// converging statement states them.
+		if m != nil && m.Env != nil && len(m.Env.Sets) > 0 {
+			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: m.Env.Sets})
+		}
 	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole
@@ -305,9 +310,6 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
 	var comments []string
 	if !env.Empty() {
-		if len(env.Sets) > 0 {
-			alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Sets})
-		}
 		var clauses []grammar.Clause
 		clauses, comments = varClauses(env.Set, env.Refs, env.Block, func(k string) string {
 			return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)

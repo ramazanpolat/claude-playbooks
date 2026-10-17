@@ -126,7 +126,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | CREATE OR REPLACE ENV <name> [env-clause ...]
             | ALTER  ENV <name> env-clause ...
             | DROP   ENV [IF EXISTS] <name>
-            | CREATE [OR ALTER] PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...]
+            | CREATE [OR ALTER] PLAYBOOK [IF NOT EXISTS] <name> [origin] [SET property, ...] [USE ENV <env> ...]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
@@ -220,6 +220,13 @@ because a playbook has other things to set.
 Order matters for env sets: a later set overrides an earlier one. `USE ENV a b`
 states the whole list, so it is the idempotent form; `ADD ENV` places one set
 without restating the rest.
+
+`CREATE [OR ALTER] PLAYBOOK` takes `USE ENV a b …`, the whole list: on a
+new playbook it attaches the sets, each of which must exist before anything
+is created; on one that exists, `CREATE OR ALTER` replaces the attached
+list only where it differs, and a statement without `USE ENV` keeps the
+list it finds. `ADD`, `DROP` and `REPLACE ENV` edit a list that exists, so
+they stay in `ALTER`. `SHOW CREATE` writes the list on the `CREATE`.
 
 `REPLACE ENV <old> WITH <new>`, in `ALTER PLAYBOOK` and `ALTER DEFAULTS`,
 swaps one set for another at old's position: switching a playbook from one
@@ -1760,10 +1767,10 @@ ALTER DEFAULTS USE ENV claude-default;
 CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
-  SET launcher = 'w', login = 'shared', global_instructions = 'excluded', sandbox.always = false;
+  SET launcher = 'w', login = 'shared', global_instructions = 'excluded', sandbox.always = false
+  USE ENV router;
 
 ALTER PLAYBOOK work
-  USE ENV router
   SET VAR MAX_THINKING_TOKENS=8000
   BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN;
 ```

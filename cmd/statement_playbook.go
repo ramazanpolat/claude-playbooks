@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -118,6 +119,17 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		default:
 			after = append(after, c)
+		}
+	}
+	// The env sets USE ENV attaches must exist before anything is created:
+	// the statement applies whole or not at all.
+	for _, c := range st.Clauses {
+		if c.Kind == grammar.UseEnv {
+			for _, n := range c.Names {
+				if err := r.requireEnv(envset.Dir(config.ResolvePlaybooksDir()), n); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if err := createPlaybookOnly(r, st); err != nil || len(after) == 0 || r.outcome != outCreated {

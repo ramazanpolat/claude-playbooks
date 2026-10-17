@@ -104,6 +104,53 @@ func TestCreateSetListOnNewPlaybook(t *testing.T) {
 	}
 }
 
+// CREATE [OR ALTER] PLAYBOOK takes USE ENV, the whole list: on a new
+// playbook it attaches the sets; on one that exists, OR ALTER replaces the
+// list only where it differs, and an omitted list keeps the attachments.
+func TestCreateUseEnv(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	for _, n := range []string{"acct-work", "acct-personal", "corp"} {
+		mustStmt(t, "CREATE ENV "+n)
+	}
+	sets := func() []string {
+		if e := readEnv(t, filepath.Join(root, "ue")); e != nil {
+			return e.Sets
+		}
+		return nil
+	}
+	mustStmt(t, "CREATE OR ALTER PLAYBOOK ue SET launcher = '' USE ENV acct-work corp")
+	if got := strings.Join(sets(), ","); got != "acct-work,corp" {
+		t.Fatalf("new playbook: %q", got)
+	}
+	file := writePlaybookFile(t, "CREATE OR ALTER PLAYBOOK ue SET launcher = '' USE ENV acct-personal corp;\n")
+	if out, err := apply(t, file); err != nil || !strings.Contains(out, "0 created, 1 changed") {
+		t.Fatalf("replace the list: %v\n%s", err, out)
+	}
+	if got := strings.Join(sets(), ","); got != "acct-personal,corp" {
+		t.Fatalf("after OR ALTER: %q", got)
+	}
+	if out, err := apply(t, file); err != nil || !strings.Contains(out, "0 created, 0 changed, 1 unchanged") {
+		t.Fatalf("again: %v\n%s", err, out)
+	}
+	// No USE ENV: the attachments stay.
+	mustStmt(t, "CREATE OR ALTER PLAYBOOK ue SET model = 'm'")
+	if got := strings.Join(sets(), ","); got != "acct-personal,corp" {
+		t.Fatalf("an omitted list changed the attachments: %q", got)
+	}
+	// An unknown set refuses the whole statement, on create too.
+	if err := stmtErr(t, "CREATE PLAYBOOK ue2 USE ENV ghost"); err == nil || !strings.Contains(err.Error(), `no env set "ghost"`) {
+		t.Fatalf("unknown set: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ue2")); !os.IsNotExist(err) {
+		t.Fatalf("a refused CREATE left a playbook behind: %v", err)
+	}
+	// SHOW CREATE states the list on the CREATE.
+	if show := mustStmt(t, "SHOW CREATE PLAYBOOK ue"); !strings.Contains(show, "USE ENV acct-personal corp;") || strings.Contains(show, "ALTER PLAYBOOK ue\n  USE ENV") {
+		t.Fatalf("SHOW CREATE:\n%s", show)
+	}
+}
+
 // SET IF UNSET applies whole, and only when none of its keys is set (each
 // at the value RESET gives it); else it changes nothing and says which key
 // was set.

@@ -11,6 +11,13 @@
   unknown new set is an error, and nothing is written. `SHOW CREATE` writes
   the whole `USE ENV` list, never `REPLACE`; a played recipe may not hold it.
   `WITH` is a reserved word.
+- **`USE ENV` inside `CREATE [OR ALTER] PLAYBOOK`** (SPEC.md, *Grammar*):
+  the whole list, so one statement creates or converges a playbook with its
+  env sets. Every set must exist before anything is created. On a playbook
+  that exists, `CREATE OR ALTER` replaces the list only where it differs; a
+  statement without `USE ENV` keeps it. `ADD`, `DROP` and `REPLACE ENV` stay
+  in `ALTER`. `SHOW CREATE` now writes `USE ENV` on the `CREATE`, not in
+  the `ALTER` after it.
 
 ### Changed
 
