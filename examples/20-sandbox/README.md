@@ -1,5 +1,7 @@
 # 20: a playbook that always runs in a sandbox
 
+Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
+
 ```
 cpb APPLY playbook.cpb --dry-run
 cpb APPLY playbook.cpb
@@ -8,19 +10,26 @@ cpb run --no-sandbox box              # this launch on your machine, said loudly
 cpb SHOW CREATE PLAYBOOK box          # the [sandbox] settings, as statements
 ```
 
-`SET SANDBOX` on its own makes every launch of `box` run in a
-[Docker Sandbox](https://docs.docker.com/ai/sandboxes/) (`sbx`), and isolates
-its login: the sandbox never sees your machine's login. The keyed form,
-`SET SANDBOX <key>=<value> ...`, sets the playbook's `[sandbox]` table:
+`sandbox.always = true` makes every launch of `box` run in a
+[Docker Sandbox](https://docs.docker.com/ai/sandboxes/) (`sbx`). A sandbox
+never sees your machine's login, so the playbook's login is isolated too:
+`login = 'isolated'` in the same `SET` (a sandbox never isolates it on its
+own). The other `sandbox.<key>` properties set the playbook's `[sandbox]`
+table:
 
-- `backend=sbx` names the backend (sbx is the one there is);
-- `allow_net=api.github.com` lets the sandbox reach one more host;
-- `mounts=~/shared-libs:ro` mounts one more directory, read-only, at its own
-  path.
+- `sandbox.backend = 'sbx'` names the backend (sbx is the one there is);
+- `sandbox.allow_net = ['api.github.com']` lets the sandbox reach one more
+  host;
+- `sandbox.mounts = ['~/shared-libs:ro']` mounts one more directory,
+  read-only, at its own path.
 
-`UNSET SANDBOX` turns "always" off again (the login stays isolated), and
-`UNSET SANDBOX <key>` forgets one setting. The settings live in the
-playbook's `.playbook`, and `SHOW CREATE` writes them back as statements.
+On the command line, quote a statement with a list in it: zsh reads `[ ]` as
+a pattern (`cpb "ALTER PLAYBOOK box SET sandbox.mounts = ['~/a:ro']"`).
+
+`SET sandbox.always = false` turns "always" off again (the login stays
+isolated), `RESET sandbox.<key>` forgets one setting, and `RESET sandbox`
+the whole table. The settings live in the playbook's `.playbook`, and `SHOW
+CREATE` writes them back as statements.
 
 A launch needs `sbx` installed and logged in (`sbx login` once). Without it,
 the launch refuses before it touches anything and says what to install. That

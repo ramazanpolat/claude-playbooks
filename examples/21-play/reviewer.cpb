@@ -3,6 +3,6 @@
 -- min-cpb: 4.0.0
 
 ALTER PLAYBOOK
-  SET MODEL 'claude-opus-5-5'
+  SET model = 'claude-opus-5-5'
   ALLOW TOOL 'Read' 'Grep' 'Glob'
   DENY TOOL 'Write' 'Edit';

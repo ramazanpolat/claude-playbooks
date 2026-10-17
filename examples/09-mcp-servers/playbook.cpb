@@ -2,9 +2,9 @@
 -- with the playbook as CLAUDE_CONFIG_DIR, so the servers are this agent's
 -- only. The credential is a reference: Claude's config gets ${CPB_MCP_…},
 -- and the secret helper resolves it into the session at launch.
-ALTER DEFAULTS SET SECRET HELPER 'cpb-secret-file';
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
 
-CREATE PLAYBOOK IF NOT EXISTS researcher NO LAUNCHER;
+CREATE PLAYBOOK IF NOT EXISTS researcher SET launcher = '';
 
 ALTER PLAYBOOK researcher
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'

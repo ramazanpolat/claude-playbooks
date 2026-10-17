@@ -1,5 +1,5 @@
 -- agent.cpb: the reviewer agent on top of base. reviewer-marketplace/ is a
--- local marketplace whose plugin carries the agent; SET AGENT makes it the
+-- local marketplace whose plugin carries the agent; SET agent makes it the
 -- main thread. A plugin sets neither a status line nor permissions, so the
 -- playbook does.
 INCLUDE 'base.cpb';
@@ -7,5 +7,5 @@ INCLUDE 'base.cpb';
 ALTER PLAYBOOK
   ADD MARKETPLACE reviewers FROM './reviewer-marketplace'
   ADD PLUGIN reviewer@reviewers
-  SET AGENT 'reviewer'
-  SET STATUSLINE 'echo reviewer' REFRESH 10 IF UNSET;
+  SET agent = 'reviewer'
+  SET IF UNSET statusline.command = 'echo reviewer', statusline.refresh = 10;

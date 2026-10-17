@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -182,7 +183,7 @@ func createDefaultsBlocks(dir string) (helper, defaults createBlock, err error) 
 }
 
 func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
-	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook, Name: pb.Name, IfNotExists: true}
+	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Playbook, Name: pb.Name, OrAlter: true}
 	v := describePlaybook(pb)
 	m := pb.Manifest
 	switch {
@@ -198,13 +199,49 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		}
 	}
 	switch {
-	case v.Launcher != nil:
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: *v.Launcher})
-	case hasNameLauncher(pb.Name):
-		// The default launcher, named after the playbook: no clause
-		// creates it again.
+	case pb.Alias() != "" && pb.Alias() != pb.Name:
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Launcher, Arg: pb.Alias()})
+	case hasNameLauncher(pb.Name) || !launcherOpsAllowed():
+		// The default launcher, named after the playbook, as RESET launcher
+		// (D2: a key at its default is RESET), never as SET launcher =
+		// '<name>': a playbook's name may be a keyword ('server', or one
+		// named with before WITH was reserved), which is no launcher value.
+		// Under a --playbooks-dir root cpb manages no launchers, so no alias
+		// is the default there.
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.DefaultLauncher})
 	default:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.NoLauncher})
+	}
+	// The properties SHOW CREATE always writes, so a recipe never leans on
+	// a default: login and global_instructions, and sandbox.always with the table's
+	// other set keys (a sandboxed playbook's login is isolated). On the
+	// CREATE, which applies them to a playbook that exists too (CREATE OR
+	// ALTER converges). A linked playbook's manifest and settings.json
+	// are the target's.
+	sandboxed := v.Sandbox.Always && v.Linked == nil
+	if v.Linked == nil {
+		login := "shared"
+		if v.IsolatedLogin || sandboxed {
+			login = "isolated"
+		}
+		global, _ := globalInstructionsStateOf(pb.Path)
+		st.Clauses = append(st.Clauses,
+			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}})
+		// Exact convergence (D2): every key that is not set is RESET, so
+		// the statement brings a playbook back to exactly this, and the
+		// whole env list is stated, '' for none. Collections (plugins,
+		// tools, MCP servers, models, skills) stay additive.
+		st.Clauses = append(st.Clauses, sandboxCreateClauses(m, sandboxed)...)
+		sf, err := settings.Load(pb.Path)
+		if err != nil {
+			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %w", pb.Name, err)
+		}
+		st.Clauses = append(st.Clauses, settingsResetClauses(sf.Root)...)
+		var sets []string
+		if m != nil && m.Env != nil {
+			sets = m.Env.Sets
+		}
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: sets})
 	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole
@@ -271,21 +308,6 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			}
 		}
 	}
-	// The [sandbox] table travels as a bare SET SANDBOX (always) and one
-	// SET SANDBOX <key>=<value> … for the rest: an ALTER applies to an
-	// existing playbook too, where CREATE IF NOT EXISTS would not. The
-	// properties travel the same way, as SET login = …, global_instructions = …: both
-	// always, so a recipe never leans on a default (a sandboxed playbook's
-	// login is isolated). A linked playbook's manifest and settings.json
-	// are the target's.
-	sandboxed := v.Sandbox.Always && v.Linked == nil
-	var sandboxSettings []grammar.Var
-	if v.Linked == nil && m != nil && m.Sandbox != nil {
-		for _, kv := range m.Sandbox.Settings() {
-			sandboxSettings = append(sandboxSettings, grammar.Var{Key: kv[0], Value: kv[1]})
-		}
-	}
-	isolated := v.IsolatedLogin || sandboxed
 	if v.Linked != nil {
 		if env.Empty() {
 			return withPlugins(createBlock{text: text, withheld: withheldSource}), nil
@@ -295,33 +317,79 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	alter := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Playbook, Name: pb.Name}
 	var comments []string
 	if !env.Empty() {
-		if len(env.Sets) > 0 {
-			alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: env.Sets})
-		}
 		var clauses []grammar.Clause
 		clauses, comments = varClauses(env.Set, env.Refs, env.Block, func(k string) string {
 			return fmt.Sprintf("ALTER PLAYBOOK %s SET VAR %s FROM '<ref>'", pb.Name, k)
 		})
 		alter.Clauses = append(alter.Clauses, clauses...)
 	}
-	login := "shared"
-	if isolated {
-		login = "isolated"
-	}
-	set := grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}}}
-	global, _ := globalInstructionsStateOf(pb.Path)
-	set.Settings = append(set.Settings, grammar.Var{Key: "global_instructions", Value: global})
-	alter.Clauses = append(alter.Clauses, set)
-	if sandboxed {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandbox})
-	}
-	if len(sandboxSettings) > 0 {
-		alter.Clauses = append(alter.Clauses, grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: sandboxSettings})
-	}
 	if len(alter.Clauses) > 0 {
 		text += "\n\n" + alter.Pretty() + ";"
 	}
 	return withPlugins(createBlock{text: joinComments(comments, text), withheld: len(comments)/2 + withheldSource}), nil
+}
+
+// sandboxCreateClauses is the [sandbox] table as SHOW CREATE states it:
+// RESET sandbox when nothing in it is set, else sandbox.always and the keys
+// that are set, and RESET for the keys that are not.
+func sandboxCreateClauses(m *manifest.Manifest, sandboxed bool) []grammar.Clause {
+	set := map[string]string{}
+	if m != nil && m.Sandbox != nil {
+		for _, kv := range m.Sandbox.Settings() {
+			set[kv[0]] = kv[1]
+		}
+	}
+	all := grammar.Clause{Kind: grammar.UnsetSandboxKeys}
+	for _, k := range manifest.SandboxKeys {
+		all.Settings = append(all.Settings, grammar.Var{Key: k})
+	}
+	if !sandboxed && len(set) == 0 {
+		return []grammar.Clause{all}
+	}
+	on := grammar.Clause{Kind: grammar.SetSandboxKeys, Settings: []grammar.Var{{Key: "always", Value: strconv.FormatBool(sandboxed)}}}
+	off := grammar.Clause{Kind: grammar.UnsetSandboxKeys}
+	for _, k := range manifest.SandboxKeys {
+		if k == "always" {
+			continue
+		}
+		if v, ok := set[k]; ok {
+			on.Settings = append(on.Settings, grammar.Var{Key: k, Value: v})
+		} else {
+			off.Settings = append(off.Settings, grammar.Var{Key: k})
+		}
+	}
+	if len(off.Settings) == 0 {
+		return []grammar.Clause{on}
+	}
+	return []grammar.Clause{on, off}
+}
+
+// settingsResetClauses RESETs the settings.json properties a playbook does
+// not set: the model, the agent, the status line (or only its refresh, when
+// a command status line has none) and the picker mode. A key that is set is
+// written by the plugins ALTER, or left out when the grammar cannot write
+// it, and is never reset.
+func settingsResetClauses(root *settings.Object) []grammar.Clause {
+	var out []grammar.Clause
+	if !root.Has(keyModel) {
+		out = append(out, grammar.Clause{Kind: grammar.UnsetModel})
+	}
+	if !root.Has(keyAgent) {
+		out = append(out, grammar.Clause{Kind: grammar.UnsetAgent})
+	}
+	_, command, _ := settingsExtras(root)
+	switch {
+	case !root.Has(keyStatusline):
+		out = append(out, grammar.Clause{Kind: grammar.UnsetStatusline})
+	case command != nil:
+		if sl, err := root.Object(keyStatusline); err == nil && !sl.Has(keyRefreshInterval) {
+			out = append(out, grammar.Clause{Kind: grammar.UnsetStatuslineRefresh})
+		}
+	}
+	if mp, err := root.Object(keyModelPicker); !root.Has(keyModelPicker) || (err == nil && !mp.Has("replaceBuiltInOptions")) {
+		out = append(out, grammar.Clause{Kind: grammar.UnsetModelPickerMode})
+	}
+	return out
 }
 
 // hasNameLauncher reports whether the launcher named after a playbook is

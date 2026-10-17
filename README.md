@@ -15,12 +15,12 @@ anywhere:
 | **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills; `~/.claude`'s own `CLAUDE.md` and rules stay out of it. Your `~/.claude` never moves. | every playbook (`global_instructions = 'excluded'`, the default) |
 | **Environment** | its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is. | `USE ENV`, `SET VAR`, `BLOCK VAR` |
 | **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `SET login = 'isolated'` |
-| **Process** | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SANDBOX`, or `--sandbox` on any launch |
+| **Process** (experimental) | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SET sandbox.always = true`, or `--sandbox` on any launch |
 
 ```bash
 cpb CREATE PLAYBOOK work                           # a playbook, and a `work` command that opens it
 cpb CREATE PLAYBOOK side SET login=isolated   # a second account, running beside the first
-cpb CREATE PLAYBOOK sre SANDBOX                    # every launch inside a microVM
+cpb CREATE PLAYBOOK sre SET sandbox.always = true, login = isolated   # every launch inside a microVM
 work                                               # Claude Code, bound to that playbook
 ```
 
@@ -72,6 +72,7 @@ keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its
 
 ### Let an agent loose without letting it near your machine
 
+Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
 With `--sandbox`, Claude Code runs in a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/)
 that sees your working directory and the playbook's own directory, and not
 your home, `~/.claude`, your shell's environment or your other playbooks.
@@ -85,7 +86,7 @@ cpb run --sandbox-host me@buildbox work                        # the same launch
 
 By default your backend API keys stay on the host: the sandbox sees a
 placeholder that a host-side proxy swaps for the real key, for that endpoint
-only ([when a key does go in](docs/guides/sandbox.md#secrets)). A `SANDBOX` playbook is sandboxed on every launch. Needs `sbx`. [Sandbox →](docs/guides/sandbox.md)
+only ([when a key does go in](docs/guides/sandbox.md#secrets)). A playbook with `sandbox.always = true` is sandboxed on every launch. Needs `sbx`. [Sandbox →](docs/guides/sandbox.md)
 
 ### Put the whole setup in a file
 
@@ -101,7 +102,7 @@ ALTER PLAYBOOK
       HEADER 'Authorization' FROM 'keychain:github-mcp'   -- a secret by reference
   ALLOW TOOL 'Bash(gh pr *)'  DENY TOOL 'Bash(git push *)'
   ADD SKILL review FROM 'https://github.com/me/skills' SUBDIR review
-  SET MODEL 'claude-opus-5-5';
+  SET model = 'claude-opus-5-5';
 ```
 
 ```bash
@@ -114,7 +115,7 @@ cpb APPLY machine.cpb                              # on the next machine
 Secrets are references, resolved at launch by your helper; `SHOW CREATE` never
 prints a value. A recipe covers the whole agent (plugins, MCP servers, tools,
 status line, model and `/model` picker, skills) and applies to any
-playbook or to `~/.claude`. A playbook can also come from git (`FROM <url> BRANCH <ref>`) or run in place from a folder (`LINK <dir>`).
+playbook or to `~/.claude`. A playbook can also be installed from a source, a git repository or a folder (`FROM <url-or-dir> BRANCH <ref>`), or run in place from a folder (`LINK <dir>`).
 
 ### See everything that is running
 

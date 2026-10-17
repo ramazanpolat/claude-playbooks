@@ -129,6 +129,9 @@ type stmtRun struct {
 	// backedUp marks the files of plain config directories a run already
 	// backed up (TO '<dir>'): each is backed up once, before its first write.
 	backedUp map[string]bool
+	// exists: the ALTER being run is CREATE OR ALTER's SET list on a
+	// playbook that exists, so "unchanged" says that it exists.
+	exists bool
 }
 
 // stmtWarning is one warning a statement raises, with its code for APPLY
@@ -174,7 +177,15 @@ func execStatement(r *stmtRun, st *grammar.Stmt) error {
 	case st.Verb == grammar.Drop && st.Object == grammar.Playbook:
 		return dropPlaybookStatement(r, st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Playbook:
+		// SET IF UNSET first: what applies of it may be the launcher.
+		st, err := r.resolveIfUnset(st)
+		if err != nil {
+			return err
+		}
 		if lifecycle(st) {
+			if launcherWithOthers(st) {
+				return alterPlaybookWithLauncher(r, st)
+			}
 			return alterPlaybookLifecycle(r, st)
 		}
 		return playbookStatement(r, st)
@@ -338,7 +349,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		// Removing needs no profile to be readable, which matters exactly
 		// when one is broken; adding checks every name.
 		for _, c := range listClauses {
-			if c.Kind == grammar.UseEnv || c.Kind == grammar.AddEnv {
+			if c.Kind == grammar.UseEnv || c.Kind == grammar.AddEnv || c.Kind == grammar.ReplaceEnv {
 				write = envset.WriteDefaults
 			}
 		}
@@ -459,7 +470,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		sf          *settings.File
 		agentLines  []string
 		agentChange bool
-		slp         *slPlan // the status line history this statement changes
 	)
 	if pluginClauses(st.Clauses) {
 		cfg := r.configDir(st.Name, pb)
@@ -498,14 +508,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 		r.warnMarketplaceRef(st.Clauses)
-		slKey := cfg
-		if slKey == "" { // created earlier in this dry run: no history yet
-			slKey = "dry:" + st.Name
-		}
-		if slp, err = r.planSLHistory(slKey, "PLAYBOOK "+st.Name, st.Clauses); err != nil {
-			return err
-		}
-		if agentLines, agentChange, err = applySettingsWithHistory(sf, st.Clauses, slp, true); err != nil {
+		if agentLines, agentChange, err = applySettings(sf, st.Clauses); err != nil {
 			return err
 		}
 	}
@@ -552,12 +555,17 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if m.Env.Empty() {
 		m.Env = nil
 	}
-	// SANDBOX: the [sandbox] block, in the same manifest write. Planned
-	// first: bare SET SANDBOX also isolates the login.
+	// The [sandbox] block, in the same manifest write.
 	wasIsolated := r.isolated(st.Name, m)
 	wasSandboxed := r.sandboxed(st.Name, m)
+	if r.dry != nil {
+		// What earlier statements of the dry run left, not the disk.
+		if sb, ok := r.dry.sandboxes[st.Name]; ok {
+			m.Sandbox = cloneSandbox(sb)
+		}
+	}
 	beforeSandbox := cloneSandbox(m.Sandbox)
-	sandbox, isolate, sandboxLines, err := planSandbox(m.Sandbox, st.Clauses)
+	sandbox, alwaysOn, sandboxLines, err := planSandbox(m.Sandbox, st.Clauses)
 	if err != nil {
 		return err
 	}
@@ -569,9 +577,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err != nil {
 		return err
 	}
-	if isolate && !nowIsolated {
-		nowIsolated = true
-		loginLines = append(loginLines, "login     isolated: a sandbox shares nothing with ~/.claude; /login once in it")
+	// A sandbox shares nothing with ~/.claude: sandbox.always = true needs
+	// the login isolated, already or by this statement. It never isolates
+	// it on its own.
+	if alwaysOn && !nowIsolated {
+		return fmt.Errorf("PLAYBOOK %s: a sandboxed playbook's login is isolated: SET sandbox.always = true, login = 'isolated'", st.Name)
 	}
 	loginChange := nowIsolated != wasIsolated
 	m.IsolatedLogin = nowIsolated
@@ -624,7 +634,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && len(steps) == 0 {
 		r.outcome = outUnchanged
-		r.say("PLAYBOOK "+st.Name+" unchanged", pluginLines)
+		head := "PLAYBOOK " + st.Name + " unchanged"
+		if r.exists {
+			head = "PLAYBOOK " + st.Name + " already exists; unchanged"
+		}
+		r.say(head, pluginLines)
 		return nil
 	}
 	r.outcome = outChanged
@@ -636,6 +650,9 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if nowSandboxed := sandbox != nil && sandbox.Always; nowSandboxed != wasSandboxed && r.dry != nil {
 			r.dry.sandboxed[st.Name] = nowSandboxed
 		}
+		if sandboxChange && r.dry != nil {
+			r.dry.sandboxes[st.Name] = cloneSandbox(sandbox)
+		}
 		if mcp != nil {
 			finishMCP()
 			r.recordPlaybookEnv(st.Name, m.Env)
@@ -645,9 +662,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if agentChange && r.dry != nil {
 			r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
-			if slp != nil && slp.changed {
-				_ = r.commitSLHistory(slp.key, slp.after)
-			}
 		}
 		var cmds []string
 		dir := r.configDir(st.Name, pb)
@@ -734,16 +748,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if sf, err = settings.Load(pb.Path); err != nil {
 			return err
 		}
-		if _, _, err := applySettingsWithHistory(sf, st.Clauses, slp, false); err != nil {
+		if _, _, err := applySettings(sf, st.Clauses); err != nil {
 			return err
 		}
 		if err := sf.Write(); err != nil {
 			return fmt.Errorf("cannot set the agent: %w", err)
-		}
-		if slp != nil && slp.changed {
-			if err := r.commitSLHistory(slp.key, slp.after); err != nil {
-				return fmt.Errorf("the status line is set, but its history could not be recorded: %w", err)
-			}
 		}
 		lines = append(lines, agentLines...)
 	}
@@ -795,6 +804,27 @@ func (r *stmtRun) applyEnvList(dir string, list []string, clauses []grammar.Clau
 				out = append(out, n)
 			}
 			changed = true
+		case grammar.ReplaceEnv:
+			// REPLACE ENV old WITH new keeps old's position. Run twice, it
+			// changes nothing the second time (old gone, new attached).
+			old, repl := c.Names[0], c.Names[1]
+			if err := r.requireEnv(dir, repl); err != nil {
+				return nil, nil, err
+			}
+			oldAt, newAt := slices.Index(out, old), slices.Index(out, repl)
+			switch {
+			case old == repl && oldAt >= 0:
+				lines = append(lines, fmt.Sprintf("%s is attached; unchanged", old))
+			case oldAt >= 0 && newAt < 0:
+				out[oldAt] = repl
+				changed = true
+			case oldAt >= 0:
+				return nil, nil, fmt.Errorf("REPLACE ENV %s WITH %s: %s is already attached; DROP ENV %s, or state the list with USE ENV", old, repl, repl, old)
+			case newAt >= 0:
+				lines = append(lines, fmt.Sprintf("%s is not attached and %s already is; unchanged", old, repl))
+			default:
+				return nil, nil, fmt.Errorf("REPLACE ENV %s WITH %s: %s is not attached; ADD ENV %s attaches it", old, repl, old, repl)
+			}
 		case grammar.DropEnv:
 			for _, n := range c.Names {
 				if !slices.Contains(out, n) {

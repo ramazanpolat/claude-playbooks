@@ -3,4 +3,4 @@
 
 ALTER PLAYBOOK
   SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1
-  SET MODEL 'glm-5.3';
+  SET model = 'glm-5.3';

@@ -1,0 +1,23 @@
+# CREATE OR ALTER PLAYBOOK converges: on a playbook that exists it applies
+# its SET list, and applied again it changes nothing. IF NOT EXISTS would
+# leave it as it is.
+f="$HOME/notes.cpb"
+printf "CREATE PLAYBOOK IF NOT EXISTS notes SET launcher = '', global_instructions = 'inherited';\n" > "$f"
+cpb APPLY "$f" | grep -q '0 created, 0 changed, 1 unchanged'
+printf "CREATE OR ALTER PLAYBOOK notes SET launcher = '', global_instructions = 'inherited';\n" > "$f"
+cpb APPLY "$f" | grep -q '0 created, 1 changed, 0 unchanged'
+cpb SHOW PLAYBOOK notes --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["global_instructions"] == "inherited", v'
+cpb APPLY "$f" | grep -q '0 created, 0 changed, 1 unchanged'
+# SHOW CREATE writes the properties on the CREATE: one converging statement,
+# exact: what is not set is RESET, and the env list is stated whole.
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^CREATE OR ALTER PLAYBOOK notes$"
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^  SET launcher = '', login = 'shared', global_instructions = 'inherited'$"
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^  RESET sandbox, model, agent, statusline, model_picker.mode$"
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^  USE ENV '';$"
+# A model set elsewhere is put back by the playbook's own SHOW CREATE.
+cpb SHOW CREATE PLAYBOOK notes > "$f"
+cpb ALTER PLAYBOOK notes SET model = 'claude-opus-5-5'
+cpb APPLY "$f" | grep -q '0 created, 1 changed'
+cpb SHOW PLAYBOOK notes --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["model"] is None, v'
+cpb APPLY "$f" | grep -q ' 0 created, 0 changed,'
+rm -f "$f"

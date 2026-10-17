@@ -43,14 +43,18 @@ type dryState struct {
 	// always as earlier statements would leave them.
 	isolated  map[string]bool
 	sandboxed map[string]bool
+	// sandboxes, per playbook: the [sandbox] block earlier statements would
+	// leave (nil: none); absent: as on disk.
+	sandboxes map[string]*manifest.Sandbox
 
-	// slHistory, per config directory key: the status line history as
-	// earlier statements would leave it.
-	slHistory map[string][]slEntry
+	// launchers, per playbook: the launcher earlier statements would leave
+	// it (a command name, or "" for none); absent: as on disk.
+	launchers map[string]string
 }
 
 func newDryState() *dryState {
 	return &dryState{
+		sandboxes:    map[string]*manifest.Sandbox{},
 		profiles:     map[string]*envset.Set{},
 		playbooks:    map[string]bool{},
 		pbEnvs:       map[string]*manifest.Env{},
@@ -63,7 +67,7 @@ func newDryState() *dryState {
 		skillKnown:   map[string]map[string]bool{},
 		isolated:     map[string]bool{},
 		sandboxed:    map[string]bool{},
-		slHistory:    map[string][]slEntry{},
+		launchers:    map[string]string{},
 	}
 }
 
@@ -118,6 +122,7 @@ func (r *stmtRun) recordPlaybook(name string, exists bool) {
 		delete(r.dry.skillKnown, name)
 		delete(r.dry.isolated, name)
 		delete(r.dry.sandboxed, name)
+		delete(r.dry.launchers, name)
 	}
 }
 
@@ -138,6 +143,7 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	sk, skok := r.dry.skillKnown[from]
 	iso, isook := r.dry.isolated[from]
 	sbx, sbxok := r.dry.sandboxed[from]
+	sbk, sbkok := r.dry.sandboxes[from]
 	// A playbook on disk carries its login setting under its new name: the
 	// directory it keeps says what it is.
 	if cfg != "" && !(isook && sbxok) {
@@ -172,6 +178,9 @@ func (r *stmtRun) renamePlaybook(from, to, cfg string) {
 	}
 	if sbxok {
 		r.dry.sandboxed[to] = sbx
+	}
+	if sbkok {
+		r.dry.sandboxes[to] = sbk
 	}
 	if aok {
 		r.dry.settings[to] = a

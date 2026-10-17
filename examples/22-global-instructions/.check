@@ -4,10 +4,10 @@ entry="$HOME/.claude/**"
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == [sys.argv[2]], v' "$p/focused/settings.json" "$entry"
 cpb SHOW PLAYBOOK focused --json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v["login"] == "shared" and v["global_instructions"] == "excluded", v'
 cpb EXPLAIN PLAYBOOK focused | grep -q '^Global instructions: excluded'
-cpb SHOW CREATE PLAYBOOK focused | grep -qx "  SET login = 'shared', global_instructions = 'excluded';"
+cpb SHOW CREATE PLAYBOOK focused | grep -q "login = 'shared', global_instructions = 'excluded'$"
 # inherited: nothing written.
 if grep -qs claudeMdExcludes "$p/familiar/settings.json"; then echo "familiar excludes"; exit 1; fi
-cpb SHOW CREATE PLAYBOOK familiar | grep -qx "  SET login = 'shared', global_instructions = 'inherited';"
+cpb SHOW CREATE PLAYBOOK familiar | grep -q "login = 'shared', global_instructions = 'inherited'$"
 # SET and RESET move only cpb's entry; the rest of the list is yours.
 printf '{"claudeMdExcludes": ["/opt/notes/**"]}\n' > "$p/familiar/settings.json"
 cpb "ALTER PLAYBOOK familiar SET global_instructions = 'excluded'" > /dev/null
@@ -16,3 +16,9 @@ cpb "ALTER PLAYBOOK familiar SET global_instructions = 'inherited'" > /dev/null
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["claudeMdExcludes"] == ["/opt/notes/**"], v' "$p/familiar/settings.json"
 cpb ALTER PLAYBOOK focused RESET global_instructions | grep -q unchanged
 cpb "SELECT name, global_instructions FROM PLAYBOOKS" --json | python3 -c 'import json,sys; v={r["name"]: r["global_instructions"] for r in json.load(sys.stdin)}; assert v == {"familiar": "inherited", "focused": "excluded"}, v'
+# Never on the machine's own ~/.claude: there the exclude would hide bare
+# claude's own CLAUDE.md. Refused before anything is written.
+mkdir -p "$HOME/.claude"
+printf "ALTER PLAYBOOK SET global_instructions = 'excluded';\n" > "$HOME/gi.cpb"
+if cpb APPLY "$HOME/gi.cpb" TO "$HOME/.claude" --yes 2> "$HOME/gi.err"; then echo "global_instructions applied to ~/.claude"; exit 1; fi
+grep -q "the machine's own Claude Code configuration" "$HOME/gi.err"

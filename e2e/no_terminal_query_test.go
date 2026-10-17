@@ -49,7 +49,7 @@ func TestNoTerminalQueryAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := []string{"HOME=" + home, "PATH=" + fake + ":/usr/bin:/bin", "TERM=xterm-256color"}
-	create := exec.Command(binPath, "CREATE", "PLAYBOOK", "pty", "NO", "LAUNCHER")
+	create := exec.Command(binPath, "CREATE", "PLAYBOOK", "pty", "SET", "launcher", "=", "")
 	create.Env = env
 	if out, err := create.CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)

@@ -12,3 +12,6 @@ earlier one. The playbook's own `SET VAR` overrides every set, so `work` runs
 `glm-5.3-flash` while other users of `router` get `glm-5.3`. `BLOCK VAR` removes
 a variable at launch even when your shell exports it. `ADD ENV x FIRST` or
 `ADD ENV x AFTER router` places one set without restating the list.
+`REPLACE ENV router WITH fast` swaps one set for another at the same place;
+run again, it changes nothing. A recipe states `USE ENV`; `REPLACE` is for the
+prompt, and `SHOW CREATE` never writes it.

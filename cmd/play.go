@@ -34,7 +34,7 @@ or a local file (./x.cpb). A played recipe changes nothing on your machine but
 the playbook play makes: no env sets, no DEFAULTS and no plaintext secrets, and
 its CLAUDE.md imports nothing.
 
-It runs in a sandbox (sbx) where one is available, and
+It runs in a sandbox (sbx, experimental) where one is available, and
 says so when none is; --no-sandbox runs it on this machine, as you. A recipe
 whose header asks for a sandbox (-- create-with: SANDBOX) is refused where none
 is available. A recipe that reads a secret reference cannot run sandboxed
@@ -320,9 +320,9 @@ func playSetup(name string, res *play.Result) string { return playSetupKeeping(n
 // BLOCK: the ones an --env-set set the pilot attached provides.
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s NO LAUNCHER", name)
+	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s SET launcher = ''", name)
 	if res.Endpoint != "" {
-		b.WriteString(" SET login = 'isolated'")
+		b.WriteString(", login = 'isolated'")
 	}
 	b.WriteString(";\n")
 	if res.Endpoint != "" {

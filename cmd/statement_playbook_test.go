@@ -16,7 +16,7 @@ func TestStatementCreateAndDropPlaybook(t *testing.T) {
 	root := sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 
-	mustStmt(t, "CREATE PLAYBOOK fresh LAUNCHER fr SANDBOX")
+	mustStmt(t, "CREATE PLAYBOOK fresh SET launcher = 'fr', sandbox.always = true, login = isolated")
 	m, err := manifest.Read(filepath.Join(root, "fresh"))
 	if err != nil || m == nil || m.Launcher != "fr" || m.Sandbox == nil || !m.Sandbox.Always {
 		t.Fatalf("created manifest: %#v %v", m, err)
@@ -50,13 +50,13 @@ func TestStatementCreatePlaybookFromSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "CLAUDE.md"), []byte("# upstream\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustStmt(t, "CREATE PLAYBOOK mine FROM "+src+" NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK mine FROM "+src+" SET launcher = ''")
 	m, err := manifest.Read(filepath.Join(root, "mine"))
 	if err != nil || m == nil || m.Version != "1.0.0" {
 		t.Fatalf("installed manifest: %#v %v", m, err)
 	}
 	if _, exists, _ := launcher.Lookup(config.LauncherDir, "up"); exists {
-		t.Fatal("NO LAUNCHER still wrote the source's launcher")
+		t.Fatal("SET launcher = '' still wrote the source's launcher")
 	}
 }
 
@@ -67,13 +67,13 @@ func TestStatementCreatePlaybookLink(t *testing.T) {
 	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare); err == nil || !strings.Contains(err.Error(), "add one to the target first") {
 		t.Fatalf("LINK without a manifest must name the way out: %v", err)
 	}
-	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare+" SANDBOX"); err == nil || !strings.Contains(err.Error(), "SANDBOX does not apply to LINK") {
+	if _, err := stmt(t, "CREATE PLAYBOOK dev LINK "+bare+" SET sandbox.backend = sbx"); err == nil || !strings.Contains(err.Error(), "sandbox.backend does not apply to LINK") {
 		t.Fatalf("LINK with SANDBOX: %v", err)
 	}
 	if err := manifest.Write(bare, &manifest.Manifest{Name: "dev"}); err != nil {
 		t.Fatal(err)
 	}
-	mustStmt(t, "CREATE PLAYBOOK dev LINK "+bare+" NO LAUNCHER")
+	mustStmt(t, "CREATE PLAYBOOK dev LINK "+bare+" SET launcher = ''")
 	if info, err := os.Lstat(filepath.Join(root, "dev")); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("not linked: %v", err)
 	}
@@ -84,18 +84,18 @@ func TestStatementRenameAndAlias(t *testing.T) {
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	writePlaybook(t, root, "old", &manifest.Manifest{})
 
-	mustStmt(t, "ALTER PLAYBOOK old RENAME TO new LAUNCHER nw")
+	mustStmt(t, "ALTER PLAYBOOK old RENAME TO new SET launcher = 'nw'")
 	m, err := manifest.Read(filepath.Join(root, "new"))
 	if err != nil || m == nil || m.Launcher != "nw" {
 		t.Fatalf("after RENAME TO … LAUNCHER: %#v %v", m, err)
 	}
-	mustStmt(t, "ALTER PLAYBOOK new LAUNCHER n2")
+	mustStmt(t, "ALTER PLAYBOOK new SET launcher = 'n2'")
 	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Launcher != "n2" {
 		t.Fatalf("LAUNCHER: %q", m.Launcher)
 	}
-	mustStmt(t, "ALTER PLAYBOOK new NO LAUNCHER")
+	mustStmt(t, "ALTER PLAYBOOK new SET launcher = ''")
 	if m, _ := manifest.Read(filepath.Join(root, "new")); m.Launcher != "" {
-		t.Fatalf("NO LAUNCHER: %q", m.Launcher)
+		t.Fatalf("SET launcher = '': %q", m.Launcher)
 	}
 
 	// A rename and an environment change are two statements.
@@ -110,8 +110,9 @@ func TestStatementRenameAndAlias(t *testing.T) {
 	}
 }
 
-// A playbook has one launcher, its alias or its name. NO LAUNCHER removes the
-// name launcher too; LAUNCHER <its name> retires the alias it replaces.
+// A playbook has one launcher, its alias or its name. The empty launcher
+// removes the name launcher too; launcher = '<its name>' retires the alias
+// it replaces.
 func TestStatementLauncherIsOneOrNone(t *testing.T) {
 	sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
@@ -123,13 +124,13 @@ func TestStatementLauncherIsOneOrNone(t *testing.T) {
 	if !has("plain") {
 		t.Fatal("the name launcher was not written")
 	}
-	mustStmt(t, "ALTER PLAYBOOK plain NO LAUNCHER")
+	mustStmt(t, "ALTER PLAYBOOK plain SET launcher = ''")
 	if has("plain") {
-		t.Fatal("NO LAUNCHER kept the name launcher")
+		t.Fatal("SET launcher = '' kept the name launcher")
 	}
 
-	mustStmt(t, "ALTER PLAYBOOK plain LAUNCHER pl")
-	mustStmt(t, "ALTER PLAYBOOK plain LAUNCHER plain")
+	mustStmt(t, "ALTER PLAYBOOK plain SET launcher = 'pl'")
+	mustStmt(t, "ALTER PLAYBOOK plain SET launcher = 'plain'")
 	if has("pl") || !has("plain") {
 		t.Fatalf("LAUNCHER <name> over alias pl: pl=%v plain=%v", has("pl"), has("plain"))
 	}

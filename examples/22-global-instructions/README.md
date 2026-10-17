@@ -26,5 +26,8 @@ into every playbook you run anywhere under your home directory.
   matters.
 - A playbook created before this setting existed keeps loading them until
   you run `SET global_instructions = 'excluded'` in it: nothing is migrated.
+- `APPLY … TO ~/.claude` refuses it (`SET` and `RESET` alike), before
+  anything is written: on the machine's own configuration the exclude would
+  hide bare claude's own `CLAUDE.md`.
 
 Reference: [Playbook properties](../../SPEC.md#playbook-properties).

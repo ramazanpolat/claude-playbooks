@@ -22,6 +22,9 @@ provider), every request the playbook makes goes there, with whatever its
   credentials your shell may export out of its launches. The router's own key
   belongs in the env set, by reference ([example 04](../04-secret-references/)).
 
+`CREATE OR ALTER PLAYBOOK … USE ENV router` creates the playbook with its env
+set in one statement, and applied again changes nothing.
+
 `localhost` is a route like any other: a local router forwards elsewhere.
 
 Reference: [Objects](../../SPEC.md#objects) and [Layers at launch](../../SPEC.md#layers-at-launch).

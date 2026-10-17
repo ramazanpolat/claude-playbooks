@@ -56,12 +56,6 @@ func rowModel(o *settings.Object) string {
 
 // applyPicker applies one picker clause to a settings root.
 func applyPicker(root *settings.Object, c grammar.Clause) ([]string, bool, error) {
-	if c.Kind == grammar.UnsetModelPicker {
-		if root.Delete(keyModelPicker) {
-			return []string{"unset     model picker"}, true, nil
-		}
-		return nil, false, nil
-	}
 	mp, err := root.Object(keyModelPicker)
 	if err != nil {
 		return nil, false, err
@@ -112,6 +106,10 @@ func applyPicker(root *settings.Object, c grammar.Clause) ([]string, bool, error
 	case grammar.SetModelPicker:
 		_ = mp.Set("replaceBuiltInOptions", c.Arg == "ONLY")
 		line = "picker    " + strings.ToLower(c.Arg)
+	case grammar.UnsetModelPickerMode:
+		// Back to the default: Claude Code appends the rows.
+		mp.Delete("replaceBuiltInOptions")
+		line = "picker    mode unset (append)"
 	}
 	if len(rows) == 0 {
 		mp.Delete("options")
@@ -127,7 +125,11 @@ func applyPicker(root *settings.Object, c grammar.Clause) ([]string, bool, error
 	if bytes.Equal(compactJSON(before), compactJSON(after)) {
 		return nil, false, nil
 	}
-	root.SetObject(keyModelPicker, mp)
+	if len(mp.Keys()) == 0 {
+		root.Delete(keyModelPicker) // nothing left of it
+	} else {
+		root.SetObject(keyModelPicker, mp)
+	}
 	return []string{line}, true, nil
 }
 

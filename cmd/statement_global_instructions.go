@@ -32,13 +32,20 @@ func machineGlobalExclude() (string, error) {
 }
 
 // inMachineConfig reports whether dir is ~/.claude or inside it, where the
-// exclude would hide the install's own instructions.
+// exclude would hide the install's own instructions. ~/.claude itself is
+// decided by filesystem identity, so another spelling of it (a symlink, a
+// case variant on a case-insensitive filesystem) is it too.
 func inMachineConfig(dir string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil || dir == "" {
 		return false
 	}
 	base, d := filepath.Join(home, ".claude"), filepath.Clean(dir)
+	if bi, err := os.Stat(base); err == nil {
+		if di, err := os.Stat(d); err == nil && os.SameFile(bi, di) {
+			return true
+		}
+	}
 	if r, err := filepath.EvalSymlinks(base); err == nil {
 		base = r
 	}
@@ -150,7 +157,7 @@ func writeGlobalInstructions(dir, value string) error {
 // global_instructions property.
 func globalInstructionsLine(state, other string) string {
 	if state == "excluded" {
-		return "Global instructions: excluded: ~/.claude's CLAUDE.md and rules are not loaded (SET global_instructions = 'inherited' loads them)"
+		return "Global instructions: excluded (default): ~/.claude's CLAUDE.md and rules are not loaded (SET global_instructions = 'inherited' loads them)"
 	}
 	line := "Global instructions: inherited: ~/.claude's CLAUDE.md and rules load into it (SET global_instructions = 'excluded' keeps them out)"
 	if other != "" {

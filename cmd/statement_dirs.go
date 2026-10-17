@@ -30,17 +30,17 @@ import (
 
 // dirRefusals names why each refused clause cannot apply to a directory.
 var dirRefusals = map[grammar.Kind]string{
-	grammar.SetRef:     "a secret reference is resolved by cpb's launcher, which never runs for this directory",
-	grammar.BlockVar:   "removing a variable at launch is the launcher's job",
-	grammar.UseEnv:     "env sets are layered by the launcher",
-	grammar.AddEnv:     "env sets are layered by the launcher",
-	grammar.DropEnv:    "env sets are layered by the launcher",
-	grammar.RenameTo:   "the directory is not in the registry",
-	grammar.Launcher:   "the directory has no launcher",
-	grammar.NoLauncher: "the directory has no launcher",
+	grammar.SetRef:          "a secret reference is resolved by cpb's launcher, which never runs for this directory",
+	grammar.BlockVar:        "removing a variable at launch is the launcher's job",
+	grammar.UseEnv:          "env sets are layered by the launcher",
+	grammar.AddEnv:          "env sets are layered by the launcher",
+	grammar.DropEnv:         "env sets are layered by the launcher",
+	grammar.ReplaceEnv:      "env sets are layered by the launcher",
+	grammar.RenameTo:        "the directory is not in the registry",
+	grammar.Launcher:        "the directory has no launcher",
+	grammar.NoLauncher:      "the directory has no launcher",
+	grammar.DefaultLauncher: "the directory has no launcher",
 
-	grammar.SetSandbox:       "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
-	grammar.UnsetSandbox:     "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.SetSandboxKeys:   "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 	grammar.UnsetSandboxKeys: "[sandbox] is recorded in a playbook's manifest, which the directory does not have",
 }
@@ -50,11 +50,17 @@ var dirRefusals = map[grammar.Kind]string{
 // anything is written.
 func validateDirClauses(st *grammar.Stmt) error {
 	dir := st.Dir
-	for _, c := range st.Clauses {
+	for _, c := range grammar.Flatten(st.Clauses) {
 		if why, refused := dirRefusals[c.Kind]; refused {
 			return fmt.Errorf("%s cannot apply to %s: %s", c.Kind, dir, why)
 		}
 		if c.Kind == grammar.SetProperties || c.Kind == grammar.ResetProperties {
+			// D4: on the machine's own ~/.claude the exclude would hide
+			// bare claude's own CLAUDE.md and rules. Refused before anything
+			// in the run is written.
+			if v, ok := grammar.PropertyValue([]grammar.Clause{c}, "global_instructions"); ok && inMachineConfig(dir) {
+				return fmt.Errorf("global_instructions = '%s' cannot apply to %s: it is the machine's own Claude Code configuration, and its CLAUDE.md is its own instructions", v, dir)
+			}
 			if _, ok := grammar.PropertyValue([]grammar.Clause{c}, "login"); ok {
 				verb := "SET"
 				if c.Kind == grammar.ResetProperties {
@@ -80,6 +86,10 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	}
 	dir := st.Dir
 	key := dirMark + dir
+	st, err := r.resolveIfUnsetDir(st, key)
+	if err != nil {
+		return err
+	}
 	unlock, err := r.lockRegistry()
 	if err != nil {
 		return err
@@ -132,12 +142,7 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	r.warnMarketplaceRef(st.Clauses)
-	slKey, _ := filepath.Abs(dir)
-	slp, err := r.planSLHistory(slKey, dir, st.Clauses)
-	if err != nil {
-		return err
-	}
-	setLines, setChange, err := applySettingsWithHistory(sf, st.Clauses, slp, true)
+	setLines, setChange, err := applySettings(sf, st.Clauses)
 	if err != nil {
 		return err
 	}
@@ -211,9 +216,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if settingsChange && r.dry != nil {
 			r.dry.settings[key], _ = sf.Root.MarshalJSON()
-			if slp.changed {
-				_ = r.commitSLHistory(slp.key, slp.after)
-			}
 		}
 		r.note = "would run: " + strings.Join(what, "; ")
 		return nil
@@ -244,13 +246,9 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err == nil && settingsChange {
 		// Loaded again: the commands above may have rewritten it.
 		if sf, err = settings.Load(dir); err == nil {
-			if _, _, err = applySettingsWithHistory(sf, st.Clauses, slp, false); err == nil {
+			if _, _, err = applySettings(sf, st.Clauses); err == nil {
 				if _, _, err = applyDirEnv(sf, st.Clauses); err == nil {
-					if err = sf.Write(); err == nil && slp.changed {
-						if herr := r.commitSLHistory(slp.key, slp.after); herr != nil {
-							err = fmt.Errorf("the status line is set, but its history could not be recorded: %w", herr)
-						}
-					}
+					err = sf.Write()
 				}
 			}
 		}

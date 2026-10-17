@@ -21,7 +21,8 @@ only if you run `/login` in it.
   a shared launch would take it out of use: another account's login is set
   aside, and the same account's is copied over the machine's. Run
   `/logout` in it first. It is also
-  refused on a `SANDBOX` playbook, which is always isolated.
+  refused on a sandboxed playbook (`sandbox.always = true`), which is always
+  isolated.
 - Use it for a second account, and for a throwaway or a third-party route
   whose `/login` must not land in the machine's shared login
   ([example 15](../15-third-party-route/)).
