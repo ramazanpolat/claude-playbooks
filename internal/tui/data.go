@@ -145,9 +145,6 @@ type Playbook struct {
 	Statusline struct {
 		Command *string `json:"command"`
 		Refresh *int    `json:"refresh"`
-		History []struct {
-			Command string `json:"command"`
-		} `json:"history"`
 	} `json:"statusline"`
 	Model       *string `json:"model"`
 	ModelPicker *struct {

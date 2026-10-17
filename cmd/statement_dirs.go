@@ -142,12 +142,7 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 	r.warnMarketplaceRef(st.Clauses)
-	slKey, _ := filepath.Abs(dir)
-	slp, err := r.planSLHistory(slKey, dir, st.Clauses)
-	if err != nil {
-		return err
-	}
-	setLines, setChange, err := applySettingsWithHistory(sf, st.Clauses, slp, true)
+	setLines, setChange, err := applySettings(sf, st.Clauses)
 	if err != nil {
 		return err
 	}
@@ -221,9 +216,6 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if settingsChange && r.dry != nil {
 			r.dry.settings[key], _ = sf.Root.MarshalJSON()
-			if slp.changed {
-				_ = r.commitSLHistory(slp.key, slp.after)
-			}
 		}
 		r.note = "would run: " + strings.Join(what, "; ")
 		return nil
@@ -254,13 +246,9 @@ func dirStatement(r *stmtRun, st *grammar.Stmt) error {
 	if err == nil && settingsChange {
 		// Loaded again: the commands above may have rewritten it.
 		if sf, err = settings.Load(dir); err == nil {
-			if _, _, err = applySettingsWithHistory(sf, st.Clauses, slp, false); err == nil {
+			if _, _, err = applySettings(sf, st.Clauses); err == nil {
 				if _, _, err = applyDirEnv(sf, st.Clauses); err == nil {
-					if err = sf.Write(); err == nil && slp.changed {
-						if herr := r.commitSLHistory(slp.key, slp.after); herr != nil {
-							err = fmt.Errorf("the status line is set, but its history could not be recorded: %w", herr)
-						}
-					}
+					err = sf.Write()
 				}
 			}
 		}

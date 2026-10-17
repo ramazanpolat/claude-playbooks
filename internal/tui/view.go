@@ -545,7 +545,6 @@ func (m Model) tabBody(p Playbook, tab string) []string {
 		out := []string{
 			kv("Command", orDash(deref(p.Statusline.Command))),
 			kv("Refresh", refresh),
-			kv("History", fmt.Sprintf("%d (REVERT STATUSLINE puts back the newest)", len(p.Statusline.History))),
 		}
 		return out
 	case "Model":

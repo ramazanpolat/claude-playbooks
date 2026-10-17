@@ -782,7 +782,7 @@ const (
 
 	removedStatusline      = "SET STATUSLINE is a property now: SET statusline.command = '<command>'[, statusline.refresh = <n>] (SET IF UNSET … for IF UNSET)"
 	removedRefresh         = "SET STATUSLINE REFRESH is a property now: SET statusline.refresh = <n>"
-	removedPrevious        = "SET STATUSLINE PREVIOUS is gone: REVERT STATUSLINE"
+	removedPrevious        = "SET STATUSLINE PREVIOUS is gone with the status line history: set the command again, SET statusline.command = '<command>'"
 	removedUnsetStatusline = "UNSET STATUSLINE is gone: RESET statusline"
 	removedUnsetRefresh    = "UNSET STATUSLINE REFRESH is gone: RESET statusline.refresh"
 	removedPicker          = "SET MODEL PICKER is a property now: SET model_picker.mode = 'only' | 'append'"

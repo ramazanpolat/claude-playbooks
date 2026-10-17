@@ -330,13 +330,12 @@ command = '''P="$HOME/.claude-playbooks/shh"; S="$P/settings.json"; c() { tr -d 
 contains = "statusline-if-unset-ok"
 
 [[verify.commands]]
-# The status line history (v3.25.0), on a throwaway playbook: PREVIOUS with
-# no history is refused; SET a, SET b, PREVIOUS restores a with its padding
-# and interval, PREVIOUS again restores b; SHOW --json lists the history;
-# the history is cpb's own state (0600), never in the playbook; SHOW CREATE
-# does not write it.
-command = '''P="$HOME/.claude-playbooks/slh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; cpb CREATE PLAYBOOK slh SET launcher = '' >/dev/null && if cpb "ALTER PLAYBOOK slh REVERT STATUSLINE" > "$HOME/slh.err" 2>&1; then echo previous-accepted; elif ! grep -q "no earlier status line is recorded" "$HOME/slh.err"; then echo previous-wrong; else printf '{"statusLine":{"type":"command","command":"echo a","padding":2,"refreshInterval":7}}\n' > "$S" && cpb "ALTER PLAYBOOK slh SET statusline.command = 'echo b', statusline.refresh = 3" >/dev/null && cpb "ALTER PLAYBOOK slh REVERT STATUSLINE" >/dev/null && c | grep -qF '"command":"echoa"' && c | grep -qF '"padding":2' && c | grep -qF '"refreshInterval":7' && cpb "ALTER PLAYBOOK slh REVERT STATUSLINE" >/dev/null && c | grep -qF '"command":"echob"' && cpb SHOW PLAYBOOK slh --json | tr -d ' \n' | grep -qF '"history":[{"command":"echoa","refresh":7,' && H="$HOME/.claude-playbooks/.state/statusline-history.json" && [ "$(stat -c %a "$H" 2>/dev/null || stat -f %Lp "$H")" = 600 ] && ! ls -a "$P" | grep -q history && ! cpb SHOW CREATE PLAYBOOK slh | grep -q PREVIOUS && echo statusline-history-ok; fi'''
-contains = "statusline-history-ok"
+# No status line history (rc4): a replaced status line is not recorded, so
+# no .state/statusline-history.json appears; REVERT STATUSLINE is not a
+# clause; rc3's SET STATUSLINE PREVIOUS is refused with the hint; SHOW --json
+# has no history field.
+command = '''P="$HOME/.claude-playbooks/slh"; S="$P/settings.json"; c() { tr -d ' \n' < "$S"; }; cpb CREATE PLAYBOOK slh SET launcher = '' >/dev/null && cpb "ALTER PLAYBOOK slh SET statusline.command = 'echo a'" >/dev/null && cpb "ALTER PLAYBOOK slh SET statusline.command = 'echo b'" >/dev/null && c | grep -qF '"command":"echob"' && [ ! -e "$HOME/.claude-playbooks/.state/statusline-history.json" ] && ! cpb "ALTER PLAYBOOK slh REVERT STATUSLINE" >/dev/null 2>&1 && cpb "ALTER PLAYBOOK slh SET STATUSLINE PREVIOUS" 2>&1 | grep -q "gone with the status line history" && ! cpb SHOW PLAYBOOK slh --json | tr -d ' \n' | grep -qF '"history"' && echo statusline-no-history-ok'''
+contains = "statusline-no-history-ok"
 
 [[verify.commands]]
 # Sessions (v3.25.x), on throwaway playbooks, with a real live process: a

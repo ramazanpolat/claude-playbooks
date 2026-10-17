@@ -14,8 +14,8 @@ Left out, each for a reason:
 - the [apply] and [play] records and .apply/: they say how a playbook came
   to be, and SHOW CREATE does not carry them by design (it names every
   playbook, so applying it records neither);
-- cpb's .state/ (the status line history): state, not configuration, which
-  SHOW CREATE never writes;
+- cpb's .state/ (dirs.toml, the plain directories statements target):
+  state, not configuration, which SHOW CREATE never writes;
 - what a launch leaves behind (the stand-in's launch-env).
 An empty settings.json reads as none: a key added and removed again leaves
 "{}" where there was no file. Marketplaces and plugins are compared in

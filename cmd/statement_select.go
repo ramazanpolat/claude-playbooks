@@ -86,7 +86,7 @@ var selectTables = map[string]selectTable{
 			"mcp_servers":         "The MCP servers: name, transport, command and args or url, env and headers as variables.",
 			"tools":               "The tool permission rules: allow, deny.",
 			"skills":              "The skills cpb recorded: name, source, branch, subdir, mode.",
-			"statusline":          "The status line: command (null for none), refresh in whole seconds (null when unset), and history, the status lines REVERT STATUSLINE can go back to, newest first: command, refresh, replaced_at.",
+			"statusline":          "The status line: command (null for none), refresh in whole seconds (null when unset).",
 			"model":               "The playbook's default model (SET model); null when unset.",
 			"model_picker":        "The model picker: mode (only or append) and options; null when unset.",
 			"play":                "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",

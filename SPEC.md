@@ -178,7 +178,6 @@ pb-clause  := set-clause
             | SET IF UNSET property, ...   whole, and only where none of them is set;
                                            keys whose default is no value; also in CREATE OR ALTER
             | RESET <key>, ...            back to the default
-            | REVERT STATUSLINE            the status line cpb replaced last
             | ADD MODEL '<id>' [LABEL '<text>'] [DESCRIPTION '<text>'] [BEHAVES AS '<id>']   see "Model picker"
             | DROP MODEL '<id>'
             | ADD SKILL <name> FROM '<dir>'
@@ -701,7 +700,8 @@ secret_helper = '<command>'`, `RESET secret_helper`; see *Secrets*).
   (`SET agent = '<agent>'`, `RESET agent`), the `SANDBOX` forms
   (`sandbox.<key>`), `SET STATUSLINE '<command>' [REFRESH <n>] [IF UNSET]`
   (`SET [IF UNSET] statusline.command = '<command>', statusline.refresh = <n>`),
-  `SET STATUSLINE PREVIOUS` (`REVERT STATUSLINE`), `UNSET STATUSLINE
+  `SET STATUSLINE PREVIOUS` (gone with the status line history: set the
+  command again), `UNSET STATUSLINE
   [REFRESH]` (`RESET statusline`, `RESET statusline.refresh`), `SET MODEL
   PICKER ONLY | APPEND` and `UNSET MODEL PICKER` (`SET model_picker.mode =
   …`, `RESET model_picker.mode` and `DROP MODEL`), and `SET` / `UNSET
@@ -1121,32 +1121,15 @@ The status line is a table of two properties, `statusline.command` and
     2.1.283) does not re-render the status line while a session is idle.
     Anything that rides on renders stops, a heartbeat for example.
   - `SHOW PLAYBOOK --json` has `"statusline": {"command": <command> | null,
-    "refresh": <n> | null, "history": [...]}`, each property its field, and
+    "refresh": <n> | null}`, each property its field, and
     `SELECT`'s `PLAYBOOKS` has a `statusline` JSON column. `SHOW` and
     `EXPLAIN` print `Status line: <command> (refreshes every <n> s)`. It is
     valid on a plain config directory too.
-- **History and `REVERT STATUSLINE`.** Every time a
-  statement replaces the status line's command, or removes the status line,
-  cpb keeps the whole `statusLine` object it replaced (`padding`,
-  `refreshInterval` and all).
-  - `REVERT STATUSLINE` puts the newest one back and keeps the current
-    one in its place, so a second `REVERT STATUSLINE` returns to where you
-    were.
-  - A change of `statusline.refresh` alone is not history.
-  - With nothing recorded, `REVERT STATUSLINE` is refused: "no earlier status
-    line is recorded".
-  - The history is cpb's own state:
-    `<playbooks root>/.state/statusline-history.json` (mode 0600), keyed by
-    the config directory. At most 10 entries are kept per directory. A
-    change made outside cpb (`/statusline`, another tool, a hand edit)
-    is recorded the next time a cpb statement replaces it.
-  - `SHOW PLAYBOOK --json` has `statusline.history`: `[{"command",
-    "refresh", "replaced_at"}]`, newest first, inside the `statusline`
-    object (`SELECT`'s `statusline` column too). `EXPLAIN` prints `Status line history: N earlier
-    (REVERT STATUSLINE restores <command>)`.
-  - `SHOW CREATE` never writes it, since it is state and not configuration.
-  - It is valid on a plain config directory, and it is refused together with
-    another status line clause in one statement.
+- **No history.** cpb writes the setting and keeps no record of what it
+  replaced: a status line another tool or `/statusline` wrote is that
+  tool's to restore. A status line program that composes several (any
+  program) is simply the command:
+  `SET statusline.command = 'my-statusline render', statusline.refresh = 10`.
 - `SET model = '<model>'` writes `model`; `RESET model` removes it. It is the
   playbook's default model and the lowest-priority choice: `ANTHROPIC_MODEL`
   from an env set or `SET VAR`, a launch's `--model`, and `/model` in a
@@ -1598,7 +1581,7 @@ code to the same lines):
 | `mcp_servers` | `Array(JSON)` | The MCP servers: name, transport, command and args or url, env and headers as variables. |
 | `tools` | `JSON` | The tool permission rules: allow, deny. |
 | `skills` | `Array(JSON)` | The skills cpb recorded: name, source, branch, subdir, mode. |
-| `statusline` | `JSON` | The status line: command (null for none), refresh in whole seconds (null when unset), and history, the status lines REVERT STATUSLINE can go back to, newest first: command, refresh, replaced_at. |
+| `statusline` | `JSON` | The status line: command (null for none), refresh in whole seconds (null when unset). |
 | `model` | `Nullable(String)` | The playbook's default model (SET model); null when unset. |
 | `model_picker` | `JSON` | The model picker: mode (only or append) and options; null when unset. |
 | `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
@@ -1869,9 +1852,7 @@ drops only the replaced entries.
 
 - **A clause that depends on what it finds** replaces nothing: `SET IF
   UNSET …`, `ADD ENV` and `DROP ENV`. A `SET IF UNSET` is one clause, and is
-  dropped only when every key it names is written again later. Neither does
-  `REVERT STATUSLINE`, which reads the history that every earlier status line
-  writes, so no status line clause before it is dropped.
+  dropped only when every key it names is written again later.
 - **`CREATE`, `DROP` and `RENAME TO`** of a playbook start its keys afresh,
   except a `CREATE OR ALTER PLAYBOOK` on a playbook that exists before
   the run: its `SET` list folds as an `ALTER`'s.
@@ -2651,7 +2632,7 @@ shows `SHOW CREATE`, copies statements and commands, and exports a `.cpb`.
 | View | Reads | Shows |
 |---|---|---|
 | Playbooks | `SHOW PLAYBOOKS --json`, `SHOW SESSIONS --json` | name, launcher, version, env sets, login kind (`shared`, `isolated`, `sandbox`), live-session count, model |
-| a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview, Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line (history), Model (the picker), Sessions |
+| a playbook (`enter`) | `SHOW PLAYBOOK`, `EXPLAIN PLAYBOOK --json` | tabs: Overview, Env, Vars (effective, with the layer each comes from), Plugins, MCP, Skills, Status line, Model (the picker), Sessions |
 | Sessions | `SHOW SESSIONS --json` | pid, tty, kind, status, age, last active, model, folder; the footer says where past sessions are, `past sessions: <launcher> --resume` |
 | Env sets | `SHOW ENVS --json` | the env sets: variables, `used_by`, default |
 | Defaults | `SHOW DEFAULTS --json` | the env sets under every playbook, the secret helper |
@@ -2979,7 +2960,7 @@ them: cpb tui`. Off a terminal, the output is the listing above, without that li
 
 ### The filesystem is the source of truth
 
-There is no index of playbooks and no database. The state cpb reads and writes is: the playbooks root (each playbook directory with its optional `.playbook` manifest, where its launcher is recorded; `.env-sets/`, the shared env sets and DEFAULTS; and `.state/`, cpb's own records about what it does not own: `dirs.toml` for the plain config directories statements target, `statusline-history.json` for the status lines `SET statusline` replaced), the launcher directory (symlinks to the binary that serve as per-playbook commands), the launcher receipt (`<state>/cpb/launchers`, `$XDG_STATE_HOME` or `~/.local/state`: one line per launcher cpb wrote), and a flock lock file in the user cache dir (`<cache>/cpb/registry.lock`, falling back to `<tmp>/cpb-registry-<uid>.lock` when no cache directory can be resolved or created; used only to serialize concurrent mutations — it holds no data). Discovery reads the directories themselves, so a change the pilot makes with `mv`, `rm`, or a text editor is what cpb sees on its next invocation.
+There is no index of playbooks and no database. The state cpb reads and writes is: the playbooks root (each playbook directory with its optional `.playbook` manifest, where its launcher is recorded; `.env-sets/`, the shared env sets and DEFAULTS; and `.state/`, cpb's own records about what it does not own: `dirs.toml` for the plain config directories statements target), the launcher directory (symlinks to the binary that serve as per-playbook commands), the launcher receipt (`<state>/cpb/launchers`, `$XDG_STATE_HOME` or `~/.local/state`: one line per launcher cpb wrote), and a flock lock file in the user cache dir (`<cache>/cpb/registry.lock`, falling back to `<tmp>/cpb-registry-<uid>.lock` when no cache directory can be resolved or created; used only to serialize concurrent mutations — it holds no data). Discovery reads the directories themselves, so a change the pilot makes with `mv`, `rm`, or a text editor is what cpb sees on its next invocation.
 
 ### Playbook manifest
 

@@ -196,7 +196,6 @@ func TestCheckRefusals(t *testing.T) {
 		"ALTER PLAYBOOK ADD SKILL s FROM file:///tmp/repo;":                        "https, git@ or github: only",
 		"ALTER PLAYBOOK SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;":                    "even AS PLAINTEXT",
 		"ALTER PLAYBOOK SET VAR API_KEY=abc AS PLAINTEXT;":                         "even AS PLAINTEXT",
-		"ALTER PLAYBOOK REVERT STATUSLINE;":                                        "not in a played recipe",
 		"ALTER PLAYBOOK ADD MCP SERVER s URL 'https://u:tok@mcp.example.com/sse';": "URL carrying credentials",
 		"ALTER PLAYBOOK SET MODEL":                                                 "the file",
 		"":                                                                         "no statements",

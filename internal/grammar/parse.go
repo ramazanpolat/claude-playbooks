@@ -32,7 +32,7 @@ func init() {
 		"MCP", "SERVER", "COMMAND", "ARGS", "URL", "TRANSPORT", "SSE", "HEADER",
 		"ALLOW", "DENY", "TOOL", "STATUSLINE", "MODEL", "SKILL",
 		"LABEL", "DESCRIPTION", "BEHAVES",
-		"RESET", "REVERT",
+		"RESET",
 		// The words of removed clauses (LAUNCHER, NO LAUNCHER, SANDBOX, SET
 		// AGENT, SET SECRET HELPER, MODEL PICKER ONLY|APPEND, REFRESH) are
 		// not reserved: they only trigger the hint that names the new form,
@@ -175,7 +175,7 @@ func Expect(args []string) []string {
 // next unquoted starter, so these are also the words that end a list.
 var (
 	envStarters            = []string{"SET", "BLOCK", "UNSET", "DESCRIPTION"}
-	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "RESET", "REVERT"}
+	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "RESET"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "UNSET", "RESET"}
 	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "RESET", "USE"}
 )
@@ -953,12 +953,6 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 		keys, err := p.keys("UNSET VAR")
 		c.Keys = keys
 		return c, err
-	case "REVERT":
-		if p.kw("STATUSLINE") == "" {
-			return nil, p.fail("REVERT takes STATUSLINE: REVERT STATUSLINE puts back the status line cpb replaced last")
-		}
-		c.Kind = SetStatuslinePrevious
-		return c, nil
 	case "RENAME":
 		if p.kw("TO") == "" {
 			return nil, p.fail("expected TO after RENAME")
@@ -1280,7 +1274,7 @@ func validate(s *Stmt) *Error {
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
 		SetModelPicker: true, UnsetModelPickerMode: true,
-		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true, SetStatuslinePrevious: true,
+		SetStatuslineRefresh: true, UnsetStatuslineRefresh: true,
 	}
 	settings := map[string]bool{}
 	for _, c := range Flatten(s.Clauses) {
@@ -1338,9 +1332,7 @@ func validate(s *Stmt) *Error {
 	pairs := [][2]Kind{{Launcher, NoLauncher}, {From, Link}, {SetHelper, UnsetHelper}, {SetAgent, UnsetAgent},
 		{SetStatusline, UnsetStatusline}, {SetModel, UnsetModel}, {SetModelPicker, UnsetModelPickerMode},
 		{SetStatuslineRefresh, UnsetStatuslineRefresh}, {SetStatuslineRefresh, UnsetStatusline},
-		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh},
-		{SetStatuslinePrevious, SetStatusline}, {SetStatuslinePrevious, UnsetStatusline},
-		{SetStatuslinePrevious, SetStatuslineRefresh}, {SetStatuslinePrevious, UnsetStatuslineRefresh}}
+		{SetStatusline, SetStatuslineRefresh}, {UnsetStatusline, UnsetStatuslineRefresh}}
 	// Pairs are judged clause by clause: a SET IF UNSET is one clause, and
 	// its pairs never conflict with each other (mergeStatusline).
 	top := map[Kind]bool{}

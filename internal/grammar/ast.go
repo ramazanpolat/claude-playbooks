@@ -111,9 +111,6 @@ const (
 	// The status line's refresh (v3.23.0): statusLine.refreshInterval.
 	SetStatuslineRefresh   Kind = "SET statusline.refresh" // SET statusline.refresh = <n>
 	UnsetStatuslineRefresh Kind = "RESET statusline.refresh"
-	// SetStatuslinePrevious: REVERT STATUSLINE, the status line cpb
-	// replaced last, from its history.
-	SetStatuslinePrevious Kind = "REVERT STATUSLINE"
 
 	AddModel             Kind = "ADD MODEL"               // ADD MODEL '<id>' [LABEL '…'] [DESCRIPTION '…'] [BEHAVES AS '<id>']
 	DropModel            Kind = "DROP MODEL"              // DROP MODEL '<id>'

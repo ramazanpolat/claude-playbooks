@@ -92,8 +92,13 @@
   '<command>'`, `RESET secret_helper`.
   - `SET IF UNSET statusline.command = …` offers a status line without
     replacing one; the condition goes right after `SET`.
-  - `REVERT STATUSLINE` puts back the status line cpb replaced last (was
-    `SET STATUSLINE PREVIOUS`).
+  - **The status line history is gone.** cpb keeps no record of the status
+    lines it replaced, so there is no `REVERT STATUSLINE`; rc3's
+    `SET STATUSLINE PREVIOUS` is refused with a hint to set the command
+    again. A status line another tool wrote is that tool's to restore.
+    `SHOW PLAYBOOK --json` and `SELECT`'s `statusline` lose their `history`
+    field. A leftover `<playbooks root>/.state/statusline-history.json` is
+    no longer read and can be deleted.
   - The old `SET` / `UNSET STATUSLINE [REFRESH]`, `SET STATUSLINE PREVIOUS`,
     `SET` / `UNSET MODEL PICKER` and `SET` / `UNSET SECRET HELPER` forms are
     refused with a one-line hint. `ADD` / `DROP MODEL` are unchanged.

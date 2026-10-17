@@ -44,10 +44,6 @@ type dryState struct {
 	isolated  map[string]bool
 	sandboxed map[string]bool
 
-	// slHistory, per config directory key: the status line history as
-	// earlier statements would leave it.
-	slHistory map[string][]slEntry
-
 	// launchers, per playbook: the launcher earlier statements would leave
 	// it (a command name, or "" for none); absent: as on disk.
 	launchers map[string]string
@@ -67,7 +63,6 @@ func newDryState() *dryState {
 		skillKnown:   map[string]map[string]bool{},
 		isolated:     map[string]bool{},
 		sandboxed:    map[string]bool{},
-		slHistory:    map[string][]slEntry{},
 		launchers:    map[string]string{},
 	}
 }

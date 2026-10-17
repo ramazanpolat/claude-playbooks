@@ -85,14 +85,6 @@ func TestFoldStatements(t *testing.T) {
 		{"IF UNSET before a status line is replaced",
 			"ALTER PLAYBOOK p SET IF UNSET statusline.command = 'a';\nALTER PLAYBOOK p SET statusline.command = 'b';",
 			[]string{"- | SET IF UNSET by 1", "SET statusline.command"}},
-		{"PREVIOUS reads what came before it",
-			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p REVERT STATUSLINE;",
-			[]string{"SET statusline.command", "REVERT STATUSLINE"}},
-		// PREVIOUS restores the refresh too, which the later lines without
-		// REFRESH keep: it stays.
-		{"PREVIOUS reads the whole history: every status line before it stays",
-			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p SET statusline.command = 'b';\nALTER PLAYBOOK p REVERT STATUSLINE;\nALTER PLAYBOOK p SET statusline.command = 'c';\nALTER PLAYBOOK p SET statusline.command = 'd';",
-			[]string{"SET statusline.command", "SET statusline.command", "REVERT STATUSLINE", "- | SET statusline.command by 4", "SET statusline.command"}},
 		{"a refresh the later status line does not set stays, alone",
 			"ALTER PLAYBOOK p SET statusline.command = 'a', statusline.refresh = 5;\nALTER PLAYBOOK p SET statusline.command = 'b';",
 			[]string{"SET statusline.refresh | SET statusline.command by 1", "SET statusline.command"}},
@@ -102,9 +94,6 @@ func TestFoldStatements(t *testing.T) {
 		{"each part names the statement that replaces it",
 			"ALTER PLAYBOOK p RESET statusline;\nALTER PLAYBOOK p SET statusline.refresh = 10;\nALTER PLAYBOOK p SET statusline.command = 'new';",
 			[]string{"- | RESET statusline by 2 | RESET statusline.refresh by 1", "SET statusline.refresh", "SET statusline.command"}},
-		{"a PREVIOUS that is itself replaced keeps nothing before it",
-			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p REVERT STATUSLINE;\nALTER PLAYBOOK p RESET statusline;",
-			[]string{"- | SET statusline.command by 2", "- | REVERT STATUSLINE by 2", "RESET statusline"}},
 		{"a later status line with a refresh replaces both",
 			"ALTER PLAYBOOK p SET statusline.command = 'a';\nALTER PLAYBOOK p SET statusline.command = 'b', statusline.refresh = 5;",
 			[]string{"- | SET statusline.command by 1", "SET statusline.command"}},
@@ -223,11 +212,6 @@ func TestApplyFoldStackConverges(t *testing.T) {
 	if vars["LOG_LEVEL"] != "debug" || vars["TEAM"] != "one" || v.Model == nil || *v.Model != "child-model" ||
 		len(v.Tools.Allow) != 0 || len(v.Tools.Deny) != 1 || v.Statusline.Command == nil || *v.Statusline.Command != "echo child" {
 		t.Fatalf("the child does not win: %+v model=%v allow=%v deny=%v statusline.command=%v", vars, v.Model, v.Tools.Allow, v.Tools.Deny, v.Statusline.Command)
-	}
-	for _, h := range v.Statusline.History {
-		if h.Command == "echo base" {
-			t.Fatalf("the base's status line was written: %+v", v.Statusline.History)
-		}
 	}
 	planJSON := captureStdout(t, func() { _ = runStatement([]string{"APPLY", child, "TO", "p", "--dry-run", "--json"}) })
 	var rep struct {

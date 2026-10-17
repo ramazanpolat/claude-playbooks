@@ -101,8 +101,6 @@ func foldParts(c grammar.Clause) []foldPart {
 			foldPart{index: 1, what: "RESET statusline.refresh", effects: []foldEffect{w("statusline-refresh")}, withFirst: true})
 	case grammar.SetStatuslineRefresh, grammar.UnsetStatuslineRefresh:
 		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{w("statusline-refresh")}})
-	case grammar.SetStatuslinePrevious: // reads the history every earlier one wrote (see foldStatements)
-		out = append(out, foldPart{index: -1, what: string(c.Kind), effects: []foldEffect{m("statusline"), m("statusline-refresh")}})
 	case grammar.UseEnv:
 		out = append(out, foldPart{index: -1, what: "USE ENV", effects: []foldEffect{w("envs")}})
 	case grammar.AddEnv, grammar.DropEnv, grammar.ReplaceEnv: // relative to the list as it stands
@@ -159,7 +157,6 @@ func foldStatements(in []located, exists func(name string) bool) foldResult {
 		part  partKey
 		key   string
 		write bool
-		sl    bool // a status line key: a later live PREVIOUS keeps it
 	}
 	parts := make([][][]foldPart, len(in))
 	keyOf := make([]string, len(in))
@@ -183,17 +180,15 @@ func foldStatements(in []located, exists func(name string) bool) foldResult {
 		}
 	}
 	dead := map[partKey]bool{}
-	previous := map[partKey]bool{}  // a REVERT STATUSLINE
 	withFirst := map[partKey]bool{} // dropped only with the clause's part 0
 	var all []occ                   // every effect, in run order
-	for i, x := range in {
+	for i := range in {
 		for j := range parts[i] {
 			for _, fp := range parts[i][j] {
 				pk := partKey{i, j, fp.index}
-				previous[pk] = x.s.Clauses[j].Kind == grammar.SetStatuslinePrevious
 				withFirst[pk] = fp.withFirst
 				for _, e := range fp.effects {
-					all = append(all, occ{pk, keyOf[i] + e.key, e.write, strings.HasPrefix(e.key, "statusline")})
+					all = append(all, occ{pk, keyOf[i] + e.key, e.write})
 				}
 			}
 		}
@@ -204,17 +199,6 @@ func foldStatements(in []located, exists func(name string) bool) foldResult {
 		for _, o := range all {
 			if !dead[o.part] {
 				live = append(live, o)
-			}
-		}
-		// REVERT STATUSLINE restores from the history, which every
-		// earlier replacement of the target's status line adds to, not only
-		// the last: while a PREVIOUS runs, no status line clause before it is
-		// dropped. Taken from the live clauses on every pass, so a PREVIOUS
-		// that is itself dropped keeps nothing.
-		lastPrevious := map[string]int{}
-		for _, o := range live {
-			if previous[o.part] {
-				lastPrevious[keyOf[o.part.i]] = o.part.i
 			}
 		}
 		// A part is dead when the next live occurrence of each of its keys
@@ -229,10 +213,8 @@ func foldStatements(in []located, exists func(name string) bool) foldResult {
 		}
 		verdict := map[partKey]bool{}
 		for k, o := range live {
-			last, ok := lastPrevious[keyOf[o.part.i]]
-			pinned := o.sl && ok && o.part.i < last
 			d, seenPart := verdict[o.part]
-			verdict[o.part] = (d || !seenPart) && nextWrite[k] && !pinned
+			verdict[o.part] = (d || !seenPart) && nextWrite[k]
 		}
 		for p := range verdict {
 			if withFirst[p] {

@@ -16,11 +16,11 @@ write:
   removes it from either.
 - `SET statusline.command = '<command>'` sets `statusLine` to that command, keeping any
   other field of an existing one (such as `padding`). `RESET statusline`
-  removes it. `REFRESH 10` also re-renders it every 10 seconds while the
-  session is idle, which Claude Code does not do without it. `SET STATUSLINE
-  REFRESH <n>` and `RESET statusline.refresh` change only the interval.
-  `REVERT STATUSLINE` puts back the status line a statement replaced
-  last (cpb keeps a short history of them).
+  removes it. `statusline.refresh = 10` also re-renders it every 10 seconds
+  while the session is idle, which Claude Code does not do without it.
+  `SET statusline.refresh = <n>` and `RESET statusline.refresh` change only
+  the interval. cpb keeps no history of the status lines it replaced: to go
+  back, set the command again.
 - `SET model = '<model>'` is the playbook's default model and the weakest
   choice: `ANTHROPIC_MODEL` from an env set, `--model` at launch and `/model`
   in a session all win over it. `EXPLAIN PLAYBOOK` says which one decides.

@@ -38,7 +38,7 @@ session at launch. A header's reference resolves to the whole value
 ```
 ALLOW TOOL '<rule>' ...     DENY TOOL '<rule>' ...     UNSET TOOL '<rule>' ...
 SET statusline.command = '<command>'[, statusline.refresh = <n>]   RESET statusline
-SET statusline.refresh = <n>   RESET statusline.refresh   REVERT STATUSLINE
+SET statusline.refresh = <n>   RESET statusline.refresh
 SET model = '<model>'         RESET model
 ```
 

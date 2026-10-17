@@ -91,12 +91,10 @@ type playbookJSON struct {
 }
 
 // statuslineJSON is a playbook's status line (settings.json statusLine):
-// the command, its refresh in whole seconds (statusLine.refreshInterval),
-// and what REVERT STATUSLINE can go back to, newest first (v3.25.0).
+// the command and its refresh in whole seconds (statusLine.refreshInterval).
 type statuslineJSON struct {
-	Command *string         `json:"command"`
-	Refresh *int            `json:"refresh"`
-	History []slHistoryJSON `json:"history"`
+	Command *string `json:"command"`
+	Refresh *int    `json:"refresh"`
 }
 
 // sandboxJSON is a playbook's [sandbox] table: always, then each setting,
@@ -350,7 +348,6 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.ModelPicker = readPicker(sf.Root)
 		v.Statusline.Refresh = statuslineRefresh(sf.Root)
 	}
-	v.Statusline.History = describeSLHistory(pb.Path)
 	if !pb.LastUsed.IsZero() {
 		v.LastUsed = strPtr(rfc3339(pb.LastUsed))
 	}
@@ -919,9 +916,6 @@ func printToolsAndModel(pb *playbook.Playbook, vars []varJSON) {
 	}
 	if v.Statusline.Command != nil {
 		fmt.Printf("Status line: %s\n", statuslineLine(v))
-	}
-	if n := len(v.Statusline.History); n > 0 {
-		fmt.Printf("Status line history: %d earlier (REVERT STATUSLINE restores %s)\n", n, v.Statusline.History[0].Command)
 	}
 }
 

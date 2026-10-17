@@ -304,7 +304,7 @@ func TestParseArgsInvalid(t *testing.T) {
 		{w("ALTER DEFAULTS SET secret_helper = h RESET secret_helper"), "secret_helper is named twice"},
 		{w("ALTER PLAYBOOK k SET secret_helper = h"), "not a playbook property"},
 		{w("ALTER PLAYBOOK k SET STATUSLINE x"), "SET STATUSLINE is a property now"},
-		{w("ALTER PLAYBOOK k SET STATUSLINE PREVIOUS"), "REVERT STATUSLINE"},
+		{w("ALTER PLAYBOOK k SET STATUSLINE PREVIOUS"), "gone with the status line history"},
 		{w("ALTER PLAYBOOK k UNSET STATUSLINE REFRESH"), "RESET statusline.refresh"},
 		{w("ALTER PLAYBOOK k UNSET MODEL PICKER"), "RESET model_picker"},
 		{w("ALTER DEFAULTS USE FOO x"), "USE takes ENV"},

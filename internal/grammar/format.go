@@ -328,7 +328,7 @@ func (c *Clause) words(varWord bool) []string {
 			w = append(w, k)
 		}
 		return w
-	default: // SetStatuslinePrevious, DefaultLauncher, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPickerMode: no argument
+	default: // DefaultLauncher, UnsetHelper, UnsetAgent, UnsetStatusline, UnsetModel, UnsetModelPickerMode: no argument
 		return strings.Fields(string(c.Kind))
 	}
 }

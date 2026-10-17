@@ -470,7 +470,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		sf          *settings.File
 		agentLines  []string
 		agentChange bool
-		slp         *slPlan // the status line history this statement changes
 	)
 	if pluginClauses(st.Clauses) {
 		cfg := r.configDir(st.Name, pb)
@@ -509,14 +508,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			}
 		}
 		r.warnMarketplaceRef(st.Clauses)
-		slKey := cfg
-		if slKey == "" { // created earlier in this dry run: no history yet
-			slKey = "dry:" + st.Name
-		}
-		if slp, err = r.planSLHistory(slKey, "PLAYBOOK "+st.Name, st.Clauses); err != nil {
-			return err
-		}
-		if agentLines, agentChange, err = applySettingsWithHistory(sf, st.Clauses, slp, true); err != nil {
+		if agentLines, agentChange, err = applySettings(sf, st.Clauses); err != nil {
 			return err
 		}
 	}
@@ -661,9 +653,6 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if agentChange && r.dry != nil {
 			r.dry.settings[st.Name], _ = sf.Root.MarshalJSON()
-			if slp != nil && slp.changed {
-				_ = r.commitSLHistory(slp.key, slp.after)
-			}
 		}
 		var cmds []string
 		dir := r.configDir(st.Name, pb)
@@ -750,16 +739,11 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if sf, err = settings.Load(pb.Path); err != nil {
 			return err
 		}
-		if _, _, err := applySettingsWithHistory(sf, st.Clauses, slp, false); err != nil {
+		if _, _, err := applySettings(sf, st.Clauses); err != nil {
 			return err
 		}
 		if err := sf.Write(); err != nil {
 			return fmt.Errorf("cannot set the agent: %w", err)
-		}
-		if slp != nil && slp.changed {
-			if err := r.commitSLHistory(slp.key, slp.after); err != nil {
-				return fmt.Errorf("the status line is set, but its history could not be recorded: %w", err)
-			}
 		}
 		lines = append(lines, agentLines...)
 	}
