@@ -115,7 +115,7 @@ cpb APPLY machine.cpb                              # on the next machine
 Secrets are references, resolved at launch by your helper; `SHOW CREATE` never
 prints a value. A recipe covers the whole agent (plugins, MCP servers, tools,
 status line, model and `/model` picker, skills) and applies to any
-playbook or to `~/.claude`. A playbook can also come from git (`FROM <url> BRANCH <ref>`) or run in place from a folder (`LINK <dir>`).
+playbook or to `~/.claude`. A playbook can also be installed from a source, a git repository or a folder (`FROM <url-or-dir> BRANCH <ref>`), or run in place from a folder (`LINK <dir>`).
 
 ### See everything that is running
 

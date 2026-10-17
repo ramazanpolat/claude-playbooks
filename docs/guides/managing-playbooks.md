@@ -56,7 +56,7 @@ The human layout may change between releases; scripts read `--json`.
 
 ## Install a shared playbook repo
 
-`CREATE PLAYBOOK … FROM` clones or copies a source, installs it under the name
+`CREATE PLAYBOOK … FROM` installs from a source: it clones a git repository or copies a local directory, installs it under the name
 you give and creates its launcher: the source manifest's `launcher`, unless you
 name one.
 

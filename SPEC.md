@@ -132,7 +132,7 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
 
-origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   clone or copy a source
+origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a source
             | LINK <dir>                                    develop in place
 property   := <key> = <value>             launcher, login, global_instructions, model, agent, sandbox.<key>,
                                            statusline.command, statusline.refresh, model_picker.mode
@@ -352,7 +352,7 @@ Registers a directory in place: `<root>/<name>` becomes a symlink to `<dir>`, an
 
 ### `CREATE PLAYBOOK <name> FROM <source>`
 
-Installs a single playbook from a Git repository or a local directory, as `<name>`. The result is always **one flat playbook** under the playbooks root.
+Installs a single playbook from a source, as `<name>`: `FROM` reads "install from a source", a Git repository or a local directory. The result is always **one flat playbook** under the playbooks root.
 
 It always **copies** the source into the playbooks root — Git URLs via clone, local directories via recursive copy. The installed playbook is a self-contained, independent copy; later edits to the original source do not affect it. To keep an *external* directory in place and expose it under the playbooks root as a symlink instead of a copy, use `CREATE PLAYBOOK <name> LINK <dir>`.
 
@@ -2966,7 +2966,7 @@ No playbooks installed yet. Get started with one of:
   # Your own, from scratch:
   cpb CREATE PLAYBOOK <name>
 
-  # One from a Git repository or a directory (SUBDIR picks one out of a monorepo):
+  # Install one from a source, a Git repository or a directory (SUBDIR picks one out of a monorepo):
   cpb CREATE PLAYBOOK <name> FROM <git-url-or-dir>
 
 Run 'cpb --help' for all commands.

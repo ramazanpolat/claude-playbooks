@@ -122,7 +122,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		fmt.Println("  # Your own, from scratch:")
 		fmt.Println("  cpb CREATE PLAYBOOK <name>")
 		fmt.Println()
-		fmt.Println("  # One from a Git repository or a directory (SUBDIR picks one out of a monorepo):")
+		fmt.Println("  # Install one from a source, a Git repository or a directory (SUBDIR picks one out of a monorepo):")
 		fmt.Println("  cpb CREATE PLAYBOOK <name> FROM <git-url-or-dir>")
 		fmt.Println()
 		fmt.Println("Run 'cpb --help' for all commands.")

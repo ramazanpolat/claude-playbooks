@@ -47,6 +47,7 @@
 
 ### Changed
 
+- **`FROM` reads "install from a source"** in SPEC, README, the guides and bare `cpb`'s empty-state hint: `CREATE PLAYBOOK … FROM` installs a playbook from a Git repository or a local directory. The keyword and what it does are unchanged.
 - **The sandbox is marked experimental** in SPEC, README, the guides and `--help`: it works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner. Nothing changes at launch.
 - **`CREATE OR ALTER PLAYBOOK … SET …` converges** (SPEC.md, *Grammar*,
   *Playbook properties*): it creates the playbook, or, on one that exists,
