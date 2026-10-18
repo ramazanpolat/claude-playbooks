@@ -68,7 +68,7 @@ Statements never prompt, with two exceptions: `DROP PLAYBOOK`, and `APPLY … TO
 
 ```bash
 cpb CREATE PLAYBOOK IF NOT EXISTS <name> SET launcher = ''            # no launcher; run via `run <name>`
-cpb CREATE PLAYBOOK <name> LAUNCHER <cmd>
+cpb CREATE PLAYBOOK <name> SET launcher = '<cmd>'
 cpb CREATE PLAYBOOK <name> FROM <git-url> BRANCH <ref> SUBDIR <path> SET launcher = ''
 cpb CREATE PLAYBOOK <name> LINK <dir> SET launcher = ''              # the target needs a .playbook first
 cpb ALTER PLAYBOOK <name> RENAME TO <new>
