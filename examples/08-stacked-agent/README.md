@@ -26,7 +26,7 @@ nothing. Both marketplaces are directories beside the files:
 
 ## What the layers do at launch
 
-- The playbook's `settings.json` pins `agent: reviewer` (`SET AGENT`), so the
+- The playbook's `settings.json` pins `agent: reviewer` (`SET agent = 'reviewer'`), so the
   reviewer's prompt is the main thread's system prompt.
 - `ALLOW TOOL` lets the agent run `git diff` and `git log` without asking.
   A plugin cannot grant permissions, so the playbook does.

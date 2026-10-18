@@ -34,7 +34,7 @@ ALTER PLAYBOOK
 `ADD MARKETPLACE` and `ADD PLUGIN` run `claude plugin marketplace add` and
 `claude plugin install` with the playbook as `CLAUDE_CONFIG_DIR`: Claude Code
 installs the plugin for this playbook only. `'./reviewer-marketplace'` is a
-directory beside the file. `SET AGENT` pins the agent in the playbook's
+directory beside the file. `SET agent = '<agent>'` pins the agent in the playbook's
 `settings.json`, so its prompt is the session's system prompt. A plugin can
 set neither permissions nor a status line, so the playbook does, and
 `IF UNSET` offers the status line without replacing one you chose.

@@ -160,7 +160,7 @@ cpb ALTER PLAYBOOK k ADD MARKETPLACE team FROM 'github:example/team-plugins' \
 
 The marketplace and plugin clauses run Claude Code's own `claude plugin …` with
 the playbook as `CLAUDE_CONFIG_DIR`, reading the state first so a repeat runs
-nothing; `SET AGENT` writes `agent` in the playbook's `settings.json`. Sources,
+nothing; `SET agent = '<agent>'` writes `agent` in the playbook's `settings.json`. Sources,
 rules and the confirmation guard for marketplace-declared commands are in
 [Plugins and the agent](../../SPEC.md#plugins-and-the-agent).
 

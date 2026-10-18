@@ -17,7 +17,7 @@ cpb SHOW PLAYBOOKS --json            # an array of playbook objects (a bare `cpb
 cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, launcher, envs, vars, sandbox, marketplaces, plugins, agent, mcp_servers, tools, skills, statusline, model, play
 cpb SHOW ENVS --json                 # env sets: name, description, vars, used_by, default
 cpb "SELECT name, envs FROM PLAYBOOKS" --json   # chosen columns, one table (anything beyond columns needs clickhouse-local)
-cpb SHOW DEFAULTS --json             # {"envs": [...], "secret_helper": {...} | null}
+cpb SHOW DEFAULTS --json             # {"envs": [...], "secret_helper": "<command>" | null, "secret_helper_from": "setting" | ...}
 cpb EXPLAIN PLAYBOOK <name> --json   # every variable a launch would change, with its layer, and its route: base URL, models, auth state, egress (never a secret)
 ```
 
@@ -68,7 +68,7 @@ Statements never prompt, with two exceptions: `DROP PLAYBOOK`, and `APPLY … TO
 
 ```bash
 cpb CREATE PLAYBOOK IF NOT EXISTS <name> SET launcher = ''            # no launcher; run via `run <name>`
-cpb CREATE PLAYBOOK <name> LAUNCHER <cmd>
+cpb CREATE PLAYBOOK <name> SET launcher = '<cmd>'
 cpb CREATE PLAYBOOK <name> FROM <git-url> BRANCH <ref> SUBDIR <path> SET launcher = ''
 cpb CREATE PLAYBOOK <name> LINK <dir> SET launcher = ''              # the target needs a .playbook first
 cpb ALTER PLAYBOOK <name> RENAME TO <new>
