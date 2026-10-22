@@ -226,7 +226,12 @@ func restoreOwnLogin(configDir string) error {
 		return fmt.Errorf("cannot put the login set aside in %s back: %w", configDir, err)
 	}
 	if grant == nil {
-		return os.Remove(aside)
+		// Gone already (another run restored it while this one waited for
+		// the lock), or empty: nothing to put back.
+		if err := os.Remove(aside); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
 	}
 	storeMap := map[string]json.RawMessage{}
 	info, err := os.Lstat(store)
