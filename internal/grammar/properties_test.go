@@ -208,3 +208,17 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestCheckTrustedEndpoint(t *testing.T) {
+	for _, ok := range []string{"gateway.corp.example", "gw.example:8443", "localhost", "a-b.c1.example", "10.0.0.1"} {
+		if why := checkTrustedEndpoint(ok); why != "" {
+			t.Errorf("%q refused: %s", ok, why)
+		}
+	}
+	for _, bad := range []string{"", "Gateway.example", "https://gw.example", "gw.example/v1", "user@gw.example",
+		"gw.example:", "gw.example:123456", "gw.example:8a", "-gw.example", "gw-.example", "gw..example", ".gw", ":443", "gw example"} {
+		if checkTrustedEndpoint(bad) == "" {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

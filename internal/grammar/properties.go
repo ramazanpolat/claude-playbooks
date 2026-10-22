@@ -104,13 +104,35 @@ var defaultsPropertyTable = []playbookProperty{
 	{key: "secret_helper", kind: kindString, check: checkHelper, set: SetHelper, del: UnsetHelper, placeholder: "<command>"},
 }
 
-var trustedEndpointPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`)
-
 // checkTrustedEndpoint: a host name, lower case, with an optional port; no
-// scheme, path or user (RESET trusted_endpoint clears it).
+// scheme, path or user (RESET trusted_endpoint clears it). Hand-written, not
+// a package-level regexp: the package's init time is budgeted (e2e
+// TestNoSlowPackageInit).
 func checkTrustedEndpoint(v string) string {
-	if !trustedEndpointPattern.MatchString(v) {
-		return "trusted_endpoint is a host name in lower case, with an optional :port, as in 'gateway.corp.example' (no scheme or path; RESET trusted_endpoint clears it)"
+	const why = "trusted_endpoint is a host name in lower case, with an optional :port, as in 'gateway.corp.example' (no scheme or path; RESET trusted_endpoint clears it)"
+	host, port, hasPort := strings.Cut(v, ":")
+	if hasPort {
+		if port == "" || len(port) > 5 {
+			return why
+		}
+		for _, r := range port {
+			if r < '0' || r > '9' {
+				return why
+			}
+		}
+	}
+	if host == "" {
+		return why
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
+			return why
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+				return why
+			}
+		}
 	}
 	return ""
 }
