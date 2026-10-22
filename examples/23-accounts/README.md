@@ -32,3 +32,7 @@ placeholders.
 - **Another provider never gets your token.** Pointing a playbook with an
   account at a router without the router's own key is refused at launch
   (the login guard; see [02](../02-env-sets-and-order/)).
+- **A gateway you trust.** `ALTER PLAYBOOK <name> SET trusted_endpoint =
+  'gateway.corp.example'` lets the guard send the login to that one host,
+  over https only (a gateway that forwards to Anthropic). The `.check` shows
+  the refusal, the opt-in and the launch.

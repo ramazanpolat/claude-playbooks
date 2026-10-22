@@ -34,6 +34,13 @@
   Claude login or token could reach it, naming the fixes. `EXPLAIN --json`
   gains `route.guard`. See *Breaking changes* for what it refuses on
   upgrade.
+- **`trusted_endpoint`: a gateway you trust** (the name is provisional until
+  the v4.1.0 release). `ALTER PLAYBOOK <name> SET trusted_endpoint =
+  '<host>'` lets the login guard send the playbook's Claude login or token to
+  that one host, over https only, for a gateway that forwards to Anthropic.
+  Another address turns the guard back on; `RESET trusted_endpoint` clears
+  it. A source (`CREATE … FROM`, `cpb update`) or a `cpb play` recipe never
+  sets it. `SHOW`, `SELECT` and `SHOW CREATE` carry it.
 - **A token over an isolated playbook's own login no longer costs that
   login.** Before, cpb deleted the playbook's stored login for a token run,
   and it needed `/login` again. On Linux the login is now set aside for the

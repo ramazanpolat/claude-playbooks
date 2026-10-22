@@ -586,6 +586,17 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 	loginChange := nowIsolated != wasIsolated
 	m.IsolatedLogin = nowIsolated
 	lines = append(lines, loginLines...)
+	// trusted_endpoint, in the same manifest write.
+	trustChange := false
+	if v, ok := grammar.PropertyValue(st.Clauses, "trusted_endpoint"); ok && v != m.TrustedEndpoint {
+		if v == "" {
+			lines = append(lines, "trusted_endpoint  cleared: the login guard trusts no gateway")
+		} else {
+			lines = append(lines, "trusted_endpoint  "+v+": the login guard lets the Claude login or token go there, over https")
+		}
+		m.TrustedEndpoint = v
+		trustChange = true
+	}
 	envChange := !envEqual(before, m.Env)
 	mcpRecordChange := mcp != nil && !reflect.DeepEqual(beforeMCP, m.MCP)
 	mcpRemovals := mcp != nil && mcp.hasRemovals(beforeMCP)
@@ -632,7 +643,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 			m.Env = nil
 		}
 	}
-	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !sandboxChange && len(steps) == 0 {
+	if !envChange && !mcpRecordChange && !mcpRemovals && !agentChange && !skillChange && !loginChange && !trustChange && !sandboxChange && len(steps) == 0 {
 		r.outcome = outUnchanged
 		head := "PLAYBOOK " + st.Name + " unchanged"
 		if r.exists {
@@ -683,7 +694,7 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		return nil
 	}
-	if envChange || mcpRecordChange || loginChange || sandboxChange {
+	if envChange || mcpRecordChange || loginChange || trustChange || sandboxChange {
 		if err := manifest.Write(pb.RootPath, m); err != nil {
 			return fmt.Errorf("cannot record the environment: %w", err)
 		}

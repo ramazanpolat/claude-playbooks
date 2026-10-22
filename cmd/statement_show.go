@@ -91,8 +91,12 @@ type playbookJSON struct {
 	Apply *applyRecordJSON `json:"apply"`
 	// Account is which Claude credential a launch uses and where it comes
 	// from (v4.1.0): auth_mode, token_source, token_kind, token_blocked,
-	// token_account, flattened. Last: SELECT appends them after apply.
+	// token_account, flattened. SELECT appends them after apply.
 	auth.Account
+	// TrustedEndpoint is the trusted_endpoint property: the one gateway,
+	// not Anthropic's, the login guard lets the Claude login or token
+	// reach; null when unset (v4.1.0). Last.
+	TrustedEndpoint *string `json:"trusted_endpoint"`
 }
 
 // statuslineJSON is a playbook's status line (settings.json statusLine):
@@ -392,6 +396,10 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
 	}
 	v.Account = auth.AccountOf(pb.Path)
+	if m != nil && m.TrustedEndpoint != "" {
+		t := m.TrustedEndpoint
+		v.TrustedEndpoint = &t
+	}
 	return v
 }
 
@@ -767,8 +775,11 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 		fmt.Println(line)
 	}
 	if eff, err := auth.EffectiveBlock(pb.Path, nil); err == nil {
-		if g := auth.Guard(pb.Path, eff, os.Environ()); g.Verdict == auth.GuardRefused {
+		switch g := auth.Guard(pb.Path, eff, os.Environ()); g.Verdict {
+		case auth.GuardRefused:
 			fmt.Printf("Login guard: a launch would be refused: %s\n", g.Reason)
+		case auth.GuardTrusted:
+			fmt.Printf("Login guard: trusted gateway: %s\n", g.Reason)
 		}
 	}
 }

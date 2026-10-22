@@ -253,17 +253,21 @@ func (e *Env) Blocks(key string) bool {
 
 // Manifest holds the parsed contents of a .playbook file.
 type Manifest struct {
-	Version       string   `toml:"version"`
-	Name          string   `toml:"name"`
-	Launcher      string   `toml:"launcher"`
-	Description   string   `toml:"description"`
-	Homepage      string   `toml:"homepage"`
-	Author        string   `toml:"author"`
-	IsolatedLogin bool     `toml:"isolated_login"`
-	Source        *Source  `toml:"source,omitempty"`
-	Update        *Update  `toml:"update,omitempty"`
-	Env           *Env     `toml:"env,omitempty"`
-	Sandbox       *Sandbox `toml:"sandbox,omitempty"`
+	Version       string `toml:"version"`
+	Name          string `toml:"name"`
+	Launcher      string `toml:"launcher"`
+	Description   string `toml:"description"`
+	Homepage      string `toml:"homepage"`
+	Author        string `toml:"author"`
+	IsolatedLogin bool   `toml:"isolated_login"`
+	// TrustedEndpoint is the one non-Anthropic host the login guard lets
+	// a Claude login or token reach (a gateway that forwards to
+	// Anthropic), the playbook's own choice: never taken from a source.
+	TrustedEndpoint string   `toml:"trusted_endpoint"`
+	Source          *Source  `toml:"source,omitempty"`
+	Update          *Update  `toml:"update,omitempty"`
+	Env             *Env     `toml:"env,omitempty"`
+	Sandbox         *Sandbox `toml:"sandbox,omitempty"`
 
 	// MCP records, per MCP server a statement declared, the variables cpb
 	// derived for its secret references, so dropping the server forgets
@@ -580,6 +584,9 @@ func Write(dir string, m *Manifest) error {
 	}
 	if m.IsolatedLogin {
 		fmt.Fprintf(&b, "isolated_login = true\n")
+	}
+	if m.TrustedEndpoint != "" {
+		fmt.Fprintf(&b, "trusted_endpoint = %s\n", QuoteTOML(m.TrustedEndpoint))
 	}
 	if m.Source != nil {
 		b.WriteString("\n[source]\n")

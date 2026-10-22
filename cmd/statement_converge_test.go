@@ -65,7 +65,7 @@ func TestCreateOrAlterConverges(t *testing.T) {
 	// SHOW CREATE is one converging statement per property list: applied to
 	// the playbook it describes, it changes nothing.
 	created := mustStmt(t, "SHOW CREATE PLAYBOOK cv")
-	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK cv\n  SET launcher = 'cv2', login = 'shared', global_instructions = 'inherited'\n  RESET sandbox, agent, statusline.refresh, model_picker.mode\n  USE ENV '';") {
+	if !strings.Contains(created, "CREATE OR ALTER PLAYBOOK cv\n  SET launcher = 'cv2', login = 'shared', global_instructions = 'inherited'\n  RESET sandbox, trusted_endpoint, agent, statusline.refresh, model_picker.mode\n  USE ENV '';") {
 		t.Fatalf("SHOW CREATE:\n%s", created)
 	}
 	if out, err := apply(t, writePlaybookFile(t, created)); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {

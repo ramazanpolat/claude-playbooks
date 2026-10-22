@@ -65,6 +65,11 @@ var playbookPropertyTable = []playbookProperty{
 	// loads them, as Claude Code's ancestor walk does for any directory
 	// under $HOME.
 	{key: "global_instructions", values: []string{"excluded", "inherited"}},
+	// trusted_endpoint: the one host, not Anthropic's, the login guard
+	// lets the Claude login or token reach, over https (a gateway that
+	// forwards to Anthropic). Stays in its SET and RESET clauses, like
+	// login. RESET clears it.
+	{key: "trusted_endpoint", kind: kindString, check: checkTrustedEndpoint, placeholder: "<host>"},
 	// model: the playbook's default model (settings.json model).
 	{key: "model", kind: kindString, check: checkModel, set: SetModel, del: UnsetModel, placeholder: "<model>"},
 	// agent: the agent the main session runs as (settings.json agent).
@@ -97,6 +102,44 @@ var playbookPropertyTable = []playbookProperty{
 // defaultsPropertyTable is DEFAULTS' one property: the secret helper.
 var defaultsPropertyTable = []playbookProperty{
 	{key: "secret_helper", kind: kindString, check: checkHelper, set: SetHelper, del: UnsetHelper, placeholder: "<command>"},
+}
+
+// checkTrustedEndpoint: a host name, lower case, with an optional port; no
+// scheme, path or user (RESET trusted_endpoint clears it). Hand-written, not
+// a package-level regexp: the package's init time is budgeted (e2e
+// TestNoSlowPackageInit).
+func checkTrustedEndpoint(v string) string {
+	const why = "trusted_endpoint is a host name in lower case, with an optional :port, as in 'gateway.corp.example' (no scheme or path; RESET trusted_endpoint clears it)"
+	host, port, hasPort := strings.Cut(v, ":")
+	if hasPort {
+		if port == "" || len(port) > 5 {
+			return why
+		}
+		n := 0
+		for _, r := range port {
+			if r < '0' || r > '9' {
+				return why
+			}
+			n = n*10 + int(r-'0')
+		}
+		if n < 1 || n > 65535 {
+			return why
+		}
+	}
+	if host == "" {
+		return why
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
+			return why
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+				return why
+			}
+		}
+	}
+	return ""
 }
 
 func checkStatusline(v string) string {
@@ -168,6 +211,11 @@ func (p *parser) ifUnsetProperties(c *Clause) *Error {
 		return err
 	}
 	for _, v := range c.Settings {
+		if v.Key == "trusted_endpoint" {
+			// Which gateway may receive the Claude login is said outright:
+			// SET IF UNSET would replace a trust it cannot read (v4.1.0).
+			return errAt(c.Pos, "SET IF UNSET does not take trusted_endpoint: which gateway may receive your Claude login is set outright, SET trusted_endpoint = '<host>'")
+		}
 		if def, refused := ifUnsetRefused[v.Key]; refused {
 			return errAt(c.Pos, "SET IF UNSET takes only keys whose default is no value (model, agent, statusline.*, model_picker.mode, sandbox.<key> without a default): "+v.Key+" defaults to "+def+", so it is never unset; use SET")
 		}

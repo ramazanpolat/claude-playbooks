@@ -22,6 +22,9 @@ import (
 const (
 	GuardOK      = "ok"
 	GuardRefused = "refused"
+	// GuardTrusted: the credential goes to a gateway the playbook names
+	// in trusted_endpoint, by its own choice. The launch proceeds.
+	GuardTrusted = "trusted"
 )
 
 // GuardResult is the guard's verdict for one launch. Host is the request
@@ -94,6 +97,16 @@ func Guard(configDir string, eff *manifest.Env, environ []string) GuardResult {
 		// sent whatever the layers say.
 		sends = "token"
 	}
+	if sends != "" && !ref {
+		if trusted := trustedEndpoint(configDir); trusted != "" && strings.EqualFold(host, trusted) {
+			if endpointScheme(base) == "https" {
+				return GuardResult{Verdict: GuardTrusted, Host: host, Sends: sends,
+					Reason: fmt.Sprintf("trusted_endpoint names %s: the playbook sends your Claude %s there by its own choice", host, sends)}
+			}
+			return GuardResult{Verdict: GuardRefused, Host: host, Sends: sends,
+				Reason: fmt.Sprintf("trusted_endpoint names %s, but requests go there without https: Claude Code would send your Claude %s unencrypted", host, sends)}
+		}
+	}
 	if sends != "" {
 		return GuardResult{Verdict: GuardRefused, Host: host, Sends: sends,
 			Reason: fmt.Sprintf("requests go to %s, which is not Anthropic, and no provider key is set: Claude Code would send your Claude %s there", host, sends)}
@@ -109,10 +122,15 @@ func GuardError(r GuardResult, name string) error {
 	if name != "" {
 		target = name
 	}
+	host := "<host>"
+	if r.Host != "" && !strings.ContainsAny(r.Host, " /@") {
+		host = strings.ToLower(r.Host)
+	}
 	return fmt.Errorf("%s. Fix one of:\n"+
 		"  - give the provider its own key, by reference: cpb ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'\n"+
-		"  - keep every Claude credential out: cpb ALTER PLAYBOOK %s SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN (and /logout in it, if it holds a login of its own)",
-		r.Reason, target)
+		"  - keep every Claude credential out: cpb ALTER PLAYBOOK %s SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN (and /logout in it, if it holds a login of its own)\n"+
+		"  - only for a gateway you trust that forwards to Anthropic, over https: cpb ALTER PLAYBOOK %s SET trusted_endpoint = '%s'",
+		r.Reason, target, target, host)
 }
 
 // claudeCredentialReachable names the Claude credential a launch would
@@ -173,6 +191,25 @@ func lookupLaunch(eff *manifest.Env, environ []string, key string) (value string
 		}
 	}
 	return "", false, false
+}
+
+// trustedEndpoint is the playbook's trusted_endpoint, "" for none or an
+// unreadable manifest.
+func trustedEndpoint(configDir string) string {
+	m, _ := manifest.Nearest(configDir)
+	if m == nil {
+		return ""
+	}
+	return m.TrustedEndpoint
+}
+
+// endpointScheme is base's URL scheme, lower case; "" when it does not parse.
+func endpointScheme(base string) string {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Scheme)
 }
 
 // anthropicEndpoint reports the host of base and whether it is Anthropic's:

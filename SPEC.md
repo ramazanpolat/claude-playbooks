@@ -806,6 +806,29 @@ keeps them out. ("Global" means the machine-wide instructions in
   entry. An older Claude Code that does not know `claudeMdExcludes` ignores
   it.
 
+#### trusted_endpoint
+
+`SET trusted_endpoint = '<host>'` (since v4.1.0; the name is provisional
+until the v4.1.0 release) names the one gateway, not Anthropic's, that the
+login guard lets the playbook's Claude login or token reach: a gateway you
+trust that forwards to Anthropic. The value is a host name in lower case with
+an optional `:port`, no scheme or path. It is recorded as `trusted_endpoint`
+in the playbook's manifest; `RESET trusted_endpoint` clears it.
+
+- **Only that host, only over https.** The guard returns `trusted` (not
+  `refused`) when the effective `ANTHROPIC_BASE_URL` is `https` and its host,
+  port included, equals the value, case aside. Another host or port, plain
+  `http`, or an address held by a secret reference is refused as before.
+  Changing the address turns the guard back on.
+- **Never from a source or a recipe.** `CREATE … FROM` ignores a
+  `trusted_endpoint` in the source's manifest (one stderr line), `cpb update`
+  keeps the installed value, and `cpb play` refuses a recipe that sets it.
+- **Said outright.** `SET IF UNSET trusted_endpoint` is refused: it would
+  replace a trust it cannot see.
+- **Reads.** `SHOW PLAYBOOK --json` and `SELECT`'s `trusted_endpoint` column
+  (null when unset); `SHOW CREATE` writes it when set and `RESET` when not;
+  `EXPLAIN` prints `Login guard: trusted gateway: …`.
+
 ### Sandbox (experimental)
 
 Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
@@ -1640,6 +1663,7 @@ code to the same lines):
 | `token_kind` | `Nullable(String)` | value or reference; null when the launch uses no token. |
 | `token_blocked` | `Bool` | True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login. |
 | `token_account` | `Nullable(String)` | The env set holding the token, the account; null when the token comes from no env set. |
+| `trusted_endpoint` | `Nullable(String)` | The one gateway, not Anthropic's, the login guard lets the Claude login or token reach over https (SET trusted_endpoint); null when unset. |
 
 **`ENVS`**
 
@@ -1833,7 +1857,7 @@ CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
   SET launcher = 'w', login = 'shared', global_instructions = 'excluded'
-  RESET sandbox, model, agent, statusline, model_picker.mode
+  RESET sandbox, trusted_endpoint, model, agent, statusline, model_picker.mode
   USE ENV router;
 
 ALTER PLAYBOOK work
@@ -2251,7 +2275,7 @@ Every launch (`run`, `start`, launcher dispatch) prepares the config directory's
 - neither provider key is set (a value or a reference, not blocked), and `settings.json` names no `apiKeyHelper`;
 - a Claude credential can reach the launch: a token is active for it (step 2, or on the isolated path the playbook's own token), or `settings.json`'s `env` block sets `CLAUDE_CODE_OAUTH_TOKEN` (applied by Claude Code over the launch, a blocked variable included), or the login is shared, or the playbook is isolated and holds a login of its own (a grant in its store file, or its Keychain item; a store that is still a link is detached at launch and does not count; a store or Keychain that cannot be read counts as holding one).
 
-The refusal names the address and the credential, never a value or the URL's userinfo, and the fixes: the provider's own key by reference (`ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'`), or `SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` (and `/logout` in it). `EXPLAIN --json` reports the same verdict in `route.guard`. A sandboxed launch is not guarded yet.
+The refusal names the address and the credential, never a value or the URL's userinfo, and the fixes: the provider's own key by reference (`ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'`), or `SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` (and `/logout` in it), or, for a gateway you trust that forwards to Anthropic over https, `SET trusted_endpoint = '<host>'` (see *trusted_endpoint*), which turns the verdict into `trusted`. `EXPLAIN --json` reports the same verdict in `route.guard` (`ok`, `refused` or `trusted`). A sandboxed launch is not guarded yet.
 
 Before any of this, a launch refuses while a manifest on the config directory's way up cannot be read, sandboxed or not: it may ask for an isolated login or a sandbox (`<error>. cpb does not launch over a manifest it cannot read: it may ask for an isolated login or a sandbox`). Every preparation failure is advisory (a warning, then launch) except an env set that cannot be resolved, which refuses the launch before step 1. Raw `claude` invocations bypass this entirely.
 

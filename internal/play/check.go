@@ -148,6 +148,10 @@ func (r *Result) clause(c grammar.Clause) {
 		// A recipe may isolate more, never less: the login and ~/.claude's
 		// instructions stay apart unless play itself lets them in.
 		for _, v := range c.Settings {
+			if v.Key == "trusted_endpoint" {
+				r.refuse(line, "SET trusted_endpoint", "which gateway may receive your Claude login is your decision, never a recipe's")
+				return
+			}
 			switch v.Value {
 			case "shared":
 				r.refuse(line, "SET "+v.Key+" = 'shared'", "sharing the "+v.Key+" is play's decision, not the recipe's")

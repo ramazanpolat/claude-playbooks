@@ -183,6 +183,7 @@ func TestCheckRefusals(t *testing.T) {
 		"ALTER PLAYBOOK USE ENV work;":                                             "your env sets, and your keys",
 		"ALTER PLAYBOOK ADD ENV work;":                                             "your env sets, and your keys",
 		"ALTER PLAYBOOK SET login = 'shared';":                                     "play's decision",
+		"ALTER PLAYBOOK SET trusted_endpoint = 'gw.example';":                      "never a recipe's",
 		"ALTER PLAYBOOK SET global_instructions = 'inherited';":                    "play's decision",
 		"ALTER PLAYBOOK SET IF UNSET login = 'shared', model = 'm';":               "never unset",
 		"ALTER PLAYBOOK SET IF UNSET launcher = 'x';":                              "never unset",

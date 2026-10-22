@@ -275,6 +275,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		updated = &copied
 		updated.Launcher = liveManifest.Launcher
 		updated.IsolatedLogin = liveManifest.IsolatedLogin
+		updated.TrustedEndpoint = liveManifest.TrustedEndpoint
 		updated.Source = liveManifest.Source
 		updated.Env = liveManifest.Env
 		updated.Sandbox = liveManifest.Sandbox

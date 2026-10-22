@@ -162,6 +162,14 @@ func doInstall(o installOpts, args []string) error {
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}
+	if mPre.TrustedEndpoint != "" {
+		// Where the Claude login may go is the pilot's choice, never a
+		// source's: a published manifest naming a host would send the
+		// login there.
+		fmt.Fprintf(os.Stderr, "Note: ignoring trusted_endpoint in the source's %s; which gateway may receive your Claude login is install-local. Set it with: ALTER PLAYBOOK <name> SET trusted_endpoint = '<host>'\n", manifest.FileName)
+		mPre.TrustedEndpoint = ""
+		needsManifestWrite = true
+	}
 	if o.sandbox {
 		mPre.IsolatedLogin = true
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
