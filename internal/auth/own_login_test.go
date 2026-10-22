@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -325,4 +326,77 @@ func readStoreOrEmpty(t *testing.T, path string) map[string]json.RawMessage {
 		return map[string]json.RawMessage{}
 	}
 	return readStore(t, path)
+}
+
+// cpb killed alone while its session keeps running on the token: the
+// session's pid keeps the run live, so the next launch does not put the
+// login back under it. Once the session ends, it does.
+func TestSessionOutlivingCpbKeepsTheLoginAside(t *testing.T) {
+	configDir := t.TempDir()
+	writeManifest(t, configDir, ownTokenManifest)
+	store := writeStore(t, configDir, `{`+grantJSON+`}`)
+	if _, err := PrepareLaunchEnv(configDir); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	session := exec.Command("sleep", "60")
+	if err := session.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer session.Process.Kill()
+	SessionStarted(session.Process.Pid)
+
+	// cpb dies: its run lock goes with it, EndLaunch never runs.
+	tokenRunsMu.Lock()
+	tokenRuns[configDir].lock.Close()
+	delete(tokenRuns, configDir)
+	tokenRunsMu.Unlock()
+
+	if err := restoreOwnLogin(configDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := readStoreOrEmpty(t, store)["claudeAiOauth"]; present {
+		t.Fatal("login restored under a live session")
+	}
+	session.Process.Kill()
+	session.Wait()
+	if err := restoreOwnLogin(configDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := readStore(t, store)["claudeAiOauth"]; !present {
+		t.Fatal("login not restored after the session ended")
+	}
+	if exists(filepath.Join(configDir, CredentialsFileName) + runPidsSuffix) {
+		t.Fatal("pid list left behind")
+	}
+}
+
+// Two archives in the same second never replace each other.
+func TestArchiveNeverOverwrites(t *testing.T) {
+	configDir := t.TempDir()
+	aside := asidePath(configDir)
+	for _, body := range []string{"first", "second"} {
+		if err := os.WriteFile(aside, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := archiveAside(aside); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kept, _ := filepath.Glob(aside + "-*")
+	if len(kept) != 2 {
+		t.Fatalf("archives = %v, want two", kept)
+	}
+}
+
+// A grant a killed run left aside comes back at the next launch: the login
+// guard counts it before that launch, routed to a router with no key.
+func TestGuardCountsALoginSetAside(t *testing.T) {
+	configDir := t.TempDir()
+	writeManifest(t, configDir, "isolated_login = true\n\n[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://router.example/v1\"\n")
+	if err := os.WriteFile(asidePath(configDir), []byte(`{`+grantJSON+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if g := guardOf(t, configDir); g.Verdict != GuardRefused || g.Sends != "login" {
+		t.Fatalf("guard = %+v, want refused for the login set aside", g)
+	}
 }

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -37,6 +39,10 @@ const (
 	asideSuffix     = ".cpb-aside"
 	runLockSuffix   = ".cpb-run.lock"
 	asideLockSuffix = ".cpb-aside.lock"
+	// runPidsSuffix lists the sessions token runs started, one pid a line:
+	// a session can outlive the cpb that started it (cpb killed alone), and
+	// its token run is live while it is.
+	runPidsSuffix = ".cpb-run.pids"
 )
 
 // ErrOwnLogin marks the refusal of a token launch over a playbook's own
@@ -95,10 +101,17 @@ func ownLoginWhere(configDir string) string {
 	return ""
 }
 
-// tokenRuns are the run locks this process holds, by config directory.
+// tokenRun is one token run this process holds: its shared run lock, and
+// the session it started, once started.
+type tokenRun struct {
+	lock *os.File
+	pid  int
+}
+
+// tokenRuns are the token runs this process holds, by config directory.
 var (
 	tokenRunsMu sync.Mutex
-	tokenRuns   = map[string]*os.File{}
+	tokenRuns   = map[string]*tokenRun{}
 )
 
 // setAsideForTokenRun moves an isolated playbook's own grant out of its
@@ -130,8 +143,8 @@ func setAsideForTokenRun(configDir string) error {
 	}
 	aside := store + asideSuffix
 	if _, err := os.Lstat(aside); err == nil {
-		kept := aside + "-" + now().Format("2006-01-02-15_04_05")
-		if err := os.Rename(aside, kept); err != nil {
+		kept, err := archiveAside(aside)
+		if err != nil {
 			return fmt.Errorf("cannot set the login in %s aside for the token run: %w", configDir, err)
 		}
 		Notice(fmt.Sprintf("%s was logged in again while an earlier login was set aside; kept the earlier one as %s", configDir, filepath.Base(kept)))
@@ -152,8 +165,23 @@ func setAsideForTokenRun(configDir string) error {
 // warning.
 func EndLaunch(configDir string) {
 	tokenRunsMu.Lock()
-	if f, ok := tokenRuns[configDir]; ok {
-		f.Close() // releases the shared lock
+	if run, ok := tokenRuns[configDir]; ok {
+		if run.pid != 0 {
+			store := filepath.Join(configDir, CredentialsFileName)
+			if unlock, err := lockFile(store+asideLockSuffix, syscall.LOCK_EX); err == nil {
+				editPids(store+runPidsSuffix, func(pids []int) []int {
+					out := pids[:0]
+					for _, p := range pids {
+						if p != run.pid {
+							out = append(out, p)
+						}
+					}
+					return out
+				})
+				unlock()
+			}
+		}
+		run.lock.Close() // releases the shared lock
 		delete(tokenRuns, configDir)
 	}
 	tokenRunsMu.Unlock()
@@ -182,6 +210,17 @@ func restoreOwnLogin(configDir string) error {
 	if live, err := tokenRunLive(store + runLockSuffix); err != nil || live {
 		return err
 	}
+	// A session whose cpb was killed alone is still using its token.
+	sessionLive := false
+	if err := editPids(store+runPidsSuffix, func(pids []int) []int {
+		sessionLive = len(pids) > 0
+		return pids
+	}); err != nil {
+		return err
+	}
+	if sessionLive {
+		return nil
+	}
 	grant, err := readGrant(aside)
 	if err != nil {
 		return fmt.Errorf("cannot put the login set aside in %s back: %w", configDir, err)
@@ -200,8 +239,8 @@ func restoreOwnLogin(configDir string) error {
 			return fmt.Errorf("cannot put the login set aside in %s back: %w", configDir, err)
 		}
 		if existing != nil {
-			kept := aside + "-" + now().Format("2006-01-02-15_04_05")
-			if err := os.Rename(aside, kept); err != nil {
+			kept, err := archiveAside(aside)
+			if err != nil {
 				return err
 			}
 			Notice(fmt.Sprintf("%s was logged in again during a token run; kept the earlier login as %s", configDir, filepath.Base(kept)))
@@ -226,6 +265,28 @@ func restoreOwnLogin(configDir string) error {
 	return os.Remove(aside)
 }
 
+// archiveAside moves the grant at aside to a dated name that no other file
+// holds: a hard link refuses an existing name, so an earlier archive is
+// never replaced, then the original goes.
+func archiveAside(aside string) (string, error) {
+	base := aside + "-" + now().Format("2006-01-02-15_04_05")
+	for i := 0; i < 1000; i++ {
+		kept := base
+		if i > 0 {
+			kept = fmt.Sprintf("%s-%d", base, i)
+		}
+		err := os.Link(aside, kept)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		return kept, os.Remove(aside)
+	}
+	return "", fmt.Errorf("no free name for %s", base)
+}
+
 // loginAside reports whether configDir has a grant set aside by a token run.
 func loginAside(configDir string) bool {
 	_, err := os.Lstat(filepath.Join(configDir, CredentialsFileName) + asideSuffix)
@@ -247,8 +308,70 @@ func holdTokenRun(configDir string) error {
 		f.Close()
 		return err
 	}
-	tokenRuns[configDir] = f
+	tokenRuns[configDir] = &tokenRun{lock: f}
 	return nil
+}
+
+// SessionStarted records the session a launch started (its pid) with every
+// token run this process holds, so the run stays live for as long as the
+// session does, even if this process is killed first. A no-op without one.
+// A failure is a warning: the run lock still covers this process.
+func SessionStarted(pid int) {
+	tokenRunsMu.Lock()
+	defer tokenRunsMu.Unlock()
+	for configDir, run := range tokenRuns {
+		store := filepath.Join(configDir, CredentialsFileName)
+		unlock, err := lockFile(store+asideLockSuffix, syscall.LOCK_EX)
+		if err != nil {
+			Notice(fmt.Sprintf("cannot record the session for the token run in %s: %v", configDir, err))
+			continue
+		}
+		err = editPids(store+runPidsSuffix, func(pids []int) []int { return append(pids, pid) })
+		unlock()
+		if err != nil {
+			Notice(fmt.Sprintf("cannot record the session for the token run in %s: %v", configDir, err))
+			continue
+		}
+		run.pid = pid
+	}
+}
+
+// editPids rewrites the pid list at path through edit, dropping pids no
+// longer alive; an empty list removes the file. Callers hold the aside
+// lock.
+func editPids(path string, edit func([]int) []int) error {
+	var pids []int
+	if data, err := os.ReadFile(path); err == nil {
+		for _, f := range strings.Fields(string(data)) {
+			if pid, err := strconv.Atoi(f); err == nil && pidAlive(pid) {
+				pids = append(pids, pid)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	pids = edit(pids)
+	if len(pids) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	var b strings.Builder
+	for _, pid := range pids {
+		b.WriteString(strconv.Itoa(pid) + "\n")
+	}
+	return writeFilePrivate(path, []byte(b.String()))
+}
+
+// pidAlive reports whether a process with pid exists (EPERM: it does, as
+// another user's).
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // tokenRunLive reports whether any process holds the run lock at path.
