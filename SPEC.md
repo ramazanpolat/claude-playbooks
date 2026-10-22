@@ -2227,7 +2227,7 @@ Every launch (`run`, `start`, launcher dispatch) prepares the config directory's
 
 - the effective `ANTHROPIC_BASE_URL` (from the playbook's `settings.json` `env` block, which Claude Code applies over the environment, else the layers, else the environment) is set and is not Anthropic's (`https` and `anthropic.com` or a subdomain), or comes from a reference; and no Bedrock, Vertex or Foundry switch is on;
 - neither provider key is set (a value or a reference, not blocked), and `settings.json` names no `apiKeyHelper`;
-- a Claude credential can reach the launch: a token is active for it (step 2, or on the isolated path the playbook's own token), or the login is shared, or the playbook is isolated and holds a login of its own (a grant in its store, or its Keychain item; a store or Keychain that cannot be read counts as holding one).
+- a Claude credential can reach the launch: a token is active for it (step 2, or on the isolated path the playbook's own token), or `settings.json`'s `env` block sets `CLAUDE_CODE_OAUTH_TOKEN` (applied by Claude Code over the launch, a blocked variable included), or the login is shared, or the playbook is isolated and holds a login of its own (a grant in its store file, or its Keychain item; a store that is still a link is detached at launch and does not count; a store or Keychain that cannot be read counts as holding one).
 
 The refusal names the address and the credential, never a value or the URL's userinfo, and the fixes: the provider's own key by reference (`ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'`), or `SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` (and `/logout` in it). `EXPLAIN --json` reports the same verdict in `route.guard`. A sandboxed launch is not guarded yet.
 
