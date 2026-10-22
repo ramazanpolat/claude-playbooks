@@ -165,7 +165,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 				_, setsToken = menv.Set[OAuthTokenEnv]
 			}
 			switch {
-			case setsToken && manifestToken(menv) != "":
+			case setsToken && manifestToken(menv) != "", tokenRef(menv):
 				// Honoured on the isolated path too: PrepareLaunchEnv injects
 				// it and quarantines the stored grant exactly as elsewhere.
 				r.Mode = ModePlaybookToken

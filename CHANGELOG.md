@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Accounts
+
+- **The OAuth token takes a secret reference.** `CREATE ENV acct-work SET
+  CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'` makes an account: attach it to
+  switch a playbook's account (`REPLACE ENV`), or pick it for one launch
+  (`cpb run --env-set acct-work <name>`). The launch execs through the secret
+  helper, which sets the token; cpb never holds its value, and a token exported
+  in the shell cannot stand in for it. Until now this key was refused as a
+  reference.
+
 ## [v4.0.0-rc4] -- 2026-10-18
 
 ### Upgrading from rc3

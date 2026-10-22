@@ -73,10 +73,16 @@ func TokenActive() (inject string, active bool) {
 //   - env.set supplies CLAUDE_CODE_OAUTH_TOKEN: that value is the token for
 //     this install, injected in place of the file's. An empty value counts as
 //     inactive, matching the file rule.
+//   - env.refs supplies it: the token is active and nothing is injected here;
+//     the secret helper sets it when it execs claude (cmd/secret.go), so cpb
+//     never holds the value.
 //   - otherwise TokenActive decides.
 func resolveToken(menv *manifest.Env) (inject string, active bool) {
 	if menv.Blocks(OAuthTokenEnv) {
 		return "", false
+	}
+	if tokenRef(menv) {
+		return "", true
 	}
 	if menv != nil {
 		if _, ok := menv.Set[OAuthTokenEnv]; ok {
@@ -94,6 +100,19 @@ func manifestToken(menv *manifest.Env) string {
 		return ""
 	}
 	return strings.TrimSpace(menv.Set[OAuthTokenEnv])
+}
+
+// tokenRef reports whether the flattened block supplies the token by
+// reference (CREATE ENV acct SET CLAUDE_CODE_OAUTH_TOKEN FROM '<ref>'). The
+// value is resolved by the secret helper at exec and never reaches cpb.
+func tokenRef(menv *manifest.Env) bool {
+	return menv != nil && strings.TrimSpace(menv.Refs[OAuthTokenEnv]) != ""
+}
+
+// ownToken reports whether the block supplies this install's own token, by
+// value or by reference: another account as far as the launch is concerned.
+func ownToken(menv *manifest.Env) bool {
+	return manifestToken(menv) != "" || tokenRef(menv)
 }
 
 // applyManifestEnv overlays the manifest [env] block on environ: set entries
@@ -231,11 +250,13 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// non-isolated token path (the adoption hazard is the same).
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
 		syncErr := SyncCredentials(configDir)
-		if own := manifestToken(menv); own != "" {
+		if ownToken(menv) {
 			if qErr := QuarantineStoredOAuth(configDir); syncErr == nil {
 				syncErr = qErr
 			}
-			env = append(env, OAuthTokenEnv+"="+own)
+			if own := manifestToken(menv); own != "" {
+				env = append(env, OAuthTokenEnv+"="+own)
+			}
 		} else if absent, aErr := storeGrantAbsent(filepath.Join(configDir, CredentialsFileName)); aErr != nil {
 			// Cannot tell whether this playbook is logged in: leave its
 			// state alone and say so. An unreadable store may hold a login.
@@ -279,16 +300,17 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// own comment rejects relying on exec preferring the last duplicate.
 		env = removeEnv(env, OAuthTokenEnv)
 		env = append(env, OAuthTokenEnv+"="+inject)
-	} else if !active {
-		// Inactive by manifest decision (unset, or set to empty): an inherited
+	} else if !active || tokenRef(menv) {
+		// By reference, the helper sets the token at exec: an inherited one
+		// must not stand in if it fails. Inactive by manifest decision (unset, or set to empty): an inherited
 		// token would otherwise still reach the child and re-arm the very
 		// adoption hazard the stored-credentials path exists to avoid.
 		env = removeEnv(env, OAuthTokenEnv)
 	}
 	if active {
 		switch {
-		case manifestToken(menv) != "":
-			// An OWN token (manifest or profile) is another account as far
+		case ownToken(menv):
+			// An OWN token (manifest or profile, a value or a reference) is another account as far
 			// as this launch is concerned: the plan descriptors read from
 			// the global store describe the wrong account, and an inherited
 			// pair does too. The block may set its own via [env.set].

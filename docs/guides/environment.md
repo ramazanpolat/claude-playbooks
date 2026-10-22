@@ -162,7 +162,8 @@ be a secret passes: empty, an integer, or `true`/`false`, so
   value exists only in that one process. `CPB_SECRET_HELPER` in the environment
   overrides the stored setting. Without a helper, `SET … FROM` is refused, and
   so is launching a playbook whose layers hold a reference.
-  `CLAUDE_CODE_OAUTH_TOKEN` never takes a reference: cpb reads its value itself.
+  `CLAUDE_CODE_OAUTH_TOKEN` takes a reference too (since v4.1.0): an env set
+  holding it is an account (see [Authentication](authentication.md)).
   A sandboxed launch of a playbook with references is refused in this release.
 - **As plain text, knowingly:** add `AS PLAINTEXT` to the `SET` clause.
   `EXPLAIN` marks such an entry `(plaintext)`, and `SHOW CREATE` never carries
