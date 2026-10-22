@@ -268,7 +268,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
-	runErr := c.Run()
+	runErr := runAttached(c)
 
 	if deleteAfter {
 		if rmErr := os.RemoveAll(absPath); rmErr != nil {
