@@ -58,6 +58,9 @@ func runAttached(c *exec.Cmd) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
+	// A token run stays live for as long as this session does, even if
+	// cpb is killed first (internal/auth/own_login.go).
+	auth.SessionStarted(c.Process.Pid)
 	if onLaunch != nil {
 		onLaunch(c.Process)
 	}
