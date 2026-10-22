@@ -87,7 +87,14 @@ func Guard(configDir string, eff *manifest.Env, environ []string) GuardResult {
 		return GuardResult{Verdict: GuardOK, Host: host, Reason: "settings.json's apiKeyHelper supplies the provider's key"}
 	}
 
-	if sends := claudeCredentialReachable(configDir, eff); sends != "" {
+	sends := claudeCredentialReachable(configDir, eff)
+	if v, ok := sets[OAuthTokenEnv]; ok && strings.TrimSpace(v) != "" {
+		// settings.json's env block is applied by Claude Code over the
+		// launch environment, a blocked variable included: its token is
+		// sent whatever the layers say.
+		sends = "token"
+	}
+	if sends != "" {
 		return GuardResult{Verdict: GuardRefused, Host: host, Sends: sends,
 			Reason: fmt.Sprintf("requests go to %s, which is not Anthropic, and no provider key is set: Claude Code would send your Claude %s there", host, sends)}
 	}
@@ -118,8 +125,15 @@ func claudeCredentialReachable(configDir string, eff *manifest.Env) string {
 		if ownToken(eff) {
 			return "token"
 		}
-		absent, err := storeGrantAbsent(filepath.Join(configDir, CredentialsFileName))
-		if err != nil || !absent {
+		// A store that is still a link (to the shared one) is detached
+		// before Claude Code starts: what it reaches is not this
+		// playbook's login.
+		store := filepath.Join(configDir, CredentialsFileName)
+		if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink == 0 {
+			if absent, err := storeGrantAbsent(store); err != nil || !absent {
+				return "login"
+			}
+		} else if err != nil && !os.IsNotExist(err) {
 			return "login"
 		}
 		if keychainLogin(configDir, false, false) != KeychainAbsent {
