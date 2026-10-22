@@ -199,7 +199,7 @@ jobs:
           # SELECT *: version_tuple where it has always been on this path, then
           # play and apply, then the account columns (v4.1.0): the columns
           # appended after it.
-          late="version_tuple play apply auth_mode token_source token_kind token_blocked token_account"
+          late="version_tuple play apply auth_mode token_source token_kind token_blocked token_account trusted_endpoint"
           tail3="$("$cpb" "SELECT * FROM PLAYBOOKS LIMIT 1 FORMAT TSVWithNames" | head -1 | tr '\t' ' ' | sed 's/.* version_tuple /version_tuple /')"
           [ "$tail3" = "$late" ] || { echo "FAIL: SELECT * column tail is '$tail3', want '$late'"; exit 1; }
           echo "ok: SELECT * column tail"
