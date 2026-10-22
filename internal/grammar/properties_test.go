@@ -216,7 +216,7 @@ func TestCheckTrustedEndpoint(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{"", "Gateway.example", "https://gw.example", "gw.example/v1", "user@gw.example",
-		"gw.example:", "gw.example:123456", "gw.example:8a", "-gw.example", "gw-.example", "gw..example", ".gw", ":443", "gw example"} {
+		"gw.example:", "gw.example:123456", "gw.example:0", "gw.example:65536", "gw.example:8a", "-gw.example", "gw-.example", "gw..example", ".gw", ":443", "gw example"} {
 		if checkTrustedEndpoint(bad) == "" {
 			t.Errorf("%q accepted", bad)
 		}

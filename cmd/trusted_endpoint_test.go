@@ -61,8 +61,18 @@ func TestTrustedEndpointProperty(t *testing.T) {
 	// A playbook with none says RESET, so re-applying its statement clears
 	// one added later by hand.
 	mustStmt(t, "CREATE PLAYBOOK plain SET launcher = ''")
-	if out := mustStmt(t, "SHOW CREATE PLAYBOOK plain"); !strings.Contains(out, "trusted_endpoint") || strings.Contains(out, "trusted_endpoint = ") {
-		t.Fatalf("SHOW CREATE of an untrusting playbook:\n%s", out)
+	plain := mustStmt(t, "SHOW CREATE PLAYBOOK plain")
+	if !strings.Contains(plain, "trusted_endpoint") || strings.Contains(plain, "trusted_endpoint = ") {
+		t.Fatalf("SHOW CREATE of an untrusting playbook:\n%s", plain)
+	}
+	plainFile := filepath.Join(t.TempDir(), "plain.cpb")
+	if err := os.WriteFile(plainFile, []byte(plain), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustStmt(t, "ALTER PLAYBOOK plain SET trusted_endpoint = 'gw.example'")
+	mustStmt(t, "APPLY "+plainFile+" --yes")
+	if got := trustedOf(t, "plain"); got != "" {
+		t.Fatalf("re-applying the statement left a trust added by hand: %q", got)
 	}
 }
 

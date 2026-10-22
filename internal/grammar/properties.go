@@ -115,10 +115,15 @@ func checkTrustedEndpoint(v string) string {
 		if port == "" || len(port) > 5 {
 			return why
 		}
+		n := 0
 		for _, r := range port {
 			if r < '0' || r > '9' {
 				return why
 			}
+			n = n*10 + int(r-'0')
+		}
+		if n < 1 || n > 65535 {
+			return why
 		}
 	}
 	if host == "" {
