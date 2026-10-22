@@ -1,8 +1,14 @@
 -- Two env sets, attached in order: a later set wins over an earlier one,
 -- and the playbook's own variables win over both.
+-- A route carries its provider's own key, by reference (see 04): without
+-- one, Claude Code would send your Claude login there, and cpb refuses
+-- the launch.
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
+
 CREATE OR REPLACE ENV router
   DESCRIPTION 'A model router on this machine'
-  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3;
+  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
+  SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token';
 
 CREATE OR REPLACE ENV thinking
   SET MAX_THINKING_TOKENS=8000;

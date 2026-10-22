@@ -1,3 +1,6 @@
+# The launch the README shows: the router's key reaches claude, by the helper.
+cpb run work
+grep -qx 'ANTHROPIC_AUTH_TOKEN=placeholder-router-token' "$HOME/.claude-playbooks/work/.fake-claude/launch-env"
 # Place a set without restating the list: take thinking out, put it first.
 cpb ALTER PLAYBOOK work DROP ENV thinking
 cpb SHOW PLAYBOOK work --json | python3 -c 'import json,sys; e=json.load(sys.stdin)["envs"]; assert e==["router"], e'

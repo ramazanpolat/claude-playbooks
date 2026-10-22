@@ -1,0 +1,24 @@
+p="$HOME/.claude-playbooks/sre"
+token() { sed -n 's/^CLAUDE_CODE_OAUTH_TOKEN=//p' "$p/.fake-claude/launch-env"; }
+# Which account each playbook runs on: names only.
+cpb "SELECT name, token_source, token_account FROM PLAYBOOKS" | grep -qx "$(printf 'sre\tenv-set:acct-work\tacct-work')"
+cpb EXPLAIN PLAYBOOK sre | grep -q 'Claude token: from env set acct-work (the account, by reference)'
+# The attached account's token reaches claude, through the helper.
+cpb run sre
+test "$(token)" = placeholder-work-token
+# One launch on the other account, without switching.
+cpb run --env-set acct-personal sre
+test "$(token)" = placeholder-personal-token
+cpb "SELECT name, token_account FROM PLAYBOOKS" | grep -qx "$(printf 'sre\tacct-work')"
+# Switch for good; a second run changes nothing.
+cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal
+cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal | grep -q unchanged
+cpb run sre
+test "$(token)" = placeholder-personal-token
+# A token exported in the shell cannot stand in for the account's.
+CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run sre
+test "$(token)" = placeholder-personal-token
+# No value is ever written under the playbooks root (the stand-in claude's
+# own record of its environment aside).
+if grep -rq --exclude-dir=.fake-claude 'placeholder-' "$HOME/.claude-playbooks"; then echo "a token reached a file"; exit 1; fi
+cpb ALTER PLAYBOOK sre REPLACE ENV acct-personal WITH acct-work

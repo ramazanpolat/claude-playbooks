@@ -49,6 +49,12 @@
   `token_account` (the env set holding the token). `EXPLAIN` says it in a
   `Claude token:` line. Never a credential character:
   `cpb SELECT name, token_account FROM PLAYBOOKS`.
+- **Examples and arena.** `examples/23-accounts`: two accounts as env sets,
+  switched with `REPLACE ENV`, one launch on the other with `--env-set`.
+  The router examples (02, 13, 19) now give the router its own key by
+  reference, as the login guard requires. The arena gains the `accounts`
+  suite: account launches through the helper, the guard's refusal and its
+  fix, and the own login set aside and restored.
 
 ## [v4.0.0-rc4] -- 2026-10-18
 
