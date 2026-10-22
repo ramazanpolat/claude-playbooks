@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **A playbook routed to another provider with no key of its own, on a shared
+  login, no longer launches** (the login guard, below): Claude Code would
+  send your Claude login or token there. The refusal names the address and
+  the fixes; `examples/upgrade.sh` names each affected playbook. Fix, one
+  line: `cpb ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'` (the
+  provider's own key), or `cpb ALTER PLAYBOOK <name> SET login = 'isolated'
+  BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN`.
+
+### Known gaps
+
+- The website's `cpb play` template `router-glm` (`site/p/router-glm.cpb`)
+  routes to a router without a router key, so the login guard refuses it
+  once a login can reach it. The site is unchanged in this release.
+
 ### Accounts
 
 - **The OAuth token takes a secret reference.** `CREATE ENV acct-work SET
@@ -16,9 +32,8 @@
   provider key (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`, a value or a
   reference, or an `apiKeyHelper`), is refused before anything changes when a
   Claude login or token could reach it, naming the fixes. `EXPLAIN --json`
-  gains `route.guard`. **Upgrading:** a playbook routed to a router without a
-  key, on a shared login, now refuses to launch; give the router its own key,
-  or `SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN`.
+  gains `route.guard`. See *Breaking changes* for what it refuses on
+  upgrade.
 - **A token over an isolated playbook's own login no longer costs that
   login.** Before, cpb deleted the playbook's stored login for a token run,
   and it needed `/login` again. On Linux the login is now set aside for the
