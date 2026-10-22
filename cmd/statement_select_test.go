@@ -72,7 +72,7 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 		t.Fatalf("handoff: %v\n%q", err, out)
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
-	late := "play, apply, auth_mode, token_source, token_kind, token_blocked, token_account"
+	late := "play, apply, auth_mode, token_source, token_kind, token_blocked, token_account, trusted_endpoint"
 	want := strings.Join([]string{"local", "--input-format", "JSONEachRow", "--structure", selectTables["PLAYBOOKS"].structure,
 		"--date_time_input_format", "best_effort", "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0", "--output_format_json_quote_64bit_integers=0",
 		"-q", "SELECT name FROM (SELECT * EXCEPT (" + late + "), " + versionTupleSQL + " AS version_tuple, " + late + " FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"

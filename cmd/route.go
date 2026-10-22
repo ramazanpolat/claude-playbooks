@@ -36,9 +36,10 @@ type routeJSON struct {
 	// nor Vertex is switched on), "unknown" otherwise. cpb names no other class.
 	Egress string `json:"egress"`
 	// Guard is the login guard's verdict for a launch with no flags (v4.1.0):
-	// ok, or refused when the requests go to an address that is not
+	// ok; refused when the requests go to an address that is not
 	// Anthropic's, no provider key is set, and a Claude login or token
-	// would be sent there. Presence only, never a value.
+	// would be sent there; trusted when that address is the playbook's
+	// trusted_endpoint, over https. Presence only, never a value.
 	Guard auth.GuardResult `json:"guard"`
 }
 

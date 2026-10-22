@@ -164,11 +164,26 @@ address instead. cpb refuses that launch before it changes anything (the
 requests go to localhost:20128, which is not Anthropic, and no provider key is set: Claude Code would send your Claude login there. Fix one of:
   - give the provider its own key, by reference: cpb ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'
   - keep every Claude credential out: cpb ALTER PLAYBOOK glm SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN (and /logout in it, if it holds a login of its own)
+  - only for a gateway you trust that forwards to Anthropic, over https: cpb ALTER PLAYBOOK glm SET trusted_endpoint = 'localhost:20128'
 ```
 
 A key in the playbook's `settings.json` (`env.ANTHROPIC_AUTH_TOKEN`, or an
 `apiKeyHelper`) counts too. `cpb EXPLAIN PLAYBOOK <name>` says when a launch
 would be refused, and `--json` gives the verdict as `route.guard`.
+
+**A gateway you trust.** Some setups put a gateway in front of Anthropic
+(a company proxy that logs or rate-limits) and want your Claude login to go
+through it. Name that one host for the playbook:
+
+```bash
+cpb ALTER PLAYBOOK corp SET trusted_endpoint = 'gateway.corp.example'
+```
+
+The guard then lets the login through to that host only, and only over
+`https`; `EXPLAIN` says `Login guard: trusted gateway`. Point the playbook at
+another address and the guard refuses again. `RESET trusted_endpoint` takes
+the trust back. A playbook installed from a source, or built by `cpb play`
+from a recipe, never gets this setting from it: it is yours to set.
 
 ## See where every playbook stands
 

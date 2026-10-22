@@ -225,13 +225,21 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			login = "isolated"
 		}
 		global, _ := globalInstructionsStateOf(pb.Path)
-		st.Clauses = append(st.Clauses,
-			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}})
+		props := []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}
+		if m != nil && m.TrustedEndpoint != "" {
+			props = append(props, grammar.Var{Key: "trusted_endpoint", Value: m.TrustedEndpoint})
+		}
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetProperties, Settings: props})
 		// Exact convergence (D2): every key that is not set is RESET, so
 		// the statement brings a playbook back to exactly this, and the
 		// whole env list is stated, '' for none. Collections (plugins,
 		// tools, MCP servers, models, skills) stay additive.
 		st.Clauses = append(st.Clauses, sandboxCreateClauses(m, sandboxed)...)
+		if m == nil || m.TrustedEndpoint == "" {
+			// Exact convergence: a trusted gateway added later by hand is
+			// cleared by re-applying this statement.
+			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.ResetProperties, Settings: []grammar.Var{{Key: "trusted_endpoint"}}})
+		}
 		sf, err := settings.Load(pb.Path)
 		if err != nil {
 			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %w", pb.Name, err)

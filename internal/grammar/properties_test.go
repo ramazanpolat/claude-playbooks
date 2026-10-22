@@ -118,8 +118,8 @@ func TestFormatPlaybookProperties(t *testing.T) {
 
 func TestPlaybookPropertyErrors(t *testing.T) {
 	for src, want := range map[string]string{
-		"CREATE PLAYBOOK x SET;":                                                                    "SET takes <key> = '<value>' (launcher, login, global_instructions, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
-		"CREATE PLAYBOOK x SET colour = 'blue';":                                                    "colour is not a playbook property (launcher, login, global_instructions, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
+		"CREATE PLAYBOOK x SET;":                                                                    "SET takes <key> = '<value>' (launcher, login, global_instructions, trusted_endpoint, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
+		"CREATE PLAYBOOK x SET colour = 'blue';":                                                    "colour is not a playbook property (launcher, login, global_instructions, trusted_endpoint, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
 		"CREATE PLAYBOOK x SET global_instructions = 'sealed';":                                     "global_instructions takes 'excluded' or 'inherited'",
 		"CREATE PLAYBOOK x SET global_instructions;":                                                "SET takes <key> = '<value>'",
 		"CREATE PLAYBOOK x SET global_instructions = ;":                                             "needs a value",
@@ -128,7 +128,7 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 		"ALTER PLAYBOOK x SET global_instructions = 'inherited', global_instructions = 'excluded';": "global_instructions is named twice in one statement",
 		"ALTER PLAYBOOK x SET global_instructions = 'inherited' RESET global_instructions;":         "global_instructions is named twice in one statement",
 		"ALTER PLAYBOOK x SET login = 'shared' SET login = 'isolated';":                             "login is named twice in one statement",
-		"ALTER PLAYBOOK x RESET;":                                                                   "RESET takes <key> (launcher, login, global_instructions, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
+		"ALTER PLAYBOOK x RESET;":                                                                   "RESET takes <key> (launcher, login, global_instructions, trusted_endpoint, model, agent, sandbox.<key>, statusline.command, statusline.refresh, model_picker.mode)",
 		"ALTER PLAYBOOK x RESET colour;":                                                            "colour is not a playbook property",
 		"ALTER PLAYBOOK x SET FOO=1;":                                                               "FOO is not a playbook property; a variable is SET VAR FOO=<value>",
 		"CREATE PLAYBOOK x SET sandbox.always = true, login = 'shared';":                            "cannot be combined with login = 'shared'",
@@ -186,7 +186,7 @@ func TestPlaybookPropertyErrors(t *testing.T) {
 
 func TestExpectPlaybookProperties(t *testing.T) {
 	w := strings.Fields
-	if got := Expect(w("ALTER PLAYBOOK k RESET")); !reflect.DeepEqual(got, []string{"launcher", "login", "global_instructions", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
+	if got := Expect(w("ALTER PLAYBOOK k RESET")); !reflect.DeepEqual(got, []string{"launcher", "login", "global_instructions", "trusted_endpoint", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
 		t.Errorf("ALTER PLAYBOOK k RESET offers %q", got)
 	}
 	if got := Expect(w("ALTER PLAYBOOK k SET")); !contains(got, "VAR") || !contains(got, "login") || !contains(got, "global_instructions") {
@@ -195,7 +195,7 @@ func TestExpectPlaybookProperties(t *testing.T) {
 	if got := Expect(w("CREATE PLAYBOOK k")); !contains(got, "SET") || contains(got, "ISOLATED") || contains(got, "SETTINGS") {
 		t.Errorf("CREATE PLAYBOOK k offers %q", got)
 	}
-	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"launcher", "login", "global_instructions", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
+	if got := Expect(w("CREATE PLAYBOOK k SET")); !reflect.DeepEqual(got, []string{"launcher", "login", "global_instructions", "trusted_endpoint", "model", "agent", "sandbox.always", "sandbox.backend", "sandbox.host", "sandbox.workdir", "sandbox.mounts", "sandbox.allow_net", "sandbox.secrets", "sandbox.claude_version", "sandbox.share_skills", "statusline.command", "statusline.refresh", "model_picker.mode"}) {
 		t.Errorf("CREATE PLAYBOOK k SET offers %q", got)
 	}
 }

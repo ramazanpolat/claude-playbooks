@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,45 @@ func TestGuardIgnoresALinkIsolationDetaches(t *testing.T) {
 	writeStore(t, configDir, `{`+grantJSON+`}`)
 	if g := guardOf(t, configDir); g.Verdict != GuardRefused || g.Sends != "login" {
 		t.Fatalf("guard = %+v, want refused for the own login", g)
+	}
+}
+
+// trusted_endpoint: the one host the playbook names lets its Claude login
+// through, over https only, and only that host.
+func TestGuardTrustedEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, trusted, want string
+	}{
+		{"the trusted host, https", "https://gateway.corp.example/v1", "gateway.corp.example", GuardTrusted},
+		{"case does not matter", "https://Gateway.Corp.Example/v1", "gateway.corp.example", GuardTrusted},
+		{"with its port", "https://gw.example:8443/v1", "gw.example:8443", GuardTrusted},
+		{"another port is another endpoint", "https://gw.example:9443/v1", "gw.example:8443", GuardRefused},
+		{"plain http", "http://gateway.corp.example/v1", "gateway.corp.example", GuardRefused},
+		{"another host", "https://router.example/v1", "gateway.corp.example", GuardRefused},
+		{"a lookalike", "https://gateway.corp.example.evil.example/v1", "gateway.corp.example", GuardRefused},
+		{"nothing trusted", "https://gateway.corp.example/v1", "", GuardRefused},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir := t.TempDir()
+			body := "[env.set]\nANTHROPIC_BASE_URL = \"" + tc.base + "\"\n"
+			if tc.trusted != "" {
+				body = "trusted_endpoint = \"" + tc.trusted + "\"\n\n" + body
+			}
+			writeManifest(t, configDir, body)
+			g := guardOf(t, configDir)
+			if g.Verdict != tc.want {
+				t.Fatalf("guard = %+v, want %s", g, tc.want)
+			}
+			if tc.want == GuardRefused && !strings.Contains(GuardError(g, "pb").Error(), "SET trusted_endpoint = '") {
+				t.Fatalf("the refusal does not name the opt-in: %v", GuardError(g, "pb"))
+			}
+		})
+	}
+	// An address from a secret reference is never matched: its host is
+	// unknown to cpb.
+	configDir := t.TempDir()
+	writeManifest(t, configDir, "trusted_endpoint = \"gateway.corp.example\"\n\n[env.refs]\nANTHROPIC_BASE_URL = \"keychain:gw-url\"\n")
+	if g := guardOf(t, configDir); g.Verdict != GuardRefused {
+		t.Fatalf("a referenced address was trusted: %+v", g)
 	}
 }

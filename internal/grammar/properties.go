@@ -65,6 +65,11 @@ var playbookPropertyTable = []playbookProperty{
 	// loads them, as Claude Code's ancestor walk does for any directory
 	// under $HOME.
 	{key: "global_instructions", values: []string{"excluded", "inherited"}},
+	// trusted_endpoint: the one host, not Anthropic's, the login guard
+	// lets the Claude login or token reach, over https (a gateway that
+	// forwards to Anthropic). Stays in its SET and RESET clauses, like
+	// login. RESET clears it.
+	{key: "trusted_endpoint", kind: kindString, check: checkTrustedEndpoint, placeholder: "<host>"},
 	// model: the playbook's default model (settings.json model).
 	{key: "model", kind: kindString, check: checkModel, set: SetModel, del: UnsetModel, placeholder: "<model>"},
 	// agent: the agent the main session runs as (settings.json agent).
@@ -97,6 +102,17 @@ var playbookPropertyTable = []playbookProperty{
 // defaultsPropertyTable is DEFAULTS' one property: the secret helper.
 var defaultsPropertyTable = []playbookProperty{
 	{key: "secret_helper", kind: kindString, check: checkHelper, set: SetHelper, del: UnsetHelper, placeholder: "<command>"},
+}
+
+var trustedEndpointPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`)
+
+// checkTrustedEndpoint: a host name, lower case, with an optional port; no
+// scheme, path or user (RESET trusted_endpoint clears it).
+func checkTrustedEndpoint(v string) string {
+	if !trustedEndpointPattern.MatchString(v) {
+		return "trusted_endpoint is a host name in lower case, with an optional :port, as in 'gateway.corp.example' (no scheme or path; RESET trusted_endpoint clears it)"
+	}
+	return ""
 }
 
 func checkStatusline(v string) string {
