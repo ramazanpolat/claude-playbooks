@@ -823,6 +823,8 @@ in the playbook's manifest; `RESET trusted_endpoint` clears it.
 - **Never from a source or a recipe.** `CREATE … FROM` ignores a
   `trusted_endpoint` in the source's manifest (one stderr line), `cpb update`
   keeps the installed value, and `cpb play` refuses a recipe that sets it.
+- **Said outright.** `SET IF UNSET trusted_endpoint` is refused: it would
+  replace a trust it cannot see.
 - **Reads.** `SHOW PLAYBOOK --json` and `SELECT`'s `trusted_endpoint` column
   (null when unset); `SHOW CREATE` writes it when set and `RESET` when not;
   `EXPLAIN` prints `Login guard: trusted gateway: …`.

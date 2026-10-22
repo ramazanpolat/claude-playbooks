@@ -206,6 +206,11 @@ func (p *parser) ifUnsetProperties(c *Clause) *Error {
 		return err
 	}
 	for _, v := range c.Settings {
+		if v.Key == "trusted_endpoint" {
+			// Which gateway may receive the Claude login is said outright:
+			// SET IF UNSET would replace a trust it cannot read (v4.1.0).
+			return errAt(c.Pos, "SET IF UNSET does not take trusted_endpoint: which gateway may receive your Claude login is set outright, SET trusted_endpoint = '<host>'")
+		}
 		if def, refused := ifUnsetRefused[v.Key]; refused {
 			return errAt(c.Pos, "SET IF UNSET takes only keys whose default is no value (model, agent, statusline.*, model_picker.mode, sandbox.<key> without a default): "+v.Key+" defaults to "+def+", so it is never unset; use SET")
 		}

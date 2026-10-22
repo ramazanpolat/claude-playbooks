@@ -222,3 +222,11 @@ func TestCheckTrustedEndpoint(t *testing.T) {
 		}
 	}
 }
+
+// Trusting a gateway is said outright, never IF UNSET.
+func TestIfUnsetRefusesTrustedEndpoint(t *testing.T) {
+	_, err := ParseLine("ALTER PLAYBOOK p SET IF UNSET trusted_endpoint = 'gw.example'")
+	if err == nil || !strings.Contains(err.Error(), "SET IF UNSET does not take trusted_endpoint") {
+		t.Fatalf("err = %v", err)
+	}
+}
