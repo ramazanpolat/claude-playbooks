@@ -235,8 +235,8 @@ func TestMissingProfileIsReportedTyped(t *testing.T) {
 }
 
 // An isolated playbook ignores the machine-global token, but a token its own
-// manifest sets is that playbook's choice: injected, with the stored grant
-// quarantined exactly as on the shared token path.
+// manifest sets is that playbook's choice: injected, with its own login set
+// aside for the run (own_login_test.go has the restore).
 func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
 	tokenPath := filepath.Join(t.TempDir(), "oauth-token")
 	if err := os.WriteFile(tokenPath, []byte("sk-ant-oat01-GLOBAL\n"), 0o600); err != nil {
@@ -252,6 +252,7 @@ func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
 	store := writeStore(t, configDir, `{`+grantJSON+`,`+mcpJSON+`}`)
 
 	env, _ := PrepareLaunchEnv(configDir)
+	defer EndLaunch(configDir)
 
 	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-OWN" {
 		t.Fatalf("token = %q, want the manifest's own", got)

@@ -240,13 +240,19 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if g := auth.Guard(absPath, eff, os.Environ()); g.Verdict == auth.GuardRefused {
 		return auth.GuardError(g, "")
 	}
+	if err := auth.OwnLoginRefusal(absPath, eff, ""); err != nil {
+		return err
+	}
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
-	if errors.Is(syncErr, envset.ErrSet) {
+	// A token run may have set the playbook's own login aside: it comes
+	// back when the launch returns, whatever the outcome.
+	defer auth.EndLaunch(absPath)
+	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
 		// wrong credentials -- refuse, do not warn.
@@ -262,7 +268,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
-	runErr := c.Run()
+	runErr := runAttached(c)
 
 	if deleteAfter {
 		if rmErr := os.RemoveAll(absPath); rmErr != nil {

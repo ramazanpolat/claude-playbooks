@@ -136,6 +136,11 @@ func claudeCredentialReachable(configDir string, eff *manifest.Env) string {
 		} else if err != nil && !os.IsNotExist(err) {
 			return "login"
 		}
+		// A grant a token run set aside comes back at this launch when no
+		// run holds it any more (own_login.go): reachable either way.
+		if loginAside(configDir) {
+			return "login"
+		}
 		if keychainLogin(configDir, false, false) != KeychainAbsent {
 			return "login"
 		}
