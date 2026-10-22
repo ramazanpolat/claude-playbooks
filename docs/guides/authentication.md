@@ -39,7 +39,7 @@ session.
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'` (a reference, resolved by your secret helper at launch; `=... AS PLAINTEXT` also works) | that token wins over the file; its own login removed |
 | Switch a playbook between accounts | one env set per account, `cpb CREATE ENV acct-work SET CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'`; then `cpb ALTER PLAYBOOK <name> REPLACE ENV acct-work WITH acct-personal`, or `cpb run --env-set acct-work <name>` for one launch | the attached account's token wins; its own login removed |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token (over a login of its own: set aside for the run on Linux, refused on macOS; see below). `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
 [env set](environment.md#env-sets-define-once-attach-to-many) shared by
@@ -66,6 +66,32 @@ env set may set its own). The same holds for a token you export in the shell
 yourself: only the token read from the token file gets the global descriptors.
 This is a middle ground between sharing the token and `isolated_login` (the
 playbook shares nothing).
+
+## A token over an isolated playbook's own login
+
+An isolated playbook can hold a `/login` of its own and still be launched on
+a token: its env set's (an account), or one picked with `--env-set`. While
+that token runs, the stored login must not stay readable: on an error Claude
+Code would swap it in over the token, and the session breaks.
+
+- **On Linux** the login is a file. cpb moves the grant out of the
+  playbook's `.credentials.json` into `.credentials.json.cpb-aside` for the
+  run, and puts it back when the last token run of that playbook ends. Other
+  keys in the store (MCP logins) stay where they are. A run that was killed
+  leaves the file aside; the next launch of the playbook puts it back first.
+  A `/login` during the token run wins: the earlier login is kept as
+  `.credentials.json.cpb-aside-<stamp>`, never overwritten.
+- **On macOS** the login lives in the Keychain, which cpb cannot move
+  without reading it. The launch is refused before anything changes, naming
+  where the login is and the fixes:
+
+```
+cpb run --block CLAUDE_CODE_OAUTH_TOKEN <name>              # this launch on its own login
+cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN  # always on its own login
+cpb ALTER PLAYBOOK <name> DROP ENV <set>                    # drop the account's set
+```
+
+  Or `/logout` in the playbook once, and it runs on the token from then on.
 
 ## Only the machine's own account is shared
 

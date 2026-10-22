@@ -12,6 +12,7 @@ record of why they are the rules. Newest last.
 | 2026-09-26 | cpb defines a secret helper interface (`--check`, then exec) and never names or discovers a helper | Secrets |
 | 2026-09-26 | Keys cpb reads itself (`CLAUDE_CODE_OAUTH_TOKEN`) never take a reference | Secrets |
 | 2026-10-14/16 | An account is an env set holding `CLAUDE_CODE_OAUTH_TOKEN` by reference; the token leaves the refused list (v4.1.0); the Claude login or token never goes to another provider | Secrets |
+| 2026-10-16 | A token over an isolated playbook's own login: set aside for the run and restored on Linux; refused on macOS for good, since the login is a Keychain item cpb cannot move (D5) | Secrets |
 | 2026-09-26 | A credential-looking literal is refused; `AS PLAINTEXT` stores one knowingly | Secrets |
 | 2026-09-26 | Two senses of "playbook" are kept apart: the installed `PLAYBOOK`, and the playbook *file* | playbook.cpb |
 | 2026-09-26 | `APPLY` takes several files, validates every statement first, and writes nothing on any refusal | playbook.cpb |

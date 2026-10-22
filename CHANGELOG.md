@@ -19,6 +19,14 @@
   gains `route.guard`. **Upgrading:** a playbook routed to a router without a
   key, on a shared login, now refuses to launch; give the router its own key,
   or `SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN`.
+- **A token over an isolated playbook's own login no longer costs that
+  login.** Before, cpb deleted the playbook's stored login for a token run,
+  and it needed `/login` again. On Linux the login is now set aside for the
+  run and put back when it ends (a killed run's comes back at the next
+  launch). On macOS, where the login lives in the Keychain, the launch is
+  refused before anything changes, naming the fixes: `cpb run --block
+  CLAUDE_CODE_OAUTH_TOKEN <name>` for one launch, `BLOCK VAR
+  CLAUDE_CODE_OAUTH_TOKEN` for good, or dropping the account's env set.
 
 ## [v4.0.0-rc4] -- 2026-10-18
 

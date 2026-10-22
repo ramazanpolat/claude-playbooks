@@ -32,6 +32,7 @@ const (
 	tokenFileEnv   = "CPB_OAUTH_TOKEN_FILE"
 	isolateEnv     = "CPB_ISOLATED_LOGIN"
 	dumpEnv        = "CPB_TEST_ENVDUMP"
+	storeDumpEnv   = "CPB_TEST_STOREDUMP"
 	securityLogEnv = "CPB_TEST_SECURITY_LOG"
 )
 
@@ -79,7 +80,10 @@ func shimDir(t *testing.T) string {
 	dir := t.TempDir()
 
 	stubs := map[string]string{
-		"claude": "#!/bin/sh\nenv > \"$" + dumpEnv + "\"\nexit 0\n",
+		// With storeDumpEnv set, the stub also copies the store as the
+		// session sees it, to prove what was readable during the run.
+		"claude": "#!/bin/sh\nenv > \"$" + dumpEnv + "\"\n" +
+			"if [ -n \"$" + storeDumpEnv + "\" ]; then cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$" + storeDumpEnv + "\" 2>/dev/null || : > \"$" + storeDumpEnv + "\"; fi\nexit 0\n",
 		// Records each interception so a test can prove the stub is the binary
 		// actually reached -- a stub silently bypassed by a PATH change would
 		// otherwise re-expose the real Keychain while every test still passed.
