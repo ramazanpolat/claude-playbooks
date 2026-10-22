@@ -83,7 +83,9 @@ func shimDir(t *testing.T) string {
 		// Records each interception so a test can prove the stub is the binary
 		// actually reached -- a stub silently bypassed by a PATH change would
 		// otherwise re-expose the real Keychain while every test still passed.
-		"security": "#!/bin/sh\necho \"$*\" >> \"$" + securityLogEnv + "\"\nexit 1\n",
+		// Exit 44 is errSecItemNotFound: a machine with no Claude item, so
+		// the presence probe answers absent rather than unreadable.
+		"security": "#!/bin/sh\necho \"$*\" >> \"$" + securityLogEnv + "\"\nexit 44\n",
 	}
 	for name, script := range stubs {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
