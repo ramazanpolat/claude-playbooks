@@ -400,3 +400,17 @@ func TestGuardCountsALoginSetAside(t *testing.T) {
 		t.Fatalf("guard = %+v, want refused for the login set aside", g)
 	}
 }
+
+// A restore that finds no grant aside once it holds the lock (another
+// restore took it meanwhile, or the file is empty) drops the file quietly:
+// a missing file is not an error.
+func TestRestoreWithNoGrantIsQuiet(t *testing.T) {
+	configDir := t.TempDir()
+	writeManifest(t, configDir, ownTokenManifest)
+	if err := os.WriteFile(asidePath(configDir), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreOwnLogin(configDir); err != nil || exists(asidePath(configDir)) {
+		t.Fatalf("empty aside: %v", err)
+	}
+}
