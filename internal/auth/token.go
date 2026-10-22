@@ -246,12 +246,19 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// The machine-global token and the plan descriptors describe the
 		// global account and never apply here. A token the MANIFEST sets is
 		// this install's own choice, not the global one, and is honoured:
-		// injected, with the stored grant quarantined exactly as on the
-		// non-isolated token path (the adoption hazard is the same).
+		// injected, with the playbook's own login kept out of the run (the
+		// adoption hazard is the same as on the non-isolated token path):
+		// refused on macOS, set aside elsewhere (own_login.go).
+		if err := OwnLoginRefusal(configDir, menv, ""); err != nil {
+			return refuse(err)
+		}
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
-		syncErr := SyncCredentials(configDir)
+		// A login an earlier token run set aside comes back first, unless
+		// that run is still live: a killed run's is recovered here.
+		restoreErr := restoreOwnLogin(configDir)
+		syncErr := firstErr(SyncCredentials(configDir), restoreErr)
 		if ownToken(menv) {
-			if qErr := QuarantineStoredOAuth(configDir); syncErr == nil {
+			if qErr := setAsideForTokenRun(configDir); syncErr == nil {
 				syncErr = qErr
 			}
 			if own := manifestToken(menv); own != "" {
@@ -263,9 +270,10 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 			if syncErr == nil {
 				syncErr = aErr
 			}
-		} else if absent {
+		} else if absent && !loginAside(configDir) {
 			// Isolated and logged in nowhere: nothing may keep presenting
 			// this directory as the global account. See QuarantineAccountState.
+			// A login a live token run holds aside is still the playbook's.
 			if _, qErr := QuarantineAccountState(configDir); qErr != nil && syncErr == nil {
 				syncErr = qErr
 			}

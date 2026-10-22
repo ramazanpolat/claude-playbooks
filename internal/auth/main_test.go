@@ -27,6 +27,10 @@ func TestMain(m *testing.M) {
 	// The presence probe too: absent unless a test says otherwise, so no
 	// test reaches a real Keychain (CI's macOS runner has one).
 	KeychainProbe = func(string, string) KeychainState { return KeychainAbsent }
+	// The host is Linux unless a test says otherwise, so the own-login
+	// decision (refused on macOS, set aside elsewhere) does not depend on
+	// the machine the suite runs on.
+	hostOS = "linux"
 	// The FILE store is as real as the Keychain: a test that forgets to set a
 	// temporary HOME would read ~/.claude/.credentials.json and could link it
 	// into a fixture. The whole package runs under a scratch HOME, with the

@@ -253,6 +253,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if g := auth.Guard(configDir, eff, os.Environ()); g.Verdict == auth.GuardRefused {
 		return auth.GuardError(g, pb.Name)
 	}
+	// A token over an isolated playbook's own login: refused on macOS,
+	// before anything is mutated (internal/auth/own_login.go).
+	if err := auth.OwnLoginRefusal(configDir, eff, pb.Name); err != nil {
+		return err
+	}
 
 	// A --resume or --continue of a session still live elsewhere is refused
 	// before anything is mutated (resume.go).
@@ -269,7 +274,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configDir, layers)
-	if errors.Is(syncErr, envset.ErrSet) {
+	// A token run may have set the playbook's own login aside: it comes
+	// back when the launch returns, whatever the outcome.
+	defer auth.EndLaunch(configDir)
+	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
 		// wrong credentials -- refuse, do not warn.

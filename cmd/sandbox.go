@@ -798,7 +798,7 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
-	if errors.Is(syncErr, envset.ErrSet) {
+	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		return nil, "", syncErr
 	}
 	if syncErr != nil {
@@ -976,6 +976,9 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		return false, fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", t.configPath)
 	}
 	env, loginPath, err := prepareSandboxEnv(t, backend, layers)
+	// A token run may have set the playbook's own login aside: it comes back
+	// when the launch returns (internal/auth/own_login.go).
+	defer auth.EndLaunch(t.configPath)
 	if err != nil {
 		return false, err
 	}
