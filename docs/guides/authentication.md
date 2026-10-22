@@ -172,6 +172,17 @@ would be refused, and `--json` gives the verdict as `route.guard`.
 
 ## See where every playbook stands
 
+Which account each playbook runs on, and where its token comes from (names
+and states only, never the token):
+
+```
+cpb SELECT name, auth_mode, token_source, token_account FROM PLAYBOOKS
+```
+
+`token_source` is `none`, `playbook`, `env-set:<name>`, `file` (the
+machine's token file) or `shell`; `EXPLAIN PLAYBOOK <name>` says the same in
+its `Claude token:` line.
+
 Without launching anything:
 
 ```bash
