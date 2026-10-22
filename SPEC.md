@@ -1297,10 +1297,27 @@ fetches again (a template name, a URL, a `github:` ref, or a local file's
 absolute path); `url` is empty for a local file; `played_at` is RFC 3339,
 UTC. The human form has a `Played from:` line.
 
-**`apply`** is the object's last field. It is the `[apply]` record of a
+**`apply`** is the `[apply]` record of a
 playbook an `APPLY` gave name-less statements, and `null` for every other:
 `{"files", "to", "sha256", "applied_at"}` (see *The `[apply]` record*). The
 human form has an `Applied from:` line.
+
+**The account fields** (since v4.1.0) come last: which Claude credential a
+launch with no flags uses, and where it comes from. States and names only,
+never a credential character, and no Keychain probe. `EXPLAIN PLAYBOOK
+--json` carries the same five after `global_instructions`, and the human
+`EXPLAIN` has a `Claude token:` line when a token is used or blocked.
+
+- `auth_mode`: `isolated-login`, `token`, `playbook-token`, `shared-login`,
+  or `error` (an env set cannot be resolved), as `cpb auth status` decides it.
+- `token_source`: `none`, `playbook` (its own block), `env-set:<name>`,
+  `file` (the machine's token file), `shell` (exported where cpb runs), or
+  `unknown`.
+- `token_kind`: `value` or `reference`; `null` without a token.
+- `token_blocked`: the playbook blocks `CLAUDE_CODE_OAUTH_TOKEN` (or sets it
+  empty), so a launch takes a stored login wherever a token is active.
+- `token_account`: the env set holding the token -- the account; `null`
+  when the token comes from no env set.
 
 ### SHOW PLAYBOOKS
 
@@ -1618,6 +1635,11 @@ code to the same lines):
 | `model_picker` | `JSON` | The model picker: mode (only or append) and options; null when unset. |
 | `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
 | `apply` | `JSON` | The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other. |
+| `auth_mode` | `String` | How a launch authenticates: isolated-login, token, playbook-token, shared-login, or error. |
+| `token_source` | `String` | Where the Claude token comes from: none, playbook, env-set:<name>, file (the machine's token file), shell, or unknown. |
+| `token_kind` | `Nullable(String)` | value or reference; null when the launch uses no token. |
+| `token_blocked` | `Bool` | True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login. |
+| `token_account` | `Nullable(String)` | The env set holding the token, the account; null when the token comes from no env set. |
 
 **`ENVS`**
 

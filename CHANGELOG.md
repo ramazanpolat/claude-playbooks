@@ -42,6 +42,13 @@
   refused before anything changes, naming the fixes: `cpb run --block
   CLAUDE_CODE_OAUTH_TOKEN <name>` for one launch, `BLOCK VAR
   CLAUDE_CODE_OAUTH_TOKEN` for good, or dropping the account's env set.
+- **Which account a playbook runs on, at a glance.** `SELECT`, `SHOW
+  PLAYBOOK --json` and `EXPLAIN PLAYBOOK --json` gain `auth_mode`,
+  `token_source` (`none`, `playbook`, `env-set:<name>`, `file`, `shell`),
+  `token_kind` (`value` or `reference`), `token_blocked` and
+  `token_account` (the env set holding the token). `EXPLAIN` says it in a
+  `Claude token:` line. Never a credential character:
+  `cpb SELECT name, token_account FROM PLAYBOOKS`.
 
 ## [v4.0.0-rc4] -- 2026-10-18
 

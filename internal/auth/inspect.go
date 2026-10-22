@@ -8,9 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
-	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // Mode is how a launch of a config directory would authenticate, decided
@@ -140,51 +138,8 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			r.Mode = ModeSharedLogin
 		}
 	} else {
-		// Mode: the same decision PrepareLaunchEnv makes, minus its side
-		// effects. Isolation is a manifest property and is reported even
-		// when profile resolution fails.
 		r.IsolatedLogin = isAuthIsolated(configDir)
-		var menv *manifest.Env
-		if m, _ := manifest.Nearest(configDir); m != nil {
-			var err error
-			menv, err = envset.ExpandWithDefault(envset.Dir(config.ResolvePlaybooksDir()), m.Env)
-			if err != nil {
-				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
-			}
-		} else {
-			// No manifest: the registry default still applies.
-			var err error
-			menv, err = envset.ExpandWithDefault(envset.Dir(config.ResolvePlaybooksDir()), nil)
-			if err != nil {
-				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
-			}
-		}
-		if r.Mode == "" {
-			_, setsToken := (map[string]string)(nil), false
-			if menv != nil {
-				_, setsToken = menv.Set[OAuthTokenEnv]
-			}
-			switch {
-			case setsToken && manifestToken(menv) != "", tokenRef(menv):
-				// Honoured on the isolated path too: PrepareLaunchEnv injects
-				// it and quarantines the stored grant exactly as elsewhere.
-				r.Mode = ModePlaybookToken
-			case r.IsolatedLogin:
-				r.Mode = ModeIsolatedLogin
-			case menv.Blocks(OAuthTokenEnv):
-				r.Mode, r.TokenBlocked = ModeSharedLogin, true
-			case setsToken:
-				// Set to an empty value: resolveToken treats that as
-				// inactive, so the launch takes the stored-login path.
-				r.Mode, r.TokenBlocked = ModeSharedLogin, true
-			default:
-				if _, active := TokenActive(); active {
-					r.Mode = ModeToken
-				} else {
-					r.Mode = ModeSharedLogin
-				}
-			}
-		}
+		r.Mode, r.ModeError, r.TokenBlocked, _ = launchMode(configDir)
 	}
 	if f := OAuthTokenFile(); f != "" {
 		if data, err := os.ReadFile(f); err == nil && len(trimSpace(data)) > 0 {

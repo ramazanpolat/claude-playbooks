@@ -87,8 +87,12 @@ type playbookJSON struct {
 	// for every other.
 	Play *playRecordJSON `json:"play"`
 	// Apply is the [apply] record of a playbook an APPLY gave name-less
-	// statements, null for every other. Last.
+	// statements, null for every other.
 	Apply *applyRecordJSON `json:"apply"`
+	// Account is which Claude credential a launch uses and where it comes
+	// from (v4.1.0): auth_mode, token_source, token_kind, token_blocked,
+	// token_account, flattened. Last: SELECT appends them after apply.
+	auth.Account
 }
 
 // statuslineJSON is a playbook's status line (settings.json statusLine):
@@ -210,6 +214,8 @@ type explainJSON struct {
 	// runs with.
 	Login              string `json:"login"`
 	GlobalInstructions string `json:"global_instructions"`
+	// Account is SHOW's, flattened (v4.1.0).
+	auth.Account
 }
 
 // agentJSON is the agent a launch starts as, when the playbook names one.
@@ -385,6 +391,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.Envs = nonNil(m.Env.Sets)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
 	}
+	v.Account = auth.AccountOf(pb.Path)
 	return v
 }
 
@@ -704,7 +711,8 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		model := launchModel(pb, vars)
 		pv := describePlaybook(pb)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
-			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions})
+			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions,
+			Account: pv.Account})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -755,11 +763,36 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}
 	fmt.Println(globalInstructionsLine(globalInstructionsStateOf(pb.Path)))
+	if line := accountLine(v.Account); line != "" {
+		fmt.Println(line)
+	}
 	if eff, err := auth.EffectiveBlock(pb.Path, nil); err == nil {
 		if g := auth.Guard(pb.Path, eff, os.Environ()); g.Verdict == auth.GuardRefused {
 			fmt.Printf("Login guard: a launch would be refused: %s\n", g.Reason)
 		}
 	}
+}
+
+// accountLine is EXPLAIN's line for the Claude token a launch uses, "" when
+// it uses none and blocks none.
+func accountLine(a auth.Account) string {
+	how := ""
+	if a.TokenKind != nil && *a.TokenKind == "reference" {
+		how = ", by reference"
+	}
+	switch {
+	case a.TokenAccount != nil:
+		return fmt.Sprintf("Claude token: from env set %s (the account%s)", *a.TokenAccount, how)
+	case a.TokenSource == auth.TokenSourcePlaybook:
+		return "Claude token: the playbook's own" + how
+	case a.TokenSource == auth.TokenSourceFile:
+		return "Claude token: the machine's token file"
+	case a.TokenSource == auth.TokenSourceShell:
+		return "Claude token: the one exported in this shell"
+	case a.TokenBlocked:
+		return "Claude token: blocked; a launch uses the stored login"
+	}
+	return ""
 }
 
 // helperInEffect is the configured secret helper for --json, nil if none.
