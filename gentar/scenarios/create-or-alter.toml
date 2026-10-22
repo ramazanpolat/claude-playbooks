@@ -1,0 +1,88 @@
+# claude-playbooks own-arena suite: CREATE OR ALTER converges, and a
+# statement is whole or nothing (v4.0.0-rc4).
+#
+# A playbook file (sre.cpb) holds one CREATE OR ALTER PLAYBOOK. Applied
+# twice, the second run changes nothing. Drift made by hand (ALTER) is
+# undone by the next apply, and SHOW CREATE afterwards is byte-identical
+# to the baseline. SHOW CREATE's output, renamed and applied, rebuilds an
+# identical twin. APPLY --dry-run reports the drift without touching the
+# manifest. REPLACE ENV swaps an attached env set, and run --env-set picks
+# one for a single launch and writes nothing back. A CREATE that fails
+# after its creation step (a source whose settings.json is not JSON, so
+# the SET list's model cannot be written) leaves no directory, launcher or
+# registry entry; one refused before it (a missing env set) creates
+# nothing either.
+#
+# A stub `claude` on PATH dumps the environment it received, so the env
+# sets are proven on the REAL launch path. Keyless: no credentials.
+
+[scenario]
+name = "create-or-alter"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
+  '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
+  'cpb CREATE ENV acct-a SET WHO=a && cpb CREATE ENV acct-b SET WHO=b',
+  '''printf '%s\n' "CREATE OR ALTER PLAYBOOK sre" "  SET login = 'isolated', model = 'claude-opus-5-5'" "  USE ENV acct-a;" > "$HOME/sre.cpb"''',
+  'cpb APPLY "$HOME/sre.cpb" > "$HOME/apply-1.out"',
+  'cpb SHOW CREATE PLAYBOOK sre > "$HOME/baseline.cpb"',
+]
+
+[[verify.files]]
+path = "~/.claude-playbooks/sre/.playbook"
+
+[[verify.files]]
+path = "~/baseline.cpb"
+
+[[verify.commands]]
+# The first apply created the playbook with the file's properties and
+# env list; SHOW CREATE states every key, the unset ones as RESET.
+command = '''grep -F "1 created, 0 changed" "$HOME/apply-1.out" && grep -F "CREATE OR ALTER PLAYBOOK sre" "$HOME/baseline.cpb" && grep -F "login = 'isolated'" "$HOME/baseline.cpb" && grep -F "RESET launcher" "$HOME/baseline.cpb" && grep -F "USE ENV acct-a;" "$HOME/baseline.cpb" && grep -F "model = 'claude-opus-5-5'" "$HOME/baseline.cpb" && echo created-ok'''
+contains = "created-ok"
+
+[[verify.commands]]
+# Applied again, the same file changes nothing, and SHOW CREATE is
+# byte-identical.
+command = 'cpb APPLY "$HOME/sre.cpb" > "$HOME/apply-2.out" && grep -F "0 created, 0 changed, 1 unchanged, 0 dropped" "$HOME/apply-2.out" && cpb SHOW CREATE PLAYBOOK sre | cmp -s - "$HOME/baseline.cpb" && echo converged-ok'
+contains = "converged-ok"
+
+[[verify.commands]]
+# Drift by hand: another model, the shared login, another env set. A dry
+# run reports the change and writes nothing; the real apply undoes all
+# three, and SHOW CREATE is the baseline again.
+command = '''cpb ALTER PLAYBOOK sre SET model = 'claude-sonnet-5-5' RESET login >/dev/null && cpb ALTER PLAYBOOK sre USE ENV acct-b >/dev/null && cp "$HOME/.claude-playbooks/sre/.playbook" "$HOME/drifted" && cpb APPLY --dry-run "$HOME/sre.cpb" | grep -F "Would apply" | grep -F "1 changed" && cmp -s "$HOME/drifted" "$HOME/.claude-playbooks/sre/.playbook" && cpb APPLY "$HOME/sre.cpb" | grep -F "0 created, 1 changed" && cpb SHOW CREATE PLAYBOOK sre | cmp -s - "$HOME/baseline.cpb" && echo drift-undone'''
+contains = "drift-undone"
+
+[[verify.commands]]
+# SHOW CREATE is a recipe: renamed and applied, it builds a twin whose
+# own SHOW CREATE, renamed back, is the baseline byte for byte.
+command = 'sed "s/PLAYBOOK sre$/PLAYBOOK twin/" "$HOME/baseline.cpb" > "$HOME/twin.cpb" && grep -q "PLAYBOOK twin" "$HOME/twin.cpb" && cpb APPLY "$HOME/twin.cpb" >/dev/null && cpb SHOW CREATE PLAYBOOK twin | sed "s/PLAYBOOK twin$/PLAYBOOK sre/" | cmp -s - "$HOME/baseline.cpb" && echo twin-ok'
+contains = "twin-ok"
+
+[[verify.commands]]
+# REPLACE ENV swaps the attached set in place, and the launch carries it.
+command = 'cpb ALTER PLAYBOOK twin REPLACE ENV acct-a WITH acct-b >/dev/null && grep -F "sets = [\"acct-b\"]" "$HOME/.claude-playbooks/twin/.playbook" && rm -f "$HOME/claude-env" && cpb run twin && grep -x WHO=b "$HOME/claude-env" >/dev/null && echo replace-ok'
+contains = "replace-ok"
+
+[[verify.commands]]
+# run --env-set picks a set for one launch and writes nothing back.
+command = 'cp "$HOME/.claude-playbooks/sre/.playbook" "$HOME/sre-before" && rm -f "$HOME/claude-env" && cpb run --env-set acct-b sre && grep -x WHO=b "$HOME/claude-env" >/dev/null && cmp -s "$HOME/sre-before" "$HOME/.claude-playbooks/sre/.playbook" && rm -f "$HOME/claude-env" && cpb run sre && grep -x WHO=a "$HOME/claude-env" >/dev/null && echo env-set-ok'
+contains = "env-set-ok"
+
+[[verify.commands]]
+# Whole or nothing, after the creation: the source's settings.json is not
+# JSON, so the install succeeds (global_instructions = inherited writes
+# nothing there) and the SET list's model cannot be written. The refusal
+# says so, and the directory, the launcher and the registry entry are gone.
+command = '''mkdir -p "$HOME/bad-src" && printf "{not json\n" > "$HOME/bad-src/settings.json" && printf "# src\n" > "$HOME/bad-src/CLAUDE.md" && if cpb CREATE PLAYBOOK rb FROM "$HOME/bad-src" SET launcher = 'rbl', global_instructions = 'inherited', model = 'm' > "$HOME/rb.out" 2>&1; then echo not-refused; else grep -F "nothing was created" "$HOME/rb.out" && test ! -e "$HOME/.claude-playbooks/rb" && test ! -e "$HOME/.local/bin/rbl" && ! cpb SHOW PLAYBOOKS | grep -qw rb && echo rolled-back; fi'''
+contains = "rolled-back"
+
+[[verify.commands]]
+# Whole or nothing, before the creation: a missing env set is refused
+# and nothing is made.
+command = 'if cpb CREATE PLAYBOOK ghost USE ENV no-such-set > "$HOME/ghost.out" 2>&1; then echo not-refused; else grep -F "no env set" "$HOME/ghost.out" && test ! -e "$HOME/.claude-playbooks/ghost" && test ! -e "$HOME/.local/bin/ghost" && echo nothing-made; fi'
+contains = "nothing-made"
