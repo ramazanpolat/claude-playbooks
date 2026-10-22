@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **A playbook routed to another provider with no key of its own, on a shared
+  login, no longer launches** (the login guard, below): Claude Code would
+  send your Claude login or token there. The refusal names the address and
+  the fixes; `examples/upgrade.sh` names each affected playbook. Fix, one
+  line: `cpb ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'` (the
+  provider's own key), or `cpb ALTER PLAYBOOK <name> SET login = 'isolated'
+  BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN`.
+
+### Known gaps
+
+- The website's `cpb play` template `router-glm` (`site/p/router-glm.cpb`)
+  routes to a router without a router key, so the login guard refuses it
+  once a login can reach it. The site is unchanged in this release.
+
 ### Accounts
 
 - **The OAuth token takes a secret reference.** `CREATE ENV acct-work SET
@@ -11,6 +27,13 @@
   helper, which sets the token; cpb never holds its value, and a token exported
   in the shell cannot stand in for it. Until now this key was refused as a
   reference.
+- **The login guard: your Claude login or token never goes to another
+  provider.** A launch whose `ANTHROPIC_BASE_URL` is not Anthropic's, with no
+  provider key (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`, a value or a
+  reference, or an `apiKeyHelper`), is refused before anything changes when a
+  Claude login or token could reach it, naming the fixes. `EXPLAIN --json`
+  gains `route.guard`. See *Breaking changes* for what it refuses on
+  upgrade.
 
 ## [v4.0.0-rc4] -- 2026-10-18
 

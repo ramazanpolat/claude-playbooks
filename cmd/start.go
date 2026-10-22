@@ -236,6 +236,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// See cmd/run.go: the login guard, before anything is mutated.
+	if g := auth.Guard(absPath, eff, os.Environ()); g.Verdict == auth.GuardRefused {
+		return auth.GuardError(g, "")
+	}
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {

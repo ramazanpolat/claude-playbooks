@@ -248,6 +248,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// The login guard: no Claude login or token goes to an address that is
+	// not Anthropic's. Refused here, before anything is mutated.
+	if g := auth.Guard(configDir, eff, os.Environ()); g.Verdict == auth.GuardRefused {
+		return auth.GuardError(g, pb.Name)
+	}
 
 	// A --resume or --continue of a session still live elsewhere is refused
 	// before anything is mutated (resume.go).

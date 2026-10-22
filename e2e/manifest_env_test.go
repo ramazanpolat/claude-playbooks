@@ -63,7 +63,9 @@ func TestSiblingPlaybookStillReceivesToken(t *testing.T) {
 func TestManifestSetAndUnsetReachChild(t *testing.T) {
 	root := t.TempDir()
 	playbookWithEnv(t, root, "router",
-		"[env]\nblock = [\"NOISY\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\n")
+		// The router's own key: without one the login guard refuses a
+		// launch to an address that is not Anthropic's (login_guard_test.go).
+		"[env]\nblock = [\"NOISY\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\n")
 
 	got := childEnv(t, root, launch{
 		env: []string{
@@ -135,7 +137,7 @@ func TestProfileReachesChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(profiles, "glm.toml"),
-		[]byte("block = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nANTHROPIC_BASE_URL = \"http://profile/v1\"\nMODEL = \"profile\"\n"), 0o600); err != nil {
+		[]byte("block = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nANTHROPIC_BASE_URL = \"http://profile/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\nMODEL = \"profile\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	playbookWithEnv(t, root, "router", "[env]\nsets = [\"glm\"]\n\n[env.set]\nMODEL = \"own\"\n")

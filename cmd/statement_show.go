@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -754,6 +755,11 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}
 	fmt.Println(globalInstructionsLine(globalInstructionsStateOf(pb.Path)))
+	if eff, err := auth.EffectiveBlock(pb.Path, nil); err == nil {
+		if g := auth.Guard(pb.Path, eff, os.Environ()); g.Verdict == auth.GuardRefused {
+			fmt.Printf("Login guard: a launch would be refused: %s\n", g.Reason)
+		}
+	}
 }
 
 // helperInEffect is the configured secret helper for --json, nil if none.
