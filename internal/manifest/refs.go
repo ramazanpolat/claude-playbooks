@@ -7,15 +7,14 @@ import (
 	"strings"
 )
 
-// RefRefusedKeys may never hold a secret reference. cpb's own launch logic
-// reads their VALUES (the long-lived OAuth token decides injection and
-// credential quarantine), and a reference hides the value by design; "set,
-// value unknown" would break that logic silently. A future key cpb reads
-// joins this list rather than getting a special case. Refused at every
-// layer: a playbook's own block and every env set.
-var RefRefusedKeys = map[string]string{
-	"CLAUDE_CODE_OAUTH_TOKEN": "cpb's authentication needs this token's value: set it as a literal (AS PLAINTEXT)",
-}
+// RefRefusedKeys may never hold a secret reference: keys whose VALUE cpb's
+// own launch logic must read, which a reference hides by design ("set, value
+// unknown" would break that logic silently). A future such key joins this
+// list rather than getting a special case. Refused at every layer: a
+// playbook's own block and every env set. Empty since v4.1.0:
+// CLAUDE_CODE_OAUTH_TOKEN left it when the token decision learned to treat a
+// reference as "a token, supplied by the helper at exec" (accounts).
+var RefRefusedKeys = map[string]string{}
 
 // refPattern is the shape every secret reference shares: a scheme, a colon,
 // the rest (keychain:…, op://…, vault:…). A bare word is far more likely a

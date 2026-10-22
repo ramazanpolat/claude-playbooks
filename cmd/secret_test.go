@@ -98,31 +98,53 @@ func TestSetFromChecksTheReference(t *testing.T) {
 	}
 }
 
-// Keys whose value cpb itself reads never take a reference, at any layer.
-func TestOAuthTokenReferenceRefusedAtEveryLayer(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	helper, _ := fakeHelper(t)
-	root := seedFlatPlaybook(t, "router")
+// An account is an env set holding the OAuth token by reference (v4.1.0).
+// Both layers take it, the launch execs through the helper, which sets the
+// token, and a token exported in the shell never stands in for it. On the
+// isolated path too. BLOCK of the token wins over the reference.
+func TestOAuthTokenByReference(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "work", &manifest.Manifest{})
+	writePlaybook(t, root, "iso", &manifest.Manifest{IsolatedLogin: true})
+	helper, helperLog := fakeHelper(t)
+	claudeLog := stubClaude(t)
 	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
-	mustStmt(t, "CREATE ENV e")
-	for _, line := range []string{
-		"ALTER ENV e SET CLAUDE_CODE_OAUTH_TOKEN FROM keychain:ok/x",
-		"ALTER PLAYBOOK router SET VAR CLAUDE_CODE_OAUTH_TOKEN FROM keychain:ok/x",
-	} {
-		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), "cannot be a secret reference") {
-			t.Errorf("%s: %v", line, err)
+	mustStmt(t, "CREATE ENV acct-work SET CLAUDE_CODE_OAUTH_TOKEN FROM keychain:ok/work")
+	mustStmt(t, "ALTER PLAYBOOK work USE ENV acct-work")
+	mustStmt(t, "ALTER PLAYBOOK iso SET VAR CLAUDE_CODE_OAUTH_TOKEN FROM keychain:ok/iso")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-from-the-shell")
+
+	for name, want := range map[string]string{"work": "keychain:ok/work", "iso": "keychain:ok/iso"} {
+		os.Remove(claudeLog)
+		os.Remove(helperLog)
+		if err := runRun(nil, []string{name, "--version"}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got := readLog(t, claudeLog)
+		if !strings.Contains(got, "CLAUDE_CODE_OAUTH_TOKEN=resolved:"+want) {
+			t.Fatalf("%s: claude did not get the token from the helper:\n%s", name, got)
+		}
+		if strings.Contains(got, "stale-from-the-shell") {
+			t.Fatalf("%s: the shell's token reached claude:\n%s", name, got)
+		}
+		if h := readLog(t, helperLog); !strings.Contains(h, "CLAUDE_CODE_OAUTH_TOKEN="+want+" -- ") {
+			t.Fatalf("%s: helper argv:\n%s", name, h)
 		}
 	}
-	// A hand-written reference is refused when the file is read or written,
-	// so no launch runs with it.
-	if err := envset.Write(envset.Dir(filepath.Dir(root)), &envset.Set{Name: "x",
-		Refs: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:ok/x"}}); err == nil {
-		t.Error("an env set file took a reference for the OAuth token")
+
+	// A one-off --block of the token wins: no token reaches claude.
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	os.Remove(claudeLog)
+	if err := runRun(nil, []string{"--block", "CLAUDE_CODE_OAUTH_TOKEN", "work", "--version"}); err != nil {
+		t.Fatal(err)
 	}
-	if err := manifest.Write(root, &manifest.Manifest{Name: "router",
-		Env: &manifest.Env{Refs: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:ok/x"}}}); err == nil {
-		t.Error("a manifest took a reference for the OAuth token")
+	if got := readLog(t, claudeLog); strings.Contains(got, "CLAUDE_CODE_OAUTH_TOKEN=resolved") {
+		t.Fatalf("a blocked token reached claude:\n%s", got)
+	}
+
+	// The files hold the reference, never a value.
+	if p := readProfile(t, "acct-work"); p.Refs["CLAUDE_CODE_OAUTH_TOKEN"] != "keychain:ok/work" {
+		t.Fatalf("env set refs: %#v", p.Refs)
 	}
 }
 

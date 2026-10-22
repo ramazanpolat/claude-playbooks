@@ -540,13 +540,18 @@ disambiguates.
 - The value never appears in a file, in argv, or in any `SHOW`/`EXPLAIN`
   output.
 - A sandboxed launch of a playbook with references is refused, with a message saying so.
-- **Keys cpb reads itself never take a reference**: `CLAUDE_CODE_OAUTH_TOKEN`, whose value cpb's authentication handling
-  reads to decide injection and credential quarantine. A reference hides the
-  value by design, and "set, value unknown" would break that logic silently.
-  `SET CLAUDE_CODE_OAUTH_TOKEN FROM …` is refused in a playbook's block and
-  in every env set (so under DEFAULTS too), and a hand-written reference for
-  it makes the file invalid. The list lives in one place
-  (`manifest.RefRefusedKeys`); a future key cpb reads joins it.
+- **The OAuth token takes a reference** (since v4.1.0): `SET
+  CLAUDE_CODE_OAUTH_TOKEN FROM '<ref>'` in an env set or a playbook's block
+  makes the token active for the launch, exactly as a value would (the
+  playbook's stored login is quarantined, the global plan descriptors are not
+  injected), and the helper sets it when it execs `claude`; cpb never holds
+  the value. A token exported in the shell is removed first, so it cannot
+  stand in if the helper fails. `BLOCK VAR` / `--block` of the token still
+  wins. An env set holding a token by reference is an **account**: attach it
+  to switch a playbook's account (`REPLACE ENV`), or pick it for one launch
+  (`--env-set`). A key whose value cpb must read itself would never take a
+  reference; the list lives in one place (`manifest.RefRefusedKeys`) and is
+  empty today.
 
 **The grammar refuses a credential-looking literal**: a
 `SET [VAR] K=V` whose key looks like a credential (the rule SHOW uses to
