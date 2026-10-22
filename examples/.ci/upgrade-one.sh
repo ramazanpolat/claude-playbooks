@@ -89,8 +89,16 @@ for pb in $pbs; do
   if [ "${info%% *}" = True ]; then echo "$pb" >> "$home/launch-skipped"; continue; fi
   cfg=${info#* }
   rm -f "$cfg/.fake-claude/launch-env"
-  cpb run "$pb" > /dev/null 2>&1
-  if [ ! -f "$cfg/.fake-claude/launch-env" ]; then echo "run $pb did not launch claude"; exit 1; fi
+  # Since v4.1.0 the login guard refuses a launch that would send the Claude
+  # login to an address that is not Anthropic's with no provider key: an
+  # older release's router playbook with no key is refused, by design, and
+  # upgrade.sh's line names it. Anything else that stops the launch fails.
+  if ! cpb run "$pb" > /dev/null 2> "$home/run-$pb.err"; then
+    if grep -q "which is not Anthropic, and no provider key is set" "$home/run-$pb.err" && [ ! -f "$cfg/.fake-claude/launch-env" ]; then
+      echo "$pb" >> "$home/guard-refused"; continue
+    fi
+  fi
+  if [ ! -f "$cfg/.fake-claude/launch-env" ]; then echo "run $pb did not launch claude"; cat "$home/run-$pb.err"; exit 1; fi
 done
 for pb in $pbs; do
   cpb DROP PLAYBOOK "$pb" --yes > /dev/null
