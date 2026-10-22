@@ -152,3 +152,34 @@ func TestExplainRouteInherited(t *testing.T) {
 		t.Fatalf("a shared launch uses the inherited OAuth token: %+v", r)
 	}
 }
+
+// The login guard's verdict (v4.1.0): a shared playbook routed to another
+// provider with no key is refused, naming the login; the provider's key
+// makes it ok. The URL's userinfo never reaches the reason.
+func TestExplainRouteGuard(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	clearRouteEnv(t)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	stubKeychainProbe(t, auth.KeychainAbsent)
+	mustStmt(t, "CREATE PLAYBOOK plain SET launcher = ''")
+	if g := routeOf(t, "plain").Guard; g.Verdict != auth.GuardOK {
+		t.Fatalf("a plain playbook: %+v", g)
+	}
+	mustStmt(t, "CREATE PLAYBOOK bare SET launcher = ''")
+	mustStmt(t, "ALTER PLAYBOOK bare SET VAR ANTHROPIC_BASE_URL=http://user:s3cr3tpw@router.example/v1 AS PLAINTEXT")
+	g := routeOf(t, "bare").Guard
+	if g.Verdict != auth.GuardRefused || g.Sends != "login" || g.Host != "router.example" {
+		t.Fatalf("a keyless routed playbook: %+v", g)
+	}
+	if strings.Contains(g.Reason, "s3cr3tpw") {
+		t.Fatalf("the reason quotes the userinfo: %s", g.Reason)
+	}
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK bare"); !strings.Contains(out, "Login guard: a launch would be refused") {
+		t.Fatalf("the human EXPLAIN does not say so:\n%s", out)
+	}
+	mustStmt(t, "ALTER PLAYBOOK bare SET VAR ANTHROPIC_AUTH_TOKEN=router-key AS PLAINTEXT")
+	if g := routeOf(t, "bare").Guard; g.Verdict != auth.GuardOK {
+		t.Fatalf("with the provider's key: %+v", g)
+	}
+}

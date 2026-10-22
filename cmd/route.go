@@ -35,6 +35,11 @@ type routeJSON struct {
 	// api.anthropic.com over https (or no base URL is set and neither Bedrock
 	// nor Vertex is switched on), "unknown" otherwise. cpb names no other class.
 	Egress string `json:"egress"`
+	// Guard is the login guard's verdict for a launch with no flags (v4.1.0):
+	// ok, or refused when the requests go to an address that is not
+	// Anthropic's, no provider key is set, and a Claude login or token
+	// would be sent there. Presence only, never a value.
+	Guard auth.GuardResult `json:"guard"`
 }
 
 var defaultModelVar = regexp.MustCompile(`^ANTHROPIC_DEFAULT_([A-Z0-9_]+)_MODEL$`)
@@ -74,6 +79,8 @@ func routeInherited(origins []envset.Origin, environ []string) []envset.Origin {
 
 func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSON) routeJSON {
 	r := routeJSON{Models: map[string]string{}, Auth: "none", Egress: "anthropic"}
+	eff, _ := auth.EffectiveBlock(pb.Path, nil)
+	r.Guard = auth.Guard(pb.Path, eff, os.Environ())
 	if model != nil && model.Name != "" {
 		r.Models["default"] = model.Name
 	}

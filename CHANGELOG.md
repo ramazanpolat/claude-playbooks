@@ -11,6 +11,14 @@
   helper, which sets the token; cpb never holds its value, and a token exported
   in the shell cannot stand in for it. Until now this key was refused as a
   reference.
+- **The login guard: your Claude login or token never goes to another
+  provider.** A launch whose `ANTHROPIC_BASE_URL` is not Anthropic's, with no
+  provider key (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`, a value or a
+  reference, or an `apiKeyHelper`), is refused before anything changes when a
+  Claude login or token could reach it, naming the fixes. `EXPLAIN --json`
+  gains `route.guard`. **Upgrading:** a playbook routed to a router without a
+  key, on a shared login, now refuses to launch; give the router its own key,
+  or `SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN`.
 
 ## [v4.0.0-rc4] -- 2026-10-18
 

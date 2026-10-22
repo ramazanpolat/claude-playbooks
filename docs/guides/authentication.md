@@ -119,6 +119,31 @@ interactive turn. Isolation removes that leftover state at launch while the
 playbook has no login of its own, and `cpb auth status` shows `no login; stale
 account state, purged at launch` until it has.
 
+## Another provider gets its own key, never your login
+
+Claude Code sends its credential to whatever `ANTHROPIC_BASE_URL` names. A
+provider other than Anthropic issues its own key, and that key outranks your
+Claude login, so your login stays on your machine:
+
+```bash
+cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
+cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-key'
+```
+
+With no such key, Claude Code would send your Claude login or token to that
+address instead. cpb refuses that launch before it changes anything (the
+**login guard**), and says how to fix it:
+
+```
+requests go to localhost:20128, which is not Anthropic, and no provider key is set: Claude Code would send your Claude login there. Fix one of:
+  - give the provider its own key, by reference: cpb ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'
+  - keep every Claude credential out: cpb ALTER PLAYBOOK glm SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN (and /logout in it, if it holds a login of its own)
+```
+
+A key in the playbook's `settings.json` (`env.ANTHROPIC_AUTH_TOKEN`, or an
+`apiKeyHelper`) counts too. `cpb EXPLAIN PLAYBOOK <name>` says when a launch
+would be refused, and `--json` gives the verdict as `route.guard`.
+
 ## See where every playbook stands
 
 Without launching anything:
