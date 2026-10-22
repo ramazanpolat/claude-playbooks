@@ -27,7 +27,7 @@ steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\ncp "$CLAUDE_CONFIG_DIR/.credentials.json" "$HOME/store-during" 2>/dev/null || : > "$HOME/store-during"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
-  '''printf '#!/bin/sh\nif [ "$1" = --check ]; then exit 0; fi\nwhile [ "$1" != -- ]; do export "${1%%%%=*}=secret-${1#*=stub:}"; shift; done\nshift\nexec "$@"\n' > "$HOME/.local/bin/arena-helper" && chmod 755 "$HOME/.local/bin/arena-helper"''',
+  '''printf '#!/bin/sh\nif [ "$1" = --check ]; then exit 0; fi\nprintf "%%s\\n" "${CLAUDE_CODE_OAUTH_TOKEN:-unset}" > "$HOME/helper-inherited"\nwhile [ "$1" != -- ]; do export "${1%%%%=*}=secret-${1#*=stub:}"; shift; done\nshift\nexec "$@"\n' > "$HOME/.local/bin/arena-helper" && chmod 755 "$HOME/.local/bin/arena-helper"''',
   "cpb ALTER DEFAULTS SET secret_helper = 'arena-helper'",
   "cpb CREATE ENV acct-work SET CLAUDE_CODE_OAUTH_TOKEN FROM 'stub:work'",
   "cpb CREATE ENV acct-personal SET CLAUDE_CODE_OAUTH_TOKEN FROM 'stub:personal'",
@@ -46,8 +46,9 @@ contains = "account-ok"
 
 [[verify.commands]]
 # REPLACE ENV switches the account for good, and a token exported in the
-# shell does not stand in for it.
-command = '''cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal >/dev/null && CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run sre && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-personal" "$HOME/claude-env" && cpb EXPLAIN PLAYBOOK sre | grep -qF "Claude token: from env set acct-personal (the account, by reference)" && echo switch-ok'''
+# shell does not stand in for it: cpb removes it before the helper runs
+# (the helper records what it inherited).
+command = '''cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal >/dev/null && CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run sre && grep -qx unset "$HOME/helper-inherited" && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-personal" "$HOME/claude-env" && cpb EXPLAIN PLAYBOOK sre | grep -qF "Claude token: from env set acct-personal (the account, by reference)" && echo switch-ok'''
 contains = "switch-ok"
 
 [[verify.commands]]
@@ -63,3 +64,9 @@ contains = "guard-ok"
 # the launch is refused before anything changes, naming the fixes (D5).
 command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE ENV acct-work >/dev/null && P="$HOME/.claude-playbooks/own" && (umask 077 && printf '%s' '{"claudeAiOauth":{"accessToken":"own-login","refreshToken":"r","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"m"}}}' > "$P/.credentials.json") && if [ "$(uname)" = Darwin ]; then rm -f "$HOME/claude-env"; if cpb run own 2> "$HOME/own.err"; then echo own-login-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "holds a login of its own" "$HOME/own.err" && grep -qF "cpb run --block CLAUDE_CODE_OAUTH_TOKEN own" "$HOME/own.err" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; else cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && ! grep -q claudeAiOauth "$HOME/store-during" && grep -q mcpOAuth "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; fi'''
 contains = "aside-ok"
+
+[[verify.commands]]
+# After every launch above: no resolved value (secret-<name>) was ever
+# written under the playbooks root.
+command = '! grep -rq "secret-" "$HOME/.claude-playbooks" && echo no-value-on-disk'
+contains = "no-value-on-disk"
