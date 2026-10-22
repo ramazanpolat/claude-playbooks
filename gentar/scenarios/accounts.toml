@@ -9,7 +9,8 @@
 # address that is not Anthropic's with no provider key, and lets it
 # through once the router has its own key. An isolated playbook holding a
 # /login of its own, launched on an account, has that login set aside for
-# the run (unreadable to claude) and back afterwards (Linux).
+# the run (unreadable to claude) and back afterwards on Linux; on macOS the
+# launch is refused before anything changes.
 #
 # Stubs on PATH: `claude` dumps the environment it received and the
 # credential store it can read; `arena-helper` is a secret helper that
@@ -56,8 +57,9 @@ command = '''cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.invalid/
 contains = "guard-ok"
 
 [[verify.commands]]
-# An isolated playbook with a /login of its own, launched on an account:
-# the login is unreadable during the run and back afterwards, other keys
-# kept, nothing left aside (Linux).
-command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE ENV acct-work >/dev/null && P="$HOME/.claude-playbooks/own" && (umask 077 && printf '%s' '{"claudeAiOauth":{"accessToken":"own-login","refreshToken":"r","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"m"}}}' > "$P/.credentials.json") && cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && ! grep -q claudeAiOauth "$HOME/store-during" && grep -q mcpOAuth "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok'''
+# An isolated playbook with a /login of its own, launched on an account.
+# Linux: the login is unreadable during the run and back afterwards, other
+# keys kept, nothing left aside. macOS (the login lives in the Keychain):
+# the launch is refused before anything changes, naming the fixes (D5).
+command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE ENV acct-work >/dev/null && P="$HOME/.claude-playbooks/own" && (umask 077 && printf '%s' '{"claudeAiOauth":{"accessToken":"own-login","refreshToken":"r","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"m"}}}' > "$P/.credentials.json") && if [ "$(uname)" = Darwin ]; then rm -f "$HOME/claude-env"; if cpb run own 2> "$HOME/own.err"; then echo own-login-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "holds a login of its own" "$HOME/own.err" && grep -qF "cpb run --block CLAUDE_CODE_OAUTH_TOKEN own" "$HOME/own.err" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; else cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && ! grep -q claudeAiOauth "$HOME/store-during" && grep -q mcpOAuth "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; fi'''
 contains = "aside-ok"
