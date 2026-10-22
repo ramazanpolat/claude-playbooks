@@ -1,0 +1,16 @@
+-- Two Claude accounts, each an env set holding its token by reference
+-- (`claude setup-token` makes one per account). Attach one to switch a
+-- playbook's account; pick one for a single launch.
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
+
+CREATE OR REPLACE ENV acct-work
+  DESCRIPTION 'Claude account: work'
+  SET CLAUDE_CODE_OAUTH_TOKEN FROM 'file:claude-token-work';
+
+CREATE OR REPLACE ENV acct-personal
+  DESCRIPTION 'Claude account: personal'
+  SET CLAUDE_CODE_OAUTH_TOKEN FROM 'file:claude-token-personal';
+
+CREATE OR ALTER PLAYBOOK sre
+  SET launcher = ''
+  USE ENV acct-work;

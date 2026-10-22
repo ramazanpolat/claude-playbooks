@@ -40,3 +40,4 @@ helper, `cpb-secret-file`, which examples 04 and 09 use.
 | [20-sandbox](20-sandbox/) | a playbook that always runs in a Docker Sandbox: its `[sandbox]` settings, written and unset |
 | [21-play](21-play/) | `cpb play`: check, plan, run, keep and update someone else's recipe |
 | [22-global-instructions](22-global-instructions/) | the `global_instructions` setting: `~/.claude`'s `CLAUDE.md` and rules kept out of a playbook |
+| [23-accounts](23-accounts/) | accounts: env sets holding a Claude token by reference; switch with `REPLACE ENV`, one launch with `--env-set` |

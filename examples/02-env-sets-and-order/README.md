@@ -15,3 +15,8 @@ a variable at launch even when your shell exports it. `ADD ENV x FIRST` or
 `REPLACE ENV router WITH fast` swaps one set for another at the same place;
 run again, it changes nothing. A recipe states `USE ENV`; `REPLACE` is for the
 prompt, and `SHOW CREATE` never writes it.
+
+`router` holds the router's own key by reference, resolved at launch by the
+sample secret helper (`.setup` stores a placeholder; see
+[04](../04-secret-references/)). A route to another provider with no key of
+its own is refused at launch: Claude Code would send your Claude login there.
