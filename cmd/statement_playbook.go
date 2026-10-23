@@ -94,6 +94,13 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 // SET list as an ALTER (convergePlaybook), and IF NOT EXISTS changes
 // nothing; what is fixed at creation is only compared.
 func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
+	// Before either existing-playbook branch: a credential in the source
+	// is refused whether or not anything would be fetched.
+	if o := createOptionsOf(st); o.from != "" {
+		if err := refuseCredentialSource(o.from); err != nil {
+			return err
+		}
+	}
 	if st.OrAlter || st.IfNotExists {
 		pb, exists, err := r.findPlaybook(st.Name)
 		if err != nil {
@@ -278,15 +285,18 @@ func warnDrift(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) {
 	if pb == nil || o.from == "" {
 		return
 	}
-	var have string
+	// Compared as recorded, shown masked: either side may carry a
+	// credential (an install recorded before cpb refused them).
+	var have, haveShown string
 	if m := pb.Manifest; m != nil && m.Source != nil {
-		have = describeSource(redactSourceURL(m.Source.Repository), m.Source.Branch, m.Source.Subdir)
+		have = describeSource(m.Source.Repository, m.Source.Branch, m.Source.Subdir)
+		haveShown = describeSource(redactSourceURL(m.Source.Repository), m.Source.Branch, m.Source.Subdir)
 	}
 	if want := describeSource(o.from, o.branch, o.subdir); have != want {
-		if have == "" {
-			have = "no recorded source"
+		if haveShown == "" {
+			haveShown = "no recorded source"
 		}
-		r.warn(warnSourceDrift, fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, have, want))
+		r.warn(warnSourceDrift, fmt.Sprintf("PLAYBOOK %s exists; source differs (installed %s, file says %s)", st.Name, haveShown, describeSource(redactSourceURL(o.from), o.branch, o.subdir)))
 	}
 }
 

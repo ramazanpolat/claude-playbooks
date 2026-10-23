@@ -574,3 +574,71 @@ func TestUpdateLeavesSourceRuntimeOut(t *testing.T) {
 		t.Fatal("the source itself was changed")
 	}
 }
+
+// On an existing playbook, CREATE … IF NOT EXISTS and CREATE OR ALTER
+// refuse a credential source too (they fetch nothing, but the source is
+// compared and shown), on every path, and the token is never printed.
+func TestCredentialSourceRefusedOnAnExistingPlaybook(t *testing.T) {
+	resetCommandTestState(t)
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "p", &manifest.Manifest{Source: &manifest.Source{Repository: "https://git.example/repo"}})
+	const token = "ghp_synthetic0123456789abcdef"
+	for _, form := range []string{"CREATE PLAYBOOK IF NOT EXISTS p", "CREATE OR ALTER PLAYBOOK p"} {
+		line := form + " FROM https://" + token + "@git.example/repo"
+		f := writePlaybookFile(t, line+";\n")
+		var outs []string
+		check := func(how string, err error) {
+			t.Helper()
+			if err == nil || !strings.Contains(err.Error(), "carries a credential") || strings.Contains(err.Error(), token) {
+				t.Fatalf("%s, %s: %v", form, how, err)
+			}
+		}
+		stderr := captureStderr(t, func() {
+			out, err := stmt(t, line)
+			outs = append(outs, out)
+			check("statement", err)
+			out, err = apply(t, f)
+			outs = append(outs, out)
+			check("APPLY", err)
+			out, err = apply(t, f, "--dry-run")
+			outs = append(outs, out)
+			check("APPLY --dry-run", err)
+		})
+		var jout string
+		jerr := captureStderr(t, func() { _, jout, _ = applyJSON(t, f, "--dry-run", "--json") })
+		if !strings.Contains(jout, "carries a credential") {
+			t.Fatalf("%s: the JSON report does not refuse:\n%s", form, jout)
+		}
+		for _, s := range append(outs, stderr, jout, jerr) {
+			if strings.Contains(s, token) {
+				t.Fatalf("%s: the token was printed:\n%s", form, s)
+			}
+		}
+	}
+}
+
+// The drift warning shows both sources masked: an install recorded with a
+// credential URL before the refusal never has it printed.
+func TestSourceDriftWarningIsMasked(t *testing.T) {
+	resetCommandTestState(t)
+	root := sandboxDefaultRoot(t)
+	const token = "ghp_synthetic0123456789abcdef"
+	writePlaybook(t, root, "p", &manifest.Manifest{Source: &manifest.Source{Repository: "https://" + token + "@git.example/repo"}})
+	f := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS p FROM https://git.example/other;\n")
+	var out string
+	stderr := captureStderr(t, func() {
+		var err error
+		if out, err = apply(t, f, "--dry-run"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var jout string
+	jerr := captureStderr(t, func() { _, jout, _ = applyJSON(t, f, "--dry-run", "--json") })
+	all := out + stderr + jout + jerr
+	if !strings.Contains(all, "source differs (installed https://<redacted") || !strings.Contains(all, "git.example/other") {
+		t.Fatalf("no masked drift warning:\n%s", all)
+	}
+	if strings.Contains(all, token) {
+		t.Fatalf("the recorded token was printed:\n%s", all)
+	}
+}
