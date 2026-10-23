@@ -83,15 +83,17 @@ func doRename(o renameOpts, args []string) error {
 		}
 	}
 	// A rename carries the launcher the playbook has: its default launcher
-	// (the name) follows the new name, a custom launcher is kept, and a
-	// playbook without one gets none. SET launcher replaces it. Whatever
-	// will be written is checked before any mutation — the late
-	// launcher.Write warning would leave a renamed playbook without its
-	// command.
+	// (the name) follows the new name, and a playbook without one gets none.
+	// A custom launcher is kept, and the new name gets its launcher beside
+	// it, as before, unless that name cannot be a launcher (a command on
+	// PATH, a keyword): then the custom launcher is the command, with a
+	// note. SET launcher replaces it all. Whatever will be written is
+	// checked before any mutation — the late launcher.Write warning would
+	// leave a renamed playbook without its command.
 	followsName := o.launcher == "" && !o.noLauncher &&
 		(oldManifestAlias == oldName || oldManifestAlias == "" && hasNameLauncher(oldName))
 	var writeName string
-	var werr error
+	var werr, nameLauncherErr error
 	switch {
 	case o.launcher != "" || o.noLauncher:
 		// The launcher it has, kept when SET launcher restates it: the
@@ -105,10 +107,12 @@ func doRename(o renameOpts, args []string) error {
 		writeName, werr = resolveLauncherName(false, "", newName, "rename")
 	case oldManifestAlias != "":
 		werr = checkLauncherKept(oldManifestAlias)
+		nameLauncherErr = checkNewLauncher(newName)
 	}
 	if werr != nil {
 		return werr
 	}
+	nameBeside := !followsName && o.launcher == "" && !o.noLauncher && oldManifestAlias != ""
 	if writeName != "" && launcherOpsAllowed() {
 		if ldir, lerr := config.ResolveLauncherDir(); lerr == nil {
 			if _, _, foreign := launcher.Lookup(ldir, writeName); foreign {
@@ -243,7 +247,9 @@ func doRename(o renameOpts, args []string) error {
 			} else {
 				fmt.Printf("Launcher %q now runs %q\n", o.launcher, newName)
 			}
-		case followsName:
+		case nameBeside && nameLauncherErr != nil:
+			fmt.Fprintf(os.Stderr, "Note: no launcher %q (%v); launcher %q runs %q\n", newName, nameLauncherErr, oldManifestAlias, newName)
+		case followsName || nameBeside:
 			if _, werr := launcher.Write(ldir, newName); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", newName, werr)
 			} else {

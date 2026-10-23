@@ -412,3 +412,37 @@ func TestRenameKeepsTheNameLauncherItRestates(t *testing.T) {
 		t.Fatal("the kept launcher claude is gone")
 	}
 }
+
+// The lifecycle a playbook with a custom launcher goes through (the arena's
+// playbook-lifecycle suite): a rename retires the old name's launcher and
+// gives the new name one, and the custom launcher stays.
+func TestRenameWithCustomLauncherGivesTheNewNameALauncher(t *testing.T) {
+	sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	exists := func(name string) bool {
+		_, ok, foreign := launcher.Lookup(config.LauncherDir, name)
+		return ok && !foreign
+	}
+	for _, steps := range [][]string{
+		{"CREATE PLAYBOOK lifecycle-pb", "ALTER PLAYBOOK lifecycle-pb SET launcher = 'lcpb'"},
+		{"CREATE PLAYBOOK lifecycle-pb", "ALTER PLAYBOOK lifecycle-pb SET launcher = 'lcpb'",
+			"ALTER PLAYBOOK lifecycle-pb SET launcher = ''", "ALTER PLAYBOOK lifecycle-pb SET launcher = 'lcpb'"},
+	} {
+		for _, s := range steps {
+			mustStmt(t, s)
+		}
+		file := writePlaybookFile(t, "ALTER PLAYBOOK lifecycle-pb RENAME TO lifecycle-pb2;\n")
+		if out, err := apply(t, file, "--dry-run"); err != nil {
+			t.Fatalf("dry run: %v\n%s", err, out)
+		}
+		mustStmt(t, "ALTER PLAYBOOK lifecycle-pb RENAME TO lifecycle-pb2")
+		if exists("lifecycle-pb") || !exists("lifecycle-pb2") || !exists("lcpb") {
+			t.Fatalf("after %v and the rename: lifecycle-pb %v, lifecycle-pb2 %v, lcpb %v",
+				steps, exists("lifecycle-pb"), exists("lifecycle-pb2"), exists("lcpb"))
+		}
+		mustStmt(t, "DROP PLAYBOOK lifecycle-pb2 --yes")
+		if exists("lifecycle-pb2") || exists("lcpb") {
+			t.Fatal("DROP left a launcher")
+		}
+	}
+}

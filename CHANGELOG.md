@@ -21,10 +21,11 @@
 
 ### Fixed
 
-- **A rename keeps the launcher the playbook has.** `RENAME TO` gave every
-  renamed playbook a launcher named after its new name, even one that had
-  none or a custom launcher. Now only the default launcher follows the
-  name; a custom launcher stays, and a playbook without one gets none.
+- **A rename keeps the launcher the playbook has.** `RENAME TO` gave a
+  playbook with no launcher (`SET launcher = ''`) a launcher named after its
+  new name; it now gets none. A custom launcher stays, and the new name
+  gets a launcher beside it unless that name cannot be one (a command on
+  PATH): then the rename goes ahead with a note instead of failing.
 - **`APPLY --dry-run` refuses what the run refuses about names**: a
   `RENAME TO` onto an existing playbook, a launcher another playbook
   answers to, a launcher that cannot be created. Names are judged against
