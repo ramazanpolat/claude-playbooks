@@ -100,9 +100,9 @@ fallback:
 
 ## A source never carries a login
 
-A playbook you install brings no login with it. `install` and
-`CREATE PLAYBOOK … FROM` leave a source's `.credentials.json`, and the
-account keys of its `.claude.json`, out of the install, and say so in one
+A playbook you install brings no login with it. `CREATE PLAYBOOK … FROM`
+leaves a source's `.credentials.json`, and the
+account keys of its `.claude.json`, out of the install, and says so in one
 line each. `LINK` sets them aside in place rather than deleting anything.
 
 ## Routing a playbook to another backend
