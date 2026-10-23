@@ -358,13 +358,14 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	return nil
 }
 
-// list reads one or more items up to the next clause starter. An unquoted
-// trailing comma is a separator and is dropped; a lone comma is skipped.
+// list reads one or more items up to the next clause starter. A trailing
+// comma outside quotes is a separator and is dropped ('a', in a file too);
+// a lone comma is skipped.
 func (p *parser) list(what, placeholder string, check func(Token) *Error) ([]string, *Error) {
 	var out []string
 	for !p.atEnd() && !p.isStarter() {
 		t := p.toks[p.i]
-		if !t.Quoted {
+		if !t.Quoted || t.Comma {
 			t.Text = strings.TrimSuffix(t.Text, ",")
 			if t.Text == "" {
 				p.i++
@@ -1159,8 +1160,9 @@ func (p *parser) set(c *Clause) *Error {
 		}
 		// An unquoted trailing comma separates list items: A=1, B=2. It is
 		// dropped only when another K=V follows, so a last value that
-		// really ends in a comma survives.
-		if !t.Quoted && strings.HasSuffix(v, ",") && p.kvAt(p.i+1) {
+		// really ends in a comma survives. A comma after a quoted value
+		// (A='x', B=2 in a file) is always the separator.
+		if (t.Comma || !t.Quoted && p.kvAt(p.i+1)) && strings.HasSuffix(v, ",") {
 			v = strings.TrimSuffix(v, ",")
 		}
 		if err := manifest.ValidateEnvValue(k, v); err != nil {
@@ -1610,7 +1612,12 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		m.Command = cmd.Text
 		if p.kw("ARGS") != "" {
 			for !p.atEnd() && !p.mcpPartOrStarter() {
-				m.Args = append(m.Args, p.toks[p.i].Text)
+				arg := p.toks[p.i]
+				if arg.Comma {
+					// 'a', in a file: the comma after the quotes separates.
+					arg.Text = strings.TrimSuffix(arg.Text, ",")
+				}
+				m.Args = append(m.Args, arg.Text)
 				p.i++
 			}
 			if len(m.Args) == 0 {
@@ -1699,6 +1706,9 @@ func (p *parser) mcpEnv(m *MCP) *Error {
 		}
 		if !keyPattern.MatchString(k) {
 			return errAt(t.Pos, "invalid variable name before '='")
+		}
+		if (t.Comma || !t.Quoted && p.kvAt(p.i+1)) && strings.HasSuffix(v, ",") {
+			v = strings.TrimSuffix(v, ",")
 		}
 		if manifest.LooksLikeSecretKey(k) && !manifest.PlainSetting(v) {
 			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential: on an MCP server it takes a reference, VAR %s FROM '<ref>' (a literal would be written into Claude Code's config)", k, k))
