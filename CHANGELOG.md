@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [v4.0.0-rc5] -- 2026-10-24
+
+### Upgrading from rc4
+
+- **Three things rc4 accepted are now refused**, each with a one-line
+  reason: a new launcher named after an existing command (`claude`, a keyword, or a command already on PATH), a
+  source URL carrying a credential (`https://TOKEN@host/…`), and a token
+  launch over an isolated playbook's own login. A launcher that already
+  exists keeps working.
+- **Installing from a source changes what it copies:** the source's
+  launcher, cpb's own records and one machine's runtime state stay behind.
+  See Changed and Fixed below.
+- **An isolated playbook no longer gets a token from `DEFAULTS`.** One that
+  launched on a `CLAUDE_CODE_OAUTH_TOKEN` from an env set in `DEFAULTS`
+  under rc4 launches without it: give it the token in its own block or an
+  env set it uses, or log in there.
+- **A playbook file is read as written:** a comma after a quoted item
+  separates it from the next (a re-apply that stored `'x',` as `x,` now
+  stores `x`), and an empty quoted list item is refused.
+
 ### Changed
 
 - **A new launcher never takes an existing command's name.** Creating a
