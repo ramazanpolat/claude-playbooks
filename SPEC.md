@@ -105,7 +105,11 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 - Lists are **space-separated**, without commas. An unquoted comma at the
   end of an item is read as a separator when another item follows it
   (`SET A=1, B=2`, `USE ENV a, b`); a final value keeps its comma, so
-  `SET NO_PROXY=a,b,` stores `a,b,`. Quote a value to be explicit.
+  `SET NO_PROXY=a,b,` stores `a,b,`. Quote a value to be explicit. In a
+  file a comma after a quoted item, or standing alone, always separates
+  (`'a', 'b'`, `'a' , 'b'`). MCP `ARGS` are the exception for unquoted
+  words: `ARGS a, b` keeps `a,` as written, since an argument may end in
+  a comma.
 - Names follow the rules each object already has: a playbook name is
   letters, digits, `_` and `-`; an env set name also allows dots
   (`glm-5.3`). An **unquoted keyword is not a valid new name** (refused with an error naming the keyword); quoted, it is one, which is how `SHOW CREATE` writes such a name back, and an existing object whose name is a keyword can be addressed in the name slot. A launcher name is never a keyword, quoted or not.

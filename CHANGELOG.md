@@ -21,6 +21,18 @@
 
 ### Fixed
 
+- **Playbook files: commas and quotes parse as written.** In a playbook
+  file a comma after a quoted item is the separator, never part of the
+  item: `ALLOW TOOL 'Bash(git diff *)', 'Read'`, `SET A='x', B=y` and
+  `ARGS '--a', '--b'` give `Bash(git diff *)`, `x` and `--a` (they used to
+  keep the comma). A fully quoted property value keeps the quotes inside
+  it: `SET statusline.command = '"/opt/My Tools/sl.sh"'` stores
+  `"/opt/My Tools/sl.sh"`. A file that starts with a UTF-8 byte-order mark
+  is read (it was refused). An empty quoted list item is refused with or
+  without a comma after it (`'', 'Read'` used to drop it silently).
+  Unchanged: an unquoted final value keeps its comma
+  (`SET NO_PROXY=a,b,`), an unquoted `ARGS` item is taken as written, and
+  command-line values are parsed as before.
 - **A rename keeps the launcher the playbook has.** `RENAME TO` gave a
   playbook with no launcher (`SET launcher = ''`) a launcher named after its
   new name; it now gets none. A custom launcher stays, and the new name
