@@ -675,24 +675,13 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 			if err := r.preflightNames(st.Name, alias, rename); err != nil {
 				return err
 			}
-			kept := ""
-			if onDisk != nil {
-				kept = onDisk.Alias()
-			}
-			// The launcher an earlier statement left it decides, as the
-			// manifest it writes would in the run.
-			if r.dry != nil {
-				if l, ok := r.dry.launchers[st.Name]; ok {
-					kept = l
-				}
-			}
 			// As doRename: SET launcher replaces the launcher; else the
 			// default launcher follows the new name, a custom one is kept,
 			// and none stays none.
 			var err error
 			switch {
 			case alias != "" || noAlias:
-				_, err = resolveLauncherNameKeeping(noAlias, alias, rename, "rename", kept)
+				_, err = resolveLauncherNameKeeping(noAlias, alias, rename, "rename", was)
 			case was == st.Name:
 				_, err = resolveLauncherName(false, "", rename, "rename")
 			case was != "":

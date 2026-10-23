@@ -94,7 +94,13 @@ func doRename(o renameOpts, args []string) error {
 	var werr error
 	switch {
 	case o.launcher != "" || o.noLauncher:
-		writeName, werr = resolveLauncherNameKeeping(o.noLauncher, o.launcher, newName, "rename", oldManifestAlias)
+		// The launcher it has, kept when SET launcher restates it: the
+		// alias, or the name when that is its launcher.
+		kept := oldManifestAlias
+		if kept == "" && hasNameLauncher(oldName) {
+			kept = oldName
+		}
+		writeName, werr = resolveLauncherNameKeeping(o.noLauncher, o.launcher, newName, "rename", kept)
 	case followsName:
 		writeName, werr = resolveLauncherName(false, "", newName, "rename")
 	case oldManifestAlias != "":

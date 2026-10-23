@@ -384,3 +384,31 @@ func TestRenameCarriesTheLauncherItHas(t *testing.T) {
 		t.Fatalf("dry run, default launcher created in the file: %v", err)
 	}
 }
+
+// A playbook whose launcher is its own name keeps that launcher across a
+// rename that restates it, made under whatever rules it was made under.
+func TestRenameKeepsTheNameLauncherItRestates(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "claude", &manifest.Manifest{})
+	if _, err := launcher.Write(config.LauncherDir, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	file := writePlaybookFile(t, "ALTER PLAYBOOK claude RENAME TO old-claude SET launcher = 'claude';\n")
+	if out, err := apply(t, file, "--dry-run"); err != nil {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
+	if out, err := apply(t, file); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	pb, err := playbook.Require(root, "old-claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.Alias() != "claude" {
+		t.Fatalf("launcher after the rename: %q", pb.Alias())
+	}
+	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "claude"); !exists || foreign {
+		t.Fatal("the kept launcher claude is gone")
+	}
+}
