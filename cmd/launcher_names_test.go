@@ -424,6 +424,7 @@ func TestRenameWithCustomLauncherGivesTheNewNameALauncher(t *testing.T) {
 		return ok && !foreign
 	}
 	for _, steps := range [][]string{
+		{"CREATE PLAYBOOK lifecycle-pb SET launcher = 'lcpb'"}, // the custom launcher only
 		{"CREATE PLAYBOOK lifecycle-pb", "ALTER PLAYBOOK lifecycle-pb SET launcher = 'lcpb'"},
 		{"CREATE PLAYBOOK lifecycle-pb", "ALTER PLAYBOOK lifecycle-pb SET launcher = 'lcpb'",
 			"ALTER PLAYBOOK lifecycle-pb SET launcher = ''", "ALTER PLAYBOOK lifecycle-pb SET launcher = 'lcpb'"},
@@ -440,9 +441,28 @@ func TestRenameWithCustomLauncherGivesTheNewNameALauncher(t *testing.T) {
 			t.Fatalf("after %v and the rename: lifecycle-pb %v, lifecycle-pb2 %v, lcpb %v",
 				steps, exists("lifecycle-pb"), exists("lifecycle-pb2"), exists("lcpb"))
 		}
+		// Both commands dispatch to the renamed playbook.
+		for _, cmd := range []string{"lcpb", "lifecycle-pb2"} {
+			if got := dispatchesTo(t, cmd); got != "lifecycle-pb2" {
+				t.Fatalf("launcher %s dispatches to %q", cmd, got)
+			}
+		}
 		mustStmt(t, "DROP PLAYBOOK lifecycle-pb2 --yes")
 		if exists("lifecycle-pb2") || exists("lcpb") {
 			t.Fatal("DROP left a launcher")
 		}
 	}
+}
+
+// dispatchesTo is the playbook a launcher in the launcher directory runs.
+func dispatchesTo(t *testing.T, cmd string) string {
+	t.Helper()
+	saved := os.Args
+	defer func() { os.Args = saved }()
+	os.Args = append([]string{filepath.Join(config.LauncherDir, cmd)}, saved[1:]...)
+	name, ok, err := multicallPlaybook()
+	if err != nil || !ok {
+		t.Fatalf("launcher %s: %v (resolved %v)", cmd, err, ok)
+	}
+	return name
 }
