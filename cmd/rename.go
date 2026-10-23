@@ -86,7 +86,7 @@ func doRename(o renameOpts, args []string) error {
 	// (explicit --alias or the new name) must be writable before any
 	// mutation — the late launcher.Write warning would leave a renamed
 	// playbook without its replacement command. --no-alias is the opt-out.
-	writeName, werr := resolveLauncherName(o.noLauncher, o.launcher, newName, "rename")
+	writeName, werr := resolveLauncherNameKeeping(o.noLauncher, o.launcher, newName, "rename", oldManifestAlias)
 	if werr != nil {
 		return werr
 	}

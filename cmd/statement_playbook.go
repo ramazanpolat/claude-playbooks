@@ -675,7 +675,16 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 			if err := r.preflightNames(st.Name, alias, rename); err != nil {
 				return err
 			}
-			if _, err := resolveLauncherName(noAlias, alias, rename, "rename"); err != nil {
+			kept := ""
+			if onDisk != nil {
+				kept = onDisk.Alias()
+			}
+			if r.dry != nil {
+				if l, ok := r.dry.launchers[st.Name]; ok && l != st.Name {
+					kept = l
+				}
+			}
+			if _, err := resolveLauncherNameKeeping(noAlias, alias, rename, "rename", kept); err != nil {
 				return err
 			}
 		}

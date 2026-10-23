@@ -255,3 +255,55 @@ func TestExistingClaudeLauncherIsKept(t *testing.T) {
 		t.Fatal("the claude launcher was not removed")
 	}
 }
+
+// A RENAME TO keeps a launcher an earlier release made under older rules
+// when the launcher's name does not change; only a new name is checked.
+func TestRenameKeepsAnExistingLauncherName(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "a", &manifest.Manifest{Launcher: "claude"})
+	if _, err := launcher.Write(config.LauncherDir, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	file := writePlaybookFile(t, "ALTER PLAYBOOK a RENAME TO b SET launcher = 'claude';\n")
+	if out, err := apply(t, file, "--dry-run"); err != nil {
+		t.Fatalf("dry run of a rename keeping launcher claude: %v\n%s", err, out)
+	}
+	mustStmt(t, "ALTER PLAYBOOK a RENAME TO b SET launcher = 'claude'")
+	pb, err := playbook.Require(root, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.Alias() != "claude" {
+		t.Fatalf("launcher after the rename: %q", pb.Alias())
+	}
+	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "claude"); !exists || foreign {
+		t.Fatal("the kept launcher claude is gone")
+	}
+	// A new name is still checked.
+	if err := stmtErr(t, "ALTER PLAYBOOK b RENAME TO c SET launcher = 'CLAUDE2'"); err != nil {
+		t.Fatalf("an ordinary new launcher: %v", err)
+	}
+	mustStmt(t, "CREATE PLAYBOOK d SET launcher = 'd-run'")
+	if err := stmtErr(t, "ALTER PLAYBOOK d RENAME TO e SET launcher = 'Claude'"); err == nil {
+		t.Fatal("a rename onto a new claude launcher was accepted")
+	}
+}
+
+// A new launcher name never starts with a dash or holds a control
+// character.
+func TestNewLauncherRefusesDashAndControlCharacters(t *testing.T) {
+	for _, name := range []string{"-x", "--help", "a\x01b", "a\x7fb"} {
+		if err := launcher.CheckNew(name); err == nil {
+			t.Fatalf("CheckNew(%q) accepted", name)
+		}
+	}
+	if err := launcher.CheckNew("ok-name"); err != nil {
+		t.Fatal(err)
+	}
+	sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	if err := stmtErr(t, "CREATE PLAYBOOK p SET launcher = '-p'"); err == nil {
+		t.Fatal("SET launcher = '-p' accepted")
+	}
+}

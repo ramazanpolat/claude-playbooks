@@ -5,11 +5,12 @@
 ### Changed
 
 - **A new launcher never takes an existing command's name.** Creating a
-  launcher is refused when its name is `claude` (any case), a keyword, or a
-  command already on PATH or a file in the launcher directory that cpb did
+  launcher is refused when its name is `claude` (any case), a keyword,
+  starts with `-`, holds a control character, or is a command already on PATH or a file in the launcher directory that cpb did
   not write. A playbook named after a command (`git`, `python3`) needs
   `SET launcher = '<another name>'` or `SET launcher = ''`. A launcher
-  that already exists keeps working and can still be removed.
+  that already exists keeps working, survives a `RENAME TO` that keeps its
+  name, and can still be removed.
 - **A source never chooses the launcher.** `CREATE PLAYBOOK … FROM` ignores
   a `launcher` in the source's manifest, with a note: the launcher is
   `SET launcher`, else the playbook's name.

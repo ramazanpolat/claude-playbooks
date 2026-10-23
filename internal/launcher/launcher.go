@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // ErrTaken is returned by Write when the target name exists in the launcher
@@ -281,6 +282,14 @@ func CheckNew(cmdName string) error {
 	}
 	if strings.EqualFold(cmdName, "claude") {
 		return fmt.Errorf("launcher name %q is reserved: it is the command cpb launches", cmdName)
+	}
+	// A leading dash reads as an option to every command that is handed
+	// the name; a control character hides in a listing and a terminal.
+	if strings.HasPrefix(cmdName, "-") {
+		return fmt.Errorf("launcher name %q starts with '-'", cmdName)
+	}
+	if strings.IndexFunc(cmdName, unicode.IsControl) >= 0 {
+		return fmt.Errorf("launcher name %q holds a control character", cmdName)
 	}
 	return nil
 }

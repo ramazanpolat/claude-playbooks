@@ -100,12 +100,27 @@ func checkLauncherConflict(launcher string, noLauncher bool) error {
 // under --no-alias. verb names the command in the message (e.g. "install",
 // "link", "create the playbook").
 func resolveLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string) (string, error) {
+	return resolveLauncherNameKeeping(noAlias, effectiveAlias, fallbackName, verb, "")
+}
+
+// resolveLauncherNameKeeping is resolveLauncherName for a playbook that
+// already has the launcher kept (its manifest alias, "" for none): a
+// launcher it keeps across the change (a RENAME TO that restates or leaves
+// its alias) is kept as it is, made under whatever rules it was made under;
+// only a name that is new to the playbook must pass checkNewLauncher.
+func resolveLauncherNameKeeping(noAlias bool, effectiveAlias, fallbackName, verb, kept string) (string, error) {
 	if noAlias {
 		return "", nil
 	}
 	name := effectiveAlias
 	if name == "" {
 		name = fallbackName
+	}
+	if kept != "" && name == kept {
+		if err := launcher.ValidateName(name); err != nil {
+			return "", err
+		}
+		return name, nil
 	}
 	if err := checkNewLauncher(name); err != nil {
 		return "", fmt.Errorf("%w (add SET launcher = '<another name>', or SET launcher = '' to %s without a launcher)", err, verb)
