@@ -352,13 +352,15 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 	}
 	info, err := os.Stat(abs)
 	if os.IsNotExist(err) {
-		return "", func() {}, fmt.Errorf("%q not found", source)
+		return "", func() {}, fmt.Errorf("%q not found", redactSourceURL(source))
 	}
 	if err != nil {
-		return "", func() {}, err
+		// The error names the cleaned path, where a URL's "//" is gone
+		// and redaction no longer finds it: name the source instead.
+		return "", func() {}, fmt.Errorf("cannot read %q", redactSourceURL(source))
 	}
 	if !info.IsDir() {
-		return "", func() {}, fmt.Errorf("%q is not a directory", source)
+		return "", func() {}, fmt.Errorf("%q is not a directory", redactSourceURL(source))
 	}
 	work := abs
 	if subdir != "" {
@@ -382,7 +384,7 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 	cleanup := func() { os.RemoveAll(tmp) }
 	if err := copyDir(work, tmp); err != nil {
 		cleanup()
-		return "", func() {}, fmt.Errorf("failed to stage %s: %w", source, err)
+		return "", func() {}, fmt.Errorf("failed to stage %s: %w", redactSourceURL(source), err)
 	}
 	return tmp, cleanup, nil
 }
@@ -549,16 +551,16 @@ func overlayDir(src, dst string) error {
 func stripSourceLogin(dir, source string) error {
 	creds, stateLink, keys, err := auth.StripSourceLogin(dir)
 	if err != nil {
-		return fmt.Errorf("cannot leave %s's login out of the install: %w", redactURLCredentials(source), err)
+		return fmt.Errorf("cannot leave %s's login out of the install: %w", redactSourceURL(source), err)
 	}
 	if creds {
-		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s: a playbook source never carries a login\n", redactURLCredentials(source), auth.CredentialsFileName)
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s: a playbook source never carries a login\n", redactSourceURL(source), auth.CredentialsFileName)
 	}
 	if stateLink {
-		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s, a link out of the source: a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName)
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s, a link out of the source: a playbook source never carries a login\n", redactSourceURL(source), auth.StateFileName)
 	}
 	if len(keys) > 0 {
-		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName, strings.Join(keys, ", "))
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login\n", redactSourceURL(source), auth.StateFileName, strings.Join(keys, ", "))
 	}
 	return nil
 }

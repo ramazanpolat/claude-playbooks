@@ -1097,6 +1097,12 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		ph := map[string]string{"FROM": "<source>", "BRANCH": "<ref>", "SUBDIR": "<dir>", "LINK": "<dir>"}[w]
 		t, err := p.take(w, ph)
 		c.Arg = t.Text
+		if !t.Quoted {
+			// On the command line a word can still carry its quotes (a
+			// script that word-splits a statement passes '<source>' as
+			// is): the value is what is inside them, as for a property.
+			c.Arg = unquoteArg(c.Arg)
+		}
 		return c, err
 	case "SET":
 		if p.at("IF") {

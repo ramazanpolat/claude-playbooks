@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -640,5 +641,67 @@ func TestSourceDriftWarningIsMasked(t *testing.T) {
 	}
 	if strings.Contains(all, token) {
 		t.Fatalf("the recorded token was printed:\n%s", all)
+	}
+}
+
+// A source word that still carries its quotes (a script that word-splits a
+// statement passes '<url>' as one argument) is the URL inside them: the
+// credential is refused, on a new playbook and an existing one, and the
+// token reaches no output, error or JSON report.
+func TestQuotedCredentialSourceWordIsRefused(t *testing.T) {
+	resetCommandTestState(t)
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "ex", &manifest.Manifest{Source: &manifest.Source{Repository: "https://example.com/o/r"}})
+	const token = "ghp_synthetic0123456789abcdef"
+	for _, word := range []string{"'https://" + token + "@example.com/o/r'", `"https://` + token + `@example.com/o/r"`} {
+		for _, args := range [][]string{
+			{"CREATE", "PLAYBOOK", "IF", "NOT", "EXISTS", "ex", "FROM", word},
+			{"CREATE", "OR", "ALTER", "PLAYBOOK", "ex", "FROM", word},
+			{"CREATE", "PLAYBOOK", "fresh", "FROM", word},
+			{"CREATE", "PLAYBOOK", "IF", "NOT", "EXISTS", "fresh", "FROM", word},
+		} {
+			var err error
+			stderr := captureStderr(t, func() {
+				out := captureStdout(t, func() { err = runStatement(args) })
+				if strings.Contains(out, token) {
+					t.Fatalf("%v: stdout has the token:\n%s", args, out)
+				}
+			})
+			if err == nil || !strings.Contains(err.Error(), "carries a credential") || strings.Contains(err.Error()+stderr, token) {
+				t.Fatalf("%v: %v\n%s", args, err, stderr)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "fresh")); !os.IsNotExist(err) {
+		t.Fatal("a refused source was installed")
+	}
+	// In a file the quotes are the grammar's: the same refusal, JSON too.
+	f := writePlaybookFile(t, "CREATE PLAYBOOK IF NOT EXISTS ex FROM 'https://"+token+"@example.com/o/r';\n")
+	var jout string
+	jerr := captureStderr(t, func() { _, jout, _ = applyJSON(t, f, "--dry-run", "--json") })
+	if !strings.Contains(jout, "carries a credential") || strings.Contains(jout+jerr, token) {
+		t.Fatalf("the JSON report:\n%s\n%s", jout, jerr)
+	}
+}
+
+// Every message that echoes a source masks its credential wherever it sits
+// in the text, quoted or not; an ssh account name stays.
+func TestSourceRedactionIgnoresQuoting(t *testing.T) {
+	const token = "ghp_synthetic0123456789abcdef"
+	for _, in := range []string{
+		"'https://" + token + "@example.com/o/r'",
+		`"https://` + token + `@example.com/o/r"`,
+		"stat /home/user/'https://" + token + "@example.com/o/r': no such file",
+		"https://user:" + token + "@example.com/o/r",
+	} {
+		if got := redactSourceURL(in); strings.Contains(got, token) {
+			t.Fatalf("%s -> %s", in, got)
+		}
+	}
+	if got := redactSourceURL("'ssh://git@example.com/o/r'"); got != "'ssh://git@example.com/o/r'" {
+		t.Fatalf("an ssh account name was masked: %s", got)
+	}
+	if _, _, err := stageSource(io.Discard, "'https://"+token+"@example.com/o/r'", false, "", ""); err == nil || strings.Contains(err.Error(), token) {
+		t.Fatalf("the not-found error: %v", err)
 	}
 }

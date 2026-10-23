@@ -76,21 +76,25 @@ func redactSecretValue(value string) string {
 	return fmt.Sprintf("<redacted, %d chars>", len([]rune(value)))
 }
 
-// redactSourceURL masks the credential in a playbook source URL. Over
-// http(s) a lone user name is how a token travels (https://TOKEN@host), so
-// it is masked; on any other scheme a user name without a password
-// (ssh://git@host/o/r) is an account, not a credential, and stays.
-func redactSourceURL(u string) string {
-	if scheme, _, ok := strings.Cut(u, "://"); ok {
-		switch strings.ToLower(scheme) {
+// redactSourceURL masks the credential in every URL a source value or a
+// message holding one carries, wherever it sits in the text (quotes, a
+// prefix and the like do not hide it). Over http(s) a lone user name is how
+// a token travels (https://TOKEN@host), so it is masked; on any other
+// scheme a user name without a password (ssh://git@host/o/r) is an
+// account, not a credential, and stays. Every message that prints a
+// playbook source goes through it.
+func redactSourceURL(text string) string {
+	return urlUserinfo.ReplaceAllStringFunc(text, func(match string) string {
+		parts := urlUserinfo.FindStringSubmatch(match)
+		switch strings.ToLower(strings.TrimSuffix(parts[1], "://")) {
 		case "http", "https":
 		default:
-			if m := urlUserinfo.FindStringSubmatch(u); m != nil && !strings.Contains(m[2], ":") {
-				return u
+			if !strings.Contains(parts[2], ":") {
+				return match
 			}
 		}
-	}
-	return redactURLCredentials(u)
+		return redactURLCredentials(match)
+	})
 }
 
 // refuseCredentialSource refuses a playbook source whose URL carries a
