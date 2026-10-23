@@ -10,4 +10,4 @@ ALTER PLAYBOOK
   ADD SKILL pptx FROM 'github:anthropics/skills' SUBDIR 'skills/pptx'
   ADD SKILL doc-coauthoring FROM 'github:anthropics/skills' SUBDIR 'skills/doc-coauthoring'
   ADD SKILL internal-comms FROM 'github:anthropics/skills' SUBDIR 'skills/internal-comms'
-  SET MODEL 'claude-sonnet-5-5';
+  SET model = 'claude-sonnet-5-5';

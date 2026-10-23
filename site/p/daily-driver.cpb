@@ -15,5 +15,5 @@ ALTER PLAYBOOK
   ADD SKILL pptx FROM 'github:anthropics/skills' SUBDIR 'skills/pptx'
   ALLOW TOOL 'Bash(gh pr *)'
   DENY TOOL 'Bash(git push --force *)'
-  SET MODEL 'claude-opus-5-5'
+  SET model = 'claude-opus-5-5'
   SET VAR MAX_THINKING_TOKENS=8000;
