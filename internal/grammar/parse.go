@@ -308,6 +308,18 @@ func (p *parser) unexpected() *Error {
 // a command. Any word is accepted, keywords included: only NEW NAMES are
 // reserved, and on the command line the shell has already removed any
 // quotes that could have said otherwise.
+// source reads a source-like value (a URL, a ref, a directory): on the
+// command line a word can still carry its quotes (a script that
+// word-splits a statement passes '<source>' as is), and the value is what
+// is inside them, as for a property.
+func (p *parser) source(what, placeholder string) (Token, *Error) {
+	t, err := p.take(what, placeholder)
+	if err == nil && !t.Quoted {
+		t.Text = unquoteArg(t.Text)
+	}
+	return t, err
+}
+
 func (p *parser) take(what, placeholder string) (Token, *Error) {
 	if p.atEnd() {
 		p.note(placeholder)
@@ -1095,14 +1107,8 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "FROM", "BRANCH", "SUBDIR", "LINK":
 		c.Kind = Kind(w)
 		ph := map[string]string{"FROM": "<source>", "BRANCH": "<ref>", "SUBDIR": "<dir>", "LINK": "<dir>"}[w]
-		t, err := p.take(w, ph)
+		t, err := p.source(w, ph)
 		c.Arg = t.Text
-		if !t.Quoted {
-			// On the command line a word can still carry its quotes (a
-			// script that word-splits a statement passes '<source>' as
-			// is): the value is what is inside them, as for a property.
-			c.Arg = unquoteArg(c.Arg)
-		}
 		return c, err
 	case "SET":
 		if p.at("IF") {
@@ -1436,7 +1442,7 @@ func (p *parser) marketplace(c *Clause, verb string) *Error {
 	if p.kw("FROM") == "" {
 		return p.fail("ADD MARKETPLACE needs FROM '<source>'")
 	}
-	src, err := p.take("FROM", "'<source>'")
+	src, err := p.source("FROM", "'<source>'")
 	if err != nil {
 		return err
 	}
@@ -1872,7 +1878,7 @@ func (p *parser) skill(c *Clause, verb string) *Error {
 	if p.kw("FROM") == "" {
 		return p.fail("ADD SKILL needs FROM <source>")
 	}
-	src, err := p.take("FROM", "<source>")
+	src, err := p.source("FROM", "<source>")
 	if err != nil {
 		return err
 	}
@@ -1893,7 +1899,7 @@ func (p *parser) skill(c *Clause, verb string) *Error {
 			if kind != SkillGit {
 				return errAt(p.toks[p.i-1].Pos, w+" applies to a git source; a directory is linked as it is")
 			}
-			t, err := p.take(w, "<"+strings.ToLower(w)+">")
+			t, err := p.source(w, "<"+strings.ToLower(w)+">")
 			if err != nil {
 				return err
 			}

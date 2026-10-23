@@ -590,7 +590,7 @@ func playUpdateRun(name string) error {
 			block.Update = &playUpdateJSON{FromSHA256: recd.SHA256, Unchanged: true}
 			return printPlayCheckJSON(block)
 		}
-		fmt.Printf("%s is unchanged: %s still has sha256 %s.\n", name, recd.Ref, rec.SHA256)
+		fmt.Printf("%s is unchanged: %s still has sha256 %s.\n", name, redactSourceURL(recd.Ref), rec.SHA256)
 		return nil
 	}
 	block.Update = &playUpdateJSON{FromSHA256: recd.SHA256, TagMoved: src.Pinned && recd.URL != "" && rec.URL == recd.URL}
@@ -670,7 +670,7 @@ func playUpdateRun(name string) error {
 		fmt.Println("  " + l)
 	}
 	if block.Update.TagMoved {
-		fmt.Printf("\nNote: %s is pinned, and it now serves different bytes: the tag moved.\n", recd.Ref)
+		fmt.Printf("\nNote: %s is pinned, and it now serves different bytes: the tag moved.\n", redactSourceURL(recd.Ref))
 	}
 	fmt.Printf("\nWhat the update would do to %s:\n", name)
 	if err := applyRun(plan, nil); err != nil {

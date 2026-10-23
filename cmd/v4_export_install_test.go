@@ -12,6 +12,7 @@ import (
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/settings"
 )
 
 // codeLines is a SHOW CREATE text without its comment lines.
@@ -704,4 +705,102 @@ func TestSourceRedactionIgnoresQuoting(t *testing.T) {
 	if _, _, err := stageSource(io.Discard, "'https://"+token+"@example.com/o/r'", false, "", ""); err == nil || strings.Contains(err.Error(), token) {
 		t.Fatalf("the not-found error: %v", err)
 	}
+}
+
+// ADD SKILL and ADD MARKETPLACE fetch a source too: a credential in it is
+// refused, quoted or not, on the command line and in a file, dry run and
+// JSON included, and the token reaches no output.
+func TestCredentialSkillAndMarketplaceSourcesAreRefused(t *testing.T) {
+	resetCommandTestState(t)
+	root := sandboxDefaultRoot(t)
+	writePlaybook(t, root, "p", nil)
+	const token = "ghp_synthetic0123456789abcdef"
+	url := "https://" + token + "@example.com/o/r.git"
+	for _, word := range []string{url, "'" + url + "'", `"` + url + `"`} {
+		for _, args := range [][]string{
+			{"ALTER", "PLAYBOOK", "p", "ADD", "SKILL", "s", "FROM", word},
+			{"ALTER", "PLAYBOOK", "p", "ADD", "MARKETPLACE", "m", "FROM", word},
+		} {
+			var err error
+			stderr := captureStderr(t, func() {
+				out := captureStdout(t, func() { err = runStatement(args) })
+				if strings.Contains(out, token) {
+					t.Fatalf("%v: stdout has the token:\n%s", args, out)
+				}
+			})
+			// The grammar refuses a git URL with credentials itself; the
+			// rest is cpb's refusal. Either way, by its words, not the URL.
+			if err == nil || !strings.Contains(err.Error(), "credential") || strings.Contains(err.Error()+stderr, token) {
+				t.Fatalf("%v: %v\n%s", args, err, stderr)
+			}
+		}
+	}
+	for _, clause := range []string{"ADD SKILL s FROM '" + url + "'", "ADD MARKETPLACE m FROM '" + url + "'"} {
+		f := writePlaybookFile(t, "ALTER PLAYBOOK p "+clause+";\n")
+		var out string
+		var err error
+		stderr := captureStderr(t, func() { out, err = apply(t, f, "--dry-run") })
+		if err == nil || strings.Contains(out+stderr+err.Error(), token) {
+			t.Fatalf("%s: %v\n%s%s", clause, err, out, stderr)
+		}
+		var jout string
+		jerr := captureStderr(t, func() { _, jout, _ = applyJSON(t, f, "--dry-run", "--json") })
+		if !strings.Contains(jout, "credential") || strings.Contains(jout+jerr, token) {
+			t.Fatalf("%s: the JSON report:\n%s\n%s", clause, jout, jerr)
+		}
+	}
+	if m, _ := manifest.Read(filepath.Join(root, "p")); m != nil && m.Skills != nil {
+		t.Fatalf("a refused skill was recorded: %v", m.Skills)
+	}
+}
+
+// A skill or marketplace recorded with a credential source before the
+// refusal (or written into settings.json by hand) is shown masked, and
+// SHOW CREATE withholds it.
+func TestRecordedCredentialSkillAndMarketplaceAreMasked(t *testing.T) {
+	resetCommandTestState(t)
+	root := sandboxDefaultRoot(t)
+	const token = "ghp_synthetic0123456789abcdef"
+	url := "https://" + token + "@example.com/o/r.git"
+	writePlaybook(t, root, "p", &manifest.Manifest{Skills: map[string]*manifest.SkillRecord{"s": {Source: url, Mode: "copy"}}})
+	settingsJSON := `{"extraKnownMarketplaces":{"m":{"source":{"source":"git","url":"` + url + `"}}}}`
+	if err := os.WriteFile(filepath.Join(root, "p", "settings.json"), []byte(settingsJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"SHOW PLAYBOOK p", "SHOW PLAYBOOK p --json", "SHOW CREATE PLAYBOOK p --skip-secrets"} {
+		var out string
+		stderr := captureStderr(t, func() { out, _ = stmt(t, line) })
+		if strings.Contains(out+stderr, token) {
+			t.Fatalf("%s printed the token:\n%s%s", line, out, stderr)
+		}
+	}
+	out, _ := stmt(t, "SHOW CREATE PLAYBOOK p --skip-secrets")
+	if !strings.Contains(out, "-- withheld: the source of SKILL s carries credentials") || !strings.Contains(out, "-- MARKETPLACE m ") || strings.Contains(out, "ADD MARKETPLACE m") {
+		t.Fatalf("SHOW CREATE wrote a credential source:\n%s", out)
+	}
+	// The withholding itself, on a source the grammar writes.
+	if b, err := pluginCreateBlock("p", mustParseSettings(t, `{"extraKnownMarketplaces":{"m":{"source":{"source":"git","url":"`+url+`#v1"}}}}`)); err != nil || strings.Contains(b, token) || strings.Contains(b, "ADD MARKETPLACE m") {
+		t.Fatalf("pluginCreateBlock: %v\n%s", err, b)
+	}
+}
+
+// cpb play refuses a credential URL, quoted or not, without echoing it.
+func TestPlayCredentialURLIsRefused(t *testing.T) {
+	const token = "ghp_synthetic0123456789abcdef"
+	url := "https://" + token + "@example.com/r.cpb"
+	for _, ref := range []string{url, "'" + url + "'", `"` + url + `"`} {
+		_, _, err := fetchRecipe(ref)
+		if err == nil || strings.Contains(err.Error(), token) {
+			t.Fatalf("%s: %v", ref, err)
+		}
+	}
+}
+
+func mustParseSettings(t *testing.T, text string) *settings.Object {
+	t.Helper()
+	o, err := settings.ParseObject([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
 }

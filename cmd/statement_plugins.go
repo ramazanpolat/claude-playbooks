@@ -437,6 +437,11 @@ func marketNames(configDir string) map[string]bool {
 // marketplaceArg is the source as `claude plugin marketplace add` takes it,
 // and the entry it should produce. A '~/' directory is expanded here.
 func marketplaceArg(src string) (string, cliMarketplace, error) {
+	// Claude Code records the source in settings.json and fetches it: a
+	// credential in it would be plaintext there and in every listing.
+	if err := refuseCredentialSource(src); err != nil {
+		return "", cliMarketplace{}, err
+	}
 	kind, err := grammar.MarketplaceSource(src)
 	if err != nil {
 		return "", cliMarketplace{}, err
@@ -768,6 +773,10 @@ func pluginCreateBlock(name string, root *settings.Object) (string, error) {
 		src, ok := sourceString(m.Source)
 		if !ok || manifest.ValidateSetName(m.Name) != nil {
 			comments = append(comments, fmt.Sprintf("-- MARKETPLACE %s has a source the grammar does not write; not written", m.Name))
+			continue
+		}
+		if masked := redactSourceURL(src); masked != src {
+			comments = append(comments, fmt.Sprintf("-- withheld: the source of MARKETPLACE %s carries credentials (%s); add it from a URL without them", m.Name, masked))
 			continue
 		}
 		written[m.Name] = true

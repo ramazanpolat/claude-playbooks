@@ -342,6 +342,11 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	// none rather than failing the whole SHOW.
 	if sf, err := settings.Load(pb.Path); err == nil {
 		if mps, plugins, agent, err := pluginState(sf.Root); err == nil {
+			// Shown masked: a settings.json written by hand may carry a
+			// credential in a source URL.
+			for i := range mps {
+				mps[i].Source = json.RawMessage(redactSourceURL(string(mps[i].Source)))
+			}
 			v.Marketplaces, v.Plugins, v.Agent = mps, plugins, agent
 		}
 		v.Tools, v.Statusline.Command, v.Model = settingsExtras(sf.Root)

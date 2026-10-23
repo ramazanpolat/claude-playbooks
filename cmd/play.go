@@ -217,7 +217,7 @@ func printPlayCheck(w *os.File, src *play.Source, rec *play.Recipe, res *play.Re
 	if from == "" {
 		from = rec.Path
 	}
-	fmt.Fprintf(w, "Recipe:  %s\n", src.Ref)
+	fmt.Fprintf(w, "Recipe:  %s\n", redactSourceURL(src.Ref))
 	fmt.Fprintf(w, "From:    %s\n", from)
 	fmt.Fprintf(w, "sha256:  %s (%d bytes)\n", rec.SHA256, len(rec.Bytes))
 	if src.Note != "" {
