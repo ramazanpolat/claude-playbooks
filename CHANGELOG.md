@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`SHOW CREATE … --skip-secrets` no longer deletes a withheld value when
+  the file is applied.** An env set with a withheld literal is written as
+  `CREATE ENV IF NOT EXISTS` plus an additive `ALTER ENV`, so `APPLY` keeps
+  the stored value (the TUI's export always withholds). Such a set no longer
+  converges exactly: a key added to it since is not removed.
+- **A source no longer brings cpb's own records.** `CREATE PLAYBOOK … FROM`
+  drops a source's `[play]`, `[apply]`, `[skills]` and `[mcp]` records with a
+  note, so `cpb update` cannot follow the source author's recipe; `update`
+  keeps the live records.
+- **A source URL carrying a credential is refused** (`https://TOKEN@host/…`),
+  dry run included. An install recorded with one still updates, with the URL
+  masked in SHOW, SELECT, update and git's output.
+- **`update` keeps one backup, without values.** The old `.playbook` and the
+  preserved files are removed from the backup after a successful update,
+  earlier updates' backups are removed, and `DROP PLAYBOOK` removes the last.
+- **A `LINK`ed playbook whose target is gone can be dropped.**
+
 ## [v4.0.0-rc4] -- 2026-10-18
 
 ### Upgrading from rc3

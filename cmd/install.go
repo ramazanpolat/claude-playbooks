@@ -39,6 +39,9 @@ func doInstall(o installOpts, args []string) error {
 	}
 
 	source := args[0]
+	if err := refuseCredentialSource(source); err != nil {
+		return err
+	}
 
 	// Parse GitHub /tree/<ref>/<path> URLs into source + branch + subdir.
 	repoURL, parsedRef, parsedSubdir, parsed := parseGitTreeURLWithRef(source, o.branch)
@@ -162,6 +165,23 @@ func doInstall(o installOpts, args []string) error {
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}
+	// [play], [apply], [skills] and [mcp] are cpb's own bookkeeping of what
+	// was done to one install: a source's copy describes the author's
+	// install, and `cpb update` would follow its recipe instead of this
+	// one's. The skill files and MCP configuration the source ships stay.
+	for _, r := range []struct {
+		name  string
+		found bool
+	}{
+		{"[play]", mPre.Play != nil}, {"[apply]", mPre.Apply != nil},
+		{"[skills]", mPre.Skills != nil}, {"[mcp]", mPre.MCP != nil},
+	} {
+		if r.found {
+			fmt.Fprintf(os.Stderr, "Note: ignoring the %s record shipped in the source's %s; it records what was done to one install\n", r.name, manifest.FileName)
+			needsManifestWrite = true
+		}
+	}
+	mPre.Play, mPre.Apply, mPre.Skills, mPre.MCP = nil, nil, nil, nil
 	if o.sandbox {
 		mPre.IsolatedLogin = true
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
@@ -276,7 +296,8 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 		}
 		args = append(args, source, tmp)
 
-		fmt.Fprintf(w, "Cloning %s", source)
+		shown := redactSourceURL(source)
+		fmt.Fprintf(w, "Cloning %s", shown)
 		if ref != "" {
 			fmt.Fprintf(w, " (branch %s)", ref)
 		}
@@ -287,10 +308,21 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 
 		gitCmd := exec.Command("git", args...)
 		// git narrates progress on stderr; both go to the caller's writer so a
-		// bulk run can hold them back until a playbook actually fails.
-		gitCmd.Stdout = w
-		gitCmd.Stderr = w
-		if err := gitCmd.Run(); err != nil {
+		// bulk run can hold them back until a playbook actually fails. A URL
+		// that carries a credential (an install recorded before cpb refused
+		// them, now updating) has git's output held and masked: git can echo
+		// the URL it was given.
+		var held strings.Builder
+		if shown != source {
+			gitCmd.Stdout, gitCmd.Stderr = &held, &held
+		} else {
+			gitCmd.Stdout, gitCmd.Stderr = w, w
+		}
+		err = gitCmd.Run()
+		if held.Len() > 0 {
+			io.WriteString(w, redactURLCredentials(held.String()))
+		}
+		if err != nil {
 			cleanup()
 			return "", func() {}, fmt.Errorf("git clone failed")
 		}

@@ -280,7 +280,7 @@ func warnDrift(r *stmtRun, st *grammar.Stmt, pb *playbook.Playbook) {
 	}
 	var have string
 	if m := pb.Manifest; m != nil && m.Source != nil {
-		have = describeSource(m.Source.Repository, m.Source.Branch, m.Source.Subdir)
+		have = describeSource(redactSourceURL(m.Source.Repository), m.Source.Branch, m.Source.Subdir)
 	}
 	if want := describeSource(o.from, o.branch, o.subdir); have != want {
 		if have == "" {
@@ -328,6 +328,11 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 		return err
 	}
 	o := createOptionsOf(st)
+	if o.from != "" {
+		if err := refuseCredentialSource(o.from); err != nil {
+			return err
+		}
+	}
 	if r.dryRun {
 		if exists {
 			return fmt.Errorf("playbook %q already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it, or CREATE OR ALTER PLAYBOOK to apply the SET list to it)", st.Name)
@@ -391,7 +396,7 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 func dropPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 	// Only a playbook that is not there is "nothing to drop"; a registry
 	// that cannot be read is an error.
-	pb, err := playbook.Find(config.ResolvePlaybooksDir(), st.Name)
+	pb, err := findOrDangling(config.ResolvePlaybooksDir(), st.Name)
 	if err != nil {
 		return err
 	}

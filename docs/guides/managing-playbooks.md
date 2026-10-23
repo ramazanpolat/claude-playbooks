@@ -180,7 +180,9 @@ cpb APPLY playbook.cpb                   # on another machine, or again here: no
 failure; every statement `SHOW CREATE` writes is safe to repeat, so running the
 fixed file again is the recovery. `SHOW CREATE` never prints a credential: a
 credential-looking literal becomes a comment and the command exits non-zero
-unless `--skip-secrets`. A file can `INCLUDE 'base.cpb'` another, relative to
+unless `--skip-secrets`. An env set with such a comment is written as
+`CREATE ENV IF NOT EXISTS` plus `ALTER ENV`, so applying the file keeps the
+value already stored instead of rebuilding the set without it. A file can `INCLUDE 'base.cpb'` another, relative to
 itself, so layers stack; see
 [playbook.cpb](../../SPEC.md#playbookcpb-show-create-and-apply) and
 [INCLUDE](../../SPEC.md#include).
@@ -208,7 +210,14 @@ Runtime state the source knows nothing about (`data/`, `projects/`, `sessions/`,
 `history.jsonl`) is never read, moved or copied, so a session writing to it
 during the update cannot lose work. Replaced entries are moved to a timestamped
 `.<name>.bak.<stamp>` beside the install first, and rolled back if the overlay
-fails.
+fails. After a successful update the backup keeps only the replaced files (the
+old `.playbook` and the preserved files, which hold values, are removed from
+it), only the last update's backup is kept, and `DROP PLAYBOOK` removes it.
+
+A source's own `[play]`, `[apply]`, `[skills]` and `[mcp]` records are never
+adopted, at install or update: they describe what was done to the author's
+install. A source URL carrying a credential (`https://TOKEN@host/…`) is
+refused; authenticate with a git credential helper or an SSH remote.
 
 Local configuration survives even when the source ships its own copy:
 `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json`

@@ -75,3 +75,32 @@ func maskUserinfoField(field string) string {
 func redactSecretValue(value string) string {
 	return fmt.Sprintf("<redacted, %d chars>", len([]rune(value)))
 }
+
+// redactSourceURL masks the credential in a playbook source URL. Over
+// http(s) a lone user name is how a token travels (https://TOKEN@host), so
+// it is masked; on any other scheme a user name without a password
+// (ssh://git@host/o/r) is an account, not a credential, and stays.
+func redactSourceURL(u string) string {
+	if scheme, _, ok := strings.Cut(u, "://"); ok {
+		switch strings.ToLower(scheme) {
+		case "http", "https":
+		default:
+			if m := urlUserinfo.FindStringSubmatch(u); m != nil && !strings.Contains(m[2], ":") {
+				return u
+			}
+		}
+	}
+	return redactURLCredentials(u)
+}
+
+// refuseCredentialSource refuses a playbook source whose URL carries a
+// credential. The source is recorded in the manifest, printed by SHOW and
+// update, and passed to git on every update: a token in it would be
+// plaintext on disk and in every transcript. git's own credential helper or
+// an SSH remote authenticates instead.
+func refuseCredentialSource(source string) error {
+	if masked := redactSourceURL(source); masked != source {
+		return fmt.Errorf("source %s carries a credential in its URL; cpb never records one: use a URL without it, authenticated by a git credential helper or an SSH remote", masked)
+	}
+	return nil
+}

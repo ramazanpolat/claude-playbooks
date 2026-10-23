@@ -446,9 +446,25 @@ No shell reload is needed — the launcher is a symlink in a PATH directory, liv
   removing the same keys. A directory with `isolated_login = true` keeps both.
 - `update` keeps the install's own files (see *`cpb update <name>`*).
 
+**A source never carries cpb's records or a credential in its URL.**
+- The `[play]`, `[apply]`, `[skills]` and `[mcp]` records describe what was
+  done to one install. A source's copies are dropped, each with one stderr
+  line (`Note: ignoring the [apply] record shipped in the source's
+  .playbook; it records what was done to one install`); the skill files and
+  MCP configuration the source ships stay. `update` keeps the live records.
+- A source URL that carries a credential (`https://TOKEN@host/…`,
+  `https://user:password@host/…`) is refused before anything is fetched,
+  dry run included, with the URL masked (`source https://<redacted, N
+  chars>@host/… carries a credential in its URL; cpb never records one: use
+  a URL without it, authenticated by a git credential helper or an SSH
+  remote`). A user name alone on another scheme (`ssh://git@host/o/r`) is
+  not a credential. An install recorded with one before this rule still
+  updates; its URL is masked in `SHOW`, `SELECT`, `update` and git's output,
+  and `SHOW CREATE` withholds its statement.
+
 ### `DROP PLAYBOOK [IF EXISTS] <name> [--yes]`
 
-Deletes the playbook's directory (for a `LINK`, only the link), then retires its launchers by the rule in *Launchers*, printing `Removed launcher "<n>"` or `Kept launcher "<n>" (still addresses playbook "<other>")` for each. Without `--yes` it first shows the playbook, its location, its launchers and how many files go, and asks on stdin; any answer but `y` or `yes`, end of input included, prints `Cancelled.` and deletes nothing. The confirmation runs before the registry lock is taken; the playbook is found again under the lock, and nothing is removed if it moved meanwhile (`"<name>" disappeared while waiting for confirmation (deleted or renamed concurrently); nothing removed`). An unknown name refuses (`unknown playbook "<name>". `cpb SHOW PLAYBOOKS` lists them`); `IF EXISTS` makes it a no-op. In a file, `APPLY` never takes a drop on the file's word (see *playbook.cpb: SHOW CREATE and APPLY*). Under a custom playbooks root, launchers are not touched.
+Deletes the playbook's directory (for a `LINK`, only the link, also when its target is gone), and the backup an earlier `update` left beside it, then retires its launchers by the rule in *Launchers*, printing `Removed launcher "<n>"` or `Kept launcher "<n>" (still addresses playbook "<other>")` for each. Without `--yes` it first shows the playbook, its location, its launchers and how many files go, and asks on stdin; any answer but `y` or `yes`, end of input included, prints `Cancelled.` and deletes nothing. The confirmation runs before the registry lock is taken; the playbook is found again under the lock, and nothing is removed if it moved meanwhile (`"<name>" disappeared while waiting for confirmation (deleted or renamed concurrently); nothing removed`). An unknown name refuses (`unknown playbook "<name>". `cpb SHOW PLAYBOOKS` lists them`); `IF EXISTS` makes it a no-op. In a file, `APPLY` never takes a drop on the file's word (see *playbook.cpb: SHOW CREATE and APPLY*). Under a custom playbooks root, launchers are not touched.
 
 ## CREATE / ALTER / DROP ENV and ALTER DEFAULTS
 
@@ -1828,6 +1844,13 @@ File rules:
   which converges, `USE ENV` with the full list, `''` for none), so applying
   a file twice changes nothing the second time, and a playbook's properties
   and env list come back exactly as written. Collections stay additive.
+  One exception keeps a value safe: an env set with a withheld literal is
+  written as `CREATE ENV IF NOT EXISTS <set>;` and `ALTER ENV <set> …;`
+  (the clauses it has; none, no `ALTER`), with a comment saying so, because
+  `CREATE OR REPLACE` would rebuild the set without the withheld value and
+  delete it. Applying such a file keeps the stored value and adds the
+  clauses; a key added to the set since is not removed, and on a machine
+  without the set the withheld key is simply absent.
 - **Machine-specific parts stay explicit.** `LINK <dir>` and the sandbox are
   emitted as they are; a `LINK` path missing on the target fails validation.
 - `SHOW CREATE ALL` orders statements: the secret helper first (`APPLY`
@@ -2820,7 +2843,7 @@ playbooks, and those that name their playbook, are not run:
 6. With `--dry-run`, report the installed version (`version` from the live `.playbook`) against the available one (`version` from the staged `.playbook`, falling back to the staged `VERSION` file), and the migrate step with its sha256, and stop.
 7. A declared step is agreed to before anything changes, even one that will not run because a version is unknown: `--yes`, or a yes on a terminal; otherwise the update is refused (`… declares a migrate step (…); pass --yes to run it, or --dry-run to see the update; nothing was changed`), and a no on a terminal cancels it.
 8. Take the registry lock and re-read the live manifest. If the install directory is no longer the same filesystem object, or any `[source]` field changed while staging ran, activate nothing.
-9. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. The live root directory keeps its own mode; only entries below it take the source's. A failure at any point rolls back: entries the source **introduced** are removed and moved entries are restored from the backup; if any restoration fails the backup is kept and named in the error rather than deleted.
+9. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. The live root directory keeps its own mode; only entries below it take the source's. A failure at any point rolls back: entries the source **introduced** are removed and moved entries are restored from the backup; if any restoration fails the backup is kept and named in the error rather than deleted. After a successful overlay the backup keeps only the replaced files: the old `.playbook` and the top-level preserved files, which went live again and hold values (`[env]` sets, a login, settings), are removed from it, an empty backup is removed, and the backups of earlier updates are removed, so one backup, the last update's, is kept.
 10. Restore the preserved files over the incoming copies: `settings.json`, `settings.local.json`, `.credentials.json`, `.claude.json`, plus every path in `[update].preserve`. A preserved file the source ships but the install did not have is removed rather than adopted, whether it arrived under a moved entry or a newly introduced one. Preserved paths under an entry the overlay never touched are left alone. Whether a preserved path's top-level entry was touched is decided by filesystem identity, not spelling, so on a case-insensitive filesystem a source-shipped `SETTINGS.JSON` is the preserved `settings.json`. Before anything is removed or written, every ancestor between a nested preserved path and its top-level entry is checked for **physical** containment inside that entry (symlinks evaluated, nearest existing ancestor; the final component itself is never followed, so a preserved entry that is a symlink such as the shared `.credentials.json` is recreated as a link). A source that turned a directory on the path into a symlink — pointing outside the install, or into a sibling entry the overlay never backed up — makes the update fail and roll back: `<rel> resolves outside <top>/ after the update (a symlinked ancestor); refusing to restore through it`.
 11. Assemble the manifest that goes live in the staged tree before the overlay: local launcher, authentication-isolation, `[env]` overrides, the `[sandbox]` block, and source metadata are preserved from the live manifest (a source-shipped `[env]` or `[sandbox]` block is never adopted, not even transiently), and the install's `name` is always reset to its directory name.
 12. Check, still under the registry lock, that the installed step resolves inside the install and has the sha256 agreed to; release the lock; then run it: as `<script> <from-version> <to-version> <install-dir>` with working directory the install and `CLAUDE_CONFIG_DIR`, `CPB_PLAYBOOK_NAME`, `CPB_PLAYBOOK_DIR` in the environment. It may run cpb statements, which take the lock themselves. Steps are expected to be idempotent; the CLI does not track which have run. A declared step is not run, with a warning, when either side has no `version`.

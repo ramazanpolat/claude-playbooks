@@ -280,6 +280,8 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		updated.Sandbox = liveManifest.Sandbox
 		updated.MCP = liveManifest.MCP
 		updated.Skills = liveManifest.Skills
+		updated.Play = liveManifest.Play
+		updated.Apply = liveManifest.Apply
 	}
 	updated.Name = filepath.Base(root)
 	if err := manifest.Write(work, updated); err != nil {
@@ -298,7 +300,7 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		}
 	}
 
-	fmt.Fprintf(w, "Updating %s from %s...\n", name, pb.Manifest.Source.Repository)
+	fmt.Fprintf(w, "Updating %s from %s...\n", name, redactSourceURL(pb.Manifest.Source.Repository))
 	// The skills the source ships, before the overlay moves them: a
 	// recorded skill of the same name is put back over them.
 	shipped := map[string]bool{}
@@ -311,8 +313,12 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	if err != nil {
 		return err
 	}
-
-	fmt.Fprintf(w, "Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
+	if trimUpdateBackup(backupPath, preserve) {
+		fmt.Fprintf(w, "Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
+	} else {
+		fmt.Fprintf(w, "Updated %q to %s.\n", name, displayVersion(toVersion))
+	}
+	removeUpdateBackups(root, backupPath)
 
 	// The overlay can replace skills/ as a whole: put back the skills
 	// statements added (SPEC.md, "Skills").
@@ -352,7 +358,7 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 	}
 
 	parent := filepath.Dir(root)
-	backupPath := filepath.Join(parent, fmt.Sprintf(".%s.bak.%s", filepath.Base(root), time.Now().UTC().Format("20060102T150405.000000000")))
+	backupPath := filepath.Join(parent, fmt.Sprintf(".%s.bak.%s", filepath.Base(root), time.Now().UTC().Format(backupStamp)))
 	if err := os.MkdirAll(backupPath, 0700); err != nil {
 		return "", err
 	}
@@ -745,4 +751,61 @@ func restoreLocalEntry(backup, root, rel string, moved, introduced map[string]bo
 		return copyDir(src, dst)
 	}
 	return copyFile(src, dst, info.Mode())
+}
+
+// backupStamp is the timestamp in an update backup's name,
+// .<name>.bak.<stamp>, beside the install.
+const backupStamp = "20060102T150405.000000000"
+
+// trimUpdateBackup removes from a successful update's backup what went live
+// again: the manifest (the update carries its install-local state forward)
+// and the top-level preserved files, which were copied back. Those are the
+// ones that hold values ([env] sets, a login, settings), and a second copy
+// of them is only a leak. It reports whether the backup still holds
+// anything; an empty one is removed.
+func trimUpdateBackup(backupPath string, preserve []string) bool {
+	for _, rel := range append([]string{manifest.FileName}, preserve...) {
+		if strings.Contains(rel, "/") {
+			continue // nested: below an entry the backup keeps whole
+		}
+		removeAny(filepath.Join(backupPath, rel))
+	}
+	if entries, err := os.ReadDir(backupPath); err == nil && len(entries) == 0 {
+		os.Remove(backupPath)
+		return false
+	}
+	return true
+}
+
+// updateBackups lists the backups updates left beside root, by their exact
+// name shape, so a playbook named "a" never matches "a.bak"'s. Symlinks
+// are never listed.
+func updateBackups(root string) []string {
+	parent, prefix := filepath.Dir(root), "."+filepath.Base(root)+".bak."
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		n := e.Name()
+		if !e.IsDir() || !strings.HasPrefix(n, prefix) {
+			continue
+		}
+		if _, err := time.Parse(backupStamp, n[len(prefix):]); err != nil {
+			continue
+		}
+		out = append(out, filepath.Join(parent, n))
+	}
+	return out
+}
+
+// removeUpdateBackups removes the backups of earlier updates of root, all
+// but keep ("" for none): one update's backup is what an undo needs.
+func removeUpdateBackups(root, keep string) {
+	for _, b := range updateBackups(root) {
+		if b != keep {
+			os.RemoveAll(b)
+		}
+	}
 }

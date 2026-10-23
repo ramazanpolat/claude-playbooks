@@ -260,12 +260,16 @@ func TestNativeUpdateLeavesRuntimeStateInPlace(t *testing.T) {
 	if !os.SameFile(before, after) {
 		t.Fatal("runtime data was copied through the update instead of left in place")
 	}
+	// The backup held only the old manifest, which went live again, so
+	// none is kept; there is at most one either way.
 	backups, err := filepath.Glob(filepath.Join(config.PlaybooksDir, ".pb.bak.*"))
-	if err != nil || len(backups) != 1 {
+	if err != nil || len(backups) > 1 {
 		t.Fatalf("backups=%v err=%v", backups, err)
 	}
-	if _, err := os.Stat(filepath.Join(backups[0], "data")); !os.IsNotExist(err) {
-		t.Fatalf("runtime data was dragged into the backup: %v", err)
+	for _, b := range backups {
+		if _, err := os.Stat(filepath.Join(b, "data")); !os.IsNotExist(err) {
+			t.Fatalf("runtime data was dragged into the backup: %v", err)
+		}
 	}
 }
 
