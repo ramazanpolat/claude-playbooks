@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [v4.0.0-rc5] -- 2026-10-24
+
+### Upgrading from rc4
+
+- **Playbooks on disk need nothing.** Three things rc4 accepted are now
+  refused, each with a one-line reason: a new launcher named after an
+  existing command (`claude`, a keyword, or a command already on PATH), a
+  source URL carrying a credential (`https://TOKEN@host/…`), and a token
+  launch over an isolated playbook's own login. A launcher that already
+  exists keeps working.
+- **Installing from a source changes what it copies:** the source's
+  launcher, cpb's own records and one machine's runtime state stay behind.
+  See Changed and Fixed below.
+
 ### Changed
 
 - **A new launcher never takes an existing command's name.** Creating a
