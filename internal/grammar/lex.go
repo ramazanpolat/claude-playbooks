@@ -54,6 +54,8 @@ func argTokens(args []string) []Token {
 // and a doubled quote inside is a literal one. Empty statements (';;') are
 // skipped.
 func lexFile(src string) ([][]Token, error) {
+	// A UTF-8 byte-order mark (Windows editors write one) is not a word.
+	src = strings.TrimPrefix(src, "\ufeff")
 	var (
 		stmts     [][]Token
 		cur       []Token
