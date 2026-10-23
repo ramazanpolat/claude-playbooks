@@ -1615,6 +1615,12 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		if p.kw("ARGS") != "" {
 			for !p.atEnd() && !p.mcpPartOrStarter() {
 				arg := p.toks[p.i]
+				if !arg.Quoted && arg.Comma && arg.Text == "," {
+					// A lone comma in a file ('a' , 'b') only separates, as
+					// in list(); argv words carry no Comma and pass as given.
+					p.i++
+					continue
+				}
 				if arg.Quoted && arg.Comma {
 					// 'a', in a file: the comma after the quotes separates.
 					arg.Text = strings.TrimSuffix(arg.Text, ",")

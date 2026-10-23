@@ -143,3 +143,26 @@ func TestEmptyQuotedListItemRefused(t *testing.T) {
 		t.Fatalf("names = %q", names)
 	}
 }
+
+// In a file a lone comma between MCP ARGS only separates; an unquoted
+// argument keeps an attached comma, and argv passes every word as given.
+func TestMCPArgsLoneComma(t *testing.T) {
+	stmts, err := ParseFile("ALTER PLAYBOOK w ADD MCP SERVER s COMMAND x ARGS 'a' , 'b';\n" +
+		"ALTER PLAYBOOK w ADD MCP SERVER s COMMAND x ARGS a, b;\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := Flatten(stmts[0].Clauses)[0].MCP.Args; len(a) != 2 || a[0] != "a" || a[1] != "b" {
+		t.Fatalf("spaced comma: args = %q", a)
+	}
+	if a := Flatten(stmts[1].Clauses)[0].MCP.Args; len(a) != 2 || a[0] != "a," || a[1] != "b" {
+		t.Fatalf("attached comma: args = %q", a)
+	}
+	st, err := ParseArgs([]string{"ALTER", "PLAYBOOK", "w", "ADD", "MCP", "SERVER", "s", "COMMAND", "x", "ARGS", "a", ",", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := Flatten(st.Clauses)[0].MCP.Args; len(a) != 3 || a[1] != "," {
+		t.Fatalf("argv: args = %q", a)
+	}
+}
