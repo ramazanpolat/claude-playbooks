@@ -149,15 +149,32 @@ func varClauses(set, refs map[string]string, unset []string, fix func(key string
 }
 
 func createEnvBlock(p *envset.Set) createBlock {
-	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Env, Name: p.Name, OrReplace: true}
+	var clauses []grammar.Clause
 	if p.Description != "" {
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Description, Arg: p.Description})
+		clauses = append(clauses, grammar.Clause{Kind: grammar.Description, Arg: p.Description})
 	}
-	clauses, comments := varClauses(p.Set, p.Refs, p.Block, func(k string) string {
+	vars, comments := varClauses(p.Set, p.Refs, p.Block, func(k string) string {
 		return fmt.Sprintf("ALTER ENV %s SET %s FROM '<ref>'", p.Name, k)
 	})
-	st.Clauses = append(st.Clauses, clauses...)
-	return createBlock{text: joinComments(comments, st.Pretty()+";"), withheld: len(comments) / 2}
+	clauses = append(clauses, vars...)
+	if len(comments) == 0 {
+		st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Env, Name: p.Name, OrReplace: true, Clauses: clauses}
+		return createBlock{text: st.Pretty() + ";"}
+	}
+	// A withheld literal is not in the file, so CREATE OR REPLACE would
+	// rebuild the set without it and delete the stored value on APPLY.
+	// Written instead as a create that leaves an existing set alone and an
+	// ALTER that only adds: the stored value survives, at the price of
+	// exact convergence for this set.
+	withheld := len(comments) / 2
+	comments = append(comments,
+		"-- ENV "+p.Name+" withholds a literal, so it is written to keep what is stored: APPLY creates the set",
+		"-- only if it is missing and adds the clauses below; keys added to it since are not removed")
+	text := (&grammar.Stmt{Verb: grammar.Create, Object: grammar.Env, Name: p.Name, IfNotExists: true}).Pretty() + ";"
+	if len(clauses) > 0 {
+		text += "\n" + (&grammar.Stmt{Verb: grammar.Alter, Object: grammar.Env, Name: p.Name, Clauses: clauses}).Pretty() + ";"
+	}
+	return createBlock{text: joinComments(comments, text), withheld: withheld}
 }
 
 // createDefaultsBlocks is DEFAULTS as two statements: the secret helper,
@@ -190,7 +207,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	case v.Linked != nil:
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Link, Arg: *v.Linked})
 	case v.Source != nil:
-		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.From, Arg: v.Source.URL})
+		// The recorded URL, not the view's masked one: a credential in it
+		// is caught below and the whole statement withheld.
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.From, Arg: m.Source.Repository})
 		if v.Source.Branch != nil {
 			st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.Branch, Arg: *v.Source.Branch})
 		}
@@ -247,12 +266,12 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 	// A source URL that carries credentials is never printed: the whole
 	// statement is withheld, shown with the URL masked.
 	withheldSource := 0
-	if v.Source != nil && redactURLCredentials(v.Source.URL) != v.Source.URL {
+	if v.Source != nil && redactSourceURL(m.Source.Repository) != m.Source.Repository {
 		masked := *st
 		masked.Clauses = slices.Clone(st.Clauses)
 		for i, c := range masked.Clauses {
 			if c.Kind == grammar.From {
-				masked.Clauses[i].Arg = redactURLCredentials(c.Arg)
+				masked.Clauses[i].Arg = redactSourceURL(c.Arg)
 			}
 		}
 		lines := []string{"-- withheld: the source URL of PLAYBOOK " + pb.Name + " carries credentials; install it from a URL without them"}
@@ -276,7 +295,9 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 		}
 		// MCP servers and skills, as clauses of their own statement.
 		mcps, mcpComments := mcpCreateClauses(pb.Path, m)
-		mcps = append(mcps, skillCreateClauses(m)...)
+		skills, skillComments := skillCreateClauses(m)
+		mcps = append(mcps, skills...)
+		mcpComments = append(mcpComments, skillComments...)
 		if len(mcps)+len(mcpComments) > 0 {
 			t := strings.Join(mcpComments, "\n")
 			if len(mcps) > 0 {

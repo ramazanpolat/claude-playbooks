@@ -42,6 +42,30 @@
   `RENAME TO` onto an existing playbook, a launcher another playbook
   answers to, a launcher that cannot be created. Names are judged against
   the registry the file's earlier statements leave.
+- **`SHOW CREATE … --skip-secrets` no longer deletes a withheld value when
+  the file is applied.** An env set with a withheld literal is written as
+  `CREATE ENV IF NOT EXISTS` plus an additive `ALTER ENV`, so `APPLY` keeps
+  the stored value (the TUI's export always withholds). Such a set no longer
+  converges exactly: a key added to it since is not removed.
+- **A source no longer brings cpb's own records.** `CREATE PLAYBOOK … FROM`
+  drops a source's `[play]`, `[apply]`, `[skills]` and `[mcp]` records with a
+  note, so `cpb update` cannot follow the source author's recipe; `update`
+  keeps the live records.
+- **A source URL carrying a credential is refused** (`https://TOKEN@host/…`),
+  dry run included. An install recorded with one still updates, with the URL
+  masked in SHOW, SELECT, update and git's output.
+- **`update` keeps one backup, without values.** The old `.playbook` and the
+  preserved files are removed from the backup after a successful update,
+  earlier updates' backups are removed, and `DROP PLAYBOOK` removes the last.
+- **A `LINK`ed playbook whose target is gone can be dropped.**
+- **A source never brings one machine's runtime state.** Installing from a
+  used directory or a repository holding one leaves out its session records
+  (`projects/`, `history.jsonl` and the like), set-aside logins
+  (`.credentials.json.*`), state backups (`.claude.json.*`, `*.cpb-backup-*`)
+  and `.apply/`, with a note; `update` never lets them replace the install's
+  own.
+- **A backup kept by an incomplete rollback is never removed** by a later
+  update or `DROP PLAYBOOK` (it is renamed `….incomplete` and named on drop).
 
 ## [v4.0.0-rc4] -- 2026-10-18
 
