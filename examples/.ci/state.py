@@ -68,6 +68,11 @@ def playbook(name):
         # the directory names the playbook.
         if m.get("name") == name:
             del m["name"]
+        # A launcher that is the playbook's own name is the default launcher,
+        # recorded or not: earlier releases recorded it over a source's
+        # launcher, which no source chooses any more.
+        if m.get("launcher") == name:
+            del m["launcher"]
     out["manifest"] = m or None
     s = read_json(os.path.join(d, "settings.json"))
     out["settings"] = s or None
