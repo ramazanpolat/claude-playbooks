@@ -225,13 +225,23 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 
 	if isAuthIsolated(configDir) {
 		// The machine-global token and the plan descriptors describe the
-		// global account and never apply here. A token the MANIFEST sets is
-		// this install's own choice, not the global one, and is honoured:
-		// injected, with the stored grant quarantined exactly as on the
-		// non-isolated token path (the adoption hazard is the same).
+		// global account and never apply here, DEFAULTS included. A token
+		// the playbook supplies itself is honoured: injected, with the
+		// stored grant quarantined exactly as on the non-isolated token path
+		// (the adoption hazard is the same). A login of its own refuses
+		// the launch first, before anything is changed: see ownLoginRefusal.
+		own, oerr := ownToken(configDir, layers)
+		if oerr != nil {
+			return refuse(oerr)
+		}
+		if own != "" {
+			if err := ownLoginRefusal(configDir); err != nil {
+				return refuse(err)
+			}
+		}
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
 		syncErr := SyncCredentials(configDir)
-		if own := manifestToken(menv); own != "" {
+		if own != "" {
 			if qErr := QuarantineStoredOAuth(configDir); syncErr == nil {
 				syncErr = qErr
 			}
@@ -261,8 +271,12 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// still leaves the config dir without the stale grant that would
 		// hijack the token. Its error is reported only if metadata sync had
 		// none of its own -- both are advisory, and the sync warning is the
-		// more actionable of the two.
-		qErr := QuarantineStoredOAuth(configDir)
+		// more actionable of the two. A grant the quarantine would strip is
+		// kept first, or the strip waits: see keepStoreGrant.
+		qErr := keepStoreGrant(configDir)
+		if qErr == nil {
+			qErr = QuarantineStoredOAuth(configDir)
+		}
 		syncErr = SyncAccountMetadata(configDir)
 		if syncErr == nil {
 			syncErr = qErr

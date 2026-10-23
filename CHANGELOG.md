@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **An isolated playbook's login is never deleted by a token launch.** A
+  token in an env set listed in `DEFAULTS` was taken as an isolated
+  playbook's own token: it was injected, and the playbook's own login was
+  deleted from its store. `DEFAULTS` is the machine's layer and no longer
+  supplies an isolated playbook's token. A token the playbook supplies itself
+  (its block, an env set it uses, `--env`) over a login it holds is now
+  refused before anything changes, naming the ways out: `--block
+  CLAUDE_CODE_OAUTH_TOKEN` to use the login, removing the token from the
+  playbook, or `/logout` first to use the token. `auth status` shows such a
+  playbook as `error` with the reason.
+- **A token launch keeps a shared playbook's stored login.** When the token
+  path stripped a store's grant that was another account's, or one not
+  confirmed as the machine's, that login was lost. It is now copied to
+  `.credentials.json.cpb-own-<stamp>` first, with one line on stderr; the
+  machine's own account's newer grant goes over the machine store first.
+- **A stale `~/.claude/.claude.json` no longer passes for the machine's
+  account.** It was read ahead of `~/.claude.json`, so after the machine
+  logged in to another account an old account's grant could be copied over
+  the machine's login. `~/.claude.json` now decides whenever it exists, and
+  when the two files name different accounts no login is promoted.
+
 ## [v4.0.0-rc4] -- 2026-10-18
 
 ### Upgrading from rc3

@@ -159,15 +159,29 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
 			}
 		}
+		var own string
+		if r.Mode == "" && r.IsolatedLogin {
+			// DEFAULTS never supplies an isolated playbook's token.
+			var err error
+			if own, err = ownToken(configDir, nil); err != nil {
+				r.Mode, r.ModeError = ModeError, sanitizeProfileError(err)
+			}
+		}
 		if r.Mode == "" {
 			_, setsToken := (map[string]string)(nil), false
 			if menv != nil {
 				_, setsToken = menv.Set[OAuthTokenEnv]
 			}
 			switch {
-			case setsToken && manifestToken(menv) != "":
-				// Honoured on the isolated path too: PrepareLaunchEnv injects
-				// it and quarantines the stored grant exactly as elsewhere.
+			case r.IsolatedLogin && own != "":
+				// Honoured: PrepareLaunchEnv injects it and quarantines the
+				// stored grant, unless the playbook holds a login of its own,
+				// which refuses the launch.
+				r.Mode = ModePlaybookToken
+				if err := ownLoginRefusal(configDir); err != nil {
+					r.Mode, r.ModeError = ModeError, err.Error()
+				}
+			case !r.IsolatedLogin && setsToken && manifestToken(menv) != "":
 				r.Mode = ModePlaybookToken
 			case r.IsolatedLogin:
 				r.Mode = ModeIsolatedLogin

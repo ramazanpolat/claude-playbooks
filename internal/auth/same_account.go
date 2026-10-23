@@ -36,7 +36,10 @@ func accountUUID(path string) string {
 }
 
 // machineAccountUUID is the account of the machine's own login, from its
-// own state (~/.claude/.claude.json, then ~/.claude.json).
+// own state (see findAccountState). When both machine state files name an
+// account and the accounts differ, one of them is stale and nothing tells
+// which: the machine's account is then unknown, so no login is promoted
+// over the machine store on its strength.
 func machineAccountUUID(targetDir string) string {
 	state, err := findAccountState(targetDir)
 	if err != nil || state == nil {
@@ -44,6 +47,19 @@ func machineAccountUUID(targetDir string) string {
 	}
 	account, _ := state["oauthAccount"].(map[string]any)
 	uuid, _ := account["accountUuid"].(string)
+	canonical, nested, err := machineStateFiles()
+	if err != nil {
+		return ""
+	}
+	targetState, _ := filepath.Abs(filepath.Join(targetDir, StateFileName))
+	for _, path := range []string{canonical, nested} {
+		if abs, _ := filepath.Abs(path); abs == targetState {
+			continue
+		}
+		if other := accountUUID(path); other != "" && other != uuid {
+			return ""
+		}
+	}
 	return uuid
 }
 
@@ -61,11 +77,18 @@ func sameAccount(targetDir string) bool {
 // .credentials.json.cpb-own-<stamp>, and the account state that came with it
 // leaves .claude.json (backed up first), so the metadata sync fills in the
 // machine's. Nothing is deleted, and nothing of either account is printed.
-func setAsideOwnLogin(targetDir string) error {
+// then says what the launch does instead, for the notice. With copy, the
+// store stays in place and a copy is kept, for a caller that strips only the
+// grant from it and keeps its other logins (mcpOAuth) where they are.
+func setAsideOwnLogin(targetDir, then string, copy bool) error {
 	stamp := now().Format("2006-01-02-15_04_05")
 	creds := filepath.Join(targetDir, CredentialsFileName)
 	kept := creds + ".cpb-own-" + stamp
-	if err := os.Rename(creds, kept); err != nil {
+	keep := os.Rename
+	if copy {
+		keep = func(from, to string) error { return copyFile(from, to, 0600) }
+	}
+	if err := keep(creds, kept); err != nil {
 		return fmt.Errorf("cannot set aside the login in %s: %w", targetDir, err)
 	}
 	state := filepath.Join(targetDir, StateFileName)
@@ -76,7 +99,7 @@ func setAsideOwnLogin(targetDir string) error {
 	if accountUUID(state+".cpb-backup-"+stamp) == "" || machineAccountUUID(targetDir) == "" {
 		why = "a login that cannot be confirmed as the machine's account"
 	}
-	Notice(fmt.Sprintf("%s held %s; kept it as %s and linked the machine's login. To keep that account there: ALTER PLAYBOOK <name> SET login = 'isolated', then move the file back",
-		targetDir, why, filepath.Base(kept)))
+	Notice(fmt.Sprintf("%s held %s; kept it as %s and %s. To keep that account there: ALTER PLAYBOOK <name> SET login = 'isolated', then move the file back",
+		targetDir, why, filepath.Base(kept), then))
 	return nil
 }
