@@ -61,7 +61,7 @@ you give and creates its launcher: the source manifest's `launcher`, unless you
 name one.
 
 ```bash
-cpb CREATE PLAYBOOK awesome FROM https://github.com/ramazanpolat/awesome-claude-playbooks BRANCH v2.0.0
+cpb CREATE PLAYBOOK awesome-dba FROM https://github.com/ramazanpolat/awesome-claude-playbooks BRANCH v2.0.0 SUBDIR playbooks/dba
 cpb CREATE PLAYBOOK team-tools FROM https://github.com/user/awesome BRANCH main SET launcher = 'tt'
 cpb CREATE PLAYBOOK mine FROM ~/dev/my-playbook        # a local directory, copied
 ```

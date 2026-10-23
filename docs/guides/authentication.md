@@ -38,7 +38,7 @@ session.
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
 | One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT` (this key never takes a reference: cpb reads it itself) | that token wins over the file; its own login removed |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once, or give it a per-account token instead (`ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN=... AS PLAINTEXT`). `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
 [env set](environment.md#env-sets-define-once-attach-to-many) shared by
@@ -100,9 +100,9 @@ fallback:
 
 ## A source never carries a login
 
-A playbook you install brings no login with it. `install` and
-`CREATE PLAYBOOK … FROM` leave a source's `.credentials.json`, and the
-account keys of its `.claude.json`, out of the install, and say so in one
+A playbook you install brings no login with it. `CREATE PLAYBOOK … FROM`
+leaves a source's `.credentials.json`, and the
+account keys of its `.claude.json`, out of the install, and says so in one
 line each. `LINK` sets them aside in place rather than deleting anything.
 
 ## Routing a playbook to another backend
