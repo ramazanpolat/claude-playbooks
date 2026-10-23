@@ -57,8 +57,8 @@ The human layout may change between releases; scripts read `--json`.
 ## Install a shared playbook repo
 
 `CREATE PLAYBOOK … FROM` installs from a source: it clones a git repository or copies a local directory, installs it under the name
-you give and creates its launcher: the source manifest's `launcher`, unless you
-name one.
+you give and creates its launcher: the name you give, unless you name another
+one. A source never chooses this machine's commands: a `launcher` in its manifest is ignored, with a note.
 
 ```bash
 cpb CREATE PLAYBOOK awesome FROM https://github.com/ramazanpolat/awesome-claude-playbooks BRANCH v2.0.0
@@ -108,7 +108,17 @@ resolves against the live registry (directory name first, then the manifest's
 `launcher`) at invocation time, so the launcher carries no state that can go stale.
 Launchers work from any shell, in scripts and in cron.
 
-A playbook has one launcher: the name `LAUNCHER` gave it, or its own name.
+A playbook has one launcher: the name `SET launcher` gave it, or its own name.
+
+A new launcher never takes the name of a command you already have. `claude`,
+a keyword, or a name already on your PATH (`git`, `python3`) is refused before
+anything is created, naming the command it would hide. Give the playbook
+another launcher, or none:
+
+```bash
+cpb CREATE PLAYBOOK git SET launcher = 'git-pb'   # the playbook is git, the command git-pb
+cpb CREATE PLAYBOOK python3 SET launcher = ''     # no launcher: cpb run python3
+```
 
 ```bash
 cpb ALTER PLAYBOOK experiment SET launcher = 'exp'          # set or replace it
@@ -180,7 +190,9 @@ cpb APPLY playbook.cpb                   # on another machine, or again here: no
 failure; every statement `SHOW CREATE` writes is safe to repeat, so running the
 fixed file again is the recovery. `SHOW CREATE` never prints a credential: a
 credential-looking literal becomes a comment and the command exits non-zero
-unless `--skip-secrets`. A file can `INCLUDE 'base.cpb'` another, relative to
+unless `--skip-secrets`. An env set with such a comment is written as
+`CREATE ENV IF NOT EXISTS` plus `ALTER ENV`, so applying the file keeps the
+value already stored instead of rebuilding the set without it. A file can `INCLUDE 'base.cpb'` another, relative to
 itself, so layers stack; see
 [playbook.cpb](../../SPEC.md#playbookcpb-show-create-and-apply) and
 [INCLUDE](../../SPEC.md#include).
@@ -208,7 +220,17 @@ Runtime state the source knows nothing about (`data/`, `projects/`, `sessions/`,
 `history.jsonl`) is never read, moved or copied, so a session writing to it
 during the update cannot lose work. Replaced entries are moved to a timestamped
 `.<name>.bak.<stamp>` beside the install first, and rolled back if the overlay
-fails.
+fails. After a successful update the backup keeps only the replaced files (the
+old `.playbook` and the preserved files, which hold values, are removed from
+it), only the last update's backup is kept, and `DROP PLAYBOOK` removes it.
+
+A source's own `[play]`, `[apply]`, `[skills]` and `[mcp]` records are never
+adopted, at install or update: they describe what was done to the author's
+install. A source URL carrying a credential (`https://TOKEN@host/…`) is
+refused; authenticate with a git credential helper or an SSH remote. Nor
+does a source bring one machine's runtime state: installing from a directory
+that was used as a config directory leaves its session records, set-aside
+logins and backups out, with a note.
 
 Local configuration survives even when the source ships its own copy:
 `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json`

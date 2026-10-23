@@ -105,7 +105,11 @@ cpb  <VERB>   <OBJECT>   <name>   <clause> <clause> ...
 - Lists are **space-separated**, without commas. An unquoted comma at the
   end of an item is read as a separator when another item follows it
   (`SET A=1, B=2`, `USE ENV a, b`); a final value keeps its comma, so
-  `SET NO_PROXY=a,b,` stores `a,b,`. Quote a value to be explicit.
+  `SET NO_PROXY=a,b,` stores `a,b,`. Quote a value to be explicit. In a
+  file a comma after a quoted item, or standing alone, always separates
+  (`'a', 'b'`, `'a' , 'b'`). MCP `ARGS` are the exception for unquoted
+  words: `ARGS a, b` keeps `a,` as written, since an argument may end in
+  a comma.
 - Names follow the rules each object already has: a playbook name is
   letters, digits, `_` and `-`; an env set name also allows dots
   (`glm-5.3`). An **unquoted keyword is not a valid new name** (refused with an error naming the keyword); quoted, it is one, which is how `SHOW CREATE` writes such a name back, and an existing object whose name is a keyword can be addressed in the name slot. A launcher name is never a keyword, quoted or not.
@@ -389,7 +393,7 @@ cpb CREATE PLAYBOOK sre FROM https://github.com/user/repo/tree/main/playbooks/sr
 1. Stage the source (Git URL → `git clone --depth=1`, with `BRANCH <ref>` if given, into a temp dir; local path → read in place) so its `.playbook` can be consulted.
 2. The install directory is `<name>`; the source manifest's `name` never chooses it.
 3. Check the target doesn't already exist under the playbooks root.
-4. Preflight command names against the registry under the registry lock — the name and the effective launcher name (`SET launcher`, or the staged manifest's `launcher`) — erroring **before anything is copied** if a name already addresses another playbook.
+4. Preflight command names against the registry under the registry lock — the name and the launcher name (`SET launcher`, else the name) — erroring **before anything is copied** if a name already addresses another playbook or the launcher cannot be created (see *Launchers*).
 5. Copy the staged tree into the target. The installed directory **is** the playbook. If a `.playbook` is present it supplies metadata; if not, the directory is still a valid playbook.
 6. Register a launcher command per the rules below.
 7. Print a summary.
@@ -406,7 +410,9 @@ The source never gets a `.playbook` written into it, and does not need one.
 
 **Default command name**
 
-One launcher is registered, named by `SET launcher`, or the source manifest's `launcher` field, or `<name>`, in that order. `SET launcher = ''` skips it. When `SET launcher` differs from what the installed manifest records, the name is written into the installed playbook's `.playbook` — a custom command name is only resolvable at invocation time through the manifest `launcher` field (on manifest-write failure the install is rolled back).
+One launcher is registered, named by `SET launcher`, else `<name>`. `SET launcher = ''` skips it. A source never chooses the launcher: a `launcher` in the source manifest is dropped with a note, since the commands a playbook answers to on this machine are the installer's choice.
+
+The login is the statement's: `SET login = 'isolated'` or `'shared'` wins over the source manifest's `isolated_login`, with a note when they differ. Without `SET login`, the source's `isolated_login` is kept. When `SET launcher` differs from what the installed manifest records, the name is written into the installed playbook's `.playbook` — a custom command name is only resolvable at invocation time through the manifest `launcher` field (on manifest-write failure the install is rolled back).
 
 **Command-name collision handling**: collisions against the registry are a hard **pre-copy error**, not a skip-with-warning — `launcher name "sre" already addresses playbook "other". Pick another name`, and nothing is copied. Only a *foreign file* (not a launcher) already occupying the name in the launcher directory degrades to a post-install warning: the playbook is installed and runnable via `cpb run <name>`, and the warning suggests renaming or removing the conflicting file.
 
@@ -446,9 +452,37 @@ No shell reload is needed — the launcher is a symlink in a PATH directory, liv
   removing the same keys. A directory with `isolated_login = true` keeps both.
 - `update` keeps the install's own files (see *`cpb update <name>`*).
 
+**A source never carries cpb's records, runtime state, or a credential in its URL.**
+- A source that has been used as a config directory holds one machine's
+  history. Its session records (`projects/`, `sessions/`, `session-env/`,
+  `history.jsonl`, `todos/`, `shell-snapshots/`, `statsig/`,
+  `file-history/`, `ide/`, `debug/`, `telemetry/`, `plans/`,
+  `paste-cache/`), cpb's `.apply/` record, every file beside the login
+  stores (`.credentials.json.*`: set-aside logins, run locks; `.claude.json.*`:
+  state backups) and every `*.cpb-backup-*` file are left out of the install,
+  from a directory and from a git repository alike, with one stderr line
+  naming them (`Note: left <source>'s history.jsonl, projects out: session
+  records and set-aside logins belong to the machine that made them, never
+  to a playbook`). `update` leaves them out of the overlay the same way, so
+  a source's never replaces the install's own.
+- The `[play]`, `[apply]`, `[skills]` and `[mcp]` records describe what was
+  done to one install. A source's copies are dropped, each with one stderr
+  line (`Note: ignoring the [apply] record shipped in the source's
+  .playbook; it records what was done to one install`); the skill files and
+  MCP configuration the source ships stay. `update` keeps the live records.
+- A source URL that carries a credential (`https://TOKEN@host/…`,
+  `https://user:password@host/…`) is refused before anything is fetched,
+  dry run included, with the URL masked (`source https://<redacted, N
+  chars>@host/… carries a credential in its URL; cpb never records one: use
+  a URL without it, authenticated by a git credential helper or an SSH
+  remote`). A user name alone on another scheme (`ssh://git@host/o/r`) is
+  not a credential. An install recorded with one before this rule still
+  updates; its URL is masked in `SHOW`, `SELECT`, `update` and git's output,
+  and `SHOW CREATE` withholds its statement.
+
 ### `DROP PLAYBOOK [IF EXISTS] <name> [--yes]`
 
-Deletes the playbook's directory (for a `LINK`, only the link), then retires its launchers by the rule in *Launchers*, printing `Removed launcher "<n>"` or `Kept launcher "<n>" (still addresses playbook "<other>")` for each. Without `--yes` it first shows the playbook, its location, its launchers and how many files go, and asks on stdin; any answer but `y` or `yes`, end of input included, prints `Cancelled.` and deletes nothing. The confirmation runs before the registry lock is taken; the playbook is found again under the lock, and nothing is removed if it moved meanwhile (`"<name>" disappeared while waiting for confirmation (deleted or renamed concurrently); nothing removed`). An unknown name refuses (`unknown playbook "<name>". `cpb SHOW PLAYBOOKS` lists them`); `IF EXISTS` makes it a no-op. In a file, `APPLY` never takes a drop on the file's word (see *playbook.cpb: SHOW CREATE and APPLY*). Under a custom playbooks root, launchers are not touched.
+Deletes the playbook's directory (for a `LINK`, only the link, also when its target is gone), and the backup an earlier `update` left beside it, then retires its launchers by the rule in *Launchers*, printing `Removed launcher "<n>"` or `Kept launcher "<n>" (still addresses playbook "<other>")` for each. Without `--yes` it first shows the playbook, its location, its launchers and how many files go, and asks on stdin; any answer but `y` or `yes`, end of input included, prints `Cancelled.` and deletes nothing. The confirmation runs before the registry lock is taken; the playbook is found again under the lock, and nothing is removed if it moved meanwhile (`"<name>" disappeared while waiting for confirmation (deleted or renamed concurrently); nothing removed`). An unknown name refuses (`unknown playbook "<name>". `cpb SHOW PLAYBOOKS` lists them`); `IF EXISTS` makes it a no-op. In a file, `APPLY` never takes a drop on the file's word (see *playbook.cpb: SHOW CREATE and APPLY*). Under a custom playbooks root, launchers are not touched.
 
 ## CREATE / ALTER / DROP ENV and ALTER DEFAULTS
 
@@ -1828,6 +1862,13 @@ File rules:
   which converges, `USE ENV` with the full list, `''` for none), so applying
   a file twice changes nothing the second time, and a playbook's properties
   and env list come back exactly as written. Collections stay additive.
+  One exception keeps a value safe: an env set with a withheld literal is
+  written as `CREATE ENV IF NOT EXISTS <set>;` and `ALTER ENV <set> …;`
+  (the clauses it has; none, no `ALTER`), with a comment saying so, because
+  `CREATE OR REPLACE` would rebuild the set without the withheld value and
+  delete it. Applying such a file keeps the stored value and adds the
+  clauses; a key added to the set since is not removed, and on a machine
+  without the set the withheld key is simply absent.
 - **Machine-specific parts stay explicit.** `LINK <dir>` and the sandbox are
   emitted as they are; a `LINK` path missing on the target fails validation.
 - `SHOW CREATE ALL` orders statements: the secret helper first (`APPLY`
@@ -1853,6 +1894,13 @@ File rules:
 `--dry-run` does step 1 and reports what step 2 would do, judging each
 statement against the files as they are plus what earlier statements, in
 any of the files, would have created.
+The dry run refuses what the run would refuse about names: a `RENAME TO`
+onto an existing playbook, a launcher another playbook answers to, and a
+launcher that cannot be created (see *Launchers*). Names are judged against
+the registry the earlier statements leave: a playbook they drop or rename
+away claims nothing, and one they create claims its name and launcher. A
+dry run reserves nothing; the run checks the names again under the
+registry lock.
 
 **A setting set more than once is written once.** A stack of files often
 sets one key of one target again: a base recipe, then the child that
@@ -2378,7 +2426,9 @@ Per-playbook commands are **launchers**: symlinks to the `cpb` binary placed in 
 - **Launcher directory.** `--launcher-dir` / `CPB_LAUNCHER_DIR`, else the directory the binary was invoked from (on PATH by construction), falling back to `~/.local/bin` when that is unwritable.
 - **Default root only.** Launcher mutations happen only when operating on the default playbooks root (`~/.claude-playbooks`). A symlink carries no root identity, so managing links on behalf of a custom `--playbooks-dir` root would corrupt the default registry's commands; under a custom root the tool prints a note and the `cpb --playbooks-dir <root> run <name>` form instead.
 - **Reserved name.** `cpb` always means the CLI itself; it never dispatches and may never name a launcher.
+- **Names a new launcher may not take.** Creating a launcher (`CREATE PLAYBOOK`, with `FROM`, `LINK` or neither, `RENAME TO`, `SET launcher`, `RESET launcher`, a playbook's default launcher, `play --keep`) is refused, before anything is registered, when the name is `claude` in any case (the command cpb launches), a keyword in any case, starts with `-`, holds a control character, or is a name that already exists as a command: an executable of that name in an absolute PATH directory, or any file in the launcher directory, that is not a cpb launcher (`launcher name "git" is taken: /usr/bin/git is not a cpb launcher, and a launcher of that name would hide it or be hidden by it`). On a case-insensitive filesystem the lookup folds case. The refusal suggests `SET launcher = '<another name>'` or `SET launcher = ''`. A launcher cpb already wrote under such a name keeps working and can be removed, and a `RENAME TO` that keeps its name keeps it; only a name new to the playbook is refused. The PATH and launcher-directory checks run where cpb writes launchers (the default playbooks root).
 - **Collisions and locking.** The registry is the ownership authority: a command name that already addresses another playbook (by directory name or manifest launcher) is a hard error before any mutation. Preflight-through-registration is serialized across concurrent processes by a flock in the user cache dir (`<cache>/cpb/registry.lock`).
+- **A rename carries the launcher.** `RENAME TO` without `SET launcher` keeps the launcher the playbook has. The default launcher (its name) follows the new name, which is checked as a new launcher and refuses the rename when it cannot be one. A custom launcher stays (checked only for still being cpb's), and the new name gets a launcher beside it, unless the new name cannot be a launcher: then the rename goes ahead with a note, and the custom launcher is the command. A playbook without a launcher gets none. `SET launcher` in the same statement replaces it.
 - **Retirement rule.** `DROP PLAYBOOK` and `RENAME TO` remove a launcher named for the playbook going away (its name, its manifest launcher, or a name a rename leaves behind), receipt line included, printing `Removed launcher "x"`, unless another playbook still claims the name: by spelling in the registry, or by directory-entry identity on a case-insensitive filesystem (`cpb CREATE PLAYBOOK one SET launcher = 'Foo'` and `cpb CREATE PLAYBOOK two SET launcher = 'foo'` share one entry). A claimed launcher is kept outright (`Kept launcher "x" (still addresses playbook "y")`); when the registry cannot be scanned the launcher is kept with a warning, since ownership could not be verified. The rule rests on the launcher gate: the tool only ever writes launchers for the default registry root, so a name nobody in that registry claims serves nothing the tool made. A hand-made link named for the playbook goes with it; it would only fail loudly as stale afterwards.
 - **Stale launchers fail loudly.** Invoking a launcher whose name no longer resolves errors with `unknown playbook "<name>" — this launcher no longer matches any playbook` and exit code 1, never a silent fall-through to the CLI overview.
 - **Foreign files are never touched.** A file occupying a launcher name that is not a symlink to this binary is left alone; attempting to write over it degrades to a warning with manual instructions.
@@ -2820,7 +2870,7 @@ playbooks, and those that name their playbook, are not run:
 6. With `--dry-run`, report the installed version (`version` from the live `.playbook`) against the available one (`version` from the staged `.playbook`, falling back to the staged `VERSION` file), and the migrate step with its sha256, and stop.
 7. A declared step is agreed to before anything changes, even one that will not run because a version is unknown: `--yes`, or a yes on a terminal; otherwise the update is refused (`… declares a migrate step (…); pass --yes to run it, or --dry-run to see the update; nothing was changed`), and a no on a terminal cancels it.
 8. Take the registry lock and re-read the live manifest. If the install directory is no longer the same filesystem object, or any `[source]` field changed while staging ran, activate nothing.
-9. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. The live root directory keeps its own mode; only entries below it take the source's. A failure at any point rolls back: entries the source **introduced** are removed and moved entries are restored from the backup; if any restoration fails the backup is kept and named in the error rather than deleted.
+9. Move every top-level entry the staged source also provides into a timestamped `.<name>.bak.<stamp>` beside the install, then copy the staged source over the install **in place**. Entries the source does not ship — `data/`, `projects/`, `sessions/`, `history.jsonl` and the like — are never read, moved, or copied, so concurrent writes to them cannot be lost. The live root directory keeps its own mode; only entries below it take the source's. A failure at any point rolls back: entries the source **introduced** are removed and moved entries are restored from the backup; if any restoration fails the backup is kept and named in the error rather than deleted. After a successful overlay the backup keeps only the replaced files: the old `.playbook` and the top-level preserved files, which went live again and hold values (`[env]` sets, a login, settings), are removed from it, an empty backup is removed, and the backups of earlier updates are removed, so one backup, the last update's, is kept. A nested preserved path is removed from the backup only when it lies physically inside its entry there. What cannot be removed is a warning naming it. A backup kept by an incomplete rollback is renamed `.<name>.bak.<stamp>.incomplete` (or, when the rename fails, marked by a `.cpb-rollback-incomplete` file inside): no later update removes it, and `DROP PLAYBOOK` keeps it and names it on stderr.
 10. Restore the preserved files over the incoming copies: `settings.json`, `settings.local.json`, `.credentials.json`, `.claude.json`, plus every path in `[update].preserve`. A preserved file the source ships but the install did not have is removed rather than adopted, whether it arrived under a moved entry or a newly introduced one. Preserved paths under an entry the overlay never touched are left alone. Whether a preserved path's top-level entry was touched is decided by filesystem identity, not spelling, so on a case-insensitive filesystem a source-shipped `SETTINGS.JSON` is the preserved `settings.json`. Before anything is removed or written, every ancestor between a nested preserved path and its top-level entry is checked for **physical** containment inside that entry (symlinks evaluated, nearest existing ancestor; the final component itself is never followed, so a preserved entry that is a symlink such as the shared `.credentials.json` is recreated as a link). A source that turned a directory on the path into a symlink — pointing outside the install, or into a sibling entry the overlay never backed up — makes the update fail and roll back: `<rel> resolves outside <top>/ after the update (a symlinked ancestor); refusing to restore through it`.
 11. Assemble the manifest that goes live in the staged tree before the overlay: local launcher, authentication-isolation, `[env]` overrides, the `[sandbox]` block, and source metadata are preserved from the live manifest (a source-shipped `[env]` or `[sandbox]` block is never adopted, not even transiently), and the install's `name` is always reset to its directory name.
 12. Check, still under the registry lock, that the installed step resolves inside the install and has the sha256 agreed to; release the lock; then run it: as `<script> <from-version> <to-version> <install-dir>` with working directory the install and `CLAUDE_CONFIG_DIR`, `CPB_PLAYBOOK_NAME`, `CPB_PLAYBOOK_DIR` in the environment. It may run cpb statements, which take the lock themselves. Steps are expected to be idempotent; the CLI does not track which have run. A declared step is not run, with a warning, when either side has no `version`.

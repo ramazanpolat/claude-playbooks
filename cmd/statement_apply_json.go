@@ -194,7 +194,7 @@ func fetchAction(source, branch, subdir, to string) planAction {
 			source = abs
 		}
 	}
-	return planAction{Type: "fetch", Source: source, Branch: branch, Subdir: subdir, To: to, Network: !local}
+	return planAction{Type: "fetch", Source: redactSourceURL(source), Branch: branch, Subdir: subdir, To: to, Network: !local}
 }
 
 func expandHomeDir(p string) string {
