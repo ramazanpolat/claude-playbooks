@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -349,4 +351,70 @@ func (r *stmtRun) recordSkills(name string, after map[string]*manifest.SkillReco
 		known[n] = rec != nil
 	}
 	r.dry.skillKnown[name] = known
+}
+
+// nameOwner is commandNameOwner as the run sees it: the playbook other
+// than exceptName that cmdName addresses, "" for none. In a dry run a
+// playbook an earlier statement dropped or renamed away claims nothing,
+// and one it created or renamed to claims its name and the launcher that
+// statement left it, so a file is checked against the registry its own
+// earlier statements produce. The real run checks the disk again under
+// the registry lock: a dry run reserves nothing.
+func (r *stmtRun) nameOwner(cmdName, exceptName string) (string, error) {
+	pbs, err := playbook.Discover(config.ResolvePlaybooksDir())
+	if err != nil {
+		return "", err
+	}
+	claims := map[string][]string{}
+	onDisk := map[string]*playbook.Playbook{}
+	for _, pb := range pbs {
+		onDisk[pb.Name] = pb
+		if known, _ := r.playbookState(pb.Name); !known {
+			claims[pb.Name] = launcherNamesFor(pb)
+		}
+	}
+	if r.dry != nil {
+		for name, alive := range r.dry.playbooks {
+			if !alive {
+				continue
+			}
+			l, ok := r.dry.launchers[name]
+			if !ok && onDisk[name] != nil {
+				l = onDisk[name].Alias()
+			}
+			names := []string{name}
+			if l != "" && l != name {
+				names = append(names, l)
+			}
+			claims[name] = names
+		}
+	}
+	owners := make([]string, 0, len(claims))
+	for name := range claims {
+		owners = append(owners, name)
+	}
+	slices.Sort(owners)
+	for _, name := range owners {
+		if name != exceptName && slices.Contains(claims[name], cmdName) {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+// preflightNames is preflightCommandNames over nameOwner.
+func (r *stmtRun) preflightNames(exceptName string, names ...string) error {
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		owner, err := r.nameOwner(n, exceptName)
+		if err != nil {
+			return fmt.Errorf("cannot check launcher name %q against every playbook: %w", n, err)
+		}
+		if owner != "" {
+			return fmt.Errorf("launcher name %q already addresses playbook %q. Pick another name", n, owner)
+		}
+	}
+	return nil
 }

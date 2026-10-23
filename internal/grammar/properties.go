@@ -128,8 +128,8 @@ func checkLauncher(v string) string {
 		return "" // no launcher
 	case IsKeyword(v):
 		return "a launcher name is never a keyword"
-	case launcher.ValidateName(v) != nil:
-		return "invalid launcher name: one word, with no path separator or whitespace (cpb is reserved)"
+	case launcher.CheckNew(v) != nil:
+		return "invalid launcher name: one word, with no path separator or whitespace (cpb and claude are reserved)"
 	}
 	return ""
 }

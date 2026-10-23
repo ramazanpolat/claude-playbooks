@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **A new launcher never takes an existing command's name.** Creating a
+  launcher is refused when its name is `claude` (any case), a keyword, or a
+  command already on PATH or a file in the launcher directory that cpb did
+  not write. A playbook named after a command (`git`, `python3`) needs
+  `SET launcher = '<another name>'` or `SET launcher = ''`. A launcher
+  that already exists keeps working and can still be removed.
+- **A source never chooses the launcher.** `CREATE PLAYBOOK … FROM` ignores
+  a `launcher` in the source's manifest, with a note: the launcher is
+  `SET launcher`, else the playbook's name.
+- **A stated login wins over the source's.** `CREATE PLAYBOOK … FROM …
+  SET login = 'shared'` installs a shared login even when the source's
+  manifest sets `isolated_login`; without `SET login` the source's value is
+  kept.
+
+### Fixed
+
+- **`APPLY --dry-run` refuses what the run refuses about names**: a
+  `RENAME TO` onto an existing playbook, a launcher another playbook
+  answers to, a launcher that cannot be created. Names are judged against
+  the registry the file's earlier statements leave.
+
 ## [v4.0.0-rc4] -- 2026-10-18
 
 ### Upgrading from rc3

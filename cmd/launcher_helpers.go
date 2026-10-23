@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/launcher"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
@@ -106,10 +107,53 @@ func resolveLauncherName(noAlias bool, effectiveAlias, fallbackName, verb string
 	if name == "" {
 		name = fallbackName
 	}
-	if err := launcher.ValidateName(name); err != nil {
-		return "", fmt.Errorf("%w (add SET launcher = '' to %s without a launcher)", err, verb)
+	if err := checkNewLauncher(name); err != nil {
+		return "", fmt.Errorf("%w (add SET launcher = '<another name>', or SET launcher = '' to %s without a launcher)", err, verb)
 	}
 	return name, nil
+}
+
+// checkNewLauncher refuses a name a NEW launcher may not take: an invalid
+// or reserved one (cpb, claude), a keyword, or one that collides with a
+// command already on PATH or a file in the launcher directory that cpb did
+// not write. A launcher named after an existing command hides it from
+// every shell, cpb's own subprocesses included (a `git` launcher
+// re-dispatches cpb's clone into a playbook). The collision checks run
+// only where cpb writes launchers; elsewhere no launcher is written.
+func checkNewLauncher(name string) error {
+	if err := launcher.CheckNew(name); err != nil {
+		return err
+	}
+	if grammar.IsKeyword(name) {
+		return fmt.Errorf("launcher name %q is a keyword", name)
+	}
+	if !launcherOpsAllowed() {
+		return nil
+	}
+	ldir, err := config.ResolveLauncherDir()
+	if err != nil {
+		return nil // no launcher can be written; the write reports it
+	}
+	if p := launcher.Shadowed(ldir, name); p == filepath.Join(ldir, name) {
+		return fmt.Errorf("launcher name %q is taken by a file cpb did not generate", name)
+	} else if p != "" {
+		return fmt.Errorf("launcher name %q is taken: %s is not a cpb launcher, and a launcher of that name would hide it or be hidden by it", name, p)
+	}
+	return nil
+}
+
+// checkLauncherKept is checkNewLauncher for a launcher that may already be
+// in place: a launcher cpb wrote under that name is kept as it is, so only
+// a name that would be written anew is checked.
+func checkLauncherKept(name string) error {
+	if launcherOpsAllowed() {
+		if ldir, err := config.ResolveLauncherDir(); err == nil {
+			if _, exists, foreign := launcher.Lookup(ldir, name); exists && !foreign {
+				return nil
+			}
+		}
+	}
+	return checkNewLauncher(name)
 }
 
 // writeAliasManifest records alias in the playbook's manifest so multicall

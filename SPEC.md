@@ -389,7 +389,7 @@ cpb CREATE PLAYBOOK sre FROM https://github.com/user/repo/tree/main/playbooks/sr
 1. Stage the source (Git URL → `git clone --depth=1`, with `BRANCH <ref>` if given, into a temp dir; local path → read in place) so its `.playbook` can be consulted.
 2. The install directory is `<name>`; the source manifest's `name` never chooses it.
 3. Check the target doesn't already exist under the playbooks root.
-4. Preflight command names against the registry under the registry lock — the name and the effective launcher name (`SET launcher`, or the staged manifest's `launcher`) — erroring **before anything is copied** if a name already addresses another playbook.
+4. Preflight command names against the registry under the registry lock — the name and the launcher name (`SET launcher`, else the name) — erroring **before anything is copied** if a name already addresses another playbook or the launcher cannot be created (see *Launchers*).
 5. Copy the staged tree into the target. The installed directory **is** the playbook. If a `.playbook` is present it supplies metadata; if not, the directory is still a valid playbook.
 6. Register a launcher command per the rules below.
 7. Print a summary.
@@ -406,7 +406,9 @@ The source never gets a `.playbook` written into it, and does not need one.
 
 **Default command name**
 
-One launcher is registered, named by `SET launcher`, or the source manifest's `launcher` field, or `<name>`, in that order. `SET launcher = ''` skips it. When `SET launcher` differs from what the installed manifest records, the name is written into the installed playbook's `.playbook` — a custom command name is only resolvable at invocation time through the manifest `launcher` field (on manifest-write failure the install is rolled back).
+One launcher is registered, named by `SET launcher`, else `<name>`. `SET launcher = ''` skips it. A source never chooses the launcher: a `launcher` in the source manifest is dropped with a note, since the commands a playbook answers to on this machine are the installer's choice.
+
+The login is the statement's: `SET login = 'isolated'` or `'shared'` wins over the source manifest's `isolated_login`, with a note when they differ. Without `SET login`, the source's `isolated_login` is kept. When `SET launcher` differs from what the installed manifest records, the name is written into the installed playbook's `.playbook` — a custom command name is only resolvable at invocation time through the manifest `launcher` field (on manifest-write failure the install is rolled back).
 
 **Command-name collision handling**: collisions against the registry are a hard **pre-copy error**, not a skip-with-warning — `launcher name "sre" already addresses playbook "other". Pick another name`, and nothing is copied. Only a *foreign file* (not a launcher) already occupying the name in the launcher directory degrades to a post-install warning: the playbook is installed and runnable via `cpb run <name>`, and the warning suggests renaming or removing the conflicting file.
 
@@ -1853,6 +1855,13 @@ File rules:
 `--dry-run` does step 1 and reports what step 2 would do, judging each
 statement against the files as they are plus what earlier statements, in
 any of the files, would have created.
+The dry run refuses what the run would refuse about names: a `RENAME TO`
+onto an existing playbook, a launcher another playbook answers to, and a
+launcher that cannot be created (see *Launchers*). Names are judged against
+the registry the earlier statements leave: a playbook they drop or rename
+away claims nothing, and one they create claims its name and launcher. A
+dry run reserves nothing; the run checks the names again under the
+registry lock.
 
 **A setting set more than once is written once.** A stack of files often
 sets one key of one target again: a base recipe, then the child that
@@ -2378,6 +2387,7 @@ Per-playbook commands are **launchers**: symlinks to the `cpb` binary placed in 
 - **Launcher directory.** `--launcher-dir` / `CPB_LAUNCHER_DIR`, else the directory the binary was invoked from (on PATH by construction), falling back to `~/.local/bin` when that is unwritable.
 - **Default root only.** Launcher mutations happen only when operating on the default playbooks root (`~/.claude-playbooks`). A symlink carries no root identity, so managing links on behalf of a custom `--playbooks-dir` root would corrupt the default registry's commands; under a custom root the tool prints a note and the `cpb --playbooks-dir <root> run <name>` form instead.
 - **Reserved name.** `cpb` always means the CLI itself; it never dispatches and may never name a launcher.
+- **Names a new launcher may not take.** Creating a launcher (`CREATE PLAYBOOK`, with `FROM`, `LINK` or neither, `RENAME TO`, `SET launcher`, `RESET launcher`, a playbook's default launcher, `play --keep`) is refused, before anything is registered, when the name is `claude` in any case (the command cpb launches), a keyword in any case, or a name that already exists as a command: an executable of that name in an absolute PATH directory, or any file in the launcher directory, that is not a cpb launcher (`launcher name "git" is taken: /usr/bin/git is not a cpb launcher, and a launcher of that name would hide it or be hidden by it`). On a case-insensitive filesystem the lookup folds case. The refusal suggests `SET launcher = '<another name>'` or `SET launcher = ''`. A launcher cpb already wrote under such a name keeps working and can be removed; only a new one is refused. The PATH and launcher-directory checks run where cpb writes launchers (the default playbooks root).
 - **Collisions and locking.** The registry is the ownership authority: a command name that already addresses another playbook (by directory name or manifest launcher) is a hard error before any mutation. Preflight-through-registration is serialized across concurrent processes by a flock in the user cache dir (`<cache>/cpb/registry.lock`).
 - **Retirement rule.** `DROP PLAYBOOK` and `RENAME TO` remove a launcher named for the playbook going away (its name, its manifest launcher, or a name a rename leaves behind), receipt line included, printing `Removed launcher "x"`, unless another playbook still claims the name: by spelling in the registry, or by directory-entry identity on a case-insensitive filesystem (`cpb CREATE PLAYBOOK one SET launcher = 'Foo'` and `cpb CREATE PLAYBOOK two SET launcher = 'foo'` share one entry). A claimed launcher is kept outright (`Kept launcher "x" (still addresses playbook "y")`); when the registry cannot be scanned the launcher is kept with a warning, since ownership could not be verified. The rule rests on the launcher gate: the tool only ever writes launchers for the default registry root, so a name nobody in that registry claims serves nothing the tool made. A hand-made link named for the playbook goes with it; it would only fail loudly as stale afterwards.
 - **Stale launchers fail loudly.** Invoking a launcher whose name no longer resolves errors with `unknown playbook "<name>" — this launcher no longer matches any playbook` and exit code 1, never a silent fall-through to the CLI overview.

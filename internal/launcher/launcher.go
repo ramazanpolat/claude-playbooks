@@ -270,6 +270,54 @@ func ValidateName(cmdName string) error {
 	return nil
 }
 
+// CheckNew reports whether cmdName may name a NEW launcher: ValidateName,
+// and never `claude`, the command cpb itself launches. A launcher of that
+// name would make every later launch re-enter cpb. Only creation is
+// refused: a launcher made under older rules is still refreshed and
+// removed through ValidateName.
+func CheckNew(cmdName string) error {
+	if err := ValidateName(cmdName); err != nil {
+		return err
+	}
+	if strings.EqualFold(cmdName, "claude") {
+		return fmt.Errorf("launcher name %q is reserved: it is the command cpb launches", cmdName)
+	}
+	return nil
+}
+
+// Owned reports whether path is a launcher: a symlink resolving to the
+// running binary.
+func Owned(path string) bool {
+	bin, err := BinPath()
+	return err == nil && isOurs(path, bin)
+}
+
+// Shadowed returns a file a new launcher dir/cmdName would collide with,
+// or "" when there is none: an entry of that name in dir that is not a
+// launcher (Write would refuse it), or an executable of that name in an
+// absolute PATH directory that is not a launcher. A launcher there would
+// either hide that command or be hidden by it; on a case-insensitive
+// filesystem the lookup folds case, so `Git` finds `git`.
+func Shadowed(dir, cmdName string) string {
+	if _, err := os.Lstat(filepath.Join(dir, cmdName)); err == nil {
+		if p := filepath.Join(dir, cmdName); !Owned(p) {
+			return p
+		}
+	}
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		if !filepath.IsAbs(d) {
+			continue // "" and relative entries name the working directory
+		}
+		p := filepath.Join(d, cmdName)
+		info, err := os.Stat(p)
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 || Owned(p) {
+			continue
+		}
+		return p
+	}
+	return ""
+}
+
 // singleSegment reports whether cmdName is one directory entry name: not
 // empty, not "." or "..", and carrying no path separator. This is the
 // REMOVAL-side check: what may be created is stricter (ValidateName), and
