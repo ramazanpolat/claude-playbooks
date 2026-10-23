@@ -1,5 +1,112 @@
 # Changelog
 
+## [Unreleased]
+
+## [v4.0.0-rc5] -- 2026-10-24
+
+### Upgrading from rc4
+
+- **Three things rc4 accepted are now refused**, each with a one-line
+  reason: a new launcher named after an existing command (`claude`, a keyword, or a command already on PATH), a
+  source URL carrying a credential (`https://TOKEN@host/…`), and a token
+  launch over an isolated playbook's own login. A launcher that already
+  exists keeps working.
+- **Installing from a source changes what it copies:** the source's
+  launcher, cpb's own records and one machine's runtime state stay behind.
+  See Changed and Fixed below.
+- **An isolated playbook no longer gets a token from `DEFAULTS`.** One that
+  launched on a `CLAUDE_CODE_OAUTH_TOKEN` from an env set in `DEFAULTS`
+  under rc4 launches without it: give it the token in its own block or an
+  env set it uses, or log in there.
+- **A playbook file is read as written:** a comma after a quoted item
+  separates it from the next (a re-apply that stored `'x',` as `x,` now
+  stores `x`), and an empty quoted list item is refused.
+
+### Changed
+
+- **A new launcher never takes an existing command's name.** Creating a
+  launcher is refused when its name is `claude` (any case), a keyword,
+  starts with `-`, holds a control character, or is a command already on PATH or a file in the launcher directory that cpb did
+  not write. A playbook named after a command (`git`, `python3`) needs
+  `SET launcher = '<another name>'` or `SET launcher = ''`. A launcher
+  that already exists keeps working, survives a `RENAME TO` that keeps its
+  name, and can still be removed.
+- **A source never chooses the launcher.** `CREATE PLAYBOOK … FROM` ignores
+  a `launcher` in the source's manifest, with a note: the launcher is
+  `SET launcher`, else the playbook's name.
+- **A stated login wins over the source's.** `CREATE PLAYBOOK … FROM …
+  SET login = 'shared'` installs a shared login even when the source's
+  manifest sets `isolated_login`; without `SET login` the source's value is
+  kept.
+
+### Fixed
+
+- **Playbook files: commas and quotes parse as written.** In a playbook
+  file a comma after a quoted item is the separator, never part of the
+  item: `ALLOW TOOL 'Bash(git diff *)', 'Read'`, `SET A='x', B=y` and
+  `ARGS '--a', '--b'` give `Bash(git diff *)`, `x` and `--a` (they used to
+  keep the comma). A fully quoted property value keeps the quotes inside
+  it: `SET statusline.command = '"/opt/My Tools/sl.sh"'` stores
+  `"/opt/My Tools/sl.sh"`. A file that starts with a UTF-8 byte-order mark
+  is read (it was refused). An empty quoted list item is refused with or
+  without a comma after it (`'', 'Read'` used to drop it silently).
+  Unchanged: an unquoted final value keeps its comma
+  (`SET NO_PROXY=a,b,`), an unquoted `ARGS` item is taken as written, and
+  command-line values are parsed as before.
+- **A rename keeps the launcher the playbook has.** `RENAME TO` gave a
+  playbook with no launcher (`SET launcher = ''`) a launcher named after its
+  new name; it now gets none. A custom launcher stays, and the new name
+  gets a launcher beside it unless that name cannot be one (a command on
+  PATH): then the rename goes ahead with a note instead of failing.
+- **`APPLY --dry-run` refuses what the run refuses about names**: a
+  `RENAME TO` onto an existing playbook, a launcher another playbook
+  answers to, a launcher that cannot be created. Names are judged against
+  the registry the file's earlier statements leave.
+- **`SHOW CREATE … --skip-secrets` no longer deletes a withheld value when
+  the file is applied.** An env set with a withheld literal is written as
+  `CREATE ENV IF NOT EXISTS` plus an additive `ALTER ENV`, so `APPLY` keeps
+  the stored value (the TUI's export always withholds). Such a set no longer
+  converges exactly: a key added to it since is not removed.
+- **A source no longer brings cpb's own records.** `CREATE PLAYBOOK … FROM`
+  drops a source's `[play]`, `[apply]`, `[skills]` and `[mcp]` records with a
+  note, so `cpb update` cannot follow the source author's recipe; `update`
+  keeps the live records.
+- **A source URL carrying a credential is refused** (`https://TOKEN@host/…`),
+  dry run included. An install recorded with one still updates, with the URL
+  masked in SHOW, SELECT, update and git's output.
+- **`update` keeps one backup, without values.** The old `.playbook` and the
+  preserved files are removed from the backup after a successful update,
+  earlier updates' backups are removed, and `DROP PLAYBOOK` removes the last.
+- **A `LINK`ed playbook whose target is gone can be dropped.**
+- **A source never brings one machine's runtime state.** Installing from a
+  used directory or a repository holding one leaves out its session records
+  (`projects/`, `history.jsonl` and the like), set-aside logins
+  (`.credentials.json.*`), state backups (`.claude.json.*`, `*.cpb-backup-*`)
+  and `.apply/`, with a note; `update` never lets them replace the install's
+  own.
+- **A backup kept by an incomplete rollback is never removed** by a later
+  update or `DROP PLAYBOOK` (it is renamed `….incomplete` and named on drop).
+- **An isolated playbook's login is never deleted by a token launch.** A
+  token in an env set listed in `DEFAULTS` was taken as an isolated
+  playbook's own token: it was injected, and the playbook's own login was
+  deleted from its store. `DEFAULTS` is the machine's layer and no longer
+  supplies an isolated playbook's token. A token the playbook supplies itself
+  (its block, an env set it uses, `--env`) over a login it holds is now
+  refused before anything changes, naming the ways out: `--block
+  CLAUDE_CODE_OAUTH_TOKEN` to use the login, removing the token from the
+  playbook, or `/logout` first to use the token. `auth status` shows such a
+  playbook as `error` with the reason.
+- **A token launch keeps a shared playbook's stored login.** When the token
+  path stripped a store's grant that was another account's, or one not
+  confirmed as the machine's, that login was lost. It is now copied to
+  `.credentials.json.cpb-own-<stamp>` first, with one line on stderr; the
+  machine's own account's newer grant goes over the machine store first.
+- **A stale `~/.claude/.claude.json` no longer passes for the machine's
+  account.** It was read ahead of `~/.claude.json`, so after the machine
+  logged in to another account an old account's grant could be copied over
+  the machine's login. `~/.claude.json` now decides whenever it exists, and
+  when the two files name different accounts no login is promoted.
+
 ## [v4.0.0-rc4] -- 2026-10-18
 
 ### Upgrading from rc3

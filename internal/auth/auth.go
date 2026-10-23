@@ -192,7 +192,7 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 							}
 						}
 					default:
-						if err := setAsideOwnLogin(targetDir); err != nil {
+						if err := setAsideOwnLogin(targetDir, "linked the machine's login", false); err != nil {
 							return err
 						}
 						return os.Symlink(sourceAbs, targetCreds)
@@ -331,8 +331,26 @@ func credentialsFileUsable(path string) (bool, error) {
 	return true, nil
 }
 
-func findAccountState(targetDir string) (map[string]any, error) {
+// machineStateFiles are the two places Claude Code keeps the machine's
+// account state: ~/.claude.json when it runs with CLAUDE_CONFIG_DIR unset (a
+// raw claude), ~/.claude/.claude.json when it runs with CLAUDE_CONFIG_DIR set
+// to ~/.claude (cpb start ~/.claude). Both pair with the one machine store.
+func machineStateFiles() (canonical, nested string, err error) {
 	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", err
+	}
+	return filepath.Join(home, StateFileName), filepath.Join(home, ".claude", StateFileName), nil
+}
+
+// findAccountState returns the machine's own account state. ~/.claude.json
+// decides whenever it exists, the file a raw claude keeps: the nested file is
+// read only when it is absent, and an unreadable or malformed ~/.claude.json
+// is an error, never a reason to fall back. Preferring the nested file let a
+// stale one, left by an earlier account, pass for the machine's account and
+// promote that account's grant over the machine store.
+func findAccountState(targetDir string) (map[string]any, error) {
+	canonical, nested, err := machineStateFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -341,32 +359,17 @@ func findAccountState(targetDir string) (map[string]any, error) {
 	// The machine's own state only. Other playbooks' state is never a
 	// source: an isolated one may be another account, and seeding its
 	// identity into a shared playbook is the cross-account bug this avoids.
-	candidates := []string{
-		filepath.Join(home, ".claude", StateFileName),
-		filepath.Join(home, StateFileName),
-	}
-
-	var fallback map[string]any
-	for _, path := range candidates {
+	for _, path := range []string{canonical, nested} {
 		abs, _ := filepath.Abs(path)
 		if abs == targetState {
 			continue
 		}
-		state, err := readAccountState(path)
-		if err != nil {
-			return nil, err
+		if _, err := os.Lstat(path); os.IsNotExist(err) {
+			continue
 		}
-		if state != nil {
-			if state["hasCompletedOnboarding"] == true {
-				return state, nil
-			}
-			if fallback == nil {
-				fallback = state
-			}
-		}
+		return readAccountState(path)
 	}
-
-	return fallback, nil
+	return nil, nil
 }
 
 func readAccountState(path string) (map[string]any, error) {

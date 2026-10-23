@@ -798,7 +798,7 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
 	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
-	if errors.Is(syncErr, envset.ErrSet) {
+	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		return nil, "", syncErr
 	}
 	if syncErr != nil {
