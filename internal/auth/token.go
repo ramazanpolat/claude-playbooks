@@ -226,10 +226,10 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	if isAuthIsolated(configDir) {
 		// The machine-global token and the plan descriptors describe the
 		// global account and never apply here, DEFAULTS included. A token
-		// the playbook supplies itself is honoured: injected, with the
-		// stored grant quarantined exactly as on the non-isolated token path
-		// (the adoption hazard is the same). A login of its own refuses
-		// the launch first, before anything is changed: see ownLoginRefusal.
+		// the playbook supplies itself is honoured: injected. A login of its
+		// own refuses the launch first, before anything is changed, since the
+		// stored grant would have to be quarantined (the adoption hazard of
+		// the non-isolated token path): see ownLoginRefusal.
 		own, oerr := ownToken(configDir, layers)
 		if oerr != nil {
 			return refuse(oerr)
@@ -242,8 +242,11 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
 		syncErr := SyncCredentials(configDir)
 		if own != "" {
-			if qErr := QuarantineStoredOAuth(configDir); syncErr == nil {
-				syncErr = qErr
+			// No quarantine here: the check above found no login of the
+			// playbook's own, so a grant found now arrived since (a /login
+			// in a session of this playbook). It is refused, never stripped.
+			if err := ownLoginRefusal(configDir); err != nil {
+				return refuse(err)
 			}
 			env = append(env, OAuthTokenEnv+"="+own)
 		} else if absent, aErr := storeGrantAbsent(filepath.Join(configDir, CredentialsFileName)); aErr != nil {

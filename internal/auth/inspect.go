@@ -174,9 +174,8 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 			}
 			switch {
 			case r.IsolatedLogin && own != "":
-				// Honoured: PrepareLaunchEnv injects it and quarantines the
-				// stored grant, unless the playbook holds a login of its own,
-				// which refuses the launch.
+				// Honoured: PrepareLaunchEnv injects it, unless the playbook
+				// holds a login of its own, which refuses the launch.
 				r.Mode = ModePlaybookToken
 				if err := ownLoginRefusal(configDir); err != nil {
 					r.Mode, r.ModeError = ModeError, err.Error()

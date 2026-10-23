@@ -270,3 +270,37 @@ func TestNonASCIIPathKeychainOnlyCountsOnDarwin(t *testing.T) {
 		})
 	}
 }
+
+// A login that arrives between the own-login check and the launch (a
+// concurrent /login in a session of the same playbook) is refused, never
+// stripped: the isolated token path quarantines nothing.
+func TestLoginArrivingAfterTheCheckIsRefused(t *testing.T) {
+	_, configDir := isolatedWithToken(t)
+	store := filepath.Join(configDir, CredentialsFileName)
+	body := `{` + grantJSON + `}`
+	old := KeychainProbe
+	calls := 0
+	// The first own-login check probes the Keychain once the store shows no
+	// grant; the login lands right then.
+	KeychainProbe = func(string, string) KeychainState {
+		calls++
+		if calls == 1 {
+			if err := os.WriteFile(store, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return KeychainAbsent
+	}
+	t.Cleanup(func() { KeychainProbe = old })
+
+	_, err := PrepareLaunchEnv(configDir)
+	if !errors.Is(err, ErrOwnLogin) {
+		t.Fatalf("err = %v, want ErrOwnLogin", err)
+	}
+	if calls != 1 {
+		t.Fatalf("Keychain probed %d times, want once (the re-check finds the store's grant first)", calls)
+	}
+	if data, _ := os.ReadFile(store); string(data) != body {
+		t.Fatalf("the login that arrived was changed: %s", data)
+	}
+}
