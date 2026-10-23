@@ -304,3 +304,57 @@ func TestLoginArrivingAfterTheCheckIsRefused(t *testing.T) {
 		t.Fatalf("the login that arrived was changed: %s", data)
 	}
 }
+
+// The machine store is a recovery copy only when it holds a grant: an
+// MCP-only machine store, even a newer one, leaves the playbook's grant its
+// only copy, so it is set aside before the token launch strips it, and the
+// notice says why. The same holds when there is no machine store at all.
+func TestSharedTokenLaunchSetsAsideWhenTheMachineHoldsNoGrant(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		machine string // "" removes the machine store
+	}{
+		{"an MCP-only machine store, newer", `{` + mcpJSON + `}`},
+		{"no machine store", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newSyncFixture(t, "acct", "acct")
+			if c.machine == "" {
+				if err := os.Remove(f.global); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.WriteFile(f.global, []byte(c.machine), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				later := time.Now().Add(time.Hour)
+				if err := os.Chtimes(f.global, later, later); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tokenPath := filepath.Join(t.TempDir(), "oauth-token")
+			if err := os.WriteFile(tokenPath, []byte("sk-ant-oat01-MACHINE\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(oauthTokenFileEnv, tokenPath)
+
+			if _, err := PrepareLaunchEnv(f.target); err != nil {
+				t.Fatal(err)
+			}
+			if data, _ := os.ReadFile(f.local + ".cpb-own-2026-09-27-16_00_00"); string(data) != ownGrant {
+				t.Fatalf("the only copy of the grant was not kept aside: %q", data)
+			}
+			if storeHasGrant(t, f.local) {
+				t.Fatal("the token launch kept a stored grant")
+			}
+			if c.machine != "" {
+				if data, _ := os.ReadFile(f.global); string(data) != c.machine {
+					t.Fatalf("the machine store changed: %s", data)
+				}
+			}
+			if len(f.notices) != 1 || !strings.Contains(f.notices[0], "the machine store does not hold") {
+				t.Fatalf("notices: %q", f.notices)
+			}
+		})
+	}
+}

@@ -103,7 +103,7 @@ func ownLoginRefusal(configDir string) error {
 // that grant's only copy unless it is the machine's own account: then a
 // newer copy goes over the machine store first, as the credential sync does,
 // and the strip loses nothing. Any other login, or one that cannot be
-// confirmed as the machine's, or one with no machine store to compare with,
+// confirmed as the machine's, or one with no machine grant to fall back on,
 // is copied aside first (the quarantine then strips only the grant, and the
 // store's other logins stay). A link, an unreadable store and the machine's
 // own store are left to the quarantine, which keeps them.
@@ -125,8 +125,12 @@ func keepStoreGrant(configDir string) error {
 	}
 	globalStore := filepath.Join(global, CredentialsFileName)
 	globalInfo, err := os.Stat(globalStore)
+	// The machine store is the recovery copy only when it holds a grant of
+	// its own: one holding nothing but MCP logins would leave the stripped
+	// grant nowhere.
+	globalAbsent, gErr := storeGrantAbsent(globalStore)
 	switch {
-	case err == nil && sameAccount(configDir):
+	case err == nil && gErr == nil && !globalAbsent && sameAccount(configDir):
 		if info.ModTime().After(globalInfo.ModTime()) {
 			if err := copyFile(store, globalStore, 0600); err != nil {
 				return fmt.Errorf("failed to copy newer credentials to global: %w", err)

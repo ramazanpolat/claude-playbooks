@@ -95,9 +95,15 @@ func setAsideOwnLogin(targetDir, then string, copy bool) error {
 	if _, err := removeStateKeys(state, state+".cpb-backup-"+stamp); err != nil {
 		return fmt.Errorf("set aside the login in %s, but cannot clear its account state: %w", targetDir, err)
 	}
+	own, machine := accountUUID(state+".cpb-backup-"+stamp), machineAccountUUID(targetDir)
 	why := "another account's login"
-	if accountUUID(state+".cpb-backup-"+stamp) == "" || machineAccountUUID(targetDir) == "" {
+	switch {
+	case own == "" || machine == "":
 		why = "a login that cannot be confirmed as the machine's account"
+	case own == machine:
+		// The machine's account, set aside only because the machine store
+		// holds no grant of it to fall back on.
+		why = "the machine account's login, which the machine store does not hold"
 	}
 	Notice(fmt.Sprintf("%s held %s; kept it as %s and %s. To keep that account there: ALTER PLAYBOOK <name> SET login = 'isolated', then move the file back",
 		targetDir, why, filepath.Base(kept), then))
