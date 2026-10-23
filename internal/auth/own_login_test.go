@@ -233,3 +233,40 @@ func storeHasGrant(t *testing.T, path string) bool {
 	_, present := readStore(t, path)["claudeAiOauth"]
 	return present
 }
+
+// A config directory whose path is not ASCII has a Keychain item name cpb
+// cannot derive. Off macOS there is no Keychain, so an isolated playbook
+// there launches on its own token; on macOS the item may exist, and the
+// launch is refused as unknown.
+func TestNonASCIIPathKeychainOnlyCountsOnDarwin(t *testing.T) {
+	for _, c := range []struct {
+		os      string
+		refused bool
+	}{{"linux", false}, {"darwin", true}} {
+		t.Run(c.os, func(t *testing.T) {
+			_, base := isolatedWithToken(t)
+			configDir := filepath.Join(filepath.Dir(base), "çalışma")
+			if err := os.Rename(base, configDir); err != nil {
+				t.Fatal(err)
+			}
+			oldOS, oldProbe := hostOS, KeychainProbe
+			hostOS = c.os
+			KeychainProbe = func(string, string) KeychainState { return KeychainAbsent }
+			t.Cleanup(func() { hostOS, KeychainProbe = oldOS, oldProbe })
+
+			env, err := PrepareLaunchEnv(configDir)
+			if c.refused {
+				if !errors.Is(err, ErrOwnLogin) || !strings.Contains(err.Error(), "could not be checked") {
+					t.Fatalf("err = %v, want the unknown-Keychain refusal", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-OWN" {
+				t.Fatalf("token = %q, want the playbook's own", got)
+			}
+		})
+	}
+}

@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
+
+// hostOS is runtime.GOOS; tests replace it.
+var hostOS = runtime.GOOS
 
 // ErrOwnLogin is what a launch refused by ownLoginRefusal satisfies
 // (errors.Is): every launching caller treats it as fatal, like an env set
