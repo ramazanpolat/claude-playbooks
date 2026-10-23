@@ -390,23 +390,35 @@ self-hosted runner registered to the mirror, labeled `arena`, with Docker
 and reach to the bench-host. The mirror's README lists its setup. This
 repository keeps no bench secret and no runner.
 
-Secrets/vars the mirror's bench job reads (set in the mirror, by reference):
+Secrets/vars the mirror's bench job reads (set in the mirror, by reference).
+The bench-host comes first, in one of two modes:
 
-- `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
-- `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
-  engine ships none, so without these no suite can run (secrets, because a public
-  repo's logs are public)
+- **Local:** `vars.GENTAR_BENCH_HOST = local`, when the runner runs on the
+  bench-host itself. The arena calls that host's `sbx` directly: no SSH, no
+  key, no bench user. The runner's user must be the one signed in to sbx,
+  with the login in files (the engine's `bin/sbx-file-login`), and the host
+  must hold no stored sbx secrets; the arena refuses with exit 2 otherwise.
+- **SSH:** `secrets.BENCH_SSH_KEY` (the key the coordinator uses to reach the
+  bench-host), plus `secrets.GENTAR_BENCH_HOST` and `secrets.GENTAR_BENCH_USER`
+  (the bench-host itself; secrets, because a public repo's logs are public).
+
+Then:
+
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
-- `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
+- `secrets.ANTHROPIC_API_KEY` (first-party, no base URL) or
+  `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
-- `vars.GENTAR_BUDGET_CAP` — ceiling the budget guard enforces (default 50000)
+- `vars.GENTAR_BUDGET_CAP` — the budget guard's ceiling (default 50000). It
+  compares each suite's DECLARED `[budget] tokens` before the run; it does not
+  meter what a provider bills, so a spend limit belongs on the key itself
 - `vars.GENTAR_CLICKHOUSE_HOST_PORT`, `vars.GENTAR_OTLP_HOST_PORT` — move the
   arena's host ports when another arena shares the runner's Docker host
 
-The three bench values are required; the workflow refuses with a named error
-before staging anything if one is missing or still the placeholder. Everything
-else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
+The engine ships no bench-host, so the bench values are required: `local`, or
+all three for SSH. The workflow refuses with a named error before staging
+anything if one is missing or still the placeholder. Everything else is
+optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
 are absent are skipped and named, not run into a red refusal, and in the
 mirror a phase 2 that skipped any suite is a failure (`reports/sweep-skipped.txt`
 names them), so the release gate refuses it. It tears down
