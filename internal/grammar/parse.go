@@ -1162,7 +1162,7 @@ func (p *parser) set(c *Clause) *Error {
 		// dropped only when another K=V follows, so a last value that
 		// really ends in a comma survives. A comma after a quoted value
 		// (A='x', B=2 in a file) is always the separator.
-		if (t.Comma || !t.Quoted && p.kvAt(p.i+1)) && strings.HasSuffix(v, ",") {
+		if (t.Quoted && t.Comma || !t.Quoted && p.kvAt(p.i+1)) && strings.HasSuffix(v, ",") {
 			v = strings.TrimSuffix(v, ",")
 		}
 		if err := manifest.ValidateEnvValue(k, v); err != nil {
@@ -1613,7 +1613,7 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		if p.kw("ARGS") != "" {
 			for !p.atEnd() && !p.mcpPartOrStarter() {
 				arg := p.toks[p.i]
-				if arg.Comma {
+				if arg.Quoted && arg.Comma {
 					// 'a', in a file: the comma after the quotes separates.
 					arg.Text = strings.TrimSuffix(arg.Text, ",")
 				}
@@ -1707,7 +1707,10 @@ func (p *parser) mcpEnv(m *MCP) *Error {
 		if !keyPattern.MatchString(k) {
 			return errAt(t.Pos, "invalid variable name before '='")
 		}
-		if (t.Comma || !t.Quoted && p.kvAt(p.i+1)) && strings.HasSuffix(v, ",") {
+		// In a file only, as in SET: a comma after a quoted value always
+		// separates, an unquoted one only before another K=V. Words from
+		// argv carry no Comma, so the command line keeps 'A=ends,' as is.
+		if t.Comma && (t.Quoted || p.kvAt(p.i+1)) {
 			v = strings.TrimSuffix(v, ",")
 		}
 		if manifest.LooksLikeSecretKey(k) && !manifest.PlainSetting(v) {
