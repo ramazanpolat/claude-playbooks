@@ -106,3 +106,24 @@ func TestUnquotedTrailingCommaUnchanged(t *testing.T) {
 		t.Fatalf("argv set = %+v", vars)
 	}
 }
+
+// An empty quoted item is refused whether a comma follows it or not.
+func TestEmptyQuotedListItemRefused(t *testing.T) {
+	for _, src := range []string{
+		"ALTER PLAYBOOK w ALLOW TOOL '', 'Read';\n",
+		"ALTER PLAYBOOK w ALLOW TOOL '' 'Read';\n",
+		"ALTER PLAYBOOK w ALLOW TOOL 'Read', '';\n",
+	} {
+		if _, err := ParseFile(src); err == nil {
+			t.Fatalf("%q parsed; want the empty item refused", src)
+		}
+	}
+	// A lone comma between items is still only a separator.
+	stmts, err := ParseFile("ALTER PLAYBOOK w ALLOW TOOL 'Read' , 'Grep';\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := Flatten(stmts[0].Clauses)[0].Names; len(names) != 2 {
+		t.Fatalf("names = %q", names)
+	}
+}

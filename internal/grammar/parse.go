@@ -367,7 +367,9 @@ func (p *parser) list(what, placeholder string, check func(Token) *Error) ([]str
 		t := p.toks[p.i]
 		if !t.Quoted || t.Comma {
 			t.Text = strings.TrimSuffix(t.Text, ",")
-			if t.Text == "" {
+			// A lone comma is skipped; a quoted empty item ('', ) is still
+			// an item, and check refuses it as '' 'Read' is refused.
+			if t.Text == "" && !t.Quoted {
 				p.i++
 				continue
 			}
