@@ -113,9 +113,25 @@ func TestEmptyQuotedListItemRefused(t *testing.T) {
 		"ALTER PLAYBOOK w ALLOW TOOL '', 'Read';\n",
 		"ALTER PLAYBOOK w ALLOW TOOL '' 'Read';\n",
 		"ALTER PLAYBOOK w ALLOW TOOL 'Read', '';\n",
+		"ALTER PLAYBOOK w BLOCK VAR '', FOO;\n",
+		"ALTER PLAYBOOK w BLOCK VAR '' FOO;\n",
 	} {
 		if _, err := ParseFile(src); err == nil {
 			t.Fatalf("%q parsed; want the empty item refused", src)
+		}
+	}
+	// MCP ARGS may hold an empty argument; the comma after it only
+	// separates, so both spellings give the same argv.
+	for _, src := range []string{
+		"ALTER PLAYBOOK w ADD MCP SERVER s COMMAND srv ARGS '', '--b';\n",
+		"ALTER PLAYBOOK w ADD MCP SERVER s COMMAND srv ARGS '' '--b';\n",
+	} {
+		stmts, err := ParseFile(src)
+		if err != nil {
+			t.Fatalf("%q: %v", src, err)
+		}
+		if a := Flatten(stmts[0].Clauses)[0].MCP.Args; len(a) != 2 || a[0] != "" || a[1] != "--b" {
+			t.Fatalf("%q: args = %q", src, a)
 		}
 	}
 	// A lone comma between items is still only a separator.
