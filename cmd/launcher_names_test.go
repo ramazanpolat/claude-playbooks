@@ -191,3 +191,67 @@ func TestDryRunChecksNamesLikeTheRun(t *testing.T) {
 		}
 	}
 }
+
+// A dry run sees a launcher an earlier ALTER gives a playbook on disk: the
+// launcher it gives up is free, and the one it takes is taken.
+func TestDryRunSeesAlteredLaunchers(t *testing.T) {
+	sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	mustStmt(t, "CREATE PLAYBOOK a SET launcher = 'old-run'")
+
+	free := "ALTER PLAYBOOK a SET launcher = 'new-run';\nCREATE PLAYBOOK b SET launcher = 'old-run';\n"
+	if out, err := apply(t, writePlaybookFile(t, free), "--dry-run"); err != nil {
+		t.Fatalf("a launcher an earlier ALTER gave up: %v\n%s", err, out)
+	}
+	taken := "ALTER PLAYBOOK a SET launcher = 'x-run';\nCREATE PLAYBOOK c SET launcher = 'x-run';\n"
+	if _, err := apply(t, writePlaybookFile(t, taken), "--dry-run"); err == nil || !strings.Contains(err.Error(), "addresses playbook \"a\"") {
+		t.Fatalf("a launcher an earlier ALTER took: %v", err)
+	}
+}
+
+// RESET launcher onto a name that cannot be a launcher is refused before
+// the launcher in place is retired: the playbook keeps it.
+func TestRefusedResetKeepsTheLauncher(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	mustStmt(t, "CREATE PLAYBOOK othertool SET launcher = 'ot-run'")
+	tool := pathWithCommand(t, "othertool")
+	if err := stmtErr(t, "ALTER PLAYBOOK othertool RESET launcher"); err == nil || !strings.Contains(err.Error(), tool) {
+		t.Fatalf("RESET launcher onto a PATH command: %v", err)
+	}
+	pb, err := playbook.Require(root, "othertool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.Alias() != "ot-run" {
+		t.Fatalf("a refused RESET changed the launcher to %q", pb.Alias())
+	}
+	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "ot-run"); !exists || foreign {
+		t.Fatal("a refused RESET retired the launcher ot-run")
+	}
+}
+
+// A launcher named claude that an earlier release wrote keeps working:
+// statements that keep it parse and apply, and it can be removed. Only a
+// new one is refused.
+func TestExistingClaudeLauncherIsKept(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	writePlaybook(t, root, "old", &manifest.Manifest{Launcher: "claude"})
+	if _, err := launcher.Write(config.LauncherDir, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	mustStmt(t, "ALTER PLAYBOOK old SET launcher = 'claude'")
+	mustStmt(t, "CREATE OR ALTER PLAYBOOK old SET launcher = 'claude'")
+	file := writePlaybookFile(t, mustStmt(t, "SHOW CREATE PLAYBOOK old"))
+	if out, err := apply(t, file); err != nil || !strings.Contains(out, "0 created, 0 changed") {
+		t.Fatalf("re-applying the SHOW CREATE of a claude launcher: %v\n%s", err, out)
+	}
+	if err := stmtErr(t, "CREATE PLAYBOOK new SET launcher = 'claude'"); err == nil {
+		t.Fatal("a second, new claude launcher was accepted")
+	}
+	mustStmt(t, "ALTER PLAYBOOK old SET launcher = ''")
+	if _, exists, _ := launcher.Lookup(config.LauncherDir, "claude"); exists {
+		t.Fatal("the claude launcher was not removed")
+	}
+}

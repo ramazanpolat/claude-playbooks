@@ -367,26 +367,35 @@ func (r *stmtRun) nameOwner(cmdName, exceptName string) (string, error) {
 	}
 	claims := map[string][]string{}
 	onDisk := map[string]*playbook.Playbook{}
+	// claim is what a playbook answers to: its name, and the launcher an
+	// earlier statement left it (an ALTER of a playbook on disk included),
+	// else the one its manifest records.
+	claim := func(name string) []string {
+		l, ok := "", false
+		if r.dry != nil {
+			l, ok = r.dry.launchers[name]
+		}
+		if !ok && onDisk[name] != nil {
+			return launcherNamesFor(onDisk[name])
+		}
+		if l != "" && l != name {
+			return []string{name, l}
+		}
+		return []string{name}
+	}
 	for _, pb := range pbs {
 		onDisk[pb.Name] = pb
+	}
+	for _, pb := range pbs {
 		if known, _ := r.playbookState(pb.Name); !known {
-			claims[pb.Name] = launcherNamesFor(pb)
+			claims[pb.Name] = claim(pb.Name)
 		}
 	}
 	if r.dry != nil {
 		for name, alive := range r.dry.playbooks {
-			if !alive {
-				continue
+			if alive {
+				claims[name] = claim(name)
 			}
-			l, ok := r.dry.launchers[name]
-			if !ok && onDisk[name] != nil {
-				l = onDisk[name].Alias()
-			}
-			names := []string{name}
-			if l != "" && l != name {
-				names = append(names, l)
-			}
-			claims[name] = names
 		}
 	}
 	owners := make([]string, 0, len(claims))

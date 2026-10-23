@@ -730,6 +730,9 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		if owner != nil {
 			return fmt.Errorf("launcher name %q already addresses playbook %q; launcher %q kept", st.Name, owner.Name, pb.Alias())
 		}
+		if err := checkLauncherKept(st.Name); err != nil {
+			return fmt.Errorf("%w; launcher %q kept", err, pb.Alias())
+		}
 		if err := doLauncher(launcherOpts{remove: true}, []string{st.Name}); err != nil {
 			return err
 		}
