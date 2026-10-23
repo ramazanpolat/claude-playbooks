@@ -34,6 +34,9 @@ func lifecycle(st *grammar.Stmt) bool {
 type createOptions struct {
 	from, branch, subdir, link, alias string
 	noAlias, sandbox, isolatedLogin   bool
+	// login is the statement's SET login, "" when it does not say: an
+	// install keeps the source's then.
+	login string
 	// globalInstructions: the global_instructions property, 'excluded'
 	// unless SET says otherwise; a LINK has none (its settings.json is the
 	// target's).
@@ -42,7 +45,6 @@ type createOptions struct {
 
 func createOptionsOf(st *grammar.Stmt) createOptions {
 	var o createOptions
-	defaultLauncher := false
 	for _, c := range st.Clauses {
 		switch c.Kind {
 		case grammar.From:
@@ -57,8 +59,6 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			o.alias = c.Arg
 		case grammar.NoLauncher:
 			o.noAlias = true
-		case grammar.DefaultLauncher:
-			defaultLauncher = true
 		case grammar.SetSandboxKeys:
 			for _, v := range c.Settings {
 				if v.Key == "always" && v.Value == "true" {
@@ -67,8 +67,8 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 			}
 		}
 	}
-	login, _ := grammar.PropertyValue(st.Clauses, "login")
-	o.isolatedLogin = login == "isolated"
+	o.login, _ = grammar.PropertyValue(st.Clauses, "login")
+	o.isolatedLogin = o.login == "isolated"
 	o.globalInstructions = grammar.PlaybookPropertyDefault("global_instructions")
 	if v, ok := grammar.PropertyValue(st.Clauses, "global_instructions"); ok {
 		o.globalInstructions = v
@@ -76,12 +76,8 @@ func createOptionsOf(st *grammar.Stmt) createOptions {
 	if o.link != "" {
 		o.globalInstructions = ""
 	}
-	// RESET launcher is the playbook's own name. On an install FROM a
-	// source it is said out loud: the source's manifest may name another
-	// launcher, which an install would otherwise adopt.
-	if defaultLauncher && o.from != "" && o.alias == "" && !o.noAlias {
-		o.alias = st.Name
-	}
+	// RESET launcher is the playbook's own name: the default, nothing to
+	// record (a source never names the launcher).
 	return o
 }
 
@@ -347,10 +343,30 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 		if exists {
 			return fmt.Errorf("playbook %q already exists (write CREATE PLAYBOOK IF NOT EXISTS to keep it, or CREATE OR ALTER PLAYBOOK to apply the SET list to it)", st.Name)
 		}
+		alias := o.alias
 		if o.link != "" {
-			if abs, err := filepath.Abs(o.link); err != nil || !manifest.Exists(abs) {
+			abs, err := filepath.Abs(o.link)
+			if err != nil || !manifest.Exists(abs) {
 				return fmt.Errorf("LINK %s: the directory has no %s", o.link, manifest.FileName)
 			}
+			// A linked target's manifest is shared: its launcher registers.
+			if m, _ := manifest.Read(abs); alias == "" && m != nil {
+				alias = m.Launcher
+			}
+		}
+		// The checks the creation runs before it registers anything: the
+		// launcher it writes, and every name that will address it.
+		if alias == st.Name {
+			alias = ""
+		}
+		if err := validateTopLevelName("playbook name", st.Name); err != nil {
+			return err
+		}
+		if _, err := resolveLauncherName(o.noAlias, alias, st.Name, "create the playbook"); err != nil {
+			return err
+		}
+		if err := r.preflightNames("", st.Name, alias); err != nil {
+			return err
 		}
 		r.recordPlaybook(st.Name, true)
 		r.recordPlaybookEnv(st.Name, nil) // a new playbook's env block is empty
@@ -358,8 +374,8 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 			switch {
 			case o.noAlias:
 				r.dry.launchers[st.Name] = ""
-			case o.alias != "":
-				r.dry.launchers[st.Name] = o.alias
+			case alias != "":
+				r.dry.launchers[st.Name] = alias
 			default:
 				r.dry.launchers[st.Name] = st.Name
 			}
@@ -392,7 +408,7 @@ func createPlaybookOnly(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case o.from != "":
 		return doInstall(installOpts{name: st.Name, branch: o.branch, subdir: o.subdir,
-			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, isolatedLogin: o.isolatedLogin, globalInstructions: o.globalInstructions}, []string{o.from})
+			launcher: o.alias, noLauncher: o.noAlias, sandbox: o.sandbox, login: o.login, globalInstructions: o.globalInstructions}, []string{o.from})
 
 	case o.link != "":
 		if o.sandbox {
@@ -538,11 +554,14 @@ func (r *stmtRun) recordedAlias(name string, pb *playbook.Playbook) string {
 // alterPlaybookLifecycle would give later, read-only and in advance.
 func (r *stmtRun) preflightLauncher(name string, pb *playbook.Playbook, c grammar.Clause) error {
 	want := launcherWanted(name, c)
-	if pb == nil { // created earlier in this dry run: only the registry can refuse
-		if want != "" && want != name {
-			return preflightCommandNames(name, want)
+	if pb == nil { // created earlier in this dry run: the registry and the name can refuse
+		if want == "" || want == r.launcherOf(name, nil) {
+			return nil
 		}
-		return nil
+		if err := checkNewLauncher(want); err != nil {
+			return err
+		}
+		return r.preflightNames(name, want)
 	}
 	linked := false
 	if info, err := os.Lstat(pb.RootPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -567,15 +586,18 @@ func (r *stmtRun) preflightLauncher(name string, pb *playbook.Playbook, c gramma
 		}
 		return nil
 	case want == name:
-		owner, err := commandNameOwner(name, name)
+		owner, err := r.nameOwner(name, name)
 		if err != nil {
 			return fmt.Errorf("cannot check launcher name %q against every playbook: %w", name, err)
 		}
-		if owner != nil {
-			return fmt.Errorf("launcher name %q already addresses playbook %q", name, owner.Name)
+		if owner != "" {
+			return fmt.Errorf("launcher name %q already addresses playbook %q", name, owner)
 		}
 		if linked && old != "" {
 			return fmt.Errorf("cannot clear launcher %q: the linked target's manifest is shared with other registrations. Edit the target's %s directly if you really mean it", old, manifest.FileName)
+		}
+		if err := checkLauncherKept(name); err != nil {
+			return err
 		}
 		return foreign(name)
 	}
@@ -588,7 +610,10 @@ func (r *stmtRun) preflightLauncher(name string, pb *playbook.Playbook, c gramma
 	if want == old {
 		return nil
 	}
-	if err := preflightCommandNames(pb.Name, want); err != nil {
+	if err := checkNewLauncher(want); err != nil {
+		return err
+	}
+	if err := r.preflightNames(pb.Name, want); err != nil {
 		return err
 	}
 	return foreign(want)
@@ -644,6 +669,43 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		// The launcher later statements see: the one given, else the one
 		// it had, renamed with the playbook when it was the default.
 		was := r.launcherOf(st.Name, onDisk)
+		if rename == "" {
+			// The launcher alone: the checks ALTER … SET launcher runs.
+			for _, c := range st.Clauses {
+				if err := r.preflightLauncher(st.Name, onDisk, c); err != nil {
+					return err
+				}
+			}
+		}
+		if rename != "" {
+			// The refusals doRename gives before it moves anything.
+			if err := validateTopLevelName("new name", rename); err != nil {
+				return err
+			}
+			if _, exists, err := r.findPlaybook(rename); err != nil {
+				return err
+			} else if exists {
+				return fmt.Errorf("playbook %q already exists", rename)
+			}
+			if err := r.preflightNames(st.Name, alias, rename); err != nil {
+				return err
+			}
+			// As doRename: SET launcher replaces the launcher; else the
+			// default launcher follows the new name, a custom one is kept,
+			// and none stays none.
+			var err error
+			switch {
+			case alias != "" || noAlias:
+				_, err = resolveLauncherNameKeeping(noAlias, alias, rename, "rename", was)
+			case was == st.Name:
+				_, err = resolveLauncherName(false, "", rename, "rename")
+			case was != "":
+				err = checkLauncherKept(was)
+			}
+			if err != nil {
+				return err
+			}
+		}
 		target := st.Name
 		if rename != "" { // later statements of the file address the new name, with its environment and plugins
 			env := r.playbookEnv(st.Name, disk)
@@ -694,6 +756,9 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if owner != nil {
 			return fmt.Errorf("launcher name %q already addresses playbook %q; launcher %q kept", st.Name, owner.Name, pb.Alias())
+		}
+		if err := checkLauncherKept(st.Name); err != nil {
+			return fmt.Errorf("%w; launcher %q kept", err, pb.Alias())
 		}
 		if err := doLauncher(launcherOpts{remove: true}, []string{st.Name}); err != nil {
 			return err

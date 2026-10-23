@@ -57,8 +57,8 @@ The human layout may change between releases; scripts read `--json`.
 ## Install a shared playbook repo
 
 `CREATE PLAYBOOK … FROM` installs from a source: it clones a git repository or copies a local directory, installs it under the name
-you give and creates its launcher: the source manifest's `launcher`, unless you
-name one.
+you give and creates its launcher: the name you give, unless you name another
+one. A source never chooses this machine's commands: a `launcher` in its manifest is ignored, with a note.
 
 ```bash
 cpb CREATE PLAYBOOK awesome FROM https://github.com/ramazanpolat/awesome-claude-playbooks BRANCH v2.0.0
@@ -108,7 +108,17 @@ resolves against the live registry (directory name first, then the manifest's
 `launcher`) at invocation time, so the launcher carries no state that can go stale.
 Launchers work from any shell, in scripts and in cron.
 
-A playbook has one launcher: the name `LAUNCHER` gave it, or its own name.
+A playbook has one launcher: the name `SET launcher` gave it, or its own name.
+
+A new launcher never takes the name of a command you already have. `claude`,
+a keyword, or a name already on your PATH (`git`, `python3`) is refused before
+anything is created, naming the command it would hide. Give the playbook
+another launcher, or none:
+
+```bash
+cpb CREATE PLAYBOOK git SET launcher = 'git-pb'   # the playbook is git, the command git-pb
+cpb CREATE PLAYBOOK python3 SET launcher = ''     # no launcher: cpb run python3
+```
 
 ```bash
 cpb ALTER PLAYBOOK experiment SET launcher = 'exp'          # set or replace it

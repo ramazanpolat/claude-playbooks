@@ -26,9 +26,10 @@ type installOpts struct {
 	launcher   string
 	noLauncher bool
 	sandbox    bool
-	// isolatedLogin: isolated_login = true without a sandbox (CREATE
-	// PLAYBOOK … FROM … SET login = 'isolated').
-	isolatedLogin bool
+	// login is the statement's SET login: 'isolated', 'shared', or "" when
+	// the statement does not say. A stated login wins over the source's
+	// manifest; an unstated one keeps it.
+	login string
 	// globalInstructions: 'excluded' writes the claudeMdExcludes entry into the
 	// install's settings.json (kept across updates, which preserve it).
 	globalInstructions string
@@ -109,24 +110,19 @@ func doInstall(o installOpts, args []string) error {
 	// registry even under --no-alias, and an imported manifest's alias
 	// registers without any flag.
 	// launcher = '<its own name>' is the default launcher, nothing to
-	// record, unless the source's manifest names another one to override.
-	if o.launcher == targetName && (mPre == nil || mPre.Launcher == "" || mPre.Launcher == targetName) {
+	// record. A source never chooses the launcher: the command a playbook
+	// answers to on this machine is the statement's, or the playbook's own
+	// name (the source's is dropped below, with a note).
+	if o.launcher == targetName {
 		o.launcher = ""
 	}
-	effectiveAlias := o.launcher
-	if effectiveAlias == "" && mPre != nil {
-		effectiveAlias = mPre.Launcher
-	}
-	// The launcher that will actually be written uses the effective alias,
-	// falling back to the target name — an unwritable name must fail before
-	// the source is copied into the registry, not as a post-copy warning.
-	// The installed manifest normalizes its name to targetName, so this
-	// resolved name is still the command to write after the copy.
-	launcherName, err := resolveLauncherName(o.noLauncher, effectiveAlias, targetName, "create the playbook")
+	// The launcher that will actually be written, checked before the source
+	// is copied into the registry, not as a post-copy warning.
+	launcherName, err := resolveLauncherName(o.noLauncher, o.launcher, targetName, "create the playbook")
 	if err != nil {
 		return err
 	}
-	if err := preflightCommandNames("", targetName, effectiveAlias); err != nil {
+	if err := preflightCommandNames("", targetName, o.launcher); err != nil {
 		return err
 	}
 
@@ -188,8 +184,20 @@ func doInstall(o installOpts, args []string) error {
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
 		needsManifestWrite = true
 	}
-	if o.isolatedLogin {
+	if mPre.Launcher != "" {
+		if mPre.Launcher != targetName && mPre.Launcher != o.launcher {
+			fmt.Fprintf(os.Stderr, "Note: ignoring launcher %q named by the source's %s; a source does not choose this machine's commands. Set one with: cpb ALTER PLAYBOOK %s SET launcher = '<name>'\n", mPre.Launcher, manifest.FileName, targetName)
+		}
+		mPre.Launcher = "" // the statement's launcher is recorded after activation
+		needsManifestWrite = true
+	}
+	switch {
+	case o.login == "isolated":
 		mPre.IsolatedLogin = true
+		needsManifestWrite = true
+	case o.login == "shared" && mPre.IsolatedLogin && !o.sandbox:
+		fmt.Fprintf(os.Stderr, "Note: the source's %s sets an isolated login; the statement's login = 'shared' wins\n", manifest.FileName)
+		mPre.IsolatedLogin = false
 		needsManifestWrite = true
 	}
 	sourceSubdir := subdir
