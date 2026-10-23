@@ -317,3 +317,70 @@ func TestNewLauncherRefusesDashAndControlCharacters(t *testing.T) {
 		t.Fatal("SET launcher = '-p' accepted")
 	}
 }
+
+// A rename carries the launcher the playbook has. With none, or a custom
+// one, the new name is only a directory name, so it may be a command on
+// PATH; with the default launcher, the launcher follows the name and the
+// new name must be free. The dry run and the run agree on each.
+func TestRenameCarriesTheLauncherItHas(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
+	tool := pathWithCommand(t, "sometool")
+	noLauncher := func(name string) {
+		t.Helper()
+		if _, exists, _ := launcher.Lookup(config.LauncherDir, name); exists {
+			t.Fatalf("a launcher %s was written", name)
+		}
+	}
+
+	// None, created in the same file: nothing to check, nothing written.
+	none := writePlaybookFile(t, "CREATE PLAYBOOK scratch SET launcher = '';\nALTER PLAYBOOK scratch RENAME TO sometool;\n")
+	if out, err := apply(t, none, "--dry-run"); err != nil {
+		t.Fatalf("dry run, no launcher: %v\n%s", err, out)
+	}
+	if out, err := apply(t, none); err != nil {
+		t.Fatalf("run, no launcher: %v\n%s", err, out)
+	}
+	noLauncher("sometool")
+	mustStmt(t, "DROP PLAYBOOK sometool --yes")
+
+	// Custom, on disk: kept, and the new name gets no launcher.
+	mustStmt(t, "CREATE PLAYBOOK c SET launcher = 'c-pb'")
+	custom := writePlaybookFile(t, "ALTER PLAYBOOK c RENAME TO sometool;\n")
+	if out, err := apply(t, custom, "--dry-run"); err != nil {
+		t.Fatalf("dry run, custom launcher: %v\n%s", err, out)
+	}
+	if out, err := apply(t, custom); err != nil {
+		t.Fatalf("run, custom launcher: %v\n%s", err, out)
+	}
+	noLauncher("sometool")
+	pb, err := playbook.Require(root, "sometool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.Alias() != "c-pb" {
+		t.Fatalf("custom launcher after the rename: %q", pb.Alias())
+	}
+	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "c-pb"); !exists || foreign {
+		t.Fatal("the kept launcher c-pb is gone")
+	}
+	mustStmt(t, "DROP PLAYBOOK sometool --yes")
+
+	// Default: the launcher follows the name, which a command holds.
+	mustStmt(t, "CREATE PLAYBOOK d")
+	def := writePlaybookFile(t, "ALTER PLAYBOOK d RENAME TO sometool;\n")
+	if _, err := apply(t, def, "--dry-run"); err == nil || !strings.Contains(err.Error(), tool) {
+		t.Fatalf("dry run, default launcher: %v", err)
+	}
+	if _, err := apply(t, def); err == nil || !strings.Contains(err.Error(), tool) {
+		t.Fatalf("run, default launcher: %v", err)
+	}
+	if _, err := playbook.Require(root, "d"); err != nil {
+		t.Fatalf("a refused rename moved d: %v", err)
+	}
+	// Created in the same file with its default launcher: refused too.
+	inFile := writePlaybookFile(t, "CREATE PLAYBOOK e;\nALTER PLAYBOOK e RENAME TO sometool;\n")
+	if _, err := apply(t, inFile, "--dry-run"); err == nil || !strings.Contains(err.Error(), tool) {
+		t.Fatalf("dry run, default launcher created in the file: %v", err)
+	}
+}

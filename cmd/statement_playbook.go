@@ -686,7 +686,19 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 					kept = l
 				}
 			}
-			if _, err := resolveLauncherNameKeeping(noAlias, alias, rename, "rename", kept); err != nil {
+			// As doRename: SET launcher replaces the launcher; else the
+			// default launcher follows the new name, a custom one is kept,
+			// and none stays none.
+			var err error
+			switch {
+			case alias != "" || noAlias:
+				_, err = resolveLauncherNameKeeping(noAlias, alias, rename, "rename", kept)
+			case was == st.Name:
+				_, err = resolveLauncherName(false, "", rename, "rename")
+			case was != "":
+				err = checkLauncherKept(was)
+			}
+			if err != nil {
 				return err
 			}
 		}

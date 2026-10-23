@@ -82,11 +82,24 @@ func doRename(o renameOpts, args []string) error {
 			return fmt.Errorf("launcher name %q already addresses playbook %q", cand, owner.Name)
 		}
 	}
-	// Rename promises a replacement command: the effective launcher name
-	// (explicit --alias or the new name) must be writable before any
-	// mutation — the late launcher.Write warning would leave a renamed
-	// playbook without its replacement command. --no-alias is the opt-out.
-	writeName, werr := resolveLauncherNameKeeping(o.noLauncher, o.launcher, newName, "rename", oldManifestAlias)
+	// A rename carries the launcher the playbook has: its default launcher
+	// (the name) follows the new name, a custom launcher is kept, and a
+	// playbook without one gets none. SET launcher replaces it. Whatever
+	// will be written is checked before any mutation — the late
+	// launcher.Write warning would leave a renamed playbook without its
+	// command.
+	followsName := o.launcher == "" && !o.noLauncher &&
+		(oldManifestAlias == oldName || oldManifestAlias == "" && hasNameLauncher(oldName))
+	var writeName string
+	var werr error
+	switch {
+	case o.launcher != "" || o.noLauncher:
+		writeName, werr = resolveLauncherNameKeeping(o.noLauncher, o.launcher, newName, "rename", oldManifestAlias)
+	case followsName:
+		writeName, werr = resolveLauncherName(false, "", newName, "rename")
+	case oldManifestAlias != "":
+		werr = checkLauncherKept(oldManifestAlias)
+	}
 	if werr != nil {
 		return werr
 	}
@@ -224,7 +237,7 @@ func doRename(o renameOpts, args []string) error {
 			} else {
 				fmt.Printf("Launcher %q now runs %q\n", o.launcher, newName)
 			}
-		default:
+		case followsName:
 			if _, werr := launcher.Write(ldir, newName); werr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write launcher %q: %v\n", newName, werr)
 			} else {
