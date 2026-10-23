@@ -679,8 +679,10 @@ func alterPlaybookLifecycle(r *stmtRun, st *grammar.Stmt) error {
 			if onDisk != nil {
 				kept = onDisk.Alias()
 			}
+			// The launcher an earlier statement left it decides, as the
+			// manifest it writes would in the run.
 			if r.dry != nil {
-				if l, ok := r.dry.launchers[st.Name]; ok && l != st.Name {
+				if l, ok := r.dry.launchers[st.Name]; ok {
 					kept = l
 				}
 			}

@@ -280,6 +280,16 @@ func TestRenameKeepsAnExistingLauncherName(t *testing.T) {
 	if _, exists, foreign := launcher.Lookup(config.LauncherDir, "claude"); !exists || foreign {
 		t.Fatal("the kept launcher claude is gone")
 	}
+	// An earlier statement that gives the launcher up makes it new again,
+	// in the dry run as in the run.
+	reset := writePlaybookFile(t, "ALTER PLAYBOOK b RESET launcher;\nALTER PLAYBOOK b RENAME TO b2 SET launcher = 'claude';\n")
+	if _, err := apply(t, reset, "--dry-run"); err == nil {
+		t.Fatal("the dry run kept a claude launcher an earlier RESET gave up")
+	}
+	if _, err := apply(t, reset); err == nil {
+		t.Fatal("the run kept a claude launcher an earlier RESET gave up")
+	}
+	mustStmt(t, "ALTER PLAYBOOK b SET launcher = 'b-run'")
 	// A new name is still checked.
 	if err := stmtErr(t, "ALTER PLAYBOOK b RENAME TO c SET launcher = 'CLAUDE2'"); err != nil {
 		t.Fatalf("an ordinary new launcher: %v", err)
