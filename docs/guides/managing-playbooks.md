@@ -217,7 +217,10 @@ it), only the last update's backup is kept, and `DROP PLAYBOOK` removes it.
 A source's own `[play]`, `[apply]`, `[skills]` and `[mcp]` records are never
 adopted, at install or update: they describe what was done to the author's
 install. A source URL carrying a credential (`https://TOKEN@host/…`) is
-refused; authenticate with a git credential helper or an SSH remote.
+refused; authenticate with a git credential helper or an SSH remote. Nor
+does a source bring one machine's runtime state: installing from a directory
+that was used as a config directory leaves its session records, set-aside
+logins and backups out, with a note.
 
 Local configuration survives even when the source ships its own copy:
 `settings.json`, `settings.local.json`, `.credentials.json` and `.claude.json`

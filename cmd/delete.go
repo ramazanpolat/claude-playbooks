@@ -104,7 +104,12 @@ func doDelete(o deleteOpts, args []string) error {
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
 	}
-	removeUpdateBackups(deletePath, "")
+	for _, err := range removeUpdateBackups(deletePath, "") {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	for _, b := range incompleteBackups(deletePath) {
+		fmt.Fprintf(os.Stderr, "Kept %s: the backup of an update whose rollback did not complete, the only copy of what it could not put back; remove it once nothing in it is needed\n", b)
+	}
 	removeUnclaimedLaunchers(names, pb.Name)
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
 	return nil

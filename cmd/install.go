@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -224,6 +225,10 @@ func doInstall(o installOpts, args []string) error {
 	// state of its .claude.json stay out of the install (CHANGELOG.md,
 	// v3.22.1).
 	if err := stripSourceLogin(stage, source); err != nil {
+		os.RemoveAll(stage)
+		return err
+	}
+	if err := stripSourceRuntime(stage, source); err != nil {
 		os.RemoveAll(stage)
 		return err
 	}
@@ -554,6 +559,55 @@ func stripSourceLogin(dir, source string) error {
 	}
 	if len(keys) > 0 {
 		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName, strings.Join(keys, ", "))
+	}
+	return nil
+}
+
+// sourceRuntimeEntries are what a Claude Code config directory accumulates
+// by being used, and cpb's own record of what was applied to one install:
+// a source that is a used directory holds them. They are one machine's
+// history, never a playbook's content.
+var sourceRuntimeEntries = []string{
+	"projects", "sessions", "session-env", "history.jsonl", "todos",
+	"shell-snapshots", "statsig", "file-history", "ide", "debug",
+	"telemetry", "plans", "paste-cache", ".apply",
+}
+
+// sourceRuntimeArtifact reports whether a top-level entry of a source is
+// runtime state or a login's residue: the entries above, any file beside
+// the login stores (set-aside logins .credentials.json.cpb-own-* and
+// *.cpb-ignored-*, the run lock and pid files, .claude.json backups), and
+// any *.cpb-backup-* file. .credentials.json and .claude.json themselves
+// are handled by stripSourceLogin.
+func sourceRuntimeArtifact(name string) bool {
+	if slices.Contains(sourceRuntimeEntries, name) {
+		return true
+	}
+	if strings.HasPrefix(name, auth.CredentialsFileName+".") || strings.HasPrefix(name, auth.StateFileName+".") {
+		return true
+	}
+	return strings.Contains(name, ".cpb-backup-")
+}
+
+// stripSourceRuntime removes a staged source's runtime state and login
+// residue (sourceRuntimeArtifact) and names them on stderr, one line.
+func stripSourceRuntime(dir, source string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var dropped []string
+	for _, e := range entries {
+		if !sourceRuntimeArtifact(e.Name()) {
+			continue
+		}
+		if err := removeAny(filepath.Join(dir, e.Name())); err != nil {
+			return fmt.Errorf("cannot leave %s's %s out: %w", redactSourceURL(source), e.Name(), err)
+		}
+		dropped = append(dropped, e.Name())
+	}
+	if len(dropped) > 0 {
+		fmt.Fprintf(os.Stderr, "Note: left %s's %s out: session records and set-aside logins belong to the machine that made them, never to a playbook\n", redactSourceURL(source), strings.Join(dropped, ", "))
 	}
 	return nil
 }

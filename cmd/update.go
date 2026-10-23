@@ -178,6 +178,11 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		return fmt.Errorf("failed to fetch latest source: %w", err)
 	}
 	defer cleanup()
+	// A source's runtime state would replace the install's own (its
+	// history, its sessions) in the overlay: it never reaches the install.
+	if err := stripSourceRuntime(work, pb.Manifest.Source.Repository); err != nil {
+		return err
+	}
 
 	stagedManifest, err := manifest.Read(work)
 	if err != nil {
@@ -313,12 +318,18 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 	if err != nil {
 		return err
 	}
-	if trimUpdateBackup(backupPath, preserve) {
+	kept, trimErr := trimUpdateBackup(backupPath, preserve)
+	if kept {
 		fmt.Fprintf(w, "Updated %q to %s. Replaced files backed up to %s.\n", name, displayVersion(toVersion), backupPath)
 	} else {
 		fmt.Fprintf(w, "Updated %q to %s.\n", name, displayVersion(toVersion))
 	}
-	removeUpdateBackups(root, backupPath)
+	if trimErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", trimErr)
+	}
+	for _, err := range removeUpdateBackups(root, backupPath) {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
 
 	// The overlay can replace skills/ as a whole: put back the skills
 	// statements added (SPEC.md, "Skills").
@@ -391,7 +402,7 @@ func overlaySource(work, root string, preserve []string) (string, error) {
 			// Keep the backup: it is the only copy of what could not be
 			// put back, and a silent RemoveAll here would destroy it.
 			sort.Strings(failed)
-			return fmt.Errorf("rollback incomplete for %s; backup kept at %s", strings.Join(failed, ", "), backupPath)
+			return fmt.Errorf("rollback incomplete for %s; backup kept at %s", strings.Join(failed, ", "), keepIncompleteBackup(backupPath))
 		}
 		return os.RemoveAll(backupPath)
 	}
@@ -759,53 +770,129 @@ const backupStamp = "20060102T150405.000000000"
 
 // trimUpdateBackup removes from a successful update's backup what went live
 // again: the manifest (the update carries its install-local state forward)
-// and the top-level preserved files, which were copied back. Those are the
-// ones that hold values ([env] sets, a login, settings), and a second copy
-// of them is only a leak. It reports whether the backup still holds
-// anything; an empty one is removed.
-func trimUpdateBackup(backupPath string, preserve []string) bool {
+// and the preserved files, which were copied back. Those are the ones that
+// hold values ([env] sets, a login, settings), and a second copy of them is
+// only a leak. A nested preserved path is removed only when it lies
+// physically inside its top-level entry in the backup (a symlinked ancestor
+// could point anywhere). It reports whether the backup still holds
+// anything (an empty one is removed) and what could not be removed.
+func trimUpdateBackup(backupPath string, preserve []string) (bool, error) {
+	var failed []string
 	for _, rel := range append([]string{manifest.FileName}, preserve...) {
-		if strings.Contains(rel, "/") {
-			continue // nested: below an entry the backup keeps whole
+		p := filepath.Join(backupPath, filepath.FromSlash(rel))
+		if top, _, nested := strings.Cut(rel, "/"); nested {
+			within, err := physicallyWithin(filepath.Join(backupPath, top), p)
+			if err != nil && !absentPath(err) {
+				failed = append(failed, rel)
+				continue
+			}
+			if !within {
+				continue
+			}
 		}
-		removeAny(filepath.Join(backupPath, rel))
+		if err := removeAny(p); err != nil && !absentPath(err) {
+			failed = append(failed, rel)
+		}
 	}
-	if entries, err := os.ReadDir(backupPath); err == nil && len(entries) == 0 {
-		os.Remove(backupPath)
-		return false
+	var err error
+	if len(failed) > 0 {
+		err = fmt.Errorf("could not remove %s from the update backup %s; it holds a copy of live values, remove it by hand", strings.Join(failed, ", "), backupPath)
 	}
-	return true
+	if entries, rerr := os.ReadDir(backupPath); rerr == nil && len(entries) == 0 {
+		if os.Remove(backupPath) == nil {
+			return false, err
+		}
+	}
+	return true, err
+}
+
+// incompleteSuffix marks a backup an update kept because its rollback did
+// not complete: the only copy of what could not be put back. No later
+// update or DROP removes it.
+const incompleteSuffix = ".incomplete"
+
+// incompleteMarker is the file that marks such a backup when it cannot be
+// renamed.
+const incompleteMarker = ".cpb-rollback-incomplete"
+
+// keepIncompleteBackup marks a backup as the remains of an incomplete
+// rollback, by name, or by a marker file inside when the rename fails, and
+// returns where it is.
+func keepIncompleteBackup(backupPath string) string {
+	kept := backupPath + incompleteSuffix
+	if os.Rename(backupPath, kept) == nil {
+		return kept
+	}
+	_ = os.WriteFile(filepath.Join(backupPath, incompleteMarker), []byte("the rollback of this update did not complete; this backup holds what could not be put back\n"), 0o600)
+	return backupPath
 }
 
 // updateBackups lists the backups updates left beside root, by their exact
 // name shape, so a playbook named "a" never matches "a.bak"'s. Symlinks
-// are never listed.
+// and the backups of incomplete rollbacks (incompleteBackups) are never
+// listed.
 func updateBackups(root string) []string {
+	var out []string
+	for _, b := range backupsOf(root) {
+		if b.complete {
+			out = append(out, b.path)
+		}
+	}
+	return out
+}
+
+// incompleteBackups lists the backups kept by an incomplete rollback.
+func incompleteBackups(root string) []string {
+	var out []string
+	for _, b := range backupsOf(root) {
+		if !b.complete {
+			out = append(out, b.path)
+		}
+	}
+	return out
+}
+
+type updateBackup struct {
+	path     string
+	complete bool
+}
+
+func backupsOf(root string) []updateBackup {
 	parent, prefix := filepath.Dir(root), "."+filepath.Base(root)+".bak."
 	entries, err := os.ReadDir(parent)
 	if err != nil {
 		return nil
 	}
-	var out []string
+	var out []updateBackup
 	for _, e := range entries {
 		n := e.Name()
 		if !e.IsDir() || !strings.HasPrefix(n, prefix) {
 			continue
 		}
-		if _, err := time.Parse(backupStamp, n[len(prefix):]); err != nil {
+		stamp, incomplete := strings.CutSuffix(n[len(prefix):], incompleteSuffix)
+		if _, err := time.Parse(backupStamp, stamp); err != nil {
 			continue
 		}
-		out = append(out, filepath.Join(parent, n))
+		path := filepath.Join(parent, n)
+		if _, err := os.Lstat(filepath.Join(path, incompleteMarker)); err == nil {
+			incomplete = true
+		}
+		out = append(out, updateBackup{path: path, complete: !incomplete})
 	}
 	return out
 }
 
 // removeUpdateBackups removes the backups of earlier updates of root, all
-// but keep ("" for none): one update's backup is what an undo needs.
-func removeUpdateBackups(root, keep string) {
+// but keep ("" for none): one update's backup is what an undo needs. It
+// returns what it could not remove.
+func removeUpdateBackups(root, keep string) []error {
+	var errs []error
 	for _, b := range updateBackups(root) {
 		if b != keep {
-			os.RemoveAll(b)
+			if err := os.RemoveAll(b); err != nil {
+				errs = append(errs, fmt.Errorf("could not remove the update backup %s: %w", b, err))
+			}
 		}
 	}
+	return errs
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -329,5 +330,247 @@ func TestDropDanglingLink(t *testing.T) {
 	}
 	if err := stmtErr(t, "DROP PLAYBOOK dev --yes"); err == nil {
 		t.Fatal("a second drop of the same name must still say unknown")
+	}
+}
+
+// The backup an incomplete rollback kept is the only copy of what could not
+// be put back: no later update removes it, and DROP names it and keeps it.
+func TestIncompleteRollbackBackupSurvives(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "source")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	for _, d := range []string{source, installed} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(source, "CLAUDE.md"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "CLAUDE.md"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(installed, &manifest.Manifest{Source: &manifest.Source{Repository: source}}); err != nil {
+		t.Fatal(err)
+	}
+	// One kept by name, one by its marker (the rename failed).
+	renamed := keepIncompleteBackup(mkdirAll(t, filepath.Join(config.PlaybooksDir, ".pb.bak.20200101T000000.000000000")))
+	if !strings.HasSuffix(renamed, incompleteSuffix) {
+		t.Fatalf("not marked by name: %s", renamed)
+	}
+	marked := mkdirAll(t, filepath.Join(config.PlaybooksDir, ".pb.bak.20200102T000000.000000000"))
+	if err := os.WriteFile(filepath.Join(marked, incompleteMarker), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateOnePlaybook("pb", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := incompleteBackups(installed); len(got) != 2 {
+		t.Fatalf("incomplete backups after an update: %v", got)
+	}
+	if got := updateBackups(installed); len(got) != 1 || got[0] == renamed || got[0] == marked {
+		t.Fatalf("the update's own backups: %v", got)
+	}
+	stderr := captureStderr(t, func() {
+		if err := doDelete(deleteOpts{yes: true}, []string{"pb"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, b := range []string{renamed, marked} {
+		if _, err := os.Stat(b); err != nil {
+			t.Fatalf("DROP removed %s: %v", b, err)
+		}
+		if !strings.Contains(stderr, "Kept "+b+": the backup of an update whose rollback did not complete") {
+			t.Fatalf("DROP did not name %s:\n%s", b, stderr)
+		}
+	}
+	if got := updateBackups(installed); len(got) != 0 {
+		t.Fatalf("DROP left the update's backup: %v", got)
+	}
+}
+
+func mkdirAll(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// A nested preserved path is removed from the backup too, never through a
+// symlinked ancestor.
+func TestUpdateBackupDropsNestedPreservedPaths(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "source")
+	installed := filepath.Join(config.PlaybooksDir, "pb")
+	outside := mkdirAll(t, filepath.Join(root, "outside"))
+	for _, d := range []string{filepath.Join(source, "config"), filepath.Join(installed, "config"), filepath.Join(source, "linked"), filepath.Join(installed, "linked")} {
+		mkdirAll(t, d)
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(source, "config", "local.json"), "stock\n")
+	write(filepath.Join(source, "config", "other"), "new\n")
+	write(filepath.Join(installed, "config", "local.json"), "mine\n")
+	write(filepath.Join(installed, "config", "other"), "old\n")
+	write(filepath.Join(outside, "keep.json"), "outside\n")
+	m := &manifest.Manifest{Source: &manifest.Source{Repository: source}, Update: &manifest.Update{Preserve: []string{"config/local.json"}}}
+	if err := manifest.Write(installed, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateOnePlaybook("pb", false); err != nil {
+		t.Fatal(err)
+	}
+	b := updateBackups(installed)
+	if len(b) != 1 {
+		t.Fatalf("backups: %v", b)
+	}
+	if _, err := os.Lstat(filepath.Join(b[0], "config", "local.json")); !os.IsNotExist(err) {
+		t.Fatal("the nested preserved file stayed in the backup")
+	}
+	if got, _ := os.ReadFile(filepath.Join(b[0], "config", "other")); string(got) != "old\n" {
+		t.Fatalf("a replaced file left the backup: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(installed, "config", "local.json")); string(got) != "mine\n" {
+		t.Fatalf("the preserved file: %q", got)
+	}
+	// A backup whose entry is a symlink out of it: nothing below is touched.
+	evil := mkdirAll(t, filepath.Join(root, "evil-backup"))
+	if err := os.Symlink(outside, filepath.Join(evil, "config")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trimUpdateBackup(evil, []string{"config/keep.json"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "keep.json")); err != nil {
+		t.Fatalf("the trim followed a symlink out of the backup: %v", err)
+	}
+}
+
+// writeUsedSource is a source directory that has been used as a config
+// directory: session records, set-aside logins, backups and cpb's records
+// beside its real content.
+func writeUsedSource(t *testing.T, dir string) {
+	t.Helper()
+	for _, d := range []string{"projects/-home-user-work", "todos", "shell-snapshots", "file-history", "session-env", ".apply", "skills/s1"} {
+		mkdirAll(t, filepath.Join(dir, d))
+	}
+	for name, body := range map[string]string{
+		"CLAUDE.md":                        "content\n",
+		"skills/s1/SKILL.md":               "skill\n",
+		"history.jsonl":                    "{\"display\":\"a prompt\"}\n",
+		"projects/-home-user-work/s.jsonl": "{}\n",
+		".apply/recipe.cpb":                "ALTER PLAYBOOK SET VAR A=1;\n",
+		".credentials.json.cpb-own-2026-01-01-00_00_00":     "{\"claudeAiOauth\":{}}\n",
+		".credentials.json.cpb-ignored-2026-01-01-00_00_00": "{\"claudeAiOauth\":{}}\n",
+		".credentials.json.cpb-aside":                       "{\"claudeAiOauth\":{}}\n",
+		".claude.json.cpb-backup-2026-01-01-00_00_00":       "{\"oauthAccount\":{}}\n",
+		".claude.json.backup":                               "{\"oauthAccount\":{}}\n",
+		"settings.json.cpb-backup-2026-01-01-00_00_00":      "{}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+var usedSourceArtifacts = []string{"projects", "todos", "shell-snapshots", "file-history", "session-env", ".apply", "history.jsonl",
+	".credentials.json.cpb-own-2026-01-01-00_00_00", ".credentials.json.cpb-ignored-2026-01-01-00_00_00", ".credentials.json.cpb-aside",
+	".claude.json.cpb-backup-2026-01-01-00_00_00", ".claude.json.backup", "settings.json.cpb-backup-2026-01-01-00_00_00"}
+
+func assertNoRuntime(t *testing.T, dir string) {
+	t.Helper()
+	for _, a := range usedSourceArtifacts {
+		if _, err := os.Lstat(filepath.Join(dir, a)); !os.IsNotExist(err) {
+			t.Fatalf("%s reached %s", a, dir)
+		}
+	}
+	for _, keep := range []string{"CLAUDE.md", "skills/s1/SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(dir, keep)); err != nil {
+			t.Fatalf("content %s was dropped: %v", keep, err)
+		}
+	}
+}
+
+// An install from a used directory, or a git repository holding the same,
+// takes the playbook's content and none of the machine's runtime state.
+func TestInstallLeavesSourceRuntimeOut(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	home, _ := os.UserHomeDir()
+	src := filepath.Join(home, "used")
+	writeUsedSource(t, src)
+	var err error
+	stderr := captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK x SET launcher = '' FROM '"+src+"'") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoRuntime(t, filepath.Join(config.ResolvePlaybooksDir(), "x"))
+	if !strings.Contains(stderr, "Note: left "+src+"'s ") || !strings.Contains(stderr, "history.jsonl") {
+		t.Fatalf("no note:\n%s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(src, "history.jsonl")); err != nil {
+		t.Fatal("the source itself was changed")
+	}
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	repo := filepath.Join(home, "repo")
+	writeUsedSource(t, repo)
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"}} {
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	captureStderr(t, func() { _, err = quotedStmt(t, "CREATE PLAYBOOK y SET launcher = '' FROM 'file://"+repo+"'") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoRuntime(t, filepath.Join(config.ResolvePlaybooksDir(), "y"))
+}
+
+// update never lets a source's runtime state replace the install's own.
+func TestUpdateLeavesSourceRuntimeOut(t *testing.T) {
+	resetCommandTestState(t)
+	root := t.TempDir()
+	config.PlaybooksDir = filepath.Join(root, "playbooks")
+	source := filepath.Join(root, "source")
+	installed := mkdirAll(t, filepath.Join(config.PlaybooksDir, "pb"))
+	writeUsedSource(t, source)
+	if err := os.WriteFile(filepath.Join(installed, "history.jsonl"), []byte("mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(installed, &manifest.Manifest{Source: &manifest.Source{Repository: source}}); err != nil {
+		t.Fatal(err)
+	}
+	captureStderr(t, func() {
+		if err := updateOnePlaybook("pb", false); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if got, _ := os.ReadFile(filepath.Join(installed, "history.jsonl")); string(got) != "mine\n" {
+		t.Fatalf("the install's history was replaced: %q", got)
+	}
+	for _, a := range usedSourceArtifacts {
+		if a == "history.jsonl" {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(installed, a)); !os.IsNotExist(err) {
+			t.Fatalf("%s reached the install", a)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(source, "history.jsonl")); err != nil {
+		t.Fatal("the source itself was changed")
 	}
 }
