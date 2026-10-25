@@ -85,7 +85,7 @@ It sends the request and the names of what is installed: playbooks,
 launchers, env sets, `DEFAULTS`, and for each playbook and env set whether it
 routes to Anthropic or away. It never sends a variable's value, a secret
 reference, an env set's description, or a credential. Claude Code is started
-with no user settings, no `~/.claude/CLAUDE.md`, no MCP server and no tools,
+with no user settings, no proxy, no `~/.claude/CLAUDE.md`, no MCP server and no tools,
 from a fresh directory outside your home, so the model sees nothing else and
 can read nothing itself. Claude Code adds its own environment block: that
 directory's path, the platform and the OS version.
@@ -103,10 +103,27 @@ let `cpb agent` use that token:
 export CPB_AGENT_LOGIN=token
 ```
 
-cpb then reads its machine token and gives it to that one `claude` call in
-its environment, as every launch does. The token is never part of what is
-sent to the model. Whatever is set, a question that would go anywhere but
-Anthropic is refused before anything is sent.
+cpb then reads its machine token when you ask, and gives it to that one
+`claude` call in its environment, as every launch does, together with a new,
+empty config directory, so a token that is refused cannot fall back to
+another login. The token never goes into the command line, the question, a
+file or cpb's output. Without a machine token, `cpb agent` stops and says so.
+Unset, `cpb agent` uses Claude Code's own login and reads no credential.
+
+## Behind a proxy
+
+`cpb agent` does not run through a proxy yet: a proxy, with a certificate
+authority added for it, could read the question and the credential sent
+with it. When `HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY` is set, it stops
+before anything is sent:
+
+```
+Error: cpb agent does not run through a proxy yet, and HTTPS_PROXY is set here: nothing was sent. If Anthropic's API is reachable without it, run: env -u HTTPS_PROXY cpb agent ...
+```
+
+If your network reaches Anthropic's API directly, run it without the
+variable, as the message says. If it does not, `cpb agent` cannot be used
+from that network for now; the grammar and `cpb --help` work as always.
 
 ## Choosing the model
 

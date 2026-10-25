@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
@@ -131,6 +132,9 @@ func TestAgentSendsNoValue(t *testing.T) {
 			t.Errorf("claude received a canary in its %s:\n%s", f, got)
 		}
 	}
+	if strings.Contains(readRec(t, rec, "env"), "CLAUDE_CONFIG_DIR=") {
+		t.Error("the default login got a config directory: it is the machine's own")
+	}
 	stdin := readRec(t, rec, "stdin")
 	for _, want := range []string{`"name":"work"`, `"name":"route-a"`, `"route":"away"`, `"name":"plain"`, `"route":"anthropic"`, "Request: list the env profiles"} {
 		if !strings.Contains(stdin, want) {
@@ -169,7 +173,9 @@ func TestAgentEnvIsAnAllowlist(t *testing.T) {
 	in := []string{"PATH=/bin", "HOME=/home/user", "LANG=C", "LC_ALL=C", "TERM=xterm",
 		"FOO_TOKEN=x", "AWS_SECRET_ACCESS_KEY=x", "ANTHROPIC_BEDROCK_BASE_URL=x", "ANTHROPIC_UNIX_SOCKET=x",
 		"CLAUDE_CODE_API_KEY_HELPER_TTL_MS=1", "CLAUDE_CONFIG_DIR=/x", "CPB_CONFIG_DIR=/x", "ANTHROPIC_MODEL=m",
-		"ANTHROPIC_AUTH_TOKEN=x", "ANTHROPIC_API_KEY=k", "CLAUDE_CODE_OAUTH_TOKEN=o"}
+		"ANTHROPIC_AUTH_TOKEN=x", "ANTHROPIC_API_KEY=k", "CLAUDE_CODE_OAUTH_TOKEN=o",
+		"HTTPS_PROXY=http://proxy.example.test:3128", "http_proxy=x", "ALL_PROXY=x", "NO_PROXY=x",
+		"NODE_EXTRA_CA_CERTS=/x.pem", "SSL_CERT_FILE=/x.pem", "SSL_CERT_DIR=/x"}
 	got := strings.Join(agentEnv(in), "\n") + "\n"
 	for _, keep := range []string{"PATH=/bin", "HOME=/home/user", "LANG=C", "LC_ALL=C", "TERM=xterm",
 		"ANTHROPIC_API_KEY=k", "CLAUDE_CODE_OAUTH_TOKEN=o", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"} {
@@ -177,7 +183,8 @@ func TestAgentEnvIsAnAllowlist(t *testing.T) {
 			t.Errorf("dropped %s:\n%s", keep, got)
 		}
 	}
-	for _, drop := range []string{"FOO_TOKEN", "AWS_SECRET", "BEDROCK", "UNIX_SOCKET", "KEY_HELPER", "CLAUDE_CONFIG_DIR", "CPB_CONFIG_DIR", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN"} {
+	for _, drop := range []string{"FOO_TOKEN", "AWS_SECRET", "BEDROCK", "UNIX_SOCKET", "KEY_HELPER", "CLAUDE_CONFIG_DIR", "CPB_CONFIG_DIR", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN",
+		"PROXY", "proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT"} {
 		if strings.Contains(got, drop) {
 			t.Errorf("kept %s:\n%s", drop, got)
 		}
@@ -598,6 +605,19 @@ func TestAgentTokenLogin(t *testing.T) {
 	if strings.Contains(env, "other-key") || strings.Contains(env, "other-token") {
 		t.Errorf("an exported key or token went along with the machine token:\n%s", env)
 	}
+	// A config directory of its own, fresh and outside home, gone after: no
+	// stored login to fall back to.
+	cfg := ""
+	for _, kv := range strings.Split(env, "\n") {
+		if v, ok := strings.CutPrefix(kv, "CLAUDE_CONFIG_DIR="); ok {
+			cfg = v
+		}
+	}
+	if cfg == "" || underHome(cfg) || !strings.Contains(cfg, "cpb-agent-") {
+		t.Errorf("token mode's config directory: %q, want a fresh one outside home", cfg)
+	} else if _, err := os.Stat(cfg); !os.IsNotExist(err) {
+		t.Errorf("token mode's config directory is left behind: %s", cfg)
+	}
 	for _, f := range []string{"argv", "stdin"} {
 		if strings.Contains(readRec(t, rec, f), "CANARY") {
 			t.Errorf("the machine token reached claude's %s", f)
@@ -623,19 +643,56 @@ func TestAgentTokenLogin(t *testing.T) {
 	}
 }
 
-// The guard holds whatever builds the child's environment: anything that
-// would not reach Anthropic is refused.
-func TestAgentEgressGuard(t *testing.T) {
-	base := []string{"PATH=/bin", "HOME=/home/user"}
-	if err := agentEgressGuard(base); err != nil {
+// One gate, on the final environment of the claude child, whatever built
+// it: an endpoint, a provider switch, a proxy or a CA change refuses, named
+// by its variable and never its value.
+func TestAgentGate(t *testing.T) {
+	base := []string{"PATH=/bin", "HOME=/home/user", "CLAUDE_CODE_OAUTH_TOKEN=t", "CLAUDE_CONFIG_DIR=/tmp/x"}
+	if err := agentGate(base); err != nil {
 		t.Errorf("a clean environment: %v", err)
 	}
-	if err := agentEgressGuard(append(base, "ANTHROPIC_BASE_URL=https://api.anthropic.com")); err != nil {
-		t.Errorf("Anthropic's own endpoint: %v", err)
-	}
-	for _, away := range []string{"ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1", "CLAUDE_CODE_USE_FOUNDRY=true"} {
-		if err := agentEgressGuard(append(base, away)); err == nil || !strings.Contains(err.Error(), "Anthropic only") {
-			t.Errorf("%s: %v, want a refusal", away, err)
+	for _, kv := range []string{"ANTHROPIC_BASE_URL=https://api.anthropic.com", "ANTHROPIC_FOUNDRY_BASE_URL=v", "ANTHROPIC_BEDROCK_BASE_URL=v",
+		"ANTHROPIC_UNIX_SOCKET=v", "CLAUDE_CODE_USE_BEDROCK=0", "CLAUDE_CODE_USE_VERTEX=1", "CLAUDE_CODE_USE_FOUNDRY=1",
+		"HTTPS_PROXY=v", "http_proxy=v", "ALL_PROXY=v", "no_proxy=v", "NODE_EXTRA_CA_CERTS=v", "SSL_CERT_FILE=v", "NODE_TLS_REJECT_UNAUTHORIZED=0"} {
+		k, _, _ := strings.Cut(kv, "=")
+		err := agentGate(append(base, kv))
+		if err == nil || !strings.Contains(err.Error(), k) || !strings.Contains(err.Error(), "nothing was sent") {
+			t.Errorf("%s: %v, want a refusal naming it", k, err)
 		}
+	}
+}
+
+// Behind a proxy cpb agent refuses before anything is sent: started without
+// it, Claude Code would only retry. NO_PROXY alone is no proxy.
+func TestAgentProxyRefused(t *testing.T) {
+	agentFixture(t)
+	rec := fakeAgentClaude(t, agentListPlan)
+	t.Setenv("HTTPS_PROXY", "http://proxy.example.test:3128")
+	_, err := agentRun(t, nil, "list")
+	if err == nil || !strings.Contains(err.Error(), "does not run through a proxy") || !strings.Contains(err.Error(), "env -u HTTPS_PROXY") || strings.Contains(err.Error(), "proxy.example.test") {
+		t.Fatalf("behind a proxy: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Fatal("claude ran behind a proxy")
+	}
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("NO_PROXY", "localhost")
+	if _, err := agentRun(t, nil, "list"); err != nil {
+		t.Fatalf("NO_PROXY alone: %v", err)
+	}
+}
+
+// A claude that does not answer is given up on, with a message.
+func TestAgentTimeout(t *testing.T) {
+	agentFixture(t)
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "claude"), "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nexec sleep 5\n")
+	os.Chmod(filepath.Join(dir, "claude"), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	old := agentTimeout
+	agentTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { agentTimeout = old })
+	if _, err := agentRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "did not answer within") {
+		t.Fatalf("a silent claude: %v", err)
 	}
 }

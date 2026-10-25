@@ -45,41 +45,47 @@ path = "~/.claude-playbooks/.env-sets/route-a.toml"
 # not one the shell exports as a route variable or as an unrelated one.
 # claude runs with no user settings and no tools, from a fresh directory
 # outside home, and gets no route variable.
-command = '''export ANTHROPIC_BASE_URL=http://127.0.0.1:9/arena-url-canary ANTHROPIC_AUTH_TOKEN=arena-shell-canary FOO_TOKEN=arena-unrelated-canary; out=$(cpb agent "list the env profiles") || { echo "agent failed"; exit 1; }; for f in agent-argv agent-env agent-stdin; do if grep -q canary "$HOME/$f"; then echo "leaked into $f"; exit 1; fi; done; grep -q '"name":"route-a"' "$HOME/agent-stdin" && grep -q '"route":"away"' "$HOME/agent-stdin" && grep -q '"name":"work"' "$HOME/agent-stdin" || { echo "names missing"; exit 1; }; grep -qx -- "--setting-sources" "$HOME/agent-argv" && grep -qx project "$HOME/agent-argv" && grep -qx -- "--strict-mcp-config" "$HOME/agent-argv" && grep -qx -- "--tools" "$HOME/agent-argv" || { echo "flags missing"; exit 1; }; if grep -q -e '^ANTHROPIC_BASE_URL=' -e '^CLAUDE_CONFIG_DIR=' "$HOME/agent-env"; then echo "route variable passed"; exit 1; fi; case "$(cat "$HOME/agent-pwd")" in "$HOME"*) echo "ran under home"; exit 1;; esac; echo "$out" | grep -qF "cpb SHOW ENVS" && echo agent-names-only-ok'''
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; export ANTHROPIC_BASE_URL=http://127.0.0.1:9/arena-url-canary ANTHROPIC_AUTH_TOKEN=arena-shell-canary FOO_TOKEN=arena-unrelated-canary; out=$(cpb agent "list the env profiles") || { echo "agent failed"; exit 1; }; for f in agent-argv agent-env agent-stdin; do if grep -q canary "$HOME/$f"; then echo "leaked into $f"; exit 1; fi; done; grep -q '"name":"route-a"' "$HOME/agent-stdin" && grep -q '"route":"away"' "$HOME/agent-stdin" && grep -q '"name":"work"' "$HOME/agent-stdin" || { echo "names missing"; exit 1; }; grep -qx -- "--setting-sources" "$HOME/agent-argv" && grep -qx project "$HOME/agent-argv" && grep -qx -- "--strict-mcp-config" "$HOME/agent-argv" && grep -qx -- "--tools" "$HOME/agent-argv" || { echo "flags missing"; exit 1; }; if grep -q -e '^ANTHROPIC_BASE_URL=' -e '^CLAUDE_CONFIG_DIR=' "$HOME/agent-env"; then echo "route variable passed"; exit 1; fi; case "$(cat "$HOME/agent-pwd")" in "$HOME"*) echo "ran under home"; exit 1;; esac; echo "$out" | grep -qF "cpb SHOW ENVS" && echo agent-names-only-ok'''
 contains = "agent-names-only-ok"
 
 [[verify.commands]]
 # CPB_AGENT_LOGIN=token: cpb's machine token signs in, in claude's
 # environment only (never its arguments or input); without one, refused
 # before claude runs. The default login never reads the token file.
-command = '''printf 'arena-token-canary-9Rz\n' > "$HOME/agent-token"; export CPB_OAUTH_TOKEN_FILE="$HOME/agent-token"; rm -f "$HOME/agent-env"; cpb agent "list" >/dev/null || exit 1; if grep -q arena-token-canary "$HOME/agent-env"; then echo "default read the token"; exit 1; fi; CPB_AGENT_LOGIN=token cpb agent "list" >/dev/null || { echo token-mode-failed; exit 1; }; grep -qx "CLAUDE_CODE_OAUTH_TOKEN=arena-token-canary-9Rz" "$HOME/agent-env" || { echo token-not-in-env; exit 1; }; if grep -q arena-token-canary "$HOME/agent-argv" "$HOME/agent-stdin"; then echo token-sent; exit 1; fi; rm -f "$HOME/agent-env"; if CPB_AGENT_LOGIN=token CPB_OAUTH_TOKEN_FILE="$HOME/none" cpb agent "list" >/dev/null 2>&1; then echo no-token-not-refused; exit 1; fi; test ! -e "$HOME/agent-env" && echo agent-token-login-ok'''
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; printf 'arena-token-canary-9Rz\n' > "$HOME/agent-token"; export CPB_OAUTH_TOKEN_FILE="$HOME/agent-token"; rm -f "$HOME/agent-env"; cpb agent "list" >/dev/null || exit 1; if grep -q arena-token-canary "$HOME/agent-env"; then echo "default read the token"; exit 1; fi; CPB_AGENT_LOGIN=token cpb agent "list" >/dev/null || { echo token-mode-failed; exit 1; }; grep -qx "CLAUDE_CODE_OAUTH_TOKEN=arena-token-canary-9Rz" "$HOME/agent-env" || { echo token-not-in-env; exit 1; }; if grep -q arena-token-canary "$HOME/agent-argv" "$HOME/agent-stdin"; then echo token-sent; exit 1; fi; rm -f "$HOME/agent-env"; if CPB_AGENT_LOGIN=token CPB_OAUTH_TOKEN_FILE="$HOME/none" cpb agent "list" >/dev/null 2>&1; then echo no-token-not-refused; exit 1; fi; test ! -e "$HOME/agent-env" && echo agent-token-login-ok'''
 contains = "agent-token-login-ok"
 
 [[verify.commands]]
+# Behind a proxy it refuses before claude runs (exit 1), naming the variable
+# and never its value; cpb agent does not run through a proxy.
+command = 'rm -f "$HOME/agent-argv"; out=$(HTTPS_PROXY=http://proxy.example.test:3128 cpb agent "list" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "does not run through a proxy" && echo "$out" | grep -qF "env -u HTTPS_PROXY" && ! echo "$out" | grep -qF proxy.example.test && test ! -e "$HOME/agent-argv" && echo agent-proxy-refused-ok'
+contains = "agent-proxy-refused-ok"
+
+[[verify.commands]]
 # Without --run a plan is only shown: the env set is still there.
-command = 'out=$(cpb agent "drop route-b") && echo "$out" | grep -qF "cpb DROP ENV route-b" && echo "$out" | grep -qF "! removes env set route-b" && test -e "$HOME/.claude-playbooks/.env-sets/route-b.toml" && echo agent-show-only-ok'
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; out=$(cpb agent "drop route-b") && echo "$out" | grep -qF "cpb DROP ENV route-b" && echo "$out" | grep -qF "! removes env set route-b" && test -e "$HOME/.claude-playbooks/.env-sets/route-b.toml" && echo agent-show-only-ok'
 contains = "agent-show-only-ok"
 
 [[verify.commands]]
 # --run without a terminal: refused (exit 1) without --yes, and a step that
 # always asks first is refused even with it; nothing runs. A plan with
 # nothing to ask runs under --yes.
-command = 'cpb agent --run "list" </dev/null >/dev/null 2>&1; a=$?; cpb agent --run --yes "drop route-b" </dev/null >/dev/null 2>&1; b=$?; test "$a" = 1 && test "$b" = 1 && test -e "$HOME/.claude-playbooks/.env-sets/route-b.toml" && cpb agent --run --yes "list" </dev/null | grep -q "^route-b" && echo agent-run-rules-ok'
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; cpb agent --run "list" </dev/null >/dev/null 2>&1; a=$?; cpb agent --run --yes "drop route-b" </dev/null >/dev/null 2>&1; b=$?; test "$a" = 1 && test "$b" = 1 && test -e "$HOME/.claude-playbooks/.env-sets/route-b.toml" && cpb agent --run --yes "list" </dev/null | grep -q "^route-b" && echo agent-run-rules-ok'
 contains = "agent-run-rules-ok"
 
 [[verify.commands]]
 # A step that is not cpb is never proposed as runnable, and --run refuses
 # the plan.
-command = 'cpb agent "show me passwd" | grep -q "not proposed" && { cpb agent --run --yes "show me passwd" </dev/null >/dev/null 2>&1; test $? = 1; } && echo agent-reject-ok'
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; cpb agent "show me passwd" | grep -q "not proposed" && { cpb agent --run --yes "show me passwd" </dev/null >/dev/null 2>&1; test $? = 1; } && echo agent-reject-ok'
 contains = "agent-reject-ok"
 
 [[verify.commands]]
 # A launch that routes away from Anthropic is shown from outside home,
 # with what it deletes and the login note.
-command = 'out=$(cpb agent "a throwaway session on route-a") && echo "$out" | grep -qF "(cd /tmp && cpb start --env-set route-a --delete /tmp/cpb-agent-scratch)" && echo "$out" | grep -qF "! deletes /tmp/cpb-agent-scratch" && echo "$out" | grep -qF "/login" && echo agent-route-away-ok'
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; out=$(cpb agent "a throwaway session on route-a") && echo "$out" | grep -qF "(cd /tmp && cpb start --env-set route-a --delete /tmp/cpb-agent-scratch)" && echo "$out" | grep -qF "! deletes /tmp/cpb-agent-scratch" && echo "$out" | grep -qF "/login" && echo agent-route-away-ok'
 contains = "agent-route-away-ok"
 
 [[verify.commands]]
 # Usage errors exit 2; plain words in quotes point at cpb agent.
-command = 'cpb agent >/dev/null 2>&1; a=$?; cpb agent --yes "list" >/dev/null 2>&1; b=$?; test "$a" = 2 && test "$b" = 2 && cpb "print every env profile" 2>&1 | grep -qF "cpb agent" && echo agent-usage-ok'
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; cpb agent >/dev/null 2>&1; a=$?; cpb agent --yes "list" >/dev/null 2>&1; b=$?; test "$a" = 2 && test "$b" = 2 && cpb "print every env profile" 2>&1 | grep -qF "cpb agent" && echo agent-usage-ok'
 contains = "agent-usage-ok"

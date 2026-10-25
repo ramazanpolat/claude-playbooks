@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -10,9 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
-	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
 
 // How cpb agent asks (SPEC.md, "cpb agent"): Claude Code's own `claude -p`,
@@ -58,15 +59,13 @@ func agentClaudeArgs(model string) []string {
 }
 
 // agentEnvKeep is what the child keeps of the environment: what Claude Code
-// needs to run and to reach its login (the Linux keyring session included),
-// and the network's own settings. Everything else is dropped.
+// needs to run and to reach its login (the Linux keyring session included).
+// Everything else is dropped, a proxy and an added CA among them: together
+// they could read the question and the credential (agentGate).
 var agentEnvKeep = map[string]bool{
 	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true,
 	"TERM": true, "LANG": true, "TMPDIR": true,
 	"XDG_RUNTIME_DIR": true, "DBUS_SESSION_BUS_ADDRESS": true,
-	"HTTPS_PROXY": true, "https_proxy": true, "HTTP_PROXY": true, "http_proxy": true,
-	"NO_PROXY": true, "no_proxy": true, "ALL_PROXY": true, "all_proxy": true,
-	"NODE_EXTRA_CA_CERTS": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
 }
 
 // agentEnvLogin are Anthropic credentials the child keeps only when the
@@ -75,22 +74,9 @@ var agentEnvKeep = map[string]bool{
 var agentEnvLogin = map[string]bool{"ANTHROPIC_API_KEY": true, auth.OAuthTokenEnv: true}
 
 // agentRoutesToAnthropic reports whether a claude started with environ
-// sends its requests to Anthropic: EXPLAIN's egress rule, plus the Foundry
-// switch, which that rule does not name.
+// sends its requests to Anthropic, by EXPLAIN's egress rule.
 func agentRoutesToAnthropic(environ []string) bool {
-	var route []envset.Origin
-	foundry := false
-	for _, kv := range environ {
-		k, v, _ := strings.Cut(kv, "=")
-		switch k {
-		case "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX":
-			route = append(route, envset.Origin{Key: k, Value: v})
-		case "CLAUDE_CODE_USE_FOUNDRY":
-			lv := strings.ToLower(v)
-			foundry = lv != "" && lv != "0" && lv != "false"
-		}
-	}
-	return routeEgress(route) == "anthropic" && !foundry
+	return routeEgress(routeInherited(nil, environ)) == "anthropic"
 }
 
 // agentEnv builds the child's environment from environ by allowlist.
@@ -168,7 +154,12 @@ func agentLogin() (string, error) {
 // agentLoginEnvFor adds what the login mode needs to the child's
 // environment. In token mode the machine token replaces any Anthropic key
 // or token the environment carried, so it is the one that signs in.
-func agentLoginEnvFor(mode string, env []string) ([]string, error) {
+//
+// The token mode also gives Claude Code a config directory of its own,
+// configDir, empty and fresh: with no stored login in it, a token that is
+// refused cannot fall back to the machine's login. Neither mode falls back
+// to the other.
+func agentLoginEnvFor(mode string, env []string, configDir string) ([]string, error) {
 	if mode != agentLoginToken {
 		return env, nil
 	}
@@ -184,29 +175,58 @@ func agentLoginEnvFor(mode string, env []string) ([]string, error) {
 			out = append(out, kv)
 		}
 	}
-	return append(out, auth.OAuthTokenEnv+"="+tok), nil
+	return append(out, "CLAUDE_CONFIG_DIR="+configDir, auth.OAuthTokenEnv+"="+tok), nil
 }
 
-// agentEgressGuard refuses a child environment that would not send its
-// requests to Anthropic, whatever login mode built it.
-func agentEgressGuard(env []string) error {
-	if !agentRoutesToAnthropic(env) {
-		return errors.New("cpb agent asks Anthropic only, and the way it is configured to ask would send the question elsewhere: nothing was sent")
+// agentGate is the one Anthropic-only gate, on the final environment of the
+// claude child, whatever login mode built it: an endpoint, a provider
+// switch, a proxy or a trust-store change in it refuses the call, named by
+// its variable, never its value. The allowlist already drops all of them;
+// the gate is what holds if that ever changes.
+func agentGate(env []string) error {
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		u := strings.ToUpper(k)
+		switch {
+		case strings.HasPrefix(u, "ANTHROPIC_") && strings.HasSuffix(u, "_BASE_URL"),
+			u == "ANTHROPIC_UNIX_SOCKET",
+			u == "CLAUDE_CODE_USE_BEDROCK", u == "CLAUDE_CODE_USE_VERTEX", u == "CLAUDE_CODE_USE_FOUNDRY",
+			u == "HTTP_PROXY", u == "HTTPS_PROXY", u == "ALL_PROXY", u == "NO_PROXY",
+			u == "NODE_EXTRA_CA_CERTS", u == "SSL_CERT_FILE", u == "SSL_CERT_DIR", u == "NODE_TLS_REJECT_UNAUTHORIZED":
+			return fmt.Errorf("cpb agent asks Anthropic only, directly: %s would be in Claude Code's environment, so nothing was sent", k)
+		}
 	}
 	return nil
 }
+
+// agentProxy names the proxy variable the caller's environment sets, ""
+// when none. cpb agent does not run through a proxy: Claude Code started
+// without it would only retry until it gave up, so the call is refused
+// before anything is sent.
+func agentProxy(environ []string) string {
+	for _, kv := range environ {
+		k, v, _ := strings.Cut(kv, "=")
+		switch strings.ToUpper(k) {
+		case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY":
+			if strings.TrimSpace(v) != "" {
+				return k
+			}
+		}
+	}
+	return ""
+}
+
+// agentTimeout bounds the one call: Claude Code retries an unreachable API
+// for minutes.
+var agentTimeout = 3 * time.Minute
 
 // agentLoginHint ends every failure of the call.
 const agentLoginHint = "cpb agent asks Claude through your Claude Code login: run claude and /login, or set ANTHROPIC_API_KEY"
 
 // askAgent sends the installed state and the request, and returns the plan.
 func askAgent(model, login string, state *agentContext, request string) (*agentPlan, error) {
-	env, err := agentLoginEnvFor(login, agentEnv(os.Environ()))
-	if err != nil {
-		return nil, err
-	}
-	if err := agentEgressGuard(env); err != nil {
-		return nil, err
+	if p := agentProxy(os.Environ()); p != "" {
+		return nil, fmt.Errorf("cpb agent does not run through a proxy yet, and %s is set here: nothing was sent. If Anthropic's API is reachable without it, run: env -u %s cpb agent ...", p, p)
 	}
 	path, err := exec.LookPath("claude")
 	if err != nil {
@@ -217,17 +237,36 @@ func askAgent(model, login string, state *agentContext, request string) (*agentP
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
+	configDir := ""
+	if login == agentLoginToken {
+		if configDir, err = agentNeutralDir(); err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(configDir)
+	}
+	env, err := agentLoginEnvFor(login, agentEnv(os.Environ()), configDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := agentGate(env); err != nil {
+		return nil, err
+	}
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
 	}
-	c := exec.Command(path, agentClaudeArgs(model)...)
+	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, path, agentClaudeArgs(model)...)
 	c.Dir = dir
 	c.Env = env
 	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\nRequest: " + request + "\n")
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	runErr := c.Run()
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("Claude Code did not answer within %s: nothing came back. %s", agentTimeout, agentLoginHint)
+	}
 	return parseAgentAnswer(stdout.Bytes(), stderr.String(), runErr)
 }
 

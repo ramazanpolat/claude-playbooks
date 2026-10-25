@@ -13,6 +13,8 @@
   reference or credential. [Ask in plain words](docs/guides/assistant.md).
 - `CPB_AGENT_LOGIN=token` makes `cpb agent` sign in with cpb's machine token
   (the long-lived token launches use) instead of Claude Code's own login.
+- `cpb agent` does not run through a proxy: with `HTTP_PROXY`, `HTTPS_PROXY`
+  or `ALL_PROXY` set it stops before anything is sent, and names the variable.
 - A quoted statement that does not parse and does not start with a keyword
   suggests `cpb agent`.
 
