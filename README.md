@@ -147,4 +147,4 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 
 ## License
 
-Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Relicensed from MIT to Apache-2.0 from the first release after v4.0.0-rc2; v4.0.0-rc2 and earlier releases keep their MIT licence.
+Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)).
