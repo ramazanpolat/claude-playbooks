@@ -9,6 +9,6 @@ ALTER PLAYBOOK
   ADD MCP SERVER playwright COMMAND 'npx' ARGS '@playwright/mcp@latest'
   ADD SKILL canvas-design FROM 'github:anthropics/skills' SUBDIR 'skills/canvas-design'
   ADD SKILL algorithmic-art FROM 'github:anthropics/skills' SUBDIR 'skills/algorithmic-art'
-  SET MODEL 'claude-sonnet-5-5'
+  SET model = 'claude-sonnet-5-5'
   SET VAR DISABLE_TELEMETRY=1
   SET login = 'isolated';

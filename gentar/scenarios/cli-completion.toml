@@ -18,7 +18,13 @@
 # _get_comp_words_by_ref), a documented prerequisite -- and the bench, like
 # a stock macOS, has none. So the real package is loaded from a pinned tag:
 # 2.11 on bash >= 4 (what Linux distributions ship), 1.3 on bash 3.2 (what
-# Homebrew ships for stock macOS bash, since 2.x needs bash 4).
+# Homebrew ships for stock macOS bash, since 2.x needs bash 4). Only the
+# pinned script is loaded, never the host's own completion files: a host
+# with bash-completion 2.12 or later installed (Ubuntu 26.04, Debian 13) has
+# /etc/bash_completion.d/000_bash_completion_compat.bash, which calls
+# 2.12's _comp_deprecate_func, undefined under the pinned 2.11. So tab.sh
+# points BASH_COMPLETION_COMPAT_DIR (and 1.3's BASH_COMPLETION_DIR) at an
+# empty directory.
 
 [scenario]
 name = "cli-completion"
@@ -41,6 +47,11 @@ bin=$1; shift
 # A file, not `source <(...)`: bash 3.2 (stock macOS) sources an empty
 # stream from a process substitution, silently.
 if [ "${BASH_VERSINFO[0]}" -ge 4 ]; then bc=2.11; else bc=1.3; fi
+# The host's compat files are not the pinned release's (see the header).
+# 1.3 also loads BASH_COMPLETION_DIR when it differs, so both point here.
+export BASH_COMPLETION_COMPAT_DIR="$HOME/.bash-completion-compat-none"
+export BASH_COMPLETION_DIR="$BASH_COMPLETION_COMPAT_DIR"
+mkdir -p "$BASH_COMPLETION_COMPAT_DIR" || exit 3
 . "$HOME/bash-completion-$bc" || exit 3
 "$bin" completion bash > "$HOME/.tab-$bin.bash" && . "$HOME/.tab-$bin.bash" || exit 3
 COMP_WORDS=("$bin" "$@")

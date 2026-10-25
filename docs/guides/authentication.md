@@ -35,11 +35,11 @@ session.
 | You want | Do | At launch |
 |---|---|---|
 | Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; `/login` anywhere logs in everywhere |
-| Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; each playbook's own login removed |
+| Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; a playbook's stored login is stripped when it is the machine's account (a newer copy goes over the machine's first), and any other login is first copied aside to `.credentials.json.cpb-own-<stamp>` |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
-| One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'` (a reference, resolved by your secret helper at launch; `=... AS PLAINTEXT` also works) | that token wins over the file; its own login removed |
-| Switch a playbook between accounts | one env set per account, `cpb CREATE ENV acct-work SET CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'`; then `cpb ALTER PLAYBOOK <name> REPLACE ENV acct-work WITH acct-personal`, or `cpb run --env-set acct-work <name>` for one launch | the attached account's token wins; its own login removed |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; add `set CLAUDE_CODE_OAUTH_TOKEN` for a per-account token. `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
+| One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'` (a reference, resolved by your secret helper at launch; `=... AS PLAINTEXT` also works) | that token wins over the file; its stored login is handled as on the row above |
+| Switch a playbook between accounts | one env set per account, `cpb CREATE ENV acct-work SET CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'`; then `cpb ALTER PLAYBOOK <name> REPLACE ENV acct-work WITH acct-personal`, or `cpb run --env-set acct-work <name>` for one launch | the attached account's token wins; its stored login is handled as on the second row |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; or give it a token of its own, by value or by reference (its block, an env set it uses, or `--env`; a token in `DEFAULTS` never reaches it). A token launch over a login it holds is refused, since it would have to delete that login: launch with `--block CLAUDE_CODE_OAUTH_TOKEN` to use the login, or run `/logout` there first to use the token. `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
 The unset and set forms can come from an
 [env set](environment.md#env-sets-define-once-attach-to-many) shared by
@@ -101,9 +101,9 @@ fallback:
 
 ## A source never carries a login
 
-A playbook you install brings no login with it. `install` and
-`CREATE PLAYBOOK … FROM` leave a source's `.credentials.json`, and the
-account keys of its `.claude.json`, out of the install, and say so in one
+A playbook you install brings no login with it. `CREATE PLAYBOOK … FROM`
+leaves a source's `.credentials.json`, and the
+account keys of its `.claude.json`, out of the install, and says so in one
 line each. `LINK` sets them aside in place rather than deleting anything.
 
 ## Routing a playbook to another backend

@@ -33,7 +33,7 @@ func doDelete(o deleteOpts, args []string) error {
 	// Discovery and confirmation run on an UNLOCKED snapshot: the prompt
 	// waits on human input, and holding the machine-user-global registry
 	// lock there would block every concurrent command indefinitely.
-	pb, err := playbook.Find(playbooksDir, name)
+	pb, err := findOrDangling(playbooksDir, name)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func doDelete(o deleteOpts, args []string) error {
 		return err
 	}
 	defer unlock()
-	pb, err = playbook.Find(playbooksDir, name)
+	pb, err = findOrDangling(playbooksDir, name)
 	if err != nil {
 		return err
 	}
@@ -103,6 +103,12 @@ func doDelete(o deleteOpts, args []string) error {
 	names := launcherNamesFor(pb)
 	if err := removeAny(deletePath); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", deletePath, err)
+	}
+	for _, err := range removeUpdateBackups(deletePath, "") {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	for _, b := range incompleteBackups(deletePath) {
+		fmt.Fprintf(os.Stderr, "Kept %s: the backup of an update whose rollback did not complete, the only copy of what it could not put back; remove it once nothing in it is needed\n", b)
 	}
 	removeUnclaimedLaunchers(names, pb.Name)
 	fmt.Printf("Deleted playbook %q.\n", pb.Name)
@@ -498,4 +504,24 @@ func storeResolution(store string) (physical string, links, traversed []string, 
 		traversed = append(traversed, cur)
 	}
 	return cur, links, traversed, nil
+}
+
+// findOrDangling is playbook.Find, plus a LINKed playbook whose target is
+// gone: discovery skips such a link (there is no directory to describe),
+// but DROP must still be able to remove it. It comes back with no manifest,
+// so only the launcher named after it is retired.
+func findOrDangling(playbooksDir, name string) (*playbook.Playbook, error) {
+	pb, err := playbook.Find(playbooksDir, name)
+	if pb != nil || err != nil {
+		return pb, err
+	}
+	path := filepath.Join(playbooksDir, name)
+	info, lerr := os.Lstat(path)
+	if lerr != nil || info.Mode()&os.ModeSymlink == 0 {
+		return nil, nil
+	}
+	if _, serr := os.Stat(path); !os.IsNotExist(serr) {
+		return nil, nil
+	}
+	return &playbook.Playbook{Name: name, Path: path, RootPath: path}, nil
 }

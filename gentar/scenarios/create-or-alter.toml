@@ -77,8 +77,9 @@ contains = "env-set-ok"
 # Whole or nothing, after the creation: the source's settings.json is not
 # JSON, so the install succeeds (global_instructions = inherited writes
 # nothing there) and the SET list's model cannot be written. The refusal
-# says so, and the directory, the launcher and the registry entry are gone.
-command = '''mkdir -p "$HOME/bad-src" && printf "{not json\n" > "$HOME/bad-src/settings.json" && printf "# src\n" > "$HOME/bad-src/CLAUDE.md" && if cpb CREATE PLAYBOOK rb FROM "$HOME/bad-src" SET launcher = 'rbl', global_instructions = 'inherited', model = 'm' > "$HOME/rb.out" 2>&1; then echo not-refused; else grep -F "nothing was created" "$HOME/rb.out" && test ! -e "$HOME/.claude-playbooks/rb" && test ! -e "$HOME/.local/bin/rbl" && ! cpb SHOW PLAYBOOKS | grep -qw rb && echo rolled-back; fi'''
+# says so, and the directory, the launcher and the registry entry are gone
+# (SHOW PLAYBOOKS must still list sre, so an empty listing cannot pass).
+command = '''mkdir -p "$HOME/bad-src" && printf "{not json\n" > "$HOME/bad-src/settings.json" && printf "# src\n" > "$HOME/bad-src/CLAUDE.md" && if cpb CREATE PLAYBOOK rb FROM "$HOME/bad-src" SET launcher = 'rbl', global_instructions = 'inherited', model = 'm' > "$HOME/rb.out" 2>&1; then echo not-refused; else grep -F "nothing was created" "$HOME/rb.out" && test ! -e "$HOME/.claude-playbooks/rb" && test ! -e "$HOME/.local/bin/rbl" && cpb SHOW PLAYBOOKS > "$HOME/pbs.out" && grep -qw sre "$HOME/pbs.out" && ! grep -qw rb "$HOME/pbs.out" && echo rolled-back; fi'''
 contains = "rolled-back"
 
 [[verify.commands]]

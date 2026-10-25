@@ -155,6 +155,9 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 			if err != nil {
 				return nil, fmt.Errorf("ADD SKILL %s: %w", name, err)
 			}
+			if err := refuseCredentialSource(c.Skill.From); err != nil {
+				return nil, fmt.Errorf("ADD SKILL %s: %w", name, err)
+			}
 			old := recordOf(name)
 			if exists(name) && old == nil {
 				return nil, fmt.Errorf("ADD SKILL %s: skills/%s exists and cpb did not add it; remove it yourself, or pick another name", name, name)
@@ -176,11 +179,12 @@ func planSkills(configDir string, rec map[string]*manifest.SkillRecord, known ma
 			if already {
 				continue
 			}
-			op := skillOp{name: name, rec: want, old: old, clause: ci, line: "skill     " + name + " (" + want.Mode + " of " + want.Source + ")"}
+			shown := redactSourceURL(want.Source)
+			op := skillOp{name: name, rec: want, old: old, clause: ci, line: "skill     " + name + " (" + want.Mode + " of " + shown + ")"}
 			if want.Mode == "link" {
-				op.what = "link skills/" + name + " to " + want.Source
+				op.what = "link skills/" + name + " to " + shown
 			} else {
-				op.what = "copy skills/" + name + " from " + want.Source
+				op.what = "copy skills/" + name + " from " + shown
 			}
 			if configDir != "" {
 				op.do = func() error { return putSkill(configDir, name, old, want) }
@@ -347,15 +351,24 @@ func describeSkills(m *manifest.Manifest) []skillJSON {
 	sort.Strings(names)
 	for _, n := range names {
 		r := m.Skills[n]
-		out = append(out, skillJSON{Name: n, Source: r.Source, Branch: optStr(r.Branch), Subdir: optStr(r.Subdir), Mode: r.Mode})
+		out = append(out, skillJSON{Name: n, Source: redactSourceURL(r.Source), Branch: optStr(r.Branch), Subdir: optStr(r.Subdir), Mode: r.Mode})
 	}
 	return out
 }
 
-func skillCreateClauses(m *manifest.Manifest) []grammar.Clause {
+// skillCreateClauses writes the recorded skills back, from the recorded
+// source (describeSkills masks it). A source carrying a credential (recorded
+// before cpb refused them) is never written: a comment says so instead.
+func skillCreateClauses(m *manifest.Manifest) ([]grammar.Clause, []string) {
 	var out []grammar.Clause
+	var comments []string
 	for _, s := range describeSkills(m) {
-		sk := &grammar.Skill{From: s.Source}
+		r := m.Skills[s.Name]
+		if redactSourceURL(r.Source) != r.Source {
+			comments = append(comments, "-- withheld: the source of SKILL "+s.Name+" carries credentials ("+s.Source+"); add it from a URL without them")
+			continue
+		}
+		sk := &grammar.Skill{From: r.Source}
 		if s.Branch != nil {
 			sk.Branch = *s.Branch
 		}
@@ -364,7 +377,7 @@ func skillCreateClauses(m *manifest.Manifest) []grammar.Clause {
 		}
 		out = append(out, grammar.Clause{Kind: grammar.AddSkill, Names: []string{s.Name}, Skill: sk})
 	}
-	return out
+	return out, comments
 }
 
 func cloneSkills(in map[string]*manifest.SkillRecord) map[string]*manifest.SkillRecord {
