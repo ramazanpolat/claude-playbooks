@@ -3458,6 +3458,14 @@ refused, native Windows explicitly so in the shim, which names WSL) and `arch`
 from `uname -m` mapped `x86_64`→`amd64`, `aarch64`/`arm64`→`arm64`. The asset is
 fetched from `<download base>/<tag>/<asset>`.
 
+`install.sh` rides out a transient failure on each release download (the
+asset, `SHA256SUMS`, `LICENSE`, `NOTICE`): curl's `--retry 3 --retry-delay 2
+--retry-max-time 60` repeats a timeout and an HTTP 408, 429, 500, 502, 503 or
+504, and up to three attempts repeat a connection refused, reset or cut short
+(curl exit 7, 18, 35, 52, 55, 56). A 404 is not retried: a release that does
+not exist fails at once. The latest-release lookup is asked once and never
+retried, so a rate limit (403, 429) is reported at once.
+
 ### Checksum policy
 
 Shared verbatim by `install.sh` and the npx shim. After downloading the asset to

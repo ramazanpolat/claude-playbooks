@@ -86,6 +86,30 @@ if [ -z "$LATEST" ]; then
   exit 1
 fi
 
+# fetch URL ARGS...: a release download (the asset, SHA256SUMS, LICENSE,
+# NOTICE) that rides out a transient failure. curl's --retry repeats a
+# timeout and an HTTP 408, 429, 500, 502, 503 or 504; the loop around it
+# repeats a connection that was refused, reset or cut short (exit 7, 18, 35,
+# 52, 55, 56), which --retry does not cover on every curl. A 404 is not
+# transient: curl fails once and the script stops, as before. Not
+# --retry-all-errors (curl 7.71+), which would retry that 404 too. The
+# latest-release lookup above never retries: its 403 and 429 are a rate
+# limit, reported at once.
+fetch() {
+  n=1
+  while :; do
+    curl --retry 3 --retry-delay 2 --retry-max-time 60 -fsSL "$@" && return 0
+    rc=$?
+    case $rc in
+      7|18|35|52|55|56) ;;
+      *) return $rc ;;
+    esac
+    [ "$n" -ge 3 ] && return $rc
+    n=$((n + 1))
+    sleep 2
+  done
+}
+
 DOWNLOAD_BASE_URL="${CPB_INSTALL_DOWNLOAD_BASE:-https://github.com/${REPO}/releases/download}"
 URL="${CPB_INSTALL_URL:-${DOWNLOAD_BASE_URL}/${LATEST}/${ASSET}}"
 
@@ -98,7 +122,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-curl -fsSL "$URL" -o "$TMP_FILE"
+fetch "$URL" -o "$TMP_FILE"
 
 # Verify against the release's SHA256SUMS. A genuine mismatch always
 # aborts; every unverifiable case (no sums published, malformed entry, no
@@ -108,7 +132,7 @@ curl -fsSL "$URL" -o "$TMP_FILE"
 if [ -n "${CPB_INSTALL_URL:-}" ]; then
   echo "Warning: CPB_INSTALL_URL override in use; skipping checksum verification"
 else
-  SUMS=$(curl -fsSL "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" 2>/dev/null || true)
+  SUMS=$(fetch "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" 2>/dev/null || true)
   if [ -n "$SUMS" ]; then
     # Lowercased: sums files may carry uppercase hex, the tools emit lower.
     # sha256sum text mode writes "hash  name"; --binary mode "hash *name".
@@ -174,7 +198,7 @@ if [ -z "${CPB_INSTALL_URL:-}" ]; then
   doc_missing=""
   for f in LICENSE NOTICE; do
     TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb.XXXXXX")
-    if curl -fsSL "${DOWNLOAD_BASE_URL}/${LATEST}/$f" -o "$TMP_FILE" 2>/dev/null \
+    if fetch "${DOWNLOAD_BASE_URL}/${LATEST}/$f" -o "$TMP_FILE" 2>/dev/null \
       && chmod 644 "$TMP_FILE" && mkdir -p "$DOC_DIR" 2>/dev/null && mv "$TMP_FILE" "$DOC_DIR/$f" 2>/dev/null; then
       TMP_FILE=""
     else

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`install.sh` retries a release download that fails for a moment.** The
+  asset, `SHA256SUMS`, `LICENSE` and `NOTICE` are each tried again on a
+  timeout, an HTTP 408, 429 or 5xx, or a connection refused, reset or cut
+  short, a few times with a short pause. A 404 (a release that does not
+  exist) still fails at once, and the latest-release lookup is still asked
+  once, so a rate limit is reported as before.
+
 ## [v4.1.0] -- 2026-10-25
 
 v4.1.0 adds `cpb ask`: say in plain words what you want done, and it shows

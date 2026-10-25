@@ -86,6 +86,68 @@ export CPB_INSTALL_API_BASE="http://127.0.0.1:$port"
 wait "$cpid"
 SHEOF
 chmod +x "$HOME/api.sh"''',
+  # flaky.sh MODE DL CMD...: ~/fx/DL served on a free loopback port, for the
+  # length of CMD, by a server whose first answer to each path is a failure:
+  # MODE 502 answers 502, MODE drop closes the connection without a word.
+  # Every later request is served from the directory (404 for a missing
+  # file). Each request's path and status go to ~/dl.log.
+  '''cat > "$HOME/flaky.py" <<'PYEOF'
+import http.server, os, socket, sys
+mode, root = sys.argv[1], sys.argv[2]
+seen = set()
+def log(path, status):
+    with open(os.path.expanduser("~/dl.log"), "a") as f:
+        f.write(path + "\t" + status + "\n")
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path not in seen:
+            seen.add(self.path)
+            if mode == "drop":
+                log(self.path, "drop")
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.close_connection = True
+                return
+            log(self.path, "502")
+            self.send_response(502)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        f = os.path.join(root, self.path.lstrip("/"))
+        if not os.path.isfile(f):
+            log(self.path, "404")
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        body = open(f, "rb").read()
+        log(self.path, "200")
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(s.server_address[1], flush=True)
+s.serve_forever()
+PYEOF
+cat > "$HOME/flaky.sh" <<'SHEOF'
+#!/bin/sh
+mode=$1; dl=$2; shift 2
+log=$(mktemp)
+python3 -u "$HOME/flaky.py" "$mode" "$HOME/fx/$dl" >"$log" 2>&1 &
+pid=$!
+cpid=
+trap 'kill "$pid" $cpid 2>/dev/null; rm -f "$log"' EXIT
+trap 'exit 143' INT TERM HUP
+i=0; port=
+while [ -z "$port" ] && [ "$i" -lt 300 ]; do port=$(grep -E '^[0-9]+$' "$log" | head -1); i=$((i+1)); [ -n "$port" ] || { kill -0 "$pid" 2>/dev/null || break; sleep 0.1; }; done
+[ -n "$port" ] || { echo "flaky: server did not start; its output:" >&2; cat "$log" >&2; exit 3; }
+export CPB_INSTALL_DOWNLOAD_BASE="http://127.0.0.1:$port"
+"$@" & cpid=$!
+wait "$cpid"
+SHEOF
+chmod +x "$HOME/flaky.sh"''',
   # A curl that records its arguments and its stdin, and fails as an
   # unreachable host does: what install.sh hands curl, seen from outside.
   '''mkdir -p "$HOME/stubcurl" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$@" > "$HOME/curl.args"' 'cat > "$HOME/curl.stdin"' 'printf 000' 'exit 7' > "$HOME/stubcurl/curl" && chmod 755 "$HOME/stubcurl/curl"''',
@@ -125,6 +187,11 @@ command = '''for c in 403 429; do if "$HOME/api.sh" $c env CPB_INSTALL_DIR="$HOM
 contains = "rate-limit-named"
 
 [[verify.commands]]
+# The lookup is asked once: a rate limit is reported, never retried.
+command = '''for c in 403 429; do rm -f "$HOME/api.log"; "$HOME/api.sh" $c env CPB_INSTALL_DIR="$HOME/rlonce$c" sh "$WORKSPACE_DIR/install.sh" > /dev/null 2>&1; n=$(grep -c . "$HOME/api.log"); [ "$n" = 1 ] || { echo "asked-$n-times-on-$c"; exit 1; }; done; echo rate-limit-asked-once'''
+contains = "rate-limit-asked-once"
+
+[[verify.commands]]
 # Another status keeps a network message, with the status. No answer at
 # all says so after curl's own reason, and so does a 200 cut short, whose
 # partial body names a tag: nothing is installed.
@@ -152,3 +219,18 @@ contains = "token-on-stdin"
 # release without them still installs, with a note naming what is missing.
 command = '''"$HOME/serve.sh" dllic env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/lic/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/lic.out" 2>&1 || { echo install-failed; cat "$HOME/lic.out"; exit 1; }; cmp -s "$HOME/lic/share/doc/cpb/LICENSE" "$WORKSPACE_DIR/LICENSE" && cmp -s "$HOME/lic/share/doc/cpb/NOTICE" "$WORKSPACE_DIR/NOTICE" && grep -qF "Licence: $HOME/lic/share/doc/cpb/LICENSE and NOTICE" "$HOME/lic.out" || { echo texts-not-placed; cat "$HOME/lic.out"; exit 1; }; "$HOME/serve.sh" dlnolic env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/nolic/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/nolic.out" 2>&1 && test -x "$HOME/nolic/bin/cpb" && grep -qF "Note: could not place LICENSE NOTICE in" "$HOME/nolic.out" && echo licence-shipped'''
 contains = "licence-shipped"
+
+[[verify.commands]]
+# A release download rides out a transient failure, through this checkout's
+# install.sh: the asset, SHA256SUMS, LICENSE and NOTICE each answered 502
+# first, then a connection dropped without an answer first, and the install
+# completes, checksum verified and licence placed, each path asked twice.
+command = '''for m in 502 drop; do rm -f "$HOME/dl.log"; "$HOME/flaky.sh" $m dllic env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/fl$m/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/fl$m.out" 2>&1 || { echo "failed-on-$m"; cat "$HOME/fl$m.out" "$HOME/dl.log"; exit 1; }; test -x "$HOME/fl$m/bin/cpb" && grep -qF "Checksum verified (sha256)." "$HOME/fl$m.out" && cmp -s "$HOME/fl$m/share/doc/cpb/LICENSE" "$WORKSPACE_DIR/LICENSE" || { echo "incomplete-on-$m"; cat "$HOME/fl$m.out"; exit 1; }; for f in cpb- SHA256SUMS LICENSE NOTICE; do [ "$(grep -c "/$f" "$HOME/dl.log")" = 2 ] && grep "/$f" "$HOME/dl.log" | tail -1 | grep -q "	200$" || { echo "$f-not-retried-once-on-$m"; cat "$HOME/dl.log"; exit 1; }; done; done; echo transient-ridden-out'''
+contains = "transient-ridden-out"
+
+[[verify.commands]]
+# A version that does not exist is not transient: after the first answer's
+# 502 is retried, the asset's 404 stops the install with no further request,
+# and nothing is installed.
+command = '''rm -f "$HOME/dl.log"; if "$HOME/flaky.sh" 502 dllic env CPB_INSTALL_VERSION=v0.0.0-missing CPB_INSTALL_DIR="$HOME/miss/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/miss.out" 2>&1; then echo installed-a-missing-version; exit 1; fi; [ "$(grep -c "/v0.0.0-missing/cpb-" "$HOME/dl.log")" = 2 ] && grep "/v0.0.0-missing/cpb-" "$HOME/dl.log" | tail -1 | grep -q "	404$" && grep -q "404" "$HOME/miss.out" && [ -z "$(ls -A "$HOME/miss/bin" 2>/dev/null)" ] && echo missing-fails-fast || { cat "$HOME/miss.out" "$HOME/dl.log"; exit 1; }'''
+contains = "missing-fails-fast"
