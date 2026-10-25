@@ -128,7 +128,7 @@ func claudeCredentialReachable(configDir string, eff *manifest.Env) string {
 		// A store that is still a link (to the shared one) is detached
 		// before Claude Code starts: what it reaches is not this
 		// playbook's login.
-		store := filepath.Join(configDir, CredentialsFileName)
+		store := StorePath(configDir)
 		if info, err := os.Lstat(store); err == nil && info.Mode()&os.ModeSymlink == 0 {
 			if absent, err := storeGrantAbsent(store); err != nil || !absent {
 				return "login"
