@@ -155,7 +155,8 @@ func TestAskCallsClaudeWithoutUserConfig(t *testing.T) {
 	argv := strings.Split(strings.TrimSuffix(readRec(t, rec, "argv"), "\x00"), "\x00")
 	joined := strings.Join(argv, " ")
 	for _, want := range []string{"-p", "--setting-sources project", "--strict-mcp-config", "--tools  --disable-slash-commands",
-		"--no-session-persistence", "--output-format json", "--model model-x", "--json-schema {"} {
+		"--no-session-persistence", "--output-format json", "--model model-x", "--json-schema {",
+		"--allowedTools mcp__cpb__query", "--max-turns 8", `"args":["--playbooks-dir",`, `"ask-tool"]`} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("claude's arguments lack %q: %q", want, argv)
 		}
@@ -576,5 +577,103 @@ func TestAskTimeout(t *testing.T) {
 	t.Cleanup(func() { askTimeout = old })
 	if _, err := askRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "did not answer within") {
 		t.Fatalf("a silent claude: %v", err)
+	}
+}
+
+// childEnv is the recorded child environment as a map.
+func childEnv(t *testing.T, rec string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, kv := range strings.Split(readRec(t, rec, "env"), "\n") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// cpb ask <playbook>: it signs in as a launch of that playbook would, "you"
+// is it, and one routed away from Anthropic is refused before claude runs.
+func TestAskAddressedPlaybook(t *testing.T) {
+	root := askFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
+
+	// work routes away (env set route-a): refused, nothing sent.
+	_, err := askRun(t, nil, "work", "how many of your sessions are live?")
+	if err == nil || !strings.Contains(err.Error(), "sends its requests away from Anthropic") {
+		t.Fatalf("a routed playbook: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Fatal("claude ran for a routed playbook")
+	}
+
+	// A shared-login playbook, addressed by its launcher: the machine's
+	// login, no config directory, and "addressed" in the state.
+	mustStmt(t, "CREATE PLAYBOOK home SET launcher = 'hm'")
+	if _, err := askRun(t, nil, "hm", "how many of your sessions are live?"); err != nil {
+		t.Fatal(err)
+	}
+	stdin := readRec(t, rec, "stdin")
+	if !strings.Contains(stdin, `"addressed":"home"`) || !strings.Contains(stdin, "Request: how many of your sessions are live?") {
+		t.Errorf("the state or the request:\n%s", stdin)
+	}
+	if _, ok := childEnv(t, rec)["CLAUDE_CONFIG_DIR"]; ok {
+		t.Error("a shared-login playbook got a config directory")
+	}
+
+	// The machine token: a launch of home would inject it, so its question
+	// does too, with a fresh config directory.
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	writeFile(t, tokenFile, "machine-token-1\n")
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
+	if _, err := askRun(t, nil, "home", "list"); err != nil {
+		t.Fatal(err)
+	}
+	env := childEnv(t, rec)
+	if env["CLAUDE_CODE_OAUTH_TOKEN"] != "machine-token-1" || !strings.Contains(env["CLAUDE_CONFIG_DIR"], "cpb-ask-") {
+		t.Errorf("a token playbook: token %q, config dir %q", env["CLAUDE_CODE_OAUTH_TOKEN"], env["CLAUDE_CONFIG_DIR"])
+	}
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "none"))
+
+	// An isolated playbook with a login of its own: its config directory,
+	// and no other credential beside it.
+	mustStmt(t, "CREATE PLAYBOOK iso SET launcher = '', login = 'isolated'")
+	iso := filepath.Join(root, "iso")
+	os.Remove(filepath.Join(iso, ".credentials.json"))
+	writeFile(t, filepath.Join(iso, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`)
+	t.Setenv("ANTHROPIC_API_KEY", "other-key")
+	if _, err := askRun(t, nil, "iso", "list"); err != nil {
+		t.Fatal(err)
+	}
+	env = childEnv(t, rec)
+	if env["CLAUDE_CONFIG_DIR"] != iso || env["ANTHROPIC_API_KEY"] != "" || env["CLAUDE_CODE_OAUTH_TOKEN"] != "" {
+		t.Errorf("an isolated playbook: config dir %q, key %q, token %q", env["CLAUDE_CONFIG_DIR"], env["ANTHROPIC_API_KEY"], env["CLAUDE_CODE_OAUTH_TOKEN"])
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// Isolated with no login of its own: refused, no fallback.
+	mustStmt(t, "CREATE PLAYBOOK iso2 SET launcher = '', login = 'isolated'")
+	os.Remove(filepath.Join(root, "iso2", ".credentials.json"))
+	os.Remove(filepath.Join(rec, "argv"))
+	if _, err := askRun(t, nil, "iso2", "list"); err == nil || !strings.Contains(err.Error(), "no login of its own") {
+		t.Errorf("an isolated playbook without a login: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Error("claude ran without the playbook's login")
+	}
+
+	// A first word that is no playbook is part of the request; a playbook
+	// name alone is the whole request.
+	if _, err := askRun(t, nil, "list", "my", "sets"); err != nil {
+		t.Fatal(err)
+	}
+	if stdin := readRec(t, rec, "stdin"); strings.Contains(stdin, "addressed") || !strings.Contains(stdin, "Request: list my sets") {
+		t.Errorf("no playbook named:\n%s", stdin)
+	}
+	if _, err := askRun(t, nil, "home"); err != nil {
+		t.Fatal(err)
+	}
+	if stdin := readRec(t, rec, "stdin"); strings.Contains(stdin, "addressed") || !strings.Contains(stdin, "Request: home") {
+		t.Errorf("one word:\n%s", stdin)
 	}
 }

@@ -18,6 +18,28 @@ Your env sets.
 It shows the command and stops: `cpb ask` never runs anything. Copy the line
 you want and run it yourself. The contract is [SPEC.md, "cpb ask"](../../SPEC.md).
 
+## Ask a playbook
+
+Name a playbook, or its launcher, first, and the question is about it:
+
+```bash
+cpb ask work "how many of your sessions are live?"
+```
+
+```
+work has 2 live sessions: one interactive, one in the background.
+
+  cpb SHOW SESSIONS FOR PLAYBOOK work
+      Lists them with their folders and the command that resumes each.
+```
+
+"You" in the request means that playbook. The question signs in the way a
+launch of it would: with the machine's token, with the machine's login, or
+with its own login when it has one (`SET login = 'isolated'`). Only its login
+is used; its `CLAUDE.md`, settings, hooks and MCP servers stay out. A
+playbook that sends its requests away from Anthropic is refused: ask without
+naming it. Quote the request when you name a playbook.
+
 ## Reading the answer
 
 Each step is one cpb command and one line saying what it does. cpb checks
@@ -73,7 +95,14 @@ route other launches to. cpb holds no key and reads no credential.
 It sends the request and the names of what is installed: playbooks,
 launchers, env sets, `DEFAULTS`, and for each playbook and env set whether it
 routes to Anthropic or away. It never sends a variable's value, a secret
-reference, an env set's description, or a credential. Claude Code is started
+reference, an env set's description, or a credential.
+
+The model has one tool, and it is cpb, read-only: it can run `SHOW` and
+`EXPLAIN` to look things up, such as how many sessions run or which plugins a
+playbook has. What the tool returns is cut down to names, routes, versions,
+and for sessions their count, kind, status, age and model. It never returns a
+value, a path, a session's folder or title, or a credential, and it cannot
+change anything. Claude Code is started
 with no user settings, no proxy, no `~/.claude/CLAUDE.md`, no MCP server and
 no tools, from a fresh directory outside your home, so the model sees nothing
 else and can read nothing itself. Claude Code adds its own environment block:

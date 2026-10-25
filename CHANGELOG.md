@@ -11,6 +11,12 @@
   to Anthropic's API through the machine's Claude Code login, never through
   an env set or `DEFAULTS`, with the names of what is installed and no value,
   reference or credential. [Ask in plain words](docs/guides/assistant.md).
+- `cpb ask <playbook> "<request>"` addresses the question to a playbook: it
+  signs in the way a launch of that playbook would, and "you" means it. A
+  playbook routed away from Anthropic is refused.
+- The model's one tool is cpb itself, read-only (`SHOW`, `EXPLAIN`), with its
+  answers cut down to names, routes, versions and session counts: it can
+  answer questions about the current state.
 - `CPB_ASK_LOGIN=token` makes `cpb ask` sign in with cpb's machine token (the
   long-lived token launches use) instead of Claude Code's own login.
 - `cpb ask` does not run through a proxy: with `HTTP_PROXY`, `HTTPS_PROXY` or

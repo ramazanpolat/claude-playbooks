@@ -43,19 +43,42 @@ const askPlanSchema = `{"type":"object","additionalProperties":false,` +
 	`"notes":{"type":"array","items":{"type":"string"}}},` +
 	`"required":["answer","steps","notes"]}`
 
-// askClaudeArgs are the flags of the one claude -p call.
-func askClaudeArgs(model string) []string {
+// askMaxTurns bounds the model's turns: its tool calls and the answer.
+const askMaxTurns = "8"
+
+// askClaudeArgs are the flags of the one claude -p call. Its one MCP server
+// is this cpb's read-only tool (ask-tool), granted alone; Claude Code's own
+// tools stay off.
+func askClaudeArgs(model, self, root string) []string {
+	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"cpb": map[string]any{
+		"type": "stdio", "command": self, "args": []string{"--playbooks-dir", root, "ask-tool"},
+	}}})
 	return []string{"-p",
 		"--setting-sources", "project",
 		"--strict-mcp-config",
+		"--mcp-config", string(mcp),
+		"--allowedTools", "mcp__cpb__" + askToolName,
 		"--tools", "",
 		"--disable-slash-commands",
 		"--no-session-persistence",
+		"--max-turns", askMaxTurns,
 		"--system-prompt", askReference,
 		"--json-schema", askPlanSchema,
 		"--output-format", "json",
 		"--model", model,
 	}
+}
+
+// askSelf is this cpb binary, the tool's command; a variable for tests.
+var askSelf = func() (string, error) {
+	p, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return p, nil
 }
 
 // askEnvKeep is what the child keeps of the environment: what Claude Code
@@ -137,7 +160,17 @@ const (
 	askLoginEnv    = "CPB_ASK_LOGIN"
 	askLoginClaude = "claude"
 	askLoginToken  = "token"
+	// askLoginPlaybook signs in with a playbook's own stored login: its
+	// config directory is Claude Code's (cpb ask <playbook>, isolated).
+	askLoginPlaybook = "playbook"
 )
+
+// askSignIn is how one call signs in: a mode, and for askLoginPlaybook the
+// playbook's config directory.
+type askSignIn struct {
+	mode      string
+	configDir string
+}
 
 // askLogin reads CPB_ASK_LOGIN; anything else is a usage error.
 func askLogin() (string, error) {
@@ -160,6 +193,16 @@ func askLogin() (string, error) {
 // refused cannot fall back to the machine's login. Neither mode falls back
 // to the other.
 func askLoginEnvFor(mode string, env []string, configDir string) ([]string, error) {
+	if mode == askLoginPlaybook {
+		// The playbook's own login, and no other credential beside it.
+		out := make([]string, 0, len(env)+1)
+		for _, kv := range env {
+			if k, _, _ := strings.Cut(kv, "="); !askEnvLogin[k] {
+				out = append(out, kv)
+			}
+		}
+		return append(out, "CLAUDE_CONFIG_DIR="+configDir), nil
+	}
 	if mode != askLoginToken {
 		return env, nil
 	}
@@ -224,7 +267,7 @@ var askTimeout = 3 * time.Minute
 const askLoginHint = "cpb ask asks Claude through your Claude Code login: run claude and /login, or set ANTHROPIC_API_KEY"
 
 // askAsk sends the installed state and the request, and returns the plan.
-func askViaClaude(model, login string, state *askContext, request string) (*askPlan, error) {
+func askViaClaude(model string, signIn askSignIn, root string, state *askContext, request string) (*askPlan, error) {
 	if p := askProxy(os.Environ()); p != "" {
 		return nil, fmt.Errorf("cpb ask does not run through a proxy yet, and %s is set here: nothing was sent. If Anthropic's API is reachable without it, run: env -u %s cpb ask ...", p, p)
 	}
@@ -237,14 +280,14 @@ func askViaClaude(model, login string, state *askContext, request string) (*askP
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	configDir := ""
-	if login == askLoginToken {
+	configDir := signIn.configDir
+	if signIn.mode == askLoginToken {
 		if configDir, err = askNeutralDir(); err != nil {
 			return nil, err
 		}
 		defer os.RemoveAll(configDir)
 	}
-	env, err := askLoginEnvFor(login, askEnv(os.Environ()), configDir)
+	env, err := askLoginEnvFor(signIn.mode, askEnv(os.Environ()), configDir)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +300,11 @@ func askViaClaude(model, login string, state *askContext, request string) (*askP
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), askTimeout)
 	defer cancel()
-	c := exec.CommandContext(ctx, path, askClaudeArgs(model)...)
+	self, err := askSelf()
+	if err != nil {
+		return nil, err
+	}
+	c := exec.CommandContext(ctx, path, askClaudeArgs(model, self, root)...)
 	c.Dir = dir
 	c.Env = env
 	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\nRequest: " + request + "\n")

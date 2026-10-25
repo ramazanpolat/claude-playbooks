@@ -25,6 +25,8 @@ type askContext struct {
 	EnvSets           []askEnvSet   `json:"env_sets"`
 	Defaults          []string      `json:"defaults"`
 	Unreadable        []string      `json:"unreadable_playbooks,omitempty"`
+	// Addressed is the playbook the user named: "you" in the request.
+	Addressed string `json:"addressed,omitempty"`
 }
 
 type askPlaybook struct {

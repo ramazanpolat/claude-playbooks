@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -16,19 +15,26 @@ import (
 // cpb checks every step and shows it. cpb ask never runs a step: the user
 // copies what they want to run.
 var askCmd = &cobra.Command{
-	Use:   `ask [--json] [--model <model>] "<request>"`,
+	Use:   `ask [<playbook>] [--json] [--model <model>] "<request>"`,
 	Short: "Ask in plain words for the cpb command that does it",
 	Long: `ask answers a request in plain words with the cpb command or commands that do it.
 It shows them; it never runs them.
 
   cpb ask "list my env sets"
   cpb ask "attach env set router to playbook work"
+  cpb ask work "how many of your sessions are live?"
+
+Naming a playbook (or its launcher) first addresses the question to it: it
+signs in the way a launch of that playbook would, and "you" means it. A
+playbook that routes away from Anthropic is refused.
 
 It asks Claude through this machine's Claude Code login (claude -p), always on
 Anthropic's API: no env set, DEFAULTS or route of yours applies to the question.
 What it sends, to Anthropic: the request, and the names of your playbooks,
 launchers and env sets, with whether each routes away from Anthropic. Never a
-variable's value, a secret reference or a credential. The model gets no tools.
+variable's value, a secret reference or a credential. The model's one tool is
+cpb itself, read-only: SHOW and EXPLAIN, cut to names, routes, versions and
+session counts.
 CPB_ASK_LOGIN=token signs in with cpb's machine token (the long-lived token
 every launch uses) instead of Claude Code's own login.
 
@@ -56,13 +62,25 @@ func askUsage(msg string) error {
 func runAsk(cmd *cobra.Command, args []string) error {
 	asJSON, _ := cmd.Flags().GetBool("json")
 	model, _ := cmd.Flags().GetString("model")
-	request := strings.TrimSpace(strings.Join(args, " "))
+	root := config.ResolvePlaybooksDir()
+	target, request, err := askSplitArgs(root, args)
+	if err != nil {
+		return err
+	}
 	if request == "" {
-		return askUsage(`ask in plain words: cpb ask "<request>"`)
+		return askUsage(`ask in plain words: cpb ask [<playbook>] "<request>"`)
 	}
 	login, err := askLogin()
 	if err != nil {
 		return askUsage(err.Error())
+	}
+	signIn := askSignIn{mode: login}
+	if target != nil {
+		// The playbook decides how its question signs in; CPB_ASK_LOGIN is
+		// for questions addressed to no playbook.
+		if signIn, err = askTargetSignIn(root, target); err != nil {
+			return err
+		}
 	}
 	if model == "" {
 		model = os.Getenv("CPB_ASK_MODEL")
@@ -70,12 +88,14 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	if model == "" {
 		model = defaultAskModel
 	}
-	root := config.ResolvePlaybooksDir()
 	state, err := buildAskContext(root)
 	if err != nil {
 		return err
 	}
-	plan, err := askViaClaude(model, login, state, request)
+	if target != nil {
+		state.Addressed = target.Name
+	}
+	plan, err := askViaClaude(model, signIn, root, state, request)
 	if err != nil {
 		return err
 	}

@@ -83,3 +83,17 @@ contains = "ask-route-away-ok"
 # Usage errors exit 2; plain words in quotes point at cpb ask.
 command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; cpb ask >/dev/null 2>&1; a=$?; CPB_ASK_LOGIN=keychain cpb ask "list" >/dev/null 2>&1; b=$?; test "$a" = 2 && test "$b" = 2 && cpb "print every env profile" 2>&1 | grep -qF "cpb ask" && echo ask-usage-ok'
 contains = "ask-usage-ok"
+
+[[verify.commands]]
+# The model's one tool, driven over JSON-RPC as Claude Code drives it: a
+# read is answered with names and routes and no value; a write is refused by
+# the tool's own rule and changes nothing.
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; out=$(printf '%s\n' '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query","arguments":{"statement":"SHOW ENVS"}}}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query","arguments":{"statement":"DROP ENV route-b"}}}' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query","arguments":{"statement":"SHOW PLAYBOOK work"}}}' | cpb ask-tool) || { echo tool-failed; exit 1; }; echo "$out" | grep -q 'route-a' && echo "$out" | grep -q 'away' && echo "$out" | grep -q 'the tool reads only' || { echo "views or refusal missing"; exit 1; }; if echo "$out" | grep -q -e canary -e "$HOME"; then echo "the tool leaked"; exit 1; fi; test -e "$HOME/.claude-playbooks/.env-sets/route-b.toml" && echo ask-tool-ok'''
+contains = "ask-tool-ok"
+
+[[verify.commands]]
+# cpb ask <playbook>: one routed away from Anthropic is refused before
+# claude runs; a plain one is addressed ("you"), and claude gets cpb's tool
+# alone.
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; rm -f "$HOME/ask-argv"; out=$(cpb ask work "how many of your sessions are live?" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "sends its requests away from Anthropic" && test ! -e "$HOME/ask-argv" || { echo "routed playbook not refused"; exit 1; }; cpb CREATE PLAYBOOK plainpb SET launcher = '' >/dev/null && cpb ask plainpb "how many of your sessions are live?" >/dev/null || { echo plain-failed; exit 1; }; grep -q '"addressed":"plainpb"' "$HOME/ask-stdin" && grep -qx -- "--allowedTools" "$HOME/ask-argv" && grep -qx "mcp__cpb__query" "$HOME/ask-argv" && grep -q 'ask-tool' "$HOME/ask-argv" && echo ask-addressed-ok'''
+contains = "ask-addressed-ok"

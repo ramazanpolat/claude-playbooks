@@ -2781,7 +2781,7 @@ a screen that shows sessions is up. Everything else is re-read on `r`.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
-### `cpb ask [--json] [--model <model>] "<request>"`
+### `cpb ask [<playbook>] [--json] [--model <model>] "<request>"`
 
 `cpb ask` answers a request in plain words with the cpb command or commands
 that do it. A model proposes the plan; cpb checks every step and shows it.
@@ -2800,6 +2800,30 @@ The request is the arguments joined with spaces, so quoting is optional
 until a word starts with `-`. Words of cpb v3 (`env profile`, `alias`,
 `install`, `--env-profile`) are understood and answered in v4 terms.
 
+**Addressing a playbook.** `cpb ask work "how many of your sessions are
+live?"`: with more than one argument, a first one that names a playbook
+(its directory name first, then a manifest launcher, as a launcher command
+resolves) addresses the question to it, and the rest is the request; "you"
+in the request means that playbook. Quote the request in this form. A
+single argument is always the request. The question then signs in the way
+a launch of that playbook would, decided from its manifest and stores
+without preparing a launch (nothing in the playbook changes):
+
+| The playbook | Signs in with |
+|---|---|
+| uses the machine's token (`auth status`: `token`) | the machine token, as `CPB_ASK_LOGIN=token` does |
+| shares the machine's login (`shared-login`) | Claude Code's own login on this machine |
+| has its own login (`isolated-login`, a grant in its store or Keychain) | that login: its directory is Claude Code's config directory for the call, and no other credential is passed |
+| has no login of its own, sets its own token (`playbook-token`), or cannot be launched | refused, nothing sent |
+| routes away from Anthropic | refused, nothing sent: `<name> sends its requests away from Anthropic (route away), and cpb ask asks Anthropic only` |
+
+Only the playbook's login is used: its `CLAUDE.md`, settings, hooks, plugins
+and MCP servers stay out (`--setting-sources project`, as below), and its
+env sets and variables are not applied. `CPB_ASK_LOGIN` applies only to a
+question addressed to no playbook. Claude Code itself updates the
+directory's own state files (`.claude.json`), as any run of the playbook
+does.
+
 **Who answers.** Claude, through this machine's Claude Code: one `claude -p`
 call, always to Anthropic's API, directly. By default it signs in with
 Claude Code's own login on this machine, and cpb reads no credential and
@@ -2814,9 +2838,11 @@ holds no key. The child process is built so that nothing else can join in:
   `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`, the proxy variables, the CA
   variables, and any future route variable. No env set, `DEFAULTS` or
   playbook layer applies.
-- **Its flags:** `-p --setting-sources project --strict-mcp-config --tools ""
-  --disable-slash-commands --no-session-persistence --system-prompt <the
-  reference> --json-schema <the plan> --output-format json --model <model>`.
+- **Its flags:** `-p --setting-sources project --strict-mcp-config
+  --mcp-config <cpb's tool> --allowedTools mcp__cpb__query --tools ""
+  --disable-slash-commands --no-session-persistence --max-turns 8
+  --system-prompt <the reference> --json-schema <the plan> --output-format
+  json --model <model>`.
   No user settings (their `env`, hooks, plugins, `apiKeyHelper`), no user
   memory (`~/.claude/CLAUDE.md`), no MCP server, no tool: the model can read
   nothing beyond what cpb sends. Managed (enterprise) settings apply, as to
@@ -2860,15 +2886,43 @@ holds no key. The child process is built so that nothing else can join in:
   `run claude and /login, or set ANTHROPIC_API_KEY`; exit 1. It never falls
   back to another route.
 
+**Its one tool.** The model's only tool is cpb itself, read-only:
+`cpb --playbooks-dir <root> ask-tool`, an MCP server over stdio that Claude
+Code starts for that call and that is granted alone (`--allowedTools
+mcp__cpb__query`; Claude Code's own tools are off). It is a hidden command.
+- **It reads, and nothing else.** Its one tool, `query`, takes a statement and
+  accepts only `SHOW PLAYBOOKS`, `SHOW PLAYBOOK <name>`, `SHOW ENVS`,
+  `SHOW ENV <name>`, `SHOW DEFAULTS`, `SHOW SESSIONS [FOR PLAYBOOK <name>]`
+  and `EXPLAIN PLAYBOOK <name>`; anything else is refused with that list.
+  The statement runs in that process, as its `--json` form.
+- **It returns a cut-down view**, never the `--json` as it is:
+
+  | View | Returns |
+  |---|---|
+  | a playbook | `name`, `version`, `launcher`, `envs`, `login`, `global_instructions`, `agent`, `model`, `always_sandboxed`, plugin ids with `enabled`, marketplace, MCP server and skill names |
+  | an env set | `name`, `used_by`, `default`, and `route` as below |
+  | `DEFAULTS` | `envs` |
+  | sessions | `count`, and per session `playbook`, `launcher`, `kind`, `status`, `started_at`, `last_active`, `model`, `claude_version` |
+  | `EXPLAIN` | `playbook`, `route` (`anthropic` or `away`), `auth`, `login`, `global_instructions` |
+
+  Never a variable, a value or reference, a description, a path, a source,
+  a session's folder, id, title or resume command, or a credential. An
+  error comes back as its first line, home spelled `~`.
+- **It drops credentials** from its own environment first: Claude Code hands
+  a stdio MCP server its whole environment.
+- **The protocol:** one JSON-RPC object per line; `initialize`, `ping`,
+  `tools/list`, `tools/call`; any other method is "method not found".
+
 **What it sends.** The request, and one object describing what is installed,
 by name: cpb's and Claude Code's versions, the playbooks root spelled with
 `~`, each playbook's name, launcher, attached env set names and whether it
 is always sandboxed, each env set's name and whether it is in `DEFAULTS`,
-the `DEFAULTS` names, the names of playbooks whose manifest cannot be read, and for each playbook and env set its `route`:
+the `DEFAULTS` names, the names of playbooks whose manifest cannot be read, the playbook the question is addressed to (`addressed`), and for each playbook and env set its `route`:
 `anthropic`, `away` (another endpoint, or one set by a reference) or
 `unknown` (a layer that does not resolve), computed on this machine as
 EXPLAIN's `route.egress` is. Never a variable's value, a reference, a
-description, the secret helper or a credential. Claude Code adds its own
+description, the secret helper or a credential. What the model reads with
+its tool is the cut-down views above. Claude Code adds its own
 environment block (the working directory, platform and OS version). The
 reference cpb sends as the system prompt is built into the binary, with
 this specification's grammar block.
@@ -2911,8 +2965,8 @@ step. `--json` prints the checked plan instead: each step's `args`, `why`,
 and `cpb_notes`.
 
 **Exit codes:** 0 shown; 1 refused (a proxy, `CPB_ASK_LOGIN=token` without a
-machine token, the gate) or no plan from Claude; 2 a usage error (no request,
-an unknown `CPB_ASK_LOGIN`).
+machine token, the gate, an addressed playbook it cannot sign in as) or no
+plan from Claude; 2 a usage error (no request, an unknown `CPB_ASK_LOGIN`).
 
 `cpb "<plain words>"` is read as a quoted statement; when it does not parse
 and its first word is not a statement keyword, the error adds `Not a
