@@ -82,7 +82,7 @@ func sameAccount(targetDir string) bool {
 // grant from it and keeps its other logins (mcpOAuth) where they are.
 func setAsideOwnLogin(targetDir, then string, copy bool) error {
 	stamp := now().Format("2006-01-02-15_04_05")
-	creds := filepath.Join(targetDir, CredentialsFileName)
+	creds := StorePath(targetDir)
 	kept := creds + ".cpb-own-" + stamp
 	keep := os.Rename
 	if copy {
