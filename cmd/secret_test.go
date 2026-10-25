@@ -98,7 +98,7 @@ func TestSetFromChecksTheReference(t *testing.T) {
 	}
 }
 
-// An account is an env set holding the OAuth token by reference (v4.1.0).
+// An account is an env set holding the OAuth token by reference (v4.2.0).
 // Both layers take it, the launch execs through the helper, which sets the
 // token, and a token exported in the shell never stands in for it. On the
 // isolated path too. BLOCK of the token wins over the reference.

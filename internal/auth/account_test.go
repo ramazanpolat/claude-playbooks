@@ -22,7 +22,7 @@ func accountFixture(t *testing.T) string {
 	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
 	for _, s := range []*envset.Set{
-		{Name: "acct-work", Refs: map[string]string{OAuthTokenEnv: "keychain:pilot/claude-token-work"}},
+		{Name: "acct-work", Refs: map[string]string{OAuthTokenEnv: "keychain:claude-token-work"}},
 		{Name: "router", Set: map[string]string{"ANTHROPIC_MODEL": "glm"}},
 	} {
 		if err := envset.Write(envset.Dir(root), s); err != nil {
@@ -71,6 +71,22 @@ func TestAccountOf(t *testing.T) {
 				t.Fatalf("got  %s\nwant %s", gj, wj)
 			}
 		})
+	}
+}
+
+// An account attached through DEFAULTS is the machine's layer: an isolated
+// playbook never takes its token, so it reports its own login; a shared one
+// reports the account.
+func TestAccountOfDefaultsAccount(t *testing.T) {
+	root := accountFixture(t)
+	if err := envset.WriteDefaults(envset.Dir(root), []string{"acct-work"}); err != nil {
+		t.Fatal(err)
+	}
+	if a := AccountOf(accountPlaybook(t, root, "iso", "isolated_login = true\n")); a.AuthMode != ModeIsolatedLogin || a.TokenSource != "none" || a.TokenKind != nil {
+		t.Fatalf("isolated: %+v", a)
+	}
+	if a := AccountOf(accountPlaybook(t, root, "shared", "")); a.AuthMode != ModePlaybookToken || a.TokenSource != "env-set:acct-work" {
+		t.Fatalf("shared: %+v", a)
 	}
 }
 

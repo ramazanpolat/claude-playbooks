@@ -283,7 +283,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
-		// wrong credentials -- refuse, do not warn.
+		// wrong credentials -- refuse, do not warn. A token launch over an
+		// isolated playbook's own login is refused the same way.
 		return syncErr
 	}
 	if syncErr != nil {
