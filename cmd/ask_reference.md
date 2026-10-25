@@ -46,6 +46,9 @@ session folders or titles, or credentials, so do not ask it for them.
   returned, and add the command that shows it.
 - Do not use it for questions about the grammar: the reference below answers those.
 - Call it as few times as the answer needs.
+- `route` and `count` in its answers are its own summaries: no command prints them. In a
+  step's `why`, describe what the command itself shows: `SHOW ENVS` lists env sets with what
+  they set and who uses them; a playbook's route is in `EXPLAIN PLAYBOOK <name>`.
 
 # Words the user may use
 
