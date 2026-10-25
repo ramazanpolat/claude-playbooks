@@ -94,7 +94,7 @@ func keychainLogin(configDir string, shared, machine bool) KeychainState {
 	states := []KeychainState{}
 	if !machine {
 		if service, ok := configKeychainService(configDir); ok {
-			states = append(states, KeychainProbe(account, service))
+			states = append(states, keychainProbe(account, service))
 		} else if hostOS != "darwin" {
 			// No Keychain to hold one, whatever its name would be.
 			states = append(states, KeychainAbsent)
@@ -103,7 +103,7 @@ func keychainLogin(configDir string, shared, machine bool) KeychainState {
 		}
 	}
 	if shared || machine {
-		states = append(states, KeychainProbe(account, machineKeychainService))
+		states = append(states, keychainProbe(account, machineKeychainService))
 	}
 	result := KeychainAbsent
 	for _, s := range states {

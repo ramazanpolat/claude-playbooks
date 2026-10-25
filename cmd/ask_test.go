@@ -713,10 +713,18 @@ cat "` + filepath.Join(dir, "answer") + `"
 	writeFile(t, tokenFile, "CANARY-tool-token\n")
 	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
 	t.Setenv("CPB_ASK_LOGIN", "token")
+	t.Setenv("CPB_ISOLATED_LOGIN", "false")
 	if _, err := askRun(t, nil, "list"); err != nil {
 		t.Fatal(err)
 	}
 	env := readRec(t, filepath.Dir(rec), "tool-env")
+	// The tool judges no login, so the settings that change how one is
+	// judged stay behind too.
+	for _, k := range []string{"CPB_OAUTH_TOKEN_FILE=", "CPB_ISOLATED_LOGIN="} {
+		if strings.Contains(env, k) {
+			t.Errorf("the tool server began with %s", k)
+		}
+	}
 	if strings.Contains(env, "CANARY") {
 		t.Errorf("the tool server began with the token:\n%s", env)
 	}

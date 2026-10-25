@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 )
 
@@ -164,10 +165,55 @@ func TestAskToolNoValues(t *testing.T) {
 			t.Errorf("the views lack %s:\n%s", want, all)
 		}
 	}
-	for _, never := range []string{`"vars"`, `"cwd"`, `"session_id"`, `"resume"`, `"path"`, `"description"`, `"source"`, `"config_dir"`} {
+	for _, never := range []string{`"vars"`, `"cwd"`, `"session_id"`, `"resume"`, `"path"`, `"description"`, `"source"`, `"config_dir"`, `"auth"`} {
 		if strings.Contains(all, never) {
 			t.Errorf("the views carry %s:\n%s", never, all)
 		}
+	}
+}
+
+// The tool touches no credential: every statement it admits runs with a trip
+// on the token file, the login stores and the Keychain, over an install
+// where each is there to be found, and none fires.
+func TestAskToolTouchesNoCredential(t *testing.T) {
+	root := askFixture(t)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = root
+	seedFlatPlaybook(t, "solo")
+	mustStmt(t, "ALTER PLAYBOOK solo SET login = 'isolated'")
+	writeFile(t, filepath.Join(root, "solo", ".credentials.json"), `{"claudeAiOauth":{"accessToken":"CANARY-own-login"}}`)
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	writeFile(t, tokenFile, "CANARY-machine-token\n")
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
+	home, _ := os.UserHomeDir()
+	now := time.Now()
+	cwd := filepath.Join(home, "project")
+	writeSessionFile(t, filepath.Join(root, "work"), 101, sidLive, cwd, "interactive", liveStart, now.Add(-time.Hour))
+	writeTranscript(t, filepath.Join(root, "work"), cwd, sidLive, "claude-sonnet-5-5", "title", now)
+	fakeProcs(t, map[int]string{101: liveStart})
+
+	var fired []string
+	auth.CredentialTouch = func(what string) { fired = append(fired, what) }
+	t.Cleanup(func() { auth.CredentialTouch = nil })
+	statements := []string{"SHOW PLAYBOOKS", "SHOW PLAYBOOK work", "SHOW PLAYBOOK solo", "SHOW ENVS", "SHOW ENV route-a",
+		"SHOW DEFAULTS", "SHOW SESSIONS", "SHOW SESSIONS FOR PLAYBOOK work", "EXPLAIN PLAYBOOK work", "EXPLAIN PLAYBOOK solo"}
+	var lines []string
+	for i, st := range statements {
+		lines = append(lines, toolCall(i+1, st))
+	}
+	r := toolExchange(t, lines...)
+	for i, st := range statements {
+		if text, isErr := toolText(t, r[jsonID(i+1)]); isErr {
+			t.Errorf("%s: refused: %s", st, text)
+		}
+	}
+	if len(fired) > 0 {
+		t.Errorf("the tool touched a credential: %v", fired)
+	}
+	// The trip itself works: the same EXPLAIN as a statement judges the login.
+	askCapture([]string{"EXPLAIN", "PLAYBOOK", "solo", "--json"})
+	if len(fired) == 0 {
+		t.Error("EXPLAIN's own login check set off no trip; the guard proves nothing")
 	}
 }
 

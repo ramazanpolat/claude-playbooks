@@ -17,6 +17,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
 // cpb ask-tool is the one tool cpb ask gives the model: an MCP server over
@@ -30,7 +31,10 @@ import (
 //     names, launchers, attached env set names, a route class, versions,
 //     and for sessions their kind, status, age and model. Never a
 //     variable's value, a reference, a description, a path, a session's
-//     folder or title, or a credential.
+//     folder or title, or a credential;
+//   - it touches no credential: no token file, no login store, no Keychain,
+//     not even to see whether one is there. EXPLAIN is built here for that
+//     reason (askToolExplain), and the tool reports no auth class.
 var askToolCmd = &cobra.Command{
 	Use:    "ask-tool",
 	Short:  "The read-only tool cpb ask gives the model (MCP over stdio)",
@@ -195,7 +199,12 @@ func askQuery(statement string) (string, error) {
 			}
 		}
 	case st.Verb == grammar.Explain && st.Object == grammar.Playbook:
-		args, view = []string{"EXPLAIN", "PLAYBOOK", st.Name}, "explain"
+		v, err := askToolExplain(st.Name)
+		if err != nil {
+			return "", err
+		}
+		out, err := json.Marshal(v)
+		return string(out), err
 	}
 	if view == "" {
 		return "", errors.New(askToolRefusal)
@@ -274,17 +283,26 @@ func askToolCut(view string, v any) any {
 			out = append(out, askPick(askMap(s), "playbook", "launcher", "kind", "status", "started_at", "last_active", "model", "claude_version"))
 		}
 		return map[string]any{"count": len(out), "sessions": askEmpty(out)}
-	case "explain":
-		m := askMap(v)
-		route := askMap(m["route"])
-		egress := "away"
-		if route["egress"] == "anthropic" {
-			egress = "anthropic"
-		}
-		return map[string]any{"playbook": m["playbook"], "route": egress, "auth": route["auth"],
-			"login": m["login"], "global_instructions": m["global_instructions"]}
 	}
 	return nil
+}
+
+// askToolExplain is the tool's EXPLAIN PLAYBOOK: where a launch of the
+// playbook sends its requests, as cpb ask itself judges it, and its login
+// and global instructions as its manifest sets them. It does not run
+// EXPLAIN, which judges the login from the token file, the login store and
+// the Keychain: the tool process touches no credential.
+func askToolExplain(name string) (map[string]any, error) {
+	pb, err := playbook.Require(config.ResolvePlaybooksDir(), name)
+	if err != nil {
+		return nil, errors.New(askToolScrub(err.Error()))
+	}
+	route := "away"
+	if askPlaybookRoute(pb.Path) == "anthropic" {
+		route = "anthropic"
+	}
+	v := describePlaybook(pb)
+	return map[string]any{"playbook": pb.Name, "route": route, "login": v.Login, "global_instructions": v.GlobalInstructions}, nil
 }
 
 func askCutPlaybook(m map[string]any) map[string]any {

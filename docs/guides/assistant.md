@@ -102,7 +102,10 @@ The model has one tool, and it is cpb, read-only: it can run `SHOW` and
 playbook has. What the tool returns is cut down to names, routes, versions,
 and for sessions their count, kind, status, age and model. It never returns a
 value, a path, a session's folder or title, or a credential, and it cannot
-change anything. Claude Code is started
+change anything. It does not even look at a credential: it never reads, or
+checks for, the token file, a login store or the Keychain. So it cannot say
+whether a playbook signs in with a token or a stored login, only whether its
+`login` is `shared` or `isolated`. Claude Code is started
 with no user settings, no proxy, no `~/.claude/CLAUDE.md`, no MCP server and
 no tools, from a fresh directory outside your home, so the model sees nothing
 else and can read nothing itself. Claude Code adds its own environment block:

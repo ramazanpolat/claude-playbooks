@@ -2900,7 +2900,8 @@ mcp__cpb__query`; Claude Code's own tools are off). It is a hidden command.
   accepts only `SHOW PLAYBOOKS`, `SHOW PLAYBOOK <name>`, `SHOW ENVS`,
   `SHOW ENV <name>`, `SHOW DEFAULTS`, `SHOW SESSIONS [FOR PLAYBOOK <name>]`
   and `EXPLAIN PLAYBOOK <name>`; anything else is refused with that list.
-  The statement runs in that process, as its `--json` form.
+  A `SHOW` runs in that process, as its `--json` form. `EXPLAIN` is built by
+  the tool itself (below), since EXPLAIN's own login check reads credentials.
 - **It returns a cut-down view**, never the `--json` as it is:
 
   | View | Returns |
@@ -2909,16 +2910,22 @@ mcp__cpb__query`; Claude Code's own tools are off). It is a hidden command.
   | an env set | `name`, `used_by`, `default`, and `route` as below |
   | `DEFAULTS` | `envs` |
   | sessions | `count`, and per session `playbook`, `launcher`, `kind`, `status`, `started_at`, `last_active`, `model`, `claude_version` |
-  | `EXPLAIN` | `playbook`, `route` (`anthropic` or `away`), `auth`, `login`, `global_instructions` |
+  | `EXPLAIN` | `playbook`, `route` (`anthropic` or `away`, judged as cpb ask judges a playbook's route), `login` and `global_instructions` as the manifest sets them |
 
   Never a variable, a value or reference, a description, a path, a source,
   a session's folder, id, title or resume command, or a credential. An
   error comes back as its first line, home spelled `~`.
+- **It touches no credential.** The tool process never reads, opens or
+  checks for the token file, a login store (`.credentials.json`) or a
+  Keychain item, not even to see whether one is there. So it reports no auth
+  class (a token, a stored login): only the `login` setting, `shared` or
+  `isolated`, as the manifest says.
+  A test runs every view with a trip on each of those and fails if one fires.
 - **It starts with a clean environment.** Claude Code hands a stdio MCP
   server its whole environment, the token included, so the MCP config starts
   the server through `env -i`, with only `HOME`, `PATH`, `USER`, `LOGNAME`,
-  `LANG`, `TMPDIR`, `CPB_OAUTH_TOKEN_FILE` and `CPB_ISOLATED_LOGIN` from
-  cpb ask's own environment: the server never holds a credential, not even
+  `LANG` and `TMPDIR` from cpb ask's own environment, what reading the
+  registry needs: the server never holds a credential, not even
   in its initial environment (`/proc/<pid>/environ` on Linux). It also drops
   any credential-looking variable it finds, a second guard.
 - **The protocol:** one JSON-RPC object per line; `initialize`, `ping`,

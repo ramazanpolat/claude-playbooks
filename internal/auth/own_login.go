@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
@@ -70,7 +69,7 @@ func ownToken(configDir string, layers []*manifest.Env) (string, error) {
 // holds the shared login, which isolation detaches; it is not the
 // playbook's own. Nothing is changed here.
 func ownLoginRefusal(configDir string) error {
-	store := filepath.Join(configDir, CredentialsFileName)
+	store := StorePath(configDir)
 	where := ""
 	info, err := os.Lstat(store)
 	switch {
@@ -111,7 +110,7 @@ func keepStoreGrant(configDir string) error {
 	if isGlobalConfigDir(configDir) {
 		return nil
 	}
-	store := filepath.Join(configDir, CredentialsFileName)
+	store := StorePath(configDir)
 	info, err := os.Lstat(store)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || isGlobalCredentialsFile(store) {
 		return nil
@@ -123,7 +122,7 @@ func keepStoreGrant(configDir string) error {
 	if err != nil {
 		return err
 	}
-	globalStore := filepath.Join(global, CredentialsFileName)
+	globalStore := StorePath(global)
 	globalInfo, err := os.Stat(globalStore)
 	// The machine store is the recovery copy only when it holds a grant of
 	// its own: one holding nothing but MCP logins would leave the stripped

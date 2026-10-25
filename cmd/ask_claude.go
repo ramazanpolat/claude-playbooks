@@ -71,9 +71,9 @@ func askClaudeArgs(model, self, root string) []string {
 
 // askToolEnvKeep is what the tool server starts with. Claude Code hands an
 // MCP server its whole environment, credentials included, so the server is
-// started through env -i with only these: what reading the registry needs,
-// and the two cpb settings that change how a login is judged.
-var askToolEnvKeep = []string{"HOME", "PATH", "USER", "LOGNAME", "LANG", "TMPDIR", "CPB_OAUTH_TOKEN_FILE", "CPB_ISOLATED_LOGIN"}
+// started through env -i with only what reading the registry needs. It
+// judges no login, so no setting that changes how one is judged goes along.
+var askToolEnvKeep = []string{"HOME", "PATH", "USER", "LOGNAME", "LANG", "TMPDIR"}
 
 // askEnvCommand is env, by its absolute path.
 func askEnvCommand() string {
