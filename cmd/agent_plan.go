@@ -418,7 +418,7 @@ func checkAgentLaunch(s *agentStep, args []string, root string) error {
 	origins = append(origins, routeInherited(origins, os.Environ())...)
 	if envFile || routeEgress(origins) != "anthropic" {
 		s.RouteAway = true
-		s.CPBNotes = append(s.CPBNotes, "This launch sends its requests away from Anthropic. A session takes the CLAUDE.md files of its working directory and of every directory above it, ~/CLAUDE.md and ~/.claude/CLAUDE.md among them below home, so cpb agent runs it from a new directory outside home.")
+		s.CPBNotes = append(s.CPBNotes, "This launch sends its requests away from Anthropic, with the CLAUDE.md files of the directory it starts in and of every directory above it (from below home, ~/CLAUDE.md and ~/.claude/CLAUDE.md too). cpb agent runs it from a new directory outside home, so none of yours go along.")
 	}
 	if verb == "start" && !sopts.enabled {
 		s.CPBNotes = append(s.CPBNotes, "The new directory shares this machine's login: a /login inside it replaces the machine's login.")
