@@ -67,10 +67,10 @@ ok("unknown things are refused", function () {
   refused(sel({ plugins: ["nope"] }), /Unknown plugin/);
 });
 ok("a keyword cannot name a playbook, a word that only looks like one can", function () {
-  for (const w of ["launcher", "model", "url", "describe", "description"]) {
+  for (const w of ["model", "url", "describe", "description"]) {
     refused(sel({ name: w }), /keyword/);
   }
-  for (const w of ["alias", "isolated", "login", "select"]) {
+  for (const w of ["alias", "isolated", "login", "select", "launcher"]) {
     assert.ok(core.render(sel({ name: w })).ok, w);
   }
 });
