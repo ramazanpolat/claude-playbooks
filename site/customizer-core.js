@@ -145,10 +145,10 @@
 
   /* ---------- validation: the rules cpb itself enforces ---------- */
   /* cpb's reserved words (internal/grammar/parse.go): none may name a playbook. site-tools/check-keywords.py keeps this list equal to cpb's. */
-  var KEYWORDS = ("ADD AFTER AGENT ALL ALLOW ALTER APPEND APPLY ARGS AS BEFORE BEHAVES BLOCK BRANCH COMMAND CREATE DEFAULTS DENY " +
-    "DESCRIBE DESCRIPTION DROP ENV ENVS EXISTS EXPLAIN FIRST FROM HEADER HELPER IF INCLUDE LABEL LAST LAUNCHER " +
-    "LINK MARKETPLACE MCP MODEL NO NOT ONLY OR PICKER PLAINTEXT PLAYBOOK PLAYBOOKS PLUGIN REFRESH RENAME REPLACE " +
-    "SANDBOX SECRET SERVER SET SHOW SKILL SSE STATUSLINE SUBDIR TO TOOL TRANSPORT UNSET URL USE VAR").split(" ");
+  var KEYWORDS = ("ADD AFTER ALL ALLOW ALTER APPLY ARGS AS BEFORE BEHAVES BLOCK BRANCH COMMAND CREATE DEFAULTS DENY DESCRIBE " +
+    "DESCRIPTION DROP ENV ENVS EXISTS EXPLAIN FIRST FROM HEADER IF INCLUDE LABEL LAST LINK MARKETPLACE MCP " +
+    "MODEL NOT OR PLAINTEXT PLAYBOOK PLAYBOOKS PLUGIN RENAME REPLACE RESET SERVER SET SHOW SKILL SSE " +
+    "STATUSLINE SUBDIR TO TOOL TRANSPORT UNSET URL USE VAR WITH").split(" ");
   var NAME = /^[a-z][a-z0-9_-]{0,39}$/;
   var KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
   var VALUE = /^[A-Za-z0-9_.:\/@%+=,~-]{0,200}$/;
@@ -243,7 +243,7 @@
     if (sel.allow.length) out.push("ALLOW TOOL " + order(sel.allow, RULES.allow).map(q).join(" "));
     if (sel.deny.length) out.push("DENY TOOL " + order(sel.deny, RULES.deny).map(q).join(" "));
     var m = sel.model || { kind: "default" };
-    if (m.kind === "claude" && m.id) out.push("SET MODEL " + q(m.id));
+    if (m.kind === "claude" && m.id) out.push("SET model = " + q(m.id));
     if (m.kind === "router") {
       out.push("SET VAR ANTHROPIC_BASE_URL=" + m.baseUrl);
       out.push("SET VAR ANTHROPIC_MODEL=" + m.id);
@@ -252,17 +252,17 @@
       (m.picker || []).forEach(function (e) {
         out.push("ADD MODEL " + q(e.id) + (e.label ? " LABEL " + q(e.label) : "") + (e.behavesAs ? " BEHAVES AS " + q(e.behavesAs) : ""));
       });
-      if ((m.picker || []).length) out.push("SET MODEL PICKER " + m.pickerMode);
+      if ((m.picker || []).length) out.push("SET model_picker.mode = " + q(m.pickerMode.toLowerCase()));
     }
     sel.vars.forEach(function (v) { out.push("SET VAR " + v.key + "=" + (v.value || "")); });
-    if (sel.mode === "recipe" && sel.isolated && !sel.sandbox) out.push("SET ISOLATED LOGIN");
+    if (sel.mode === "recipe" && sel.isolated && !sel.sandbox) out.push("SET login = 'isolated'");
     return out;
   }
 
   function createFlags(sel) {
     var f = [];
-    if (sel.sandbox) f.push("SANDBOX");
-    if (sel.mode === "file" && sel.isolated && !sel.sandbox) f.push("ISOLATED LOGIN");
+    if (sel.sandbox) f.push("SET sandbox.always = true, login = 'isolated'");
+    if (sel.mode === "file" && sel.isolated && !sel.sandbox) f.push("SET login = 'isolated'");
     return f;
   }
   function needs(sel) {
@@ -305,7 +305,7 @@
     if (sel.mode === "file") {
       cmds.push("cpb APPLY " + file + " --dry-run", "cpb APPLY " + file, name);
     } else {
-      if (sel.sandbox) cmds.push("cpb CREATE PLAYBOOK " + name + " SANDBOX");
+      if (sel.sandbox) cmds.push("cpb CREATE PLAYBOOK " + name + " " + flags.join(" "));
       cmds.push("cpb APPLY " + file + " TO " + name + " --dry-run", "cpb APPLY " + file + " TO " + name, name);
     }
     return { ok: true, text: text, file: file, create: flags, commands: cmds, needs: needs(sel), lines: body.length };

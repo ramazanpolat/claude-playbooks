@@ -60,12 +60,12 @@
         <div class="term-title">quick start</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
-      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK work</span>                           <span class="comment"># a playbook, and a `work` command that opens it</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK side ISOLATED LOGIN</span>            <span class="comment"># a second account, running beside the first</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK sre SANDBOX</span>                    <span class="comment"># every launch inside a microVM</span>
-<span class="cmd"><span class="prompt">$ </span>work</span>                                               <span class="comment"># Claude Code, bound to that playbook</span></code></pre>
+      <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK work</span>                                               <span class="comment"># a playbook, and a `work` command that opens it</span>
+<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK side SET login = 'isolated'</span>                        <span class="comment"># a second account, running beside the first</span>
+<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK sre SET sandbox.always = true, login = 'isolated'</span>  <span class="comment"># every launch inside a microVM</span>
+<span class="cmd"><span class="prompt">$ </span>work</span>                                                                   <span class="comment"># Claude Code, bound to that playbook</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0, throwaway HOME</span>
       </div>
     </div>
   </section>
@@ -94,7 +94,7 @@
       <div class="layer-card">
         <h3>Login</h3>
         <p>Its own Anthropic account, sharing nothing with <code class="inline">~/.claude</code>.</p>
-        <code class="kw">ISOLATED LOGIN</code>
+        <code class="kw">login = 'isolated'</code>
       </div>
       <div class="layer-card">
         <h3>Process</h3>
@@ -102,7 +102,7 @@
            working directory and its own config; your machine's login never enters it.
            By default a host-side proxy injects backend API keys, so the sandbox
            never holds them.</p>
-        <code class="kw">SANDBOX · --sandbox</code>
+        <code class="kw">sandbox.always · --sandbox</code>
       </div>
     </div>
   </section>
@@ -117,7 +117,7 @@
     <div class="term" data-verify="examples/01-first-playbook">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc2</div>
+        <div class="term-title">real run, v4.0.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK scratch</span>
@@ -127,19 +127,21 @@ Launcher: scratch  (at /home/you/bin/scratch)
 Run it now:
   'scratch'</span>
 <span class="cmd"><span class="prompt">$ </span>cpb SHOW PLAYBOOK scratch</span>
-<span class="out">Name:       scratch
-Version:    (none)
-Path:       /home/you/.claude-playbooks/scratch
-Source:     (none)
-Launcher:   scratch
-Env sets:   (none)
-Variables:  (none)
-Sandbox:    no</span>
+<span class="out">Name:                 scratch
+Version:              (none)
+Path:                 /home/you/.claude-playbooks/scratch
+Source:               (none)
+Launcher:             scratch
+Env sets:             (none)
+Variables:            (none)
+Sandbox:              no
+Login:                shared with ~/.claude (default)
+Global instructions:  excluded (default): ~/.claude's CLAUDE.md and rules are not loaded (SET global_instructions = 'inherited' loads them)</span>
 <span class="cmd"><span class="prompt">$ </span>cpb DROP PLAYBOOK scratch --yes</span>
 <span class="out">Removed launcher "scratch"
 Deleted playbook "scratch".</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0, throwaway HOME</span>
       </div>
     </div>
     <p>A throwaway session in a throwaway folder works the same way:
@@ -158,13 +160,13 @@ Deleted playbook "scratch".</span></code></pre>
     <div class="term" data-verify="README.md:59-68, examples/14-model-picker">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc2</div>
+        <div class="term-title">real run, v4.0.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1</span>
 <span class="out">Created ENV router
   set       ANTHROPIC_BASE_URL</span>
-<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm ISOLATED LOGIN</span>
+<span class="cmd"><span class="prompt">$ </span>cpb CREATE PLAYBOOK glm SET login = 'isolated'</span>
 <span class="out">Created playbook "glm" at /home/you/.claude-playbooks/glm
 Login isolated: it shares no login with ~/.claude; run /login once in it.
 Launcher: glm  (at /home/you/bin/glm)
@@ -184,7 +186,7 @@ Run it now:
 <span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'</span>
 <span class="out">Altered PLAYBOOK glm
   model     glm-5.3-flash</span>
-<span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm SET MODEL PICKER ONLY</span>
+<span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK glm SET model_picker.mode = 'only'</span>
 <span class="out">Altered PLAYBOOK glm
   picker    only</span>
 <span class="cmd"><span class="prompt">$ </span>cpb EXPLAIN PLAYBOOK glm</span>
@@ -195,16 +197,17 @@ ANTHROPIC_BASE_URL  http://localhost:4000/v1  ENV router
 ANTHROPIC_MODEL     glm-5.3                   PLAYBOOK glm
 
 Secret helper: (none)
-Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (UNSET ISOLATED LOGIN shares it again)
+Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)
+Global instructions: excluded (default): ~/.claude's CLAUDE.md and rules are not loaded (SET global_instructions = 'inherited' loads them)
 Plugins: (none)
 Agent: (none)
 Model: glm-5.3 (ANTHROPIC_MODEL); a launch's --model and /model still win
 Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0, throwaway HOME</span>
       </div>
     </div>
-    <p><code class="inline">ISOLATED LOGIN</code> keeps your Anthropic login away from that
+    <p><code class="inline">login = 'isolated'</code> keeps your Anthropic login away from that
       provider.</p>
   </section>
 
@@ -231,13 +234,13 @@ Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)</span></cod
     <p>By default your backend API keys stay on the host: the sandbox sees a placeholder
       that a host-side proxy swaps for the real key, for that endpoint only. If a key can't
       be registered with the proxy, the launch refuses rather than fall back to sending it in
-      plain; <code class="inline">ALTER PLAYBOOK work SET SANDBOX secrets=env</code>
-      is the only way to pass one in as a variable instead. A <code class="inline">SANDBOX</code>
-      playbook is sandboxed on every launch: <code class="inline">ALTER PLAYBOOK work SET SANDBOX</code>
-      makes an existing playbook one, and <code class="inline">UNSET SANDBOX</code> turns it off.
+      plain; <code class="inline">ALTER PLAYBOOK work SET sandbox.secrets = 'env'</code>
+      is the only way to pass one in as a variable instead. A <code class="inline">sandbox.always</code>
+      playbook is sandboxed on every launch: <code class="inline">ALTER PLAYBOOK work SET sandbox.always = true, login = 'isolated'</code>
+      makes an existing playbook one, and <code class="inline">SET sandbox.always = false</code> turns it off.
       The sandbox settings (<code class="inline">backend</code>, <code class="inline">host</code>,
       <code class="inline">mounts</code>, <code class="inline">allow_net</code> and the rest) are set one by one
-      the same way: <code class="inline">SET SANDBOX host=me@buildbox</code>.</p>
+      the same way: <code class="inline">SET sandbox.host = 'me@buildbox'</code>.</p>
   </section>
 
   <section id="recipes">
@@ -261,12 +264,12 @@ ALTER PLAYBOOK
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ALLOW TOOL 'Bash(gh pr *)'  DENY TOOL 'Bash(git push *)'
   ADD SKILL review FROM '/home/you/skills-src/review'
-  SET MODEL 'claude-opus-5-5';</code></pre>
+  SET model = 'claude-opus-5-5';</code></pre>
     </div>
     <div class="term">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc2</div>
+        <div class="term-title">real run, v4.0.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb APPLY reviewer.cpb TO reviewer --dry-run</span>
@@ -289,19 +292,22 @@ Altered PLAYBOOK reviewer
   model     claude-opus-5-5
 Applied reviewer.cpb: 1 created, 1 changed, 0 unchanged, 0 dropped</span>
 <span class="cmd"><span class="prompt">$ </span>cpb SHOW CREATE PLAYBOOK reviewer --skip-secrets</span>
-<span class="out">CREATE PLAYBOOK IF NOT EXISTS reviewer
-  LAUNCHER reviewer;
+<span class="out">CREATE OR ALTER PLAYBOOK reviewer
+  RESET launcher
+  SET login = 'shared', global_instructions = 'excluded'
+  RESET sandbox, agent, statusline, model_picker.mode
+  USE ENV '';
 
 ALTER PLAYBOOK reviewer
   ALLOW TOOL 'Bash(gh pr *)'
   DENY TOOL 'Bash(git push *)'
-  SET MODEL 'claude-opus-5-5';
+  SET model = 'claude-opus-5-5';
 
 ALTER PLAYBOOK reviewer
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ADD SKILL review FROM '/home/you/skills-src/review';</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0, throwaway HOME</span>
       </div>
     </div>
     <p>Secrets are references, resolved at launch by your helper; <code class="inline">SHOW CREATE</code>
@@ -322,7 +328,7 @@ ALTER PLAYBOOK reviewer
     <div class="term" data-verify="examples/09-mcp-servers">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc2</div>
+        <div class="term-title">real run, v4.0.0</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'</span>
@@ -334,18 +340,21 @@ ALTER PLAYBOOK reviewer
 CPB_MCP_SENTRY_H_AUTHORIZATION_32770652  &lt;from keychain:sentry-auth&gt;  PLAYBOOK researcher
 
 Secret helper: /home/you/helper (from CPB_SECRET_HELPER)
+Global instructions: excluded (default): ~/.claude's CLAUDE.md and rules are not loaded (SET global_instructions = 'inherited' loads them)
 Plugins: (none)
 Agent: (none)
 MCP servers: files, sentry</span>
 <span class="cmd"><span class="prompt">$ </span>cpb SHOW CREATE PLAYBOOK researcher --skip-secrets</span>
-<span class="out">CREATE PLAYBOOK IF NOT EXISTS researcher
-  NO LAUNCHER;
+<span class="out">CREATE OR ALTER PLAYBOOK researcher
+  SET launcher = '', login = 'shared', global_instructions = 'excluded'
+  RESET sandbox, model, agent, statusline, model_picker.mode
+  USE ENV '';
 
 ALTER PLAYBOOK researcher
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth';</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME</span>
+        <span class="verified-tag">verified against v4.0.0, throwaway HOME</span>
       </div>
     </div>
     <p>The value never appears in a file, in argv, or in any <code class="inline">SHOW</code>/<code class="inline">EXPLAIN</code>
@@ -365,21 +374,21 @@ ALTER PLAYBOOK researcher
     <div class="term" data-verify="examples/18-sessions, examples/13-select">
       <div class="term-bar">
         <div class="term-dots"><span></span><span></span><span></span></div>
-        <div class="term-title">real run, v4.0.0-rc2, with example 18's stand-in session</div>
+        <div class="term-title">real run, v4.0.0, with example 18's stand-in session</div>
         <button class="copy-btn" type="button">copy</button>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>cpb SHOW SESSIONS</span>
 <span class="out">PLAYBOOK  PID     TTY  KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
 --------  ---     ---  ----         ------  ---  ------  -----            -------                               ---
 worker    447747  -    interactive  idle    0s   0s      claude-opus-5-5  0e5c1a2b-0000-4000-8000-000000000001  /home/you/project</span>
-<span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"</span>
-<span class="out">name	envs	isolated_login
-glm	router	true
-researcher	-	false
-reviewer	-	false
-side	-	true
-sre	-	true
-work	-	false</span>
+<span class="cmd"><span class="prompt">$ </span>cpb "SELECT name, envs, login FROM PLAYBOOKS"</span>
+<span class="out">name	envs	login
+glm	router	isolated
+researcher	-	shared
+reviewer	-	shared
+side	-	isolated
+sre	-	isolated
+work	-	shared</span>
 <span class="cmd"><span class="prompt">$ </span>cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"</span>
 <span class="out">playbook	key
 glm	ANTHROPIC_API_KEY
@@ -387,7 +396,7 @@ glm	ANTHROPIC_BASE_URL
 glm	ANTHROPIC_MODEL
 researcher	CPB_MCP_SENTRY_H_AUTHORIZATION_32770652</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc2, testbed, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
+        <span class="verified-tag">verified against v4.0.0, throwaway HOME (SELECT …WHERE via clickhouse local)</span>
       </div>
     </div>
     <p><code class="inline">cpb run worker --continue</code> resumes the newest session in this folder,
@@ -459,7 +468,7 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
     </p>
     <div class="reliability-grid">
       <div class="stat">
-        <span class="n">21 examples</span>
+        <span class="n">22 examples</span>
         <span class="d">applied in CI on every change &mdash; dry run, apply, re-apply (no-op), then each README's own checks</span>
       </div>
       <div class="stat">
@@ -489,9 +498,9 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
       </div>
       <pre><code><span class="cmd"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh</span>
 <span class="cmd"><span class="prompt">$ </span>cpb --version</span>
-<span class="out">cpb version v4.0.0-rc2</span></code></pre>
+<span class="out">cpb version v4.0.0</span></code></pre>
       <div class="term-bar" style="border-bottom:none; border-top:1px solid rgba(255,255,255,.06);">
-        <span class="verified-tag">verified against v4.0.0-rc2, testbed</span>
+        <span class="verified-tag">verified against v4.0.0</span>
       </div>
     </div>
     <p class="install-row">
@@ -505,7 +514,7 @@ reads: cpb SHOW PLAYBOOK router --json · cpb SHOW SESSIONS --json</code></pre>
 
 <footer>
   <div class="wrap">
-    <div>MIT License &middot; &copy; 2026 Ramazan Polat</div>
+    <div>Apache-2.0 License &middot; &copy; 2026 Ramazan Polat</div>
     <nav aria-label="Footer">
       <a href="index.html">Home</a>
       <a href="templates.html">Templates</a>
