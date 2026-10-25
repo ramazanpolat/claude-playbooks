@@ -2811,7 +2811,7 @@ can join in:
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. `ANTHROPIC_API_KEY` and
   `CLAUDE_CODE_OAUTH_TOKEN` are kept only when the environment routes to
   Anthropic (no `ANTHROPIC_BASE_URL` other than `https://api.anthropic.com`,
-  no Bedrock or Vertex switch): a key that came with another endpoint
+  no Bedrock, Vertex or Foundry switch): a key that came with another endpoint
   belongs to it. Every other variable, `ANTHROPIC_BASE_URL`,
   `CLAUDE_CONFIG_DIR` and any future route variable included, is dropped.
   No env set, `DEFAULTS` or playbook layer applies.

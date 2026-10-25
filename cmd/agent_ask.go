@@ -77,14 +77,20 @@ var agentEnvLogin = map[string]bool{"ANTHROPIC_API_KEY": true, auth.OAuthTokenEn
 // agentEnv builds the child's environment from environ by allowlist.
 func agentEnv(environ []string) []string {
 	var route []envset.Origin
+	foundry := false
 	for _, kv := range environ {
 		k, v, _ := strings.Cut(kv, "=")
 		switch k {
 		case "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX":
 			route = append(route, envset.Origin{Key: k, Value: v})
+		case "CLAUDE_CODE_USE_FOUNDRY":
+			// EXPLAIN's egress rule names Bedrock and Vertex; a Foundry
+			// switch sends requests elsewhere just the same.
+			lv := strings.ToLower(v)
+			foundry = lv != "" && lv != "0" && lv != "false"
 		}
 	}
-	anthropic := routeEgress(route) == "anthropic"
+	anthropic := routeEgress(route) == "anthropic" && !foundry
 	out := []string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"}
 	for _, kv := range environ {
 		k, _, ok := strings.Cut(kv, "=")

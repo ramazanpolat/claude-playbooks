@@ -179,11 +179,14 @@ func TestAgentEnvIsAnAllowlist(t *testing.T) {
 		}
 	}
 	// A key that came with another endpoint belongs to it.
-	for _, route := range []string{"ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "CLAUDE_CODE_USE_BEDROCK=1"} {
+	for _, route := range []string{"ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=true", "CLAUDE_CODE_USE_FOUNDRY=1"} {
 		got = strings.Join(agentEnv(append(in, route)), "\n")
 		if strings.Contains(got, "ANTHROPIC_API_KEY") || strings.Contains(got, "CLAUDE_CODE_OAUTH_TOKEN") || strings.Contains(got, "ANTHROPIC_BASE_URL") {
 			t.Errorf("with %s the Anthropic credentials went along:\n%s", route, got)
 		}
+	}
+	if got = strings.Join(agentEnv(append(in, "CLAUDE_CODE_USE_FOUNDRY=0")), "\n"); !strings.Contains(got, "ANTHROPIC_API_KEY=k") || strings.Contains(got, "FOUNDRY") {
+		t.Errorf("a Foundry switch that is off: want the key kept and the switch dropped:\n%s", got)
 	}
 	got = strings.Join(agentEnv(append(in, "ANTHROPIC_BASE_URL=https://api.anthropic.com")), "\n")
 	if !strings.Contains(got, "ANTHROPIC_API_KEY=k") || strings.Contains(got, "ANTHROPIC_BASE_URL") {
