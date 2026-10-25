@@ -25,6 +25,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/ramazanpolat/claude-playbooks/internal/testenv"
 )
 
 const (
@@ -56,7 +58,16 @@ func TestMain(m *testing.M) {
 		panic("building cpb for e2e: " + err.Error() + "\n" + string(out))
 	}
 
+	// Every launch below gets this PATH (plus its own shims): a launcher a
+	// test creates never meets a command that only some hosts have.
+	path, err := testenv.HermeticPath()
+	if err != nil {
+		os.RemoveAll(dir)
+		panic(err)
+	}
+	os.Setenv("PATH", path)
 	code := m.Run()
+	os.RemoveAll(path)
 	// os.Exit does not run deferred functions, so a `defer os.RemoveAll(dir)`
 	// here would silently leak a ~13MB binary per run into the system temp
 	// directory. Clean up explicitly on every exit path instead.

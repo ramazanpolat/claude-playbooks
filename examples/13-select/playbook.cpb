@@ -4,5 +4,5 @@ ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
 CREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token';
 
 CREATE PLAYBOOK IF NOT EXISTS alpha SET launcher = '';
-CREATE PLAYBOOK IF NOT EXISTS beta SET launcher = '';
+CREATE PLAYBOOK IF NOT EXISTS beta SET launcher = '', login = 'isolated';
 ALTER PLAYBOOK beta USE ENV router SET VAR MODEL=glm;

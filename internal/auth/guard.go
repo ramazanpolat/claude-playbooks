@@ -11,7 +11,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// The login guard (v4.1.0, accounts). Claude Code sends its credential to
+// The login guard (v4.2.0, accounts). Claude Code sends its credential to
 // whatever ANTHROPIC_BASE_URL names. Another provider issues its own key
 // (ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY), which outranks the Claude
 // login; with no such key, the Claude login or token itself goes to that
@@ -140,7 +140,7 @@ func GuardError(r GuardResult, name string) error {
 // the machine in. A store that cannot be read counts as holding a login.
 func claudeCredentialReachable(configDir string, eff *manifest.Env) string {
 	if isAuthIsolated(configDir) {
-		if ownToken(eff) {
+		if suppliesToken(eff) {
 			return "token"
 		}
 		// A store that is still a link (to the shared one) is detached

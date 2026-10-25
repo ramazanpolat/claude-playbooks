@@ -12,4 +12,4 @@ ALTER PLAYBOOK
   ADD SKILL webapp-testing FROM 'github:anthropics/skills' SUBDIR 'skills/webapp-testing'
   ADD SKILL theme-factory FROM 'github:anthropics/skills' SUBDIR 'skills/theme-factory'
   ALLOW TOOL 'Bash(npm test *)'
-  SET MODEL 'claude-sonnet-5-5';
+  SET model = 'claude-sonnet-5-5';

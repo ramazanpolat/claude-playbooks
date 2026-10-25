@@ -1,8 +1,8 @@
 -- Two env sets, attached in order: a later set wins over an earlier one,
--- and the playbook's own variables win over both.
--- A route carries its provider's own key, by reference (see 04): without
--- one, Claude Code would send your Claude login there, and cpb refuses
--- the launch.
+-- and the playbook's own variables win over both. The router is not
+-- Anthropic, so the playbook keeps a login of its own (example 16), and the
+-- route carries its provider's own key, by reference (see 04): without one,
+-- Claude Code would send your Claude login there, and cpb refuses the launch.
 ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
 
 CREATE OR REPLACE ENV router
@@ -13,7 +13,7 @@ CREATE OR REPLACE ENV router
 CREATE OR REPLACE ENV thinking
   SET MAX_THINKING_TOKENS=8000;
 
-CREATE PLAYBOOK IF NOT EXISTS work SET launcher = '';
+CREATE PLAYBOOK IF NOT EXISTS work SET launcher = '', login = 'isolated';
 
 ALTER PLAYBOOK work
   USE ENV router thinking

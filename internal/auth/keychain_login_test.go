@@ -63,6 +63,13 @@ func TestKeychainLogin(t *testing.T) {
 			t.Errorf("%s: %s, want %s", c.name, got, c.want)
 		}
 	}
+	oldOS := hostOS
+	defer func() { hostOS = oldOS }()
+	hostOS = "linux"
+	if got := keychainLogin("/tmp/çağ", false, false); got != KeychainAbsent {
+		t.Errorf("an underivable name off macOS: %s, want absent (no Keychain)", got)
+	}
+	hostOS = "darwin"
 	if got := keychainLogin("/tmp/çağ", false, false); got != KeychainUnknown {
 		t.Errorf("an underivable name: %s, want unknown", got)
 	}

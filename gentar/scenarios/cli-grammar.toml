@@ -410,7 +410,7 @@ contains = "sessions-tty-ok"
 
 [[verify.commands]]
 # SHOW PLAYBOOK --json has model_picker, play, apply, then the account
-# fields (v4.1.0), and DESCRIBE PLAYBOOKS lists the columns in that order.
+# fields (v4.2.0), and DESCRIBE PLAYBOOKS lists the columns in that order.
 command = '''
 cpb CREATE PLAYBOOK ppi SET launcher = '' >/dev/null || exit 1
 cpb SHOW PLAYBOOK ppi --json | tr -d ' \n' | grep -qF '"model_picker":null,"play":null,"apply":null,"auth_mode":"' || { echo show-tail-wrong; exit 1; }

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,9 +110,9 @@ func tokenRef(menv *manifest.Env) bool {
 	return menv != nil && strings.TrimSpace(menv.Refs[OAuthTokenEnv]) != ""
 }
 
-// ownToken reports whether the block supplies this install's own token, by
-// value or by reference: another account as far as the launch is concerned.
-func ownToken(menv *manifest.Env) bool {
+// suppliesToken reports whether the block supplies this install's own token,
+// by value or by reference: another account as far as the launch is concerned.
+func suppliesToken(menv *manifest.Env) bool {
 	return manifestToken(menv) != "" || tokenRef(menv)
 }
 
@@ -244,24 +245,36 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 
 	if isAuthIsolated(configDir) {
 		// The machine-global token and the plan descriptors describe the
-		// global account and never apply here. A token the MANIFEST sets is
-		// this install's own choice, not the global one, and is honoured:
-		// injected, with the playbook's own login kept out of the run (the
-		// adoption hazard is the same as on the non-isolated token path):
-		// refused on macOS, set aside elsewhere (own_login.go).
-		if err := OwnLoginRefusal(configDir, menv, ""); err != nil {
-			return refuse(err)
+		// global account and never apply here, DEFAULTS included. A token
+		// the playbook supplies itself is honoured: injected, with the
+		// playbook's own login kept out of the run (the adoption hazard of
+		// the non-isolated token path): refused on macOS, before anything
+		// is changed, and set aside elsewhere (own_login.go).
+		own, ownRef, oerr := ownToken(configDir, layers)
+		if oerr != nil {
+			return refuse(oerr)
+		}
+		if own != "" || ownRef {
+			if err := ownLoginRefusal(configDir, ""); err != nil {
+				return refuse(err)
+			}
 		}
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
 		// A login an earlier token run set aside comes back first, unless
 		// that run is still live: a killed run's is recovered here.
 		restoreErr := restoreOwnLogin(configDir)
 		syncErr := firstErr(SyncCredentials(configDir), restoreErr)
-		if ownToken(menv) {
+		if own != "" || ownRef {
+			// On macOS a login that arrived since the check above (a /login
+			// in a session of this playbook) is refused too, never stripped.
+			if err := ownLoginRefusal(configDir, ""); err != nil {
+				return refuse(err)
+			}
 			if qErr := setAsideForTokenRun(configDir); syncErr == nil {
 				syncErr = qErr
 			}
-			if own := manifestToken(menv); own != "" {
+			// By reference, the secret helper sets it when it execs claude.
+			if own != "" {
 				env = append(env, OAuthTokenEnv+"="+own)
 			}
 		} else if absent, aErr := storeGrantAbsent(filepath.Join(configDir, CredentialsFileName)); aErr != nil {
@@ -290,8 +303,12 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// still leaves the config dir without the stale grant that would
 		// hijack the token. Its error is reported only if metadata sync had
 		// none of its own -- both are advisory, and the sync warning is the
-		// more actionable of the two.
-		qErr := QuarantineStoredOAuth(configDir)
+		// more actionable of the two. A grant the quarantine would strip is
+		// kept first, or the strip waits: see keepStoreGrant.
+		qErr := keepStoreGrant(configDir)
+		if qErr == nil {
+			qErr = QuarantineStoredOAuth(configDir)
+		}
 		syncErr = SyncAccountMetadata(configDir)
 		if syncErr == nil {
 			syncErr = qErr
@@ -317,7 +334,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	}
 	if active {
 		switch {
-		case ownToken(menv):
+		case suppliesToken(menv):
 			// An OWN token (manifest or profile, a value or a reference) is another account as far
 			// as this launch is concerned: the plan descriptors read from
 			// the global store describe the wrong account, and an inherited
@@ -373,9 +390,33 @@ func bindOwnEnv(env []string, configDir string) []string {
 // errors.Is(err, envset.ErrProfile) when a profile cannot be resolved,
 // the same condition on which a launch is refused. A manifest that cannot
 // be read is not an error here: the launch treats it as declaring nothing.
+//
+// An isolated playbook's token comes only from what it supplies itself
+// (ownToken): a token that only DEFAULTS sets, by value or by reference, is
+// left out, as the launch leaves it out. So the secret helper never sets the
+// machine layer's token there, and the login guard does not count it.
 func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, error) {
 	menv, _, perr := effectiveBlock(configDir, layers)
-	return menv, perr
+	if perr != nil || menv == nil || !isAuthIsolated(configDir) {
+		return menv, perr
+	}
+	_, inSet := menv.Set[OAuthTokenEnv]
+	if !inSet && !tokenRef(menv) {
+		return menv, nil
+	}
+	own, ownRef, err := ownToken(configDir, layers)
+	if err != nil {
+		return nil, err
+	}
+	if inSet && own == "" {
+		menv.Set = maps.Clone(menv.Set)
+		delete(menv.Set, OAuthTokenEnv)
+	}
+	if !ownRef {
+		menv.Refs = maps.Clone(menv.Refs)
+		delete(menv.Refs, OAuthTokenEnv)
+	}
+	return menv, nil
 }
 
 // effectiveBlock builds EffectiveBlock and also returns the manifest read

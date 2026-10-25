@@ -213,7 +213,7 @@ func (p *parser) ifUnsetProperties(c *Clause) *Error {
 	for _, v := range c.Settings {
 		if v.Key == "trusted_endpoint" {
 			// Which gateway may receive the Claude login is said outright:
-			// SET IF UNSET would replace a trust it cannot read (v4.1.0).
+			// SET IF UNSET would replace a trust it cannot read (v4.2.0).
 			return errAt(c.Pos, "SET IF UNSET does not take trusted_endpoint: which gateway may receive your Claude login is set outright, SET trusted_endpoint = '<host>'")
 		}
 		if def, refused := ifUnsetRefused[v.Key]; refused {
@@ -569,7 +569,11 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 		if !vt.Quoted || vt.Comma {
 			v = strings.TrimSuffix(v, ",")
 		}
-		v = unquoteArg(v)
+		if !vt.Quoted {
+			// Quotes a shell left inside one word; a value quoted in a
+			// file keeps the quotes it holds ('"/My Tools/sl.sh"').
+			v = unquoteArg(v)
+		}
 		// A one-word value reads the same quoted or not, in a file and on the
 		// command line; a value with a space or a comma is quoted (SHOW
 		// CREATE writes every string quoted).
@@ -726,7 +730,8 @@ var sandboxKeyWord = regexp.MustCompile(`^sandbox\.[a-z_]{1,24}$`)
 
 // unquoteArg removes one pair of quotes a command-line word kept: a shell
 // passes global_instructions='inherited' through as one word when it is quoted whole
-// ("global_instructions='inherited'"). Property values never hold a quote of their own.
+// ("global_instructions='inherited'"). Only for unquoted words: a value
+// quoted in a file may hold quotes of its own (a status line command).
 func unquoteArg(v string) string {
 	if len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
 		return v[1 : len(v)-1]

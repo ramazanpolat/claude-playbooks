@@ -140,6 +140,13 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	} else {
 		r.IsolatedLogin = isAuthIsolated(configDir)
 		r.Mode, r.ModeError, r.TokenBlocked, _ = launchMode(configDir)
+		if r.Mode == ModePlaybookToken && r.IsolatedLogin {
+			// Honoured, unless the launch is refused over a login of the
+			// playbook's own (macOS): auth status says so, as the launch will.
+			if err := ownLoginRefusal(configDir, ""); err != nil {
+				r.Mode, r.ModeError = ModeError, err.Error()
+			}
+		}
 	}
 	if f := OAuthTokenFile(); f != "" {
 		if data, err := os.ReadFile(f); err == nil && len(trimSpace(data)) > 0 {

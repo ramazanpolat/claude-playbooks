@@ -13,15 +13,17 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
+	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// A token over a playbook's own login (v4.1.0, accounts). An isolated
+// A token over a playbook's own login (v4.2.0, accounts). An isolated
 // playbook can hold a /login of its own and still be launched on a token
 // (its env set's, or --env-set's). The stored login must not stay readable
 // during that run: on an error Claude Code swaps a stored login in over the
-// token, and the session breaks. Before v4.1.0 cpb deleted the grant, and the
-// playbook needed /login again.
+// token, and the session breaks. v4.0.0 refuses such a launch everywhere;
+// earlier releases deleted the grant, and the playbook needed /login again.
 //
 // On Linux the login is a file: the grant is moved aside for the run
 // (.credentials.json.cpb-aside) and put back when the last token run of the
@@ -56,10 +58,21 @@ func (e *ownLoginError) Error() string        { return e.msg }
 func (e *ownLoginError) Is(target error) bool { return target == ErrOwnLogin }
 
 // OwnLoginRefusal refuses, on macOS, a launch that would carry a token over
-// an isolated playbook's own login. nil everywhere else. It reads presence
-// only and changes nothing. name is the playbook's name ("" when unknown).
+// an isolated playbook's own login. nil everywhere else. eff is the launch's
+// effective block (EffectiveBlock: a DEFAULTS token is not in it). It reads
+// presence only and changes nothing. name is the playbook's name ("" when
+// unknown).
 func OwnLoginRefusal(configDir string, eff *manifest.Env, name string) error {
-	if hostOS != "darwin" || !isAuthIsolated(configDir) || !ownToken(eff) {
+	if !isAuthIsolated(configDir) || !suppliesToken(eff) {
+		return nil
+	}
+	return ownLoginRefusal(configDir, name)
+}
+
+// ownLoginRefusal is OwnLoginRefusal for a launch already known to carry a
+// token of the playbook's own.
+func ownLoginRefusal(configDir, name string) error {
+	if hostOS != "darwin" {
 		return nil
 	}
 	where := ownLoginWhere(configDir)
@@ -99,6 +112,82 @@ func ownLoginWhere(configDir string) string {
 		return "possibly, in a Keychain that cannot be read"
 	}
 	return ""
+}
+
+// ownToken is the token an isolated playbook supplies itself: the one its
+// own block, the env sets it uses, or a launch flag sets. DEFAULTS never
+// counts: it is the machine's layer, and an isolated login has no machine
+// token. The value is "" when none is set, or it is set empty or blocked;
+// ref reports a token supplied by reference instead, which the secret
+// helper sets at exec.
+func ownToken(configDir string, layers []*manifest.Env) (tok string, ref bool, err error) {
+	dir := envset.Dir(config.ResolvePlaybooksDir())
+	var block *manifest.Env
+	if m, _ := manifest.Nearest(configDir); m != nil {
+		block = m.Env
+	}
+	own, err := envset.Expand(dir, block)
+	if err != nil {
+		return "", false, err
+	}
+	flat := []*manifest.Env{own}
+	for _, layer := range layers {
+		expanded, err := envset.Expand(dir, layer)
+		if err != nil {
+			return "", false, err
+		}
+		flat = append(flat, expanded)
+	}
+	menv := manifest.MergeEnv(flat...)
+	if menv.Blocks(OAuthTokenEnv) {
+		return "", false, nil
+	}
+	return manifestToken(menv), tokenRef(menv), nil
+}
+
+// keepStoreGrant runs before the token path's quarantine strips a shared
+// playbook's stored grant. A store that is a regular file holding a grant is
+// that grant's only copy unless it is the machine's own account: then a
+// newer copy goes over the machine store first, as the credential sync does,
+// and the strip loses nothing. Any other login, or one that cannot be
+// confirmed as the machine's, or one with no machine grant to fall back on,
+// is copied aside first (the quarantine then strips only the grant, and the
+// store's other logins stay). A link, an unreadable store and the machine's
+// own store are left to the quarantine, which keeps them.
+func keepStoreGrant(configDir string) error {
+	if isGlobalConfigDir(configDir) {
+		return nil
+	}
+	store := filepath.Join(configDir, CredentialsFileName)
+	info, err := os.Lstat(store)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || isGlobalCredentialsFile(store) {
+		return nil
+	}
+	if usable, err := credentialsFileUsable(store); err != nil || !usable || !storeHasOAuthGrant(store) {
+		return nil
+	}
+	global, err := globalClaudeDir()
+	if err != nil {
+		return err
+	}
+	globalStore := filepath.Join(global, CredentialsFileName)
+	globalInfo, err := os.Stat(globalStore)
+	// The machine store is the recovery copy only when it holds a grant of
+	// its own: one holding nothing but MCP logins would leave the stripped
+	// grant nowhere.
+	globalAbsent, gErr := storeGrantAbsent(globalStore)
+	switch {
+	case err == nil && gErr == nil && !globalAbsent && sameAccount(configDir):
+		if info.ModTime().After(globalInfo.ModTime()) {
+			if err := copyFile(store, globalStore, 0600); err != nil {
+				return fmt.Errorf("failed to copy newer credentials to global: %w", err)
+			}
+		}
+		return nil
+	case err != nil && !os.IsNotExist(err):
+		return err
+	}
+	return setAsideOwnLogin(configDir, "launched on the token", true)
 }
 
 // tokenRun is one token run this process holds: its shared run lock, and

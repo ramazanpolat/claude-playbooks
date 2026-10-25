@@ -17,6 +17,8 @@ warning. `CREATE PLAYBOOK IF NOT EXISTS` leaves a playbook that exists as it
 is. `SHOW CREATE` writes the launcher, login, global instructions and sandbox on the
 `CREATE`, so one statement brings a playbook back to them. Credential-looking literals are written
 as comments and make it exit non-zero until you store them by reference
-(`--skip-secrets` accepts the output without them). `APPLY` validates every
+(`--skip-secrets` accepts the output without them; such an env set is written
+as `CREATE ENV IF NOT EXISTS` plus `ALTER ENV`, so applying the file keeps the
+stored value). `APPLY` validates every
 statement before writing anything, runs them in order, and stops at the first
 failure; running the fixed file again finishes the job.

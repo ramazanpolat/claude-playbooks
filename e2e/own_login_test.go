@@ -1,3 +1,5 @@
+//go:build !windows
+
 package e2e
 
 import (
@@ -8,7 +10,7 @@ import (
 	"testing"
 )
 
-// A token over an isolated playbook's own login (v4.1.0): on Linux the login
+// A token over an isolated playbook's own login (v4.2.0): on Linux the login
 // is set aside for the token run and comes back after it; on macOS, where the
 // login lives in the Keychain, the launch is refused before anything changes.
 func TestTokenOverOwnLogin(t *testing.T) {
@@ -29,6 +31,13 @@ func TestTokenOverOwnLogin(t *testing.T) {
 		}
 		if _, present := storeKeys(t, creds)["claudeAiOauth"]; !present {
 			t.Fatal("the refused launch touched the playbook's own login")
+		}
+		// cpb start refuses the same launch of the directory.
+		if out := launchFails(t, root, launch{args: []string{"start", dir}}); !strings.Contains(out, "holds a login of its own") {
+			t.Fatalf("start: refusal not explained:\n%s", out)
+		}
+		if _, present := storeKeys(t, creds)["claudeAiOauth"]; !present {
+			t.Fatal("the refused start touched the playbook's own login")
 		}
 	} else {
 		during := filepath.Join(t.TempDir(), "store-during")

@@ -20,7 +20,7 @@ func trustedOf(t *testing.T, name string) string {
 	return m.TrustedEndpoint
 }
 
-// trusted_endpoint (v4.1.0): the playbook's own choice of the one gateway
+// trusted_endpoint (v4.2.0): the playbook's own choice of the one gateway
 // the login guard lets its Claude login reach. SET, RESET, CREATE, SHOW,
 // SHOW CREATE and its convergence.
 func TestTrustedEndpointProperty(t *testing.T) {

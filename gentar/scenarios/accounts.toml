@@ -1,4 +1,4 @@
-# claude-playbooks own-arena suite: accounts (v4.1.0).
+# claude-playbooks own-arena suite: accounts (v4.2.0).
 #
 # An account is an env set holding CLAUDE_CODE_OAUTH_TOKEN by reference.
 # Attached, it is the playbook's account; --env-set picks another for one

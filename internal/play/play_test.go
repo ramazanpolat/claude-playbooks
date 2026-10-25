@@ -316,6 +316,19 @@ func TestCheckTypedOnlyForEndpoint(t *testing.T) {
 	if strings.Join(confirms, " ") != "tls_or_proxy=mitm.example tls_or_proxy=TLS endpoint_change=bedrock" {
 		t.Fatalf("proxy, TLS, bedrock: %v", confirms)
 	}
+	// Foundry, by its switch or its base URL, is typed like Bedrock and Vertex.
+	for recipe, want := range map[string]string{
+		"ALTER PLAYBOOK SET VAR CLAUDE_CODE_USE_FOUNDRY=1;\n":                                         "foundry",
+		"ALTER PLAYBOOK SET VAR ANTHROPIC_FOUNDRY_BASE_URL=https://foundry.example.test/anthropic;\n": "foundry.example.test",
+	} {
+		r := Check([]byte(recipe))
+		if len(r.Risks) != 1 || r.Risks[0].Code != RiskEndpointChange || r.Risks[0].Confirm != want || r.Endpoint != want {
+			t.Fatalf("%s: %+v, endpoint %q", recipe, r.Risks, r.Endpoint)
+		}
+	}
+	if r := Check([]byte("ALTER PLAYBOOK SET VAR CLAUDE_CODE_USE_FOUNDRY=0;\n")); len(r.Risks) != 0 {
+		t.Fatalf("Foundry switched off: %+v", r.Risks)
+	}
 }
 
 func TestWideAllow(t *testing.T) {

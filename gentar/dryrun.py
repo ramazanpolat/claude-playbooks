@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 """Run an own-arena scenario locally, without a bench.
 
     gentar/dryrun.py gentar/scenarios/first-suite.toml

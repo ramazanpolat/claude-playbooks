@@ -24,17 +24,26 @@ func launchMode(configDir string) (mode Mode, modeErr string, blocked bool, bloc
 	if err != nil {
 		return ModeError, sanitizeProfileError(err), false, block
 	}
+	if isolated {
+		// DEFAULTS never supplies an isolated playbook's token. One it
+		// supplies itself is honoured: PrepareLaunchEnv injects it and keeps
+		// the playbook's own login out of the run.
+		own, ownRef, err := ownToken(configDir, nil)
+		switch {
+		case err != nil:
+			return ModeError, sanitizeProfileError(err), false, block
+		case own != "" || ownRef:
+			return ModePlaybookToken, "", false, block
+		}
+		return ModeIsolatedLogin, "", false, block
+	}
 	setsToken := false
 	if menv != nil {
 		_, setsToken = menv.Set[OAuthTokenEnv]
 	}
 	switch {
 	case setsToken && manifestToken(menv) != "", tokenRef(menv):
-		// Honoured on the isolated path too: PrepareLaunchEnv injects it and
-		// keeps the playbook's own login out of the run.
 		return ModePlaybookToken, "", false, block
-	case isolated:
-		return ModeIsolatedLogin, "", false, block
 	case menv.Blocks(OAuthTokenEnv):
 		return ModeSharedLogin, "", true, block
 	case setsToken:
@@ -59,7 +68,7 @@ const (
 )
 
 // Account is which Claude credential a launch of a playbook with no flags
-// uses, and where it comes from (v4.1.0): what EXPLAIN, SHOW --json and
+// uses, and where it comes from (v4.2.0): what EXPLAIN, SHOW --json and
 // SELECT report. States and names only, never a credential character; no
 // Keychain probe and no process is spawned, so it is cheap for every
 // playbook.

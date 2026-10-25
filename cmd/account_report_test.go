@@ -10,7 +10,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
-// The account fields (v4.1.0): SELECT, SHOW --json and EXPLAIN say which
+// The account fields (v4.2.0): SELECT, SHOW --json and EXPLAIN say which
 // Claude token a launch uses and where it comes from, never the token.
 func TestAccountReporting(t *testing.T) {
 	root := sandboxDefaultRoot(t)
