@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # release-gate: may this commit be released?
 #
 #   gentar/release-gate.sh <sha>
@@ -21,6 +23,13 @@
 # older than that (the bench image, agent CLI or provider may have moved
 # since). Needs `gh` with GH_TOKEN (actions: read) and GITHUB_REPOSITORY.
 #
+# evidence = "status" (a PUBLIC repository whose phase 2 runs in a private
+# arena mirror, [arena] bench = "mirror"): the proof is instead a SUCCESS
+# commit status `arena/phase2` on exactly that commit -- the latest one
+# for that context, which the mirror or gentar/mirror.sh posted, linking a
+# run of the mirror [arena] mirror names. Its age counts from when it was
+# posted. Needs GH_TOKEN with statuses: read.
+#
 # Exit: 0 releasable · 1 not releasable (reasons printed) · 2 usage.
 
 set -euo pipefail
@@ -40,6 +49,51 @@ JOB="arena / phase2"
 cfg=$(python3 "$HERE/plan.py" gate-config) || exit 2
 GATE=$(printf '%s\n' "$cfg" | sed -n 's/^release_gate=//p')
 MAXAGE=$(printf '%s\n' "$cfg" | sed -n 's/^max_age_days=//p')
+EVIDENCE=$(printf '%s\n' "$cfg" | sed -n 's/^evidence=//p')
+MIRROR=$(python3 "$HERE/plan.py" arena-config | sed -n 's/^mirror=//p') || exit 2
+
+if [ "${EVIDENCE:-job}" = status ]; then
+  CONTEXT=arena/phase2
+  unproven() {             # a disabled gate reports, and never refuses
+    if [ "$GATE" = false ]; then
+      echo "release-gate: $1 — NOT refusing ([phase2] release_gate = false)"; exit 0
+    fi
+    echo "release-gate: refusing $SHA — $1" >&2
+    echo "run phase 2 on it first, in the arena mirror: gentar/mirror.sh dispatch $SHA" >&2
+    exit 1
+  }
+  line=$(gh api "repos/$REPO/commits/$SHA/status" \
+    --jq ".statuses[] | select(.context == \"$CONTEXT\") | \"\(.state)\t\((now - (.updated_at | fromdateiso8601)) | floor)\t\(.target_url // \"-\")\"") \
+    || unproven "could not read the commit statuses of $SHA"
+  [ -n "$line" ] || unproven "no $CONTEXT status on this commit"
+  IFS=$'\t' read -r state secs url <<EOF
+$line
+EOF
+  age=$(( ${secs:-0} / 86400 ))
+  # Only a status linking a run of THE mirror counts: another tool posting
+  # the same context name proves nothing, and with no mirror set nothing
+  # can be tied to a run (plan.py refuses that policy too). The link must be
+  # exactly a run of it, by number: no prefix that walks elsewhere with
+  # `..` (agy on #81). Owner and repository names are case-insensitive.
+  [ -n "$MIRROR" ] || unproven "[phase2] evidence = \"status\" needs [arena] mirror"
+  lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+  pre="https://github.com/$(lc "$MIRROR")/actions/runs/"
+  rid=$(lc "$url")
+  case "$rid" in "$pre"*) rid=${rid#"$pre"} ;; *) rid="" ;; esac
+  case "$rid" in
+    ''|*[!0-9]*) unproven "$CONTEXT links $url, not a run of the arena mirror $MIRROR" ;;
+  esac
+  case "$state" in
+    success)
+      if [ "${MAXAGE:-0}" -gt 0 ] && [ "${secs:-0}" -gt $(( MAXAGE * 86400 )) ]; then
+        unproven "$CONTEXT passed, but $age day(s) ago (max_age_days = $MAXAGE): $url"
+      fi
+      echo "release-gate: $SHA passed phase 2 — $CONTEXT success, $age day(s) ago: $url"
+      exit 0 ;;
+    pending) unproven "$CONTEXT is still pending: $url" ;;
+    *)       unproven "$CONTEXT is $state: $url" ;;
+  esac
+fi
 
 runs=$(gh api "repos/$REPO/actions/workflows/$WF/runs?head_sha=$SHA&per_page=100" \
   --jq '.workflow_runs[] | "\(.id)\t\(.status)\t\(.conclusion // "-")\t\(.event)\t\(.head_branch // "-")"') || {

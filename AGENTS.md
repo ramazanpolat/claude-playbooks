@@ -189,7 +189,10 @@ release:
       `package.json`'s major, and has nothing to compare with before a
       major's first release.
 - [ ] **A full arena regression (phase 2) is green on the exact commit to be
-      tagged.** release.yml's gate refuses a tag without one, and
+      tagged.** It runs in the private mirror
+      (`ramazanpolat/claude-playbooks-arena`): `gentar/mirror.sh dispatch
+      <sha>` waits for it and posts the commit status `arena/phase2`.
+      release.yml's gate refuses a tag without a success status, and
       `gentar/policy.toml` `[phase2] max_age_days = 2` refuses one older
       than two days. A re-run is allowed only for an infrastructure failure
       (the judge unreachable, a provider refusing the key); a real red means
@@ -200,15 +203,14 @@ release:
       **on the PR itself**, as a fix commit or a reply naming the finding.
       `gh pr view <n> --comments` prints the reviews and the replies to check.
 
-**Nightlies are drift monitors (report on red).** Every night
-`arena-nightly` runs phase 2 on main; a dispatch with `ref` runs another ref,
-a release tag included: since gentar v0.9.1 the kit's plan treats a dispatch
-on a tag ref as a dispatch, so it runs phase 2 on that release (a drift run).
-Before, it applied the tag-push rules and skipped it, and the run read as
-green (v3.25.0, 2026-09-30). `arena-nightly` fails when a dispatched run's
-`arena / phase2` job is skipped or absent, naming the ref and plan's reason,
-so a skip never reads as green. A red is fixed like any bug. They gate
-nothing.
+**Phase 2 runs in the private mirror, never here.** cpb is public, so no
+self-hosted runner is registered to it: a fork's own workflow could reach
+one (D5, 2026-10-08). The mirror pulls cpb and runs phase 2 on its own
+runner. It admits only commits reachable from main or a `v*` tag, plus any
+branch head when its variable `GENTAR_ALLOW_BRANCH_HEADS` is `true`. Every
+day it runs phase 2 on main's head unless that head is already green there,
+so drift on an unchanged main shows at the next dispatch or merge. A phase 2
+that skipped a suite is a failure, not green. A red is fixed like any bug.
 
 If any is missing, build it first; never tag without it.
 
@@ -227,12 +229,14 @@ the run, with the reason (`.github/scripts/release-refs.sh`). The order:
      equal the tag;
    - the install pins in `docs/guides/installation.md` (`refs/tags/vX.Y.Z`).
 4. **A green full arena phase 2 on that head.** Check the arena bench is
-   idle first, then dispatch `gentar-arena.yml` on the branch with no
-   scenario. The run's head sha must be the exact commit you will tag, which
-   is what the release gate checks. A new commit on the branch needs a new
-   pass, and a pass older than two days does not count.
-5. **Tag `vX.Y.Z` on that head.** The release gate also requires a green
-   `arena / phase2` on the tagged sha.
+   idle first, then run `gentar/mirror.sh dispatch <head sha>` with no
+   suites. A release-branch head is reachable from neither main nor a tag,
+   so the mirror admits it only with `GENTAR_ALLOW_BRANCH_HEADS = true`. The
+   sha must be the exact commit you will tag, which is what the release gate
+   checks. A new commit on the branch needs a new pass, and a pass older
+   than two days does not count.
+5. **Tag `vX.Y.Z` on that head.** The release gate also requires a success
+   `arena/phase2` status on the tagged sha.
 6. **The main bump PR, opened at tag time.** Once vX.Y.Z is tagged, CI's
    npx check fails every push to main until main's `package.json` says
    X.Y.Z: it compares against the newest release, wherever it was tagged. The
@@ -248,6 +252,7 @@ newest published release of the same major and says so on stderr
 the tag, since the shim never falls back across a major.
 
 A **release candidate**, `vX.Y.Z-rcN`, follows the same steps. It publishes
-as a GitHub pre-release, never as the Latest release. Its tag starts phase 2
-on its commit, so the release workflow's first run on it stops at the arena
-gate: re-run that run once phase 2 is green, and it publishes.
+as a GitHub pre-release, never as the Latest release. Its tag does not start
+phase 2. Dispatch phase 2 on its commit before the tag, or right after it,
+since a tagged commit is admitted. If the release workflow's first run stops
+at the arena gate, re-run it once `arena/phase2` is success, and it publishes.
