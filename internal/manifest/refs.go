@@ -11,7 +11,7 @@ import (
 // own launch logic must read, which a reference hides by design ("set, value
 // unknown" would break that logic silently). A future such key joins this
 // list rather than getting a special case. Refused at every layer: a
-// playbook's own block and every env set. Empty since v4.1.0:
+// playbook's own block and every env set. Empty since v4.2.0:
 // CLAUDE_CODE_OAUTH_TOKEN left it when the token decision learned to treat a
 // reference as "a token, supplied by the helper at exec" (accounts).
 var RefRefusedKeys = map[string]string{}

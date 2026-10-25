@@ -90,6 +90,7 @@ route sends its `CLAUDE.md` there with every request; the one cpb writes
 imports nothing ([example 15](../../examples/15-third-party-route/)).
 
 ```bash
+cpb CREATE PLAYBOOK router SET login = 'isolated'     # its own login: yours never reaches the proxy
 cpb ALTER PLAYBOOK router USE ENV glm                 # the whole list, in order
 cpb ALTER PLAYBOOK router ADD ENV team FIRST          # insert one: FIRST, LAST (default), BEFORE x, AFTER x
 cpb ALTER PLAYBOOK router DROP ENV team               # detach
@@ -162,7 +163,7 @@ be a secret passes: empty, an integer, or `true`/`false`, so
   value exists only in that one process. `CPB_SECRET_HELPER` in the environment
   overrides the stored setting. Without a helper, `SET … FROM` is refused, and
   so is launching a playbook whose layers hold a reference.
-  `CLAUDE_CODE_OAUTH_TOKEN` takes a reference too (since v4.1.0): an env set
+  `CLAUDE_CODE_OAUTH_TOKEN` takes a reference too (since v4.2.0): an env set
   holding it is an account (see [Authentication](authentication.md)).
   A sandboxed launch of a playbook with references is refused in this release.
 - **As plain text, knowingly:** add `AS PLAINTEXT` to the `SET` clause.
@@ -179,8 +180,8 @@ carries the token as the user name:
 DATABASE_URL  postgres://<redacted, 4 chars>:<redacted, 11 chars>@db.internal:5432/app
 ```
 
-A credential in a query parameter (`?password=`) is not covered. The grammar has
-no `--reveal`; the older `env … --reveal` still exists.
+A credential in a query parameter (`?password=`) is not covered. There is no
+`--reveal`: no command prints a credential.
 
 ## One launch only
 
@@ -241,7 +242,7 @@ sync and the manifest lookup treat it as they would the playbook's own.
 ## What stays yours
 
 Env blocks and env sets are **install-local**, like the launcher. `update` keeps
-your block and ignores one the source ships; `install` drops a source-shipped
+your block and ignores one the source ships; `CREATE PLAYBOOK … FROM` drops a source-shipped
 block with a note; nothing ships env sets and `update` never touches their
 directory. A shared playbook repository cannot redirect your API endpoint or
 strip your authentication by publishing a manifest. Manifests holding values

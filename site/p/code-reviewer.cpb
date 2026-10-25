@@ -10,4 +10,4 @@ ALTER PLAYBOOK
   ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'
   ALLOW TOOL 'Bash(gh pr view *)' 'Bash(git diff *)'
   DENY TOOL 'Edit' 'Write'
-  SET MODEL 'claude-sonnet-5-5';
+  SET model = 'claude-sonnet-5-5';

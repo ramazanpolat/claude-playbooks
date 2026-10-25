@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -25,9 +26,10 @@ type installOpts struct {
 	launcher   string
 	noLauncher bool
 	sandbox    bool
-	// isolatedLogin: isolated_login = true without a sandbox (CREATE
-	// PLAYBOOK … FROM … SET login = 'isolated').
-	isolatedLogin bool
+	// login is the statement's SET login: 'isolated', 'shared', or "" when
+	// the statement does not say. A stated login wins over the source's
+	// manifest; an unstated one keeps it.
+	login string
 	// globalInstructions: 'excluded' writes the claudeMdExcludes entry into the
 	// install's settings.json (kept across updates, which preserve it).
 	globalInstructions string
@@ -39,6 +41,9 @@ func doInstall(o installOpts, args []string) error {
 	}
 
 	source := args[0]
+	if err := refuseCredentialSource(source); err != nil {
+		return err
+	}
 
 	// Parse GitHub /tree/<ref>/<path> URLs into source + branch + subdir.
 	repoURL, parsedRef, parsedSubdir, parsed := parseGitTreeURLWithRef(source, o.branch)
@@ -105,24 +110,19 @@ func doInstall(o installOpts, args []string) error {
 	// registry even under --no-alias, and an imported manifest's alias
 	// registers without any flag.
 	// launcher = '<its own name>' is the default launcher, nothing to
-	// record, unless the source's manifest names another one to override.
-	if o.launcher == targetName && (mPre == nil || mPre.Launcher == "" || mPre.Launcher == targetName) {
+	// record. A source never chooses the launcher: the command a playbook
+	// answers to on this machine is the statement's, or the playbook's own
+	// name (the source's is dropped below, with a note).
+	if o.launcher == targetName {
 		o.launcher = ""
 	}
-	effectiveAlias := o.launcher
-	if effectiveAlias == "" && mPre != nil {
-		effectiveAlias = mPre.Launcher
-	}
-	// The launcher that will actually be written uses the effective alias,
-	// falling back to the target name — an unwritable name must fail before
-	// the source is copied into the registry, not as a post-copy warning.
-	// The installed manifest normalizes its name to targetName, so this
-	// resolved name is still the command to write after the copy.
-	launcherName, err := resolveLauncherName(o.noLauncher, effectiveAlias, targetName, "create the playbook")
+	// The launcher that will actually be written, checked before the source
+	// is copied into the registry, not as a post-copy warning.
+	launcherName, err := resolveLauncherName(o.noLauncher, o.launcher, targetName, "create the playbook")
 	if err != nil {
 		return err
 	}
-	if err := preflightCommandNames("", targetName, effectiveAlias); err != nil {
+	if err := preflightCommandNames("", targetName, o.launcher); err != nil {
 		return err
 	}
 
@@ -162,13 +162,42 @@ func doInstall(o installOpts, args []string) error {
 		mPre.Sandbox = nil
 		needsManifestWrite = true
 	}
+	// [play], [apply], [skills] and [mcp] are cpb's own bookkeeping of what
+	// was done to one install: a source's copy describes the author's
+	// install, and `cpb update` would follow its recipe instead of this
+	// one's. The skill files and MCP configuration the source ships stay.
+	for _, r := range []struct {
+		name  string
+		found bool
+	}{
+		{"[play]", mPre.Play != nil}, {"[apply]", mPre.Apply != nil},
+		{"[skills]", mPre.Skills != nil}, {"[mcp]", mPre.MCP != nil},
+	} {
+		if r.found {
+			fmt.Fprintf(os.Stderr, "Note: ignoring the %s record shipped in the source's %s; it records what was done to one install\n", r.name, manifest.FileName)
+			needsManifestWrite = true
+		}
+	}
+	mPre.Play, mPre.Apply, mPre.Skills, mPre.MCP = nil, nil, nil, nil
 	if o.sandbox {
 		mPre.IsolatedLogin = true
 		mPre.Sandbox = &manifest.Sandbox{Always: true}
 		needsManifestWrite = true
 	}
-	if o.isolatedLogin {
+	if mPre.Launcher != "" {
+		if mPre.Launcher != targetName && mPre.Launcher != o.launcher {
+			fmt.Fprintf(os.Stderr, "Note: ignoring launcher %q named by the source's %s; a source does not choose this machine's commands. Set one with: cpb ALTER PLAYBOOK %s SET launcher = '<name>'\n", mPre.Launcher, manifest.FileName, targetName)
+		}
+		mPre.Launcher = "" // the statement's launcher is recorded after activation
+		needsManifestWrite = true
+	}
+	switch {
+	case o.login == "isolated":
 		mPre.IsolatedLogin = true
+		needsManifestWrite = true
+	case o.login == "shared" && mPre.IsolatedLogin && !o.sandbox:
+		fmt.Fprintf(os.Stderr, "Note: the source's %s sets an isolated login; the statement's login = 'shared' wins\n", manifest.FileName)
+		mPre.IsolatedLogin = false
 		needsManifestWrite = true
 	}
 	sourceSubdir := subdir
@@ -204,6 +233,10 @@ func doInstall(o installOpts, args []string) error {
 	// state of its .claude.json stay out of the install (CHANGELOG.md,
 	// v3.22.1).
 	if err := stripSourceLogin(stage, source); err != nil {
+		os.RemoveAll(stage)
+		return err
+	}
+	if err := stripSourceRuntime(stage, source); err != nil {
 		os.RemoveAll(stage)
 		return err
 	}
@@ -276,7 +309,8 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 		}
 		args = append(args, source, tmp)
 
-		fmt.Fprintf(w, "Cloning %s", source)
+		shown := redactSourceURL(source)
+		fmt.Fprintf(w, "Cloning %s", shown)
 		if ref != "" {
 			fmt.Fprintf(w, " (branch %s)", ref)
 		}
@@ -287,10 +321,21 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 
 		gitCmd := exec.Command("git", args...)
 		// git narrates progress on stderr; both go to the caller's writer so a
-		// bulk run can hold them back until a playbook actually fails.
-		gitCmd.Stdout = w
-		gitCmd.Stderr = w
-		if err := gitCmd.Run(); err != nil {
+		// bulk run can hold them back until a playbook actually fails. A URL
+		// that carries a credential (an install recorded before cpb refused
+		// them, now updating) has git's output held and masked: git can echo
+		// the URL it was given.
+		var held strings.Builder
+		if shown != source {
+			gitCmd.Stdout, gitCmd.Stderr = &held, &held
+		} else {
+			gitCmd.Stdout, gitCmd.Stderr = w, w
+		}
+		err = gitCmd.Run()
+		if held.Len() > 0 {
+			io.WriteString(w, redactURLCredentials(held.String()))
+		}
+		if err != nil {
 			cleanup()
 			return "", func() {}, fmt.Errorf("git clone failed")
 		}
@@ -315,13 +360,15 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 	}
 	info, err := os.Stat(abs)
 	if os.IsNotExist(err) {
-		return "", func() {}, fmt.Errorf("%q not found", source)
+		return "", func() {}, fmt.Errorf("%q not found", redactSourceURL(source))
 	}
 	if err != nil {
-		return "", func() {}, err
+		// The error names the cleaned path, where a URL's "//" is gone
+		// and redaction no longer finds it: name the source instead.
+		return "", func() {}, fmt.Errorf("cannot read %q", redactSourceURL(source))
 	}
 	if !info.IsDir() {
-		return "", func() {}, fmt.Errorf("%q is not a directory", source)
+		return "", func() {}, fmt.Errorf("%q is not a directory", redactSourceURL(source))
 	}
 	work := abs
 	if subdir != "" {
@@ -345,7 +392,7 @@ func stageSource(w io.Writer, source string, isGit bool, ref, subdir string) (st
 	cleanup := func() { os.RemoveAll(tmp) }
 	if err := copyDir(work, tmp); err != nil {
 		cleanup()
-		return "", func() {}, fmt.Errorf("failed to stage %s: %w", source, err)
+		return "", func() {}, fmt.Errorf("failed to stage %s: %w", redactSourceURL(source), err)
 	}
 	return tmp, cleanup, nil
 }
@@ -512,16 +559,65 @@ func overlayDir(src, dst string) error {
 func stripSourceLogin(dir, source string) error {
 	creds, stateLink, keys, err := auth.StripSourceLogin(dir)
 	if err != nil {
-		return fmt.Errorf("cannot leave %s's login out of the install: %w", redactURLCredentials(source), err)
+		return fmt.Errorf("cannot leave %s's login out of the install: %w", redactSourceURL(source), err)
 	}
 	if creds {
-		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s: a playbook source never carries a login\n", redactURLCredentials(source), auth.CredentialsFileName)
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s: a playbook source never carries a login\n", redactSourceURL(source), auth.CredentialsFileName)
 	}
 	if stateLink {
-		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s, a link out of the source: a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName)
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's %s, a link out of the source: a playbook source never carries a login\n", redactSourceURL(source), auth.StateFileName)
 	}
 	if len(keys) > 0 {
-		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login\n", redactURLCredentials(source), auth.StateFileName, strings.Join(keys, ", "))
+		fmt.Fprintf(os.Stderr, "Warning: ignored %s's account state in %s (%s): a playbook source never carries a login\n", redactSourceURL(source), auth.StateFileName, strings.Join(keys, ", "))
+	}
+	return nil
+}
+
+// sourceRuntimeEntries are what a Claude Code config directory accumulates
+// by being used, and cpb's own record of what was applied to one install:
+// a source that is a used directory holds them. They are one machine's
+// history, never a playbook's content.
+var sourceRuntimeEntries = []string{
+	"projects", "sessions", "session-env", "history.jsonl", "todos",
+	"shell-snapshots", "statsig", "file-history", "ide", "debug",
+	"telemetry", "plans", "paste-cache", ".apply",
+}
+
+// sourceRuntimeArtifact reports whether a top-level entry of a source is
+// runtime state or a login's residue: the entries above, any file beside
+// the login stores (set-aside logins .credentials.json.cpb-own-* and
+// *.cpb-ignored-*, the run lock and pid files, .claude.json backups), and
+// any *.cpb-backup-* file. .credentials.json and .claude.json themselves
+// are handled by stripSourceLogin.
+func sourceRuntimeArtifact(name string) bool {
+	if slices.Contains(sourceRuntimeEntries, name) {
+		return true
+	}
+	if strings.HasPrefix(name, auth.CredentialsFileName+".") || strings.HasPrefix(name, auth.StateFileName+".") {
+		return true
+	}
+	return strings.Contains(name, ".cpb-backup-")
+}
+
+// stripSourceRuntime removes a staged source's runtime state and login
+// residue (sourceRuntimeArtifact) and names them on stderr, one line.
+func stripSourceRuntime(dir, source string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var dropped []string
+	for _, e := range entries {
+		if !sourceRuntimeArtifact(e.Name()) {
+			continue
+		}
+		if err := removeAny(filepath.Join(dir, e.Name())); err != nil {
+			return fmt.Errorf("cannot leave %s's %s out: %w", redactSourceURL(source), e.Name(), err)
+		}
+		dropped = append(dropped, e.Name())
+	}
+	if len(dropped) > 0 {
+		fmt.Fprintf(os.Stderr, "Note: left %s's %s out: session records and set-aside logins belong to the machine that made them, never to a playbook\n", redactSourceURL(source), strings.Join(dropped, ", "))
 	}
 	return nil
 }

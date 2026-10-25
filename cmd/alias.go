@@ -114,6 +114,9 @@ func doLauncher(o launcherOpts, args []string) error {
 		if owner != nil {
 			return fmt.Errorf("launcher name %q already addresses playbook %q", newAlias, owner.Name)
 		}
+		if err := checkLauncherKept(newAlias); err != nil {
+			return err
+		}
 		if !launcherOpsAllowed() {
 			fmt.Fprintf(os.Stderr, "Note: launchers are managed only for the default playbooks root; run manually with:\n  cpb --playbooks-dir %q run %q\n", config.ResolvePlaybooksDir(), newAlias)
 			return nil
@@ -138,6 +141,11 @@ func doLauncher(o launcherOpts, args []string) error {
 	}
 	if err := launcher.ValidateName(newAlias); err != nil {
 		return err
+	}
+	if newAlias != old {
+		if err := checkNewLauncher(newAlias); err != nil {
+			return err
+		}
 	}
 	if newAlias == old {
 		// Nothing to record — and for a linked playbook, rewriting the
