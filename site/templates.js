@@ -88,8 +88,8 @@
   }
   function flagChips(d) {
     var f = [];
-    if (d.sandbox) f.push('<span class="flag">SANDBOX</span>');
-    if (d.isolated || d.sandbox) f.push('<span class="flag">ISOLATED LOGIN</span>');
+    if (d.sandbox) f.push('<span class="flag">sandbox.always</span>');
+    if (d.isolated || d.sandbox) f.push('<span class="flag">login = \'isolated\'</span>');
     return f.join("");
   }
 

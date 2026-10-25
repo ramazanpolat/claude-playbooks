@@ -37,7 +37,7 @@ func SourceStateKeys() []string {
 // that leaves the source) is removed, never written through: it could
 // point at the pilot's own state. It reports what it removed, by name only.
 func StripSourceLogin(dir string) (credentials, stateLink bool, keys []string, err error) {
-	creds := filepath.Join(dir, CredentialsFileName)
+	creds := StorePath(dir)
 	if _, lerr := os.Lstat(creds); lerr == nil {
 		if err := os.Remove(creds); err != nil {
 			return false, false, nil, err
@@ -68,7 +68,7 @@ func SetAsideSourceLogin(dir string, now time.Time) (credsTo string, keys []stri
 		return "", nil, "", nil
 	}
 	stamp := now.Format("2006-01-02-15_04_05")
-	creds := filepath.Join(dir, CredentialsFileName)
+	creds := StorePath(dir)
 	if info, lerr := os.Lstat(creds); lerr == nil && info.Mode().IsRegular() {
 		credsTo = creds + ".cpb-ignored-" + stamp
 		if err := os.Rename(creds, credsTo); err != nil {

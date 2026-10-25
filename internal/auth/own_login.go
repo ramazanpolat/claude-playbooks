@@ -94,7 +94,7 @@ func ownLoginRefusal(configDir, name string) error {
 // its store file, the Keychain, or "" for none. A store or Keychain that
 // cannot be read counts as holding one.
 func ownLoginWhere(configDir string) string {
-	store := filepath.Join(configDir, CredentialsFileName)
+	store := StorePath(configDir)
 	if info, err := os.Lstat(store); err == nil && info.Mode().IsRegular() {
 		if absent, err := storeGrantAbsent(store); err != nil || !absent {
 			return "in its " + CredentialsFileName
@@ -158,7 +158,7 @@ func keepStoreGrant(configDir string) error {
 	if isGlobalConfigDir(configDir) {
 		return nil
 	}
-	store := filepath.Join(configDir, CredentialsFileName)
+	store := StorePath(configDir)
 	info, err := os.Lstat(store)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || isGlobalCredentialsFile(store) {
 		return nil
@@ -170,7 +170,7 @@ func keepStoreGrant(configDir string) error {
 	if err != nil {
 		return err
 	}
-	globalStore := filepath.Join(global, CredentialsFileName)
+	globalStore := StorePath(global)
 	globalInfo, err := os.Stat(globalStore)
 	// The machine store is the recovery copy only when it holds a grant of
 	// its own: one holding nothing but MCP logins would leave the stripped
@@ -210,7 +210,7 @@ var (
 // both are kept, the earlier under a dated name. If the grant cannot be
 // moved aside it stays in place: losing it would cost a /login.
 func setAsideForTokenRun(configDir string) error {
-	store := filepath.Join(configDir, CredentialsFileName)
+	store := StorePath(configDir)
 	unlock, err := lockFile(store+asideLockSuffix, syscall.LOCK_EX)
 	if err != nil {
 		return fmt.Errorf("cannot set the login in %s aside for the token run: %w", configDir, err)
@@ -256,7 +256,7 @@ func EndLaunch(configDir string) {
 	tokenRunsMu.Lock()
 	if run, ok := tokenRuns[configDir]; ok {
 		if run.pid != 0 {
-			store := filepath.Join(configDir, CredentialsFileName)
+			store := StorePath(configDir)
 			if unlock, err := lockFile(store+asideLockSuffix, syscall.LOCK_EX); err == nil {
 				editPids(store+runPidsSuffix, func(pids []int) []int {
 					out := pids[:0]
@@ -286,7 +286,7 @@ func EndLaunch(configDir string) {
 // name. A store that is a link (the playbook shares the machine's login now)
 // is never written through.
 func restoreOwnLogin(configDir string) error {
-	store := filepath.Join(configDir, CredentialsFileName)
+	store := StorePath(configDir)
 	aside := store + asideSuffix
 	if _, err := os.Lstat(aside); os.IsNotExist(err) {
 		return nil
@@ -383,7 +383,7 @@ func archiveAside(aside string) (string, error) {
 
 // loginAside reports whether configDir has a grant set aside by a token run.
 func loginAside(configDir string) bool {
-	_, err := os.Lstat(filepath.Join(configDir, CredentialsFileName) + asideSuffix)
+	_, err := os.Lstat(StorePath(configDir) + asideSuffix)
 	return err == nil
 }
 
@@ -394,7 +394,7 @@ func holdTokenRun(configDir string) error {
 	if _, ok := tokenRuns[configDir]; ok {
 		return nil
 	}
-	f, err := os.OpenFile(filepath.Join(configDir, CredentialsFileName)+runLockSuffix, os.O_CREATE|os.O_RDWR, 0600)
+	f, err := os.OpenFile(StorePath(configDir)+runLockSuffix, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
@@ -414,7 +414,7 @@ func SessionStarted(pid int) {
 	tokenRunsMu.Lock()
 	defer tokenRunsMu.Unlock()
 	for configDir, run := range tokenRuns {
-		store := filepath.Join(configDir, CredentialsFileName)
+		store := StorePath(configDir)
 		unlock, err := lockFile(store+asideLockSuffix, syscall.LOCK_EX)
 		if err != nil {
 			Notice(fmt.Sprintf("cannot record the session for the token run in %s: %v", configDir, err))

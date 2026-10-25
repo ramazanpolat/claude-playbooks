@@ -155,7 +155,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	}
 
 	// Store shape and grant expiry.
-	store := filepath.Join(configDir, CredentialsFileName)
+	store := StorePath(configDir)
 	if info, err := os.Lstat(store); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			r.Store = StoreSymlink

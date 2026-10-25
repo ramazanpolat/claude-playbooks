@@ -50,26 +50,26 @@ check() {
 
 echo "== hero: the four-line quick start =="
 out=$(cpb CREATE PLAYBOOK work); check "hero: CREATE PLAYBOOK work" 'Created playbook "work"'
-out=$(cpb CREATE PLAYBOOK side ISOLATED LOGIN); check "hero: ISOLATED LOGIN" 'Login isolated'
-out=$(cpb CREATE PLAYBOOK sre SANDBOX); check "hero: SANDBOX" 'Always sandboxed'
-out=$(cpb ALTER PLAYBOOK work SET SANDBOX secrets=env); check "sandbox: SET SANDBOX key" "sandbox   secrets=env"
-out=$(cpb SHOW PLAYBOOK work); check "sandbox: SHOW lists the key" "Sandbox:    no (secrets=env)"
-out=$(cpb ALTER PLAYBOOK work SET SANDBOX host=me@buildbox); check "sandbox: SET SANDBOX host" "sandbox   host=me@buildbox"
-out=$(cpb ALTER PLAYBOOK work UNSET SANDBOX host); check "sandbox: UNSET SANDBOX host" "Altered PLAYBOOK work"
+out=$(cpb CREATE PLAYBOOK side SET login = 'isolated'); check "hero: login = 'isolated'" 'Login isolated'
+out=$(cpb CREATE PLAYBOOK sre SET sandbox.always = true, login = 'isolated'); check "hero: sandbox.always" 'Always sandboxed'
+out=$(cpb ALTER PLAYBOOK work SET sandbox.secrets = 'env'); check "sandbox: SET sandbox.<key>" "sandbox   secrets=env"
+out=$(cpb SHOW PLAYBOOK work); check "sandbox: SHOW lists the key" "Sandbox:              no (secrets=env)"
+out=$(cpb ALTER PLAYBOOK work SET sandbox.host = 'me@buildbox'); check "sandbox: SET sandbox.host" "sandbox   host=me@buildbox"
+out=$(cpb ALTER PLAYBOOK work RESET sandbox.host); check "sandbox: RESET sandbox.host" "Altered PLAYBOOK work"
 
 echo "== try it: scratch playbook =="
 out=$(cpb CREATE PLAYBOOK scratch); check "scratch: created" 'Created playbook "scratch"'
-out=$(cpb SHOW PLAYBOOK scratch); check "scratch: SHOW PLAYBOOK" 'Sandbox:    no'
+out=$(cpb SHOW PLAYBOOK scratch); check "scratch: SHOW PLAYBOOK" 'Sandbox:              no'
 out=$(cpb DROP PLAYBOOK scratch --yes); check "scratch: dropped" 'Deleted playbook "scratch"'
 
 echo "== routing: env set, isolated login, model picker =="
 out=$(cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1); check "routing: CREATE ENV" "Created ENV router"
-out=$(cpb CREATE PLAYBOOK glm ISOLATED LOGIN); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
+out=$(cpb CREATE PLAYBOOK glm SET login = 'isolated'); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
 out=$(cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3); check "routing: USE ENV" "env sets  router"
 out=$(cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY); check "routing: BLOCK VAR" "blocked   ANTHROPIC_API_KEY"
 out=$(cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'); check "routing: ADD MODEL" "model     glm-5.3"
 out=$(cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'); check "routing: ADD MODEL flash" "model     glm-5.3-flash"
-out=$(cpb ALTER PLAYBOOK glm SET MODEL PICKER ONLY); check "routing: SET MODEL PICKER ONLY" "picker    only"
+out=$(cpb ALTER PLAYBOOK glm SET model_picker.mode = 'only'); check "routing: SET model_picker.mode" "picker    only"
 out=$(cpb EXPLAIN PLAYBOOK glm); check "routing: EXPLAIN shows the picker" 'Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)'
 
 echo "== recipes: APPLY --dry-run, APPLY, SHOW CREATE =="
@@ -80,20 +80,20 @@ ALTER PLAYBOOK
   ADD MCP SERVER files COMMAND 'npx' ARGS '-y' '@modelcontextprotocol/server-filesystem' '/srv/notes'
   ALLOW TOOL 'Bash(gh pr *)'  DENY TOOL 'Bash(git push *)'
   ADD SKILL review FROM '$home/skills-src/review'
-  SET MODEL 'claude-opus-5-5';
+  SET model = 'claude-opus-5-5';
 EOF
 out=$(cpb APPLY reviewer.cpb TO reviewer --dry-run); check "recipe: dry-run" "Would apply reviewer.cpb: 1 created, 1 changed"
 out=$(cpb APPLY reviewer.cpb TO reviewer); check "recipe: apply" "Applied reviewer.cpb: 1 created, 1 changed"
 out=$(cpb SHOW CREATE PLAYBOOK reviewer --skip-secrets); check "recipe: SHOW CREATE has the MCP server" "ADD MCP SERVER files"
 
 echo "== mcp + secret ref =="
-out=$(cpb CREATE PLAYBOOK researcher NO LAUNCHER); check "mcp: created" 'Created playbook "researcher"'
+out=$(cpb CREATE PLAYBOOK researcher SET launcher = ''); check "mcp: created" 'Created playbook "researcher"'
 out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER files COMMAND npx ARGS -y @modelcontextprotocol/server-filesystem /srv/notes); check "mcp: add files server" "MCP server files"
 out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL https://mcp.sentry.dev/mcp HEADER Authorization FROM keychain:sentry-auth); check "mcp: add sentry server" "MCP server sentry"
 out=$(cpb EXPLAIN PLAYBOOK researcher); check "mcp: EXPLAIN shows the placeholder var" "CPB_MCP_SENTRY_H_AUTHORIZATION_"
 
 echo "== sessions + SELECT =="
-out=$(cpb "SELECT name, envs, isolated_login FROM PLAYBOOKS"); check "select: built-in table" "$(printf 'glm\trouter\ttrue')"
+out=$(cpb "SELECT name, envs, login FROM PLAYBOOKS"); check "select: built-in table" "$(printf 'glm\trouter\tisolated')"
 if [ -x "${CPB_CLICKHOUSE:-/nonexistent}" ] || command -v clickhouse >/dev/null 2>&1 || command -v ch >/dev/null 2>&1; then
   out=$(cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"); check "select: WHERE via clickhouse" "ANTHROPIC_BASE_URL"
 else
