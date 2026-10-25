@@ -2779,6 +2779,131 @@ a screen that shows sessions is up. Everything else is re-read on `r`.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
+### `cpb agent [--run [--yes]] [--json] [--model <model>] "<request>"`
+
+`cpb agent` answers a request in plain words with the cpb command or
+commands that do it. A model proposes the plan; cpb checks every step,
+decides which ones always ask first, shows it, and runs it only under
+`--run` after a yes. The guide is [Ask in plain words](docs/guides/assistant.md).
+
+```
+$ cpb agent "list the env profiles"
+Your env sets.
+
+  cpb SHOW ENVS
+      Lists the env sets (v3 called them env profiles).
+```
+
+The request is the arguments joined with spaces, so quoting is optional
+until a word starts with `-`. Words of cpb v3 (`env profile`, `alias`,
+`install`, `--env-profile`) are understood and answered in v4 terms.
+
+**Who answers.** Claude, through this machine's Claude Code: one `claude -p`
+call, on the machine's login, always to Anthropic's API. cpb reads no
+credential and holds no key. The child process is built so that nothing else
+can join in:
+
+- **Its environment is an allowlist:** `PATH`, `HOME`, `USER`, `LOGNAME`,
+  `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`, `XDG_RUNTIME_DIR`,
+  `DBUS_SESSION_BUS_ADDRESS`, the proxy variables (`HTTPS_PROXY`,
+  `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY`, either case) and the CA variables
+  (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`), plus
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. `ANTHROPIC_API_KEY` and
+  `CLAUDE_CODE_OAUTH_TOKEN` are kept only when the environment routes to
+  Anthropic (no `ANTHROPIC_BASE_URL` other than `https://api.anthropic.com`,
+  no Bedrock or Vertex switch): a key that came with another endpoint
+  belongs to it. Every other variable, `ANTHROPIC_BASE_URL`,
+  `CLAUDE_CONFIG_DIR` and any future route variable included, is dropped.
+  No env set, `DEFAULTS` or playbook layer applies.
+- **Its flags:** `-p --setting-sources project --strict-mcp-config --tools ""
+  --disable-slash-commands --no-session-persistence --system-prompt <the
+  reference> --json-schema <the plan> --output-format json --model <model>`.
+  No user settings (their `env`, hooks, plugins, `apiKeyHelper`), no user
+  memory (`~/.claude/CLAUDE.md`), no MCP server, no tool: the model can read
+  nothing beyond what cpb sends. Managed (enterprise) settings apply, as to
+  every Claude Code run.
+- **Its working directory** is a new directory under the system temp
+  directory (`/tmp` when that one is under home), removed afterwards. Claude
+  Code takes the `CLAUDE.md` files of a session's working directory and of
+  every directory above it, so none of home's can join.
+- **The model:** `--model`, else `CPB_AGENT_MODEL`, else `sonnet`.
+- **No login, or an error:** one line naming Claude Code's own message and
+  `run claude and /login, or set ANTHROPIC_API_KEY`; exit 1. It never falls
+  back to another route.
+
+**What it sends.** The request, and one object describing what is installed,
+by name: cpb's and Claude Code's versions, the playbooks root spelled with
+`~`, each playbook's name, launcher, attached env set names and whether it
+is always sandboxed, each env set's name and whether it is in `DEFAULTS`,
+the `DEFAULTS` names, the names of playbooks whose manifest cannot be read, and for each playbook and env set its `route`:
+`anthropic`, `away` (another endpoint, or one set by a reference) or
+`unknown` (a layer that does not resolve), computed on this machine as
+EXPLAIN's `route.egress` is. Never a variable's value, a reference, a
+description, the secret helper or a credential. Claude Code adds its own
+environment block (the working directory, platform and OS version). The
+reference cpb sends as the system prompt is built into the binary, with
+this specification's grammar block.
+
+**The plan** the model returns is `{"answer", "steps": [{"args", "why"}],
+"notes"}`; `args` is a step's argument vector after `cpb`. cpb decides each
+step:
+
+| Status | When | Shown |
+|---|---|---|
+| `ok` | a statement that parses, or `run`, `start`, `play`, `update`, `auth status` or `tui` whose flags and names check out | the command, its line, its `!` lines and notes |
+| `placeholder` | an argument holds `<…>` | the command and `fill in <…> first`; never runs |
+| `rejected` | anything else: another program, a global flag, `self-update`, `self-uninstall`, `completion`, a statement that does not parse, a launch or `update` naming an unknown playbook or env set | `not proposed: <reason>`; never runs |
+
+**What always asks first** (`!` lines), decided by cpb from the parsed step:
+
+- **destructive:** `DROP PLAYBOOK`, `DROP ENV`, `CREATE OR REPLACE ENV`,
+  `APPLY` without `--dry-run`; the clauses `UNSET`, `BLOCK`, `RESET`, `DROP …`,
+  `RENAME TO`, `SET launcher = ''`; `start --delete`; `--sandbox-fresh`;
+- **credential:** a credential-looking key set or removed (the redaction
+  rules), `SET … FROM` a reference, `login`, `secret_helper`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `--env-file`;
+- **fetch:** `CREATE PLAYBOOK … FROM`, `ADD MARKETPLACE`, `ADD PLUGIN`,
+  `ADD SKILL`, `ADD MCP SERVER`, `play`, `update`. The line shows the source
+  as written.
+
+**A launch that routes away.** A `run` or `start` step whose route, judged
+as EXPLAIN judges it (`DEFAULTS`, the playbook's env sets, the step's launch
+flags and the caller's environment), is not Anthropic's is shown as
+`(cd /tmp && cpb …)` and runs from a new directory outside home, so no
+`CLAUDE.md` of the caller's directory or home goes to that endpoint; when the
+caller's directory has such files, the plan names them. A `start` without a
+sandbox notes that its directory shares the machine's login, so a `/login`
+in it replaces the machine's.
+
+**Show or run.**
+
+- Without `--run` the plan is shown and nothing runs.
+- `--run` shows it exactly as it will run and asks `Run it? [y/N]` on a
+  terminal. Without a terminal it refuses, unless `--yes` is given and no
+  step is marked `!`. A plan with a `!` step always asks on a terminal,
+  `--yes` or not, and never runs without one.
+- A plan with a step that is not `ok` never runs.
+- Steps run in order, each as this cpb binary with the step's arguments (and
+  `--playbooks-dir` when one was given), never through a shell, with the
+  terminal attached, in the caller's directory except a step that routes
+  away. The first failure stops the plan and names the steps that ran.
+- `--json` prints the checked plan (each step's `args`, `why`, `command`,
+  `status`, `reason`, `guards` as `{"kind", "what"}`, `route_away`,
+  `cpb_notes`) and runs nothing; it cannot be combined with `--run`.
+
+**Exit codes:** 0 shown, or run with every step succeeding; 1 refused,
+declined, or no plan from Claude; 2 a usage error (no request, `--yes`
+without `--run`, `--json` with `--run`). A failing step's own exit code
+passes through.
+
+`cpb "<plain words>"` is read as a quoted statement; when it does not parse
+and its first word is not a statement keyword, the error adds `Not a
+statement? Ask in plain words: cpb agent '<plain words>'`.
+
+`agent` the command and `agent` the playbook property (`SET agent =
+'<agent>'`, see *Plugins and the agent*) are unrelated: the property is only
+ever written inside a statement.
+
 ### `cpb auth status [name...]`
 
 Read-only view of how each playbook authenticates and what its stored login looks like. Nothing is written, no credential value is read into the output, no network call is made, no process is spawned unless `--claude` is given.

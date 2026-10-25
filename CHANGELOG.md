@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cpb agent "<request>"`**: ask in plain words for the cpb command that
+  does it. The plan is shown; `--run` shows it and asks before running it.
+  Steps that remove, forget or replace something, touch a credential or the
+  login, or fetch code always ask, `--yes` or not. The question goes to
+  Anthropic's API through the machine's Claude Code login, never through an
+  env set or `DEFAULTS`, with the names of what is installed and no value,
+  reference or credential. [Ask in plain words](docs/guides/assistant.md).
+- A quoted statement that does not parse and does not start with a keyword
+  suggests `cpb agent`.
+
 ## [v4.0.0-rc5] -- 2026-10-24
 
 ### Upgrading from rc4
