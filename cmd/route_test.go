@@ -153,6 +153,32 @@ func TestExplainRouteInherited(t *testing.T) {
 	}
 }
 
+// A CLAUDE_CODE_OAUTH_TOKEN that only DEFAULTS sets is the machine's: an
+// isolated launch drops it, so it does not make that route token-set, while
+// a shared launch still uses it. One the playbook sets itself counts.
+func TestExplainRouteDefaultsTokenIsolated(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	clearRouteEnv(t)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	stubKeychainProbe(t, auth.KeychainAbsent)
+	mustStmt(t, "CREATE ENV machine SET CLAUDE_CODE_OAUTH_TOKEN=machine-token AS PLAINTEXT")
+	mustStmt(t, "ALTER DEFAULTS USE ENV machine")
+	mustStmt(t, "CREATE PLAYBOOK iso SET launcher = '' SET login=isolated")
+	if r := routeOf(t, "iso"); r.Auth != "none" {
+		t.Fatalf("an isolated launch drops a DEFAULTS OAuth token: %+v", r)
+	}
+	mustStmt(t, "CREATE PLAYBOOK shared SET launcher = ''")
+	if r := routeOf(t, "shared"); r.Auth != "token-set" {
+		t.Fatalf("a shared launch uses a DEFAULTS OAuth token: %+v", r)
+	}
+	mustStmt(t, "CREATE ENV own SET CLAUDE_CODE_OAUTH_TOKEN=own-token AS PLAINTEXT")
+	mustStmt(t, "ALTER PLAYBOOK iso ADD ENV own")
+	if r := routeOf(t, "iso"); r.Auth != "token-set" {
+		t.Fatalf("an isolated playbook's own env set supplies its token: %+v", r)
+	}
+}
+
 // A Foundry route is not Anthropic's: its switch or its base URL, from a
 // layer or from the environment, makes the egress unknown, as Bedrock's and
 // Vertex's do; a switch that is off, or a BLOCK VAR, does not.
