@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`EXPLAIN` no longer reports an isolated playbook as `token-set` for a
+  token it never uses.** `route.auth` counted a `CLAUDE_CODE_OAUTH_TOKEN`
+  from an env set in `DEFAULTS`, which an isolated launch drops. It now reads
+  the login the launch actually uses; a shared playbook, and a token the
+  isolated playbook sets itself, still read `token-set`.
+
 ## [v4.0.0-rc5] -- 2026-10-24
 
 ### Upgrading from rc4

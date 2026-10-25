@@ -89,6 +89,7 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 	}
 	origins = append(append([]envset.Origin{}, origins...), inherited...)
 	tokenSet := false
+	isolated := auth.IsAuthIsolated(pb.Path)
 	cloud := false
 	baseFromRef := false
 	for _, o := range origins {
@@ -116,6 +117,11 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 				r.Egress = "unknown"
 			}
 		case routeTokenVars[o.Key]:
+			// An isolated launch drops a CLAUDE_CODE_OAUTH_TOKEN that only
+			// DEFAULTS sets (the machine's layer), so it is not this route's.
+			if o.Key == auth.OAuthTokenEnv && o.Kind == envset.LayerDefaults && isolated {
+				continue
+			}
 			if o.Ref != "" || o.Value != "" {
 				tokenSet = true
 			}
