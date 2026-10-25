@@ -88,8 +88,13 @@ func TestManifestSetTokenOverridesFile(t *testing.T) {
 	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-PERINSTALL" {
 		t.Fatalf("token = %q, want the manifest's", got)
 	}
-	if _, present := readStore(t, store)["claudeAiOauth"]; present {
+	if storeHasGrant(t, store) {
 		t.Fatal("stored grant survived a token-auth launch")
+	}
+	// Not the machine's account as far as anything can tell: a copy is
+	// kept aside, not deleted.
+	if kept, _ := filepath.Glob(store + ".cpb-own-*"); len(kept) != 1 {
+		t.Fatalf("the stored login was not kept aside: %v", kept)
 	}
 }
 
@@ -249,10 +254,14 @@ func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
 
 	configDir := t.TempDir()
 	writeManifest(t, configDir, "isolated_login = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	// A login of its own is set aside for the run (own_login_test.go).
 	store := writeStore(t, configDir, `{`+grantJSON+`,`+mcpJSON+`}`)
 
-	env, _ := PrepareLaunchEnv(configDir)
+	env, err := PrepareLaunchEnv(configDir)
 	defer EndLaunch(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-OWN" {
 		t.Fatalf("token = %q, want the manifest's own", got)
@@ -262,10 +271,10 @@ func TestIsolatedPlaybookHonoursManifestToken(t *testing.T) {
 	}
 	keys := readStore(t, store)
 	if _, present := keys["claudeAiOauth"]; present {
-		t.Fatal("stored grant survived a token-auth launch of an isolated playbook")
+		t.Fatal("stored grant stayed readable during a token run of an isolated playbook")
 	}
 	if _, present := keys["mcpOAuth"]; !present {
-		t.Fatal("MCP logins destroyed alongside the grant")
+		t.Fatal("MCP logins lost on a token launch")
 	}
 }
 

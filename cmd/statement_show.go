@@ -90,7 +90,7 @@ type playbookJSON struct {
 	// statements, null for every other.
 	Apply *applyRecordJSON `json:"apply"`
 	// Account is which Claude credential a launch uses and where it comes
-	// from (v4.1.0): auth_mode, token_source, token_kind, token_blocked,
+	// from (v4.2.0): auth_mode, token_source, token_kind, token_blocked,
 	// token_account, flattened. Last: SELECT appends them after apply.
 	auth.Account
 }
@@ -214,7 +214,7 @@ type explainJSON struct {
 	// runs with.
 	Login              string `json:"login"`
 	GlobalInstructions string `json:"global_instructions"`
-	// Account is SHOW's, flattened (v4.1.0).
+	// Account is SHOW's, flattened (v4.2.0).
 	auth.Account
 }
 
@@ -349,6 +349,11 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	// none rather than failing the whole SHOW.
 	if sf, err := settings.Load(pb.Path); err == nil {
 		if mps, plugins, agent, err := pluginState(sf.Root); err == nil {
+			// Shown masked: a settings.json written by hand may carry a
+			// credential in a source URL.
+			for i := range mps {
+				mps[i].Source = json.RawMessage(redactSourceURL(string(mps[i].Source)))
+			}
 			v.Marketplaces, v.Plugins, v.Agent = mps, plugins, agent
 		}
 		v.Tools, v.Statusline.Command, v.Model = settingsExtras(sf.Root)
@@ -376,7 +381,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	v.Version, v.Description, v.Homepage, v.Author = optStr(m.Version), optStr(m.Description), optStr(m.Homepage), optStr(m.Author)
 	if m.Source != nil && m.Source.Repository != "" {
-		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
+		v.Source = &sourceJSON{URL: redactSourceURL(m.Source.Repository), Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
 	}
 	if m.Update != nil {
 		v.Migrate = optStr(m.Update.Migrate)

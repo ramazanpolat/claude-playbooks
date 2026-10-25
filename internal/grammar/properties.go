@@ -521,7 +521,11 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 		if !vt.Quoted || vt.Comma {
 			v = strings.TrimSuffix(v, ",")
 		}
-		v = unquoteArg(v)
+		if !vt.Quoted {
+			// Quotes a shell left inside one word; a value quoted in a
+			// file keeps the quotes it holds ('"/My Tools/sl.sh"').
+			v = unquoteArg(v)
+		}
 		// A one-word value reads the same quoted or not, in a file and on the
 		// command line; a value with a space or a comma is quoted (SHOW
 		// CREATE writes every string quoted).
@@ -678,7 +682,8 @@ var sandboxKeyWord = regexp.MustCompile(`^sandbox\.[a-z_]{1,24}$`)
 
 // unquoteArg removes one pair of quotes a command-line word kept: a shell
 // passes global_instructions='inherited' through as one word when it is quoted whole
-// ("global_instructions='inherited'"). Property values never hold a quote of their own.
+// ("global_instructions='inherited'"). Only for unquoted words: a value
+// quoted in a file may hold quotes of its own (a status line command).
 func unquoteArg(v string) string {
 	if len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
 		return v[1 : len(v)-1]

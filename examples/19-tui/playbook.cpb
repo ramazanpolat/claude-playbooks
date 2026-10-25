@@ -2,5 +2,5 @@
 -- reference, never shown as a value), and a status line.
 ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
 CREATE ENV IF NOT EXISTS proxy DESCRIPTION 'an LLM proxy' SET ANTHROPIC_BASE_URL=http://127.0.0.1:8080/v1 SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token';
-CREATE PLAYBOOK IF NOT EXISTS browsed SET launcher = '';
+CREATE PLAYBOOK IF NOT EXISTS browsed SET launcher = '', login = 'isolated';
 ALTER PLAYBOOK browsed ADD ENV proxy SET VAR MAX_THINKING_TOKENS=8000 SET statusline.command = 'echo browsed', statusline.refresh = 10;

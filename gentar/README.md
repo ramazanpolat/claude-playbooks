@@ -11,10 +11,10 @@ can hand to an agent to fix what failed.
 | subject name | `subject = "…"` in every scenario TOML — `run.sh` reads it from there and refuses scenarios that disagree | `claude-playbooks` |
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
-| trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
+| trigger | `.github/workflows/gentar-arena.yml`: plan and checks, GitHub-hosted. Phase 2 runs in the private mirror `ramazanpolat/claude-playbooks-arena` (`[arena] bench = "mirror"`) | the kit's public variant, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.9.3` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.10.0` |
 
 ## Quickstart (local)
 
@@ -139,23 +139,33 @@ Decided once, in `gentar/policy.toml`, and carried out by the workflow
 without further thought. `gentar/plan.py` is its only reader; the
 workflow's first job asks it what this event should run.
 
+This repository is public, so it is in **mirror mode** (`[arena] bench =
+"mirror"`). No self-hosted runner is registered here, so no event here runs
+a bench. Neither a fork's pull request nor a workflow file it adds has a
+runner holding the bench key to reach (D5, 2026-10-08). Phase 2 runs in the
+private mirror `ramazanpolat/claude-playbooks-arena`, which pulls this
+repository and reports back as the commit status `arena/phase2`.
+
 | Event | Runs |
 |---|---|
-| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
-| push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
-| dispatch (no suites; on any ref, a release tag included: a drift run), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
-| `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
-| `v*` tag pushed | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
+| pull request | **phase 1**: bench-free checks on GitHub-hosted runners, `ubuntu-latest` and `macos-latest` (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift) |
+| push to the default branch | **phase 1**: the checks. There is no floor: the floor's suites run in the mirror's phase 2 |
+| `v*` tag pushed (a `v*-rc*` included) | the plan only. A release is **gated** on a success `arena/phase2` status on its commit (below) |
+| `gentar/mirror.sh dispatch <sha>` | **phase 2** in the mirror: the full regression, every suite, as the job `arena / phase2` there. It waits, then posts `arena/phase2` on the commit |
+| `gentar/mirror.sh dispatch <sha> a b` | exactly those suites in the mirror (`arena / targeted`; never counts as phase 2, posts no status) |
+| the mirror's daily schedule | phase 2 on main's head, unless that head is already green there |
 
-A fork's pull request never reaches the self-hosted runner, whatever the
-policy says: the bench job checks that from GitHub's own context. Try any
-event locally:
+The mirror admits a commit only when it is reachable from main or a `v*`
+tag. It also admits any branch head, but only when its variable
+`GENTAR_ALLOW_BRANCH_HEADS` is `true`. A phase 2 there that skipped a suite
+is a failure, not green. Try any event locally:
 
 ```bash
 GITHUB_EVENT_NAME=push GITHUB_REF=refs/tags/v1.2.0-rc1 gentar/run.sh --plan
 ```
 
-**Narrowing a PR** (`bench = "declared"` only): one line in the PR body,
+**Narrowing a PR** (`bench = "declared"` only, so never in mirror mode: a
+public repository's PR code must not reach a bench): one line in the PR body,
 
 ```
 gentar: auth-flow config-migration
@@ -190,21 +200,21 @@ an unexplained skip is how checks rot.
 
 ```yaml
   arena-gate:
-    # the same runner as the arena's plan/checks (GENTAR_CI_RUNNER, if set)
-    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
-    permissions: { actions: read, contents: read }
+    runs-on: ubuntu-latest
+    permissions: { statuses: read, contents: read }
     steps:
       - uses: actions/checkout@v4
       - run: gentar/release-gate.sh "$GITHUB_SHA"
         env: { GH_TOKEN: "${{ github.token }}" }
 ```
 
-and every publishing job `needs: arena-gate`. It passes only if that exact
-commit has a green `arena / phase2`, however it was triggered — so run
-phase 2 first (push `arena`, or a `v*-rc*` tag, at the commit), then tag
-the release. A refusal names what it found instead: a failed phase 2, a
-cancelled one, or a run GitHub cancelled before it started.
-`[phase2] max_age_days` also refuses a pass older than that.
+and every publishing job `needs: arena-gate`. With `[phase2] evidence =
+"status"`, it passes only if that exact commit's latest `arena/phase2`
+status is `success` and links a run of the mirror. So run `gentar/mirror.sh
+dispatch <sha>` first, then tag the release. A refusal names what it found
+instead: no status, a pending or failed one, or a link to anything but a
+mirror run. `[phase2] max_age_days` also refuses a pass older than that,
+counted from when the status was posted.
 
 **One arena at a time per host.** Runs of this repo on one Docker host
 share a compose project and ports, so `run.sh` takes a host lock and a
@@ -263,7 +273,7 @@ only says what each suite is for.
 | `env-overrides` | manifest `[env]`, env sets and launch flags reach the child process |
 | `cli-grammar` | the statement grammar on the real launch path: env sets, DEFAULTS, a secret reference resolved by a stub helper, `EXPLAIN --json`, `SHOW CREATE` into `APPLY` with no change, `APPLY` across files, the `DROP PLAYBOOK` guard, source drift, a credential literal never printed, `INCLUDE` stacking files (shared base once, later layer wins, cycle refused), the plugin clauses through a stub `claude plugin`, and v3.21.0's MCP servers (credential by reference), tools / status line / model, skills, recipes and `TO <playbook>` / `TO '<dir>'`, `SELECT` (stub clickhouse-local), a git marketplace's `#ref`, and v3.22.0's `APPLY --dry-run --json` (schema, exit codes, a dry run that writes nothing, references never values) model picker, the refusal of a claude too old for the plugin clauses, `DESCRIBE`, and v3.26.0's `SELECT --json` key order and a sandboxed launch refusing when its key cannot be registered at the proxy (stub `sbx`), and v3.27.0's `github:` marketplace pinned to a tag (a commit refused) |
 | `create-or-alter` | v4.0.0-rc4's convergence: a `CREATE OR ALTER` file applied twice changes nothing, hand-made drift is undone by the next apply (a dry run reports it and writes nothing), `SHOW CREATE` rebuilds an identical twin, `REPLACE ENV` and `run --env-set` reach the child, and a `CREATE` is whole or nothing (rolled back after a failed later step, refused before a missing env set) |
-| `accounts` | v4.1.0's accounts: an env set holding the Claude token by reference is the playbook's account (attached, `--env-set` for one launch, `REPLACE ENV` to switch), the token reaches claude only through the helper and a shell token never stands in, `SELECT` names the account; the login guard refuses a keyless route on a shared login and lets the keyed one through; an isolated playbook's own login is set aside for a token run and restored |
+| `accounts` | v4.2.0's accounts: an env set holding the Claude token by reference is the playbook's account (attached, `--env-set` for one launch, `REPLACE ENV` to switch), the token reaches claude only through the helper and a shell token never stands in, `SELECT` names the account; the login guard refuses a keyless route on a shared login and lets the keyed one through; an isolated playbook's own login is set aside for a token run and restored |
 | `config-dir-override` | `CPB_CONFIG_DIR` end to end |
 | `auth-status` | `auth status` reports without touching anything |
 | `pilot-interactive-delete` | a simulated pilot answering prompts on a pty |
@@ -272,13 +282,14 @@ only says what each suite is for.
 
 ## Watching a run
 
-Every arena job (phase 2, targeted, and the main-push floor) uploads an
+Every arena job in the mirror (phase 2 and targeted) uploads an
 `arena-reports` artifact holding the markdown reports and a self-contained
 `dashboard.html`: the verdict per suite, and each step's spans with durations.
-Open the run in the Actions tab, download `arena-reports`, and open
-`dashboard.html`; it needs no server. This repo is public, so both are redacted
-before upload: bench-host values and declared credentials are masked, and an
-agent transcript appears only as its length.
+Open the run in the mirror's Actions tab (the `arena/phase2` status links it;
+only the mirror's members can open it), download `arena-reports`, and open
+`dashboard.html`; it needs no server. Both are redacted before upload:
+bench-host values and declared credentials are masked, and an agent
+transcript appears only as its length.
 
 **Telemetry to ClickStack.** This repo sets the repository secrets
 `GENTAR_OTLP_EXPORT` (the collector's base URL on the bench's internal network) and
@@ -303,21 +314,23 @@ exists.
 Every kit file is byte-identical to the pinned engine's copy; `gentar/run.sh
 --check` enforces it. What is this repo's lives only here:
 
-- **`gentar/policy.toml`**: no bench for PRs (`bench = "off"`: the repo is
-  public, the runner persistent, and the maintainer chose it); the main-push floor
-  is `cli-head-build`, `docs-honesty` and `playbook-lifecycle`; Go 1.26 for the
-  bench-free checks (and `golang:1.26` for the bench's build); phase 2 on dispatch, the `arena` tag or a `v*-rc*` tag; a
-  release gate.
+- **`gentar/policy.toml`**: mirror mode (`[arena] bench = "mirror"`, the
+  mirror `ramazanpolat/claude-playbooks-arena`): the repo is public, so it has
+  no bench runner at all, no bench for PRs and no main-push floor; Go 1.26 for
+  the bench-free checks (and `golang:1.26` for the bench's build); phase 2 in
+  the mirror; a release gate on the `arena/phase2` status (`[phase2] evidence
+  = "status"`).
 - **`gentar/hooks.py`**: `prepare()` builds `cpb` the way the bench
   does; `SKIP_STEP_SUBSTR` skips the container build it replaces;
   `HIDE_FROM_PATH` hides `cpb` (suites create it).
 - **`gentar/policy.toml` `os`**: the bench-free checks run on Ubuntu and on
   macOS. On macOS that is the dry-run on macOS userland (bash 3.2, BSD tools),
   not a macOS bench.
-- **Repository variables** `GENTAR_CLICKHOUSE_HOST_PORT=8126` and
+- **The mirror's variables** `GENTAR_CLICKHOUSE_HOST_PORT=8126` and
   `GENTAR_OTLP_HOST_PORT=4320`: the `arena` runner is shared with other arenas.
 - **`.github/workflows/release.yml`** runs `gentar/release-gate.sh` first; a
-  `v*` publishes only if that exact commit has a green `arena / phase2`.
+  `v*` publishes only if that exact commit has a success `arena/phase2`
+  status from the mirror.
 - **`cpb-agent-bench-v1`** is this repo's own bench image, built by
   `bench-template/build.sh` on the bench-host, used only by
   `pilot-agent-session`.
@@ -366,51 +379,50 @@ face. Decisions and reality assertions, never scripts.
 
 ## CI (`.github/workflows/`)
 
-The arena workflow is the kit's, byte for byte — `--check` compares it —
-and does what the run policy says (above). Its `plan` and `checks` jobs
-run on GitHub-hosted runners; only the `bench` job needs a self-hosted
-runner labeled `arena` with Docker + reach to the bench-host.
+The arena workflow is the kit's public variant, byte for byte (`--check`
+compares it), and does what the run policy says (above). It has two jobs,
+`plan` and `checks`, both on GitHub-hosted runners, and no self-hosted job.
+`GENTAR_CI_RUNNER` is refused in mirror mode, because this repository's pull
+requests run there.
 
-**No GitHub-hosted minutes, or CI kept in-house?** Set the repository or
-organisation variable `GENTAR_CI_RUNNER` to a JSON runs-on value, e.g.
-`["self-hosted", "linux-ci"]`, and `plan` and `checks` run there instead
-(the plan output's `runner=` line says where). It needs `git`, `python3`
-and `bash`, plus `gh` for the release gate below. Three things change with it set:
+The `bench` job lives in the mirror. It is the kit's
+`subject-template/mirror/arena/` copied unchanged, and it runs on a
+self-hosted runner registered to the mirror, labeled `arena`, with Docker
+and reach to the bench-host. The mirror's README lists its setup. This
+repository keeps no bench secret and no runner.
 
-- a **fork's** pull request runs nothing at all, not even the checks: its
-  code never reaches a self-hosted runner;
-- `[phase1] os` may only list `ubuntu-latest` (macOS checks need a hosted
-  runner; `plan.py` refuses rather than quietly running Linux);
-- the value may not mention `arena` in any case, not even inside a longer
-  label: the checks run pull request code and the bench runner must never
-  get it. The workflow fails such a run before scheduling anything
-  (`ci-runner-refused`), because runner labels match regardless of case.
+Secrets/vars the mirror's bench job reads (set in the mirror, by reference).
+The bench-host comes first, in one of two modes:
 
-The `bench` job is unaffected: it always runs on `arena`.
-GitHub-hosted runners cannot reach an internal bench-host. One-time
-setup, ~5 min on any always-on machine with Docker:
+- **Local:** `vars.GENTAR_BENCH_HOST = local`, when the runner runs on the
+  bench-host itself. The arena calls that host's `sbx` directly: no SSH, no
+  key, no bench user. The runner's user must be the one signed in to sbx,
+  with the login in files (the engine's `bin/sbx-file-login`), and the host
+  must hold no stored sbx secrets; the arena refuses with exit 2 otherwise.
+- **SSH:** `secrets.BENCH_SSH_KEY` (the key the coordinator uses to reach the
+  bench-host), plus `secrets.GENTAR_BENCH_HOST` and `secrets.GENTAR_BENCH_USER`
+  (the bench-host itself; secrets, because a public repo's logs are public).
 
-GitHub → this repo → Settings → Actions → Runners → New self-hosted
-runner → follow the commands → when configuring, labels: `arena`.
+Then:
 
-Secrets/vars the workflow reads:
-
-- `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
-- `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
-  engine ships none, so without these no suite can run (secrets, because a public
-  repo's logs are public)
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
-- `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
+- `secrets.ANTHROPIC_API_KEY` (first-party, no base URL) or
+  `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
-- `vars.GENTAR_BUDGET_CAP` — ceiling the budget guard enforces (default 50000)
+- `vars.GENTAR_BUDGET_CAP` — the budget guard's ceiling (default 50000). It
+  compares each suite's DECLARED `[budget] tokens` before the run; it does not
+  meter what a provider bills, so a spend limit belongs on the key itself
 - `vars.GENTAR_CLICKHOUSE_HOST_PORT`, `vars.GENTAR_OTLP_HOST_PORT` — move the
   arena's host ports when another arena shares the runner's Docker host
 
-The three bench values are required; the workflow refuses with a named error
-before staging anything if one is missing or still the placeholder. Everything
-else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
-are absent are skipped and named, not run into a red refusal. It tears down
+The engine ships no bench-host, so the bench values are required: `local`, or
+all three for SSH. The workflow refuses with a named error before staging
+anything if one is missing or still the placeholder. Everything else is
+optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
+are absent are skipped and named, not run into a red refusal, and in the
+mirror a phase 2 that skipped any suite is a failure (`reports/sweep-skipped.txt`
+names them), so the release gate refuses it. It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
 
@@ -443,6 +455,7 @@ gentar/
   dryrun.py          # kit — local, bench-less step/assertion replay
   plan.py            # kit — the run policy's only reader
   release-gate.sh    # kit — may this commit be released?
+  mirror.sh          # kit — phase 2 in the private mirror; posts arena/phase2
   reports/           # run reports land here (gitignored)
   .arena/            # gentar checkout (gitignored, auto-cloned)
 ```

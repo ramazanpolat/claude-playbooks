@@ -162,19 +162,21 @@ func TestFromInstallResetAndIfUnset(t *testing.T) {
 }
 
 // A playbook named with a keyword has a SHOW CREATE that parses, alone and
-// in SHOW CREATE ALL: its default launcher is written as RESET launcher.
+// in SHOW CREATE ALL. Its name cannot be its launcher: a keyword never
+// names a new launcher, so it is created without one.
 func TestShowCreateKeywordNamedPlaybook(t *testing.T) {
 	sandboxDefaultRoot(t)
 	t.Setenv("CPB_LAUNCHER_RECEIPT", filepath.Join(t.TempDir(), "launchers"))
 	var err error
 	captureStdout(t, func() { err = runStatement([]string{"CREATE PLAYBOOK 'server'"}) })
+	if err == nil || !strings.Contains(err.Error(), "is a keyword") {
+		t.Fatalf("a keyword became a launcher: %v", err)
+	}
+	captureStdout(t, func() { err = runStatement([]string{"CREATE PLAYBOOK 'server' SET launcher = ''"}) })
 	if err != nil {
 		t.Fatal(err)
 	}
 	file := writePlaybookFile(t, mustStmt(t, "SHOW CREATE ALL"))
-	if strings.Contains(readFile(t, file), "launcher = 'server'") {
-		t.Fatalf("SHOW CREATE writes the default launcher as a value:\n%s", readFile(t, file))
-	}
 	if out, err := apply(t, file); err != nil || !strings.Contains(out, " 0 created, 0 changed,") {
 		t.Fatalf("SHOW CREATE ALL does not re-apply: %v\n%s", err, out)
 	}
