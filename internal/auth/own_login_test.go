@@ -157,6 +157,17 @@ func TestDefaultsTokenNeverReachesIsolatedPlaybook(t *testing.T) {
 	if r := Inspect("pb", configDir, time.Now()); r.Mode != ModeIsolatedLogin {
 		t.Fatalf("inspect mode = %s, want isolated-login", r.Mode)
 	}
+	// The launch plan's view agrees: the DEFAULTS token is not in it.
+	eff, err := EffectiveBlock(configDir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := eff.Set[OAuthTokenEnv]; present {
+		t.Fatal("the effective block of an isolated playbook holds the DEFAULTS token")
+	}
+	if eff.Set["FROM_DEFAULT"] != "yes" {
+		t.Fatal("the effective block dropped the rest of DEFAULTS")
+	}
 
 	shared := filepath.Join(root, "shared")
 	if err := os.MkdirAll(shared, 0o755); err != nil {

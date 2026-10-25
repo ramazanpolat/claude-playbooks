@@ -386,16 +386,27 @@ func bindOwnEnv(env []string, configDir string) []string {
 // be read is not an error here: the launch treats it as declaring nothing.
 //
 // An isolated playbook's token comes only from what it supplies itself
-// (ownToken): a token reference that only DEFAULTS holds is left out, so the
-// secret helper never sets the machine layer's token there.
+// (ownToken): a token that only DEFAULTS sets, by value or by reference, is
+// left out, as the launch leaves it out. So the secret helper never sets the
+// machine layer's token there, and the login guard does not count it.
 func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, error) {
 	menv, _, perr := effectiveBlock(configDir, layers)
-	if perr != nil || !tokenRef(menv) || !isAuthIsolated(configDir) {
+	if perr != nil || menv == nil || !isAuthIsolated(configDir) {
 		return menv, perr
 	}
-	if _, ownRef, err := ownToken(configDir, layers); err != nil {
+	_, inSet := menv.Set[OAuthTokenEnv]
+	if !inSet && !tokenRef(menv) {
+		return menv, nil
+	}
+	own, ownRef, err := ownToken(configDir, layers)
+	if err != nil {
 		return nil, err
-	} else if !ownRef {
+	}
+	if inSet && own == "" {
+		menv.Set = maps.Clone(menv.Set)
+		delete(menv.Set, OAuthTokenEnv)
+	}
+	if !ownRef {
 		menv.Refs = maps.Clone(menv.Refs)
 		delete(menv.Refs, OAuthTokenEnv)
 	}
