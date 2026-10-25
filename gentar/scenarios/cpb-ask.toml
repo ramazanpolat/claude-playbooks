@@ -1,0 +1,85 @@
+# claude-playbooks own-arena suite: cpb ask, the assistant. A stub
+# `claude` on PATH records what it received (argv, environment, working
+# directory, stdin) and answers a canned plan chosen by the request, so the
+# whole path runs keylessly on the real binary: what reaches the model
+# (names only, never a value, whatever the shell exports), how claude is
+# called (no user settings, no tools, from a directory outside home), what
+# is shown and what is marked, what is refused, and the exit codes. cpb ask
+# never runs a plan.
+
+[scenario]
+name = "cpb-ask"
+subject = "claude-playbooks"
+agent = "shell"
+
+[oracle]
+steps = [
+  '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
+  'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
+  '''cat > "$HOME/.local/bin/claude" <<'STUB'
+#!/bin/sh
+[ "$1" = "--version" ] && { echo "2.1.310 (Claude Code)"; exit 0; }
+printf '%s\n' "$@" > "$HOME/ask-argv"
+env > "$HOME/ask-env"
+pwd > "$HOME/ask-pwd"
+cat > "$HOME/ask-stdin"
+case "$(tail -n 2 "$HOME/ask-stdin")" in
+  *drop*) P='{"answer":"","steps":[{"args":["DROP","ENV","route-b"],"why":"Removes env set route-b."}],"notes":[]}' ;;
+  *throwaway*) P='{"answer":"","steps":[{"args":["start","--env-set","route-a","--delete","/tmp/cpb-ask-scratch"],"why":"A throwaway session on route-a."}],"notes":[]}' ;;
+  *passwd*) P='{"answer":"","steps":[{"args":["cat","/etc/passwd"],"why":"Reads a file."}],"notes":[]}' ;;
+  *) P='{"answer":"Your env sets.","steps":[{"args":["SHOW","ENVS"],"why":"Lists the env sets (v3 called them env profiles)."}],"notes":[]}' ;;
+esac
+printf '{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":%s}\n' "$P"
+STUB
+chmod 755 "$HOME/.local/bin/claude"''',
+  'cpb CREATE ENV route-a SET ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1 DESCRIPTION "arena-description-canary"',
+  'cpb ALTER ENV route-a SET ANTHROPIC_AUTH_TOKEN=arena-envset-canary-7Qz AS PLAINTEXT',
+  'cpb CREATE ENV route-b SET MAX_THINKING_TOKENS=8000',
+  'cpb CREATE PLAYBOOK work && cpb ALTER PLAYBOOK work USE ENV route-a SET VAR MY_SECRET=arena-manifest-canary-4Kp AS PLAINTEXT',
+]
+
+[[verify.files]]
+path = "~/.claude-playbooks/.env-sets/route-a.toml"
+
+[[verify.commands]]
+# Names reach claude, values never: not an env set's, not the manifest's,
+# not one the shell exports as a route variable or as an unrelated one.
+# claude runs with no user settings and no tools, from a fresh directory
+# outside home, and gets no route variable.
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; export ANTHROPIC_BASE_URL=http://127.0.0.1:9/arena-url-canary ANTHROPIC_AUTH_TOKEN=arena-shell-canary FOO_TOKEN=arena-unrelated-canary; out=$(cpb ask "list the env profiles") || { echo "ask failed"; exit 1; }; for f in ask-argv ask-env ask-stdin; do if grep -q canary "$HOME/$f"; then echo "leaked into $f"; exit 1; fi; done; grep -q '"name":"route-a"' "$HOME/ask-stdin" && grep -q '"route":"away"' "$HOME/ask-stdin" && grep -q '"name":"work"' "$HOME/ask-stdin" || { echo "names missing"; exit 1; }; grep -qx -- "--setting-sources" "$HOME/ask-argv" && grep -qx project "$HOME/ask-argv" && grep -qx -- "--strict-mcp-config" "$HOME/ask-argv" && grep -qx -- "--tools" "$HOME/ask-argv" || { echo "flags missing"; exit 1; }; if grep -q -e '^ANTHROPIC_BASE_URL=' -e '^CLAUDE_CONFIG_DIR=' "$HOME/ask-env"; then echo "route variable passed"; exit 1; fi; case "$(cat "$HOME/ask-pwd")" in "$HOME"*) echo "ran under home"; exit 1;; esac; echo "$out" | grep -qF "cpb SHOW ENVS" && echo ask-names-only-ok'''
+contains = "ask-names-only-ok"
+
+[[verify.commands]]
+# CPB_ASK_LOGIN=token: cpb's machine token signs in, in claude's
+# environment only (never its arguments or input); without one, refused
+# before claude runs. The default login never reads the token file.
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; printf 'arena-token-canary-9Rz\n' > "$HOME/ask-token"; export CPB_OAUTH_TOKEN_FILE="$HOME/ask-token"; rm -f "$HOME/ask-env"; cpb ask "list" >/dev/null || exit 1; if grep -q arena-token-canary "$HOME/ask-env"; then echo "default read the token"; exit 1; fi; CPB_ASK_LOGIN=token cpb ask "list" >/dev/null || { echo token-mode-failed; exit 1; }; grep -qx "CLAUDE_CODE_OAUTH_TOKEN=arena-token-canary-9Rz" "$HOME/ask-env" || { echo token-not-in-env; exit 1; }; if grep -q arena-token-canary "$HOME/ask-argv" "$HOME/ask-stdin"; then echo token-sent; exit 1; fi; rm -f "$HOME/ask-env"; if CPB_ASK_LOGIN=token CPB_OAUTH_TOKEN_FILE="$HOME/none" cpb ask "list" >/dev/null 2>&1; then echo no-token-not-refused; exit 1; fi; test ! -e "$HOME/ask-env" && echo ask-token-login-ok'''
+contains = "ask-token-login-ok"
+
+[[verify.commands]]
+# Behind a proxy it refuses before claude runs (exit 1), naming the variable
+# and never its value; cpb ask does not run through a proxy.
+command = 'rm -f "$HOME/ask-argv"; out=$(HTTPS_PROXY=http://proxy.example.test:3128 cpb ask "list" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "does not run through a proxy" && echo "$out" | grep -qF "env -u HTTPS_PROXY" && ! echo "$out" | grep -qF proxy.example.test && test ! -e "$HOME/ask-argv" && echo ask-proxy-refused-ok'
+contains = "ask-proxy-refused-ok"
+
+[[verify.commands]]
+# cpb ask only shows: the plan is printed, nothing runs (the env set is
+# still there), and there is no flag to run it.
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; out=$(cpb ask "drop route-b") && echo "$out" | grep -qF "cpb DROP ENV route-b" && echo "$out" | grep -qF "! removes env set route-b" && ! cpb ask --run "drop route-b" >/dev/null 2>&1 && test -e "$HOME/.claude-playbooks/.env-sets/route-b.toml" && echo ask-show-only-ok'
+contains = "ask-show-only-ok"
+
+[[verify.commands]]
+# A step that is not cpb is never shown as a command to run.
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; out=$(cpb ask "show me passwd") && echo "$out" | grep -qF "not proposed" && echo ask-reject-ok'
+contains = "ask-reject-ok"
+
+[[verify.commands]]
+# A launch that routes away from Anthropic is shown from outside home,
+# with what it deletes and the login note.
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; out=$(cpb ask "a throwaway session on route-a") && echo "$out" | grep -qF "(cd /tmp && cpb start --env-set route-a --delete /tmp/cpb-ask-scratch)" && echo "$out" | grep -qF "! deletes /tmp/cpb-ask-scratch" && echo "$out" | grep -qF "/login" && echo ask-route-away-ok'
+contains = "ask-route-away-ok"
+
+[[verify.commands]]
+# Usage errors exit 2; plain words in quotes point at cpb ask.
+command = 'unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; cpb ask >/dev/null 2>&1; a=$?; CPB_ASK_LOGIN=keychain cpb ask "list" >/dev/null 2>&1; b=$?; test "$a" = 2 && test "$b" = 2 && cpb "print every env profile" 2>&1 | grep -qF "cpb ask" && echo ask-usage-ok'
+contains = "ask-usage-ok"

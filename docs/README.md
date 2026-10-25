@@ -29,7 +29,7 @@ Pages are grouped by what you came for:
 | [The terminal UI](guides/tui.md) | `cpb tui`: browse playbooks, sessions and env sets; SHOW CREATE, copy, export, resume |
 | [Resume a session](guides/resume-a-session.md) | `SHOW SESSIONS`, `--resume` through a launcher, and the resume line a launch prints |
 | [Agent guide](guides/agent-guide.md) | driving `cpb` unattended from an agent or CI |
-| [Ask in plain words](guides/assistant.md) | `cpb agent "<request>"`: the command for what you mean, shown or run on your yes |
+| [Ask in plain words](guides/assistant.md) | `cpb ask "<request>"`: the cpb command for what you mean, shown to copy |
 
 ## Reference
 

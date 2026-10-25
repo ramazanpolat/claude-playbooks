@@ -78,7 +78,7 @@ func routeInherited(origins []envset.Origin, environ []string) []envset.Origin {
 // "anthropic" when its requests go to api.anthropic.com over https, or no
 // base URL is set and none of Bedrock, Vertex and Foundry is switched on or
 // given a base URL; "unknown" otherwise, a base URL from a reference or one
-// that does not parse included. EXPLAIN's route and cpb agent's route check both use it.
+// that does not parse included. EXPLAIN's route and cpb ask's route check both use it.
 func routeEgress(origins []envset.Origin) string {
 	for _, o := range origins {
 		if o.Blocked {

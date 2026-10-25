@@ -4,19 +4,19 @@
 
 ### Added
 
-- **`cpb agent "<request>"`**: ask in plain words for the cpb command that
-  does it. The plan is shown; `--run` shows it and asks before running it.
-  Steps that remove, forget or replace something, touch a credential or the
-  login, or fetch code always ask, `--yes` or not. The question goes to
-  Anthropic's API through the machine's Claude Code login, never through an
-  env set or `DEFAULTS`, with the names of what is installed and no value,
+- **`cpb ask "<request>"`**: ask in plain words for the cpb command that
+  does it. It shows the command, one line on what it does, and `!` lines for
+  what a step removes, forgets or replaces, which credential or login it
+  touches, or what code it fetches; it never runs anything. The question goes
+  to Anthropic's API through the machine's Claude Code login, never through
+  an env set or `DEFAULTS`, with the names of what is installed and no value,
   reference or credential. [Ask in plain words](docs/guides/assistant.md).
-- `CPB_AGENT_LOGIN=token` makes `cpb agent` sign in with cpb's machine token
-  (the long-lived token launches use) instead of Claude Code's own login.
-- `cpb agent` does not run through a proxy: with `HTTP_PROXY`, `HTTPS_PROXY`
-  or `ALL_PROXY` set it stops before anything is sent, and names the variable.
+- `CPB_ASK_LOGIN=token` makes `cpb ask` sign in with cpb's machine token (the
+  long-lived token launches use) instead of Claude Code's own login.
+- `cpb ask` does not run through a proxy: with `HTTP_PROXY`, `HTTPS_PROXY` or
+  `ALL_PROXY` set it stops before anything is sent, and names the variable.
 - A quoted statement that does not parse and does not start with a keyword
-  suggests `cpb agent`.
+  suggests `cpb ask`.
 
 ## [v4.0.0-rc5] -- 2026-10-24
 

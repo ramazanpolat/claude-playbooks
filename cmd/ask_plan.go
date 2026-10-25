@@ -16,29 +16,31 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
-// agentPlan is the model's answer, then cpb's verdict on each step. The
+// askPlan is the model's answer, then cpb's verdict on each step. The
 // model writes answer, steps[].args, steps[].why and notes; everything else
 // is cpb's own, decided from the parsed command and local state.
-type agentPlan struct {
-	Answer string      `json:"answer"`
-	Steps  []agentStep `json:"steps"`
-	Notes  []string    `json:"notes"`
+type askPlan struct {
+	Answer string    `json:"answer"`
+	Steps  []askStep `json:"steps"`
+	Notes  []string  `json:"notes"`
 }
 
-type agentStep struct {
+type askStep struct {
 	Args []string `json:"args"`
 	Why  string   `json:"why"`
 
-	Command   string       `json:"command"`          // as shown and run, after cpb
-	Status    string       `json:"status"`           // ok | placeholder | rejected
-	Reason    string       `json:"reason,omitempty"` // why it is not ok
-	Guards    []agentGuard `json:"guards,omitempty"` // why it always asks first
-	RouteAway bool         `json:"route_away,omitempty"`
-	CPBNotes  []string     `json:"cpb_notes,omitempty"`
+	Command   string     `json:"command"`          // as shown and run, after cpb
+	Status    string     `json:"status"`           // ok | placeholder | rejected
+	Reason    string     `json:"reason,omitempty"` // why it is not ok
+	Guards    []askGuard `json:"guards,omitempty"` // what to know before running it
+	RouteAway bool       `json:"route_away,omitempty"`
+	CPBNotes  []string   `json:"cpb_notes,omitempty"`
 }
 
-// agentGuard is one reason a step always asks before it runs.
-type agentGuard struct {
+// askGuard is one thing a step does that its reader must know before
+// running it: it removes, forgets or replaces something, touches a
+// credential or the login, or fetches code.
+type askGuard struct {
 	Kind string `json:"kind"` // destructive | credential | fetch
 	What string `json:"what"`
 }
@@ -53,31 +55,31 @@ const (
 	guardFetch       = "fetch"
 )
 
-// agentVerbs are the commands a plan may hold besides statements.
-var agentVerbs = map[string]bool{"run": true, "start": true, "play": true, "update": true, "auth": true, "tui": true}
+// askVerbs are the commands a plan may hold besides statements.
+var askVerbs = map[string]bool{"run": true, "start": true, "play": true, "update": true, "auth": true, "tui": true}
 
 var placeholderRe = regexp.MustCompile(`<[^<>\s][^<>]*>`)
 
-// checkAgentPlan decides every step of p against the registry at root.
-func checkAgentPlan(p *agentPlan, root string) {
+// checkAskPlan decides every step of p against the registry at root.
+func checkAskPlan(p *askPlan, root string) {
 	if p.Notes == nil {
 		p.Notes = []string{}
 	}
 	if p.Steps == nil {
-		p.Steps = []agentStep{}
+		p.Steps = []askStep{}
 	}
 	for i := range p.Steps {
-		checkAgentStep(&p.Steps[i], root)
+		checkAskStep(&p.Steps[i], root)
 	}
 }
 
-func checkAgentStep(s *agentStep, root string) {
+func checkAskStep(s *askStep, root string) {
 	args := append([]string(nil), s.Args...)
 	if len(args) > 0 && args[0] == "cpb" {
 		args = args[1:]
 	}
 	s.Args = args
-	s.Command = agentCommandLine(args)
+	s.Command = askCommandLine(args)
 	s.Status = stepOK
 	reject := func(format string, a ...any) {
 		s.Status, s.Reason, s.Guards = stepRejected, fmt.Sprintf(format, a...), nil
@@ -99,19 +101,19 @@ func checkAgentStep(s *agentStep, root string) {
 		return
 	}
 	if grammar.IsStatement(args) {
-		if err := checkAgentStatement(s, args); err != nil {
+		if err := checkAskStatement(s, args); err != nil {
 			reject("%v", err)
 		}
 		return
 	}
 	verb := args[0]
-	if !agentVerbs[verb] {
-		reject("%q is not a command cpb agent proposes", verb)
+	if !askVerbs[verb] {
+		reject("%q is not a command cpb ask proposes", verb)
 		return
 	}
 	switch verb {
 	case "run", "start":
-		if err := checkAgentLaunch(s, args, root); err != nil {
+		if err := checkAskLaunch(s, args, root); err != nil {
 			reject("%v", err)
 		}
 	case "play":
@@ -120,7 +122,7 @@ func checkAgentStep(s *agentStep, root string) {
 			reject("play what? cpb play <ref>")
 			return
 		}
-		s.Guards = append(s.Guards, agentGuard{guardFetch, "fetches the recipe " + ref + " and runs what it says"})
+		s.Guards = append(s.Guards, askGuard{guardFetch, "fetches the recipe " + ref + " and runs what it says"})
 	case "update":
 		name := firstOperand(args[1:])
 		if name == "" {
@@ -131,7 +133,7 @@ func checkAgentStep(s *agentStep, root string) {
 			reject("unknown playbook %q", name)
 			return
 		}
-		s.Guards = append(s.Guards, agentGuard{guardFetch, "fetches playbook " + name + "'s source again and installs what changed"})
+		s.Guards = append(s.Guards, askGuard{guardFetch, "fetches playbook " + name + "'s source again and installs what changed"})
 	case "auth":
 		if len(args) < 2 || args[1] != "status" {
 			reject("only auth status is proposed")
@@ -152,9 +154,9 @@ func firstOperand(args []string) string {
 	return ""
 }
 
-// checkAgentStatement parses a statement step as runStatement would, and
-// records what in it always asks first.
-func checkAgentStatement(s *agentStep, args []string) error {
+// checkAskStatement parses a statement step as runStatement would, and
+// records what in it to know before running it.
+func checkAskStatement(s *askStep, args []string) error {
 	if _, _, ok := describeArgs(args); ok {
 		return nil
 	}
@@ -178,12 +180,12 @@ func checkAgentStatement(s *agentStep, args []string) error {
 	return nil
 }
 
-// statementGuards is what a statement does that always asks first: it
+// statementGuards is what a statement does that its reader must know: it
 // removes, forgets or replaces something, touches a credential or the
 // login, or fetches code.
-func statementGuards(st *grammar.Stmt) []agentGuard {
-	var g []agentGuard
-	add := func(kind, format string, a ...any) { g = append(g, agentGuard{kind, fmt.Sprintf(format, a...)}) }
+func statementGuards(st *grammar.Stmt) []askGuard {
+	var g []askGuard
+	add := func(kind, format string, a ...any) { g = append(g, askGuard{kind, fmt.Sprintf(format, a...)}) }
 	switch st.Verb {
 	case grammar.Drop:
 		switch st.Object {
@@ -216,9 +218,9 @@ func statementGuards(st *grammar.Stmt) []agentGuard {
 	return g
 }
 
-func clauseGuards(st *grammar.Stmt, c grammar.Clause, branch, subdir string) []agentGuard {
-	var g []agentGuard
-	add := func(kind, format string, a ...any) { g = append(g, agentGuard{kind, fmt.Sprintf(format, a...)}) }
+func clauseGuards(st *grammar.Stmt, c grammar.Clause, branch, subdir string) []askGuard {
+	var g []askGuard
+	add := func(kind, format string, a ...any) { g = append(g, askGuard{kind, fmt.Sprintf(format, a...)}) }
 	credKey := func(k string) bool { return k == auth.OAuthTokenEnv || manifest.LooksLikeSecretKey(k) }
 	subject := strings.Join(append(append(append([]string(nil), c.Names...), c.Keys...), nonEmpty(c.Arg)...), " ")
 	switch c.Kind {
@@ -329,10 +331,10 @@ func nonEmpty(s string) []string {
 	return []string{s}
 }
 
-// checkAgentLaunch checks a run or start step: its flags as the launch reads
+// checkAskLaunch checks a run or start step: its flags as the launch reads
 // them (nothing evaluated, no file read), the playbook or directory, and
 // where its requests would go.
-func checkAgentLaunch(s *agentStep, args []string, root string) error {
+func checkAskLaunch(s *askStep, args []string, root string) error {
 	verb := args[0]
 	var sopts sandboxOpts
 	var deleteAfter bool
@@ -386,27 +388,27 @@ func checkAgentLaunch(s *agentStep, args []string, root string) error {
 			}
 			env.Set[k] = v
 			if k == auth.OAuthTokenEnv || manifest.LooksLikeSecretKey(k) {
-				s.Guards = append(s.Guards, agentGuard{guardCredential, "sets " + k + " for this launch"})
+				s.Guards = append(s.Guards, askGuard{guardCredential, "sets " + k + " for this launch"})
 			}
 		case "--block":
 			env.Block = append(env.Block, t.value)
 			if t.value == auth.OAuthTokenEnv || manifest.LooksLikeSecretKey(t.value) {
-				s.Guards = append(s.Guards, agentGuard{guardCredential, "removes " + t.value + " for this launch"})
+				s.Guards = append(s.Guards, askGuard{guardCredential, "removes " + t.value + " for this launch"})
 			}
 		case "--env-file":
 			envFile = true
-			s.Guards = append(s.Guards, agentGuard{guardCredential, "reads variables from " + t.value})
+			s.Guards = append(s.Guards, askGuard{guardCredential, "reads variables from " + t.value})
 		}
 	}
 	if sopts.fresh {
-		s.Guards = append(s.Guards, agentGuard{guardDestructive, "removes the sandbox and creates it again"})
+		s.Guards = append(s.Guards, askGuard{guardDestructive, "removes the sandbox and creates it again"})
 	}
 	if deleteAfter {
 		what := "deletes " + target + " when the session ends"
 		if fi, err := os.Stat(target); err == nil && fi.IsDir() {
 			what = "deletes " + target + " when the session ends: it exists now, and everything in it goes"
 		}
-		s.Guards = append(s.Guards, agentGuard{guardDestructive, what})
+		s.Guards = append(s.Guards, askGuard{guardDestructive, what})
 	}
 	if sopts.host != "" {
 		return nil // runs on that host, with its registry: nothing to judge here
@@ -418,7 +420,7 @@ func checkAgentLaunch(s *agentStep, args []string, root string) error {
 	origins = append(origins, routeInherited(origins, os.Environ())...)
 	if envFile || routeEgress(origins) != "anthropic" {
 		s.RouteAway = true
-		s.CPBNotes = append(s.CPBNotes, "This launch sends its requests away from Anthropic, with the CLAUDE.md files of the directory it starts in and of every directory above it (from below home, ~/CLAUDE.md and ~/.claude/CLAUDE.md too). cpb agent runs it from a new directory outside home, so none of yours go along.")
+		s.CPBNotes = append(s.CPBNotes, "This launch sends its requests away from Anthropic, with the CLAUDE.md files of the directory it starts in and of every directory above it (from below home, ~/CLAUDE.md and ~/.claude/CLAUDE.md too). Run it from a directory outside home, as shown, so none of yours go along.")
 	}
 	if verb == "start" && !sopts.enabled {
 		s.CPBNotes = append(s.CPBNotes, "The new directory shares this machine's login: a /login inside it replaces the machine's login.")
@@ -426,10 +428,10 @@ func checkAgentLaunch(s *agentStep, args []string, root string) error {
 	return nil
 }
 
-// agentHomeMemory lists the CLAUDE.md files a session started in dir would
+// askHomeMemory lists the CLAUDE.md files a session started in dir would
 // take from dir and the directories above it, spelled with ~: what a
 // route-away launch from there would send along.
-func agentHomeMemory(dir string) []string {
+func askHomeMemory(dir string) []string {
 	var out []string
 	for d := dir; ; d = filepath.Dir(d) {
 		for _, f := range []string{"CLAUDE.md", "CLAUDE.local.md", filepath.Join(".claude", "CLAUDE.md")} {
@@ -445,8 +447,8 @@ func agentHomeMemory(dir string) []string {
 
 var bareArg = regexp.MustCompile(`^[A-Za-z0-9_./:=@%+,-]+$`)
 
-// agentCommandLine spells args as one shell line after cpb.
-func agentCommandLine(args []string) string {
+// askCommandLine spells args as one shell line after cpb.
+func askCommandLine(args []string) string {
 	words := []string{"cpb"}
 	for _, a := range args {
 		if bareArg.MatchString(a) {
@@ -458,9 +460,10 @@ func agentCommandLine(args []string) string {
 	return strings.Join(words, " ")
 }
 
-// printAgentPlan shows the plan. neutral is the directory a route-away step
-// runs from: "/tmp" when only shown, the real one when about to run.
-func printAgentPlan(w io.Writer, p *agentPlan, cwd, neutral string) {
+// printAskPlan shows the plan. A step that routes away from Anthropic is
+// shown run from /tmp, outside home; cwd is where the user asked from, to
+// name the CLAUDE.md files a launch from there would send.
+func printAskPlan(w io.Writer, p *askPlan, cwd string) {
 	if a := strings.TrimSpace(p.Answer); a != "" {
 		fmt.Fprintln(w, a)
 	}
@@ -468,7 +471,7 @@ func printAgentPlan(w io.Writer, p *agentPlan, cwd, neutral string) {
 		fmt.Fprintln(w)
 		line := s.Command
 		if s.RouteAway && s.Status == stepOK {
-			line = "(cd " + shellWord(neutral) + " && " + line + ")"
+			line = "(cd /tmp && " + line + ")"
 		}
 		switch s.Status {
 		case stepRejected:
@@ -489,7 +492,7 @@ func printAgentPlan(w io.Writer, p *agentPlan, cwd, neutral string) {
 			fmt.Fprintf(w, "      note: %s\n", n)
 		}
 		if s.RouteAway && s.Status == stepOK {
-			if files := agentHomeMemory(cwd); len(files) > 0 {
+			if files := askHomeMemory(cwd); len(files) > 0 {
 				fmt.Fprintf(w, "      note: from here (%s) it would have sent %s.\n", tildePath(cwd), strings.Join(files, ", "))
 			}
 		}
@@ -501,11 +504,4 @@ func printAgentPlan(w io.Writer, p *agentPlan, cwd, neutral string) {
 			fmt.Fprintf(w, "  - %s\n", n)
 		}
 	}
-}
-
-func shellWord(s string) string {
-	if bareArg.MatchString(s) {
-		return s
-	}
-	return shell.QuoteArg(s)
 }

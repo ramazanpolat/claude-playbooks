@@ -13,12 +13,12 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
 
-// fakeAgentClaude puts a `claude` on PATH that answers cpb agent's call
+// fakeAskClaude puts a `claude` on PATH that answers cpb ask's call
 // with plan (a JSON plan, or a whole result object when it starts with
 // {"is_error"), and records what it received in the returned directory:
 // argv (NUL-separated), env, pwd and stdin. Its paths are written into the
-// script: cpb agent passes the child no variable the test could add.
-func fakeAgentClaude(t *testing.T, plan string) string {
+// script: cpb ask passes the child no variable the test could add.
+func fakeAskClaude(t *testing.T, plan string) string {
 	t.Helper()
 	dir := t.TempDir()
 	rec := filepath.Join(dir, "rec")
@@ -56,28 +56,28 @@ func readRec(t *testing.T, rec, name string) string {
 	return string(data)
 }
 
-// agentRun runs cpb agent with flags, as the command line would.
-func agentRun(t *testing.T, flags map[string]string, request ...string) (string, error) {
+// askRun runs cpb ask with flags, as the command line would.
+func askRun(t *testing.T, flags map[string]string, request ...string) (string, error) {
 	t.Helper()
 	for k, v := range flags {
-		if err := agentCmd.Flags().Set(k, v); err != nil {
+		if err := askCmd.Flags().Set(k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() {
-		for _, k := range []string{"run", "yes", "json"} {
-			agentCmd.Flags().Set(k, "false")
+		for _, k := range []string{"json"} {
+			askCmd.Flags().Set(k, "false")
 		}
-		agentCmd.Flags().Set("model", "")
+		askCmd.Flags().Set("model", "")
 	})
 	var err error
-	out := captureStdout(t, func() { err = runAgent(agentCmd, request) })
+	out := captureStdout(t, func() { err = runAsk(askCmd, request) })
 	return out, err
 }
 
-// agentFixture is a registry with a playbook "work" on env set route-a,
+// askFixture is a registry with a playbook "work" on env set route-a,
 // which routes away, and a plain env set "plain".
-func agentFixture(t *testing.T) string {
+func askFixture(t *testing.T) string {
 	t.Helper()
 	resetCommandTestState(t)
 	aliasTestHome(t)
@@ -105,14 +105,14 @@ REF_KEY = "keychain:CANARY-env-set-ref"
 	return root
 }
 
-const agentListPlan = `{"answer":"Your env sets.","steps":[{"args":["SHOW","ENVS"],"why":"Lists the env sets (v3 called them env profiles)."}],"notes":[]}`
+const askListPlan = `{"answer":"Your env sets.","steps":[{"args":["SHOW","ENVS"],"why":"Lists the env sets (v3 called them env profiles)."}],"notes":[]}`
 
 // The mechanism behind "no value reaches the model": a canary in every value
 // an install can hold, and in the shell environment as a route variable and
 // as an unrelated one, and none of it in what claude receives.
-func TestAgentSendsNoValue(t *testing.T) {
-	agentFixture(t)
-	rec := fakeAgentClaude(t, agentListPlan)
+func TestAskSendsNoValue(t *testing.T) {
+	askFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
 	t.Setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9/CANARY-base-url")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "CANARY-shell-token")
 	t.Setenv("ANTHROPIC_API_KEY", "CANARY-shell-key")
@@ -123,7 +123,7 @@ func TestAgentSendsNoValue(t *testing.T) {
 	writeFile(t, tokenFile, "CANARY-machine-token\n")
 	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
 
-	out, err := agentRun(t, nil, "list the env profiles")
+	out, err := askRun(t, nil, "list the env profiles")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,10 +146,10 @@ func TestAgentSendsNoValue(t *testing.T) {
 	}
 }
 
-func TestAgentCallsClaudeWithoutUserConfig(t *testing.T) {
-	agentFixture(t)
-	rec := fakeAgentClaude(t, agentListPlan)
-	if _, err := agentRun(t, map[string]string{"model": "model-x"}, "list"); err != nil {
+func TestAskCallsClaudeWithoutUserConfig(t *testing.T) {
+	askFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
+	if _, err := askRun(t, map[string]string{"model": "model-x"}, "list"); err != nil {
 		t.Fatal(err)
 	}
 	argv := strings.Split(strings.TrimSuffix(readRec(t, rec, "argv"), "\x00"), "\x00")
@@ -161,7 +161,7 @@ func TestAgentCallsClaudeWithoutUserConfig(t *testing.T) {
 		}
 	}
 	pwd := strings.TrimSpace(readRec(t, rec, "pwd"))
-	if underHome(pwd) || !strings.Contains(filepath.Base(pwd), "cpb-agent-") {
+	if underHome(pwd) || !strings.Contains(filepath.Base(pwd), "cpb-ask-") {
 		t.Errorf("claude ran in %s, want a fresh directory outside home", pwd)
 	}
 	if _, err := os.Stat(pwd); !os.IsNotExist(err) {
@@ -169,14 +169,14 @@ func TestAgentCallsClaudeWithoutUserConfig(t *testing.T) {
 	}
 }
 
-func TestAgentEnvIsAnAllowlist(t *testing.T) {
+func TestAskEnvIsAnAllowlist(t *testing.T) {
 	in := []string{"PATH=/bin", "HOME=/home/user", "LANG=C", "LC_ALL=C", "TERM=xterm",
 		"FOO_TOKEN=x", "AWS_SECRET_ACCESS_KEY=x", "ANTHROPIC_BEDROCK_BASE_URL=x", "ANTHROPIC_UNIX_SOCKET=x",
 		"CLAUDE_CODE_API_KEY_HELPER_TTL_MS=1", "CLAUDE_CONFIG_DIR=/x", "CPB_CONFIG_DIR=/x", "ANTHROPIC_MODEL=m",
 		"ANTHROPIC_AUTH_TOKEN=x", "ANTHROPIC_API_KEY=k", "CLAUDE_CODE_OAUTH_TOKEN=o",
 		"HTTPS_PROXY=http://proxy.example.test:3128", "http_proxy=x", "ALL_PROXY=x", "NO_PROXY=x",
 		"NODE_EXTRA_CA_CERTS=/x.pem", "SSL_CERT_FILE=/x.pem", "SSL_CERT_DIR=/x"}
-	got := strings.Join(agentEnv(in), "\n") + "\n"
+	got := strings.Join(askEnv(in), "\n") + "\n"
 	for _, keep := range []string{"PATH=/bin", "HOME=/home/user", "LANG=C", "LC_ALL=C", "TERM=xterm",
 		"ANTHROPIC_API_KEY=k", "CLAUDE_CODE_OAUTH_TOKEN=o", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"} {
 		if !strings.Contains(got, keep+"\n") {
@@ -191,61 +191,60 @@ func TestAgentEnvIsAnAllowlist(t *testing.T) {
 	}
 	// A key that came with another endpoint belongs to it.
 	for _, route := range []string{"ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=true", "CLAUDE_CODE_USE_FOUNDRY=1"} {
-		got = strings.Join(agentEnv(append(in, route)), "\n")
+		got = strings.Join(askEnv(append(in, route)), "\n")
 		if strings.Contains(got, "ANTHROPIC_API_KEY") || strings.Contains(got, "CLAUDE_CODE_OAUTH_TOKEN") || strings.Contains(got, "ANTHROPIC_BASE_URL") {
 			t.Errorf("with %s the Anthropic credentials went along:\n%s", route, got)
 		}
 	}
-	if got = strings.Join(agentEnv(append(in, "CLAUDE_CODE_USE_FOUNDRY=0")), "\n"); !strings.Contains(got, "ANTHROPIC_API_KEY=k") || strings.Contains(got, "FOUNDRY") {
+	if got = strings.Join(askEnv(append(in, "CLAUDE_CODE_USE_FOUNDRY=0")), "\n"); !strings.Contains(got, "ANTHROPIC_API_KEY=k") || strings.Contains(got, "FOUNDRY") {
 		t.Errorf("a Foundry switch that is off: want the key kept and the switch dropped:\n%s", got)
 	}
-	got = strings.Join(agentEnv(append(in, "ANTHROPIC_BASE_URL=https://api.anthropic.com")), "\n")
+	got = strings.Join(askEnv(append(in, "ANTHROPIC_BASE_URL=https://api.anthropic.com")), "\n")
 	if !strings.Contains(got, "ANTHROPIC_API_KEY=k") || strings.Contains(got, "ANTHROPIC_BASE_URL") {
 		t.Errorf("Anthropic's own endpoint: want the key kept and the variable dropped:\n%s", got)
 	}
 }
 
-func TestAgentNoLogin(t *testing.T) {
-	agentFixture(t)
-	fakeAgentClaude(t, `{"is_error":true,"result":"Invalid API key · Please run /login","subtype":"success"}`)
-	_, err := agentRun(t, nil, "list")
+func TestAskNoLogin(t *testing.T) {
+	askFixture(t)
+	fakeAskClaude(t, `{"is_error":true,"result":"Invalid API key · Please run /login","subtype":"success"}`)
+	_, err := askRun(t, nil, "list")
 	if err == nil || !strings.Contains(err.Error(), "Invalid API key") || !strings.Contains(err.Error(), "/login") {
 		t.Fatalf("got %v, want Claude Code's error and the login hint", err)
 	}
-	fakeAgentClaude(t, `{"is_error":false,"result":"no plan here","subtype":"success"}`)
-	if _, err := agentRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "not a plan") {
+	fakeAskClaude(t, `{"is_error":false,"result":"no plan here","subtype":"success"}`)
+	if _, err := askRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "not a plan") {
 		t.Fatalf("an answer that is not a plan: %v", err)
 	}
 }
 
-func TestAgentUsage(t *testing.T) {
-	agentFixture(t)
-	fakeAgentClaude(t, agentListPlan)
+func TestAskUsage(t *testing.T) {
+	askFixture(t)
+	fakeAskClaude(t, askListPlan)
 	for _, c := range []struct {
 		flags map[string]string
 		args  []string
 	}{
 		{nil, nil},
-		{map[string]string{"yes": "true"}, []string{"list"}},
-		{map[string]string{"json": "true", "run": "true"}, []string{"list"}},
+		{map[string]string{"json": "true"}, []string{"  "}},
 	} {
 		var err error
-		captureStderr(t, func() { _, err = agentRun(t, c.flags, c.args...) })
+		captureStderr(t, func() { _, err = askRun(t, c.flags, c.args...) })
 		if code, ok := exitCode(err); !ok || code != 2 {
 			t.Errorf("%v %v: %v, want exit 2", c.flags, c.args, err)
 		}
 	}
 }
 
-func step(t *testing.T, root string, args ...string) agentStep {
+func step(t *testing.T, root string, args ...string) askStep {
 	t.Helper()
-	s := agentStep{Args: args}
-	checkAgentStep(&s, root)
+	s := askStep{Args: args}
+	checkAskStep(&s, root)
 	return s
 }
 
-func TestAgentChecksSteps(t *testing.T) {
-	root := agentFixture(t)
+func TestAskChecksSteps(t *testing.T) {
+	root := askFixture(t)
 	for _, c := range []struct {
 		args   []string
 		status string
@@ -256,7 +255,7 @@ func TestAgentChecksSteps(t *testing.T) {
 		{[]string{"ALTER", "PLAYBOOK", "work", "ALLOW", "TOOL", "Bash(git diff *)"}, stepOK, ""},
 		{[]string{"ALTER", "PLAYBOOK", "work", "SET", "model", "=", "claude-sonnet-5-5"}, stepOK, ""},
 		{[]string{"SHOW", "ENVZ"}, stepRejected, ""},
-		{[]string{"cat", "/home/user/.claude-playbooks/.env-sets/route-a.toml"}, stepRejected, "not a command cpb agent proposes"},
+		{[]string{"cat", "/home/user/.claude-playbooks/.env-sets/route-a.toml"}, stepRejected, "not a command cpb ask proposes"},
 		{[]string{"self-update"}, stepRejected, "not a command"},
 		{[]string{"--playbooks-dir", "/x", "SHOW", "ENVS"}, stepRejected, "not a flag"},
 		{[]string{"run", "nosuch"}, stepRejected, `unknown playbook "nosuch"`},
@@ -272,8 +271,8 @@ func TestAgentChecksSteps(t *testing.T) {
 	}
 }
 
-func TestAgentGuards(t *testing.T) {
-	root := agentFixture(t)
+func TestAskGuards(t *testing.T) {
+	root := askFixture(t)
 	for _, c := range []struct {
 		args []string
 		kind string
@@ -292,7 +291,7 @@ func TestAgentGuards(t *testing.T) {
 		{[]string{"ALTER", "PLAYBOOK", "work", "ADD", "PLUGIN", "reviewer@team"}, guardFetch, "reviewer@team"},
 		{[]string{"play", "github:example/recipes/rev.cpb@v1"}, guardFetch, "github:example/recipes/rev.cpb@v1"},
 		{[]string{"update", "work"}, guardFetch, "work"},
-		{[]string{"start", "--delete", "/tmp/cpb-agent-test-scratch"}, guardDestructive, "deletes /tmp/cpb-agent-test-scratch"},
+		{[]string{"start", "--delete", "/tmp/cpb-ask-test-scratch"}, guardDestructive, "deletes /tmp/cpb-ask-test-scratch"},
 		{[]string{"run", "--block", "CLAUDE_CODE_OAUTH_TOKEN", "work"}, guardCredential, "CLAUDE_CODE_OAUTH_TOKEN"},
 		{[]string{"APPLY", "team.cpb"}, guardDestructive, "team.cpb"},
 	} {
@@ -317,16 +316,16 @@ func TestAgentGuards(t *testing.T) {
 	}
 }
 
-func TestAgentRouteAway(t *testing.T) {
-	root := agentFixture(t)
-	away := step(t, root, "start", "--env-set", "route-a", "--delete", "/tmp/cpb-agent-test-scratch")
+func TestAskRouteAway(t *testing.T) {
+	root := askFixture(t)
+	away := step(t, root, "start", "--env-set", "route-a", "--delete", "/tmp/cpb-ask-test-scratch")
 	if !away.RouteAway || away.Status != stepOK {
 		t.Fatalf("a start on route-a: %+v, want route_away", away)
 	}
 	if run := step(t, root, "run", "work"); !run.RouteAway {
 		t.Errorf("run work (on route-a): %+v, want route_away", run)
 	}
-	home := step(t, root, "start", "--env-set", "plain", "/tmp/cpb-agent-test-scratch")
+	home := step(t, root, "start", "--env-set", "plain", "/tmp/cpb-ask-test-scratch")
 	if home.RouteAway {
 		t.Errorf("a start on plain: %+v, want Anthropic", home)
 	}
@@ -335,7 +334,7 @@ func TestAgentRouteAway(t *testing.T) {
 	}
 	// The caller's environment counts, as at launch.
 	t.Setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9/v1")
-	if s := step(t, root, "start", "/tmp/cpb-agent-test-scratch"); !s.RouteAway {
+	if s := step(t, root, "start", "/tmp/cpb-ask-test-scratch"); !s.RouteAway {
 		t.Errorf("an exported base URL: %+v, want route_away", s)
 	}
 
@@ -346,131 +345,14 @@ func TestAgentRouteAway(t *testing.T) {
 	writeFile(t, filepath.Join(homeDir, "CLAUDE.md"), "x")
 	proj := filepath.Join(homeDir, "proj")
 	writeFile(t, filepath.Join(proj, "CLAUDE.md"), "x")
-	p := &agentPlan{Steps: []agentStep{away}}
+	p := &askPlan{Steps: []askStep{away}}
 	var b strings.Builder
-	printAgentPlan(&b, p, proj, "/tmp")
+	printAskPlan(&b, p, proj)
 	out := b.String()
-	for _, want := range []string{"(cd /tmp && cpb start --env-set route-a --delete /tmp/cpb-agent-test-scratch)", "~/proj/CLAUDE.md", "~/CLAUDE.md", "! deletes"} {
+	for _, want := range []string{"(cd /tmp && cpb start --env-set route-a --delete /tmp/cpb-ask-test-scratch)", "~/proj/CLAUDE.md", "~/CLAUDE.md", "! deletes"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("shown plan lacks %q:\n%s", want, out)
 		}
-	}
-}
-
-// fakeAgentSelf replaces the cpb that runs a step with a recorder; code is
-// the exit code it returns for steps whose first word is fail.
-func fakeAgentSelf(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	log := filepath.Join(dir, "log")
-	script := `#!/bin/sh
-printf '%s|%s\n' "$(pwd)" "$*" >> "` + log + `"
-[ "$1" = "fail" ] && exit 7
-exit 0
-`
-	self := filepath.Join(dir, "cpb")
-	if err := os.WriteFile(self, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	oldSelf, oldTTY, oldConfirm := agentSelf, agentTTY, agentConfirm
-	agentSelf = func() (string, error) { return self, nil }
-	t.Cleanup(func() { agentSelf, agentTTY, agentConfirm = oldSelf, oldTTY, oldConfirm })
-	return log
-}
-
-func plan(t *testing.T, root string, steps ...[]string) *agentPlan {
-	t.Helper()
-	p := &agentPlan{}
-	for _, a := range steps {
-		p.Steps = append(p.Steps, agentStep{Args: a, Why: "w"})
-	}
-	checkAgentPlan(p, root)
-	return p
-}
-
-func runPlanQuiet(t *testing.T, p *agentPlan, yes bool) error {
-	t.Helper()
-	var err error
-	captureStderr(t, func() { captureStdout(t, func() { err = runAgentPlan(p, yes, "/") }) })
-	return err
-}
-
-func TestAgentRunConfirms(t *testing.T) {
-	root := agentFixture(t)
-	log := fakeAgentSelf(t)
-	ran := func() string { data, _ := os.ReadFile(log); return string(data) }
-	asked := 0
-	answer := false
-	agentConfirm = func(string) bool { asked++; return answer }
-
-	// No terminal: nothing runs without --yes, and a guarded plan never.
-	agentTTY = func() bool { return false }
-	if err := runPlanQuiet(t, plan(t, root, []string{"SHOW", "ENVS"}), false); exitOf(err) != 1 {
-		t.Errorf("no terminal, no --yes: %v, want exit 1", err)
-	}
-	if err := runPlanQuiet(t, plan(t, root, []string{"DROP", "ENV", "plain"}), true); exitOf(err) != 1 {
-		t.Errorf("no terminal, a guarded step, --yes: %v, want exit 1", err)
-	}
-	if ran() != "" || asked != 0 {
-		t.Fatalf("ran %q, asked %d times, without a terminal", ran(), asked)
-	}
-	if err := runPlanQuiet(t, plan(t, root, []string{"SHOW", "ENVS"}), true); err != nil || !strings.Contains(ran(), "|SHOW ENVS") {
-		t.Fatalf("no terminal, --yes, nothing guarded: %v, ran %q", err, ran())
-	}
-
-	// A terminal: --yes skips the question only when nothing is guarded.
-	agentTTY = func() bool { return true }
-	asked = 0
-	if err := runPlanQuiet(t, plan(t, root, []string{"DROP", "ENV", "plain"}), true); exitOf(err) != 1 || asked != 1 {
-		t.Errorf("a declined guarded step under --yes: %v, asked %d, want exit 1 after one question", err, asked)
-	}
-	if strings.Contains(ran(), "DROP") {
-		t.Fatalf("a declined step ran: %q", ran())
-	}
-	answer = true
-	if err := runPlanQuiet(t, plan(t, root, []string{"DROP", "ENV", "plain"}), false); err != nil || !strings.Contains(ran(), "|DROP ENV plain") {
-		t.Fatalf("a confirmed step: %v, ran %q", err, ran())
-	}
-
-	// A step that cannot run stops the plan before anything runs.
-	before := ran()
-	if err := runPlanQuiet(t, plan(t, root, []string{"SHOW", "ENVS"}, []string{"cat", "x"}), true); exitOf(err) != 1 || ran() != before {
-		t.Errorf("a rejected step: %v, ran %q", err, ran())
-	}
-}
-
-func TestAgentRunStepsInOrder(t *testing.T) {
-	root := agentFixture(t)
-	log := fakeAgentSelf(t)
-	agentTTY = func() bool { return true }
-	agentConfirm = func(string) bool { return true }
-
-	p := plan(t, root, []string{"SHOW", "ENVS"}, []string{"start", "--env-set", "route-a", "/tmp/cpb-agent-test-scratch"}, []string{"SHOW", "PLAYBOOKS"})
-	if err := runPlanQuiet(t, p, false); err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(func() string { d, _ := os.ReadFile(log); return string(d) }()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("ran %q", lines)
-	}
-	cwd, _ := os.Getwd()
-	if !strings.HasPrefix(lines[0], cwd+"|") {
-		t.Errorf("a plain step ran in %q, want the caller's directory %s", lines[0], cwd)
-	}
-	dir, _, _ := strings.Cut(lines[1], "|")
-	if underHome(dir) || !strings.Contains(dir, "cpb-agent-") {
-		t.Errorf("a route-away step ran in %s, want a fresh directory outside home", dir)
-	}
-
-	// A failing step stops the plan and passes its code.
-	os.Remove(log)
-	p = plan(t, root, []string{"SHOW", "ENVS"}, []string{"SHOW", "PLAYBOOKS"})
-	p.Steps[0].Args = []string{"fail"}
-	if err := runPlanQuiet(t, p, false); exitOf(err) != 7 {
-		t.Errorf("a failing step: %v, want its exit code 7", err)
-	}
-	if d, _ := os.ReadFile(log); strings.Contains(string(d), "PLAYBOOKS") {
-		t.Errorf("the step after a failure ran: %s", d)
 	}
 }
 
@@ -486,21 +368,21 @@ func exitOf(err error) int {
 
 // The reference the model gets must say what this version does: its grammar
 // is SPEC.md's, and every example in it parses.
-func TestAgentReferenceMatchesSpec(t *testing.T) {
+func TestAskReferenceMatchesSpec(t *testing.T) {
 	spec, err := os.ReadFile(filepath.Join("..", "SPEC.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	block := regexp.MustCompile("(?s)### Grammar\n\n```\n(.*?)\n```")
 	want := block.FindSubmatch(spec)
-	got := regexp.MustCompile("(?s)The grammar, from cpb's specification:\n\n```\n(.*?)\n```").FindStringSubmatch(agentReference)
+	got := regexp.MustCompile("(?s)The grammar, from cpb's specification:\n\n```\n(.*?)\n```").FindStringSubmatch(askReference)
 	if want == nil || got == nil {
 		t.Fatal("grammar block not found in SPEC.md or the reference")
 	}
 	if got[1] != string(want[1]) {
 		t.Fatal("the reference's grammar block differs from SPEC.md's: copy it again")
 	}
-	examples := regexp.MustCompile("(?s)Examples:\n\n```\n(.*?)\n```").FindStringSubmatch(agentReference)
+	examples := regexp.MustCompile("(?s)Examples:\n\n```\n(.*?)\n```").FindStringSubmatch(askReference)
 	if examples == nil {
 		t.Fatal("no examples block")
 	}
@@ -512,8 +394,8 @@ func TestAgentReferenceMatchesSpec(t *testing.T) {
 			continue
 		}
 		n++
-		s := agentStep{Args: words[1:]}
-		if err := checkAgentStatement(&s, words[1:]); err != nil {
+		s := askStep{Args: words[1:]}
+		if err := checkAskStatement(&s, words[1:]); err != nil {
 			t.Errorf("%s: %v", line, err)
 		}
 	}
@@ -556,14 +438,14 @@ func shellWords(t *testing.T, line string) []string {
 	return words
 }
 
-func TestAgentJSONOutput(t *testing.T) {
-	agentFixture(t)
-	fakeAgentClaude(t, `{"answer":"a","steps":[{"args":["DROP","ENV","plain"],"why":"w"},{"args":["cat","x"],"why":"w"}],"notes":["n"]}`)
-	out, err := agentRun(t, map[string]string{"json": "true"}, "drop plain")
+func TestAskJSONOutput(t *testing.T) {
+	askFixture(t)
+	fakeAskClaude(t, `{"answer":"a","steps":[{"args":["DROP","ENV","plain"],"why":"w"},{"args":["cat","x"],"why":"w"}],"notes":["n"]}`)
+	out, err := askRun(t, map[string]string{"json": "true"}, "drop plain")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var p agentPlan
+	var p askPlan
 	if err := json.Unmarshal([]byte(out), &p); err != nil {
 		t.Fatalf("%v:\n%s", err, out)
 	}
@@ -572,30 +454,30 @@ func TestAgentJSONOutput(t *testing.T) {
 	}
 }
 
-func TestQuotedWordsSuggestAgent(t *testing.T) {
+func TestQuotedWordsSuggestAsk(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
 	err := runStatement([]string{"print every env profile"})
-	if err == nil || !strings.Contains(err.Error(), "cpb agent 'print every env profile'") {
+	if err == nil || !strings.Contains(err.Error(), "cpb ask 'print every env profile'") {
 		t.Fatalf("%v", err)
 	}
-	if err := runStatement([]string{"SHOW ENVZ"}); err == nil || strings.Contains(err.Error(), "cpb agent") {
+	if err := runStatement([]string{"SHOW ENVZ"}); err == nil || strings.Contains(err.Error(), "cpb ask") {
 		t.Fatalf("a mistyped statement: %v, want no assistant hint", err)
 	}
 }
 
-// CPB_AGENT_LOGIN=token: cpb's machine token signs in, in the child's
+// CPB_ASK_LOGIN=token: cpb's machine token signs in, in the child's
 // environment only; it replaces any Anthropic key or token exported there.
-func TestAgentTokenLogin(t *testing.T) {
-	agentFixture(t)
-	rec := fakeAgentClaude(t, agentListPlan)
+func TestAskTokenLogin(t *testing.T) {
+	askFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
 	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
 	writeFile(t, tokenFile, "CANARY-machine-token\n")
 	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
-	t.Setenv("CPB_AGENT_LOGIN", "token")
+	t.Setenv("CPB_ASK_LOGIN", "token")
 	t.Setenv("ANTHROPIC_API_KEY", "other-key")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "other-token")
-	if _, err := agentRun(t, nil, "list"); err != nil {
+	if _, err := askRun(t, nil, "list"); err != nil {
 		t.Fatal(err)
 	}
 	env := readRec(t, rec, "env")
@@ -613,7 +495,7 @@ func TestAgentTokenLogin(t *testing.T) {
 			cfg = v
 		}
 	}
-	if cfg == "" || underHome(cfg) || !strings.Contains(cfg, "cpb-agent-") {
+	if cfg == "" || underHome(cfg) || !strings.Contains(cfg, "cpb-ask-") {
 		t.Errorf("token mode's config directory: %q, want a fresh one outside home", cfg)
 	} else if _, err := os.Stat(cfg); !os.IsNotExist(err) {
 		t.Errorf("token mode's config directory is left behind: %s", cfg)
@@ -627,7 +509,7 @@ func TestAgentTokenLogin(t *testing.T) {
 	// No machine token: refused, nothing sent.
 	os.Remove(filepath.Join(rec, "argv"))
 	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "none"))
-	if _, err := agentRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "no machine token") || !strings.Contains(err.Error(), "claude setup-token") {
+	if _, err := askRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "no machine token") || !strings.Contains(err.Error(), "claude setup-token") {
 		t.Errorf("no token file: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
@@ -635,40 +517,40 @@ func TestAgentTokenLogin(t *testing.T) {
 	}
 
 	// An unknown mode is a usage error.
-	t.Setenv("CPB_AGENT_LOGIN", "keychain")
+	t.Setenv("CPB_ASK_LOGIN", "keychain")
 	var err error
-	captureStderr(t, func() { _, err = agentRun(t, nil, "list") })
+	captureStderr(t, func() { _, err = askRun(t, nil, "list") })
 	if exitOf(err) != 2 {
-		t.Errorf("CPB_AGENT_LOGIN=keychain: %v, want exit 2", err)
+		t.Errorf("CPB_ASK_LOGIN=keychain: %v, want exit 2", err)
 	}
 }
 
 // One gate, on the final environment of the claude child, whatever built
 // it: an endpoint, a provider switch, a proxy or a CA change refuses, named
 // by its variable and never its value.
-func TestAgentGate(t *testing.T) {
+func TestAskGate(t *testing.T) {
 	base := []string{"PATH=/bin", "HOME=/home/user", "CLAUDE_CODE_OAUTH_TOKEN=t", "CLAUDE_CONFIG_DIR=/tmp/x"}
-	if err := agentGate(base); err != nil {
+	if err := askGate(base); err != nil {
 		t.Errorf("a clean environment: %v", err)
 	}
 	for _, kv := range []string{"ANTHROPIC_BASE_URL=https://api.anthropic.com", "ANTHROPIC_FOUNDRY_BASE_URL=v", "ANTHROPIC_BEDROCK_BASE_URL=v",
 		"ANTHROPIC_UNIX_SOCKET=v", "CLAUDE_CODE_USE_BEDROCK=0", "CLAUDE_CODE_USE_VERTEX=1", "CLAUDE_CODE_USE_FOUNDRY=1",
 		"HTTPS_PROXY=v", "http_proxy=v", "ALL_PROXY=v", "no_proxy=v", "NODE_EXTRA_CA_CERTS=v", "SSL_CERT_FILE=v", "NODE_TLS_REJECT_UNAUTHORIZED=0"} {
 		k, _, _ := strings.Cut(kv, "=")
-		err := agentGate(append(base, kv))
+		err := askGate(append(base, kv))
 		if err == nil || !strings.Contains(err.Error(), k) || !strings.Contains(err.Error(), "nothing was sent") {
 			t.Errorf("%s: %v, want a refusal naming it", k, err)
 		}
 	}
 }
 
-// Behind a proxy cpb agent refuses before anything is sent: started without
+// Behind a proxy cpb ask refuses before anything is sent: started without
 // it, Claude Code would only retry. NO_PROXY alone is no proxy.
-func TestAgentProxyRefused(t *testing.T) {
-	agentFixture(t)
-	rec := fakeAgentClaude(t, agentListPlan)
+func TestAskProxyRefused(t *testing.T) {
+	askFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
 	t.Setenv("HTTPS_PROXY", "http://proxy.example.test:3128")
-	_, err := agentRun(t, nil, "list")
+	_, err := askRun(t, nil, "list")
 	if err == nil || !strings.Contains(err.Error(), "does not run through a proxy") || !strings.Contains(err.Error(), "env -u HTTPS_PROXY") || strings.Contains(err.Error(), "proxy.example.test") {
 		t.Fatalf("behind a proxy: %v", err)
 	}
@@ -677,22 +559,22 @@ func TestAgentProxyRefused(t *testing.T) {
 	}
 	t.Setenv("HTTPS_PROXY", "")
 	t.Setenv("NO_PROXY", "localhost")
-	if _, err := agentRun(t, nil, "list"); err != nil {
+	if _, err := askRun(t, nil, "list"); err != nil {
 		t.Fatalf("NO_PROXY alone: %v", err)
 	}
 }
 
 // A claude that does not answer is given up on, with a message.
-func TestAgentTimeout(t *testing.T) {
-	agentFixture(t)
+func TestAskTimeout(t *testing.T) {
+	askFixture(t)
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "claude"), "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nexec sleep 5\n")
 	os.Chmod(filepath.Join(dir, "claude"), 0o755)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	old := agentTimeout
-	agentTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { agentTimeout = old })
-	if _, err := agentRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "did not answer within") {
+	old := askTimeout
+	askTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { askTimeout = old })
+	if _, err := askRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "did not answer within") {
 		t.Fatalf("a silent claude: %v", err)
 	}
 }

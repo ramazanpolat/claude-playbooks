@@ -93,7 +93,7 @@ func runStatement(args []string) error {
 		}
 		// Plain words in quotes are a question, not a statement.
 		if f := strings.Fields(args[0]); len(args) == 1 && len(f) > 1 && !grammar.IsStatement(f[:1]) {
-			return fmt.Errorf("%w\nNot a statement? Ask in plain words: cpb agent %s", err, shell.QuoteArg(args[0]))
+			return fmt.Errorf("%w\nNot a statement? Ask in plain words: cpb ask %s", err, shell.QuoteArg(args[0]))
 		}
 		return err
 	}

@@ -2781,15 +2781,15 @@ a screen that shows sessions is up. Everything else is re-read on `r`.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
-### `cpb agent [--run [--yes]] [--json] [--model <model>] "<request>"`
+### `cpb ask [--json] [--model <model>] "<request>"`
 
-`cpb agent` answers a request in plain words with the cpb command or
-commands that do it. A model proposes the plan; cpb checks every step,
-decides which ones always ask first, shows it, and runs it only under
-`--run` after a yes. The guide is [Ask in plain words](docs/guides/assistant.md).
+`cpb ask` answers a request in plain words with the cpb command or commands
+that do it. A model proposes the plan; cpb checks every step and shows it.
+It never runs a step: the user copies what they decide to run. The guide is
+[Ask in plain words](docs/guides/assistant.md).
 
 ```
-$ cpb agent "list the env profiles"
+$ cpb ask "list the env profiles"
 Your env sets.
 
   cpb SHOW ENVS
@@ -2825,8 +2825,8 @@ holds no key. The child process is built so that nothing else can join in:
   directory (`/tmp` when that one is under home), removed afterwards. Claude
   Code takes the `CLAUDE.md` files of a session's working directory and of
   every directory above it, so none of home's can join.
-- **The model:** `--model`, else `CPB_AGENT_MODEL`, else `sonnet`.
-- **Signing in, `CPB_AGENT_LOGIN`:**
+- **The model:** `--model`, else `CPB_ASK_MODEL`, else `sonnet`.
+- **Signing in, `CPB_ASK_LOGIN`:**
   - `claude`, the default: Claude Code's own login on this machine. cpb
     reads no credential and sets no `CLAUDE_CONFIG_DIR`.
   - `token`: cpb's machine token, the long-lived token every launch injects
@@ -2847,12 +2847,12 @@ holds no key. The child process is built so that nothing else can join in:
   `NODE_TLS_REJECT_UNAUTHORIZED`) in it refuses the call, naming the
   variable and never its value, and nothing is sent.
 - **No proxy:** a proxy and an added certificate authority together could
-  read the question and the credential, so cpb agent does not run through
+  read the question and the credential, so cpb ask does not run through
   one. When the caller's environment sets `HTTP_PROXY`, `HTTPS_PROXY` or
   `ALL_PROXY` (either case), it refuses before anything is sent, with exit 1:
-  `cpb agent does not run through a proxy yet, and HTTPS_PROXY is set here:
+  `cpb ask does not run through a proxy yet, and HTTPS_PROXY is set here:
   nothing was sent. If Anthropic's API is reachable without it, run: env -u
-  HTTPS_PROXY cpb agent ...`. (Started without the proxy, Claude Code would
+  HTTPS_PROXY cpb ask ...`. (Started without the proxy, Claude Code would
   only retry an unreachable API for minutes.) `NO_PROXY` alone is no proxy.
 - **A time limit:** a call that has not answered after 3 minutes is
   stopped: `Claude Code did not answer within 3m0s`, exit 1.
@@ -2880,10 +2880,11 @@ step:
 | Status | When | Shown |
 |---|---|---|
 | `ok` | a statement that parses, or `run`, `start`, `play`, `update`, `auth status` or `tui` whose flags and names check out | the command, its line, its `!` lines and notes |
-| `placeholder` | an argument holds `<…>` | the command and `fill in <…> first`; never runs |
-| `rejected` | anything else: another program, a global flag, `self-update`, `self-uninstall`, `completion`, a statement that does not parse, a launch or `update` naming an unknown playbook or env set | `not proposed: <reason>`; never runs |
+| `placeholder` | an argument holds `<…>` | the command and `fill in <…> first` |
+| `rejected` | anything else: another program, a global flag, `self-update`, `self-uninstall`, `completion`, a statement that does not parse, a launch or `update` naming an unknown playbook or env set | `not proposed: <reason>` |
 
-**What always asks first** (`!` lines), decided by cpb from the parsed step:
+**What to know before running a step** (`!` lines), decided by cpb from the
+parsed step, never by the model:
 
 - **destructive:** `DROP PLAYBOOK`, `DROP ENV`, `CREATE OR REPLACE ENV`,
   `APPLY` without `--dry-run`; the clauses `UNSET`, `BLOCK`, `RESET`, `DROP …`,
@@ -2898,40 +2899,24 @@ step:
 **A launch that routes away.** A `run` or `start` step whose route, judged
 as EXPLAIN judges it (`DEFAULTS`, the playbook's env sets, the step's launch
 flags and the caller's environment), is not Anthropic's is shown as
-`(cd /tmp && cpb …)` and runs from a new directory outside home, so no
-`CLAUDE.md` of the caller's directory or home goes to that endpoint; when the
-caller's directory has such files, the plan names them. A `start` without a
+`(cd /tmp && cpb …)`: run from outside home, no `CLAUDE.md` of the caller's
+directory or of home goes to that endpoint. When the caller's directory has
+such files, the plan names them. A `start` without a
 sandbox notes that its directory shares the machine's login, so a `/login`
 in it replaces the machine's.
 
-**Show or run.**
+**Nothing runs.** cpb ask shows the plan and stops; it has no way to run a
+step. `--json` prints the checked plan instead: each step's `args`, `why`,
+`command`, `status`, `reason`, `guards` as `{"kind", "what"}`, `route_away`
+and `cpb_notes`.
 
-- Without `--run` the plan is shown and nothing runs.
-- `--run` shows it exactly as it will run and asks `Run it? [y/N]` on a
-  terminal. Without a terminal it refuses, unless `--yes` is given and no
-  step is marked `!`. A plan with a `!` step always asks on a terminal,
-  `--yes` or not, and never runs without one.
-- A plan with a step that is not `ok` never runs.
-- Steps run in order, each as this cpb binary with the step's arguments (and
-  `--playbooks-dir` when one was given), never through a shell, with the
-  terminal attached, in the caller's directory except a step that routes
-  away. The first failure stops the plan and names the steps that ran.
-- `--json` prints the checked plan (each step's `args`, `why`, `command`,
-  `status`, `reason`, `guards` as `{"kind", "what"}`, `route_away`,
-  `cpb_notes`) and runs nothing; it cannot be combined with `--run`.
-
-**Exit codes:** 0 shown, or run with every step succeeding; 1 refused,
-declined, or no plan from Claude; 2 a usage error (no request, `--yes`
-without `--run`, `--json` with `--run`). A failing step's own exit code
-passes through.
+**Exit codes:** 0 shown; 1 refused (a proxy, `CPB_ASK_LOGIN=token` without a
+machine token, the gate) or no plan from Claude; 2 a usage error (no request,
+an unknown `CPB_ASK_LOGIN`).
 
 `cpb "<plain words>"` is read as a quoted statement; when it does not parse
 and its first word is not a statement keyword, the error adds `Not a
-statement? Ask in plain words: cpb agent '<plain words>'`.
-
-`agent` the command and `agent` the playbook property (`SET agent =
-'<agent>'`, see *Plugins and the agent*) are unrelated: the property is only
-ever written inside a statement.
+statement? Ask in plain words: cpb ask '<plain words>'`.
 
 ### `cpb auth status [name...]`
 
@@ -3323,8 +3308,8 @@ These have no flag equivalent:
 | `CPB_OAUTH_TOKEN_FILE` | Overrides the long-lived token file read in step 2 of the authentication decision. Default `~/.config/claude-code/oauth-token`. |
 | `CPB_CONFIG_DIR` | The config directory `run` and launcher dispatch bind, in place of the playbook's install directory. Absolute or `~`-prefixed; empty means unset; never created. Consumed -- stripped from the child's environment after every layer. A **reserved key**: a manifest, env set, `--env` or `--env-file` that declares it is refused. Refused together with a sandboxed launch. A bare inherited `CLAUDE_CONFIG_DIR` is discarded. See *Caller-supplied config directory*. |
 | `CPB_SECRET_HELPER` | The secret helper command for this process, over the one `ALTER DEFAULTS SET secret_helper` stored (see *Secrets (optional)*). |
-| `CPB_AGENT_LOGIN` | How `cpb agent` signs in: `claude` (the default, Claude Code's own login) or `token` (cpb's machine token, into the child's environment only, with a fresh config directory). See *`cpb agent`*. |
-| `CPB_AGENT_MODEL` | The model `cpb agent` asks when `--model` is not given. Default `sonnet`. |
+| `CPB_ASK_LOGIN` | How `cpb ask` signs in: `claude` (the default, Claude Code's own login) or `token` (cpb's machine token, into the child's environment only, with a fresh config directory). See *`cpb ask`*. |
+| `CPB_ASK_MODEL` | The model `cpb ask` asks when `--model` is not given. Default `sonnet`. |
 | `CPB_CLICKHOUSE` | The `clickhouse` binary `SELECT` pipes a query to, instead of `clickhouse` or `ch` on `PATH` (see *SELECT*). |
 | `XDG_STATE_HOME` | Parent of the launcher receipt directory (`<XDG_STATE_HOME>/cpb/launchers`). Default `~/.local/state`. |
 | `CPB_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam. |

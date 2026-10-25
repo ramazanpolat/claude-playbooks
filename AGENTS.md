@@ -32,9 +32,8 @@ preparing a release, read [Before any release](#before-any-release) first.
   requests, or a secret, may go there, and an agent must not agree for them.
   To inspect a recipe, use `cpb play <ref> --dry-run --json` (or `--check`),
   which runs nothing.
-- **`cpb agent` is for the human.** Drive cpb with the grammar, not with
-  `cpb agent`: each question spends a model call on the human's login. Never
-  answer its `Run it?` for them.
+- **`cpb ask` is for the human.** Drive cpb with the grammar, not with
+  `cpb ask`: each question spends a model call on the human's login.
 - **Do not edit** an installed playbook's files by hand; change state
   through `cpb` statements. Do not touch `~/.claude` (the machine's own
   Claude Code config) unless the human asks; then use

@@ -16,11 +16,11 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 )
 
-// How cpb agent asks (SPEC.md, "cpb agent"): Claude Code's own `claude -p`,
+// How cpb ask asks (SPEC.md, "cpb ask"): Claude Code's own `claude -p`,
 // on the machine's login, always on Anthropic's API. The guarantees are
 // built into the child process, not asked of the model:
 //
-//   - its environment is an allowlist (agentEnv), so no route variable,
+//   - its environment is an allowlist (askEnv), so no route variable,
 //     today's or a future one, reaches it, and no env set, DEFAULTS or
 //     playbook layer applies;
 //   - user settings and user memory stay out (--setting-sources project), and
@@ -29,13 +29,13 @@ import (
 //   - it gets no tools, no MCP server and no slash command, so the model can
 //     read nothing beyond what cpb hands it.
 
-//go:embed agent_reference.md
-var agentReference string
+//go:embed ask_reference.md
+var askReference string
 
-const defaultAgentModel = "sonnet"
+const defaultAskModel = "sonnet"
 
-// agentPlanSchema is the plan the model must return (--json-schema).
-const agentPlanSchema = `{"type":"object","additionalProperties":false,` +
+// askPlanSchema is the plan the model must return (--json-schema).
+const askPlanSchema = `{"type":"object","additionalProperties":false,` +
 	`"properties":{"answer":{"type":"string"},` +
 	`"steps":{"type":"array","items":{"type":"object","additionalProperties":false,` +
 	`"properties":{"args":{"type":"array","items":{"type":"string"}},"why":{"type":"string"}},` +
@@ -43,68 +43,68 @@ const agentPlanSchema = `{"type":"object","additionalProperties":false,` +
 	`"notes":{"type":"array","items":{"type":"string"}}},` +
 	`"required":["answer","steps","notes"]}`
 
-// agentClaudeArgs are the flags of the one claude -p call.
-func agentClaudeArgs(model string) []string {
+// askClaudeArgs are the flags of the one claude -p call.
+func askClaudeArgs(model string) []string {
 	return []string{"-p",
 		"--setting-sources", "project",
 		"--strict-mcp-config",
 		"--tools", "",
 		"--disable-slash-commands",
 		"--no-session-persistence",
-		"--system-prompt", agentReference,
-		"--json-schema", agentPlanSchema,
+		"--system-prompt", askReference,
+		"--json-schema", askPlanSchema,
 		"--output-format", "json",
 		"--model", model,
 	}
 }
 
-// agentEnvKeep is what the child keeps of the environment: what Claude Code
+// askEnvKeep is what the child keeps of the environment: what Claude Code
 // needs to run and to reach its login (the Linux keyring session included).
 // Everything else is dropped, a proxy and an added CA among them: together
-// they could read the question and the credential (agentGate).
-var agentEnvKeep = map[string]bool{
+// they could read the question and the credential (askGate).
+var askEnvKeep = map[string]bool{
 	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true,
 	"TERM": true, "LANG": true, "TMPDIR": true,
 	"XDG_RUNTIME_DIR": true, "DBUS_SESSION_BUS_ADDRESS": true,
 }
 
-// agentEnvLogin are Anthropic credentials the child keeps only when the
+// askEnvLogin are Anthropic credentials the child keeps only when the
 // environment routes to Anthropic: a key that came with another endpoint
 // belongs to that endpoint.
-var agentEnvLogin = map[string]bool{"ANTHROPIC_API_KEY": true, auth.OAuthTokenEnv: true}
+var askEnvLogin = map[string]bool{"ANTHROPIC_API_KEY": true, auth.OAuthTokenEnv: true}
 
-// agentRoutesToAnthropic reports whether a claude started with environ
+// askRoutesToAnthropic reports whether a claude started with environ
 // sends its requests to Anthropic, by EXPLAIN's egress rule.
-func agentRoutesToAnthropic(environ []string) bool {
+func askRoutesToAnthropic(environ []string) bool {
 	return routeEgress(routeInherited(nil, environ)) == "anthropic"
 }
 
-// agentEnv builds the child's environment from environ by allowlist.
-func agentEnv(environ []string) []string {
-	anthropic := agentRoutesToAnthropic(environ)
+// askEnv builds the child's environment from environ by allowlist.
+func askEnv(environ []string) []string {
+	anthropic := askRoutesToAnthropic(environ)
 	out := []string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"}
 	for _, kv := range environ {
 		k, _, ok := strings.Cut(kv, "=")
 		if !ok {
 			continue
 		}
-		if agentEnvKeep[k] || strings.HasPrefix(k, "LC_") || (anthropic && agentEnvLogin[k]) {
+		if askEnvKeep[k] || strings.HasPrefix(k, "LC_") || (anthropic && askEnvLogin[k]) {
 			out = append(out, kv)
 		}
 	}
 	return out
 }
 
-// agentNeutralDir makes a fresh directory outside home: the system temp
+// askNeutralDir makes a fresh directory outside home: the system temp
 // dir, or /tmp when that one is under home. Claude Code loads the CLAUDE.md
 // files of a session's working directory and its ancestors, home's among
 // them when it starts below home.
-func agentNeutralDir() (string, error) {
+func askNeutralDir() (string, error) {
 	for _, base := range []string{os.TempDir(), "/tmp"} {
 		if underHome(base) {
 			continue
 		}
-		dir, err := os.MkdirTemp(base, "cpb-agent-")
+		dir, err := os.MkdirTemp(base, "cpb-ask-")
 		if err != nil {
 			return "", err
 		}
@@ -129,29 +129,29 @@ func underHome(path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// How cpb agent signs in, CPB_AGENT_LOGIN: "claude", the default, is Claude
+// How cpb ask signs in, CPB_ASK_LOGIN: "claude", the default, is Claude
 // Code's own login on this machine, and cpb reads no credential; "token" is
 // cpb's machine token, the long-lived token every launch injects
 // (auth.OAuthTokenFile), put into the child's environment and nowhere else.
 const (
-	agentLoginEnv    = "CPB_AGENT_LOGIN"
-	agentLoginClaude = "claude"
-	agentLoginToken  = "token"
+	askLoginEnv    = "CPB_ASK_LOGIN"
+	askLoginClaude = "claude"
+	askLoginToken  = "token"
 )
 
-// agentLogin reads CPB_AGENT_LOGIN; anything else is a usage error.
-func agentLogin() (string, error) {
-	switch v := os.Getenv(agentLoginEnv); v {
-	case "", agentLoginClaude:
-		return agentLoginClaude, nil
-	case agentLoginToken:
-		return agentLoginToken, nil
+// askLogin reads CPB_ASK_LOGIN; anything else is a usage error.
+func askLogin() (string, error) {
+	switch v := os.Getenv(askLoginEnv); v {
+	case "", askLoginClaude:
+		return askLoginClaude, nil
+	case askLoginToken:
+		return askLoginToken, nil
 	default:
-		return "", fmt.Errorf("%s=%q: use %s (the default) or %s", agentLoginEnv, v, agentLoginClaude, agentLoginToken)
+		return "", fmt.Errorf("%s=%q: use %s (the default) or %s", askLoginEnv, v, askLoginClaude, askLoginToken)
 	}
 }
 
-// agentLoginEnvFor adds what the login mode needs to the child's
+// askLoginEnvFor adds what the login mode needs to the child's
 // environment. In token mode the machine token replaces any Anthropic key
 // or token the environment carried, so it is the one that signs in.
 //
@@ -159,31 +159,31 @@ func agentLogin() (string, error) {
 // configDir, empty and fresh: with no stored login in it, a token that is
 // refused cannot fall back to the machine's login. Neither mode falls back
 // to the other.
-func agentLoginEnvFor(mode string, env []string, configDir string) ([]string, error) {
-	if mode != agentLoginToken {
+func askLoginEnvFor(mode string, env []string, configDir string) ([]string, error) {
+	if mode != askLoginToken {
 		return env, nil
 	}
 	f := auth.OAuthTokenFile()
 	data, err := os.ReadFile(f)
 	tok := strings.TrimSpace(string(data))
 	if f == "" || err != nil || tok == "" {
-		return nil, fmt.Errorf("%s=%s, but there is no machine token at %s: create it with claude setup-token (see docs/guides/authentication.md), or unset %s", agentLoginEnv, agentLoginToken, tildePath(f), agentLoginEnv)
+		return nil, fmt.Errorf("%s=%s, but there is no machine token at %s: create it with claude setup-token (see docs/guides/authentication.md), or unset %s", askLoginEnv, askLoginToken, tildePath(f), askLoginEnv)
 	}
 	out := make([]string, 0, len(env)+1)
 	for _, kv := range env {
-		if k, _, _ := strings.Cut(kv, "="); !agentEnvLogin[k] {
+		if k, _, _ := strings.Cut(kv, "="); !askEnvLogin[k] {
 			out = append(out, kv)
 		}
 	}
 	return append(out, "CLAUDE_CONFIG_DIR="+configDir, auth.OAuthTokenEnv+"="+tok), nil
 }
 
-// agentGate is the one Anthropic-only gate, on the final environment of the
+// askGate is the one Anthropic-only gate, on the final environment of the
 // claude child, whatever login mode built it: an endpoint, a provider
 // switch, a proxy or a trust-store change in it refuses the call, named by
 // its variable, never its value. The allowlist already drops all of them;
 // the gate is what holds if that ever changes.
-func agentGate(env []string) error {
+func askGate(env []string) error {
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
 		u := strings.ToUpper(k)
@@ -193,17 +193,17 @@ func agentGate(env []string) error {
 			u == "CLAUDE_CODE_USE_BEDROCK", u == "CLAUDE_CODE_USE_VERTEX", u == "CLAUDE_CODE_USE_FOUNDRY",
 			u == "HTTP_PROXY", u == "HTTPS_PROXY", u == "ALL_PROXY", u == "NO_PROXY",
 			u == "NODE_EXTRA_CA_CERTS", u == "SSL_CERT_FILE", u == "SSL_CERT_DIR", u == "NODE_TLS_REJECT_UNAUTHORIZED":
-			return fmt.Errorf("cpb agent asks Anthropic only, directly: %s would be in Claude Code's environment, so nothing was sent", k)
+			return fmt.Errorf("cpb ask asks Anthropic only, directly: %s would be in Claude Code's environment, so nothing was sent", k)
 		}
 	}
 	return nil
 }
 
-// agentProxy names the proxy variable the caller's environment sets, ""
-// when none. cpb agent does not run through a proxy: Claude Code started
+// askProxy names the proxy variable the caller's environment sets, ""
+// when none. cpb ask does not run through a proxy: Claude Code started
 // without it would only retry until it gave up, so the call is refused
 // before anything is sent.
-func agentProxy(environ []string) string {
+func askProxy(environ []string) string {
 	for _, kv := range environ {
 		k, v, _ := strings.Cut(kv, "=")
 		switch strings.ToUpper(k) {
@@ -216,48 +216,48 @@ func agentProxy(environ []string) string {
 	return ""
 }
 
-// agentTimeout bounds the one call: Claude Code retries an unreachable API
+// askTimeout bounds the one call: Claude Code retries an unreachable API
 // for minutes.
-var agentTimeout = 3 * time.Minute
+var askTimeout = 3 * time.Minute
 
-// agentLoginHint ends every failure of the call.
-const agentLoginHint = "cpb agent asks Claude through your Claude Code login: run claude and /login, or set ANTHROPIC_API_KEY"
+// askLoginHint ends every failure of the call.
+const askLoginHint = "cpb ask asks Claude through your Claude Code login: run claude and /login, or set ANTHROPIC_API_KEY"
 
-// askAgent sends the installed state and the request, and returns the plan.
-func askAgent(model, login string, state *agentContext, request string) (*agentPlan, error) {
-	if p := agentProxy(os.Environ()); p != "" {
-		return nil, fmt.Errorf("cpb agent does not run through a proxy yet, and %s is set here: nothing was sent. If Anthropic's API is reachable without it, run: env -u %s cpb agent ...", p, p)
+// askAsk sends the installed state and the request, and returns the plan.
+func askViaClaude(model, login string, state *askContext, request string) (*askPlan, error) {
+	if p := askProxy(os.Environ()); p != "" {
+		return nil, fmt.Errorf("cpb ask does not run through a proxy yet, and %s is set here: nothing was sent. If Anthropic's API is reachable without it, run: env -u %s cpb ask ...", p, p)
 	}
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		return nil, errors.New("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
-	dir, err := agentNeutralDir()
+	dir, err := askNeutralDir()
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
 	configDir := ""
-	if login == agentLoginToken {
-		if configDir, err = agentNeutralDir(); err != nil {
+	if login == askLoginToken {
+		if configDir, err = askNeutralDir(); err != nil {
 			return nil, err
 		}
 		defer os.RemoveAll(configDir)
 	}
-	env, err := agentLoginEnvFor(login, agentEnv(os.Environ()), configDir)
+	env, err := askLoginEnvFor(login, askEnv(os.Environ()), configDir)
 	if err != nil {
 		return nil, err
 	}
-	if err := agentGate(env); err != nil {
+	if err := askGate(env); err != nil {
 		return nil, err
 	}
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), askTimeout)
 	defer cancel()
-	c := exec.CommandContext(ctx, path, agentClaudeArgs(model)...)
+	c := exec.CommandContext(ctx, path, askClaudeArgs(model)...)
 	c.Dir = dir
 	c.Env = env
 	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\nRequest: " + request + "\n")
@@ -265,13 +265,13 @@ func askAgent(model, login string, state *agentContext, request string) (*agentP
 	c.Stdout, c.Stderr = &stdout, &stderr
 	runErr := c.Run()
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("Claude Code did not answer within %s: nothing came back. %s", agentTimeout, agentLoginHint)
+		return nil, fmt.Errorf("Claude Code did not answer within %s: nothing came back. %s", askTimeout, askLoginHint)
 	}
-	return parseAgentAnswer(stdout.Bytes(), stderr.String(), runErr)
+	return parseAskAnswer(stdout.Bytes(), stderr.String(), runErr)
 }
 
-// parseAgentAnswer reads claude -p --output-format json's result object.
-func parseAgentAnswer(stdout []byte, stderr string, runErr error) (*agentPlan, error) {
+// parseAskAnswer reads claude -p --output-format json's result object.
+func parseAskAnswer(stdout []byte, stderr string, runErr error) (*askPlan, error) {
 	var res struct {
 		IsError          bool            `json:"is_error"`
 		Result           string          `json:"result"`
@@ -285,20 +285,20 @@ func parseAgentAnswer(stdout []byte, stderr string, runErr error) (*agentPlan, e
 		if why == "" && runErr != nil {
 			why = runErr.Error()
 		}
-		return nil, fmt.Errorf("Claude Code did not answer (%s). %s", why, agentLoginHint)
+		return nil, fmt.Errorf("Claude Code did not answer (%s). %s", why, askLoginHint)
 	}
 	if res.IsError || runErr != nil {
 		why := firstLine(res.Result)
 		if why == "" {
 			why = firstLine(stderr)
 		}
-		return nil, fmt.Errorf("Claude Code answered with an error: %s. %s", why, agentLoginHint)
+		return nil, fmt.Errorf("Claude Code answered with an error: %s. %s", why, askLoginHint)
 	}
 	raw := res.StructuredOutput
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(res.Result)
 	}
-	var p agentPlan
+	var p askPlan
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, errors.New("the answer was not a plan; ask again, perhaps in other words")
 	}

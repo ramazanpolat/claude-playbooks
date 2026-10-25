@@ -11,23 +11,23 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
-// agentContext is everything cpb agent tells the model about this machine,
+// askContext is everything cpb ask tells the model about this machine,
 // besides the request. It holds names and classes only: no field can carry
 // a variable's value, a reference, a description or a credential, and the
 // value-bearing types (manifests, env sets) never cross into it. A test
 // plants a canary in every value an install can hold and checks that none
 // reaches claude.
-type agentContext struct {
-	CPBVersion        string          `json:"cpb_version"`
-	ClaudeCodeVersion string          `json:"claude_code_version,omitempty"`
-	PlaybooksRoot     string          `json:"playbooks_root"`
-	Playbooks         []agentPlaybook `json:"playbooks"`
-	EnvSets           []agentEnvSet   `json:"env_sets"`
-	Defaults          []string        `json:"defaults"`
-	Unreadable        []string        `json:"unreadable_playbooks,omitempty"`
+type askContext struct {
+	CPBVersion        string        `json:"cpb_version"`
+	ClaudeCodeVersion string        `json:"claude_code_version,omitempty"`
+	PlaybooksRoot     string        `json:"playbooks_root"`
+	Playbooks         []askPlaybook `json:"playbooks"`
+	EnvSets           []askEnvSet   `json:"env_sets"`
+	Defaults          []string      `json:"defaults"`
+	Unreadable        []string      `json:"unreadable_playbooks,omitempty"`
 }
 
-type agentPlaybook struct {
+type askPlaybook struct {
 	Name            string   `json:"name"`
 	Launcher        string   `json:"launcher,omitempty"`
 	EnvSets         []string `json:"env_sets,omitempty"`
@@ -35,20 +35,20 @@ type agentPlaybook struct {
 	Route           string   `json:"route"`
 }
 
-type agentEnvSet struct {
+type askEnvSet struct {
 	Name       string `json:"name"`
 	InDefaults bool   `json:"in_defaults,omitempty"`
 	Route      string `json:"route"`
 }
 
-// buildAgentContext reads the registry under root by name.
-func buildAgentContext(root string) (*agentContext, error) {
-	actx := &agentContext{
+// buildAskContext reads the registry under root by name.
+func buildAskContext(root string) (*askContext, error) {
+	actx := &askContext{
 		CPBVersion:        Version,
 		ClaudeCodeVersion: claudeVersion(),
 		PlaybooksRoot:     tildePath(root),
-		Playbooks:         []agentPlaybook{},
-		EnvSets:           []agentEnvSet{},
+		Playbooks:         []askPlaybook{},
+		EnvSets:           []askEnvSet{},
 		Defaults:          []string{},
 	}
 	pbs, bad, err := playbook.Scan(root)
@@ -57,7 +57,7 @@ func buildAgentContext(root string) (*agentContext, error) {
 	}
 	dir := envset.Dir(root)
 	for _, pb := range pbs {
-		ap := agentPlaybook{Name: pb.Name, Launcher: pb.Alias()}
+		ap := askPlaybook{Name: pb.Name, Launcher: pb.Alias()}
 		var env *manifest.Env
 		if m := pb.Manifest; m != nil {
 			env = m.Env
@@ -66,7 +66,7 @@ func buildAgentContext(root string) (*agentContext, error) {
 		if env != nil {
 			ap.EnvSets = append([]string(nil), env.Sets...)
 		}
-		ap.Route = agentRoute(dir, env)
+		ap.Route = askRoute(dir, env)
 		actx.Playbooks = append(actx.Playbooks, ap)
 	}
 	for _, u := range bad {
@@ -78,7 +78,7 @@ func buildAgentContext(root string) (*agentContext, error) {
 	for _, n := range defaults {
 		inDefaults[n] = true
 	}
-	// The env sets by file name: their content is read only by agentRoute,
+	// The env sets by file name: their content is read only by askRoute,
 	// which returns a class.
 	entries, _ := os.ReadDir(dir)
 	var names []string
@@ -89,16 +89,16 @@ func buildAgentContext(root string) (*agentContext, error) {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		actx.EnvSets = append(actx.EnvSets, agentEnvSet{Name: n, InDefaults: inDefaults[n],
-			Route: agentRoute(dir, &manifest.Env{Sets: []string{n}})})
+		actx.EnvSets = append(actx.EnvSets, askEnvSet{Name: n, InDefaults: inDefaults[n],
+			Route: askRoute(dir, &manifest.Env{Sets: []string{n}})})
 	}
 	return actx, nil
 }
 
-// agentRoute is where a launch with env sends its requests, as a class:
+// askRoute is where a launch with env sends its requests, as a class:
 // "anthropic", "away" (another endpoint, or one set by a reference), or
 // "unknown" (a layer that does not resolve). DEFAULTS count, as at launch.
-func agentRoute(dir string, env *manifest.Env) string {
+func askRoute(dir string, env *manifest.Env) string {
 	origins, err := envset.Explain(dir, env)
 	if err != nil {
 		return "unknown"
