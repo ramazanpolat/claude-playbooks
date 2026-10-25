@@ -38,6 +38,10 @@ session counts.
 CPB_ASK_LOGIN=token signs in with cpb's machine token (the long-lived token
 every launch uses) instead of Claude Code's own login.
 
+A request that holds a credential (KEY=value with a secret-looking key, a
+token-shaped word, a URL with a password) is refused before anything is
+sent: name the key instead, and leave the value out.
+
 A line marked ! says what a step removes, forgets or replaces, which
 credential or login it touches, or what code it fetches: read it before you
 run the step.
@@ -69,6 +73,9 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	}
 	if request == "" {
 		return askUsage(`ask in plain words: cpb ask [<playbook>] "<request>"`)
+	}
+	if found := askRequestCredential(request); found != "" {
+		return fmt.Errorf("the request looks like it holds a credential (%s): nothing was sent. Leave the value out and name it instead, e.g. <token>", found)
 	}
 	login, err := askLogin()
 	if err != nil {

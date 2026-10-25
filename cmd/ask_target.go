@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
-	"github.com/ramazanpolat/claude-playbooks/internal/envset"
-	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -57,11 +55,7 @@ func askSplitArgs(root string, args []string) (*playbook.Playbook, string, error
 // askTargetSignIn decides how a question addressed to pb signs in: as a
 // launch of pb would, on Anthropic only, with no fallback to another login.
 func askTargetSignIn(root string, pb *playbook.Playbook) (askSignIn, error) {
-	var env *manifest.Env
-	if pb.Manifest != nil {
-		env = pb.Manifest.Env
-	}
-	if route := askRoute(envset.Dir(root), env); route != "anthropic" {
+	if route := askPlaybookRoute(pb.Path); route != "anthropic" {
 		return askSignIn{}, fmt.Errorf("%s sends its requests away from Anthropic (route %s), and cpb ask asks Anthropic only: nothing was sent. Ask without naming it: cpb ask \"<request>\"", pb.Name, route)
 	}
 	rep := auth.Inspect(pb.Name, pb.Path, time.Now())

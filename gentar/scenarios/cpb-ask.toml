@@ -97,3 +97,9 @@ contains = "ask-tool-ok"
 # alone.
 command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; rm -f "$HOME/ask-argv"; out=$(cpb ask work "how many of your sessions are live?" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "sends its requests away from Anthropic" && test ! -e "$HOME/ask-argv" || { echo "routed playbook not refused"; exit 1; }; cpb CREATE PLAYBOOK plainpb SET launcher = '' >/dev/null && cpb ask plainpb "how many of your sessions are live?" >/dev/null || { echo plain-failed; exit 1; }; grep -q '"addressed":"plainpb"' "$HOME/ask-stdin" && grep -qx -- "--allowedTools" "$HOME/ask-argv" && grep -qx "mcp__cpb__query" "$HOME/ask-argv" && grep -q 'ask-tool' "$HOME/ask-argv" && echo ask-addressed-ok'''
 contains = "ask-addressed-ok"
+
+[[verify.commands]]
+# A credential typed into the request is refused before claude runs,
+# named by its key and never echoed.
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; rm -f "$HOME/ask-argv"; out=$(cpb ask "create env set x with ANTHROPIC_AUTH_TOKEN=FAKE0arena0token0value" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "ANTHROPIC_AUTH_TOKEN=..." && ! echo "$out" | grep -qF FAKE0arena && test ! -e "$HOME/ask-argv" && echo ask-credential-refused-ok'''
+contains = "ask-credential-refused-ok"

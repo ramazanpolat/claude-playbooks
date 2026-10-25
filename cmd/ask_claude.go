@@ -51,7 +51,7 @@ const askMaxTurns = "8"
 // tools stay off.
 func askClaudeArgs(model, self, root string) []string {
 	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"cpb": map[string]any{
-		"type": "stdio", "command": self, "args": []string{"--playbooks-dir", root, "ask-tool"},
+		"type": "stdio", "command": askEnvCommand(), "args": askToolArgs(self, root, os.Environ()),
 	}}})
 	return []string{"-p",
 		"--setting-sources", "project",
@@ -67,6 +67,35 @@ func askClaudeArgs(model, self, root string) []string {
 		"--output-format", "json",
 		"--model", model,
 	}
+}
+
+// askToolEnvKeep is what the tool server starts with. Claude Code hands an
+// MCP server its whole environment, credentials included, so the server is
+// started through env -i with only these: what reading the registry needs,
+// and the two cpb settings that change how a login is judged.
+var askToolEnvKeep = []string{"HOME", "PATH", "USER", "LOGNAME", "LANG", "TMPDIR", "CPB_OAUTH_TOKEN_FILE", "CPB_ISOLATED_LOGIN"}
+
+// askEnvCommand is env, by its absolute path.
+func askEnvCommand() string {
+	if p, err := exec.LookPath("env"); err == nil && filepath.IsAbs(p) {
+		return p
+	}
+	return "/usr/bin/env"
+}
+
+// askToolArgs starts the tool server with a clean environment: env's -i,
+// then the kept variables from environ, then cpb ask-tool.
+func askToolArgs(self, root string, environ []string) []string {
+	args := []string{"-i"}
+	for _, k := range askToolEnvKeep {
+		for _, kv := range environ {
+			if key, v, ok := strings.Cut(kv, "="); ok && key == k && v != "" {
+				args = append(args, kv)
+				break
+			}
+		}
+	}
+	return append(args, self, "--playbooks-dir", root, "ask-tool")
 }
 
 // askSelf is this cpb binary, the tool's command; a variable for tests.
@@ -118,13 +147,17 @@ func askEnv(environ []string) []string {
 	return out
 }
 
-// askNeutralDir makes a fresh directory outside home: the system temp
-// dir, or /tmp when that one is under home. Claude Code loads the CLAUDE.md
-// files of a session's working directory and its ancestors, home's among
-// them when it starts below home.
+// askNeutralBases are where a neutral directory may go, in order; a
+// variable for tests.
+var askNeutralBases = func() []string { return []string{os.TempDir(), "/tmp"} }
+
+// askNeutralDir makes a fresh directory outside home and outside any
+// instruction tree: the system temp dir, else /tmp, else none. Claude Code
+// loads the CLAUDE.md files of a session's working directory and of every
+// directory above it, so no directory above it may hold one.
 func askNeutralDir() (string, error) {
-	for _, base := range []string{os.TempDir(), "/tmp"} {
-		if underHome(base) {
+	for _, base := range askNeutralBases() {
+		if underHome(base) || askInstructionTree(base) != "" {
 			continue
 		}
 		dir, err := os.MkdirTemp(base, "cpb-ask-")
@@ -133,7 +166,29 @@ func askNeutralDir() (string, error) {
 		}
 		return dir, nil
 	}
-	return "", errors.New("no temporary directory outside your home directory: set TMPDIR to one")
+	return "", errors.New("no temporary directory outside your home and outside every CLAUDE.md tree: set TMPDIR to one")
+}
+
+// askInstructionTree names the first instruction file or directory at or
+// above dir, symlinks resolved: CLAUDE.md, CLAUDE.local.md or .claude/.
+// "" when there is none.
+func askInstructionTree(dir string) string {
+	d, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		d = filepath.Clean(dir)
+	}
+	for {
+		for _, name := range []string{"CLAUDE.md", "CLAUDE.local.md", ".claude"} {
+			if _, err := os.Lstat(filepath.Join(d, name)); err == nil {
+				return filepath.Join(d, name)
+			}
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return ""
+		}
+		d = parent
+	}
 }
 
 // underHome reports whether path is home or below it, symlinks resolved.

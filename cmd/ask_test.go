@@ -33,7 +33,7 @@ func fakeAskClaude(t *testing.T, plan string) string {
 		t.Fatal(err)
 	}
 	script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo "2.1.310 (Claude Code)"; exit 0; fi
+if [ "$1" = "--version" ]; then env > "` + rec + `/version-env"; echo "2.1.310 (Claude Code)"; exit 0; fi
 printf '%s\0' "$@" > "` + rec + `/argv"
 env > "` + rec + `/env"
 pwd > "` + rec + `/pwd"
@@ -135,6 +135,9 @@ func TestAskSendsNoValue(t *testing.T) {
 	if strings.Contains(readRec(t, rec, "env"), "CLAUDE_CONFIG_DIR=") {
 		t.Error("the default login got a config directory: it is the machine's own")
 	}
+	if data, err := os.ReadFile(filepath.Join(rec, "version-env")); err == nil && strings.Contains(string(data), "CANARY") {
+		t.Errorf("claude --version ran with the caller's environment:\n%s", data)
+	}
 	stdin := readRec(t, rec, "stdin")
 	for _, want := range []string{`"name":"work"`, `"name":"route-a"`, `"route":"away"`, `"name":"plain"`, `"route":"anthropic"`, "Request: list the env profiles"} {
 		if !strings.Contains(stdin, want) {
@@ -156,7 +159,7 @@ func TestAskCallsClaudeWithoutUserConfig(t *testing.T) {
 	joined := strings.Join(argv, " ")
 	for _, want := range []string{"-p", "--setting-sources project", "--strict-mcp-config", "--tools  --disable-slash-commands",
 		"--no-session-persistence", "--output-format json", "--model model-x", "--json-schema {",
-		"--allowedTools mcp__cpb__query", "--max-turns 8", `"args":["--playbooks-dir",`, `"ask-tool"]`} {
+		"--allowedTools mcp__cpb__query", "--max-turns 8", `"args":["-i",`, `"--playbooks-dir",`, `"ask-tool"]`} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("claude's arguments lack %q: %q", want, argv)
 		}
@@ -675,5 +678,182 @@ func TestAskAddressedPlaybook(t *testing.T) {
 	}
 	if stdin := readRec(t, rec, "stdin"); strings.Contains(stdin, "addressed") || !strings.Contains(stdin, "Request: home") {
 		t.Errorf("one word:\n%s", stdin)
+	}
+}
+
+// The tool server starts with a clean environment: Claude Code hands an MCP
+// server its whole environment, the token included, so cpb starts it
+// through env -i. The fake claude starts the configured command as Claude
+// Code does, with its own environment; the server's stand-in records the
+// environment it began with.
+func TestAskToolServerCleanEnv(t *testing.T) {
+	askFixture(t)
+	dir := t.TempDir()
+	rec := filepath.Join(dir, "tool-env")
+	recorder := filepath.Join(dir, "cpb-recorder")
+	writeFile(t, recorder, "#!/bin/sh\nenv > "+rec+"\n")
+	os.Chmod(recorder, 0o755)
+	old := askSelf
+	askSelf = func() (string, error) { return recorder, nil }
+	t.Cleanup(func() { askSelf = old })
+	answer := `{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":` + askListPlan + `}`
+	writeFile(t, filepath.Join(dir, "answer"), answer)
+	script := `#!/bin/sh
+[ "$1" = "--version" ] && exit 0
+cat > /dev/null
+python3 -c 'import json,sys,subprocess,os
+a=sys.argv[1:]; c=json.loads(a[a.index("--mcp-config")+1])["mcpServers"]["cpb"]
+subprocess.run([c["command"]]+c["args"], input=b"", env=os.environ)' "$@"
+cat "` + filepath.Join(dir, "answer") + `"
+`
+	writeFile(t, filepath.Join(dir, "claude"), script)
+	os.Chmod(filepath.Join(dir, "claude"), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	writeFile(t, tokenFile, "CANARY-tool-token\n")
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
+	t.Setenv("CPB_ASK_LOGIN", "token")
+	if _, err := askRun(t, nil, "list"); err != nil {
+		t.Fatal(err)
+	}
+	env := readRec(t, filepath.Dir(rec), "tool-env")
+	if strings.Contains(env, "CANARY") {
+		t.Errorf("the tool server began with the token:\n%s", env)
+	}
+	keep := map[string]bool{}
+	for _, k := range askToolEnvKeep {
+		keep[k] = true
+	}
+	for _, kv := range strings.Split(strings.TrimSpace(env), "\n") {
+		k, _, _ := strings.Cut(kv, "=")
+		if !keep[k] && k != "PWD" && k != "SHLVL" && k != "_" && k != "OLDPWD" {
+			t.Errorf("the tool server began with %s", k)
+		}
+	}
+	if !strings.Contains(env, "HOME=") || !strings.Contains(env, "PATH=") {
+		t.Errorf("the tool server lacks HOME or PATH:\n%s", env)
+	}
+}
+
+// The neutral directory is outside home and outside every instruction tree:
+// a base with CLAUDE.md, CLAUDE.local.md or .claude/ above it is passed
+// over, and with no good base the call is refused.
+func TestAskNeutralDirOutsideInstructionTrees(t *testing.T) {
+	askFixture(t)
+	if tree := askInstructionTree(t.TempDir()); tree != "" {
+		t.Skipf("this machine's temp directory is inside an instruction tree (%s): the test needs one outside", tree)
+	}
+	withMD := t.TempDir()
+	writeFile(t, filepath.Join(withMD, "CLAUDE.md"), "x")
+	badMD := filepath.Join(withMD, "tmp")
+	withLocal := t.TempDir()
+	writeFile(t, filepath.Join(withLocal, "CLAUDE.local.md"), "x")
+	withDir := t.TempDir()
+	os.MkdirAll(filepath.Join(withDir, ".claude"), 0o755)
+	badDir := filepath.Join(withDir, "a", "b")
+	good := t.TempDir()
+	for _, d := range []string{badMD, badDir} {
+		os.MkdirAll(d, 0o755)
+	}
+	old := askNeutralBases
+	t.Cleanup(func() { askNeutralBases = old })
+	askNeutralBases = func() []string { return []string{badMD, withLocal, badDir, good} }
+	dir, err := askNeutralDir()
+	if err != nil || filepath.Dir(dir) != good {
+		t.Fatalf("got %q %v, want a directory in %s", dir, err, good)
+	}
+	os.RemoveAll(dir)
+	askNeutralBases = func() []string { return []string{badMD, badDir} }
+	if _, err := askNeutralDir(); err == nil || !strings.Contains(err.Error(), "CLAUDE.md tree") {
+		t.Fatalf("no good base: %v", err)
+	}
+}
+
+// A request that holds a credential is refused before anything is sent,
+// naming the key or the kind and never the value. Synthetic values only.
+func TestAskRequestCredential(t *testing.T) {
+	for req, want := range map[string]string{
+		"create env set x with ANTHROPIC_AUTH_TOKEN=FAKE0token0value0for0tests": "ANTHROPIC_AUTH_TOKEN=...",
+		"set MY_API_KEY: abcdefghijklmnop":                                      "MY_API_KEY=...",
+		"use sk-ant-api03-FAKEFAKEFAKEFAKE0000 for router":                      "an Anthropic key",
+		"my key is sk-proj-FAKE0000FAKE0000FAKE0000":                            "an API key",
+		"token ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE1234":                        "a GitHub token",
+		"aws AKIAFAKEFAKEFAKEFAKE":                                              "an AWS access key",
+		"jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.ZmFrZXNpZ25hdHVyZQ":       "a JSON web token",
+		"proxy https://bob:FAKEpass@proxy.example.test/":                        "a URL with a password",
+		"the key 0123456789abcdef0123456789abcdef0123":                          "a long key-shaped word",
+	} {
+		if got := askRequestCredential(req); !strings.Contains(got, want) {
+			t.Errorf("%q: %q, want %q", req, got, want)
+		}
+	}
+	for _, req := range []string{
+		"list my env sets", "SET VAR MAX_THINKING_TOKENS=8000", "ANTHROPIC_AUTH_TOKEN FROM keychain:router-token",
+		"set ANTHROPIC_AUTH_TOKEN=<token> on router", "ANTHROPIC_AUTH_TOKEN=... on router", "ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1",
+		"start in /home/user/projects/my-long-project-name-for-the-team", "resume 11111111-1111-4111-8111-111111111111",
+		"play x --sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"update to commit 0123456789abcdef0123456789abcdef01234567", "how many of your sessions are live?",
+	} {
+		if got := askRequestCredential(req); got != "" {
+			t.Errorf("%q: refused as %q", req, got)
+		}
+	}
+	// End to end: refused, the value never echoed, claude never runs.
+	askFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
+	_, err := askRun(t, nil, "create env set x with ANTHROPIC_AUTH_TOKEN=FAKE0token0value0for0tests")
+	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_AUTH_TOKEN=...") || strings.Contains(err.Error(), "FAKE0token") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Fatal("claude ran with a credential in the request")
+	}
+}
+
+// Launch steps are judged as the launch resolves them.
+func TestAskLaunchRoutePrecedence(t *testing.T) {
+	root := askFixture(t)
+	// A step that names its own playbooks root is not proposed: the launch
+	// would take it out before reading --delete.
+	if s := step(t, root, "start", "/tmp/cpb-ask-test-x", "--playbooks-dir="+root, "--delete"); s.Status != stepRejected {
+		t.Errorf("--playbooks-dir in a step: %+v", s)
+	}
+	// One-off layers go above the playbook's own block, in order.
+	mustStmt(t, "CREATE PLAYBOOK direct SET launcher = ''")
+	mustStmt(t, "ALTER PLAYBOOK direct SET VAR ANTHROPIC_BASE_URL=https://api.anthropic.com")
+	if s := step(t, root, "run", "direct"); s.RouteAway {
+		t.Errorf("direct alone: %+v", s)
+	}
+	if s := step(t, root, "run", "--env-set", "route-a", "direct"); !s.RouteAway {
+		t.Errorf("--env-set route-a over direct's own Anthropic URL: %+v", s)
+	}
+	if s := step(t, root, "run", "--env", "ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "--block", "ANTHROPIC_BASE_URL", "direct"); s.RouteAway {
+		t.Errorf("--env then --block: %+v", s)
+	}
+	if s := step(t, root, "run", "--block", "ANTHROPIC_BASE_URL", "--env", "ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "direct"); !s.RouteAway {
+		t.Errorf("--block then --env: %+v", s)
+	}
+	// start reads the directory's own manifest.
+	sdir := filepath.Join(t.TempDir(), "routed")
+	writeFile(t, filepath.Join(sdir, ".playbook"), "[env.set]\nANTHROPIC_BASE_URL = \"http://127.0.0.1:9/v1\"\n")
+	if s := step(t, root, "start", sdir); !s.RouteAway {
+		t.Errorf("start on a routed directory: %+v", s)
+	}
+	// run honours the caller's CPB_CONFIG_DIR.
+	t.Setenv("CPB_CONFIG_DIR", sdir)
+	if s := step(t, root, "run", "direct"); !s.RouteAway {
+		t.Errorf("run under CPB_CONFIG_DIR: %+v", s)
+	}
+	t.Setenv("CPB_CONFIG_DIR", "")
+}
+
+// A launch after a step that changes the registry is shown as away.
+func TestAskPlanChangesRoute(t *testing.T) {
+	root := askFixture(t)
+	mustStmt(t, "CREATE PLAYBOOK plainpb SET launcher = ''")
+	p := &askPlan{Steps: []askStep{{Args: []string{"run", "plainpb"}}, {Args: []string{"ALTER", "PLAYBOOK", "plainpb", "ADD", "ENV", "route-a"}}, {Args: []string{"run", "plainpb"}}}}
+	checkAskPlan(p, root)
+	if p.Steps[0].RouteAway || !p.Steps[2].RouteAway || !strings.Contains(strings.Join(p.Steps[2].CPBNotes, " "), "A step before this one") {
+		t.Errorf("before %+v, after %+v", p.Steps[0], p.Steps[2])
 	}
 }

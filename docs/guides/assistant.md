@@ -143,6 +143,20 @@ If your network reaches Anthropic's API directly, run it without the
 variable, as the message says. If it does not, `cpb ask` cannot be used
 from that network for now; the grammar and `cpb --help` work as always.
 
+## Leave secrets out of the request
+
+The request goes to the model as you type it, so `cpb ask` checks it first.
+A request that holds something shaped like a credential, such as
+`ANTHROPIC_AUTH_TOKEN=sk-...`, a GitHub token or a URL with a password, is
+refused before anything is sent, naming what was found and never the value:
+
+```
+Error: the request looks like it holds a credential (ANTHROPIC_AUTH_TOKEN=...): nothing was sent. Leave the value out and name it instead, e.g. <token>
+```
+
+Name a key instead (`set ANTHROPIC_AUTH_TOKEN on router from my keychain`):
+the answer then uses a reference, `SET ANTHROPIC_AUTH_TOKEN FROM '<secret-ref>'`.
+
 ## Choosing the model
 
 `--model <model>`, or `CPB_ASK_MODEL`, else `sonnet`. Any Claude model your

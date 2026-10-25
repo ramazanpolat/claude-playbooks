@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
-	"github.com/ramazanpolat/claude-playbooks/internal/envset"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -34,7 +34,12 @@ type askStep struct {
 	Reason    string     `json:"reason,omitempty"` // why it is not ok
 	Guards    []askGuard `json:"guards,omitempty"` // what to know before running it
 	RouteAway bool       `json:"route_away,omitempty"`
-	CPBNotes  []string   `json:"cpb_notes,omitempty"`
+
+	// launch and writes say what the step is, for the plan-wide check:
+	// a launch judged here, and a step that changes the registry.
+	launch   bool
+	writes   bool
+	CPBNotes []string `json:"cpb_notes,omitempty"`
 }
 
 // askGuard is one thing a step does that its reader must know before
@@ -68,8 +73,20 @@ func checkAskPlan(p *askPlan, root string) {
 	if p.Steps == nil {
 		p.Steps = []askStep{}
 	}
+	// A step is judged against the registry as it is: once an earlier step
+	// changes it, a later launch may route elsewhere, and is shown as if it
+	// routed away.
+	changed := false
 	for i := range p.Steps {
-		checkAskStep(&p.Steps[i], root)
+		st := &p.Steps[i]
+		checkAskStep(st, root)
+		if changed && st.Status == stepOK && st.launch && !st.RouteAway {
+			st.RouteAway = true
+			st.CPBNotes = append(st.CPBNotes, askChangedNote)
+		}
+		if st.Status == stepOK && st.writes {
+			changed = true
+		}
 	}
 }
 
@@ -123,6 +140,7 @@ func checkAskStep(s *askStep, root string) {
 			return
 		}
 		s.Guards = append(s.Guards, askGuard{guardFetch, "fetches the recipe " + ref + " and runs what it says"})
+		s.writes = true
 	case "update":
 		name := firstOperand(args[1:])
 		if name == "" {
@@ -134,6 +152,7 @@ func checkAskStep(s *askStep, root string) {
 			return
 		}
 		s.Guards = append(s.Guards, askGuard{guardFetch, "fetches playbook " + name + "'s source again and installs what changed"})
+		s.writes = true
 	case "auth":
 		if len(args) < 2 || args[1] != "status" {
 			reject("only auth status is proposed")
@@ -176,6 +195,7 @@ func checkAskStatement(s *askStep, args []string) error {
 	if err != nil {
 		return err
 	}
+	s.writes = st.Write() || (st.Verb == grammar.Apply && !st.DryRun)
 	s.Guards = append(s.Guards, statementGuards(st)...)
 	return nil
 }
@@ -336,6 +356,17 @@ func nonEmpty(s string) []string {
 // where its requests would go.
 func checkAskLaunch(s *askStep, args []string, root string) error {
 	verb := args[0]
+	// A step names no playbooks root or launcher directory of its own: the
+	// launch would take it out of the arguments before reading its flags,
+	// and it would be judged against another registry than this one.
+	for _, a := range args[1:] {
+		if a == "--" {
+			break
+		}
+		if f, _, _ := strings.Cut(a, "="); f == "--playbooks-dir" || f == "--launcher-dir" {
+			return fmt.Errorf("a step names no playbooks root or launcher directory of its own (%s)", f)
+		}
+	}
 	var sopts sandboxOpts
 	var deleteAfter bool
 	extra := map[string]*bool{}
@@ -359,7 +390,9 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 	}
 	tokens = append(tokens, more...)
 
-	env := &manifest.Env{}
+	// The config directory the launch binds: the playbook's (or the
+	// caller's CPB_CONFIG_DIR) for run, the directory for start.
+	var configDir string
 	if verb == "run" {
 		pb, err := playbook.Find(root, target)
 		if err != nil {
@@ -368,30 +401,23 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 		if pb == nil {
 			return fmt.Errorf("unknown playbook %q", target)
 		}
-		if pb.Manifest != nil && pb.Manifest.Env != nil {
-			e := pb.Manifest.Env
-			env = &manifest.Env{Sets: append([]string(nil), e.Sets...), Set: map[string]string{}, Refs: e.Refs, Block: append([]string(nil), e.Block...)}
-			for k, v := range e.Set {
-				env.Set[k] = v
-			}
+		configDir = pb.Path
+		if dir, override, err := config.ResolveConfigDirOverride(); err == nil && override {
+			configDir = dir
 		}
+	} else if configDir, err = filepath.Abs(target); err != nil {
+		return err
 	}
+
 	envFile := false
 	for _, t := range tokens {
 		switch t.flag {
-		case "--env-set":
-			env.Sets = append(env.Sets, t.value)
 		case "--env":
-			k, v, _ := strings.Cut(t.value, "=")
-			if env.Set == nil {
-				env.Set = map[string]string{}
-			}
-			env.Set[k] = v
+			k, _, _ := strings.Cut(t.value, "=")
 			if k == auth.OAuthTokenEnv || manifest.LooksLikeSecretKey(k) {
 				s.Guards = append(s.Guards, askGuard{guardCredential, "sets " + k + " for this launch"})
 			}
 		case "--block":
-			env.Block = append(env.Block, t.value)
 			if t.value == auth.OAuthTokenEnv || manifest.LooksLikeSecretKey(t.value) {
 				s.Guards = append(s.Guards, askGuard{guardCredential, "removes " + t.value + " for this launch"})
 			}
@@ -413,20 +439,38 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 	if sopts.host != "" {
 		return nil // runs on that host, with its registry: nothing to judge here
 	}
-	origins, err := envset.Explain(envset.Dir(root), env)
-	if err != nil {
+	s.launch = true
+	if err := refuseUnreadableManifest(configDir); err != nil {
 		return err
 	}
-	origins = append(origins, routeInherited(origins, os.Environ())...)
-	if envFile || routeEgress(origins) != "anthropic" {
+	// The route as the launch resolves it: DEFAULTS and the governing
+	// manifest, then the launch flags in order on top, then the caller's
+	// environment. An env file is not read here: judged as away.
+	away := envFile
+	if !envFile {
+		layers, err := launchLayers(tokens)
+		if err != nil {
+			return err
+		}
+		route, err := askLaunchRoute(configDir, layers, os.Environ())
+		if err != nil {
+			return err
+		}
+		away = route != "anthropic"
+	}
+	if away {
 		s.RouteAway = true
-		s.CPBNotes = append(s.CPBNotes, "This launch sends its requests away from Anthropic, with the CLAUDE.md files of the directory it starts in and of every directory above it (from below home, ~/CLAUDE.md and ~/.claude/CLAUDE.md too). Run it from a directory outside home, as shown, so none of yours go along.")
+		s.CPBNotes = append(s.CPBNotes, askRouteAwayNote)
 	}
 	if verb == "start" && !sopts.enabled {
 		s.CPBNotes = append(s.CPBNotes, "The new directory shares this machine's login: a /login inside it replaces the machine's login.")
 	}
 	return nil
 }
+
+const askRouteAwayNote = "This launch sends its requests away from Anthropic, with the CLAUDE.md files of the directory it starts in and of every directory above it (from below home, ~/CLAUDE.md and ~/.claude/CLAUDE.md too). Run it from a directory outside home, as shown, so none of yours go along."
+
+const askChangedNote = "A step before this one changes what this launch uses, so cpb ask cannot tell where it will send its requests: run it from a directory outside home, as shown."
 
 // askHomeMemory lists the CLAUDE.md files a session started in dir would
 // take from dir and the directories above it, spelled with ~: what a

@@ -2847,10 +2847,14 @@ holds no key. The child process is built so that nothing else can join in:
   memory (`~/.claude/CLAUDE.md`), no MCP server, no tool: the model can read
   nothing beyond what cpb sends. Managed (enterprise) settings apply, as to
   every Claude Code run.
-- **Its working directory** is a new directory under the system temp
-  directory (`/tmp` when that one is under home), removed afterwards. Claude
-  Code takes the `CLAUDE.md` files of a session's working directory and of
-  every directory above it, so none of home's can join.
+- **Its working directory** is a new directory, removed afterwards, outside
+  home and outside every instruction tree: under the system temp directory,
+  else under `/tmp`, else the call is refused (`no temporary directory
+  outside your home and outside every CLAUDE.md tree: set TMPDIR to one`). A
+  base is passed over when a `CLAUDE.md`, a `CLAUDE.local.md` or a `.claude/`
+  sits in it or in any directory above it, symlinks resolved: Claude Code
+  takes the `CLAUDE.md` files of a session's working directory and of every
+  directory above it, so none can join.
 - **The model:** `--model`, else `CPB_ASK_MODEL`, else `sonnet`.
 - **Signing in, `CPB_ASK_LOGIN`:**
   - `claude`, the default: Claude Code's own login on this machine. cpb
@@ -2908,13 +2912,18 @@ mcp__cpb__query`; Claude Code's own tools are off). It is a hidden command.
   Never a variable, a value or reference, a description, a path, a source,
   a session's folder, id, title or resume command, or a credential. An
   error comes back as its first line, home spelled `~`.
-- **It drops credentials** from its own environment first: Claude Code hands
-  a stdio MCP server its whole environment.
+- **It starts with a clean environment.** Claude Code hands a stdio MCP
+  server its whole environment, the token included, so the MCP config starts
+  the server through `env -i`, with only `HOME`, `PATH`, `USER`, `LOGNAME`,
+  `LANG`, `TMPDIR`, `CPB_OAUTH_TOKEN_FILE` and `CPB_ISOLATED_LOGIN` from
+  cpb ask's own environment: the server never holds a credential, not even
+  in its initial environment (`/proc/<pid>/environ` on Linux). It also drops
+  any credential-looking variable it finds, a second guard.
 - **The protocol:** one JSON-RPC object per line; `initialize`, `ping`,
   `tools/list`, `tools/call`; any other method is "method not found".
 
 **What it sends.** The request, and one object describing what is installed,
-by name: cpb's and Claude Code's versions, the playbooks root spelled with
+by name: cpb's version, the playbooks root spelled with
 `~`, each playbook's name, launcher, attached env set names and whether it
 is always sandboxed, each env set's name and whether it is in `DEFAULTS`,
 the `DEFAULTS` names, the names of playbooks whose manifest cannot be read, the playbook the question is addressed to (`addressed`), and for each playbook and env set its `route`:
@@ -2935,7 +2944,7 @@ step:
 |---|---|---|
 | `ok` | a statement that parses, or `run`, `start`, `play`, `update`, `auth status` or `tui` whose flags and names check out | the command, its line, its `!` lines and notes |
 | `placeholder` | an argument holds `<…>` | the command and `fill in <…> first` |
-| `rejected` | anything else: another program, a global flag, `self-update`, `self-uninstall`, `completion`, a statement that does not parse, a launch or `update` naming an unknown playbook or env set | `not proposed: <reason>` |
+| `rejected` | anything else: another program, a global flag, `self-update`, `self-uninstall`, `completion`, a statement that does not parse, a launch or `update` naming an unknown playbook or env set, a launch naming its own `--playbooks-dir` or `--launcher-dir`, a launch over a manifest that cannot be read | `not proposed: <reason>` |
 
 **What to know before running a step** (`!` lines), decided by cpb from the
 parsed step, never by the model:
@@ -2950,12 +2959,19 @@ parsed step, never by the model:
   `ADD SKILL`, `ADD MCP SERVER`, `play`, `update`. The line shows the source
   as written.
 
-**A launch that routes away.** A `run` or `start` step whose route, judged
-as EXPLAIN judges it (`DEFAULTS`, the playbook's env sets, the step's launch
-flags and the caller's environment), is not Anthropic's is shown as
-`(cd /tmp && cpb …)`: run from outside home, no `CLAUDE.md` of the caller's
-directory or of home goes to that endpoint. When the caller's directory has
-such files, the plan names them. A `start` without a
+**A launch that routes away.** A `run` or `start` step's route is resolved
+as the launch resolves it (`auth.EffectiveBlock`): `DEFAULTS` and the
+governing manifest of the config directory the launch binds (the
+playbook's, or the caller's `CPB_CONFIG_DIR` for `run`; the directory's own
+for `start`), then the step's launch flags in their order on top, then the
+caller's environment, by EXPLAIN's egress rule. A step with `--env-file` is
+not read and counts as away. A step whose route is not Anthropic's is shown
+as `(cd /tmp && cpb …)`: run from outside home, no `CLAUDE.md` of the
+caller's directory or of home goes to that endpoint. When the caller's
+directory has such files, the plan names them. A launch that comes after a
+step changing the registry (a write statement, an `APPLY`, `play`,
+`update`) is shown as routing away too, with a note: cpb ask judges each
+step against the registry as it is now. A `start` without a
 sandbox notes that its directory shares the machine's login, so a `/login`
 in it replaces the machine's.
 
@@ -2964,7 +2980,18 @@ step. `--json` prints the checked plan instead: each step's `args`, `why`,
 `command`, `status`, `reason`, `guards` as `{"kind", "what"}`, `route_away`
 and `cpb_notes`.
 
-**Exit codes:** 0 shown; 1 refused (a proxy, `CPB_ASK_LOGIN=token` without a
+**The request is checked first.** Before anything is sent, a request that
+holds a credential-shaped value is refused, exit 1, naming what was found
+and never the value: `the request looks like it holds a credential
+(ANTHROPIC_AUTH_TOKEN=...): nothing was sent. Leave the value out and name it
+instead, e.g. <token>`. It looks for `KEY=value` or `KEY: value` whose key the
+redaction rules call a credential and whose value is not a reference, a
+placeholder or a plain setting; a URL with a password; words shaped like
+known keys and tokens (Anthropic and other `sk-` keys, GitHub, GitLab and
+Slack tokens, AWS access keys, Google API keys, JSON web tokens); and long
+key-shaped runs, except a hash that follows `sha256`, `commit` and the like.
+
+**Exit codes:** 0 shown; 1 refused (a credential in the request, a proxy, `CPB_ASK_LOGIN=token` without a
 machine token, the gate, an addressed playbook it cannot sign in as) or no
 plan from Claude; 2 a usage error (no request, an unknown `CPB_ASK_LOGIN`).
 

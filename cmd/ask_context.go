@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -18,13 +19,12 @@ import (
 // plants a canary in every value an install can hold and checks that none
 // reaches claude.
 type askContext struct {
-	CPBVersion        string        `json:"cpb_version"`
-	ClaudeCodeVersion string        `json:"claude_code_version,omitempty"`
-	PlaybooksRoot     string        `json:"playbooks_root"`
-	Playbooks         []askPlaybook `json:"playbooks"`
-	EnvSets           []askEnvSet   `json:"env_sets"`
-	Defaults          []string      `json:"defaults"`
-	Unreadable        []string      `json:"unreadable_playbooks,omitempty"`
+	CPBVersion    string        `json:"cpb_version"`
+	PlaybooksRoot string        `json:"playbooks_root"`
+	Playbooks     []askPlaybook `json:"playbooks"`
+	EnvSets       []askEnvSet   `json:"env_sets"`
+	Defaults      []string      `json:"defaults"`
+	Unreadable    []string      `json:"unreadable_playbooks,omitempty"`
 	// Addressed is the playbook the user named: "you" in the request.
 	Addressed string `json:"addressed,omitempty"`
 }
@@ -46,12 +46,11 @@ type askEnvSet struct {
 // buildAskContext reads the registry under root by name.
 func buildAskContext(root string) (*askContext, error) {
 	actx := &askContext{
-		CPBVersion:        Version,
-		ClaudeCodeVersion: claudeVersion(),
-		PlaybooksRoot:     tildePath(root),
-		Playbooks:         []askPlaybook{},
-		EnvSets:           []askEnvSet{},
-		Defaults:          []string{},
+		CPBVersion:    Version,
+		PlaybooksRoot: tildePath(root),
+		Playbooks:     []askPlaybook{},
+		EnvSets:       []askEnvSet{},
+		Defaults:      []string{},
 	}
 	pbs, bad, err := playbook.Scan(root)
 	if err != nil {
@@ -68,7 +67,7 @@ func buildAskContext(root string) (*askContext, error) {
 		if env != nil {
 			ap.EnvSets = append([]string(nil), env.Sets...)
 		}
-		ap.Route = askRoute(dir, env)
+		ap.Route = askPlaybookRoute(pb.Path)
 		actx.Playbooks = append(actx.Playbooks, ap)
 	}
 	for _, u := range bad {
@@ -109,6 +108,46 @@ func askRoute(dir string, env *manifest.Env) string {
 		return "anthropic"
 	}
 	return "away"
+}
+
+// askLaunchRoute is where a launch that binds configDir, with layers on
+// top, sends its requests: resolved as the launch resolves it
+// (auth.EffectiveBlock: DEFAULTS, the governing manifest, then the layers in
+// order), plus environ's route variables no layer sets or blocks, by
+// EXPLAIN's egress rule (routeEgress): "anthropic" or "away".
+func askLaunchRoute(configDir string, layers []*manifest.Env, environ []string) (string, error) {
+	menv, err := auth.EffectiveBlock(configDir, layers)
+	if err != nil {
+		return "", err
+	}
+	var origins []envset.Origin
+	if menv != nil {
+		for k, v := range menv.Set {
+			origins = append(origins, envset.Origin{Key: k, Value: v})
+		}
+		for k, r := range menv.Refs {
+			origins = append(origins, envset.Origin{Key: k, Ref: r})
+		}
+		for _, k := range menv.Block {
+			origins = append(origins, envset.Origin{Key: k, Blocked: true})
+		}
+	}
+	origins = append(origins, routeInherited(origins, environ)...)
+	if routeEgress(origins) == "anthropic" {
+		return "anthropic", nil
+	}
+	return "away", nil
+}
+
+// askPlaybookRoute is a playbook's own route, as a launch of it with no
+// flags resolves it, without the caller's environment: "unknown" when a
+// layer does not resolve.
+func askPlaybookRoute(configDir string) string {
+	route, err := askLaunchRoute(configDir, nil, nil)
+	if err != nil {
+		return "unknown"
+	}
+	return route
 }
 
 // tildePath spells a path below home with ~, so a home directory's name
