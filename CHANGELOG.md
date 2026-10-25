@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Foundry route is no longer reported as Anthropic's.** `EXPLAIN`'s
+  `route.egress` reads `unknown` when `CLAUDE_CODE_USE_FOUNDRY` is on or
+  `ANTHROPIC_FOUNDRY_BASE_URL` is set, in a layer or in the environment, as for
+  Bedrock and Vertex; `cpb play` asks for the typed confirmation of a recipe
+  that sets either.
+
 ## [v4.0.0-rc5] -- 2026-10-24
 
 ### Upgrading from rc4

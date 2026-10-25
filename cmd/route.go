@@ -32,8 +32,8 @@ type routeJSON struct {
 	// unknown (the login could not be determined; never reported as none).
 	Auth string `json:"auth"`
 	// Egress is derived only: "anthropic" when the requests go to
-	// api.anthropic.com over https (or no base URL is set and neither Bedrock
-	// nor Vertex is switched on), "unknown" otherwise. cpb names no other class.
+	// api.anthropic.com over https (or no base URL is set and none of Bedrock,
+	// Vertex and Foundry is switched on or given a base URL), "unknown" otherwise. cpb names no other class.
 	Egress string `json:"egress"`
 }
 
@@ -64,7 +64,8 @@ func routeInherited(origins []envset.Origin, environ []string) []envset.Origin {
 		}
 		switch {
 		case k == "ANTHROPIC_BASE_URL", k == "ANTHROPIC_MODEL", routeTokenVars[k],
-			k == "CLAUDE_CODE_USE_BEDROCK", k == "CLAUDE_CODE_USE_VERTEX", defaultModelVar.MatchString(k):
+			k == "CLAUDE_CODE_USE_BEDROCK", k == "CLAUDE_CODE_USE_VERTEX", k == "CLAUDE_CODE_USE_FOUNDRY",
+			k == "ANTHROPIC_FOUNDRY_BASE_URL", defaultModelVar.MatchString(k):
 			covered[k] = true // the first entry is the one a lookup sees
 			out = append(out, envset.Origin{Key: k, Value: v})
 		}
@@ -117,8 +118,13 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 			if o.Ref != "" || o.Value != "" {
 				tokenSet = true
 			}
-		case o.Key == "CLAUDE_CODE_USE_BEDROCK" || o.Key == "CLAUDE_CODE_USE_VERTEX":
+		case o.Key == "CLAUDE_CODE_USE_BEDROCK" || o.Key == "CLAUDE_CODE_USE_VERTEX" || o.Key == "CLAUDE_CODE_USE_FOUNDRY":
 			if v := strings.ToLower(o.Value); o.Ref != "" || (v != "" && v != "0" && v != "false") {
+				cloud = true
+			}
+		case o.Key == "ANTHROPIC_FOUNDRY_BASE_URL":
+			// A Foundry endpoint is never Anthropic's own API.
+			if o.Ref != "" || o.Value != "" {
 				cloud = true
 			}
 		default:

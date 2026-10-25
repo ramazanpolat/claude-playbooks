@@ -247,6 +247,7 @@ func (r *Result) mcp(c grammar.Clause) {
 // credential sent with it, to another host. Typed to confirm.
 var endpointVars = map[string]bool{
 	"ANTHROPIC_BASE_URL": true, "ANTHROPIC_BEDROCK_BASE_URL": true, "ANTHROPIC_VERTEX_BASE_URL": true,
+	"ANTHROPIC_FOUNDRY_BASE_URL": true,
 }
 
 var (
@@ -275,7 +276,7 @@ func (r *Result) setVar(line int, v grammar.Var) {
 		if r.Endpoint == "" {
 			r.Endpoint = host
 		}
-	case key == "CLAUDE_CODE_USE_BEDROCK" || key == "CLAUDE_CODE_USE_VERTEX":
+	case key == "CLAUDE_CODE_USE_BEDROCK" || key == "CLAUDE_CODE_USE_VERTEX" || key == "CLAUDE_CODE_USE_FOUNDRY":
 		if v.Value == "" || v.Value == "0" || strings.EqualFold(v.Value, "false") {
 			return
 		}
