@@ -175,14 +175,14 @@
         <svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>
         <h3>Login</h3>
         <p>Its own Anthropic account, sharing nothing with <code class="inl">~/.claude</code>. Run two accounts side by side.</p>
-        <div class="kw"><code>ISOLATED LOGIN</code></div>
+        <div class="kw"><code>login = 'isolated'</code></div>
         <div class="used"><span class="lab">used by</span><div class="dots" data-used="login"></div></div>
       </div>
       <div class="lcard">
         <svg class="ic" aria-hidden="true"><use href="#i-cube"/></svg>
         <h3>Process</h3>
         <p>A microVM with its own kernel, filesystem and network. It sees only your working directory and its own config. Keys stay on the host by default.</p>
-        <div class="kw"><code>SANDBOX</code><code>--sandbox</code></div>
+        <div class="kw"><code>sandbox.always</code><code>--sandbox</code></div>
         <div class="used"><span class="lab">used by</span><div class="dots" data-used="process"></div></div>
       </div>
     </div>
@@ -261,7 +261,7 @@
       <p>Every change is tested the same way, on the exact commit a release tags.</p>
     </div>
     <div class="stats">
-      <div class="stat"><span class="n">21 examples</span><span class="d">applied in CI on every change: dry run, apply, re-apply (a no-op), then each README's own checks.</span></div>
+      <div class="stat"><span class="n">22 examples</span><span class="d">applied in CI on every change: dry run, apply, re-apply (a no-op), then each README's own checks.</span></div>
       <div class="stat"><span class="n">upgrade-tested</span><span class="d">The previous release's binary applies its own examples; this build takes over the same state and must read it identically.</span></div>
       <div class="stat"><span class="n">arena regression</span><span class="d">A full <a href="https://github.com/ramazanpolat/claude-playbooks/tree/main/gentar" target="_blank" rel="noopener">gentar</a> run on the exact commit each release is tagged from.</span></div>
     </div>
@@ -438,11 +438,11 @@
       ],
       "file_text": {
         "CLAUDE.md": "# Playbook: work\n\nThis Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n## Useful cpb statements\n\n```\ncpb SHOW PLAYBOOKS                      # every playbook and its launcher\ncpb SHOW PLAYBOOK work\ncpb ALTER PLAYBOOK work RENAME TO <name>\n",
-        "settings.json": "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(gh pr *)\"\n    ],\n    \"deny\": [\n      \"Bash(git push --force *)\"\n    ]\n  },\n  \"model\": \"claude-opus-5-5\"\n}\n",
+        "settings.json": "{\n  \"claudeMdExcludes\": [\n    \"~/.claude/**\"\n  ],\n  \"extraKnownMarketplaces\": {\n    \"claude-code-plugins\": {\n      \"source\": {\n        \"source\": \"github\",\n        \"repo\": \"anthropics/claude-code\"\n      }\n    }\n  },\n  \"enabledPlugins\": {\n    \"commit-commands@claude-code-plugins\": true,\n    \"feature-dev@claude-code-plugins\": true\n  },\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(gh pr *)\"\n    ],\n    \"deny\": [\n      \"Bash(git push --force *)\"\n    ]\n  },\n  \"model\": \"claude-opus-5-5\"\n}\n",
         ".claude.json": "{\n  \"mcpServers\": {\n    \"github\": {\n      \"type\": \"http\",\n      \"url\": \"https://api.githubcopilot.com/mcp/\",\n      \"headers\": {\n        \"Authorization\": \"${CPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039}\"\n      }\n    },\n    \"linear\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.linear.app/mcp\"\n    }\n  }\n}",
         ".playbook": "name = \"work\"\n\n[env]\n\n[env.set]\nMAX_THINKING_TOKENS = \"8000\"\n\n[env.refs]\nCPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039 = \"keychain:github-mcp\"\n\n[mcp.\"github\"]\nvars = [\"CPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039\"]\n\n[skills.\"docx\"]\nsource = \"github:anthropics/skills\"\nsubdir = \"skills/docx\"\nmode = \"copy\"\n\n[skills.\"pdf\"]\nsource = \"github:anthropics/skills\"\nsubdir = \"skills/pdf\"\nmode = \"copy\"\n\n[skills.\"pptx\"]\nsource = \"github:anthropics/skills\"\nsubdir = \"skills/pptx\"\nmode = \"copy\"\n\n[skills.\"xlsx\"]\nsource = \"github:anthropics/skills\"\nsubdir = \"skills/xlsx\"\nmode = \"copy\"\n"
       },
-      "recipe": "-- work: your daily driver. It shares your login.\nCREATE PLAYBOOK IF NOT EXISTS work;\nALTER PLAYBOOK work\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN commit-commands@claude-code-plugins\n  ADD PLUGIN feature-dev@claude-code-plugins\n  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'\n  ADD MCP SERVER linear URL 'https://mcp.linear.app/mcp'\n  ADD SKILL pdf FROM 'github:anthropics/skills' SUBDIR 'skills/pdf'\n  ADD SKILL docx FROM 'github:anthropics/skills' SUBDIR 'skills/docx'\n  ADD SKILL xlsx FROM 'github:anthropics/skills' SUBDIR 'skills/xlsx'\n  ADD SKILL pptx FROM 'github:anthropics/skills' SUBDIR 'skills/pptx'\n  ALLOW TOOL 'Bash(gh pr *)'\n  DENY TOOL 'Bash(git push --force *)'\n  SET MODEL 'claude-opus-5-5'\n  SET VAR MAX_THINKING_TOKENS=8000;\n"
+      "recipe": "-- work: your daily driver. It shares your login.\nCREATE PLAYBOOK IF NOT EXISTS work;\nALTER PLAYBOOK work\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN commit-commands@claude-code-plugins\n  ADD PLUGIN feature-dev@claude-code-plugins\n  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'\n  ADD MCP SERVER linear URL 'https://mcp.linear.app/mcp'\n  ADD SKILL pdf FROM 'github:anthropics/skills' SUBDIR 'skills/pdf'\n  ADD SKILL docx FROM 'github:anthropics/skills' SUBDIR 'skills/docx'\n  ADD SKILL xlsx FROM 'github:anthropics/skills' SUBDIR 'skills/xlsx'\n  ADD SKILL pptx FROM 'github:anthropics/skills' SUBDIR 'skills/pptx'\n  ALLOW TOOL 'Bash(gh pr *)'\n  DENY TOOL 'Bash(git push --force *)'\n  SET model = 'claude-opus-5-5'\n  SET VAR MAX_THINKING_TOKENS=8000;\n"
     },
     {
       "name": "side",
@@ -534,11 +534,11 @@
       ],
       "file_text": {
         "CLAUDE.md": "# Playbook: side\n\nThis Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n## Useful cpb statements\n\n```\ncpb SHOW PLAYBOOKS                      # every playbook and its launcher\ncpb SHOW PLAYBOOK side\ncpb ALTER PLAYBOOK side RENAME TO <name>\n",
-        "settings.json": "{\n  \"model\": \"claude-sonnet-5-5\"\n}\n",
+        "settings.json": "{\n  \"claudeMdExcludes\": [\n    \"~/.claude/**\"\n  ],\n  \"extraKnownMarketplaces\": {\n    \"claude-code-plugins\": {\n      \"source\": {\n        \"source\": \"github\",\n        \"repo\": \"anthropics/claude-code\"\n      }\n    }\n  },\n  \"enabledPlugins\": {\n    \"frontend-design@claude-code-plugins\": true\n  },\n  \"model\": \"claude-sonnet-5-5\"\n}\n",
         ".claude.json": "{\n  \"mcpServers\": {\n    \"notion\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.notion.com/mcp\"\n    },\n    \"playwright\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\n        \"@playwright/mcp@latest\"\n      ]\n    }\n  }\n}",
         ".playbook": "name = \"side\"\nisolated_login = true\n\n[env]\n\n[env.set]\nDISABLE_TELEMETRY = \"1\"\n\n[skills.\"algorithmic-art\"]\nsource = \"github:anthropics/skills\"\nsubdir = \"skills/algorithmic-art\"\nmode = \"copy\"\n\n[skills.\"canvas-design\"]\nsource = \"github:anthropics/skills\"\nsubdir = \"skills/canvas-design\"\nmode = \"copy\"\n"
       },
-      "recipe": "-- side: a second account, running beside the first.\nCREATE PLAYBOOK IF NOT EXISTS side ISOLATED LOGIN;\nALTER PLAYBOOK side\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN frontend-design@claude-code-plugins\n  ADD MCP SERVER notion URL 'https://mcp.notion.com/mcp'\n  ADD MCP SERVER playwright COMMAND 'npx' ARGS '@playwright/mcp@latest'\n  ADD SKILL canvas-design FROM 'github:anthropics/skills' SUBDIR 'skills/canvas-design'\n  ADD SKILL algorithmic-art FROM 'github:anthropics/skills' SUBDIR 'skills/algorithmic-art'\n  SET MODEL 'claude-sonnet-5-5'\n  SET VAR DISABLE_TELEMETRY=1;\n"
+      "recipe": "-- side: a second account, running beside the first.\nCREATE PLAYBOOK IF NOT EXISTS side SET login = 'isolated';\nALTER PLAYBOOK side\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN frontend-design@claude-code-plugins\n  ADD MCP SERVER notion URL 'https://mcp.notion.com/mcp'\n  ADD MCP SERVER playwright COMMAND 'npx' ARGS '@playwright/mcp@latest'\n  ADD SKILL canvas-design FROM 'github:anthropics/skills' SUBDIR 'skills/canvas-design'\n  ADD SKILL algorithmic-art FROM 'github:anthropics/skills' SUBDIR 'skills/algorithmic-art'\n  SET model = 'claude-sonnet-5-5'\n  SET VAR DISABLE_TELEMETRY=1;\n"
     },
     {
       "name": "sre",
@@ -620,11 +620,11 @@
       ],
       "file_text": {
         "CLAUDE.md": "# Playbook: sre\n\nThis Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n## Useful cpb statements\n\n```\ncpb SHOW PLAYBOOKS                      # every playbook and its launcher\ncpb SHOW PLAYBOOK sre\ncpb ALTER PLAYBOOK sre RENAME TO <name>\n",
-        "settings.json": "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(kubectl get *)\"\n    ],\n    \"deny\": [\n      \"Bash(kubectl delete *)\"\n    ]\n  }\n}\n",
+        "settings.json": "{\n  \"claudeMdExcludes\": [\n    \"~/.claude/**\"\n  ],\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(kubectl get *)\"\n    ],\n    \"deny\": [\n      \"Bash(kubectl delete *)\"\n    ]\n  }\n}\n",
         ".claude.json": "{\n  \"mcpServers\": {\n    \"sentry\": {\n      \"type\": \"http\",\n      \"url\": \"https://mcp.sentry.dev/mcp\",\n      \"headers\": {\n        \"Authorization\": \"${CPB_MCP_SENTRY_H_AUTHORIZATION_32770652}\"\n      }\n    },\n    \"cloudflare-docs\": {\n      \"type\": \"http\",\n      \"url\": \"https://docs.mcp.cloudflare.com/mcp\"\n    }\n  }\n}",
         ".playbook": "name = \"sre\"\nisolated_login = true\n\n[env]\n\n[env.refs]\nCPB_MCP_SENTRY_H_AUTHORIZATION_32770652 = \"keychain:sentry-auth\"\n\n[sandbox]\nalways = true\n\n[mcp.\"sentry\"]\nvars = [\"CPB_MCP_SENTRY_H_AUTHORIZATION_32770652\"]\n\n[skills.\"doc-coauthoring\"]\nsource = \"github:anthropics/skills\"\nsubdir = \"skills/doc-coauthoring\"\nmode = \"copy\"\n\n[skills.\"runbook\"]\nsource = \"~/skills/runbook\"\nmode = \"link\"\n"
       },
-      "recipe": "-- sre: every launch inside a microVM.\nCREATE PLAYBOOK IF NOT EXISTS sre SANDBOX;\nALTER PLAYBOOK sre\n  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'\n  ADD MCP SERVER cloudflare-docs URL 'https://docs.mcp.cloudflare.com/mcp'\n  ADD SKILL runbook FROM '~/skills/runbook'\n  ADD SKILL doc-coauthoring FROM 'github:anthropics/skills' SUBDIR 'skills/doc-coauthoring'\n  ALLOW TOOL 'Bash(kubectl get *)'\n  DENY TOOL 'Bash(kubectl delete *)';\n"
+      "recipe": "-- sre: every launch inside a microVM.\nCREATE PLAYBOOK IF NOT EXISTS sre SET sandbox.always = true, login = 'isolated';\nALTER PLAYBOOK sre\n  ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'\n  ADD MCP SERVER cloudflare-docs URL 'https://docs.mcp.cloudflare.com/mcp'\n  ADD SKILL runbook FROM '~/skills/runbook'\n  ADD SKILL doc-coauthoring FROM 'github:anthropics/skills' SUBDIR 'skills/doc-coauthoring'\n  ALLOW TOOL 'Bash(kubectl get *)'\n  DENY TOOL 'Bash(kubectl delete *)';\n"
     },
     {
       "name": "glm",
@@ -705,11 +705,11 @@
       ],
       "file_text": {
         "CLAUDE.md": "# Playbook: glm\n\nThis Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n## Useful cpb statements\n\n```\ncpb SHOW PLAYBOOKS                      # every playbook and its launcher\ncpb SHOW PLAYBOOK glm\ncpb ALTER PLAYBOOK glm RENAME TO <name>\n",
-        "settings.json": "{\n  \"modelPicker\": {\n    \"options\": [\n      {\n        \"model\": \"glm-5.3\",\n        \"label\": \"GLM 5.3\",\n        \"description\": \"via the router\"\n      },\n      {\n        \"model\": \"glm-5.3-flash\",\n        \"label\": \"GLM 5.3 Flash\",\n        \"behavesAs\": \"claude-sonnet-5\"\n      }\n    ],\n    \"replaceBuiltInOptions\": true\n  }\n}\n",
+        "settings.json": "{\n  \"claudeMdExcludes\": [\n    \"~/.claude/**\"\n  ],\n  \"modelPicker\": {\n    \"options\": [\n      {\n        \"model\": \"glm-5.3\",\n        \"label\": \"GLM 5.3\",\n        \"description\": \"via the router\"\n      },\n      {\n        \"model\": \"glm-5.3-flash\",\n        \"label\": \"GLM 5.3 Flash\",\n        \"behavesAs\": \"claude-sonnet-5\"\n      }\n    ],\n    \"replaceBuiltInOptions\": true\n  }\n}\n",
         ".claude.json": "{\n  \"mcpServers\": {\n    \"context7\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@upstash/context7-mcp\"\n      ]\n    }\n  }\n}",
         ".playbook": "name = \"glm\"\nisolated_login = true\n\n[env]\nsets = [\"router\"]\nblock = [\"ANTHROPIC_API_KEY\"]\n\n[env.set]\nANTHROPIC_MODEL = \"glm-5.3\"\n"
       },
-      "recipe": "-- glm: another model backend, behind a router. It shares nothing.\nCREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1;\nCREATE PLAYBOOK IF NOT EXISTS glm ISOLATED LOGIN;\nALTER PLAYBOOK glm\n  USE ENV router\n  SET VAR ANTHROPIC_MODEL=glm-5.3\n  BLOCK VAR ANTHROPIC_API_KEY\n  ADD MCP SERVER context7 COMMAND 'npx' ARGS '-y' '@upstash/context7-mcp'\n  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'\n  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'\n  SET MODEL PICKER ONLY;\n"
+      "recipe": "-- glm: another model backend, behind a router. It shares nothing.\nCREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1;\nCREATE PLAYBOOK IF NOT EXISTS glm SET login = 'isolated';\nALTER PLAYBOOK glm\n  USE ENV router\n  SET VAR ANTHROPIC_MODEL=glm-5.3\n  BLOCK VAR ANTHROPIC_API_KEY\n  ADD MCP SERVER context7 COMMAND 'npx' ARGS '-y' '@upstash/context7-mcp'\n  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'\n  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'\n  SET model_picker.mode = 'only';\n"
     },
     {
       "name": "reviewer",
@@ -765,11 +765,11 @@
       ],
       "file_text": {
         "CLAUDE.md": "# Playbook: reviewer\n\nThis Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n## Useful cpb statements\n\n```\ncpb SHOW PLAYBOOKS                      # every playbook and its launcher\ncpb SHOW PLAYBOOK reviewer\ncpb ALTER PLAYBOOK reviewer RENAME TO <name>\n",
-        "settings.json": "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(gh pr view *)\",\n      \"Bash(git diff *)\"\n    ],\n    \"deny\": [\n      \"Edit\",\n      \"Write\"\n    ]\n  },\n  \"model\": \"claude-sonnet-5-5\"\n}\n",
+        "settings.json": "{\n  \"claudeMdExcludes\": [\n    \"~/.claude/**\"\n  ],\n  \"extraKnownMarketplaces\": {\n    \"claude-code-plugins\": {\n      \"source\": {\n        \"source\": \"github\",\n        \"repo\": \"anthropics/claude-code\"\n      }\n    }\n  },\n  \"enabledPlugins\": {\n    \"code-review@claude-code-plugins\": true,\n    \"pr-review-toolkit@claude-code-plugins\": true\n  },\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(gh pr view *)\",\n      \"Bash(git diff *)\"\n    ],\n    \"deny\": [\n      \"Edit\",\n      \"Write\"\n    ]\n  },\n  \"model\": \"claude-sonnet-5-5\"\n}\n",
         ".claude.json": "{\n  \"mcpServers\": {\n    \"github\": {\n      \"type\": \"http\",\n      \"url\": \"https://api.githubcopilot.com/mcp/\",\n      \"headers\": {\n        \"Authorization\": \"${CPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039}\"\n      }\n    }\n  }\n}",
         ".playbook": "name = \"reviewer\"\n\n[env]\n\n[env.refs]\nCPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039 = \"keychain:github-mcp\"\n\n[mcp.\"github\"]\nvars = [\"CPB_MCP_GITHUB_H_AUTHORIZATION_9af8a039\"]\n"
       },
-      "recipe": "-- reviewer: reads code, never writes it.\nCREATE PLAYBOOK IF NOT EXISTS reviewer;\nALTER PLAYBOOK reviewer\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN code-review@claude-code-plugins\n  ADD PLUGIN pr-review-toolkit@claude-code-plugins\n  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(git diff *)'\n  DENY TOOL 'Edit' 'Write'\n  SET MODEL 'claude-sonnet-5-5';\n\n-- ephemeral spike: a throwaway session in a throwaway folder.\n--   cpb start /tmp/spike --delete\n-- Not a playbook: nothing to create, nothing registered, nothing left behind.\n"
+      "recipe": "-- reviewer: reads code, never writes it.\nCREATE PLAYBOOK IF NOT EXISTS reviewer;\nALTER PLAYBOOK reviewer\n  ADD MARKETPLACE claude-code-plugins FROM 'github:anthropics/claude-code'\n  ADD PLUGIN code-review@claude-code-plugins\n  ADD PLUGIN pr-review-toolkit@claude-code-plugins\n  ADD MCP SERVER github URL 'https://api.githubcopilot.com/mcp/' HEADER 'Authorization' FROM 'keychain:github-mcp'\n  ALLOW TOOL 'Bash(gh pr view *)' 'Bash(git diff *)'\n  DENY TOOL 'Edit' 'Write'\n  SET model = 'claude-sonnet-5-5';\n\n-- ephemeral spike: a throwaway session in a throwaway folder.\n--   cpb start /tmp/spike --delete\n-- Not a playbook: nothing to create, nothing registered, nothing left behind.\n"
     },
     {
       "name": "spike",
