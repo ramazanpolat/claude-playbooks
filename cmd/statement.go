@@ -17,6 +17,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 	"github.com/ramazanpolat/claude-playbooks/internal/settings"
+	"github.com/ramazanpolat/claude-playbooks/internal/shell"
 )
 
 // Statements (SPEC.md) are recognised before cobra runs, so
@@ -89,6 +90,10 @@ func runStatement(args []string) error {
 		// does not parse.
 		if applyJSONArgs(args) {
 			return printApplyReport(&applyReport{Error: &applyErrorJSON{Message: err.Error()}}, 2)
+		}
+		// Plain words in quotes are a question, not a statement.
+		if f := strings.Fields(args[0]); len(args) == 1 && len(f) > 1 && !grammar.IsStatement(f[:1]) {
+			return fmt.Errorf("%w\nNot a statement? Ask in plain words: cpb ask %s", err, shell.QuoteArg(args[0]))
 		}
 		return err
 	}

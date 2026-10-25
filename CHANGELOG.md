@@ -64,13 +64,78 @@
   suite: account launches through the helper, the guard's refusal and its
   fix, and the own login set aside and restored.
 
-## [v4.0.0-rc5] -- 2026-10-24
+## [v4.1.0] -- 2026-10-25
 
-### Upgrading from rc4
+v4.1.0 adds `cpb ask`: say in plain words what you want done, and it shows
+the cpb command that does it. What it guarantees:
+
+- **It shows commands and never runs them.** You copy what you decide to run.
+- **It asks Anthropic only.** The question goes to Anthropic's API, signed
+  in with this machine's Claude Code login (cpb's machine token with
+  `CPB_ASK_LOGIN=token`; with `cpb ask <playbook>`, the login a launch of
+  that playbook would use), never through an env set or `DEFAULTS`: the
+  environment's route variables are dropped. A playbook that routes away
+  from Anthropic, or a proxy in the environment, is refused before anything
+  is sent.
+- **The model's one tool touches no credential.** It is cpb itself,
+  read-only (`SHOW` and `EXPLAIN`), and it never reads, opens or checks for a
+  token file, a login store or a Keychain item.
+- **A request holding a credential-looking value is refused before anything
+  is sent**, naming the key or the kind, never the value.
+
+Nothing changes for an existing playbook, and there is no upgrade step.
+
+### Added
+
+- **`cpb ask "<request>"`**: ask in plain words for the cpb command that
+  does it. It shows the command, one line on what it does, and `!` lines for
+  what a step removes, forgets or replaces, which credential or login it
+  touches, or what code it fetches; it never runs anything. The question goes
+  to Anthropic's API through the machine's Claude Code login, never through
+  an env set or `DEFAULTS`, with the names of what is installed and no value,
+  reference or credential. [Ask in plain words](docs/guides/assistant.md).
+- `cpb ask <playbook> "<request>"` addresses the question to a playbook: it
+  signs in the way a launch of that playbook would, and "you" means it. A
+  playbook routed away from Anthropic is refused.
+- The model's one tool is cpb itself, read-only (`SHOW`, `EXPLAIN`), with its
+  answers cut down to names, routes, versions and session counts: it can
+  answer questions about the current state.
+- `cpb ask` refuses a request that holds a credential-shaped value before
+  anything is sent, naming the key or the kind, never the value.
+- `CPB_ASK_LOGIN=token` makes `cpb ask` sign in with cpb's machine token (the
+  long-lived token launches use) instead of Claude Code's own login.
+- `cpb ask` does not run through a proxy: with `HTTP_PROXY`, `HTTPS_PROXY` or
+  `ALL_PROXY` set it stops before anything is sent, and names the variable.
+- A quoted statement that does not parse and does not start with a keyword
+  suggests `cpb ask`.
+
+## [v4.0.0] -- 2026-10-25
+
+cpb v4 is one CLI with one grammar, and v4.0.0 is its first release. It
+breaks v3 on purpose: names, files, flags and JSON change, and v4 reads no v3
+name. It was tried out as four published release candidates (rc1 to rc4); the
+fifth was never tagged and its changes ship here. Each candidate's notes stay
+below as the record of what changed between them. [SPEC.md](SPEC.md)
+describes v4 as it is.
+
+### Upgrading from v3
+
+- **Install v4 fresh, then convert the machine once.** A v3 binary does not
+  update itself into v4, and `cpb self-update` never crosses a major version.
+  The one-off cutover script attached to this release converts one machine:
+  it backs up the whole playbooks root first, renames v3 keys and files, and
+  checks the result with v4. Everything else a v3 user needs to know is under
+  *Upgrading from v3* in [v4.0.0-rc1](#v400-rc1----2026-10-03), and the
+  grammar changes since then are in each candidate's notes.
+
+### Upgrading from a release candidate
+
+From rc4, the items below are all. From an earlier candidate, apply each
+later candidate's *Upgrading from* notes in order, then these.
 
 - **Three things rc4 accepted are now refused**, each with a one-line
-  reason: a new launcher named after an existing command (`claude`, a keyword, or a command already on PATH), a
-  source URL carrying a credential (`https://TOKEN@host/…`), and a token
+  reason: a new launcher named after an existing command (`claude`, a
+  keyword, or a command already on PATH), a source URL carrying a credential (`https://TOKEN@host/…`), and a token
   launch over an isolated playbook's own login. A launcher that already
   exists keeps working.
 - **Installing from a source changes what it copies:** the source's
@@ -102,6 +167,12 @@
   kept.
 
 ### Fixed
+
+- **`EXPLAIN` no longer reports an isolated playbook as `token-set` for a
+  token it never uses.** `route.auth` counted a `CLAUDE_CODE_OAUTH_TOKEN`
+  from an env set in `DEFAULTS`, which an isolated launch drops. It now reads
+  the login the launch actually uses; a shared playbook, and a token the
+  isolated playbook sets itself, still read `token-set`.
 
 - **A Foundry route is no longer reported as Anthropic's.** `EXPLAIN`'s
   `route.egress` reads `unknown` when `CLAUDE_CODE_USE_FOUNDRY` is on or

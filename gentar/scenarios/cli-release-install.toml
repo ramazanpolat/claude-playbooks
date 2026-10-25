@@ -15,7 +15,9 @@ agent = "shell"
 [oracle]
 steps = [
   '''curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/v4.0.0-rc3/install.sh -o "$HOME/install.sh"''',
-  '''CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/.local/bin" sh "$HOME/install.sh" > "$HOME/install.out" 2>&1''',
+  # On failure the step prints install.sh's last lines, so the report names
+  # what failed (the host, curl's message), not only the exit status.
+  '''CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/.local/bin" sh "$HOME/install.sh" > "$HOME/install.out" 2>&1 || { rc=$?; tail -n 20 "$HOME/install.out"; exit $rc; }''',
   # dlbad/v4.0.0-rc3: an asset that does not match the SHA256SUMS beside it.
   '''os=$(uname -s | tr '[:upper:]' '[:lower:]'); case $(uname -m) in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; esac; d="$HOME/fx/dlbad/v4.0.0-rc3"; mkdir -p "$d" && printf 'the published asset\n' > "$d/good" && (cd "$d" && { sha256sum good 2>/dev/null || shasum -a 256 good; } | sed "s/good\$/cpb-$os-$a/" > SHA256SUMS) && rm "$d/good" && printf 'not a binary\n' > "$d/cpb-$os-$a"''',
   # dllic/v4.0.0-rc3: a release with LICENSE and NOTICE beside its asset;

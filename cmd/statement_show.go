@@ -400,13 +400,20 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.Envs = nonNil(m.Env.Sets)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
 	}
-	v.Account = auth.AccountOf(pb.Path)
+	if showAccount {
+		v.Account = auth.AccountOf(pb.Path)
+	}
 	if m != nil && m.TrustedEndpoint != "" {
 		t := m.TrustedEndpoint
 		v.TrustedEndpoint = &t
 	}
 	return v
 }
+
+// showAccount is false while cpb ask's tool runs a SHOW: the account columns
+// read the token file and the login store, and the tool touches no
+// credential (it reports no auth class, so it needs none of them).
+var showAccount = true
 
 // layerVars lists one layer's own entries, sorted: literals and
 // references by key, then blocked.
