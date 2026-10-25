@@ -217,6 +217,30 @@ func TestAskToolTouchesNoCredential(t *testing.T) {
 	}
 }
 
+// The claude process cpb ask started, the tool's parent, is not counted as
+// one of the playbook's sessions.
+func TestAskToolSessionsLeaveOutTheAsk(t *testing.T) {
+	root := askFixture(t)
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = root
+	home, _ := os.UserHomeDir()
+	now := time.Now()
+	work := filepath.Join(root, "work")
+	writeSessionFile(t, work, 101, sidLive, filepath.Join(home, "project"), "interactive", liveStart, now.Add(-time.Hour))
+	writeSessionFile(t, work, 102, sidSpare, filepath.Join(home, "project"), "interactive", liveStart, now)
+	fakeProcs(t, map[int]string{101: liveStart, 102: liveStart})
+	old := askToolParent
+	t.Cleanup(func() { askToolParent = old })
+	askToolParent = func() int { return 102 }
+	r := toolExchange(t, toolCall(1, "SHOW SESSIONS FOR PLAYBOOK work"), toolCall(2, "SHOW SESSIONS"))
+	for _, id := range []string{"1", "2"} {
+		text, isErr := toolText(t, r[id])
+		if isErr || !strings.Contains(text, `"count":1`) {
+			t.Errorf("sessions with the ask's own claude left out: %s", text)
+		}
+	}
+}
+
 // The tool drops the credentials Claude Code hands it.
 func TestAskToolDropsCredentials(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "t")

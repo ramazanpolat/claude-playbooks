@@ -50,6 +50,10 @@ func init() {
 	rootCmd.AddCommand(askToolCmd)
 }
 
+// askToolParent is the process that started the tool: the claude process
+// cpb ask runs, which env -i executes into this one.
+var askToolParent = os.Getppid
+
 // askToolName is the tool's name; Claude Code calls it mcp__cpb__query.
 const askToolName = "query"
 
@@ -279,7 +283,13 @@ func askToolCut(view string, v any) any {
 		return askPick(askMap(v), "envs")
 	case "sessions":
 		var out []any
+		self := askToolParent()
 		for _, s := range askList(v) {
+			// The claude process cpb ask started is a live session too, of
+			// the playbook it signs in as; it is not one of the user's.
+			if pid, ok := askMap(s)["pid"].(float64); ok && int(pid) == self {
+				continue
+			}
 			out = append(out, askPick(askMap(s), "playbook", "launcher", "kind", "status", "started_at", "last_active", "model", "claude_version"))
 		}
 		return map[string]any{"count": len(out), "sessions": askEmpty(out)}
