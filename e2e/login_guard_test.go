@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// The login guard (v4.1.0): a launch whose requests go to an address that is
+// The login guard (v4.2.0): a launch whose requests go to an address that is
 // not Anthropic's, with no provider key, is refused before anything changes,
 // because Claude Code would send the Claude login or token there.
 

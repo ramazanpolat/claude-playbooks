@@ -15,7 +15,7 @@
 #   - auth status --json is identical;
 #   - every playbook launches (the stand-in claude records the launch),
 #     except one sandboxed on every launch: there is no sbx here, and the
-#     log says it was skipped; and one the login guard (v4.1.0) refuses: a
+#     log says it was skipped; and one the login guard (v4.2.0) refuses: a
 #     route with no provider key would get the Claude login, and the log
 #     names it;
 #   - every playbook drops cleanly;

@@ -89,7 +89,7 @@ for pb in $pbs; do
   if [ "${info%% *}" = True ]; then echo "$pb" >> "$home/launch-skipped"; continue; fi
   cfg=${info#* }
   rm -f "$cfg/.fake-claude/launch-env"
-  # Since v4.1.0 the login guard refuses a launch that would send the Claude
+  # Since v4.2.0 the login guard refuses a launch that would send the Claude
   # login to an address that is not Anthropic's with no provider key: an
   # older release's router playbook with no key is refused, by design, and
   # upgrade.sh's line names it. Anything else that stops the launch fails.

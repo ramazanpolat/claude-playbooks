@@ -13,21 +13,22 @@ on:
 # the only place the downloadable binaries themselves are exercised.
 jobs:
   # FIRST: may this commit be released at all? gentar/release-gate.sh passes
-  # only when the arena workflow has a SUCCESSFUL `arena / phase2` job on
-  # exactly this commit -- the full regression, however it was triggered (a
-  # dispatch, the `arena` tag, a `v*-rc*` tag). build needs this job, and
-  # smoke-darwin and release need build, so nothing ships without it. It
-  # names its reason when it refuses, including a phase 2 that GitHub
-  # cancelled before it started. The flow: push `arena` (or tag v*-rc*) on
-  # the commit, wait for phase 2 to go green, then tag v* on that commit.
+  # only when exactly this commit has a SUCCESS commit status `arena/phase2`
+  # linking a run of the private mirror ([arena] mirror in
+  # gentar/policy.toml) -- the full regression, run there, since this public
+  # repository has no bench runner ([phase2] evidence = "status"). build
+  # needs this job, and smoke-darwin and release need build, so nothing
+  # ships without it. It names its reason when it refuses. The flow:
+  # `gentar/mirror.sh dispatch <sha>`, which waits for phase 2 and posts the
+  # status, then tag v* on that commit.
   arena-gate:
     runs-on: ubuntu-latest
     permissions:
-      actions: read     # to find the arena workflow's jobs for this sha
+      statuses: read    # to read the commit status arena/phase2 for this sha
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: a green arena / phase2 on this exact commit
+      - name: a success arena/phase2 status on this exact commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: gentar/release-gate.sh "$GITHUB_SHA"
@@ -163,9 +164,10 @@ jobs:
           path: dist
 
       # A release candidate (vX.Y.Z-rcN) is a pre-release and never the
-      # Latest release. Its tag starts phase 2 itself, so the first run of
-      # this workflow on it stops at arena-gate; re-run it once that phase 2
-      # is green, and it publishes. A final release keeps GitHub's default.
+      # Latest release. Run phase 2 on its commit before the tag
+      # (`gentar/mirror.sh dispatch <sha>`), or the first run of this
+      # workflow on it stops at arena-gate; then re-run it once arena/phase2
+      # is success, and it publishes. A final release keeps GitHub's default.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

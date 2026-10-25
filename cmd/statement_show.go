@@ -343,6 +343,11 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	// none rather than failing the whole SHOW.
 	if sf, err := settings.Load(pb.Path); err == nil {
 		if mps, plugins, agent, err := pluginState(sf.Root); err == nil {
+			// Shown masked: a settings.json written by hand may carry a
+			// credential in a source URL.
+			for i := range mps {
+				mps[i].Source = json.RawMessage(redactSourceURL(string(mps[i].Source)))
+			}
 			v.Marketplaces, v.Plugins, v.Agent = mps, plugins, agent
 		}
 		v.Tools, v.Statusline.Command, v.Model = settingsExtras(sf.Root)
@@ -370,7 +375,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	v.Version, v.Description, v.Homepage, v.Author = optStr(m.Version), optStr(m.Description), optStr(m.Homepage), optStr(m.Author)
 	if m.Source != nil && m.Source.Repository != "" {
-		v.Source = &sourceJSON{URL: m.Source.Repository, Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
+		v.Source = &sourceJSON{URL: redactSourceURL(m.Source.Repository), Branch: optStr(m.Source.Branch), Subdir: optStr(m.Source.Subdir)}
 	}
 	if m.Update != nil {
 		v.Migrate = optStr(m.Update.Migrate)

@@ -308,6 +308,18 @@ func (p *parser) unexpected() *Error {
 // a command. Any word is accepted, keywords included: only NEW NAMES are
 // reserved, and on the command line the shell has already removed any
 // quotes that could have said otherwise.
+// source reads a source-like value (a URL, a ref, a directory): on the
+// command line a word can still carry its quotes (a script that
+// word-splits a statement passes '<source>' as is), and the value is what
+// is inside them, as for a property.
+func (p *parser) source(what, placeholder string) (Token, *Error) {
+	t, err := p.take(what, placeholder)
+	if err == nil && !t.Quoted {
+		t.Text = unquoteArg(t.Text)
+	}
+	return t, err
+}
+
 func (p *parser) take(what, placeholder string) (Token, *Error) {
 	if p.atEnd() {
 		p.note(placeholder)
@@ -358,15 +370,18 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	return nil
 }
 
-// list reads one or more items up to the next clause starter. An unquoted
-// trailing comma is a separator and is dropped; a lone comma is skipped.
+// list reads one or more items up to the next clause starter. A trailing
+// comma outside quotes is a separator and is dropped ('a', in a file too);
+// a lone comma is skipped.
 func (p *parser) list(what, placeholder string, check func(Token) *Error) ([]string, *Error) {
 	var out []string
 	for !p.atEnd() && !p.isStarter() {
 		t := p.toks[p.i]
-		if !t.Quoted {
+		if !t.Quoted || t.Comma {
 			t.Text = strings.TrimSuffix(t.Text, ",")
-			if t.Text == "" {
+			// A lone comma is skipped; a quoted empty item ('', ) is still
+			// an item, and check refuses it as '' 'Read' is refused.
+			if t.Text == "" && !t.Quoted {
 				p.i++
 				continue
 			}
@@ -1095,7 +1110,7 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 	case "FROM", "BRANCH", "SUBDIR", "LINK":
 		c.Kind = Kind(w)
 		ph := map[string]string{"FROM": "<source>", "BRANCH": "<ref>", "SUBDIR": "<dir>", "LINK": "<dir>"}[w]
-		t, err := p.take(w, ph)
+		t, err := p.source(w, ph)
 		c.Arg = t.Text
 		return c, err
 	case "SET":
@@ -1159,8 +1174,9 @@ func (p *parser) set(c *Clause) *Error {
 		}
 		// An unquoted trailing comma separates list items: A=1, B=2. It is
 		// dropped only when another K=V follows, so a last value that
-		// really ends in a comma survives.
-		if !t.Quoted && strings.HasSuffix(v, ",") && p.kvAt(p.i+1) {
+		// really ends in a comma survives. A comma after a quoted value
+		// (A='x', B=2 in a file) is always the separator.
+		if (t.Quoted && t.Comma || !t.Quoted && p.kvAt(p.i+1)) && strings.HasSuffix(v, ",") {
 			v = strings.TrimSuffix(v, ",")
 		}
 		if err := manifest.ValidateEnvValue(k, v); err != nil {
@@ -1430,7 +1446,7 @@ func (p *parser) marketplace(c *Clause, verb string) *Error {
 	if p.kw("FROM") == "" {
 		return p.fail("ADD MARKETPLACE needs FROM '<source>'")
 	}
-	src, err := p.take("FROM", "'<source>'")
+	src, err := p.source("FROM", "'<source>'")
 	if err != nil {
 		return err
 	}
@@ -1610,7 +1626,18 @@ func (p *parser) mcpServer(c *Clause, verb string) *Error {
 		m.Command = cmd.Text
 		if p.kw("ARGS") != "" {
 			for !p.atEnd() && !p.mcpPartOrStarter() {
-				m.Args = append(m.Args, p.toks[p.i].Text)
+				arg := p.toks[p.i]
+				if !arg.Quoted && arg.Comma && arg.Text == "," {
+					// A lone comma in a file ('a' , 'b') only separates, as
+					// in list(); argv words carry no Comma and pass as given.
+					p.i++
+					continue
+				}
+				if arg.Quoted && arg.Comma {
+					// 'a', in a file: the comma after the quotes separates.
+					arg.Text = strings.TrimSuffix(arg.Text, ",")
+				}
+				m.Args = append(m.Args, arg.Text)
 				p.i++
 			}
 			if len(m.Args) == 0 {
@@ -1699,6 +1726,12 @@ func (p *parser) mcpEnv(m *MCP) *Error {
 		}
 		if !keyPattern.MatchString(k) {
 			return errAt(t.Pos, "invalid variable name before '='")
+		}
+		// In a file only, as in SET: a comma after a quoted value always
+		// separates, an unquoted one only before another K=V. Words from
+		// argv carry no Comma, so the command line keeps 'A=ends,' as is.
+		if t.Comma && (t.Quoted || p.kvAt(p.i+1)) {
+			v = strings.TrimSuffix(v, ",")
 		}
 		if manifest.LooksLikeSecretKey(k) && !manifest.PlainSetting(v) {
 			return errAt(t.Pos, fmt.Sprintf("%s looks like a credential: on an MCP server it takes a reference, VAR %s FROM '<ref>' (a literal would be written into Claude Code's config)", k, k))
@@ -1866,7 +1899,7 @@ func (p *parser) skill(c *Clause, verb string) *Error {
 	if p.kw("FROM") == "" {
 		return p.fail("ADD SKILL needs FROM <source>")
 	}
-	src, err := p.take("FROM", "<source>")
+	src, err := p.source("FROM", "<source>")
 	if err != nil {
 		return err
 	}
@@ -1887,7 +1920,7 @@ func (p *parser) skill(c *Clause, verb string) *Error {
 			if kind != SkillGit {
 				return errAt(p.toks[p.i-1].Pos, w+" applies to a git source; a directory is linked as it is")
 			}
-			t, err := p.take(w, "<"+strings.ToLower(w)+">")
+			t, err := p.source(w, "<"+strings.ToLower(w)+">")
 			if err != nil {
 				return err
 			}

@@ -51,7 +51,7 @@ func TestValidateRefs(t *testing.T) {
 			t.Errorf("%s: the error quotes the value", name)
 		}
 	}
-	// The OAuth token takes a reference since v4.1.0 (accounts).
+	// The OAuth token takes a reference since v4.2.0 (accounts).
 	if err := ValidateRefs(map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:x"}, nil, nil); err != nil {
 		t.Errorf("the OAuth token's reference was refused: %v", err)
 	}
