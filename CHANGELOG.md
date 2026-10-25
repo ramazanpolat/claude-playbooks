@@ -26,13 +26,33 @@
 - A quoted statement that does not parse and does not start with a keyword
   suggests `cpb ask`.
 
-## [v4.0.0-rc5] -- 2026-10-24
+## [v4.0.0] -- 2026-10-25
 
-### Upgrading from rc4
+cpb v4 is one CLI with one grammar, and v4.0.0 is its first release. It
+breaks v3 on purpose: names, files, flags and JSON change, and v4 reads no v3
+name. It was tried out as four published release candidates (rc1 to rc4); the
+fifth was never tagged and its changes ship here. Each candidate's notes stay
+below as the record of what changed between them. [SPEC.md](SPEC.md)
+describes v4 as it is.
+
+### Upgrading from v3
+
+- **Install v4 fresh, then convert the machine once.** A v3 binary does not
+  update itself into v4, and `cpb self-update` never crosses a major version.
+  The one-off cutover script attached to this release converts one machine:
+  it backs up the whole playbooks root first, renames v3 keys and files, and
+  checks the result with v4. Everything else a v3 user needs to know is under
+  *Upgrading from v3* in [v4.0.0-rc1](#v400-rc1----2026-10-03), and the
+  grammar changes since then are in each candidate's notes.
+
+### Upgrading from a release candidate
+
+From rc4, the items below are all. From an earlier candidate, apply each
+later candidate's *Upgrading from* notes in order, then these.
 
 - **Three things rc4 accepted are now refused**, each with a one-line
-  reason: a new launcher named after an existing command (`claude`, a keyword, or a command already on PATH), a
-  source URL carrying a credential (`https://TOKEN@host/…`), and a token
+  reason: a new launcher named after an existing command (`claude`, a
+  keyword, or a command already on PATH), a source URL carrying a credential (`https://TOKEN@host/…`), and a token
   launch over an isolated playbook's own login. A launcher that already
   exists keeps working.
 - **Installing from a source changes what it copies:** the source's
@@ -64,6 +84,12 @@
   kept.
 
 ### Fixed
+
+- **`EXPLAIN` no longer reports an isolated playbook as `token-set` for a
+  token it never uses.** `route.auth` counted a `CLAUDE_CODE_OAUTH_TOKEN`
+  from an env set in `DEFAULTS`, which an isolated launch drops. It now reads
+  the login the launch actually uses; a shared playbook, and a token the
+  isolated playbook sets itself, still read `token-set`.
 
 - **A Foundry route is no longer reported as Anthropic's.** `EXPLAIN`'s
   `route.egress` reads `unknown` when `CLAUDE_CODE_USE_FOUNDRY` is on or

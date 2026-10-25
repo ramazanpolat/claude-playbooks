@@ -1406,7 +1406,9 @@ stores that `auth status` does, so the two agree.
 - **`auth`:**
   - `token-set` when `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
     `CLAUDE_CODE_OAUTH_TOKEN` is set (a value or a reference) and not blocked,
-    or a machine or playbook token is in effect;
+    or a machine or playbook token is in effect. For an isolated playbook a
+    `CLAUDE_CODE_OAUTH_TOKEN` that only `DEFAULTS` sets does not count: its
+    launch drops it;
   - otherwise `oauth-login` when the login `auth status` reports is in the
     store or in the Keychain. An isolated playbook's store that is still a
     link to the shared one is detached at its next launch, so a grant reached
