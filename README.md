@@ -32,8 +32,7 @@ work                                               # Claude Code, bound to that 
 curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | sh
 ```
 
-Linux and macOS, amd64/arm64. Installs one executable, `cpb`;
-`cpb self-update` updates it. [devbox, Nix, npx and source builds →](docs/guides/installation.md)
+Linux and macOS, amd64/arm64. Installs one executable, `cpb`; `cpb self-update` updates it. [devbox, Nix, npx and source builds →](docs/guides/installation.md)
 
 ## What you can do with it
 
@@ -142,6 +141,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | base -> an agent -> a team layer, as recipes |
 | [Examples 01-22](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI and `cpb play`, all applied in CI |
+| [Ask in plain words](docs/guides/assistant.md) | `cpb ask "<request>"` shows the cpb command that does it |
 | [Guides](docs/README.md) · [SPEC.md](SPEC.md) | how-tos for every area · every statement, command, file and output format: the contract |
 | [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) | what changed in each release · development |
 

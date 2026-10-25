@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cpb ask "<request>"`**: ask in plain words for the cpb command that
+  does it. It shows the command, one line on what it does, and `!` lines for
+  what a step removes, forgets or replaces, which credential or login it
+  touches, or what code it fetches; it never runs anything. The question goes
+  to Anthropic's API through the machine's Claude Code login, never through
+  an env set or `DEFAULTS`, with the names of what is installed and no value,
+  reference or credential. [Ask in plain words](docs/guides/assistant.md).
+- `cpb ask <playbook> "<request>"` addresses the question to a playbook: it
+  signs in the way a launch of that playbook would, and "you" means it. A
+  playbook routed away from Anthropic is refused.
+- The model's one tool is cpb itself, read-only (`SHOW`, `EXPLAIN`), with its
+  answers cut down to names, routes, versions and session counts: it can
+  answer questions about the current state.
+- `cpb ask` refuses a request that holds a credential-shaped value before
+  anything is sent, naming the key or the kind, never the value.
+- `CPB_ASK_LOGIN=token` makes `cpb ask` sign in with cpb's machine token (the
+  long-lived token launches use) instead of Claude Code's own login.
+- `cpb ask` does not run through a proxy: with `HTTP_PROXY`, `HTTPS_PROXY` or
+  `ALL_PROXY` set it stops before anything is sent, and names the variable.
+- A quoted statement that does not parse and does not start with a keyword
+  suggests `cpb ask`.
+
 ## [v4.0.0] -- 2026-10-25
 
 cpb v4 is one CLI with one grammar, and v4.0.0 is its first release. It

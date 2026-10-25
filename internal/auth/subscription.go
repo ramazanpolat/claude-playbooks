@@ -68,7 +68,7 @@ func readCredentialFile() []byte {
 	if err != nil {
 		return nil
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".claude", CredentialsFileName))
+	data, err := os.ReadFile(StorePath(filepath.Join(home, ".claude")))
 	if err != nil {
 		return nil
 	}
@@ -91,7 +91,7 @@ func readCredentialKeychain() []byte {
 	// The bare service name is the default config dir's item. Playbook config
 	// dirs use a sha256-suffixed service, but the account's plan is a property
 	// of the account, not of whichever playbook happens to be launching.
-	out, err := findGenericPassword("Claude Code-credentials")
+	out, err := keychainSecret("Claude Code-credentials")
 	if err != nil {
 		return nil
 	}
