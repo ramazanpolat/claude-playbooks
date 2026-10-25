@@ -74,6 +74,42 @@ func routeInherited(origins []envset.Origin, environ []string) []envset.Origin {
 	return out
 }
 
+// routeEgress is the egress class of a launch whose variables are origins:
+// "anthropic" when its requests go to api.anthropic.com over https, or no
+// base URL is set and none of Bedrock, Vertex and Foundry is switched on or
+// given a base URL; "unknown" otherwise, a base URL from a reference or one
+// that does not parse included. EXPLAIN's route and cpb ask's route check both use it.
+func routeEgress(origins []envset.Origin) string {
+	for _, o := range origins {
+		if o.Blocked {
+			continue
+		}
+		switch o.Key {
+		case "ANTHROPIC_BASE_URL":
+			if o.Ref != "" {
+				return "unknown"
+			}
+			if o.Value == "" {
+				continue
+			}
+			u, err := url.Parse(o.Value)
+			if err != nil || u.Host == "" || !(u.Scheme == "https" && u.Hostname() == "api.anthropic.com") {
+				return "unknown"
+			}
+		case "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY":
+			if v := strings.ToLower(o.Value); o.Ref != "" || (v != "" && v != "0" && v != "false") {
+				return "unknown"
+			}
+		case "ANTHROPIC_FOUNDRY_BASE_URL":
+			// A Foundry endpoint is never Anthropic's own API.
+			if o.Ref != "" || o.Value != "" {
+				return "unknown"
+			}
+		}
+	}
+	return "anthropic"
+}
+
 func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSON) routeJSON {
 	r := routeJSON{Models: map[string]string{}, Auth: "none", Egress: "anthropic"}
 	if model != nil && model.Name != "" {
@@ -89,44 +125,31 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 	}
 	origins = append(append([]envset.Origin{}, origins...), inherited...)
 	tokenSet := false
-	cloud := false
-	baseFromRef := false
+	isolated := auth.IsAuthIsolated(pb.Path)
 	for _, o := range origins {
 		if o.Blocked {
 			continue
 		}
 		switch {
 		case o.Key == "ANTHROPIC_BASE_URL":
-			if o.Ref != "" {
-				baseFromRef = true
-				continue
-			}
-			if o.Value == "" {
+			if o.Ref != "" || o.Value == "" {
 				continue
 			}
 			u, err := url.Parse(o.Value)
 			if err != nil || u.Host == "" {
-				baseFromRef = true // unparsable: say nothing about it, egress unknown
-				continue
+				continue // unparsable: say nothing about it, egress unknown
 			}
 			u.User = nil
 			base, host := u.String(), u.Host
 			r.BaseURL, r.Host = &base, &host
-			if !(u.Scheme == "https" && u.Hostname() == "api.anthropic.com") {
-				r.Egress = "unknown"
-			}
 		case routeTokenVars[o.Key]:
+			// An isolated launch drops a CLAUDE_CODE_OAUTH_TOKEN that only
+			// DEFAULTS sets (the machine's layer), so it is not this route's.
+			if o.Key == auth.OAuthTokenEnv && o.Kind == envset.LayerDefaults && isolated {
+				continue
+			}
 			if o.Ref != "" || o.Value != "" {
 				tokenSet = true
-			}
-		case o.Key == "CLAUDE_CODE_USE_BEDROCK" || o.Key == "CLAUDE_CODE_USE_VERTEX" || o.Key == "CLAUDE_CODE_USE_FOUNDRY":
-			if v := strings.ToLower(o.Value); o.Ref != "" || (v != "" && v != "0" && v != "false") {
-				cloud = true
-			}
-		case o.Key == "ANTHROPIC_FOUNDRY_BASE_URL":
-			// A Foundry endpoint is never Anthropic's own API.
-			if o.Ref != "" || o.Value != "" {
-				cloud = true
 			}
 		default:
 			if m := defaultModelVar.FindStringSubmatch(o.Key); m != nil && o.Ref == "" && o.Value != "" {
@@ -134,9 +157,7 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 			}
 		}
 	}
-	if baseFromRef || cloud {
-		r.Egress = "unknown"
-	}
+	r.Egress = routeEgress(origins)
 	// The login: the same report auth status prints, so the two agree.
 	rep := auth.Inspect(pb.Name, pb.Path, time.Now())
 	switch {

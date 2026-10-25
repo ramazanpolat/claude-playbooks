@@ -56,7 +56,7 @@ func QuarantineStoredOAuth(configDir string) error {
 		return nil
 	}
 
-	path := filepath.Join(configDir, CredentialsFileName)
+	path := StorePath(configDir)
 
 	// Lstat, not Stat: a symlink must be recognised before anything is written,
 	// or the rewrite below would follow it and strip the GLOBAL credentials --
@@ -182,7 +182,7 @@ func isGlobalCredentialsFile(p string) bool {
 	if err != nil || global == "" {
 		return false
 	}
-	gi, err := os.Stat(filepath.Join(global, CredentialsFileName))
+	gi, err := os.Stat(StorePath(global))
 	if err != nil {
 		return false
 	}
@@ -215,7 +215,7 @@ func inGlobalCredentialsChain(p string) bool {
 	if err != nil {
 		return false
 	}
-	cur := filepath.Join(globalReal, CredentialsFileName)
+	cur := StorePath(globalReal)
 	for hops := 0; hops < 40; hops++ {
 		ci, err := os.Lstat(cur)
 		if err != nil {
@@ -334,7 +334,7 @@ func writeFilePrivate(path string, data []byte) error {
 // credentials store is a file (not a link to the shared store) carrying an
 // account OAuth grant. Nothing of the grant is read out.
 func OwnLoginGrant(configDir string) bool {
-	path := filepath.Join(configDir, CredentialsFileName)
+	path := StorePath(configDir)
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return false

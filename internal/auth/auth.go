@@ -58,10 +58,10 @@ func EnsureGlobalCredentials() (string, error) {
 		return "", err
 	}
 	globalClaude := filepath.Join(home, ".claude")
-	globalCreds := filepath.Join(globalClaude, CredentialsFileName)
+	globalCreds := StorePath(globalClaude)
 
 	if runtime.GOOS == "darwin" {
-		out, err := findGenericPassword("Claude Code-credentials")
+		out, err := keychainSecret("Claude Code-credentials")
 		out = bytes.TrimSpace(out)
 		if err == nil && len(out) > 0 {
 			if !json.Valid(out) {
@@ -118,7 +118,7 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 		return nil
 	}
 
-	targetCreds := filepath.Join(targetDir, CredentialsFileName)
+	targetCreds := StorePath(targetDir)
 	targetLinfo, err := os.Lstat(targetCreds)
 	exists := err == nil
 	if exists {
@@ -209,7 +209,7 @@ func LinkCredentials(targetDir, sourceCreds string) error {
 }
 
 func detachSharedCredentials(targetDir string) error {
-	targetCreds := filepath.Join(targetDir, CredentialsFileName)
+	targetCreds := StorePath(targetDir)
 	info, err := os.Lstat(targetCreds)
 	if os.IsNotExist(err) {
 		return nil
