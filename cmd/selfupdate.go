@@ -417,9 +417,10 @@ func downloadTo(cfg selfUpdateConfig, url string, dst io.Writer) error {
 var hexDigest = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 // verifyChecksum fetches the release's SHA256SUMS and compares the staged
-// download's digest. Policy mirrors install.sh: a genuine mismatch aborts;
-// every unverifiable case (no sums published, entry missing, malformed or
-// duplicated) warns and continues — the sums travel over the same channel
+// download's digest. Policy mirrors install.sh: a genuine mismatch,
+// conflicting hashes for the asset, or an entry for it that is not a hash,
+// aborts; the unverifiable cases (no sums published, the asset not listed)
+// warn and continue — the sums travel over the same channel
 // as the binary, so they guard against corruption and truncation, not a
 // compromised host.
 func verifyChecksum(w io.Writer, cfg selfUpdateConfig, downloadBase, latest, asset, path string) error {
@@ -460,19 +461,24 @@ func verifyChecksum(w io.Writer, cfg selfUpdateConfig, downloadBase, latest, ass
 		fields := strings.Fields(line)
 		// sha256sum text mode writes "hash  name"; --binary mode writes
 		// "hash *name" — both are valid manifests.
-		if len(fields) == 2 && (fields[1] == asset || fields[1] == "*"+asset) {
-			matches++
-			want = fields[0]
+		if len(fields) != 2 || (fields[1] != asset && fields[1] != "*"+asset) {
+			continue
+		}
+		matches++
+		// An entry for this asset that is not a hash cannot vouch for it.
+		if !hexDigest.MatchString(fields[0]) {
+			return fmt.Errorf("malformed SHA256SUMS entry for %s %s; refusing a binary that cannot be verified", asset, latest)
+		}
+		// Two different hashes for one asset are conflicting evidence; the
+		// same hash listed twice verifies as one.
+		if h := strings.ToLower(fields[0]); want == "" {
+			want = h
+		} else if h != want {
+			return fmt.Errorf("checksum mismatch for %s %s: SHA256SUMS lists conflicting hashes for it", asset, latest)
 		}
 	}
 	if matches == 0 {
 		fmt.Fprintf(w, "Warning: %s not listed in SHA256SUMS; skipping checksum verification\n", asset)
-		return nil
-	}
-	if matches != 1 || !hexDigest.MatchString(want) {
-		// A truncated or duplicated entry must not fail a legitimate binary
-		// as "mismatch" — it is unverifiable, not wrong.
-		fmt.Fprintf(w, "Warning: malformed SHA256SUMS entry for %s; skipping checksum verification\n", asset)
 		return nil
 	}
 

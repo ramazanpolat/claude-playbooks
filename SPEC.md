@@ -3458,26 +3458,43 @@ refused, native Windows explicitly so in the shim, which names WSL) and `arch`
 from `uname -m` mapped `x86_64`→`amd64`, `aarch64`/`arm64`→`arm64`. The asset is
 fetched from `<download base>/<tag>/<asset>`.
 
+`install.sh` rides out a transient failure on each release download (the
+asset, `SHA256SUMS`, `LICENSE`, `NOTICE`): an HTTP 408, 429 or 5xx, a timeout,
+or a connection refused, reset or cut short (curl exit 7, 18, 28, 35, 52, 55,
+56) is tried again, up to three attempts two seconds apart. Each download goes
+to a file, and every attempt starts it empty, so nothing a cut-short attempt
+received survives into the next; `SHA256SUMS` is read only once fetched whole.
+A 404 is not retried: a release that does not exist fails at once. The
+latest-release lookup is asked once and never retried, so a rate limit (403,
+429) is reported at once.
+
 ### Checksum policy
 
-Shared verbatim by `install.sh` and the npx shim. After downloading the asset to
+Shared verbatim by `install.sh` and the npx shim, and kept by `cpb self-update`. After downloading the asset to
 a temporary file, the release's `SHA256SUMS` is fetched from the same base URL
 and the asset's line located by name (`hash  name` and `hash *name` both parsed,
 comparison lowercased since sums files may carry uppercase hex).
 
 - **A hash that is present, well-formed, and different aborts the install**, printing
   the expected and actual digests. The temporary file is removed by the trap.
-- **Every unverifiable case warns and continues**: no `SHA256SUMS` published for
-  the tag, the asset not listed in it, a malformed or duplicated entry, no
-  `sha256sum` or `shasum` on the machine, and — for `install.sh` — a
-  `CPB_INSTALL_URL` override in use.
+- **Conflicting hashes for the asset abort as a mismatch**: two entries for
+  its name with different hashes are conflicting evidence, even when one of
+  them is right. The same hash listed twice (in either case, text or binary
+  mode) verifies as one entry.
+- **An entry for the asset that is not a hash aborts**: it names the asset and
+  cannot vouch for it, so the binary is refused, never installed unverified.
+- **The unverifiable cases warn and continue**: no `SHA256SUMS` published for
+  the tag, the asset not listed in it, no `sha256sum` or `shasum` on the
+  machine, and — for `install.sh` — a `CPB_INSTALL_URL` override in use.
 
 The asymmetry is deliberate and is the policy's whole content: the sums travel
 over the same channel as the binary, so they establish that what arrived is what
 was published, not that the publisher is honest. They guard against corruption
-and truncation, not a compromised host. A malformed entry is therefore treated as
-*unverifiable*, never as a mismatch, so a truncated sums file cannot fail a
-legitimate binary.
+and truncation, not a compromised host. A sums file that does not mention the
+asset says nothing about it and is unverifiable; an entry that does mention it
+but is not a single well-formed hash is evidence against the binary, and
+refuses it. A truncated download of the sums file never reaches this check: it
+fails as a download, and is retried from an empty file.
 
 The download is written to a `mktemp` file inside the destination directory (the
 shim) or under `$TMPDIR` (`install.sh`), made executable, and moved into place
