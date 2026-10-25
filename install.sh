@@ -86,25 +86,34 @@ if [ -z "$LATEST" ]; then
   exit 1
 fi
 
-# fetch URL ARGS...: a release download (the asset, SHA256SUMS, LICENSE,
-# NOTICE) that rides out a transient failure. curl's --retry repeats a
-# timeout and an HTTP 408, 429, 500, 502, 503 or 504; the loop around it
-# repeats a connection that was refused, reset or cut short (exit 7, 18, 35,
-# 52, 55, 56), which --retry does not cover on every curl. A 404 is not
-# transient: curl fails once and the script stops, as before. Not
-# --retry-all-errors (curl 7.71+), which would retry that 404 too. The
-# latest-release lookup above never retries: its 403 and 429 are a rate
+# fetch URL FILE: a release download (the asset, SHA256SUMS, LICENSE,
+# NOTICE) into FILE that rides out a transient failure: an HTTP 408, 429 or
+# 5xx, a timeout, or a connection refused, reset or cut short (curl exit 7,
+# 18, 28, 35, 52, 55, 56), up to three attempts two seconds apart. Every
+# attempt starts on an empty FILE, so a cut-short attempt leaves nothing for
+# the next one to append to; curl's own --retry is not used, since it can
+# keep a failed attempt's bytes in a stream. A 404 is not transient: it fails
+# at once, with curl's own message. FETCH_CODE holds the last HTTP status.
+# The latest-release lookup above never retries: its 403 and 429 are a rate
 # limit, reported at once.
 fetch() {
   n=1
   while :; do
-    curl --retry 3 --retry-delay 2 --retry-max-time 60 -fsSL "$@" && return 0
-    rc=$?
-    case $rc in
-      7|18|35|52|55|56) ;;
+    : > "$2"
+    FETCH_CODE=$(curl -sSL -w '%{http_code}' -o "$2" "$1") && rc=0 || rc=$?
+    case "$rc:$FETCH_CODE" in
+      0:2??) return 0 ;;
+      0:408|0:429|0:5??|7:*|18:*|28:*|35:*|52:*|55:*|56:*) ;;
+      0:*) echo "curl: (22) The requested URL returned error: $FETCH_CODE" >&2; return 22 ;;
       *) return $rc ;;
     esac
-    [ "$n" -ge 3 ] && return $rc
+    if [ "$n" -ge 3 ]; then
+      if [ "$rc" = 0 ]; then
+        echo "curl: (22) The requested URL returned error: $FETCH_CODE" >&2
+        return 22
+      fi
+      return $rc
+    fi
     n=$((n + 1))
     sleep 2
   done
@@ -115,29 +124,38 @@ URL="${CPB_INSTALL_URL:-${DOWNLOAD_BASE_URL}/${LATEST}/${ASSET}}"
 
 echo "Installing cpb from ${ASSET} ${LATEST} (${OS}/${ARCH})..."
 TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb.XXXXXX")
-trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi' EXIT
+SUMS_FILE=""
+trap 'if [ -n "$TMP_FILE" ]; then rm -f "$TMP_FILE"; fi; if [ -n "$SUMS_FILE" ]; then rm -f "$SUMS_FILE"; fi' EXIT
 # A signal ends the script; the EXIT trap then cleans up. A trap that only
 # cleaned up would let the script run on after Ctrl-C.
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-fetch "$URL" -o "$TMP_FILE"
+fetch "$URL" "$TMP_FILE"
 
-# Verify against the release's SHA256SUMS. A genuine mismatch always
-# aborts; every unverifiable case (no sums published, malformed entry, no
-# sha256 tool, CPB_INSTALL_URL override) warns and continues — the sums travel
+# Verify against the release's SHA256SUMS. A genuine mismatch, conflicting
+# hashes for the asset, or an entry for it that is not a hash, aborts; the
+# unverifiable cases (no sums published, the asset not listed, no sha256
+# tool, CPB_INSTALL_URL override) warn and continue — the sums travel
 # over the same channel as the binary, so they guard against corruption
 # and truncation, not a compromised host.
 if [ -n "${CPB_INSTALL_URL:-}" ]; then
   echo "Warning: CPB_INSTALL_URL override in use; skipping checksum verification"
 else
-  SUMS=$(fetch "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" 2>/dev/null || true)
+  # Read only once fetched whole: a failed download leaves no partial list.
+  SUMS_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb-sums.XXXXXX")
+  if fetch "${DOWNLOAD_BASE_URL}/${LATEST}/SHA256SUMS" "$SUMS_FILE" 2>/dev/null; then
+    SUMS=$(cat "$SUMS_FILE")
+  else
+    SUMS=""
+  fi
+  rm -f "$SUMS_FILE"; SUMS_FILE=""
   if [ -n "$SUMS" ]; then
     # Lowercased: sums files may carry uppercase hex, the tools emit lower.
     # sha256sum text mode writes "hash  name"; --binary mode "hash *name".
-    want=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a || $2=="*"a {print $1}' | tr 'A-F' 'a-f')
-    matches=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a || $2=="*"a' | grep -c . || true)
+    lines=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a || $2=="*"a {print $1}' | tr 'A-F' 'a-f')
+    want=$(printf '%s\n' "$lines" | grep . | sort -u || true)
     if command -v sha256sum >/dev/null 2>&1; then
       got=$(sha256sum "$TMP_FILE" | awk '{print $1}')
     elif command -v shasum >/dev/null 2>&1; then
@@ -147,10 +165,15 @@ else
     fi
     if [ -z "$want" ]; then
       echo "Warning: ${ASSET} not listed in SHA256SUMS; skipping checksum verification"
-    elif [ "$matches" != "1" ] || ! printf '%s' "$want" | grep -qiE '^[0-9a-f]{64}$'; then
-      # A truncated or duplicated entry must not fail a legitimate binary
-      # as "mismatch" — it is unverifiable, not wrong.
-      echo "Warning: malformed SHA256SUMS entry for ${ASSET}; skipping checksum verification"
+    elif printf '%s\n' "$want" | grep -qvE '^[0-9a-f]{64}$'; then
+      # An entry for this asset that is not a hash cannot vouch for it.
+      echo "Error: malformed SHA256SUMS entry for ${ASSET} ${LATEST}; refusing a binary that cannot be verified"
+      exit 1
+    elif [ "$(printf '%s\n' "$want" | grep -c .)" != "1" ]; then
+      # Two different hashes for one asset are conflicting evidence. The
+      # same hash listed twice verifies as one.
+      echo "Error: checksum mismatch for ${ASSET} ${LATEST}: SHA256SUMS lists conflicting hashes for it"
+      exit 1
     elif [ -z "$got" ]; then
       echo "Warning: no sha256 tool found; skipping checksum verification"
     elif [ "$want" != "$got" ]; then
@@ -198,7 +221,7 @@ if [ -z "${CPB_INSTALL_URL:-}" ]; then
   doc_missing=""
   for f in LICENSE NOTICE; do
     TMP_FILE=$(mktemp "${TMPDIR:-/tmp}/cpb.XXXXXX")
-    if fetch "${DOWNLOAD_BASE_URL}/${LATEST}/$f" -o "$TMP_FILE" 2>/dev/null \
+    if fetch "${DOWNLOAD_BASE_URL}/${LATEST}/$f" "$TMP_FILE" 2>/dev/null \
       && chmod 644 "$TMP_FILE" && mkdir -p "$DOC_DIR" 2>/dev/null && mv "$TMP_FILE" "$DOC_DIR/$f" 2>/dev/null; then
       TMP_FILE=""
     else

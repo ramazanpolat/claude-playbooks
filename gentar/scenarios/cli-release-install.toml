@@ -86,11 +86,19 @@ export CPB_INSTALL_API_BASE="http://127.0.0.1:$port"
 wait "$cpid"
 SHEOF
 chmod +x "$HOME/api.sh"''',
+  # Sums fixtures, each a release whose asset is the installed binary:
+  # dlcut/v4.0.0-rc3, a corrupted asset whose SHA256SUMS lists it first and
+  # then LICENSE; dlconf, two different hashes for the asset (the right one
+  # first); dldup, the right hash listed twice; dlmal, an entry for the
+  # asset that is not a hash.
+  '''os=$(uname -s | tr '[:upper:]' '[:lower:]'); case $(uname -m) in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; esac; sum() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d' ' -f1; }; for k in dlcut dlconf dldup dlmal; do d="$HOME/fx/$k/v4.0.0-rc3"; mkdir -p "$d" && cp "$HOME/.local/bin/cpb" "$d/cpb-$os-$a" && cp "$WORKSPACE_DIR/LICENSE" "$d/" || exit 1; done; h=$(sum "$HOME/.local/bin/cpb"); l=$(sum "$WORKSPACE_DIR/LICENSE"); printf '%s  %s\n%s  %s\n' "$h" "cpb-$os-$a" "$l" LICENSE > "$HOME/fx/dlcut/v4.0.0-rc3/SHA256SUMS" && printf 'corrupted in transit\n' >> "$HOME/fx/dlcut/v4.0.0-rc3/cpb-$os-$a" && printf '%s  %s\n%s  %s\n' "$h" "cpb-$os-$a" "$l" "cpb-$os-$a" > "$HOME/fx/dlconf/v4.0.0-rc3/SHA256SUMS" && printf '%s  %s\n%s  %s\n' "$h" "cpb-$os-$a" "$h" "cpb-$os-$a" > "$HOME/fx/dldup/v4.0.0-rc3/SHA256SUMS" && printf '1234  %s\n' "cpb-$os-$a" > "$HOME/fx/dlmal/v4.0.0-rc3/SHA256SUMS"''',
   # flaky.sh MODE DL CMD...: ~/fx/DL served on a free loopback port, for the
   # length of CMD, by a server whose first answer to each path is a failure:
   # MODE 502 answers 502, MODE drop closes the connection without a word.
-  # Every later request is served from the directory (404 for a missing
-  # file). Each request's path and status go to ~/dl.log.
+  # MODE cut fails only the first SHA256SUMS: it promises the whole file,
+  # sends it up to the end of the asset's line, and closes. Every later
+  # request is served from the directory (404 for a missing file). Each
+  # request's path and status go to ~/dl.log.
   '''cat > "$HOME/flaky.py" <<'PYEOF'
 import http.server, os, socket, sys
 mode, root = sys.argv[1], sys.argv[2]
@@ -100,7 +108,22 @@ def log(path, status):
         f.write(path + "\t" + status + "\n")
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path not in seen:
+        f = os.path.join(root, self.path.lstrip("/"))
+        if mode == "cut":
+            if self.path.endswith("/SHA256SUMS") and self.path not in seen and os.path.isfile(f):
+                seen.add(self.path)
+                body = open(f, "rb").read()
+                part = b"".join(l for l in body.splitlines(True) if b"cpb-" in l)
+                log(self.path, "cut")
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(part)
+                self.wfile.flush()
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.close_connection = True
+                return
+        elif self.path not in seen:
             seen.add(self.path)
             if mode == "drop":
                 log(self.path, "drop")
@@ -112,7 +135,6 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        f = os.path.join(root, self.path.lstrip("/"))
         if not os.path.isfile(f):
             log(self.path, "404")
             self.send_response(404)
@@ -234,3 +256,18 @@ contains = "transient-ridden-out"
 # and nothing is installed.
 command = '''rm -f "$HOME/dl.log"; if "$HOME/flaky.sh" 502 dllic env CPB_INSTALL_VERSION=v0.0.0-missing CPB_INSTALL_DIR="$HOME/miss/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/miss.out" 2>&1; then echo installed-a-missing-version; exit 1; fi; [ "$(grep -c "/v0.0.0-missing/cpb-" "$HOME/dl.log")" = 2 ] && grep "/v0.0.0-missing/cpb-" "$HOME/dl.log" | tail -1 | grep -q "	404$" && grep -q "404" "$HOME/miss.out" && [ -z "$(ls -A "$HOME/miss/bin" 2>/dev/null)" ] && echo missing-fails-fast || { cat "$HOME/miss.out" "$HOME/dl.log"; exit 1; }'''
 contains = "missing-fails-fast"
+
+[[verify.commands]]
+# A retried SHA256SUMS starts from nothing: its first answer is cut right
+# after the asset's entry, the second is whole, and the asset itself is
+# corrupted. The install refuses it as a mismatch and installs nothing; the
+# cut attempt's bytes do not linger as a second entry.
+command = '''rm -f "$HOME/dl.log"; if "$HOME/flaky.sh" cut dlcut env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/cut/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/cut.out" 2>&1; then echo installed-a-corrupted-asset; cat "$HOME/cut.out"; exit 1; fi; grep "/SHA256SUMS" "$HOME/dl.log" | head -1 | grep -q "	cut$" && grep -q "^Error: checksum mismatch for cpb-[a-z]*-[a-z0-9]* v4.0.0-rc3$" "$HOME/cut.out" && [ -z "$(ls -A "$HOME/cut/bin" 2>/dev/null)" ] && echo cut-sums-refused || { cat "$HOME/cut.out" "$HOME/dl.log"; exit 1; }'''
+contains = "cut-sums-refused"
+
+[[verify.commands]]
+# Two different hashes for the asset are conflicting evidence: a mismatch,
+# nothing installed. The same hash listed twice verifies. An entry for the
+# asset that is not a hash cannot vouch for it: refused, nothing installed.
+command = '''if "$HOME/serve.sh" dlconf env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/conf/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/conf.out" 2>&1; then echo installed-on-conflict; cat "$HOME/conf.out"; exit 1; fi; grep -qF "SHA256SUMS lists conflicting hashes for it" "$HOME/conf.out" && grep -q "^Error: checksum mismatch for cpb-" "$HOME/conf.out" && [ -z "$(ls -A "$HOME/conf/bin" 2>/dev/null)" ] || { echo conflict-wrong; cat "$HOME/conf.out"; exit 1; }; "$HOME/serve.sh" dldup env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/dup/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/dup.out" 2>&1 && grep -qF "Checksum verified (sha256)." "$HOME/dup.out" && test -x "$HOME/dup/bin/cpb" || { echo duplicate-wrong; cat "$HOME/dup.out"; exit 1; }; if "$HOME/serve.sh" dlmal env CPB_INSTALL_VERSION=v4.0.0-rc3 CPB_INSTALL_DIR="$HOME/mal/bin" sh "$WORKSPACE_DIR/install.sh" > "$HOME/mal.out" 2>&1; then echo installed-on-malformed; cat "$HOME/mal.out"; exit 1; fi; grep -qF "malformed SHA256SUMS entry for cpb-" "$HOME/mal.out" && [ -z "$(ls -A "$HOME/mal/bin" 2>/dev/null)" ] && echo sums-entries-judged || { echo malformed-wrong; cat "$HOME/mal.out"; exit 1; }'''
+contains = "sums-entries-judged"

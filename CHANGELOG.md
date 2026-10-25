@@ -7,9 +7,15 @@
 - **`install.sh` retries a release download that fails for a moment.** The
   asset, `SHA256SUMS`, `LICENSE` and `NOTICE` are each tried again on a
   timeout, an HTTP 408, 429 or 5xx, or a connection refused, reset or cut
-  short, a few times with a short pause. A 404 (a release that does not
-  exist) still fails at once, and the latest-release lookup is still asked
-  once, so a rate limit is reported as before.
+  short, up to three attempts, each starting from an empty file. A 404 (a
+  release that does not exist) still fails at once, and the latest-release
+  lookup is still asked once, so a rate limit is reported as before.
+- **Conflicting or malformed `SHA256SUMS` entries for the asset now refuse
+  the binary** in `install.sh`, the npx shim and `cpb self-update`. Two
+  different hashes for the asset are a checksum mismatch, and an entry for it
+  that is not a hash is refused as malformed. Both used to warn and install
+  unverified. The same hash listed twice verifies; a sums file that does not
+  list the asset still warns and continues.
 
 ## [v4.1.0] -- 2026-10-25
 
