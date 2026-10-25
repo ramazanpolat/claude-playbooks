@@ -74,8 +74,10 @@ var agentEnvKeep = map[string]bool{
 // belongs to that endpoint.
 var agentEnvLogin = map[string]bool{"ANTHROPIC_API_KEY": true, auth.OAuthTokenEnv: true}
 
-// agentEnv builds the child's environment from environ by allowlist.
-func agentEnv(environ []string) []string {
+// agentRoutesToAnthropic reports whether a claude started with environ
+// sends its requests to Anthropic: EXPLAIN's egress rule, plus the Foundry
+// switch, which that rule does not name.
+func agentRoutesToAnthropic(environ []string) bool {
 	var route []envset.Origin
 	foundry := false
 	for _, kv := range environ {
@@ -84,13 +86,16 @@ func agentEnv(environ []string) []string {
 		case "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX":
 			route = append(route, envset.Origin{Key: k, Value: v})
 		case "CLAUDE_CODE_USE_FOUNDRY":
-			// EXPLAIN's egress rule names Bedrock and Vertex; a Foundry
-			// switch sends requests elsewhere just the same.
 			lv := strings.ToLower(v)
 			foundry = lv != "" && lv != "0" && lv != "false"
 		}
 	}
-	anthropic := routeEgress(route) == "anthropic" && !foundry
+	return routeEgress(route) == "anthropic" && !foundry
+}
+
+// agentEnv builds the child's environment from environ by allowlist.
+func agentEnv(environ []string) []string {
+	anthropic := agentRoutesToAnthropic(environ)
 	out := []string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"}
 	for _, kv := range environ {
 		k, _, ok := strings.Cut(kv, "=")
@@ -138,11 +143,71 @@ func underHome(path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// How cpb agent signs in, CPB_AGENT_LOGIN: "claude", the default, is Claude
+// Code's own login on this machine, and cpb reads no credential; "token" is
+// cpb's machine token, the long-lived token every launch injects
+// (auth.OAuthTokenFile), put into the child's environment and nowhere else.
+const (
+	agentLoginEnv    = "CPB_AGENT_LOGIN"
+	agentLoginClaude = "claude"
+	agentLoginToken  = "token"
+)
+
+// agentLogin reads CPB_AGENT_LOGIN; anything else is a usage error.
+func agentLogin() (string, error) {
+	switch v := os.Getenv(agentLoginEnv); v {
+	case "", agentLoginClaude:
+		return agentLoginClaude, nil
+	case agentLoginToken:
+		return agentLoginToken, nil
+	default:
+		return "", fmt.Errorf("%s=%q: use %s (the default) or %s", agentLoginEnv, v, agentLoginClaude, agentLoginToken)
+	}
+}
+
+// agentLoginEnvFor adds what the login mode needs to the child's
+// environment. In token mode the machine token replaces any Anthropic key
+// or token the environment carried, so it is the one that signs in.
+func agentLoginEnvFor(mode string, env []string) ([]string, error) {
+	if mode != agentLoginToken {
+		return env, nil
+	}
+	f := auth.OAuthTokenFile()
+	data, err := os.ReadFile(f)
+	tok := strings.TrimSpace(string(data))
+	if f == "" || err != nil || tok == "" {
+		return nil, fmt.Errorf("%s=%s, but there is no machine token at %s: create it with claude setup-token (see docs/guides/authentication.md), or unset %s", agentLoginEnv, agentLoginToken, tildePath(f), agentLoginEnv)
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); !agentEnvLogin[k] {
+			out = append(out, kv)
+		}
+	}
+	return append(out, auth.OAuthTokenEnv+"="+tok), nil
+}
+
+// agentEgressGuard refuses a child environment that would not send its
+// requests to Anthropic, whatever login mode built it.
+func agentEgressGuard(env []string) error {
+	if !agentRoutesToAnthropic(env) {
+		return errors.New("cpb agent asks Anthropic only, and the way it is configured to ask would send the question elsewhere: nothing was sent")
+	}
+	return nil
+}
+
 // agentLoginHint ends every failure of the call.
 const agentLoginHint = "cpb agent asks Claude through your Claude Code login: run claude and /login, or set ANTHROPIC_API_KEY"
 
 // askAgent sends the installed state and the request, and returns the plan.
-func askAgent(model string, state *agentContext, request string) (*agentPlan, error) {
+func askAgent(model, login string, state *agentContext, request string) (*agentPlan, error) {
+	env, err := agentLoginEnvFor(login, agentEnv(os.Environ()))
+	if err != nil {
+		return nil, err
+	}
+	if err := agentEgressGuard(env); err != nil {
+		return nil, err
+	}
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		return nil, errors.New("'claude' command not found. Install Claude Code first: https://claude.ai/download")
@@ -158,7 +223,7 @@ func askAgent(model string, state *agentContext, request string) (*agentPlan, er
 	}
 	c := exec.Command(path, agentClaudeArgs(model)...)
 	c.Dir = dir
-	c.Env = agentEnv(os.Environ())
+	c.Env = env
 	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\nRequest: " + request + "\n")
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr

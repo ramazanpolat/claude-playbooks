@@ -11,6 +11,8 @@
   Anthropic's API through the machine's Claude Code login, never through an
   env set or `DEFAULTS`, with the names of what is installed and no value,
   reference or credential. [Ask in plain words](docs/guides/assistant.md).
+- `CPB_AGENT_LOGIN=token` makes `cpb agent` sign in with cpb's machine token
+  (the long-lived token launches use) instead of Claude Code's own login.
 - A quoted statement that does not parse and does not start with a keyword
   suggests `cpb agent`.
 

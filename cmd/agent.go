@@ -29,6 +29,8 @@ Anthropic's API: no env set, DEFAULTS or route of yours applies to the question.
 What it sends, to Anthropic: the request, and the names of your playbooks,
 launchers and env sets, with whether each routes away from Anthropic. Never a
 variable's value, a secret reference or a credential. The model gets no tools.
+CPB_AGENT_LOGIN=token signs in with cpb's machine token (the long-lived token
+every launch uses) instead of Claude Code's own login.
 
 Without --run it only shows the plan. --run shows it and asks before running
 it. A step that removes, forgets or replaces something, touches a credential
@@ -83,6 +85,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	case asJSON && run:
 		return agentUsage("--json only shows the plan: drop --run or --json")
 	}
+	login, err := agentLogin()
+	if err != nil {
+		return agentUsage(err.Error())
+	}
 	if model == "" {
 		model = os.Getenv("CPB_AGENT_MODEL")
 	}
@@ -94,7 +100,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	plan, err := askAgent(model, state, request)
+	plan, err := askAgent(model, login, state, request)
 	if err != nil {
 		return err
 	}

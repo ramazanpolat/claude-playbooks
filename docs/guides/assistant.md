@@ -93,6 +93,21 @@ directory's path, the platform and the OS version.
 If Claude Code is not logged in, `cpb agent` says so and stops: run `claude`
 and `/login`, or set `ANTHROPIC_API_KEY`. It never asks another endpoint.
 
+## Signing in with cpb's token
+
+If your playbooks sign in with a long-lived token (`claude setup-token`, see
+[Authentication](authentication.md)) and plain `claude` is not logged in,
+let `cpb agent` use that token:
+
+```bash
+export CPB_AGENT_LOGIN=token
+```
+
+cpb then reads its machine token and gives it to that one `claude` call in
+its environment, as every launch does. The token is never part of what is
+sent to the model. Whatever is set, a question that would go anywhere but
+Anthropic is refused before anything is sent.
+
 ## Choosing the model
 
 `--model <model>`, or `CPB_AGENT_MODEL`, else `sonnet`. Any Claude model your

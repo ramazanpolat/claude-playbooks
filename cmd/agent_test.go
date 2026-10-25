@@ -117,6 +117,10 @@ func TestAgentSendsNoValue(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "CANARY-shell-key")
 	t.Setenv("FOO_TOKEN", "CANARY-unrelated")
 	t.Setenv("CLAUDE_CONFIG_DIR", "/CANARY-config-dir")
+	// The default login reads no credential: not cpb's machine token either.
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	writeFile(t, tokenFile, "CANARY-machine-token\n")
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
 
 	out, err := agentRun(t, nil, "list the env profiles")
 	if err != nil {
@@ -570,5 +574,68 @@ func TestQuotedWordsSuggestAgent(t *testing.T) {
 	}
 	if err := runStatement([]string{"SHOW ENVZ"}); err == nil || strings.Contains(err.Error(), "cpb agent") {
 		t.Fatalf("a mistyped statement: %v, want no assistant hint", err)
+	}
+}
+
+// CPB_AGENT_LOGIN=token: cpb's machine token signs in, in the child's
+// environment only; it replaces any Anthropic key or token exported there.
+func TestAgentTokenLogin(t *testing.T) {
+	agentFixture(t)
+	rec := fakeAgentClaude(t, agentListPlan)
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	writeFile(t, tokenFile, "CANARY-machine-token\n")
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
+	t.Setenv("CPB_AGENT_LOGIN", "token")
+	t.Setenv("ANTHROPIC_API_KEY", "other-key")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "other-token")
+	if _, err := agentRun(t, nil, "list"); err != nil {
+		t.Fatal(err)
+	}
+	env := readRec(t, rec, "env")
+	if strings.Count(env, "CANARY-machine-token") != 1 || !strings.Contains(env, "CLAUDE_CODE_OAUTH_TOKEN=CANARY-machine-token\n") {
+		t.Errorf("the machine token is not the child's one CLAUDE_CODE_OAUTH_TOKEN:\n%s", env)
+	}
+	if strings.Contains(env, "other-key") || strings.Contains(env, "other-token") {
+		t.Errorf("an exported key or token went along with the machine token:\n%s", env)
+	}
+	for _, f := range []string{"argv", "stdin"} {
+		if strings.Contains(readRec(t, rec, f), "CANARY") {
+			t.Errorf("the machine token reached claude's %s", f)
+		}
+	}
+
+	// No machine token: refused, nothing sent.
+	os.Remove(filepath.Join(rec, "argv"))
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "none"))
+	if _, err := agentRun(t, nil, "list"); err == nil || !strings.Contains(err.Error(), "no machine token") || !strings.Contains(err.Error(), "claude setup-token") {
+		t.Errorf("no token file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Error("claude ran without the machine token")
+	}
+
+	// An unknown mode is a usage error.
+	t.Setenv("CPB_AGENT_LOGIN", "keychain")
+	var err error
+	captureStderr(t, func() { _, err = agentRun(t, nil, "list") })
+	if exitOf(err) != 2 {
+		t.Errorf("CPB_AGENT_LOGIN=keychain: %v, want exit 2", err)
+	}
+}
+
+// The guard holds whatever builds the child's environment: anything that
+// would not reach Anthropic is refused.
+func TestAgentEgressGuard(t *testing.T) {
+	base := []string{"PATH=/bin", "HOME=/home/user"}
+	if err := agentEgressGuard(base); err != nil {
+		t.Errorf("a clean environment: %v", err)
+	}
+	if err := agentEgressGuard(append(base, "ANTHROPIC_BASE_URL=https://api.anthropic.com")); err != nil {
+		t.Errorf("Anthropic's own endpoint: %v", err)
+	}
+	for _, away := range []string{"ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "CLAUDE_CODE_USE_BEDROCK=1", "CLAUDE_CODE_USE_VERTEX=1", "CLAUDE_CODE_USE_FOUNDRY=true"} {
+		if err := agentEgressGuard(append(base, away)); err == nil || !strings.Contains(err.Error(), "Anthropic only") {
+			t.Errorf("%s: %v, want a refusal", away, err)
+		}
 	}
 }

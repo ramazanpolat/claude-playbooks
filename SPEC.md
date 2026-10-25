@@ -2799,9 +2799,9 @@ until a word starts with `-`. Words of cpb v3 (`env profile`, `alias`,
 `install`, `--env-profile`) are understood and answered in v4 terms.
 
 **Who answers.** Claude, through this machine's Claude Code: one `claude -p`
-call, on the machine's login, always to Anthropic's API. cpb reads no
-credential and holds no key. The child process is built so that nothing else
-can join in:
+call, always to Anthropic's API. By default it signs in with Claude Code's
+own login on this machine, and cpb reads no credential and holds no key. The
+child process is built so that nothing else can join in:
 
 - **Its environment is an allowlist:** `PATH`, `HOME`, `USER`, `LOGNAME`,
   `SHELL`, `TERM`, `LANG`, `LC_*`, `TMPDIR`, `XDG_RUNTIME_DIR`,
@@ -2827,6 +2827,17 @@ can join in:
   Code takes the `CLAUDE.md` files of a session's working directory and of
   every directory above it, so none of home's can join.
 - **The model:** `--model`, else `CPB_AGENT_MODEL`, else `sonnet`.
+- **Signing in, `CPB_AGENT_LOGIN`:** `claude` (the default) is Claude Code's
+  own login. `token` is cpb's machine token, the long-lived token every
+  launch injects (`~/.config/claude-code/oauth-token`, or
+  `CPB_OAUTH_TOKEN_FILE`): cpb reads it and puts it in the child's
+  environment as `CLAUDE_CODE_OAUTH_TOKEN`, replacing any Anthropic key or
+  token the environment carried, and nowhere else (never in its arguments or
+  its input). Without a machine token, `token` refuses before anything is
+  sent. Any other value is a usage error.
+- **Anthropic only, whatever is configured:** before `claude` starts, its
+  environment is checked with EXPLAIN's egress rule (and the Foundry
+  switch); one that would not reach Anthropic is refused and nothing is sent.
 - **No login, or an error:** one line naming Claude Code's own message and
   `run claude and /login, or set ANTHROPIC_API_KEY`; exit 1. It never falls
   back to another route.
@@ -3294,6 +3305,8 @@ These have no flag equivalent:
 | `CPB_OAUTH_TOKEN_FILE` | Overrides the long-lived token file read in step 2 of the authentication decision. Default `~/.config/claude-code/oauth-token`. |
 | `CPB_CONFIG_DIR` | The config directory `run` and launcher dispatch bind, in place of the playbook's install directory. Absolute or `~`-prefixed; empty means unset; never created. Consumed -- stripped from the child's environment after every layer. A **reserved key**: a manifest, env set, `--env` or `--env-file` that declares it is refused. Refused together with a sandboxed launch. A bare inherited `CLAUDE_CONFIG_DIR` is discarded. See *Caller-supplied config directory*. |
 | `CPB_SECRET_HELPER` | The secret helper command for this process, over the one `ALTER DEFAULTS SET secret_helper` stored (see *Secrets (optional)*). |
+| `CPB_AGENT_LOGIN` | How `cpb agent` signs in: `claude` (the default, Claude Code's own login) or `token` (cpb's machine token, into the child's environment only). See *`cpb agent`*. |
+| `CPB_AGENT_MODEL` | The model `cpb agent` asks when `--model` is not given. Default `sonnet`. |
 | `CPB_CLICKHOUSE` | The `clickhouse` binary `SELECT` pipes a query to, instead of `clickhouse` or `ch` on `PATH` (see *SELECT*). |
 | `XDG_STATE_HOME` | Parent of the launcher receipt directory (`<XDG_STATE_HOME>/cpb/launchers`). Default `~/.local/state`. |
 | `CPB_LAUNCHER_RECEIPT` | Absolute path of the launcher receipt file, overriding the `XDG_STATE_HOME` computation. A test seam. |

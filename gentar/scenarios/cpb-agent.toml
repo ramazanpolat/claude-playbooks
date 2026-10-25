@@ -49,6 +49,13 @@ command = '''export ANTHROPIC_BASE_URL=http://127.0.0.1:9/arena-url-canary ANTHR
 contains = "agent-names-only-ok"
 
 [[verify.commands]]
+# CPB_AGENT_LOGIN=token: cpb's machine token signs in, in claude's
+# environment only (never its arguments or input); without one, refused
+# before claude runs. The default login never reads the token file.
+command = '''printf 'arena-token-canary-9Rz\n' > "$HOME/agent-token"; export CPB_OAUTH_TOKEN_FILE="$HOME/agent-token"; rm -f "$HOME/agent-env"; cpb agent "list" >/dev/null || exit 1; if grep -q arena-token-canary "$HOME/agent-env"; then echo "default read the token"; exit 1; fi; CPB_AGENT_LOGIN=token cpb agent "list" >/dev/null || { echo token-mode-failed; exit 1; }; grep -qx "CLAUDE_CODE_OAUTH_TOKEN=arena-token-canary-9Rz" "$HOME/agent-env" || { echo token-not-in-env; exit 1; }; if grep -q arena-token-canary "$HOME/agent-argv" "$HOME/agent-stdin"; then echo token-sent; exit 1; fi; rm -f "$HOME/agent-env"; if CPB_AGENT_LOGIN=token CPB_OAUTH_TOKEN_FILE="$HOME/none" cpb agent "list" >/dev/null 2>&1; then echo no-token-not-refused; exit 1; fi; test ! -e "$HOME/agent-env" && echo agent-token-login-ok'''
+contains = "agent-token-login-ok"
+
+[[verify.commands]]
 # Without --run a plan is only shown: the env set is still there.
 command = 'out=$(cpb agent "drop route-b") && echo "$out" | grep -qF "cpb DROP ENV route-b" && echo "$out" | grep -qF "! removes env set route-b" && test -e "$HOME/.claude-playbooks/.env-sets/route-b.toml" && echo agent-show-only-ok'
 contains = "agent-show-only-ok"
