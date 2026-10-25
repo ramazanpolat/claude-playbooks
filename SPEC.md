@@ -1392,7 +1392,8 @@ stores that `auth status` does, so the two agree.
   in, so a route variable exported there and not set or blocked by any layer
   is part of the route (`ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`,
   `ANTHROPIC_DEFAULT_<NAME>_MODEL`, `ANTHROPIC_API_KEY`,
-  `ANTHROPIC_AUTH_TOKEN`, the Bedrock and Vertex switches). Run EXPLAIN in
+  `ANTHROPIC_AUTH_TOKEN`, the Bedrock, Vertex and Foundry switches,
+  `ANTHROPIC_FOUNDRY_BASE_URL`). Run EXPLAIN in
   the environment the launch will use.
 - **`base_url` and `host`:** the effective `ANTHROPIC_BASE_URL`, its userinfo
   removed (absent, not masked). Both are `null` when it is unset (Anthropic's
@@ -1415,8 +1416,8 @@ stores that `auth status` does, so the two agree.
     login). Never `none`;
   - `none` otherwise.
 - **`egress`:** `anthropic` for `https://api.anthropic.com`, or no base URL
-  with neither Bedrock nor Vertex switched on. `unknown` otherwise; cpb names
-  no other class.
+  with none of Bedrock, Vertex and Foundry switched on and no
+  `ANTHROPIC_FOUNDRY_BASE_URL`. `unknown` otherwise; cpb names no other class.
 
 An unreadable env set or manifest makes `EXPLAIN` fail with that error rather
 than answer.
@@ -2513,9 +2514,10 @@ closed set: `runs_program`, `third_party_code`, `sends_data`,
 
 Three kinds need a **typed confirmation** before a recipe runs (`!!` in the
 preview, `confirm` in JSON):
-- **the model endpoint** (`ANTHROPIC_BASE_URL` and the Bedrock and Vertex
-  base URLs, unless the host is Anthropic's over https;
-  `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`): the host is typed;
+- **the model endpoint** (`ANTHROPIC_BASE_URL` and the Bedrock, Vertex and
+  Foundry base URLs, unless the host is Anthropic's over https;
+  `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
+  `CLAUDE_CODE_USE_FOUNDRY`): the host is typed;
 - **a proxy** (`HTTP(S)_PROXY`, `ALL_PROXY`, any case): its host is typed;
   **a TLS change** (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
   `NODE_TLS_REJECT_UNAUTHORIZED`): the word `TLS` is typed;

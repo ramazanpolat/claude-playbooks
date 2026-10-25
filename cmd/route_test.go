@@ -34,7 +34,7 @@ func stubKeychainProbe(t *testing.T, s auth.KeychainState) {
 func clearRouteEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
-		"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"} {
+		"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "ANTHROPIC_FOUNDRY_BASE_URL"} {
 		t.Setenv(k, "")
 	}
 	for _, kv := range os.Environ() {
@@ -150,5 +150,44 @@ func TestExplainRouteInherited(t *testing.T) {
 	}
 	if r := routeOf(t, "plain"); r.Auth != "token-set" {
 		t.Fatalf("a shared launch uses the inherited OAuth token: %+v", r)
+	}
+}
+
+// A Foundry route is not Anthropic's: its switch or its base URL, from a
+// layer or from the environment, makes the egress unknown, as Bedrock's and
+// Vertex's do; a switch that is off, or a BLOCK VAR, does not.
+func TestExplainRouteFoundry(t *testing.T) {
+	resetCommandTestState(t)
+	aliasTestHome(t)
+	clearRouteEnv(t)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	stubKeychainProbe(t, auth.KeychainAbsent)
+	mustStmt(t, "CREATE PLAYBOOK fsw SET launcher = ''")
+	mustStmt(t, "ALTER PLAYBOOK fsw SET VAR CLAUDE_CODE_USE_FOUNDRY=1")
+	if r := routeOf(t, "fsw"); r.Egress != "unknown" {
+		t.Fatalf("the Foundry switch: %+v", r)
+	}
+	mustStmt(t, "ALTER PLAYBOOK fsw SET VAR CLAUDE_CODE_USE_FOUNDRY=0")
+	if r := routeOf(t, "fsw"); r.Egress != "anthropic" {
+		t.Fatalf("the Foundry switch off: %+v", r)
+	}
+	mustStmt(t, "CREATE PLAYBOOK furl SET launcher = ''")
+	mustStmt(t, "ALTER PLAYBOOK furl SET VAR ANTHROPIC_FOUNDRY_BASE_URL=https://foundry.example.test/anthropic")
+	if r := routeOf(t, "furl"); r.Egress != "unknown" {
+		t.Fatalf("a Foundry base URL: %+v", r)
+	}
+
+	// From the environment: exported and not blocked, it is part of the route.
+	mustStmt(t, "CREATE PLAYBOOK fenv SET launcher = ''")
+	for _, kv := range [][2]string{{"CLAUDE_CODE_USE_FOUNDRY", "true"}, {"ANTHROPIC_FOUNDRY_BASE_URL", "https://foundry.example.test/anthropic"}} {
+		t.Setenv(kv[0], kv[1])
+		if r := routeOf(t, "fenv"); r.Egress != "unknown" {
+			t.Fatalf("exported %s: %+v", kv[0], r)
+		}
+		mustStmt(t, "ALTER PLAYBOOK fenv BLOCK VAR "+kv[0])
+		if r := routeOf(t, "fenv"); r.Egress != "anthropic" {
+			t.Fatalf("exported and blocked %s: %+v", kv[0], r)
+		}
+		t.Setenv(kv[0], "")
 	}
 }
