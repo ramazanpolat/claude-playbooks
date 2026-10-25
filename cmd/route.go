@@ -32,8 +32,9 @@ type routeJSON struct {
 	// unknown (the login could not be determined; never reported as none).
 	Auth string `json:"auth"`
 	// Egress is derived only: "anthropic" when the requests go to
-	// api.anthropic.com over https (or no base URL is set and neither Bedrock
-	// nor Vertex is switched on), "unknown" otherwise. cpb names no other class.
+	// api.anthropic.com over https (or no base URL is set and none of
+	// Bedrock, Vertex and Foundry is switched on or given a base URL),
+	// "unknown" otherwise. cpb names no other class.
 	Egress string `json:"egress"`
 }
 
@@ -64,7 +65,8 @@ func routeInherited(origins []envset.Origin, environ []string) []envset.Origin {
 		}
 		switch {
 		case k == "ANTHROPIC_BASE_URL", k == "ANTHROPIC_MODEL", routeTokenVars[k],
-			k == "CLAUDE_CODE_USE_BEDROCK", k == "CLAUDE_CODE_USE_VERTEX", defaultModelVar.MatchString(k):
+			k == "CLAUDE_CODE_USE_BEDROCK", k == "CLAUDE_CODE_USE_VERTEX", k == "CLAUDE_CODE_USE_FOUNDRY",
+			k == "ANTHROPIC_FOUNDRY_BASE_URL", defaultModelVar.MatchString(k):
 			covered[k] = true // the first entry is the one a lookup sees
 			out = append(out, envset.Origin{Key: k, Value: v})
 		}
@@ -74,9 +76,9 @@ func routeInherited(origins []envset.Origin, environ []string) []envset.Origin {
 
 // routeEgress is the egress class of a launch whose variables are origins:
 // "anthropic" when its requests go to api.anthropic.com over https, or no
-// base URL is set and neither Bedrock nor Vertex is switched on; "unknown"
-// otherwise, a base URL from a reference or one that does not parse
-// included. EXPLAIN's route and cpb agent's route check both use it.
+// base URL is set and none of Bedrock, Vertex and Foundry is switched on or
+// given a base URL; "unknown" otherwise, a base URL from a reference or one
+// that does not parse included. EXPLAIN's route and cpb agent's route check both use it.
 func routeEgress(origins []envset.Origin) string {
 	for _, o := range origins {
 		if o.Blocked {
@@ -94,8 +96,13 @@ func routeEgress(origins []envset.Origin) string {
 			if err != nil || u.Host == "" || !(u.Scheme == "https" && u.Hostname() == "api.anthropic.com") {
 				return "unknown"
 			}
-		case "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX":
+		case "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY":
 			if v := strings.ToLower(o.Value); o.Ref != "" || (v != "" && v != "0" && v != "false") {
+				return "unknown"
+			}
+		case "ANTHROPIC_FOUNDRY_BASE_URL":
+			// A Foundry endpoint is never Anthropic's own API.
+			if o.Ref != "" || o.Value != "" {
 				return "unknown"
 			}
 		}
