@@ -77,14 +77,14 @@ ok("a keyword cannot name a playbook, a word that only looks like one can", func
 ok("sandbox implies an isolated login; flags go where cpb takes them", function () {
   const s = sel({ sandbox: true, isolated: true, mode: "file" });
   const f = core.render(s);
-  assert.ok(f.text.includes("CREATE PLAYBOOK IF NOT EXISTS work SANDBOX;"), f.text);
-  assert.ok(!/ISOLATED LOGIN/.test(f.text));
+  assert.ok(f.text.includes("CREATE PLAYBOOK IF NOT EXISTS work SET sandbox.always = true, login = 'isolated';"), f.text);
+  assert.strictEqual((f.text.match(/login = 'isolated'/g) || []).length, 1, f.text);
   const r = core.render(Object.assign(core.clone(s), { mode: "recipe" }));
-  assert.ok(!/CREATE PLAYBOOK/.test(r.text) && !/ISOLATED LOGIN/.test(r.text));
-  assert.deepStrictEqual(r.commands[0], "cpb CREATE PLAYBOOK work SANDBOX");
+  assert.ok(!/CREATE PLAYBOOK/.test(r.text) && !/login = 'isolated'/.test(r.text));
+  assert.deepStrictEqual(r.commands[0], "cpb CREATE PLAYBOOK work SET sandbox.always = true, login = 'isolated'");
   assert.ok(r.text.includes("-- create-with: SANDBOX\n"));
   const i = core.render(sel({ isolated: true, mode: "recipe" }));
-  assert.ok(i.text.includes("SET ISOLATED LOGIN;"));
+  assert.ok(i.text.includes("SET login = 'isolated';"));
 });
 ok("an empty recipe is refused, an empty file is just the playbook", function () {
   const e = sel({ mcp: [], skills: [], plugins: [], allow: [], deny: [], vars: [], model: { kind: "default" } });
