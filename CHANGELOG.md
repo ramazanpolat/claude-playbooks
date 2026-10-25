@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [v4.1.0] -- 2026-10-25
+
+v4.1.0 adds `cpb ask`: say in plain words what you want done, and it shows
+the cpb command that does it. What it guarantees:
+
+- **It shows commands and never runs them.** You copy what you decide to run.
+- **It asks Anthropic only.** The question goes to Anthropic's API through
+  this machine's Claude Code login, never through an env set or `DEFAULTS`.
+  A playbook or an environment routed anywhere else is refused before
+  anything is sent.
+- **The model's one tool touches no credential.** It is cpb itself,
+  read-only (`SHOW` and `EXPLAIN`), and it never reads, opens or checks for a
+  token file, a login store or a Keychain item.
+- **A request holding a credential-looking value is refused before anything
+  is sent**, naming the key or the kind, never the value.
+
+Nothing changes for an existing playbook, and there is no upgrade step.
+
 ### Added
 
 - **`cpb ask "<request>"`**: ask in plain words for the cpb command that
