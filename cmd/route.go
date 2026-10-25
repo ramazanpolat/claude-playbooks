@@ -32,8 +32,9 @@ type routeJSON struct {
 	// unknown (the login could not be determined; never reported as none).
 	Auth string `json:"auth"`
 	// Egress is derived only: "anthropic" when the requests go to
-	// api.anthropic.com over https (or no base URL is set and none of Bedrock,
-	// Vertex and Foundry is switched on or given a base URL), "unknown" otherwise. cpb names no other class.
+	// api.anthropic.com over https (or no base URL is set and none of
+	// Bedrock, Vertex and Foundry is switched on or given a base URL),
+	// "unknown" otherwise. cpb names no other class.
 	Egress string `json:"egress"`
 }
 
