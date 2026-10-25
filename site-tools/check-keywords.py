@@ -62,13 +62,13 @@ def main():
     r = Run(a.cpb, [])
     try:
         for word in sorted(theirs):
-            code, out = r.raw("CREATE", "PLAYBOOK", word.lower(), "NO", "LAUNCHER")
+            code, out = r.raw("CREATE", "PLAYBOOK", word.lower(), "SET", "launcher", "=", "")
             # refused for any reason: IF, for one, is read as a clause, not rejected as a name
             if code == 0:
                 print(f"FAIL  cpb accepted the keyword {word.lower()} as a playbook name: {out.strip()[:120]}", file=sys.stderr)
                 bad = 1
         for word in NOT_KEYWORDS:
-            code, out = r.raw("CREATE", "PLAYBOOK", word, "NO", "LAUNCHER")
+            code, out = r.raw("CREATE", "PLAYBOOK", word, "SET", "launcher", "=", "")
             if code != 0:
                 print(f"FAIL  cpb refused {word} as a playbook name: {out.strip()[:120]}", file=sys.stderr)
                 bad = 1

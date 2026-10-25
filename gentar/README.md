@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml`: plan and checks, GitHub-hosted. Phase 2 runs in the private mirror `ramazanpolat/claude-playbooks-arena` (`[arena] bench = "mirror"`) | the kit's public variant, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.10.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.10.1` |
 
 ## Quickstart (local)
 
@@ -271,6 +271,7 @@ only says what each suite is for.
 | `launcher-run-version` | `run` launches claude with the playbook wired (keyless, via `--version`) |
 | `global-instructions` | the global_instructions setting through the real claude: `~/.claude/CLAUDE.md` reaches an inherited playbook's request, never an excluded one's (bench only) |
 | `env-overrides` | manifest `[env]`, env sets and launch flags reach the child process |
+| `cpb-ask` | `cpb ask`: names and no value reach the model, claude without user settings or tools, the token login, the proxy refusal, show only (nothing runs), `!` marks, route-away launches, exit codes (stub `claude`, keyless) |
 | `cli-grammar` | the statement grammar on the real launch path: env sets, DEFAULTS, a secret reference resolved by a stub helper, `EXPLAIN --json`, `SHOW CREATE` into `APPLY` with no change, `APPLY` across files, the `DROP PLAYBOOK` guard, source drift, a credential literal never printed, `INCLUDE` stacking files (shared base once, later layer wins, cycle refused), the plugin clauses through a stub `claude plugin`, and v3.21.0's MCP servers (credential by reference), tools / status line / model, skills, recipes and `TO <playbook>` / `TO '<dir>'`, `SELECT` (stub clickhouse-local), a git marketplace's `#ref`, and v3.22.0's `APPLY --dry-run --json` (schema, exit codes, a dry run that writes nothing, references never values) model picker, the refusal of a claude too old for the plugin clauses, `DESCRIBE`, and v3.26.0's `SELECT --json` key order and a sandboxed launch refusing when its key cannot be registered at the proxy (stub `sbx`), and v3.27.0's `github:` marketplace pinned to a tag (a commit refused) |
 | `create-or-alter` | v4.0.0-rc4's convergence: a `CREATE OR ALTER` file applied twice changes nothing, hand-made drift is undone by the next apply (a dry run reports it and writes nothing), `SHOW CREATE` rebuilds an identical twin, `REPLACE ENV` and `run --env-set` reach the child, and a `CREATE` is whole or nothing (rolled back after a failed later step, refused before a missing env set) |
 | `config-dir-override` | `CPB_CONFIG_DIR` end to end |

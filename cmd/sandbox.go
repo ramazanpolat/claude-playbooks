@@ -774,7 +774,7 @@ func sandboxLoginPath(backend sandboxBackend, name string) string {
 // a sandbox-local login (any sandbox's), which a host launch never
 // resolves.
 func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
-	target, err := os.Readlink(filepath.Join(configPath, auth.CredentialsFileName))
+	target, err := os.Readlink(auth.StorePath(configPath))
 	return err == nil && strings.HasPrefix(target, backend.homeDir()+"/.cpb-logins/")
 }
 
@@ -804,7 +804,7 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
-	store := filepath.Join(t.configPath, auth.CredentialsFileName)
+	store := auth.StorePath(t.configPath)
 	if envHas(launchEnv, auth.OAuthTokenEnv) && isSandboxLoginLink(t.configPath, backend) {
 		// Token launch after a sandbox login: on the host the link dangles,
 		// so the quarantine above found no grant to detach, but inside the
@@ -944,7 +944,7 @@ func machineLoginInside(mount string) string {
 		if _, err := os.Stat(dir); err == nil && mountCovers(mount, dir) {
 			return "the machine's Claude config directory " + dir
 		}
-		if store, err := filepath.EvalSymlinks(filepath.Join(dir, auth.CredentialsFileName)); err == nil && mountCovers(mount, store) {
+		if store, err := filepath.EvalSymlinks(auth.StorePath(dir)); err == nil && mountCovers(mount, store) {
 			return "the machine's credentials store " + store
 		}
 	}

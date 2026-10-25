@@ -24,6 +24,7 @@ const oauthTokenFileEnv = "CPB_OAUTH_TOKEN_FILE"
 // Default: $HOME/.config/claude-code/oauth-token. Overridable via
 // CPB_OAUTH_TOKEN_FILE (primarily for tests).
 func OAuthTokenFile() string {
+	touch(TouchTokenFile)
 	if p := os.Getenv(oauthTokenFileEnv); p != "" {
 		return p
 	}
@@ -272,7 +273,7 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 			if own != "" {
 				env = append(env, OAuthTokenEnv+"="+own)
 			}
-		} else if absent, aErr := storeGrantAbsent(filepath.Join(configDir, CredentialsFileName)); aErr != nil {
+		} else if absent, aErr := storeGrantAbsent(StorePath(configDir)); aErr != nil {
 			// Cannot tell whether this playbook is logged in: leave its
 			// state alone and say so. An unreadable store may hold a login.
 			if syncErr == nil {
