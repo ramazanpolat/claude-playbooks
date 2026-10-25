@@ -10,8 +10,8 @@ the cpb command that does it. What it guarantees:
 - **It shows commands and never runs them.** You copy what you decide to run.
 - **It asks Anthropic only.** The question goes to Anthropic's API, signed
   in with this machine's Claude Code login (cpb's machine token with
-  `CPB_ASK_LOGIN=token`; a named playbook's own login with
-  `cpb ask <playbook>`), never through an env set or `DEFAULTS`: the
+  `CPB_ASK_LOGIN=token`; with `cpb ask <playbook>`, the login a launch of
+  that playbook would use), never through an env set or `DEFAULTS`: the
   environment's route variables are dropped. A playbook that routes away
   from Anthropic, or a proxy in the environment, is refused before anything
   is sent.
