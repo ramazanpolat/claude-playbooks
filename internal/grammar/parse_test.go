@@ -511,12 +511,12 @@ func TestExpect(t *testing.T) {
 		want []string
 	}{
 		{nil, []string{"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY"}},
-		{w("CREATE"), []string{"OR", "PLAYBOOK", "ENV"}},
+		{w("CREATE"), []string{"OR", "PLAYBOOK", "ENV", "ACCOUNT"}},
 		{w("CREATE PLAYBOOK"), []string{"IF", "<playbook>"}},
-		{w("ALTER"), []string{"PLAYBOOK", "ENV", "DEFAULTS"}},
+		{w("ALTER"), []string{"PLAYBOOK", "ENV", "DEFAULTS", "ACCOUNT"}},
 		{w("ALTER PLAYBOOK"), []string{"<playbook>"}},
 		{w("ALTER PLAYBOOK k"), alterPlaybookStarters},
-		{w("ALTER PLAYBOOK k USE"), []string{"ENV"}},
+		{w("ALTER PLAYBOOK k USE"), []string{"ENV", "ACCOUNT"}},
 		{w("ALTER PLAYBOOK k USE ENV a"), append([]string{"<env>"}, alterPlaybookStarters...)},
 		{w("ALTER PLAYBOOK k ADD ENV a"), append([]string{"FIRST", "LAST", "BEFORE", "AFTER"}, alterPlaybookStarters...)},
 		{w("ALTER ENV e SET"), []string{"VAR", "<key>=<value>", "<key>"}},
@@ -524,7 +524,7 @@ func TestExpect(t *testing.T) {
 		{w("ALTER ENV e SET A=1 AS"), []string{"PLAINTEXT"}},
 		{w("ALTER DEFAULTS"), defaultsStarters},
 		{w("ALTER DEFAULTS SET"), []string{"secret_helper"}},
-		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "SESSIONS", "--json"}},
+		{w("SHOW"), []string{"CREATE", "PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "--json"}},
 		{w("SHOW SESSIONS"), []string{"FOR", "--json"}},
 		{w("APPLY f"), []string{"<file>", "--dry-run", "--yes", "--json"}},
 		{w("CREATE PLAYBOOK x BRANCH main"), createPlaybookStarters}, // FROM may still follow
