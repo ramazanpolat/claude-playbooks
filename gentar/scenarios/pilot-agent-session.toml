@@ -76,7 +76,28 @@ steps = [
   # is sbx's credential-proxy placeholder, the literal `proxy-managed`, set
   # in every sandbox; it is treated as absent.
   '''umask 077; H="$HOME/.probe-h"; cp=; trap '[ -n "$cp" ] && kill "$cp" 2>/dev/null; rm -f "$H" "$HOME/.probe-code"' EXIT; trap 'exit 143' INT TERM HUP; B=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}; if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then printf 'Authorization: Bearer %s\n' "$ANTHROPIC_AUTH_TOKEN" > "$H"; via=auth-token; elif [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "$ANTHROPIC_API_KEY" != proxy-managed ]; then printf 'x-api-key: %s\n' "$ANTHROPIC_API_KEY" > "$H"; via=api-key; else echo "provider-unprobed: no credential reached the oracle" > "$HOME/provider-probe.txt"; exit 0; fi; M=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-haiku-4-5}; curl -s -o "$HOME/.probe-body" -w '%{http_code}' --max-time 60 -H @"$H" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' -d "{\"model\":\"$M\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\"ok\"}]}" "${B%/}/v1/messages" > "$HOME/.probe-code" & cp=$!; wait "$cp"; code=$(cat "$HOME/.probe-code"); rm -f "$H"; if [ "$code" = 200 ] && grep -q '"content"' "$HOME/.probe-body"; then r="provider-ok (via $via)"; else case $code in 429) r="provider-quota (HTTP 429)";; 401|403) r="provider-auth (HTTP $code)";; *) r="provider-error (HTTP $code)";; esac; r="$r via $via at ${B%%://*}://${B#*://}: $(head -c 300 "$HOME/.probe-body" | tr -d '\n')"; fi; echo "$r" > "$HOME/provider-probe.txt"''',
-  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK pilotpb SET launcher=""',
+  # The bench's credential becomes an account (v4.2.0): a launch carries the
+  # routing and credential variables its account renders, never the ones it
+  # inherits. The account names the credential by reference, env:<VAR>,
+  # which this tiny helper resolves from the environment at exec; the value
+  # is never on a command line or in a file. BENCH_CREDENTIAL carries it,
+  # since cpb removes the ANTHROPIC_* variables before the helper runs. The
+  # model slots pinned for a routed endpoint move onto the account.
+  '''cat > "$HOME/.local/bin/cpb-secret-env" <<'EOF'
+#!/bin/sh
+# Resolves env:<VAR> references from this process's environment.
+if [ "$1" = --check ]; then
+  shift
+  for kv in "$@"; do v=${kv#*=env:}; eval "x=\${$v:-}"; [ -n "$x" ] || { echo "MISSING $v" >&2; exit 4; }; done
+  exit 0
+fi
+while [ $# -gt 0 ] && [ "$1" != -- ]; do k=${1%%=*}; v=${1#*=env:}; eval "export $k=\"\${$v}\""; shift; done
+shift
+exec "$@"
+EOF
+chmod 755 "$HOME/.local/bin/cpb-secret-env"''',
+  '''B="$HOME/.local/bin"; m=""; for s in opus sonnet haiku fable; do eval "v=\${ANTHROPIC_DEFAULT_$(printf %s "$s" | tr a-z A-Z)_MODEL:-}"; [ -n "$v" ] && m="$m, ${s}_model = '$v'"; done; "$B/cpb" ALTER DEFAULTS SET secret_helper = cpb-secret-env >/dev/null && if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then BENCH_CREDENTIAL="$ANTHROPIC_AUTH_TOKEN" "$B/cpb" "CREATE ACCOUNT bench SET provider = 'gateway', base_url = '$ANTHROPIC_BASE_URL', auth_token FROM 'env:BENCH_CREDENTIAL'$m"; else BENCH_CREDENTIAL="${ANTHROPIC_API_KEY:-}" "$B/cpb" "CREATE ACCOUNT bench SET provider = 'anthropic', api_key FROM 'env:BENCH_CREDENTIAL'$m"; fi''',
+  '"$HOME/.local/bin/cpb" CREATE PLAYBOOK pilotpb SET launcher="", login=isolated USE ACCOUNT bench',
   # The playbook's standing instruction. The prompt below never mentions
   # ORBIT-7 -- only this file does, so the marker's presence is proof the
   # session was governed by this playbook.
@@ -89,7 +110,7 @@ steps = [
 # and retry indefinitely, which must fail honestly with the transcript
 # attached rather than hang the bench. Startup update/telemetry checks are
 # off; bench egress hangs on them.
-command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 cpb run pilotpb -p "Create a marker file named marker.txt in the current working directory." --dangerously-skip-permissions'
+command = 'cd "$WORKSPACE_DIR" && BENCH_CREDENTIAL="${ANTHROPIC_AUTH_TOKEN:-${ANTHROPIC_API_KEY:-}}" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 cpb run pilotpb -p "Create a marker file named marker.txt in the current working directory." --dangerously-skip-permissions'
 
 [budget]
 # Declared ceiling for the guard, not measured usage. The arena's

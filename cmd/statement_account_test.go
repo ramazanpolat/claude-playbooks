@@ -169,7 +169,7 @@ func TestAccountShow(t *testing.T) {
 	if out, err := stmt(t, "SHOW CREATE ACCOUNT console"); err == nil || strings.Contains(out, "sk-ant-literal-123") || strings.Contains(err.Error(), "sk-ant-literal-123") {
 		t.Fatalf("SHOW CREATE of a literal: %v\n%s", err, out)
 	}
-	if out := mustStmt(t, "SHOW CREATE ACCOUNT console --skip-secrets"); !strings.Contains(out, "-- ACCOUNT console left out") || strings.Contains(out, "sk-ant") {
+	if out := mustStmt(t, "SHOW CREATE ACCOUNT console --skip-secrets"); !strings.Contains(out, "-- ACCOUNT console withheld") || strings.Contains(out, "sk-ant") {
 		t.Fatalf("--skip-secrets:\n%s", out)
 	}
 

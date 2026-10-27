@@ -1,16 +1,16 @@
 # claude-playbooks own-arena suite: accounts (v4.2.0).
 #
-# An account is an env set holding CLAUDE_CODE_OAUTH_TOKEN by reference.
-# Attached, it is the playbook's account; --env-set picks another for one
-# launch; REPLACE ENV switches for good. The launch execs through the
-# secret helper, so the token reaches claude only, and a token exported in
-# the shell never stands in for it. SELECT names the account, never the
-# token. The login guard refuses a shared-login launch routed to an
-# address that is not Anthropic's with no provider key, and lets it
-# through once the router has its own key. An isolated playbook holding a
-# /login of its own, launched on an account, has that login set aside for
-# the run (unreadable to claude) and back afterwards on Linux; on macOS the
-# launch is refused before anything changes.
+# An account is one record that says where a playbook's requests go and how
+# they authenticate. A playbook names the accounts it may run on, the first
+# by default; --account picks another it lists for one launch. The launch
+# derives the routing and credential variables from the account, through the
+# secret helper for a reference, so the token reaches claude only, and a
+# token exported in the shell never stands in for it. SELECT names the
+# account, never the token. A variable an account owns set anywhere else
+# refuses the launch. An account that uses no Claude login keeps one out of
+# the run: a shared playbook is refused; an isolated playbook's own /login is
+# set aside for the run (unreadable to claude) and back afterwards on Linux,
+# and refused on macOS before anything changes.
 #
 # Stubs on PATH: `claude` dumps the environment it received and the
 # credential store it can read; `arena-helper` is a secret helper that
@@ -29,40 +29,43 @@ steps = [
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\ncp "$CLAUDE_CONFIG_DIR/.credentials.json" "$HOME/store-during" 2>/dev/null || : > "$HOME/store-during"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
   '''printf '#!/bin/sh\nif [ "$1" = --check ]; then exit 0; fi\nprintf "%%s\\n" "${CLAUDE_CODE_OAUTH_TOKEN:-unset}" > "$HOME/helper-inherited"\nwhile [ "$1" != -- ]; do export "${1%%%%=*}=secret-${1#*=stub:}"; shift; done\nshift\nexec "$@"\n' > "$HOME/.local/bin/arena-helper" && chmod 755 "$HOME/.local/bin/arena-helper"''',
   "cpb ALTER DEFAULTS SET secret_helper = 'arena-helper'",
-  "cpb CREATE ENV acct-work SET CLAUDE_CODE_OAUTH_TOKEN FROM 'stub:work'",
-  "cpb CREATE ENV acct-personal SET CLAUDE_CODE_OAUTH_TOKEN FROM 'stub:personal'",
-  "cpb CREATE PLAYBOOK sre SET launcher = '' USE ENV acct-work",
+  "cpb CREATE ACCOUNT acct-work SET provider = 'anthropic', claude_token FROM 'stub:work'",
+  "cpb CREATE ACCOUNT acct-personal SET provider = 'anthropic', claude_token FROM 'stub:personal'",
+  "cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'stub:router', model = 'glm-5.3'",
+  "cpb CREATE PLAYBOOK sre SET launcher = '' USE ACCOUNT acct-work, acct-personal",
 ]
 
 [[verify.files]]
-path = "~/.claude-playbooks/.env-sets/acct-work.toml"
+path = "~/.claude-playbooks/.accounts/acct-work.toml"
 
 [[verify.commands]]
-# The attached account's token reaches claude through the helper; one
-# launch on the other account writes nothing back; SELECT names the
+# The first account's token reaches claude through the helper; one launch
+# on the other account it lists writes nothing back; SELECT names the
 # account; no token is written under the playbooks root.
-command = '''cpb run sre && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && cpb run --env-set acct-personal sre && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-personal" "$HOME/claude-env" && cpb SELECT name, token_source, token_account FROM PLAYBOOKS | grep -qx "$(printf 'sre\tenv-set:acct-work\tacct-work')" && ! grep -rq "secret-work" "$HOME/.claude-playbooks" && echo account-ok'''
+command = '''cpb run sre && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && cpb run --account acct-personal sre && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-personal" "$HOME/claude-env" && cpb SELECT name, token_source, account FROM PLAYBOOKS | grep -qx "$(printf 'sre\taccount\tacct-work')" && ! grep -rq "secret-work" "$HOME/.claude-playbooks" && echo account-ok'''
 contains = "account-ok"
 
 [[verify.commands]]
-# REPLACE ENV switches the account for good, and a token exported in the
-# shell does not stand in for it: cpb removes it before the helper runs
-# (the helper records what it inherited).
-command = '''cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal >/dev/null && CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run sre && grep -qx unset "$HOME/helper-inherited" && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-personal" "$HOME/claude-env" && cpb EXPLAIN PLAYBOOK sre | grep -qF "Claude token: from env set acct-personal (the account, by reference)" && echo switch-ok'''
+# USE ACCOUNT's order switches the default for good, and a token exported
+# in the shell does not stand in for the account's: cpb removes it before
+# the helper runs (the helper records what it inherited).
+command = '''cpb ALTER PLAYBOOK sre USE ACCOUNT acct-personal, acct-work >/dev/null && CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run sre && grep -qx unset "$HOME/helper-inherited" && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-personal" "$HOME/claude-env" && cpb EXPLAIN PLAYBOOK sre | grep -qF "Account: acct-personal (anthropic, claude_token from a reference; the playbook's first)" && echo switch-ok'''
 contains = "switch-ok"
 
 [[verify.commands]]
-# The login guard: a shared-login playbook routed to a router with no key
-# is refused, claude never started; with the router's own key it launches.
-command = '''cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.invalid/v1 >/dev/null && cpb CREATE PLAYBOOK routed SET launcher = '', login = 'shared' USE ENV router >/dev/null && rm -f "$HOME/claude-env" && if cpb run routed 2> "$HOME/guard.err"; then echo guard-let-it-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "router.invalid, which is not Anthropic" "$HOME/guard.err" && cpb EXPLAIN PLAYBOOK routed --json | python3 -c 'import json,sys; g=json.load(sys.stdin)["route"]["guard"]; assert g["verdict"]=="refused", g' && cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'stub:router' >/dev/null && cpb run routed && grep -qx "ANTHROPIC_AUTH_TOKEN=secret-router" "$HOME/claude-env" && echo guard-ok'''
-contains = "guard-ok"
+# A gateway account: its address, key and model reach claude, no Claude
+# credential does, and a shared playbook cannot run on it (claude never
+# starts). A variable an account owns, set in an env set, refuses the
+# launch and names the account that replaces it.
+command = '''cpb CREATE PLAYBOOK routed SET launcher = '', login = 'isolated' USE ACCOUNT router >/dev/null && CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run routed && grep -qx "ANTHROPIC_BASE_URL=http://localhost:4000/v1" "$HOME/claude-env" && grep -qx "ANTHROPIC_AUTH_TOKEN=secret-router" "$HOME/claude-env" && grep -qx "ANTHROPIC_DEFAULT_MODEL=glm-5.3" "$HOME/claude-env" && ! grep -q "^CLAUDE_CODE_OAUTH_TOKEN=" "$HOME/claude-env" && cpb CREATE PLAYBOOK shared SET launcher = '', login = 'shared' USE ACCOUNT router >/dev/null && rm -f "$HOME/claude-env" && if cpb run shared 2> "$HOME/shared.err"; then echo shared-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "shares the machine's Claude login" "$HOME/shared.err" && cpb CREATE ENV loose SET ANTHROPIC_BASE_URL=http://router.invalid/v1 >/dev/null && cpb CREATE PLAYBOOK loose SET launcher = '', login = 'isolated' USE ENV loose >/dev/null && if cpb run loose 2> "$HOME/loose.err"; then echo loose-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "ANTHROPIC_BASE_URL, set by ENV loose" "$HOME/loose.err" && cpb EXPLAIN PLAYBOOK loose --json | python3 -c 'import json,sys; r=json.load(sys.stdin)["route"]; assert r["refused"], r' && echo gateway-ok'''
+contains = "gateway-ok"
 
 [[verify.commands]]
-# An isolated playbook with a /login of its own, launched on an account.
-# Linux: the login is unreadable during the run and back afterwards, other
-# keys kept, nothing left aside. macOS (the login lives in the Keychain):
-# the launch is refused before anything changes, naming the fixes (D5).
-command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE ENV acct-work >/dev/null && P="$HOME/.claude-playbooks/own" && (umask 077 && printf '%s' '{"claudeAiOauth":{"accessToken":"own-login","refreshToken":"r","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"m"}}}' > "$P/.credentials.json") && if [ "$(uname)" = Darwin ]; then rm -f "$HOME/claude-env"; if cpb run own 2> "$HOME/own.err"; then echo own-login-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "holds a login of its own" "$HOME/own.err" && grep -qF "cpb run --block CLAUDE_CODE_OAUTH_TOKEN own" "$HOME/own.err" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; else cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && ! grep -q claudeAiOauth "$HOME/store-during" && grep -q mcpOAuth "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; fi'''
+# An isolated playbook with a /login of its own, launched on a token
+# account. Linux: the login is unreadable during the run and back
+# afterwards, other keys kept, nothing left aside. macOS (the login lives
+# in the Keychain): the launch is refused before anything changes.
+command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE ACCOUNT acct-work >/dev/null && P="$HOME/.claude-playbooks/own" && (umask 077 && printf '%s' '{"claudeAiOauth":{"accessToken":"own-login","refreshToken":"r","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"m"}}}' > "$P/.credentials.json") && if [ "$(uname)" = Darwin ]; then rm -f "$HOME/claude-env"; if cpb run own 2> "$HOME/own.err"; then echo own-login-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "holds a login of its own" "$HOME/own.err" && grep -qF "cpb run --account <account> own" "$HOME/own.err" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; else cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && ! grep -q claudeAiOauth "$HOME/store-during" && grep -q mcpOAuth "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; fi'''
 contains = "aside-ok"
 
 [[verify.commands]]

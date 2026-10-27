@@ -501,15 +501,12 @@ func showAccounts(playbooksDir string, st *grammar.Stmt) error {
 }
 
 // createAccountBlock is SHOW CREATE ACCOUNT: the statement that states the
-// account whole. A literal credential is never printed: without
-// --skip-secrets it refuses, with it the account is left out with a
-// comment naming it.
-func createAccountBlock(a *account.Account, skipSecrets bool) (string, error) {
+// account whole. A literal credential is never printed: the account is
+// left out, a comment naming it, and counted as withheld, so SHOW CREATE
+// refuses at the end without --skip-secrets, as for an env set's literal.
+func createAccountBlock(a *account.Account) createBlock {
 	if a.Auth.Value != "" {
-		if !skipSecrets {
-			return "", fmt.Errorf("account %q holds its %s as plain text, which SHOW CREATE never prints: store it by reference (ALTER ACCOUNT %s SET %s FROM '<ref>'), or pass --skip-secrets to leave it out", a.Name, a.Auth.Kind, a.Name, a.Auth.Kind)
-		}
-		return fmt.Sprintf("-- ACCOUNT %s left out: its %s is plain text (--skip-secrets); restate it with a reference\n", a.Name, a.Auth.Kind), nil
+		return createBlock{text: fmt.Sprintf("-- ACCOUNT %s withheld: its %s is plain text; restate it with a reference (ALTER ACCOUNT %s SET %s FROM '<ref>')", a.Name, a.Auth.Kind, a.Name, a.Auth.Kind), withheld: 1}
 	}
 	set := []grammar.Var{{Key: "provider", Value: a.Provider}}
 	add := func(k, v string) {
@@ -539,5 +536,5 @@ func createAccountBlock(a *account.Account, skipSecrets bool) (string, error) {
 	add("description", a.Description)
 	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Account, Name: a.Name, OrReplace: true,
 		Clauses: []grammar.Clause{{Kind: grammar.SetAccount, Settings: set}}}
-	return st.Pretty() + ";\n", nil
+	return createBlock{text: st.Pretty() + ";"}
 }

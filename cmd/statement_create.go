@@ -45,11 +45,7 @@ func showCreate(st *grammar.Stmt) error {
 		if a == nil {
 			return fmt.Errorf("no account %q", st.Name)
 		}
-		text, err := createAccountBlock(a, st.SkipSecrets)
-		if err != nil {
-			return err
-		}
-		blocks = append(blocks, createBlock{text: strings.TrimSuffix(text, "\n")})
+		blocks = append(blocks, createAccountBlock(a))
 	case grammar.Env:
 		p, err := envset.Read(dir, st.Name)
 		if err != nil {
@@ -92,11 +88,7 @@ func showCreate(st *grammar.Stmt) error {
 			return err
 		}
 		for _, a := range accounts {
-			text, err := createAccountBlock(a, st.SkipSecrets)
-			if err != nil {
-				return err
-			}
-			blocks = append(blocks, createBlock{text: strings.TrimSuffix(text, "\n")})
+			blocks = append(blocks, createAccountBlock(a))
 		}
 		if defaults.text != "" {
 			blocks = append(blocks, defaults)

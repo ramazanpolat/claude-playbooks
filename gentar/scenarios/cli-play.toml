@@ -20,8 +20,9 @@ agent = "shell"
 steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
-  '''F="$HOME/playfx"; mkdir -p "$F/tpl" && printf '%s\n' "ALTER PLAYBOOK" "  USE ENV work" "  SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;" "ALTER DEFAULTS SET secret_helper = 'x';" > "$F/bad.cpb" && printf '%s\n' "-- title: Router" "-- description: GLM through a router." "" "ALTER PLAYBOOK" "  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1" "  SET model = 'glm-5.3';" > "$F/router.cpb" && cp "$F/router.cpb" "$F/tpl/router.cpb" && printf '%s\n' "-- title: Reviewer" "-- description: Reads code." "-- min-cpb: 3.28.0" "" "ALTER PLAYBOOK SET model = 'opus';" > "$F/tpl/code-reviewer.cpb" && printf '%s\n' code-reviewer router > "$F/tpl/index.txt"''',
-  'cpb CREATE ENV mine SET ANTHROPIC_BASE_URL=https://mine.example && cpb ALTER DEFAULTS USE ENV mine',
+  '''F="$HOME/playfx"; mkdir -p "$F/tpl" && printf '%s\n' "ALTER PLAYBOOK" "  USE ENV work" "  SET VAR GITHUB_TOKEN=abc AS PLAINTEXT;" "ALTER DEFAULTS SET secret_helper = 'x';" > "$F/bad.cpb" && printf '%s\n' "-- title: Router" "-- description: GLM through a router." "" "ALTER PLAYBOOK" "  SET VAR SENTRY_URL=https://sentry.example.com/1" "  SET model = 'glm-5.3';" > "$F/router.cpb" && cp "$F/router.cpb" "$F/tpl/router.cpb" && printf '%s\n' "-- title: Reviewer" "-- description: Reads code." "-- min-cpb: 3.28.0" "" "ALTER PLAYBOOK SET model = 'opus';" > "$F/tpl/code-reviewer.cpb" && printf '%s\n' code-reviewer router > "$F/tpl/index.txt" && printf '%s\n' "-- title: Proxied" "-- description: Through a proxy." "" "ALTER PLAYBOOK SET VAR HTTPS_PROXY=http://p.example:8080;" > "$F/proxied.cpb" && printf '%s\n' "-- title: Routed" "-- description: Moves the endpoint." "" "ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1;" > "$F/routed.cpb"''',
+  'cpb CREATE ENV mine SET MINE_URL=https://mine.example && cpb ALTER DEFAULTS USE ENV mine',
+  "cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'https://router.example.net/v1', auth = 'none'",
   '''mkdir -p "$HOME/tls" && openssl req -x509 -newkey rsa:2048 -nodes -keyout "$HOME/tls/key.pem" -out "$HOME/tls/cert.pem" -days 2 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 2>/dev/null''',
   '''mkdir -p "$HOME/stubsbx" && printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$*" >> "$HOME/sbx.log"' 'if [ "$1" = ls ] && [ "$2" = --json ]; then printf "%s" "{\"sandboxes\":[]}"; exit 0; fi' 'if [ "$1" = exec ]; then case "$*" in *"cat ~/.cpb-sandbox"*) printf "%s" skills=private;; esac; fi' 'exit 0' > "$HOME/stubsbx/sbx" && chmod 755 "$HOME/stubsbx/sbx" && printf '%s\n' "ALTER PLAYBOOK SET VAR GH FROM 'keychain:gh';" > "$HOME/playfx/refs.cpb"''',
   '''F="$HOME/playfx"; printf '%s\n' "-- title: Plain" "-- description: A model." "" "ALTER PLAYBOOK SET model = 'claude-opus-5-5';" > "$F/plain.cpb" && mkdir -p "$HOME/sleepclaude" && printf '%s\n' '#!/bin/sh' 'echo "$CLAUDE_CONFIG_DIR" > "$HOME/play-cfg"' 'sleep 30' > "$HOME/sleepclaude/claude" && chmod 755 "$HOME/sleepclaude/claude"''',
@@ -29,16 +30,17 @@ steps = [
 
 [[verify.commands]]
 # --check: what a played recipe may not hold is refused, with its line,
-# and exits 1; a recipe that moves the model endpoint asks for exactly one
-# typed confirmation (root, 2026-10-01: SENTRY_URL is flagged, not typed).
-command = '''F="$HOME/playfx"; if cpb play --check "$F/bad.cpb" > "$HOME/bad.out" 2>&1; then echo bad-accepted; elif ! grep -q "line 2   USE ENV: it would attach your env sets" "$HOME/bad.out" || ! grep -q "line 3   SET VAR GITHUB_TOKEN: a shared recipe carries no secret, even AS PLAINTEXT" "$HOME/bad.out" || ! grep -q "line 4   ALTER DEFAULTS" "$HOME/bad.out"; then echo bad-wrong; else cpb play --check "$F/router.cpb" > "$HOME/r.out" 2>&1 && [ "$(grep -c "you will type" "$HOME/r.out")" = 1 ] && grep -q "you will type: router.example.net" "$HOME/r.out" && grep -q "a tool may send data to sentry.example.com" "$HOME/r.out" && echo play-check-ok; fi'''
+# and exits 1; a recipe that moves the model endpoint is refused (where
+# requests go is an account's, v4.2.0); SENTRY_URL is flagged, not typed.
+command = '''F="$HOME/playfx"; if cpb play --check "$F/bad.cpb" > "$HOME/bad.out" 2>&1; then echo bad-accepted; elif ! grep -q "line 2   USE ENV: it would attach your env sets" "$HOME/bad.out" || ! grep -q "line 3   SET VAR GITHUB_TOKEN: a shared recipe carries no secret, even AS PLAINTEXT" "$HOME/bad.out" || ! grep -q "line 4   ALTER DEFAULTS" "$HOME/bad.out"; then echo bad-wrong; else cpb play --check "$F/router.cpb" > "$HOME/r.out" 2>&1 && [ "$(grep -c "you will type" "$HOME/r.out")" = 0 ] && grep -q "a tool may send data to sentry.example.com" "$HOME/r.out" && if cpb play --check "$F/routed.cpb" > "$HOME/routed.out" 2>&1; then echo routed-accepted; elif grep -q -- "--account" "$HOME/routed.out"; then echo play-check-ok; else echo routed-wrong; fi; fi'''
 contains = "play-check-ok"
 
 [[verify.commands]]
 # --dry-run --json: APPLY's plan with a "play" block, against a throwaway
-# store: the user's DEFAULTS (env set mine) never layer in, the endpoint
-# move isolates the login, nothing is left in the user's store or in /tmp.
-command = '''F="$HOME/playfx"; before=$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l); cpb play --dry-run --json "$F/router.cpb" > "$HOME/r.json" 2> "$HOME/r.err" && python3 -c "import json,sys; r=json.load(open(sys.argv[1])); p=r['play']; assert r['ok'] and p['endpoint']=='router.example.net' and p['playbook'].startswith('play-router-') and len(r['statements'])==3 and p['header']['title']=='Router' and len(p['sha256'])==64, r" "$HOME/r.json" && ! grep -q "mine.example" "$HOME/r.json" "$HOME/r.err" && ! cpb SHOW PLAYBOOKS --json | grep -q "play-router-" && [ "$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l)" = "$before" ] && echo play-dry-run-ok'''
+# store: the user's DEFAULTS (env set mine) never layer in, the account
+# (--account router, not Anthropic's) isolates the login, nothing is left in
+# the user's store or in /tmp.
+command = '''F="$HOME/playfx"; before=$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l); cpb play --dry-run --json --account router "$F/router.cpb" > "$HOME/r.json" 2> "$HOME/r.err" && python3 -c "import json,sys; r=json.load(open(sys.argv[1])); p=r['play']; assert r['ok'] and p['endpoint']=='router.example.net' and p['playbook'].startswith('play-router-') and len(r['statements'])==4 and p['header']['title']=='Router' and len(p['sha256'])==64, r" "$HOME/r.json" && ! grep -q "mine.example" "$HOME/r.json" "$HOME/r.err" && ! cpb SHOW PLAYBOOKS --json | grep -q "play-router-" && [ "$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l)" = "$before" ] && echo play-dry-run-ok'''
 contains = "play-dry-run-ok"
 
 [[verify.commands]]
@@ -74,11 +76,10 @@ contains = "play-term-caller-ok"
 [[verify.commands]]
 # Slice 3: a play runs in a sandbox by default (a stub sbx records its
 # calls). The typed-host gate runs before any sandbox is created: a recipe
-# that moves the endpoint, unconfirmed, never reaches sbx (in a sandbox the
-# proxy would inject a key for that host; root, 2026-10-02). A recipe with a
+# whose proxy is unconfirmed never reaches sbx. A recipe with a
 # secret reference is refused sandboxed, also before sbx. A plain recipe:
 # create, attach, remove, in that order, and the store is gone.
-command = '''F="$HOME/playfx"; export PATH="$HOME/stubsbx:$PATH"; rm -f "$HOME/sbx.log"; before=$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l); if cpb play --yes "$F/router.cpb" > "$HOME/sb1.out" 2>&1; then echo moved-endpoint-ran; elif ! grep -q -- "--trust-endpoint router.example.net" "$HOME/sb1.out"; then echo gate-wrong; elif [ -e "$HOME/sbx.log" ]; then echo sbx-before-gate; elif cpb play --yes --trust-secret keychain:gh "$F/refs.cpb" > "$HOME/sb2.out" 2>&1; then echo refs-sandboxed; elif ! grep -q -- "--no-sandbox" "$HOME/sb2.out" || [ -e "$HOME/sbx.log" ]; then echo refs-wrong; elif ! cpb play --yes "$F/plain.cpb" > "$HOME/sb3.out" 2>&1; then echo sandboxed-failed; elif ! grep -q "Sandboxed (sbx)" "$HOME/sb3.out"; then echo no-sandbox-note; else python3 -c "import sys; c=open(sys.argv[1]).read(); a=c.find('create --name cpb-play-plain-'); b=c.find('exec -i'); r=c.find('rm -f cpb-play-plain-'); sys.exit(0 if 0<=a<b<r else 1)" "$HOME/sbx.log" && [ "$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l)" = "$before" ] && echo play-sandbox-ok; fi'''
+command = '''F="$HOME/playfx"; export PATH="$HOME/stubsbx:$PATH"; rm -f "$HOME/sbx.log"; before=$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l); if cpb play --yes "$F/proxied.cpb" > "$HOME/sb1.out" 2>&1; then echo proxy-ran; elif ! grep -q -- "--trust-endpoint p.example" "$HOME/sb1.out"; then echo gate-wrong; elif [ -e "$HOME/sbx.log" ]; then echo sbx-before-gate; elif cpb play --yes --trust-secret keychain:gh "$F/refs.cpb" > "$HOME/sb2.out" 2>&1; then echo refs-sandboxed; elif ! grep -q -- "--no-sandbox" "$HOME/sb2.out" || [ -e "$HOME/sbx.log" ]; then echo refs-wrong; elif ! cpb play --yes "$F/plain.cpb" > "$HOME/sb3.out" 2>&1; then echo sandboxed-failed; elif ! grep -q "Sandboxed (sbx)" "$HOME/sb3.out"; then echo no-sandbox-note; else python3 -c "import sys; c=open(sys.argv[1]).read(); a=c.find('create --name cpb-play-plain-'); b=c.find('exec -i'); r=c.find('rm -f cpb-play-plain-'); sys.exit(0 if 0<=a<b<r else 1)" "$HOME/sbx.log" && [ "$(ls -d /tmp/cpb-play-* 2>/dev/null | wc -l)" = "$before" ] && echo play-sandbox-ok; fi'''
 contains = "play-sandbox-ok"
 
 [[verify.commands]]

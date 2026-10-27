@@ -30,8 +30,8 @@ steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
   '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
-  'cpb CREATE ENV synth-router SET ANTHROPIC_BASE_URL=http://router.invalid/v1 DESCRIPTION "synthetic router"',
-  'cpb CREATE ENV synth-direct SET ANTHROPIC_BASE_URL=http://direct.invalid/v1 DESCRIPTION "synthetic direct"',
+  'cpb CREATE ENV synth-router SET SYNTH_ENDPOINT=http://router.invalid/v1 DESCRIPTION "synthetic router"',
+  'cpb CREATE ENV synth-direct SET SYNTH_ENDPOINT=http://direct.invalid/v1 DESCRIPTION "synthetic direct"',
   'cpb CREATE PLAYBOOK keep SET launcher="" && cpb ALTER PLAYBOOK keep USE ENV synth-direct',
   'cksum < "$HOME/.claude-playbooks/keep/.playbook" > "$HOME/keep.sum" && mkdir -p "$HOME/work"',
 ]
@@ -115,7 +115,7 @@ contains = "registry-ok"
 [[verify.commands]]
 # A launch through the stub claude gets the router and not the proxy the
 # shell exports.
-command = 'rm -f "$HOME/claude-env"; HTTP_PROXY=http://proxy.invalid cpb run demo && grep -qx "ANTHROPIC_BASE_URL=http://router.invalid/v1" "$HOME/claude-env" && ! grep -q "^HTTP_PROXY=" "$HOME/claude-env" && echo launch-ok'
+command = 'rm -f "$HOME/claude-env"; HTTP_PROXY=http://proxy.invalid cpb run demo && grep -qx "SYNTH_ENDPOINT=http://router.invalid/v1" "$HOME/claude-env" && ! grep -q "^HTTP_PROXY=" "$HOME/claude-env" && echo launch-ok'
 contains = "launch-ok"
 
 [[verify.judge]]
