@@ -6,7 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -111,32 +113,36 @@ func askRoute(dir string, env *manifest.Env) string {
 }
 
 // askLaunchRoute is where a launch that binds configDir, with layers on
-// top, sends its requests: resolved as the launch resolves it
-// (auth.EffectiveBlock: DEFAULTS, the governing manifest, then the layers in
-// order), plus environ's route variables no layer sets or blocks, by
-// EXPLAIN's egress rule (routeEgress): "anthropic" or "away".
+// top, sends its requests: decided by the account it runs on, as the
+// launch decides it (environ's routing is removed at every launch, so it no
+// longer counts): "anthropic" for the machine account or an anthropic one,
+// "away" for any other, or for a launch that would be refused.
 func askLaunchRoute(configDir string, layers []*manifest.Env, environ []string) (string, error) {
-	menv, err := auth.EffectiveBlock(configDir, layers)
-	if err != nil {
+	if _, err := auth.EffectiveBlock(configDir, layers); err != nil {
 		return "", err
 	}
-	var origins []envset.Origin
-	if menv != nil {
-		for k, v := range menv.Set {
-			origins = append(origins, envset.Origin{Key: k, Value: v})
-		}
-		for k, r := range menv.Refs {
-			origins = append(origins, envset.Origin{Key: k, Ref: r})
-		}
-		for _, k := range menv.Block {
-			origins = append(origins, envset.Origin{Key: k, Blocked: true})
-		}
+	acct, err := planAccount(configDir, "", layers, "")
+	if err != nil {
+		return "away", nil
 	}
-	origins = append(origins, routeInherited(origins, environ)...)
-	if routeEgress(origins) == "anthropic" {
-		return "anthropic", nil
+	if a := acct.sel.Account; a != nil && a.Provider != account.Anthropic {
+		return "away", nil
 	}
-	return "away", nil
+	return "anthropic", nil
+}
+
+// askPlaybookAccount is the account a launch of configDir with no flags
+// runs on: nil for the machine account, or one that cannot be resolved.
+func askPlaybookAccount(configDir, name string) *account.Account {
+	var list []string
+	if m, _ := manifest.Nearest(configDir); m != nil && m.Env != nil {
+		list = m.Env.Accounts
+	}
+	sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), name, list, "")
+	if err != nil {
+		return nil
+	}
+	return sel.Account
 }
 
 // askPlaybookRoute is a playbook's own route, as a launch of it with no

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -57,6 +58,11 @@ func askSplitArgs(root string, args []string) (*playbook.Playbook, string, error
 func askTargetSignIn(root string, pb *playbook.Playbook) (askSignIn, error) {
 	if route := askPlaybookRoute(pb.Path); route != "anthropic" {
 		return askSignIn{}, fmt.Errorf("%s sends its requests away from Anthropic (route %s), and cpb ask asks Anthropic only: nothing was sent. Ask without naming it: cpb ask \"<request>\"", pb.Name, route)
+	}
+	// An Anthropic account that signs in with a key or a token of its own:
+	// cpb ask signs in with a Claude login, the playbook's or the machine's.
+	if a := askPlaybookAccount(pb.Path, pb.Name); a != nil && a.Auth.Kind != account.ClaudeLogin {
+		return askSignIn{}, fmt.Errorf("%s runs on account %s, which signs in with its %s, and cpb ask signs in with a Claude login only: nothing was sent. Ask without naming it: cpb ask \"<request>\"", pb.Name, a.Name, a.Auth.Kind)
 	}
 	rep := auth.Inspect(pb.Name, pb.Path, time.Now())
 	switch rep.Mode {
