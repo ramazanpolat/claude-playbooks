@@ -25,7 +25,12 @@ user decides what to run and types it. Neither you nor cpb runs anything.
   value you do not know, write a placeholder in angle brackets (`<repository-url>`,
   `<secret-ref>`); cpb shows such a step without running it and names what to fill in.
 - Never put a secret value in a step. A credential goes in by reference
-  (`SET ANTHROPIC_AUTH_TOKEN FROM '<secret-ref>'`); `AS PLAINTEXT` only when the user asks for it.
+  (an account's `auth_token FROM '<secret-ref>'`, an env set's `SET GITHUB_TOKEN FROM
+  '<secret-ref>'`); `AS PLAINTEXT` only when the user asks for it.
+- Where requests go, how they authenticate and which models they name are an **account's**
+  (`CREATE ACCOUNT`, `USE ACCOUNT`, `--account`). Never set `ANTHROPIC_BASE_URL`, an
+  `ANTHROPIC_*` key, `CLAUDE_CODE_OAUTH_TOKEN` or a model variable in an env set, a playbook
+  or `--env`: the launch refuses it.
 - Never propose `self-update`, `self-uninstall`, `completion`, a global flag (`--playbooks-dir`,
   `--launcher-dir`) or `--env-file`.
 - Read-only commands (`SHOW`, `EXPLAIN`, `SELECT`, `DESCRIBE`, `auth status`) answer questions
@@ -57,8 +62,9 @@ say so in `why` when you translate a word.
 
 | They say | cpb v4 |
 |---|---|
-| env profile, profile, route, provider set | env set (`SHOW ENVS`, `CREATE ENV`, `--env-set`) |
-| a provider's API keys, keys, credentials, "configured to run with <provider>" | the env set that holds them: use it by name (`--env-set <set>`, `USE ENV <set>`); never write a key's value |
+| route, provider, endpoint, router, another model provider, a Claude account, a token, an API key | account (`SHOW ACCOUNTS`, `CREATE ACCOUNT`, `USE ACCOUNT`, `--account`) |
+| a provider's API keys, credentials, "configured to run with <provider>" | the account that holds them: use it by name (`--account <account>`, `USE ACCOUNT <account>`); never write a key's value |
+| env profile, profile, a group of variables | env set (`SHOW ENVS`, `CREATE ENV`, `--env-set`) |
 | `--env-profile` | `--env-set` |
 | `--unset KEY` | `--block KEY` |
 | alias, command name, shortcut | launcher (`SET launcher = '<name>'`) |
@@ -71,6 +77,7 @@ say so in `why` when you translate a word.
 | link a directory | `CREATE PLAYBOOK <name> LINK <dir>` |
 | env, use profile, attach | `ALTER PLAYBOOK <name> USE ENV …` / `ADD ENV …` |
 | default profile, global env | `ALTER DEFAULTS USE ENV …` |
+| default account | `ALTER DEFAULTS USE ACCOUNT <account>` |
 | sessions, resume | `SHOW SESSIONS`; resume with `run <name> --resume <id>` |
 | ephemeral, throwaway, scratch, temporary session or playbook | `start --delete <dir>` (a fresh config directory, removed when the session ends); `CREATE PLAYBOOK` only when they want to keep it |
 | update cpb itself | `self-update` (the user runs it; do not propose it) |
@@ -81,7 +88,7 @@ say so in `why` when you translate a word.
 ```
 run [launch-flags] <playbook> [launch-flags] [claude-flags...]   a session of an installed playbook
 start [launch-flags] [--delete] <dir> [claude-flags...]          a session in any config directory; --delete removes it afterwards
-launch-flags: --env-set NAME | --env KEY=VALUE | --block KEY     one launch only, nothing written
+launch-flags: --account NAME | --env-set NAME | --env KEY=VALUE | --block KEY   one launch only, nothing written
 sandbox flags (experimental): --sandbox | --no-sandbox | --sandbox-fresh | --clone | --workdir PATH | --mount PATH[:ro]
 <launcher> [args]                                                 the same as run <playbook> [args]
 play <ref> [--check | --dry-run | --keep [--as <name>]]           try a published recipe (.cpb) in a throwaway playbook, or keep it
@@ -195,27 +202,28 @@ cpb EXPLAIN PLAYBOOK work
 cpb CREATE PLAYBOOK scratch
 cpb CREATE PLAYBOOK scratch SET launcher = 'sc', login = 'isolated'
 cpb CREATE PLAYBOOK reviewer FROM https://github.com/example/reviewer-playbook BRANCH main
-cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=model-a
-cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-token'
-cpb ALTER ENV router BLOCK CLAUDE_CODE_OAUTH_TOKEN
-cpb ALTER PLAYBOOK work USE ENV router
-cpb ALTER PLAYBOOK work ADD ENV router FIRST
-cpb ALTER PLAYBOOK work REPLACE ENV router WITH router-b
+cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:8080/v1', auth_token FROM 'keychain:router-token', model = 'model-a'
+cpb ALTER PLAYBOOK work SET login = 'isolated' USE ACCOUNT router, claude-work
+cpb ALTER DEFAULTS USE ACCOUNT claude-work
+cpb SHOW ACCOUNTS
+cpb CREATE ENV tools SET MAX_THINKING_TOKENS=8000
+cpb ALTER PLAYBOOK work USE ENV tools
+cpb ALTER PLAYBOOK work ADD ENV tools FIRST
+cpb ALTER PLAYBOOK work REPLACE ENV tools WITH tools-b
 cpb ALTER PLAYBOOK work SET model = 'claude-sonnet-5-5'
 cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)'
 cpb ALTER PLAYBOOK work ADD MARKETPLACE team FROM 'github:example/team-plugins' ADD PLUGIN reviewer@team SET agent = 'reviewer'
 cpb ALTER PLAYBOOK work RENAME TO lab
-cpb ALTER DEFAULTS USE ENV router
+cpb ALTER DEFAULTS USE ENV tools
 cpb DROP PLAYBOOK lab
-cpb DROP ENV router-b
+cpb DROP ENV tools-b
 cpb SHOW CREATE PLAYBOOK work
 cpb SHOW SESSIONS
 cpb "SELECT name, envs FROM PLAYBOOKS"
 ```
 
-A routed env set (one that sets `ANTHROPIC_BASE_URL` to another endpoint) usually also
-blocks the machine's Anthropic token (`BLOCK CLAUDE_CODE_OAUTH_TOKEN`) and is used by a playbook
-with `login = 'isolated'`.
+A route to another endpoint is an account (`provider = 'gateway'`), and a playbook on such
+an account carries `login = 'isolated'`: on a shared one the launch is refused.
 
 # Installed state
 

@@ -51,23 +51,24 @@ cpb start /tmp/spike --delete                      # or a throwaway session in a
 
 ### Try someone's playbook safely
 
-`cpb play frontend-craft` (a template, a URL, `github:…@tag` or a file) shows exactly what the recipe would do and asks first. A changed model endpoint, proxy or secret must be typed to confirm, the session runs in a sandbox where one is available, and it is removed when it ends; `--keep` keeps it as yours. [Try someone else's playbook →](docs/guides/play.md)
+`cpb play frontend-craft` (a template, a URL, `github:…@tag` or a file) shows exactly what the recipe would do and asks first. A recipe never picks where your requests go (`--account` runs it on one of your accounts); a proxy or secret must be typed to confirm, the session runs in a sandbox where one is available, and it is removed when it ends; `--keep` keeps it as yours. [Try someone else's playbook →](docs/guides/play.md)
 
 ### Route one playbook to another model
 
-An env set is a named group of variables, attached to one playbook or to all
-of them (`DEFAULTS`). `EXPLAIN` shows what a launch sets, and which layer set it.
+An account is one record: where requests go, how they authenticate, and that
+provider's model names. A playbook names the accounts it may run on; every
+launch derives its address, key and models from one of them, so an address
+never changes while its key stays behind.
 
 ```bash
-cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:8080/v1
-cpb CREATE PLAYBOOK glm SET login=isolated
-cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3
-cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY   # removed even if your shell exports it
-cpb EXPLAIN PLAYBOOK glm
+cpb CREATE ACCOUNT glm SET provider = gateway, base_url = http://localhost:8080/v1, auth_token FROM keychain:router-token, model = glm-5.3
+cpb CREATE PLAYBOOK glm SET login=isolated USE ACCOUNT glm
+cpb EXPLAIN PLAYBOOK glm      # Account: glm (gateway http://localhost:8080/v1, …)
+cpb run --account work glm    # one launch on another account it lists
 ```
 
 `login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook
-keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
+keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
 
@@ -127,12 +128,15 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 
 ## Built to be relied on
 
-- **Tested on every change:** CI applies all 22 examples and, on Linux and
+- **Tested on every change:** CI applies all 23 examples and, on Linux and
   macOS, upgrades from the previous release and checks the state reads the
   same. A full arena regression runs on the exact commit each release is
   tagged from.
 - **Another account's login never replaces yours:** cpb sets it aside rather
   than copying it over `~/.claude`'s.
+- **Your Claude login never goes to another provider:** a playbook routed
+  elsewhere runs on an account with that provider's own key, and a login it
+  does not use is kept out of the run.
 
 ## Learn it
 
@@ -140,7 +144,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
 |---|---|
 | [Your first playbook.cpb](docs/tutorials/first-playbook.md) | create, route, run, export, apply elsewhere |
 | [Stack layers into an agent](docs/tutorials/stacked-agent.md) | base -> an agent -> a team layer, as recipes |
-| [Examples 01-22](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI and `cpb play`, all applied in CI |
+| [Examples 01-23](examples/) | one `playbook.cpb` per idea, from a first playbook to sessions, the TUI, `cpb play` and accounts, all applied in CI |
 | [Ask in plain words](docs/guides/assistant.md) | `cpb ask "<request>"` shows the cpb command that does it |
 | [Guides](docs/README.md) · [SPEC.md](SPEC.md) | how-tos for every area · every statement, command, file and output format: the contract |
 | [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) | what changed in each release · development |

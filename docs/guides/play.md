@@ -70,30 +70,30 @@ your `DEFAULTS`, other playbooks, a plaintext secret, the login, the launcher,
 `INCLUDE` of other files, and a skill or marketplace from a directory on your
 disk.
 
-## When a recipe changes where your requests go
+## Where your requests go is yours
 
-A recipe that sets `ANTHROPIC_BASE_URL` (or a Bedrock or Vertex switch) sends
-every request, your code and your conversation with it, to that host, and any
-credential the session holds with it. So that is never a plain yes:
+A recipe never says where requests go: one that sets `ANTHROPIC_BASE_URL`, a
+Bedrock or Vertex switch, a key, the Claude token or a model variable is
+refused, since those are an account's ([Accounts](accounts.md)). To play a
+recipe on another model, run it on one of your accounts:
 
 ```
-  !! line 5   SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1: every request, your code and conversation with it, goes to router.example.net, with the credential sent to it
-       → to run it, you will type: router.example.net
-
-Requests would go to router.example.net, not Anthropic: the played playbook gets its own login, and your
-credential variables are blocked. Attach a key for that host yourself, by name.
+cpb play --account glm ./router.cpb
+...
+Requests would go to localhost (account glm), not Anthropic: the played playbook gets its own login, and your
+other credential variables are blocked.
 ```
 
-- You type the host. A typo stops the run, with nothing written.
-- The playbook gets a login of its own, and every credential your shell or
-  machine holds (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, the AWS and
+- On an account that is not Anthropic's, the played playbook gets a login of
+  its own, and every credential-looking variable your shell holds (the AWS and
   Google ones, and any variable whose name looks like a secret) is blocked in
-  it. Your key for Anthropic never reaches someone else's host.
-- If the host does need a key, give it one of your env sets by name:
-  `--env-set routerkey`. Its keys are the only ones that follow.
+  it. The account's own key is the only one that follows.
+- `--env-set <set>` attaches one of your env sets by name; its keys are left
+  out of that block.
 
 A proxy (`HTTPS_PROXY`) and a change to which certificates are trusted are
-typed the same way. A secret reference (`SET VAR GH FROM 'keychain:…'`) is
+typed: you type the host (`TLS` for a certificate change), and a typo stops
+the run, with nothing written. A secret reference (`SET VAR GH FROM 'keychain:…'`) is
 typed too, and the prompt says the secret is read on this machine, as you.
 
 ## Sandboxed by default

@@ -3,16 +3,19 @@
 Which Anthropic account, token, or login a playbook's session uses — the
 identity boundary.
 
-At every launch `cpb` first decides whether a **long-lived token** is active for
-that playbook, then prepares the config directory accordingly. Nothing else in
-the tool touches credentials.
+Every launch runs on one **account** (since v4.2.0, see
+[Accounts](accounts.md)): where its requests go and how they authenticate.
+A playbook that names none runs on `machine`, the machine's own login, and
+this page is mostly about that account: how a launch decides whether a
+**long-lived token** is active, then prepares the config directory
+accordingly. Nothing else in the tool touches credentials.
 
 ```text
 token active for this playbook?
-  = the playbook's [env] (or an env set it uses) sets CLAUDE_CODE_OAUTH_TOKEN
-    or the shell exports CLAUDE_CODE_OAUTH_TOKEN
-    or ~/.config/claude-code/oauth-token is non-empty
-  and the playbook's [env] does not unset it
+  = its account is a claude_token account
+    or, on machine: the shell exports CLAUDE_CODE_OAUTH_TOKEN
+       or ~/.config/claude-code/oauth-token is non-empty
+       and the playbook does not block it (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN)
 
 yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth only,
          MCP logins survive); sync non-secret account metadata so the dir presents as logged in
@@ -37,13 +40,13 @@ session.
 | Everything shares one login, no token | nothing (no `oauth-token` file) | credentials symlinked to `~/.claude`; `/login` anywhere logs in everywhere |
 | Everything shares one long-lived token | `claude setup-token` once | token injected everywhere; a playbook's stored login is stripped when it is the machine's account (a newer copy goes over the machine's first), and any other login is first copied aside to `.credentials.json.cpb-own-<stamp>` |
 | One playbook keeps its own `/login` while the others use the token | `cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` | that playbook takes the no-token path; the rest unchanged |
-| One playbook uses its own token | `cpb ALTER PLAYBOOK <name> SET VAR CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'` (a reference, resolved by your secret helper at launch; `=... AS PLAINTEXT` also works) | that token wins over the file; its stored login is handled as on the row above |
-| Switch a playbook between accounts | one env set per account, `cpb CREATE ENV acct-work SET CLAUDE_CODE_OAUTH_TOKEN FROM 'keychain:…'`; then `cpb ALTER PLAYBOOK <name> REPLACE ENV acct-work WITH acct-personal`, or `cpb run --env-set acct-work <name>` for one launch | the attached account's token wins; its stored login is handled as on the second row |
-| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once; or give it a token of its own, by value or by reference (its block, an env set it uses, or `--env`; a token in `DEFAULTS` never reaches it). Over a login of its own, a token run sets that login aside for the run on Linux and is refused on macOS (see below). `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
+| One playbook uses its own token | an account, `cpb CREATE ACCOUNT work SET provider = 'anthropic', claude_token FROM 'keychain:…'` (a reference, resolved by your secret helper at launch; `claude_token = '…' AS PLAINTEXT` also works); then `cpb ALTER PLAYBOOK <name> USE ACCOUNT work` | that token wins over the file; its stored login is handled as on the second row |
+| Switch a playbook between accounts | one account per Claude account; the playbook lists them, `cpb ALTER PLAYBOOK <name> USE ACCOUNT work, personal`, the first by default; `cpb run --account personal <name>` for one launch | the account's token wins; its stored login is handled as on the second row |
+| One playbook is a different account, sharing nothing | `cpb ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); it writes `isolated_login = true` in its `.playbook`. `CPB_ISOLATED_LOGIN=true` does the same for one launch | detached at once; log in there once (an account with `auth = 'claude_login'` names that login), or run it on a token account. Over a login of its own, a token run sets that login aside for the run on Linux and is refused on macOS (see below). `SET login = 'shared'` is refused while it holds its own login, which a shared launch would set aside (another account's) or copy over the machine's (the same account's) |
 
-The unset and set forms can come from an
-[env set](environment.md#env-sets-define-once-attach-to-many) shared by
-several playbooks.
+A token or a key is never a loose variable: an env set, `DEFAULTS` or a
+playbook's own `SET VAR` that sets `CLAUDE_CODE_OAUTH_TOKEN` (or any other
+variable an account owns) refuses the launch. `BLOCK VAR` of it is fine.
 
 ## The token middle ground
 
@@ -70,13 +73,14 @@ playbook shares nothing).
 ## A token over an isolated playbook's own login
 
 An isolated playbook can hold a `/login` of its own and still be launched on
-a token: its env set's (an account), or one picked with `--env-set`. While
-that token runs, the stored login must not stay readable: on an error Claude
-Code would swap it in over the token, and the session breaks.
+a token account, or on an account that uses no Claude login at all (a
+router's key). While it runs, the stored login must not stay readable: on an
+error Claude Code would swap it in over the token, or send it where the
+account's requests go.
 
 - **On Linux** the login is a file. cpb moves the grant out of the
   playbook's `.credentials.json` into `.credentials.json.cpb-aside` for the
-  run, and puts it back when the last token run of that playbook ends. Other
+  run, and puts it back when the last such run of that playbook ends. Other
   keys in the store (MCP logins) stay where they are. A run that was killed
   leaves the file aside; the next launch of the playbook puts it back first.
   A `/login` during the token run wins: the earlier login is kept as
@@ -86,12 +90,11 @@ Code would swap it in over the token, and the session breaks.
   where the login is and the fixes:
 
 ```
-cpb run --block CLAUDE_CODE_OAUTH_TOKEN <name>              # this launch on its own login
-cpb ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN  # always on its own login
-cpb ALTER PLAYBOOK <name> DROP ENV <set>                    # drop the account's set
+cpb run --account <account> <name>   # on an account it lists that uses its login (or machine)
 ```
 
-  Or `/logout` in the playbook once, and it runs on the token from then on.
+  Or `/logout` in the playbook once, and it runs on the account from then
+  on.
 
 ## Only the machine's own account is shared
 
@@ -134,56 +137,38 @@ line each. `LINK` sets them aside in place rather than deleting anything.
 
 ## Routing a playbook to another backend
 
-A playbook whose `settings.json` or env block points `ANTHROPIC_BASE_URL` at a
-third-party Anthropic-compatible endpoint (a GLM plan through a router, say)
-should carry `isolated_login = true`. Claude Code decides which claude.ai-hosted
-tools to send from the feature flags it cached while an Anthropic account was
-logged in, not from where requests go; a playbook that ran as your global account
-before being rerouted keeps sending them, and since Claude Code 2.1.265 at least
-one backend (GLM) rejects the Artifact tool's schema with `400` on every
-interactive turn. Isolation removes that leftover state at launch while the
-playbook has no login of its own, and `cpb auth status` shows `no login; stale
-account state, purged at launch` until it has.
-
-## Another provider gets its own key, never your login
-
-Claude Code sends its credential to whatever `ANTHROPIC_BASE_URL` names. A
-provider other than Anthropic issues its own key, and that key outranks your
-Claude login, so your login stays on your machine:
+A route to another backend (a GLM plan through a router, say) is an
+account: its address and its key travel together, so your Claude login
+never goes there ([Accounts](accounts.md)):
 
 ```bash
-cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:20128/v1
-cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-key'
+cpb CREATE ACCOUNT glm SET provider = 'gateway', base_url = 'http://localhost:20128/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3'
+cpb ALTER PLAYBOOK glm SET login = 'isolated' USE ACCOUNT glm
 ```
 
-With no such key, Claude Code would send your Claude login or token to that
-address instead. cpb refuses that launch before it changes anything (the
-**login guard**), and says how to fix it:
+The playbook should carry `login = 'isolated'`: an account that uses no
+Claude login never reaches one, so on a shared playbook the launch is
+refused. Isolation also matters for another reason: Claude Code decides
+which claude.ai-hosted tools to send from the feature flags it cached while
+an Anthropic account was logged in, not from where requests go; a playbook
+that ran as your global account before being rerouted keeps sending them,
+and since Claude Code 2.1.265 at least one backend (GLM) rejects the
+Artifact tool's schema with `400` on every interactive turn. Isolation
+removes that leftover state at launch while the playbook has no login of its
+own, and `cpb auth status` shows `no login; stale account state, purged at
+launch` until it has.
 
-```
-requests go to localhost:20128, which is not Anthropic, and no provider key is set: Claude Code would send your Claude login there. Fix one of:
-  - give the provider its own key, by reference: cpb ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'
-  - keep every Claude credential out: cpb ALTER PLAYBOOK glm SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN (and /logout in it, if it holds a login of its own)
-  - only for a gateway you trust that forwards to Anthropic, over https: cpb ALTER PLAYBOOK glm SET trusted_endpoint = 'localhost:20128'
-```
-
-A key in the playbook's `settings.json` (`env.ANTHROPIC_AUTH_TOKEN`, or an
-`apiKeyHelper`) counts too. `cpb EXPLAIN PLAYBOOK <name>` says when a launch
-would be refused, and `--json` gives the verdict as `route.guard`.
-
-**A gateway you trust.** Some setups put a gateway in front of Anthropic
-(a company proxy that logs or rate-limits) and want your Claude login to go
-through it. Name that one host for the playbook:
+**A gateway you trust.** Some setups put a gateway in front of Anthropic (a
+company proxy that logs or rate-limits) and want your Claude credential to
+go through it. That gateway is an account that says so, over `https` only:
 
 ```bash
-cpb ALTER PLAYBOOK corp SET trusted_endpoint = 'gateway.corp.example'
+cpb CREATE ACCOUNT corp SET provider = 'gateway', base_url = 'https://gateway.corp.example/v1', claude_token FROM 'keychain:claude-work', claude_login_trusted = true
 ```
 
-The guard then lets the login through to that host only, and only over
-`https`; `EXPLAIN` says `Login guard: trusted gateway`. Point the playbook at
-another address and the guard refuses again. `RESET trusted_endpoint` takes
-the trust back. A playbook installed from a source, or built by `cpb play`
-from a recipe, never gets this setting from it: it is yours to set.
+Without `claude_login_trusted`, a gateway account with a Claude credential
+is refused when written. A playbook installed from a source, or built by
+`cpb play` from a recipe, never names an account: that is yours to do.
 
 ## See where every playbook stands
 
@@ -191,12 +176,13 @@ Which account each playbook runs on, and where its token comes from (names
 and states only, never the token):
 
 ```
-cpb SELECT name, auth_mode, token_source, token_account FROM PLAYBOOKS
+cpb SELECT name, account, auth_mode, token_source FROM PLAYBOOKS
 ```
 
-`token_source` is `none`, `playbook`, `env-set:<name>`, `file` (the
-machine's token file) or `shell`; `EXPLAIN PLAYBOOK <name>` says the same in
-its `Claude token:` line.
+`account` is the account a launch runs on; `token_source` is `none`,
+`account`, `file` (the machine's token file) or `shell`. `EXPLAIN PLAYBOOK
+<name>` says the same in its `Account:` line (and, on `machine`, a `Claude
+token:` line).
 
 Without launching anything:
 
@@ -212,9 +198,8 @@ review             shared-login (token blocked)  symlink -> ~/.claude/.credentia
 personal           isolated-login                file                                    in 22m    -
 ```
 
-`MODE` is the decision `run` would make: `token`, `playbook-token` (a token
-the playbook or its env set sets), `shared-login`, `isolated-login` or
-`error`. `(token blocked)` marks a playbook that blocks the machine's token,
+`MODE` is the decision `run` would make on the playbook's own layers:
+`token`, `playbook-token`, `shared-login`, `isolated-login` or `error`. `(token blocked)` marks a playbook that blocks the machine's token,
 so it uses the stored login; `--json` says `"token_blocked": true`. `EXPIRES` is the stored grant's expiry.
 `DAEMON` reads Claude Code's own `daemon-auth-status.json`, shown as
 `auth_required` only when the marker is newer than the current grant. `--json`

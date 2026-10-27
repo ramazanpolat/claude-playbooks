@@ -17,7 +17,7 @@ func TestAccountReporting(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	if err := account.Write(account.Dir(config.ResolvePlaybooksDir()), &account.Account{
 		Name: "acct-work", Provider: account.Anthropic,
-		Auth: account.Auth{Kind: account.ClaudeToken, Ref: "keychain:pilot/claude-token-work"},
+		Auth: account.Auth{Kind: account.ClaudeToken, Ref: "keychain:claude-token-work"},
 	}); err != nil {
 		t.Fatal(err)
 	}

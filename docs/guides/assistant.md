@@ -157,8 +157,9 @@ refused before anything is sent, naming what was found and never the value:
 Error: the request looks like it holds a credential (ANTHROPIC_AUTH_TOKEN=...): nothing was sent. Leave the value out and name it instead, e.g. <token>
 ```
 
-Name a key instead (`set ANTHROPIC_AUTH_TOKEN on router from my keychain`):
-the answer then uses a reference, `SET ANTHROPIC_AUTH_TOKEN FROM '<secret-ref>'`.
+Name a key instead (`set the router account's key from my keychain`): the
+answer then uses a reference, `ALTER ACCOUNT router SET auth_token FROM
+'<secret-ref>'`.
 
 ## Choosing the model
 

@@ -49,12 +49,13 @@ One-off environment for a single launch, nothing written to disk. Launch flags a
 
 ```bash
 cpb run --env-set work <name> -p "..."               # an existing env set, this launch only
-cpb run <name> --env ANTHROPIC_MODEL=claude-opus-5 -p "..."
-cpb run --block CLAUDE_CODE_OAUTH_TOKEN <name> -p "..."  # use the stored login for this run
+cpb run <name> --env MAX_THINKING_TOKENS=8000 -p "..."
+cpb run --account work <name> -p "..."               # another account the playbook may run on
+cpb run --block CLAUDE_CODE_OAUTH_TOKEN <name> -p "..."  # on machine: the stored login for this run
 cpb run --env-file ./job.env <name> -p "..."             # KEY=VALUE lines; validated like a manifest
 ```
 
-A missing or broken `--env-set` refuses the launch. `--env` after a `claude` argument is forwarded to `claude`, not applied.
+A missing or broken `--env-set` refuses the launch, and so does a layer that sets a variable an account owns (the address, a key, the Claude token, the model variables): those come from the launch's account only. `--env` after a `claude` argument is forwarded to `claude`, not applied.
 
 For a throwaway config directory that is not a registered playbook:
 
@@ -149,14 +150,14 @@ A credential-looking literal (`*TOKEN*`, `*SECRET*`, `*_KEY`, …) is refused. S
 
 ## Choose an authentication mode per playbook
 
-At every launch cpb decides whether a long-lived token is active for that playbook (`~/.config/claude-code/oauth-token`, or the variable exported, or the playbook's layers setting it, and not blocking it). Token active: inject it and remove the playbook's own stored login so a 401 cannot swap the token for a dead grant. Token inactive: symlink the playbook's credentials to `~/.claude/.credentials.json`. `isolated_login = true`: share nothing.
+At every launch cpb picks the playbook's account (`--account`, its first, the `DEFAULTS` account, else `machine`) and decides whether a long-lived token is active (a `claude_token` account; on `machine`, `~/.config/claude-code/oauth-token` or the variable exported, and the playbook not blocking it). Token active: inject it and remove the playbook's own stored login so a 401 cannot swap the token for a dead grant. Token inactive: symlink the playbook's credentials to `~/.claude/.credentials.json`. `isolated_login = true`: share nothing.
 
 | Goal | Statement |
 |---|---|
 | this playbook keeps its own `/login` while others use the token | `ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` |
-| this playbook uses a specific token | none for an agent: stop and ask the human to set it. This key never takes a reference, so it would sit in the manifest as plain text, and the value would pass through your command line |
+| this playbook uses a specific token | an account holding it: `CREATE ACCOUNT <a> SET provider = 'anthropic', claude_token FROM '<ref>'`, then `ALTER PLAYBOOK <name> USE ACCOUNT <a>`. The reference is the human's to give (never a value through your command line); without one, stop and ask |
 | a different account entirely, or a throwaway whose `/login` must not reach the machine's login | `ALTER PLAYBOOK <name> SET login = 'isolated'` (or `CREATE PLAYBOOK <name> SET login = 'isolated'`); the `/login` itself is the human's. Never `SET login = 'shared'` to "fix" a login: it is refused while the playbook holds one of its own, and the refusal is right |
-| this playbook talks to a proxy | `CREATE ENV <p> SET ANTHROPIC_BASE_URL=…`, then `ALTER PLAYBOOK <name> ADD ENV <p>`. Create a playbook meant for a non-Anthropic route with `CREATE PLAYBOOK <name> SET login = 'isolated'`, and keep its `global_instructions` setting `'excluded'` (the default), so `~/.claude`'s `CLAUDE.md` stays out; its own `CLAUDE.md` goes to that provider with every request |
+| this playbook talks to a proxy | an account: `CREATE ACCOUNT <a> SET provider = 'gateway', base_url = '…', auth_token FROM '<ref>'`, then `ALTER PLAYBOOK <name> USE ACCOUNT <a>`. A playbook on such an account needs `SET login = 'isolated'` (a shared one is refused at launch); keep its `global_instructions` setting `'excluded'`. Never set `ANTHROPIC_BASE_URL` or a key as a variable: the launch refuses it |
 
 An agent cannot complete an interactive `/login`. If a headless run exits with an authentication error, report it and stop; do not retry in a loop, and do not edit `.credentials.json`.
 
@@ -179,7 +180,7 @@ unknown playbook "x". `cpb SHOW PLAYBOOKS` lists them
 launcher name "x" already addresses playbook "y". Pick another name
 no env set "x": create it with CREATE ENV x
 env set "x" is used by a, b: detach it first with ALTER PLAYBOOK <playbook> DROP ENV x
-ANTHROPIC_AUTH_TOKEN looks like a credential: use SET ANTHROPIC_AUTH_TOKEN FROM '<ref>' (needs a secret helper), or add AS PLAINTEXT to store the literal knowingly
+GITHUB_TOKEN looks like a credential: use SET GITHUB_TOKEN FROM '<ref>' (needs a secret helper), or add AS PLAINTEXT to store the literal knowingly
 ```
 
 A launch that was refused prints the reason and never starts `claude`; a preparation *warning* (`Warning: failed to prepare authentication state: ...`) still launches.
