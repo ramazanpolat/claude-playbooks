@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
@@ -120,6 +121,9 @@ type sandboxTarget struct {
 	rootPath   string            // absolute root to mount (contains configPath)
 	manifest   *manifest.Sandbox // [sandbox] defaults, may be nil
 	backend    string            // resolved backend name
+	// noLoginAccount names the launch's account when it uses no Claude
+	// login: none may be reachable for the run (PrepareLaunchEnvFor).
+	noLoginAccount string
 }
 
 var sandboxNameClean = regexp.MustCompile(`[^A-Za-z0-9.+-]+`)
@@ -797,7 +801,7 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // in is purged, as for an isolated playbook: inside, nothing authenticates
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
+	launchEnv, syncErr := auth.PrepareLaunchEnvFor(t.configPath, layers, t.noLoginAccount)
 	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		return nil, "", syncErr
 	}
@@ -957,6 +961,10 @@ func machineLoginInside(mount string) string {
 	// keeps their keys out of the sandbox only while the files stay out).
 	if profiles, err := filepath.EvalSymlinks(envset.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
 		return "the registry's env sets " + profiles
+	}
+	// So are its accounts, whose credentials may be stored AS PLAINTEXT.
+	if accounts, err := filepath.EvalSymlinks(account.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, accounts) {
+		return "the registry's accounts " + accounts
 	}
 	return ""
 }

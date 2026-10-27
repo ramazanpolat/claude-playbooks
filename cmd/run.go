@@ -178,6 +178,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		// The account, as for a host launch: rendered inside the sandbox.
+		acct, err := planSandboxAccount(pb.Path, pb.Name, layers, sbm, sopts)
+		if err != nil {
+			return err
+		}
+		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(pb.Path, layers); perr == nil {
 			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name)); err != nil {
 				return err
@@ -198,10 +204,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if rootPath, err = filepath.Abs(rootPath); err != nil {
 			return err
 		}
+		if err := acct.prepare(); err != nil {
+			return err
+		}
 		_, err = runSandboxed(sandboxTarget{
 			label: fmt.Sprintf("playbook %q", pb.Name), name: sandboxName(pb.Name),
 			configPath: configPath, rootPath: rootPath, manifest: sbm, backend: backend,
-		}, layers, claudeArgs, sopts)
+			noLoginAccount: acct.noLoginAccount(),
+		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		return err
 	}
 

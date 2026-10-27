@@ -13,6 +13,15 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
+// putAccount stores an account directly, without the secret helper's
+// check, for tests that launch on it.
+func putAccount(t *testing.T, a account.Account) {
+	t.Helper()
+	if err := account.Write(account.Dir(config.ResolvePlaybooksDir()), &a); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func readAccount(t *testing.T, root, name string) *account.Account {
 	t.Helper()
 	a, err := account.Read(account.Dir(root), name)

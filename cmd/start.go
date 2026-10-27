@@ -179,16 +179,25 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		acct, err := planSandboxAccount(absPath, "", layers, sbm, sopts)
+		if err != nil {
+			return err
+		}
+		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(absPath, layers); perr == nil {
 			if err := refuseRefsInSandbox(eff, "directory "+absPath); err != nil {
 				return err
 			}
 		}
+		if err := acct.prepare(); err != nil {
+			return err
+		}
 		name := startSandboxName(absPath)
 		started, runErr := runSandboxed(sandboxTarget{
 			label: "directory " + absPath, name: name,
 			configPath: absPath, rootPath: absPath, manifest: sbm, backend: backend,
-		}, layers, claudeArgs, sopts)
+			noLoginAccount: acct.noLoginAccount(),
+		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		// Cleanup only after a session actually ran: a launch refused
 		// before attaching (a bad mount, sbx missing) leaves the directory
 		// and any sandbox exactly as they were.

@@ -79,6 +79,19 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string)
 	return &accountLaunch{sel: sel, rendered: rendered, layers: all, configDir: configDir}, nil
 }
 
+// planSandboxAccount is planAccount for a sandboxed launch, whose working
+// directory is the sandbox's: --workdir, else the manifest's, else here.
+func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *manifest.Sandbox, opts sandboxOpts) (*accountLaunch, error) {
+	workdir := opts.workdir
+	if workdir == "" && sb != nil {
+		workdir = sb.Workdir
+	}
+	if workdir == "" {
+		workdir, _ = os.Getwd()
+	}
+	return planAccount(configDir, name, layers, expandHome(workdir))
+}
+
 // noLoginAccount is what PrepareLaunchEnvFor takes: the account's name when
 // it uses no Claude login.
 func (a *accountLaunch) noLoginAccount() string {

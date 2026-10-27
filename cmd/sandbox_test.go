@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -108,7 +109,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	extra := t.TempDir()
 	work := t.TempDir()
 	writePlaybook(t, root, "box", &manifest.Manifest{
-		Env:     &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1", "MODEL": "glm"}},
+		Env:     &manifest.Env{Set: map[string]string{"MODEL": "glm"}},
 		Sandbox: &manifest.Sandbox{Mounts: []string{extra + ":ro"}, AllowNet: []string{"api.example.com"}, ClaudeVersion: "2.1.263"},
 	})
 	t.Setenv("HOSTONLY", "leak")
@@ -124,7 +125,6 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 		"create --name cpb-box --no-share-skills claude " + work + " " + pbDir + " " + extra + ":ro",
 		"exec cpb-box bash -lc printf %s 'skills=private' > ~/.cpb-sandbox",
 		"policy allow network --sandbox cpb-box api.example.com",
-		"policy allow network --sandbox cpb-box router.local",
 		"exec cpb-box bash -lc set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash -s '2.1.263'",
 	}
 	for i, w := range want {
@@ -296,7 +296,8 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	if err := os.Symlink(want, store); err != nil {
 		t.Fatal(err)
 	}
-	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "box"}); err != nil {
+	putAccount(t, account.Account{Name: "tok", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Value: "sk-ant-oat01-x"}})
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--account", "tok", "box"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(store); !os.IsNotExist(err) {
@@ -327,8 +328,8 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "iso"}); err != nil {
 		t.Fatal(err)
 	}
-	// So is one the layers give a token.
-	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "box"}); err != nil {
+	// So is one on a token account.
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--account", "tok", "box"}); err != nil {
 		t.Fatal(err)
 	}
 	// A token launch whose store is a leftover link to a grantless store:
@@ -340,7 +341,7 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	if err := os.Symlink(filepath.Join(home, ".claude", ".credentials.json"), filepath.Join(root, "leftover", ".credentials.json")); err != nil {
 		t.Fatal(err)
 	}
-	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--env", "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x", "leftover"}); err != nil {
+	if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "--account", "tok", "leftover"}); err != nil {
 		t.Fatalf("token launch with a grantless leftover link: %v", err)
 	}
 	if info, err := os.Lstat(filepath.Join(root, "leftover", ".credentials.json")); err != nil || info.Mode()&os.ModeSymlink == 0 {
@@ -657,35 +658,35 @@ func TestCreateAndInstallSandboxFlag(t *testing.T) {
 
 func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	root := sandboxRoot(t, "pbs")
-	// Keys come from an env set: profiles live in the registry root,
-	// outside every mount.
-	if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=real-token ANTHROPIC_API_KEY=real-key MODEL=glm AS PLAINTEXT"); err != nil {
+	// Keys come from an account and an env set: both live in the registry
+	// root, outside every mount.
+	putAccount(t, account.Account{Name: "router", Provider: account.Gateway, BaseURL: "https://router.local:9/v1", DefaultModel: "glm", Auth: account.Auth{Kind: account.AuthToken, Value: "real-token"}})
+	if err := stmtErr(t, "CREATE ENV extras SET MODEL=glm"); err != nil {
 		t.Fatal(err)
 	}
-	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}}})
+	writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"extras"}, Accounts: []string{"router"}}})
 	work := t.TempDir()
 	log := stubSbx(t)
-	// A key in the playbook's own manifest is on the mount: refused before
-	// any sbx call, unless secrets = "env" accepts the exposure.
+	// A key in the playbook's own manifest is an account's variable set
+	// elsewhere, and on the mount: refused before any sbx call.
 	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}})
 	err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"})
-	if err == nil || !strings.Contains(err.Error(), "which the sandbox mounts") || !strings.Contains(err.Error(), "cpb CREATE ENV <set> SET ANTHROPIC_API_KEY=") || !strings.Contains(err.Error(), "cpb ALTER PLAYBOOK <playbook> ADD ENV <set> UNSET VAR ANTHROPIC_API_KEY") {
+	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY, set by the playbook's own block") {
 		t.Fatalf("key on the mount: %v", err)
 	}
 	if _, statErr := os.Stat(log); statErr == nil {
 		t.Fatal("sbx was called with a key on the mount")
 	}
-	writePlaybook(t, root, "onmount", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "on-disk"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
-	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onmount"}); err != nil {
-		t.Fatalf("key on the mount with secrets = env: %v", err)
-	}
-	// A start directory under the working directory inherits the manifest
-	// above it, which the working-directory mount carries: refused.
+	// A manifest above the start directory's own is not the launch's, but
+	// the working-directory mount carries it: a key there is refused.
 	project := filepath.Join(t.TempDir(), "project")
 	if err := os.MkdirAll(filepath.Join(project, "config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := manifest.Write(project, &manifest.Manifest{Name: "project", Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_AUTH_TOKEN": "above"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(filepath.Join(project, "config"), &manifest.Manifest{Name: "config", IsolatedLogin: true}); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(log)
@@ -751,14 +752,13 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	joined := strings.Join(calls, "\n")
 	for _, want := range []string{
 		"secret set-custom --host router.local --env ANTHROPIC_AUTH_TOKEN --value real-token --placeholder cpb-box-ANTHROPIC_AUTH_TOKEN --sandbox cpb-box",
-		"secret set-custom --host router.local --env ANTHROPIC_API_KEY --value real-key --placeholder cpb-box-ANTHROPIC_API_KEY --sandbox cpb-box",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in %q", want, calls)
 		}
 	}
 	attach := calls[len(calls)-1]
-	if !strings.Contains(attach, "-e ANTHROPIC_AUTH_TOKEN=cpb-box-ANTHROPIC_AUTH_TOKEN ") || !strings.Contains(attach, "-e ANTHROPIC_API_KEY=cpb-box-ANTHROPIC_API_KEY ") || !strings.Contains(attach, "-e MODEL=glm") {
+	if !strings.Contains(attach, "-e ANTHROPIC_AUTH_TOKEN=cpb-box-ANTHROPIC_AUTH_TOKEN ") || !strings.Contains(attach, "-e MODEL=glm") || !strings.Contains(attach, "-e ANTHROPIC_DEFAULT_MODEL=glm") || !strings.Contains(attach, "-e ANTHROPIC_BASE_URL=https://router.local:9/v1") {
 		t.Fatalf("attach env: %q", attach)
 	}
 	if strings.Contains(attach, "real-token") || strings.Contains(attach, "real-key") {
@@ -773,10 +773,8 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// A service on this machine: the sandbox reaches it as
 	// host.docker.internal, while the policy and the secret name it
 	// localhost (what the sbx proxy matches).
-	if err := stmtErr(t, "CREATE ENV local SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_AUTH_TOKEN=lt AS PLAINTEXT"); err != nil {
-		t.Fatal(err)
-	}
-	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
+	putAccount(t, account.Account{Name: "local", Provider: account.Gateway, BaseURL: "http://localhost:8080/v1", Auth: account.Auth{Kind: account.AuthToken, Value: "lt"}})
+	writePlaybook(t, root, "onhost", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"local"}}, Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "onhost"}); err != nil {
 		t.Fatal(err)
@@ -796,10 +794,8 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 		t.Fatalf("host service attach: %q", calls)
 	}
 	// No endpoint: the key goes to Anthropic's host.
-	if err := stmtErr(t, "CREATE ENV direct SET ANTHROPIC_API_KEY=k AS PLAINTEXT"); err != nil {
-		t.Fatal(err)
-	}
-	writePlaybook(t, root, "direct", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"direct"}}})
+	putAccount(t, account.Account{Name: "direct", Provider: account.Anthropic, Auth: account.Auth{Kind: account.APIKey, Value: "k"}})
+	writePlaybook(t, root, "direct", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"direct"}}})
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "direct"}); err != nil {
 		t.Fatal(err)
@@ -809,7 +805,8 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	// secrets = "env" passes plain values and registers nothing;
 	// share_skills = true drops the --no-share-skills flag.
-	writePlaybook(t, root, "plain", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_API_KEY": "plain-key"}}, Sandbox: &manifest.Sandbox{Secrets: "env", ShareSkills: true}})
+	putAccount(t, account.Account{Name: "plainkey", Provider: account.Anthropic, Auth: account.Auth{Kind: account.APIKey, Value: "plain-key"}})
+	writePlaybook(t, root, "plain", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"plainkey"}}, Sandbox: &manifest.Sandbox{Secrets: "env", ShareSkills: true}})
 	// (a plain-mode key may sit in the manifest: the exposure is accepted)
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "plain"}); err != nil {
@@ -823,7 +820,8 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// A key registered by an earlier launch and no longer in the
 	// environment is revoked: its placeholder is re-registered as its own
 	// value, for the current endpoint host.
-	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
+	putAccount(t, account.Account{Name: "rv", Provider: account.Gateway, BaseURL: "https://router.local:9/v1", Auth: account.Auth{Kind: account.None}})
+	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"rv"}}})
 	t.Setenv("SBX_STUB_LS", "cpb-revoke")
 	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]}`)
 	t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
@@ -845,10 +843,8 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	// the sandbox as a plain value, and its value is in no message, even
 	// when the backend's own error echoes it (the stub echoes its argv).
 	const canary = "cpbcanary148value"
-	if err := stmtErr(t, "CREATE ENV canary SET ANTHROPIC_API_KEY="+canary+" AS PLAINTEXT"); err != nil {
-		t.Fatal(err)
-	}
-	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"canary"}}})
+	putAccount(t, account.Account{Name: "canary", Provider: account.Anthropic, Auth: account.Auth{Kind: account.APIKey, Value: canary}})
+	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"canary"}}})
 	t.Setenv("SBX_STUB_FAIL", "secret")
 	os.Remove(log)
 	var runErr error
@@ -875,7 +871,7 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	// secrets = "env" is the only way a key goes in plainly: it registers
 	// nothing, so the same backend failure cannot arise.
-	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"canary"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
+	writePlaybook(t, root, "failreg", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"canary"}}, Sandbox: &manifest.Sandbox{Secrets: "env"}})
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "failreg"}); err != nil {
 		t.Fatalf("secrets = \"env\" with a failing backend secret step: %v", err)
@@ -1096,13 +1092,13 @@ func TestRunSandboxRefusalRestoresSharedLogin(t *testing.T) {
 	if err := os.WriteFile(globalStore, []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := stmtErr(t, "CREATE ENV keyed SET ANTHROPIC_API_KEY=cpbcanary148restore AS PLAINTEXT"); err != nil {
-		t.Fatal(err)
-	}
-	writePlaybook(t, root, "box", &manifest.Manifest{Env: &manifest.Env{Sets: []string{"keyed"}}})
+	writePlaybook(t, root, "box", nil)
 	store := filepath.Join(root, "box", ".credentials.json")
 	log := stubSbx(t)
-	for _, fail := range []string{"secret", "create"} {
+	// A shared playbook carries no proxied key (those come from accounts
+	// that use no Claude login, which a shared playbook cannot run on), so
+	// the refusal before the attach is a failed create.
+	for _, fail := range []string{"create"} {
 		t.Setenv("SBX_STUB_FAIL", fail)
 		os.Remove(log)
 		if err := runRun(nil, []string{"--sandbox", "--workdir", t.TempDir(), "box"}); err == nil {
