@@ -104,8 +104,9 @@ func TestAccountOfMachineToken(t *testing.T) {
 	if a := AccountOf(shared); a.AuthMode != ModeToken || a.TokenSource != "file" || a.TokenKind == nil || *a.TokenKind != "value" {
 		t.Fatalf("file: %+v", a)
 	}
+	// A token exported in the shell never reaches a launch: still the file.
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-SHELL")
-	if a := AccountOf(shared); a.TokenSource != "shell" {
+	if a := AccountOf(shared); a.TokenSource != "file" {
 		t.Fatalf("shell: %+v", a)
 	}
 	if a := AccountOf(isolated); a.AuthMode != ModeIsolatedLogin || a.TokenSource != "none" || a.TokenKind != nil {

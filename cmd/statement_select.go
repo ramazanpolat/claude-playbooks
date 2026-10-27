@@ -94,7 +94,7 @@ var selectTables = map[string]selectTable{
 			"play":                "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
 			"apply":               "The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other.",
 			"auth_mode":           "How a launch authenticates: isolated-login, token, playbook-token, shared-login, or error.",
-			"token_source":        "Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), shell, or unknown.",
+			"token_source":        "Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), or unknown.",
 			"token_kind":          "value or reference; null when the launch uses no token.",
 			"token_blocked":       "True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login.",
 			"accounts":            "The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook.",

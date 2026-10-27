@@ -20,8 +20,9 @@
 - **Those variables exported in your shell no longer reach a launch:** every
   launch removes them and sets what its account renders. A playbook that
   names no account runs on `machine`, your machine's login as before
-  (including its long-lived token file); one that relied on an exported
-  `ANTHROPIC_API_KEY` or router address needs an account.
+  (including its long-lived token file, which now always wins over an
+  exported `CLAUDE_CODE_OAUTH_TOKEN`); one that relied on an exported
+  token, `ANTHROPIC_API_KEY` or router address needs an account.
 - **`cpb play`: a recipe may not set those variables either.** It is refused,
   naming the line; `cpb play --account <account>` runs it on one of yours.
   The typed confirmation of a model endpoint is gone with it; a proxy, a TLS
@@ -73,8 +74,8 @@
   or `/logout` in it).
 - **Which account a playbook runs on, at a glance.** `SELECT` and `SHOW
   PLAYBOOK --json` gain `accounts` (the list) and `account` (the one a launch
-  runs on), with `auth_mode`, `token_source` (`none`, `account`, `file`,
-  `shell`), `token_kind` and `token_blocked`. `EXPLAIN` prints an `Account:`
+  runs on), with `auth_mode`, `token_source` (`none`, `account`, `file`),
+  `token_kind` and `token_blocked`. `EXPLAIN` prints an `Account:`
   line, and `--json` gains `route.account` and `route.refused`. Never a
   credential character.
 - **`cpb ask <playbook>`** asks Anthropic only, signed in with a Claude

@@ -462,23 +462,21 @@ func TestOwnTokenDropsGlobalPlanDescriptors(t *testing.T) {
 		t.Fatalf("global token lost its descriptors: %q", got)
 	}
 
-	// A token inherited from the shell is not known to be the global
-	// account's: the global descriptors are not appended, an inherited
-	// descriptor is kept as it is.
+	// A token exported in the shell never counts: the file's token is the
+	// launch's, with the global descriptors; an exported descriptor is kept,
+	// and only a missing one is filled.
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-SHELL")
 	env, _ = PrepareLaunchEnv(configDir)
-	for _, key := range []string{SubscriptionTypeEnv, RateLimitTierEnv} {
-		if v, present := envValue(t, env, key); present {
-			t.Fatalf("%s=%q appended from the global store to an inherited token", key, v)
-		}
+	if got, _ := envValue(t, env, OAuthTokenEnv); got != "sk-ant-oat01-GLOBAL" {
+		t.Fatalf("exported token used over the file: %q", got)
+	}
+	if got, _ := envValue(t, env, SubscriptionTypeEnv); got != "max" {
+		t.Fatalf("file token lost its descriptors beside an exported token: %q", got)
 	}
 	t.Setenv(RateLimitTierEnv, "default_claude_pro")
 	env, _ = PrepareLaunchEnv(configDir)
 	if got, _ := envValue(t, env, RateLimitTierEnv); got != "default_claude_pro" {
-		t.Fatalf("inherited descriptor lost: %q", got)
-	}
-	if v, present := envValue(t, env, SubscriptionTypeEnv); present {
-		t.Fatalf("missing descriptor filled from the global store beside an inherited token: %q", v)
+		t.Fatalf("exported descriptor lost: %q", got)
 	}
 }
 

@@ -35,6 +35,9 @@ var (
 	playTrustSecret   []string
 	playEnvSets       []string
 	playAccount       string // --account: the account the played playbook runs on
+	// playIsolateLogin: the --account uses no Claude login, so the played
+	// playbook gets a login of its own (a shared one is refused at launch).
+	playIsolateLogin bool
 )
 
 // playMarker, in a throwaway store's directory, names the cpb that owns
@@ -456,7 +459,7 @@ func playSetupFor(name string, res *play.Result, envSets []string, keep map[stri
 		// In the order given: a later set wins, as for USE ENV anywhere.
 		text += fmt.Sprintf("ALTER PLAYBOOK %s USE ENV %s;\n", name, strings.Join(envSets, " "))
 	}
-	if playAccount != "" && playAccount != account.Machine {
+	if playAccount != "" {
 		text += fmt.Sprintf("ALTER PLAYBOOK %s USE ACCOUNT %s;\n", name, playAccount)
 	}
 	return text
@@ -468,6 +471,7 @@ func playSetupFor(name string, res *play.Result, envSets []string, keep map[stri
 // credentials a launch would inherit (res.Endpoint), as it always has for
 // a moved endpoint. The recipe itself never moves it.
 func playUseAccount(res *play.Result, userStore string) error {
+	playIsolateLogin = false
 	if playAccount == "" || playAccount == account.Machine {
 		return nil
 	}
@@ -475,6 +479,7 @@ func playUseAccount(res *play.Result, userStore string) error {
 	if err != nil {
 		return fmt.Errorf("--account: %w", err)
 	}
+	playIsolateLogin = !a.UsesClaudeCredential()
 	if a.Provider != account.Anthropic {
 		res.Endpoint = a.Provider
 		if u, err := account.ParseBaseURL(a.BaseURL); err == nil {

@@ -198,6 +198,15 @@ func validateAccount(s *Stmt) *Error {
 	var moves []string
 	provider := false
 	for _, c := range s.Clauses {
+		if c.Kind == ResetAccount {
+			// Resetting the address moves the account to the provider's own.
+			for _, v := range c.Settings {
+				if v.Key == "base_url" {
+					moves = append(moves, v.Key)
+				}
+			}
+			continue
+		}
 		if c.Kind != SetAccount {
 			continue
 		}

@@ -13,9 +13,10 @@ accordingly. Nothing else in the tool touches credentials.
 ```text
 token active for this playbook?
   = its account is a claude_token account
-    or, on machine: the shell exports CLAUDE_CODE_OAUTH_TOKEN
-       or ~/.config/claude-code/oauth-token is non-empty
+    or, on machine: ~/.config/claude-code/oauth-token is non-empty
        and the playbook does not block it (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN)
+  (a CLAUDE_CODE_OAUTH_TOKEN exported in your shell never counts: every
+   launch removes it, since v4.2.0)
 
 yes  ->  inject the token; remove the playbook's own stored login (claudeAiOauth only,
          MCP logins survive); sync non-secret account metadata so the dir presents as logged in
@@ -180,7 +181,7 @@ cpb SELECT name, account, auth_mode, token_source FROM PLAYBOOKS
 ```
 
 `account` is the account a launch runs on; `token_source` is `none`,
-`account`, `file` (the machine's token file) or `shell`. `EXPLAIN PLAYBOOK
+`account` or `file` (the machine's token file). `EXPLAIN PLAYBOOK
 <name>` says the same in its `Account:` line (and, on `machine`, a `Claude
 token:` line).
 

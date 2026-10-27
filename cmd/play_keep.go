@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -169,7 +168,7 @@ func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) 
 	switch {
 	case sandboxed:
 		b.WriteString(" SET sandbox.always = true, login = 'isolated'")
-	case res.Endpoint != "":
+	case res.Endpoint != "" || playIsolateLogin:
 		b.WriteString(" SET login = 'isolated'")
 	}
 	b.WriteString(";\n")
@@ -179,7 +178,9 @@ func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) 
 	if len(playEnvSets) > 0 {
 		fmt.Fprintf(&b, "ALTER PLAYBOOK %s USE ENV %s;\n", name, strings.Join(playEnvSets, " "))
 	}
-	if playAccount != "" && playAccount != account.Machine {
+	if playAccount != "" {
+		// machine too, said outright: in your store DEFAULTS may name
+		// another account.
 		fmt.Fprintf(&b, "ALTER PLAYBOOK %s USE ACCOUNT %s;\n", name, playAccount)
 	}
 	return b.String()

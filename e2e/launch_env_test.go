@@ -210,7 +210,9 @@ func TestNonIsolatedReceivesToken(t *testing.T) {
 		}
 	})
 
-	t.Run("already exported wins over the file", func(t *testing.T) {
+	// A token exported in the shell never counts: the machine's token file
+	// decides (SPEC.md, "Token active?").
+	t.Run("the file wins over an exported token", func(t *testing.T) {
 		env := childEnv(t, root, launch{
 			env: []string{
 				tokenEnv + "=sk-ant-oat01-FROMENV",
@@ -218,8 +220,8 @@ func TestNonIsolatedReceivesToken(t *testing.T) {
 			},
 			args: []string{"run", "shared"},
 		})
-		if got := env[tokenEnv]; got != "sk-ant-oat01-FROMENV" {
-			t.Fatalf("child token = %q, want the exported token", got)
+		if got := env[tokenEnv]; got != "sk-ant-oat01-FROMFILE" {
+			t.Fatalf("child token = %q, want the file's token", got)
 		}
 	})
 }

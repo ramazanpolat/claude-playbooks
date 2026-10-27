@@ -68,7 +68,16 @@ func TestPlaySetup(t *testing.T) {
 	if strings.Contains(moved, "do-not-print") {
 		t.Fatal("a shell secret's value reached the setup")
 	}
+	// An Anthropic account that uses no Claude login (a Console key) moves
+	// no endpoint, but the played playbook still gets a login of its own.
+	playIsolateLogin = true
+	t.Cleanup(func() { playIsolateLogin = false })
+	if keyed := playSetup("play-x-000000", play.Check([]byte(plainRecipeForSetup))); !strings.Contains(keyed, "SET launcher = '', login = 'isolated';") || strings.Contains(keyed, "BLOCK VAR") {
+		t.Fatalf("on a key account: %q", keyed)
+	}
 }
+
+const plainRecipeForSetup = "ALTER PLAYBOOK SET model = 'm';\n"
 
 func TestPlayCheckAndDryRun(t *testing.T) {
 	resetCommandTestState(t)

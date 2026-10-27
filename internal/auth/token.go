@@ -35,19 +35,15 @@ func OAuthTokenFile() string {
 	return filepath.Join(home, ".config", "claude-code", "oauth-token")
 }
 
-// TokenActive reports whether a long-lived OAuth token governs authentication
-// for child claude processes. Two cases count as active:
-//
-//   - The token is already exported in this process's environment. Then inject
-//     is "" (children inherit it via os.Environ()) and active is true.
-//   - A non-empty token file exists. Then inject is the token to add to the
-//     child environment and active is true.
+// TokenActive reports whether the machine's long-lived OAuth token governs
+// authentication for child claude processes: a non-empty token file. Then
+// inject is the token to add to the child environment and active is true.
+// A token exported in this process's environment never counts (v4.2.0): it
+// is an account's variable, which every launch removes, so only the file
+// and an account supply one.
 //
 // When no token is available, inject is "" and active is false.
 func TokenActive() (inject string, active bool) {
-	if os.Getenv(OAuthTokenEnv) != "" {
-		return "", true
-	}
 	f := OAuthTokenFile()
 	if f == "" {
 		return "", false

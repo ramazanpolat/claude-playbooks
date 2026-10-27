@@ -118,11 +118,19 @@ func TestMachineAccountKeepsTheTokenFile(t *testing.T) {
 	root := t.TempDir()
 	playbook(t, root, "shared", false)
 	got := childEnv(t, root, launch{
-		env:  []string{tokenFile(t, "sk-ant-oat01-FROMFILE"), "ANTHROPIC_BASE_URL=http://shell/v1", "ANTHROPIC_API_KEY=sk-ant-shell"},
+		env:  []string{tokenFile(t, "sk-ant-oat01-FROMFILE"), tokenEnv + "=sk-ant-oat01-SHELL", "ANTHROPIC_BASE_URL=http://shell/v1", "ANTHROPIC_API_KEY=sk-ant-shell"},
 		args: []string{"run", "shared"},
 	})
 	if got[tokenEnv] != "sk-ant-oat01-FROMFILE" {
-		t.Fatalf("token = %q, want the machine's file", got[tokenEnv])
+		t.Fatalf("token = %q, want the machine's file, never the shell's", got[tokenEnv])
+	}
+	// With no token file, the shell's token does not stand in.
+	got = childEnv(t, root, launch{
+		env:  []string{tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent"), tokenEnv + "=sk-ant-oat01-SHELL"},
+		args: []string{"run", "shared"},
+	})
+	if v, present := got[tokenEnv]; present {
+		t.Fatalf("the shell's token reached the launch: %q", v)
 	}
 	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"} {
 		if v, present := got[k]; present {

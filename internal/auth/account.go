@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"os"
-
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -63,7 +61,6 @@ const (
 	TokenSourcePlaybook = "playbook" // the playbook's own block
 	TokenSourceEnvSet   = "env-set:" // + the env set's name: an account
 	TokenSourceFile     = "file"     // the machine's token file
-	TokenSourceShell    = "shell"    // exported in the environment cpb runs in
 	TokenSourceUnknown  = "unknown"  // an env set could not be resolved
 	TokenSourceAccount  = "account"  // the launch's account (claude_token)
 )
@@ -128,11 +125,7 @@ func AccountOf(configDir string) Account {
 		}
 	case ModeToken:
 		a.TokenKind = kind("value")
-		if os.Getenv(OAuthTokenEnv) != "" {
-			a.TokenSource = TokenSourceShell
-		} else {
-			a.TokenSource = TokenSourceFile
-		}
+		a.TokenSource = TokenSourceFile
 	}
 	return a
 }

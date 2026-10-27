@@ -834,8 +834,6 @@ func accountLine(a auth.Account) string {
 		return "Claude token: the playbook's own" + how
 	case a.TokenSource == auth.TokenSourceFile:
 		return "Claude token: the machine's token file"
-	case a.TokenSource == auth.TokenSourceShell:
-		return "Claude token: the one exported in this shell"
 	case a.TokenBlocked:
 		return "Claude token: blocked; a launch uses the stored login"
 	}

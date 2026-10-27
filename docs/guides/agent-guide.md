@@ -150,7 +150,7 @@ A credential-looking literal (`*TOKEN*`, `*SECRET*`, `*_KEY`, …) is refused. S
 
 ## Choose an authentication mode per playbook
 
-At every launch cpb picks the playbook's account (`--account`, its first, the `DEFAULTS` account, else `machine`) and decides whether a long-lived token is active (a `claude_token` account; on `machine`, `~/.config/claude-code/oauth-token` or the variable exported, and the playbook not blocking it). Token active: inject it and remove the playbook's own stored login so a 401 cannot swap the token for a dead grant. Token inactive: symlink the playbook's credentials to `~/.claude/.credentials.json`. `isolated_login = true`: share nothing.
+At every launch cpb picks the playbook's account (`--account`, its first, the `DEFAULTS` account, else `machine`) and decides whether a long-lived token is active (a `claude_token` account; on `machine`, `~/.config/claude-code/oauth-token`, unless the playbook blocks it; a token exported in the shell never counts). Token active: inject it and remove the playbook's own stored login so a 401 cannot swap the token for a dead grant. Token inactive: symlink the playbook's credentials to `~/.claude/.credentials.json`. `isolated_login = true`: share nothing.
 
 | Goal | Statement |
 |---|---|

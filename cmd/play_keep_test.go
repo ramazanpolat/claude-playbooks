@@ -183,6 +183,22 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	if strings.Join(m.Env.Accounts, " ") != "router" {
 		t.Fatalf("accounts: %v", m.Env.Accounts)
 	}
+	// --account machine, said outright, is kept as said: in your store
+	// DEFAULTS may name another account.
+	mustStmt(t, "CREATE ACCOUNT mine SET provider = anthropic, auth = claude_login")
+	mustStmt(t, "ALTER DEFAULTS USE ACCOUNT mine")
+	usePlayAccount(t, "machine")
+	playKeepFlags(t, true, "router2")
+	if out := captureStdout(t, func() { err = runPlay(playCmd, []string{router}) }); err != nil {
+		t.Fatalf("keep on machine: %v\n%s", err, out)
+	}
+	m2, err := manifest.Read(showPlaybook(t, "router2")["path"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(m2.Env.Accounts, " ") != "machine" {
+		t.Fatalf("kept on machine: %v", m2.Env.Accounts)
+	}
 }
 
 // --keep --dry-run --json plans against the pilot's store and writes

@@ -29,6 +29,9 @@ func TestAccountStatements(t *testing.T) {
 			w("ALTER ACCOUNT glm SET base_url=https://new.example/v1, auth_token FROM keychain:glm-new"),
 			Stmt{Verb: Alter, Object: Account, Name: "glm", Clauses: []Clause{{Kind: SetAccount, Settings: []Var{
 				{Key: "base_url", Value: "https://new.example/v1"}, {Key: "auth_token", Ref: "keychain:glm-new"}}}}}},
+		{"alter: reset the address with the credential",
+			w("ALTER ACCOUNT glm RESET base_url SET auth_token FROM keychain:glm"),
+			Stmt{Verb: Alter, Object: Account, Name: "glm", Clauses: []Clause{{Kind: ResetAccount, Settings: []Var{{Key: "base_url"}}}, {Kind: SetAccount, Settings: []Var{{Key: "auth_token", Ref: "keychain:glm"}}}}}},
 		{"alter: reset optional keys",
 			w("ALTER ACCOUNT glm RESET identity, model"),
 			Stmt{Verb: Alter, Object: Account, Name: "glm", Clauses: []Clause{{Kind: ResetAccount, Settings: []Var{{Key: "identity"}, {Key: "model"}}}}}},
@@ -119,6 +122,7 @@ func TestAccountErrors(t *testing.T) {
 		{"CREATE OR ALTER ACCOUNT k SET provider=anthropic auth=claude_login", "OR ALTER applies to PLAYBOOK only"},
 		{"ALTER ACCOUNT glm SET base_url=https://new.example/v1", "state the credential"},
 		{"ALTER ACCOUNT glm SET provider=anthropic", "state the credential"},
+		{"ALTER ACCOUNT glm RESET base_url", "state the credential"},
 		{"ALTER ACCOUNT glm RESET provider", "provider is the account itself"},
 		{"ALTER ACCOUNT glm RESET auth_token", "one credential"},
 		{"ALTER ACCOUNT glm SET ANTHROPIC_BASE_URL=x", "not an account key"},

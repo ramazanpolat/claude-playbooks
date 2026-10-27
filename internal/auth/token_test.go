@@ -42,14 +42,17 @@ func TestTokenActive(t *testing.T) {
 		t.Fatalf("expected trimmed token, got %q", inject)
 	}
 
-	// Env already set -> active but nothing to inject (children inherit it).
+	// A token exported in the environment never counts (v4.2.0): the file
+	// still decides, and with no file nothing is active.
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-FROMENV")
-	inject, active = TokenActive()
-	if !active {
-		t.Fatal("env set: expected active")
+	if inject, active = TokenActive(); !active || inject != "sk-ant-oat01-TESTTOKEN" {
+		t.Fatalf("env set over a file: inject=%q active=%v, want the file's", inject, active)
 	}
-	if inject != "" {
-		t.Fatalf("env set: expected no injection, got %q", inject)
+	if err := os.Remove(tokenFile); err != nil {
+		t.Fatal(err)
+	}
+	if inject, active = TokenActive(); active || inject != "" {
+		t.Fatalf("env set, no file: inject=%q active=%v, want inactive", inject, active)
 	}
 }
 
@@ -185,8 +188,9 @@ func TestPrepareLaunchEnvIsolatedStripsInheritedToken(t *testing.T) {
 	}
 }
 
-// A non-isolated playbook whose token is already exported must inherit exactly
-// one entry -- not a second, appended copy whose resolution would depend on
+// A non-isolated playbook launched with a token already exported gets exactly
+// one entry, the file's: the exported one never counts, and is removed rather
+// than left beside a second, appended copy whose resolution would depend on
 // exec's duplicate-key behaviour.
 func TestPrepareLaunchEnvInheritedTokenNotDuplicated(t *testing.T) {
 	t.Setenv("CPB_ISOLATED_LOGIN", "")
@@ -207,8 +211,8 @@ func TestPrepareLaunchEnvInheritedTokenNotDuplicated(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected exactly one token entry, got %v", got)
 	}
-	if got[0] != OAuthTokenEnv+"=sk-ant-oat01-FROMENV" {
-		t.Fatalf("exported token must win over the file, got %q", got[0])
+	if got[0] != OAuthTokenEnv+"=sk-ant-oat01-FROMFILE" {
+		t.Fatalf("the file's token must replace the exported one, got %q", got[0])
 	}
 }
 
