@@ -76,6 +76,7 @@ The charset is enforced for names being **created** (`CREATE PLAYBOOK`, with `FR
 | `PLAYBOOK` | an installed playbook: dir, launcher, source, attached ENVs, own variables | `<root>/<name>/` |
 | `ENV` | an **env set**: a named, reusable set of variables | `<root>/.env-sets/<name>.toml` |
 | `DEFAULTS` | the machine-wide layer under every playbook: an ordered list of env sets; a singleton, no name | `<root>/.env-sets/.defaults` |
+| `ACCOUNT` | where requests go and how they authenticate: provider, address, identity, one credential, model names (since v4.2.0) | `<root>/.accounts/<name>.toml` |
 
 Two words keep the variables apart: **`ENV` is a named set**, **`VAR` is one
 variable**. "Profile" is deliberately not a keyword: it would be ambiguous with other
@@ -135,6 +136,10 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
+            | CREATE [OR REPLACE] ACCOUNT [IF NOT EXISTS] <name> SET account-pair, ... [AS PLAINTEXT]
+            | ALTER  ACCOUNT <name> { SET account-pair, ... [AS PLAINTEXT] | RESET <key>, ... } ...
+            | DROP   ACCOUNT [IF EXISTS] <name>
+                                           see "CREATE / ALTER / DROP ACCOUNT"
 
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a source
             | LINK <dir>                                    develop in place
@@ -157,6 +162,8 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
             | DROP ENV <env> ...           detach
             | REPLACE ENV <old> WITH <new> swap one set, keeping its position
                                            USE ENV '' states the empty list
+            | USE ACCOUNT <account>, ...   the accounts it may run on, the first by default
+                                           USE ACCOUNT '' states the empty list
 
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
@@ -195,9 +202,9 @@ mcp-part   := VAR <key>=<value> ...          literal values; a credential needs 
             | HEADER '<name>' '<value>'
             | HEADER '<name>' FROM '<ref>'
 
-read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> ] [--json]
+read       := SHOW [ PLAYBOOKS | ENVS | ACCOUNTS | DEFAULTS | PLAYBOOK <name> | ENV <name> | ACCOUNT <name> ] [--json]
             | SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
-            | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
+            | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ACCOUNT <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name> [--json]
 ```
 
@@ -294,6 +301,9 @@ stores commands; files store the result.
 | `ALTER PLAYBOOK … UNSET VAR K` | removes K from whichever of the three holds it |
 | `ALTER DEFAULTS … USE / ADD / DROP / REPLACE ENV` | `<root>/.env-sets/.defaults`, one set name per line, in order |
 | `ALTER DEFAULTS SET / RESET secret_helper` | `<root>/.env-sets/.secret-helper`, one line: the command |
+| `CREATE / ALTER / DROP ACCOUNT` | `<root>/.accounts/<name>.toml` |
+| `ALTER PLAYBOOK … USE ACCOUNT` | the playbook's `.playbook`, `[env] accounts = [...]` |
+| `ALTER DEFAULTS USE ACCOUNT` | `<root>/.accounts/.default`, one name |
 | `CREATE / DROP PLAYBOOK`, `RENAME TO`, `SET launcher` / `RESET launcher` | the playbook dir, the registry and the launcher |
 | `ALTER PLAYBOOK … ADD / DROP MARKETPLACE`, `ADD / DROP PLUGIN` | nothing directly: runs `claude plugin …` with the playbook as `CLAUDE_CONFIG_DIR` (see "Plugins and the agent") |
 | `ALTER PLAYBOOK … SET / RESET agent` | the playbook's `settings.json`, `agent` |
@@ -601,6 +611,189 @@ such an entry `(plaintext)`, and `SHOW CREATE` never carries the value (see
 playbook files). The refusal is the grammar's: a manifest or env set file that already holds such a literal is read and launched as it is, and `SHOW` redacts the value.
 
 All output redacts credential-looking literals; no form prints the value.
+
+## CREATE / ALTER / DROP ACCOUNT
+
+An **account** (since v4.2.0) is one record that says where a playbook's
+requests go and how they authenticate: the provider, its address, who you
+are there, one credential, and that provider's model names. A playbook
+names the accounts it may run on; at launch cpb **derives** every routing,
+credential and model variable from the account it runs on. Those variables
+are never set one by one, so an address cannot change while its key stays
+behind.
+
+```sql
+CREATE ACCOUNT glm SET provider = 'gateway', base_url = 'http://localhost:4000/v1',
+  auth_token FROM 'keychain:glm', model = 'glm-5.3', description = 'GLM through the router';
+CREATE ACCOUNT claude-work SET provider = 'anthropic', identity = 'me@work.example',
+  claude_token FROM 'keychain:claude-work';
+CREATE ACCOUNT console SET provider = 'anthropic', api_key FROM 'keychain:anthropic-api';
+CREATE ACCOUNT mine SET provider = 'anthropic', auth = 'claude_login';
+
+ALTER PLAYBOOK reviewer USE ACCOUNT glm, claude-work;   -- may run on these; the first by default
+cpb run reviewer --account claude-work                  -- one launch on the other
+ALTER DEFAULTS USE ACCOUNT mine;                        -- for playbooks that name none
+SHOW ACCOUNTS;  SHOW ACCOUNT glm;  DROP ACCOUNT glm;
+```
+
+### The record
+
+| Key | Value |
+|---|---|
+| `provider` | `'anthropic'`, `'gateway'` (anything that speaks the Anthropic API: a router, a proxy, another vendor's endpoint), `'bedrock'`, `'vertex'` or `'foundry'`. Required. |
+| `base_url` | Where requests go. Required for `gateway`; for `anthropic`, only `https` on `anthropic.com` or a subdomain; for a cloud provider, its endpoint override. `https`, or `http` only to `localhost`, `127.0.0.1` or `::1`; no `user:password@`. |
+| the credential | Exactly one: `auth_token FROM '<ref>'` (sent as `Authorization: Bearer`), `api_key FROM '<ref>'` (`X-Api-Key`), `claude_token FROM '<ref>'` (a Claude subscription token, `claude setup-token`), `helper = '<command>'` (an `apiKeyHelper` that prints the key), or `auth = 'claude_login'` (the playbook's own Claude login, see *login*), `auth = 'cloud'` (the cloud's own credential chain), `auth = 'none'` (a local router that takes no key). A literal instead of a reference needs `AS PLAINTEXT` after the list, as in an env set. |
+| `identity` | Who you are there, free text (an email). For `auth = 'claude_login'` and `claude_token`, `EXPLAIN` compares it with the login's recorded email when it can read one. |
+| `access` | `'any'` (the default): any playbook may use it. `'listed'`: only a playbook whose own `USE ACCOUNT` list names it. |
+| `claude_login_trusted` | `true` lets a Claude credential (`claude_login`, `claude_token`) reach a `gateway` address, a gateway you trust that forwards to Anthropic; `https` only. Default `false`. |
+| `model`, `opus_model`, `sonnet_model`, `haiku_model`, `fable_model` | The provider's model names: the default model of a new session (`ANTHROPIC_DEFAULT_MODEL`), and what the `opus`, `sonnet`, `haiku` and `fable` aliases resolve to. |
+| `description` | Free text. |
+
+Which credentials a provider takes:
+
+| provider | credentials |
+|---|---|
+| `anthropic` | `api_key`, `auth_token`, `claude_token`, `helper`, `auth = 'claude_login'` |
+| `gateway` | `auth_token`, `api_key`, `helper`, `auth = 'none'`; `claude_token` and `auth = 'claude_login'` only with `claude_login_trusted = true` and an `https` address |
+| `bedrock`, `vertex`, `foundry` | `auth = 'cloud'` |
+
+### Statements
+
+```
+write += CREATE ACCOUNT [IF NOT EXISTS] <name> SET account-pair, ... [AS PLAINTEXT]
+       | CREATE OR REPLACE ACCOUNT <name> SET account-pair, ... [AS PLAINTEXT]
+       | ALTER  ACCOUNT <name> account-clause ...
+       | DROP   ACCOUNT [IF EXISTS] <name>
+account-clause := SET account-pair, ... [AS PLAINTEXT]
+               | RESET <key>, ...            back to the default (no value, 'any', false)
+account-pair   := <key> = <value>
+               | <credential> FROM '<ref>'    auth_token, api_key, claude_token
+set-clause    += USE ACCOUNT <account>, ...  (PLAYBOOK and DEFAULTS) the whole list; USE ACCOUNT '' empties it
+read          += SHOW ACCOUNTS [--json] | SHOW ACCOUNT <name> [--json] | SHOW CREATE ACCOUNT <name>
+```
+
+- An account name follows the env set rule: letters, digits, dots, dashes
+  and underscores. `machine` is reserved: it names the implicit account
+  (below).
+- **Whole records.** `CREATE` needs `provider` and a credential. A new
+  credential replaces the old one (`SET api_key FROM …` on an account that
+  had `auth_token`). `RESET` takes `base_url`, `identity`, `access`,
+  `claude_login_trusted`, the model keys and `description`, never
+  `provider` or the credential.
+- **Moving an account moves its credential.** `ALTER ACCOUNT … SET` of
+  `provider` or `base_url` is refused unless the same statement states the
+  credential: `ALTER ACCOUNT glm SET base_url = 'https://new.example/v1',
+  auth_token FROM 'keychain:glm-new'`. Restating the same reference is
+  allowed; it says so outright.
+- `CREATE OR REPLACE ACCOUNT` states the record whole; `IF NOT EXISTS`
+  leaves an existing one as it is.
+- `DROP ACCOUNT` is refused while a playbook or `DEFAULTS` names it; the
+  error lists them.
+- Stored at `<root>/.accounts/<name>.toml` (mode `0600`): references and
+  values written with `AS PLAINTEXT`, never a resolved secret. The
+  playbook's list is the manifest's `[env] accounts = [...]`; `DEFAULTS`'
+  is `<root>/.accounts/.default`, one name.
+
+### Which account a launch runs on
+
+1. `--account <name>` on `cpb run` or `cpb start`;
+2. else the first account of the playbook's `USE ACCOUNT` list;
+3. else the `DEFAULTS` account;
+4. else `machine`.
+
+**Who may use which account.** Both sides are allow-lists, and both must
+agree:
+
+- A playbook with a `USE ACCOUNT` list runs only on accounts it lists:
+  `--account` with any other is refused, naming the list.
+- A playbook with no list may run on any account whose `access` is `'any'`.
+- An account with `access = 'listed'` runs only for a playbook that lists
+  it, and cannot be the `DEFAULTS` account.
+- Only you set a playbook's list. `CREATE … FROM` and `cpb update` ignore
+  an `accounts` list in a source's manifest (one stderr line; `update` keeps
+  the installed list), and `cpb play` refuses a recipe that states `USE
+  ACCOUNT`. An account is local to the machine, so a playbook from
+  elsewhere can never name its way into one.
+
+**`machine`** is the account of a launch that names none: Anthropic, the
+playbook's own login (shared or isolated, per its `login`) and, on a shared
+playbook, the machine's long-lived token file, exactly as before accounts
+existed.
+
+### Derived at launch
+
+cpb removes every **reserved variable** from the environment it starts
+with, then sets exactly what the account renders. The reserved variables:
+
+- routing: `ANTHROPIC_BASE_URL`, `ANTHROPIC_BEDROCK_BASE_URL`,
+  `ANTHROPIC_BEDROCK_MANTLE_BASE_URL`, `ANTHROPIC_VERTEX_BASE_URL`,
+  `ANTHROPIC_FOUNDRY_BASE_URL`, `ANTHROPIC_AWS_BASE_URL`,
+  `ANTHROPIC_UNIX_SOCKET`, `CLAUDE_CODE_USE_BEDROCK`,
+  `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`,
+  `CLAUDE_CODE_USE_MANTLE`, `CLAUDE_CODE_USE_ANTHROPIC_AWS`, the
+  `CLAUDE_CODE_SKIP_*_AUTH` switches;
+- credentials: `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_OAUTH_REFRESH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_SCOPES`, `ANTHROPIC_CUSTOM_HEADERS`,
+  `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`,
+  `ANTHROPIC_AWS_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`,
+  `CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`,
+  `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE`, and Anthropic profiles and
+  federation: `ANTHROPIC_PROFILE`, `ANTHROPIC_CONFIG_DIR`,
+  `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`,
+  `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_IDENTITY_TOKEN`,
+  `ANTHROPIC_IDENTITY_TOKEN_FILE`, `ANTHROPIC_WORKSPACE_ID`;
+- models: `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_MODEL`,
+  `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`,
+  `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`,
+  `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`.
+
+A cloud's own credential chain (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS`,
+the Vertex project and region) is not reserved: Claude Code reads it only
+when a cloud switch is on, and only a cloud account turns one on.
+
+- **Nothing else sets them.** An env set, `DEFAULTS`, a playbook's
+  `SET VAR` and `--env` that set a reserved variable are refused when
+  written, and a launch whose layers hold one (a file written by hand, or
+  before v4.2.0) is refused naming the layer and the variable, and, when
+  the layer holds an address and a key together, the `CREATE ACCOUNT`
+  statement that replaces it (built from references, never values).
+  `BLOCK VAR` of a reserved variable is accepted and changes nothing:
+  cpb removes it anyway.
+- **Settings files too.** The playbook's `settings.json` and the working
+  folder's `.claude/settings.json` and `.claude/settings.local.json` apply
+  their `env` over the environment cpb hands Claude Code, and may name an
+  `apiKeyHelper`. A launch is refused when any of them sets a reserved
+  variable or an `apiKeyHelper` (one that cannot be read or parsed refuses
+  too): routing and credentials come from the account, never from a file a
+  repository carries.
+- **What the account renders.** `anthropic`: its `base_url`, if any, as
+  `ANTHROPIC_BASE_URL`. `gateway`: `ANTHROPIC_BASE_URL`. `bedrock`,
+  `vertex`, `foundry`: `CLAUDE_CODE_USE_<CLOUD>=1`, and `base_url` as that
+  cloud's base URL variable. The credential: `auth_token` as
+  `ANTHROPIC_AUTH_TOKEN`, `api_key` as `ANTHROPIC_API_KEY`, `claude_token` as
+  `CLAUDE_CODE_OAUTH_TOKEN` (references through the secret helper, which
+  sets them for the one exec), `helper` as `apiKeyHelper` in a launch-only
+  `--settings` argument; `claude_login`, `cloud` and `none` render nothing.
+  The model keys as `ANTHROPIC_DEFAULT_MODEL` and
+  `ANTHROPIC_DEFAULT_<TIER>_MODEL`. Always: `ANTHROPIC_CONFIG_DIR` set to an
+  empty directory of cpb's, so an Anthropic profile in `~/.config/anthropic`
+  (which Claude Code reads with no variable set) is never the credential. A
+  variable is removed, never set to the empty string, which can still hold
+  its place in Claude Code's credential order.
+- **The login follows the account.** Only an account with `auth =
+  'claude_login'` (or `machine`) reaches a stored Claude login. Every other
+  account runs with none reachable: a shared playbook's link to the machine
+  store is detached for the run (the next launch relinks it); an isolated
+  playbook that holds a login of its own sets it aside for the run on
+  Linux, and is refused on macOS, as a token run is (see *Authentication
+  preparation*). A Claude credential reaches a non-Anthropic address only
+  through `claude_login_trusted`.
+- **Sandboxed launches** render the same account inside the sandbox.
+
+`EXPLAIN PLAYBOOK` names the account, why it was chosen, and what it
+renders (`Account: glm (gateway http://localhost:4000/v1, auth_token from a
+reference; the playbook's first)`); `--json` has `route.account`.
 
 ## ALTER PLAYBOOK
 
