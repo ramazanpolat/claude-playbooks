@@ -175,8 +175,8 @@ func TestCheckRefusals(t *testing.T) {
 	for src, want := range map[string]string{
 		"INCLUDE 'base.cpb';":                                                      "INCLUDE",
 		"USE PLAYBOOK x;\nALTER PLAYBOOK SET model = 'm';":                         "USE PLAYBOOK",
-		"CREATE ENV e SET A=1;":                                                    "env sets or DEFAULTS",
-		"ALTER DEFAULTS SET secret_helper = 'h';":                                  "env sets or DEFAULTS",
+		"CREATE ENV e SET A=1;":                                                    "env sets, accounts or DEFAULTS",
+		"ALTER DEFAULTS SET secret_helper = 'h';":                                  "env sets, accounts or DEFAULTS",
 		"ALTER PLAYBOOK named SET model = 'm';":                                    "write it as a recipe",
 		"CREATE PLAYBOOK p;":                                                       "write it as a recipe",
 		"DROP PLAYBOOK p;":                                                         "write it as a recipe",

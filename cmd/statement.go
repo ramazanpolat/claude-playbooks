@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
@@ -175,6 +176,8 @@ func execStatement(r *stmtRun, st *grammar.Stmt) error {
 		return dirStatement(r, st)
 	case st.Object == grammar.Env && st.Write():
 		return envStatement(r, st)
+	case st.Object == grammar.Account && st.Write():
+		return accountStatement(r, st)
 	case st.Verb == grammar.Alter && st.Object == grammar.Defaults:
 		return defaultsStatement(r, st)
 	case st.Verb == grammar.Create && st.Object == grammar.Playbook:
@@ -320,11 +323,14 @@ func (r *stmtRun) writeProfile(dir string, old, p *envset.Set, changed, what str
 func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 	dir := envset.Dir(config.ResolvePlaybooksDir())
 
-	var listClauses, helperClauses []grammar.Clause
+	var listClauses, helperClauses, accountClauses []grammar.Clause
 	for _, c := range st.Clauses {
-		if c.Kind == grammar.SetHelper || c.Kind == grammar.UnsetHelper {
+		switch c.Kind {
+		case grammar.SetHelper, grammar.UnsetHelper:
 			helperClauses = append(helperClauses, c)
-		} else {
+		case grammar.UseAccount:
+			accountClauses = append(accountClauses, c)
+		default:
 			listClauses = append(listClauses, c)
 		}
 	}
@@ -360,6 +366,23 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 	}
 
+	// The DEFAULTS account: one, or none.
+	accountDir := account.Dir(config.ResolvePlaybooksDir())
+	var defAccount, curAccount string
+	if len(accountClauses) > 0 {
+		var line string
+		if defAccount, line, err = r.defaultsAccountClause(accountDir, accountClauses[0]); err != nil {
+			return err
+		}
+		if curAccount, err = r.defaultAccount(accountDir); err != nil {
+			curAccount = "\x00unreadable" // replaced outright
+		}
+		if defAccount != curAccount {
+			lines = append(lines, line)
+		}
+	}
+	accountSame := len(accountClauses) == 0 || defAccount == curAccount
+
 	// Unchanged when the list and the helper setting would stay as they are.
 	listSame := len(listClauses) == 0 || slices.Equal(current, names)
 	helperSame := true
@@ -369,7 +392,7 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		helperSame = (c.Kind == grammar.SetHelper && stored == c.Arg) || (c.Kind == grammar.UnsetHelper && stored == "")
 	}
 	switch {
-	case listSame && helperSame:
+	case listSame && helperSame && accountSame:
 		r.outcome = outUnchanged
 		r.say("DEFAULTS unchanged", nil)
 		return nil
@@ -380,6 +403,9 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		if len(listClauses) > 0 {
 			r.recordDefaults(names)
+		}
+		if len(accountClauses) > 0 && r.dry != nil {
+			r.dry.defaultAccount, r.dry.hasDefaultAccount = defAccount, true
 		}
 		return nil
 	}
@@ -418,6 +444,12 @@ func defaultsStatement(r *stmtRun, st *grammar.Stmt) error {
 		if err := write(dir, names); err != nil {
 			restore()
 			return fmt.Errorf("cannot write DEFAULTS: %w", err)
+		}
+	}
+	if len(accountClauses) > 0 && !accountSame {
+		if err := account.WriteDefault(accountDir, defAccount); err != nil {
+			restore()
+			return fmt.Errorf("cannot write the DEFAULTS account: %w", err)
 		}
 	}
 	r.say("Altered DEFAULTS", lines)
@@ -537,6 +569,12 @@ func playbookStatement(r *stmtRun, st *grammar.Stmt) error {
 		return err
 	}
 	m.Env.Sets = profiles
+	accounts, accountLines, err := r.applyAccountList(account.Dir(playbooksDir), m.Env.Accounts, st.Clauses)
+	if err != nil {
+		return err
+	}
+	m.Env.Accounts = accounts
+	lines = append(lines, accountLines...)
 	lines = append(lines, applyVarClauses(&m.Env.Set, &m.Env.Refs, &m.Env.Block, nil, st.Clauses)...)
 	// MCP servers: planned against the playbook's .claude.json; their
 	// secret references land in this same layer, under derived variables.
@@ -949,7 +987,7 @@ func cloneEnv(e *manifest.Env) *manifest.Env {
 	if e == nil {
 		return nil
 	}
-	return &manifest.Env{Sets: slices.Clone(e.Sets), Set: maps.Clone(e.Set), Refs: maps.Clone(e.Refs), Block: slices.Clone(e.Block)}
+	return &manifest.Env{Sets: slices.Clone(e.Sets), Accounts: slices.Clone(e.Accounts), Set: maps.Clone(e.Set), Refs: maps.Clone(e.Refs), Block: slices.Clone(e.Block)}
 }
 
 // envEqual compares two blocks as a launch sees them: attached sets in
@@ -961,7 +999,7 @@ func envEqual(a, b *manifest.Env) bool {
 	ua, ub := slices.Clone(a.Block), slices.Clone(b.Block)
 	slices.Sort(ua)
 	slices.Sort(ub)
-	return slices.Equal(a.Sets, b.Sets) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
+	return slices.Equal(a.Sets, b.Sets) && slices.Equal(a.Accounts, b.Accounts) && maps.Equal(a.Set, b.Set) && maps.Equal(a.Refs, b.Refs) && slices.Equal(ua, ub)
 }
 
 // dropString is list without s.

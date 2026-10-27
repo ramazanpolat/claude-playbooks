@@ -64,10 +64,14 @@ type Update struct {
 // them (SPEC.md, "Secrets"). A key lives in at most one of Set,
 // Refs and Block.
 type Env struct {
-	Sets  []string          `toml:"sets,omitempty"`
-	Set   map[string]string `toml:"set,omitempty"`
-	Refs  map[string]string `toml:"refs,omitempty"`
-	Block []string          `toml:"block,omitempty"`
+	Sets []string `toml:"sets,omitempty"`
+	// Accounts are the accounts the playbook may run on, the first by
+	// default (USE ACCOUNT, since v4.2.0). Not a layer: a launch runs on one
+	// account, and its routing and credential variables come from it.
+	Accounts []string          `toml:"accounts,omitempty"`
+	Set      map[string]string `toml:"set,omitempty"`
+	Refs     map[string]string `toml:"refs,omitempty"`
+	Block    []string          `toml:"block,omitempty"`
 }
 
 var profileNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -235,7 +239,7 @@ func ValidateEnvKey(key string) error {
 
 // Empty reports whether the block declares nothing.
 func (e *Env) Empty() bool {
-	return e == nil || (len(e.Sets) == 0 && len(e.Set) == 0 && len(e.Refs) == 0 && len(e.Block) == 0)
+	return e == nil || (len(e.Sets) == 0 && len(e.Accounts) == 0 && len(e.Set) == 0 && len(e.Refs) == 0 && len(e.Block) == 0)
 }
 
 // Blocks reports whether key is listed for removal.
@@ -478,6 +482,17 @@ func (m *Manifest) validate(path string) error {
 				return fmt.Errorf("invalid .playbook at %s: env.sets: %w", path, err)
 			}
 		}
+		seen := map[string]bool{}
+		for _, name := range m.Env.Accounts {
+			// The account name rule is the env set's (internal/account).
+			if ValidateSetName(name) != nil {
+				return fmt.Errorf("invalid .playbook at %s: env.accounts: invalid account name: use letters, digits, dots, dashes and underscores", path)
+			}
+			if seen[name] {
+				return fmt.Errorf("invalid .playbook at %s: env.accounts: %q is listed twice", path, name)
+			}
+			seen[name] = true
+		}
 		for key, value := range m.Env.Set {
 			if err := ValidateEnvKey(key); err != nil {
 				return fmt.Errorf("invalid .playbook at %s: env.set: %w", path, err)
@@ -623,6 +638,17 @@ func Write(dir string, m *Manifest) error {
 		if len(m.Env.Sets) > 0 {
 			b.WriteString("sets = [")
 			for i, name := range m.Env.Sets {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(QuoteTOML(name))
+			}
+			b.WriteString("]\n")
+		}
+		if len(m.Env.Accounts) > 0 {
+			// In order: the first is the default.
+			b.WriteString("accounts = [")
+			for i, name := range m.Env.Accounts {
 				if i > 0 {
 					b.WriteString(", ")
 				}

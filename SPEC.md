@@ -709,10 +709,10 @@ agree:
 - A playbook with no list may run on any account whose `access` is `'any'`.
 - An account with `access = 'listed'` runs only for a playbook that lists
   it, and cannot be the `DEFAULTS` account.
-- Only you set a playbook's list. `CREATE … FROM` and `cpb update` ignore
-  an `accounts` list in a source's manifest (one stderr line; `update` keeps
-  the installed list), and `cpb play` refuses a recipe that states `USE
-  ACCOUNT`. An account is local to the machine, so a playbook from
+- Only you set a playbook's list. `CREATE … FROM` ignores a source
+  manifest's `[env]` block, its `accounts` list with it (one stderr line),
+  `cpb update` keeps the installed list, and `cpb play` refuses a recipe
+  that states `USE ACCOUNT`. An account is local to the machine, so a playbook from
   elsewhere can never name its way into one.
 
 **`machine`** is the account of a launch that names none: Anthropic, the

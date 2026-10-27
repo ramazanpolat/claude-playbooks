@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -22,6 +23,11 @@ type dryState struct {
 	pbEnvs      map[string]*manifest.Env // a playbook's env block after earlier statements; nil: empty
 	defaults    []string
 	hasDefaults bool
+
+	// accounts written (nil: dropped), and the DEFAULTS account.
+	accounts          map[string]*account.Account
+	defaultAccount    string
+	hasDefaultAccount bool
 
 	// Plugins and the agent, per playbook name: what earlier statements
 	// would have installed and pinned, and, for a playbook renamed earlier,
@@ -58,6 +64,7 @@ func newDryState() *dryState {
 	return &dryState{
 		sandboxes:    map[string]*manifest.Sandbox{},
 		profiles:     map[string]*envset.Set{},
+		accounts:     map[string]*account.Account{},
 		playbooks:    map[string]bool{},
 		pbEnvs:       map[string]*manifest.Env{},
 		worlds:       map[string]*pluginWorld{},

@@ -113,6 +113,10 @@ write      := CREATE ENV [IF NOT EXISTS] <name> [env-clause ...]
             | ALTER  PLAYBOOK [<name>] pb-clause ...   no name: a recipe, see "Targets"
             | DROP   PLAYBOOK [IF EXISTS] <name> [--yes]
             | ALTER  DEFAULTS defaults-clause ...
+            | CREATE [OR REPLACE] ACCOUNT [IF NOT EXISTS] <name> SET account-pair, ... [AS PLAINTEXT]
+            | ALTER  ACCOUNT <name> { SET account-pair, ... [AS PLAINTEXT] | RESET <key>, ... } ...
+            | DROP   ACCOUNT [IF EXISTS] <name>
+                                           see "CREATE / ALTER / DROP ACCOUNT"
 
 origin     := FROM <source> [BRANCH <ref>] [SUBDIR <dir>]   install from a source
             | LINK <dir>                                    develop in place
@@ -135,6 +139,8 @@ set-clause := USE ENV <env> ...            replace the attached list with exactl
             | DROP ENV <env> ...           detach
             | REPLACE ENV <old> WITH <new> swap one set, keeping its position
                                            USE ENV '' states the empty list
+            | USE ACCOUNT <account>, ...   the accounts it may run on, the first by default
+                                           USE ACCOUNT '' states the empty list
 
 defaults-clause := set-clause
             | SET secret_helper = '<command>'   the secret helper (see Secrets)
@@ -173,9 +179,9 @@ mcp-part   := VAR <key>=<value> ...          literal values; a credential needs 
             | HEADER '<name>' '<value>'
             | HEADER '<name>' FROM '<ref>'
 
-read       := SHOW [ PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name> ] [--json]
+read       := SHOW [ PLAYBOOKS | ENVS | ACCOUNTS | DEFAULTS | PLAYBOOK <name> | ENV <name> | ACCOUNT <name> ] [--json]
             | SHOW SESSIONS [FOR PLAYBOOK <name>] [--json]
-            | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL } [--skip-secrets]
+            | SHOW CREATE { PLAYBOOK <name> | ENV <name> | ACCOUNT <name> | ALL } [--skip-secrets]
             | EXPLAIN PLAYBOOK <name> [--json]
 ```
 

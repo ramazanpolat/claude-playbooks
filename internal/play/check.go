@@ -91,8 +91,8 @@ func (r *Result) statement(s *grammar.Stmt) {
 	case s.Verb == grammar.Use:
 		r.refuse(line, "USE PLAYBOOK", onlyThisPlaybook)
 		return
-	case s.Object == grammar.Env || s.Object == grammar.Defaults:
-		r.refuse(line, fmt.Sprintf("%s %s", s.Verb, s.Object), "it would change your env sets or DEFAULTS: "+onlyThisPlaybook)
+	case s.Object == grammar.Env || s.Object == grammar.Defaults || s.Object == grammar.Account:
+		r.refuse(line, fmt.Sprintf("%s %s", s.Verb, s.Object), "it would change your env sets, accounts or DEFAULTS: "+onlyThisPlaybook)
 		return
 	case s.Verb != grammar.Alter || s.Object != grammar.Playbook || !s.Recipe:
 		r.refuse(line, strings.TrimSpace(fmt.Sprintf("%s %s %s", s.Verb, s.Object, s.Name)),
@@ -107,6 +107,7 @@ func (r *Result) statement(s *grammar.Stmt) {
 // Clauses a played recipe may not hold, with the reason.
 var refusedClauses = map[grammar.Kind]string{
 	grammar.UseEnv:          "it would attach your env sets, and your keys, to someone else's playbook",
+	grammar.UseAccount:      "it would choose your accounts, and their credentials, for someone else's playbook",
 	grammar.AddEnv:          "it would attach your env sets, and your keys, to someone else's playbook",
 	grammar.DropEnv:         "it would detach your env sets: " + onlyThisPlaybook,
 	grammar.ReplaceEnv:      "it would attach your env sets, and your keys, to someone else's playbook",

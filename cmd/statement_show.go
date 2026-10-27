@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
@@ -61,6 +62,7 @@ type playbookJSON struct {
 	Linked   *string   `json:"linked"`
 	Launcher *string   `json:"launcher"`
 	Envs     []string  `json:"envs"`
+	Accounts []string  `json:"accounts"` // USE ACCOUNT, the first by default (v4.2.0)
 	Vars     []varJSON `json:"vars"`
 	// Sandbox is the [sandbox] table, key for key.
 	Sandbox sandboxJSON `json:"sandbox"`
@@ -189,9 +191,11 @@ type helperJSON struct {
 // defaultsJSON is DEFAULTS: its env sets and its property, secret_helper,
 // the command in effect, with where it comes from beside it.
 type defaultsJSON struct {
-	Envs             []string `json:"envs"`
-	SecretHelper     *string  `json:"secret_helper"`
-	SecretHelperFrom *string  `json:"secret_helper_from"`
+	Envs []string `json:"envs"`
+	// Account is the DEFAULTS account (v4.2.0); null: none, the machine's.
+	Account          *string `json:"account"`
+	SecretHelper     *string `json:"secret_helper"`
+	SecretHelperFrom *string `json:"secret_helper_from"`
 }
 
 func defaultsOf(names []string, h *helperJSON) defaultsJSON {
@@ -318,6 +322,8 @@ func readStatement(st *grammar.Stmt) error {
 		return showSessions(st)
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
 		return showEnvs(playbooksDir, dir, st)
+	case st.Object == grammar.Account, st.Object == grammar.Accounts:
+		return showAccounts(playbooksDir, st)
 	case st.Object == grammar.Defaults:
 		names, err := envset.Defaults(dir)
 		if err != nil {
@@ -328,10 +334,15 @@ func readStatement(st *grammar.Stmt) error {
 			return err
 		}
 		v := defaultsOf(names, helper)
+		def, err := account.Default(account.Dir(playbooksDir))
+		if err != nil {
+			return fmt.Errorf("the DEFAULTS account cannot be read: %w", err)
+		}
+		v.Account = optStr(def)
 		if st.JSON {
 			return printJSON(v)
 		}
-		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Secret helper", humanHelper(helper)}})
+		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Account", deref(v.Account, account.Machine+" (none set)")}, {"Secret helper", humanHelper(helper)}})
 		return nil
 	}
 	return fmt.Errorf("cannot run %s", st.String())
@@ -398,6 +409,7 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Sets)
+		v.Accounts = nonNil(m.Env.Accounts)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
 	}
 	if showAccount {

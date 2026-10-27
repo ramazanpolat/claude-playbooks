@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -171,6 +172,13 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if c.Kind == grammar.UseEnv {
 			for _, n := range c.Names {
 				if err := r.requireEnv(envset.Dir(config.ResolvePlaybooksDir()), n); err != nil {
+					return err
+				}
+			}
+		}
+		if c.Kind == grammar.UseAccount {
+			for _, n := range c.Names {
+				if _, err := r.requireAccount(account.Dir(config.ResolvePlaybooksDir()), n); err != nil {
 					return err
 				}
 			}
