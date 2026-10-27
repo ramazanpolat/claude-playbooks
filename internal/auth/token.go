@@ -225,6 +225,16 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 // unset of CLAUDE_CODE_OAUTH_TOKEN takes the stored-credentials path for
 // this launch only. Nothing is written to disk.
 func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, error) {
+	return PrepareLaunchEnvFor(configDir, layers, "")
+}
+
+// PrepareLaunchEnvFor is PrepareLaunchEnvWith for a launch on an account
+// that uses no Claude login (noLoginAccount is its name; "" for an account
+// that does): no Claude login may be reachable for the run. The caller has
+// refused a shared playbook already (AccountLoginRefusal); an isolated
+// playbook's own login is kept aside for the run as for a token run, and on
+// macOS a login that arrived since that check refuses the launch.
+func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccount string) ([]string, error) {
 	env := os.Environ()
 	refuse := func(err error) ([]string, error) {
 		// The launch will be refused on this error (see cmd/run.go), so
@@ -255,8 +265,17 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		if oerr != nil {
 			return refuse(oerr)
 		}
-		if own != "" || ownRef {
-			if err := ownLoginRefusal(configDir, ""); err != nil {
+		// keepOut: no login of the playbook's own may be reachable for the
+		// run, under a token or on an account that uses no login.
+		keepOut := own != "" || ownRef || noLoginAccount != ""
+		refusal := func() error {
+			if noLoginAccount != "" {
+				return accountOwnLoginRefusal(configDir, "<playbook>", noLoginAccount)
+			}
+			return ownLoginRefusal(configDir, "")
+		}
+		if keepOut {
+			if err := refusal(); err != nil {
 				return refuse(err)
 			}
 		}
@@ -265,10 +284,10 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// that run is still live: a killed run's is recovered here.
 		restoreErr := restoreOwnLogin(configDir)
 		syncErr := firstErr(SyncCredentials(configDir), restoreErr)
-		if own != "" || ownRef {
+		if keepOut {
 			// On macOS a login that arrived since the check above (a /login
 			// in a session of this playbook) is refused too, never stripped.
-			if err := ownLoginRefusal(configDir, ""); err != nil {
+			if err := refusal(); err != nil {
 				return refuse(err)
 			}
 			if qErr := setAsideForTokenRun(configDir); syncErr == nil {
@@ -278,18 +297,24 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 			if own != "" {
 				env = append(env, OAuthTokenEnv+"="+own)
 			}
-		} else if absent, aErr := storeGrantAbsent(StorePath(configDir)); aErr != nil {
-			// Cannot tell whether this playbook is logged in: leave its
-			// state alone and say so. An unreadable store may hold a login.
-			if syncErr == nil {
-				syncErr = aErr
-			}
-		} else if absent && !loginAside(configDir) {
-			// Isolated and logged in nowhere: nothing may keep presenting
-			// this directory as the global account. See QuarantineAccountState.
-			// A login a live token run holds aside is still the playbook's.
-			if _, qErr := QuarantineAccountState(configDir); qErr != nil && syncErr == nil {
-				syncErr = qErr
+		}
+		// A token is a Claude account of its own; an account that uses no
+		// login is not, and, logged in nowhere, nothing may keep presenting
+		// this directory as one.
+		if !keepOut || noLoginAccount != "" {
+			if absent, aErr := storeGrantAbsent(StorePath(configDir)); aErr != nil {
+				// Cannot tell whether this playbook is logged in: leave its
+				// state alone and say so. An unreadable store may hold a login.
+				if syncErr == nil {
+					syncErr = aErr
+				}
+			} else if absent && !loginAside(configDir) {
+				// Isolated and logged in nowhere: nothing may keep presenting
+				// this directory as the global account. See QuarantineAccountState.
+				// A login a live token run holds aside is still the playbook's.
+				if _, qErr := QuarantineAccountState(configDir); qErr != nil && syncErr == nil {
+					syncErr = qErr
+				}
 			}
 		}
 		env = applyManifestEnv(env, menv)

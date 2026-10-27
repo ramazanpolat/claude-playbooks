@@ -283,51 +283,44 @@ func TestCheckRisks(t *testing.T) {
 	}
 }
 
-// Root's refinement (2026-10-01): only the model endpoint, a proxy and a TLS
-// change are typed; any other *_URL is flagged, not typed. SENTRY_URL plus
-// ANTHROPIC_BASE_URL asks exactly once.
-func TestCheckTypedOnlyForEndpoint(t *testing.T) {
-	r := Check([]byte("ALTER PLAYBOOK SET VAR SENTRY_URL=https://sentry.example.com/1 ANTHROPIC_BASE_URL=https://router.example.net/v1 METRICS_HOST=m.example.org;\n"))
-	typed := 0
+// Only a proxy and a TLS change are typed; any other *_URL is flagged, not
+// typed. Where requests go, how they authenticate and which models they name
+// are an account's: a recipe that sets one of those variables is refused.
+func TestCheckTypedOnlyForProxyAndTLS(t *testing.T) {
+	r := Check([]byte("ALTER PLAYBOOK SET VAR SENTRY_URL=https://sentry.example.com/1 METRICS_HOST=m.example.org;\n"))
 	for _, x := range r.Risks {
 		if x.Confirm != "" {
-			typed++
-			if x.Code != RiskEndpointChange || x.Confirm != "router.example.net" {
-				t.Errorf("typed: %+v", x)
-			}
+			t.Errorf("typed: %+v", x)
 		}
 	}
-	if typed != 1 || riskCodes(r)[RiskSendsData] != 2 || r.Endpoint != "router.example.net" {
-		t.Fatalf("typed %d, risks %+v, endpoint %q", typed, r.Risks, r.Endpoint)
+	if riskCodes(r)[RiskSendsData] != 2 || r.Endpoint != "" {
+		t.Fatalf("risks %+v, endpoint %q", r.Risks, r.Endpoint)
 	}
-	// Anthropic's own host is no change, over https; plain http is.
-	if r := Check([]byte("ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=http://api.anthropic.com;\n")); len(r.Risks) != 1 || r.Risks[0].Confirm != "api.anthropic.com" {
-		t.Fatalf("anthropic over http: %+v", r.Risks)
+	for _, recipe := range []string{
+		"ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1;\n",
+		"ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=https://api.anthropic.com;\n",
+		"ALTER PLAYBOOK SET VAR CLAUDE_CODE_USE_BEDROCK=1;\n",
+		"ALTER PLAYBOOK SET VAR ANTHROPIC_FOUNDRY_BASE_URL=https://foundry.example.test/anthropic;\n",
+		"ALTER PLAYBOOK SET VAR ANTHROPIC_MODEL=glm-5.3;\n",
+		"ALTER PLAYBOOK SET VAR ANTHROPIC_AUTH_TOKEN FROM 'keychain:x';\n",
+	} {
+		r := Check([]byte(recipe))
+		if len(r.Refused) != 1 || !strings.Contains(r.Refused[0].Reason, "--account") || r.Endpoint != "" {
+			t.Fatalf("%s: refused %+v, endpoint %q", recipe, r.Refused, r.Endpoint)
+		}
 	}
-	if r := Check([]byte("ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=https://api.anthropic.com;\n")); len(r.Risks) != 0 || r.Endpoint != "" {
-		t.Fatalf("anthropic: %+v", r.Risks)
+	// Blocking one is fine: every launch removes it anyway.
+	if r := Check([]byte("ALTER PLAYBOOK BLOCK VAR ANTHROPIC_API_KEY;\n")); len(r.Refused) != 0 {
+		t.Fatalf("BLOCK VAR of an account's variable: %+v", r.Refused)
 	}
 	// A proxy and a CA are typed; a NO_PROXY is not a risk.
-	r = Check([]byte("ALTER PLAYBOOK SET VAR HTTPS_PROXY=http://mitm.example:8080 NODE_EXTRA_CA_CERTS=/tmp/ca.pem NO_PROXY=localhost CLAUDE_CODE_USE_BEDROCK=1;\n"))
+	r = Check([]byte("ALTER PLAYBOOK SET VAR HTTPS_PROXY=http://mitm.example:8080 NODE_EXTRA_CA_CERTS=/tmp/ca.pem NO_PROXY=localhost;\n"))
 	confirms := []string{}
 	for _, x := range r.Risks {
 		confirms = append(confirms, x.Code+"="+x.Confirm)
 	}
-	if strings.Join(confirms, " ") != "tls_or_proxy=mitm.example tls_or_proxy=TLS endpoint_change=bedrock" {
-		t.Fatalf("proxy, TLS, bedrock: %v", confirms)
-	}
-	// Foundry, by its switch or its base URL, is typed like Bedrock and Vertex.
-	for recipe, want := range map[string]string{
-		"ALTER PLAYBOOK SET VAR CLAUDE_CODE_USE_FOUNDRY=1;\n":                                         "foundry",
-		"ALTER PLAYBOOK SET VAR ANTHROPIC_FOUNDRY_BASE_URL=https://foundry.example.test/anthropic;\n": "foundry.example.test",
-	} {
-		r := Check([]byte(recipe))
-		if len(r.Risks) != 1 || r.Risks[0].Code != RiskEndpointChange || r.Risks[0].Confirm != want || r.Endpoint != want {
-			t.Fatalf("%s: %+v, endpoint %q", recipe, r.Risks, r.Endpoint)
-		}
-	}
-	if r := Check([]byte("ALTER PLAYBOOK SET VAR CLAUDE_CODE_USE_FOUNDRY=0;\n")); len(r.Risks) != 0 {
-		t.Fatalf("Foundry switched off: %+v", r.Risks)
+	if strings.Join(confirms, " ") != "tls_or_proxy=mitm.example tls_or_proxy=TLS" {
+		t.Fatalf("proxy, TLS: %v", confirms)
 	}
 }
 

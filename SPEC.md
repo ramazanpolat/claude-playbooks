@@ -758,8 +758,9 @@ when a cloud switch is on, and only a cloud account turns one on.
   before v4.2.0) is refused naming the layer and the variable, and, when
   the layer holds an address and a key together, the `CREATE ACCOUNT`
   statement that replaces it (built from references, never values).
-  `BLOCK VAR` of a reserved variable is accepted and changes nothing:
-  cpb removes it anyway.
+  `BLOCK VAR` of a reserved variable is accepted: cpb removes it anyway.
+  On `machine` alone, `BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` still keeps the
+  machine's token file out, as before accounts.
 - **Settings files too.** The playbook's `settings.json` and the working
   folder's `.claude/settings.json` and `.claude/settings.local.json` apply
   their `env` over the environment cpb hands Claude Code, and may name an
@@ -783,11 +784,11 @@ when a cloud switch is on, and only a cloud account turns one on.
   its place in Claude Code's credential order.
 - **The login follows the account.** Only an account with `auth =
   'claude_login'` (or `machine`) reaches a stored Claude login. Every other
-  account runs with none reachable: a shared playbook's link to the machine
-  store is detached for the run (the next launch relinks it); an isolated
-  playbook that holds a login of its own sets it aside for the run on
-  Linux, and is refused on macOS, as a token run is (see *Authentication
-  preparation*). A Claude credential reaches a non-Anthropic address only
+  account runs with none reachable: a shared playbook (whose store is the
+  machine's) is refused before anything changes, naming the fix, `SET login
+  = 'isolated'`; an isolated playbook that holds a login of its own sets it
+  aside for the run on Linux, and is refused on macOS, as a token run is
+  (see *Authentication preparation*). A Claude credential reaches a non-Anthropic address only
   through `claude_login_trusted`.
 - **Sandboxed launches** render the same account inside the sandbox.
 
@@ -2508,7 +2509,7 @@ says so: `Note: cpb update <name> now applies <files> again (it applied
 
 Every launch (`run`, `start`, launcher dispatch) prepares the config directory's authentication before exec, in `auth.PrepareLaunchEnv`. "The config directory" is whatever the launch bound: the playbook's install directory, `start`'s path argument, or a caller-supplied `CPB_CONFIG_DIR` (see *Caller-supplied config directory*). The decision below is identical in every case -- a supplied directory is judged, synced and quarantined exactly as a playbook's own would be, which is what makes it usable as a private state directory. The decision, in order:
 
-1. **Isolation wins.** If the nearest manifest walking up from the config directory has `isolated_login = true`, or `CPB_ISOLATED_LOGIN=true` is set: detach a symlinked `.credentials.json` (the target file survives), sync no account metadata, strip `CLAUDE_CODE_OAUTH_TOKEN` and the plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) from the child environment. A `CLAUDE_CODE_OAUTH_TOKEN` the playbook supplies itself, a value or a reference (its own block, the env sets it uses, or a launch flag; never `DEFAULTS`, which is the machine's layer) is honoured as its own token: injected, with the playbook's own login kept out of the run. **On macOS** (the login lives in the Keychain) a launch whose isolated playbook holds a login of its own -- a grant in its store file (a link to the shared store is not its own; isolation detaches it), a grant set aside, or its Keychain item; a store or Keychain that cannot be read counts as holding one -- is refused before anything changes, and again after the credential sync, so a login that arrives in between is refused too, never stripped, naming where the login is and the fixes (`cpb run --block CLAUDE_CODE_OAUTH_TOKEN <name>`, `ALTER PLAYBOOK <name> BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN`, dropping the account's env set or `--env-set`, or `/logout` in it). **Elsewhere** the `claudeAiOauth` grant is moved from the store into `.credentials.json.cpb-aside` (mode `0600`) for the run, other keys staying. Every token run holds `.credentials.json.cpb-run.lock` shared until it returns and records its session's pid in `.credentials.json.cpb-run.pids`, so a session whose cpb was killed alone keeps its run live. The grant goes back into the store when the last such run ends (no lock held, no recorded session alive), merged with whatever the store holds then; each launch of the isolated playbook first puts back a grant no live run holds (one a killed run left). A store holding a grant again by then keeps it, and the one aside is kept as `.credentials.json.cpb-aside-<YYYY-MM-DD-HH_MM_SS>` (with `-<n>` when that name is taken; an archive is never replaced), with one stderr line. The login guard counts a grant set aside as a login the launch can reach. Moves are serialised by `.credentials.json.cpb-aside.lock`. A grant set aside counts as the playbook's own login (`SET login = 'shared'` stays refused), and its account state is not purged while it is aside. When the isolated playbook holds no login of its own (no grant in its store) and its block sets no token, the Anthropic account state in its `.claude.json` is removed as well: `oauthAccount`, `cachedGrowthBookFeatures`, `cachedGrowthBookFeaturesAt`, `cachedExperimentFeatures`, `cachedExperimentData`, `passesEligibilityCache`, `cachedExtraUsageDisabledReason`. Rationale: Claude Code enables its claude.ai-hosted tools (Artifact and friends) from those cached flags regardless of `ANTHROPIC_BASE_URL`, so a playbook routed to another backend that once ran as the global account keeps sending them; since Claude Code 2.1.265 the Artifact tool's schema is rejected by at least one such backend (GLM, `400` code `1210`) and every interactive turn fails. A playbook that logs in on its own regenerates the state, so nothing of value is lost; an unreadable `.claude.json` leaves it in place and is reported as an advisory warning. `auth status` shows the pending removal as `no login; stale account state, purged at launch`, judged as the launch will see it: a grant reached only through a symlinked shared store does not count, since isolation detaches that link first (`stale account state, purged at launch (the shared login is detached at launch)`). A store that cannot be read or parsed leaves the state in place with an advisory warning, since it may hold a login. The rewrite keeps the file's owner permissions masked to `0600`, never widening a read-only state file.
+1. **Isolation wins.** If the nearest manifest walking up from the config directory has `isolated_login = true`, or `CPB_ISOLATED_LOGIN=true` is set: detach a symlinked `.credentials.json` (the target file survives), sync no account metadata, strip `CLAUDE_CODE_OAUTH_TOKEN` and the plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) from the child environment. A Claude token the launch's account supplies (`claude_token`, a value or a reference) is honoured as the playbook's own token: injected, with the playbook's own login kept out of the run; so is an account that uses no Claude login at all, without a token. **On macOS** (the login lives in the Keychain) a launch whose isolated playbook holds a login of its own -- a grant in its store file (a link to the shared store is not its own; isolation detaches it), a grant set aside, or its Keychain item; a store or Keychain that cannot be read counts as holding one -- is refused before anything changes, and again after the credential sync, so a login that arrives in between is refused too, never stripped, naming where the login is and the fixes (`cpb run --account <account> <name>` with an account it lists that uses its login, or `/logout` in it). **Elsewhere** the `claudeAiOauth` grant is moved from the store into `.credentials.json.cpb-aside` (mode `0600`) for the run, other keys staying. Every token run holds `.credentials.json.cpb-run.lock` shared until it returns and records its session's pid in `.credentials.json.cpb-run.pids`, so a session whose cpb was killed alone keeps its run live. The grant goes back into the store when the last such run ends (no lock held, no recorded session alive), merged with whatever the store holds then; each launch of the isolated playbook first puts back a grant no live run holds (one a killed run left). A store holding a grant again by then keeps it, and the one aside is kept as `.credentials.json.cpb-aside-<YYYY-MM-DD-HH_MM_SS>` (with `-<n>` when that name is taken; an archive is never replaced), with one stderr line. Moves are serialised by `.credentials.json.cpb-aside.lock`. A grant set aside counts as the playbook's own login (`SET login = 'shared'` stays refused), and its account state is not purged while it is aside. When the isolated playbook holds no login of its own (no grant in its store) and its block sets no token, the Anthropic account state in its `.claude.json` is removed as well: `oauthAccount`, `cachedGrowthBookFeatures`, `cachedGrowthBookFeaturesAt`, `cachedExperimentFeatures`, `cachedExperimentData`, `passesEligibilityCache`, `cachedExtraUsageDisabledReason`. Rationale: Claude Code enables its claude.ai-hosted tools (Artifact and friends) from those cached flags regardless of `ANTHROPIC_BASE_URL`, so a playbook routed to another backend that once ran as the global account keeps sending them; since Claude Code 2.1.265 the Artifact tool's schema is rejected by at least one such backend (GLM, `400` code `1210`) and every interactive turn fails. A playbook that logs in on its own regenerates the state, so nothing of value is lost; an unreadable `.claude.json` leaves it in place and is reported as an advisory warning. `auth status` shows the pending removal as `no login; stale account state, purged at launch`, judged as the launch will see it: a grant reached only through a symlinked shared store does not count, since isolation detaches that link first (`stale account state, purged at launch (the shared login is detached at launch)`). A store that cannot be read or parsed leaves the state in place with an advisory warning, since it may hold a login. The rewrite keeps the file's owner permissions masked to `0600`, never widening a read-only state file.
 2. **Token active?** True when the flattened `[env]` sets `CLAUDE_CODE_OAUTH_TOKEN` to a non-empty value, else when the process environment carries it, else when `~/.config/claude-code/oauth-token` (overridable via `CPB_OAUTH_TOKEN_FILE`) is non-empty; false when the flattened `[env]` unsets it, regardless of the rest.
 3. **Token path.** The plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) are appended from the global account's store only when the token IS the machine-global one, read from the token file by this launch, and only for the descriptors the shell did not already export: an explicit export is the pilot's deliberate act and outranks what is inferred from disk (a Team seat needs exactly that, its real `subscriptionType` is not a value the picker accepts). A token the flattened `[env]` block supplies (`playbook-token`) belongs to some other account, so the global descriptors are neither appended nor inherited (the block may set its own); a token inherited from the shell is of unknown provenance, so nothing is appended and whatever descriptors the shell exported beside it pass through unchanged. Then: keep a regular-file store's grant before the quarantine strips it: the machine's own account's grant goes over the machine store when it is newer (as on the no-token path), and any other login, one not confirmed as the machine's account, or one with no machine store to compare with is copied to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>` with one stderr line (its account state backed up and removed, as on the no-token path); then quarantine the playbook's stored `claudeAiOauth` grant (other keys such as `mcpOAuth` survive; a symlinked store is detached, never written through; the global store is never quarantined — identity is decided with symlinks resolved and `os.SameFile` for the directory and for the credentials file itself, so `start <symlink-to-~/.claude>`, a linked registration of it, or a config directory whose store is the target of a symlinked `~/.claude/.credentials.json` are all recognised as the global store), sync non-secret account metadata into `.claude.json` so an interactive start presents as logged in, and inject the token (replacing any inherited entry); the descriptor rule above then applies. Rationale: under token auth Claude Code never refreshes a stored grant, and its 401-recovery path adopts a differing stored `accessToken` over the environment token; an expired stored grant would replace a working token with a dead one.
 4. **No-token path.** `SyncCredentials`: the playbook's `.credentials.json` becomes a symlink to the global `~/.claude/.credentials.json`, so `/login` in any playbook is visible to all, and Claude Code refreshes the shared grant itself. A target that is the global directory by identity, or whose store is the global file itself, is left untouched. A regular file there (Claude Code writes its store by rename, so a refresh or `/login` in a shared playbook leaves one) is judged before the link replaces it. A file with no account grant never overwrites the global store. A grant-bearing file becomes the machine's login when there is none, and is copied over it when it is the machine's own account and newer. The machine's account is the one its state names: `~/.claude.json` (what a raw `claude` keeps) whenever it exists, `~/.claude/.claude.json` (what a launch with `CLAUDE_CONFIG_DIR=~/.claude` keeps) only when it does not; an unreadable `~/.claude.json` is an error, never a fallback, and when both files name an account and the accounts differ, the machine's account is unconfirmed, since either may be stale. Any other login, or one that cannot be confirmed as the machine's account, is set aside: renamed to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>`, its account state backed up to `.claude.json.cpb-backup-<…>` and removed, with one stderr line naming the kept file and `ALTER PLAYBOOK <name> SET login = 'isolated'` as the way to keep that account there. Nothing is deleted.
@@ -2559,8 +2560,8 @@ cpb run experiment
 cpb run sre
 cpb run sre --model claude-opus-5
 cpb run --env-set work sre                       # one launch with an env set
-cpb run sre --env ANTHROPIC_MODEL=claude-opus-5      # flags may also follow the name
-cpb run --block CLAUDE_CODE_OAUTH_TOKEN sre          # this launch uses the stored login
+cpb run sre --env MAX_THINKING_TOKENS=8000           # flags may also follow the name
+cpb run --account work sre                           # one launch on another account it may use
 cpb run --env-file ./work.env sre -p "..."
 ```
 
@@ -2568,12 +2569,13 @@ cpb run --env-file ./work.env sre -p "..."
 
 | Flag | Layer |
 |------|-------|
+| `--account NAME` | not a layer: the account this launch runs on (see *Which account a launch runs on*); the last one wins |
 | `--env-set NAME` | an existing env set (`<playbooks root>/.env-sets/NAME.toml`); a missing or invalid one refuses the launch |
 | `--env KEY=VALUE` | set one variable |
 | `--block KEY` | remove one variable |
 | `--env-file PATH` | a dotenv-style file: `KEY=VALUE` per line, blank and `#` lines skipped, a leading `export ` tolerated, one pair of matching surrounding quotes stripped, later lines win; every line validated like a manifest entry |
 
-Scanning: launch flags are recognised only as a **leading run**, before the name and again immediately after it; the first argument that is not a launch flag ends the scan and everything from there on is `claude`'s. Through a launcher (`sre --env K=V -p hi`) the same rule applies to the arguments after the command name. Keys and values follow the manifest rules (`CLAUDE_CONFIG_DIR` reserved, valid UTF-8, no NUL). The layers apply on top of the playbook's flattened `[env]` block in command-line order, are resolved against the same env sets, drive the token decision exactly as the block would (a one-off `--block CLAUDE_CODE_OAUTH_TOKEN` takes the stored-credentials path for this launch), and are never written to disk.
+Scanning: launch flags are recognised only as a **leading run**, before the name and again immediately after it; the first argument that is not a launch flag ends the scan and everything from there on is `claude`'s. Through a launcher (`sre --env K=V -p hi`) the same rule applies to the arguments after the command name. Keys and values follow the manifest rules (`CLAUDE_CONFIG_DIR` reserved, valid UTF-8, no NUL). The layers apply on top of the playbook's flattened `[env]` block in command-line order, are resolved against the same env sets, drive the token decision exactly as the block would (on the `machine` account, a one-off `--block CLAUDE_CODE_OAUTH_TOKEN` takes the stored-credentials path for this launch), and are never written to disk. A layer that sets an account's variable refuses the launch (see *Derived at launch*).
 
 Equivalent to:
 ```bash
@@ -2705,7 +2707,7 @@ available. `--keep` keeps it as a playbook of your own instead. The guide is
 [Try someone else's playbook](docs/guides/play.md).
 
 ```
-cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env-set <set>]...
+cpb play <ref> [--yes] [--trust-endpoint <host>|TLS]... [--trust-secret <ref>]... [--env-set <set>]... [--account <account>]
                [--sandbox[=sbx] | --no-sandbox] [--sha256 <hex>] [-- <claude arguments>]
                                                        preview, confirm, run, remove
 cpb play <ref> --check [--json] [--sha256 <hex>]      fetch and check: refusals and risks
@@ -2755,7 +2757,10 @@ Refused, each with its line and reason:
 - **anything outside the one playbook `play` makes:** `INCLUDE`, `USE
   PLAYBOOK`, an env set or `DEFAULTS` statement, a named or created playbook;
 - **`USE ENV`, `ADD ENV` and `REPLACE ENV`:** they would attach your env
-  sets, and your keys;
+  sets, and your keys; **`USE ACCOUNT`**, and an account statement;
+- **an account's variable** (see *Derived at launch*: the address, the
+  credentials, the models): where requests go is your account's, picked
+  with `--account`;
 - **a credential-looking literal, even `AS PLAINTEXT`:** a shared recipe
   carries no secret, only a reference. This is the grammar's own rule, so a
   value that cannot be a secret passes: empty, an integer, `true` or
@@ -2769,15 +2774,11 @@ Refused, each with its line and reason:
 
 **Risks.** The preview marks each risky clause with a code. The codes are a
 closed set: `runs_program`, `third_party_code`, `sends_data`,
-`acts_without_asking`, `fetches_code`, `endpoint_change`, `tls_or_proxy`,
+`acts_without_asking`, `fetches_code`, `tls_or_proxy`,
 `telemetry_export`, `uses_secret`, `no_sandbox`.
 
 Three kinds need a **typed confirmation** before a recipe runs (`!!` in the
 preview, `confirm` in JSON):
-- **the model endpoint** (`ANTHROPIC_BASE_URL` and the Bedrock, Vertex and
-  Foundry base URLs, unless the host is Anthropic's over https;
-  `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
-  `CLAUDE_CODE_USE_FOUNDRY`): the host is typed;
 - **a proxy** (`HTTP(S)_PROXY`, `ALL_PROXY`, any case): its host is typed;
   **a TLS change** (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
   `NODE_TLS_REJECT_UNAUTHORIZED`): the word `TLS` is typed;
@@ -2882,20 +2883,25 @@ those names, sorted, one per line.
   `--no-sandbox`. With no backend at all it runs on this machine like any
   recipe.
 
-The sandbox is created only after every confirmation, so a moved endpoint
-that is not confirmed never reaches a sandbox (whose proxy would inject a
-key for that host), and it is removed with the throwaway playbook.
+The sandbox is created only after every confirmation, so a proxy that is
+not confirmed never reaches a sandbox, and it is removed with the throwaway
+playbook.
 
 **Without a terminal**, `--yes` answers the yes. It **never** confirms what
-must be typed: each model-endpoint or proxy host needs `--trust-endpoint
+must be typed: each proxy host needs `--trust-endpoint
 <host>` (`TLS` for a TLS change), and each secret reference needs
 `--trust-secret <ref>`. A missing one refuses, naming the flags. Without
 `--yes`, a run off a terminal is refused.
 
 **`--env-set <set>`** copies one of your env sets into the throwaway store and
-attaches it (`USE ENV`, in the order given). It is how a key reaches a moved
-endpoint: the keys it sets are left out of the credential `BLOCK`, and
-nothing else of yours follows.
+attaches it (`USE ENV`, in the order given): the keys it sets are left out
+of the credential `BLOCK`, and nothing else of yours follows.
+
+**`--account <account>`** runs the played playbook on one of your accounts
+(copied into the throwaway store, with `--keep` named by the kept
+playbook's list). An account that is not Anthropic's moves its requests:
+the played playbook gets a login of its own, and the credential-looking
+variables your shell exports are blocked in it, by name.
 
 **Clean-up on every way out.**
 - **`^C`** reaches Claude Code from the terminal, so cpb waits for it to

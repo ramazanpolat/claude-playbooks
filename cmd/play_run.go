@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
@@ -33,6 +34,7 @@ var (
 	playTrustEndpoint []string
 	playTrustSecret   []string
 	playEnvSets       []string
+	playAccount       string // --account: the account the played playbook runs on
 )
 
 // playMarker, in a throwaway store's directory, names the cpb that owns
@@ -268,6 +270,9 @@ func playRun(src *play.Source, rec *play.Recipe, res *play.Result, claudeArgs []
 		if err != nil {
 			return err
 		}
+		if err := copyAccount(userStore, config.ResolvePlaybooksDir()); err != nil {
+			return err
+		}
 		setup, recipe, err := writePlayFiles(dir, src, rec, playSetupFor(name, res, playEnvSets, keep))
 		if err != nil {
 			return err
@@ -451,7 +456,45 @@ func playSetupFor(name string, res *play.Result, envSets []string, keep map[stri
 		// In the order given: a later set wins, as for USE ENV anywhere.
 		text += fmt.Sprintf("ALTER PLAYBOOK %s USE ENV %s;\n", name, strings.Join(envSets, " "))
 	}
+	if playAccount != "" && playAccount != account.Machine {
+		text += fmt.Sprintf("ALTER PLAYBOOK %s USE ACCOUNT %s;\n", name, playAccount)
+	}
 	return text
+}
+
+// playUseAccount reads --account from the pilot's store before anything is
+// previewed: an account that is not Anthropic's moves the played
+// playbook's requests, so play isolates its login and blocks the
+// credentials a launch would inherit (res.Endpoint), as it always has for
+// a moved endpoint. The recipe itself never moves it.
+func playUseAccount(res *play.Result, userStore string) error {
+	if playAccount == "" || playAccount == account.Machine {
+		return nil
+	}
+	a, err := account.Must(account.Dir(userStore), playAccount)
+	if err != nil {
+		return fmt.Errorf("--account: %w", err)
+	}
+	if a.Provider != account.Anthropic {
+		res.Endpoint = a.Provider
+		if u, err := account.ParseBaseURL(a.BaseURL); err == nil {
+			res.Endpoint = u.Hostname()
+		}
+	}
+	return nil
+}
+
+// copyAccount copies --account from the pilot's store into the throwaway
+// one, where the played playbook names it.
+func copyAccount(userStore, store string) error {
+	if playAccount == "" || playAccount == account.Machine {
+		return nil
+	}
+	a, err := account.Must(account.Dir(userStore), playAccount)
+	if err != nil {
+		return fmt.Errorf("--account: %w", err)
+	}
+	return account.Write(account.Dir(store), a)
 }
 
 var (

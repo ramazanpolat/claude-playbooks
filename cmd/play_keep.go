@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -177,6 +178,9 @@ func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) 
 	}
 	if len(playEnvSets) > 0 {
 		fmt.Fprintf(&b, "ALTER PLAYBOOK %s USE ENV %s;\n", name, strings.Join(playEnvSets, " "))
+	}
+	if playAccount != "" && playAccount != account.Machine {
+		fmt.Fprintf(&b, "ALTER PLAYBOOK %s USE ACCOUNT %s;\n", name, playAccount)
 	}
 	return b.String()
 }

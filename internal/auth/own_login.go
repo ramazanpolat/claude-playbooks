@@ -69,6 +69,42 @@ func OwnLoginRefusal(configDir string, eff *manifest.Env, name string) error {
 	return ownLoginRefusal(configDir, name)
 }
 
+// AccountLoginRefusal refuses, before anything is changed, a launch on an
+// account that uses no Claude login (account is its name) when the login
+// cannot be kept out of the run: a shared playbook, whose store is the
+// machine's, or, on macOS, an isolated playbook that holds a login of its
+// own. nil when the login can be kept out. name is the playbook's name (""
+// when unknown).
+func AccountLoginRefusal(configDir, name, account string) error {
+	target := "<playbook>"
+	if name != "" {
+		target = name
+	}
+	if !isAuthIsolated(configDir) {
+		return &ownLoginError{fmt.Sprintf("%s shares the machine's Claude login, and account %s does not use it: the login would stay reachable for the run, and Claude Code can fall back to it on an error and send it to the account's address. Fix one of:\n"+
+			"  - give the playbook a login of its own: cpb ALTER PLAYBOOK %s SET login = 'isolated'\n"+
+			"  - run it on an account that uses the Claude login: cpb run --account <account> %s",
+			target, account, target, target)}
+	}
+	return accountOwnLoginRefusal(configDir, target, account)
+}
+
+// accountOwnLoginRefusal is AccountLoginRefusal's macOS half, for an
+// isolated playbook.
+func accountOwnLoginRefusal(configDir, target, account string) error {
+	if hostOS != "darwin" {
+		return nil
+	}
+	where := ownLoginWhere(configDir)
+	if where == "" {
+		return nil
+	}
+	return &ownLoginError{fmt.Sprintf("%s holds a login of its own (%s), and account %s does not use it. On macOS cpb cannot keep that login aside for the run, and Claude Code could fall back to it on an error. Fix one of:\n"+
+		"  - run it on an account that uses its login (auth = 'claude_login'): cpb run --account <account> %s\n"+
+		"  - /logout in it once, so it holds no login of its own",
+		target, where, account, target)}
+}
+
 // ownLoginRefusal is OwnLoginRefusal for a launch already known to carry a
 // token of the playbook's own.
 func ownLoginRefusal(configDir, name string) error {
@@ -84,10 +120,9 @@ func ownLoginRefusal(configDir, name string) error {
 		target = name
 	}
 	return &ownLoginError{fmt.Sprintf("%s holds a login of its own (%s), and this launch would carry a token. On macOS cpb cannot keep that login aside for the run, and Claude Code would swap it in over the token on an error. Fix one of:\n"+
-		"  - this launch on its own login: cpb run --block CLAUDE_CODE_OAUTH_TOKEN %s\n"+
-		"  - always on its own login: cpb ALTER PLAYBOOK %s BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN\n"+
-		"  - always on the token: drop --env-set, or cpb ALTER PLAYBOOK %s DROP ENV <set> for the account's set; or /logout in it once",
-		target, where, target, target, target)}
+		"  - this launch on its own login: cpb run --account <account> %s, an account with auth = 'claude_login' (or machine) that it lists\n"+
+		"  - always on the token: /logout in it once, so it holds no login of its own",
+		target, where, target)}
 }
 
 // ownLoginWhere names where an isolated playbook keeps a login of its own:

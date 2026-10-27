@@ -241,8 +241,21 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// purely, and let the input name itself like the other five. EffectiveBlock
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
+	if _, perr := auth.EffectiveBlock(configDir, layers); errors.Is(perr, envset.ErrSet) {
+		return perr
+	}
+	// The account: where requests go and how they authenticate, derived
+	// from it as the launch's last layer. Anything else that would route or
+	// authenticate the launch, and a login it cannot keep out, refuses here,
+	// before anything is mutated.
+	wd, _ := os.Getwd()
+	acct, err := planAccount(configDir, pb.Name, layers, wd)
+	if err != nil {
+		return err
+	}
+	layers = acct.layers
 	eff, perr := auth.EffectiveBlock(configDir, layers)
-	if errors.Is(perr, envset.ErrSet) {
+	if perr != nil {
 		return perr
 	}
 	// Secret references exec the launch through the helper; with none
@@ -250,11 +263,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	plan, err := planLaunch(eff)
 	if err != nil {
 		return err
-	}
-	// The login guard: no Claude login or token goes to an address that is
-	// not Anthropic's. Refused here, before anything is mutated.
-	if g := auth.Guard(configDir, eff, os.Environ()); g.Verdict == auth.GuardRefused {
-		return auth.GuardError(g, pb.Name)
 	}
 	// A token over an isolated playbook's own login: refused on macOS,
 	// before anything is mutated (internal/auth/own_login.go).
@@ -276,7 +284,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configDir, layers)
+	if err := acct.prepare(); err != nil {
+		return err
+	}
+	launchEnv, syncErr := auth.PrepareLaunchEnvFor(configDir, layers, acct.noLoginAccount())
 	// A token run may have set the playbook's own login aside: it comes
 	// back when the launch returns, whatever the outcome.
 	defer auth.EndLaunch(configDir)
@@ -295,7 +306,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
-	c := plan.command(claudePath, claudeArgs, launchEnv)
+	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), launchEnv)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

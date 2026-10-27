@@ -26,20 +26,41 @@ func writeRecipe(t *testing.T, dir, name, text string) string {
 	return p
 }
 
-const routerRecipe = "-- title: Router\n-- description: GLM through a router.\n\nALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 SENTRY_URL=https://sentry.example.com/1\n  SET model = 'glm-5.3';\n"
+const routerRecipe = "-- title: Router\n-- description: GLM through a router.\n\nALTER PLAYBOOK\n  SET VAR SENTRY_URL=https://sentry.example.com/1\n  SET model = 'glm-5.3';\n"
+
+// routedRecipe moves the model endpoint itself: refused, since where
+// requests go is an account's.
+const routedRecipe = "-- title: Routed\n-- description: Moves the endpoint.\n\nALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1;\n"
+
+// routerAccount is the pilot's account a played playbook runs on with
+// --account router.
+const routerAccount = "CREATE ACCOUNT router SET provider=gateway, base_url=https://router.example.net/v1, auth_token=router-token AS PLAINTEXT"
+
+// usePlayAccount sets --account for one test.
+func usePlayAccount(t *testing.T, name string) {
+	t.Helper()
+	playAccount = name
+	t.Cleanup(func() { playAccount = "" })
+}
 
 // The playbook play writes first: no launcher;
-// and when the endpoint moves, a login of its own and the credentials a
-// launch would inherit blocked, by name (a shell secret's name included,
-// never its value).
+// and when its account moves the endpoint, a login of its own and the
+// credentials a launch would inherit blocked, by name (a shell secret's name
+// included, never its value; the account's own variables are removed at
+// every launch anyway).
 func TestPlaySetup(t *testing.T) {
 	t.Setenv("MY_SECRET_TOKEN", "do-not-print")
 	plain := playSetup("play-x-000000", play.Check([]byte("ALTER PLAYBOOK SET model = 'm';\n")))
 	if plain != "CREATE PLAYBOOK IF NOT EXISTS play-x-000000 SET launcher = '';\n" {
 		t.Fatalf("plain: %q", plain)
 	}
-	moved := playSetup("play-x-000000", play.Check([]byte(routerRecipe)))
-	for _, want := range []string{"SET launcher = '', login = 'isolated';", "ALTER PLAYBOOK play-x-000000 BLOCK VAR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN", "MY_SECRET_TOKEN"} {
+	res := play.Check([]byte(routerRecipe))
+	res.Endpoint = "router.example.net"
+	moved := playSetup("play-x-000000", res)
+	if strings.Contains(moved, "ANTHROPIC_") {
+		t.Errorf("the account's variables in the setup: %q", moved)
+	}
+	for _, want := range []string{"SET launcher = '', login = 'isolated';", "ALTER PLAYBOOK play-x-000000 BLOCK VAR AWS_ACCESS_KEY_ID", "MY_SECRET_TOKEN"} {
 		if !strings.Contains(moved, want) {
 			t.Errorf("endpoint moved: %q lacks %q", moved, want)
 		}
@@ -64,8 +85,15 @@ func TestPlayCheckAndDryRun(t *testing.T) {
 		t.Fatalf("check bad: %v\n%s", err, out)
 	}
 	out = captureStdout(t, func() { err = runPlay(playCmd, []string{good}) })
-	if err != nil || !strings.Contains(out, "→ to run it, you will type: router.example.net") || strings.Count(out, "you will type") != 1 {
+	if err != nil || strings.Contains(out, "you will type") || !strings.Contains(out, "SENTRY_URL") {
 		t.Fatalf("check router: %v\n%s", err, out)
+	}
+	// A recipe that moves the endpoint itself is refused: that is an
+	// account's, picked with --account.
+	routed := writeRecipe(t, dir, "routed.cpb", routedRecipe)
+	out = captureStdout(t, func() { err = runPlay(playCmd, []string{routed}) })
+	if code, _ := exitCode(err); code != 1 || !strings.Contains(out, "SET VAR ANTHROPIC_BASE_URL") || !strings.Contains(out, "--account") {
+		t.Fatalf("check routed: %v\n%s", err, out)
 	}
 
 	// --sha256 refuses another recipe before anything is shown.
@@ -77,8 +105,10 @@ func TestPlayCheckAndDryRun(t *testing.T) {
 
 	// --dry-run --json: APPLY's plan with the play block, against a
 	// throwaway store: the pilot's DEFAULTS never layer in.
-	mustStmt(t, "CREATE ENV mine SET ANTHROPIC_BASE_URL=https://mine.example")
+	mustStmt(t, "CREATE ENV mine SET MINE_URL=https://mine.example")
 	mustStmt(t, "ALTER DEFAULTS USE ENV mine")
+	mustStmt(t, routerAccount)
+	usePlayAccount(t, "router")
 	playFlags(t, false, true, true, "")
 	out = captureStdout(t, func() { err = runPlay(playCmd, []string{good}) })
 	if err != nil {
@@ -95,7 +125,7 @@ func TestPlayCheckAndDryRun(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if !rep.OK || rep.Play == nil || rep.Play.Endpoint != "router.example.net" || !strings.HasPrefix(rep.Play.Playbook, "play-router-") ||
-		len(rep.Statements) != 3 || rep.Play.SHA256 == "" || rep.Play.Header.Title != "Router" {
+		len(rep.Statements) != 4 || rep.Play.SHA256 == "" || rep.Play.Header.Title != "Router" {
 		t.Fatalf("dry run report: %s", out)
 	}
 	if strings.Contains(out, "mine.example") {

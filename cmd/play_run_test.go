@@ -91,27 +91,19 @@ func TestPlayRun(t *testing.T) {
 		t.Fatalf("a playbook in the pilot's store: %s", out)
 	}
 
-	// A moved endpoint: --yes alone refuses and names the flag.
-	os.Remove(log)
-	playCmd.Flags().Parse([]string{router})
-	captureStdout(t, func() { err = runPlay(playCmd, []string{router}) })
-	if err == nil || !strings.Contains(err.Error(), "--trust-endpoint router.example.net") {
-		t.Fatalf("--yes alone on a moved endpoint: %v", err)
-	}
-	if args, _ := stubLog(t, log); args != "" {
-		t.Fatal("launched without the endpoint confirmed")
-	}
-
-	// Confirmed: the key the pilot attaches with --env-set follows; the shell's
-	// own credentials do not.
+	// On the pilot's account that is not Anthropic's: --yes runs it (the
+	// account is the pilot's own choice, nothing to type); the account's
+	// key follows, the shell's credentials do not.
 	t.Setenv("ANTHROPIC_API_KEY", "shell-key-must-not-follow")
 	t.Setenv("MY_SECRET_TOKEN", "shell-secret-must-not-follow")
-	mustStmt(t, "CREATE ENV routerkey SET ANTHROPIC_AUTH_TOKEN=router-token AS PLAINTEXT")
-	playRunFlags(t, true, []string{"router.example.net"}, nil, []string{"routerkey"})
+	mustStmt(t, routerAccount)
+	usePlayAccount(t, "router")
+	playRunFlags(t, true, nil, nil, nil)
+	os.Remove(log)
 	captureStdout(t, func() { err = runPlay(playCmd, []string{router}) })
 	_, env = stubLog(t, log)
 	if err != nil || env["ANTHROPIC_BASE_URL"] != "https://router.example.net/v1" || env["ANTHROPIC_AUTH_TOKEN"] != "router-token" {
-		t.Fatalf("endpoint confirmed: %v, env %v", err, env)
+		t.Fatalf("on the account: %v, env %v", err, env)
 	}
 	for _, k := range []string{"ANTHROPIC_API_KEY", "MY_SECRET_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"} {
 		if _, ok := env[k]; ok {
@@ -125,14 +117,14 @@ func TestPlayRun(t *testing.T) {
 
 // On a terminal: the yes, then each typed confirmation, exactly.
 func TestPlayConfirmInteractive(t *testing.T) {
-	res := play.Check([]byte("ALTER PLAYBOOK\n  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1 HTTPS_PROXY=http://p.example:8080\n  SET VAR GH FROM 'keychain:gh';\n"))
+	res := play.Check([]byte("ALTER PLAYBOOK\n  SET VAR HTTPS_PROXY=http://p.example:8080\n  SET VAR GH FROM 'keychain:gh';\n"))
 	playRunFlags(t, false, nil, nil, nil)
 	defer func() { promptIn = os.Stdin }()
 	for input, wantErr := range map[string]string{
-		"y\nrouter.example.net\np.example\nkeychain:gh\n": "",
-		"n\n":                    "not confirmed",
-		"y\nrouter.example.ne\n": "router.example.net was not confirmed",
-		"y\nrouter.example.net\np.example\nkeychain:other\n": "keychain:gh was not confirmed",
+		"y\np.example\nkeychain:gh\n":    "",
+		"n\n":                            "not confirmed",
+		"y\np.exampl\n":                  "p.example was not confirmed",
+		"y\np.example\nkeychain:other\n": "keychain:gh was not confirmed",
 	} {
 		promptIn = strings.NewReader(input)
 		var err error
@@ -143,18 +135,18 @@ func TestPlayConfirmInteractive(t *testing.T) {
 	}
 	// --yes answers the yes, never the typed ones.
 	playRunFlags(t, true, nil, nil, nil)
-	promptIn = strings.NewReader("router.example.net\np.example\nkeychain:gh\n")
+	promptIn = strings.NewReader("p.example\nkeychain:gh\n")
 	var err error
 	captureStdout(t, func() { err = playConfirm(res, true) })
 	if err != nil {
 		t.Fatalf("--yes on a terminal still asks the typed ones: %v", err)
 	}
 	// Without a terminal: each typed one needs its flag.
-	playRunFlags(t, true, []string{"router.example.net", "p.example"}, nil, nil)
+	playRunFlags(t, true, []string{"p.example"}, nil, nil)
 	if err := playConfirm(res, false); err == nil || !strings.Contains(err.Error(), "--trust-secret keychain:gh") {
 		t.Fatalf("a secret without --trust-secret: %v", err)
 	}
-	playRunFlags(t, true, []string{"router.example.net", "p.example"}, []string{"keychain:gh"}, nil)
+	playRunFlags(t, true, []string{"p.example"}, []string{"keychain:gh"}, nil)
 	if err := playConfirm(res, false); err != nil {
 		t.Fatalf("all trusted: %v", err)
 	}
@@ -201,7 +193,7 @@ func TestSweepStalePlays(t *testing.T) {
 // ^C (or TERM, HUP) at a prompt cancels the play: the prompt returns, and
 // nothing runs.
 func TestPlayConfirmCancelled(t *testing.T) {
-	res := play.Check([]byte("ALTER PLAYBOOK SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1;\n"))
+	res := play.Check([]byte("ALTER PLAYBOOK SET VAR HTTPS_PROXY=http://p.example:8080;\n"))
 	playRunFlags(t, false, nil, nil, nil)
 	r, w, _ := os.Pipe() // a prompt that would wait for ever
 	defer w.Close()
@@ -291,8 +283,7 @@ func TestChoosePlaySandbox(t *testing.T) {
 
 // A sandboxed play: the sandbox is created only after every confirmation,
 // the session attaches to it, and it is removed with the store. A recipe
-// that moves the endpoint and is not confirmed never reaches sbx at all:
-// the proxy would inject a key for that host (root, 2026-10-02).
+// whose proxy is not confirmed never reaches sbx at all.
 func TestPlayRunSandboxed(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
@@ -300,19 +291,19 @@ func TestPlayRunSandboxed(t *testing.T) {
 	log := stubSbx(t)
 	dir := t.TempDir()
 	plain := writeRecipe(t, dir, "plain.cpb", plainRecipe)
-	router := writeRecipe(t, dir, "router.cpb", routerRecipe)
+	proxied := writeRecipe(t, dir, "proxied.cpb", "-- title: Proxied\n-- description: Through a proxy.\n\nALTER PLAYBOOK SET VAR HTTPS_PROXY=http://p.example:8080;\n")
 	playFlags(t, false, false, false, "")
 	playSandboxFlags(t, "", false)
 
-	// Unconfirmed endpoint: refused, and sbx never ran.
+	// Unconfirmed proxy: refused, and sbx never ran.
 	playRunFlags(t, true, nil, nil, nil)
 	var err error
-	captureStdout(t, func() { err = runPlay(playCmd, []string{router}) })
-	if err == nil || !strings.Contains(err.Error(), "--trust-endpoint router.example.net") {
-		t.Fatalf("unconfirmed endpoint: %v", err)
+	captureStdout(t, func() { err = runPlay(playCmd, []string{proxied}) })
+	if err == nil || !strings.Contains(err.Error(), "--trust-endpoint p.example") {
+		t.Fatalf("unconfirmed proxy: %v", err)
 	}
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
-		t.Fatalf("sbx ran before the endpoint was confirmed: %q", sbxCalls(t, log))
+		t.Fatalf("sbx ran before the proxy was confirmed: %q", sbxCalls(t, log))
 	}
 
 	// A plain recipe, sandboxed by default: create, attach, remove.

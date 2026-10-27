@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -18,7 +19,6 @@ const (
 	RiskSendsData         = "sends_data"
 	RiskActsWithoutAsking = "acts_without_asking"
 	RiskFetchesCode       = "fetches_code"
-	RiskEndpointChange    = "endpoint_change"
 	RiskTLSOrProxy        = "tls_or_proxy"
 	RiskTelemetryExport   = "telemetry_export"
 	RiskUsesSecret        = "uses_secret"
@@ -48,9 +48,10 @@ type Result struct {
 	Header  Header    `json:"-"`
 	Refused []Refusal `json:"refused"`
 	Risks   []Risk    `json:"risks"`
-	// Endpoint is the model endpoint's host when the recipe moves it away
-	// from Anthropic, "" otherwise: play then isolates the login and blocks
-	// the credentials a launch would inherit.
+	// Endpoint is where the played playbook's requests go when the account
+	// it runs on (--account) is not Anthropic's, "" otherwise: play then
+	// isolates the login and blocks the credentials a launch would inherit.
+	// A recipe never moves it: its routing variables are refused.
 	Endpoint string `json:"endpoint"`
 }
 
@@ -103,6 +104,10 @@ func (r *Result) statement(s *grammar.Stmt) {
 		r.clause(c)
 	}
 }
+
+// reservedReason refuses a recipe's routing, credential or model variable:
+// those are an account's (SPEC.md, "Derived at launch").
+const reservedReason = "where requests go, how they authenticate and which models they name are your account's, never a recipe's: play it on one of your accounts with --account <account>"
 
 // Clauses a played recipe may not hold, with the reason.
 var refusedClauses = map[grammar.Kind]string{
@@ -180,10 +185,18 @@ func (r *Result) clause(c grammar.Clause) {
 		r.mcp(c)
 	case grammar.SetVar:
 		for _, v := range c.Vars {
+			if account.IsReserved(v.Key) {
+				r.refuse(line, "SET VAR "+v.Key, reservedReason)
+				return
+			}
 			r.setVar(line, v)
 		}
 	case grammar.SetRef:
 		for _, v := range c.Vars {
+			if account.IsReserved(v.Key) {
+				r.refuse(line, "SET VAR "+v.Key, reservedReason)
+				return
+			}
 			r.risk(line, RiskUsesSecret, "SET VAR "+v.Key+" FROM '"+v.Ref+"'",
 				"your secret "+v.Ref+" → the playbook's environment as "+v.Key+", which every tool and MCP server can read", v.Ref)
 		}
@@ -248,13 +261,6 @@ func (r *Result) mcp(c grammar.Clause) {
 	}
 }
 
-// Model-endpoint variables: a change moves every request, and the
-// credential sent with it, to another host. Typed to confirm.
-var endpointVars = map[string]bool{
-	"ANTHROPIC_BASE_URL": true, "ANTHROPIC_BEDROCK_BASE_URL": true, "ANTHROPIC_VERTEX_BASE_URL": true,
-	"ANTHROPIC_FOUNDRY_BASE_URL": true,
-}
-
 var (
 	proxyVar     = regexp.MustCompile(`^(?i)(https?_proxy|all_proxy)$`)
 	tlsVars      = map[string]bool{"NODE_EXTRA_CA_CERTS": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_TLS_REJECT_UNAUTHORIZED": true}
@@ -269,27 +275,6 @@ func (r *Result) setVar(line int, v grammar.Var) {
 		// The grammar's own rule: a value that cannot be a secret (empty,
 		// an integer, true/false) passes, so MAX_THINKING_TOKENS=8000 does.
 		r.refuse(line, clause, "a shared recipe carries no secret, even AS PLAINTEXT: use a reference, FROM '<ref>'")
-	case endpointVars[key]:
-		host := hostOf(v.Value)
-		// Anthropic's own host is no move, over https only: plain http
-		// would send the conversation and the credential unencrypted.
-		if anthropic(host) && strings.HasPrefix(strings.TrimSpace(v.Value), "https://") {
-			return
-		}
-		r.risk(line, RiskEndpointChange, clause+"="+v.Value,
-			"every request, your code and conversation with it, goes to "+host+", with the credential sent to it", host)
-		if r.Endpoint == "" {
-			r.Endpoint = host
-		}
-	case key == "CLAUDE_CODE_USE_BEDROCK" || key == "CLAUDE_CODE_USE_VERTEX" || key == "CLAUDE_CODE_USE_FOUNDRY":
-		if v.Value == "" || v.Value == "0" || strings.EqualFold(v.Value, "false") {
-			return
-		}
-		word := strings.ToLower(strings.TrimPrefix(key, "CLAUDE_CODE_USE_"))
-		r.risk(line, RiskEndpointChange, clause+"="+v.Value, "requests go to "+word+" instead of Anthropic", word)
-		if r.Endpoint == "" {
-			r.Endpoint = word
-		}
 	case proxyVar.MatchString(key):
 		host := hostOf(v.Value)
 		r.risk(line, RiskTLSOrProxy, clause+"="+v.Value, "every request goes through the proxy "+host+", which can read or change it", host)
@@ -312,10 +297,6 @@ func hostOf(v string) string {
 		return strings.ToLower(u.Hostname())
 	}
 	return v
-}
-
-func anthropic(host string) bool {
-	return host == "anthropic.com" || strings.HasSuffix(host, ".anthropic.com")
 }
 
 // Interpreters and launchers: any rule with a wildcard after them runs

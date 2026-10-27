@@ -10,18 +10,20 @@ import (
 	"testing"
 )
 
-// A token over an isolated playbook's own login (v4.2.0): on Linux the login
-// is set aside for the token run and comes back after it; on macOS, where the
-// login lives in the Keychain, the launch is refused before anything changes.
+// A token account over an isolated playbook's own login (v4.2.0): on Linux
+// the login is set aside for the token run and comes back after it; on
+// macOS, where the login lives in the Keychain, the launch is refused before
+// anything changes.
 func TestTokenOverOwnLogin(t *testing.T) {
 	root := t.TempDir()
 	dir := playbookWithEnv(t, root, "acct",
-		"isolated_login = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-ACCOUNT\"\n")
+		"isolated_login = true\n\n[env]\naccounts = [\"work\", \"machine\"]\n")
+	writeAccount(t, root, "work", "provider = \"anthropic\"\n\n[auth]\nkind = \"claude_token\"\nvalue = \"sk-ant-oat01-ACCOUNT\"\n")
 	creds := seedPlaybookCredentials(t, dir)
 
 	if runtime.GOOS == "darwin" {
 		out := launchFails(t, root, launch{args: []string{"run", "acct"}})
-		for _, want := range []string{"holds a login of its own", "cpb run --block CLAUDE_CODE_OAUTH_TOKEN acct"} {
+		for _, want := range []string{"holds a login of its own", "cpb run --account <account> acct"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("the refusal lacks %q:\n%s", want, out)
 			}
@@ -63,11 +65,11 @@ func TestTokenOverOwnLogin(t *testing.T) {
 		}
 	}
 
-	// The fix the refusal names works everywhere: this launch on the
-	// playbook's own login, nothing set aside.
-	got := childEnv(t, root, launch{args: []string{"run", "--block", tokenEnv, "acct"}})
+	// The fix the refusal names works everywhere: this launch on an account
+	// that uses the playbook's own login, nothing set aside.
+	got := childEnv(t, root, launch{args: []string{"run", "--account", "machine", "acct"}})
 	if _, present := got[tokenEnv]; present {
-		t.Fatal("--block left the token in the launch")
+		t.Fatal("the machine account carried a token on an isolated playbook")
 	}
 	if _, present := storeKeys(t, creds)["claudeAiOauth"]; !present {
 		t.Fatal("a launch on the own login lost it")

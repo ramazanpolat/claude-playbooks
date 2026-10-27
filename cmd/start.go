@@ -227,18 +227,24 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// purely, and let the input name itself like the other five. EffectiveBlock
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
+	if _, perr := auth.EffectiveBlock(absPath, layers); errors.Is(perr, envset.ErrSet) {
+		return perr
+	}
+	// See cmd/run.go: the account, before anything is mutated.
+	wd, _ := os.Getwd()
+	acct, err := planAccount(absPath, "", layers, wd)
+	if err != nil {
+		return err
+	}
+	layers = acct.layers
 	eff, perr := auth.EffectiveBlock(absPath, layers)
-	if errors.Is(perr, envset.ErrSet) {
+	if perr != nil {
 		return perr
 	}
 	// See cmd/run.go: references exec through the helper, or refuse here.
 	plan, err := planLaunch(eff)
 	if err != nil {
 		return err
-	}
-	// See cmd/run.go: the login guard, before anything is mutated.
-	if g := auth.Guard(absPath, eff, os.Environ()); g.Verdict == auth.GuardRefused {
-		return auth.GuardError(g, "")
 	}
 	if err := auth.OwnLoginRefusal(absPath, eff, ""); err != nil {
 		return err
@@ -248,7 +254,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
+	if err := acct.prepare(); err != nil {
+		return err
+	}
+	launchEnv, syncErr := auth.PrepareLaunchEnvFor(absPath, layers, acct.noLoginAccount())
 	// A token run may have set the playbook's own login aside: it comes
 	// back when the launch returns, whatever the outcome.
 	defer auth.EndLaunch(absPath)
@@ -264,7 +273,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
-	c := plan.command(claudePath, claudeArgs, launchEnv)
+	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), launchEnv)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

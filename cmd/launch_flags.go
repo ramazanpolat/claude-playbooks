@@ -15,6 +15,7 @@ import (
 //	--env KEY=VALUE      set one variable
 //	--block KEY          remove one variable
 //	--env-file PATH      layer a dotenv-style file (KEY=VALUE lines)
+//	--account NAME       run on this account (one the playbook may use)
 //
 // They are recognised only as a LEADING run of arguments: for `run`, before
 // the playbook name and again immediately after it; for `start`, before the
@@ -22,12 +23,12 @@ import (
 // one of these ends the scan and everything from there on belongs to claude,
 // so a claude flag can never be mistaken for ours and vice versa. Each flag
 // takes its value as the next argument or after "=".
-const launchFlagsUsage = "[--env-set NAME] [--env KEY=VALUE] [--block KEY] [--env-file PATH]"
+const launchFlagsUsage = "[--account NAME] [--env-set NAME] [--env KEY=VALUE] [--block KEY] [--env-file PATH]"
 
 // runFlagsUsage adds the sandbox family, which only run accepts.
 const runFlagsUsage = launchFlagsUsage + " [--sandbox[=BACKEND] | --no-sandbox] [--sandbox-host USER@HOST] [--sandbox-fresh] [--clone] [--workdir PATH] [--mount PATH[:ro]]"
 
-var launchFlagNames = map[string]bool{"--env-set": true, "--env": true, "--block": true, "--env-file": true}
+var launchFlagNames = map[string]bool{"--env-set": true, "--env": true, "--block": true, "--env-file": true, "--account": true}
 
 // takeLaunchFlags consumes leading launch flags from args and returns the
 // remaining arguments and the layers they describe, in order. Validation is
@@ -77,6 +78,13 @@ func takeLaunchFlagsWith(args []string, bools map[string]*bool) (rest []string, 
 
 func launchLayer(flag, value string) (*manifest.Env, error) {
 	switch flag {
+	case "--account":
+		// The account a launch runs on, carried as a layer that sets
+		// nothing: the last one names it (accountFlag).
+		if err := manifest.ValidateSetName(value); err != nil {
+			return nil, fmt.Errorf("--account: invalid account name: use letters, digits, dots, dashes and underscores")
+		}
+		return &manifest.Env{Accounts: []string{value}}, nil
 	case "--env-set":
 		if err := manifest.ValidateSetName(value); err != nil {
 			return nil, err

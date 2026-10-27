@@ -249,7 +249,7 @@ func TestMacOSRefusesTokenOverOwnLogin(t *testing.T) {
 				t.Fatalf("err = %v, want ErrOwnLogin", err)
 			}
 			msg := err.Error()
-			for _, want := range []string{tc.where, "--block CLAUDE_CODE_OAUTH_TOKEN", "BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN", "DROP ENV"} {
+			for _, want := range []string{tc.where, "cpb run --account <account>", "auth = 'claude_login'", "/logout"} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("refusal lacks %q:\n%s", want, msg)
 				}
@@ -282,7 +282,7 @@ func TestMacOSRefusesTokenOverOwnLogin(t *testing.T) {
 	// The name, when known, goes into the fixes.
 	writeStore(t, configDir, `{`+grantJSON+`}`)
 	err = OwnLoginRefusal(configDir, mustBlock(t, configDir), "sre")
-	if err == nil || !strings.Contains(err.Error(), "cpb run --block CLAUDE_CODE_OAUTH_TOKEN sre") {
+	if err == nil || !strings.Contains(err.Error(), "cpb run --account <account> sre") {
 		t.Fatalf("refusal = %v", err)
 	}
 }
@@ -480,7 +480,7 @@ func TestTokenLaunchRefusedOverIsolatedOwnLogin(t *testing.T) {
 					t.Fatalf("err = %v, want ErrOwnLogin", err)
 				}
 				msg := err.Error()
-				for _, want := range []string{c.where, "--block CLAUDE_CODE_OAUTH_TOKEN", "BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN", "/logout"} {
+				for _, want := range []string{c.where, "cpb run --account <account>", "/logout"} {
 					if !strings.Contains(msg, want) {
 						t.Fatalf("refusal lacks %q: %s", want, msg)
 					}
