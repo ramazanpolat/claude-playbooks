@@ -1034,29 +1034,6 @@ keeps them out. ("Global" means the machine-wide instructions in
   entry. An older Claude Code that does not know `claudeMdExcludes` ignores
   it.
 
-#### trusted_endpoint
-
-`SET trusted_endpoint = '<host>'` (since v4.2.0; the name is provisional
-until the v4.2.0 release) names the one gateway, not Anthropic's, that the
-login guard lets the playbook's Claude login or token reach: a gateway you
-trust that forwards to Anthropic. The value is a host name in lower case with
-an optional `:port`, no scheme or path. It is recorded as `trusted_endpoint`
-in the playbook's manifest; `RESET trusted_endpoint` clears it.
-
-- **Only that host, only over https.** The guard returns `trusted` (not
-  `refused`) when the effective `ANTHROPIC_BASE_URL` is `https` and its host,
-  port included, equals the value, case aside. Another host or port, plain
-  `http`, or an address held by a secret reference is refused as before.
-  Changing the address turns the guard back on.
-- **Never from a source or a recipe.** `CREATE … FROM` ignores a
-  `trusted_endpoint` in the source's manifest (one stderr line), `cpb update`
-  keeps the installed value, and `cpb play` refuses a recipe that sets it.
-- **Said outright.** `SET IF UNSET trusted_endpoint` is refused: it would
-  replace a trust it cannot see.
-- **Reads.** `SHOW PLAYBOOK --json` and `SELECT`'s `trusted_endpoint` column
-  (null when unset); `SHOW CREATE` writes it when set and `RESET` when not;
-  `EXPLAIN` prints `Login guard: trusted gateway: …`.
-
 ### Sandbox (experimental)
 
 Experimental: the sandbox works and is supported in v4, but its flags and `sandbox.*` keys may change or move to a separate runner without the usual notice.
@@ -1659,12 +1636,14 @@ stores that `auth status` does, so the two agree.
 - **`egress`:** `anthropic` for `https://api.anthropic.com`, or no base URL
   with none of Bedrock, Vertex and Foundry switched on and no
   `ANTHROPIC_FOUNDRY_BASE_URL`. `unknown` otherwise; cpb names no other class.
-- **`guard`** (since v4.2.0): the login guard's verdict for a launch with no
-  flags, `{verdict, host, reason, sends}`. `verdict` is `ok` or `refused`;
-  `sends` names the Claude credential a refused launch would send (`token` or
-  `login`). See *The login guard* under *Authentication preparation*. The
-  human `EXPLAIN` prints `Login guard: a launch would be refused: <reason>`
-  when it is refused, and nothing otherwise.
+- **`account`** (since v4.2.0): the account a launch with no flags runs on,
+  `{name, why, provider}` (`machine`, why `none named`, for the implicit
+  one); the route above is what it renders. **`refused`**: why that launch
+  would be refused before anything changes (a variable an account owns set
+  elsewhere, a login it cannot keep out, an account it may not use), null
+  when it would run; the route then says nothing more. The human `EXPLAIN`
+  prints `Account: <name> (<provider> <address>, <credential>; <why>)`, or
+  `Account: a launch would be refused: <reason>`.
 
 An unreadable env set or manifest makes `EXPLAIN` fail with that error rather
 than answer.
@@ -1890,11 +1869,11 @@ code to the same lines):
 | `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
 | `apply` | `JSON` | The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other. |
 | `auth_mode` | `String` | How a launch authenticates: isolated-login, token, playbook-token, shared-login, or error. |
-| `token_source` | `String` | Where the Claude token comes from: none, playbook, env-set:<name>, file (the machine's token file), shell, or unknown. |
+| `token_source` | `String` | Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), shell, or unknown. |
 | `token_kind` | `Nullable(String)` | value or reference; null when the launch uses no token. |
 | `token_blocked` | `Bool` | True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login. |
-| `token_account` | `Nullable(String)` | The env set holding the token, the account; null when the token comes from no env set. |
-| `trusted_endpoint` | `Nullable(String)` | The one gateway, not Anthropic's, the login guard lets the Claude login or token reach over https (SET trusted_endpoint); null when unset. |
+| `accounts` | `Array(String)` | The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook. |
+| `account` | `Nullable(String)` | The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why). |
 
 **`ENVS`**
 
@@ -2088,8 +2067,9 @@ CREATE OR ALTER PLAYBOOK work
   FROM https://github.com/example/work-playbook
   BRANCH v1.2.0
   SET launcher = 'w', login = 'shared', global_instructions = 'excluded'
-  RESET sandbox, trusted_endpoint, model, agent, statusline, model_picker.mode
-  USE ENV router;
+  RESET sandbox, model, agent, statusline, model_picker.mode
+  USE ENV router
+  USE ACCOUNT '';
 
 ALTER PLAYBOOK work
   SET VAR MAX_THINKING_TOKENS=8000
@@ -2514,13 +2494,7 @@ Every launch (`run`, `start`, launcher dispatch) prepares the config directory's
 3. **Token path.** The plan descriptors (`CLAUDE_CODE_SUBSCRIPTION_TYPE`, `CLAUDE_CODE_RATE_LIMIT_TIER`) are appended from the global account's store only when the token IS the machine-global one, read from the token file by this launch, and only for the descriptors the shell did not already export: an explicit export is the pilot's deliberate act and outranks what is inferred from disk (a Team seat needs exactly that, its real `subscriptionType` is not a value the picker accepts). A token the flattened `[env]` block supplies (`playbook-token`) belongs to some other account, so the global descriptors are neither appended nor inherited (the block may set its own); a token inherited from the shell is of unknown provenance, so nothing is appended and whatever descriptors the shell exported beside it pass through unchanged. Then: keep a regular-file store's grant before the quarantine strips it: the machine's own account's grant goes over the machine store when it is newer (as on the no-token path), and any other login, one not confirmed as the machine's account, or one with no machine store to compare with is copied to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>` with one stderr line (its account state backed up and removed, as on the no-token path); then quarantine the playbook's stored `claudeAiOauth` grant (other keys such as `mcpOAuth` survive; a symlinked store is detached, never written through; the global store is never quarantined — identity is decided with symlinks resolved and `os.SameFile` for the directory and for the credentials file itself, so `start <symlink-to-~/.claude>`, a linked registration of it, or a config directory whose store is the target of a symlinked `~/.claude/.credentials.json` are all recognised as the global store), sync non-secret account metadata into `.claude.json` so an interactive start presents as logged in, and inject the token (replacing any inherited entry); the descriptor rule above then applies. Rationale: under token auth Claude Code never refreshes a stored grant, and its 401-recovery path adopts a differing stored `accessToken` over the environment token; an expired stored grant would replace a working token with a dead one.
 4. **No-token path.** `SyncCredentials`: the playbook's `.credentials.json` becomes a symlink to the global `~/.claude/.credentials.json`, so `/login` in any playbook is visible to all, and Claude Code refreshes the shared grant itself. A target that is the global directory by identity, or whose store is the global file itself, is left untouched. A regular file there (Claude Code writes its store by rename, so a refresh or `/login` in a shared playbook leaves one) is judged before the link replaces it. A file with no account grant never overwrites the global store. A grant-bearing file becomes the machine's login when there is none, and is copied over it when it is the machine's own account and newer. The machine's account is the one its state names: `~/.claude.json` (what a raw `claude` keeps) whenever it exists, `~/.claude/.claude.json` (what a launch with `CLAUDE_CONFIG_DIR=~/.claude` keeps) only when it does not; an unreadable `~/.claude.json` is an error, never a fallback, and when both files name an account and the accounts differ, the machine's account is unconfirmed, since either may be stale. Any other login, or one that cannot be confirmed as the machine's account, is set aside: renamed to `.credentials.json.cpb-own-<YYYY-MM-DD-HH_MM_SS>`, its account state backed up to `.claude.json.cpb-backup-<…>` and removed, with one stderr line naming the kept file and `ALTER PLAYBOOK <name> SET login = 'isolated'` as the way to keep that account there. Nothing is deleted.
 
-**The login guard** (since v4.2.0) runs before all of this, so a refused launch changes nothing. Claude Code sends its credential to whatever `ANTHROPIC_BASE_URL` names; another provider issues its own key (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`), which outranks the Claude login. The launch is refused when all of these hold:
-
-- the effective `ANTHROPIC_BASE_URL` (from the playbook's `settings.json` `env` block, which Claude Code applies over the environment, else the layers, else the environment) is set and is not Anthropic's (`https` and `anthropic.com` or a subdomain), or comes from a reference; and no Bedrock, Vertex or Foundry switch is on;
-- neither provider key is set (a value or a reference, not blocked), and `settings.json` names no `apiKeyHelper`;
-- a Claude credential can reach the launch: a token is active for it (step 2, or on the isolated path the playbook's own token), or `settings.json`'s `env` block sets `CLAUDE_CODE_OAUTH_TOKEN` (applied by Claude Code over the launch, a blocked variable included), or the login is shared, or the playbook is isolated and holds a login of its own (a grant in its store file, or its Keychain item; a store that is still a link is detached at launch and does not count; a store or Keychain that cannot be read counts as holding one).
-
-The refusal names the address and the credential, never a value or the URL's userinfo, and the fixes: the provider's own key by reference (`ALTER ENV <set> SET ANTHROPIC_AUTH_TOKEN FROM '<ref>'`), or `SET login = 'isolated' BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` (and `/logout` in it), or, for a gateway you trust that forwards to Anthropic over https, `SET trusted_endpoint = '<host>'` (see *trusted_endpoint*), which turns the verdict into `trusted`. `EXPLAIN --json` reports the same verdict in `route.guard` (`ok`, `refused` or `trusted`). A sandboxed launch is not guarded yet.
+**The account** (since v4.2.0) is decided before all of this, so a refused launch changes nothing: which account the launch runs on, that no other layer or settings file sets one of its variables, and that a login it does not use can be kept out (see *CREATE / ALTER / DROP ACCOUNT*). Its variables are the launch's last layer, so the steps above see them as they see any layer: a `claude_token` account is the playbook's own token, and an account that uses no Claude login runs the isolated path with the playbook's own login kept out.
 
 Before any of this, a launch refuses while a manifest on the config directory's way up cannot be read, sandboxed or not: it may ask for an isolated login or a sandbox (`<error>. cpb does not launch over a manifest it cannot read: it may ask for an isolated login or a sandbox`). Every preparation failure is advisory (a warning, then launch) except an env set that cannot be resolved, which refuses the launch before step 1. Raw `claude` invocations bypass this entirely.
 

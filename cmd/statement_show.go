@@ -62,7 +62,6 @@ type playbookJSON struct {
 	Linked   *string   `json:"linked"`
 	Launcher *string   `json:"launcher"`
 	Envs     []string  `json:"envs"`
-	Accounts []string  `json:"accounts"` // USE ACCOUNT, the first by default (v4.2.0)
 	Vars     []varJSON `json:"vars"`
 	// Sandbox is the [sandbox] table, key for key.
 	Sandbox sandboxJSON `json:"sandbox"`
@@ -93,12 +92,14 @@ type playbookJSON struct {
 	Apply *applyRecordJSON `json:"apply"`
 	// Account is which Claude credential a launch uses and where it comes
 	// from (v4.2.0): auth_mode, token_source, token_kind, token_blocked,
-	// token_account, flattened. SELECT appends them after apply.
+	// flattened. SELECT appends them after apply.
 	auth.Account
-	// TrustedEndpoint is the trusted_endpoint property: the one gateway,
-	// not Anthropic's, the login guard lets the Claude login or token
-	// reach; null when unset (v4.2.0). Last.
-	TrustedEndpoint *string `json:"trusted_endpoint"`
+	// Accounts are the accounts the playbook may run on (USE ACCOUNT), the
+	// first by default; RunsOn is the one a launch with no flags runs on,
+	// "machine" for the implicit one, null when the account it names
+	// cannot be resolved, or is not read (v4.2.0). Last.
+	Accounts []string `json:"accounts"`
+	RunsOn   *string  `json:"account"`
 }
 
 // statuslineJSON is a playbook's status line (settings.json statusLine):
@@ -349,7 +350,7 @@ func readStatement(st *grammar.Stmt) error {
 }
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
-	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{}, Sandbox: describeSandbox(nil),
+	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Accounts: []string{}, Vars: []varJSON{}, Sandbox: describeSandbox(nil),
 		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
 		Skills: describeSkills(pb.Manifest)}
 	if pb.Manifest != nil && pb.Manifest.Play != nil {
@@ -414,10 +415,21 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	if showAccount {
 		v.Account = auth.AccountOf(pb.Path)
-	}
-	if m != nil && m.TrustedEndpoint != "" {
-		t := m.TrustedEndpoint
-		v.TrustedEndpoint = &t
+		var list []string
+		if m != nil && m.Env != nil {
+			list = m.Env.Accounts
+		}
+		if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil {
+			v.RunsOn = &sel.Name
+			// A Claude token the account supplies is the launch's token.
+			if a := sel.Account; a != nil && a.Auth.Kind == account.ClaudeToken {
+				kind := "value"
+				if a.Auth.Ref != "" {
+					kind = "reference"
+				}
+				v.Account.TokenSource, v.Account.TokenKind = auth.TokenSourceAccount, &kind
+			}
+		}
 	}
 	return v
 }
@@ -795,15 +807,17 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}
 	fmt.Println(globalInstructionsLine(globalInstructionsStateOf(pb.Path)))
-	if line := accountLine(v.Account); line != "" {
-		fmt.Println(line)
-	}
-	if eff, err := auth.EffectiveBlock(pb.Path, nil); err == nil {
-		switch g := auth.Guard(pb.Path, eff, os.Environ()); g.Verdict {
-		case auth.GuardRefused:
-			fmt.Printf("Login guard: a launch would be refused: %s\n", g.Reason)
-		case auth.GuardTrusted:
-			fmt.Printf("Login guard: trusted gateway: %s\n", g.Reason)
+	// The account a launch with no flags runs on, or why it would be
+	// refused (the same checks a launch makes).
+	wd, _ := os.Getwd()
+	if acct, err := planAccount(pb.Path, pb.Name, nil, wd); err != nil {
+		fmt.Printf("Account: a launch would be refused: %s\n", err)
+	} else {
+		fmt.Printf("Account: %s\n", acct.sel.Describe())
+		if acct.sel.Account == nil {
+			if line := accountLine(v.Account); line != "" {
+				fmt.Println(line)
+			}
 		}
 	}
 }
@@ -816,8 +830,6 @@ func accountLine(a auth.Account) string {
 		how = ", by reference"
 	}
 	switch {
-	case a.TokenAccount != nil:
-		return fmt.Sprintf("Claude token: from env set %s (the account%s)", *a.TokenAccount, how)
 	case a.TokenSource == auth.TokenSourcePlaybook:
 		return "Claude token: the playbook's own" + how
 	case a.TokenSource == auth.TokenSourceFile:

@@ -65,6 +65,7 @@ const (
 	TokenSourceFile     = "file"     // the machine's token file
 	TokenSourceShell    = "shell"    // exported in the environment cpb runs in
 	TokenSourceUnknown  = "unknown"  // an env set could not be resolved
+	TokenSourceAccount  = "account"  // the launch's account (claude_token)
 )
 
 // Account is which Claude credential a launch of a playbook with no flags
@@ -85,9 +86,6 @@ type Account struct {
 	// CLAUDE_CODE_OAUTH_TOKEN, or sets it empty), so a launch takes a
 	// stored login wherever a token is active.
 	TokenBlocked bool `json:"token_blocked"`
-	// TokenAccount is the env set holding the token: the account, when the
-	// token comes from one; null otherwise.
-	TokenAccount *string `json:"token_account"`
 }
 
 // AccountOf reports the Account of a launch of configDir.
@@ -126,8 +124,6 @@ func AccountOf(configDir string) Account {
 				a.TokenSource = TokenSourcePlaybook
 			} else {
 				a.TokenSource = TokenSourceEnvSet + o.Set
-				name := o.Set
-				a.TokenAccount = &name
 			}
 		}
 	case ModeToken:

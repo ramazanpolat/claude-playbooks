@@ -391,19 +391,6 @@ func TestArchiveNeverOverwrites(t *testing.T) {
 	}
 }
 
-// A grant a killed run left aside comes back at the next launch: the login
-// guard counts it before that launch, routed to a router with no key.
-func TestGuardCountsALoginSetAside(t *testing.T) {
-	configDir := t.TempDir()
-	writeManifest(t, configDir, "isolated_login = true\n\n[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://router.example/v1\"\n")
-	if err := os.WriteFile(asidePath(configDir), []byte(`{`+grantJSON+`}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if g := guardOf(t, configDir); g.Verdict != GuardRefused || g.Sends != "login" {
-		t.Fatalf("guard = %+v, want refused for the login set aside", g)
-	}
-}
-
 // A restore that finds no grant aside once it holds the lock (another
 // restore took it meanwhile, or the file is empty) drops the file quietly:
 // a missing file is not an error.

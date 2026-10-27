@@ -45,15 +45,14 @@ func accountPlaybook(t *testing.T, root, name, manifest string) string {
 func TestAccountOf(t *testing.T) {
 	root := accountFixture(t)
 	ref, value := "reference", "value"
-	work := "acct-work"
 	for _, tc := range []struct {
 		name, manifest string
 		want           Account
 	}{
 		{"an account by reference", "[env]\nsets = [\"router\", \"acct-work\"]\n",
-			Account{AuthMode: ModePlaybookToken, TokenSource: "env-set:acct-work", TokenKind: &ref, TokenAccount: &work}},
+			Account{AuthMode: ModePlaybookToken, TokenSource: "env-set:acct-work", TokenKind: &ref}},
 		{"isolated, on an account", "isolated_login = true\n\n[env]\nsets = [\"acct-work\"]\n",
-			Account{AuthMode: ModePlaybookToken, TokenSource: "env-set:acct-work", TokenKind: &ref, TokenAccount: &work}},
+			Account{AuthMode: ModePlaybookToken, TokenSource: "env-set:acct-work", TokenKind: &ref}},
 		{"the playbook's own, by value", "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n",
 			Account{AuthMode: ModePlaybookToken, TokenSource: "playbook", TokenKind: &value}},
 		{"blocked over an account", "[env]\nsets = [\"acct-work\"]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n",

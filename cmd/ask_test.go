@@ -595,23 +595,6 @@ func childEnv(t *testing.T, rec string) map[string]string {
 	return out
 }
 
-// A trusted endpoint lets a gateway have the Claude login at launch, but the
-// gateway is still not Anthropic: cpb ask refuses the playbook before claude
-// runs, as it does any playbook routed away.
-func TestAskTrustedEndpointRefused(t *testing.T) {
-	askFixture(t)
-	rec := fakeAskClaude(t, askListPlan)
-	mustStmt(t, "CREATE PLAYBOOK gw SET launcher = '', trusted_endpoint = 'gateway.corp.example'")
-	mustStmt(t, "ALTER PLAYBOOK gw SET VAR ANTHROPIC_BASE_URL=https://gateway.corp.example/v1")
-	_, err := askRun(t, nil, "gw", "how many of your sessions are live?")
-	if err == nil || !strings.Contains(err.Error(), "sends its requests away from Anthropic") {
-		t.Fatalf("a playbook on a trusted endpoint: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
-		t.Fatal("claude ran for a playbook on a trusted endpoint")
-	}
-}
-
 // cpb ask <playbook>: it signs in as a launch of that playbook would, "you"
 // is it, and one routed away from Anthropic is refused before claude runs.
 func TestAskAddressedPlaybook(t *testing.T) {

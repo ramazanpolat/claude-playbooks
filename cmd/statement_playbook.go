@@ -134,18 +134,7 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		}
 		switch c.Kind {
 		case grammar.SetProperties:
-			// login and global_instructions are the creation's own;
-			// trusted_endpoint is an ALTER of the new playbook.
-			rest := c
-			rest.Settings = nil
-			for _, v := range c.Settings {
-				if v.Key == "trusted_endpoint" {
-					rest.Settings = append(rest.Settings, v)
-				}
-			}
-			if len(rest.Settings) > 0 {
-				after = append(after, rest)
-			}
+			// login and global_instructions are the creation's own.
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link,
 			grammar.Launcher, grammar.NoLauncher:
 			// the creation's own
