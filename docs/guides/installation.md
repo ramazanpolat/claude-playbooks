@@ -22,6 +22,9 @@ Verify:
 cpb --version
 ```
 
+A download that fails for a moment (a 502 from GitHub, a dropped connection) is
+retried a few times before the script gives up.
+
 If the script says `GitHub rate-limited this request`, the latest-release lookup
 was refused. GitHub limits unauthenticated callers per IP, and an office,
 campus or CI network shares one. Name the release, which skips the lookup:

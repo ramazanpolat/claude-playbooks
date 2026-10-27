@@ -176,6 +176,26 @@ check "an HTTP 500 is an error, not a fallback" [ $rc != 0 ]
 check "  it names the code" err_has "could not download $asset v3.26.0 (500)"
 check "  and does not look up the latest release" sh -c "! grep -q releases/latest '$t/curl.log'"
 
+# SHA256SUMS entries for the asset: two different hashes are conflicting
+# evidence, a mismatch; the same hash twice verifies; an entry that is not a
+# hash refuses. Each refusal runs nothing.
+publish v3.27.0
+good=$(awk '{print $1}' "$store/v3.27.0/SHA256SUMS")
+printf '%s  %s\n%s  %s\n' "$good" "$asset" "$(printf 'ab%.0s' $(seq 32))" "$asset" > "$store/v3.27.0/SHA256SUMS"
+run CPB_NPX_VERSION=v3.27.0
+check "conflicting hashes for the asset refuse" [ $rc != 0 ]
+check "  as a mismatch" err_has "checksum mismatch for $asset v3.27.0: SHA256SUMS lists conflicting hashes for it"
+check "  and run nothing" out_is ""
+printf '%s  %s\n%s *%s\n' "$good" "$asset" "$good" "$asset" > "$store/v3.27.0/SHA256SUMS"
+run CPB_NPX_VERSION=v3.27.0
+check "the same hash listed twice verifies" err_has "Checksum verified"
+check "  and runs" out_is "cpb v3.27.0 --version"
+printf '1234  %s\n' "$asset" > "$store/v3.27.0/SHA256SUMS"
+run CPB_NPX_VERSION=v3.27.0
+check "an entry that is not a hash refuses" [ $rc != 0 ]
+check "  naming it" err_has "malformed SHA256SUMS entry for $asset v3.27.0"
+check "  and runs nothing" out_is ""
+
 # Bootstrap mode (the default) installs the fallback and says which.
 n=$((n + 1)); rm -rf "$t/inst"; : > "$t/curl.log"
 set +e

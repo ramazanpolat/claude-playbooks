@@ -192,16 +192,17 @@ download() {
   esac
 
   # Verify against the release's SHA256SUMS. Same policy as install.sh:
-  # a genuine mismatch always aborts; every unverifiable case (no sums
-  # published, malformed entry, no sha256 tool) warns and continues — the
+  # a genuine mismatch, conflicting hashes for the asset, or an entry for it
+  # that is not a hash, aborts; the unverifiable cases (no sums published,
+  # the asset not listed, no sha256 tool) warn and continue — the
   # sums travel over the same channel as the binary, so they guard against
   # corruption and truncation, not a compromised host.
   SUMS=$(curl -fsSL "${DOWNLOAD_BASE_URL}/${TAG}/SHA256SUMS" 2>/dev/null || true)
   if [ -n "$SUMS" ]; then
     # Lowercased: sums files may carry uppercase hex, the tools emit lower.
     # sha256sum text mode writes "hash  name"; --binary mode "hash *name".
-    want=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a || $2=="*"a {print $1}' | tr 'A-F' 'a-f')
-    matches=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a || $2=="*"a' | grep -c . || true)
+    lines=$(printf '%s\n' "$SUMS" | awk -v a="$ASSET" '$2==a || $2=="*"a {print $1}' | tr 'A-F' 'a-f')
+    want=$(printf '%s\n' "$lines" | grep . | sort -u || true)
     if command -v sha256sum >/dev/null 2>&1; then
       got=$(sha256sum "$TMP_FILE" | awk '{print $1}')
     elif command -v shasum >/dev/null 2>&1; then
@@ -211,10 +212,15 @@ download() {
     fi
     if [ -z "$want" ]; then
       echo "Warning: ${ASSET} not listed in SHA256SUMS; skipping checksum verification" >&2
-    elif [ "$matches" != "1" ] || ! printf '%s' "$want" | grep -qiE '^[0-9a-f]{64}$'; then
-      # A truncated or duplicated entry must not fail a legitimate binary
-      # as "mismatch" — it is unverifiable, not wrong.
-      echo "Warning: malformed SHA256SUMS entry for ${ASSET}; skipping checksum verification" >&2
+    elif printf '%s\n' "$want" | grep -qvE '^[0-9a-f]{64}$'; then
+      # An entry for this asset that is not a hash cannot vouch for it.
+      echo "Error: malformed SHA256SUMS entry for ${ASSET} ${TAG}; refusing a binary that cannot be verified" >&2
+      exit 1
+    elif [ "$(printf '%s\n' "$want" | grep -c .)" != "1" ]; then
+      # Two different hashes for one asset are conflicting evidence. The
+      # same hash listed twice verifies as one.
+      echo "Error: checksum mismatch for ${ASSET} ${TAG}: SHA256SUMS lists conflicting hashes for it" >&2
+      exit 1
     elif [ -z "$got" ]; then
       echo "Warning: no sha256 tool found; skipping checksum verification" >&2
     elif [ "$want" != "$got" ]; then

@@ -229,7 +229,9 @@ func TestSelfUpdateChecksumMismatchAborts(t *testing.T) {
 	}
 }
 
-func TestSelfUpdateChecksumMalformedWarnsAndProceeds(t *testing.T) {
+// An entry for the asset that is not a hash cannot vouch for it: refused,
+// and the running binary stays.
+func TestSelfUpdateChecksumMalformedRefuses(t *testing.T) {
 	srv := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
 		return "1234  " + asset + "\n"
 	})
@@ -239,11 +241,48 @@ func TestSelfUpdateChecksumMalformedWarnsAndProceeds(t *testing.T) {
 	cfg.currentVersion = "v9.0.0"
 
 	var out strings.Builder
-	if err := selfUpdate(&out, cfg); err != nil {
+	err := selfUpdate(&out, cfg)
+	if err == nil || !strings.Contains(err.Error(), "malformed SHA256SUMS entry") {
+		t.Fatalf("expected a malformed-entry refusal, got %v\n%s", err, out.String())
+	}
+	if data, rerr := os.ReadFile(exe); rerr != nil || string(data) != "OLD-BINARY" {
+		t.Fatalf("binary replaced despite a malformed entry: %q %v", data, rerr)
+	}
+}
+
+// Two different hashes for the asset are conflicting evidence: a mismatch,
+// even when one of them is right. The same hash listed twice verifies.
+func TestSelfUpdateChecksumConflictingAndDuplicateEntries(t *testing.T) {
+	srv := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
+		return scriptDigest(script) + "  " + asset + "\n" + strings.Repeat("ab", 32) + "  " + asset + "\n"
+	})
+	defer srv.Close()
+	exe := newExecutable(t)
+	cfg := baseConfig(exe, srv)
+	cfg.currentVersion = "v9.0.0"
+	var out strings.Builder
+	err := selfUpdate(&out, cfg)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") || !strings.Contains(err.Error(), "conflicting hashes") {
+		t.Fatalf("expected a conflicting-hashes mismatch, got %v", err)
+	}
+	if data, rerr := os.ReadFile(exe); rerr != nil || string(data) != "OLD-BINARY" {
+		t.Fatalf("binary replaced despite conflicting hashes: %q %v", data, rerr)
+	}
+
+	dup := sumsReleaseServer(t, "v9.9.9", "cpb version v9.9.9", func(asset, script string) string {
+		d := scriptDigest(script)
+		return d + "  " + asset + "\n" + strings.ToUpper(d) + " *" + asset + "\n"
+	})
+	defer dup.Close()
+	exe2 := newExecutable(t)
+	cfg2 := baseConfig(exe2, dup)
+	cfg2.currentVersion = "v9.0.0"
+	var out2 strings.Builder
+	if err := selfUpdate(&out2, cfg2); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "malformed SHA256SUMS") {
-		t.Fatalf("no malformed warning:\n%s", out.String())
+	if !strings.Contains(out2.String(), "Checksum verified (sha256).") {
+		t.Fatalf("a duplicated identical entry did not verify:\n%s", out2.String())
 	}
 }
 

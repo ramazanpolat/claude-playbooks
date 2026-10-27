@@ -35,20 +35,25 @@ TAG=cpb-agent-bench-v1
 # for running this script from a checkout on the bench-host itself. Falling
 # back to a literal silently would defeat "the pin lives in VERSION".
 VERSION=${VERSION:-$(cat VERSION 2>/dev/null || echo 2.1.234)}
-WS=/tmp/cpb-agent-template-build
 
 command -v sbx >/dev/null || { echo "sbx not installed on this host" >&2; exit 1; }
 
-rm -rf "$WS" && mkdir -p "$WS"
-sbx rm cpb-agent-tpl-build --force >/dev/null 2>&1 || true
+# A workspace and a build sandbox of this run's own, so two bench users (or
+# two runs) on one host never share, delete or race on each other's. Both go
+# when the script ends, however it ends.
+WS=$(mktemp -d "${TMPDIR:-/tmp}/cpb-agent-template-build.XXXXXX")
+BOX=cpb-agent-tpl-build-$(printf '%s' "${WS##*.}" | tr '[:upper:]' '[:lower:]')
+cleanup() { sbx rm "$BOX" --force >/dev/null 2>&1 || true; rm -rf "$WS"; }
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-sbx create --name cpb-agent-tpl-build shell "$WS" >/dev/null
-sbx exec cpb-agent-tpl-build sh -lc \
+sbx create --name "$BOX" shell "$WS" >/dev/null
+sbx exec "$BOX" sh -lc \
   "npm install -g @anthropic-ai/claude-code@$VERSION && claude --version"
-sbx stop cpb-agent-tpl-build >/dev/null
-sbx template save cpb-agent-tpl-build "$TAG" >/dev/null
-sbx rm cpb-agent-tpl-build --force >/dev/null
-rm -rf "$WS"
+sbx stop "$BOX" >/dev/null
+sbx template save "$BOX" "$TAG" >/dev/null
 
 echo "template $TAG built with claude-code $VERSION:"
 sbx template ls | grep "$TAG" || true
