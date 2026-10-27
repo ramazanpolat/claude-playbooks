@@ -633,6 +633,7 @@ CREATE ACCOUNT mine SET provider = 'anthropic', auth = 'claude_login';
 ALTER PLAYBOOK reviewer USE ACCOUNT glm, claude-work;   -- may run on these; the first by default
 cpb run reviewer --account claude-work                  -- one launch on the other
 ALTER DEFAULTS USE ACCOUNT mine;                        -- for playbooks that name none
+ALTER ACCOUNT glm RESET identity, model;                -- back to no value
 SHOW ACCOUNTS;  SHOW ACCOUNT glm;  DROP ACCOUNT glm;
 ```
 
