@@ -1,0 +1,3 @@
+# The router account the README plays router.cpb on: a local router that
+# takes no key.
+cpb CREATE OR REPLACE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:8080/v1', auth = 'none'

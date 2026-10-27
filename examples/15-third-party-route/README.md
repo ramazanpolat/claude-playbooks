@@ -3,28 +3,31 @@
 ```
 cpb APPLY playbook.cpb --dry-run
 cpb APPLY playbook.cpb
-cpb EXPLAIN PLAYBOOK routed   # ANTHROPIC_BASE_URL from router
+cpb EXPLAIN PLAYBOOK routed   # Account: router (gateway http://localhost:8080/v1, …)
 ```
 
-With `ANTHROPIC_BASE_URL` pointing at a router (a local proxy, or another
-provider), every request the playbook makes goes there, with whatever its
-`CLAUDE.md` holds. Four things keep it to what you meant to send:
+A route to a router (a local proxy, or another provider) is an **account**:
+its address, its key (here none, for a local router that takes no key) and
+its model names in one record ([example 23](../23-accounts/)). Every request
+the playbook makes goes there, with whatever its `CLAUDE.md` holds. Four
+things keep it to what you meant to send:
 
 - The `CLAUDE.md` that `CREATE PLAYBOOK` writes imports nothing. Anything you
   add to it, `@` imports included, goes to the router with every request.
 - `SET login = 'isolated'` gives the playbook a login of its own, so a
   `/login` in it never lands in the machine's shared login
-  ([example 16](../16-isolated-login/)).
+  ([example 16](../16-isolated-login/)). An account that uses no Claude login
+  never reaches that login either: on a shared playbook, the launch is
+  refused.
 - Its `global_instructions` setting is `'excluded'`, a new playbook's default, so the
   machine's `~/.claude/CLAUDE.md` and rules do not go along either
   ([example 22](../22-global-instructions/)).
-- `BLOCK VAR ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN` keeps the Anthropic
-  credentials your shell may export out of its launches. The router's own key
-  belongs in the env set, by reference ([example 04](../04-secret-references/)).
+- The account's variables are the only routing and credentials the launch
+  carries: the Anthropic credentials your shell may export are removed.
 
-`CREATE OR ALTER PLAYBOOK … USE ENV router` creates the playbook with its env
-set in one statement, and applied again changes nothing.
+`CREATE OR ALTER PLAYBOOK … USE ACCOUNT router` creates the playbook on its
+account in one statement, and applied again changes nothing.
 
 `localhost` is a route like any other: a local router forwards elsewhere.
 
-Reference: [Objects](../../SPEC.md#objects) and [Layers at launch](../../SPEC.md#layers-at-launch).
+Reference: [CREATE / ALTER / DROP ACCOUNT](../../SPEC.md#create--alter--drop-account).

@@ -15,7 +15,7 @@ mkdir -p ~/.config/cpb-secrets && chmod 700 ~/.config/cpb-secrets
 (umask 077 && read -r v && printf '%s' "$v" > ~/.config/cpb-secrets/router-token)
 
 cpb ALTER DEFAULTS SET secret_helper = cpb-secret-file
-cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token'
+cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'https://router.example/v1', auth_token FROM 'file:router-token'
 ```
 
 The interface, which any helper implements
@@ -27,6 +27,6 @@ The interface, which any helper implements
 - `<helper> KEY=REF … -- claude <args>`: cpb runs it at launch. The helper
   sets each `KEY` in the environment of that one command and runs it.
 
-Examples [04](../04-secret-references/) and [09](../09-mcp-servers/) use
-this helper. Their `.setup` writes a placeholder file, as you would write the
+Examples [04](../04-secret-references/), [09](../09-mcp-servers/) and
+[23](../23-accounts/) use this helper. Their `.setup` writes a placeholder file, as you would write the
 real value.

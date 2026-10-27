@@ -21,7 +21,9 @@ write:
   `SET statusline.refresh = <n>` and `RESET statusline.refresh` change only
   the interval. cpb keeps no history of the status lines it replaced: to go
   back, set the command again.
-- `SET model = '<model>'` is the playbook's default model and the weakest
-  choice: `ANTHROPIC_MODEL` from an env set, `--model` at launch and `/model`
-  in a session all win over it. `EXPLAIN PLAYBOOK` says which one decides.
-  `RESET model` removes it.
+- `SET model = '<model>'` is the playbook's default model: `--model` at
+  launch and `/model` in a session win over it, and it wins over the default
+  its account names (`model` on the account, example 23). Name an alias
+  (`opus`, `sonnet`, `haiku`) to keep it right on every account: the account
+  maps each alias to its provider's model. `EXPLAIN PLAYBOOK` says which one
+  decides. `RESET model` removes it.

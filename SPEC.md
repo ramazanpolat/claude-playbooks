@@ -752,12 +752,15 @@ A cloud's own credential chain (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS`,
 the Vertex project and region) is not reserved: Claude Code reads it only
 when a cloud switch is on, and only a cloud account turns one on.
 
-- **Nothing else sets them.** An env set, `DEFAULTS`, a playbook's
-  `SET VAR` and `--env` that set a reserved variable are refused when
-  written, and a launch whose layers hold one (a file written by hand, or
-  before v4.2.0) is refused naming the layer and the variable, and, when
-  the layer holds an address and a key together, the `CREATE ACCOUNT`
-  statement that replaces it (built from references, never values).
+- **Nothing else sets them.** A launch whose layers set a reserved
+  variable (an env set, `DEFAULTS`, the playbook's `SET VAR`, a launch
+  flag) is refused before anything changes, naming the layer and the
+  variable, and, when an env set holds an address and a key together, the
+  `CREATE ACCOUNT` statement that replaces it (built from references, never
+  values). `EXPLAIN` says so in `route.refused`. The statements still store
+  such a variable, as the files of a release before accounts hold it: the
+  refusal is the launch's, so every file stays readable and `SHOW CREATE`
+  stays exact.
   `BLOCK VAR` of a reserved variable is accepted: cpb removes it anyway.
   On `machine` alone, `BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN` still keeps the
   machine's token file out, as before accounts.

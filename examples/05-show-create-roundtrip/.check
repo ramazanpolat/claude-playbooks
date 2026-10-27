@@ -12,7 +12,7 @@ cpb APPLY "$f" | grep -q '0 created, 0 changed, 1 unchanged'
 # exact: what is not set is RESET, and the env list is stated whole.
 cpb SHOW CREATE PLAYBOOK notes | grep -q "^CREATE OR ALTER PLAYBOOK notes$"
 cpb SHOW CREATE PLAYBOOK notes | grep -q "^  SET launcher = '', login = 'shared', global_instructions = 'inherited'$"
-cpb SHOW CREATE PLAYBOOK notes | grep -q "^  RESET sandbox, trusted_endpoint, model, agent, statusline, model_picker.mode$"
+cpb SHOW CREATE PLAYBOOK notes | grep -q "^  RESET sandbox, model, agent, statusline, model_picker.mode$"
 cpb SHOW CREATE PLAYBOOK notes | grep -q "^  USE ENV ''$"
 cpb SHOW CREATE PLAYBOOK notes | grep -q "^  USE ACCOUNT '';$"
 # A model set elsewhere is put back by the playbook's own SHOW CREATE.

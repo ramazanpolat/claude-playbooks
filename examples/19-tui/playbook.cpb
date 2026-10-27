@@ -1,6 +1,7 @@
 -- What cpb tui browses: a playbook with an env set, variables (one by
--- reference, never shown as a value), and a status line.
+-- reference, never shown as a value), an account, and a status line.
 ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
-CREATE ENV IF NOT EXISTS proxy DESCRIPTION 'an LLM proxy' SET ANTHROPIC_BASE_URL=http://127.0.0.1:8080/v1 SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token';
+CREATE ENV IF NOT EXISTS tools DESCRIPTION 'shared tools' SET EDITOR=vim SET GH_TOKEN FROM 'file:router-token';
+CREATE ACCOUNT IF NOT EXISTS proxy SET provider = 'gateway', base_url = 'http://127.0.0.1:8080/v1', auth_token FROM 'file:router-token', description = 'an LLM proxy';
 CREATE PLAYBOOK IF NOT EXISTS browsed SET launcher = '', login = 'isolated';
-ALTER PLAYBOOK browsed ADD ENV proxy SET VAR MAX_THINKING_TOKENS=8000 SET statusline.command = 'echo browsed', statusline.refresh = 10;
+ALTER PLAYBOOK browsed ADD ENV tools USE ACCOUNT proxy SET VAR MAX_THINKING_TOKENS=8000 SET statusline.command = 'echo browsed', statusline.refresh = 10;

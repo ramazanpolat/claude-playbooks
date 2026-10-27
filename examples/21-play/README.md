@@ -4,7 +4,7 @@
 cpb play --check ./reviewer.cpb                  # what it holds, and what to look at
 cpb play --dry-run --json ./reviewer.cpb         # the plan, for a program
 cpb play ./reviewer.cpb                          # preview, yes, run, removed afterwards
-cpb play ./router.cpb                            # type router.example.net to run it
+cpb play --account router ./router.cpb           # on your router account
 cpb play ./reviewer.cpb --keep                   # keep it as a playbook of your own
 cpb update reviewer                              # fetch it again; the diff before anything changes
 ```
@@ -17,11 +17,15 @@ code-reviewer`), an https URL, or `github:<owner>/<repo>/<path>.cpb@<tag>`.
 - `reviewer.cpb` is a recipe a team might share: a model and tool rules, with
   a header (`title`, `description`, `min-cpb`) the preview shows.
 - `refused.cpb` holds what a played recipe may not: `USE ENV` would attach your
-  env sets, and a plaintext token is never shared. `--check` names both lines
+  env sets, a plaintext token is never shared, and `ANTHROPIC_BASE_URL` is an
+  account's. `--check` names each line
   and exits 1.
-- `router.cpb` moves the endpoint. That is never a plain yes: you type the
-  host, the playbook gets its own login, and your credentials are blocked in
-  it. `--yes` alone is refused and names `--trust-endpoint`.
+- `router.cpb` is a GLM recipe. Where its requests go is not the recipe's
+  to say: a recipe that sets `ANTHROPIC_BASE_URL` or any other account
+  variable is refused. `--account router` plays it on your own router
+  account (`.setup` makes one); on an account that is not Anthropic's, the
+  played playbook gets its own login and your shell's credentials are
+  blocked in it.
 - `--keep` builds the recipe as a playbook in your store (here `reviewer`),
   records where it came from (`SHOW PLAYBOOK reviewer`: `Played from:`), and
   runs nothing. `cpb update` fetches it again and shows the diff first.

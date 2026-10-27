@@ -1,8 +1,8 @@
--- Something to query: two playbooks, one on an env set with its own variable.
--- The router's own key goes with its address (see 02 and 04).
-ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
-CREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token';
+-- Something to query: two playbooks, one on an env set with its own variable
+-- and on an account (see 23).
+CREATE OR REPLACE ENV router SET MODEL=glm;
+CREATE OR REPLACE ACCOUNT local SET provider = 'gateway', base_url = 'http://localhost:8080/v1', auth = 'none';
 
 CREATE PLAYBOOK IF NOT EXISTS alpha SET launcher = '';
 CREATE PLAYBOOK IF NOT EXISTS beta SET launcher = '', login = 'isolated';
-ALTER PLAYBOOK beta USE ENV router SET VAR MODEL=glm;
+ALTER PLAYBOOK beta USE ENV router USE ACCOUNT local SET VAR EDITOR=vim;

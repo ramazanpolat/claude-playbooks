@@ -1,36 +1,49 @@
 p="$HOME/.claude-playbooks/sre"
 token() { sed -n 's/^CLAUDE_CODE_OAUTH_TOKEN=//p' "$p/.fake-claude/launch-env"; }
 # Which account each playbook runs on: names only.
-cpb "SELECT name, token_source, token_account FROM PLAYBOOKS" | grep -qx "$(printf 'sre\tenv-set:acct-work\tacct-work')"
-cpb EXPLAIN PLAYBOOK sre | grep -q 'Claude token: from env set acct-work (the account, by reference)'
-# The attached account's token reaches claude, through the helper.
+cpb "SELECT name, account FROM PLAYBOOKS" | grep -qx "$(printf 'sre\tacct-work')"
+cpb EXPLAIN PLAYBOOK sre | grep -q "Account: acct-work (anthropic, claude_token from a reference; the playbook's first)"
+# The first account's token reaches claude, through the helper.
 cpb run sre
 test "$(token)" = placeholder-work-token
-# One launch on the other account, without switching.
-cpb run --env-set acct-personal sre
+# One launch on the other account it lists, without switching.
+cpb run --account acct-personal sre
 test "$(token)" = placeholder-personal-token
-cpb "SELECT name, token_account FROM PLAYBOOKS" | grep -qx "$(printf 'sre\tacct-work')"
-# Switch for good; a second run changes nothing.
-cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal
-cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal | grep -q unchanged
+cpb "SELECT name, account FROM PLAYBOOKS" | grep -qx "$(printf 'sre\tacct-work')"
+# Switch for good: the list's order is the default; a second run changes nothing.
+cpb ALTER PLAYBOOK sre USE ACCOUNT acct-personal, acct-work
+cpb ALTER PLAYBOOK sre USE ACCOUNT acct-personal, acct-work | grep -q unchanged
 cpb run sre
 test "$(token)" = placeholder-personal-token
 # A token exported in the shell cannot stand in for the account's.
 CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run sre
 test "$(token)" = placeholder-personal-token
+# An account the playbook does not list is refused.
+cpb CREATE OR REPLACE ACCOUNT other SET provider = 'anthropic', auth = 'claude_login'
+if cpb run --account other sre 2> "$HOME/other.err"; then echo "an unlisted account ran"; exit 1; fi
+grep -q 'runs only on the accounts it lists' "$HOME/other.err"
+# A listed-only account runs for a playbook that lists it, and no other.
+cpb ALTER ACCOUNT acct-work SET access = 'listed'
+cpb CREATE PLAYBOOK IF NOT EXISTS open SET launcher = ''
+if cpb run --account acct-work open 2> "$HOME/listed.err"; then echo "a listed account ran for a playbook that does not list it"; exit 1; fi
+grep -q "access = 'listed'" "$HOME/listed.err"
+cpb run --account acct-work sre
+test "$(token)" = placeholder-work-token
 # No value is ever written under the playbooks root (the stand-in claude's
 # own record of its environment aside).
 if grep -rq --exclude-dir=.fake-claude 'placeholder-' "$HOME/.claude-playbooks"; then echo "a token reached a file"; exit 1; fi
-cpb ALTER PLAYBOOK sre REPLACE ENV acct-personal WITH acct-work
-# A gateway you trust that forwards to Anthropic: the guard refuses a
-# keyless route, and trusted_endpoint names the one host it lets through,
-# over https only.
-cpb CREATE OR REPLACE ENV corp-gw SET ANTHROPIC_BASE_URL=https://gateway.corp.example/v1
-cpb CREATE PLAYBOOK corp SET launcher = '', login = 'shared' USE ENV corp-gw
-if cpb run corp 2> "$HOME/guard.err"; then echo "the guard let a keyless route through"; exit 1; fi
-grep -q "SET trusted_endpoint = 'gateway.corp.example'" "$HOME/guard.err"
-cpb ALTER PLAYBOOK corp SET trusted_endpoint = 'gateway.corp.example'
-cpb EXPLAIN PLAYBOOK corp --json | python3 -c 'import json,sys; g=json.load(sys.stdin)["route"]["guard"]; assert g["verdict"]=="trusted", g'
+# A gateway you trust with your Claude credential is an account that says so,
+# https only; without claude_login_trusted it is refused when written.
+if cpb CREATE ACCOUNT gw SET provider = 'gateway', base_url = 'https://gateway.corp.example/v1', claude_token FROM 'file:claude-token-work' 2> "$HOME/gw.err"; then echo "an untrusted gateway took the Claude token"; exit 1; fi
+grep -q 'claude_login_trusted' "$HOME/gw.err"
+cpb CREATE ACCOUNT gw SET provider = 'gateway', base_url = 'https://gateway.corp.example/v1', claude_token FROM 'file:claude-token-work', claude_login_trusted = true
+cpb CREATE PLAYBOOK corp SET launcher = '' USE ACCOUNT gw
 cpb run corp
-cpb SHOW CREATE PLAYBOOK corp | grep -q "trusted_endpoint = 'gateway.corp.example'"
+grep -qx 'ANTHROPIC_BASE_URL=https://gateway.corp.example/v1' "$HOME/.claude-playbooks/corp/.fake-claude/launch-env"
+# Clean up what the check added, so APPLY again finds what it made.
 cpb DROP PLAYBOOK corp --yes
+cpb DROP PLAYBOOK open --yes
+cpb DROP ACCOUNT gw
+cpb DROP ACCOUNT other
+cpb ALTER ACCOUNT acct-work RESET access
+cpb ALTER PLAYBOOK sre USE ACCOUNT acct-work, acct-personal

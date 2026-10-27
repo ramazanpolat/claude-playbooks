@@ -1,6 +1,5 @@
--- title: GLM through a router
--- description: Sends your requests to a router, not to Anthropic.
+-- title: GLM through your router
+-- description: A GLM model; play it on your router account with --account.
 
 ALTER PLAYBOOK
-  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1
   SET model = 'glm-5.3';

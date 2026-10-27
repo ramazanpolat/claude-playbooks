@@ -2,37 +2,41 @@
 
 ```
 cpb APPLY playbook.cpb
-cpb SELECT name, token_account FROM PLAYBOOKS           # which account each playbook runs on
-cpb run sre                                             # on acct-work
-cpb run --env-set acct-personal sre                     # one launch on acct-personal
-cpb ALTER PLAYBOOK sre REPLACE ENV acct-work WITH acct-personal   # switch for good
+cpb SHOW ACCOUNTS                                        # the accounts, never a credential
+cpb "SELECT name, account FROM PLAYBOOKS"                # which account each playbook runs on
+cpb run sre                                              # on acct-work, its first
+cpb run --account acct-personal sre                      # one launch on another it lists
+cpb ALTER PLAYBOOK sre USE ACCOUNT acct-personal, acct-work   # switch for good
 ```
 
-An account is an env set that holds `CLAUDE_CODE_OAUTH_TOKEN` by reference:
-the long-lived token `claude setup-token` prints for that account, stored in
-your secret store, never in a file cpb writes. Attaching the set switches the
-playbook's account; `--env-set` picks one for a single launch. The launch
-execs through the secret helper, which sets the token for claude only, so cpb
-never holds it. This example uses the sample
-[`cpb-secret-file`](../secret-helper/) helper, and `.setup` stores two
+An **account** is one record that says where a playbook's requests go and
+how they authenticate: the provider, its address, who you are there, one
+credential, and that provider's model names. Here two Claude accounts each
+hold the long-lived token `claude setup-token` prints, by reference, in your
+secret store, never in a file cpb writes. The launch execs through the
+secret helper, which sets the token for claude only. This example uses the
+sample [`cpb-secret-file`](../secret-helper/) helper, and `.setup` stores two
 placeholders.
 
-- **Names, never tokens.** `SELECT`, `SHOW PLAYBOOK --json` and `EXPLAIN`
-  report `token_source` (`env-set:acct-work`), `token_kind` (`reference`)
-  and `token_account` (`acct-work`).
-- **The account wins over the shell.** A token exported in your shell is
-  removed from the launch: if the helper fails, nothing stands in for the
-  account's token.
-- **Login stays a separate switch.** `SET login = 'isolated'` decides what
-  the playbook shares with your machine's login, not which account it uses.
-  A playbook that also holds a `/login` of its own keeps it: on Linux it is
-  set aside for the token run and put back after; on macOS such a launch is
-  refused, naming the fixes (see the
-  [authentication guide](../../docs/guides/authentication.md)).
-- **Another provider never gets your token.** Pointing a playbook with an
-  account at a router without the router's own key is refused at launch
-  (the login guard; see [02](../02-env-sets-and-order/)).
-- **A gateway you trust.** `ALTER PLAYBOOK <name> SET trusted_endpoint =
-  'gateway.corp.example'` lets the guard send the login to that one host,
-  over https only (a gateway that forwards to Anthropic). The `.check` shows
-  the refusal, the opt-in and the launch.
+- **Derived, never set one by one.** At launch cpb sets the routing,
+  credential and model variables from the account, and removes every other
+  one the shell exports. An env set, a playbook variable, a launch flag or a
+  settings file that sets one of them refuses the launch, so an address can
+  never change while its key stays behind.
+- **Which account.** `--account`, else the playbook's first, else the
+  `DEFAULTS` account (`ALTER DEFAULTS USE ACCOUNT …`), else `machine`: the
+  machine's own login, as before accounts.
+- **Who may use which.** A playbook's `USE ACCOUNT` list is an allow-list. An
+  account with `access = 'listed'` runs only for a playbook that lists it.
+- **Moving an account moves its credential.** `ALTER ACCOUNT … SET
+  base_url = …` is refused unless the same statement states the credential.
+- **The login follows the account.** An account that uses no Claude login (a
+  router's key, an API key) never reaches one: an isolated playbook's own
+  login is kept out of the run, and a shared playbook is refused.
+- **A gateway you trust** with your Claude credential is an account with
+  `claude_login_trusted = true`, over https only.
+- **Names, never tokens.** `SHOW ACCOUNTS`, `SELECT`, `SHOW PLAYBOOK --json`
+  and `EXPLAIN` show the account and the reference, never a value.
+
+Reference: [CREATE / ALTER / DROP ACCOUNT](../../SPEC.md#create--alter--drop-account);
+guide: [Accounts](../../docs/guides/accounts.md).

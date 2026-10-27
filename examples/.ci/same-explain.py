@@ -35,6 +35,15 @@ def keep(o, n, path):
     return {k: keep(o[k], v, path + k + ".") for k, v in n.items() if k in o}
 
 
+# A launch the account refuses (v4.2.0: a layer sets a variable an account
+# owns, as a release before accounts allowed) has no route to compare: the
+# route is the account's now, and route.refused says why. Listed, not
+# compared.
+route = new.get("route")
+if isinstance(route, dict) and route.get("refused"):
+    old = {k: v for k, v in old.items() if k != "route"}
+    new = {k: v for k, v in new.items() if k != "route"}
+    added.append("route (refused: an account's variable is set elsewhere)")
 kept = keep(old, new, "")
 a = json.dumps(old, indent=1).splitlines()
 b = json.dumps(kept, indent=1).splitlines()
