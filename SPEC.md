@@ -1571,13 +1571,16 @@ Keychain probe. `EXPLAIN PLAYBOOK --json` carries the first four after
 `EXPLAIN` has an `Account:` line, plus a `Claude token:` line on `machine`
 when a token is used or blocked.
 
-- `auth_mode`: `isolated-login`, `token`, `playbook-token`, `shared-login`,
-  or `error` (an env set cannot be resolved), as `cpb auth status` decides it.
-- `token_source`: `none`; `account` (the launch's account, a
-  `claude_token`); `file` (the machine's token file); `playbook` or
-  `env-set:<name>` when a layer still sets `CLAUDE_CODE_OAUTH_TOKEN`, which
-  a launch refuses since v4.2.0; or `unknown` (an env set cannot be
-  resolved). A token exported where cpb runs never counts.
+- `auth_mode`: `isolated-login`, `token`, `playbook-token` (a
+  `claude_token` account), `shared-login` (also on an `auth =
+  'claude_login'` account, with `token_blocked`), `account` (the account's
+  own credential, no Claude login), or `error` (the launch would be
+  refused: an env set or account that cannot be resolved, a layer that sets
+  an account's variable, a shared playbook on an account with no Claude
+  login), as `cpb auth status` decides it.
+- `token_source`: `none`; `account` (a `claude_token` account); `file` (the
+  machine's token file); or `unknown` (the launch would be refused). A
+  token exported where cpb runs never counts.
 - `token_kind`: `value` or `reference`; `null` without a token.
 - `token_blocked`: the playbook blocks `CLAUDE_CODE_OAUTH_TOKEN` (or sets it
   empty), so a launch takes a stored login wherever a token is active.
@@ -1912,7 +1915,7 @@ code to the same lines):
 | `model_picker` | `JSON` | The model picker: mode (only or append) and options; null when unset. |
 | `play` | `JSON` | The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other. |
 | `apply` | `JSON` | The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other. |
-| `auth_mode` | `String` | How a launch authenticates: isolated-login, token, playbook-token, shared-login, or error. |
+| `auth_mode` | `String` | How a launch authenticates: isolated-login, token, playbook-token, shared-login, account (the account's own credential, no Claude login), or error. |
 | `token_source` | `String` | Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), or unknown. |
 | `token_kind` | `Nullable(String)` | value or reference; null when the launch uses no token. |
 | `token_blocked` | `Bool` | True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login. |
@@ -3103,9 +3106,9 @@ without preparing a launch (nothing in the playbook changes):
 | The playbook | Signs in with |
 |---|---|
 | uses the machine's token (`auth status`: `token`) | the machine token, as `CPB_ASK_LOGIN=token` does |
-| shares the machine's login (`shared-login`) | Claude Code's own login on this machine |
+| shares the machine's login (`shared-login`, on `machine` or an `auth = 'claude_login'` account) | Claude Code's own login on this machine |
 | has its own login (`isolated-login`, a grant in its store or Keychain) | that login: its directory is Claude Code's config directory for the call, and no other credential is passed |
-| has no login of its own, sets its own token (`playbook-token`), or cannot be launched | refused, nothing sent |
+| has no login of its own, runs on an account that signs in with a key or a token of its own (`playbook-token`, `account`), or cannot be launched | refused, nothing sent |
 | routes away from Anthropic | refused, nothing sent: `<name> sends its requests away from Anthropic (route away), and cpb ask asks Anthropic only` |
 
 Only the playbook's login is used: its `CLAUDE.md`, settings, hooks, plugins
@@ -3312,7 +3315,7 @@ cpb auth status --claude        # add 'claude auth status --json' per directory
 
 | Column | Meaning |
 |--------|---------|
-| `MODE` | How a launch would authenticate, decided exactly as `run` decides it: `token` (machine-global long-lived token injected), `playbook-token` (a token the manifest or an env set sets), `shared-login` (stored login, shared store; `shared-login (token blocked)` when the playbook blocks the machine's token, `token_blocked` in `--json`), `isolated-login` (`isolated_login`), `error` (the launch would be refused, reason in `NOTE`). An isolated playbook whose own block or env set sets a non-empty token is `playbook-token (isolated)`, matching the launch, which injects that token; when it holds a login of its own the launch is refused, and the mode is `error` with the refusal in `NOTE`. A token in `DEFAULTS` never makes an isolated playbook a token mode. For `~/.claude`, which cpb does not launch, only an exported `CLAUDE_CODE_OAUTH_TOKEN` counts as `token`. |
+| `MODE` | How a launch would authenticate, on the account it runs on, decided exactly as `run` decides it: `token` (the machine account, its token file injected), `playbook-token` (a `claude_token` account), `shared-login` (stored login, shared store; `shared-login (token blocked)` when the playbook blocks the machine's token or runs on an `auth = 'claude_login'` account, `token_blocked` in `--json`), `isolated-login` (`isolated_login`), `account` (the account's own credential, no Claude login), `error` (the launch would be refused, reason in `NOTE`: a layer that sets an account's variable, an account that cannot be resolved, a shared playbook on an account with no Claude login). An isolated playbook on a `claude_token` account is `playbook-token (isolated)`, matching the launch, which injects that token; when it holds a login of its own on macOS the launch is refused, and the mode is `error` with the refusal in `NOTE`; the same holds for `account`. A token in `DEFAULTS` never makes an isolated playbook a token mode. For `~/.claude`, which cpb does not launch, only an exported `CLAUDE_CODE_OAUTH_TOKEN` counts as `token`. |
 | `STORE` | What sits at `.credentials.json`: `symlink -> <target>`, `file`, `file (no grant)`, or `absent`. |
 | `EXPIRES` | The stored grant's `expiresAt` as `in 6h12m`, `expired`, `unknown`, or `-` when there is no grant. |
 | `DAEMON` | Claude Code's `daemon-auth-status.json`: `auth_required` when its `since` is at or after the current grant's refresh instant (`expiresAt` minus 4 minutes, the daemon's proactive-refresh lead) and the row is a stored-login mode, `<status> (stale)` otherwise (the file is never cleared on recovery; under a token mode the stored login is quarantined and unused; for an isolated playbook whose store is still a symlink to the shared one, the marker concerns a login the launch detaches, so it never counts against that playbook), `-` when absent. |

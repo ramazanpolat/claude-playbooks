@@ -84,8 +84,12 @@
 - **Which account a playbook runs on, at a glance.** `SELECT` and `SHOW
   PLAYBOOK --json` gain `accounts` (the list) and `account` (the one a launch
   runs on), with `auth_mode`, `token_source` (`none`, `account`, `file`),
-  `token_kind` and `token_blocked`; `SHOW DEFAULTS` and `SELECT … FROM
-  DEFAULTS` gain `account`. `EXPLAIN` prints an `Account:` line, and `--json`
+  `token_kind` and `token_blocked`, read from the account the launch runs
+  on (`cpb auth status` too: a new mode `account` for an account with its
+  own key, `playbook-token` for a `claude_token` account, and `error` with
+  the reason for a launch that would be refused); `SHOW DEFAULTS` and
+  `SELECT … FROM DEFAULTS` gain `account`. `EXPLAIN`'s model falls back to
+  the account's `model`. `EXPLAIN` prints an `Account:` line, and `--json`
   gains `route.account`, `route.refused` and the `route.auth` state
   `key-helper`; on `machine` its route reads the token file only, as the
   launch does. Never a credential character.
@@ -102,6 +106,12 @@
 
 ### Changed
 
+- **`cpb play` with accounts.** The notice that requests go to another
+  provider shows even when the recipe has nothing else to look at; a kept
+  playbook gets a login of its own when the `DEFAULTS` account uses none;
+  an account whose credential is a secret reference is refused for a
+  sandboxed play up front. `APPLY` checks an account's credential reference
+  with the secret helper before anything in the file is written.
 - **A malformed launch flag no longer echoes its value.** `--env`, `--block`
   and the other launch flags name the flag and refuse without printing what
   follows the key, which may be a credential.
