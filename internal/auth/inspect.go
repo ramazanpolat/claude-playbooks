@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
 
@@ -18,8 +19,9 @@ type Mode string
 const (
 	ModeIsolatedLogin Mode = "isolated-login" // isolated_login: own store, shares nothing
 	ModeToken         Mode = "token"          // machine-global long-lived token injected
-	ModePlaybookToken Mode = "playbook-token" // a token the manifest or an env set sets
+	ModePlaybookToken Mode = "playbook-token" // a Claude token the launch's account supplies
 	ModeSharedLogin   Mode = "shared-login"   // stored login, shared store (see TokenBlocked)
+	ModeAccount       Mode = "account"        // the account's own credential, no Claude login
 	ModeError         Mode = "error"          // the launch would be refused (env set error)
 )
 
@@ -139,11 +141,17 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 		}
 	} else {
 		r.IsolatedLogin = isAuthIsolated(configDir)
-		r.Mode, r.ModeError, r.TokenBlocked, _ = launchMode(configDir)
-		if r.Mode == ModePlaybookToken && r.IsolatedLogin {
+		var acct *account.Account
+		r.Mode, r.ModeError, r.TokenBlocked, _, acct = launchMode(configDir)
+		switch {
+		case r.Mode == ModePlaybookToken && r.IsolatedLogin:
 			// Honoured, unless the launch is refused over a login of the
 			// playbook's own (macOS): auth status says so, as the launch will.
 			if err := ownLoginRefusal(configDir, ""); err != nil {
+				r.Mode, r.ModeError = ModeError, err.Error()
+			}
+		case r.Mode == ModeAccount && acct != nil:
+			if err := accountOwnLoginRefusal(configDir, "<playbook>", acct.Name); err != nil {
 				r.Mode, r.ModeError = ModeError, err.Error()
 			}
 		}

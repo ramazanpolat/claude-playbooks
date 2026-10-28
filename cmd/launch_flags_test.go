@@ -90,3 +90,13 @@ func writeTempEnvFile(t *testing.T) string {
 	}
 	return p
 }
+
+// A malformed flag never echoes what may be a value.
+func TestLaunchFlagErrorsNeverEchoAValue(t *testing.T) {
+	for _, args := range [][]string{{"--env", "sk-ant-api03-SECRET"}, {"--block", "ANTHROPIC_API_KEY=sk-ant-api03-SECRET"}} {
+		_, err := launchLayer(args[0], args[1])
+		if err == nil || strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("%q: err = %v", args, err)
+		}
+	}
+}

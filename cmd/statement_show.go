@@ -421,14 +421,6 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		}
 		if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil {
 			v.RunsOn = &sel.Name
-			// A Claude token the account supplies is the launch's token.
-			if a := sel.Account; a != nil && a.Auth.Kind == account.ClaudeToken {
-				kind := "value"
-				if a.Auth.Ref != "" {
-					kind = "reference"
-				}
-				v.Account.TokenSource, v.Account.TokenKind = auth.TokenSourceAccount, &kind
-			}
 		}
 	}
 	return v
@@ -810,7 +802,7 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 	// The account a launch with no flags runs on, or why it would be
 	// refused (the same checks a launch makes).
 	wd, _ := os.Getwd()
-	if acct, err := planAccount(pb.Path, pb.Name, nil, wd); err != nil {
+	if acct, err := planAccount(pb.Path, pb.Name, nil, wd, nil); err != nil {
 		fmt.Printf("Account: a launch would be refused: %s\n", err)
 	} else {
 		fmt.Printf("Account: %s\n", acct.sel.Describe())
@@ -830,8 +822,8 @@ func accountLine(a auth.Account) string {
 		how = ", by reference"
 	}
 	switch {
-	case a.TokenSource == auth.TokenSourcePlaybook:
-		return "Claude token: the playbook's own" + how
+	case a.TokenSource == auth.TokenSourceAccount:
+		return "Claude token: the account's" + how
 	case a.TokenSource == auth.TokenSourceFile:
 		return "Claude token: the machine's token file"
 	case a.TokenBlocked:
@@ -972,6 +964,16 @@ func launchModel(pb *playbook.Playbook, vars []varJSON) *modelJSON {
 	}
 	if m := describePlaybook(pb).Model; m != nil {
 		return &modelJSON{Name: *m, From: "playbook settings"}
+	}
+	// Below the settings: the account's default (ANTHROPIC_DEFAULT_MODEL).
+	var list []string
+	if pb.Manifest != nil && pb.Manifest.Env != nil {
+		list = pb.Manifest.Env.Accounts
+	}
+	if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil && sel.Account != nil {
+		if m := sel.Account.ModelOf("model"); m != "" {
+			return &modelJSON{Name: m, From: "account " + sel.Name}
+		}
 	}
 	return nil
 }

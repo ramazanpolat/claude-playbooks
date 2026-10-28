@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -427,6 +428,17 @@ func isolatedWithToken(t *testing.T) (root, configDir string) {
 	return root, configDir
 }
 
+// useTokenAccount moves the playbook's token onto an account that supplies
+// it (claude_token), the v4.2.0 form of the same launch.
+func useTokenAccount(t *testing.T, root, configDir string) {
+	t.Helper()
+	a := &account.Account{Name: "own", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Ref: "keychain:own-token"}}
+	if err := account.Write(account.Dir(root), a); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, configDir, "isolated_login = true\n\n[env]\naccounts = [\"own\"]\n")
+}
+
 // On macOS a token launch of an isolated playbook that holds, or may hold, a
 // login of its own is refused before anything changes, for the playbook's
 // own token and a launch flag's alike: the store and the account state are
@@ -447,7 +459,7 @@ func TestTokenLaunchRefusedOverIsolatedOwnLogin(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, configDir := isolatedWithToken(t)
+			root, configDir := isolatedWithToken(t)
 			old := KeychainProbe
 			KeychainProbe = func(string, string) KeychainState { return c.keychain }
 			t.Cleanup(func() { KeychainProbe = old })
@@ -486,6 +498,9 @@ func TestTokenLaunchRefusedOverIsolatedOwnLogin(t *testing.T) {
 			if data, _ := os.ReadFile(state); string(data) != stateBody {
 				t.Fatalf("account state changed: %s", data)
 			}
+			// auth status judges the same token on the account that
+			// supplies it since v4.2.0 (a layer's token refuses the launch).
+			useTokenAccount(t, root, configDir)
 			if r := Inspect("pb", configDir, time.Now()); r.Mode != ModeError || !strings.Contains(r.ModeError, c.where) {
 				t.Fatalf("inspect mode = %s (%s), want error naming the login", r.Mode, r.ModeError)
 			}
@@ -605,6 +620,12 @@ func TestDefaultsTokenRefNeverReachesIsolatedPlaybook(t *testing.T) {
 	if got := eff.Refs[OAuthTokenEnv]; got != "keychain:own-token" {
 		t.Fatalf("own token reference = %q, want keychain:own-token", got)
 	}
+	// A launch now refuses a token a layer sets; on an account that supplies
+	// it, auth status reports the playbook's own token.
+	if r := Inspect("pb", configDir, time.Now()); r.Mode != ModeError {
+		t.Fatalf("inspect mode = %s, want error", r.Mode)
+	}
+	useTokenAccount(t, root, configDir)
 	if r := Inspect("pb", configDir, time.Now()); r.Mode != ModePlaybookToken {
 		t.Fatalf("inspect mode = %s, want playbook-token", r.Mode)
 	}
@@ -811,5 +832,72 @@ func TestSharedTokenLaunchSetsAsideWhenTheMachineHoldsNoGrant(t *testing.T) {
 				t.Fatalf("notices: %q", f.notices)
 			}
 		})
+	}
+}
+
+// On Linux a launch on an account that uses no Claude login proceeds only
+// once the playbook's own login is out of reach. The machine's own directory,
+// made isolated by the override, keeps its login where it is (the set-aside
+// never empties it): refused. A set-aside that failed refuses too.
+func TestNoLoginAccountRefusesAReachableLogin(t *testing.T) {
+	hostOS = "linux"
+	isolatedWithToken(t)
+	home, _ := os.UserHomeDir()
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store := writeStore(t, global, `{`+grantJSON+`}`)
+	t.Setenv("CPB_ISOLATED_LOGIN", "true")
+	_, err := PrepareLaunchEnvFor(global, nil, "router")
+	EndLaunch(global)
+	if matches, _ := filepath.Glob(store + asideSuffix + "*"); len(matches) > 0 {
+		t.Fatalf("the refused launch left a copy of the login: %v", matches)
+	}
+	if !errors.Is(err, ErrOwnLogin) || !strings.Contains(err.Error(), "router") || strings.Contains(err.Error(), "STALE") {
+		t.Fatalf("err = %v, want a refusal naming the account and no credential", err)
+	}
+	if data, _ := os.ReadFile(store); !strings.Contains(string(data), "STALE") {
+		t.Fatal("the machine's login was changed")
+	}
+
+	_, configDir := isolatedWithToken(t)
+	if err := loginLeftReachable(configDir, "router", errors.New("cannot write")); !errors.Is(err, ErrOwnLogin) {
+		t.Fatalf("a failed set-aside: err = %v, want a refusal", err)
+	}
+	if err := loginLeftReachable(configDir, "router", nil); err != nil {
+		t.Fatalf("no login left: %v", err)
+	}
+}
+
+// A sandboxed launch on such an account refuses a login of the playbook's
+// own in any form: the directory is mounted into the sandbox.
+func TestSandboxAccountLoginRefusal(t *testing.T) {
+	hostOS = "linux"
+	_, configDir := isolatedWithToken(t)
+	if err := SandboxAccountLoginRefusal(configDir, "pb", "router"); err != nil {
+		t.Fatalf("no login: %v", err)
+	}
+	store := StorePath(configDir)
+	for name, make := range map[string]func(){
+		"a grant": func() { writeStore(t, configDir, `{`+grantJSON+`}`) },
+		"a login set aside": func() {
+			if err := os.WriteFile(store+asideSuffix, []byte(`{`+grantJSON+`}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"a link": func() {
+			if err := os.Symlink("/nonexistent/.cpb-logins/pb", store); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		os.Remove(store)
+		os.Remove(store + asideSuffix)
+		make()
+		err := SandboxAccountLoginRefusal(configDir, "pb", "router")
+		if !errors.Is(err, ErrOwnLogin) || strings.Contains(err.Error(), "STALE") {
+			t.Errorf("%s: err = %v, want a refusal with no credential", name, err)
+		}
 	}
 }

@@ -70,3 +70,61 @@ func TestAccountLaunchRefusals(t *testing.T) {
 		t.Fatalf("a blocked account variable: %v", err)
 	}
 }
+
+// A --settings passed through to claude is held to the settings files' rule:
+// inline or a file, a reserved variable or an apiKeyHelper refuses.
+func TestReservedInSettingsArgs(t *testing.T) {
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "routed.json"), []byte(`{"env":{"ANTHROPIC_BASE_URL":"https://gateway.example"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "plain.json"), []byte(`{"env":{"FOO":"1"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string // "" for accepted
+	}{
+		{[]string{"-p", "hi"}, ""},
+		{[]string{"--settings", `{"env":{"FOO":"1"}}`}, ""},
+		{[]string{"--settings", "plain.json"}, ""},
+		{[]string{"--settings", `{"env":{"ANTHROPIC_BASE_URL":"https://gateway.example"}}`}, "ANTHROPIC_BASE_URL"},
+		{[]string{"--settings={\"apiKeyHelper\":\"echo k\"}"}, "apiKeyHelper"},
+		{[]string{"-p", "x", "--settings", "routed.json"}, "ANTHROPIC_BASE_URL"},
+		{[]string{"--settings", "missing.json"}, "cannot be read"},
+		{[]string{"--settings", "{not json"}, "does not parse"},
+	} {
+		err := reservedInSettingsArgs(tc.args, work)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%q refused: %v", tc.args, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%q: want a refusal naming %q, got %v", tc.args, tc.want, err)
+		}
+	}
+}
+
+// Inside a sandbox the account's variables are set again after the login
+// shell, and every other one is removed; a credential is never on the
+// command line.
+func TestAccountEnvCommand(t *testing.T) {
+	cmd := accountEnvCommand([]string{
+		"ANTHROPIC_BASE_URL=https://router.example/v1",
+		"ANTHROPIC_AUTH_TOKEN=sk-secret",
+		"ANTHROPIC_DEFAULT_MODEL=glm",
+		"PATH=/bin",
+	})
+	for _, want := range []string{"env -u ", "-u CLAUDE_CODE_USE_BEDROCK", "'ANTHROPIC_BASE_URL=https://router.example/v1'", "'ANTHROPIC_DEFAULT_MODEL=glm'"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("lacks %q: %s", want, cmd)
+		}
+	}
+	for _, not := range []string{"sk-secret", "ANTHROPIC_AUTH_TOKEN", "-u ANTHROPIC_BASE_URL", "PATH", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if strings.Contains(cmd, not) {
+			t.Errorf("carries %q: %s", not, cmd)
+		}
+	}
+	if i, j := strings.LastIndex(cmd, "-u "), strings.Index(cmd, "'ANTHROPIC_"); i > j {
+		t.Errorf("an assignment before an option: %s", cmd)
+	}
+}

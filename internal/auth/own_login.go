@@ -92,6 +92,13 @@ func AccountLoginRefusal(configDir, name, account string) error {
 // accountOwnLoginRefusal is AccountLoginRefusal's macOS half, for an
 // isolated playbook.
 func accountOwnLoginRefusal(configDir, target, account string) error {
+	// The machine's own directory keeps its login where it is: nothing sets
+	// it aside, on any system, so a login there refuses before anything moves.
+	if IsGlobalConfigDir(configDir) {
+		if where := ownLoginWhere(configDir); where != "" {
+			return &ownLoginError{fmt.Sprintf("%s is the machine's own Claude directory and holds its login (%s), which account %s does not use and cpb never moves. Run a playbook with a login of its own on that account instead (cpb ALTER PLAYBOOK <playbook> SET login = 'isolated')", target, where, account)}
+		}
+	}
 	if hostOS != "darwin" {
 		return nil
 	}
@@ -103,6 +110,53 @@ func accountOwnLoginRefusal(configDir, target, account string) error {
 		"  - run it on an account that uses its login (auth = 'claude_login'): cpb run --account <account> %s\n"+
 		"  - /logout in it once, so it holds no login of its own",
 		target, where, account, target)}
+}
+
+// loginLeftReachable refuses a launch on an account that uses no Claude
+// login when the playbook's own login could not be set aside (setAsideErr),
+// or is still reachable through its store afterwards: a store that cannot be
+// read, or one that still holds a grant (a link to another login, the
+// machine's own directory). Elsewhere than macOS that is the only guard.
+func loginLeftReachable(configDir, account string, setAsideErr error) error {
+	fix := "Fix one of:\n" +
+		"  - run it on an account that uses its login (auth = 'claude_login'): cpb run --account <account> <playbook>\n" +
+		"  - /logout in it once, so it holds no login of its own"
+	if setAsideErr != nil {
+		return &ownLoginError{fmt.Sprintf("%s holds a login of its own, and account %s does not use it; cpb could not set it aside for the run (%v), and Claude Code could fall back to it on an error. %s", configDir, account, setAsideErr, fix)}
+	}
+	store := StorePath(configDir)
+	absent, err := storeGrantAbsent(store)
+	if err != nil {
+		return &ownLoginError{fmt.Sprintf("%s cannot be read (%v): it may hold a login, and account %s does not use one. %s", store, err, account, fix)}
+	}
+	if !absent {
+		return &ownLoginError{fmt.Sprintf("%s still holds a login after it was set aside (a link to another login, or the machine's own directory), and account %s does not use it. %s", store, account, fix)}
+	}
+	return nil
+}
+
+// SandboxAccountLoginRefusal refuses a sandboxed launch on an account that
+// uses no Claude login (account) when the playbook holds a login of its own
+// in any form: its store with a grant, a store link to another login, a
+// login set aside, or one in the Keychain. The playbook's directory is
+// mounted into the sandbox, so a login set aside there, or a link that
+// resolves inside, would stay within reach of the run. target names the
+// playbook for the message.
+func SandboxAccountLoginRefusal(configDir, target, account string) error {
+	where := ownLoginWhere(configDir)
+	if where == "" {
+		if info, err := os.Lstat(StorePath(configDir)); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			where = "its " + CredentialsFileName + " links to a login"
+		}
+	}
+	if where == "" {
+		return nil
+	}
+	return &ownLoginError{fmt.Sprintf("%s holds a login of its own (%s), and account %s does not use it. Its directory is mounted into the sandbox, so the login would stay within reach of the run. Fix one of:\n"+
+		"  - /logout in it once, so it holds no login of its own\n"+
+		"  - run it on an account that uses its login (auth = 'claude_login'): cpb run --account <account> <playbook>\n"+
+		"  - run it unsandboxed (on Linux cpb sets the login aside for the run)",
+		target, where, account)}
 }
 
 // ownLoginRefusal is OwnLoginRefusal for a launch already known to carry a

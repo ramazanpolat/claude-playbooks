@@ -354,7 +354,7 @@ func TestDescribe(t *testing.T) {
 	}
 	selectTTY = func() bool { return false }
 	tsv := mustStmt(t, "DESC TABLE defaults")
-	if want := "name\ttype\tcomment\nenvs\tArray(String)\tThe env sets every launch applies first, in order.\n"; !strings.HasPrefix(tsv, want) || strings.Count(tsv, "\n") != 4 {
+	if want := "name\ttype\tcomment\nenvs\tArray(String)\tThe env sets every launch applies first, in order.\n"; !strings.HasPrefix(tsv, want) || strings.Count(tsv, "\n") != 5 {
 		t.Fatalf("DESC TABLE defaults in a pipe: TSV with a header row:\n%q", tsv)
 	}
 	var cols []columnJSON

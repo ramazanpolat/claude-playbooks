@@ -134,7 +134,7 @@ func TestRunSandboxCreatesConfiguresAndAttaches(t *testing.T) {
 	}
 	attach := calls[len(calls)-1]
 	// Tests run without a terminal, so no pty is requested.
-	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd '" + work + "' && exec claude '-p' 'it'\\''s'"} {
+	for _, frag := range []string{"exec -i -e ", "-e CLAUDE_CONFIG_DIR=" + pbDir, "-e MODEL=glm", "-e EXTRA=1", " cpb-box bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd '" + work + "' && exec env -u ", " -u ANTHROPIC_BASE_URL ", " claude '-p' 'it'\\''s'"} {
 		if !strings.Contains(attach, frag) {
 			t.Errorf("attach lacks %q: %q", frag, attach)
 		}
@@ -417,7 +417,7 @@ func TestRunSandboxAlwaysAndOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := sbxCalls(t, sbxLog)
-	if !strings.HasPrefix(calls[1], "create --name cpb-locked ") || !strings.HasSuffix(calls[len(calls)-1], "exec claude '--version'") {
+	if !strings.HasPrefix(calls[1], "create --name cpb-locked ") || !strings.HasSuffix(calls[len(calls)-1], " claude '--version'") {
 		t.Fatalf("always-sandboxed launch: %q", calls)
 	}
 	if _, err := os.Stat(claudeLog); err == nil {
@@ -494,7 +494,7 @@ func TestStartSandbox(t *testing.T) {
 		t.Fatalf("start create: %q", calls)
 	}
 	last := calls[len(calls)-1]
-	if !strings.Contains(last, "-e CLAUDE_CONFIG_DIR="+canon(t, dir)+" ") || !strings.HasSuffix(last, "exec claude '-p' 'hi'") {
+	if !strings.Contains(last, "-e CLAUDE_CONFIG_DIR="+canon(t, dir)+" ") || !strings.HasSuffix(last, " claude '-p' 'hi'") {
 		t.Fatalf("start attach: %q", last)
 	}
 	if _, err := os.Stat(claudeLog); err == nil {

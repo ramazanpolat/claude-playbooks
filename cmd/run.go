@@ -179,7 +179,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		// The account, as for a host launch: rendered inside the sandbox.
-		acct, err := planSandboxAccount(pb.Path, pb.Name, layers, sbm, sopts)
+		acct, err := planSandboxAccount(pb.Path, pb.Name, layers, sbm, sopts, claudeArgs)
 		if err != nil {
 			return err
 		}
@@ -259,7 +259,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// authenticate the launch, and a login it cannot keep out, refuses here,
 	// before anything is mutated.
 	wd, _ := os.Getwd()
-	acct, err := planAccount(configDir, pb.Name, layers, wd)
+	acct, err := planAccount(configDir, pb.Name, layers, wd, claudeArgs)
 	if err != nil {
 		return err
 	}

@@ -130,7 +130,7 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 	// The account decides the route: the same checks a launch makes, none
 	// of which changes anything.
 	wd, _ := os.Getwd()
-	acct, err := planAccount(pb.Path, pb.Name, nil, wd)
+	acct, err := planAccount(pb.Path, pb.Name, nil, wd, nil)
 	if err != nil {
 		msg := err.Error()
 		r.Refused, r.Egress, r.Auth = &msg, "unknown", "unknown"
@@ -153,18 +153,9 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 	for k, ref := range layer.Refs {
 		routeOrigins = append(routeOrigins, envset.Origin{Key: k, Ref: ref})
 	}
-	if acct.sel.Account == nil {
-		for _, o := range origins {
-			if o.Key == auth.OAuthTokenEnv {
-				routeOrigins = append(routeOrigins, o)
-			}
-		}
-		for _, o := range routeInherited(origins, os.Environ()) {
-			if o.Key == auth.OAuthTokenEnv {
-				routeOrigins = append(routeOrigins, o)
-			}
-		}
-	}
+	// On the machine account the token is the token file's, which the
+	// login report below reads; an exported one never counts (every launch
+	// removes it), and a layer that sets one refuses the launch.
 	if _, ok := r.Models["default"]; !ok && layer.Set["ANTHROPIC_DEFAULT_MODEL"] != "" {
 		r.Models["default"] = layer.Set["ANTHROPIC_DEFAULT_MODEL"]
 	}

@@ -801,6 +801,13 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // in is purged, as for an isolated playbook: inside, nothing authenticates
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
+	if t.noLoginAccount != "" {
+		// Checked before anything is changed: a login set aside would still
+		// be on the mount.
+		if err := auth.SandboxAccountLoginRefusal(t.configPath, t.label, t.noLoginAccount); err != nil {
+			return nil, "", err
+		}
+	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvFor(t.configPath, layers, t.noLoginAccount)
 	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		return nil, "", syncErr
@@ -1178,7 +1185,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	for _, a := range claudeArgs {
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
-	command := "cd " + shell.QuoteArg(workdir) + " && exec claude"
+	command := "cd " + shell.QuoteArg(workdir) + " && exec " + accountEnvCommand(env) + " claude"
 	if loginPath != "" {
 		// The sandbox-local login directory must exist for /login to write
 		// through the store link; created as the sandbox user, inside.
@@ -1190,6 +1197,39 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	runErr := backend.attach(name, env, tty, command)
 	return true, preserveExitCode(runErr)
+}
+
+// accountEnvCommand is the `env` command that starts claude inside the
+// sandbox with the account's variables exactly as the launch decided, after
+// the sandbox's login shell has read its profile: every reserved variable
+// the launch does not pass is removed, and every one it passes is set again,
+// so a profile inside cannot re-route the run. The credential variables are
+// left as the launch and the backend set them: a value is never put on a
+// command line, and a backend may supply its own placeholder for a key it
+// injects at its proxy.
+func accountEnvCommand(env []string) string {
+	passed := map[string]string{}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		passed[k] = v
+	}
+	credential := map[string]bool{}
+	for _, v := range account.CredentialVar {
+		credential[v] = true
+	}
+	unset := []string{"env"}
+	var set []string
+	for _, k := range account.Reserved {
+		if credential[k] {
+			continue
+		}
+		if v, ok := passed[k]; ok {
+			set = append(set, shell.QuoteArg(k+"="+v))
+		} else {
+			unset = append(unset, "-u", k)
+		}
+	}
+	return strings.Join(append(unset, set...), " ")
 }
 
 // rewriteHostEndpoint points an ANTHROPIC_BASE_URL at localhost (the

@@ -70,12 +70,20 @@ func TestInspectModes(t *testing.T) {
 			t.Fatalf("%+v", r)
 		}
 	})
-	t.Run("own token via profile", func(t *testing.T) {
+	t.Run("a token in an env set is refused since v4.2.0", func(t *testing.T) {
 		root, dir := inspectFixture(t)
 		if err := envset.Write(envset.Dir(root), &envset.Set{Name: "acct", Set: map[string]string{OAuthTokenEnv: "sk-ant-oat01-OWN"}}); err != nil {
 			t.Fatal(err)
 		}
 		writeManifest(t, dir, "[env]\nsets = [\"acct\"]\n")
+		if r := Inspect("pb", dir, now); r.Mode != ModeError || !strings.Contains(r.ModeError, OAuthTokenEnv) || strings.Contains(r.ModeError, "OWN") {
+			t.Fatalf("%+v", r)
+		}
+	})
+	t.Run("own token via an account", func(t *testing.T) {
+		root, dir := inspectFixture(t)
+		useTokenAccount(t, root, dir)
+		writeManifest(t, dir, "[env]\naccounts = [\"own\"]\n")
 		if r := Inspect("pb", dir, now); r.Mode != ModePlaybookToken {
 			t.Fatalf("%+v", r)
 		}
@@ -174,9 +182,9 @@ func TestInspectSanitizesProfileErrors(t *testing.T) {
 	}
 }
 
-// An explicitly empty token set by the manifest is inactive for the launch
-// (resolveToken), so the mode is shared-login, token blocked, even with a
-// global token file.
+// An explicitly empty token set by the manifest still sets a variable an
+// account owns: since v4.2.0 the launch is refused (BLOCK VAR is the way to
+// keep the token out), and auth status says so.
 func TestInspectEmptyManifestTokenIsOwnLogin(t *testing.T) {
 	_, dir := inspectFixture(t)
 	tf := filepath.Join(t.TempDir(), "oauth-token")
@@ -185,8 +193,8 @@ func TestInspectEmptyManifestTokenIsOwnLogin(t *testing.T) {
 	}
 	t.Setenv(oauthTokenFileEnv, tf)
 	writeManifest(t, dir, "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"\"\n")
-	if r := Inspect("pb", dir, time.Now()); r.Mode != ModeSharedLogin || !r.TokenBlocked {
-		t.Fatalf("mode = %s (token blocked %v), want shared-login, token blocked", r.Mode, r.TokenBlocked)
+	if r := Inspect("pb", dir, time.Now()); r.Mode != ModeError {
+		t.Fatalf("mode = %s (token blocked %v), want error", r.Mode, r.TokenBlocked)
 	}
 }
 
@@ -227,12 +235,12 @@ func TestInspectTokenModeIgnoresDaemonMarker(t *testing.T) {
 	}
 }
 
-// An isolated playbook whose manifest sets a token launches by that token
+// An isolated playbook whose account supplies a token launches by that token
 // (injected, grant quarantined): playbook-token, isolated, and no stored-login
 // judgement even with a live daemon marker.
 func TestInspectIsolatedWithOwnTokenIsOwnToken(t *testing.T) {
-	_, dir := inspectFixture(t)
-	writeManifest(t, dir, "isolated_login = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	root, dir := inspectFixture(t)
+	useTokenAccount(t, root, dir)
 	now := time.Now()
 	if err := os.WriteFile(filepath.Join(dir, "daemon-auth-status.json"), []byte(`{"status":"auth_required","since":`+itoa(now.UnixMilli())+`}`), 0o600); err != nil {
 		t.Fatal(err)

@@ -244,9 +244,9 @@ func printPlayCheck(w *os.File, src *play.Source, rec *play.Recipe, res *play.Re
 	}
 	if len(res.Risks) == 0 {
 		fmt.Fprintln(w, "\nNothing to look at: no program, plugin, remote server, wide permission or secret.")
-		return
+	} else {
+		fmt.Fprintf(w, "\n%d thing(s) to look at:\n", len(res.Risks))
 	}
-	fmt.Fprintf(w, "\n%d thing(s) to look at:\n", len(res.Risks))
 	for _, r := range res.Risks {
 		mark := "!"
 		if r.Confirm != "" {

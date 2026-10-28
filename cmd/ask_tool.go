@@ -283,7 +283,7 @@ func askToolCut(view string, v any) any {
 	case "env":
 		return askCutEnv(askMap(v))
 	case "defaults":
-		return askPick(askMap(v), "envs")
+		return askPick(askMap(v), "envs", "account")
 	case "sessions":
 		var out []any
 		self := askToolParent()

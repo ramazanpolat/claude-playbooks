@@ -46,9 +46,11 @@ func accountFlag(layers []*manifest.Env) string {
 // planAccount picks the account a launch of configDir runs on and refuses,
 // before anything is changed, a launch that something other than the
 // account would route or authenticate: a reserved variable set by a layer,
-// or a settings file that sets one or names an apiKeyHelper. workdir is the
-// directory Claude Code starts in, whose .claude settings apply too.
-func planAccount(configDir, name string, layers []*manifest.Env, workdir string) (*accountLaunch, error) {
+// or a settings file, or a --settings passed to claude, that sets one or
+// names an apiKeyHelper. workdir is the directory Claude Code starts in,
+// whose .claude settings apply too; claudeArgs are the arguments passed
+// through to claude (nil when there are none, as for EXPLAIN).
+func planAccount(configDir, name string, layers []*manifest.Env, workdir string, claudeArgs []string) (*accountLaunch, error) {
 	root := config.ResolvePlaybooksDir()
 	var list []string
 	m, _ := manifest.Nearest(configDir)
@@ -69,6 +71,9 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string)
 	if err := reservedInSettings(configDir, workdir); err != nil {
 		return nil, err
 	}
+	if err := reservedInSettingsArgs(claudeArgs, workdir); err != nil {
+		return nil, err
+	}
 	rendered := sel.Render(filepath.Join(configDir, anthropicConfigDirName))
 	if rendered.NoClaudeLogin {
 		if err := auth.AccountLoginRefusal(configDir, name, sel.Name); err != nil {
@@ -81,7 +86,7 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string)
 
 // planSandboxAccount is planAccount for a sandboxed launch, whose working
 // directory is the sandbox's: --workdir, else the manifest's, else here.
-func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *manifest.Sandbox, opts sandboxOpts) (*accountLaunch, error) {
+func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *manifest.Sandbox, opts sandboxOpts, claudeArgs []string) (*accountLaunch, error) {
 	workdir := opts.workdir
 	if workdir == "" && sb != nil {
 		workdir = sb.Workdir
@@ -89,7 +94,7 @@ func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *mani
 	if workdir == "" {
 		workdir, _ = os.Getwd()
 	}
-	return planAccount(configDir, name, layers, expandHome(workdir))
+	return planAccount(configDir, name, layers, expandHome(workdir), claudeArgs)
 }
 
 // noLoginAccount is what PrepareLaunchEnvFor takes: the account's name when
@@ -252,26 +257,73 @@ func reservedInSettings(configDir, workdir string) error {
 		if err != nil {
 			return fmt.Errorf("%s cannot be read (%v): it may route or authenticate this launch, so it is refused", f, err)
 		}
-		var s struct {
-			Env          map[string]any `json:"env"`
-			APIKeyHelper any            `json:"apiKeyHelper"`
+		if err := settingsReserved(f, data); err != nil {
+			return err
 		}
-		if err := json.Unmarshal(data, &s); err != nil {
-			return fmt.Errorf("%s does not parse (%v): it may route or authenticate this launch, so it is refused", f, err)
+	}
+	return nil
+}
+
+// reservedInSettingsArgs is reservedInSettings for the --settings that the
+// launch passes through to claude: inline JSON, or a file, relative to the
+// directory claude starts in. Claude Code applies it over every settings
+// file, so it is held to the same rule.
+func reservedInSettingsArgs(claudeArgs []string, workdir string) error {
+	for i := 0; i < len(claudeArgs); i++ {
+		a := claudeArgs[i]
+		var value string
+		switch {
+		case a == "--settings" && i+1 < len(claudeArgs):
+			i++
+			value = claudeArgs[i]
+		case strings.HasPrefix(a, "--settings="):
+			value = strings.TrimPrefix(a, "--settings=")
+		default:
+			continue
 		}
-		var found []string
-		for k := range s.Env {
-			if account.IsReserved(k) {
-				found = append(found, k)
+		if strings.HasPrefix(strings.TrimSpace(value), "{") {
+			if err := settingsReserved("--settings", []byte(value)); err != nil {
+				return err
 			}
+			continue
 		}
-		sort.Strings(found)
-		if s.APIKeyHelper != nil {
-			found = append(found, "apiKeyHelper")
+		f := expandHome(value)
+		if !filepath.IsAbs(f) && workdir != "" {
+			f = filepath.Join(workdir, f)
 		}
-		if len(found) > 0 {
-			return fmt.Errorf("%s sets %s, which would route or authenticate this launch after its account: since v4.2.0 that is the account's (CREATE ACCOUNT … SET …, helper = '<command>' for an apiKeyHelper); remove it from the file", f, strings.Join(found, ", "))
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("--settings %s cannot be read (%v): it may route or authenticate this launch, so it is refused", value, err)
 		}
+		if err := settingsReserved("--settings "+value, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// settingsReserved refuses settings (from the file or flag name) that set a
+// reserved variable in their env, or name an apiKeyHelper, or do not parse.
+func settingsReserved(name string, data []byte) error {
+	var s struct {
+		Env          map[string]any `json:"env"`
+		APIKeyHelper any            `json:"apiKeyHelper"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("%s does not parse (%v): it may route or authenticate this launch, so it is refused", name, err)
+	}
+	var found []string
+	for k := range s.Env {
+		if account.IsReserved(k) {
+			found = append(found, k)
+		}
+	}
+	sort.Strings(found)
+	if s.APIKeyHelper != nil {
+		found = append(found, "apiKeyHelper")
+	}
+	if len(found) > 0 {
+		return fmt.Errorf("%s sets %s, which would route or authenticate this launch after its account: since v4.2.0 that is the account's (CREATE ACCOUNT … SET …, helper = '<command>' for an apiKeyHelper); remove it", name, strings.Join(found, ", "))
 	}
 	return nil
 }

@@ -7,12 +7,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
 
-// accountFixture is a playbooks root with two env sets: acct-work holds the
-// token by reference (an account), router holds none.
+// accountFixture is a playbooks root with three accounts: work (a Claude
+// token by reference), team (the playbook's own Claude login) and glm (a
+// router key, no Claude login), and an env set, acct-work, that still holds
+// a token as v4.1 did (refused at launch since v4.2.0).
 func accountFixture(t *testing.T) string {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -21,11 +24,15 @@ func accountFixture(t *testing.T) string {
 	root := t.TempDir()
 	t.Setenv("CPB_PLAYBOOKS_DIR", root)
 	config.PlaybooksDir = ""
-	for _, s := range []*envset.Set{
-		{Name: "acct-work", Refs: map[string]string{OAuthTokenEnv: "keychain:claude-token-work"}},
-		{Name: "router", Set: map[string]string{"ANTHROPIC_MODEL": "glm"}},
+	if err := envset.Write(envset.Dir(root), &envset.Set{Name: "acct-work", Refs: map[string]string{OAuthTokenEnv: "keychain:claude-token-work"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []*account.Account{
+		{Name: "work", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Ref: "keychain:claude-token-work"}},
+		{Name: "team", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeLogin}},
+		{Name: "glm", Provider: account.Gateway, BaseURL: "https://router.example/v1", Auth: account.Auth{Kind: account.AuthToken, Ref: "keychain:router"}},
 	} {
-		if err := envset.Write(envset.Dir(root), s); err != nil {
+		if err := account.Write(account.Dir(root), a); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -44,23 +51,34 @@ func accountPlaybook(t *testing.T, root, name, manifest string) string {
 
 func TestAccountOf(t *testing.T) {
 	root := accountFixture(t)
-	ref, value := "reference", "value"
+	ref := "reference"
 	for _, tc := range []struct {
 		name, manifest string
 		want           Account
 	}{
-		{"an account by reference", "[env]\nsets = [\"router\", \"acct-work\"]\n",
-			Account{AuthMode: ModePlaybookToken, TokenSource: "env-set:acct-work", TokenKind: &ref}},
-		{"isolated, on an account", "isolated_login = true\n\n[env]\nsets = [\"acct-work\"]\n",
-			Account{AuthMode: ModePlaybookToken, TokenSource: "env-set:acct-work", TokenKind: &ref}},
-		{"the playbook's own, by value", "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n",
-			Account{AuthMode: ModePlaybookToken, TokenSource: "playbook", TokenKind: &value}},
-		{"blocked over an account", "[env]\nsets = [\"acct-work\"]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n",
+		{"a claude_token account", "[env]\naccounts = [\"work\"]\n",
+			Account{AuthMode: ModePlaybookToken, TokenSource: "account", TokenKind: &ref}},
+		{"isolated, on a claude_token account", "isolated_login = true\n\n[env]\naccounts = [\"work\"]\n",
+			Account{AuthMode: ModePlaybookToken, TokenSource: "account", TokenKind: &ref}},
+		{"shared, on a claude_login account", "[env]\naccounts = [\"team\"]\n",
 			Account{AuthMode: ModeSharedLogin, TokenSource: "none", TokenBlocked: true}},
+		{"isolated, on a claude_login account", "isolated_login = true\n\n[env]\naccounts = [\"team\"]\n",
+			Account{AuthMode: ModeIsolatedLogin, TokenSource: "none"}},
+		{"isolated, on a router account", "isolated_login = true\n\n[env]\naccounts = [\"glm\"]\n",
+			Account{AuthMode: ModeAccount, TokenSource: "none"}},
+		{"shared, on a router account: refused", "[env]\naccounts = [\"glm\"]\n",
+			Account{AuthMode: ModeError, TokenSource: "unknown"}},
+		{"a v4.1 token in an env set: refused", "[env]\nsets = [\"acct-work\"]\n",
+			Account{AuthMode: ModeError, TokenSource: "unknown"}},
+		{"a v4.1 token of the playbook's own: refused", "[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n",
+			Account{AuthMode: ModeError, TokenSource: "unknown"}},
 		{"isolated, blocked", "isolated_login = true\n\n[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n",
 			Account{AuthMode: ModeIsolatedLogin, TokenSource: "none", TokenBlocked: true}},
+		{"shared, blocked", "[env]\nblock = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n",
+			Account{AuthMode: ModeSharedLogin, TokenSource: "none", TokenBlocked: true}},
 		{"shared, no token", "", Account{AuthMode: ModeSharedLogin, TokenSource: "none"}},
 		{"a missing env set", "[env]\nsets = [\"ghost\"]\n", Account{AuthMode: ModeError, TokenSource: "unknown"}},
+		{"a missing account", "[env]\naccounts = [\"ghost\"]\n", Account{AuthMode: ModeError, TokenSource: "unknown"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := AccountOf(accountPlaybook(t, root, strings.ReplaceAll(tc.name, " ", "-"), tc.manifest))
@@ -73,19 +91,17 @@ func TestAccountOf(t *testing.T) {
 	}
 }
 
-// An account attached through DEFAULTS is the machine's layer: an isolated
-// playbook never takes its token, so it reports its own login; a shared one
-// reports the account.
+// A playbook that names no account runs on the DEFAULTS account: isolated
+// or shared, it reports that account's credential.
 func TestAccountOfDefaultsAccount(t *testing.T) {
 	root := accountFixture(t)
-	if err := envset.WriteDefaults(envset.Dir(root), []string{"acct-work"}); err != nil {
+	if err := account.WriteDefault(account.Dir(root), "work"); err != nil {
 		t.Fatal(err)
 	}
-	if a := AccountOf(accountPlaybook(t, root, "iso", "isolated_login = true\n")); a.AuthMode != ModeIsolatedLogin || a.TokenSource != "none" || a.TokenKind != nil {
-		t.Fatalf("isolated: %+v", a)
-	}
-	if a := AccountOf(accountPlaybook(t, root, "shared", "")); a.AuthMode != ModePlaybookToken || a.TokenSource != "env-set:acct-work" {
-		t.Fatalf("shared: %+v", a)
+	for name, m := range map[string]string{"iso": "isolated_login = true\n", "shared": ""} {
+		if a := AccountOf(accountPlaybook(t, root, name, m)); a.AuthMode != ModePlaybookToken || a.TokenSource != "account" {
+			t.Fatalf("%s: %+v", name, a)
+		}
 	}
 }
 

@@ -121,7 +121,7 @@ func askLaunchRoute(configDir string, layers []*manifest.Env, environ []string) 
 	if _, err := auth.EffectiveBlock(configDir, layers); err != nil {
 		return "", err
 	}
-	acct, err := planAccount(configDir, "", layers, "")
+	acct, err := planAccount(configDir, "", layers, "", nil)
 	if err != nil {
 		return "away", nil
 	}

@@ -179,7 +179,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		acct, err := planSandboxAccount(absPath, "", layers, sbm, sopts)
+		acct, err := planSandboxAccount(absPath, "", layers, sbm, sopts, claudeArgs)
 		if err != nil {
 			return err
 		}
@@ -241,7 +241,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	// See cmd/run.go: the account, before anything is mutated.
 	wd, _ := os.Getwd()
-	acct, err := planAccount(absPath, "", layers, wd)
+	acct, err := planAccount(absPath, "", layers, wd, claudeArgs)
 	if err != nil {
 		return err
 	}

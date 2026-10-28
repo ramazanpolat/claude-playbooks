@@ -56,6 +56,9 @@ func keepSandbox(res *play.Result) (sandboxed bool, backend string, err error) {
 		if refs := playRefs(res); len(refs) > 0 {
 			return false, "", fmt.Errorf("the recipe uses secret references (%s), which a sandboxed launch cannot resolve yet: keep it with --no-sandbox", strings.Join(refs, ", "))
 		}
+		if playAccountRef != "" {
+			return false, "", fmt.Errorf("account %s takes its credential from a secret reference (%s), which a sandboxed launch cannot resolve yet: keep it with --no-sandbox", playAccount, playAccountRef)
+		}
 	}
 	if playSandboxFlag != "auto" {
 		backend = playSandboxFlag
@@ -168,7 +171,7 @@ func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) 
 	switch {
 	case sandboxed:
 		b.WriteString(" SET sandbox.always = true, login = 'isolated'")
-	case res.Endpoint != "" || playIsolateLogin:
+	case res.Endpoint != "" || playIsolateLogin || playDefaultsIsolate:
 		b.WriteString(" SET login = 'isolated'")
 	}
 	b.WriteString(";\n")

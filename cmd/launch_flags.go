@@ -93,7 +93,8 @@ func launchLayer(flag, value string) (*manifest.Env, error) {
 	case "--env":
 		key, val, ok := strings.Cut(value, "=")
 		if !ok {
-			return nil, fmt.Errorf("--env expects KEY=VALUE, got %q", value)
+			// Never echoed: an argument with no '=' may be a value pasted alone.
+			return nil, fmt.Errorf("--env expects KEY=VALUE; the argument has no '='")
 		}
 		if err := manifest.ValidateEnvKey(key); err != nil {
 			return nil, err
@@ -103,8 +104,9 @@ func launchLayer(flag, value string) (*manifest.Env, error) {
 		}
 		return &manifest.Env{Set: map[string]string{key: val}}, nil
 	case "--block":
-		if strings.Contains(value, "=") {
-			return nil, fmt.Errorf("--block expects a variable name, got %q", value)
+		if key, _, found := strings.Cut(value, "="); found {
+			// The name only: what follows '=' may be a value.
+			return nil, fmt.Errorf("--block expects a variable name, got %q followed by a value", key)
 		}
 		if err := manifest.ValidateEnvKey(value); err != nil {
 			return nil, err

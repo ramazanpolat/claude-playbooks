@@ -286,7 +286,16 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 			if err := refusal(); err != nil {
 				return refuse(err)
 			}
-			if qErr := setAsideForTokenRun(configDir); syncErr == nil {
+			qErr := setAsideForTokenRun(configDir)
+			if noLoginAccount != "" {
+				// On an account that uses no Claude login nothing outranks a
+				// login left in place (auth = 'none', a reference the helper
+				// fails to set): it would go to the account's address. So the
+				// login must be gone, not merely attempted.
+				if err := loginLeftReachable(configDir, noLoginAccount, qErr); err != nil {
+					return refuse(err)
+				}
+			} else if syncErr == nil {
 				syncErr = qErr
 			}
 			// By reference, the secret helper sets it when it execs claude.

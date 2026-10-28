@@ -38,6 +38,13 @@ var (
 	// playIsolateLogin: the --account uses no Claude login, so the played
 	// playbook gets a login of its own (a shared one is refused at launch).
 	playIsolateLogin bool
+	// playAccountRef is the --account's credential reference ("" for none):
+	// a sandboxed launch cannot resolve one yet.
+	playAccountRef string
+	// playDefaultsIsolate: with no --account, a kept playbook runs on the
+	// DEFAULTS account, and that one uses no Claude login, so the kept
+	// playbook needs a login of its own.
+	playDefaultsIsolate bool
 )
 
 // playMarker, in a throwaway store's directory, names the cpb that owns
@@ -471,8 +478,18 @@ func playSetupFor(name string, res *play.Result, envSets []string, keep map[stri
 // credentials a launch would inherit (res.Endpoint), as it always has for
 // a moved endpoint. The recipe itself never moves it.
 func playUseAccount(res *play.Result, userStore string) error {
-	playIsolateLogin = false
-	if playAccount == "" || playAccount == account.Machine {
+	playIsolateLogin, playAccountRef, playDefaultsIsolate = false, "", false
+	if playAccount == "" {
+		// The play itself runs in a store with no DEFAULTS account; kept, the
+		// playbook runs on the pilot's, like any other.
+		if def, err := account.Default(account.Dir(userStore)); err == nil && def != "" {
+			if a, err := account.Must(account.Dir(userStore), def); err == nil && !a.UsesClaudeCredential() {
+				playDefaultsIsolate = true
+			}
+		}
+		return nil
+	}
+	if playAccount == account.Machine {
 		return nil
 	}
 	a, err := account.Must(account.Dir(userStore), playAccount)
@@ -480,6 +497,7 @@ func playUseAccount(res *play.Result, userStore string) error {
 		return fmt.Errorf("--account: %w", err)
 	}
 	playIsolateLogin = !a.UsesClaudeCredential()
+	playAccountRef = a.Auth.Ref
 	if a.Provider != account.Anthropic {
 		res.Endpoint = a.Provider
 		if u, err := account.ParseBaseURL(a.BaseURL); err == nil {
@@ -571,6 +589,9 @@ func choosePlaySandbox(res *play.Result) (playSandbox, error) {
 	}
 	if len(refs) > 0 {
 		return playSandbox{}, fmt.Errorf("the recipe uses secret references (%s), which a sandboxed launch cannot resolve yet: run it on this machine with --no-sandbox, and the preview will say so", strings.Join(refs, ", "))
+	}
+	if playAccountRef != "" {
+		return playSandbox{}, fmt.Errorf("account %s takes its credential from a secret reference (%s), which a sandboxed launch cannot resolve yet: run it on this machine with --no-sandbox", playAccount, playAccountRef)
 	}
 	return playSandbox{Backend: backend, Note: "Sandboxed (" + backend + "): the agent sees this folder and its own playbook, not your home or ~/.claude; your keys stay outside by default. The sandbox is removed when the session ends."}, nil
 }

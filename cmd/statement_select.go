@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -93,7 +94,7 @@ var selectTables = map[string]selectTable{
 			"model_picker":        "The model picker: mode (only or append) and options; null when unset.",
 			"play":                "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
 			"apply":               "The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other.",
-			"auth_mode":           "How a launch authenticates: isolated-login, token, playbook-token, shared-login, or error.",
+			"auth_mode":           "How a launch authenticates: isolated-login, token, playbook-token, shared-login, account (the account's own credential, no Claude login), or error.",
 			"token_source":        "Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), or unknown.",
 			"token_kind":          "value or reference; null when the launch uses no token.",
 			"token_blocked":       "True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login.",
@@ -156,10 +157,11 @@ var selectTables = map[string]selectTable{
 		rows: sessionRows,
 	},
 	"DEFAULTS": {
-		columns:   []string{"envs", "secret_helper", "secret_helper_from"},
-		structure: "envs Array(String), secret_helper Nullable(String), secret_helper_from Nullable(String)",
+		columns:   []string{"envs", "account", "secret_helper", "secret_helper_from"},
+		structure: "envs Array(String), account Nullable(String), secret_helper Nullable(String), secret_helper_from Nullable(String)",
 		comments: map[string]string{
 			"envs":               "The env sets every launch applies first, in order.",
+			"account":            "The DEFAULTS account (USE ACCOUNT), for playbooks that name none; null when none is set (they run on machine).",
 			"secret_helper":      "The command that resolves secret references (SET secret_helper); null when none is configured.",
 			"secret_helper_from": "Where the secret helper is set: setting or CPB_SECRET_HELPER; null when none is configured.",
 		},
@@ -280,7 +282,13 @@ func defaultsRows() ([]any, []playbook.Unreadable, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return []any{defaultsOf(names, helper)}, nil, nil
+	v := defaultsOf(names, helper)
+	def, err := account.Default(account.Dir(config.ResolvePlaybooksDir()))
+	if err != nil {
+		return nil, nil, fmt.Errorf("the DEFAULTS account cannot be read: %w", err)
+	}
+	v.Account = optStr(def)
+	return []any{v}, nil, nil
 }
 
 var builtinSelect = regexp.MustCompile(`(?is)^\s*SELECT\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+FROM\s+([A-Za-z_]+)\s*;?\s*$`)
