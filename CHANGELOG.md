@@ -13,8 +13,9 @@
   set holding an address and its key, the `CREATE ACCOUNT` statement that
   replaces it. So is a launch whose playbook `settings.json`, or the working
   folder's `.claude/settings.json` or `settings.local.json`, sets one of them
-  or names an `apiKeyHelper`. The files stay readable, and `SHOW CREATE`
-  stays exact. Fix: `cpb CREATE ACCOUNT <name> SET …`, `cpb ALTER PLAYBOOK
+  or names an `apiKeyHelper`, or whose `--settings` passed through to
+  `claude` (a file or inline JSON) does. The files stay readable, and `SHOW
+  CREATE` stays exact. Fix: `cpb CREATE ACCOUNT <name> SET …`, `cpb ALTER PLAYBOOK
   <playbook> USE ACCOUNT <name>`, then unset the variables where they are
   set. `examples/upgrade.sh` names each playbook this refuses.
 - **Those variables exported in your shell no longer reach a launch:** every
@@ -59,14 +60,22 @@
   (through the secret helper for a reference), the models
   (`ANTHROPIC_DEFAULT_MODEL` and the alias variables) and an empty
   `ANTHROPIC_CONFIG_DIR`, so an Anthropic profile in `~/.config/anthropic` is
-  never the credential. Sandboxed launches render the same account.
+  never the credential. Sandboxed launches render the same account, and,
+  after the sandbox's login shell has run, remove every variable the account
+  does not set and set the non-secret ones again, so a profile inside the
+  sandbox cannot re-route the run.
 - **Your Claude login never goes to another provider.** An account that
   uses no Claude login keeps it out of the run: a shared playbook is
   refused (fix: `SET login = 'isolated'`); an isolated playbook's own login is
   set aside for the run on Linux (put back when the last run ends; a killed
   run's comes back at the next launch) and the launch is refused on macOS,
-  where the login lives in the Keychain. A gateway you trust with your
-  Claude credential says so: `claude_login_trusted = true`, over https only.
+  where the login lives in the Keychain. On Linux the launch is refused too,
+  never warned about, when the login cannot be set aside, the store cannot be
+  read, or a login is still reachable afterwards. A sandboxed launch on such
+  an account is refused while the playbook holds a login of its own in any
+  form, since its directory is mounted inside (fix: `/logout` in it, run it
+  unsandboxed, or use another playbook). A gateway you trust with your Claude
+  credential says so: `claude_login_trusted = true`, over https only.
 - **A token over an isolated playbook's own login runs on Linux again.**
   v4.0.0 refuses that launch everywhere. On Linux, a `claude_token`
   account's run now sets the login aside as above; on macOS it is refused,
@@ -75,9 +84,11 @@
 - **Which account a playbook runs on, at a glance.** `SELECT` and `SHOW
   PLAYBOOK --json` gain `accounts` (the list) and `account` (the one a launch
   runs on), with `auth_mode`, `token_source` (`none`, `account`, `file`),
-  `token_kind` and `token_blocked`. `EXPLAIN` prints an `Account:`
-  line, and `--json` gains `route.account` and `route.refused`. Never a
-  credential character.
+  `token_kind` and `token_blocked`; `SHOW DEFAULTS` and `SELECT … FROM
+  DEFAULTS` gain `account`. `EXPLAIN` prints an `Account:` line, and `--json`
+  gains `route.account`, `route.refused` and the `route.auth` state
+  `key-helper`; on `machine` its route reads the token file only, as the
+  launch does. Never a credential character.
 - **`cpb ask <playbook>`** asks Anthropic only, signed in with a Claude
   login: a playbook on an account that is not Anthropic's, or on one that
   signs in with a key or token of its own, is refused before anything is
@@ -91,6 +102,9 @@
 
 ### Changed
 
+- **A malformed launch flag no longer echoes its value.** `--env`, `--block`
+  and the other launch flags name the flag and refuse without printing what
+  follows the key, which may be a credential.
 - **`install.sh` retries a release download that fails for a moment.** The
   asset, `SHA256SUMS`, `LICENSE` and `NOTICE` are each tried again on a
   timeout, an HTTP 408, 429 or 5xx, or a connection refused, reset or cut
