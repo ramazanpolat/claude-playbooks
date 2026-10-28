@@ -1,16 +1,17 @@
 -- Two env sets, attached in order: a later set wins over an earlier one,
--- and the playbook's own variables win over both. The router is not
--- Anthropic, so the playbook keeps a login of its own (example 16).
-CREATE OR REPLACE ENV router
-  DESCRIPTION 'A model router on this machine'
-  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3;
+-- and the playbook's own variables win over both. Env sets carry anything
+-- but where requests go and how they authenticate, which is an account's
+-- (example 23).
+CREATE OR REPLACE ENV tools
+  DESCRIPTION 'What every session uses'
+  SET EDITOR=vim MAX_THINKING_TOKENS=4000;
 
 CREATE OR REPLACE ENV thinking
   SET MAX_THINKING_TOKENS=8000;
 
-CREATE PLAYBOOK IF NOT EXISTS work SET launcher = '', login = 'isolated';
+CREATE PLAYBOOK IF NOT EXISTS work SET launcher = '';
 
 ALTER PLAYBOOK work
-  USE ENV router thinking
-  SET VAR ANTHROPIC_MODEL=glm-5.3-flash
+  USE ENV tools thinking
+  SET VAR MAX_THINKING_TOKENS=16000
   BLOCK VAR HTTP_PROXY;

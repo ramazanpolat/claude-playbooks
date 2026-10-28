@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -25,37 +26,35 @@ func TestSbxCallLogGolden(t *testing.T) {
 	}
 	scenarios := []scenario{
 		{"create-routed", func(t *testing.T, root, work string) (string, []string) {
-			if err := stmtErr(t, "CREATE ENV router SET ANTHROPIC_BASE_URL=http://router.local:9/v1 ANTHROPIC_AUTH_TOKEN=real-token ANTHROPIC_API_KEY=real-key MODEL=glm AS PLAINTEXT"); err != nil {
+			putAccount(t, account.Account{Name: "router", Provider: account.Gateway, BaseURL: "https://router.local:9/v1", Auth: account.Auth{Kind: account.AuthToken, Value: "real-token"}})
+			if err := stmtErr(t, "CREATE ENV router SET MODEL=glm"); err != nil {
 				t.Fatal(err)
 			}
 			extra := filepath.Join(filepath.Dir(work), "extra")
 			if err := os.MkdirAll(extra, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}},
+			writePlaybook(t, root, "box", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"router"}, Accounts: []string{"router"}},
 				Sandbox: &manifest.Sandbox{Mounts: []string{extra + ":ro"}, AllowNet: []string{"api.example.com"}, ClaudeVersion: "2.1.263"}})
 			return "box", []string{"--env", "EXTRA=1", "-p", "it's"}
 		}},
 		{"host-service", func(t *testing.T, root, work string) (string, []string) {
-			if err := stmtErr(t, "CREATE ENV local SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_AUTH_TOKEN=lt AS PLAINTEXT"); err != nil {
-				t.Fatal(err)
-			}
-			writePlaybook(t, root, "onhost", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"local"}},
+			putAccount(t, account.Account{Name: "local", Provider: account.Gateway, BaseURL: "http://localhost:8080/v1", Auth: account.Auth{Kind: account.AuthToken, Value: "lt"}})
+			writePlaybook(t, root, "onhost", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"local"}},
 				Sandbox: &manifest.Sandbox{AllowNet: []string{"host.docker.internal", "other.example"}}})
 			return "onhost", nil
 		}},
 		{"reuse-rotate", func(t *testing.T, root, work string) (string, []string) {
-			if err := stmtErr(t, "CREATE ENV rot SET ANTHROPIC_API_KEY=new-key AS PLAINTEXT"); err != nil {
-				t.Fatal(err)
-			}
-			writePlaybook(t, root, "rot", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Sets: []string{"rot"}}})
+			putAccount(t, account.Account{Name: "rot", Provider: account.Anthropic, Auth: account.Auth{Kind: account.APIKey, Value: "new-key"}})
+			writePlaybook(t, root, "rot", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"rot"}}})
 			t.Setenv("SBX_STUB_LS", "cpb-rot")
 			t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-rot","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "rot"))+`"]}]}`)
 			t.Setenv("SBX_STUB_SECRETS", "cpb-rot api.anthropic.com ANTHROPIC_API_KEY cpb-rot-ANTHROPIC_API_KEY old-***")
 			return "rot", nil
 		}},
 		{"revoke", func(t *testing.T, root, work string) (string, []string) {
-			writePlaybook(t, root, "revoke", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Set: map[string]string{"ANTHROPIC_BASE_URL": "http://router.local:9/v1"}}})
+			putAccount(t, account.Account{Name: "rv", Provider: account.Gateway, BaseURL: "https://router.local:9/v1", Auth: account.Auth{Kind: account.None}})
+			writePlaybook(t, root, "revoke", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"rv"}}})
 			t.Setenv("SBX_STUB_LS", "cpb-revoke")
 			t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]}`)
 			t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
@@ -72,11 +71,8 @@ func TestSbxCallLogGolden(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(home, ".claude", ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := stmtErr(t, "CREATE ENV canary SET ANTHROPIC_API_KEY=cpbcanaryvalue AS PLAINTEXT"); err != nil {
-				t.Fatal(err)
-			}
-			writePlaybook(t, root, "failreg", &manifest.Manifest{Env: &manifest.Env{Sets: []string{"canary"}}})
-			t.Setenv("SBX_STUB_FAIL", "secret")
+			writePlaybook(t, root, "failreg", nil)
+			t.Setenv("SBX_STUB_FAIL", "create")
 			return "failreg", nil
 		}},
 	}

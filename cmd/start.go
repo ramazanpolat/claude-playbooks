@@ -179,16 +179,25 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		acct, err := planSandboxAccount(absPath, "", layers, sbm, sopts, claudeArgs)
+		if err != nil {
+			return err
+		}
+		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(absPath, layers); perr == nil {
 			if err := refuseRefsInSandbox(eff, "directory "+absPath); err != nil {
 				return err
 			}
 		}
+		if err := acct.prepare(); err != nil {
+			return err
+		}
 		name := startSandboxName(absPath)
 		started, runErr := runSandboxed(sandboxTarget{
 			label: "directory " + absPath, name: name,
 			configPath: absPath, rootPath: absPath, manifest: sbm, backend: backend,
-		}, layers, claudeArgs, sopts)
+			noLoginAccount: acct.noLoginAccount(),
+		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		// Cleanup only after a session actually ran: a launch refused
 		// before attaching (a bad mount, sbx missing) leaves the directory
 		// and any sandbox exactly as they were.
@@ -227,8 +236,18 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// purely, and let the input name itself like the other five. EffectiveBlock
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
+	if _, perr := auth.EffectiveBlock(absPath, layers); errors.Is(perr, envset.ErrSet) {
+		return perr
+	}
+	// See cmd/run.go: the account, before anything is mutated.
+	wd, _ := os.Getwd()
+	acct, err := planAccount(absPath, "", layers, wd, claudeArgs)
+	if err != nil {
+		return err
+	}
+	layers = acct.layers
 	eff, perr := auth.EffectiveBlock(absPath, layers)
-	if errors.Is(perr, envset.ErrSet) {
+	if perr != nil {
 		return perr
 	}
 	// See cmd/run.go: references exec through the helper, or refuse here.
@@ -236,12 +255,21 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := auth.OwnLoginRefusal(absPath, eff, ""); err != nil {
+		return err
+	}
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(absPath, layers)
+	if err := acct.prepare(); err != nil {
+		return err
+	}
+	launchEnv, syncErr := auth.PrepareLaunchEnvFor(absPath, layers, acct.noLoginAccount())
+	// A token run may have set the playbook's own login aside: it comes
+	// back when the launch returns, whatever the outcome.
+	defer auth.EndLaunch(absPath)
 	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
@@ -254,12 +282,12 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
-	c := plan.command(claudePath, claudeArgs, launchEnv)
+	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), launchEnv)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 
-	runErr := c.Run()
+	runErr := runAttached(c)
 
 	if deleteAfter {
 		if rmErr := os.RemoveAll(absPath); rmErr != nil {

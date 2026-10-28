@@ -32,7 +32,7 @@ helper, `cpb-secret-file`, which examples 04 and 09 use.
 | [12-recipes-and-targets](12-recipes-and-targets/) | one recipe for two playbooks, `TO <playbook>`, `TO '<dir>'` |
 | [13-select](13-select/) | `SELECT` over playbooks, env sets and variables |
 | [14-model-picker](14-model-picker/) | the `/model` picker: its rows, ONLY or APPEND |
-| [15-third-party-route](15-third-party-route/) | a playbook routed away from Anthropic: its own login, credentials blocked |
+| [15-third-party-route](15-third-party-route/) | a playbook routed away from Anthropic, on a router account: its own login, nothing else of yours goes along |
 | [16-isolated-login](16-isolated-login/) | a playbook that shares no login with `~/.claude` |
 | [17-statusline-if-unset](17-statusline-if-unset/) | a status line offered with IF UNSET, never imposed |
 | [18-sessions](18-sessions/) | live sessions, `--resume` through the playbook, and what cpb refuses to resume |
@@ -40,3 +40,4 @@ helper, `cpb-secret-file`, which examples 04 and 09 use.
 | [20-sandbox](20-sandbox/) | a playbook that always runs in a Docker Sandbox: its `[sandbox]` settings, written and unset |
 | [21-play](21-play/) | `cpb play`: check, plan, run, keep and update someone else's recipe |
 | [22-global-instructions](22-global-instructions/) | the `global_instructions` setting: `~/.claude`'s `CLAUDE.md` and rules kept out of a playbook |
+| [23-accounts](23-accounts/) | accounts: where requests go and how they authenticate, one record each; a playbook's list, `--account` for one launch, listed-only accounts, a trusted gateway |

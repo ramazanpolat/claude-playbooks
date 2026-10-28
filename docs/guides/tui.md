@@ -46,8 +46,8 @@ line, Model and Sessions. `←→` or `1`–`9` switch between them.
   effective at launch, from EXPLAIN
   KEY                   VALUE / REF                  LAYER
   X                     1                            defaults base
-  ANTHROPIC_BASE_URL    http://localhost:8080/v1     env proxy
-  ANTHROPIC_AUTH_TOKEN  FROM 'keychain:proxy-token'  env proxy
+  EDITOR                vim                          env tools
+  GH_TOKEN              FROM 'keychain:gh-token'     env tools
   OPENAI_API_KEY        (redacted, plaintext)        playbook
   MY_FLAG               1                            playbook
 

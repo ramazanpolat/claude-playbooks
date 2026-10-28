@@ -41,7 +41,6 @@ func TestValidateRefs(t *testing.T) {
 		"not a reference": {map[string]string{"T": pasted}, nil, nil, "not a secret reference"},
 		"both set":        {map[string]string{"T": "keychain:x"}, map[string]string{"T": "v"}, nil, "both set"},
 		"both unset":      {map[string]string{"T": "keychain:x"}, nil, []string{"T"}, "both unset"},
-		"refused key":     {map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:x"}, nil, nil, "cannot be a secret reference"},
 		"reserved key":    {map[string]string{"CLAUDE_CONFIG_DIR": "keychain:x"}, nil, nil, "managed by cpb"},
 	} {
 		err := ValidateRefs(c.refs, c.set, c.unset)
@@ -51,6 +50,10 @@ func TestValidateRefs(t *testing.T) {
 		if err != nil && strings.Contains(err.Error(), pasted) {
 			t.Errorf("%s: the error quotes the value", name)
 		}
+	}
+	// The OAuth token takes a reference since v4.2.0 (accounts).
+	if err := ValidateRefs(map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:x"}, nil, nil); err != nil {
+		t.Errorf("the OAuth token's reference was refused: %v", err)
 	}
 }
 

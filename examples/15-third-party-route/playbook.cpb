@@ -1,13 +1,12 @@
 -- A playbook for a non-Anthropic model route. Every request goes to the
 -- router, with what the playbook's CLAUDE.md holds; the CLAUDE.md cpb writes
--- imports nothing. The playbook keeps its own login, and the Anthropic
--- credentials a shell may export are blocked in it.
-CREATE OR REPLACE ENV router
-  DESCRIPTION 'A model router: requests leave Anthropic'
-  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3;
+-- imports nothing. The route is an account: the address and its key (none,
+-- for a local router) travel together, and the playbook keeps a login of its
+-- own, which the run never reaches.
+CREATE OR REPLACE ACCOUNT router
+  SET provider = 'gateway', base_url = 'http://localhost:8080/v1', auth = 'none',
+      model = 'glm-5.3', description = 'A model router: requests leave Anthropic';
 
 CREATE OR ALTER PLAYBOOK routed
   SET launcher = '', login = 'isolated'
-  USE ENV router;
-ALTER PLAYBOOK routed
-  BLOCK VAR ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;
+  USE ACCOUNT router;

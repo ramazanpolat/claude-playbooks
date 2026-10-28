@@ -63,18 +63,18 @@ func TestSiblingPlaybookStillReceivesToken(t *testing.T) {
 func TestManifestSetAndUnsetReachChild(t *testing.T) {
 	root := t.TempDir()
 	playbookWithEnv(t, root, "router",
-		"[env]\nblock = [\"NOISY\"]\n\n[env.set]\nANTHROPIC_BASE_URL = \"http://proxy/v1\"\n")
+		"[env]\nblock = [\"NOISY\"]\n\n[env.set]\nTOOL_BASE_URL = \"http://proxy/v1\"\n")
 
 	got := childEnv(t, root, launch{
 		env: []string{
 			tokenFileEnv + "=" + filepath.Join(t.TempDir(), "absent"),
-			"ANTHROPIC_BASE_URL=http://shell/v1",
+			"TOOL_BASE_URL=http://shell/v1",
 			"NOISY=1",
 		},
 		args: []string{"run", "router"},
 	})
-	if got["ANTHROPIC_BASE_URL"] != "http://proxy/v1" {
-		t.Fatalf("ANTHROPIC_BASE_URL = %q, want the manifest's", got["ANTHROPIC_BASE_URL"])
+	if got["TOOL_BASE_URL"] != "http://proxy/v1" {
+		t.Fatalf("TOOL_BASE_URL = %q, want the manifest's", got["TOOL_BASE_URL"])
 	}
 	if v, present := got["NOISY"]; present {
 		t.Fatalf("NOISY=%q survived the manifest unset", v)
@@ -135,7 +135,7 @@ func TestProfileReachesChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(profiles, "glm.toml"),
-		[]byte("block = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nANTHROPIC_BASE_URL = \"http://profile/v1\"\nMODEL = \"profile\"\n"), 0o600); err != nil {
+		[]byte("block = [\"CLAUDE_CODE_OAUTH_TOKEN\"]\n\n[set]\nTOOL_BASE_URL = \"http://profile/v1\"\nMODEL = \"profile\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	playbookWithEnv(t, root, "router", "[env]\nsets = [\"glm\"]\n\n[env.set]\nMODEL = \"own\"\n")
@@ -144,8 +144,8 @@ func TestProfileReachesChild(t *testing.T) {
 		env:  []string{tokenFile(t, "sk-ant-oat01-FROMFILE")},
 		args: []string{"run", "router"},
 	})
-	if got["ANTHROPIC_BASE_URL"] != "http://profile/v1" || got["MODEL"] != "own" {
-		t.Fatalf("ANTHROPIC_BASE_URL=%q MODEL=%q", got["ANTHROPIC_BASE_URL"], got["MODEL"])
+	if got["TOOL_BASE_URL"] != "http://profile/v1" || got["MODEL"] != "own" {
+		t.Fatalf("TOOL_BASE_URL=%q MODEL=%q", got["TOOL_BASE_URL"], got["MODEL"])
 	}
 	if v, present := got[tokenEnv]; present {
 		t.Fatalf("token reached the child despite the profile's unset: %q", v)

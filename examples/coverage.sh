@@ -26,6 +26,9 @@ while IFS= read -r k; do
     "RESET sandbox.<key>") re='(^|[^A-Z])RESET[[:space:]]+sandbox\.[a-z_]+' ;;
     "SET <key> = <value>") re='(^|[^A-Z])SET[[:space:]]+[a-z_]+[[:space:]]*=' ;;
     "RESET <key>") re='(^|[^A-Z])RESET[[:space:]]+[a-z_]+([^A-Za-z_=]|$)' ;;
+    # An account's keys, after the account it changes.
+    "SET <account key>") re='ACCOUNT[[:space:]]+[A-Za-z0-9._-]+[[:space:]]+SET[[:space:]]+[a-z_]+' ;;
+    "RESET <account key>") re='ACCOUNT[[:space:]]+[A-Za-z0-9._-]+[[:space:]]+RESET[[:space:]]+[a-z_]+' ;;
     *) re="(^|[^A-Z])$(printf '%s' "$k" | sed 's/ /[[:space:]]+/g')([^A-Z]|$)" ;;
   esac
   grep -Eq "$re" SPEC.md || { echo "no reference entry: $k"; fail=1; }

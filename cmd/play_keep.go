@@ -56,6 +56,12 @@ func keepSandbox(res *play.Result) (sandboxed bool, backend string, err error) {
 		if refs := playRefs(res); len(refs) > 0 {
 			return false, "", fmt.Errorf("the recipe uses secret references (%s), which a sandboxed launch cannot resolve yet: keep it with --no-sandbox", strings.Join(refs, ", "))
 		}
+		if playAccountRef != "" {
+			return false, "", fmt.Errorf("account %s takes its credential from a secret reference (%s), which a sandboxed launch cannot resolve yet: keep it with --no-sandbox", playAccount, playAccountRef)
+		}
+		if playDefaultsRef != "" {
+			return false, "", fmt.Errorf("the DEFAULTS account, which the kept playbook would run on, takes its credential from a secret reference (%s), which a sandboxed launch cannot resolve yet: keep it with --no-sandbox, or with --account <account>", playDefaultsRef)
+		}
 	}
 	if playSandboxFlag != "auto" {
 		backend = playSandboxFlag
@@ -168,7 +174,7 @@ func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) 
 	switch {
 	case sandboxed:
 		b.WriteString(" SET sandbox.always = true, login = 'isolated'")
-	case res.Endpoint != "":
+	case res.Endpoint != "" || playIsolateLogin || playDefaultsIsolate:
 		b.WriteString(" SET login = 'isolated'")
 	}
 	b.WriteString(";\n")
@@ -177,6 +183,11 @@ func keepSetup(name string, res *play.Result, sandboxed bool, blocked []string) 
 	}
 	if len(playEnvSets) > 0 {
 		fmt.Fprintf(&b, "ALTER PLAYBOOK %s USE ENV %s;\n", name, strings.Join(playEnvSets, " "))
+	}
+	if playAccount != "" {
+		// machine too, said outright: in your store DEFAULTS may name
+		// another account.
+		fmt.Fprintf(&b, "ALTER PLAYBOOK %s USE ACCOUNT %s;\n", name, playAccount)
 	}
 	return b.String()
 }

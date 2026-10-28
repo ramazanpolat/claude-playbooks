@@ -72,9 +72,10 @@ func TestSelectHandsOffToClickHouse(t *testing.T) {
 		t.Fatalf("handoff: %v\n%q", err, out)
 	}
 	args, _ := os.ReadFile(filepath.Join(dir, "args"))
+	late := "play, apply, auth_mode, token_source, token_kind, token_blocked, accounts, account"
 	want := strings.Join([]string{"local", "--input-format", "JSONEachRow", "--structure", selectTables["PLAYBOOKS"].structure,
 		"--date_time_input_format", "best_effort", "--output-format", "JSONCompact", "--output_format_json_escape_forward_slashes=0", "--output_format_json_quote_64bit_integers=0",
-		"-q", "SELECT name FROM (SELECT * EXCEPT (play, apply), " + versionTupleSQL + " AS version_tuple, play, apply FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
+		"-q", "SELECT name FROM (SELECT * EXCEPT (" + late + "), " + versionTupleSQL + " AS version_tuple, " + late + " FROM table) WHERE version_tuple > [3, 10] ORDER BY name"}, "\n") + "\n"
 	if string(args) != want {
 		t.Fatalf("args:\n%s\nwant:\n%s", args, want)
 	}
@@ -353,7 +354,7 @@ func TestDescribe(t *testing.T) {
 	}
 	selectTTY = func() bool { return false }
 	tsv := mustStmt(t, "DESC TABLE defaults")
-	if want := "name\ttype\tcomment\nenvs\tArray(String)\tThe env sets every launch applies first, in order.\n"; !strings.HasPrefix(tsv, want) || strings.Count(tsv, "\n") != 4 {
+	if want := "name\ttype\tcomment\nenvs\tArray(String)\tThe env sets every launch applies first, in order.\n"; !strings.HasPrefix(tsv, want) || strings.Count(tsv, "\n") != 5 {
 		t.Fatalf("DESC TABLE defaults in a pipe: TSV with a header row:\n%q", tsv)
 	}
 	var cols []columnJSON

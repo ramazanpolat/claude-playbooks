@@ -192,6 +192,13 @@ func applyRunIn(st *grammar.Stmt, rep *applyReport, sc *applyScope) error {
 					return refused(x.path, s.Pos.Line, fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err))
 				}
 			}
+			// An account's credential reference, under the variable it
+			// renders as at launch.
+			if c.Kind == grammar.SetAccount {
+				if err := checkRefsWith(helper, accountRefClauses([]grammar.Clause{c})); err != nil {
+					return refused(x.path, s.Pos.Line, fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err))
+				}
+			}
 			if c.Kind == grammar.SetRef {
 				if err := checkRefsWith(helper, []grammar.Clause{c}); err != nil {
 					return refused(x.path, s.Pos.Line, fmt.Errorf("%s:%d: %w\nnothing was written", x.file, s.Pos.Line, err))

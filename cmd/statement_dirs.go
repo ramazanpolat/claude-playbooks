@@ -33,6 +33,7 @@ var dirRefusals = map[grammar.Kind]string{
 	grammar.SetRef:          "a secret reference is resolved by cpb's launcher, which never runs for this directory",
 	grammar.BlockVar:        "removing a variable at launch is the launcher's job",
 	grammar.UseEnv:          "env sets are layered by the launcher",
+	grammar.UseAccount:      "accounts are chosen by the launcher",
 	grammar.AddEnv:          "env sets are layered by the launcher",
 	grammar.DropEnv:         "env sets are layered by the launcher",
 	grammar.ReplaceEnv:      "env sets are layered by the launcher",

@@ -3,10 +3,11 @@
 
 Usage: same-explain.py <old.json> <new.json>
 
-Every top-level key the old binary printed must come back unchanged and in
-the same order: that is what a launch sets, and an upgrade must not change
-it. A key the new binary adds is new information, not a change, so it is
-not compared; its name is printed on stdout, one per line, for the log.
+Every key the old binary printed, at any depth, must come back unchanged
+and in the same order: that is what a launch sets, and an upgrade must not
+change it. A key the new binary adds, at the top or inside an object the
+old one printed (route.guard, say), is new information, not a change, so it
+is not compared; its path is printed on stdout, one per line, for the log.
 Exit 1, with a diff, when a kept key differs, moved or is gone.
 """
 import difflib
@@ -21,13 +22,34 @@ with open(new_path) as f:
 if not isinstance(old, dict) or not isinstance(new, dict):
     print("EXPLAIN --json is not an object")
     sys.exit(1)
-kept = {k: v for k, v in new.items() if k in old}
+added = []
+
+
+def keep(o, n, path):
+    """n restricted to the keys o has, recursively through objects."""
+    if not isinstance(o, dict) or not isinstance(n, dict):
+        return n
+    for k in n:
+        if k not in o:
+            added.append(path + k)
+    return {k: keep(o[k], v, path + k + ".") for k, v in n.items() if k in o}
+
+
+# A launch the account refuses (v4.2.0: a layer sets a variable an account
+# owns, as a release before accounts allowed) has no route to compare: the
+# route is the account's now, and route.refused says why. Listed, not
+# compared.
+route = new.get("route")
+if isinstance(route, dict) and route.get("refused"):
+    old = {k: v for k, v in old.items() if k != "route"}
+    new = {k: v for k, v in new.items() if k != "route"}
+    added.append("route (refused: an account's variable is set elsewhere)")
+kept = keep(old, new, "")
 a = json.dumps(old, indent=1).splitlines()
 b = json.dumps(kept, indent=1).splitlines()
 if a != b:
     diff = difflib.unified_diff(a, b, "old", "new (keys the old one printed)", lineterm="")
     print("\n".join(list(diff)[:40]))
     sys.exit(1)
-for k in new:
-    if k not in old:
-        print(k)
+for k in added:
+    print(k)

@@ -1,6 +1,7 @@
 # The built-in form needs nothing installed.
 cpb "SELECT name, envs FROM PLAYBOOKS" | grep -qx "$(printf 'beta\trouter')"
-cpb "SELECT playbook, key, effective FROM VARS" --json | grep -q '"key": "MODEL"'
+cpb "SELECT name, account FROM PLAYBOOKS" | grep -qx "$(printf 'beta\tlocal')"
+cpb "SELECT playbook, key, effective FROM VARS" --json | grep -q '"key": "EDITOR"'
 cpb EXPLAIN SELECT name FROM ENVS | grep -q 'engine: built in'
 cpb DESCRIBE playbooks | grep -q "$(printf '^version_tuple\tArray(UInt32)\tThe numbers')"
 cpb "DESC TABLE vars --json" | grep -q '"name": "effective"'

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
@@ -36,6 +37,20 @@ type routeJSON struct {
 	// Bedrock, Vertex and Foundry is switched on or given a base URL),
 	// "unknown" otherwise. cpb names no other class.
 	Egress string `json:"egress"`
+	// Account is the account a launch with no flags runs on, and why
+	// (v4.2.0); the route above is derived from it.
+	Account routeAccountJSON `json:"account"`
+	// Refused is why such a launch would be refused before anything
+	// changes (a variable an account owns set elsewhere, a login it cannot
+	// keep out, an account it may not use); null when it would run.
+	Refused *string `json:"refused"`
+}
+
+// routeAccountJSON names the account a launch runs on.
+type routeAccountJSON struct {
+	Name     string `json:"name"`     // "machine" for the implicit account
+	Why      string `json:"why"`      // --account, the playbook's first, DEFAULTS, none named
+	Provider string `json:"provider"` // anthropic for machine
 }
 
 var defaultModelVar = regexp.MustCompile(`^ANTHROPIC_DEFAULT_([A-Z0-9_]+)_MODEL$`)
@@ -112,18 +127,39 @@ func routeEgress(origins []envset.Origin) string {
 
 func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSON) routeJSON {
 	r := routeJSON{Models: map[string]string{}, Auth: "none", Egress: "anthropic"}
+	// The account decides the route: the same checks a launch makes, none
+	// of which changes anything.
+	wd, _ := os.Getwd()
+	acct, err := planAccount(pb.Path, pb.Name, nil, wd, nil)
+	if err != nil {
+		msg := err.Error()
+		r.Refused, r.Egress, r.Auth = &msg, "unknown", "unknown"
+		return r
+	}
+	r.Account = routeAccountJSON{Name: acct.sel.Name, Why: acct.sel.Why, Provider: account.Anthropic}
+	if acct.sel.Account != nil {
+		r.Account.Provider = acct.sel.Account.Provider
+	}
 	if model != nil && model.Name != "" {
 		r.Models["default"] = model.Name
 	}
-	inherited := routeInherited(origins, os.Environ())
-	for _, o := range inherited {
-		// An inherited model wins over the playbook's settings, as it does
-		// in Claude Code; a layer that sets or blocks it is already in model.
-		if o.Key == "ANTHROPIC_MODEL" && o.Value != "" {
-			r.Models["default"] = o.Value
-		}
+	// What the account renders; on the machine account the playbook's own
+	// layers still decide the token, as a launch does.
+	layer := acct.rendered.Layer
+	routeOrigins := []envset.Origin{}
+	for k, v := range layer.Set {
+		routeOrigins = append(routeOrigins, envset.Origin{Key: k, Value: v})
 	}
-	origins = append(append([]envset.Origin{}, origins...), inherited...)
+	for k, ref := range layer.Refs {
+		routeOrigins = append(routeOrigins, envset.Origin{Key: k, Ref: ref})
+	}
+	// On the machine account the token is the token file's, which the
+	// login report below reads; an exported one never counts (every launch
+	// removes it), and a layer that sets one refuses the launch.
+	if _, ok := r.Models["default"]; !ok && layer.Set["ANTHROPIC_DEFAULT_MODEL"] != "" {
+		r.Models["default"] = layer.Set["ANTHROPIC_DEFAULT_MODEL"]
+	}
+	origins = routeOrigins
 	tokenSet := false
 	isolated := auth.IsAuthIsolated(pb.Path)
 	for _, o := range origins {
@@ -161,8 +197,12 @@ func launchRoute(pb *playbook.Playbook, origins []envset.Origin, model *modelJSO
 	// The login: the same report auth status prints, so the two agree.
 	rep := auth.Inspect(pb.Name, pb.Path, time.Now())
 	switch {
-	case tokenSet || rep.Mode == auth.ModeToken || rep.Mode == auth.ModePlaybookToken:
+	case tokenSet || (acct.sel.Account == nil && (rep.Mode == auth.ModeToken || rep.Mode == auth.ModePlaybookToken)):
 		r.Auth = "token-set"
+	case acct.rendered.KeyHelper != "":
+		r.Auth = "key-helper"
+	case acct.rendered.NoClaudeLogin:
+		r.Auth = "none"
 	default:
 		switch rep.Login() {
 		case "store", "keychain":

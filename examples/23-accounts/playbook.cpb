@@ -1,0 +1,17 @@
+-- Two Claude accounts, each holding its token by reference
+-- (`claude setup-token` makes one per account). A playbook names the
+-- accounts it may run on, the first by default; --account picks another for
+-- one launch.
+ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
+
+CREATE OR REPLACE ACCOUNT acct-work
+  SET provider = 'anthropic', identity = 'me@work.example',
+      claude_token FROM 'file:claude-token-work', description = 'Claude account: work';
+
+CREATE OR REPLACE ACCOUNT acct-personal
+  SET provider = 'anthropic', claude_token FROM 'file:claude-token-personal',
+      description = 'Claude account: personal';
+
+CREATE OR ALTER PLAYBOOK sre
+  SET launcher = ''
+  USE ACCOUNT acct-work, acct-personal;

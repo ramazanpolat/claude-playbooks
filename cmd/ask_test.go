@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 )
@@ -336,10 +337,11 @@ func TestAskRouteAway(t *testing.T) {
 	if !strings.Contains(strings.Join(home.CPBNotes, " "), "/login") {
 		t.Errorf("a start: notes %q, want the shared-login note", home.CPBNotes)
 	}
-	// The caller's environment counts, as at launch.
+	// The caller's routing does not count: every launch removes it, and
+	// the account decides (v4.2.0).
 	t.Setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:9/v1")
-	if s := step(t, root, "start", "/tmp/cpb-ask-test-scratch"); !s.RouteAway {
-		t.Errorf("an exported base URL: %+v, want route_away", s)
+	if s := step(t, root, "start", "/tmp/cpb-ask-test-scratch"); s.RouteAway {
+		t.Errorf("an exported base URL: %+v, want Anthropic", s)
 	}
 
 	// Shown with the directory it runs from, and the files it would have
@@ -826,20 +828,22 @@ func TestAskLaunchRoutePrecedence(t *testing.T) {
 	if s := step(t, root, "start", "/tmp/cpb-ask-test-x", "--playbooks-dir="+root, "--delete"); s.Status != stepRejected {
 		t.Errorf("--playbooks-dir in a step: %+v", s)
 	}
-	// One-off layers go above the playbook's own block, in order.
-	mustStmt(t, "CREATE PLAYBOOK direct SET launcher = ''")
-	mustStmt(t, "ALTER PLAYBOOK direct SET VAR ANTHROPIC_BASE_URL=https://api.anthropic.com")
+	// The account decides: the playbook's first, or --account.
+	putAccount(t, account.Account{Name: "anth", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeLogin}})
+	putAccount(t, account.Account{Name: "glm", Provider: account.Gateway, BaseURL: "http://127.0.0.1:9/v1", Auth: account.Auth{Kind: account.None}})
+	mustStmt(t, "CREATE PLAYBOOK direct SET launcher = '', login = 'isolated' USE ACCOUNT anth, glm")
 	if s := step(t, root, "run", "direct"); s.RouteAway {
-		t.Errorf("direct alone: %+v", s)
+		t.Errorf("direct on its first account: %+v", s)
+	}
+	if s := step(t, root, "run", "--account", "glm", "direct"); !s.RouteAway {
+		t.Errorf("--account glm: %+v", s)
+	}
+	// A layer that sets an account's variable refuses the launch: away.
+	if s := step(t, root, "run", "--env", "ANTHROPIC_BASE_URL=https://api.anthropic.com", "direct"); !s.RouteAway {
+		t.Errorf("--env of a base URL: %+v", s)
 	}
 	if s := step(t, root, "run", "--env-set", "route-a", "direct"); !s.RouteAway {
-		t.Errorf("--env-set route-a over direct's own Anthropic URL: %+v", s)
-	}
-	if s := step(t, root, "run", "--env", "ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "--block", "ANTHROPIC_BASE_URL", "direct"); s.RouteAway {
-		t.Errorf("--env then --block: %+v", s)
-	}
-	if s := step(t, root, "run", "--block", "ANTHROPIC_BASE_URL", "--env", "ANTHROPIC_BASE_URL=http://127.0.0.1:9/v1", "direct"); !s.RouteAway {
-		t.Errorf("--block then --env: %+v", s)
+		t.Errorf("--env-set route-a: %+v", s)
 	}
 	// start reads the directory's own manifest.
 	sdir := filepath.Join(t.TempDir(), "routed")
@@ -863,5 +867,26 @@ func TestAskPlanChangesRoute(t *testing.T) {
 	checkAskPlan(p, root)
 	if p.Steps[0].RouteAway || !p.Steps[2].RouteAway || !strings.Contains(strings.Join(p.Steps[2].CPBNotes, " "), "A step before this one") {
 		t.Errorf("before %+v, after %+v", p.Steps[0], p.Steps[2])
+	}
+}
+
+// cpb ask <playbook> signs in as a launch of it would, with a Claude login
+// only: a playbook on an account with a key of its own is refused, and so is
+// one on an account that is not Anthropic's.
+func TestAskTargetAccountRefused(t *testing.T) {
+	askFixture(t)
+	putAccount(t, account.Account{Name: "console", Provider: account.Anthropic, Auth: account.Auth{Kind: account.APIKey, Value: "sk-ant-x"}})
+	putAccount(t, account.Account{Name: "glm", Provider: account.Gateway, BaseURL: "http://127.0.0.1:9/v1", Auth: account.Auth{Kind: account.None}})
+	mustStmt(t, "CREATE PLAYBOOK keyed SET launcher = '', login = 'isolated' USE ACCOUNT console")
+	mustStmt(t, "CREATE PLAYBOOK routed SET launcher = '', login = 'isolated' USE ACCOUNT glm")
+	rec := fakeAskClaude(t, askListPlan)
+	for pb, want := range map[string]string{"keyed": "signs in with its api_key", "routed": "away from Anthropic"} {
+		_, err := askRun(t, nil, pb, "list my env sets")
+		if err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "sk-ant-x") {
+			t.Fatalf("%s: %v", pb, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Fatal("claude ran for a refused target")
 	}
 }

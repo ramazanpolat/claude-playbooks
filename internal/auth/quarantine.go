@@ -332,9 +332,13 @@ func writeFilePrivate(path string, data []byte) error {
 
 // OwnLoginGrant reports whether configDir holds a login of its own: its
 // credentials store is a file (not a link to the shared store) carrying an
-// account OAuth grant. Nothing of the grant is read out.
+// account OAuth grant, or a token run holds that grant aside
+// (own_login.go). Nothing of the grant is read out.
 func OwnLoginGrant(configDir string) bool {
 	path := StorePath(configDir)
+	if storeHasOAuthGrant(path + asideSuffix) {
+		return true
+	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return false

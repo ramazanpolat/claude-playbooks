@@ -98,31 +98,58 @@ func TestSetFromChecksTheReference(t *testing.T) {
 	}
 }
 
-// Keys whose value cpb itself reads never take a reference, at any layer.
-func TestOAuthTokenReferenceRefusedAtEveryLayer(t *testing.T) {
-	resetCommandTestState(t)
-	aliasTestHome(t)
-	helper, _ := fakeHelper(t)
-	root := seedFlatPlaybook(t, "router")
+// An account holding a Claude token by reference (v4.2.0): the launch
+// execs through the helper, which sets the token, and a token exported in
+// the shell never stands in for it. On the isolated path too. --account
+// picks another account the playbook lists.
+func TestOAuthTokenByReference(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "work", &manifest.Manifest{})
+	writePlaybook(t, root, "iso", &manifest.Manifest{IsolatedLogin: true})
+	helper, helperLog := fakeHelper(t)
+	claudeLog := stubClaude(t)
 	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
-	mustStmt(t, "CREATE ENV e")
-	for _, line := range []string{
-		"ALTER ENV e SET CLAUDE_CODE_OAUTH_TOKEN FROM keychain:ok/x",
-		"ALTER PLAYBOOK router SET VAR CLAUDE_CODE_OAUTH_TOKEN FROM keychain:ok/x",
+	mustStmt(t, "CREATE ACCOUNT acct-work SET provider=anthropic, claude_token FROM keychain:ok/work")
+	mustStmt(t, "CREATE ACCOUNT acct-iso SET provider=anthropic, claude_token FROM keychain:ok/iso")
+	mustStmt(t, "ALTER PLAYBOOK work USE ACCOUNT acct-work, acct-iso")
+	mustStmt(t, "ALTER PLAYBOOK iso USE ACCOUNT acct-iso")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-from-the-shell")
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"work", "--version"}, "keychain:ok/work"},
+		{[]string{"iso", "--version"}, "keychain:ok/iso"},
+		{[]string{"--account", "acct-iso", "work", "--version"}, "keychain:ok/iso"},
 	} {
-		if _, err := stmt(t, line); err == nil || !strings.Contains(err.Error(), "cannot be a secret reference") {
-			t.Errorf("%s: %v", line, err)
+		os.Remove(claudeLog)
+		os.Remove(helperLog)
+		if err := runRun(nil, tc.args); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		got := readLog(t, claudeLog)
+		if !strings.Contains(got, "CLAUDE_CODE_OAUTH_TOKEN=resolved:"+tc.want) {
+			t.Fatalf("%v: claude did not get the token from the helper:\n%s", tc.args, got)
+		}
+		if strings.Contains(got, "stale-from-the-shell") {
+			t.Fatalf("%v: the shell's token reached claude:\n%s", tc.args, got)
+		}
+		if h := readLog(t, helperLog); !strings.Contains(h, "CLAUDE_CODE_OAUTH_TOKEN="+tc.want+" -- ") {
+			t.Fatalf("%v: helper argv:\n%s", tc.args, h)
 		}
 	}
-	// A hand-written reference is refused when the file is read or written,
-	// so no launch runs with it.
-	if err := envset.Write(envset.Dir(filepath.Dir(root)), &envset.Set{Name: "x",
-		Refs: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:ok/x"}}); err == nil {
-		t.Error("an env set file took a reference for the OAuth token")
+	// An account the playbook does not list is refused, before claude runs.
+	os.Remove(claudeLog)
+	if err := runRun(nil, []string{"--account", "acct-work", "iso", "--version"}); err == nil || !strings.Contains(err.Error(), "runs only on the accounts it lists") {
+		t.Fatalf("an unlisted account: %v", err)
 	}
-	if err := manifest.Write(root, &manifest.Manifest{Name: "router",
-		Env: &manifest.Env{Refs: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "keychain:ok/x"}}}); err == nil {
-		t.Error("a manifest took a reference for the OAuth token")
+	if _, err := os.Stat(claudeLog); err == nil {
+		t.Fatal("claude ran on an unlisted account")
+	}
+	// The file holds the reference, never a value.
+	if a := readAccount(t, root, "acct-work"); a.Auth.Ref != "keychain:ok/work" || a.Auth.Value != "" {
+		t.Fatalf("account: %+v", a.Auth)
 	}
 }
 
@@ -133,15 +160,15 @@ func TestLaunchExecsThroughTheHelper(t *testing.T) {
 	claudeLog := stubClaude(t)
 	mustStmt(t, "ALTER DEFAULTS SET secret_helper = "+helper)
 	mustStmt(t, "CREATE ENV r SET BASE=http://buildbox/v1")
-	mustStmt(t, "ALTER ENV r SET ANTHROPIC_AUTH_TOKEN FROM keychain:ok/router")
-	mustStmt(t, "ALTER PLAYBOOK router USE ENV r")
+	mustStmt(t, "CREATE ACCOUNT router SET provider=gateway, base_url=http://localhost:4000/v1, auth_token FROM keychain:ok/router")
+	mustStmt(t, "ALTER PLAYBOOK router USE ENV r USE ACCOUNT router")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "stale-from-the-shell")
 
 	if err := runRun(nil, []string{"router", "--version"}); err != nil {
 		t.Fatal(err)
 	}
 	got := readLog(t, claudeLog)
-	if !strings.Contains(got, "ARGS --version") || !strings.Contains(got, "ANTHROPIC_AUTH_TOKEN=resolved:keychain:ok/router") || !strings.Contains(got, "BASE=http://buildbox/v1") {
+	if !strings.Contains(got, "ARGS --version") || !strings.Contains(got, "ANTHROPIC_AUTH_TOKEN=resolved:keychain:ok/router") || !strings.Contains(got, "BASE=http://buildbox/v1") || !strings.Contains(got, "ANTHROPIC_BASE_URL=http://localhost:4000/v1") {
 		t.Fatalf("claude did not get the resolved value:\n%s", got)
 	}
 	if strings.Contains(got, "stale-from-the-shell") {

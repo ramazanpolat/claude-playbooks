@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
@@ -120,6 +121,9 @@ type sandboxTarget struct {
 	rootPath   string            // absolute root to mount (contains configPath)
 	manifest   *manifest.Sandbox // [sandbox] defaults, may be nil
 	backend    string            // resolved backend name
+	// noLoginAccount names the launch's account when it uses no Claude
+	// login: none may be reachable for the run (PrepareLaunchEnvFor).
+	noLoginAccount string
 }
 
 var sandboxNameClean = regexp.MustCompile(`[^A-Za-z0-9.+-]+`)
@@ -717,7 +721,10 @@ func (b sbxBackend) attach(name string, env []string, tty bool, command string) 
 	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}
-	args = append(args, name, "bash", "-lc", command)
+	// A plain shell: the profile is read for PATH only (claudeCommand), and
+	// no startup file runs either (BASH_ENV, ENV), so nothing in the
+	// sandbox's environment can change what the launch passes.
+	args = append(args, name, "env", "-u", "BASH_ENV", "-u", "ENV", "bash", "-c", command)
 	c := exec.Command(b.bin, args...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
@@ -797,9 +804,24 @@ func isSandboxLoginLink(configPath string, backend sandboxBackend) bool {
 // in is purged, as for an isolated playbook: inside, nothing authenticates
 // as that account until /login.
 func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manifest.Env) (env []string, loginPath string, err error) {
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(t.configPath, layers)
+	if t.noLoginAccount != "" {
+		// Checked before anything is changed: a login set aside would still
+		// be on the mount.
+		if err := auth.SandboxAccountLoginRefusal(t.configPath, t.label, t.noLoginAccount); err != nil {
+			return nil, "", err
+		}
+	}
+	launchEnv, syncErr := auth.PrepareLaunchEnvFor(t.configPath, layers, t.noLoginAccount)
 	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		return nil, "", syncErr
+	}
+	if t.noLoginAccount != "" {
+		// Isolation detached the shared link; any link still here (one into
+		// an earlier sandbox's login, which dangles on the host) would
+		// resolve inside.
+		if info, err := os.Lstat(auth.StorePath(t.configPath)); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, "", fmt.Errorf("%s: its %s links to a login, and account %s does not use one; inside the sandbox the link would reach it. /logout in it once (or remove the link), then launch again", t.label, auth.CredentialsFileName, t.noLoginAccount)
+		}
 	}
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
@@ -958,6 +980,10 @@ func machineLoginInside(mount string) string {
 	if profiles, err := filepath.EvalSymlinks(envset.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
 		return "the registry's env sets " + profiles
 	}
+	// So are its accounts, whose credentials may be stored AS PLAINTEXT.
+	if accounts, err := filepath.EvalSymlinks(account.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, accounts) {
+		return "the registry's accounts " + accounts
+	}
 	return ""
 }
 
@@ -976,6 +1002,9 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		return false, fmt.Errorf("%s is the machine's Claude config directory: a sandbox would mount the machine login. Sandbox a playbook or another directory", t.configPath)
 	}
 	env, loginPath, err := prepareSandboxEnv(t, backend, layers)
+	// A token run may have set the playbook's own login aside: it comes back
+	// when the launch returns (internal/auth/own_login.go).
+	defer auth.EndLaunch(t.configPath)
 	if err != nil {
 		return false, err
 	}
@@ -1167,7 +1196,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	for _, a := range claudeArgs {
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
-	command := "cd " + shell.QuoteArg(workdir) + " && exec claude"
+	command := claudeCommand(workdir, env)
 	if loginPath != "" {
 		// The sandbox-local login directory must exist for /login to write
 		// through the store link; created as the sandbox user, inside.
@@ -1179,6 +1208,39 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	tty := isTerminal(os.Stdin) && isTerminal(os.Stdout)
 	runErr := backend.attach(name, env, tty, command)
 	return true, preserveExitCode(runErr)
+}
+
+// accountEnvCommand is the `env` command that starts claude inside the
+// sandbox: every reserved variable the launch does not pass is removed, so
+// one the sandbox's own environment carries (a placeholder, a leftover)
+// never stands in for the account. What the launch passes reaches claude as
+// passed: claude starts from a plain shell (sbxBackend.attach), and the
+// sandbox's login shell, read only for its PATH (claudeCommand), never runs
+// in the shell that starts it.
+func accountEnvCommand(env []string) string {
+	passed := map[string]bool{}
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		passed[k] = true
+	}
+	parts := []string{"env"}
+	for _, k := range account.Reserved {
+		if !passed[k] {
+			parts = append(parts, "-u", k)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// claudeCommand starts claude in workdir with the launch's environment: the
+// PATH comes from the sandbox's login shell (where an installer puts
+// claude), read in a subshell with no stdin whose last output line is
+// taken, so nothing else the profile sets reaches the run. Every step is
+// joined with &&: a workdir it cannot enter starts nothing.
+func claudeCommand(workdir string, env []string) string {
+	return "cd " + shell.QuoteArg(workdir) +
+		` && p="$(bash -lc 'printf "\n%s" "$PATH"' </dev/null 2>/dev/null | tail -n 1)" && { [ -n "$p" ] || p="$PATH"; } && exec ` +
+		accountEnvCommand(env) + ` PATH="$p" claude`
 }
 
 // rewriteHostEndpoint points an ANTHROPIC_BASE_URL at localhost (the

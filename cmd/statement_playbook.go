@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -132,9 +133,11 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 			continue
 		}
 		switch c.Kind {
+		case grammar.SetProperties:
+			// login and global_instructions are the creation's own.
 		case grammar.From, grammar.Branch, grammar.Subdir, grammar.Link,
-			grammar.Launcher, grammar.NoLauncher, grammar.SetProperties:
-			// the creation's own: login and global_instructions are SetProperties
+			grammar.Launcher, grammar.NoLauncher:
+			// the creation's own
 		case grammar.SetSandboxKeys:
 			// always is the creation's (with the isolated login); the other
 			// keys are an ALTER of the new playbook.
@@ -158,6 +161,13 @@ func createPlaybookStatement(r *stmtRun, st *grammar.Stmt) error {
 		if c.Kind == grammar.UseEnv {
 			for _, n := range c.Names {
 				if err := r.requireEnv(envset.Dir(config.ResolvePlaybooksDir()), n); err != nil {
+					return err
+				}
+			}
+		}
+		if c.Kind == grammar.UseAccount {
+			for _, n := range c.Names {
+				if _, err := r.requireAccount(account.Dir(config.ResolvePlaybooksDir()), n); err != nil {
 					return err
 				}
 			}

@@ -34,6 +34,8 @@ const (
 	Defaults  Object = "DEFAULTS"
 	Playbooks Object = "PLAYBOOKS"
 	Envs      Object = "ENVS"
+	Account   Object = "ACCOUNT"  // since v4.2.0: where requests go and how they authenticate
+	Accounts  Object = "ACCOUNTS" // SHOW ACCOUNTS
 	All       Object = "ALL"      // SHOW CREATE ALL
 	Sessions  Object = "SESSIONS" // SHOW SESSIONS: the live Claude Code sessions of cpb's config dirs
 )
@@ -53,6 +55,12 @@ const (
 	DropEnv     Kind = "DROP ENV"    // DROP ENV a b ...
 	ReplaceEnv  Kind = "REPLACE ENV" // REPLACE ENV old WITH new: Names is [old, new]
 	RenameTo    Kind = "RENAME TO"   // RENAME TO n
+	// Accounts (since v4.2.0): USE ACCOUNT a, b in ALTER PLAYBOOK, CREATE
+	// PLAYBOOK and ALTER DEFAULTS; an account's SET pairs (Settings, a
+	// credential's reference in Ref) and RESET keys.
+	UseAccount   Kind = "USE ACCOUNT"
+	SetAccount   Kind = "SET <account key>"
+	ResetAccount Kind = "RESET <account key>"
 	// The launcher property: SET launcher = '<name>', SET launcher = ''
 	// (none), RESET launcher (back to the playbook's name).
 	Launcher        Kind = "SET launcher"

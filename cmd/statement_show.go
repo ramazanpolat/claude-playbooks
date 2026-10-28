@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -86,8 +88,18 @@ type playbookJSON struct {
 	// for every other.
 	Play *playRecordJSON `json:"play"`
 	// Apply is the [apply] record of a playbook an APPLY gave name-less
-	// statements, null for every other. Last.
+	// statements, null for every other.
 	Apply *applyRecordJSON `json:"apply"`
+	// Account is which Claude credential a launch uses and where it comes
+	// from (v4.2.0): auth_mode, token_source, token_kind, token_blocked,
+	// flattened. SELECT appends them after apply.
+	auth.Account
+	// Accounts are the accounts the playbook may run on (USE ACCOUNT), the
+	// first by default; RunsOn is the one a launch with no flags runs on,
+	// "machine" for the implicit one, null when the account it names
+	// cannot be resolved, or is not read (v4.2.0). Last.
+	Accounts []string `json:"accounts"`
+	RunsOn   *string  `json:"account"`
 }
 
 // statuslineJSON is a playbook's status line (settings.json statusLine):
@@ -180,9 +192,11 @@ type helperJSON struct {
 // defaultsJSON is DEFAULTS: its env sets and its property, secret_helper,
 // the command in effect, with where it comes from beside it.
 type defaultsJSON struct {
-	Envs             []string `json:"envs"`
-	SecretHelper     *string  `json:"secret_helper"`
-	SecretHelperFrom *string  `json:"secret_helper_from"`
+	Envs []string `json:"envs"`
+	// Account is the DEFAULTS account (v4.2.0); null: none, the machine's.
+	Account          *string `json:"account"`
+	SecretHelper     *string `json:"secret_helper"`
+	SecretHelperFrom *string `json:"secret_helper_from"`
 }
 
 func defaultsOf(names []string, h *helperJSON) defaultsJSON {
@@ -209,6 +223,8 @@ type explainJSON struct {
 	// runs with.
 	Login              string `json:"login"`
 	GlobalInstructions string `json:"global_instructions"`
+	// Account is SHOW's, flattened (v4.2.0).
+	auth.Account
 }
 
 // agentJSON is the agent a launch starts as, when the playbook names one.
@@ -307,6 +323,8 @@ func readStatement(st *grammar.Stmt) error {
 		return showSessions(st)
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
 		return showEnvs(playbooksDir, dir, st)
+	case st.Object == grammar.Account, st.Object == grammar.Accounts:
+		return showAccounts(playbooksDir, st)
 	case st.Object == grammar.Defaults:
 		names, err := envset.Defaults(dir)
 		if err != nil {
@@ -317,17 +335,22 @@ func readStatement(st *grammar.Stmt) error {
 			return err
 		}
 		v := defaultsOf(names, helper)
+		def, err := account.Default(account.Dir(playbooksDir))
+		if err != nil {
+			return fmt.Errorf("the DEFAULTS account cannot be read: %w", err)
+		}
+		v.Account = optStr(def)
 		if st.JSON {
 			return printJSON(v)
 		}
-		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Secret helper", humanHelper(helper)}})
+		printLabels([][2]string{{"Env sets", listOrNone(v.Envs)}, {"Account", deref(v.Account, account.Machine+" (none set)")}, {"Secret helper", humanHelper(helper)}})
 		return nil
 	}
 	return fmt.Errorf("cannot run %s", st.String())
 }
 
 func describePlaybook(pb *playbook.Playbook) playbookJSON {
-	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Vars: []varJSON{}, Sandbox: describeSandbox(nil),
+	v := playbookJSON{Name: pb.Name, Path: pb.Path, Envs: []string{}, Accounts: []string{}, Vars: []varJSON{}, Sandbox: describeSandbox(nil),
 		Marketplaces: []marketplaceJSON{}, Plugins: []pluginJSON{}, MCPServers: describeMCP(pb.Path, pb.Manifest),
 		Skills: describeSkills(pb.Manifest)}
 	if pb.Manifest != nil && pb.Manifest.Play != nil {
@@ -387,10 +410,26 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	}
 	if m.Env != nil {
 		v.Envs = nonNil(m.Env.Sets)
+		v.Accounts = nonNil(m.Env.Accounts)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
+	}
+	if showAccount {
+		v.Account = auth.AccountOf(pb.Path)
+		var list []string
+		if m != nil && m.Env != nil {
+			list = m.Env.Accounts
+		}
+		if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil {
+			v.RunsOn = &sel.Name
+		}
 	}
 	return v
 }
+
+// showAccount is false while cpb ask's tool runs a SHOW: the account columns
+// read the token file and the login store, and the tool touches no
+// credential (it reports no auth class, so it needs none of them).
+var showAccount = true
 
 // layerVars lists one layer's own entries, sorted: literals and
 // references by key, then blocked.
@@ -708,7 +747,8 @@ func explainPlaybook(playbooksDir, dir string, st *grammar.Stmt) error {
 		model := launchModel(pb, vars)
 		pv := describePlaybook(pb)
 		return printJSON(explainJSON{Playbook: pb.Name, Vars: vars, SecretHelper: helper, Plugins: plugins, Agent: agent, MCPServers: mcpNames(pb),
-			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions})
+			Tools: pv.Tools, Model: model, Route: launchRoute(pb, origins, model), Login: pv.Login, GlobalInstructions: pv.GlobalInstructions,
+			Account: pv.Account})
 	}
 	if len(vars) == 0 {
 		fmt.Printf("A launch of %s changes no environment variables.\n", pb.Name)
@@ -759,6 +799,37 @@ func printLaunchSandbox(pb *playbook.Playbook) {
 		fmt.Println("Login: isolated, shares nothing with ~/.claude: no link to its login and no machine token; /login once in it (SET login = 'shared' shares it again)")
 	}
 	fmt.Println(globalInstructionsLine(globalInstructionsStateOf(pb.Path)))
+	// The account a launch with no flags runs on, or why it would be
+	// refused (the same checks a launch makes).
+	wd, _ := os.Getwd()
+	if acct, err := planAccount(pb.Path, pb.Name, nil, wd, nil); err != nil {
+		fmt.Printf("Account: a launch would be refused: %s\n", err)
+	} else {
+		fmt.Printf("Account: %s\n", acct.sel.Describe())
+		if acct.sel.Account == nil {
+			if line := accountLine(v.Account); line != "" {
+				fmt.Println(line)
+			}
+		}
+	}
+}
+
+// accountLine is EXPLAIN's line for the Claude token a launch uses, "" when
+// it uses none and blocks none.
+func accountLine(a auth.Account) string {
+	how := ""
+	if a.TokenKind != nil && *a.TokenKind == "reference" {
+		how = ", by reference"
+	}
+	switch {
+	case a.TokenSource == auth.TokenSourceAccount:
+		return "Claude token: the account's" + how
+	case a.TokenSource == auth.TokenSourceFile:
+		return "Claude token: the machine's token file"
+	case a.TokenBlocked:
+		return "Claude token: blocked; a launch uses the stored login"
+	}
+	return ""
 }
 
 // helperInEffect is the configured secret helper for --json, nil if none.
@@ -893,6 +964,16 @@ func launchModel(pb *playbook.Playbook, vars []varJSON) *modelJSON {
 	}
 	if m := describePlaybook(pb).Model; m != nil {
 		return &modelJSON{Name: *m, From: "playbook settings"}
+	}
+	// Below the settings: the account's default (ANTHROPIC_DEFAULT_MODEL).
+	var list []string
+	if pb.Manifest != nil && pb.Manifest.Env != nil {
+		list = pb.Manifest.Env.Accounts
+	}
+	if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil && sel.Account != nil {
+		if m := sel.Account.ModelOf("model"); m != "" {
+			return &modelJSON{Name: m, From: "account " + sel.Name}
+		}
 	}
 	return nil
 }

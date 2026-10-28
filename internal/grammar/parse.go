@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
@@ -22,7 +23,7 @@ func init() {
 	for _, w := range []string{
 		"CREATE", "ALTER", "DROP", "SHOW", "EXPLAIN", "APPLY",
 		"OR", "REPLACE", "IF", "NOT", "EXISTS",
-		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "DEFAULTS", "ALL",
+		"PLAYBOOK", "PLAYBOOKS", "ENV", "ENVS", "DEFAULTS", "ALL", "ACCOUNT", "ACCOUNTS",
 		"SET", "VAR", "FROM", "BLOCK", "UNSET", "DESCRIBE",
 		"USE", "ADD", "FIRST", "LAST", "BEFORE", "AFTER",
 		"RENAME", "TO", "WITH",
@@ -178,6 +179,7 @@ var (
 	alterPlaybookStarters  = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "BLOCK", "UNSET", "RENAME", "ALLOW", "DENY", "RESET"}
 	defaultsStarters       = []string{"USE", "ADD", "DROP", "REPLACE", "SET", "UNSET", "RESET"}
 	createPlaybookStarters = []string{"FROM", "BRANCH", "SUBDIR", "LINK", "SET", "RESET", "USE"}
+	accountStarters        = []string{"SET", "RESET"}
 )
 
 var (
@@ -206,6 +208,9 @@ type parser struct {
 	defaults bool
 	// creating: a CREATE PLAYBOOK statement, which has no SET VAR.
 	creating bool
+	// account: a CREATE or ALTER ACCOUNT statement, whose keys are an
+	// account's.
+	account bool
 
 	tried   []string // what was acceptable at position triedAt
 	triedAt int
@@ -330,7 +335,7 @@ func (p *parser) take(what, placeholder string) (Token, *Error) {
 	return t, nil
 }
 
-var placeholders = map[Object]string{Playbook: "<playbook>", Env: "<env>"}
+var placeholders = map[Object]string{Playbook: "<playbook>", Env: "<env>", Account: "<account>"}
 
 // name reads an object name. A new name (CREATE, RENAME TO) may not be a
 // keyword; an existing one may, since the slot is unambiguous.
@@ -350,8 +355,11 @@ func (p *parser) name(obj Object, isNew bool) (string, *Error) {
 
 func checkName(obj Object, t Token, isNew bool) *Error {
 	label := "a " + strings.Trim(placeholders[obj], "<>")
-	if obj == Env {
+	switch obj {
+	case Env:
 		label = "an env set"
+	case Account:
+		label = "an account"
 	}
 	if t.Text == "" {
 		return errAt(t.Pos, "empty name for "+label)
@@ -363,6 +371,17 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 	// may be a value, a reference or a pasted token.
 	if obj == Env && manifest.ValidateSetName(t.Text) != nil {
 		return errAt(t.Pos, "invalid env set name: use letters, digits, dots, dashes and underscores")
+	}
+	if obj == Account {
+		// A new account may not take the implicit account's name; an
+		// existing one is named as the env set rule allows (machine is one).
+		if isNew {
+			if err := account.ValidateName(t.Text); err != nil {
+				return errAt(t.Pos, err.Error())
+			}
+		} else if manifest.ValidateSetName(t.Text) != nil {
+			return errAt(t.Pos, "invalid account name: use letters, digits, dots, dashes and underscores")
+		}
 	}
 	if obj == Playbook && isNew && !playbook.NewNamePattern.MatchString(t.Text) {
 		return errAt(t.Pos, "invalid playbook name: use letters, digits, underscores and dashes (a name is one safe word)")
@@ -487,13 +506,18 @@ func (p *parser) create(s *Stmt) *Error {
 			s.OrAlter = true
 		}
 	}
-	switch p.kw("PLAYBOOK", "ENV") {
+	switch p.kw("PLAYBOOK", "ENV", "ACCOUNT") {
 	case "":
 		return p.fail("CREATE needs an object")
 	case "PLAYBOOK":
 		s.Object = Playbook
 	case "ENV":
 		s.Object = Env
+	case "ACCOUNT":
+		s.Object = Account
+	}
+	if s.OrAlter && s.Object == Account {
+		return errAt(s.Pos, "OR ALTER applies to PLAYBOOK only: CREATE OR REPLACE ACCOUNT states an account whole")
 	}
 	if s.OrReplace && s.Object == Playbook {
 		return errAt(s.Pos, "OR REPLACE applies to ENV only: a playbook is never re-created in place; CREATE OR ALTER PLAYBOOK applies the SET list to one that exists")
@@ -518,6 +542,10 @@ func (p *parser) create(s *Stmt) *Error {
 	if s.Object == Env {
 		p.starters = envStarters
 		return p.clauses(s, p.envClause, 0)
+	}
+	if s.Object == Account {
+		p.starters, p.account = accountStarters, true
+		return p.clauses(s, p.accountClause, 1)
 	}
 	p.starters = createPlaybookStarters
 	if err := p.clauses(s, p.createPlaybookClause, 0); err != nil {
@@ -551,7 +579,7 @@ func (p *parser) ifNotExists(s *Stmt) *Error {
 }
 
 func (p *parser) alter(s *Stmt) *Error {
-	switch p.kw("PLAYBOOK", "ENV", "DEFAULTS") {
+	switch p.kw("PLAYBOOK", "ENV", "DEFAULTS", "ACCOUNT") {
 	case "":
 		return p.fail("ALTER needs an object")
 	case "PLAYBOOK":
@@ -560,6 +588,15 @@ func (p *parser) alter(s *Stmt) *Error {
 	case "ENV":
 		s.Object = Env
 		p.starters = envStarters
+	case "ACCOUNT":
+		s.Object = Account
+		p.starters, p.account = accountStarters, true
+		name, err := p.name(Account, false)
+		if err != nil {
+			return err
+		}
+		s.Name = name
+		return p.clauses(s, p.accountClause, 1)
 	case "DEFAULTS":
 		s.Object = Defaults
 		p.starters = defaultsStarters
@@ -586,13 +623,15 @@ func (p *parser) alter(s *Stmt) *Error {
 }
 
 func (p *parser) drop(s *Stmt) *Error {
-	switch p.kw("PLAYBOOK", "ENV") {
+	switch p.kw("PLAYBOOK", "ENV", "ACCOUNT") {
 	case "":
 		return p.fail("DROP needs an object")
 	case "PLAYBOOK":
 		s.Object = Playbook
 	case "ENV":
 		s.Object = Env
+	case "ACCOUNT":
+		s.Object = Account
 	}
 	if p.kw("IF") != "" {
 		if p.kw("EXISTS") == "" {
@@ -615,13 +654,15 @@ func (p *parser) drop(s *Stmt) *Error {
 func (p *parser) show(s *Stmt) *Error {
 	if p.kw("CREATE") != "" {
 		s.ShowCreate = true
-		switch p.kw("PLAYBOOK", "ENV", "ALL") {
+		switch p.kw("PLAYBOOK", "ENV", "ACCOUNT", "ALL") {
 		case "":
 			return p.fail("SHOW CREATE needs an object")
 		case "PLAYBOOK":
 			s.Object = Playbook
 		case "ENV":
 			s.Object = Env
+		case "ACCOUNT":
+			s.Object = Account
 		case "ALL":
 			s.Object = All
 		}
@@ -643,12 +684,12 @@ func (p *parser) show(s *Stmt) *Error {
 	// not an object is still an error, never a silent fallback, and
 	// completion still offers every object here.
 	if p.atEnd() || p.at("--json") {
-		p.kw("PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "SESSIONS")
+		p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS")
 		s.Object = Playbooks
 		p.jsonFlag(s)
 		return nil
 	}
-	switch w := p.kw("PLAYBOOKS", "ENVS", "DEFAULTS", "PLAYBOOK", "ENV", "SESSIONS"); w {
+	switch w := p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS"); w {
 	case "":
 		return p.fail("SHOW needs an object")
 	case "SESSIONS":
@@ -656,7 +697,7 @@ func (p *parser) show(s *Stmt) *Error {
 		if err := p.forPlaybook(s); err != nil {
 			return err
 		}
-	case "PLAYBOOK", "ENV":
+	case "PLAYBOOK", "ENV", "ACCOUNT":
 		s.Object = Object(w)
 		name, err := p.name(s.Object, false)
 		if err != nil {
@@ -836,7 +877,7 @@ func (p *parser) playbookClause() (*Clause, *Error) {
 	case "":
 		return nil, p.unexpected()
 	case "USE":
-		return c, p.envList(c, w)
+		return c, p.useList(c)
 	case "ADD", "DROP":
 		switch p.kw("ENV", "MARKETPLACE", "PLUGIN", "MCP", "SKILL", "MODEL") {
 		case "ENV":
@@ -988,7 +1029,9 @@ func (p *parser) defaultsClause() (*Clause, *Error) {
 	switch w := p.kw(defaultsStarters...); w {
 	case "":
 		return nil, p.unexpected()
-	case "USE", "DROP":
+	case "USE":
+		return c, p.useList(c)
+	case "DROP":
 		return c, p.envList(c, w)
 	case "ADD":
 		return c, p.addEnv(c)
@@ -1137,7 +1180,7 @@ func (p *parser) createPlaybookClause() (*Clause, *Error) {
 		// are refused by name rather than read as env set names.
 		saved := p.starters
 		p.starters = append(slices.Clone(saved), "ADD", "DROP", "REPLACE")
-		err := p.envList(c, w)
+		err := p.useList(c)
 		p.starters = saved
 		if err == nil && (p.at("ADD") || p.at("DROP") || p.at("REPLACE")) {
 			err = p.fail(strings.ToUpper(p.toks[p.i].Text) + " ENV is for ALTER PLAYBOOK; CREATE takes the whole list: USE ENV <env> ...")
@@ -1288,7 +1331,7 @@ func validate(s *Stmt) *Error {
 	keys := map[string]bool{}
 	envs := map[string]bool{}
 	once := map[Kind]bool{
-		Description: true, UseEnv: true, RenameTo: true,
+		Description: true, UseEnv: true, UseAccount: true, RenameTo: true,
 		Launcher: true, NoLauncher: true, DefaultLauncher: true, From: true, Branch: true, Subdir: true, Link: true,
 		SetHelper: true, UnsetHelper: true, SetAgent: true, UnsetAgent: true,
 		SetStatusline: true, UnsetStatusline: true, SetModel: true, UnsetModel: true,
@@ -1303,7 +1346,7 @@ func validate(s *Stmt) *Error {
 		for _, v := range c.Settings {
 			// A property may be set or deleted in several SET and RESET
 			// clauses, but each key once.
-			if c.Kind == SetProperties || c.Kind == ResetProperties {
+			if c.Kind == SetProperties || c.Kind == ResetProperties || c.Kind == SetAccount || c.Kind == ResetAccount {
 				if settings["property "+v.Key] {
 					return errAt(c.Pos, v.Key+" is named twice in one statement")
 				}
@@ -1335,7 +1378,7 @@ func validate(s *Stmt) *Error {
 			what := map[Kind]string{AddMarketplace: "marketplace", DropMarketplace: "marketplace",
 				AddPlugin: "plugin", DropPlugin: "plugin", AddMCP: "MCP server", DropMCP: "MCP server",
 				AllowTool: "tool rule", DenyTool: "tool rule", UnsetTool: "tool rule",
-				AddSkill: "skill", DropSkill: "skill", AddModel: "model", DropModel: "model"}[c.Kind]
+				AddSkill: "skill", DropSkill: "skill", AddModel: "model", DropModel: "model", UseAccount: "account"}[c.Kind]
 			if what == "" {
 				what = "env set"
 			}
@@ -1386,8 +1429,8 @@ func validate(s *Stmt) *Error {
 			// Flatten: a property inside SET IF UNSET is refused like one
 			// outside it, before anything is linked.
 			for _, c := range Flatten(s.Clauses) {
-				if c.Kind == UseEnv {
-					return errAt(c.Pos, "USE ENV does not apply to LINK: a linked playbook's manifest belongs to the target")
+				if c.Kind == UseEnv || c.Kind == UseAccount {
+					return errAt(c.Pos, string(c.Kind)+" does not apply to LINK: a linked playbook's manifest belongs to the target")
 				}
 				if keys := c.deleteKeys(); keys != nil && c.Kind != DefaultLauncher {
 					return errAt(c.Pos, keys[0]+" does not apply to LINK: a linked playbook's manifest and settings.json belong to the target")
@@ -1419,6 +1462,9 @@ func validate(s *Stmt) *Error {
 		if pos, ok := seen[UnsetVar]; ok {
 			return errAt(pos, "UNSET has nothing to forget in a new env set")
 		}
+	}
+	if s.Object == Account && (s.Verb == Create || s.Verb == Alter) {
+		return validateAccount(s)
 	}
 	return nil
 }

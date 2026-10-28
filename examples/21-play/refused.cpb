@@ -3,4 +3,5 @@
 
 ALTER PLAYBOOK
   USE ENV work
-  SET VAR GITHUB_TOKEN=ghp_example AS PLAINTEXT;
+  SET VAR GITHUB_TOKEN=ghp_example AS PLAINTEXT
+  SET VAR ANTHROPIC_BASE_URL=https://router.example.net/v1;

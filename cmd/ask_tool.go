@@ -89,6 +89,9 @@ type rpcError struct {
 // ends. A notification (no id) gets no answer; an unknown method gets
 // "method not found", which is how a client learns what is not supported.
 func serveAskTool(in io.Reader, out io.Writer) error {
+	saved := showAccount
+	showAccount = false
+	defer func() { showAccount = saved }()
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	enc := json.NewEncoder(out)
@@ -280,7 +283,7 @@ func askToolCut(view string, v any) any {
 	case "env":
 		return askCutEnv(askMap(v))
 	case "defaults":
-		return askPick(askMap(v), "envs")
+		return askPick(askMap(v), "envs", "account")
 	case "sessions":
 		var out []any
 		self := askToolParent()

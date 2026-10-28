@@ -25,8 +25,15 @@ cpb run --sandbox --sandbox-fresh sre                     # throw the sandbox aw
 contains it (your home directory, say) is refused. A playbook that shares it runs
 with a login of its own inside: `cpb` says so on the first sandboxed launch, and
 one `/login` there gives the sandbox its own grant, kept inside the sandbox (gone
-with `--sandbox-fresh`, never written to your machine). A token from an env
-profile works as it does on the host.
+with `--sandbox-fresh`, never written to your machine). An account's
+`claude_token` works as it does on the host.
+
+On an account that uses no Claude login (a router's key, a Console key), a
+sandboxed launch is refused while the playbook holds a login of its own, in
+any form (a copy of one beside its store included): the playbook directory is
+mounted inside, so a login there would still be readable. A `--settings` for
+such a launch goes inline, as JSON: cpb cannot read a file inside the sandbox. `/logout` in it, run it unsandboxed (Linux sets the
+login aside for the run), or use another playbook.
 
 ## Always-on
 
@@ -60,13 +67,15 @@ lives on that host.
 
 ## Secrets
 
-API keys from your env sets never enter the sandbox either (profiles are the
-place for them: a key set directly on the playbook lives in its `.playbook`,
-which is on the mount, and a sandboxed launch refuses that). `cpb` registers them
-with `sbx` as proxy-injected secrets for the endpoint host and hands the sandbox a
-placeholder; the host-side proxy swaps the real key into the request headers on
-the way out, and only for that host. Rotate the key in the profile and the next
-launch updates it; remove it and the next launch revokes the mapping. A router on
+The key of the account a launch runs on never enters the sandbox either.
+Accounts live in the playbooks root, which is never mounted. `cpb` registers
+the account's `auth_token` or `api_key` with `sbx` as a proxy-injected secret
+for the endpoint host and hands the sandbox a placeholder; the host-side proxy
+swaps the real key into the request headers on the way out, and only for that
+host. Change the account's key and the next launch updates it; move the
+playbook to an account without one and the next launch revokes the mapping.
+An account whose key is a secret reference is refused in a sandbox in this
+release. A router on
 this machine works too: a base URL at `localhost` is rewritten to the sandbox's
 name for the host, and the policy and secret are registered the way the proxy
 matches them.
@@ -90,12 +99,17 @@ The sandbox is named `cpb-<playbook>` and reused across launches, so tools the
 agent installs and its own state persist until `--sandbox-fresh` or `sbx rm`.
 `--clone` counts only when the sandbox is created: to move an existing sandbox to
 clone mode, recreate it with `--sandbox-fresh`. The environment is the same one an
-ordinary launch computes (default profile, profiles, the playbook's block, one-off
-flags, the authentication decision), reduced to the variables those layers set
-plus the token and `CLAUDE_CONFIG_DIR`; nothing else of your shell reaches the
-sandbox. Network egress follows your `sbx` policy (balanced by default: model
-APIs, package managers, code hosts), widened per sandbox by the manifest and by
-the host of `ANTHROPIC_BASE_URL` when the playbook is routed elsewhere.
+ordinary launch computes (`DEFAULTS`, env sets, the playbook's block, one-off
+flags, the account, the authentication decision), reduced to the variables
+those layers set plus the token and `CLAUDE_CONFIG_DIR`; nothing else of your
+shell reaches the sandbox. After the sandbox's login shell has run, the launch
+starts `claude` from a plain shell: the sandbox's login shell is read for its
+`PATH` only, and every variable the account does not set is removed,
+credentials included, so a profile inside the sandbox can neither re-route
+the run nor slip a credential into it. Network
+egress follows your `sbx` policy (balanced by default: model APIs, package
+managers, code hosts), widened per sandbox by the manifest and by the host of
+the account's `base_url` when the playbook is routed elsewhere.
 
 ## Manifest block
 

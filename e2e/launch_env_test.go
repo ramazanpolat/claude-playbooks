@@ -34,6 +34,7 @@ const (
 	tokenFileEnv   = "CPB_OAUTH_TOKEN_FILE"
 	isolateEnv     = "CPB_ISOLATED_LOGIN"
 	dumpEnv        = "CPB_TEST_ENVDUMP"
+	storeDumpEnv   = "CPB_TEST_STOREDUMP"
 	securityLogEnv = "CPB_TEST_SECURITY_LOG"
 )
 
@@ -90,11 +91,16 @@ func shimDir(t *testing.T) string {
 	dir := t.TempDir()
 
 	stubs := map[string]string{
-		"claude": "#!/bin/sh\nenv > \"$" + dumpEnv + "\"\nexit 0\n",
+		// With storeDumpEnv set, the stub also copies the store as the
+		// session sees it, to prove what was readable during the run.
+		"claude": "#!/bin/sh\nenv > \"$" + dumpEnv + "\"\n" +
+			"if [ -n \"$" + storeDumpEnv + "\" ]; then cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$" + storeDumpEnv + "\" 2>/dev/null || : > \"$" + storeDumpEnv + "\"; fi\nexit 0\n",
 		// Records each interception so a test can prove the stub is the binary
 		// actually reached -- a stub silently bypassed by a PATH change would
 		// otherwise re-expose the real Keychain while every test still passed.
-		"security": "#!/bin/sh\necho \"$*\" >> \"$" + securityLogEnv + "\"\nexit 1\n",
+		// Exit 44 is errSecItemNotFound: a machine with no Claude item, so
+		// the presence probe answers absent rather than unreadable.
+		"security": "#!/bin/sh\necho \"$*\" >> \"$" + securityLogEnv + "\"\nexit 44\n",
 	}
 	for name, script := range stubs {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
@@ -204,7 +210,9 @@ func TestNonIsolatedReceivesToken(t *testing.T) {
 		}
 	})
 
-	t.Run("already exported wins over the file", func(t *testing.T) {
+	// A token exported in the shell never counts: the machine's token file
+	// decides (SPEC.md, "Token active?").
+	t.Run("the file wins over an exported token", func(t *testing.T) {
 		env := childEnv(t, root, launch{
 			env: []string{
 				tokenEnv + "=sk-ant-oat01-FROMENV",
@@ -212,8 +220,8 @@ func TestNonIsolatedReceivesToken(t *testing.T) {
 			},
 			args: []string{"run", "shared"},
 		})
-		if got := env[tokenEnv]; got != "sk-ant-oat01-FROMENV" {
-			t.Fatalf("child token = %q, want the exported token", got)
+		if got := env[tokenEnv]; got != "sk-ant-oat01-FROMFILE" {
+			t.Fatalf("child token = %q, want the file's token", got)
 		}
 	})
 }

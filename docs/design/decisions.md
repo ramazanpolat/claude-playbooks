@@ -11,6 +11,8 @@ record of why they are the rules. Newest last.
 | 2026-09-26 | A statement is whole or nothing: lifecycle clauses (`RENAME TO`, `LAUNCHER`) are not combined with environment clauses | Grammar |
 | 2026-09-26 | cpb defines a secret helper interface (`--check`, then exec) and never names or discovers a helper | Secrets |
 | 2026-09-26 | Keys cpb reads itself (`CLAUDE_CODE_OAUTH_TOKEN`) never take a reference | Secrets |
+| 2026-10-14/16 | An account is an env set holding `CLAUDE_CODE_OAUTH_TOKEN` by reference; the token leaves the refused list (v4.2.0); the Claude login or token never goes to another provider | Secrets |
+| 2026-10-16 | A token over an isolated playbook's own login: set aside for the run and restored on Linux; refused on macOS for good, since the login is a Keychain item cpb cannot move (D5) | Secrets |
 | 2026-09-26 | A credential-looking literal is refused; `AS PLAINTEXT` stores one knowingly | Secrets |
 | 2026-09-26 | Two senses of "playbook" are kept apart: the installed `PLAYBOOK`, and the playbook *file* | playbook.cpb |
 | 2026-09-26 | `APPLY` takes several files, validates every statement first, and writes nothing on any refusal | playbook.cpb |
@@ -30,3 +32,6 @@ record of why they are the rules. Newest last.
 | 2026-10-02 | cpb names no other tool: the default `CLAUDE.md` imports nothing, and the clause, field and warning about imports, the status line host rule and panels leave cpb; `SET STATUSLINE … IF UNSET` offers a status line without imposing one | Objects, Status line and model |
 | 2026-10-02 | No release is marked stable or not stable | — |
 | 2026-10-07 | cpb depends on no integration: its extension points are generic (`SET VAR`, `USE ENV`, `ADD PLUGIN`, `INCLUDE`), it never interprets a variable or a plugin, and a CI lint keeps integration names out of its code, tests and docs | [Integrations](integrations.md) |
+| 2026-10-27 | Superseding 2026-10-14/16: an account is its own object, `ACCOUNT`, one record of provider, address, identity, one credential and model names; every launch derives the routing, credential and model variables from it, and no other layer or settings file may set one (v4.2.0) | CREATE / ALTER / DROP ACCOUNT |
+| 2026-10-27 | Who may use which account: allow-lists on both sides (a playbook's `USE ACCOUNT`, an account's `access = 'listed'`), no block-lists; a source or recipe brings no account list | CREATE / ALTER / DROP ACCOUNT |
+| 2026-10-28 | A login that must stay out of a run and cannot be kept out refuses the launch on every system, never a warning; a sandboxed launch on an account that uses no Claude login is refused while the playbook holds a login of its own | CREATE / ALTER / DROP ACCOUNT |

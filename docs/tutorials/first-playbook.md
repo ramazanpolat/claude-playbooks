@@ -22,22 +22,17 @@ there makes leaves Anthropic, with what its `CLAUDE.md` holds, so give the
 route a playbook of its own, with its own login, and keep your Claude
 credentials out of it.
 
-First the router's variables, in an env set, a named group that any playbook
-can use:
-
-```bash
-cpb CREATE ENV router DESCRIPTION 'my model router' SET ANTHROPIC_BASE_URL=http://localhost:8080/v1 ANTHROPIC_MODEL=glm-5.3
-```
-
-The router's token does not belong in the set as text. Store it where a secret
-helper can read it, then refer to it. With the sample helper,
+First the route itself, an **account**: the router's address, its key, and
+its model names, in one record any playbook can run on. The router's key does
+not belong in it as text. Store it where a secret helper can read it, then
+refer to it. With the sample helper,
 [`cpb-secret-file`](../../examples/secret-helper/), copied onto your `PATH`:
 
 ```bash
 mkdir -p ~/.config/cpb-secrets && chmod 700 ~/.config/cpb-secrets
 (umask 077 && read -rs v && printf '%s' "$v" > ~/.config/cpb-secrets/router-token)
 cpb ALTER DEFAULTS SET secret_helper = cpb-secret-file
-cpb ALTER ENV router SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token'
+cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:8080/v1', auth_token FROM 'file:router-token', model = 'glm-5.3', description = 'my model router'
 ```
 
 `read -rs` waits for you to paste the token and does not echo it. cpb stores
@@ -48,27 +43,30 @@ password manager included ([Secrets](../../SPEC.md#secrets-optional)).
 Then the playbook:
 
 ```bash
-cpb CREATE PLAYBOOK routed SET login = 'isolated' USE ENV router
-cpb ALTER PLAYBOOK routed BLOCK VAR ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
+cpb CREATE PLAYBOOK routed SET login = 'isolated' USE ACCOUNT router
 cpb EXPLAIN PLAYBOOK routed
 routed
 ```
 
+- The account decides where `routed` sends its requests and with which key.
+  At launch cpb sets those variables from it and removes the ones your shell
+  exports, so your Anthropic credentials never follow it to the router.
 - `SET login = 'isolated'` gives `routed` a login of its own: your Claude
-  login and long-lived token never reach the router, and a `/login` in it never
-  lands in the machine's login.
-- `BLOCK VAR` keeps the Anthropic credentials your shell may export out of its
-  launches.
+  login and long-lived token never reach the router (on a shared playbook,
+  cpb refuses the launch), and a `/login` in it never lands in the machine's
+  login.
 - The `CLAUDE.md` that `CREATE PLAYBOOK` wrote imports nothing, and
   `~/.claude`'s `CLAUDE.md` stays out (`global_instructions = 'excluded'`, the
   default). Whatever you add to its own `CLAUDE.md` goes to the router
   ([example 15](../../examples/15-third-party-route/)).
 
-`EXPLAIN` lists every variable a launch of `routed` sets and the layer that
-decided it, with no credential shown. The playbook's own `SET VAR` wins over
-its env sets, a later set wins over an earlier one, and
-`ALTER DEFAULTS USE ENV …` puts sets under every playbook. Keep route sets out
-of `DEFAULTS`: there they would reach `scratch` too.
+`EXPLAIN` names the account and lists every variable a launch of `routed`
+sets and the layer that decided it, with no credential shown. Variables that
+are not an account's (a tool's settings, `MAX_THINKING_TOKENS`) go in **env
+sets**, named groups any playbook can use: the playbook's own `SET VAR` wins
+over its env sets, a later set wins over an earlier one, and `ALTER DEFAULTS
+USE ENV …` puts sets under every playbook. `ALTER DEFAULTS USE ACCOUNT …`
+names the account a playbook with none of its own runs on.
 
 ## 3. The file
 
@@ -76,8 +74,8 @@ of `DEFAULTS`: there they would reach `scratch` too.
 cpb SHOW CREATE ALL > playbook.cpb
 ```
 
-`playbook.cpb` now holds your machine as statements: env sets, `DEFAULTS`,
-playbooks. Every statement is safe to repeat, and no secret value is in it.
+`playbook.cpb` now holds your machine as statements: env sets, accounts,
+`DEFAULTS`, playbooks. Every statement is safe to repeat, and no secret value is in it.
 Commit it to your dotfiles.
 
 ## 4. Another machine

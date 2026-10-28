@@ -45,9 +45,10 @@ SET model = '<model>'         RESET model
 These are `settings.json` keys with no CLI, so cpb writes them into the
 playbook's `settings.json` and keeps every key it did not write. A rule is
 Claude Code's permission syntax, as typed, and sits in one list at most. The
-model is the playbook's default and the weakest choice: `ANTHROPIC_MODEL`,
-`--model` and `/model` all win over it, and `EXPLAIN PLAYBOOK` says which
-one decides. Example: [10](../../examples/10-tools-statusline-model/).
+model is the playbook's default: `--model` and `/model` win over it, and it
+wins over the default its account names; name an alias (`opus`, `sonnet`,
+`haiku`) and each account maps it to its provider's model. `EXPLAIN PLAYBOOK`
+says which one decides. Example: [10](../../examples/10-tools-statusline-model/).
 
 `SET statusline.command = …` always applies. A recipe that offers a status
 line without replacing one you chose writes `SET IF UNSET

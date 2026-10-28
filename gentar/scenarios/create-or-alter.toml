@@ -41,7 +41,7 @@ path = "~/baseline.cpb"
 [[verify.commands]]
 # The first apply created the playbook with the file's properties and
 # env list; SHOW CREATE states every key, the unset ones as RESET.
-command = '''grep -F "1 created, 0 changed" "$HOME/apply-1.out" && grep -F "CREATE OR ALTER PLAYBOOK sre" "$HOME/baseline.cpb" && grep -F "login = 'isolated'" "$HOME/baseline.cpb" && grep -F "RESET launcher" "$HOME/baseline.cpb" && grep -F "USE ENV acct-a;" "$HOME/baseline.cpb" && grep -F "model = 'claude-opus-5-5'" "$HOME/baseline.cpb" && echo created-ok'''
+command = '''grep -F "1 created, 0 changed" "$HOME/apply-1.out" && grep -F "CREATE OR ALTER PLAYBOOK sre" "$HOME/baseline.cpb" && grep -F "login = 'isolated'" "$HOME/baseline.cpb" && grep -F "RESET launcher" "$HOME/baseline.cpb" && grep -F "USE ENV acct-a" "$HOME/baseline.cpb" && grep -F "USE ACCOUNT '';" "$HOME/baseline.cpb" && grep -F "model = 'claude-opus-5-5'" "$HOME/baseline.cpb" && echo created-ok'''
 contains = "created-ok"
 
 [[verify.commands]]

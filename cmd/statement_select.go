@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
@@ -48,7 +49,7 @@ var versionRe = regexp.MustCompile(versionPattern)
 
 // playbooksLateColumns are the PLAYBOOKS columns clickhouse-local's
 // SELECT * lists after the computed version_tuple, where they were appended.
-var playbooksLateColumns = []string{"play", "apply"}
+var playbooksLateColumns = []string{"play", "apply", "auth_mode", "token_source", "token_kind", "token_blocked", "accounts", "account"}
 
 // versionTupleSQL is version_tuple as a ClickHouse expression.
 const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "') = '', CAST([] AS Array(UInt32)), " +
@@ -57,11 +58,13 @@ const versionTupleSQL = "if(extract(ifNull(version, ''), '" + versionPattern + "
 var selectTables = map[string]selectTable{
 	"PLAYBOOKS": {
 		columns: []string{"name", "version", "version_tuple", "description", "homepage", "author", "path", "last_used", "source", "migrate", "linked", "launcher", "envs", "vars", "sandbox", "login", "global_instructions",
-			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "model", "model_picker", "play", "apply"},
+			"marketplaces", "plugins", "agent", "mcp_servers", "tools", "skills", "statusline", "model", "model_picker", "play", "apply",
+			"auth_mode", "token_source", "token_kind", "token_blocked", "accounts", "account"},
 		structure: "name String, version Nullable(String), description Nullable(String), homepage Nullable(String), author Nullable(String), " +
 			"path String, last_used Nullable(DateTime64(3, 'UTC')), source JSON, migrate Nullable(String), linked Nullable(String), " +
 			"launcher Nullable(String), envs Array(String), vars Array(JSON), sandbox JSON, login String, global_instructions String, marketplaces Array(JSON), plugins Array(JSON), " +
-			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline JSON, model Nullable(String), model_picker JSON, play JSON, apply JSON",
+			"agent Nullable(String), mcp_servers Array(JSON), tools JSON, skills Array(JSON), statusline JSON, model Nullable(String), model_picker JSON, play JSON, apply JSON, " +
+			"auth_mode String, token_source String, token_kind Nullable(String), token_blocked Bool, accounts Array(String), account Nullable(String)",
 		comments: map[string]string{
 			"name":                "The playbook's name.",
 			"version":             "The manifest's version; null when it has none.",
@@ -91,6 +94,12 @@ var selectTables = map[string]selectTable{
 			"model_picker":        "The model picker: mode (only or append) and options; null when unset.",
 			"play":                "The [play] record of a playbook cpb play --keep built: ref, url, sha256, played_at; null for every other.",
 			"apply":               "The [apply] record of a playbook an APPLY gave name-less statements: files, to, sha256, applied_at; null for every other.",
+			"auth_mode":           "How a launch authenticates: isolated-login, token, playbook-token, shared-login, account (the account's own credential, no Claude login), or error.",
+			"token_source":        "Where the Claude token comes from: none, account (the launch's account), file (the machine's token file), or unknown.",
+			"token_kind":          "value or reference; null when the launch uses no token.",
+			"token_blocked":       "True when the playbook blocks the Claude token (BLOCK VAR CLAUDE_CODE_OAUTH_TOKEN), so a launch uses a stored login.",
+			"accounts":            "The accounts the playbook may run on (USE ACCOUNT), the first by default; empty: any account open to every playbook.",
+			"account":             "The account a launch with no flags runs on, machine for the implicit one; null when the account it names cannot be resolved (EXPLAIN says why).",
 		},
 		rows: playbookRows,
 	},
@@ -148,10 +157,11 @@ var selectTables = map[string]selectTable{
 		rows: sessionRows,
 	},
 	"DEFAULTS": {
-		columns:   []string{"envs", "secret_helper", "secret_helper_from"},
-		structure: "envs Array(String), secret_helper Nullable(String), secret_helper_from Nullable(String)",
+		columns:   []string{"envs", "account", "secret_helper", "secret_helper_from"},
+		structure: "envs Array(String), account Nullable(String), secret_helper Nullable(String), secret_helper_from Nullable(String)",
 		comments: map[string]string{
 			"envs":               "The env sets every launch applies first, in order.",
+			"account":            "The DEFAULTS account (USE ACCOUNT), for playbooks that name none; null when none is set (they run on machine).",
 			"secret_helper":      "The command that resolves secret references (SET secret_helper); null when none is configured.",
 			"secret_helper_from": "Where the secret helper is set: setting or CPB_SECRET_HELPER; null when none is configured.",
 		},
@@ -272,7 +282,13 @@ func defaultsRows() ([]any, []playbook.Unreadable, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return []any{defaultsOf(names, helper)}, nil, nil
+	v := defaultsOf(names, helper)
+	def, err := account.Default(account.Dir(config.ResolvePlaybooksDir()))
+	if err != nil {
+		return nil, nil, fmt.Errorf("the DEFAULTS account cannot be read: %w", err)
+	}
+	v.Account = optStr(def)
+	return []any{v}, nil, nil
 }
 
 var builtinSelect = regexp.MustCompile(`(?is)^\s*SELECT\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+FROM\s+([A-Za-z_]+)\s*;?\s*$`)

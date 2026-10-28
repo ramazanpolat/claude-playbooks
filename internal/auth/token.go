@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,19 +35,15 @@ func OAuthTokenFile() string {
 	return filepath.Join(home, ".config", "claude-code", "oauth-token")
 }
 
-// TokenActive reports whether a long-lived OAuth token governs authentication
-// for child claude processes. Two cases count as active:
-//
-//   - The token is already exported in this process's environment. Then inject
-//     is "" (children inherit it via os.Environ()) and active is true.
-//   - A non-empty token file exists. Then inject is the token to add to the
-//     child environment and active is true.
+// TokenActive reports whether the machine's long-lived OAuth token governs
+// authentication for child claude processes: a non-empty token file. Then
+// inject is the token to add to the child environment and active is true.
+// A token exported in this process's environment never counts (v4.2.0): it
+// is an account's variable, which every launch removes, so only the file
+// and an account supply one.
 //
 // When no token is available, inject is "" and active is false.
 func TokenActive() (inject string, active bool) {
-	if os.Getenv(OAuthTokenEnv) != "" {
-		return "", true
-	}
 	f := OAuthTokenFile()
 	if f == "" {
 		return "", false
@@ -74,10 +71,16 @@ func TokenActive() (inject string, active bool) {
 //   - env.set supplies CLAUDE_CODE_OAUTH_TOKEN: that value is the token for
 //     this install, injected in place of the file's. An empty value counts as
 //     inactive, matching the file rule.
+//   - env.refs supplies it: the token is active and nothing is injected here;
+//     the secret helper sets it when it execs claude (cmd/secret.go), so cpb
+//     never holds the value.
 //   - otherwise TokenActive decides.
 func resolveToken(menv *manifest.Env) (inject string, active bool) {
 	if menv.Blocks(OAuthTokenEnv) {
 		return "", false
+	}
+	if tokenRef(menv) {
+		return "", true
 	}
 	if menv != nil {
 		if _, ok := menv.Set[OAuthTokenEnv]; ok {
@@ -95,6 +98,19 @@ func manifestToken(menv *manifest.Env) string {
 		return ""
 	}
 	return strings.TrimSpace(menv.Set[OAuthTokenEnv])
+}
+
+// tokenRef reports whether the flattened block supplies the token by
+// reference (CREATE ENV acct SET CLAUDE_CODE_OAUTH_TOKEN FROM '<ref>'). The
+// value is resolved by the secret helper at exec and never reaches cpb.
+func tokenRef(menv *manifest.Env) bool {
+	return menv != nil && strings.TrimSpace(menv.Refs[OAuthTokenEnv]) != ""
+}
+
+// suppliesToken reports whether the block supplies this install's own token,
+// by value or by reference: another account as far as the launch is concerned.
+func suppliesToken(menv *manifest.Env) bool {
+	return manifestToken(menv) != "" || tokenRef(menv)
 }
 
 // applyManifestEnv overlays the manifest [env] block on environ: set entries
@@ -205,6 +221,16 @@ func PrepareLaunchEnv(configDir string) ([]string, error) {
 // unset of CLAUDE_CODE_OAUTH_TOKEN takes the stored-credentials path for
 // this launch only. Nothing is written to disk.
 func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, error) {
+	return PrepareLaunchEnvFor(configDir, layers, "")
+}
+
+// PrepareLaunchEnvFor is PrepareLaunchEnvWith for a launch on an account
+// that uses no Claude login (noLoginAccount is its name; "" for an account
+// that does): no Claude login may be reachable for the run. The caller has
+// refused a shared playbook already (AccountLoginRefusal); an isolated
+// playbook's own login is kept aside for the run as for a token run, and on
+// macOS a login that arrived since that check refuses the launch.
+func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccount string) ([]string, error) {
 	env := os.Environ()
 	refuse := func(err error) ([]string, error) {
 		// The launch will be refused on this error (see cmd/run.go), so
@@ -227,40 +253,73 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 	if isAuthIsolated(configDir) {
 		// The machine-global token and the plan descriptors describe the
 		// global account and never apply here, DEFAULTS included. A token
-		// the playbook supplies itself is honoured: injected. A login of its
-		// own refuses the launch first, before anything is changed, since the
-		// stored grant would have to be quarantined (the adoption hazard of
-		// the non-isolated token path): see ownLoginRefusal.
-		own, oerr := ownToken(configDir, layers)
+		// the playbook supplies itself is honoured: injected, with the
+		// playbook's own login kept out of the run (the adoption hazard of
+		// the non-isolated token path): refused on macOS, before anything
+		// is changed, and set aside elsewhere (own_login.go).
+		own, ownRef, oerr := ownToken(configDir, layers)
 		if oerr != nil {
 			return refuse(oerr)
 		}
-		if own != "" {
-			if err := ownLoginRefusal(configDir); err != nil {
+		// keepOut: no login of the playbook's own may be reachable for the
+		// run, under a token or on an account that uses no login.
+		keepOut := own != "" || ownRef || noLoginAccount != ""
+		refusal := func() error {
+			if noLoginAccount != "" {
+				return accountOwnLoginRefusal(configDir, "<playbook>", noLoginAccount)
+			}
+			return ownLoginRefusal(configDir, "")
+		}
+		if keepOut {
+			if err := refusal(); err != nil {
 				return refuse(err)
 			}
 		}
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
-		syncErr := SyncCredentials(configDir)
-		if own != "" {
-			// No quarantine here: the check above found no login of the
-			// playbook's own, so a grant found now arrived since (a /login
-			// in a session of this playbook). It is refused, never stripped.
-			if err := ownLoginRefusal(configDir); err != nil {
+		// A login an earlier token run set aside comes back first, unless
+		// that run is still live: a killed run's is recovered here.
+		restoreErr := restoreOwnLogin(configDir)
+		syncErr := firstErr(SyncCredentials(configDir), restoreErr)
+		if keepOut {
+			// On macOS a login that arrived since the check above (a /login
+			// in a session of this playbook) is refused too, never stripped.
+			if err := refusal(); err != nil {
 				return refuse(err)
 			}
-			env = append(env, OAuthTokenEnv+"="+own)
-		} else if absent, aErr := storeGrantAbsent(StorePath(configDir)); aErr != nil {
-			// Cannot tell whether this playbook is logged in: leave its
-			// state alone and say so. An unreadable store may hold a login.
-			if syncErr == nil {
-				syncErr = aErr
-			}
-		} else if absent {
-			// Isolated and logged in nowhere: nothing may keep presenting
-			// this directory as the global account. See QuarantineAccountState.
-			if _, qErr := QuarantineAccountState(configDir); qErr != nil && syncErr == nil {
+			qErr := setAsideForTokenRun(configDir)
+			if noLoginAccount != "" {
+				// On an account that uses no Claude login nothing outranks a
+				// login left in place (auth = 'none', a reference the helper
+				// fails to set): it would go to the account's address. So the
+				// login must be gone, not merely attempted.
+				if err := loginLeftReachable(configDir, noLoginAccount, qErr); err != nil {
+					return refuse(err)
+				}
+			} else if syncErr == nil {
 				syncErr = qErr
+			}
+			// By reference, the secret helper sets it when it execs claude.
+			if own != "" {
+				env = append(env, OAuthTokenEnv+"="+own)
+			}
+		}
+		// A token is a Claude account of its own; an account that uses no
+		// login is not, and, logged in nowhere, nothing may keep presenting
+		// this directory as one.
+		if !keepOut || noLoginAccount != "" {
+			if absent, aErr := storeGrantAbsent(StorePath(configDir)); aErr != nil {
+				// Cannot tell whether this playbook is logged in: leave its
+				// state alone and say so. An unreadable store may hold a login.
+				if syncErr == nil {
+					syncErr = aErr
+				}
+			} else if absent && !loginAside(configDir) {
+				// Isolated and logged in nowhere: nothing may keep presenting
+				// this directory as the global account. See QuarantineAccountState.
+				// A login a live token run holds aside is still the playbook's.
+				if _, qErr := QuarantineAccountState(configDir); qErr != nil && syncErr == nil {
+					syncErr = qErr
+				}
 			}
 		}
 		env = applyManifestEnv(env, menv)
@@ -297,16 +356,17 @@ func PrepareLaunchEnvWith(configDir string, layers []*manifest.Env) ([]string, e
 		// own comment rejects relying on exec preferring the last duplicate.
 		env = removeEnv(env, OAuthTokenEnv)
 		env = append(env, OAuthTokenEnv+"="+inject)
-	} else if !active {
-		// Inactive by manifest decision (unset, or set to empty): an inherited
+	} else if !active || tokenRef(menv) {
+		// By reference, the helper sets the token at exec: an inherited one
+		// must not stand in if it fails. Inactive by manifest decision (unset, or set to empty): an inherited
 		// token would otherwise still reach the child and re-arm the very
 		// adoption hazard the stored-credentials path exists to avoid.
 		env = removeEnv(env, OAuthTokenEnv)
 	}
 	if active {
 		switch {
-		case manifestToken(menv) != "":
-			// An OWN token (manifest or profile) is another account as far
+		case suppliesToken(menv):
+			// An OWN token (manifest or profile, a value or a reference) is another account as far
 			// as this launch is concerned: the plan descriptors read from
 			// the global store describe the wrong account, and an inherited
 			// pair does too. The block may set its own via [env.set].
@@ -361,9 +421,33 @@ func bindOwnEnv(env []string, configDir string) []string {
 // errors.Is(err, envset.ErrProfile) when a profile cannot be resolved,
 // the same condition on which a launch is refused. A manifest that cannot
 // be read is not an error here: the launch treats it as declaring nothing.
+//
+// An isolated playbook's token comes only from what it supplies itself
+// (ownToken): a token that only DEFAULTS sets, by value or by reference, is
+// left out, as the launch leaves it out. So the secret helper never sets the
+// machine layer's token there, and the login guard does not count it.
 func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, error) {
 	menv, _, perr := effectiveBlock(configDir, layers)
-	return menv, perr
+	if perr != nil || menv == nil || !isAuthIsolated(configDir) {
+		return menv, perr
+	}
+	_, inSet := menv.Set[OAuthTokenEnv]
+	if !inSet && !tokenRef(menv) {
+		return menv, nil
+	}
+	own, ownRef, err := ownToken(configDir, layers)
+	if err != nil {
+		return nil, err
+	}
+	if inSet && own == "" {
+		menv.Set = maps.Clone(menv.Set)
+		delete(menv.Set, OAuthTokenEnv)
+	}
+	if !ownRef {
+		menv.Refs = maps.Clone(menv.Refs)
+		delete(menv.Refs, OAuthTokenEnv)
+	}
+	return menv, nil
 }
 
 // effectiveBlock builds EffectiveBlock and also returns the manifest read

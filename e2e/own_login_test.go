@@ -5,42 +5,73 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-// A token launch of an isolated playbook that holds its own login is
-// refused by run and by start, before the stub claude starts and before the
-// store changes: the launch would otherwise have to delete that login.
-func TestTokenLaunchOverIsolatedOwnLoginRefused(t *testing.T) {
+// A token account over an isolated playbook's own login (v4.2.0): on Linux
+// the login is set aside for the token run and comes back after it; on
+// macOS, where the login lives in the Keychain, the launch is refused before
+// anything changes.
+func TestTokenOverOwnLogin(t *testing.T) {
 	root := t.TempDir()
-	dir := playbookWithEnv(t, root, "own",
-		"isolated_login = true\n\n[env.set]\nCLAUDE_CODE_OAUTH_TOKEN = \"sk-ant-oat01-OWN\"\n")
+	dir := playbookWithEnv(t, root, "acct",
+		"isolated_login = true\n\n[env]\naccounts = [\"work\", \"machine\"]\n")
+	writeAccount(t, root, "work", "provider = \"anthropic\"\n\n[auth]\nkind = \"claude_token\"\nvalue = \"sk-ant-oat01-ACCOUNT\"\n")
 	creds := seedPlaybookCredentials(t, dir)
-	before, err := os.ReadFile(creds)
-	if err != nil {
-		t.Fatal(err)
+
+	if runtime.GOOS == "darwin" {
+		out := launchFails(t, root, launch{args: []string{"run", "acct"}})
+		for _, want := range []string{"holds a login of its own", "cpb run --account <account> acct"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("the refusal lacks %q:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "ACCOUNT") || strings.Contains(out, "STALE") {
+			t.Fatalf("the refusal printed a credential:\n%s", out)
+		}
+		if _, present := storeKeys(t, creds)["claudeAiOauth"]; !present {
+			t.Fatal("the refused launch touched the playbook's own login")
+		}
+		// cpb start refuses the same launch of the directory.
+		if out := launchFails(t, root, launch{args: []string{"start", dir}}); !strings.Contains(out, "holds a login of its own") {
+			t.Fatalf("start: refusal not explained:\n%s", out)
+		}
+		if _, present := storeKeys(t, creds)["claudeAiOauth"]; !present {
+			t.Fatal("the refused start touched the playbook's own login")
+		}
+	} else {
+		during := filepath.Join(t.TempDir(), "store-during")
+		got := childEnv(t, root, launch{env: []string{storeDumpEnv + "=" + during}, args: []string{"run", "acct"}})
+		if got[tokenEnv] != "sk-ant-oat01-ACCOUNT" {
+			t.Fatalf("token = %q, want the playbook's own", got[tokenEnv])
+		}
+		data, err := os.ReadFile(during)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "claudeAiOauth") {
+			t.Fatalf("the own login was readable during the token run: %s", data)
+		}
+		if !strings.Contains(string(data), "mcpOAuth") {
+			t.Fatalf("MCP logins left the store with the login: %s", data)
+		}
+		if _, present := storeKeys(t, creds)["claudeAiOauth"]; !present {
+			t.Fatal("the own login did not come back after the run")
+		}
+		if _, err := os.Lstat(creds + ".cpb-aside"); err == nil {
+			t.Fatal("aside file left behind after the run")
+		}
 	}
 
-	for _, args := range [][]string{{"run", "own"}, {"start", dir}} {
-		out := launchFails(t, root, launch{args: args})
-		if !strings.Contains(out, "has a login of its own") || !strings.Contains(out, "--block CLAUDE_CODE_OAUTH_TOKEN") {
-			t.Fatalf("%v: refusal not explained:\n%s", args, out)
-		}
-		if strings.Contains(out, "sk-ant-oat01") || strings.Contains(out, "STALE") {
-			t.Fatalf("%v: the refusal printed a credential:\n%s", args, out)
-		}
-		if after, _ := os.ReadFile(creds); string(after) != string(before) {
-			t.Fatalf("%v: the store changed: %s", args, after)
-		}
-	}
-
-	// Blocking the token for one launch uses the login, untouched.
-	got := childEnv(t, root, launch{args: []string{"run", "--block", tokenEnv, "own"}})
+	// The fix the refusal names works everywhere: this launch on an account
+	// that uses the playbook's own login, nothing set aside.
+	got := childEnv(t, root, launch{args: []string{"run", "--account", "machine", "acct"}})
 	if _, present := got[tokenEnv]; present {
-		t.Fatal("the blocked token reached the child")
+		t.Fatal("the machine account carried a token on an isolated playbook")
 	}
-	if after, _ := os.ReadFile(filepath.Clean(creds)); string(after) != string(before) {
-		t.Fatalf("the store changed on a login launch: %s", after)
+	if _, present := storeKeys(t, creds)["claudeAiOauth"]; !present {
+		t.Fatal("a launch on the own login lost it")
 	}
 }

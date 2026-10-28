@@ -147,9 +147,9 @@ func TestPlayKeepAndUpdate(t *testing.T) {
 	}
 }
 
-// A kept playbook lives in the pilot's store, so DEFAULTS layer into it. When
-// the recipe moves the endpoint, their keys are blocked there (named in the
-// preview), the login is its own, and an --env-set set's keys are not blocked.
+// A kept playbook lives in the pilot's store, so DEFAULTS layer into it. On
+// an account that is not Anthropic's, their keys are blocked there (named in
+// the preview), the login is its own, and it lists the account.
 func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	resetCommandTestState(t)
 	aliasTestHome(t)
@@ -158,22 +158,15 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 	router := writeRecipe(t, t.TempDir(), "router.cpb", routerRecipe)
 	mustStmt(t, "CREATE ENV mine SET EDITOR=vim")
 	mustStmt(t, "ALTER DEFAULTS USE ENV mine")
-	mustStmt(t, "CREATE ENV routerkey SET ANTHROPIC_AUTH_TOKEN=router-token AS PLAINTEXT")
+	mustStmt(t, routerAccount)
 	playFlags(t, false, false, false, "")
 	playKeepFlags(t, true, "")
-
-	// --yes alone does not confirm the endpoint.
+	usePlayAccount(t, "router")
 	playRunFlags(t, true, nil, nil, nil)
 	var err error
-	captureStdout(t, func() { err = runPlay(playCmd, []string{router}) })
-	if err == nil || !strings.Contains(err.Error(), "--trust-endpoint router.example.net") {
-		t.Fatalf("unconfirmed endpoint: %v", err)
-	}
-
-	playRunFlags(t, true, []string{"router.example.net"}, nil, []string{"routerkey"})
 	out := captureStdout(t, func() { err = runPlay(playCmd, []string{router}) })
 	if err != nil || !strings.Contains(out, "Your DEFAULTS (mine) will NOT follow it to router.example.net") {
-		t.Fatalf("keep a moved endpoint: %v\n%s", err, out)
+		t.Fatalf("keep on the account: %v\n%s", err, out)
 	}
 	v := showPlaybook(t, "router")
 	if v["login"] != "isolated" {
@@ -184,11 +177,27 @@ func TestPlayKeepEndpointAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	unset := strings.Join(m.Env.Block, " ")
-	if !strings.Contains(unset, "EDITOR") || !strings.Contains(unset, "ANTHROPIC_API_KEY") || strings.Contains(unset, "ANTHROPIC_AUTH_TOKEN") || strings.Contains(unset, "ANTHROPIC_BASE_URL") {
+	if !strings.Contains(unset, "EDITOR") || strings.Contains(unset, "ANTHROPIC_") {
 		t.Fatalf("blocked: %q", unset)
 	}
-	if strings.Join(m.Env.Sets, " ") != "routerkey" {
-		t.Fatalf("--env: %v", m.Env.Sets)
+	if strings.Join(m.Env.Accounts, " ") != "router" {
+		t.Fatalf("accounts: %v", m.Env.Accounts)
+	}
+	// --account machine, said outright, is kept as said: in your store
+	// DEFAULTS may name another account.
+	mustStmt(t, "CREATE ACCOUNT mine SET provider = anthropic, auth = claude_login")
+	mustStmt(t, "ALTER DEFAULTS USE ACCOUNT mine")
+	usePlayAccount(t, "machine")
+	playKeepFlags(t, true, "router2")
+	if out := captureStdout(t, func() { err = runPlay(playCmd, []string{router}) }); err != nil {
+		t.Fatalf("keep on machine: %v\n%s", err, out)
+	}
+	m2, err := manifest.Read(showPlaybook(t, "router2")["path"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(m2.Env.Accounts, " ") != "machine" {
+		t.Fatalf("kept on machine: %v", m2.Env.Accounts)
 	}
 }
 

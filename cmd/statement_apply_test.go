@@ -100,7 +100,7 @@ func TestShowCreateAllRoundTrips(t *testing.T) {
 		t.Errorf("SHOW CREATE ALL does not set the helper before the env sets:\n%s", dump)
 	}
 	for _, want := range []string{"CREATE OR REPLACE ENV glm", "ALTER DEFAULTS\n  USE ENV glm;",
-		"CREATE OR ALTER PLAYBOOK src\n  FROM https://example.com/s.git\n  BRANCH v1\n  SET launcher = 's', login = 'shared', global_instructions = 'inherited'\n  RESET sandbox, model, agent, statusline, model_picker.mode\n  USE ENV '';",
+		"CREATE OR ALTER PLAYBOOK src\n  FROM https://example.com/s.git\n  BRANCH v1\n  SET launcher = 's', login = 'shared', global_instructions = 'inherited'\n  RESET sandbox, model, agent, statusline, model_picker.mode\n  USE ENV ''\n  USE ACCOUNT '';",
 		"SET VAR API_TOKEN FROM 'keychain:ok/work'"} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("SHOW CREATE ALL missing %q:\n%s", want, dump)

@@ -29,7 +29,7 @@ cpb tui
 **v1 only reads.** Changing a playbook is still a statement, for example:
 
 ```
-cpb ALTER PLAYBOOK browsed DROP ENV proxy
+cpb ALTER PLAYBOOK browsed DROP ENV tools
 ```
 
 v2 will build such statements from the screens, show them, and run them

@@ -58,6 +58,9 @@ func runAttached(c *exec.Cmd) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
+	// A token run stays live for as long as this session does, even if
+	// cpb is killed first (internal/auth/own_login.go).
+	auth.SessionStarted(c.Process.Pid)
 	if onLaunch != nil {
 		onLaunch(c.Process)
 	}
@@ -175,6 +178,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		// The account, as for a host launch: rendered inside the sandbox.
+		acct, err := planSandboxAccount(pb.Path, pb.Name, layers, sbm, sopts, claudeArgs)
+		if err != nil {
+			return err
+		}
+		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(pb.Path, layers); perr == nil {
 			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name)); err != nil {
 				return err
@@ -195,10 +204,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if rootPath, err = filepath.Abs(rootPath); err != nil {
 			return err
 		}
+		if err := acct.prepare(); err != nil {
+			return err
+		}
 		_, err = runSandboxed(sandboxTarget{
 			label: fmt.Sprintf("playbook %q", pb.Name), name: sandboxName(pb.Name),
 			configPath: configPath, rootPath: rootPath, manifest: sbm, backend: backend,
-		}, layers, claudeArgs, sopts)
+			noLoginAccount: acct.noLoginAccount(),
+		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		return err
 	}
 
@@ -238,14 +251,32 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// purely, and let the input name itself like the other five. EffectiveBlock
 	// is the same resolution PrepareLaunchEnv performs, reading only; doing it
 	// twice costs a few file reads and cannot diverge, being one function.
+	if _, perr := auth.EffectiveBlock(configDir, layers); errors.Is(perr, envset.ErrSet) {
+		return perr
+	}
+	// The account: where requests go and how they authenticate, derived
+	// from it as the launch's last layer. Anything else that would route or
+	// authenticate the launch, and a login it cannot keep out, refuses here,
+	// before anything is mutated.
+	wd, _ := os.Getwd()
+	acct, err := planAccount(configDir, pb.Name, layers, wd, claudeArgs)
+	if err != nil {
+		return err
+	}
+	layers = acct.layers
 	eff, perr := auth.EffectiveBlock(configDir, layers)
-	if errors.Is(perr, envset.ErrSet) {
+	if perr != nil {
 		return perr
 	}
 	// Secret references exec the launch through the helper; with none
 	// configured the launch is refused here, before anything is mutated.
 	plan, err := planLaunch(eff)
 	if err != nil {
+		return err
+	}
+	// A token over an isolated playbook's own login: refused on macOS,
+	// before anything is mutated (internal/auth/own_login.go).
+	if err := auth.OwnLoginRefusal(configDir, eff, pb.Name); err != nil {
 		return err
 	}
 
@@ -263,7 +294,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("'claude' command not found. Install Claude Code first: https://claude.ai/download")
 	}
-	launchEnv, syncErr := auth.PrepareLaunchEnvWith(configDir, layers)
+	if err := acct.prepare(); err != nil {
+		return err
+	}
+	launchEnv, syncErr := auth.PrepareLaunchEnvFor(configDir, layers, acct.noLoginAccount())
+	// A token run may have set the playbook's own login aside: it comes
+	// back when the launch returns, whatever the outcome.
+	defer auth.EndLaunch(configDir)
 	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		// Missing, unreadable, or invalid profile: launching with a silently
 		// dropped layer could send traffic to the wrong endpoint with the
@@ -279,7 +316,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
 
-	c := plan.command(claudePath, claudeArgs, launchEnv)
+	c := plan.command(claudePath, acct.claudeArgs(claudeArgs), launchEnv)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

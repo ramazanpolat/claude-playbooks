@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -36,6 +37,15 @@ func showCreate(st *grammar.Stmt) error {
 	dir := envset.Dir(playbooksDir)
 	var blocks []createBlock
 	switch st.Object {
+	case grammar.Account:
+		a, err := account.Read(account.Dir(playbooksDir), st.Name)
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			return fmt.Errorf("no account %q", st.Name)
+		}
+		blocks = append(blocks, createAccountBlock(a))
 	case grammar.Env:
 		p, err := envset.Read(dir, st.Name)
 		if err != nil {
@@ -71,6 +81,14 @@ func showCreate(st *grammar.Stmt) error {
 		}
 		for _, p := range profiles {
 			blocks = append(blocks, createEnvBlock(p))
+		}
+		// Accounts before DEFAULTS and the playbooks, which name them.
+		accounts, err := account.List(account.Dir(playbooksDir))
+		if err != nil {
+			return err
+		}
+		for _, a := range accounts {
+			blocks = append(blocks, createAccountBlock(a))
 		}
 		if defaults.text != "" {
 			blocks = append(blocks, defaults)
@@ -185,8 +203,20 @@ func createDefaultsBlocks(dir string) (helper, defaults createBlock, err error) 
 	if err != nil {
 		return createBlock{}, createBlock{}, fmt.Errorf("DEFAULTS cannot be read: %w", err)
 	}
+	// The env sets dir sits in the playbooks root, beside the accounts.
+	def, err := account.Default(account.Dir(filepath.Dir(dir)))
+	if err != nil {
+		return createBlock{}, createBlock{}, fmt.Errorf("the DEFAULTS account cannot be read: %w", err)
+	}
+	var clauses []grammar.Clause
 	if len(names) > 0 {
-		st := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Defaults, Clauses: []grammar.Clause{{Kind: grammar.UseEnv, Names: names}}}
+		clauses = append(clauses, grammar.Clause{Kind: grammar.UseEnv, Names: names})
+	}
+	if def != "" {
+		clauses = append(clauses, grammar.Clause{Kind: grammar.UseAccount, Names: []string{def}})
+	}
+	if len(clauses) > 0 {
+		st := &grammar.Stmt{Verb: grammar.Alter, Object: grammar.Defaults, Clauses: clauses}
 		defaults = createBlock{text: st.Pretty() + ";"}
 	}
 	// Only the stored setting: CPB_SECRET_HELPER belongs to one process.
@@ -244,8 +274,8 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			login = "isolated"
 		}
 		global, _ := globalInstructionsStateOf(pb.Path)
-		st.Clauses = append(st.Clauses,
-			grammar.Clause{Kind: grammar.SetProperties, Settings: []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}})
+		props := []grammar.Var{{Key: "login", Value: login}, {Key: "global_instructions", Value: global}}
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.SetProperties, Settings: props})
 		// Exact convergence (D2): every key that is not set is RESET, so
 		// the statement brings a playbook back to exactly this, and the
 		// whole env list is stated, '' for none. Collections (plugins,
@@ -256,11 +286,12 @@ func createPlaybookBlock(pb *playbook.Playbook) (createBlock, error) {
 			return createBlock{}, fmt.Errorf("PLAYBOOK %s: %w", pb.Name, err)
 		}
 		st.Clauses = append(st.Clauses, settingsResetClauses(sf.Root)...)
-		var sets []string
+		var sets, accounts []string
 		if m != nil && m.Env != nil {
-			sets = m.Env.Sets
+			sets, accounts = m.Env.Sets, m.Env.Accounts
 		}
 		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseEnv, Names: sets})
+		st.Clauses = append(st.Clauses, grammar.Clause{Kind: grammar.UseAccount, Names: accounts})
 	}
 	text := st.Pretty() + ";"
 	// A source URL that carries credentials is never printed: the whole

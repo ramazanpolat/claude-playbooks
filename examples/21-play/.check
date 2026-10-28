@@ -6,11 +6,13 @@ printf '%s\n' "$out" | grep -q "Title:   Code reviewer"
 if cpb play --check ./refused.cpb > "$HOME/refused.out"; then exit 1; fi
 grep -q "line 5   USE ENV" "$HOME/refused.out"
 grep -q "line 6   SET VAR GITHUB_TOKEN" "$HOME/refused.out"
-# A moved endpoint: one typed confirmation, never a plain --yes.
+grep -q "line 7   SET VAR ANTHROPIC_BASE_URL" "$HOME/refused.out"
+# Where requests go is your account's, never a recipe's: refused.cpb's line 7
+# is refused above; router.cpb runs on your router account.
 out=$(cpb play --check ./router.cpb)
-printf '%s\n' "$out" | grep -q "you will type: router.example.net"
-if cpb play --yes --no-sandbox ./router.cpb > "$HOME/router.out" 2>&1; then exit 1; fi
-grep -q -- "--trust-endpoint router.example.net" "$HOME/router.out"
+if printf '%s\n' "$out" | grep -q "you will type"; then exit 1; fi
+cpb play --yes --no-sandbox --account router ./router.cpb > "$HOME/router.out" 2>&1
+grep -q "Requests would go to localhost (account router)" "$HOME/router.out"
 # --dry-run --json: APPLY's plan plus the "play" block; nothing is written.
 cpb play --dry-run --json ./reviewer.cpb > "$HOME/plan.json"
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); p=r["play"]; assert r["ok"] and p["header"]["title"]=="Code reviewer" and len(p["sha256"])==64 and p["playbook"].startswith("play-reviewer-"), r' "$HOME/plan.json"

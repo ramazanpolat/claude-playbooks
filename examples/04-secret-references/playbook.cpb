@@ -2,9 +2,9 @@
 -- secret. The helper resolves it at launch and hands it to claude only.
 ALTER DEFAULTS SET secret_helper = 'cpb-secret-file';
 
-CREATE OR REPLACE ENV router
-  SET ANTHROPIC_BASE_URL=http://localhost:8080/v1
-  SET ANTHROPIC_AUTH_TOKEN FROM 'file:router-token';
+CREATE OR REPLACE ACCOUNT router
+  SET provider = 'gateway', base_url = 'http://localhost:8080/v1',
+      auth_token FROM 'file:router-token';
 
 CREATE PLAYBOOK IF NOT EXISTS routed SET launcher = '', login = 'isolated';
-ALTER PLAYBOOK routed USE ENV router;
+ALTER PLAYBOOK routed USE ACCOUNT router;

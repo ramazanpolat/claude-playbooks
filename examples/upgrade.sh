@@ -15,7 +15,9 @@
 #   - auth status --json is identical;
 #   - every playbook launches (the stand-in claude records the launch),
 #     except one sandboxed on every launch: there is no sbx here, and the
-#     log says it was skipped;
+#     log says it was skipped; and one that sets a variable an account
+#     owns (v4.2.0: where requests go and how they authenticate are an
+#     account's), refused at launch, and the log names it;
 #   - every playbook drops cleanly;
 #   - the machine's login store and state are byte-identical throughout.
 # The examples applied are the OLD release's own (its tag's examples/): the
@@ -52,7 +54,9 @@ for dir in "$src"/[0-9][0-9]-*/; do
        [ -s "$home/explain-added" ] && added="; EXPLAIN adds $(sort -u "$home/explain-added" | tr '\n' ' ' | sed 's/ $//')"
        dropped=""
        [ -s "$home/grammar-dropped" ] && dropped="; old grammar refused with its hint: $(tr '\n' ';' < "$home/grammar-dropped" | sed 's/;$//')"
-       echo "ok    $name ($(cat "$home/count") playbooks$skipped$added$dropped)"; ran=$((ran + 1)) ;;
+       guarded=""
+       [ -s "$home/account-refused" ] && guarded="; launch refused for $(tr '\n' ' ' < "$home/account-refused" | sed 's/ $//'): its routing is an account's since v4.2.0"
+       echo "ok    $name ($(cat "$home/count") playbooks$skipped$added$dropped$guarded)"; ran=$((ran + 1)) ;;
     3) echo "skip  $name (the old release refuses it)" ;;
     *) echo "FAIL  $name"; sed 's/^/      /' "$home/log" | tail -30; fail=1 ;;
   esac

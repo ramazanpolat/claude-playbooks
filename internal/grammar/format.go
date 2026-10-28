@@ -191,6 +191,21 @@ func (c *Clause) words(varWord bool) []string {
 		return w
 	case Description:
 		return []string{"DESCRIPTION", quote(c.Arg)}
+	case SetAccount, ResetAccount:
+		return c.accountWords()
+	case UseAccount:
+		w := []string{"USE", "ACCOUNT"}
+		if len(c.Names) == 0 {
+			return append(w, "''")
+		}
+		for i, n := range c.Names {
+			n = quoteWord(n)
+			if i < len(c.Names)-1 {
+				n += ","
+			}
+			w = append(w, n)
+		}
+		return w
 	case UseEnv, DropEnv:
 		w := strings.Fields(string(c.Kind))
 		if c.Kind == UseEnv && len(c.Names) == 0 {

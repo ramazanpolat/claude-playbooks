@@ -198,6 +198,9 @@ func propertyOf(key string) (*playbookProperty, bool) {
 // props is the table of the object the parser reads: a playbook's unless
 // the statement is ALTER DEFAULTS.
 func (p *parser) props() []playbookProperty {
+	if p.account {
+		return accountPropertyTable
+	}
 	if p.defaults {
 		return defaultsPropertyTable
 	}
@@ -470,11 +473,20 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 	}
 	// A key may share a word with a clause keyword (launcher, model): a
 	// pair, or under RESET a key, is read as one before it ends the list.
-	for !p.atEnd() && (!p.isStarter() || p.atPropertyKey(withValues)) {
+	for !p.atEnd() && (!p.isStarter() || p.atPropertyKey(withValues)) && !(p.account && p.at("AS")) {
 		t := p.toks[p.i]
 		if t.Text == "," && !t.Quoted {
 			p.i++
 			continue
+		}
+		// An account's credential by reference: auth_token FROM '<ref>'.
+		if withValues {
+			if ok, err := p.accountRef(c); ok {
+				if err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		// vt is the word the value came from: whether it was quoted, and
 		// whether a comma after its quotes separates it from the next pair.
@@ -634,6 +646,19 @@ func (p *parser) notAProperty(t Token, k, keys string) *Error {
 	object := "a playbook property"
 	if p.defaults {
 		object = "a DEFAULTS property"
+	}
+	if p.account {
+		// An account has no variables and no removed words: its keys are
+		// the record's.
+		if mixedCaseKey.MatchString(k) {
+			if _, ok := propertyIn(p.props(), strings.ToLower(k)); ok {
+				return errAt(t.Pos, "account keys are lowercase: "+strings.ToLower(k))
+			}
+		}
+		if safeWord.MatchString(k) || mixedCaseKey.MatchString(k) {
+			return errAt(t.Pos, k+" is not an account key ("+keys+")")
+		}
+		return errAt(t.Pos, "not an account key ("+keys+")")
 	}
 	// A hint names only a form the statement at hand accepts: the removed
 	// playbook words and SET IF UNSET mean nothing to DEFAULTS, and a

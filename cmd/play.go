@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -84,7 +85,8 @@ func init() {
 	playCmd.Flags().BoolVar(&playYes, "yes", false, "answer the yes, for scripts; never confirms an endpoint, a proxy, TLS or a secret")
 	playCmd.Flags().StringArrayVar(&playTrustEndpoint, "trust-endpoint", nil, "without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
 	playCmd.Flags().StringArrayVar(&playTrustSecret, "trust-secret", nil, "without a terminal: confirm a secret reference; repeatable")
-	playCmd.Flags().StringArrayVar(&playEnvSets, "env-set", nil, "attach one of your env sets to the played playbook (a key for a moved endpoint); repeatable")
+	playCmd.Flags().StringArrayVar(&playEnvSets, "env-set", nil, "attach one of your env sets to the played playbook; repeatable")
+	playCmd.Flags().StringVar(&playAccount, "account", "", "run the played playbook on one of your accounts: where its requests go and how they authenticate")
 	playCmd.Flags().StringVar(&playSandboxFlag, "sandbox", "", "run sandboxed (the default where sbx is available); =sbx names the backend")
 	playCmd.Flags().Lookup("sandbox").NoOptDefVal = "auto"
 	playCmd.Flags().BoolVar(&playNoSandbox, "no-sandbox", false, "run on this machine, as you; the preview says so")
@@ -152,6 +154,11 @@ func fetchRecipe(ref string) (*play.Source, *play.Recipe, error) {
 // checkRecipe checks a fetched recipe, the header's min-cpb included.
 func checkRecipe(rec *play.Recipe) *play.Result {
 	res := play.Check(rec.Bytes)
+	// --account picks where the played playbook's requests go: read before
+	// anything is shown, so every preview and report says so.
+	if err := playUseAccount(res, config.ResolvePlaybooksDir()); err != nil {
+		res.Refused = append(res.Refused, play.Refusal{Line: 0, What: "--account", Reason: err.Error()})
+	}
 	for _, p := range res.Header.Problems {
 		res.Refused = append(res.Refused, play.Refusal{Line: 0, What: "the header", Reason: p})
 	}
@@ -237,9 +244,9 @@ func printPlayCheck(w *os.File, src *play.Source, rec *play.Recipe, res *play.Re
 	}
 	if len(res.Risks) == 0 {
 		fmt.Fprintln(w, "\nNothing to look at: no program, plugin, remote server, wide permission or secret.")
-		return
+	} else {
+		fmt.Fprintf(w, "\n%d thing(s) to look at:\n", len(res.Risks))
 	}
-	fmt.Fprintf(w, "\n%d thing(s) to look at:\n", len(res.Risks))
 	for _, r := range res.Risks {
 		mark := "!"
 		if r.Confirm != "" {
@@ -251,8 +258,8 @@ func printPlayCheck(w *os.File, src *play.Source, rec *play.Recipe, res *play.Re
 		}
 	}
 	if res.Endpoint != "" {
-		fmt.Fprintf(w, "\nRequests would go to %s, not Anthropic: the played playbook gets its own login, and your\n"+
-			"credential variables are blocked. Attach a key for that host yourself, by name.\n", res.Endpoint)
+		fmt.Fprintf(w, "\nRequests would go to %s (account %s), not Anthropic: the played playbook gets its own login, and your\n"+
+			"other credential variables are blocked.\n", res.Endpoint, playAccount)
 	}
 }
 
@@ -277,7 +284,6 @@ func printPlayCheckJSON(block *playJSON) error {
 // endpoint is not Anthropic's, beside every credential-looking variable the
 // shell exports: none of them may follow a recipe to another host.
 var playCredentialVars = []string{
-	"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
 	"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE",
 	"GOOGLE_APPLICATION_CREDENTIALS",
 }
@@ -300,7 +306,8 @@ func playBlockedVars() []string {
 	var shell []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
-		if manifest.LooksLikeSecretKey(k) {
+		// The account's own variables are removed at every launch anyway.
+		if manifest.LooksLikeSecretKey(k) && !account.IsReserved(k) {
 			shell = append(shell, k)
 		}
 	}
@@ -321,7 +328,7 @@ func playSetup(name string, res *play.Result) string { return playSetupKeeping(n
 func playSetupKeeping(name string, res *play.Result, keep map[string]bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE PLAYBOOK IF NOT EXISTS %s SET launcher = ''", name)
-	if res.Endpoint != "" {
+	if res.Endpoint != "" || playIsolateLogin {
 		b.WriteString(", login = 'isolated'")
 	}
 	b.WriteString(";\n")
@@ -385,6 +392,9 @@ func playDryRunPlan(src *play.Source, rec *play.Recipe, res *play.Result, block 
 	return withThrowawayStore(func(dir string) error {
 		keep, err := copyEnvSets(userStore, config.ResolvePlaybooksDir())
 		if err != nil {
+			return err
+		}
+		if err := copyAccount(userStore, config.ResolvePlaybooksDir()); err != nil {
 			return err
 		}
 		setup, recipe, err := writePlayFiles(dir, src, rec, playSetupFor(name, res, playEnvSets, keep))
