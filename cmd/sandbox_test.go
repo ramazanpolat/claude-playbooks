@@ -824,6 +824,14 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	writePlaybook(t, root, "revoke", &manifest.Manifest{IsolatedLogin: true, Env: &manifest.Env{Accounts: []string{"rv"}}})
 	t.Setenv("SBX_STUB_LS", "cpb-revoke")
 	t.Setenv("SBX_STUB_LSJSON", `{"sandboxes":[{"name":"cpb-revoke","workspaces":["`+canon(t, work)+`","`+canon(t, filepath.Join(root, "revoke"))+`"]}]}`)
+	// An existing sandbox serves the account it was created for: one with
+	// no record is machine's, so a launch on rv is refused until rv's.
+	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "revoke"}); err == nil || !strings.Contains(err.Error(), "created for account machine") {
+		t.Fatalf("reuse under another account: %v", err)
+	}
+	if err := bindSandbox("cpb-revoke", "rv"); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("SBX_STUB_SECRETS", "cpb-revoke router.local ANTHROPIC_AUTH_TOKEN cpb-revoke-ANTHROPIC_AUTH_TOKEN old-***\ncpb-revoke router.local OTHER cpb-revoke-OTHER x")
 	os.Remove(log)
 	if err := runRun(nil, []string{"--sandbox", "--workdir", work, "revoke"}); err != nil {

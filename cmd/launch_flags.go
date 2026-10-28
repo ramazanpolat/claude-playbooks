@@ -81,8 +81,8 @@ func launchLayer(flag, value string) (*manifest.Env, error) {
 	case "--account":
 		// The account a launch runs on, carried as a layer that sets
 		// nothing: the last one names it (accountFlag).
-		if err := manifest.ValidateSetName(value); err != nil {
-			return nil, fmt.Errorf("--account: invalid account name: use letters, digits, dots, dashes and underscores")
+		if err := manifest.ValidateAccountName(value); err != nil {
+			return nil, fmt.Errorf("--account: %w", err)
 		}
 		return &manifest.Env{Accounts: []string{value}}, nil
 	case "--env-set":

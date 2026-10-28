@@ -160,15 +160,15 @@ func Dir(playbooksDir string) string { return filepath.Join(playbooksDir, DirNam
 
 func path(dir, name string) string { return filepath.Join(dir, name+FileExt) }
 
-// ValidateName reports whether name can name an account: the env set rule
-// (letters, digits, dots, dashes, underscores), and not the implicit
-// account's name. The name is never quoted back: whatever landed in a name
-// slot may be a pasted value.
+// ValidateName reports whether name can name a new account: the account
+// name rule (manifest.ValidateAccountName: lowercase, short), and not the
+// implicit account's name. The name is never quoted back: whatever landed
+// in a name slot may be a pasted value.
 func ValidateName(name string) error {
-	if manifest.ValidateSetName(name) != nil {
-		return errors.New("invalid account name: use letters, digits, dots, dashes and underscores")
+	if err := manifest.ValidateAccountName(name); err != nil {
+		return err
 	}
-	if strings.EqualFold(name, Machine) {
+	if name == Machine {
 		return fmt.Errorf("%q names the implicit account (a launch that names none) and cannot name another", Machine)
 	}
 	return nil
@@ -402,7 +402,7 @@ func Write(dir string, a *Account) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	var b strings.Builder
@@ -515,7 +515,7 @@ func WriteDefault(dir, name string) error {
 	if err := ValidateName(name); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	return manifest.WritePrivate(filepath.Join(dir, DefaultMarker), []byte(name+"\n"), 0o600)

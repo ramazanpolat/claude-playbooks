@@ -63,11 +63,12 @@ env set, does more than drop the variable: the token is treated as inactive for
 that playbook, so the launch takes the stored-credentials path. No token is
 injected, the playbook's own login is left alone, and the shared credentials are
 synced. `/login` once there and it sticks, while every other playbook keeps using
-the token. Setting the variable instead supplies a per-playbook token that wins
-over the machine-global file; such a launch counts as another account, so the
-plan descriptors read from your global login are not injected into it (the
-env set may set its own). The same holds for a token you export in the shell
-yourself: only the token read from the token file gets the global descriptors.
+the token. A per-playbook token is an account (`claude_token`), never a
+variable: setting `CLAUDE_CODE_OAUTH_TOKEN` in a layer refuses the launch,
+and one exported in your shell is removed at every launch, so the token file
+decides for the `machine` account. A launch on a `claude_token` account counts
+as another account, so the plan descriptors read from your global login are
+not injected into it; only the token read from the token file gets them.
 This is a middle ground between sharing the token and `isolated_login` (the
 playbook shares nothing).
 
@@ -143,7 +144,7 @@ account: its address and its key travel together, so your Claude login
 never goes there ([Accounts](accounts.md)):
 
 ```bash
-cpb CREATE ACCOUNT glm SET provider = 'gateway', base_url = 'http://localhost:20128/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3'
+cpb CREATE ACCOUNT glm SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3'
 cpb ALTER PLAYBOOK glm SET login = 'isolated' USE ACCOUNT glm
 ```
 
@@ -199,9 +200,13 @@ review             shared-login (token blocked)  symlink -> ~/.claude/.credentia
 personal           isolated-login                file                                    in 22m    -
 ```
 
-`MODE` is the decision `run` would make on the playbook's own layers:
-`token`, `playbook-token`, `shared-login`, `isolated-login` or `error`. `(token blocked)` marks a playbook that blocks the machine's token,
-so it uses the stored login; `--json` says `"token_blocked": true`. `EXPIRES` is the stored grant's expiry.
+`MODE` is the decision `run` would make on the account the playbook runs on
+and its own layers: `token` (the machine's token file), `playbook-token` (a
+`claude_token` account), `shared-login`, `isolated-login`, `account` (an
+account with its own key, no Claude login) or `error` (the launch would be
+refused, the reason in `NOTE`). `(token blocked)` marks a playbook that blocks
+the machine's token, or runs on an `auth = 'claude_login'` account, so it uses
+the stored login; `--json` says `"token_blocked": true`. `EXPIRES` is the stored grant's expiry.
 `DAEMON` reads Claude Code's own `daemon-auth-status.json`, shown as
 `auth_required` only when the marker is newer than the current grant. `--json`
 for scripts (times in UTC), `--claude` to add `claude auth status` per

@@ -161,8 +161,13 @@ func SandboxAccountLoginRefusal(configDir, target, account string) error {
 		copies, _ := filepath.Glob(StorePath(configDir) + ".*")
 		var names []string
 		for _, c := range copies {
-			// A lock or an empty file holds no grant; one that cannot be
-			// read may.
+			// cpb's own lock and pid files hold no login: matched by their
+			// exact names, so any other copy is read.
+			switch filepath.Base(c) {
+			case CredentialsFileName + runLockSuffix, CredentialsFileName + asideLockSuffix, CredentialsFileName + runPidsSuffix:
+				continue
+			}
+			// An empty file holds no grant; one that cannot be read may.
 			if absent, err := storeGrantAbsent(c); err != nil || !absent {
 				names = append(names, filepath.Base(c))
 			}
@@ -490,6 +495,38 @@ func archiveAside(aside string) (string, error) {
 		return kept, os.Remove(aside)
 	}
 	return "", fmt.Errorf("no free name for %s", base)
+}
+
+// loginHeldAside refuses a launch that uses the playbook's own login while
+// a live run keeps that login aside (a token run, or one on an account that
+// uses no Claude login): a /login or a refresh in the new session would put
+// a login back in the store under the live run.
+func loginHeldAside(configDir string) error {
+	if !loginAside(configDir) {
+		return nil
+	}
+	store := StorePath(configDir)
+	live, err := tokenRunLive(store + runLockSuffix)
+	if err == nil && !live {
+		err = editPids(store+runPidsSuffix, func(pids []int) []int {
+			live = len(pids) > 0
+			return pids
+		})
+	}
+	if err != nil {
+		return &ownLoginError{fmt.Sprintf("cannot tell whether a run of %s keeps its login aside (%v): a launch that uses that login waits until it can", configDir, err)}
+	}
+	if live {
+		return &ownLoginError{fmt.Sprintf("a run of %s that keeps its login aside (on a token, or on an account that uses no Claude login) is live: a launch that uses the login waits until that run ends", configDir)}
+	}
+	return nil
+}
+
+// StoreHoldsLogin reports whether configDir's store holds a login (or
+// cannot be read, and may).
+func StoreHoldsLogin(configDir string) bool {
+	absent, err := storeGrantAbsent(StorePath(configDir))
+	return err != nil || !absent
 }
 
 // loginAside reports whether configDir has a grant set aside by a token run.

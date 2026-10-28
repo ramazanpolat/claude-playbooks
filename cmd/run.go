@@ -178,8 +178,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		// The registry's spelling of the config directory, made absolute
+		// so a relative --playbooks-dir cannot leak a relative
+		// CLAUDE_CONFIG_DIR (or ANTHROPIC_CONFIG_DIR) into a sandbox whose
+		// working directory is elsewhere.
+		configPath, err := filepath.Abs(pb.Path)
+		if err != nil {
+			return err
+		}
 		// The account, as for a host launch: rendered inside the sandbox.
-		acct, err := planSandboxAccount(pb.Path, pb.Name, layers, sbm, sopts, claudeArgs)
+		acct, err := planSandboxAccount(configPath, pb.Name, layers, sbm, sopts, claudeArgs)
 		if err != nil {
 			return err
 		}
@@ -188,14 +196,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name)); err != nil {
 				return err
 			}
-		}
-		// The registry's spelling of the config directory, made absolute
-		// so a relative --playbooks-dir cannot leak a relative
-		// CLAUDE_CONFIG_DIR into a sandbox whose working directory is
-		// elsewhere.
-		configPath, err := filepath.Abs(pb.Path)
-		if err != nil {
-			return err
 		}
 		rootPath := pb.RootPath
 		if rootPath == "" {
@@ -211,6 +211,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 			label: fmt.Sprintf("playbook %q", pb.Name), name: sandboxName(pb.Name),
 			configPath: configPath, rootPath: rootPath, manifest: sbm, backend: backend,
 			noLoginAccount: acct.noLoginAccount(),
+			account:        acct.sel.Name,
 		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		return err
 	}
@@ -261,6 +262,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	wd, _ := os.Getwd()
 	acct, err := planAccount(configDir, pb.Name, layers, wd, claudeArgs)
 	if err != nil {
+		return err
+	}
+	if err := liveLoginRefusal(pb.Name, configDir, acct); err != nil {
 		return err
 	}
 	layers = acct.layers

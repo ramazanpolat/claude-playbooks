@@ -125,6 +125,14 @@ func accountRefClauses(clauses []grammar.Clause) []grammar.Clause {
 // is not a secret and is.
 func applyAccountClauses(a *account.Account, clauses []grammar.Clause) []string {
 	var lines []string
+	oldBase, trustStated := a.BaseURL, false
+	for _, c := range clauses {
+		for _, v := range c.Settings {
+			if v.Key == "claude_login_trusted" {
+				trustStated = true
+			}
+		}
+	}
 	for _, c := range clauses {
 		for _, v := range c.Settings {
 			if c.Kind == grammar.ResetAccount {
@@ -178,6 +186,12 @@ func applyAccountClauses(a *account.Account, clauses []grammar.Clause) []string 
 			}
 			lines = append(lines, v.Key+"  "+v.Value)
 		}
+	}
+	// Trust is in one gateway: an address that moves loses it unless the
+	// same statement says it again.
+	if a.BaseURL != oldBase && a.ClaudeLoginTrusted && !trustStated {
+		a.ClaudeLoginTrusted = false
+		lines = append(lines, "claude_login_trusted  false (base_url moved; SET claude_login_trusted = true again for the new address)")
 	}
 	return lines
 }

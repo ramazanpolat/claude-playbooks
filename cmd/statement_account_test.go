@@ -10,6 +10,7 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
+	"github.com/ramazanpolat/claude-playbooks/internal/play"
 	"github.com/ramazanpolat/claude-playbooks/internal/playbook"
 )
 
@@ -254,5 +255,45 @@ func TestInstallIgnoresAccounts(t *testing.T) {
 	// Accounts live in [env], which an install never takes from a source.
 	if !strings.Contains(stderr, "ignoring the [env] block shipped in the source's") {
 		t.Fatalf("no note:\n%s", stderr)
+	}
+}
+
+// Trust is in one gateway: moving its address clears claude_login_trusted
+// unless the same statement says it again. Names are lowercase, so another
+// spelling of an account is no name at all.
+func TestAccountTrustAndNameCase(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	putAccount(t, account.Account{Name: "gw", Provider: account.Gateway, BaseURL: "https://gw.example/v1", ClaudeLoginTrusted: true, Auth: account.Auth{Kind: account.ClaudeLogin}})
+	if _, err := stmt(t, "ALTER ACCOUNT gw SET base_url=https://other.example/v1, auth=claude_login"); err == nil || !strings.Contains(err.Error(), "claude_login_trusted") {
+		t.Fatalf("a move kept the trust: %v", err)
+	}
+	if a := readAccount(t, root, "gw"); a.BaseURL != "https://gw.example/v1" || !a.ClaudeLoginTrusted {
+		t.Fatalf("a refused move changed the account: %+v", a)
+	}
+	mustStmt(t, "ALTER ACCOUNT gw SET base_url=https://other.example/v1, auth=claude_login, claude_login_trusted=true")
+	if a := readAccount(t, root, "gw"); a.BaseURL != "https://other.example/v1" || !a.ClaudeLoginTrusted {
+		t.Fatalf("restated trust: %+v", a)
+	}
+	putAccount(t, account.Account{Name: "work", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeLogin}})
+	mustStmt(t, "ALTER DEFAULTS USE ACCOUNT work")
+	for _, s := range []string{"DROP ACCOUNT Work", "ALTER ACCOUNT WORK SET access=listed"} {
+		if _, err := stmt(t, s); err == nil || !strings.Contains(err.Error(), "lowercase") {
+			t.Errorf("%s: %v", s, err)
+		}
+	}
+	if a := readAccount(t, root, "work"); a == nil || a.Listed() {
+		t.Fatalf("the DEFAULTS account changed: %+v", a)
+	}
+}
+
+// cpb play --account never names a listed account into a recipe's playbook.
+func TestPlayRefusesAListedAccount(t *testing.T) {
+	root := sandboxDefaultRoot(t)
+	putAccount(t, account.Account{Name: "private", Provider: account.Anthropic, Access: account.AccessListed, Auth: account.Auth{Kind: account.ClaudeLogin}})
+	old := playAccount
+	playAccount = "private"
+	t.Cleanup(func() { playAccount = old })
+	if err := playUseAccount(&play.Result{}, root); err == nil || !strings.Contains(err.Error(), "listed") {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -124,6 +124,35 @@ type sandboxTarget struct {
 	// noLoginAccount names the launch's account when it uses no Claude
 	// login: none may be reachable for the run (PrepareLaunchEnvFor).
 	noLoginAccount string
+	// account is the launch's account: a sandbox serves the one it was
+	// created for (sandboxBinding).
+	account string
+}
+
+// sandboxBindingPath is where the host records the account a sandbox was
+// created for: under the account store, which no sandbox mounts, so nothing
+// inside can rewrite it.
+func sandboxBindingPath(name string) string {
+	return filepath.Join(account.Dir(config.ResolvePlaybooksDir()), ".sandboxes", name)
+}
+
+// sandboxBinding is the account a sandbox was created for: machine for one
+// with no record (made before v4.2.0, when every launch was the machine's).
+func sandboxBinding(name string) string {
+	data, err := os.ReadFile(sandboxBindingPath(name))
+	if err != nil || strings.TrimSpace(string(data)) == "" {
+		return account.Machine
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// bindSandbox records the account a sandbox is created for.
+func bindSandbox(name, acct string) error {
+	p := sandboxBindingPath(name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(p, []byte(acct+"\n"), 0o600)
 }
 
 var sandboxNameClean = regexp.MustCompile(`[^A-Za-z0-9.+-]+`)
@@ -977,14 +1006,27 @@ func machineLoginInside(mount string) string {
 	}
 	// The registry's env sets are its secret store (proxy injection
 	// keeps their keys out of the sandbox only while the files stay out).
-	if profiles, err := filepath.EvalSymlinks(envset.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
-		return "the registry's env sets " + profiles
+	// So are its accounts, whose credentials may be stored AS PLAINTEXT, and
+	// which record each sandbox's account. Judged whether or not they exist
+	// yet: one made later would land inside the mount.
+	root := config.ResolvePlaybooksDir()
+	if p := registryPath(envset.Dir(root)); mountCovers(mount, p) {
+		return "the registry's env sets " + p
 	}
-	// So are its accounts, whose credentials may be stored AS PLAINTEXT.
-	if accounts, err := filepath.EvalSymlinks(account.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, accounts) {
-		return "the registry's accounts " + accounts
+	if p := registryPath(account.Dir(root)); mountCovers(mount, p) {
+		return "the registry's accounts " + p
 	}
 	return ""
+}
+
+// registryPath is p with its symlinks resolved, or as it is when it does
+// not exist yet (mountCovers judges a path that does not exist by its
+// nearest existing parent).
+func registryPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
 }
 
 // runSandboxed launches t inside its sandbox. claudeArgs are forwarded to
@@ -1120,6 +1162,11 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		exists = false
 	}
 	if exists {
+		// A sandbox keeps what its sessions left in it (a profile, a program
+		// on its PATH): it serves only the account it was created for.
+		if bound := sandboxBinding(name); bound != t.account {
+			return false, fmt.Errorf("sandbox %s was created for account %s, and this launch runs on account %s: a sandbox serves one account. Recreate it for %s with --sandbox-fresh", name, bound, t.account, t.account)
+		}
 		// Mounts are creation-time: a reused sandbox keeps the ones it was
 		// created with. They must cover this launch (a different working
 		// directory would not exist inside) and pass the same guard as new
@@ -1155,6 +1202,9 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 		}
 	}
 	if !exists {
+		if err := bindSandbox(name, t.account); err != nil {
+			return false, fmt.Errorf("could not record the account of sandbox %s: %w", name, err)
+		}
 		if err := backend.create(name, opts.clone, sb.ShareSkills, mounts); err != nil {
 			return false, fmt.Errorf("could not create sandbox %s: %w", name, err)
 		}

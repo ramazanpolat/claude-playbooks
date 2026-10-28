@@ -162,8 +162,9 @@ func TestKilledTokenRunRecoveredAtNextLaunch(t *testing.T) {
 	}
 }
 
-// A stored-login launch while a token run is live: the login stays aside,
-// and its account state is not purged.
+// A stored-login launch while a token run is live is refused (a /login or a
+// refresh in it would put a login back under the live run): the login stays
+// aside, and its account state is not purged.
 func TestStoredLoginLaunchDuringTokenRunKeepsAccountState(t *testing.T) {
 	configDir := t.TempDir()
 	writeManifest(t, configDir, "isolated_login = true\n")
@@ -177,8 +178,8 @@ func TestStoredLoginLaunchDuringTokenRunKeepsAccountState(t *testing.T) {
 	}
 	defer holdRunElsewhere(t, configDir)()
 
-	if _, err := PrepareLaunchEnv(configDir); err != nil {
-		t.Fatalf("prepare: %v", err)
+	if _, err := PrepareLaunchEnv(configDir); !errors.Is(err, ErrOwnLogin) || !strings.Contains(err.Error(), "keeps its login aside") {
+		t.Fatalf("prepare: err = %v, want a refusal", err)
 	}
 	if !exists(asidePath(configDir)) {
 		t.Fatal("login restored under a live token run")
@@ -930,6 +931,18 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 		t.Fatalf("no login: %v", err)
 	}
 	store := StorePath(configDir)
+	// cpb's own bookkeeping files, by their exact names, hold no login.
+	for _, f := range []string{runLockSuffix, asideLockSuffix, runPidsSuffix} {
+		if err := os.WriteFile(store+f, []byte("123\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SandboxAccountLoginRefusal(configDir, "pb", "router"); err != nil {
+		t.Fatalf("bookkeeping files: %v", err)
+	}
+	for _, f := range []string{runLockSuffix, asideLockSuffix, runPidsSuffix} {
+		os.Remove(store + f)
+	}
 	if err := os.Symlink("/nonexistent/.credentials.json", store); err != nil {
 		t.Fatal(err)
 	}
@@ -940,6 +953,11 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 		"a grant": func() { writeStore(t, configDir, `{`+grantJSON+`}`) },
 		"a login set aside": func() {
 			if err := os.WriteFile(store+asideSuffix, []byte(`{`+grantJSON+`}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"a copy whose name ends in .lock": func() {
+			if err := os.WriteFile(store+".backup.lock", []byte(`{`+grantJSON+`}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		},

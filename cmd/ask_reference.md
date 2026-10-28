@@ -79,7 +79,7 @@ say so in `why` when you translate a word.
 | default profile, global env | `ALTER DEFAULTS USE ENV …` |
 | default account | `ALTER DEFAULTS USE ACCOUNT <account>` |
 | sessions, resume | `SHOW SESSIONS`; resume with `run <name> --resume <id>` |
-| ephemeral, throwaway, scratch, temporary session or playbook | `start --delete <dir>` (a fresh config directory, removed when the session ends); `CREATE PLAYBOOK` only when they want to keep it |
+| ephemeral, throwaway, scratch, temporary session or playbook | `start --delete <dir>` (a fresh config directory, removed when the session ends); `CREATE PLAYBOOK` only when they want to keep it. On an account that uses no Claude login (a router's or Console key) `start` is refused, since its directory shares the machine's login: `CREATE PLAYBOOK <name> SET login = 'isolated' USE ACCOUNT <account>`, `run` it, and `DROP PLAYBOOK <name>` when done |
 | update cpb itself | `self-update` (the user runs it; do not propose it) |
 | isolate the login, own account | `SET login = 'isolated'` |
 

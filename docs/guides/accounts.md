@@ -9,7 +9,9 @@ its key stays behind, and your Claude login never follows a playbook to
 another provider.
 
 The contract is [SPEC, CREATE / ALTER / DROP ACCOUNT](../../SPEC.md#create--alter--drop-account);
-[example 23](../../examples/23-accounts/) runs everything below.
+[example 23](../../examples/23-accounts/) runs two Claude accounts on one
+playbook; [example 15](../../examples/15-third-party-route/) runs a gateway
+account.
 
 ## Make one
 
@@ -78,12 +80,24 @@ cpb EXPLAIN PLAYBOOK sre                     # Account: work (anthropic, claude_
   macOS. On Linux, a login that cannot be set aside, a store that cannot be
   read, or a login still reachable afterwards refuses the launch: never a
   warning and a run.
-- **Sandboxes too.** A sandboxed launch renders the same account; after the
-  sandbox's login shell has run, every variable the account does not set is
-  removed again, so a profile inside cannot re-route the run. On an account
-  that uses no Claude login, a sandboxed launch is refused while the playbook
-  holds a login of its own: its directory is mounted inside. `/logout` in it,
-  run it unsandboxed, or use another playbook.
+- **Sandboxes too.** A sandboxed launch renders the same account and starts
+  claude from a plain shell: the sandbox's login shell is read for its `PATH`
+  only, and every variable the account does not set is removed, so a profile
+  inside cannot re-route the run. A sandbox is bound to the account it was
+  created for (recorded on the host, outside any mount): a launch on another
+  account is refused, and `--sandbox-fresh` recreates it for the new one. On
+  an account that uses no Claude login, a sandboxed launch is refused while
+  the playbook holds a login of its own, a copy beside its store included:
+  its directory is mounted inside. `/logout` in it, run it unsandboxed, or use
+  another playbook.
+- **One account per run of a playbook.** Two runs of one isolated playbook
+  may not mix its login with an account that keeps it out: a launch that uses
+  the playbook's own login is refused while a run that keeps that login aside
+  is live, and a launch on an account that uses no Claude login is refused
+  while the playbook holds its login and another session of it is live.
+- **One `--settings`.** An account with `helper` passes its key helper to
+  claude as a `--settings` of its own, so a `--settings` you pass along is
+  refused for it.
 - **A gateway you trust** with your Claude credential (a company proxy in
   front of Anthropic) says so: `claude_login_trusted = true`, over `https`
   only. Without it such an account is refused when written.
@@ -92,8 +106,16 @@ cpb EXPLAIN PLAYBOOK sre                     # Account: work (anthropic, claude_
   those aliases mean on this provider. Give a playbook an alias (`SET model =
   'opus'`) and it stays right on every account.
 - **No Anthropic profile sneaks in.** Claude Code also reads profiles from
-  `~/.config/anthropic`; every launch points it at an empty directory of its
-  own.
+  `~/.config/anthropic`; every launch points it at a directory of its own,
+  recreated empty each time (anything in it, or a link in its place, is
+  removed).
+- **Names are lowercase** (`a-z`, digits, `.`, `_`, `-`): the store may be on
+  a case-insensitive filesystem. A name that looks like a credential is
+  refused without being printed.
+- **A playbook is one trust zone.** Every account it lists runs with the
+  same config directory, settings and hooks, so a session on one account can
+  change what a later run on another account uses. Keep a model you would not
+  trust with your Claude credential in a playbook of its own.
 
 ## Who may use which
 
@@ -107,6 +129,9 @@ Both sides are allow-lists:
 A playbook installed from a source, or played from a recipe, never brings an
 account list: accounts are this machine's, and a recipe that tries to route
 is refused (play it on your own with `cpb play --account <account>`).
+`cpb play --account` takes an account open to every playbook only: for a
+`listed` one, keep the recipe, then list the account on the kept playbook
+(`ALTER PLAYBOOK <name> USE ACCOUNT <account>`).
 
 ## Coming from v4.1
 
@@ -115,3 +140,40 @@ sets `CLAUDE_CODE_OAUTH_TOKEN`, keeps its file, but a launch that layers it is
 refused, naming the variable and the layer, and for such an env set the
 `CREATE ACCOUNT` statement that replaces it. Make the account, attach it with
 `USE ACCOUNT`, then remove the variables (`ALTER ENV <set> UNSET …`).
+
+Which of your playbooks this refuses:
+
+```bash
+cpb auth status                                   # MODE error, the reason in NOTE
+cpb "SELECT name, auth_mode FROM PLAYBOOKS"       # auth_mode = error
+cpb EXPLAIN PLAYBOOK <name> --json                # route.refused says why
+```
+
+- **An address is `https`, or `http` to this machine only** (`localhost`,
+  `127.0.0.1`, `::1`). A v4.1 env set that routes to plain `http` on another
+  host has no account it can become, and its refusal prints no `CREATE
+  ACCOUNT` line. Put `https` in front of the gateway, or reach it through a
+  tunnel to `localhost` (`ssh -L 4000:gateway:4000 …`), then make the account
+  on that address.
+- **A model only.** A layer that sets `ANTHROPIC_MODEL` (v4.1's example 02
+  did `SET VAR ANTHROPIC_MODEL`) moves to the playbook's own `SET model =
+  '<model>'`; a provider's model names go on its account (`model`,
+  `opus_model`, …). `ANTHROPIC_SMALL_FAST_MODEL` is `haiku_model` now.
+- **A repository's `.claude/settings.json`** that sets `ANTHROPIC_MODEL` (or
+  any variable below) in `env`, or names an `apiKeyHelper`, refuses every
+  launch from that folder: use its `model` key instead, and an account's
+  `helper` for the key helper.
+- **No account key yet.** These are refused with nothing to move them to;
+  a setup that needs one stays on v4.1 until an account can say it:
+  `ANTHROPIC_CUSTOM_HEADERS`; client certificates
+  (`CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`,
+  `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE`); `ANTHROPIC_UNIX_SOCKET`;
+  `CLAUDE_CODE_SKIP_BEDROCK_AUTH` and the other `CLAUDE_CODE_SKIP_*_AUTH`;
+  Bedrock Mantle and Anthropic on AWS (`CLAUDE_CODE_USE_MANTLE`,
+  `CLAUDE_CODE_USE_ANTHROPIC_AWS`, their base URLs and `ANTHROPIC_AWS_API_KEY`);
+  `AWS_BEARER_TOKEN_BEDROCK`, `ANTHROPIC_FOUNDRY_API_KEY` and
+  `ANTHROPIC_FOUNDRY_AUTH_TOKEN` (a cloud account authenticates with
+  `auth = 'cloud'`); Anthropic profiles and federation (`ANTHROPIC_PROFILE`,
+  `ANTHROPIC_FEDERATION_RULE_ID` and the other identity variables);
+  `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` and `CLAUDE_CODE_OAUTH_SCOPES`;
+  `CLAUDE_CODE_SUBAGENT_MODEL`.
