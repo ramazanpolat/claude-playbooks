@@ -112,6 +112,10 @@ cpb EXPLAIN PLAYBOOK sre                     # Account: work (anthropic, claude_
 - **Names are lowercase** (`a-z`, digits, `.`, `_`, `-`): the store may be on
   a case-insensitive filesystem. A name that looks like a credential is
   refused without being printed.
+- **A playbook is one trust zone.** Every account it lists runs with the
+  same config directory, settings and hooks, so a session on one account can
+  change what a later run on another account uses. Keep a model you would not
+  trust with your Claude credential in a playbook of its own.
 
 ## Who may use which
 

@@ -850,6 +850,12 @@ when a cloud switch is on, and only a cloud account turns one on.
   on the host outside any mount; a launch on another account is refused,
   and `--sandbox-fresh` recreates it for the new one (a sandbox from before
   v4.2.0 counts as created for `machine`).
+- **A playbook is one trust zone.** Every account it lists runs with the
+  same config directory, settings and hooks, so a session on one account can
+  change what a later run on another account uses. Accounts separate where
+  requests go and which credential they carry, not what a playbook's
+  sessions may write. Keep a model you would not trust with your Claude
+  credential in a playbook of its own.
 
 `EXPLAIN PLAYBOOK` names the account, why it was chosen, and what it
 renders (`Account: glm (gateway http://localhost:4000/v1, auth_token from a

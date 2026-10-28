@@ -49,6 +49,10 @@
   sets `ANTHROPIC_BASE_URL`, which a recipe may no longer do: `cpb play
   router-glm` is refused. The site is unchanged in this release.
 - `cpb tui` does not list accounts yet; `cpb SHOW ACCOUNTS` does.
+- A playbook is one trust zone: every account it lists shares its config
+  directory, settings and hooks, so a session on one account can change what
+  a later run on another account uses. Keep a model you would not trust with
+  your Claude credential in a playbook of its own.
 
 ### Accounts
 
