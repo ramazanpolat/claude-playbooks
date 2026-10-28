@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [v4.2.0] -- 2026-10-29
+
+v4.2.0 adds accounts. An account is one record that says where a playbook's
+requests go and how they authenticate: the provider, its address, who you are
+there, exactly one credential and that provider's model names. A playbook
+lists the accounts it may run on, and every launch derives its routing,
+credential and model variables from one of them. What it guarantees:
+
+- **One source.** Those variables come from the account and nowhere else: an
+  env set, a playbook variable, a launch flag, a settings file or a
+  `--settings` that sets one refuses the launch, and anything your shell
+  exports for them is removed.
+- **Moving an account moves its key.** A new address must state its
+  credential in the same statement.
+- **Your Claude login never goes to another provider.** An account that uses
+  no Claude login keeps every Claude login out of its runs, sandboxed launches
+  included; a gateway you trust with it says so (`claude_login_trusted`,
+  https only).
+
+**This release is breaking.** A playbook that routes through an env set or its
+own variables is refused at launch until it runs on an account: `cpb auth
+status` shows it with MODE `error`, and the refusal prints the `CREATE
+ACCOUNT` statement that replaces it where it can. See *Breaking changes*
+below and the [accounts guide](docs/guides/accounts.md), "Coming from v4.1".
+
 ### Breaking changes
 
 - **Where a launch's requests go, and how they authenticate, is an
