@@ -161,8 +161,10 @@ func SandboxAccountLoginRefusal(configDir, target, account string) error {
 		copies, _ := filepath.Glob(StorePath(configDir) + ".*")
 		var names []string
 		for _, c := range copies {
-			// cpb's own lock and pid files hold no login.
-			if strings.HasSuffix(c, ".lock") || strings.HasSuffix(c, runPidsSuffix) {
+			// cpb's own lock and pid files hold no login: matched by their
+			// exact names, so any other copy is read.
+			switch filepath.Base(c) {
+			case CredentialsFileName + runLockSuffix, CredentialsFileName + asideLockSuffix, CredentialsFileName + runPidsSuffix:
 				continue
 			}
 			// An empty file holds no grant; one that cannot be read may.

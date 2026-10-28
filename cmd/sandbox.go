@@ -1006,14 +1006,27 @@ func machineLoginInside(mount string) string {
 	}
 	// The registry's env sets are its secret store (proxy injection
 	// keeps their keys out of the sandbox only while the files stay out).
-	if profiles, err := filepath.EvalSymlinks(envset.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, profiles) {
-		return "the registry's env sets " + profiles
+	// So are its accounts, whose credentials may be stored AS PLAINTEXT, and
+	// which record each sandbox's account. Judged whether or not they exist
+	// yet: one made later would land inside the mount.
+	root := config.ResolvePlaybooksDir()
+	if p := registryPath(envset.Dir(root)); mountCovers(mount, p) {
+		return "the registry's env sets " + p
 	}
-	// So are its accounts, whose credentials may be stored AS PLAINTEXT.
-	if accounts, err := filepath.EvalSymlinks(account.Dir(config.ResolvePlaybooksDir())); err == nil && mountCovers(mount, accounts) {
-		return "the registry's accounts " + accounts
+	if p := registryPath(account.Dir(root)); mountCovers(mount, p) {
+		return "the registry's accounts " + p
 	}
 	return ""
+}
+
+// registryPath is p with its symlinks resolved, or as it is when it does
+// not exist yet (mountCovers judges a path that does not exist by its
+// nearest existing parent).
+func registryPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
 }
 
 // runSandboxed launches t inside its sandbox. claudeArgs are forwarded to

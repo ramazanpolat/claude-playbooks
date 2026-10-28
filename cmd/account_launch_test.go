@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -194,5 +195,27 @@ func TestHelperWithSettings(t *testing.T) {
 	}
 	if err := helperWithSettings(sel, account.Rendered{}, []string{"--settings", "{}"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A mount that covers the registry's account store is refused whether or
+// not the store exists yet: one made later (a sandbox's account record, an
+// account) would land inside the mount.
+func TestMountCoveringAMissingAccountStore(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pbs")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CPB_PLAYBOOKS_DIR", root)
+	config.PlaybooksDir = ""
+	t.Setenv("HOME", t.TempDir())
+	if _, err := os.Stat(account.Dir(root)); !os.IsNotExist(err) {
+		t.Fatalf("the account store exists: %v", err)
+	}
+	if what := machineLoginInside(filepath.Dir(root)); !strings.Contains(what, "env sets") && !strings.Contains(what, "accounts") {
+		t.Fatalf("a mount over the playbooks root passed: %q", what)
+	}
+	if what := machineLoginInside(t.TempDir()); what != "" {
+		t.Fatalf("an unrelated mount refused: %q", what)
 	}
 }

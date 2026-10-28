@@ -931,6 +931,18 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 		t.Fatalf("no login: %v", err)
 	}
 	store := StorePath(configDir)
+	// cpb's own bookkeeping files, by their exact names, hold no login.
+	for _, f := range []string{runLockSuffix, asideLockSuffix, runPidsSuffix} {
+		if err := os.WriteFile(store+f, []byte("123\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SandboxAccountLoginRefusal(configDir, "pb", "router"); err != nil {
+		t.Fatalf("bookkeeping files: %v", err)
+	}
+	for _, f := range []string{runLockSuffix, asideLockSuffix, runPidsSuffix} {
+		os.Remove(store + f)
+	}
 	if err := os.Symlink("/nonexistent/.credentials.json", store); err != nil {
 		t.Fatal(err)
 	}
@@ -941,6 +953,11 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 		"a grant": func() { writeStore(t, configDir, `{`+grantJSON+`}`) },
 		"a login set aside": func() {
 			if err := os.WriteFile(store+asideSuffix, []byte(`{`+grantJSON+`}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"a copy whose name ends in .lock": func() {
+			if err := os.WriteFile(store+".backup.lock", []byte(`{`+grantJSON+`}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		},
