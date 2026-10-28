@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -141,5 +142,57 @@ func TestClaudeCommand(t *testing.T) {
 		if strings.Contains(cmd, not) {
 			t.Errorf("carries %q: %s", not, cmd)
 		}
+	}
+}
+
+// ANTHROPIC_CONFIG_DIR's directory is made afresh at every launch: what a
+// session left there, or a link in its place, is gone.
+func TestPrepareRecreatesAnthropicConfigDir(t *testing.T) {
+	cfg := t.TempDir()
+	dir := filepath.Join(cfg, anthropicConfigDirName)
+	a := &accountLaunch{configDir: cfg}
+	if err := a.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profile.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
+		t.Fatalf("not empty: %v", ents)
+	}
+	elsewhere := t.TempDir()
+	if err := os.WriteFile(filepath.Join(elsewhere, "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(dir)
+	if err := os.Symlink(elsewhere, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(dir); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("not a directory of its own: %v %v", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(elsewhere, "keep")); err != nil {
+		t.Fatal("the link's target was touched")
+	}
+}
+
+// A helper account takes claude's one --settings: a passed one is refused.
+func TestHelperWithSettings(t *testing.T) {
+	sel := account.Selection{Name: "h"}
+	r := account.Rendered{KeyHelper: "print-key"}
+	if err := helperWithSettings(sel, r, []string{"-p", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := helperWithSettings(sel, r, []string{"--settings", "{}"}); err == nil {
+		t.Fatal("a passed --settings with a helper account")
+	}
+	if err := helperWithSettings(sel, account.Rendered{}, []string{"--settings", "{}"}); err != nil {
+		t.Fatal(err)
 	}
 }

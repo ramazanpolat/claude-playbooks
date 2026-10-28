@@ -261,6 +261,9 @@ func printPlayCheck(w *os.File, src *play.Source, rec *play.Recipe, res *play.Re
 		fmt.Fprintf(w, "\nRequests would go to %s (account %s), not Anthropic: the played playbook gets its own login, and your\n"+
 			"other credential variables are blocked.\n", res.Endpoint, playAccount)
 	}
+	if playKeep && playAccount == "" && playDefaultsAway != "" {
+		fmt.Fprintf(w, "\nKept, it runs on your DEFAULTS account (%s), not Anthropic: it gets a login of its own.\n", playDefaultsAway)
+	}
 }
 
 func playLine(n int) string {

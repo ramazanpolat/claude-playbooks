@@ -48,6 +48,9 @@ var (
 	// playDefaultsRef is that DEFAULTS account's credential reference, which
 	// a kept sandboxed playbook could not resolve.
 	playDefaultsRef string
+	// playDefaultsAway names that DEFAULTS account and where its requests
+	// go, when that is not Anthropic ("" otherwise), for the preview.
+	playDefaultsAway string
 )
 
 // playMarker, in a throwaway store's directory, names the cpb that owns
@@ -481,7 +484,7 @@ func playSetupFor(name string, res *play.Result, envSets []string, keep map[stri
 // credentials a launch would inherit (res.Endpoint), as it always has for
 // a moved endpoint. The recipe itself never moves it.
 func playUseAccount(res *play.Result, userStore string) error {
-	playIsolateLogin, playAccountRef, playDefaultsIsolate, playDefaultsRef = false, "", false, ""
+	playIsolateLogin, playAccountRef, playDefaultsIsolate, playDefaultsRef, playDefaultsAway = false, "", false, "", ""
 	if playAccount == "" {
 		// The play itself runs in a store with no DEFAULTS account; kept, the
 		// playbook runs on the pilot's, like any other.
@@ -489,6 +492,13 @@ func playUseAccount(res *play.Result, userStore string) error {
 			if a, err := account.Must(account.Dir(userStore), def); err == nil {
 				playDefaultsIsolate = !a.UsesClaudeCredential()
 				playDefaultsRef = a.Auth.Ref
+				if a.Provider != account.Anthropic {
+					where := a.Provider
+					if u, err := account.ParseBaseURL(a.BaseURL); err == nil {
+						where = u.Hostname()
+					}
+					playDefaultsAway = def + ", " + where
+				}
 			}
 		}
 		return nil
@@ -499,6 +509,11 @@ func playUseAccount(res *play.Result, userStore string) error {
 	a, err := account.Must(account.Dir(userStore), playAccount)
 	if err != nil {
 		return fmt.Errorf("--account: %w", err)
+	}
+	// A listed account runs only for a playbook you list it on yourself;
+	// a recipe's playbook never names its way into one.
+	if a.Listed() {
+		return fmt.Errorf("--account: account %s is access = 'listed': it runs only for a playbook you list it on. Keep the recipe (--keep), then cpb ALTER PLAYBOOK <playbook> USE ACCOUNT %s", playAccount, playAccount)
 	}
 	playIsolateLogin = !a.UsesClaudeCredential()
 	playAccountRef = a.Auth.Ref

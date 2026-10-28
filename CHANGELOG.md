@@ -18,7 +18,20 @@
   does. The files stay readable, and `SHOW
   CREATE` stays exact. Fix: `cpb CREATE ACCOUNT <name> SET …`, `cpb ALTER PLAYBOOK
   <playbook> USE ACCOUNT <name>`, then unset the variables where they are
-  set. `examples/upgrade.sh` names each playbook this refuses.
+  set. To find the playbooks this refuses: `cpb auth status` (MODE `error`),
+  `cpb "SELECT name, auth_mode FROM PLAYBOOKS"`, or `cpb EXPLAIN PLAYBOOK
+  <name> --json` (`route.refused`). A model-only layer (`ANTHROPIC_MODEL`)
+  moves to the playbook's `SET model`; some variables have no account key
+  yet and are refused with nothing to move to (client certificates, custom
+  headers, a Unix socket, the `CLAUDE_CODE_SKIP_*_AUTH` switches and more:
+  [Accounts, Coming from v4.1](docs/guides/accounts.md#coming-from-v41)).
+- **An account's address is `https`, or `http` to this machine only.** A
+  v4.1 env set that routes to plain `http` on another host has no account it
+  can become (its refusal prints no `CREATE ACCOUNT` line): put `https` in
+  front of the gateway, or reach it through a tunnel to `localhost`.
+- **`auth status` MODE `playbook-token` means a `claude_token` account now**
+  (it meant a token a layer set, which a launch refuses since this release),
+  and MODE `account` is new: an account with its own key, no Claude login.
 - **Those variables exported in your shell no longer reach a launch:** every
   launch removes them and sets what its account renders. A playbook that
   names no account runs on `machine`, your machine's login as before
@@ -46,9 +59,12 @@
   literal with `AS PLAINTEXT`; `helper = '<command>'`; or `auth =
   'claude_login' | 'cloud' | 'none'`), and the provider's model names
   (`model`, `opus_model`, `sonnet_model`, `haiku_model`, `fable_model`).
-  Stored under `<root>/.accounts/` (mode `0600`), checked whole when written.
-  `ALTER ACCOUNT` that moves an account (`provider`, `base_url`) must state
-  its credential in the same statement. `SHOW ACCOUNTS`, `SHOW ACCOUNT`,
+  Stored under `<root>/.accounts/` (files `0600`, the directory `0700`),
+  checked whole when written. Names are lowercase (`a-z`, digits, `.`, `_`,
+  `-`); a name that looks like a credential is refused without being
+  printed. `ALTER ACCOUNT` that moves an account (`provider`, `base_url`) must
+  state its credential in the same statement, and a new `base_url` clears
+  `claude_login_trusted` unless the statement sets it again. `SHOW ACCOUNTS`, `SHOW ACCOUNT`,
   `SHOW CREATE ACCOUNT`; `SHOW CREATE ALL` writes accounts before the
   playbooks that name them.
 - **A playbook names the accounts it may run on.** `USE ACCOUNT a, b` (in
@@ -59,13 +75,18 @@
   `access = 'listed'` runs only for a playbook that lists it.
 - **Derived at launch.** The account sets the address, the credential
   (through the secret helper for a reference), the models
-  (`ANTHROPIC_DEFAULT_MODEL` and the alias variables) and an empty
-  `ANTHROPIC_CONFIG_DIR`, so an Anthropic profile in `~/.config/anthropic` is
-  never the credential. Sandboxed launches render the same account and
+  (`ANTHROPIC_DEFAULT_MODEL` and the alias variables) and
+  `ANTHROPIC_CONFIG_DIR` naming a directory recreated empty at every launch,
+  so an Anthropic profile in `~/.config/anthropic` is never the credential.
+  An account with `helper` refuses a `--settings` passed along to claude
+  (claude takes one). Sandboxed launches render the same account and
   start `claude` from a plain shell: the sandbox's login shell is read for
   its `PATH` only, and every variable the account does not set is removed,
   credentials included, so a profile inside the sandbox can neither
-  re-route the run nor slip a credential into it.
+  re-route the run nor slip a credential into it. A sandbox is bound to the
+  account it was created for (recorded on the host, outside any mount): a
+  launch on another account is refused, and `--sandbox-fresh` recreates it
+  (a sandbox from before this release counts as created for `machine`).
 - **Your Claude login never goes to another provider.** An account that
   uses no Claude login keeps it out of the run: a shared playbook is
   refused (fix: `SET login = 'isolated'`); an isolated playbook's own login is
@@ -78,8 +99,13 @@
   an account is refused while the playbook holds a login of its own in any
   form (a copy of one beside its store included), since its directory is
   mounted inside (fix: `/logout` in it, run it
-  unsandboxed, or use another playbook). A gateway you trust with your Claude
-  credential says so: `claude_login_trusted = true`, over https only.
+  unsandboxed, or use another playbook). Two runs of one isolated playbook do
+  not mix its login with an account that keeps it out: a launch that uses the
+  playbook's own login is refused while a run that keeps it aside is live,
+  and a launch on an account that uses no Claude login is refused while the
+  playbook holds its login and another session of it is live. A gateway you
+  trust with your Claude credential says so: `claude_login_trusted = true`,
+  over https only.
 - **A token over an isolated playbook's own login runs on Linux again.**
   v4.0.0 refuses that launch everywhere. On Linux, a `claude_token`
   account's run now sets the login aside as above; on macOS it is refused,
@@ -111,7 +137,9 @@
 ### Changed
 
 - **`cpb play` with accounts.** The notice that requests go to another
-  provider shows even when the recipe has nothing else to look at; a kept
+  provider shows even when the recipe has nothing else to look at; `--account`
+  refuses an `access = 'listed'` account (keep the recipe, then list the
+  account on the kept playbook); a kept
   playbook gets a login of its own when the `DEFAULTS` account uses none;
   an account whose credential is a secret reference is refused for a
   sandboxed play up front. `APPLY` checks an account's credential reference

@@ -84,6 +84,22 @@ func ValidateSetName(name string) error {
 	return nil
 }
 
+// accountNamePattern is the account name rule: lowercase, since the account
+// store may sit on a case-insensitive filesystem where Work and work are one
+// file, and short, since a pasted credential is long.
+var accountNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,39}$`)
+
+// ValidateAccountName reports whether name can name an account (the
+// implicit machine included). The error never quotes the name: what lands
+// in a name slot may be a pasted credential, and one that looks like a key
+// is refused even when it fits the pattern.
+func ValidateAccountName(name string) error {
+	if !accountNamePattern.MatchString(name) || strings.HasPrefix(name, "sk-") {
+		return errors.New("invalid account name: use lowercase letters, digits, dots, dashes and underscores, at most 40 characters, starting with a letter or digit")
+	}
+	return nil
+}
+
 // Uses reports whether profile is listed.
 func (e *Env) Uses(profile string) bool {
 	if e == nil {
@@ -480,9 +496,8 @@ func (m *Manifest) validate(path string) error {
 		}
 		seen := map[string]bool{}
 		for _, name := range m.Env.Accounts {
-			// The account name rule is the env set's (internal/account).
-			if ValidateSetName(name) != nil {
-				return fmt.Errorf("invalid .playbook at %s: env.accounts: invalid account name: use letters, digits, dots, dashes and underscores", path)
+			if err := ValidateAccountName(name); err != nil {
+				return fmt.Errorf("invalid .playbook at %s: env.accounts: %w", path, err)
 			}
 			if seen[name] {
 				return fmt.Errorf("invalid .playbook at %s: env.accounts: %q is listed twice", path, name)

@@ -274,6 +274,10 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 			if err := refusal(); err != nil {
 				return refuse(err)
 			}
+		} else if err := loginHeldAside(configDir); err != nil {
+			// This launch uses the playbook's login, which a live run keeps
+			// aside: a /login or a refresh here would put one back under it.
+			return refuse(err)
 		}
 		env = removeEnv(env, OAuthTokenEnv, SubscriptionTypeEnv, RateLimitTierEnv)
 		// A login an earlier token run set aside comes back first, unless
@@ -425,7 +429,7 @@ func bindOwnEnv(env []string, configDir string) []string {
 // An isolated playbook's token comes only from what it supplies itself
 // (ownToken): a token that only DEFAULTS sets, by value or by reference, is
 // left out, as the launch leaves it out. So the secret helper never sets the
-// machine layer's token there, and the login guard does not count it.
+// machine layer's token there, and no account check counts it.
 func EffectiveBlock(configDir string, layers []*manifest.Env) (*manifest.Env, error) {
 	menv, _, perr := effectiveBlock(configDir, layers)
 	if perr != nil || menv == nil || !isAuthIsolated(configDir) {

@@ -162,8 +162,9 @@ func TestKilledTokenRunRecoveredAtNextLaunch(t *testing.T) {
 	}
 }
 
-// A stored-login launch while a token run is live: the login stays aside,
-// and its account state is not purged.
+// A stored-login launch while a token run is live is refused (a /login or a
+// refresh in it would put a login back under the live run): the login stays
+// aside, and its account state is not purged.
 func TestStoredLoginLaunchDuringTokenRunKeepsAccountState(t *testing.T) {
 	configDir := t.TempDir()
 	writeManifest(t, configDir, "isolated_login = true\n")
@@ -177,8 +178,8 @@ func TestStoredLoginLaunchDuringTokenRunKeepsAccountState(t *testing.T) {
 	}
 	defer holdRunElsewhere(t, configDir)()
 
-	if _, err := PrepareLaunchEnv(configDir); err != nil {
-		t.Fatalf("prepare: %v", err)
+	if _, err := PrepareLaunchEnv(configDir); !errors.Is(err, ErrOwnLogin) || !strings.Contains(err.Error(), "keeps its login aside") {
+		t.Fatalf("prepare: err = %v, want a refusal", err)
 	}
 	if !exists(asidePath(configDir)) {
 		t.Fatal("login restored under a live token run")

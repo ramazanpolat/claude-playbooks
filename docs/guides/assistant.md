@@ -67,12 +67,19 @@ cpb ask "create an ephemeral playbook configured to run with route-a's keys"
 ```
 
 ```
-  (cd /tmp && cpb start --env-set route-a --delete /tmp/cpb-route-a)
-      Starts Claude Code in a new config directory with env set route-a, deleted when it ends.
-      ! deletes /tmp/cpb-route-a when the session ends
+  cpb CREATE PLAYBOOK route-a-tmp SET login = 'isolated' USE ACCOUNT route-a
+      Creates a playbook with a login of its own that runs on account route-a.
+  (cd /tmp && cpb run route-a-tmp)
+      Starts it from /tmp.
       note: This launch sends its requests away from Anthropic, with the CLAUDE.md files ... Run it from a directory outside home, as shown, so none of yours go along.
-      note: The new directory shares this machine's login: a /login inside it replaces the machine's login.
+  cpb DROP PLAYBOOK route-a-tmp
+      ! deletes the playbook when you are done
 ```
+
+`route-a` is an account (`cpb SHOW ACCOUNTS`) holding the provider's address
+and key. A playbook on an account that uses no Claude login needs a login of
+its own, so the answer creates one rather than a `start` directory, which
+shares this machine's login and would be refused on that account.
 
 When a launch would send its requests away from Anthropic, cpb shows it run
 from `/tmp`. A Claude Code session takes the `CLAUDE.md` files of the
@@ -82,8 +89,8 @@ in a project under your home would send that project's `CLAUDE.md`,
 such a directory, the answer names the files.
 
 A `start` directory shares this machine's login. Do not run `/login` inside
-it: that replaces the machine's login. For a route you use often, make a
-playbook with its own login: `CREATE PLAYBOOK <name> SET login = 'isolated'`
+it: that replaces the machine's login. For a route you use often, keep the
+playbook: `CREATE PLAYBOOK <name> SET login = 'isolated' USE ACCOUNT <account>`
 ([example 15](../../examples/15-third-party-route/)).
 
 ## What is sent, and to whom

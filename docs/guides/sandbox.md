@@ -31,9 +31,16 @@ with `--sandbox-fresh`, never written to your machine). An account's
 On an account that uses no Claude login (a router's key, a Console key), a
 sandboxed launch is refused while the playbook holds a login of its own, in
 any form (a copy of one beside its store included): the playbook directory is
-mounted inside, so a login there would still be readable. A `--settings` for
-such a launch goes inline, as JSON: cpb cannot read a file inside the sandbox. `/logout` in it, run it unsandboxed (Linux sets the
-login aside for the run), or use another playbook.
+mounted inside, so a login there would still be readable. `/logout` in it, run
+it unsandboxed (Linux sets the login aside for the run), or use another
+playbook.
+
+A sandbox is bound to the account it was created for, recorded on your
+machine outside any mount. A launch of the same playbook on another account
+is refused; `--sandbox-fresh` recreates the sandbox for the new one. (A
+sandbox from before v4.2.0 counts as created for `machine`.) A `--settings`
+you pass to a sandboxed launch goes inline, as JSON: cpb cannot read a file
+inside the sandbox.
 
 ## Always-on
 

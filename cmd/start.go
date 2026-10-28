@@ -197,6 +197,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			label: "directory " + absPath, name: name,
 			configPath: absPath, rootPath: absPath, manifest: sbm, backend: backend,
 			noLoginAccount: acct.noLoginAccount(),
+			account:        acct.sel.Name,
 		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		// Cleanup only after a session actually ran: a launch refused
 		// before attaching (a bad mount, sbx missing) leaves the directory

@@ -13,8 +13,13 @@ preparing a release, read [Before any release](#before-any-release) first.
 
 - **Never handle a secret value.** Do not ask the human to paste a token, do
   not write one into a file, a command line or a message. Store secrets by
-  reference (`SET … FROM '<ref>'`, see
-  [SPEC.md](SPEC.md), "Secrets").
+  reference (`SET … FROM '<ref>'`, and an account's `auth_token FROM
+  '<ref>'`, see [SPEC.md](SPEC.md), "Secrets"); never use `AS PLAINTEXT`
+  yourself.
+- **Where requests go is an account's** (since v4.2.0, see
+  [Accounts](#accounts)). Never route a playbook with `ANTHROPIC_BASE_URL`, a
+  key or a model variable in an env set, `SET VAR`, `--env` or a settings
+  file: the launch refuses it.
 - **Ask the human first** before: `cpb self-uninstall`, `DROP PLAYBOOK`,
   `APPLY … --yes`, `APPLY … TO '<dir>'`, deleting anything under
   `~/.claude-playbooks/`, and any login (`/login`, `claude setup-token`):
@@ -28,8 +33,10 @@ preparing a release, read [Before any release](#before-any-release) first.
   than editing it yourself.
 - **`cpb play` confirmations are the human's.** Never pass `--yes`,
   `--trust-endpoint` or `--trust-secret` on a human's behalf without their
-  explicit go: typing the host or the secret is how a person agrees that their
-  requests, or a secret, may go there, and an agent must not agree for them.
+  explicit go: typing a proxy host, a TLS change or a secret reference is how
+  a person agrees that their requests, or a secret, may go there, and an
+  agent must not agree for them. Which account a played recipe runs on
+  (`--account`) is the human's choice too.
   To inspect a recipe, use `cpb play <ref> --dry-run --json` (or `--check`),
   which runs nothing.
 - **`cpb ask` is for the human.** Drive cpb with the grammar, not with
@@ -111,6 +118,34 @@ file. Without one it is refused before anything is written.
 The statements and file rules:
 [SPEC.md](SPEC.md). Worked
 examples: [examples/](examples/).
+
+## Accounts
+
+An account says where a playbook's requests go and how they authenticate:
+the provider, its address, one credential and the provider's model names
+([docs/guides/accounts.md](docs/guides/accounts.md)).
+
+```sh
+cpb SHOW ACCOUNTS --json                     # exit 0; every account, never a credential
+cpb CREATE ACCOUNT glm SET provider = 'gateway', base_url = 'https://router.example/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3'
+cpb ALTER PLAYBOOK reviewer SET login = 'isolated' USE ACCOUNT glm
+cpb EXPLAIN PLAYBOOK reviewer --json         # verify: route.account.name is "glm", route.refused is null
+cpb run --account glm reviewer -p "…"        # one launch on an account the playbook lists
+```
+
+- The credential is a reference the human's secret helper resolves. If the
+  `CREATE ACCOUNT` check says it is not stored, ask the human to store it with
+  their helper; never ask for the value, never write it `AS PLAINTEXT`.
+- A playbook on an account that uses no Claude login (a router or Console
+  key) needs `SET login = 'isolated'`; the launch refuses a shared one.
+- The human's to decide, never yours: storing the secret, `AS PLAINTEXT`,
+  `access = 'listed'` (which playbooks may use an account),
+  `claude_login_trusted = true` (sending a Claude login through a gateway),
+  `ALTER DEFAULTS USE ACCOUNT …`, and `DROP ACCOUNT`.
+- An older setup that routes through an env set reports `auth_mode` `error`
+  (`cpb auth status`, `SELECT name, auth_mode FROM PLAYBOOKS`); `EXPLAIN
+  PLAYBOOK <name> --json` says why in `route.refused` and, when it can, prints
+  the `CREATE ACCOUNT` that replaces it. Show it to the human.
 
 ## Update
 

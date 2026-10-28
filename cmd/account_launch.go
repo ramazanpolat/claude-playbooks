@@ -75,6 +75,9 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 		return nil, err
 	}
 	rendered := sel.Render(filepath.Join(configDir, anthropicConfigDirName))
+	if err := helperWithSettings(sel, rendered, claudeArgs); err != nil {
+		return nil, err
+	}
 	if rendered.NoClaudeLogin {
 		if err := auth.AccountLoginRefusal(configDir, name, sel.Name); err != nil {
 			return nil, err
@@ -97,7 +100,32 @@ func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *mani
 	if err := reservedInSettingsArgs(claudeArgs, "", true); err != nil {
 		return nil, err
 	}
-	return planAccount(configDir, name, layers, expandHome(workdir), nil)
+	acct, err := planAccount(configDir, name, layers, expandHome(workdir), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := helperWithSettings(acct.sel, acct.rendered, claudeArgs); err != nil {
+		return nil, err
+	}
+	return acct, nil
+}
+
+// liveLoginRefusal refuses a launch on an account that uses no Claude login
+// while the playbook holds its own login and another session of it is
+// live: setting the login aside would pull it from under that session, which
+// may write it back (a /login, a refresh) within reach of this run.
+func liveLoginRefusal(name, configDir string, a *accountLaunch) error {
+	if a.noLoginAccount() == "" || !auth.IsAuthIsolated(configDir) || !auth.StoreHoldsLogin(configDir) {
+		return nil
+	}
+	live, _, err := liveSessions(name)
+	if err != nil {
+		return fmt.Errorf("cannot tell whether a session of %s is live (%v): a launch on account %s, which uses no Claude login, waits until it can", name, err, a.sel.Name)
+	}
+	if len(live) > 0 {
+		return fmt.Errorf("%s holds a login of its own and a session of it is live: a launch on account %s, which uses no Claude login, would set that login aside from under it. Launch once that session ends", name, a.sel.Name)
+	}
+	return nil
 }
 
 // noLoginAccount is what PrepareLaunchEnvFor takes: the account's name when
@@ -109,11 +137,18 @@ func (a *accountLaunch) noLoginAccount() string {
 	return ""
 }
 
-// prepare makes the empty directory ANTHROPIC_CONFIG_DIR names. It runs
-// after every refusal, with the other changes a launch makes.
+// prepare makes the empty directory ANTHROPIC_CONFIG_DIR names, afresh at
+// every launch: it sits in the playbook's directory, which its sessions can
+// write (and a sandbox mounts), so whatever is there now (a profile, a link
+// in its place) is removed, and a new directory is made without following
+// anything that appears meanwhile. It runs after every refusal, with the
+// other changes a launch makes.
 func (a *accountLaunch) prepare() error {
 	dir := filepath.Join(a.configDir, anthropicConfigDirName)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("cannot prepare %s: %w", dir, err)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		return fmt.Errorf("cannot prepare %s: %w", dir, err)
 	}
 	return nil
@@ -311,6 +346,21 @@ func reservedInSettingsArgs(claudeArgs []string, workdir string, sandboxed bool)
 		}
 		if err := settingsReserved("the --settings file", data); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// helperWithSettings refuses a --settings passed through to claude on an
+// account whose credential is a helper: the account's apiKeyHelper travels
+// as a --settings of its own, and claude takes one.
+func helperWithSettings(sel account.Selection, rendered account.Rendered, claudeArgs []string) error {
+	if rendered.KeyHelper == "" {
+		return nil
+	}
+	for _, a := range claudeArgs {
+		if a == "--settings" || strings.HasPrefix(a, "--settings=") {
+			return fmt.Errorf("account %s authenticates with a helper, which a launch passes to claude as its own --settings, and claude takes one: put these settings in the playbook's settings.json instead of --settings", sel.Name)
 		}
 	}
 	return nil

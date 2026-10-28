@@ -60,12 +60,12 @@ provider's model names. Every launch derives its address, key and models from
 one account, so an address never changes while its key stays behind.
 
 ```bash
-cpb CREATE ACCOUNT glm SET provider = gateway, base_url = http://localhost:8080/v1, auth_token FROM keychain:router-token, model = glm-5.3
+cpb CREATE ACCOUNT glm SET provider = gateway, base_url = http://localhost:8080/v1, auth = none, model = glm-5.3
 cpb CREATE PLAYBOOK glm SET login=isolated USE ACCOUNT glm
 cpb EXPLAIN PLAYBOOK glm      # Account: glm (gateway http://localhost:8080/v1, …)
 ```
 
-`login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
+A router that takes a key holds it by reference, `auth_token FROM '<ref>'`, resolved by your [secret helper](SPEC.md#secrets-optional). `login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
 

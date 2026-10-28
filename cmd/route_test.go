@@ -62,15 +62,15 @@ func TestExplainRouteAccount(t *testing.T) {
 		t.Fatalf("a plain playbook: %+v", r)
 	}
 
-	mustStmt(t, "CREATE ACCOUNT glm SET provider=gateway, base_url=http://127.0.0.1:20128/v1, auth_token FROM keychain:ok/router-token, model=glm-5.3, haiku_model=glm-5.3-flash")
+	mustStmt(t, "CREATE ACCOUNT glm SET provider=gateway, base_url=http://127.0.0.1:4000/v1, auth_token FROM keychain:ok/router-token, model=glm-5.3, haiku_model=glm-5.3-flash")
 	mustStmt(t, "CREATE PLAYBOOK routed SET launcher = '', login = 'isolated' USE ACCOUNT glm")
 	r = routeOf(t, "routed")
-	if r.BaseURL == nil || *r.BaseURL != "http://127.0.0.1:20128/v1" || r.Host == nil || *r.Host != "127.0.0.1:20128" ||
+	if r.BaseURL == nil || *r.BaseURL != "http://127.0.0.1:4000/v1" || r.Host == nil || *r.Host != "127.0.0.1:4000" ||
 		r.Egress != "unknown" || r.Auth != "token-set" || r.Account.Name != "glm" || r.Account.Provider != "gateway" ||
 		r.Models["default"] != "glm-5.3" || r.Models["haiku"] != "glm-5.3-flash" {
 		t.Fatalf("on the gateway account: %+v", r)
 	}
-	if out := mustStmt(t, "EXPLAIN PLAYBOOK routed"); !strings.Contains(out, "Account: glm (gateway http://127.0.0.1:20128/v1, auth_token from a reference; the playbook's first)") {
+	if out := mustStmt(t, "EXPLAIN PLAYBOOK routed"); !strings.Contains(out, "Account: glm (gateway http://127.0.0.1:4000/v1, auth_token from a reference; the playbook's first)") {
 		t.Fatalf("the human EXPLAIN:\n%s", out)
 	}
 

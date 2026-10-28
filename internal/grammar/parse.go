@@ -379,8 +379,8 @@ func checkName(obj Object, t Token, isNew bool) *Error {
 			if err := account.ValidateName(t.Text); err != nil {
 				return errAt(t.Pos, err.Error())
 			}
-		} else if manifest.ValidateSetName(t.Text) != nil {
-			return errAt(t.Pos, "invalid account name: use letters, digits, dots, dashes and underscores")
+		} else if err := manifest.ValidateAccountName(t.Text); err != nil {
+			return errAt(t.Pos, err.Error())
 		}
 	}
 	if obj == Playbook && isNew && !playbook.NewNamePattern.MatchString(t.Text) {

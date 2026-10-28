@@ -160,9 +160,10 @@ Kept as reviewer: run it with `reviewer` (or cpb run reviewer). Update it with c
 - Same preview, same confirmations; no session runs.
 - `--as <name>` names it. A name already taken is refused.
 - It lives in your store, so your `DEFAULTS` apply to it like to any
-  playbook, and the preview names them. When the recipe moves the endpoint,
-  their keys are blocked in it ("will NOT follow it to …") unless you attach
-  a set with `--env-set`.
+  playbook, and the preview names them. It runs on the account you played it
+  with (`--account`, written as its `USE ACCOUNT`), or, with none, on your
+  `DEFAULTS` account like any other; on an account that uses no Claude login
+  it gets a login of its own.
 - A recipe that asks for a sandbox is kept as a sandboxed playbook (`sandbox.always = true`)
   (`--no-sandbox` overrides that).
 - The exact bytes are kept in the playbook (`.play/recipe.cpb`) and the
