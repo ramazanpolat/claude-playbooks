@@ -14,7 +14,8 @@
   replaces it. So is a launch whose playbook `settings.json`, or the working
   folder's `.claude/settings.json` or `settings.local.json`, sets one of them
   or names an `apiKeyHelper`, or whose `--settings` passed through to
-  `claude` (a file or inline JSON) does. The files stay readable, and `SHOW
+  `claude` (a file or inline JSON; inline only for a sandboxed launch)
+  does. The files stay readable, and `SHOW
   CREATE` stays exact. Fix: `cpb CREATE ACCOUNT <name> SET …`, `cpb ALTER PLAYBOOK
   <playbook> USE ACCOUNT <name>`, then unset the variables where they are
   set. `examples/upgrade.sh` names each playbook this refuses.
@@ -62,8 +63,9 @@
   `ANTHROPIC_CONFIG_DIR`, so an Anthropic profile in `~/.config/anthropic` is
   never the credential. Sandboxed launches render the same account, and,
   after the sandbox's login shell has run, remove every variable the account
-  does not set and set the non-secret ones again, so a profile inside the
-  sandbox cannot re-route the run.
+  does not set, credentials included, and set every one it does again, so a
+  profile inside the sandbox can neither re-route the run nor slip a
+  credential into it.
 - **Your Claude login never goes to another provider.** An account that
   uses no Claude login keeps it out of the run: a shared playbook is
   refused (fix: `SET login = 'isolated'`); an isolated playbook's own login is
@@ -71,9 +73,11 @@
   run's comes back at the next launch) and the launch is refused on macOS,
   where the login lives in the Keychain. On Linux the launch is refused too,
   never warned about, when the login cannot be set aside, the store cannot be
-  read, or a login is still reachable afterwards. A sandboxed launch on such
+  read, or a login is still reachable afterwards; the machine's own
+  directory, whose login cpb never moves, is refused before anything moves. A sandboxed launch on such
   an account is refused while the playbook holds a login of its own in any
-  form, since its directory is mounted inside (fix: `/logout` in it, run it
+  form (a copy of one beside its store included), since its directory is
+  mounted inside (fix: `/logout` in it, run it
   unsandboxed, or use another playbook). A gateway you trust with your Claude
   credential says so: `claude_login_trusted = true`, over https only.
 - **A token over an isolated playbook's own login runs on Linux again.**

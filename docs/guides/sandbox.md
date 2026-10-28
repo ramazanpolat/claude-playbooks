@@ -30,8 +30,9 @@ with `--sandbox-fresh`, never written to your machine). An account's
 
 On an account that uses no Claude login (a router's key, a Console key), a
 sandboxed launch is refused while the playbook holds a login of its own, in
-any form: the playbook directory is mounted inside, so a login set aside there
-would still be readable. `/logout` in it, run it unsandboxed (Linux sets the
+any form (a copy of one beside its store included): the playbook directory is
+mounted inside, so a login there would still be readable. A `--settings` for
+such a launch goes inline, as JSON: cpb cannot read a file inside the sandbox. `/logout` in it, run it unsandboxed (Linux sets the
 login aside for the run), or use another playbook.
 
 ## Always-on
@@ -102,8 +103,9 @@ ordinary launch computes (`DEFAULTS`, env sets, the playbook's block, one-off
 flags, the account, the authentication decision), reduced to the variables
 those layers set plus the token and `CLAUDE_CONFIG_DIR`; nothing else of your
 shell reaches the sandbox. After the sandbox's login shell has run, the launch
-removes every variable the account does not set and sets again the non-secret
-ones it does, so a profile inside the sandbox cannot re-route the run. Network
+removes every variable the account does not set, credentials included, and
+sets again every one it does, so a profile inside the sandbox can neither
+re-route the run nor slip a credential into it. Network
 egress follows your `sbx` policy (balanced by default: model APIs, package
 managers, code hosts), widened per sandbox by the manifest and by the host of
 the account's `base_url` when the playbook is routed elsewhere.

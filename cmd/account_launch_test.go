@@ -91,10 +91,19 @@ func TestReservedInSettingsArgs(t *testing.T) {
 		{[]string{"--settings", `{"env":{"ANTHROPIC_BASE_URL":"https://gateway.example"}}`}, "ANTHROPIC_BASE_URL"},
 		{[]string{"--settings={\"apiKeyHelper\":\"echo k\"}"}, "apiKeyHelper"},
 		{[]string{"-p", "x", "--settings", "routed.json"}, "ANTHROPIC_BASE_URL"},
-		{[]string{"--settings", "missing.json"}, "cannot be read"},
+		{[]string{"--settings", "missing.json"}, "cannot be checked"},
+		{[]string{"--settings", "sk-ant-api03-SECRET"}, "cannot be checked"},
 		{[]string{"--settings", "{not json"}, "does not parse"},
+		// Keys match exactly, as Claude Code reads them.
+		{[]string{"--settings", `{"env":{"ANTHROPIC_BASE_URL":"https://gateway.example"},"ENV":null}`}, "ANTHROPIC_BASE_URL"},
+		{[]string{"--settings", `{"apiKeyHelper":"echo k","APIKEYHELPER":null}`}, "apiKeyHelper"},
+		// Claude's own options end at "--".
+		{[]string{"-p", "x", "--", "--settings", "routed.json"}, ""},
 	} {
-		err := reservedInSettingsArgs(tc.args, work)
+		err := reservedInSettingsArgs(tc.args, work, false)
+		if err != nil && strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("%q: the error echoes the value: %v", tc.args, err)
+		}
 		switch {
 		case tc.want == "" && err != nil:
 			t.Errorf("%q refused: %v", tc.args, err)
@@ -104,27 +113,42 @@ func TestReservedInSettingsArgs(t *testing.T) {
 	}
 }
 
+// A sandboxed launch takes --settings inline only: a file is read inside.
+func TestReservedInSettingsArgsSandboxed(t *testing.T) {
+	if err := reservedInSettingsArgs([]string{"--settings", `{"env":{"FOO":"1"}}`}, "", true); err != nil {
+		t.Fatalf("inline: %v", err)
+	}
+	if err := reservedInSettingsArgs([]string{"--settings", "/tmp/s.json"}, "", true); err == nil || !strings.Contains(err.Error(), "inline") {
+		t.Fatalf("a file: %v", err)
+	}
+}
+
 // Inside a sandbox the account's variables are set again after the login
 // shell, and every other one is removed; a credential is never on the
 // command line.
 func TestAccountEnvCommand(t *testing.T) {
-	cmd := accountEnvCommand([]string{
+	cmd, extra := accountEnvCommand([]string{
 		"ANTHROPIC_BASE_URL=https://router.example/v1",
 		"ANTHROPIC_AUTH_TOKEN=sk-secret",
 		"ANTHROPIC_DEFAULT_MODEL=glm",
 		"PATH=/bin",
 	})
-	for _, want := range []string{"env -u ", "-u CLAUDE_CODE_USE_BEDROCK", "'ANTHROPIC_BASE_URL=https://router.example/v1'", "'ANTHROPIC_DEFAULT_MODEL=glm'"} {
+	for _, want := range []string{"env -u ", "-u CLAUDE_CODE_USE_BEDROCK", "-u ANTHROPIC_API_KEY", "-u CLAUDE_CODE_OAUTH_TOKEN",
+		"-u CPB_ACCOUNT_ANTHROPIC_AUTH_TOKEN", `ANTHROPIC_AUTH_TOKEN="$CPB_ACCOUNT_ANTHROPIC_AUTH_TOKEN"`,
+		"'ANTHROPIC_BASE_URL=https://router.example/v1'", "'ANTHROPIC_DEFAULT_MODEL=glm'"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("lacks %q: %s", want, cmd)
 		}
 	}
-	for _, not := range []string{"sk-secret", "ANTHROPIC_AUTH_TOKEN", "-u ANTHROPIC_BASE_URL", "PATH", "CLAUDE_CODE_OAUTH_TOKEN"} {
+	for _, not := range []string{"sk-secret", "-u ANTHROPIC_BASE_URL", "PATH"} {
 		if strings.Contains(cmd, not) {
 			t.Errorf("carries %q: %s", not, cmd)
 		}
 	}
-	if i, j := strings.LastIndex(cmd, "-u "), strings.Index(cmd, "'ANTHROPIC_"); i > j {
+	if len(extra) != 1 || extra[0] != "CPB_ACCOUNT_ANTHROPIC_AUTH_TOKEN=sk-secret" {
+		t.Errorf("copies: %q", extra)
+	}
+	if i, j := strings.LastIndex(cmd, "-u "), strings.Index(cmd, "ANTHROPIC_AUTH_TOKEN=\""); i > j {
 		t.Errorf("an assignment before an option: %s", cmd)
 	}
 }

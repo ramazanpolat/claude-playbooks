@@ -59,6 +59,9 @@ func keepSandbox(res *play.Result) (sandboxed bool, backend string, err error) {
 		if playAccountRef != "" {
 			return false, "", fmt.Errorf("account %s takes its credential from a secret reference (%s), which a sandboxed launch cannot resolve yet: keep it with --no-sandbox", playAccount, playAccountRef)
 		}
+		if playDefaultsRef != "" {
+			return false, "", fmt.Errorf("the DEFAULTS account, which the kept playbook would run on, takes its credential from a secret reference (%s), which a sandboxed launch cannot resolve yet: keep it with --no-sandbox, or with --account <account>", playDefaultsRef)
+		}
 	}
 	if playSandboxFlag != "auto" {
 		backend = playSandboxFlag

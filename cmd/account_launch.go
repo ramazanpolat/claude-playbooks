@@ -71,7 +71,7 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 	if err := reservedInSettings(configDir, workdir); err != nil {
 		return nil, err
 	}
-	if err := reservedInSettingsArgs(claudeArgs, workdir); err != nil {
+	if err := reservedInSettingsArgs(claudeArgs, workdir, false); err != nil {
 		return nil, err
 	}
 	rendered := sel.Render(filepath.Join(configDir, anthropicConfigDirName))
@@ -94,7 +94,10 @@ func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *mani
 	if workdir == "" {
 		workdir, _ = os.Getwd()
 	}
-	return planAccount(configDir, name, layers, expandHome(workdir), claudeArgs)
+	if err := reservedInSettingsArgs(claudeArgs, "", true); err != nil {
+		return nil, err
+	}
+	return planAccount(configDir, name, layers, expandHome(workdir), nil)
 }
 
 // noLoginAccount is what PrepareLaunchEnvFor takes: the account's name when
@@ -267,12 +270,16 @@ func reservedInSettings(configDir, workdir string) error {
 // reservedInSettingsArgs is reservedInSettings for the --settings that the
 // launch passes through to claude: inline JSON, or a file, relative to the
 // directory claude starts in. Claude Code applies it over every settings
-// file, so it is held to the same rule.
-func reservedInSettingsArgs(claudeArgs []string, workdir string) error {
+// file, so it is held to the same rule. A sandboxed launch takes inline JSON
+// only: a file is read inside the sandbox, which cpb cannot see from here.
+// Claude's own options end at "--". Never echoes the value.
+func reservedInSettingsArgs(claudeArgs []string, workdir string, sandboxed bool) error {
 	for i := 0; i < len(claudeArgs); i++ {
 		a := claudeArgs[i]
 		var value string
 		switch {
+		case a == "--":
+			return nil
 		case a == "--settings" && i+1 < len(claudeArgs):
 			i++
 			value = claudeArgs[i]
@@ -287,15 +294,22 @@ func reservedInSettingsArgs(claudeArgs []string, workdir string) error {
 			}
 			continue
 		}
+		if sandboxed {
+			return errors.New("--settings names a file, which a sandboxed launch reads inside the sandbox where cpb cannot check it for an account's variables: pass the settings inline as JSON")
+		}
 		f := expandHome(value)
 		if !filepath.IsAbs(f) && workdir != "" {
 			f = filepath.Join(workdir, f)
 		}
 		data, err := os.ReadFile(f)
 		if err != nil {
-			return fmt.Errorf("--settings %s cannot be read (%v): it may route or authenticate this launch, so it is refused", value, err)
+			why := "it cannot be read"
+			if errors.Is(err, os.ErrNotExist) {
+				why = "no such file"
+			}
+			return fmt.Errorf("--settings names a file that cannot be checked (%s): it may route or authenticate this launch, so it is refused", why)
 		}
-		if err := settingsReserved("--settings "+value, data); err != nil {
+		if err := settingsReserved("the --settings file", data); err != nil {
 			return err
 		}
 	}
@@ -304,22 +318,27 @@ func reservedInSettingsArgs(claudeArgs []string, workdir string) error {
 
 // settingsReserved refuses settings (from the file or flag name) that set a
 // reserved variable in their env, or name an apiKeyHelper, or do not parse.
+// Keys are matched exactly, as Claude Code reads them: Go's case-insensitive
+// struct decoding would let an "ENV" key hide the "env" one.
 func settingsReserved(name string, data []byte) error {
-	var s struct {
-		Env          map[string]any `json:"env"`
-		APIKeyHelper any            `json:"apiKeyHelper"`
-	}
-	if err := json.Unmarshal(data, &s); err != nil {
-		return fmt.Errorf("%s does not parse (%v): it may route or authenticate this launch, so it is refused", name, err)
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return fmt.Errorf("%s does not parse as a JSON object: it may route or authenticate this launch, so it is refused", name)
 	}
 	var found []string
-	for k := range s.Env {
-		if account.IsReserved(k) {
-			found = append(found, k)
+	if raw, ok := top["env"]; ok && string(raw) != "null" {
+		var env map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return fmt.Errorf("%s has an env that is not an object: it may route or authenticate this launch, so it is refused", name)
+		}
+		for k := range env {
+			if account.IsReserved(k) {
+				found = append(found, k)
+			}
 		}
 	}
 	sort.Strings(found)
-	if s.APIKeyHelper != nil {
+	if raw, ok := top["apiKeyHelper"]; ok && string(raw) != "null" {
 		found = append(found, "apiKeyHelper")
 	}
 	if len(found) > 0 {

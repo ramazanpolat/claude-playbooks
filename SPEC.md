@@ -786,7 +786,9 @@ when a cloud switch is on, and only a cloud account turns one on.
   too): routing and credentials come from the account, never from a file a
   repository carries. So is a `--settings` passed through to `claude`
   (`--settings <file>`, `--settings=<file>` or inline JSON) that does the
-  same.
+  same, keys matched exactly as Claude Code reads them; one whose file
+  cannot be checked refuses too. A sandboxed launch takes `--settings` as
+  inline JSON only: a file is read inside the sandbox, out of cpb's sight.
 - **What the account renders.** `anthropic`: its `base_url`, if any, as
   `ANTHROPIC_BASE_URL`. `gateway`: `ANTHROPIC_BASE_URL`. `bedrock`,
   `vertex`, `foundry`: `CLAUDE_CODE_USE_<CLOUD>=1`, and `base_url` as that
@@ -810,18 +812,25 @@ when a cloud switch is on, and only a cloud account turns one on.
   (see *Authentication preparation*). On Linux the launch is refused, never
   warned about, when the login cannot be set aside, when the store cannot be
   read (it may hold one), or when a login is still reachable after the
-  set-aside (a store that is a link to another login, say). A Claude
+  set-aside (a store that is a link to another login, say). The machine's
+  own directory, or a store that is the machine's credentials file, is
+  refused before anything moves: cpb never sets the machine's login aside.
+  A Claude
   credential reaches a non-Anthropic address only through
   `claude_login_trusted`.
 - **Sandboxed launches** render the same account inside the sandbox. After
   the sandbox's login shell has run, the launch removes every reserved
-  variable the account does not set and sets again the non-secret ones it
-  does (address, cloud switch, models, `ANTHROPIC_CONFIG_DIR`), so a profile
-  inside the sandbox cannot re-route the run. On an account that uses no
+  variable the account does not set, credentials included, and sets again
+  every one it does: the address, cloud switch, models and
+  `ANTHROPIC_CONFIG_DIR` on the command line, a credential (or the proxy's
+  placeholder for it) from a copy passed beside it as `CPB_ACCOUNT_<name>`,
+  which is then removed. So a profile inside the sandbox can neither re-route
+  the run nor slip a credential into it. On an account that uses no
   Claude login, a sandboxed launch is refused while the playbook holds a
-  login of its own in any form (a store with a login, a store that is a
-  link, a login set aside): the playbook directory is mounted into the
-  sandbox, so a login set aside there would still be readable. Fix: `/logout`
+  login of its own in any form (a store with a login, a login set aside, any
+  other copy of a login beside the store, a store link that isolation does
+  not detach): the playbook directory is mounted into the sandbox, so a
+  login there would still be readable. Fix: `/logout`
   in it, run it unsandboxed (Linux sets the login aside), or use another
   playbook.
 

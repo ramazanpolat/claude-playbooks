@@ -860,6 +860,22 @@ func TestNoLoginAccountRefusesAReachableLogin(t *testing.T) {
 	if data, _ := os.ReadFile(store); !strings.Contains(string(data), "STALE") {
 		t.Fatal("the machine's login was changed")
 	}
+	// The machine's store as a link: refused, and the link stays.
+	elsewhere := writeStore(t, t.TempDir(), `{`+grantJSON+`}`)
+	if err := os.Remove(store); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, store); err != nil {
+		t.Fatal(err)
+	}
+	_, err = PrepareLaunchEnvFor(global, nil, "router")
+	EndLaunch(global)
+	if !errors.Is(err, ErrOwnLogin) {
+		t.Fatalf("a linked machine store: err = %v, want a refusal", err)
+	}
+	if target, err := os.Readlink(store); err != nil || target != elsewhere {
+		t.Fatalf("the machine's link was changed: %q %v", target, err)
+	}
 
 	_, configDir := isolatedWithToken(t)
 	if err := loginLeftReachable(configDir, "router", errors.New("cannot write")); !errors.Is(err, ErrOwnLogin) {
@@ -871,7 +887,9 @@ func TestNoLoginAccountRefusesAReachableLogin(t *testing.T) {
 }
 
 // A sandboxed launch on such an account refuses a login of the playbook's
-// own in any form: the directory is mounted into the sandbox.
+// own in any form: the directory is mounted into the sandbox. A link is
+// left to isolation, which detaches the shared one first (cmd/sandbox.go
+// refuses one that is still there).
 func TestSandboxAccountLoginRefusal(t *testing.T) {
 	hostOS = "linux"
 	_, configDir := isolatedWithToken(t)
@@ -879,6 +897,12 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 		t.Fatalf("no login: %v", err)
 	}
 	store := StorePath(configDir)
+	if err := os.Symlink("/nonexistent/.credentials.json", store); err != nil {
+		t.Fatal(err)
+	}
+	if err := SandboxAccountLoginRefusal(configDir, "pb", "router"); err != nil {
+		t.Fatalf("a shared link, detached at launch: %v", err)
+	}
 	for name, make := range map[string]func(){
 		"a grant": func() { writeStore(t, configDir, `{`+grantJSON+`}`) },
 		"a login set aside": func() {
@@ -886,14 +910,16 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 				t.Fatal(err)
 			}
 		},
-		"a link": func() {
-			if err := os.Symlink("/nonexistent/.cpb-logins/pb", store); err != nil {
+		"a dated copy": func() {
+			if err := os.WriteFile(store+asideSuffix+"-2026-01-01-00_00_00", []byte(`{`+grantJSON+`}`), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		},
 	} {
-		os.Remove(store)
-		os.Remove(store + asideSuffix)
+		old, _ := filepath.Glob(store + "*")
+		for _, f := range old {
+			os.Remove(f)
+		}
 		make()
 		err := SandboxAccountLoginRefusal(configDir, "pb", "router")
 		if !errors.Is(err, ErrOwnLogin) || strings.Contains(err.Error(), "STALE") {

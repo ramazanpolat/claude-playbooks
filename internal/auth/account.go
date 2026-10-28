@@ -137,9 +137,10 @@ func AccountOf(configDir string) Account {
 		a.TokenSource = TokenSourceUnknown
 		return a
 	}
-	if !blocked {
-		// An isolated playbook may block the token too; say so in every
-		// mode, as the playbook's own choice.
+	if !blocked && acct == nil {
+		// On the machine account an isolated playbook may block the token
+		// too; say so in every mode, as the playbook's own choice. An
+		// account decides the token itself.
 		if menv, err := envset.ExpandWithDefault(envset.Dir(config.ResolvePlaybooksDir()), block); err == nil {
 			a.TokenBlocked = menv.Blocks(OAuthTokenEnv)
 		}

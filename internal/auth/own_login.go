@@ -94,8 +94,12 @@ func AccountLoginRefusal(configDir, name, account string) error {
 func accountOwnLoginRefusal(configDir, target, account string) error {
 	// The machine's own directory keeps its login where it is: nothing sets
 	// it aside, on any system, so a login there refuses before anything moves.
-	if IsGlobalConfigDir(configDir) {
-		if where := ownLoginWhere(configDir); where != "" {
+	if store := StorePath(configDir); IsGlobalConfigDir(configDir) || isGlobalCredentialsFile(store) {
+		where := ownLoginWhere(configDir)
+		if info, err := os.Lstat(store); where == "" && err == nil && info.Mode()&os.ModeSymlink != 0 {
+			where = "its " + CredentialsFileName + " links to a login"
+		}
+		if where != "" {
 			return &ownLoginError{fmt.Sprintf("%s is the machine's own Claude directory and holds its login (%s), which account %s does not use and cpb never moves. Run a playbook with a login of its own on that account instead (cpb ALTER PLAYBOOK <playbook> SET login = 'isolated')", target, where, account)}
 		}
 	}
@@ -137,16 +141,28 @@ func loginLeftReachable(configDir, account string, setAsideErr error) error {
 
 // SandboxAccountLoginRefusal refuses a sandboxed launch on an account that
 // uses no Claude login (account) when the playbook holds a login of its own
-// in any form: its store with a grant, a store link to another login, a
-// login set aside, or one in the Keychain. The playbook's directory is
+// in any form: its store with a grant, a login set aside or any other copy
+// beside the store, or one in the Keychain. The playbook's directory is
 // mounted into the sandbox, so a login set aside there, or a link that
 // resolves inside, would stay within reach of the run. target names the
 // playbook for the message.
 func SandboxAccountLoginRefusal(configDir, target, account string) error {
 	where := ownLoginWhere(configDir)
 	if where == "" {
-		if info, err := os.Lstat(StorePath(configDir)); err == nil && info.Mode()&os.ModeSymlink != 0 {
-			where = "its " + CredentialsFileName + " links to a login"
+		// Copies of a login beside the store (set aside, kept, ignored at
+		// install) are on the mount too. A link is judged after isolation
+		// has detached the shared one (cmd/sandbox.go).
+		copies, _ := filepath.Glob(StorePath(configDir) + ".*")
+		var names []string
+		for _, c := range copies {
+			// A lock or an empty file holds no grant; one that cannot be
+			// read may.
+			if absent, err := storeGrantAbsent(c); err != nil || !absent {
+				names = append(names, filepath.Base(c))
+			}
+		}
+		if len(names) > 0 {
+			where = "copies of a login beside its store: " + strings.Join(names, ", ") + "; move them out of its directory"
 		}
 	}
 	if where == "" {

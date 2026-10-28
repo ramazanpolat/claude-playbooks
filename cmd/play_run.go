@@ -45,6 +45,9 @@ var (
 	// DEFAULTS account, and that one uses no Claude login, so the kept
 	// playbook needs a login of its own.
 	playDefaultsIsolate bool
+	// playDefaultsRef is that DEFAULTS account's credential reference, which
+	// a kept sandboxed playbook could not resolve.
+	playDefaultsRef string
 )
 
 // playMarker, in a throwaway store's directory, names the cpb that owns
@@ -478,13 +481,14 @@ func playSetupFor(name string, res *play.Result, envSets []string, keep map[stri
 // credentials a launch would inherit (res.Endpoint), as it always has for
 // a moved endpoint. The recipe itself never moves it.
 func playUseAccount(res *play.Result, userStore string) error {
-	playIsolateLogin, playAccountRef, playDefaultsIsolate = false, "", false
+	playIsolateLogin, playAccountRef, playDefaultsIsolate, playDefaultsRef = false, "", false, ""
 	if playAccount == "" {
 		// The play itself runs in a store with no DEFAULTS account; kept, the
 		// playbook runs on the pilot's, like any other.
 		if def, err := account.Default(account.Dir(userStore)); err == nil && def != "" {
-			if a, err := account.Must(account.Dir(userStore), def); err == nil && !a.UsesClaudeCredential() {
-				playDefaultsIsolate = true
+			if a, err := account.Must(account.Dir(userStore), def); err == nil {
+				playDefaultsIsolate = !a.UsesClaudeCredential()
+				playDefaultsRef = a.Auth.Ref
 			}
 		}
 		return nil

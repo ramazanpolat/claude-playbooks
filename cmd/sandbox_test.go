@@ -266,7 +266,7 @@ func TestRunSandboxDetachesSharedLogin(t *testing.T) {
 	// the shared link is back.
 	calls := sbxCalls(t, log)
 	last := calls[len(calls)-1]
-	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd ") {
+	if !strings.HasPrefix(last, "exec -i ") || strings.Contains(last, "-e CLAUDE_CODE_OAUTH_TOKEN") || strings.Contains(last, "CPB_ACCOUNT_CLAUDE_CODE_OAUTH_TOKEN") || !strings.Contains(last, "bash -lc mkdir -p '/home/agent/.cpb-logins/cpb-box' && cd ") {
 		t.Fatalf("attach: %q", calls)
 	}
 	if seen, _ := os.ReadFile(filepath.Join(filepath.Dir(log), "store-during-attach")); strings.TrimSpace(string(seen)) != want {

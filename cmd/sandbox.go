@@ -812,6 +812,14 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 	if errors.Is(syncErr, envset.ErrSet) || errors.Is(syncErr, auth.ErrOwnLogin) {
 		return nil, "", syncErr
 	}
+	if t.noLoginAccount != "" {
+		// Isolation detached the shared link; any link still here (one into
+		// an earlier sandbox's login, which dangles on the host) would
+		// resolve inside.
+		if info, err := os.Lstat(auth.StorePath(t.configPath)); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, "", fmt.Errorf("%s: its %s links to a login, and account %s does not use one; inside the sandbox the link would reach it. /logout in it once (or remove the link), then launch again", t.label, auth.CredentialsFileName, t.noLoginAccount)
+		}
+	}
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to prepare authentication state: %v\n", syncErr)
 	}
@@ -1185,7 +1193,9 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	for _, a := range claudeArgs {
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
-	command := "cd " + shell.QuoteArg(workdir) + " && exec " + accountEnvCommand(env) + " claude"
+	envCmd, copies := accountEnvCommand(env)
+	env = append(env, copies...)
+	command := "cd " + shell.QuoteArg(workdir) + " && exec " + envCmd + " claude"
 	if loginPath != "" {
 		// The sandbox-local login directory must exist for /login to write
 		// through the store link; created as the sandbox user, inside.
@@ -1200,14 +1210,15 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 }
 
 // accountEnvCommand is the `env` command that starts claude inside the
-// sandbox with the account's variables exactly as the launch decided, after
-// the sandbox's login shell has read its profile: every reserved variable
-// the launch does not pass is removed, and every one it passes is set again,
-// so a profile inside cannot re-route the run. The credential variables are
-// left as the launch and the backend set them: a value is never put on a
-// command line, and a backend may supply its own placeholder for a key it
-// injects at its proxy.
-func accountEnvCommand(env []string) string {
+// sandbox with the reserved variables exactly as the launch decided, after
+// the sandbox's login shell has read its profile: every one the launch does
+// not pass is removed, credentials included, and every one it passes is set
+// again, so a profile inside can neither re-route the run nor slip a
+// credential into it. A credential (or the placeholder the sandbox proxy
+// swaps for one) is never written on the command line: it is set again from
+// a copy passed beside it, CPB_ACCOUNT_<name>, which the command then
+// removes. extra is those copies, for the sandbox's environment.
+func accountEnvCommand(env []string) (command string, extra []string) {
 	passed := map[string]string{}
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
@@ -1217,19 +1228,23 @@ func accountEnvCommand(env []string) string {
 	for _, v := range account.CredentialVar {
 		credential[v] = true
 	}
-	unset := []string{"env"}
+	opts := []string{"env"}
 	var set []string
 	for _, k := range account.Reserved {
-		if credential[k] {
-			continue
-		}
-		if v, ok := passed[k]; ok {
+		v, ok := passed[k]
+		switch {
+		case !ok:
+			opts = append(opts, "-u", k)
+		case credential[k]:
+			copyVar := "CPB_ACCOUNT_" + k
+			extra = append(extra, copyVar+"="+v)
+			opts = append(opts, "-u", copyVar)
+			set = append(set, k+`="$`+copyVar+`"`)
+		default:
 			set = append(set, shell.QuoteArg(k+"="+v))
-		} else {
-			unset = append(unset, "-u", k)
 		}
 	}
-	return strings.Join(append(unset, set...), " ")
+	return strings.Join(append(opts, set...), " "), extra
 }
 
 // rewriteHostEndpoint points an ANTHROPIC_BASE_URL at localhost (the
