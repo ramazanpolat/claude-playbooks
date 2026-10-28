@@ -61,11 +61,11 @@
   (through the secret helper for a reference), the models
   (`ANTHROPIC_DEFAULT_MODEL` and the alias variables) and an empty
   `ANTHROPIC_CONFIG_DIR`, so an Anthropic profile in `~/.config/anthropic` is
-  never the credential. Sandboxed launches render the same account, and,
-  after the sandbox's login shell has run, remove every variable the account
-  does not set, credentials included, and set every one it does again, so a
-  profile inside the sandbox can neither re-route the run nor slip a
-  credential into it.
+  never the credential. Sandboxed launches render the same account and
+  start `claude` from a plain shell: the sandbox's login shell is read for
+  its `PATH` only, and every variable the account does not set is removed,
+  credentials included, so a profile inside the sandbox can neither
+  re-route the run nor slip a credential into it.
 - **Your Claude login never goes to another provider.** An account that
   uses no Claude login keeps it out of the run: a shared playbook is
   refused (fix: `SET login = 'isolated'`); an isolated playbook's own login is

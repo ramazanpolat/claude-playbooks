@@ -97,8 +97,8 @@ func TestReservedInSettingsArgs(t *testing.T) {
 		// Keys match exactly, as Claude Code reads them.
 		{[]string{"--settings", `{"env":{"ANTHROPIC_BASE_URL":"https://gateway.example"},"ENV":null}`}, "ANTHROPIC_BASE_URL"},
 		{[]string{"--settings", `{"apiKeyHelper":"echo k","APIKEYHELPER":null}`}, "apiKeyHelper"},
-		// Claude's own options end at "--".
-		{[]string{"-p", "x", "--", "--settings", "routed.json"}, ""},
+		// Past "--" too: it may be another option's value, as here.
+		{[]string{"--append-system-prompt", "--", "--settings", "routed.json"}, "ANTHROPIC_BASE_URL"},
 	} {
 		err := reservedInSettingsArgs(tc.args, work, false)
 		if err != nil && strings.Contains(err.Error(), "SECRET") {
@@ -123,32 +123,23 @@ func TestReservedInSettingsArgsSandboxed(t *testing.T) {
 	}
 }
 
-// Inside a sandbox the account's variables are set again after the login
-// shell, and every other one is removed; a credential is never on the
-// command line.
-func TestAccountEnvCommand(t *testing.T) {
-	cmd, extra := accountEnvCommand([]string{
+// Inside a sandbox, claude starts from a plain shell: the login shell is
+// read for PATH only, and every reserved variable the launch does not pass
+// is removed; a value is never on the command line.
+func TestClaudeCommand(t *testing.T) {
+	cmd := claudeCommand("/w", []string{
 		"ANTHROPIC_BASE_URL=https://router.example/v1",
 		"ANTHROPIC_AUTH_TOKEN=sk-secret",
-		"ANTHROPIC_DEFAULT_MODEL=glm",
 		"PATH=/bin",
 	})
-	for _, want := range []string{"env -u ", "-u CLAUDE_CODE_USE_BEDROCK", "-u ANTHROPIC_API_KEY", "-u CLAUDE_CODE_OAUTH_TOKEN",
-		"-u CPB_ACCOUNT_ANTHROPIC_AUTH_TOKEN", `ANTHROPIC_AUTH_TOKEN="$CPB_ACCOUNT_ANTHROPIC_AUTH_TOKEN"`,
-		"'ANTHROPIC_BASE_URL=https://router.example/v1'", "'ANTHROPIC_DEFAULT_MODEL=glm'"} {
+	for _, want := range []string{"cd '/w' && p=\"$(bash -lc ", "</dev/null", "exec env -u ", "-u ANTHROPIC_API_KEY", "-u CLAUDE_CODE_OAUTH_TOKEN", "-u CLAUDE_CODE_USE_BEDROCK", ` PATH="$p" claude`} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("lacks %q: %s", want, cmd)
 		}
 	}
-	for _, not := range []string{"sk-secret", "-u ANTHROPIC_BASE_URL", "PATH"} {
+	for _, not := range []string{"sk-secret", "router.example", "-u ANTHROPIC_BASE_URL", "-u ANTHROPIC_AUTH_TOKEN", "CPB_ACCOUNT"} {
 		if strings.Contains(cmd, not) {
 			t.Errorf("carries %q: %s", not, cmd)
 		}
-	}
-	if len(extra) != 1 || extra[0] != "CPB_ACCOUNT_ANTHROPIC_AUTH_TOKEN=sk-secret" {
-		t.Errorf("copies: %q", extra)
-	}
-	if i, j := strings.LastIndex(cmd, "-u "), strings.Index(cmd, "ANTHROPIC_AUTH_TOKEN=\""); i > j {
-		t.Errorf("an assignment before an option: %s", cmd)
 	}
 }

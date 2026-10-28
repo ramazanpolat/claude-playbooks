@@ -103,9 +103,10 @@ ordinary launch computes (`DEFAULTS`, env sets, the playbook's block, one-off
 flags, the account, the authentication decision), reduced to the variables
 those layers set plus the token and `CLAUDE_CONFIG_DIR`; nothing else of your
 shell reaches the sandbox. After the sandbox's login shell has run, the launch
-removes every variable the account does not set, credentials included, and
-sets again every one it does, so a profile inside the sandbox can neither
-re-route the run nor slip a credential into it. Network
+starts `claude` from a plain shell: the sandbox's login shell is read for its
+`PATH` only, and every variable the account does not set is removed,
+credentials included, so a profile inside the sandbox can neither re-route
+the run nor slip a credential into it. Network
 egress follows your `sbx` policy (balanced by default: model APIs, package
 managers, code hosts), widened per sandbox by the manifest and by the host of
 the account's `base_url` when the playbook is routed elsewhere.

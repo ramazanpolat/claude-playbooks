@@ -886,6 +886,39 @@ func TestNoLoginAccountRefusesAReachableLogin(t *testing.T) {
 	}
 }
 
+// The ordinary outgoing link to the machine's store is the playbook's own
+// link, which isolation detaches: a playbook that still has it after
+// SET login = 'isolated' is not the machine's directory, and its launch on
+// such an account goes ahead, leaving the machine's login as it was.
+func TestNoLoginAccountDetachesTheSharedLink(t *testing.T) {
+	hostOS = "linux"
+	_, configDir := isolatedWithToken(t)
+	writeManifest(t, configDir, "isolated_login = true\n")
+	home, _ := os.UserHomeDir()
+	global := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(global, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	machine := writeStore(t, global, `{`+grantJSON+`}`)
+	if err := os.Symlink(machine, StorePath(configDir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := AccountLoginRefusal(configDir, "pb", "router"); err != nil {
+		t.Fatalf("refused over the shared link: %v", err)
+	}
+	_, err := PrepareLaunchEnvFor(configDir, nil, "router")
+	EndLaunch(configDir)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if _, err := os.Lstat(StorePath(configDir)); !os.IsNotExist(err) {
+		t.Fatalf("the shared link is still there: %v", err)
+	}
+	if data, _ := os.ReadFile(machine); !strings.Contains(string(data), "STALE") {
+		t.Fatal("the machine's login was changed")
+	}
+}
+
 // A sandboxed launch on such an account refuses a login of the playbook's
 // own in any form: the directory is mounted into the sandbox. A link is
 // left to isolation, which detaches the shared one first (cmd/sandbox.go

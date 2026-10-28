@@ -94,9 +94,15 @@ func AccountLoginRefusal(configDir, name, account string) error {
 func accountOwnLoginRefusal(configDir, target, account string) error {
 	// The machine's own directory keeps its login where it is: nothing sets
 	// it aside, on any system, so a login there refuses before anything moves.
-	if store := StorePath(configDir); IsGlobalConfigDir(configDir) || isGlobalCredentialsFile(store) {
+	// A store that is the machine's credentials file (the target of the
+	// machine's own link, or a link on that chain) counts too; the ordinary
+	// outgoing link to it is the playbook's, which isolation detaches.
+	store := StorePath(configDir)
+	info, lerr := os.Lstat(store)
+	isLink := lerr == nil && info.Mode()&os.ModeSymlink != 0
+	if IsGlobalConfigDir(configDir) || (!isLink && isGlobalCredentialsFile(store)) || (isLink && inGlobalCredentialsChain(store)) {
 		where := ownLoginWhere(configDir)
-		if info, err := os.Lstat(store); where == "" && err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if where == "" && isLink {
 			where = "its " + CredentialsFileName + " links to a login"
 		}
 		if where != "" {

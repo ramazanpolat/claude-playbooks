@@ -272,14 +272,14 @@ func reservedInSettings(configDir, workdir string) error {
 // directory claude starts in. Claude Code applies it over every settings
 // file, so it is held to the same rule. A sandboxed launch takes inline JSON
 // only: a file is read inside the sandbox, which cpb cannot see from here.
-// Claude's own options end at "--". Never echoes the value.
+// Every argument is scanned, past a "--" too: one may be another option's
+// value, so the scan fails closed rather than guess claude's parsing. Never
+// echoes the value.
 func reservedInSettingsArgs(claudeArgs []string, workdir string, sandboxed bool) error {
 	for i := 0; i < len(claudeArgs); i++ {
 		a := claudeArgs[i]
 		var value string
 		switch {
-		case a == "--":
-			return nil
 		case a == "--settings" && i+1 < len(claudeArgs):
 			i++
 			value = claudeArgs[i]

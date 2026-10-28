@@ -721,7 +721,8 @@ func (b sbxBackend) attach(name string, env []string, tty bool, command string) 
 	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}
-	args = append(args, name, "bash", "-lc", command)
+	// A plain shell: the profile is read for PATH only (claudeCommand).
+	args = append(args, name, "bash", "-c", command)
 	c := exec.Command(b.bin, args...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
@@ -1193,9 +1194,7 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	for _, a := range claudeArgs {
 		quoted = append(quoted, shell.QuoteArg(a))
 	}
-	envCmd, copies := accountEnvCommand(env)
-	env = append(env, copies...)
-	command := "cd " + shell.QuoteArg(workdir) + " && exec " + envCmd + " claude"
+	command := claudeCommand(workdir, env)
 	if loginPath != "" {
 		// The sandbox-local login directory must exist for /login to write
 		// through the store link; created as the sandbox user, inside.
@@ -1210,41 +1209,35 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 }
 
 // accountEnvCommand is the `env` command that starts claude inside the
-// sandbox with the reserved variables exactly as the launch decided, after
-// the sandbox's login shell has read its profile: every one the launch does
-// not pass is removed, credentials included, and every one it passes is set
-// again, so a profile inside can neither re-route the run nor slip a
-// credential into it. A credential (or the placeholder the sandbox proxy
-// swaps for one) is never written on the command line: it is set again from
-// a copy passed beside it, CPB_ACCOUNT_<name>, which the command then
-// removes. extra is those copies, for the sandbox's environment.
-func accountEnvCommand(env []string) (command string, extra []string) {
-	passed := map[string]string{}
+// sandbox: every reserved variable the launch does not pass is removed, so
+// one the sandbox's own environment carries (a placeholder, a leftover)
+// never stands in for the account. What the launch passes reaches claude as
+// passed: claude starts from a plain shell (sbxBackend.attach), and the
+// sandbox's login shell, read only for its PATH (claudeCommand), never runs
+// in the shell that starts it.
+func accountEnvCommand(env []string) string {
+	passed := map[string]bool{}
 	for _, kv := range env {
-		k, v, _ := strings.Cut(kv, "=")
-		passed[k] = v
+		k, _, _ := strings.Cut(kv, "=")
+		passed[k] = true
 	}
-	credential := map[string]bool{}
-	for _, v := range account.CredentialVar {
-		credential[v] = true
-	}
-	opts := []string{"env"}
-	var set []string
+	parts := []string{"env"}
 	for _, k := range account.Reserved {
-		v, ok := passed[k]
-		switch {
-		case !ok:
-			opts = append(opts, "-u", k)
-		case credential[k]:
-			copyVar := "CPB_ACCOUNT_" + k
-			extra = append(extra, copyVar+"="+v)
-			opts = append(opts, "-u", copyVar)
-			set = append(set, k+`="$`+copyVar+`"`)
-		default:
-			set = append(set, shell.QuoteArg(k+"="+v))
+		if !passed[k] {
+			parts = append(parts, "-u", k)
 		}
 	}
-	return strings.Join(append(opts, set...), " "), extra
+	return strings.Join(parts, " ")
+}
+
+// claudeCommand starts claude in workdir with the launch's environment: the
+// PATH comes from the sandbox's login shell (where an installer puts
+// claude), read in a subshell with no stdin whose last output line is
+// taken, so nothing else the profile sets reaches the run.
+func claudeCommand(workdir string, env []string) string {
+	return "cd " + shell.QuoteArg(workdir) +
+		` && p="$(bash -lc 'printf "\n%s" "$PATH"' </dev/null 2>/dev/null | tail -n 1)"; [ -n "$p" ] || p="$PATH"; exec ` +
+		accountEnvCommand(env) + ` PATH="$p" claude`
 }
 
 // rewriteHostEndpoint points an ANTHROPIC_BASE_URL at localhost (the
