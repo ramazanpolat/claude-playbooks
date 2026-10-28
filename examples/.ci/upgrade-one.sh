@@ -73,7 +73,9 @@ python3 "$ci/state.py" "$home" > "$home/state-old.json"
 python3 "$ci/state.py" "$h2" > "$home/state-new.json"
 if ! cmp -s "$home/state-old.json" "$home/state-new.json"; then echo "the new binary's SHOW CREATE ALL does not rebuild the old state:"; diff "$home/state-old.json" "$home/state-new.json" | head -40; exit 1; fi
 cpb auth status --json > "$home/new-auth.json"
-if ! cmp -s "$home/old-auth.json" "$home/new-auth.json"; then echo "auth status differs:"; diff "$home/old-auth.json" "$home/new-auth.json" | head -20; exit 1; fi
+# A playbook an account now refuses reports that refusal (same-auth.py);
+# every other row must be unchanged.
+if ! python3 "$ci/same-auth.py" "$home/old-auth.json" "$home/new-auth.json" > "$home/auth-cmp"; then echo "auth status differs:"; head -20 "$home/auth-cmp"; exit 1; fi
 for pb in $pbs; do
   cpb EXPLAIN PLAYBOOK "$pb" --json > "$home/new-explain-$pb.json"
   # Every key the old binary printed is compared; one the new binary adds is
