@@ -124,7 +124,8 @@ Without a terminal, `cpb play` never prompts:
 ```
 cpb play ./reviewer.cpb --dry-run --json          # the plan, as APPLY --dry-run --json, plus a "play" block
 cpb play ./reviewer.cpb --yes                     # the yes
-cpb play ./router.cpb --yes --trust-endpoint router.example.net --env-set routerkey
+cpb play ./reviewer.cpb --yes --account glm      # on one of your accounts
+cpb play ./proxied.cpb --yes --trust-endpoint proxy.example.net
 cpb play ./tools.cpb --yes --trust-secret keychain:gh --no-sandbox
 cpb play https://example.com/x.cpb --sha256 c684ff05…   # refuse any other bytes, before anything is shown
 ```

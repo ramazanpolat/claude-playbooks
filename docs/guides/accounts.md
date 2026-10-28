@@ -65,8 +65,9 @@ cpb EXPLAIN PLAYBOOK sre                     # Account: work (anthropic, claude_
 - **One source.** The address, the key, the Claude token and the model
   variables come from the account and nowhere else. Anything your shell
   exports for them is removed; an env set, a playbook variable, a launch
-  flag, the playbook's `settings.json` or the project's `.claude/settings.json`
-  that sets one refuses the launch, naming where. `EXPLAIN` says the same in
+  flag, the playbook's `settings.json`, the project's `.claude/settings.json`
+  or a `--settings` you pass to claude that sets one (or names an
+  `apiKeyHelper`) refuses the launch, naming where. `EXPLAIN` says the same in
   `route.refused`.
 - **Moving an account moves its key.** `ALTER ACCOUNT glm SET base_url = …`
   is refused unless the same statement states the credential.
@@ -74,7 +75,15 @@ cpb EXPLAIN PLAYBOOK sre                     # Account: work (anthropic, claude_
   key, a Console key) never reaches yours: a playbook that shares the
   machine's login is refused on it (give it `SET login = 'isolated'`), and an
   isolated playbook's own login is set aside for the run on Linux, refused on
-  macOS.
+  macOS. On Linux, a login that cannot be set aside, a store that cannot be
+  read, or a login still reachable afterwards refuses the launch: never a
+  warning and a run.
+- **Sandboxes too.** A sandboxed launch renders the same account; after the
+  sandbox's login shell has run, every variable the account does not set is
+  removed again, so a profile inside cannot re-route the run. On an account
+  that uses no Claude login, a sandboxed launch is refused while the playbook
+  holds a login of its own: its directory is mounted inside. `/logout` in it,
+  run it unsandboxed, or use another playbook.
 - **A gateway you trust** with your Claude credential (a company proxy in
   front of Anthropic) says so: `claude_login_trusted = true`, over `https`
   only. Without it such an account is refused when written.
