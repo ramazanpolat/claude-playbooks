@@ -721,8 +721,10 @@ func (b sbxBackend) attach(name string, env []string, tty bool, command string) 
 	for _, kv := range env {
 		args = append(args, "-e", kv)
 	}
-	// A plain shell: the profile is read for PATH only (claudeCommand).
-	args = append(args, name, "bash", "-c", command)
+	// A plain shell: the profile is read for PATH only (claudeCommand), and
+	// no startup file runs either (BASH_ENV, ENV), so nothing in the
+	// sandbox's environment can change what the launch passes.
+	args = append(args, name, "env", "-u", "BASH_ENV", "-u", "ENV", "bash", "-c", command)
 	c := exec.Command(b.bin, args...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
@@ -1233,10 +1235,11 @@ func accountEnvCommand(env []string) string {
 // claudeCommand starts claude in workdir with the launch's environment: the
 // PATH comes from the sandbox's login shell (where an installer puts
 // claude), read in a subshell with no stdin whose last output line is
-// taken, so nothing else the profile sets reaches the run.
+// taken, so nothing else the profile sets reaches the run. Every step is
+// joined with &&: a workdir it cannot enter starts nothing.
 func claudeCommand(workdir string, env []string) string {
 	return "cd " + shell.QuoteArg(workdir) +
-		` && p="$(bash -lc 'printf "\n%s" "$PATH"' </dev/null 2>/dev/null | tail -n 1)"; [ -n "$p" ] || p="$PATH"; exec ` +
+		` && p="$(bash -lc 'printf "\n%s" "$PATH"' </dev/null 2>/dev/null | tail -n 1)" && { [ -n "$p" ] || p="$PATH"; } && exec ` +
 		accountEnvCommand(env) + ` PATH="$p" claude`
 }
 

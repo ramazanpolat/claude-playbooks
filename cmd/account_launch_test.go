@@ -132,7 +132,7 @@ func TestClaudeCommand(t *testing.T) {
 		"ANTHROPIC_AUTH_TOKEN=sk-secret",
 		"PATH=/bin",
 	})
-	for _, want := range []string{"cd '/w' && p=\"$(bash -lc ", "</dev/null", "exec env -u ", "-u ANTHROPIC_API_KEY", "-u CLAUDE_CODE_OAUTH_TOKEN", "-u CLAUDE_CODE_USE_BEDROCK", ` PATH="$p" claude`} {
+	for _, want := range []string{"cd '/w' && p=\"$(bash -lc ", "</dev/null", "&& exec env -u ", "-u ANTHROPIC_API_KEY", "-u CLAUDE_CODE_OAUTH_TOKEN", "-u CLAUDE_CODE_USE_BEDROCK", ` PATH="$p" claude`} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("lacks %q: %s", want, cmd)
 		}
