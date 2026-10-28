@@ -55,20 +55,17 @@ cpb start /tmp/spike --delete                      # or a throwaway session in a
 
 ### Route one playbook to another model
 
-An account is one record: where requests go, how they authenticate, and that
-provider's model names. A playbook names the accounts it may run on; every
-launch derives its address, key and models from one of them, so an address
-never changes while its key stays behind.
+An account is one record: where requests go, how they authenticate, and the
+provider's model names. Every launch derives its address, key and models from
+one account, so an address never changes while its key stays behind.
 
 ```bash
 cpb CREATE ACCOUNT glm SET provider = gateway, base_url = http://localhost:8080/v1, auth_token FROM keychain:router-token, model = glm-5.3
 cpb CREATE PLAYBOOK glm SET login=isolated USE ACCOUNT glm
 cpb EXPLAIN PLAYBOOK glm      # Account: glm (gateway http://localhost:8080/v1, …)
-cpb run --account work glm    # one launch on another account it lists
 ```
 
-`login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook
-keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
+`login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
 
@@ -134,9 +131,8 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
   tagged from.
 - **Another account's login never replaces yours:** cpb sets it aside rather
   than copying it over `~/.claude`'s.
-- **Your Claude login never goes to another provider:** a playbook routed
-  elsewhere runs on an account with that provider's own key, and a login it
-  does not use is kept out of the run.
+- **Your Claude login never goes to another provider:** an account with
+  another provider's key keeps every Claude login out of its runs.
 
 ## Learn it
 
