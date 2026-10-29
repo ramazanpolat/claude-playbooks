@@ -209,8 +209,9 @@ run**: the template you get is the one this release was tested with. A
 development build reads `main`, and says so. A name that does not exist
 suggests close ones. At v4.2.0 the `router-glm` template sets
 `ANTHROPIC_BASE_URL`, which a recipe may no longer do, so it is refused; the
-next release fixes it. Until then, play another recipe on your router account
-with `--account`.
+next release fetches the fixed one. Until then, play the fixed one by address,
+on your router's account: `cpb play
+https://cpb.ramazanpolat.com/p/router-glm.cpb --account <name>`.
 
 A template starts with a header:
 
