@@ -13,13 +13,13 @@ anywhere:
 | Layer | What each playbook gets | How |
 |---|---|---|
 | **Config home** | its own `CLAUDE.md`, `settings.json`, hooks, memory, history, sessions, plugins, MCP servers and skills; `~/.claude`'s own `CLAUDE.md` and rules stay out of it. Your `~/.claude` never moves. | every playbook (`global_instructions = 'excluded'`, the default) |
-| **Environment** | its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is. | `USE ENV`, `SET VAR`, `BLOCK VAR` |
-| **Login** | its own Anthropic account, sharing nothing with `~/.claude` | `SET login = 'isolated'` |
+| **Environment** | where its requests go and with which credential, from an account; its own variables, set or blocked at launch: a proxy, a feature flag, a tool's setting. Your shell stays as it is. | `USE ACCOUNT`; `USE ENV`, `SET VAR`, `BLOCK VAR` |
+| **Login** | its own Claude login, sharing nothing with `~/.claude` | `SET login = 'isolated'` |
 | **Process** (experimental) | a microVM with its own kernel, filesystem and network. It sees only your working directory and its own config, and your machine's login never enters it. By default a host-side proxy injects your backend API keys, so the sandbox never holds them ([sandbox guide](docs/guides/sandbox.md#secrets)). | `SET sandbox.always = true`, or `--sandbox` on any launch |
 
 ```bash
 cpb CREATE PLAYBOOK work                           # a playbook, and a `work` command that opens it
-cpb CREATE PLAYBOOK side SET login=isolated   # a second account, running beside the first
+cpb CREATE PLAYBOOK side SET login=isolated   # a second Claude login, running beside the first
 cpb CREATE PLAYBOOK sre SET sandbox.always = true, login = isolated   # every launch inside a microVM
 work                                               # Claude Code, bound to that playbook
 ```
@@ -65,7 +65,7 @@ cpb CREATE PLAYBOOK glm SET login=isolated USE ACCOUNT glm
 cpb EXPLAIN PLAYBOOK glm      # Account: glm (gateway http://localhost:8080/v1, …)
 ```
 
-A router that takes a key holds it by reference, `auth_token FROM '<ref>'`, resolved by your [secret helper](SPEC.md#secrets-optional). `login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two accounts side by side →](docs/guides/authentication.md)
+A router that takes a key holds it by reference, `auth_token FROM '<ref>'`, resolved by your [secret helper](SPEC.md#secrets-optional). `login = 'isolated'` keeps your Anthropic login away from that provider; a new playbook keeps `~/.claude`'s `CLAUDE.md` out (`global_instructions = 'excluded'`) and its own imports nothing. [Accounts →](docs/guides/accounts.md) · [Environment →](docs/guides/environment.md) · [two logins side by side →](docs/guides/authentication.md)
 
 ### Let an agent loose without letting it near your machine
 
@@ -129,7 +129,7 @@ cpb "SELECT name, envs, login FROM PLAYBOOKS"   # state as tables; add ClickHous
   macOS, upgrades from the previous release and checks the state reads the
   same. A full arena regression runs on the exact commit each release is
   tagged from.
-- **Another account's login never replaces yours:** cpb sets it aside rather
+- **Another Claude login never replaces yours:** cpb sets it aside rather
   than copying it over `~/.claude`'s.
 - **Your Claude login never goes to another provider:** an account with
   another provider's key keeps every Claude login out of its runs.

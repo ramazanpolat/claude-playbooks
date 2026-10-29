@@ -18,8 +18,8 @@ It reads no process's environment, and never changes the files.
   - the model it last answered with;
   - the command that resumes it.
 - **Resuming** is Claude Code's own `--resume` and `--continue`, on the
-  launcher or `cpb run`, so the launch is the playbook's: its env sets,
-  variables, secret references and login.
+  launcher or `cpb run`, so the launch is the playbook's: its account, env
+  sets, variables, secret references and login.
   - **A live session is never resumed.** Two processes on one session id
     corrupt it. cpb names the pid, so you can close that one first. For
     `--continue`, that is the newest session in this folder.

@@ -37,8 +37,8 @@ kd --continue                                      # the newest session here
 ```
 
 - **Without a launcher**, `cpb run <name> --resume …` does the same.
-- **The same launch as always.** The launch is the playbook's own: env sets,
-  variables, secret references, the login.
+- **The same launch as always.** The launch is the playbook's own: the
+  account, env sets, variables, secret references, the login.
 - **From another folder.** Claude Code finds a session by the folder it ran
   in. The `resume` field of `SHOW SESSIONS --json` is the whole command:
   `cd '<folder>' && kd --resume <id>`. A `--resume <id>` typed in another

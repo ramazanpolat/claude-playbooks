@@ -27,6 +27,6 @@ The interface, which any helper implements
 - `<helper> KEY=REF … -- claude <args>`: cpb runs it at launch. The helper
   sets each `KEY` in the environment of that one command and runs it.
 
-Examples [04](../04-secret-references/), [09](../09-mcp-servers/) and
-[23](../23-accounts/) use this helper. Their `.setup` writes a placeholder file, as you would write the
+Examples [04](../04-secret-references/), [09](../09-mcp-servers/),
+[19](../19-tui/) and [23](../23-accounts/) use this helper. Their `.setup` writes a placeholder file, as you would write the
 real value.
