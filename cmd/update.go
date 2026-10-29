@@ -82,10 +82,10 @@ cpb self-update updates cpb itself.`,
 
 func init() {
 	updateCmd.Flags().BoolVar(&updateDryRun, "dry-run", false, "show what the update would do, migrate step included, and change nothing")
-	updateCmd.Flags().BoolVar(&updateYes, "yes", false, "answer the yes without a terminal: run the migrate step; for a played playbook, never confirms an endpoint, a proxy, TLS or a secret")
+	updateCmd.Flags().BoolVar(&updateYes, "yes", false, "answer the yes without a terminal: run the migrate step; for a played playbook, never confirms a proxy, TLS or a secret")
 	updateCmd.Flags().BoolVar(&updateJSON, "json", false, "played or applied playbook, with --dry-run: the plan as JSON")
 	updateCmd.Flags().StringVar(&updateSHA256, "sha256", "", "played playbook: refuse any recipe whose sha256 is not this")
-	updateCmd.Flags().StringArrayVar(&updateTrustEndpoint, "trust-endpoint", nil, "played playbook, without a terminal: confirm a model endpoint or proxy host (or TLS); repeatable")
+	updateCmd.Flags().StringArrayVar(&updateTrustEndpoint, "trust-endpoint", nil, "played playbook, without a terminal: confirm a proxy host (or TLS); repeatable")
 	updateCmd.Flags().StringArrayVar(&updateTrustSecret, "trust-secret", nil, "played playbook, without a terminal: confirm a secret reference; repeatable")
 }
 

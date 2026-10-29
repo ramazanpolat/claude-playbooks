@@ -941,7 +941,9 @@ func checkMountedManifests(configPath string, mounts []string) error {
 			if m != nil && m.Env != nil {
 				for _, key := range secretEnvVars {
 					if m.Env.Set[key] != "" {
-						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an env set, which lives outside the mount (cpb CREATE ENV <set> SET %s=... AS PLAINTEXT; cpb ALTER PLAYBOOK <playbook> ADD ENV <set> UNSET VAR %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), key, key)
+						// The account key that holds it: auth_token or api_key.
+						acctKey := strings.ToLower(strings.TrimPrefix(key, "ANTHROPIC_"))
+						return fmt.Errorf("%s is set in %s, which the sandbox mounts: the key would be readable inside. Move it to an account, which lives outside the mount (cpb CREATE ACCOUNT <account> SET provider = '<provider>', %s FROM '<ref>'; cpb ALTER PLAYBOOK <playbook> USE ACCOUNT <account> UNSET VAR %s), or set [sandbox] secrets = \"env\" to accept the exposure", key, filepath.Join(dir, manifest.FileName), acctKey, key)
 					}
 				}
 			}
@@ -1135,8 +1137,8 @@ func runSandboxed(t sandboxTarget, layers []*manifest.Env, claudeArgs []string, 
 	// on the way up is checked while its directory lies under one of this
 	// launch's mounts (a subdir install keeps its [env] in the root's; a
 	// start directory under the working directory inherits from above
-	// it). Env sets live in the registry root, outside every mount,
-	// so that is where a secret belongs; refused before the sandbox
+	// it). Accounts live in the registry root, outside every mount,
+	// so that is where a key belongs; refused before the sandbox
 	// exists.
 	if sb.Secrets != "env" {
 		if err := checkMountedManifests(t.configPath, mounts); err != nil {

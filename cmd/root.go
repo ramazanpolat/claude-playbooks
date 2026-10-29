@@ -23,9 +23,9 @@ var rootCmd = &cobra.Command{
 
 State is changed and read with statements:
 
-  cpb CREATE | ALTER | DROP   PLAYBOOK | ENV | DEFAULTS  <name> <clause> ...
-  cpb SHOW [PLAYBOOKS | ENVS | DEFAULTS | PLAYBOOK <name> | ENV <name>] [--json]
-  cpb SHOW CREATE { PLAYBOOK <name> | ENV <name> | ALL }
+  cpb CREATE | ALTER | DROP   PLAYBOOK | ENV | ACCOUNT | DEFAULTS  <name> <clause> ...
+  cpb SHOW [PLAYBOOKS | ENVS | ACCOUNTS | DEFAULTS | PLAYBOOK <name> | ENV <name> | ACCOUNT <name>] [--json]
+  cpb SHOW CREATE { PLAYBOOK <name> | ENV <name> | ACCOUNT <name> | ALL }
   cpb EXPLAIN PLAYBOOK <name> [--json]
   cpb APPLY <file> [<file> ...] [--dry-run] [--yes]
 

@@ -65,7 +65,7 @@ func showCreate(st *grammar.Stmt) error {
 			return err
 		}
 		blocks = append(blocks, b)
-	default: // ALL: the secret helper, env sets, DEFAULTS, playbooks, so each statement finds what it names
+	default: // ALL: the secret helper, env sets, accounts, DEFAULTS, playbooks, so each statement finds what it names
 		helper, defaults, err := createDefaultsBlocks(dir)
 		if err != nil {
 			return err

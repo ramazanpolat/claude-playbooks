@@ -35,9 +35,10 @@ var authStatusCmd = &cobra.Command{
 authenticate -- exactly as run does, without launching -- and report the
 stored login next to it:
 
-  MODE     token | playbook-token | shared-login | isolated-login | error;
-           shared-login (token blocked) when the playbook blocks the
-           machine's token
+  MODE     token | playbook-token | shared-login | isolated-login | account |
+           error; playbook-token is a claude_token account, account one
+           with its own key and no Claude login; shared-login (token
+           blocked) when the playbook blocks the machine's token
   STORE    what sits at .credentials.json: symlink -> target, file, or absent
   EXPIRES  the stored grant's expiry, "expired", or "-" when there is no grant
   DAEMON   Claude Code's daemon-auth-status.json, when it says re-auth is
