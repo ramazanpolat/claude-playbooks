@@ -62,15 +62,15 @@ out=$(cpb CREATE PLAYBOOK scratch); check "scratch: created" 'Created playbook "
 out=$(cpb SHOW PLAYBOOK scratch); check "scratch: SHOW PLAYBOOK" 'Sandbox:              no'
 out=$(cpb DROP PLAYBOOK scratch --yes); check "scratch: dropped" 'Deleted playbook "scratch"'
 
-echo "== routing: env set, isolated login, model picker =="
-out=$(cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1); check "routing: CREATE ENV" "Created ENV router"
-out=$(cpb CREATE PLAYBOOK glm SET login = 'isolated'); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
-out=$(cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3); check "routing: USE ENV" "env sets  router"
-out=$(cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY); check "routing: BLOCK VAR" "blocked   ANTHROPIC_API_KEY"
+echo "== routing: an account, isolated login, model picker =="
+out=$(cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3'); check "routing: CREATE ACCOUNT" "router"
+out=$(cpb CREATE PLAYBOOK glm SET login = 'isolated' USE ACCOUNT router); check "routing: CREATE PLAYBOOK glm" 'Created playbook "glm"'
 out=$(cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'); check "routing: ADD MODEL" "model     glm-5.3"
 out=$(cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'); check "routing: ADD MODEL flash" "model     glm-5.3-flash"
 out=$(cpb ALTER PLAYBOOK glm SET model_picker.mode = 'only'); check "routing: SET model_picker.mode" "picker    only"
-out=$(cpb EXPLAIN PLAYBOOK glm); check "routing: EXPLAIN shows the picker" 'Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)'
+out=$(cpb SHOW ACCOUNTS); check "routing: SHOW ACCOUNTS lists it" "router"
+out=$(cpb EXPLAIN PLAYBOOK glm); check "routing: EXPLAIN names the account" 'Account: router (gateway http://localhost:4000/v1'
+check "routing: EXPLAIN shows the picker" 'Model picker: only: glm-5.3 (GLM 5.3), glm-5.3-flash (GLM 5.3 Flash)'
 
 echo "== recipes: APPLY --dry-run, APPLY, SHOW CREATE =="
 mkdir -p "$home/skills-src/review"
@@ -93,9 +93,9 @@ out=$(cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL https://mcp.sentry
 out=$(cpb EXPLAIN PLAYBOOK researcher); check "mcp: EXPLAIN shows the placeholder var" "CPB_MCP_SENTRY_H_AUTHORIZATION_"
 
 echo "== sessions + SELECT =="
-out=$(cpb "SELECT name, envs, login FROM PLAYBOOKS"); check "select: built-in table" "$(printf 'glm\trouter\tisolated')"
+out=$(cpb "SELECT name, accounts, login FROM PLAYBOOKS"); check "select: built-in table" "$(printf 'glm\trouter\tisolated')"
 if [ -x "${CPB_CLICKHOUSE:-/nonexistent}" ] || command -v clickhouse >/dev/null 2>&1 || command -v ch >/dev/null 2>&1; then
-  out=$(cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"); check "select: WHERE via clickhouse" "ANTHROPIC_BASE_URL"
+  out=$(cpb "SELECT name, login FROM PLAYBOOKS WHERE has(accounts, 'router') ORDER BY name"); check "select: WHERE via clickhouse" "$(printf 'glm\tisolated')"
 else
   echo "skip   select WHERE: no clickhouse on PATH"
 fi

@@ -158,7 +158,7 @@ def build(cpb):
         dry = r.cpb("APPLY", "showcase.cpb", "--dry-run", merge=True)
         plugins, markets = {}, {}
         for st in plan["statements"]:
-            tgt = st["target"].get("name")
+            tgt = (st.get("target") or {}).get("name")  # an account statement targets no playbook
             for a in st["actions"]:
                 argv = a.get("argv") or []
                 if argv[:3] == ["claude", "plugin", "install"]:
@@ -193,6 +193,14 @@ def build(cpb):
                 lay = v["layer"]
                 item["from"] = "PLAYBOOK" if lay["kind"].upper() == "PLAYBOOK" else f"ENV {lay['name']}"
                 env.append(item)
+
+            # the account a launch with no flags runs on; machine is no account of its own
+            route = explain.get("route") or {}
+            acct = route.get("account") or {}
+            account = None
+            if acct.get("name") and acct["name"] != "machine":
+                account = {"name": acct["name"], "provider": acct.get("provider"),
+                           "base_url": route.get("base_url"), "auth": route.get("auth")}
 
             mcp = []
             for m in show["mcp_servers"]:
@@ -246,6 +254,7 @@ def build(cpb):
                 "mcp": mcp,
                 "tools": show["tools"],
                 "env": env,
+                "account": account,
                 "files": files,
                 "file_text": texts,
                 "recipe": s["text"],

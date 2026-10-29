@@ -61,6 +61,34 @@ ok("tool rules and model fields cannot break out of their quotes", function () {
   refused(c, /router URL/);
   refused(sel({ model: { kind: "claude", id: "x y" } }), /model id/);
 });
+ok("a router is an account: a file names it, a recipe never routes", function () {
+  const f = core.defaultSelection("router-glm"); f.mode = "file"; f.model.tokenRef = "keychain:router-token";
+  const r = core.render(f); assert.ok(r.ok, (r.errors || []).join("; "));
+  assert.ok(r.text.includes("CREATE ACCOUNT IF NOT EXISTS router SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'keychain:router-token', model = 'glm-5.3';"), r.text);
+  assert.ok(r.text.includes("CREATE PLAYBOOK IF NOT EXISTS glm SET login = 'isolated';") && r.text.includes("USE ACCOUNT router"), r.text);
+  assert.ok(r.text.includes("-- min-cpb: " + core.ACCOUNT_CPB + "\n"), r.text);
+  const p = core.defaultSelection("router-glm"); p.mode = "recipe";
+  const t = core.render(p); assert.ok(t.ok);
+  assert.ok(!/ANTHROPIC_|USE ACCOUNT|CREATE ACCOUNT IF NOT EXISTS router SET[^\n]*;\n/.test(t.text.split("\n\n")[1]), t.text);
+  assert.ok(/^-- needs: an account for your router, such as cpb CREATE ACCOUNT router SET .*auth = 'none'.*; then cpb play router-glm --account router$/m.test(t.text), t.text);
+  assert.ok(t.text.includes("SET login = 'isolated';"), "a routed recipe keeps its own login");
+  assert.ok(t.commands.indexOf("cpb ALTER PLAYBOOK glm USE ACCOUNT router") > 0, t.commands.join(" | "));
+  const n = core.defaultSelection("router-glm"); n.isolated = false; n.mode = "file";
+  assert.ok(core.render(n).text.includes("SET login = 'isolated'"), "an account without a Claude login forces an isolated one");
+  const d = core.render(core.defaultSelection("daily-driver"));
+  assert.ok(d.text.includes("-- min-cpb: " + core.MIN_CPB + "\n") && !/ACCOUNT/.test(d.text));
+});
+ok("an account's address and name are what cpb takes", function () {
+  const h = core.defaultSelection("router-glm"); h.model.baseUrl = "http://llm.example.com/v1";
+  refused(h, /router URL/);
+  for (const u of ["https://llm.example.com/v1", "http://127.0.0.1:8080/v1", "http://localhost:4000"]) {
+    const o = core.defaultSelection("router-glm"); o.model.baseUrl = u; assert.ok(core.render(o).ok, u);
+  }
+  for (const a of ["machine", "Router", "sk-ant-x", "-x", ""]) {
+    const o = core.defaultSelection("router-glm"); o.model.account = a; refused(o, /account name/);
+  }
+  const g = core.defaultSelection("router-glm"); g.model.account = "glm.local_2"; assert.ok(core.render(g).ok);
+});
 ok("unknown things are refused", function () {
   refused(sel({ mcp: ["github", "nope"] }), /Unknown MCP/);
   refused(sel({ skills: ["nope"] }), /Unknown skill/);

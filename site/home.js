@@ -112,7 +112,7 @@
     var sandbox = p.login === "sandbox";
     return [
       { label: "Config home", on: true, v: "own dir" },
-      { label: "Environment", on: p.env.length > 0, v: p.env.length ? plural(p.env.length, "var") : "—" },
+      { label: "Environment", on: p.env.length > 0 || !!p.account, v: [p.account ? "account" : "", p.env.length ? plural(p.env.length, "var") : ""].filter(Boolean).join(" + ") || "—" },
       { label: "Login", on: p.login !== "shared", v: p.login },
       { label: "Process", on: sandbox, v: sandbox ? "microVM" : "host" }
     ];
@@ -151,7 +151,9 @@
       ? '<div class="rows">' + p.tools.allow.map(function (t) { return '<div class="allow">' + esc(t) + "</div>"; }).join("") +
         p.tools.deny.map(function (t) { return '<div class="deny">' + esc(t) + "</div>"; }).join("") + "</div>"
       : '<span class="none">no rules</span>';
-    var env = p.env.length ? '<div class="rows">' + p.env.map(function (v) {
+    var acct = p.account ? '<div class="kv"><span><span class="k">account</span><span class="eq"> = </span><span class="val">' + esc(p.account.name) +
+      '</span></span><span class="from">' + esc([p.account.provider, (p.account.base_url || "").replace(/^https?:\/\//, "")].filter(Boolean).join(" \u00b7 ")) + "</span></div>" : "";
+    var env = p.env.length || acct ? '<div class="rows">' + acct + p.env.map(function (v) {
       var val = v.blocked ? '<span class="blocked">blocked</span>' : '<span class="val">' + esc(v.value != null ? v.value : "<" + v.ref + ">") + "</span>";
       return '<div class="kv"><span><span class="k">' + esc(v.key) + '</span><span class="eq"> = </span>' + val +
         '</span><span class="from">' + esc(v.from) + "</span></div>";
@@ -163,7 +165,7 @@
       bay("MCP servers", "mcp", p.mcp.length, mcp, 2) +
       bay("Model", "model", null, model.length ? '<div class="chips">' + model.join("") + "</div>" : '<span class="none">default</span>', 3) +
       bay("Tools", "tools", p.tools.allow.length + p.tools.deny.length || null, tools, 4) +
-      bay("Environment", "env", p.env.length || null, env, 5) + "</div>";
+      bay("Environment", "env", p.env.length + (p.account ? 1 : 0) || null, env, 5) + "</div>";
   }
 
   var FILE_NOTE = {
@@ -448,7 +450,7 @@
   /* ---------- the four layers: who uses what ---------- */
   var uses = {
     config: function () { return true; },
-    env: function (p) { return !p.ephemeral && p.env.length > 0; },
+    env: function (p) { return !p.ephemeral && (p.env.length > 0 || !!p.account); },
     login: function (p) { return !p.ephemeral && p.login !== "shared"; },
     process: function (p) { return p.login === "sandbox"; }
   };

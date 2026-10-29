@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Website
+
+- **The website documents v4.2.0.** The tour routes a playbook through an
+  account (`CREATE ACCOUNT`, `USE ACCOUNT`, `SHOW ACCOUNTS`, `EXPLAIN`'s
+  `Account:` line), the home page's `glm` notebook runs on one, and the
+  template customizer writes an account for a router instead of routing
+  variables (a playbook file creates it; a recipe asks for one).
+- **The `router-glm` template plays on an account:** `cpb play router-glm
+  --account <name>`. cpb fetches a template at its own release tag, and
+  v4.2.0's copy still routes, so v4.2.0 refuses it; until the next release,
+  play it by address: `cpb play https://cpb.ramazanpolat.com/p/router-glm.cpb
+  --account <name>`.
+
 ## [v4.2.0] -- 2026-10-29
 
 v4.2.0 adds accounts. An account is one record that says where a playbook's
