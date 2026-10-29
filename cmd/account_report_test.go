@@ -23,11 +23,13 @@ func TestAccountReporting(t *testing.T) {
 	}
 	writePlaybook(t, root, "sre", &manifest.Manifest{Env: &manifest.Env{Accounts: []string{"acct-work"}}})
 	writePlaybook(t, root, "plain", &manifest.Manifest{})
+	writePlaybook(t, root, "bare", nil) // no manifest at all: a plain CREATE PLAYBOOK
 
-	out := mustStmt(t, "SELECT name, token_source, token_kind, account FROM PLAYBOOKS")
+	out := mustStmt(t, "SELECT name, auth_mode, token_source, token_kind, account FROM PLAYBOOKS")
 	for _, want := range []string{
-		"plain\tnone\t-\tmachine",
-		"sre\taccount\treference\tacct-work",
+		"bare\tshared-login\tnone\t-\tmachine",
+		"plain\tshared-login\tnone\t-\tmachine",
+		"sre\tplaybook-token\taccount\treference\tacct-work",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("SELECT lacks %q:\n%s", want, out)
@@ -46,6 +48,15 @@ func TestAccountReporting(t *testing.T) {
 	}
 	if ex.Route.Account.Name != "acct-work" || ex.TokenSource != "account" || ex.Route.Auth != "token-set" {
 		t.Fatalf("EXPLAIN --json: %+v", ex)
+	}
+	var bare struct {
+		AuthMode string `json:"auth_mode"`
+	}
+	if err := json.Unmarshal([]byte(mustStmt(t, "EXPLAIN PLAYBOOK bare --json")), &bare); err != nil {
+		t.Fatal(err)
+	}
+	if bare.AuthMode != "shared-login" {
+		t.Fatalf("EXPLAIN --json of a playbook with no manifest: auth_mode %q", bare.AuthMode)
 	}
 	human := mustStmt(t, "EXPLAIN PLAYBOOK sre")
 	if !strings.Contains(human, "Account: acct-work (anthropic, claude_token from a reference; the playbook's first)") {

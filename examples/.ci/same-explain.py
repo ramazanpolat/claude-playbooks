@@ -44,6 +44,14 @@ if isinstance(route, dict) and route.get("refused"):
     old = {k: v for k, v in old.items() if k != "route"}
     new = {k: v for k, v in new.items() if k != "route"}
     added.append("route (refused: an account's variable is set elsewhere)")
+# v4.2.0 printed an empty auth_mode and token_source for a playbook with no
+# manifest (a plain CREATE PLAYBOOK): it left the account fields unfilled.
+# A later binary fills them; an empty old value it fills is that fix, listed,
+# not compared. Any other change to them still fails.
+for k in ("auth_mode", "token_source"):
+    if old.get(k) == "" and new.get(k):
+        old[k] = new[k]
+        added.append(k + " (empty in the old binary: a playbook with no manifest)")
 kept = keep(old, new, "")
 a = json.dumps(old, indent=1).splitlines()
 b = json.dumps(kept, indent=1).splitlines()

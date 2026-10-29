@@ -393,6 +393,8 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 	v.GlobalInstructions, _ = globalInstructionsStateOf(pb.Path)
 	m := pb.Manifest
 	if m == nil {
+		// it still runs on an account: machine, or the DEFAULTS one
+		describeAccountOf(&v, pb)
 		return v
 	}
 	v.Version, v.Description, v.Homepage, v.Author = optStr(m.Version), optStr(m.Description), optStr(m.Homepage), optStr(m.Author)
@@ -413,17 +415,24 @@ func describePlaybook(pb *playbook.Playbook) playbookJSON {
 		v.Accounts = nonNil(m.Env.Accounts)
 		v.Vars = layerVars(m.Env.Set, m.Env.Refs, m.Env.Block)
 	}
-	if showAccount {
-		v.Account = auth.AccountOf(pb.Path)
-		var list []string
-		if m != nil && m.Env != nil {
-			list = m.Env.Accounts
-		}
-		if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil {
-			v.RunsOn = &sel.Name
-		}
-	}
+	describeAccountOf(&v, pb)
 	return v
+}
+
+// describeAccountOf fills the account fields: which Claude credential a
+// launch uses, and the account a launch with no flags runs on.
+func describeAccountOf(v *playbookJSON, pb *playbook.Playbook) {
+	if !showAccount {
+		return
+	}
+	v.Account = auth.AccountOf(pb.Path)
+	var list []string
+	if pb.Manifest != nil && pb.Manifest.Env != nil {
+		list = pb.Manifest.Env.Accounts
+	}
+	if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil {
+		v.RunsOn = &sel.Name
+	}
 }
 
 // showAccount is false while cpb ask's tool runs a SHOW: the account columns
