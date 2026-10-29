@@ -2,18 +2,45 @@
 
 ## [Unreleased]
 
+## [v4.2.1] -- 2026-10-29
+
+v4.2.1 fixes what v4.2.0 reported for a playbook with no manifest, plays the
+`router-glm` template on an account, and brings `--help`, the docs and the
+website in line with accounts. Nothing changes at launch.
+
+### Fixed
+
+- **A playbook with no manifest reports its account.** v4.2.0 gave a playbook
+  made by a plain `CREATE PLAYBOOK` an empty `auth_mode` and a null
+  `account` in `SELECT ... FROM PLAYBOOKS`, `SHOW PLAYBOOK --json` and
+  `EXPLAIN --json`, while `cpb auth status` and `EXPLAIN` said
+  `shared-login` on `machine`. All of them say that now.
+- **`cpb play router-glm` runs, on your router's account:** `cpb play
+  router-glm --account <name>`. The template sets no routing variable any
+  more (v4.2.0's copy did, so v4.2.0 refuses it; with v4.2.0, play it by
+  address: `cpb play https://cpb.ramazanpolat.com/p/router-glm.cpb --account
+  <name>`).
+- **`--help` names accounts.** The grammar summary lists `ACCOUNT`,
+  `ACCOUNTS` and `SHOW CREATE ACCOUNT`; `run` and `start` list `--account`;
+  `auth status` lists MODE `account` and says what `playbook-token` means;
+  `play` and `update` no longer offer to confirm a model endpoint (since
+  v4.2.0 only a proxy or a TLS change is typed). A sandboxed launch refused
+  for a key in a mounted `.playbook` points at an account instead of an env
+  set.
+
+### Docs
+
+- The README, the guides, SPEC and the example READMEs describe routing
+  through accounts; isolated login is "a Claude login", so it no longer reads
+  as the `ACCOUNT` object.
+
 ### Website
 
-- **The website documents v4.2.0.** The tour routes a playbook through an
+- **The website documents v4.2.x.** The tour routes a playbook through an
   account (`CREATE ACCOUNT`, `USE ACCOUNT`, `SHOW ACCOUNTS`, `EXPLAIN`'s
   `Account:` line), the home page's `glm` notebook runs on one, and the
   template customizer writes an account for a router instead of routing
   variables (a playbook file creates it; a recipe asks for one).
-- **The `router-glm` template plays on an account:** `cpb play router-glm
-  --account <name>`. cpb fetches a template at its own release tag, and
-  v4.2.0's copy still routes, so v4.2.0 refuses it; until the next release,
-  play it by address: `cpb play https://cpb.ramazanpolat.com/p/router-glm.cpb
-  --account <name>`.
 
 ## [v4.2.0] -- 2026-10-29
 
