@@ -80,6 +80,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		fmt.Println("Wrapper flags go before the path or immediately after it; the first other")
 		fmt.Println("argument (or --) ends them and everything from there on is claude's.")
 		fmt.Println("  --delete             delete the directory when the session ends")
+		fmt.Println("  --account NAME       run on this account")
 		fmt.Println("  --env-set NAME   layer an existing env set, this launch only")
 		fmt.Println("  --env KEY=VALUE      set one variable")
 		fmt.Println("  --block KEY          remove one variable")

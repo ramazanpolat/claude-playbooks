@@ -48,7 +48,7 @@ cpb SHOW PLAYBOOKS --json         # the form for scripts
 
 ```
 NAME        VERSION  LAUNCHER  ENV SETS  SOURCE
-awesome     1.4.0    ap        glm       https://github.com/user/awesome
+awesome     1.4.0    ap        tracing   https://github.com/user/awesome
 experiment  -        -         -         -
 ```
 
@@ -180,7 +180,7 @@ A **playbook file** (conventionally `playbook.cpb`) holds statements, one per
 `;`, and `APPLY` runs it. `SHOW CREATE` writes one from what is installed:
 
 ```bash
-cpb SHOW CREATE ALL > playbook.cpb       # env sets, DEFAULTS, playbooks, plugins
+cpb SHOW CREATE ALL > playbook.cpb       # env sets, accounts, DEFAULTS, playbooks, plugins
 cpb APPLY playbook.cpb --dry-run         # what would change, nothing written
 cpb APPLY playbook.cpb                   # on another machine, or again here: nothing changes
 ```

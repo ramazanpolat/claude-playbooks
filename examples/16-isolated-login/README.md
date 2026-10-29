@@ -23,7 +23,7 @@ only if you run `/login` in it.
   `/logout` in it first. It is also
   refused on a sandboxed playbook (`sandbox.always = true`), which is always
   isolated.
-- Use it for a second account, and for a throwaway or a third-party route
+- Use it for a second Claude login, and for a throwaway or a third-party route
   whose `/login` must not land in the machine's shared login
   ([example 15](../15-third-party-route/)).
 

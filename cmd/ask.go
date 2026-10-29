@@ -21,17 +21,19 @@ var askCmd = &cobra.Command{
 It shows them; it never runs them.
 
   cpb ask "list my env sets"
-  cpb ask "attach env set router to playbook work"
+  cpb ask "run playbook work on my router account"
   cpb ask work "how many of your sessions are live?"
 
 Naming a playbook (or its launcher) first addresses the question to it: it
 signs in the way a launch of that playbook would, and "you" means it. A
-playbook that routes away from Anthropic is refused.
+playbook on an account that is not Anthropic's, or on one that signs in with
+a key or a token of its own, is refused.
 
 It asks Claude through this machine's Claude Code login (claude -p), always on
-Anthropic's API: no env set, DEFAULTS or route of yours applies to the question.
+Anthropic's API: no env set, DEFAULTS or account of yours applies to the question.
 What it sends, to Anthropic: the request, and the names of your playbooks,
-launchers and env sets, with whether each routes away from Anthropic. Never a
+launchers and env sets, with whether each routes away from Anthropic (a
+playbook by the account it runs on). Never a
 variable's value, a secret reference or a credential. The model's one tool is
 cpb itself, read-only: SHOW and EXPLAIN, cut to names, routes, versions and
 session counts.

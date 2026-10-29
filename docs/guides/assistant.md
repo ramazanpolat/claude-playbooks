@@ -37,8 +37,9 @@ work has 2 live sessions: one interactive, one in the background.
 launch of it would: with the machine's token, with the machine's login, or
 with its own login when it has one (`SET login = 'isolated'`). Only its login
 is used; its `CLAUDE.md`, settings, hooks and MCP servers stay out. A
-playbook that sends its requests away from Anthropic is refused: ask without
-naming it. Quote the request when you name a playbook.
+playbook on an account that is not Anthropic's, or on one that signs in with
+a key or a token of its own, is refused: ask without naming it. Quote the
+request when you name a playbook.
 
 ## Reading the answer
 
@@ -96,12 +97,12 @@ playbook: `CREATE PLAYBOOK <name> SET login = 'isolated' USE ACCOUNT <account>`
 ## What is sent, and to whom
 
 The question goes to Anthropic's API through your own Claude Code (`claude
--p`) and its login, whatever your shell, your env sets or your `DEFAULTS`
-route other launches to. cpb holds no key and reads no credential.
+-p`) and its login, whatever your shell exports and whichever accounts your
+playbooks run on. cpb holds no key and reads no credential.
 
 It sends the request and the names of what is installed: playbooks,
-launchers, env sets, `DEFAULTS`, and for each playbook and env set whether it
-routes to Anthropic or away. It never sends a variable's value, a secret
+launchers, env sets, `DEFAULTS`, and for each playbook (by the account it
+runs on) and each env set whether it routes to Anthropic or away. It never sends a variable's value, a secret
 reference, an env set's description, or a credential.
 
 The model has one tool, and it is cpb, read-only: it can run `SHOW` and

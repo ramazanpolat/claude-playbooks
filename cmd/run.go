@@ -89,6 +89,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		fmt.Println("Runs Claude Code with the named playbook.")
 		fmt.Println("Launch flags add one-off environment layers on top of the playbook's [env]")
 		fmt.Println("block, in order, for this launch only; they go before the name or right after it.")
+		fmt.Println("  --account NAME       run on this account (one the playbook may use)")
 		fmt.Println("  --env-set NAME   layer an existing env set")
 		fmt.Println("  --env KEY=VALUE      set one variable")
 		fmt.Println("  --block KEY          remove one variable (CLAUDE_CODE_OAUTH_TOKEN: use the stored login)")

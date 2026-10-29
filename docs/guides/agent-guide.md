@@ -14,11 +14,11 @@ Never assume a playbook exists or a name is free. The registry is the filesystem
 
 ```bash
 cpb SHOW PLAYBOOKS --json            # an array of playbook objects (a bare `cpb SHOW --json` is the same)
-cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, launcher, envs, vars, sandbox, marketplaces, plugins, agent, mcp_servers, tools, skills, statusline, model, play
+cpb SHOW PLAYBOOK <name> --json      # name, version, path, source, linked, launcher, envs, vars, sandbox, marketplaces, plugins, agent, mcp_servers, tools, skills, statusline, model, play, auth_mode, token_source, token_kind, token_blocked, accounts, account
 cpb SHOW ENVS --json                 # env sets: name, description, vars, used_by, default
 cpb "SELECT name, envs FROM PLAYBOOKS" --json   # chosen columns, one table (anything beyond columns needs clickhouse-local)
-cpb SHOW DEFAULTS --json             # {"envs": [...], "secret_helper": "<command>" | null, "secret_helper_from": "setting" | ...}
-cpb EXPLAIN PLAYBOOK <name> --json   # every variable a launch would change, with its layer, and its route: base URL, models, auth state, egress (never a secret)
+cpb SHOW DEFAULTS --json             # {"envs": [...], "account": "<name>" | null, "secret_helper": "<command>" | null, "secret_helper_from": "setting" | ...}
+cpb EXPLAIN PLAYBOOK <name> --json   # every variable a launch would change, with its layer, and its route: base URL, models, auth state, egress, the account (route.account) and why a launch would be refused (route.refused); never a secret
 ```
 
 A variable is one object with exactly one of `value`, `ref`, `redacted` (with `plaintext`) or `blocked`. A credential's value is never printed in any form.
@@ -30,7 +30,7 @@ cpb auth status --json           # per playbook: mode, store, expires_at, reauth
 cpb auth status <name>           # one row, human-readable
 ```
 
-Blockers: `"mode":"error"` (the launch is refused) and `"reauth_required":true` (only set for the stored-login modes `shared-login` and `isolated-login`). Report these instead of retrying. `"expired":true` is advisory: Claude Code refreshes the stored grant at launch while its refresh token is valid. Token modes (`token`, `playbook-token`) carry no stored login to judge. `"token_blocked":true` means the playbook blocks the machine's token and uses the stored login.
+Blockers: `"mode":"error"` (the launch is refused) and `"reauth_required":true` (only set for the stored-login modes `shared-login` and `isolated-login`). Report these instead of retrying. `"expired":true` is advisory: Claude Code refreshes the stored grant at launch while its refresh token is valid. Token and key modes (`token`, `playbook-token`, `account`) carry no stored login to judge. `"token_blocked":true` means the playbook blocks the machine's token and uses the stored login.
 
 ## Launch a session headlessly
 
@@ -144,7 +144,7 @@ cpb ALTER DEFAULTS USE ENV <set> [...]           # layered under every playbook
 cpb DROP ENV <set>                               # refused while a playbook or DEFAULTS uses it
 ```
 
-Layering at launch, later wins: shell environment, `DEFAULTS` in order, the playbook's env sets in order, the playbook's own `SET VAR` / `BLOCK VAR`, one-off launch flags, then `CLAUDE_CONFIG_DIR`. Details: [Environment overrides](environment.md).
+Layering at launch, later wins: shell environment, `DEFAULTS` in order, the playbook's env sets in order, the playbook's own `SET VAR` / `BLOCK VAR`, one-off launch flags, the account's variables (every other variable an account owns removed; a layer above that sets one refuses the launch), then `CLAUDE_CONFIG_DIR`. Details: [Environment overrides](environment.md).
 
 A credential-looking literal (`*TOKEN*`, `*SECRET*`, `*_KEY`, …) is refused. Store it by reference through a secret helper the pilot configured (`SET KEY FROM '<ref>'`; `SHOW DEFAULTS --json` says whether one is), or, only when told to, `AS PLAINTEXT`. Never put a secret value on a command line you log, and never paste one into a playbook file.
 

@@ -201,7 +201,7 @@ cpb run --env-set tools work                         # an existing env set, this
 cpb run work --env MAX_THINKING_TOKENS=8000 -p "..."
 cpb run --account personal work                      # another account the playbook may run on
 cpb run --block CLAUDE_CODE_OAUTH_TOKEN work             # on machine: this launch uses the stored login
-cpb run --env-file ./work-account.env work               # KEY=VALUE lines, dotenv style
+cpb run --env-file ./job.env work                        # KEY=VALUE lines, dotenv style
 cpb start --env-set tools /tmp/scratch
 work --env-set tools -p "..."                        # launchers take them too, at the start
 ```

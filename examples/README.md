@@ -13,8 +13,13 @@ read it identically:
 - every playbook launches and drops;
 - a made-up machine login is never touched.
 
+One exception by design: since v4.2.0 a playbook that routes through an env
+set or its own variables is refused at launch until it runs on an account, so
+its `auth status` row (MODE `error`) is not compared and its launch is
+skipped; the log names it.
+
 [`secret-helper/`](secret-helper/) is not an example: it is a sample secret
-helper, `cpb-secret-file`, which examples 04 and 09 use.
+helper, `cpb-secret-file`, which examples 04, 09, 19 and 23 use.
 
 | | |
 |---|---|

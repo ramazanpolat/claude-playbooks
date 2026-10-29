@@ -8,8 +8,10 @@ cpb APPLY playbook.cpb                 # again: 0 created, 0 changed
 ```
 
 `SHOW CREATE` writes only forms that are safe to repeat (`CREATE OR REPLACE
-ENV`, `CREATE OR ALTER PLAYBOOK`, `USE ENV` with the full list), so the
-file converges instead of piling up. `CREATE OR ALTER PLAYBOOK … SET …`
+ENV`, `CREATE OR REPLACE ACCOUNT`, `CREATE OR ALTER PLAYBOOK`, `USE ENV` and
+`USE ACCOUNT` with the full list), so the file converges instead of piling
+up. `SHOW CREATE ALL` writes the secret helper, env sets, accounts,
+`DEFAULTS`, then playbooks, so each statement finds what it names. `CREATE OR ALTER PLAYBOOK … SET …`
 creates the playbook with those properties, or, when it exists, applies the
 `SET` list as `ALTER PLAYBOOK … SET` would; what is fixed at creation (`FROM`,
 `BRANCH`, `SUBDIR`, `LINK`) is only compared, and a different source is a
