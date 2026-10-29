@@ -167,14 +167,14 @@
       <div class="lcard">
         <svg class="ic" aria-hidden="true"><use href="#i-env"/></svg>
         <h3>Environment</h3>
-        <p>Its own variables, set or blocked at launch: another model backend, another token, another proxy. Your shell stays as it is.</p>
-        <div class="kw"><code>USE ENV</code><code>SET VAR</code><code>BLOCK VAR</code></div>
+        <p>Its own account (where requests go, one credential by reference, the provider's model names) and its own variables, set or blocked at launch. Your shell stays as it is.</p>
+        <div class="kw"><code>USE ACCOUNT</code><code>SET VAR</code><code>BLOCK VAR</code></div>
         <div class="used"><span class="lab">used by</span><div class="dots" data-used="env"></div></div>
       </div>
       <div class="lcard">
         <svg class="ic" aria-hidden="true"><use href="#i-key"/></svg>
         <h3>Login</h3>
-        <p>Its own Anthropic account, sharing nothing with <code class="inl">~/.claude</code>. Run two accounts side by side.</p>
+        <p>Its own Claude login, sharing nothing with <code class="inl">~/.claude</code>. Run two subscriptions side by side; a router's account never sees yours.</p>
         <div class="kw"><code>login = 'isolated'</code></div>
         <div class="used"><span class="lab">used by</span><div class="dots" data-used="login"></div></div>
       </div>
@@ -261,7 +261,7 @@
       <p>Every change is tested the same way, on the exact commit a release tags.</p>
     </div>
     <div class="stats">
-      <div class="stat"><span class="n">22 examples</span><span class="d">applied in CI on every change: dry run, apply, re-apply (a no-op), then each README's own checks.</span></div>
+      <div class="stat"><span class="n">23 examples</span><span class="d">applied in CI on every change: dry run, apply, re-apply (a no-op), then each README's own checks.</span></div>
       <div class="stat"><span class="n">upgrade-tested</span><span class="d">The previous release's binary applies its own examples; this build takes over the same state and must read it identically.</span></div>
       <div class="stat"><span class="n">arena regression</span><span class="d">A full <a href="https://github.com/ramazanpolat/claude-playbooks/tree/main/gentar" target="_blank" rel="noopener">gentar</a> run on the exact commit each release is tagged from.</span></div>
     </div>
@@ -313,11 +313,11 @@
       "showcase.cpb:28      changed   ALTER PLAYBOOK side  (would run: claude plugin marketplace add anthropics/claude-code --scope user; claude plugin install frontend-design@claude-code-plugins --scope user --json; claude mcp add-json notion --scope user; claude mcp add-json playwright --scope user; copy skills/canvas-design from github:anthropics/skills; copy skills/algorithmic-art from github:anthropics/skills)",
       "showcase.cpb:39      created   CREATE PLAYBOOK sre",
       "showcase.cpb:40      changed   ALTER PLAYBOOK sre  (would run: claude mcp add-json sentry --scope user; claude mcp add-json cloudflare-docs --scope user; link skills/runbook to ~/skills/runbook; copy skills/doc-coauthoring from github:anthropics/skills)",
-      "showcase.cpb:49      created   CREATE ENV router",
+      "showcase.cpb:49      created   CREATE ACCOUNT router",
       "showcase.cpb:50      created   CREATE PLAYBOOK glm",
       "showcase.cpb:51      changed   ALTER PLAYBOOK glm  (would run: claude mcp add-json context7 --scope user)",
-      "showcase.cpb:61      created   CREATE PLAYBOOK reviewer",
-      "showcase.cpb:62      changed   ALTER PLAYBOOK reviewer  (would run: claude plugin marketplace add anthropics/claude-code --scope user; claude plugin install code-review@claude-code-plugins --scope user --json; claude plugin install pr-review-toolkit@claude-code-plugins --scope user --json; claude mcp add-json github --scope user)",
+      "showcase.cpb:59      created   CREATE PLAYBOOK reviewer",
+      "showcase.cpb:60      changed   ALTER PLAYBOOK reviewer  (would run: claude plugin marketplace add anthropics/claude-code --scope user; claude plugin install code-review@claude-code-plugins --scope user --json; claude plugin install pr-review-toolkit@claude-code-plugins --scope user --json; claude mcp add-json github --scope user)",
       "Would apply showcase.cpb: 6 created, 5 changed, 0 unchanged, 0 dropped"
     ],
     "applied": "Applied showcase.cpb: 6 created, 5 changed, 0 unchanged, 0 dropped",
@@ -392,6 +392,7 @@
           "from": "PLAYBOOK"
         }
       ],
+      "account": null,
       "files": [
         {
           "name": "CLAUDE.md",
@@ -498,6 +499,7 @@
           "from": "PLAYBOOK"
         }
       ],
+      "account": null,
       "files": [
         {
           "name": "CLAUDE.md",
@@ -585,6 +587,7 @@
         ]
       },
       "env": [],
+      "account": null,
       "files": [
         {
           "name": "CLAUDE.md",
@@ -668,23 +671,13 @@
         "allow": [],
         "deny": []
       },
-      "env": [
-        {
-          "key": "ANTHROPIC_API_KEY",
-          "blocked": true,
-          "from": "PLAYBOOK"
-        },
-        {
-          "key": "ANTHROPIC_BASE_URL",
-          "value": "http://localhost:4000/v1",
-          "from": "ENV router"
-        },
-        {
-          "key": "ANTHROPIC_MODEL",
-          "value": "glm-5.3",
-          "from": "PLAYBOOK"
-        }
-      ],
+      "env": [],
+      "account": {
+        "name": "router",
+        "provider": "gateway",
+        "base_url": "http://localhost:4000/v1",
+        "auth": "token-set"
+      },
       "files": [
         {
           "name": "CLAUDE.md",
@@ -707,9 +700,9 @@
         "CLAUDE.md": "# Playbook: glm\n\nThis Claude Code session runs inside a **playbook**: a Claude Code config directory of its own, managed by cpb (Claude PlayBooks).\n\n`CLAUDE_CONFIG_DIR` points to this directory, so settings, hooks, memory, conversation history, MCP servers, agents, slash commands and this `CLAUDE.md` belong to this playbook. Nothing here changes `~/.claude` or any other playbook.\n\n## Useful cpb statements\n\n```\ncpb SHOW PLAYBOOKS                      # every playbook and its launcher\ncpb SHOW PLAYBOOK glm\ncpb ALTER PLAYBOOK glm RENAME TO <name>\n",
         "settings.json": "{\n  \"claudeMdExcludes\": [\n    \"~/.claude/**\"\n  ],\n  \"modelPicker\": {\n    \"options\": [\n      {\n        \"model\": \"glm-5.3\",\n        \"label\": \"GLM 5.3\",\n        \"description\": \"via the router\"\n      },\n      {\n        \"model\": \"glm-5.3-flash\",\n        \"label\": \"GLM 5.3 Flash\",\n        \"behavesAs\": \"claude-sonnet-5\"\n      }\n    ],\n    \"replaceBuiltInOptions\": true\n  }\n}\n",
         ".claude.json": "{\n  \"mcpServers\": {\n    \"context7\": {\n      \"type\": \"stdio\",\n      \"command\": \"npx\",\n      \"args\": [\n        \"-y\",\n        \"@upstash/context7-mcp\"\n      ]\n    }\n  }\n}",
-        ".playbook": "name = \"glm\"\nisolated_login = true\n\n[env]\nsets = [\"router\"]\nblock = [\"ANTHROPIC_API_KEY\"]\n\n[env.set]\nANTHROPIC_MODEL = \"glm-5.3\"\n"
+        ".playbook": "name = \"glm\"\nisolated_login = true\n\n[env]\naccounts = [\"router\"]\n"
       },
-      "recipe": "-- glm: another model backend, behind a router. It shares nothing.\nCREATE OR REPLACE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1;\nCREATE PLAYBOOK IF NOT EXISTS glm SET login = 'isolated';\nALTER PLAYBOOK glm\n  USE ENV router\n  SET VAR ANTHROPIC_MODEL=glm-5.3\n  BLOCK VAR ANTHROPIC_API_KEY\n  ADD MCP SERVER context7 COMMAND 'npx' ARGS '-y' '@upstash/context7-mcp'\n  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'\n  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'\n  SET model_picker.mode = 'only';\n"
+      "recipe": "-- glm: another model backend, behind a router. It shares nothing.\nCREATE OR REPLACE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3';\nCREATE PLAYBOOK IF NOT EXISTS glm SET login = 'isolated';\nALTER PLAYBOOK glm\n  USE ACCOUNT router\n  ADD MCP SERVER context7 COMMAND 'npx' ARGS '-y' '@upstash/context7-mcp'\n  ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'\n  ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'\n  SET model_picker.mode = 'only';\n"
     },
     {
       "name": "reviewer",
@@ -745,6 +738,7 @@
         ]
       },
       "env": [],
+      "account": null,
       "files": [
         {
           "name": "CLAUDE.md",
@@ -781,7 +775,7 @@
       "lifecycle": {
         "config_dir_is_the_path": true,
         "existed_during": true,
-        "entries_at_start": 0,
+        "entries_at_start": 1,
         "exists_after": false,
         "created_by_start": true,
         "registered": false

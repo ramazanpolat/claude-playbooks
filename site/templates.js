@@ -55,7 +55,7 @@
   }
 
   /* ---------- highlighting ---------- */
-  var KW = /\b(CREATE|ALTER|PLAYBOOK|IF|NOT|EXISTS|ENV|ADD|SET|USE|VAR|BLOCK|MCP|SERVER|SKILL|PLUGIN|MARKETPLACE|FROM|URL|COMMAND|ARGS|HEADER|ALLOW|DENY|TOOL|MODEL|PICKER|ONLY|APPEND|LABEL|BEHAVES|AS|SANDBOX|ISOLATED|LOGIN|SUBDIR|TO|APPLY|SUBDIR)\b/g;
+  var KW = /\b(CREATE|ALTER|PLAYBOOK|ACCOUNT|IF|NOT|EXISTS|ENV|ADD|SET|USE|VAR|BLOCK|MCP|SERVER|SKILL|PLUGIN|MARKETPLACE|FROM|URL|COMMAND|ARGS|HEADER|ALLOW|DENY|TOOL|MODEL|PICKER|ONLY|APPEND|LABEL|BEHAVES|AS|SANDBOX|ISOLATED|LOGIN|SUBDIR|TO|APPLY|SUBDIR)\b/g;
   function hl(line) {
     if (/^--/.test(line)) {
       var m = line.match(/^(-- )([a-z-]+:)(.*)$/);
@@ -157,7 +157,7 @@
     if (m && m.kind === "claude" && typeof m.id === "string") s.model = { kind: "claude", id: m.id.slice(0, 80) };
     else if (m && m.kind === "default") s.model = { kind: "default", id: "" };
     else if (m && m.kind === "router") {
-      s.model = { kind: "router", baseUrl: String(m.baseUrl || "").slice(0, 200), id: String(m.id || "").slice(0, 80), blockKey: m.blockKey !== false,
+      s.model = { kind: "router", account: String(m.account || "router").slice(0, 40), baseUrl: String(m.baseUrl || "").slice(0, 200), id: String(m.id || "").slice(0, 80),
         tokenRef: String(m.tokenRef || "").slice(0, 100), pickerMode: m.pickerMode === "APPEND" ? "APPEND" : "ONLY",
         picker: (Array.isArray(m.picker) ? m.picker : []).slice(0, 8).map(function (e) {
           return { id: String(e.id || "").slice(0, 80), label: String(e.label || "").slice(0, 40), behavesAs: e.behavesAs ? String(e.behavesAs).slice(0, 80) : undefined };
@@ -195,10 +195,10 @@
       '<label><input type="radio" name="mk" data-k="mk" value="router"><span><b>Another backend</b><small>behind a router</small></span></label></div>' +
       '<div class="sub" data-sub="claude"><label class="sel"><span>Model</span><select data-k="claudeId">' + C.MODELS.map(function (m) { return '<option value="' + m.id + '">' + esc(m.label) + "</option>"; }).join("") + "</select></label></div>" +
       '<div class="sub" data-sub="router">' +
+      '<div class="field"><label for="f-acct">Account name <small>(the account this playbook runs on)</small></label><input id="f-acct" type="text" data-k="routerAcct" spellcheck="false" maxlength="40"><p class="err" data-err="routerAcct"></p></div>' +
       '<div class="field"><label for="f-url">Router URL</label><input id="f-url" type="text" data-k="routerUrl" spellcheck="false"><p class="err" data-err="routerUrl"></p></div>' +
       '<div class="field"><label for="f-rid">Model id the router serves</label><input id="f-rid" type="text" data-k="routerId" spellcheck="false"><p class="err" data-err="routerId"></p></div>' +
       '<div class="field"><label for="f-rtok">Router key, by reference <small>(optional)</small></label><input id="f-rtok" type="text" data-k="routerRef" placeholder="keychain:router-token" spellcheck="false"><p class="err" data-err="routerRef"></p></div>' +
-      sw("routerBlock", "Block ANTHROPIC_API_KEY", "Removed at launch even if your shell exports it, so your own key never goes to the router.") +
       '<div class="seg2" role="radiogroup" aria-label="The /model list"><label><input type="radio" name="pm" data-k="pickerMode" value="ONLY"><span><b>/model list: only these</b><small>replaces the built-in rows</small></span></label>' +
       '<label><input type="radio" name="pm" data-k="pickerMode" value="APPEND"><span><b>/model list: add these</b><small>after the built-in rows</small></span></label></div>' +
       '<div class="rowlist" data-list="picker"></div><button class="linkbtn" type="button" data-act="add-pk">+ Add a /model entry</button>' +
@@ -270,16 +270,15 @@
     qa('[data-k="mode"]').forEach(function (r) { r.checked = r.value === sel.mode; });
     q('[data-k="sandbox"]').checked = sel.sandbox;
     var iso = q('[data-k="isolated"]');
-    iso.checked = sel.isolated || sel.sandbox; iso.disabled = sel.sandbox;
-    iso.closest(".swrow").classList.toggle("implied", sel.sandbox);
-    var m = sel.model;
+    var m = sel.model, implied = sel.sandbox || m.kind === "router";
+    iso.checked = sel.isolated || implied; iso.disabled = implied;
+    iso.closest(".swrow").classList.toggle("implied", implied);
     qa('[data-k="mk"]').forEach(function (r) { r.checked = r.value === m.kind; });
     q('[data-sub="claude"]').hidden = m.kind !== "claude";
     q('[data-sub="router"]').hidden = m.kind !== "router";
     if (m.kind === "claude") q('[data-k="claudeId"]').value = m.id;
     if (m.kind === "router") {
-      setVal(q('[data-k="routerUrl"]'), m.baseUrl); setVal(q('[data-k="routerId"]'), m.id); setVal(q('[data-k="routerRef"]'), m.tokenRef || "");
-      q('[data-k="routerBlock"]').checked = !!m.blockKey;
+      setVal(q('[data-k="routerAcct"]'), m.account); setVal(q('[data-k="routerUrl"]'), m.baseUrl); setVal(q('[data-k="routerId"]'), m.id); setVal(q('[data-k="routerRef"]'), m.tokenRef || "");
       qa('[data-k="pickerMode"]').forEach(function (r) { r.checked = r.value === m.pickerMode; });
     }
     qa("[data-mcp]").forEach(function (c) { c.checked = sel.mcp.indexOf(c.getAttribute("data-mcp")) >= 0; });
@@ -302,6 +301,7 @@
   function fieldErrors() {
     setErr("name", C.check.name(sel.name));
     var m = sel.model;
+    setErr("routerAcct", m.kind === "router" ? C.check.account(m.account) : "");
     setErr("routerUrl", m.kind === "router" ? C.check.url(m.baseUrl) : "");
     setErr("routerId", m.kind === "router" ? C.check.modelId(m.id) : "");
     setErr("routerRef", m.kind === "router" && m.tokenRef ? C.check.ref(m.tokenRef) : "");
@@ -349,7 +349,9 @@
     if (r.needs.length) notes.push("Needs a secret helper for " + r.needs.map(function (x) { return "<code>" + esc(x) + "</code>"; }).join(", ") + ". Store each secret yourself, then apply.");
     if (sel.sandbox) notes.push("Sandboxed launches need <code>sbx</code> (Docker Sandboxes).");
     if (sel.sandbox && sel.mode === "recipe") notes.push("<code>cpb CREATE PLAYBOOK</code> refuses a name that exists already. For an existing playbook, run <code>cpb ALTER PLAYBOOK " + esc(sel.name) + " SET SANDBOX</code> instead of it.");
-    if (sel.model.kind === "router") notes.push("Attach your router's key with an env set; it is never written to this file.");
+    if (sel.model.kind === "router" && sel.mode === "file") notes.push("The file creates the account <code>" + esc(sel.model.account) + "</code> unless you have one by that name already; the playbook runs on it. Your router's key stays in your secret store: the account holds a reference.");
+    if (sel.model.kind === "router" && sel.mode === "recipe") notes.push("A recipe never says where requests go: the first command makes the account, the last but one puts the playbook on it. To try it without keeping it: <code>cpb play " + esc(r.file) + " --account " + esc(sel.model.account) + "</code>.");
+    if (sel.model.kind === "router") notes.push("An account that uses no Claude login needs a playbook with a login of its own, so the login switch is on.");
     return "<h4>Use it</h4><ol class=\"cmds\">" + cmds + "</ol>" + (notes.length ? '<ul class="notes">' + notes.map(function (n) { return "<li>" + n + "</li>"; }).join("") + "</ul>" : "");
   }
 
@@ -376,7 +378,6 @@
       return changed(true);
     }
     if (k === "claudeId") { sel.model.id = t.value; memo.claude = sel.model; return changed(); }
-    if (k === "routerBlock") { sel.model.blockKey = t.checked; return changed(); }
     if (k === "pickerMode") { sel.model.pickerMode = t.value; return changed(); }
     if (t.hasAttribute("data-mcp")) { toggleIn(sel.mcp, t.getAttribute("data-mcp"), t.checked); return changed(); }
     if (t.hasAttribute("data-skill")) { toggleIn(sel.skills, t.getAttribute("data-skill"), t.checked); return changed(); }
@@ -398,6 +399,7 @@
   cz.addEventListener("input", function (e) {
     var t = e.target, k = t.getAttribute("data-k");
     if (k === "name") { sel.name = t.value.trim(); return update(); }
+    if (k === "routerAcct") { sel.model.account = t.value.trim(); return update(); }
     if (k === "routerUrl") { sel.model.baseUrl = t.value.trim(); return update(); }
     if (k === "routerId") { sel.model.id = t.value.trim(); return update(); }
     if (k === "routerRef") { sel.model.tokenRef = t.value.trim(); return update(); }

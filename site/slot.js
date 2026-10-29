@@ -20,7 +20,7 @@
     { v: "SPLIT", o: "LOGINS", c: 1, href: "#layers", link: "See the layers",
       t: "Run two Anthropic accounts side by side. An isolated login shares nothing with the other." },
     { v: "SWAP", o: "MODELS", c: 3, href: "#playbooks", link: "See the glm notebook",
-      t: "Point one playbook at another model backend with an env set, and give it its own <code class=\"inl\">/model</code> list. Your shell stays as it is." },
+      t: "Point one playbook at another model backend with an account, and give it its own <code class=\"inl\">/model</code> list. Your shell stays as it is." },
     { v: "SANDBOX", o: "AGENTS", c: 2, href: "#runtimes", link: "See where they run",
       t: "A microVM sees only your folder and the playbook's own directory. API keys stay on the host." },
     { v: "CONNECT", o: "TOOLS", c: 0, href: "#playbooks", link: "See the MCP servers",

@@ -18,6 +18,7 @@
 
   /* ---------- the catalog: real, public things ---------- */
   var MIN_CPB = "4.0.0";            // the oldest cpb whose grammar these recipes use
+  var ACCOUNT_CPB = "4.2.0";        // ... and one that routes through an account
   var MARKET = { name: "claude-code-plugins", from: "github:anthropics/claude-code" };
   var SKILLS_SRC = "github:anthropics/skills";
 
@@ -110,8 +111,8 @@
         plugins: ["frontend-design"], vars: [{ key: "DISABLE_TELEMETRY", value: "1" }], isolated: true } }),
     T({ id: "router-glm", color: 3, name: "glm", glyph: "g-glm", title: "Another model backend",
       tagline: "Send one playbook to a router.",
-      description: "A playbook for a model backend behind your router (GLM here): its own login, the API key blocked, a /model list of its own.",
-      defaults: { model: { kind: "router", baseUrl: "http://localhost:4000/v1", id: "glm-5.3", blockKey: true, tokenRef: "",
+      description: "A playbook for a model backend behind your router (GLM here): it runs on your router's account, with a login of its own and a /model list of its own.",
+      defaults: { model: { kind: "router", account: "router", baseUrl: "http://localhost:4000/v1", id: "glm-5.3", tokenRef: "",
           picker: [{ id: "glm-5.3", label: "GLM 5.3" }, { id: "glm-5.3-flash", label: "GLM 5.3 Flash", behavesAs: "claude-sonnet-5" }], pickerMode: "ONLY" },
         mcp: ["context7"], isolated: true } }),
     T({ id: "docs-writer", color: 0, name: "docs", glyph: "g-docs", title: "Documents and writing",
@@ -145,7 +146,7 @@
 
   /* ---------- validation: the rules cpb itself enforces ---------- */
   /* cpb's reserved words (internal/grammar/parse.go): none may name a playbook. site-tools/check-keywords.py keeps this list equal to cpb's. */
-  var KEYWORDS = ("ADD AFTER ALL ALLOW ALTER APPLY ARGS AS BEFORE BEHAVES BLOCK BRANCH COMMAND CREATE DEFAULTS DENY DESCRIBE " +
+  var KEYWORDS = ("ACCOUNT ACCOUNTS ADD AFTER ALL ALLOW ALTER APPLY ARGS AS BEFORE BEHAVES BLOCK BRANCH COMMAND CREATE DEFAULTS DENY DESCRIBE " +
     "DESCRIPTION DROP ENV ENVS EXISTS EXPLAIN FIRST FROM HEADER IF INCLUDE LABEL LAST LINK MARKETPLACE MCP " +
     "MODEL NOT OR PLAINTEXT PLAYBOOK PLAYBOOKS PLUGIN RENAME REPLACE RESET SERVER SET SHOW SKILL SSE " +
     "STATUSLINE SUBDIR TO TOOL TRANSPORT UNSET URL USE VAR WITH").split(" ");
@@ -154,6 +155,16 @@
   var VALUE = /^[A-Za-z0-9_.:\/@%+=,~-]{0,200}$/;
   var REF = /^(?:[a-z][a-z0-9]*:[A-Za-z0-9_.\/:#@+~=-]+)$/;
   var URLRE = /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?(?:\/[A-Za-z0-9._~\/%+-]*)?$/;
+  // an account's address: https, or http to this machine only (cpb refuses plain http to another host)
+  function accountUrl(v) {
+    if (!URLRE.test(v || "")) return false;
+    if (/^https:/.test(v)) return true;
+    var host = v.replace(/^http:\/\//, "").replace(/[:\/].*$/, "").toLowerCase();
+    return host === "localhost" || /^127(\.\d{1,3}){3}$/.test(host);
+  }
+  // cpb's account names: lowercase, and nothing that looks like a key
+  var ACCOUNT = /^[a-z0-9][a-z0-9._-]{0,39}$/;
+  function accountName(v) { return ACCOUNT.test(v || "") && v !== "machine" && !/^sk-/.test(v); }
   var MODELID = /^[A-Za-z0-9._:\/@-]{1,80}$/;
   var LABEL = /^[A-Za-z0-9][A-Za-z0-9 ._()\/-]{0,39}$/;
   var RULE = /^[^'\n\r;]{1,100}$/;
@@ -171,7 +182,8 @@
       return "";
     },
     ref: function (v, example) { return REF.test(v || "") ? "" : "A reference such as " + (example || "keychain:name") + ", never the secret itself."; },
-    url: function (v) { return URLRE.test(v || "") ? "" : "An http(s) URL, such as http://localhost:4000/v1."; },
+    url: function (v) { return accountUrl(v) ? "" : "https, or http to this machine only, such as http://localhost:4000/v1."; },
+    account: function (v) { return accountName(v) ? "" : "Lowercase letters, digits and . _ -; not machine."; },
     modelId: function (v) { return MODELID.test(v || "") ? "" : "Letters, digits and . _ : / @ -."; },
     label: function (v) { return !v || LABEL.test(v) ? "" : "Letters, digits, spaces and . _ ( ) / -."; },
     rule: function (v) { return RULE.test(v || "") ? "" : "No quotes, semicolons or line breaks."; },
@@ -191,7 +203,8 @@
     var m = sel.model || { kind: "default" };
     if (m.kind === "claude" && !MODELID.test(m.id || "")) errs.push("The model id is not valid.");
     if (m.kind === "router") {
-      if (!URLRE.test(m.baseUrl || "")) errs.push("The router URL must be an http(s) URL.");
+      if (!accountName(m.account)) errs.push("The account name is lowercase letters, digits and . _ -, and not machine.");
+      if (!accountUrl(m.baseUrl)) errs.push("The router URL must be https, or http to this machine (localhost or 127.0.0.1).");
       if (!MODELID.test(m.id || "")) errs.push("The routed model id is not valid.");
       if (m.tokenRef && !REF.test(m.tokenRef)) errs.push("The token reference looks like keychain:name (a scheme and a name), never the token itself.");
       (m.picker || []).forEach(function (e) {
@@ -225,6 +238,8 @@
 
   function clauses(sel) {
     var out = [];
+    // the account says where the requests go; a recipe never routes, so only a file names it
+    if (sel.mode === "file" && routed(sel)) out.push("USE ACCOUNT " + sel.model.account);
     var plugins = ordered(PLUGINS, sel.plugins);
     if (plugins.length) {
       out.push("ADD MARKETPLACE " + MARKET.name + " FROM " + q(MARKET.from));
@@ -245,24 +260,28 @@
     var m = sel.model || { kind: "default" };
     if (m.kind === "claude" && m.id) out.push("SET model = " + q(m.id));
     if (m.kind === "router") {
-      out.push("SET VAR ANTHROPIC_BASE_URL=" + m.baseUrl);
-      out.push("SET VAR ANTHROPIC_MODEL=" + m.id);
-      if (m.tokenRef) out.push("SET VAR ANTHROPIC_AUTH_TOKEN FROM " + q(m.tokenRef));
-      if (m.blockKey) out.push("BLOCK VAR ANTHROPIC_API_KEY");
       (m.picker || []).forEach(function (e) {
         out.push("ADD MODEL " + q(e.id) + (e.label ? " LABEL " + q(e.label) : "") + (e.behavesAs ? " BEHAVES AS " + q(e.behavesAs) : ""));
       });
       if ((m.picker || []).length) out.push("SET model_picker.mode = " + q(m.pickerMode.toLowerCase()));
     }
     sel.vars.forEach(function (v) { out.push("SET VAR " + v.key + "=" + (v.value || "")); });
-    if (sel.mode === "recipe" && sel.isolated && !sel.sandbox) out.push("SET login = 'isolated'");
+    if (sel.mode === "recipe" && isolated(sel) && !sel.sandbox) out.push("SET login = 'isolated'");
     return out;
+  }
+
+  // an account that uses no Claude login refuses a playbook that shares yours
+  function isolated(sel) { return sel.isolated || (sel.model && sel.model.kind === "router"); }
+  function routed(sel) { return sel.model && sel.model.kind === "router"; }
+  function accountStatement(m, plain) {
+    return "CREATE ACCOUNT " + (plain ? "" : "IF NOT EXISTS ") + m.account + " SET provider = 'gateway', base_url = " + q(m.baseUrl) + ", " +
+      (m.tokenRef ? "auth_token FROM " + q(m.tokenRef) : "auth = 'none'") + ", model = " + q(m.id);
   }
 
   function createFlags(sel) {
     var f = [];
     if (sel.sandbox) f.push("SET sandbox.always = true, login = 'isolated'");
-    if (sel.mode === "file" && sel.isolated && !sel.sandbox) f.push("SET login = 'isolated'");
+    if (sel.mode === "file" && isolated(sel) && !sel.sandbox) f.push("SET login = 'isolated'");
     return f;
   }
   function needs(sel) {
@@ -276,10 +295,12 @@
     var t = template(sel.template), l = [];
     l.push("-- title: " + t.title);
     l.push("-- description: " + t.description);
-    l.push("-- min-cpb: " + MIN_CPB);
-    var n = needs(sel), parts = [];
+    l.push("-- min-cpb: " + (routed(sel) ? ACCOUNT_CPB : MIN_CPB));
+    var m = sel.model || {}, parts = [];
+    var n = needs(sel).filter(function (r) { return !(sel.mode === "recipe" && routed(sel) && r === m.tokenRef); });
     if (n.length) parts.push("a secret helper for " + n.join(", "));
-    if (sel.model && sel.model.kind === "router") parts.push("your router's key, attached with an env set (it is not stored in this file)");
+    if (routed(sel) && sel.mode === "recipe")
+      parts.push("an account for your router, such as cpb " + accountStatement(m, true) + "; then cpb play " + sel.template + " --account " + m.account);
     if (parts.length) l.push("-- needs: " + parts.join("; "));
     if (sel.mode === "recipe") {
       if (sel.sandbox) l.push("-- create-with: SANDBOX");
@@ -293,6 +314,7 @@
     var body = clauses(sel), lines = header(sel), name = sel.name, flags = createFlags(sel);
     lines.push("");
     if (sel.mode === "file") {
+      if (routed(sel)) lines.push(accountStatement(sel.model) + ";");
       lines.push("CREATE PLAYBOOK IF NOT EXISTS " + name + (flags.length ? " " + flags.join(" ") : "") + ";");
       if (body.length) lines.push("ALTER PLAYBOOK " + name + "\n  " + body.join("\n  ") + ";");
     } else {
@@ -306,7 +328,10 @@
       cmds.push("cpb APPLY " + file + " --dry-run", "cpb APPLY " + file, name);
     } else {
       if (sel.sandbox) cmds.push("cpb CREATE PLAYBOOK " + name + " " + flags.join(" "));
-      cmds.push("cpb APPLY " + file + " TO " + name + " --dry-run", "cpb APPLY " + file + " TO " + name, name);
+      if (routed(sel)) cmds.push("cpb " + accountStatement(sel.model));
+      cmds.push("cpb APPLY " + file + " TO " + name + " --dry-run", "cpb APPLY " + file + " TO " + name);
+      if (routed(sel)) cmds.push("cpb ALTER PLAYBOOK " + name + " USE ACCOUNT " + sel.model.account);
+      cmds.push(name);
     }
     return { ok: true, text: text, file: file, create: flags, commands: cmds, needs: needs(sel), lines: body.length };
   }
@@ -343,7 +368,7 @@
     var k = r();
     if (k < 0.3) s.model = { kind: "default", id: "" };
     else if (k < 0.7) s.model = { kind: "claude", id: MODELS[Math.floor(r() * MODELS.length)].id };
-    else s.model = { kind: "router", baseUrl: "http://localhost:" + (4000 + Math.floor(r() * 100)) + "/v1", id: "glm-5.3", blockKey: r() < 0.7,
+    else s.model = { kind: "router", account: r() < 0.5 ? "router" : "glm.local", baseUrl: (r() < 0.3 ? "https://llm.example.com:" : "http://localhost:") + (4000 + Math.floor(r() * 100)) + "/v1", id: "glm-5.3",
       tokenRef: r() < 0.5 ? "keychain:router-token" : "", pickerMode: r() < 0.5 ? "ONLY" : "APPEND",
       picker: r() < 0.7 ? [{ id: "glm-5.3", label: "GLM 5.3" }, { id: "glm-5.3-flash", label: "GLM 5.3 Flash", behavesAs: "claude-sonnet-5" }] : [] };
     if (s.mode === "recipe" && !clauses(s).length) s.skills = ["pdf"];
@@ -365,7 +390,7 @@
   }
 
   return {
-    MIN_CPB: MIN_CPB, MARKET: MARKET, SKILLS_SRC: SKILLS_SRC, MODELS: MODELS, MCP: MCP, SKILLS: SKILLS, PLUGINS: PLUGINS, RULES: RULES, VARS: VARS,
+    MIN_CPB: MIN_CPB, ACCOUNT_CPB: ACCOUNT_CPB, MARKET: MARKET, SKILLS_SRC: SKILLS_SRC, MODELS: MODELS, MCP: MCP, SKILLS: SKILLS, PLUGINS: PLUGINS, RULES: RULES, VARS: VARS,
     TEMPLATES: TEMPLATES, template: template, defaultSelection: defaultSelection, validate: validate, render: render,
     KEYWORDS: KEYWORDS, canonical: canonical, randomSelection: randomSelection, everything: everything,
     secretLike: secretLike, check: check, clone: clone

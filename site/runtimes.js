@@ -42,7 +42,7 @@
 
   var links = [];               // {a, s}
   pbs.forEach(function (p) {
-    var base = ((p.env || []).filter(function (v) { return v.key === "ANTHROPIC_BASE_URL"; })[0] || {}).value;
+    var base = p.account && p.account.base_url;
     var be;
     if (base) {
       var host = base.replace(/^https?:\/\//, "").replace(/\/.*$/, "");

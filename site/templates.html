@@ -137,7 +137,7 @@
       <li><span class="num">3</span><h3>Apply it</h3><p>Applying twice changes nothing. The playbook gets its own command; run it like any other.</p><div class="pill-code"><code id="apply-ex">cpb APPLY reviewer.cpb TO review</code><button class="copy" type="button" data-copy-from="apply-ex">copy</button></div></li>
     </ol>
     <div class="facts">
-      <div><h3>Secrets are references</h3><p>A GitHub token appears as <code class="inl">FROM 'keychain:github-mcp'</code>, resolved at launch by your secret helper. The customizer refuses anything that looks like a credential, and so does cpb.</p></div>
+      <div><h3>Secrets are references</h3><p>A GitHub token appears as <code class="inl">FROM 'keychain:github-mcp'</code>, resolved at launch by your secret helper. The customizer refuses anything that looks like a credential, and so does cpb. Where requests go is an account's, never a recipe's: the router template runs on one of yours, <code class="inl">cpb play router-glm --account &lt;name&gt;</code>.</p></div>
       <div><h3>A sandbox is a creation flag</h3><p><code class="inl">SANDBOX</code> is set when the playbook is created, so a recipe cannot carry it. In recipe form the customizer puts it on the <code class="inl">cpb CREATE PLAYBOOK</code> line; in file form it is in the file.</p></div>
       <div><h3>Same code, tested</h3><p>The files in <code class="inl">/p/</code> and every option combination are applied by a real cpb in CI. If a template stops working, the build fails, not your afternoon.</p></div>
     </div>

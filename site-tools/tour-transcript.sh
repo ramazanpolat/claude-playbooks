@@ -41,13 +41,14 @@ run 'cpb SHOW PLAYBOOK scratch' cpb SHOW PLAYBOOK scratch
 run 'cpb DROP PLAYBOOK scratch --yes' cpb DROP PLAYBOOK scratch --yes
 
 echo "### routing"
-run 'cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1' cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1
-run "cpb CREATE PLAYBOOK glm SET login = 'isolated'" cpb CREATE PLAYBOOK glm SET login = 'isolated'
-run 'cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3' cpb ALTER PLAYBOOK glm USE ENV router SET VAR ANTHROPIC_MODEL=glm-5.3
-run 'cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY' cpb ALTER PLAYBOOK glm BLOCK VAR ANTHROPIC_API_KEY
+# a router whose key is a reference: the stand-in secret helper from here on
+export CPB_SECRET_HELPER="$H/helper"
+run "cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3'" cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'keychain:router-key', model = 'glm-5.3'
+run "cpb CREATE PLAYBOOK glm SET login = 'isolated' USE ACCOUNT router" cpb CREATE PLAYBOOK glm SET login = 'isolated' USE ACCOUNT router
 run "cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'" cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3' LABEL 'GLM 5.3' DESCRIPTION 'via the router'
 run "cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'" cpb ALTER PLAYBOOK glm ADD MODEL 'glm-5.3-flash' LABEL 'GLM 5.3 Flash' BEHAVES AS 'claude-sonnet-5'
 run "cpb ALTER PLAYBOOK glm SET model_picker.mode = 'only'" cpb ALTER PLAYBOOK glm SET model_picker.mode = 'only'
+run 'cpb SHOW ACCOUNTS' cpb SHOW ACCOUNTS
 run 'cpb EXPLAIN PLAYBOOK glm' cpb EXPLAIN PLAYBOOK glm
 
 echo "### recipes"
@@ -66,7 +67,6 @@ run 'cpb APPLY reviewer.cpb TO reviewer' cpb APPLY reviewer.cpb TO reviewer
 run 'cpb SHOW CREATE PLAYBOOK reviewer --skip-secrets' cpb SHOW CREATE PLAYBOOK reviewer --skip-secrets
 
 echo "### mcp and secrets"
-export CPB_SECRET_HELPER="$H/helper"
 cpb CREATE PLAYBOOK researcher SET launcher = '' > /dev/null
 cpb ALTER PLAYBOOK researcher ADD MCP SERVER files COMMAND npx ARGS -y @modelcontextprotocol/server-filesystem /srv/notes > /dev/null
 run "cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'" cpb ALTER PLAYBOOK researcher ADD MCP SERVER sentry URL 'https://mcp.sentry.dev/mcp' HEADER 'Authorization' FROM 'keychain:sentry-auth'
@@ -74,9 +74,9 @@ run 'cpb EXPLAIN PLAYBOOK researcher' cpb EXPLAIN PLAYBOOK researcher
 run 'cpb SHOW CREATE PLAYBOOK researcher --skip-secrets' cpb SHOW CREATE PLAYBOOK researcher --skip-secrets
 
 echo "### sql"
-run 'cpb "SELECT name, envs, login FROM PLAYBOOKS"' cpb "SELECT name, envs, login FROM PLAYBOOKS"
+run 'cpb "SELECT name, accounts, login FROM PLAYBOOKS"' cpb "SELECT name, accounts, login FROM PLAYBOOKS"
 if [ -x "${CPB_CLICKHOUSE:-/nonexistent}" ] || command -v clickhouse > /dev/null 2>&1 || command -v ch > /dev/null 2>&1; then
-  run 'cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"' cpb "SELECT playbook, key FROM VARS WHERE effective ORDER BY playbook, key"
+  run "cpb \"SELECT name, login FROM PLAYBOOKS WHERE has(accounts, 'router') ORDER BY name\"" cpb "SELECT name, login FROM PLAYBOOKS WHERE has(accounts, 'router') ORDER BY name"
 fi
 
 echo "### install"
