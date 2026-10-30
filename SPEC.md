@@ -661,7 +661,7 @@ SHOW ACCOUNTS;  SHOW ACCOUNT glm;  DROP ACCOUNT glm;
 | `access` | `'any'` (the default): any playbook may use it. `'listed'`: only a playbook whose own `USE ACCOUNT` list names it. |
 | `claude_login_trusted` | `true` lets a Claude credential (`claude_login`, `claude_token`) reach a `gateway` address, a gateway you trust that forwards to Anthropic; `https` only. Default `false`. |
 | `model`, `opus_model`, `sonnet_model`, `haiku_model`, `fable_model` | The provider's model names: the default model of a new session (`ANTHROPIC_DEFAULT_MODEL`), and what the `opus`, `sonnet`, `haiku` and `fable` aliases resolve to. |
-| `header.<Name>` | An extra request header, by reference only: `header.<Name> FROM '<ref>'`, for a gateway behind an access proxy that asks for headers of its own. At most 8, on an `anthropic` or `gateway` account. A name is letters, digits and dashes, and one name per account in any case; `Authorization`, `Proxy-Authorization`, `X-Api-Key`, `anthropic-*`, `Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding` and `Connection` are refused (the credential's, Anthropic's API's, or the request's own). See *Headers at launch*. |
+| `header.<Name>` | An extra request header (since v4.3.0), by reference only: `header.<Name> FROM '<ref>'`, for a gateway behind an access proxy that asks for headers of its own. At most 8, on an `anthropic` or `gateway` account. A name is letters, digits and dashes, and one name per account in any case; `Authorization`, `Proxy-Authorization`, `X-Api-Key`, `anthropic-*`, `Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding` and `Connection` are refused (the credential's, Anthropic's API's, or the request's own). See *Headers at launch*. |
 | `description` | Free text. |
 
 Which credentials a provider takes:
@@ -745,7 +745,7 @@ first`, `DEFAULTS`, `inherited: the playbook names no account` (`machine`,
 with none named anywhere; `USE ACCOUNT machine` names it), or `a route
 stated in <layer>`.
 
-**A route stated in one layer.** A playbook that names no account, on a
+**A route stated in one layer** (since v4.3.0). A playbook that names no account, on a
 machine whose `DEFAULTS` names none, may state its route in one layer: one
 env set it uses, its own block (`SET VAR`), or the launch's flags
 (`--env`, `--env-set`, `--env-file`, together). The layer gives
