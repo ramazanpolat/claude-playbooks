@@ -38,9 +38,6 @@ func launchMode(configDir string) (mode Mode, modeErr string, blocked bool, bloc
 	if err != nil {
 		return ModeError, sanitizeProfileError(err), false, block, nil
 	}
-	if k := reservedSetBy(eff); k != "" {
-		return ModeError, k + " is set by a layer, and since v4.2.0 it is the account's: a launch is refused (cpb EXPLAIN PLAYBOOK says where)", false, block, nil
-	}
 	var list []string
 	if block != nil {
 		list = block.Accounts
@@ -48,6 +45,20 @@ func launchMode(configDir string) (mode Mode, modeErr string, blocked bool, bloc
 	sel, err := account.Select(account.Dir(root), "", list, "")
 	if err != nil {
 		return ModeError, "its account: " + err.Error(), false, block, nil
+	}
+	if k := reservedSetBy(eff); k != "" {
+		// A playbook that names no account may state its route in one
+		// layer (layer_route.go); anything else a layer sets is refused.
+		var route *LayerRoute
+		if sel.Account == nil && sel.Why == account.WhyInherited {
+			if route, err = LayerRouteFor(configDir, nil, eff); err != nil {
+				return ModeError, err.Error(), false, block, nil
+			}
+		}
+		if route == nil {
+			return ModeError, k + " is set by a layer, and since v4.2.0 it is the account's: a launch is refused (cpb EXPLAIN PLAYBOOK says where)", false, block, nil
+		}
+		sel = account.Selection{Name: route.Name, Account: route.Account, Why: route.Why}
 	}
 	if a := sel.Account; a != nil {
 		switch {

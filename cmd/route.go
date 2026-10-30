@@ -49,7 +49,7 @@ type routeJSON struct {
 // routeAccountJSON names the account a launch runs on.
 type routeAccountJSON struct {
 	Name     string `json:"name"`     // "machine" for the implicit account
-	Why      string `json:"why"`      // --account, the playbook's first, DEFAULTS, none named
+	Why      string `json:"why"`      // --account, the playbook's first, DEFAULTS, account.WhyInherited, or a layer route's
 	Provider string `json:"provider"` // anthropic for machine
 }
 

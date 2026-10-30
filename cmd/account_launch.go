@@ -65,8 +65,21 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 	if err != nil {
 		return nil, err
 	}
-	if err := reservedInLayers(root, name, m, eff, layers); err != nil {
-		return nil, err
+	// A playbook that names no account may state its route in one layer:
+	// it runs as an account derived for the launch (internal/auth).
+	var route *auth.LayerRoute
+	if sel.Account == nil && sel.Why == account.WhyInherited {
+		if route, err = auth.LayerRouteFor(configDir, layers, eff); err != nil {
+			return nil, err
+		}
+		if route != nil {
+			sel = account.Selection{Name: route.Name, Account: route.Account, Why: route.Why}
+		}
+	}
+	if route == nil {
+		if err := reservedInLayers(root, name, m, eff, layers, sel); err != nil {
+			return nil, err
+		}
 	}
 	if err := reservedInSettings(configDir, workdir); err != nil {
 		return nil, err
@@ -75,6 +88,19 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 		return nil, err
 	}
 	rendered := sel.Render(filepath.Join(configDir, anthropicConfigDirName))
+	if route != nil && (route.Headers != "" || route.HeadersRef != "") {
+		// Custom headers stated with the route go along as they are.
+		l := rendered.Layer
+		l.Block = slices.DeleteFunc(slices.Clone(l.Block), func(k string) bool { return k == "ANTHROPIC_CUSTOM_HEADERS" })
+		if route.HeadersRef != "" {
+			if l.Refs == nil {
+				l.Refs = map[string]string{}
+			}
+			l.Refs["ANTHROPIC_CUSTOM_HEADERS"] = route.HeadersRef
+		} else {
+			l.Set["ANTHROPIC_CUSTOM_HEADERS"] = route.Headers
+		}
+	}
 	if err := helperWithSettings(sel, rendered, claudeArgs); err != nil {
 		return nil, err
 	}
@@ -170,7 +196,7 @@ func (a *accountLaunch) claudeArgs(args []string) []string {
 // removes it anyway. The refusal names the variable and the layer, never a
 // value, and, for an env set that holds an address and a key, the account
 // that replaces it.
-func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env, layers []*manifest.Env) error {
+func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env, layers []*manifest.Env, sel account.Selection) error {
 	if eff == nil {
 		return nil
 	}
@@ -226,6 +252,10 @@ func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env
 		"Move them into an account and attach it: cpb CREATE ACCOUNT <name> SET provider = '<provider>', base_url = '<address>', auth_token FROM '<ref>'; "+
 		"cpb ALTER PLAYBOOK %s USE ACCOUNT <name>; then remove them where they are set (ALTER ENV <set> UNSET …, ALTER PLAYBOOK %s UNSET VAR …)",
 		strings.Join(lines, "\n"), target, target)
+	// A route a layer states runs only where the account is inherited.
+	if sel.Why != account.WhyInherited {
+		msg += fmt.Sprintf("\nA route stated in a layer (an address with its key, in one env set, SET VAR or the launch's flags) runs only for a playbook that names no account; this launch runs on %s (%s)", sel.Name, sel.Why)
+	}
 	// One env set holding an address and its key is an account already:
 	// say which statement makes it one, from references only.
 	for set := range sets {

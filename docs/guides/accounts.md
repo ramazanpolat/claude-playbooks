@@ -133,13 +133,38 @@ is refused (play it on your own with `cpb play --account <account>`).
 `listed` one, keep the recipe, then list the account on the kept playbook
 (`ALTER PLAYBOOK <name> USE ACCOUNT <account>`).
 
+## A route stated in one place
+
+A playbook that names no account can still say where its requests go in one
+env set, its own `SET VAR` block, or one launch's `--env` flags, as long as
+the address and its key come together from that one place:
+
+```bash
+cpb CREATE ENV router SET ANTHROPIC_BASE_URL=http://localhost:4000/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3 SET ANTHROPIC_AUTH_TOKEN FROM 'keychain:router-key'
+cpb CREATE PLAYBOOK glm SET login = 'isolated' USE ENV router
+cpb EXPLAIN PLAYBOOK glm     # Account: env:router (gateway http://localhost:4000/v1, auth_token from a reference; a route stated in ENV router)
+```
+
+cpb runs it as an account derived for that launch, so the account rules
+hold: http only to this machine, your Claude login kept out (a playbook that
+shares it is refused), nothing your shell exports standing in. Model names
+may come from any of the playbook's layers. Refused: an address in one place
+and its key in another, an address with no key, a route in `DEFAULTS` (it
+would reach every playbook: give `DEFAULTS` an account instead), a route
+beside an account the playbook or the launch names, and a Claude token or a
+cloud provider's variables in a layer, which only an account says.
+
 ## Coming from v4.1
 
-An env set holding `ANTHROPIC_BASE_URL` and a key, or a playbook variable that
-sets `CLAUDE_CODE_OAUTH_TOKEN`, keeps its file, but a launch that layers it is
-refused, naming the variable and the layer, and for such an env set the
-`CREATE ACCOUNT` statement that replaces it. Make the account, attach it with
-`USE ACCOUNT`, then remove the variables (`ALTER ENV <set> UNSET …`).
+An env set holding `ANTHROPIC_BASE_URL` with its key runs as it is, as a
+route stated in one place (above), on a playbook that names no account; a
+playbook that shares your login needs `SET login = 'isolated'` for it. A
+route split across layers, a playbook variable that sets
+`CLAUDE_CODE_OAUTH_TOKEN`, or a route beside an account is refused, naming
+the variable and the layer, and for an env set holding an address and its
+key the refusal also prints the `CREATE ACCOUNT` statement that makes it an
+account of its own. Make the account, attach it with `USE ACCOUNT`, then
+remove the variables (`ALTER ENV <set> UNSET …`).
 
 Which of your playbooks this refuses:
 

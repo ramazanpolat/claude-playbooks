@@ -75,8 +75,12 @@ var CredentialVar = map[string]string{
 type Selection struct {
 	Name    string   // Machine for the implicit account
 	Account *Account // nil for Machine
-	Why     string   // "--account", "the playbook's first", "DEFAULTS", "none named"
+	Why     string   // "--account", "the playbook's first", "DEFAULTS", WhyInherited
 }
+
+// WhyInherited is the Why of a launch whose playbook names no account and
+// whose DEFAULTS names none: it inherits the implicit account, machine.
+const WhyInherited = "inherited: the playbook names no account"
 
 // Select picks the account a launch runs on (SPEC.md, "Which account a
 // launch runs on"): --account, else the playbook's first, else DEFAULTS,
@@ -118,7 +122,7 @@ func Select(dir, playbookName string, list []string, flag string) (Selection, er
 	if def != "" {
 		return pick(def, "DEFAULTS")
 	}
-	return Selection{Name: Machine, Why: "none named"}, nil
+	return Selection{Name: Machine, Why: WhyInherited}, nil
 }
 
 // Rendered is what an account puts into a launch.

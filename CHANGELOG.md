@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Routing
+
+- **A route stated in one place runs again.** A playbook that names no
+  account (on a machine whose `DEFAULTS` names none) may state where its
+  requests go in one env set, its own `SET VAR` block, or one launch's
+  `--env` flags: `ANTHROPIC_BASE_URL` with exactly one key
+  (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`), and optionally
+  `ANTHROPIC_CUSTOM_HEADERS`. It runs as an account derived for the launch,
+  so every account rule applies: the address rules, a playbook that shares
+  your Claude login refused, an isolated one's login kept out, nothing the
+  shell exports standing in. Model variables may come from any of the
+  playbook's layers on such a route. Still refused: an address and its key
+  from different layers, an address with no key, a route in `DEFAULTS`, a
+  route beside a named account, and a Claude token or cloud variables in a
+  layer. `EXPLAIN`, `auth status` and `SELECT` name the route
+  (`env:<set>`, `own-block`, `launch-flags`).
+- **`EXPLAIN` says "inherited".** A launch on `machine` because nothing
+  names an account gives the reason `inherited: the playbook names no
+  account` (it was `none named`), in the text and in `EXPLAIN --json`'s
+  `route.account.why`.
+
 ## [v4.2.1] -- 2026-10-29
 
 v4.2.1 fixes what v4.2.0 reported for a playbook with no manifest, plays the
