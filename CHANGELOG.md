@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [v4.3.0] -- 2026-10-31
+
+v4.3.0 lets a route stated in one place run again and lets an account carry
+the headers a gateway asks for. A playbook that names no account may state
+its address and key together in one env set, its own block or the launch's
+flags, and runs on an account derived from them, with every account guard;
+an address and key split across places, a route from DEFAULTS, a route in a
+`.playbook` cpb does not keep, and a Claude token in a layer stay refused.
+An account's headers are references, joined into `ANTHROPIC_CUSTOM_HEADERS`
+for the launch through the secret helper; no value reaches an argument
+list, a file or cpb's output. Nothing that ran on v4.2 changes; setups v4.2
+refused for a route stated whole now run.
+
 ### Routing
 
 - **A route stated in one place runs again.** A playbook that names no
