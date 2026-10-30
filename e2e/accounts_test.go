@@ -168,3 +168,14 @@ func TestMachineAccountKeepsTheTokenFile(t *testing.T) {
 		}
 	}
 }
+
+// A model given by reference on a route a layer states is refused, never
+// dropped: a model name is not a secret.
+func TestLayerRouteRefusesAModelByReference(t *testing.T) {
+	root := t.TempDir()
+	seedProfile(t, root, "glm", "[set]\nANTHROPIC_BASE_URL = \"http://localhost:4000/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\n\n[refs]\nANTHROPIC_DEFAULT_OPUS_MODEL = \"keychain:model\"\n")
+	playbookWithEnv(t, root, "router", "isolated_login = true\n\n[env]\nsets = [\"glm\"]\n")
+	if out := launchFails(t, root, launch{args: []string{"run", "router"}}); !strings.Contains(out, "ANTHROPIC_DEFAULT_OPUS_MODEL by reference; a model name is never a secret") {
+		t.Fatalf("a model by reference:\n%s", out)
+	}
+}

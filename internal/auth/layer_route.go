@@ -150,6 +150,13 @@ func LayerRouteFor(configDir string, layers []*manifest.Env, eff *manifest.Env) 
 	if a.Auth.Ref != "" {
 		a.Auth.Value = ""
 	}
+	// A model name is never a secret: one given by reference would be
+	// dropped by the account's render, so it is refused, not ignored.
+	for k := range routeModels {
+		if _, ref := eff.Refs[k]; ref {
+			return nil, fmt.Errorf("%w: %s gives %s by reference; a model name is never a secret: state it as a value", ErrLayerRoute, origin[k].label(), k)
+		}
+	}
 	// Models: the explicit name wins over its older alias.
 	for _, k := range []string{"ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_MODEL",
 		"ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL"} {
