@@ -179,3 +179,14 @@ func TestLayerRouteRefusesAModelByReference(t *testing.T) {
 		t.Fatalf("a model by reference:\n%s", out)
 	}
 }
+
+// Custom headers stated with a route in the same layer go along with it.
+func TestLayerRouteCarriesItsHeaders(t *testing.T) {
+	root := t.TempDir()
+	seedProfile(t, root, "edge", "[set]\nANTHROPIC_BASE_URL = \"https://router.example.com/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\nANTHROPIC_CUSTOM_HEADERS = \"X-Team: blue\"\n")
+	playbookWithEnv(t, root, "router", "isolated_login = true\n\n[env]\nsets = [\"edge\"]\n")
+	got := childEnv(t, root, launch{env: []string{"ANTHROPIC_CUSTOM_HEADERS=X-Shell: stale"}, args: []string{"run", "router"}})
+	if got["ANTHROPIC_CUSTOM_HEADERS"] != "X-Team: blue" || got["ANTHROPIC_BASE_URL"] != "https://router.example.com/v1" {
+		t.Fatalf("the route's headers: %v", got)
+	}
+}
