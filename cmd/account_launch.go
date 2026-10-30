@@ -27,6 +27,8 @@ const anthropicConfigDirName = ".cpb-anthropic-config"
 type accountLaunch struct {
 	sel      account.Selection
 	rendered account.Rendered
+	// route is the route a layer states, when the launch runs on one.
+	route *auth.LayerRoute
 	// layers are the launch's layers with the account's appended last.
 	layers    []*manifest.Env
 	configDir string
@@ -65,8 +67,21 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 	if err != nil {
 		return nil, err
 	}
-	if err := reservedInLayers(root, name, m, eff, layers); err != nil {
-		return nil, err
+	// A playbook that names no account may state its route in one layer:
+	// it runs as an account derived for the launch (internal/auth).
+	var route *auth.LayerRoute
+	if sel.Account == nil && sel.Why == account.WhyInherited {
+		if route, err = auth.LayerRouteFor(configDir, layers, eff); err != nil {
+			return nil, err
+		}
+		if route != nil {
+			sel = account.Selection{Name: route.Name, Account: route.Account, Why: route.Why}
+		}
+	}
+	if route == nil {
+		if err := reservedInLayers(root, name, m, eff, layers, sel); err != nil {
+			return nil, err
+		}
 	}
 	if err := reservedInSettings(configDir, workdir); err != nil {
 		return nil, err
@@ -75,6 +90,12 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 		return nil, err
 	}
 	rendered := sel.Render(filepath.Join(configDir, anthropicConfigDirName))
+	if route != nil && route.Headers != "" {
+		// Custom headers stated with the route go along as they are.
+		l := rendered.Layer
+		l.Block = slices.DeleteFunc(slices.Clone(l.Block), func(k string) bool { return k == "ANTHROPIC_CUSTOM_HEADERS" })
+		l.Set["ANTHROPIC_CUSTOM_HEADERS"] = route.Headers
+	}
 	if err := helperWithSettings(sel, rendered, claudeArgs); err != nil {
 		return nil, err
 	}
@@ -84,7 +105,7 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 		}
 	}
 	all := append(slices.Clone(layers), rendered.Layer)
-	return &accountLaunch{sel: sel, rendered: rendered, layers: all, configDir: configDir}, nil
+	return &accountLaunch{sel: sel, rendered: rendered, route: route, layers: all, configDir: configDir}, nil
 }
 
 // planSandboxAccount is planAccount for a sandboxed launch, whose working
@@ -103,6 +124,9 @@ func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *mani
 	acct, err := planAccount(configDir, name, layers, expandHome(workdir), nil)
 	if err != nil {
 		return nil, err
+	}
+	if acct.route != nil && acct.route.Headers != "" {
+		return nil, fmt.Errorf("%s states ANTHROPIC_CUSTOM_HEADERS with its route, and a sandboxed launch would carry them in as a plain variable: launch it unsandboxed, or drop the headers", acct.route.Why)
 	}
 	if err := helperWithSettings(acct.sel, acct.rendered, claudeArgs); err != nil {
 		return nil, err
@@ -170,7 +194,7 @@ func (a *accountLaunch) claudeArgs(args []string) []string {
 // removes it anyway. The refusal names the variable and the layer, never a
 // value, and, for an env set that holds an address and a key, the account
 // that replaces it.
-func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env, layers []*manifest.Env) error {
+func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env, layers []*manifest.Env, sel account.Selection) error {
 	if eff == nil {
 		return nil
 	}
@@ -226,8 +250,12 @@ func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env
 		"Move them into an account and attach it: cpb CREATE ACCOUNT <name> SET provider = '<provider>', base_url = '<address>', auth_token FROM '<ref>'; "+
 		"cpb ALTER PLAYBOOK %s USE ACCOUNT <name>; then remove them where they are set (ALTER ENV <set> UNSET …, ALTER PLAYBOOK %s UNSET VAR …)",
 		strings.Join(lines, "\n"), target, target)
+	// A route a layer states runs only where the account is inherited.
+	if sel.Why != account.WhyInherited {
+		msg += fmt.Sprintf("\nA route stated in a layer (an address with its key, in one env set, SET VAR or the launch's flags) runs only for a playbook that names no account; this launch runs on %s (%s)", sel.Name, sel.Why)
+	}
 	if slices.Contains(keys, "ANTHROPIC_CUSTOM_HEADERS") {
-		msg += "\nANTHROPIC_CUSTOM_HEADERS: each header goes on the account by reference, ALTER ACCOUNT <name> SET header.<Name> FROM '<ref>'"
+		msg += "\nANTHROPIC_CUSTOM_HEADERS: on an account each header goes by reference, ALTER ACCOUNT <name> SET header.<Name> FROM '<ref>'; in a layer only beside the address and key it belongs to"
 	}
 	// One env set holding an address and its key is an account already:
 	// say which statement makes it one, from references only.

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"os"
 	"strings"
 	"testing"
@@ -58,7 +59,7 @@ func TestExplainRouteAccount(t *testing.T) {
 
 	mustStmt(t, "CREATE PLAYBOOK plain SET launcher = ''")
 	r := routeOf(t, "plain")
-	if r.BaseURL != nil || r.Egress != "anthropic" || r.Auth != "none" || r.Account.Name != "machine" || r.Account.Why != "none named" || r.Refused != nil {
+	if r.BaseURL != nil || r.Egress != "anthropic" || r.Auth != "none" || r.Account.Name != "machine" || r.Account.Why != account.WhyInherited || r.Refused != nil {
 		t.Fatalf("a plain playbook: %+v", r)
 	}
 
@@ -117,8 +118,14 @@ func TestExplainRouteRefused(t *testing.T) {
 	mustStmt(t, "CREATE PLAYBOOK loose SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK loose SET VAR ANTHROPIC_BASE_URL=http://user:s3cr3tpw@router.example/v1 AS PLAINTEXT")
 	r := routeOf(t, "loose")
-	if r.Refused == nil || !strings.Contains(*r.Refused, "ANTHROPIC_BASE_URL, set by the playbook's own block") {
+	if r.Refused == nil || !strings.Contains(*r.Refused, "ANTHROPIC_BASE_URL, set by the playbook's own block (SET VAR), comes with no key") || strings.Contains(*r.Refused, "s3cr3tpw") {
 		t.Fatalf("a loose base URL: %+v", r)
+	}
+	// With its key, a route a layer states runs, under the account's rules:
+	// an address with a password in it is still refused, never printed.
+	mustStmt(t, "ALTER PLAYBOOK loose SET VAR ANTHROPIC_AUTH_TOKEN=router-key-1 AS PLAINTEXT")
+	if r := routeOf(t, "loose"); r.Refused == nil || strings.Contains(*r.Refused, "s3cr3tpw") || strings.Contains(*r.Refused, "router-key-1") {
+		t.Fatalf("a routed block with a password in its address: %+v", r)
 	}
 	out := mustStmt(t, "EXPLAIN PLAYBOOK loose")
 	if !strings.Contains(out, "Account: a launch would be refused") || strings.Contains(out, "s3cr3tpw") {

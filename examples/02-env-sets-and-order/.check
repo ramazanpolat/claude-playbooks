@@ -20,10 +20,11 @@ cpb SHOW PLAYBOOK work --json | python3 -c 'import json,sys; e=json.load(sys.std
 cpb ALTER PLAYBOOK work REPLACE ENV tools WITH fast | grep -q unchanged
 cpb ALTER PLAYBOOK work REPLACE ENV fast WITH tools
 cpb SHOW PLAYBOOK work --json | python3 -c 'import json,sys; e=json.load(sys.stdin)["envs"]; assert e==["thinking","tools"], e'
-# An account's variable in an env set refuses the launch, naming the set.
+# An env set may state a route only whole, its address with its key: an
+# address alone refuses the launch, naming the set.
 cpb CREATE OR REPLACE ENV routed SET ANTHROPIC_BASE_URL=http://localhost:8080/v1
 cpb ALTER PLAYBOOK work ADD ENV routed
 if cpb run work 2> "$HOME/routed.err"; then echo "a routed env set launched"; exit 1; fi
-grep -q 'ANTHROPIC_BASE_URL, set by ENV routed' "$HOME/routed.err"
+grep -q 'ANTHROPIC_BASE_URL, set by ENV routed, comes with no key' "$HOME/routed.err"
 cpb ALTER PLAYBOOK work DROP ENV routed
 cpb DROP ENV routed

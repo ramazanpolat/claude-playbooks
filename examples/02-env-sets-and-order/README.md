@@ -18,5 +18,8 @@ for the prompt, and `SHOW CREATE` never writes it.
 
 Where requests go and how they authenticate (`ANTHROPIC_BASE_URL`, the keys,
 the Claude token, the model variables) is not an env set's: it is an
-**account's** ([example 23](../23-accounts/)). An env set that sets one of
-those variables refuses the launch, naming the set; the `.check` shows it.
+**account's** ([example 23](../23-accounts/)). An env set may state a whole
+route, its address with its key, for a playbook that names no account
+([accounts guide](../../docs/guides/accounts.md#a-route-stated-in-one-place));
+an address alone refuses the launch, naming the set, and the `.check` shows
+it.

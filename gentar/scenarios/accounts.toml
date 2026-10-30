@@ -61,6 +61,14 @@ command = '''cpb CREATE PLAYBOOK routed SET launcher = '', login = 'isolated' US
 contains = "gateway-ok"
 
 [[verify.commands]]
+# A route stated in one env set, its address with its key, runs on a
+# playbook that names no account, as an account derived for the launch: the
+# key through the helper, no Claude credential, the shell's token removed;
+# EXPLAIN and SELECT name it. Split across two layers it is refused.
+command = '''cpb CREATE ENV onelayer SET ANTHROPIC_BASE_URL=http://localhost:4000/v1 ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3 SET ANTHROPIC_AUTH_TOKEN FROM 'stub:onelayer' >/dev/null && cpb CREATE PLAYBOOK layered SET launcher = '', login = 'isolated' USE ENV onelayer >/dev/null && rm -f "$HOME/claude-env" && CLAUDE_CODE_OAUTH_TOKEN=from-the-shell cpb run layered && grep -qx "ANTHROPIC_BASE_URL=http://localhost:4000/v1" "$HOME/claude-env" && grep -qx "ANTHROPIC_AUTH_TOKEN=secret-onelayer" "$HOME/claude-env" && grep -qx "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3" "$HOME/claude-env" && ! grep -q "^CLAUDE_CODE_OAUTH_TOKEN=" "$HOME/claude-env" && cpb EXPLAIN PLAYBOOK layered | grep -qF "Account: env:onelayer (gateway http://localhost:4000/v1, auth_token from a reference; a route stated in ENV onelayer)" && cpb SELECT name, account FROM PLAYBOOKS | grep -qx "$(printf 'layered\tenv:onelayer')" && cpb CREATE ENV addronly SET ANTHROPIC_BASE_URL=http://localhost:4000/v1 >/dev/null && cpb CREATE PLAYBOOK split SET launcher = '', login = 'isolated' USE ENV addronly >/dev/null && cpb ALTER PLAYBOOK split SET VAR ANTHROPIC_AUTH_TOKEN FROM 'stub:split' >/dev/null && rm -f "$HOME/claude-env" && if cpb run split 2> "$HOME/split.err"; then echo split-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "the address is stated in ENV addronly" "$HOME/split.err" && ! grep -q "secret-split" "$HOME/split.err" && echo one-layer-ok'''
+contains = "one-layer-ok"
+
+[[verify.commands]]
 # An isolated playbook with a /login of its own, launched on a token
 # account. Linux: the login is unreadable during the run and back
 # afterwards, other keys kept, nothing left aside. macOS (the login lives

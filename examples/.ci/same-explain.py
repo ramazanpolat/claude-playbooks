@@ -52,6 +52,13 @@ for k in ("auth_mode", "token_source"):
     if old.get(k) == "" and new.get(k):
         old[k] = new[k]
         added.append(k + " (empty in the old binary: a playbook with no manifest)")
+# v4.2.x said "none named" for a launch that inherits machine; the reason
+# now reads "inherited: the playbook names no account". Listed, not compared.
+oa = (old.get("route") or {}).get("account") or {}
+na = (new.get("route") or {}).get("account") or {}
+if oa.get("why") == "none named" and na.get("why") == "inherited: the playbook names no account":
+    oa["why"] = na["why"]
+    added.append("route.account.why (reworded: inherited)")
 kept = keep(old, new, "")
 a = json.dumps(old, indent=1).splitlines()
 b = json.dumps(kept, indent=1).splitlines()

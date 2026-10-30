@@ -737,7 +737,48 @@ read          += SHOW ACCOUNTS [--json] | SHOW ACCOUNT <name> [--json] | SHOW CR
 1. `--account <name>` on `cpb run` or `cpb start`;
 2. else the first account of the playbook's `USE ACCOUNT` list;
 3. else the `DEFAULTS` account;
-4. else `machine`.
+4. else a route stated in one layer, when the layers state one (below);
+5. else `machine`.
+
+EXPLAIN gives the reason with the name: `--account`, `the playbook's
+first`, `DEFAULTS`, `inherited: the playbook names no account` (`machine`,
+with none named anywhere; `USE ACCOUNT machine` names it), or `a route
+stated in <layer>`.
+
+**A route stated in one layer.** A playbook that names no account, on a
+machine whose `DEFAULTS` names none, may state its route in one layer: one
+env set it uses, its own block (`SET VAR`), or the launch's flags
+(`--env`, `--env-set`, `--env-file`, together). The layer gives
+`ANTHROPIC_BASE_URL` with exactly one key, `ANTHROPIC_AUTH_TOKEN` or
+`ANTHROPIC_API_KEY` (a value or a reference), and may give
+`ANTHROPIC_CUSTOM_HEADERS`. The launch runs on an account derived from it
+for that launch, never written or listed (its name is `env:<set>`,
+`block:<playbook>` or `flags:<host>`, colon forms no stored account can
+take), so every account rule applies: the address
+rules of `base_url`, a playbook that shares the machine's Claude login
+refused, an isolated one's login kept out, the provider `anthropic` for an
+Anthropic address and `gateway` otherwise, and nothing the shell exports
+standing in. Model variables (`ANTHROPIC_MODEL`,
+`ANTHROPIC_DEFAULT_<TIER>_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`) may come
+from any of the playbook's layers on such a route. Refused, naming the
+layers and the keys and never a value:
+
+- the address and its key (or headers) from different layers;
+- an address with no key (a router that takes none is an account with
+  `auth = 'none'`), or with both keys;
+- a route in a `DEFAULTS` env set, which would reach every playbook
+  (`ALTER DEFAULTS USE ACCOUNT` says it for all of them);
+- a route beside an account the launch names (`--account`, `USE ACCOUNT`,
+  `DEFAULTS`): the account says it;
+- any other variable an account owns (a Claude token, a cloud provider,
+  client certificates and the rest), and any of them in a settings file;
+- a route in a `.playbook` cpb does not keep in its registry: the one
+  governing a `cpb start` directory, or a `LINK` target's, which someone
+  else may have written;
+- `ANTHROPIC_CUSTOM_HEADERS` by reference (an account's `header.<Name>`
+  takes references), or with a header name an account would refuse; and a
+  sandboxed launch on a layer route that carries custom headers, which
+  would enter the sandbox as a plain variable.
 
 **Who may use which account.** Both sides are allow-lists, and both must
 agree:

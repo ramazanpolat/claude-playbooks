@@ -79,27 +79,57 @@ func TestAccountRefusesASharedLogin(t *testing.T) {
 	}
 }
 
-// A routing variable set anywhere but an account refuses the launch, naming
-// the layer and, for an env set holding an address and its key, the account
-// that replaces it.
+// A route stated in one env set, its address and its key together, runs as
+// an account derived for the launch: the shell's values never stand in, and
+// a playbook that shares the machine's login is refused on it, as on any
+// account that uses no Claude login.
+func TestOneLayerRouteRuns(t *testing.T) {
+	root := t.TempDir()
+	seedProfile(t, root, "glm", "[set]\nANTHROPIC_BASE_URL = \"http://localhost:4000/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\nANTHROPIC_DEFAULT_OPUS_MODEL = \"glm-5.3\"\n")
+	playbookWithEnv(t, root, "router", "isolated_login = true\n\n[env]\nsets = [\"glm\"]\n\n[env.set]\nANTHROPIC_DEFAULT_HAIKU_MODEL = \"glm-5.3-flash\"\n")
+	got := childEnv(t, root, launch{
+		env:  []string{tokenFile(t, "sk-ant-oat01-FROMFILE"), "ANTHROPIC_API_KEY=sk-ant-shell", "ANTHROPIC_BASE_URL=http://shell/v1"},
+		args: []string{"run", "router"},
+	})
+	if got["ANTHROPIC_BASE_URL"] != "http://localhost:4000/v1" || got["ANTHROPIC_AUTH_TOKEN"] != "router-test-key" ||
+		got["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.3" || got["ANTHROPIC_DEFAULT_HAIKU_MODEL"] != "glm-5.3-flash" {
+		t.Fatalf("the route was not rendered: %v", got)
+	}
+	for _, k := range []string{tokenEnv, "ANTHROPIC_API_KEY"} {
+		if v, present := got[k]; present {
+			t.Errorf("%s=%q reached a launch on a route a layer states", k, v)
+		}
+	}
+	playbookWithEnv(t, root, "shared", "[env]\nsets = [\"glm\"]\n")
+	if out := launchFails(t, root, launch{args: []string{"run", "shared"}}); !strings.Contains(out, "shares the machine's Claude login") {
+		t.Fatalf("a shared playbook on a route a layer states:\n%s", out)
+	}
+}
+
+// An address from one layer and its key from another is refused, naming
+// both layers and never a value; so is a route in DEFAULTS.
 func TestAccountRefusesLooseRouting(t *testing.T) {
 	root := t.TempDir()
-	sets := filepath.Join(root, ".env-sets")
-	if err := os.MkdirAll(sets, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sets, "glm.toml"),
-		[]byte("[set]\nANTHROPIC_BASE_URL = \"http://localhost:4000/v1\"\n\n[refs]\nANTHROPIC_AUTH_TOKEN = \"keychain:glm\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	playbookWithEnv(t, root, "router", "isolated_login = true\n\n[env]\nsets = [\"glm\"]\n")
+	seedProfile(t, root, "addr", "[set]\nANTHROPIC_BASE_URL = \"http://localhost:4000/v1\"\n")
+	playbookWithEnv(t, root, "router", "isolated_login = true\n\n[env]\nsets = [\"addr\"]\n\n[env.set]\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\n")
 	out := launchFails(t, root, launch{args: []string{"run", "router"}})
-	for _, want := range []string{"ANTHROPIC_BASE_URL, set by ENV glm", "ANTHROPIC_AUTH_TOKEN, set by ENV glm",
-		"cpb CREATE ACCOUNT glm SET provider = 'gateway', base_url = 'http://localhost:4000/v1', auth_token FROM 'keychain:glm'"} {
+	for _, want := range []string{"the address is stated in ENV addr", "ANTHROPIC_AUTH_TOKEN (set by the playbook's own block (SET VAR)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the refusal lacks %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "router-test-key") {
+		t.Fatalf("the refusal printed a credential:\n%s", out)
+	}
+	seedProfile(t, root, "everyone", "[set]\nANTHROPIC_BASE_URL = \"http://localhost:4000/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\n")
+	if err := os.WriteFile(filepath.Join(root, ".env-sets", ".defaults"), []byte("everyone\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	playbook(t, root, "plain", true)
+	if out := launchFails(t, root, launch{args: []string{"run", "plain"}}); !strings.Contains(out, "DEFAULTS reaches every playbook") {
+		t.Fatalf("a route in DEFAULTS:\n%s", out)
+	}
+	os.Remove(filepath.Join(root, ".env-sets", ".defaults"))
 
 	// The playbook's settings.json is refused too: Claude Code applies its
 	// env over the account's.
@@ -136,5 +166,50 @@ func TestMachineAccountKeepsTheTokenFile(t *testing.T) {
 		if v, present := got[k]; present {
 			t.Errorf("%s=%q survived on the machine account", k, v)
 		}
+	}
+}
+
+// A model given by reference on a route a layer states is refused, never
+// dropped: a model name is not a secret.
+func TestLayerRouteRefusesAModelByReference(t *testing.T) {
+	root := t.TempDir()
+	seedProfile(t, root, "glm", "[set]\nANTHROPIC_BASE_URL = \"http://localhost:4000/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\n\n[refs]\nANTHROPIC_DEFAULT_OPUS_MODEL = \"keychain:model\"\n")
+	playbookWithEnv(t, root, "router", "isolated_login = true\n\n[env]\nsets = [\"glm\"]\n")
+	if out := launchFails(t, root, launch{args: []string{"run", "router"}}); !strings.Contains(out, "ANTHROPIC_DEFAULT_OPUS_MODEL by reference; a model name is never a secret") {
+		t.Fatalf("a model by reference:\n%s", out)
+	}
+}
+
+// Custom headers stated with a route in the same layer go along with it.
+func TestLayerRouteCarriesItsHeaders(t *testing.T) {
+	root := t.TempDir()
+	seedProfile(t, root, "edge", "[set]\nANTHROPIC_BASE_URL = \"https://router.example.com/v1\"\nANTHROPIC_AUTH_TOKEN = \"router-test-key\"\nANTHROPIC_CUSTOM_HEADERS = \"X-Team: blue\"\n")
+	playbookWithEnv(t, root, "router", "isolated_login = true\n\n[env]\nsets = [\"edge\"]\n")
+	got := childEnv(t, root, launch{env: []string{"ANTHROPIC_CUSTOM_HEADERS=X-Shell: stale"}, args: []string{"run", "router"}})
+	if got["ANTHROPIC_CUSTOM_HEADERS"] != "X-Team: blue" || got["ANTHROPIC_BASE_URL"] != "https://router.example.com/v1" {
+		t.Fatalf("the route's headers: %v", got)
+	}
+}
+
+// A .playbook cpb does not keep (a start directory's) never routes: a cloned
+// repository must not choose where this machine sends prompts and files.
+func TestStartDirectoryNeverRoutes(t *testing.T) {
+	root := t.TempDir()
+	cfg := filepath.Join(t.TempDir(), "cloned")
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg, ".playbook"),
+		[]byte("name = \"cloned\"\nisolated_login = true\n\n[env.set]\nANTHROPIC_BASE_URL = \"https://their-gateway.example/v1\"\nANTHROPIC_AUTH_TOKEN = \"their-key-123\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := launchFails(t, root, launch{args: []string{"start", cfg}})
+	if !strings.Contains(out, "not a playbook cpb keeps in its registry") || strings.Contains(out, "their-key-123") {
+		t.Fatalf("a start directory's route:\n%s", out)
+	}
+	// A registered playbook's own block routes, named after the playbook.
+	playbookWithEnv(t, root, "mine", "isolated_login = true\n\n[env.set]\nANTHROPIC_BASE_URL = \"https://router.example.com/v1\"\nANTHROPIC_AUTH_TOKEN = \"my-key\"\n")
+	if got := childEnv(t, root, launch{args: []string{"run", "mine"}}); got["ANTHROPIC_BASE_URL"] != "https://router.example.com/v1" || got["ANTHROPIC_AUTH_TOKEN"] != "my-key" {
+		t.Fatalf("a registered playbook's own route: %v", got)
 	}
 }

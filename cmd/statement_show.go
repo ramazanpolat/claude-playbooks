@@ -431,6 +431,18 @@ func describeAccountOf(v *playbookJSON, pb *playbook.Playbook) {
 		list = pb.Manifest.Env.Accounts
 	}
 	if sel, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), pb.Name, list, ""); err == nil {
+		// An inherited account gives way to a route the layers state.
+		if sel.Account == nil && sel.Why == account.WhyInherited {
+			if eff, err := auth.EffectiveBlock(pb.Path, nil); err == nil {
+				r, err := auth.LayerRouteFor(pb.Path, nil, eff)
+				if err != nil {
+					return // the launch would be refused: no account
+				}
+				if r != nil {
+					sel.Name = r.Name
+				}
+			}
+		}
 		v.RunsOn = &sel.Name
 	}
 }
