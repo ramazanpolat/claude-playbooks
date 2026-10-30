@@ -176,6 +176,9 @@ func (lp *launchPlan) withHeaders(names []string) error {
 // set are removed from the environment first, so a stale value from the
 // shell can never stand in for one the helper failed to supply.
 func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec.Cmd {
+	// A header variable from the shell never reaches claude, nor stands in
+	// for one the helper sets: all of them go, on every launch.
+	env = withoutPrefix(env, account.HeaderVarPrefix)
 	if lp.helper == "" {
 		c := exec.Command(claudePath, claudeArgs...)
 		c.Env = env
@@ -192,17 +195,24 @@ func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec
 		argv = append(append(argv, "--", claudePath), claudeArgs...)
 	}
 	c := exec.Command(lp.helper, argv...)
-	// A header variable from the shell never stands in for one the helper
-	// sets: all of them go, not only this launch's.
-	c.Env = withoutPrefix(withoutKeys(env, keys), account.HeaderVarPrefix)
+	c.Env = withoutKeys(env, keys)
 	return c
 }
 
 // refuseRefsInSandbox: a sandboxed launch cannot exec through a helper on
 // this machine yet; refusing beats a launch without its secrets.
-func refuseRefsInSandbox(eff *manifest.Env, label string) error {
+func refuseRefsInSandbox(eff *manifest.Env, label string, headers []string) error {
 	if eff != nil && len(eff.Refs) > 0 {
-		return fmt.Errorf("%s uses secret references (%s), and a sandboxed launch cannot resolve them yet", label, strings.Join(sortedKeys(eff.Refs), ", "))
+		var what []string
+		for _, k := range sortedKeys(eff.Refs) {
+			if !strings.HasPrefix(k, account.HeaderVarPrefix) {
+				what = append(what, k)
+			}
+		}
+		if len(headers) > 0 {
+			what = append(what, "the account's headers ("+strings.Join(headers, ", ")+")")
+		}
+		return fmt.Errorf("%s uses secret references (%s), and a sandboxed launch cannot resolve them yet", label, strings.Join(what, ", "))
 	}
 	return nil
 }

@@ -194,7 +194,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(pb.Path, layers); perr == nil {
-			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name)); err != nil {
+			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name), acct.rendered.Headers); err != nil {
 				return err
 			}
 		}

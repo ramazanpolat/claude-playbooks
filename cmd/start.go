@@ -186,7 +186,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(absPath, layers); perr == nil {
-			if err := refuseRefsInSandbox(eff, "directory "+absPath); err != nil {
+			if err := refuseRefsInSandbox(eff, "directory "+absPath, acct.rendered.Headers); err != nil {
 				return err
 			}
 		}

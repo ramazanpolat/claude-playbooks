@@ -9,8 +9,8 @@
   gateway behind an access proxy that asks every request for headers of its
   own. At launch the secret helper resolves each value into a variable of
   its own and cpb's header step joins them into `ANTHROPIC_CUSTOM_HEADERS`
-  for `claude` alone: no value reaches an argument list, a file or any
-  output. At most 8, on an `anthropic` or `gateway` account; names that
+  in claude's environment, as for the account's key: no value reaches an
+  argument list, a file or cpb's output. At most 8, on an `anthropic` or `gateway` account; names that
   belong to the credential (`Authorization`, `X-Api-Key`,
   `Proxy-Authorization`), to Anthropic's API (`anthropic-*`) or to the
   request (`Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding`,

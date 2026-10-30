@@ -148,3 +148,26 @@ func TestCustomHeadersLayerPointsAtTheAccount(t *testing.T) {
 		t.Fatalf("a layer's custom headers: %v", err)
 	}
 }
+
+// A launch with no references (no helper) strips the header variables too.
+func TestDirectLaunchStripsHeaderVars(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "plainpb", &manifest.Manifest{IsolatedLogin: true})
+	claudeLog := stubClaude(t)
+	t.Setenv("CPB_ACCOUNT_HEADER_7", "stale")
+	if err := runRun(nil, []string{"plainpb", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readLog(t, claudeLog); !strings.Contains(got, "ARGS --version") || strings.Contains(got, "CPB_ACCOUNT_HEADER_") {
+		t.Fatalf("claude's environment:\n%s", got)
+	}
+}
+
+// A sandboxed launch with headers says which headers, not cpb's variables.
+func TestSandboxRefusalNamesHeaders(t *testing.T) {
+	eff := &manifest.Env{Refs: map[string]string{"ANTHROPIC_AUTH_TOKEN": "keychain:k", "CPB_ACCOUNT_HEADER_0": "keychain:a", "CPB_ACCOUNT_HEADER_1": "keychain:b"}}
+	err := refuseRefsInSandbox(eff, "playbook \"edgepb\"", []string{"X-Access-Id", "X-Access-Secret"})
+	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_AUTH_TOKEN, the account's headers (X-Access-Id, X-Access-Secret)") || strings.Contains(err.Error(), "CPB_ACCOUNT_HEADER_") {
+		t.Fatalf("refusal: %v", err)
+	}
+}

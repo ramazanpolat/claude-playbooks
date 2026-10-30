@@ -54,8 +54,9 @@ cpb ALTER ACCOUNT edge RESET header.X-Access-Id
 ```
 
 At launch your secret helper resolves each one and cpb joins them into
-`ANTHROPIC_CUSTOM_HEADERS` for that one `claude`: no value is on a command
-line, in a file or in any output. `SHOW ACCOUNT edge` lists each header's
+`ANTHROPIC_CUSTOM_HEADERS` in that launch's `claude` environment, as for
+the account's key (what claude starts, hooks and tools, may inherit it): no
+value is on a command line, in a file or in cpb's output. `SHOW ACCOUNT edge` lists each header's
 name and reference. At most 8 headers, on an `anthropic` or `gateway`
 account; the headers that belong to the credential (`Authorization`,
 `X-Api-Key`, `Proxy-Authorization`), to Anthropic's API (`anthropic-*`) or to

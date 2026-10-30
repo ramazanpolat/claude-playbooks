@@ -435,7 +435,7 @@ type accountJSON struct {
 	ClaudeLoginTrusted bool              `json:"claude_login_trusted"`
 	Models             map[string]string `json:"models"`
 	// Headers are the names of the account's extra request headers, each
-	// a reference; never a value (v4.3.0).
+	// a reference; never a value.
 	Headers []string `json:"headers"`
 	UsedBy  []string `json:"used_by"`
 	Default bool     `json:"default"`
