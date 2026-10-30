@@ -203,6 +203,7 @@ cpb CREATE PLAYBOOK scratch
 cpb CREATE PLAYBOOK scratch SET launcher = 'sc', login = 'isolated'
 cpb CREATE PLAYBOOK reviewer FROM https://github.com/example/reviewer-playbook BRANCH main
 cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'http://localhost:8080/v1', auth_token FROM 'keychain:router-token', model = 'model-a'
+cpb ALTER ACCOUNT router SET header.X-Access-Id FROM 'keychain:router-access-id'
 cpb ALTER PLAYBOOK work SET login = 'isolated' USE ACCOUNT router, claude-work
 cpb ALTER DEFAULTS USE ACCOUNT claude-work
 cpb SHOW ACCOUNTS

@@ -35,6 +35,9 @@ placeholders.
   login is kept out of the run, and a shared playbook is refused.
 - **A gateway you trust** with your Claude credential is an account with
   `claude_login_trusted = true`, over https only.
+- **Headers a gateway asks for** go on the account by reference too
+  (`SET header.<Name> FROM '<ref>'`), joined into `ANTHROPIC_CUSTOM_HEADERS`
+  for that one launch; the check gives the trusted gateway two.
 - **Names, never tokens.** `SHOW ACCOUNTS`, `SELECT`, `SHOW PLAYBOOK --json`
   and `EXPLAIN` show the account and the reference, never a value.
 

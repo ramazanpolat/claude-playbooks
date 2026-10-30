@@ -661,6 +661,7 @@ SHOW ACCOUNTS;  SHOW ACCOUNT glm;  DROP ACCOUNT glm;
 | `access` | `'any'` (the default): any playbook may use it. `'listed'`: only a playbook whose own `USE ACCOUNT` list names it. |
 | `claude_login_trusted` | `true` lets a Claude credential (`claude_login`, `claude_token`) reach a `gateway` address, a gateway you trust that forwards to Anthropic; `https` only. Default `false`. |
 | `model`, `opus_model`, `sonnet_model`, `haiku_model`, `fable_model` | The provider's model names: the default model of a new session (`ANTHROPIC_DEFAULT_MODEL`), and what the `opus`, `sonnet`, `haiku` and `fable` aliases resolve to. |
+| `header.<Name>` | An extra request header, by reference only: `header.<Name> FROM '<ref>'`, for a gateway behind an access proxy that asks for headers of its own. At most 8, on an `anthropic` or `gateway` account. A name is letters, digits and dashes, and one name per account in any case; `Authorization`, `Proxy-Authorization`, `X-Api-Key`, `anthropic-*`, `Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding` and `Connection` are refused (the credential's, Anthropic's API's, or the request's own). See *Headers at launch*. |
 | `description` | Free text. |
 
 Which credentials a provider takes:
@@ -682,6 +683,7 @@ account-clause := SET account-pair, ... [AS PLAINTEXT]
                | RESET <key>, ...            back to the default (no value, 'any', false)
 account-pair   := <key> = <value>
                | <credential> FROM '<ref>'    auth_token, api_key, claude_token
+               | header.<Name> FROM '<ref>'   a request header; RESET header.<Name> removes it
 set-clause    += USE ACCOUNT <account>, ...  (PLAYBOOK and DEFAULTS) the whole list; USE ACCOUNT '' empties it
 read          += SHOW ACCOUNTS [--json] | SHOW ACCOUNT <name> [--json] | SHOW CREATE ACCOUNT <name>
 ```
@@ -703,7 +705,23 @@ read          += SHOW ACCOUNTS [--json] | SHOW ACCOUNT <name> [--json] | SHOW CR
   auth_token FROM 'keychain:glm-new'`. Restating the same reference is
   allowed; it says so outright. A change of `base_url` also clears
   `claude_login_trusted` unless the same statement sets it again: trust is
-  given to one address.
+  given to one address. Headers are for one address too: a change of
+  `provider` or `base_url` removes every header the same statement does not
+  set again, and says so.
+- **Headers at launch.** A header's value is never stored or seen by cpb:
+  the reference is checked with the secret helper when written, and at
+  launch the helper resolves each value into a variable of its own
+  (`CPB_ACCOUNT_HEADER_<n>`) and execs cpb's header step instead of claude:
+  `<helper> … CPB_ACCOUNT_HEADER_0='<ref>' … -- cpb __account-headers <Name>
+  … -- claude <args>`. The step joins the values into
+  `ANTHROPIC_CUSTOM_HEADERS` (`<Name>: <value>`, one per line), removes every
+  `CPB_ACCOUNT_HEADER_*` variable, and execs claude. A value the helper left
+  empty, or one holding a line break (which would start another header),
+  stops the launch naming the header, never its value. A
+  `CPB_ACCOUNT_HEADER_*` or `ANTHROPIC_CUSTOM_HEADERS` from the shell never
+  reaches claude. `SHOW ACCOUNT` lists each header's name and reference,
+  `EXPLAIN`'s `Account:` line its names; a sandboxed launch with headers is
+  refused, as for any reference.
 - `CREATE OR REPLACE ACCOUNT` states the record whole; `IF NOT EXISTS`
   leaves an existing one as it is.
 - `DROP ACCOUNT` is refused while a playbook or `DEFAULTS` names it; the

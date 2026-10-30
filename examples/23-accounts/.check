@@ -40,6 +40,19 @@ cpb CREATE ACCOUNT gw SET provider = 'gateway', base_url = 'https://gateway.corp
 cpb CREATE PLAYBOOK corp SET launcher = '' USE ACCOUNT gw
 cpb run corp
 grep -qx 'ANTHROPIC_BASE_URL=https://gateway.corp.example/v1' "$HOME/.claude-playbooks/corp/.fake-claude/launch-env"
+# A gateway behind an access proxy asks for headers of its own: they go on
+# the account by reference, and reach claude joined in
+# ANTHROPIC_CUSTOM_HEADERS, with no value written or printed anywhere.
+(umask 077 && printf '%s' 'placeholder-access-id' > "$HOME/.config/cpb-secrets/access-id" && printf '%s' 'placeholder-access-secret' > "$HOME/.config/cpb-secrets/access-secret")
+cpb ALTER ACCOUNT gw SET header.X-Access-Id FROM 'file:access-id', header.X-Access-Secret FROM 'file:access-secret'
+cpb SHOW ACCOUNT gw | grep -q 'X-Access-Secret from file:access-secret'
+cpb run corp
+env="$HOME/.claude-playbooks/corp/.fake-claude/launch-env"
+grep -qx 'ANTHROPIC_CUSTOM_HEADERS=X-Access-Id: placeholder-access-id' "$env"
+grep -qx 'X-Access-Secret: placeholder-access-secret' "$env"
+if grep -q '^CPB_ACCOUNT_HEADER_' "$env"; then echo "a header variable reached claude"; exit 1; fi
+if grep -rq --exclude-dir=.fake-claude 'placeholder-access' "$HOME/.claude-playbooks"; then echo "a header value reached a file"; exit 1; fi
+cpb ALTER ACCOUNT gw RESET header.X-Access-Id, header.X-Access-Secret
 # Clean up what the check added, so APPLY again finds what it made.
 cpb DROP PLAYBOOK corp --yes
 cpb DROP PLAYBOOK open --yes

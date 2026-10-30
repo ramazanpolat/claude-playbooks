@@ -186,7 +186,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(absPath, layers); perr == nil {
-			if err := refuseRefsInSandbox(eff, "directory "+absPath); err != nil {
+			if err := refuseRefsInSandbox(eff, "directory "+absPath, acct.rendered.Headers); err != nil {
 				return err
 			}
 		}
@@ -255,6 +255,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// See cmd/run.go: references exec through the helper, or refuse here.
 	plan, err := planLaunch(eff)
 	if err != nil {
+		return err
+	}
+	if err := plan.withHeaders(acct.rendered.Headers); err != nil {
 		return err
 	}
 	if err := auth.OwnLoginRefusal(absPath, eff, ""); err != nil {

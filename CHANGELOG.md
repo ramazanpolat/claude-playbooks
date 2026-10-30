@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Accounts
+
+- **An account carries request headers, by reference.** `ALTER ACCOUNT
+  <name> SET header.<Name> FROM '<ref>'` (and `RESET header.<Name>`), for a
+  gateway behind an access proxy that asks every request for headers of its
+  own. At launch the secret helper resolves each value into a variable of
+  its own and cpb's header step joins them into `ANTHROPIC_CUSTOM_HEADERS`
+  in claude's environment, as for the account's key: no value reaches an
+  argument list, a file or cpb's output. At most 8, on an `anthropic` or `gateway` account; names that
+  belong to the credential (`Authorization`, `X-Api-Key`,
+  `Proxy-Authorization`), to Anthropic's API (`anthropic-*`) or to the
+  request (`Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding`,
+  `Connection`) are refused, and a value with a line break stops the
+  launch. Moving an account (`base_url`, `provider`) removes the headers the
+  statement does not set again. `SHOW ACCOUNT` lists names and references,
+  `SHOW ACCOUNT --json` the names (`headers`), `EXPLAIN` the names on its
+  `Account:` line. A layer that sets `ANTHROPIC_CUSTOM_HEADERS` is still
+  refused, and the refusal now points at the account's header key.
+
 ## [v4.2.1] -- 2026-10-29
 
 v4.2.1 fixes what v4.2.0 reported for a playbook with no manifest, plays the
