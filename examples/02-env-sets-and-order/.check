@@ -25,6 +25,6 @@ cpb SHOW PLAYBOOK work --json | python3 -c 'import json,sys; e=json.load(sys.std
 cpb CREATE OR REPLACE ENV routed SET ANTHROPIC_BASE_URL=http://localhost:8080/v1
 cpb ALTER PLAYBOOK work ADD ENV routed
 if cpb run work 2> "$HOME/routed.err"; then echo "a routed env set launched"; exit 1; fi
-grep -q 'ENV routed states an address with no key' "$HOME/routed.err"
+grep -q 'ANTHROPIC_BASE_URL, set by ENV routed, comes with no key' "$HOME/routed.err"
 cpb ALTER PLAYBOOK work DROP ENV routed
 cpb DROP ENV routed

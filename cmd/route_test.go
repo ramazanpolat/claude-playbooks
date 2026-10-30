@@ -118,7 +118,7 @@ func TestExplainRouteRefused(t *testing.T) {
 	mustStmt(t, "CREATE PLAYBOOK loose SET launcher = ''")
 	mustStmt(t, "ALTER PLAYBOOK loose SET VAR ANTHROPIC_BASE_URL=http://user:s3cr3tpw@router.example/v1 AS PLAINTEXT")
 	r := routeOf(t, "loose")
-	if r.Refused == nil || !strings.Contains(*r.Refused, "the playbook's own block (SET VAR) states an address with no key") || strings.Contains(*r.Refused, "s3cr3tpw") {
+	if r.Refused == nil || !strings.Contains(*r.Refused, "ANTHROPIC_BASE_URL, set by the playbook's own block (SET VAR), comes with no key") || strings.Contains(*r.Refused, "s3cr3tpw") {
 		t.Fatalf("a loose base URL: %+v", r)
 	}
 	// With its key, a route a layer states runs, under the account's rules:

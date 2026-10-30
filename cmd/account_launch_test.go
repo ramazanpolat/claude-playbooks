@@ -46,7 +46,7 @@ func TestAccountLaunchRefusals(t *testing.T) {
 	if err := runRun(nil, []string{"--account", "ghost", "open", "--version"}); err == nil || !strings.Contains(err.Error(), `account "ghost" does not exist`) {
 		t.Fatalf("an unknown account: %v", err)
 	}
-	if err := runRun(nil, []string{"--env", "ANTHROPIC_BASE_URL=http://x/v1", "open", "--version"}); err == nil || !strings.Contains(err.Error(), "the launch's flags (--env, --env-set, --env-file) states an address with no key") {
+	if err := runRun(nil, []string{"--env", "ANTHROPIC_BASE_URL=http://x/v1", "open", "--version"}); err == nil || !strings.Contains(err.Error(), "ANTHROPIC_BASE_URL, set by the launch's flags (--env, --env-set, --env-file), comes with no key") {
 		t.Fatalf("a launch flag's routing: %v", err)
 	}
 	if _, err := os.Stat(claudeLog); err == nil {

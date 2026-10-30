@@ -132,7 +132,7 @@ func LayerRouteFor(configDir string, layers []*manifest.Env, eff *manifest.Env) 
 		}
 	}
 	if kind == "" {
-		return nil, fmt.Errorf("%w: %s states an address with no key (ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY): a route a layer states gives both; for a router that takes no key, CREATE ACCOUNT <name> SET provider = 'gateway', base_url = '…', auth = 'none'", ErrLayerRoute, where.label())
+		return nil, fmt.Errorf("%w: ANTHROPIC_BASE_URL, set by %s, comes with no key (ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY): a route a layer states gives both; for a router that takes no key, CREATE ACCOUNT <name> SET provider = 'gateway', base_url = '…', auth = 'none'", ErrLayerRoute, where.label())
 	}
 
 	a := &account.Account{Provider: account.Gateway, BaseURL: eff.Set[routeAddress]}
