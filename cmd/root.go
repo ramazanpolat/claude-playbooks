@@ -37,6 +37,14 @@ The grammar: https://github.com/ramazanpolat/claude-playbooks/blob/main/SPEC.md`
 }
 
 func Execute() {
+	// A launch with account headers execs cpb's header step between the
+	// secret helper and claude (account_headers.go).
+	if len(os.Args) > 1 && os.Args[1] == headerStepArg {
+		if err := runHeaderStep(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		os.Exit(1)
+	}
 	// Multicall dispatch happens ONLY when invoked through a launcher
 	// symlink: a regular binary installed under a name that happens to
 	// match a playbook must keep the CLI reachable. Within a launcher

@@ -194,7 +194,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 		layers = acct.layers
 		if eff, perr := auth.EffectiveBlock(pb.Path, layers); perr == nil {
-			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name)); err != nil {
+			if err := refuseRefsInSandbox(eff, fmt.Sprintf("playbook %q", pb.Name), acct.rendered.Headers); err != nil {
 				return err
 			}
 		}
@@ -277,6 +277,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// configured the launch is refused here, before anything is mutated.
 	plan, err := planLaunch(eff)
 	if err != nil {
+		return err
+	}
+	if err := plan.withHeaders(acct.rendered.Headers); err != nil {
 		return err
 	}
 	// A token over an isolated playbook's own login: refused on macOS,

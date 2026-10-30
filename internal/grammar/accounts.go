@@ -136,7 +136,18 @@ func (p *parser) accountRef(c *Clause) (bool, *Error) {
 	}
 	t := p.toks[p.i]
 	k := strings.TrimSuffix(t.Text, ",")
-	if t.Quoted || !slices.Contains(account.SecretKinds, k) || p.i+1 >= len(p.toks) {
+	header := !t.Quoted && isHeaderKey(k)
+	if header {
+		// A header's value is a secret reference, always: there is no
+		// header.<Name> = '<value>'.
+		if err := checkHeaderKey(t.Pos, k); err != nil {
+			return true, err
+		}
+		if p.i+1 >= len(p.toks) || p.toks[p.i+1].Quoted || !strings.EqualFold(p.toks[p.i+1].Text, "FROM") {
+			return true, errAt(t.Pos, k+" takes a secret reference: "+k+" FROM '<ref>' (needs a secret helper); a header's value is never stored")
+		}
+	}
+	if t.Quoted || (!header && !slices.Contains(account.SecretKinds, k)) || p.i+1 >= len(p.toks) {
 		return false, nil
 	}
 	if f := p.toks[p.i+1]; f.Quoted || !strings.EqualFold(f.Text, "FROM") {
@@ -159,6 +170,19 @@ func (p *parser) accountRef(c *Clause) (bool, *Error) {
 	p.i++
 	c.Settings = append(c.Settings, Var{Key: k, Ref: ref})
 	return true, nil
+}
+
+// isHeaderKey reports header.<Name>, an account's request header.
+func isHeaderKey(k string) bool {
+	return len(k) > len(account.HeaderKeyPrefix) && strings.EqualFold(k[:len(account.HeaderKeyPrefix)], account.HeaderKeyPrefix)
+}
+
+// checkHeaderKey checks the name in header.<Name>.
+func checkHeaderKey(pos Pos, k string) *Error {
+	if err := account.ValidateHeaderName(k[len(account.HeaderKeyPrefix):]); err != nil {
+		return errAt(pos, err.Error())
+	}
+	return nil
 }
 
 // accountList reads the rest of USE ACCOUNT <account>, … (USE ACCOUNT ”

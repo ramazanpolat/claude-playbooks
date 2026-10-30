@@ -138,6 +138,10 @@ type Rendered struct {
 	// NoClaudeLogin: the account authenticates without a Claude login or
 	// token, so none may be reachable during the run.
 	NoClaudeLogin bool
+	// Headers are the account's header names, in the order of the
+	// variables their values are resolved into (HeaderVar); the launch
+	// joins them into ANTHROPIC_CUSTOM_HEADERS after the secret helper ran.
+	Headers []string
 }
 
 // Render is what s puts into a launch. configDirVar is the directory
@@ -173,6 +177,10 @@ func (s Selection) Render(configDirVar string) Rendered {
 			if m := a.ModelOf(k); m != "" {
 				set[modelVars[k]] = m
 			}
+		}
+		for i, n := range a.HeaderNames() {
+			refs[HeaderVar(i)] = a.Headers[n]
+			r.Headers = append(r.Headers, n)
 		}
 		r.NoClaudeLogin = !a.UsesClaudeCredential()
 	}
@@ -214,6 +222,9 @@ func (s Selection) Describe() string {
 		cred = "an apiKeyHelper"
 	case a.Auth.Kind == ClaudeLogin:
 		cred = "the playbook's own Claude login"
+	}
+	if n := a.HeaderNames(); len(n) > 0 {
+		cred += ", headers " + strings.Join(n, ", ") + " from references"
 	}
 	return fmt.Sprintf("%s (%s, %s; %s)", s.Name, where, cred, s.Why)
 }

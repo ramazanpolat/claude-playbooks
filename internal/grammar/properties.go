@@ -522,6 +522,15 @@ func (p *parser) playbookProperties(c *Clause, what string, withValues bool) *Er
 			}
 		}
 		k = strings.TrimSuffix(k, ",")
+		// An account's header: RESET header.<Name> (its SET is accountRef's).
+		if p.account && !withValues && isHeaderKey(k) {
+			if err := checkHeaderKey(t.Pos, k); err != nil {
+				return err
+			}
+			c.Settings = append(c.Settings, Var{Key: k})
+			p.quiet = true
+			continue
+		}
 		pr, ok := propertyIn(p.props(), k)
 		if !ok {
 			return p.notAProperty(t, k, keys)

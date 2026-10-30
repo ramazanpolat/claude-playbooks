@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -87,7 +88,7 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	if err != nil || out == nil {
 		t.Fatalf("read: %v %v", out, err)
 	}
-	if *out != *in {
+	if !reflect.DeepEqual(*out, *in) {
 		t.Fatalf("round trip:\n got %+v\nwant %+v", *out, *in)
 	}
 	if a, err := Read(dir, "nope"); a != nil || err != nil {

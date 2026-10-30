@@ -42,6 +42,29 @@ with `AS PLAINTEXT` after the list. The credential is exactly one of:
 | `auth = 'cloud'` | the cloud's own credential chain (Bedrock, Vertex, Foundry) |
 | `auth = 'none'` | nothing: a local router that takes no key |
 
+### Headers a gateway asks for
+
+A gateway behind an access proxy may ask every request for headers of its
+own, a client id and secret, say. They go on the account, each by
+reference, never as a value:
+
+```bash
+cpb ALTER ACCOUNT edge SET header.X-Access-Id FROM 'keychain:edge-id', header.X-Access-Secret FROM 'keychain:edge-secret'
+cpb ALTER ACCOUNT edge RESET header.X-Access-Id
+```
+
+At launch your secret helper resolves each one and cpb joins them into
+`ANTHROPIC_CUSTOM_HEADERS` in that launch's `claude` environment, as for
+the account's key (what claude starts, hooks and tools, may inherit it): no
+value is on a command line, in a file or in cpb's output. `SHOW ACCOUNT edge` lists each header's
+name and reference. At most 8 headers, on an `anthropic` or `gateway`
+account; the headers that belong to the credential (`Authorization`,
+`X-Api-Key`, `Proxy-Authorization`), to Anthropic's API (`anthropic-*`) or to
+the request itself (`Host`, `Content-Length`, …) are refused. Moving the
+account (`base_url`, `provider`) removes every header the same statement
+does not set again. A sandboxed launch with headers is refused, as for any
+reference.
+
 ## Run a playbook on it
 
 ```bash
@@ -189,8 +212,8 @@ cpb EXPLAIN PLAYBOOK <name> --json                # route.refused says why
   launch from that folder: use its `model` key instead, and an account's
   `helper` for the key helper.
 - **No account key yet.** These are refused with nothing to move them to;
-  a setup that needs one stays on v4.1 until an account can say it:
-  `ANTHROPIC_CUSTOM_HEADERS`; client certificates
+  a setup that needs one stays on v4.1 until an account can say it (custom
+  headers can: `header.<Name> FROM '<ref>'`, above): client certificates
   (`CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`,
   `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE`); `ANTHROPIC_UNIX_SOCKET`;
   `CLAUDE_CODE_SKIP_BEDROCK_AUTH` and the other `CLAUDE_CODE_SKIP_*_AUTH`;

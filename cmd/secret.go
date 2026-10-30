@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/envset"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
@@ -134,6 +135,11 @@ func checkRefsWith(s helperState, clauses []grammar.Clause) error {
 type launchPlan struct {
 	helper string            // executable; "" launches claude directly
 	refs   map[string]string // key -> reference
+	// headers are the account's header names (account.Rendered.Headers):
+	// the helper then execs cpb's header step, self, before claude
+	// (account_headers.go).
+	headers []string
+	self    string
 }
 
 // planLaunch decides, before anything is mutated, how a launch with the
@@ -150,10 +156,29 @@ func planLaunch(eff *manifest.Env) (*launchPlan, error) {
 	return &launchPlan{helper: path, refs: eff.Refs}, nil
 }
 
+// withHeaders makes a launch through the helper pass the account's headers.
+func (lp *launchPlan) withHeaders(names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	if lp.helper == "" {
+		return errors.New("the account's headers are secret references, and this launch has no secret helper")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("the account's headers need cpb's own binary for the launch, and it cannot be found: %w", err)
+	}
+	lp.headers, lp.self = names, self
+	return nil
+}
+
 // command builds the process to run. Through a helper, the keys it will
 // set are removed from the environment first, so a stale value from the
 // shell can never stand in for one the helper failed to supply.
 func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec.Cmd {
+	// A header variable from the shell never reaches claude, nor stands in
+	// for one the helper sets: all of them go, on every launch.
+	env = withoutPrefix(env, account.HeaderVarPrefix)
 	if lp.helper == "" {
 		c := exec.Command(claudePath, claudeArgs...)
 		c.Env = env
@@ -164,7 +189,11 @@ func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec
 	for _, k := range keys {
 		argv = append(argv, k+"="+lp.refs[k])
 	}
-	argv = append(append(argv, "--", claudePath), claudeArgs...)
+	if len(lp.headers) > 0 {
+		argv = append(append(argv, "--"), headerStepArgv(lp.self, lp.headers, claudePath, claudeArgs)...)
+	} else {
+		argv = append(append(argv, "--", claudePath), claudeArgs...)
+	}
 	c := exec.Command(lp.helper, argv...)
 	c.Env = withoutKeys(env, keys)
 	return c
@@ -172,9 +201,18 @@ func (lp *launchPlan) command(claudePath string, claudeArgs, env []string) *exec
 
 // refuseRefsInSandbox: a sandboxed launch cannot exec through a helper on
 // this machine yet; refusing beats a launch without its secrets.
-func refuseRefsInSandbox(eff *manifest.Env, label string) error {
+func refuseRefsInSandbox(eff *manifest.Env, label string, headers []string) error {
 	if eff != nil && len(eff.Refs) > 0 {
-		return fmt.Errorf("%s uses secret references (%s), and a sandboxed launch cannot resolve them yet", label, strings.Join(sortedKeys(eff.Refs), ", "))
+		var what []string
+		for _, k := range sortedKeys(eff.Refs) {
+			if !strings.HasPrefix(k, account.HeaderVarPrefix) {
+				what = append(what, k)
+			}
+		}
+		if len(headers) > 0 {
+			what = append(what, "the account's headers ("+strings.Join(headers, ", ")+")")
+		}
+		return fmt.Errorf("%s uses secret references (%s), and a sandboxed launch cannot resolve them yet", label, strings.Join(what, ", "))
 	}
 	return nil
 }

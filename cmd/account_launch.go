@@ -256,6 +256,9 @@ func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env
 	if sel.Why != account.WhyInherited {
 		msg += fmt.Sprintf("\nA route stated in a layer (an address with its key, in one env set, SET VAR or the launch's flags) runs only for a playbook that names no account; this launch runs on %s (%s)", sel.Name, sel.Why)
 	}
+	if slices.Contains(keys, "ANTHROPIC_CUSTOM_HEADERS") {
+		msg += "\nANTHROPIC_CUSTOM_HEADERS: on an account each header goes by reference, ALTER ACCOUNT <name> SET header.<Name> FROM '<ref>'; in a layer only beside the address and key it belongs to"
+	}
 	// One env set holding an address and its key is an account already:
 	// say which statement makes it one, from references only.
 	for set := range sets {
