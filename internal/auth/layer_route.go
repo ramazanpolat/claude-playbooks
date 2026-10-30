@@ -3,6 +3,8 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -28,15 +30,17 @@ import (
 type LayerRoute struct {
 	// Account is the derived record: never written, never listed.
 	Account *account.Account
-	// Name labels it where an account's name goes (env:<set>, own-block,
-	// launch-flags); never a stored account's name, which has no colon and
-	// is never one of the other two.
+	// Name labels it where an account's name goes (env:<set>,
+	// block:<playbook>, flags:<host>): a colon form, which no stored account
+	// name can take, so a derived route never shares a stored account's
+	// sandbox binding, and routes from the flags to different hosts never
+	// share one either.
 	Name string
 	// Why says where it was stated, for EXPLAIN and errors.
 	Why string
 	// Headers is ANTHROPIC_CUSTOM_HEADERS from the same layer, passed along
-	// as it is: a value, or a reference (HeadersRef).
-	Headers, HeadersRef string
+	// as it is, each header's name checked as an account's is.
+	Headers string
 }
 
 // Route-carrying names that a layer route may set: the address, exactly one
@@ -115,6 +119,12 @@ func LayerRouteFor(configDir string, layers []*manifest.Env, eff *manifest.Env) 
 			others = append(others, k+" (set by "+origin[k].label()+": only an account says it)")
 		}
 	}
+	// A playbook's own block routes only when cpb keeps that playbook here:
+	// a start directory's .playbook, or a LINK target's, is someone else's,
+	// and must not choose where this machine sends prompts and files.
+	if where.kind == envset.LayerPlaybook && !ownBlockIsLocal(configDir) {
+		return nil, fmt.Errorf("%w: ANTHROPIC_BASE_URL is set in the .playbook that governs %s, which is not a playbook cpb keeps in its registry (a start directory, or a LINK target): a route comes from your own env sets, a registered playbook's own block or the launch's flags; state it there (CREATE ENV <set> …, USE ENV <set>) or as an account", ErrLayerRoute, configDir)
+	}
 	if where.kind == envset.LayerDefaults {
 		return nil, fmt.Errorf("%w: ANTHROPIC_BASE_URL is set by %s, and DEFAULTS reaches every playbook, so it never routes one: give DEFAULTS an account (ALTER DEFAULTS USE ACCOUNT <account>) or state the route in the playbook's own env set", ErrLayerRoute, where.label())
 	}
@@ -164,8 +174,22 @@ func LayerRouteFor(configDir string, layers []*manifest.Env, eff *manifest.Env) 
 			a.SetModel(routeModels[k], v)
 		}
 	}
-	r := &LayerRoute{Account: a, Name: where.name(), Why: "a route stated in " + where.label(),
-		Headers: eff.Set[routeHeaders], HeadersRef: eff.Refs[routeHeaders]}
+	if _, ref := eff.Refs[routeHeaders]; ref {
+		return nil, fmt.Errorf("%w: %s gives ANTHROPIC_CUSTOM_HEADERS by reference: a route a layer states carries headers as a value; headers by reference go on an account (ALTER ACCOUNT <name> SET header.<Name> FROM '<ref>')", ErrLayerRoute, where.label())
+	}
+	if h := eff.Set[routeHeaders]; h != "" {
+		for _, line := range strings.Split(h, "\n") {
+			name, _, ok := strings.Cut(line, ":")
+			if !ok {
+				return nil, fmt.Errorf("%w: %s gives ANTHROPIC_CUSTOM_HEADERS with a line that is not <Name>: <value>", ErrLayerRoute, where.label())
+			}
+			if err := account.ValidateHeaderName(strings.TrimSpace(name)); err != nil {
+				return nil, fmt.Errorf("%w: %s: %v", ErrLayerRoute, where.label(), err)
+			}
+		}
+	}
+	r := &LayerRoute{Account: a, Name: where.name(configDir, a.BaseURL), Why: "a route stated in " + where.label(),
+		Headers: eff.Set[routeHeaders]}
 	a.Name = r.Name
 	if err := a.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: the route stated in %s: %v", ErrLayerRoute, where.label(), err)
@@ -193,14 +217,36 @@ func (o layerOrigin) label() string {
 	return "the launch's flags (--env, --env-set, --env-file)"
 }
 
-func (o layerOrigin) name() string {
+func (o layerOrigin) name(configDir, baseURL string) string {
 	switch o.kind {
 	case envset.LayerEnv:
 		return "env:" + o.set
 	case envset.LayerPlaybook:
-		return "own-block"
+		_, dir, _ := manifest.NearestPath(configDir)
+		return "block:" + filepath.Base(dir)
 	}
-	return "launch-flags"
+	host := baseURL
+	if u, err := account.ParseBaseURL(baseURL); err == nil {
+		host = u.Host
+	}
+	return "flags:" + host
+}
+
+// ownBlockIsLocal reports whether the manifest governing configDir is a
+// registered playbook's own: a real directory directly under the registry
+// root, not a link to elsewhere (LINK) and not a directory cpb start was
+// pointed at.
+func ownBlockIsLocal(configDir string) bool {
+	_, dir, _ := manifest.NearestPath(configDir)
+	if dir == "" {
+		return false
+	}
+	root := filepath.Clean(config.ResolvePlaybooksDir())
+	if filepath.Dir(filepath.Clean(dir)) != root {
+		return false
+	}
+	info, err := os.Lstat(dir)
+	return err == nil && info.IsDir()
 }
 
 // reservedOrigins says which layer decided each reserved variable: the

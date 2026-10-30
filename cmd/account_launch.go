@@ -27,6 +27,8 @@ const anthropicConfigDirName = ".cpb-anthropic-config"
 type accountLaunch struct {
 	sel      account.Selection
 	rendered account.Rendered
+	// route is the route a layer states, when the launch runs on one.
+	route *auth.LayerRoute
 	// layers are the launch's layers with the account's appended last.
 	layers    []*manifest.Env
 	configDir string
@@ -88,18 +90,11 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 		return nil, err
 	}
 	rendered := sel.Render(filepath.Join(configDir, anthropicConfigDirName))
-	if route != nil && (route.Headers != "" || route.HeadersRef != "") {
+	if route != nil && route.Headers != "" {
 		// Custom headers stated with the route go along as they are.
 		l := rendered.Layer
 		l.Block = slices.DeleteFunc(slices.Clone(l.Block), func(k string) bool { return k == "ANTHROPIC_CUSTOM_HEADERS" })
-		if route.HeadersRef != "" {
-			if l.Refs == nil {
-				l.Refs = map[string]string{}
-			}
-			l.Refs["ANTHROPIC_CUSTOM_HEADERS"] = route.HeadersRef
-		} else {
-			l.Set["ANTHROPIC_CUSTOM_HEADERS"] = route.Headers
-		}
+		l.Set["ANTHROPIC_CUSTOM_HEADERS"] = route.Headers
 	}
 	if err := helperWithSettings(sel, rendered, claudeArgs); err != nil {
 		return nil, err
@@ -110,7 +105,7 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 		}
 	}
 	all := append(slices.Clone(layers), rendered.Layer)
-	return &accountLaunch{sel: sel, rendered: rendered, layers: all, configDir: configDir}, nil
+	return &accountLaunch{sel: sel, rendered: rendered, route: route, layers: all, configDir: configDir}, nil
 }
 
 // planSandboxAccount is planAccount for a sandboxed launch, whose working
@@ -129,6 +124,9 @@ func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *mani
 	acct, err := planAccount(configDir, name, layers, expandHome(workdir), nil)
 	if err != nil {
 		return nil, err
+	}
+	if acct.route != nil && acct.route.Headers != "" {
+		return nil, fmt.Errorf("%s states ANTHROPIC_CUSTOM_HEADERS with its route, and a sandboxed launch would carry them in as a plain variable: launch it unsandboxed, or drop the headers", acct.route.Why)
 	}
 	if err := helperWithSettings(acct.sel, acct.rendered, claudeArgs); err != nil {
 		return nil, err

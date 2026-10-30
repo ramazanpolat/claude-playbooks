@@ -753,7 +753,8 @@ env set it uses, its own block (`SET VAR`), or the launch's flags
 `ANTHROPIC_API_KEY` (a value or a reference), and may give
 `ANTHROPIC_CUSTOM_HEADERS`. The launch runs on an account derived from it
 for that launch, never written or listed (its name is `env:<set>`,
-`own-block` or `launch-flags`), so every account rule applies: the address
+`block:<playbook>` or `flags:<host>`, colon forms no stored account can
+take), so every account rule applies: the address
 rules of `base_url`, a playbook that shares the machine's Claude login
 refused, an isolated one's login kept out, the provider `anthropic` for an
 Anthropic address and `gateway` otherwise, and nothing the shell exports
@@ -770,7 +771,14 @@ layers and the keys and never a value:
 - a route beside an account the launch names (`--account`, `USE ACCOUNT`,
   `DEFAULTS`): the account says it;
 - any other variable an account owns (a Claude token, a cloud provider,
-  client certificates and the rest), and any of them in a settings file.
+  client certificates and the rest), and any of them in a settings file;
+- a route in a `.playbook` cpb does not keep in its registry: the one
+  governing a `cpb start` directory, or a `LINK` target's, which someone
+  else may have written;
+- `ANTHROPIC_CUSTOM_HEADERS` by reference (an account's `header.<Name>`
+  takes references), or with a header name an account would refuse; and a
+  sandboxed launch on a layer route that carries custom headers, which
+  would enter the sandbox as a plain variable.
 
 **Who may use which account.** Both sides are allow-lists, and both must
 agree:

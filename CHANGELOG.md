@@ -17,7 +17,12 @@
   from different layers, an address with no key, a route in `DEFAULTS`, a
   route beside a named account, and a Claude token or cloud variables in a
   layer. `EXPLAIN`, `auth status` and `SELECT` name the route
-  (`env:<set>`, `own-block`, `launch-flags`).
+  (`env:<set>`, `block:<playbook>`, `flags:<host>`). A route stated in a
+  `.playbook` cpb does not keep in its registry (a `cpb start` directory, a
+  `LINK` target) is refused: such a file must not choose where this
+  machine's prompts go. Custom headers in a layer route are a value with
+  checked names (by reference they go on an account), and a sandboxed launch
+  on a route that carries them is refused.
 - **`EXPLAIN` says "inherited".** A launch on `machine` because nothing
   names an account gives the reason `inherited: the playbook names no
   account` (it was `none named`), in the text and in `EXPLAIN --json`'s
