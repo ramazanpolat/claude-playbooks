@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -63,6 +65,7 @@ func accountStatement(r *stmtRun, st *grammar.Stmt) error {
 			return fmt.Errorf("no account %q: create it with CREATE ACCOUNT %s SET provider = '<provider>', …", st.Name, st.Name)
 		}
 		c := *a
+		c.Headers = maps.Clone(a.Headers) // the copy may not share what the statement changes
 		old = &c
 	}
 	lines := applyAccountClauses(a, st.Clauses)
@@ -80,7 +83,7 @@ func accountStatement(r *stmtRun, st *grammar.Stmt) error {
 	switch {
 	case old == nil:
 		r.outcome = outCreated
-	case *old == *a:
+	case reflect.DeepEqual(*old, *a):
 		r.outcome = outUnchanged
 		r.say("ACCOUNT "+st.Name+" unchanged", nil)
 		return nil
@@ -113,7 +116,11 @@ func accountRefClauses(clauses []grammar.Clause) []grammar.Clause {
 	for _, c := range clauses {
 		for _, v := range c.Settings {
 			if v.Ref != "" {
-				out = append(out, grammar.Clause{Kind: grammar.SetRef, Vars: []grammar.Var{{Key: credentialVar[v.Key], Ref: v.Ref}}})
+				k := credentialVar[v.Key]
+				if strings.HasPrefix(strings.ToLower(v.Key), account.HeaderKeyPrefix) {
+					k = account.HeaderVar(0)
+				}
+				out = append(out, grammar.Clause{Kind: grammar.SetRef, Vars: []grammar.Var{{Key: k, Ref: v.Ref}}})
 			}
 		}
 	}
@@ -125,16 +132,33 @@ func accountRefClauses(clauses []grammar.Clause) []grammar.Clause {
 // is not a secret and is.
 func applyAccountClauses(a *account.Account, clauses []grammar.Clause) []string {
 	var lines []string
-	oldBase, trustStated := a.BaseURL, false
+	oldBase, oldProvider, trustStated := a.BaseURL, a.Provider, false
+	headersStated := map[string]bool{}
 	for _, c := range clauses {
 		for _, v := range c.Settings {
 			if v.Key == "claude_login_trusted" {
 				trustStated = true
 			}
+			if name, ok := headerName(v.Key); ok && c.Kind == grammar.SetAccount {
+				headersStated[strings.ToLower(name)] = true
+			}
 		}
 	}
 	for _, c := range clauses {
 		for _, v := range c.Settings {
+			if name, ok := headerName(v.Key); ok {
+				if c.Kind == grammar.ResetAccount {
+					if a.ResetHeader(name) {
+						lines = append(lines, account.HeaderKeyPrefix+name+"  (reset)")
+					} else {
+						lines = append(lines, account.HeaderKeyPrefix+name+"  (not set)")
+					}
+				} else {
+					a.SetHeader(name, v.Ref)
+					lines = append(lines, account.HeaderKeyPrefix+name+"  <from "+v.Ref+">")
+				}
+				continue
+			}
 			if c.Kind == grammar.ResetAccount {
 				switch v.Key {
 				case "base_url":
@@ -193,7 +217,25 @@ func applyAccountClauses(a *account.Account, clauses []grammar.Clause) []string 
 		a.ClaudeLoginTrusted = false
 		lines = append(lines, "claude_login_trusted  false (base_url moved; SET claude_login_trusted = true again for the new address)")
 	}
+	// Headers are for one gateway too: an account that moves keeps only
+	// the headers its statement states again.
+	if a.BaseURL != oldBase || a.Provider != oldProvider {
+		for _, n := range a.HeaderNames() {
+			if !headersStated[strings.ToLower(n)] {
+				a.ResetHeader(n)
+				lines = append(lines, account.HeaderKeyPrefix+n+"  (removed: the account moved; SET "+account.HeaderKeyPrefix+n+" FROM '<ref>' again for the new address)")
+			}
+		}
+	}
 	return lines
+}
+
+// headerName is the name in a header.<Name> key.
+func headerName(key string) (string, bool) {
+	if len(key) > len(account.HeaderKeyPrefix) && strings.EqualFold(key[:len(account.HeaderKeyPrefix)], account.HeaderKeyPrefix) {
+		return key[len(account.HeaderKeyPrefix):], true
+	}
+	return "", false
 }
 
 func (r *stmtRun) dropAccount(playbooksDir, dir string, st *grammar.Stmt, a *account.Account) error {
@@ -392,8 +434,11 @@ type accountJSON struct {
 	Access             string            `json:"access"`
 	ClaudeLoginTrusted bool              `json:"claude_login_trusted"`
 	Models             map[string]string `json:"models"`
-	UsedBy             []string          `json:"used_by"`
-	Default            bool              `json:"default"`
+	// Headers are the names of the account's extra request headers, each
+	// a reference; never a value (v4.3.0).
+	Headers []string `json:"headers"`
+	UsedBy  []string `json:"used_by"`
+	Default bool     `json:"default"`
 }
 
 func describeAccount(a *account.Account, users []string, def bool) accountJSON {
@@ -403,7 +448,7 @@ func describeAccount(a *account.Account, users []string, def bool) accountJSON {
 		Auth: a.Auth.Kind, AuthRef: optStr(a.Auth.Ref), AuthPlaintext: a.Auth.Value != "",
 		Helper: optStr(a.Auth.Helper), Access: account.AccessAny,
 		ClaudeLoginTrusted: a.ClaudeLoginTrusted, Models: map[string]string{},
-		UsedBy: nonNil(users), Default: def,
+		Headers: nonNil(a.HeaderNames()), UsedBy: nonNil(users), Default: def,
 	}
 	if a.Listed() {
 		v.Access = account.AccessListed
@@ -493,6 +538,7 @@ func showAccounts(playbooksDir string, st *grammar.Stmt) error {
 			{"Access", v.Access},
 			{"Claude login trusted", fmt.Sprint(v.ClaudeLoginTrusted)},
 			{"Models", listOrNone(models)},
+			{"Headers", listOrNone(headerSummary(list[0]))},
 			{"Used by", listOrNone(v.UsedBy)},
 			{"Default", yes},
 		})
@@ -512,6 +558,16 @@ func showAccounts(playbooksDir string, st *grammar.Stmt) error {
 	}
 	t.render(os.Stdout)
 	return leftOut(bad)
+}
+
+// headerSummary is each header's name and its reference: a reference is not
+// a secret.
+func headerSummary(a *account.Account) []string {
+	var out []string
+	for _, n := range a.HeaderNames() {
+		out = append(out, n+" from "+a.Headers[n])
+	}
+	return out
 }
 
 // createAccountBlock is SHOW CREATE ACCOUNT: the statement that states the
@@ -546,6 +602,9 @@ func createAccountBlock(a *account.Account) createBlock {
 	}
 	for _, k := range account.ModelKeys {
 		add(k, a.ModelOf(k))
+	}
+	for _, n := range a.HeaderNames() {
+		set = append(set, grammar.Var{Key: account.HeaderKeyPrefix + n, Ref: a.Headers[n]})
 	}
 	add("description", a.Description)
 	st := &grammar.Stmt{Verb: grammar.Create, Object: grammar.Account, Name: a.Name, OrReplace: true,

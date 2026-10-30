@@ -104,6 +104,9 @@ type Account struct {
 	HaikuModel         string `toml:"haiku_model,omitempty"`
 	FableModel         string `toml:"fable_model,omitempty"`
 	Auth               Auth   `toml:"auth"`
+	// Headers are extra request headers, name -> secret reference
+	// (headers.go).
+	Headers map[string]string `toml:"headers,omitempty"`
 }
 
 // ModelKeys are the model keys, in the order SHOW CREATE writes them.
@@ -299,7 +302,7 @@ func (a *Account) Validate() error {
 	if a.ClaudeLoginTrusted && a.Provider != Gateway {
 		return errors.New("claude_login_trusted applies to a gateway account only")
 	}
-	return nil
+	return a.validateHeaders()
 }
 
 func authLabel(kind string) string {
@@ -429,6 +432,13 @@ func Write(dir string, a *Account) error {
 	line("ref", a.Auth.Ref)
 	line("value", a.Auth.Value)
 	line("helper", a.Auth.Helper)
+	if names := a.HeaderNames(); len(names) > 0 {
+		// name = reference; a name is quoted like any key with a dash.
+		b.WriteString("\n[headers]\n")
+		for _, h := range names {
+			fmt.Fprintf(&b, "%s = %s\n", manifest.QuoteTOML(h), manifest.QuoteTOML(a.Headers[h]))
+		}
+	}
 	return manifest.WritePrivate(path(dir, a.Name), []byte(b.String()), 0o600)
 }
 

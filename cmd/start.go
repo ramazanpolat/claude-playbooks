@@ -257,6 +257,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := plan.withHeaders(acct.rendered.Headers); err != nil {
+		return err
+	}
 	if err := auth.OwnLoginRefusal(absPath, eff, ""); err != nil {
 		return err
 	}

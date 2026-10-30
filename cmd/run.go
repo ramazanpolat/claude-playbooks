@@ -279,6 +279,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := plan.withHeaders(acct.rendered.Headers); err != nil {
+		return err
+	}
 	// A token over an isolated playbook's own login: refused on macOS,
 	// before anything is mutated (internal/auth/own_login.go).
 	if err := auth.OwnLoginRefusal(configDir, eff, pb.Name); err != nil {

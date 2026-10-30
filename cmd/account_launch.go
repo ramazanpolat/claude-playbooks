@@ -226,6 +226,9 @@ func reservedInLayers(root, name string, m *manifest.Manifest, eff *manifest.Env
 		"Move them into an account and attach it: cpb CREATE ACCOUNT <name> SET provider = '<provider>', base_url = '<address>', auth_token FROM '<ref>'; "+
 		"cpb ALTER PLAYBOOK %s USE ACCOUNT <name>; then remove them where they are set (ALTER ENV <set> UNSET …, ALTER PLAYBOOK %s UNSET VAR …)",
 		strings.Join(lines, "\n"), target, target)
+	if slices.Contains(keys, "ANTHROPIC_CUSTOM_HEADERS") {
+		msg += "\nANTHROPIC_CUSTOM_HEADERS: each header goes on the account by reference, ALTER ACCOUNT <name> SET header.<Name> FROM '<ref>'"
+	}
 	// One env set holding an address and its key is an account already:
 	// say which statement makes it one, from references only.
 	for set := range sets {
