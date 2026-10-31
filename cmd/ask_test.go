@@ -968,6 +968,10 @@ func TestAskChecksClaudeArguments(t *testing.T) {
 	if file.Status != stepOK || !file.RouteAway {
 		t.Fatalf("a settings file: %+v, want shown as away", file)
 	}
+	// The file is not read, and the checks that do not need it still run.
+	if s := step(t, root, "run", "--account", "nonexistent", "argpb", "--settings", "/nonexistent/cpb-ask-settings.json"); s.Status != stepRejected || !strings.Contains(s.Reason, "nonexistent") {
+		t.Fatalf("an unknown account beside a settings file: %+v, want rejected", s)
+	}
 	var guarded bool
 	for _, g := range file.Guards {
 		guarded = guarded || strings.Contains(g.What, "reads settings from /nonexistent/cpb-ask-settings.json")

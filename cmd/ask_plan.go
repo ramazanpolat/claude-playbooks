@@ -427,22 +427,31 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 		}
 	}
 	// Settings passed through to claude are checked as the launch checks
-	// them; a settings file is not read here, like an env file.
+	// them. A settings file is not read here: the check sees empty inline
+	// settings in its place, and the launch is judged as away.
 	settingsFile := false
-	for i := 0; i < len(claudeArgs); i++ {
+	checkArgs := append([]string(nil), claudeArgs...)
+	for i := 0; i < len(checkArgs); i++ {
 		var value string
-		switch a := claudeArgs[i]; {
-		case a == "--settings" && i+1 < len(claudeArgs):
+		inline := strings.HasPrefix(checkArgs[i], "--settings=")
+		switch {
+		case checkArgs[i] == "--settings" && i+1 < len(checkArgs):
 			i++
-			value = claudeArgs[i]
-		case strings.HasPrefix(a, "--settings="):
-			value = strings.TrimPrefix(a, "--settings=")
+			value = checkArgs[i]
+		case inline:
+			value = strings.TrimPrefix(checkArgs[i], "--settings=")
 		default:
 			continue
 		}
-		if !strings.HasPrefix(strings.TrimSpace(value), "{") {
-			settingsFile = true
-			s.Guards = append(s.Guards, askGuard{guardCredential, "reads settings from " + value})
+		if strings.HasPrefix(strings.TrimSpace(value), "{") {
+			continue
+		}
+		settingsFile = true
+		s.Guards = append(s.Guards, askGuard{guardCredential, "reads settings from " + value})
+		if inline {
+			checkArgs[i] = "--settings={}"
+		} else {
+			checkArgs[i] = "{}"
 		}
 	}
 	if sopts.fresh {
@@ -464,10 +473,11 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 	}
 	// The route as the launch resolves it: DEFAULTS and the governing
 	// manifest, then the launch flags in order on top, then the caller's
-	// environment. An env file or a settings file is not read here: judged
-	// as away.
-	away := envFile || settingsFile
-	if !away {
+	// environment. An env file is not read here: judged as away. A
+	// settings file is not read either, and the launch is judged as away
+	// after the checks that do not need it.
+	away := envFile
+	if !envFile {
 		layers, err := launchLayers(tokens)
 		if err != nil {
 			return err
@@ -480,14 +490,14 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 			name = target
 		}
 		wd, _ := os.Getwd()
-		if _, err := planAccount(configDir, name, layers, wd, claudeArgs); err != nil {
+		if _, err := planAccount(configDir, name, layers, wd, checkArgs); err != nil {
 			return fmt.Errorf("cpb would refuse this launch: %v", err)
 		}
 		route, err := askLaunchRoute(configDir, layers, os.Environ())
 		if err != nil {
 			return err
 		}
-		away = route != "anthropic"
+		away = settingsFile || route != "anthropic"
 	}
 	if away {
 		s.RouteAway = true
