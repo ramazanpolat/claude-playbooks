@@ -12,10 +12,7 @@
   login and never trades for one, so the login reaches neither the account's
   address as a fallback nor, on an account with `auth = 'none'`, as its only
   credential. Nothing is moved, so a live session of the playbook keeps its
-  login and is not in the way. Verified with the real Claude Code against a
-  local capture gateway: without cpb, a stored login is sent to a gateway
-  address with no key; through cpb, only the placeholder or the account's
-  key arrives.
+  login and is not in the way.
 - **`cpb ask` proposes launches cpb accepts.** It now knows your accounts
   (by name and class: provider, where they route, whether they use a Claude
   login) and each playbook's login and account, and plans every `run` or
