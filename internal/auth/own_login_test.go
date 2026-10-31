@@ -978,3 +978,51 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 		}
 	}
 }
+
+// On macOS a launch on an account that uses no Claude login shadows the
+// playbook's own login instead of refusing or setting it aside: claude gets
+// CLAUDE_CODE_OAUTH_TOKEN = NoLoginPlaceholder (the shell's value removed),
+// the store is untouched, and no run holds the login, so a launch on the
+// playbook's own login is not refused meanwhile. Elsewhere nothing changes:
+// no placeholder.
+func TestNoLoginAccountShadowsTheLoginOnMacOS(t *testing.T) {
+	hostOS = "darwin"
+	t.Cleanup(func() { hostOS = "linux" })
+	_, configDir := isolatedWithToken(t)
+	writeManifest(t, configDir, "isolated_login = true\n")
+	own, _ := configKeychainService(configDir)
+	stubKeychainItems(t, map[string]KeychainState{own: KeychainPresent})
+	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-FROM-THE-SHELL")
+	if err := AccountLoginRefusal(configDir, "pb", "router"); err != nil {
+		t.Fatalf("refused on macOS: %v", err)
+	}
+	env, err := PrepareLaunchEnvFor(configDir, nil, "router")
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if v, ok := envValue(t, env, OAuthTokenEnv); !ok || v != NoLoginPlaceholder {
+		t.Fatalf("%s = %q, want the placeholder", OAuthTokenEnv, v)
+	}
+	for _, kv := range env {
+		if strings.Contains(kv, "FROM-THE-SHELL") {
+			t.Fatalf("the shell's token reached the launch: %s", kv)
+		}
+	}
+	if loginAside(configDir) {
+		t.Fatal("a run holds the login aside on macOS")
+	}
+	if err := loginHeldAside(configDir); err != nil {
+		t.Fatalf("a launch on the playbook's own login is refused during the run: %v", err)
+	}
+	EndLaunch(configDir)
+
+	hostOS = "linux"
+	env, err = PrepareLaunchEnvFor(configDir, nil, "router")
+	EndLaunch(configDir)
+	if err != nil {
+		t.Fatalf("linux launch: %v", err)
+	}
+	if v, ok := envValue(t, env, OAuthTokenEnv); ok {
+		t.Fatalf("linux: %s = %q, want none (the login is set aside there)", OAuthTokenEnv, v)
+	}
+}
