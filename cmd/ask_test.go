@@ -82,6 +82,11 @@ func askFixture(t *testing.T) string {
 	t.Helper()
 	resetCommandTestState(t)
 	aliasTestHome(t)
+	// A claude new enough for the macOS shadow (auth.MinShadowClaude): work
+	// holds a login of its own and routes away.
+	savedVersion := claudeVersion
+	claudeVersion = func() string { return "2.1.302" }
+	t.Cleanup(func() { claudeVersion = savedVersion })
 	t.Setenv("ANTHROPIC_BASE_URL", "")
 	root := config.ResolvePlaybooksDir()
 	sets := envset.Dir(root)

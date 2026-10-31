@@ -109,6 +109,9 @@ var claudeVersion = func() string {
 	}
 	c := exec.Command(path, "--version")
 	c.Dir = os.TempDir()
+	// A version needs nothing of the caller's environment: none of it,
+	// credentials included, goes along.
+	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "TMPDIR=" + os.TempDir()}
 	out, err := c.Output()
 	v := ""
 	if err == nil {
