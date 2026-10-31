@@ -141,7 +141,9 @@ func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *mani
 // live: setting the login aside would pull it from under that session, which
 // may write it back (a /login, a refresh) within reach of this run.
 func liveLoginRefusal(name, configDir string, a *accountLaunch) error {
-	if a.noLoginAccount() == "" || !auth.IsAuthIsolated(configDir) || !auth.StoreHoldsLogin(configDir) {
+	// On macOS nothing is set aside: the run shadows the login instead, so
+	// a live session of the playbook keeps it (auth.ShadowsLogin).
+	if a.noLoginAccount() == "" || auth.ShadowsLogin() || !auth.IsAuthIsolated(configDir) || !auth.StoreHoldsLogin(configDir) {
 		return nil
 	}
 	live, _, err := liveSessions(name)

@@ -264,6 +264,10 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 		// keepOut: no login of the playbook's own may be reachable for the
 		// run, under a token or on an account that uses no login.
 		keepOut := own != "" || ownRef || noLoginAccount != ""
+		// On macOS a launch on an account that uses no login shadows the
+		// playbook's own login instead of setting it aside (ShadowsLogin):
+		// nothing moves, and no run holds it.
+		shadow := noLoginAccount != "" && ShadowsLogin()
 		refusal := func() error {
 			if noLoginAccount != "" {
 				return accountOwnLoginRefusal(configDir, "<playbook>", noLoginAccount)
@@ -290,8 +294,13 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 			if err := refusal(); err != nil {
 				return refuse(err)
 			}
-			qErr := setAsideForTokenRun(configDir)
-			if noLoginAccount != "" {
+			var qErr error
+			if !shadow {
+				qErr = setAsideForTokenRun(configDir)
+			}
+			if shadow {
+				// Nothing set aside: the placeholder below outranks any login.
+			} else if noLoginAccount != "" {
 				// On an account that uses no Claude login nothing outranks a
 				// login left in place (auth = 'none', a reference the helper
 				// fails to set): it would go to the account's address. So the
@@ -327,6 +336,10 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 			}
 		}
 		env = applyManifestEnv(env, menv)
+		if shadow {
+			// After the account's layer, which blocks the variable.
+			env = append(removeEnv(env, OAuthTokenEnv), OAuthTokenEnv+"="+NoLoginPlaceholder)
+		}
 		return bindOwnEnv(env, configDir), firstErr(merr, syncErr)
 	}
 
