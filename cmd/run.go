@@ -212,6 +212,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 			label: fmt.Sprintf("playbook %q", pb.Name), name: sandboxName(pb.Name),
 			configPath: configPath, rootPath: rootPath, manifest: sbm, backend: backend,
 			noLoginAccount: acct.noLoginAccount(),
+			noCredential:   acct.noCredential(),
 			account:        acct.sel.Name,
 		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		return err
@@ -306,6 +307,9 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvFor(configDir, layers, acct.noLoginAccount())
+	if acct.noCredential() {
+		launchEnv = auth.WithNoCredential(launchEnv)
+	}
 	// A token run may have set the playbook's own login aside: it comes
 	// back when the launch returns, whatever the outcome.
 	defer auth.EndLaunch(configDir)

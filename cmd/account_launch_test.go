@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -217,5 +218,81 @@ func TestMountCoveringAMissingAccountStore(t *testing.T) {
 	}
 	if what := machineLoginInside(t.TempDir()); what != "" {
 		t.Fatalf("an unrelated mount refused: %q", what)
+	}
+}
+
+// claudeCredential is the credential Claude Code takes for a launch with this
+// environment, in its documented order: a cloud provider, then
+// ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, an apiKeyHelper (a --settings
+// argument), CLAUDE_CODE_OAUTH_TOKEN, and last a stored login. "" is Claude
+// Code's "Not logged in": it starts no session and sends nothing.
+func claudeCredential(env map[string]string, args string, storedLogin bool) (kind, value string) {
+	for _, v := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+		if env[v] != "" && env[v] != "0" {
+			return "cloud", ""
+		}
+	}
+	for _, v := range []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"} {
+		if env[v] != "" {
+			return v, env[v]
+		}
+	}
+	if strings.Contains(args, "apiKeyHelper") {
+		return "apiKeyHelper", ""
+	}
+	if env[auth.OAuthTokenEnv] != "" {
+		return auth.OAuthTokenEnv, env[auth.OAuthTokenEnv]
+	}
+	if storedLogin {
+		return "stored login", ""
+	}
+	return "", ""
+}
+
+// stubLaunch is the argv and environment stubClaude recorded.
+func stubLaunch(t *testing.T, log string) (env map[string]string, args string) {
+	t.Helper()
+	env = map[string]string{}
+	for _, line := range strings.Split(readLog(t, log), "\n") {
+		if a, ok := strings.CutPrefix(line, "ARGS "); ok {
+			args = a
+		} else if k, v, ok := strings.Cut(line, "="); ok {
+			env[k] = v
+		}
+	}
+	return env, args
+}
+
+// A launch on an account that sends no key still gives Claude Code a
+// credential: given an address and none, Claude Code does not start. The
+// fixed value is no secret, outranks a stored login (one made by a /login
+// inside the session too), and never replaces an account's own key.
+func TestKeylessAccountLaunchHasACredential(t *testing.T) {
+	root := sandboxRoot(t, "pbs")
+	writePlaybook(t, root, "routerpb", &manifest.Manifest{IsolatedLogin: true})
+	claudeLog := stubClaude(t)
+	putAccount(t, account.Account{Name: "keyless", Provider: account.Gateway, BaseURL: "http://127.0.0.1:9/v1", Auth: account.Auth{Kind: account.None}})
+	putAccount(t, account.Account{Name: "keyed", Provider: account.Gateway, BaseURL: "http://127.0.0.1:9/v1", Auth: account.Auth{Kind: account.AuthToken, Value: "keyed-token"}})
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "shell-token")
+	for _, tc := range []struct{ account, kind, value string }{
+		{"keyless", "ANTHROPIC_AUTH_TOKEN", auth.NoCredentialPlaceholder},
+		{"keyed", "ANTHROPIC_AUTH_TOKEN", "keyed-token"},
+	} {
+		if err := runRun(nil, []string{"--account", tc.account, "routerpb", "--version"}); err != nil {
+			t.Fatalf("%s: %v", tc.account, err)
+		}
+		env, args := stubLaunch(t, claudeLog)
+		if env["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:9/v1" {
+			t.Fatalf("%s: base URL %q", tc.account, env["ANTHROPIC_BASE_URL"])
+		}
+		for _, stored := range []bool{false, true} {
+			if kind, value := claudeCredential(env, args, stored); kind != tc.kind || value != tc.value {
+				t.Fatalf("%s (stored login %v): Claude Code would take %q %q, want %q %q", tc.account, stored, kind, value, tc.kind, tc.value)
+			}
+		}
+	}
+	// The report still says the account sends no key.
+	if ex := mustStmt(t, "EXPLAIN PLAYBOOK routerpb --json"); strings.Contains(ex, auth.NoCredentialPlaceholder) {
+		t.Fatalf("EXPLAIN names the fixed value:\n%s", ex)
 	}
 }

@@ -160,6 +160,12 @@ func liveLoginRefusal(name, configDir string, a *accountLaunch) error {
 	return nil
 }
 
+// noCredential reports whether the account sends no key (auth = 'none'):
+// its launches get auth.NoCredentialPlaceholder (auth.WithNoCredential).
+func (a *accountLaunch) noCredential() bool {
+	return a.sel.Account != nil && a.sel.Account.Auth.Kind == account.None
+}
+
 // noLoginAccount is what PrepareLaunchEnvFor takes: the account's name when
 // it uses no Claude login.
 func (a *accountLaunch) noLoginAccount() string {

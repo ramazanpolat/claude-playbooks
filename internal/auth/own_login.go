@@ -39,6 +39,20 @@ var hostOS = runtime.GOOS
 // in place (ShadowsLogin). It is not a credential.
 const NoLoginPlaceholder = "cpb-no-claude-login"
 
+// NoCredentialPlaceholder is what ANTHROPIC_AUTH_TOKEN holds for a launch on
+// an account with auth = 'none' (a router that takes no key). Claude Code
+// given an address and no credential does not start ("Not logged in"), so
+// the launch gets this fixed value, which is no secret. Claude Code ranks it
+// above every other credential but a cloud's, so a stored login (one a
+// /login inside the session made, too) never becomes the run's credential.
+const NoCredentialPlaceholder = "cpb-no-credential"
+
+// WithNoCredential is env with ANTHROPIC_AUTH_TOKEN set to
+// NoCredentialPlaceholder.
+func WithNoCredential(env []string) []string {
+	return append(removeEnv(env, "ANTHROPIC_AUTH_TOKEN"), "ANTHROPIC_AUTH_TOKEN="+NoCredentialPlaceholder)
+}
+
 // ShadowsLogin reports whether a launch on an account that uses no Claude
 // login shadows the playbook's own login instead of setting it aside. On
 // macOS the login lives in the Keychain, which cpb never moves; the run gets

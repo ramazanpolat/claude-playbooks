@@ -15,6 +15,14 @@
   credential. Nothing is moved, so a live session of the playbook keeps its
   login and is not in the way. An older claude, or one whose version cannot
   be told, is refused as before, naming the version to update to.
+- **An account with `auth = 'none'` runs.** Claude Code given an address and
+  no credential does not start ("Not logged in"), so a launch on a router
+  that takes no key ended there, except on macOS where a playbook's own
+  login was shadowed. Every launch on such an account, sandboxed or not, now
+  sets `ANTHROPIC_AUTH_TOKEN` to the fixed, non-secret `cpb-no-credential`.
+  Claude Code ranks it above any stored login, so a `/login` inside the
+  session never becomes the run's credential either. EXPLAIN and SHOW still
+  report the account as sending no key.
 - **`cpb ask` proposes launches cpb accepts.** It now knows your accounts
   (by name and class: provider, where they route, whether they use a Claude
   login) and each playbook's login and account, and plans every `run` or

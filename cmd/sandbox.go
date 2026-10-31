@@ -124,6 +124,9 @@ type sandboxTarget struct {
 	// noLoginAccount names the launch's account when it uses no Claude
 	// login: none may be reachable for the run (PrepareLaunchEnvFor).
 	noLoginAccount string
+	// noCredential: the account sends no key (auth = 'none'), so the
+	// launch carries auth.NoCredentialPlaceholder.
+	noCredential bool
 	// account is the launch's account: a sandbox serves the one it was
 	// created for (sandboxBinding).
 	account string
@@ -892,7 +895,11 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 		fmt.Fprintf(os.Stderr, "Shared login stays on the host: %s authenticates on its own inside the sandbox (run /login once there; the login lives in the sandbox)\n", t.label)
 	}
 	block, _ := auth.EffectiveBlock(t.configPath, layers)
-	return sandboxEnv(launchEnv, block), loginPath, nil
+	env = sandboxEnv(launchEnv, block)
+	if t.noCredential {
+		env = auth.WithNoCredential(env)
+	}
+	return env, loginPath, nil
 }
 
 // mountCovers reports whether p is the mount or below it, by filesystem
@@ -1384,7 +1391,9 @@ func injectSecrets(backend sandboxBackend, sandbox string, env []string, mode st
 				value = v
 			}
 		}
-		if value == "" {
+		// The fixed value of an account that sends no key is no secret: it
+		// enters as it is, and a key registered by an earlier launch goes.
+		if value == "" || value == auth.NoCredentialPlaceholder {
 			done, err := backend.revoke(sandbox, host, key, registered)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: %s is no longer in the environment but its proxy mapping could not be revoked (%v)\n", key, err)
