@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [v4.3.1] -- 2026-11-01
+
+v4.3.1 fixes launches on accounts that use no Claude login. On macOS a
+playbook you are logged into now runs on such an account, its login
+shadowed for the run instead of refused. An account with `auth = 'none'`
+runs at all: the launch gives Claude Code the fixed, non-secret credential
+it needs to start. `cpb ask` proposes only launches cpb accepts. Nothing
+else changes.
+
 ### Fixed
 
 - **On macOS a playbook you are logged into runs on an account that uses no
@@ -26,8 +35,8 @@
 - **`cpb ask` proposes launches cpb accepts.** It now knows your accounts
   (by name and class: provider, where they route, whether they use a Claude
   login) and each playbook's login and account, and plans every `run` or
-  `start` it proposes as the launch would: one cpb would refuse is shown as
-  rejected with cpb's reason. It suggests `--account` to switch where
+  `start` it proposes as the launch would, the arguments it passes to claude
+  included: one cpb would refuse is shown as rejected with cpb's reason. It suggests `--account` to switch where
   requests go for one launch and `--model` or `/model` to pick a model,
   never a routing env set.
 
