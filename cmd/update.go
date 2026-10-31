@@ -222,12 +222,12 @@ func runPlaybookUpdate(w io.Writer, name string, o updateOpts) error {
 		case o.yes:
 		case updateAsks():
 			fmt.Fprintf(w, "%s declares a migrate step: %s\n", name, step.describe())
-			if !confirm(fmt.Sprintf("Update %s and run it? [y/N] ", name)) {
+			if !confirm(step.consentPrompt(name)) {
 				fmt.Fprintln(w, "Cancelled; nothing was changed.")
 				return nil
 			}
 		default:
-			return fmt.Errorf("%s declares a migrate step (%s); pass --yes to run it, or --dry-run to see the update; nothing was changed", name, step.describe())
+			return step.consentRefusal(name)
 		}
 	}
 
@@ -615,6 +615,26 @@ func (m migration) describe() string {
 	default:
 		return fmt.Sprintf("%s (sha256 %s), run as %s %s %s <install dir>", m.rel, shortSHA(m.sha256), m.rel, m.from, m.to)
 	}
+}
+
+// consentPrompt is the question a terminal is asked before an update whose
+// source declares a migrate step. What is agreed to is the step, named by
+// its declared path, never the playbook itself.
+func (m migration) consentPrompt(name string) string {
+	if m.skip {
+		return fmt.Sprintf("Update %s without running its migrate step (%s)? [y/N] ", name, m.rel)
+	}
+	return fmt.Sprintf("Update %s and run its migrate step (%s)? [y/N] ", name, m.rel)
+}
+
+// consentRefusal is the refusal of an update with a migrate step when
+// nothing agreed to it: no --yes, and no terminal to ask.
+func (m migration) consentRefusal(name string) error {
+	agree := "update and run the step"
+	if m.skip {
+		agree = "update without running it"
+	}
+	return fmt.Errorf("%s declares a migrate step (%s); pass --yes to %s, or --dry-run to see the update; nothing was changed", name, m.describe(), agree)
 }
 
 // verify checks the installed step: still inside the playbook, and the same

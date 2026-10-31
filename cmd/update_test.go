@@ -575,3 +575,23 @@ func TestUpdateRefusesPlayFlagsForASourcePlaybook(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// The consent names the migrate step by its declared path: "run it" read as
+// running the playbook.
+func TestUpdateMigrateConsentWording(t *testing.T) {
+	run := migration{rel: "playbook/bin/migrate", sha256: strings.Repeat("ab", 32), from: "1.0.0", to: "1.1.0"}
+	if got := run.consentPrompt("pb"); got != "Update pb and run its migrate step (playbook/bin/migrate)? [y/N] " {
+		t.Fatalf("prompt: %q", got)
+	}
+	if err := run.consentRefusal("pb"); !strings.Contains(err.Error(), "pb declares a migrate step (playbook/bin/migrate (sha256 ") || !strings.Contains(err.Error(), "pass --yes to update and run the step, or --dry-run") {
+		t.Fatalf("refusal: %v", err)
+	}
+	skip := run
+	skip.skip = true
+	if got := skip.consentPrompt("pb"); got != "Update pb without running its migrate step (playbook/bin/migrate)? [y/N] " {
+		t.Fatalf("prompt, step not run: %q", got)
+	}
+	if err := skip.consentRefusal("pb"); !strings.Contains(err.Error(), "pass --yes to update without running it") {
+		t.Fatalf("refusal, step not run: %v", err)
+	}
+}
