@@ -116,6 +116,9 @@ value = "CANARY-account-token"
 `)
 	seedFlatPlaybook(t, "work")
 	mustStmt(t, "ALTER PLAYBOOK work USE ENV route-a SET VAR MY_SECRET=CANARY-manifest-value AS PLAINTEXT")
+	// route-a routes away with a key of its own: work keeps its own login,
+	// or a launch of it is refused (v4.3.0).
+	mustStmt(t, "ALTER PLAYBOOK work SET login = 'isolated'")
 	pb := filepath.Join(root, "work")
 	writeFile(t, filepath.Join(pb, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"CANARY-credentials"}}`)
 	writeFile(t, filepath.Join(pb, "settings.json"), `{"env":{"SOME_VAR":"CANARY-settings-env"}}`)
@@ -341,9 +344,10 @@ func TestAskGuards(t *testing.T) {
 
 func TestAskRouteAway(t *testing.T) {
 	root := askFixture(t)
-	away := step(t, root, "start", "--env-set", "route-a", "--delete", "/tmp/cpb-ask-test-scratch")
-	if !away.RouteAway || away.Status != stepOK {
-		t.Fatalf("a start on route-a: %+v, want route_away", away)
+	// A new start directory shares the machine's login, so a route with a
+	// key of its own is refused there: cpb ask says so instead of proposing it.
+	if away := step(t, root, "start", "--env-set", "route-a", "--delete", "/tmp/cpb-ask-test-scratch"); away.Status != stepRejected || !strings.Contains(away.Reason, "shares the machine's Claude login") {
+		t.Fatalf("a start on route-a: %+v, want rejected", away)
 	}
 	if run := step(t, root, "run", "work"); !run.RouteAway {
 		t.Errorf("run work (on route-a): %+v, want route_away", run)
