@@ -17,6 +17,10 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
+// The claude a launch runs, for the macOS shadow's version gate
+// (auth.MinShadowClaude).
+func init() { auth.ClaudeVersion = func() string { return claudeVersion() } }
+
 // anthropicConfigDirName is the empty directory, in each config directory,
 // that ANTHROPIC_CONFIG_DIR names at launch: no Anthropic profile there, so
 // none is ever the credential.
@@ -99,7 +103,9 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 	if err := helperWithSettings(sel, rendered, claudeArgs); err != nil {
 		return nil, err
 	}
-	if rendered.NoClaudeLogin {
+	if rendered.NoClaudeLogin && showAccount {
+		// Reads the playbook's login store; cpb ask's tool, which touches
+		// no credential (showAccount false), leaves it to the launch.
 		if err := auth.AccountLoginRefusal(configDir, name, sel.Name); err != nil {
 			return nil, err
 		}
@@ -139,7 +145,9 @@ func planSandboxAccount(configDir, name string, layers []*manifest.Env, sb *mani
 // live: setting the login aside would pull it from under that session, which
 // may write it back (a /login, a refresh) within reach of this run.
 func liveLoginRefusal(name, configDir string, a *accountLaunch) error {
-	if a.noLoginAccount() == "" || !auth.IsAuthIsolated(configDir) || !auth.StoreHoldsLogin(configDir) {
+	// On macOS nothing is set aside: the run shadows the login instead, so
+	// a live session of the playbook keeps it (auth.ShadowsLogin).
+	if a.noLoginAccount() == "" || auth.ShadowsLogin() || !auth.IsAuthIsolated(configDir) || !auth.StoreHoldsLogin(configDir) {
 		return nil
 	}
 	live, _, err := liveSessions(name)

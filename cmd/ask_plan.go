@@ -452,6 +452,17 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 		if err != nil {
 			return err
 		}
+		// The launch as cpb would plan it: a launch cpb would refuse (an
+		// account it may not use, a login it cannot keep out, a route split
+		// across layers) is rejected here with cpb's own reason.
+		name := ""
+		if verb == "run" {
+			name = target
+		}
+		wd, _ := os.Getwd()
+		if _, err := planAccount(configDir, name, layers, wd, nil); err != nil {
+			return fmt.Errorf("cpb would refuse this launch: %v", err)
+		}
 		route, err := askLaunchRoute(configDir, layers, os.Environ())
 		if err != nil {
 			return err

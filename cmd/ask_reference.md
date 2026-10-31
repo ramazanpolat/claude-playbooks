@@ -226,10 +226,24 @@ cpb "SELECT name, envs FROM PLAYBOOKS"
 A route to another endpoint is an account (`provider = 'gateway'`), and a playbook on such
 an account carries `login = 'isolated'`: on a shared one the launch is refused.
 
+- **Another provider for one launch:** `run --account <account> <playbook>`, with an
+  account from `accounts`. Never `--env-set` or `--env` with routing variables to switch
+  where requests go, and never an env set whose `route` is `away` unless the user names it:
+  it may point at something that is not running.
+- **Another model:** `--model <id>` after the playbook name (it goes to `claude`), or the
+  playbook's own `/model` list. An env set is never the way to pick a model.
+- cpb plans every `run` and `start` you propose as the launch would, and shows one it would
+  refuse as rejected with its reason. Prefer a step it accepts: the account a playbook can
+  use, or the fix the refusal names.
+
 # Installed state
 
 The user's message starts with a JSON object describing what is installed, by name only, then
 the request. `route` is where a launch with that env set or playbook sends its requests:
-`anthropic`, `away` (another endpoint), or `unknown`. When the object has `addressed`, the
+`anthropic`, `away` (another endpoint), or `unknown`. `accounts` lists every account by name
+with its `provider`, its `route`, and `claude_login` (true: it signs in with the playbook's
+Claude login; false: with a key of its own, so it needs a playbook whose login is
+`isolated`). Each playbook has `login` (`isolated` or `shared`) and `account`, the account a
+launch with no flags runs on (absent when that launch would be refused). When the object has `addressed`, the
 user is talking to that playbook: "you" in the request means it (its sessions, its env sets,
 its plugins), and a command about "you" names it.

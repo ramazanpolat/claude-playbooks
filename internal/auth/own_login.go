@@ -34,6 +34,56 @@ import (
 // hostOS is runtime.GOOS; tests replace it.
 var hostOS = runtime.GOOS
 
+// NoLoginPlaceholder is what CLAUDE_CODE_OAUTH_TOKEN holds for a launch on
+// an account that uses no Claude login where the playbook's own login stays
+// in place (ShadowsLogin). It is not a credential.
+const NoLoginPlaceholder = "cpb-no-claude-login"
+
+// ShadowsLogin reports whether a launch on an account that uses no Claude
+// login shadows the playbook's own login instead of setting it aside. On
+// macOS the login lives in the Keychain, which cpb never moves; the run gets
+// CLAUDE_CODE_OAUTH_TOKEN = NoLoginPlaceholder instead. Claude Code ranks
+// that variable above any stored login (below the account's own key, the
+// key helper and a cloud's credentials) and, once it is set, never trades it
+// for a stored login, so the login cannot reach the account's address: not
+// as a fallback, and not as the only credential of an account with
+// auth = 'none'.
+func ShadowsLogin() bool { return hostOS == "darwin" }
+
+// MinShadowClaude is the first Claude Code that keeps a user-supplied
+// CLAUDE_CODE_OAUTH_TOKEN on a 401 instead of adopting the stored login (its
+// changelog for 2.1.225: "a transient 401 replacing a long-lived
+// CLAUDE_CODE_OAUTH_TOKEN with a stored login's short-lived token"). With an
+// older claude the shadow does not hold, so the launch is refused as before.
+const MinShadowClaude = "2.1.225"
+
+// ClaudeVersion is the version of the claude a launch runs ("" when it
+// cannot be told); cmd sets it. Unknown never counts as new enough.
+var ClaudeVersion = func() string { return "" }
+
+// shadowHolds reports whether this claude keeps the placeholder on a 401,
+// and the version it found.
+func shadowHolds() (bool, string) {
+	v := ClaudeVersion()
+	return v != "" && versionAtLeast(v, MinShadowClaude), v
+}
+
+// versionAtLeast compares dotted numeric versions.
+func versionAtLeast(v, min string) bool {
+	a, b := strings.Split(v, "."), strings.Split(min, ".")
+	for i := 0; i < len(b); i++ {
+		var x, y int
+		if i < len(a) {
+			fmt.Sscanf(a[i], "%d", &x)
+		}
+		fmt.Sscanf(b[i], "%d", &y)
+		if x != y {
+			return x > y
+		}
+	}
+	return true
+}
+
 // The files next to the store, all named after it so one ignore pattern
 // covers them: the grant set aside, the lock every token run holds shared for
 // its whole run, and the lock that serialises moving the grant.
@@ -109,6 +159,9 @@ func accountOwnLoginRefusal(configDir, target, account string) error {
 			return &ownLoginError{fmt.Sprintf("%s is the machine's own Claude directory and holds its login (%s), which account %s does not use and cpb never moves. Run a playbook with a login of its own on that account instead (cpb ALTER PLAYBOOK <playbook> SET login = 'isolated')", target, where, account)}
 		}
 	}
+	// Elsewhere the login is set aside for the run (PrepareLaunchEnvFor);
+	// on macOS it is shadowed (ShadowsLogin), with a claude that keeps the
+	// placeholder on a 401. An older or unknown claude is refused as before.
 	if hostOS != "darwin" {
 		return nil
 	}
@@ -116,10 +169,18 @@ func accountOwnLoginRefusal(configDir, target, account string) error {
 	if where == "" {
 		return nil
 	}
-	return &ownLoginError{fmt.Sprintf("%s holds a login of its own (%s), and account %s does not use it. On macOS cpb cannot keep that login aside for the run, and Claude Code could fall back to it on an error. Fix one of:\n"+
+	if ok, _ := shadowHolds(); ok {
+		return nil
+	}
+	_, v := shadowHolds()
+	if v == "" {
+		v = "of an unknown version"
+	}
+	return &ownLoginError{fmt.Sprintf("%s holds a login of its own (%s), and account %s does not use it. On macOS cpb keeps that login out of the run only with Claude Code %s or newer, and this claude is %s. Fix one of:\n"+
+		"  - update Claude Code (claude update)\n"+
 		"  - run it on an account that uses its login (auth = 'claude_login'): cpb run --account <account> %s\n"+
 		"  - /logout in it once, so it holds no login of its own",
-		target, where, account, target)}
+		target, where, account, MinShadowClaude, v, target)}
 }
 
 // loginLeftReachable refuses a launch on an account that uses no Claude

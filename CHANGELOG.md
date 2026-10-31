@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **On macOS a playbook you are logged into runs on an account that uses no
+  Claude login.** `cpb run --account <router> <playbook>` was refused when the
+  playbook held its own login in the Keychain, which cpb cannot set aside.
+  With Claude Code 2.1.225 or newer the run now shadows that login: its
+  `CLAUDE_CODE_OAUTH_TOKEN` is the placeholder `cpb-no-claude-login`, which
+  Claude Code uses before any stored login and keeps on a 401 instead of
+  adopting one, so the login reaches neither the account's
+  address as a fallback nor, on an account with `auth = 'none'`, as its only
+  credential. Nothing is moved, so a live session of the playbook keeps its
+  login and is not in the way. An older claude, or one whose version cannot
+  be told, is refused as before, naming the version to update to.
+- **`cpb ask` proposes launches cpb accepts.** It now knows your accounts
+  (by name and class: provider, where they route, whether they use a Claude
+  login) and each playbook's login and account, and plans every `run` or
+  `start` it proposes as the launch would: one cpb would refuse is shown as
+  rejected with cpb's reason. It suggests `--account` to switch where
+  requests go for one launch and `--model` or `/model` to pick a model,
+  never a routing env set.
+
 ## [v4.3.0] -- 2026-10-31
 
 v4.3.0 lets a route stated in one place run again and lets an account carry
