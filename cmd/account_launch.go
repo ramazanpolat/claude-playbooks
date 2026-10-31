@@ -99,7 +99,9 @@ func planAccount(configDir, name string, layers []*manifest.Env, workdir string,
 	if err := helperWithSettings(sel, rendered, claudeArgs); err != nil {
 		return nil, err
 	}
-	if rendered.NoClaudeLogin {
+	if rendered.NoClaudeLogin && showAccount {
+		// Reads the playbook's login store; cpb ask's tool, which touches
+		// no credential (showAccount false), leaves it to the launch.
 		if err := auth.AccountLoginRefusal(configDir, name, sel.Name); err != nil {
 			return nil, err
 		}
