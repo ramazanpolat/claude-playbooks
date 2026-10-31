@@ -96,6 +96,24 @@ ANTHROPIC_AUTH_TOKEN = "CANARY-env-set-value"
 REF_KEY = "keychain:CANARY-env-set-ref"
 `)
 	writeFile(t, filepath.Join(sets, "plain.toml"), "[set]\nMAX_THINKING_TOKENS = \"8000\"\n")
+	// An account full of canaries: only its name, provider and classes may
+	// reach the model.
+	adir := filepath.Join(root, ".accounts")
+	if err := os.MkdirAll(adir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(adir, "edge.toml"), `description = "CANARY-account-description"
+provider = "gateway"
+base_url = "https://canary-host.example/CANARY-account-path"
+identity = "CANARY-identity@example.com"
+
+[auth]
+kind = "auth_token"
+value = "CANARY-account-token"
+
+[headers]
+"X-Access-Id" = "keychain:CANARY-header-ref"
+`)
 	seedFlatPlaybook(t, "work")
 	mustStmt(t, "ALTER PLAYBOOK work USE ENV route-a SET VAR MY_SECRET=CANARY-manifest-value AS PLAINTEXT")
 	pb := filepath.Join(root, "work")
@@ -838,25 +856,58 @@ func TestAskLaunchRoutePrecedence(t *testing.T) {
 	if s := step(t, root, "run", "--account", "glm", "direct"); !s.RouteAway {
 		t.Errorf("--account glm: %+v", s)
 	}
-	// A layer that sets an account's variable refuses the launch: away.
-	if s := step(t, root, "run", "--env", "ANTHROPIC_BASE_URL=https://api.anthropic.com", "direct"); !s.RouteAway {
-		t.Errorf("--env of a base URL: %+v", s)
+	// A launch cpb would refuse is rejected, with cpb's reason: a layer
+	// route beside an account the playbook names, a start directory's own
+	// route, and run under a CPB_CONFIG_DIR that holds one.
+	refused := func(what string, s askStep) {
+		t.Helper()
+		if s.Status != stepRejected || !strings.Contains(s.Reason, "cpb would refuse this launch") {
+			t.Errorf("%s: %+v", what, s)
+		}
 	}
-	if s := step(t, root, "run", "--env-set", "route-a", "direct"); !s.RouteAway {
-		t.Errorf("--env-set route-a: %+v", s)
-	}
-	// start reads the directory's own manifest.
+	refused("--env of a base URL beside an account", step(t, root, "run", "--env", "ANTHROPIC_BASE_URL=https://api.anthropic.com", "direct"))
+	refused("--env-set route-a beside an account", step(t, root, "run", "--env-set", "route-a", "direct"))
 	sdir := filepath.Join(t.TempDir(), "routed")
 	writeFile(t, filepath.Join(sdir, ".playbook"), "[env.set]\nANTHROPIC_BASE_URL = \"http://127.0.0.1:9/v1\"\n")
-	if s := step(t, root, "start", sdir); !s.RouteAway {
-		t.Errorf("start on a routed directory: %+v", s)
-	}
-	// run honours the caller's CPB_CONFIG_DIR.
+	refused("start on a routed directory", step(t, root, "start", sdir))
 	t.Setenv("CPB_CONFIG_DIR", sdir)
-	if s := step(t, root, "run", "direct"); !s.RouteAway {
-		t.Errorf("run under CPB_CONFIG_DIR: %+v", s)
-	}
+	refused("run under CPB_CONFIG_DIR", step(t, root, "run", "direct"))
 	t.Setenv("CPB_CONFIG_DIR", "")
+}
+
+// A launch on an account its playbook cannot use is rejected with cpb's
+// reason (the case cpb ask once proposed: a shared playbook on an account
+// with a key of its own), and the context names accounts by class only.
+func TestAskRejectsARefusedLaunch(t *testing.T) {
+	root := askFixture(t)
+	putAccount(t, account.Account{Name: "router", Provider: account.Gateway, BaseURL: "http://127.0.0.1:9/v1", Auth: account.Auth{Kind: account.None}})
+	mustStmt(t, "CREATE PLAYBOOK sharedpb SET launcher = ''")
+	s := step(t, root, "run", "--account", "router", "sharedpb")
+	if s.Status != stepRejected || !strings.Contains(s.Reason, "shares the machine's") {
+		t.Fatalf("a shared playbook on a keyed account: %+v", s)
+	}
+	mustStmt(t, "CREATE PLAYBOOK isopb SET launcher = '', login = 'isolated'")
+	if s := step(t, root, "run", "--account", "router", "isopb"); s.Status != stepOK || !s.RouteAway {
+		t.Fatalf("an isolated playbook on it: %+v", s)
+	}
+	ctx, err := buildAskContext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, a := range ctx.Accounts {
+		if a.Name == "router" && a.Provider == "gateway" && a.Route == "away" && !a.ClaudeLogin {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("accounts in the context: %+v", ctx.Accounts)
+	}
+	for _, p := range ctx.Playbooks {
+		if p.Name == "isopb" && (p.Login != "isolated" || p.Account != "machine") {
+			t.Fatalf("isopb in the context: %+v", p)
+		}
+	}
 }
 
 // A launch after a step that changes the registry is shown as away.

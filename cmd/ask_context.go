@@ -25,6 +25,7 @@ type askContext struct {
 	PlaybooksRoot string        `json:"playbooks_root"`
 	Playbooks     []askPlaybook `json:"playbooks"`
 	EnvSets       []askEnvSet   `json:"env_sets"`
+	Accounts      []askAccount  `json:"accounts"`
 	Defaults      []string      `json:"defaults"`
 	Unreadable    []string      `json:"unreadable_playbooks,omitempty"`
 	// Addressed is the playbook the user named: "you" in the request.
@@ -37,6 +38,23 @@ type askPlaybook struct {
 	EnvSets         []string `json:"env_sets,omitempty"`
 	AlwaysSandboxed bool     `json:"always_sandboxed,omitempty"`
 	Route           string   `json:"route"`
+	// Account is the account a launch with no flags runs on ("" when it
+	// would be refused); Login is isolated or shared.
+	Account string `json:"account,omitempty"`
+	Login   string `json:"login"`
+}
+
+// askAccount is one account, by name and class only: never its address,
+// identity, description or credential.
+type askAccount struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Route    string `json:"route"` // anthropic | away
+	// ClaudeLogin: it signs in with a Claude login or token (the playbook's
+	// own login is used); otherwise it uses a key of its own.
+	ClaudeLogin bool `json:"claude_login"`
+	Default     bool `json:"default,omitempty"`
+	Listed      bool `json:"listed_only,omitempty"`
 }
 
 type askEnvSet struct {
@@ -70,6 +88,13 @@ func buildAskContext(root string) (*askContext, error) {
 			ap.EnvSets = append([]string(nil), env.Sets...)
 		}
 		ap.Route = askPlaybookRoute(pb.Path)
+		ap.Login = "shared"
+		if auth.IsAuthIsolated(pb.Path) {
+			ap.Login = "isolated"
+		}
+		if acct, err := planAccount(pb.Path, pb.Name, nil, "", nil); err == nil {
+			ap.Account = acct.sel.Name
+		}
 		actx.Playbooks = append(actx.Playbooks, ap)
 	}
 	for _, u := range bad {
@@ -94,6 +119,18 @@ func buildAskContext(root string) (*askContext, error) {
 	for _, n := range names {
 		actx.EnvSets = append(actx.EnvSets, askEnvSet{Name: n, InDefaults: inDefaults[n],
 			Route: askRoute(dir, &manifest.Env{Sets: []string{n}})})
+	}
+	actx.Accounts = []askAccount{}
+	adir := account.Dir(root)
+	def, _ := account.Default(adir)
+	accts, _ := account.List(adir)
+	for _, a := range accts {
+		route := "away"
+		if a.Provider == account.Anthropic {
+			route = "anthropic"
+		}
+		actx.Accounts = append(actx.Accounts, askAccount{Name: a.Name, Provider: a.Provider, Route: route,
+			ClaudeLogin: a.UsesClaudeCredential(), Default: def == a.Name, Listed: a.Listed()})
 	}
 	return actx, nil
 }
