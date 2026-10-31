@@ -384,7 +384,7 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 		return fmt.Errorf("start needs a directory: cpb start <dir>")
 	}
 	target := rest[0]
-	_, more, err := takeRunFlags(rest[1:], &sopts, extra)
+	claudeArgs, more, err := takeRunFlags(rest[1:], &sopts, extra)
 	if err != nil {
 		return err
 	}
@@ -426,6 +426,25 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 			s.Guards = append(s.Guards, askGuard{guardCredential, "reads variables from " + t.value})
 		}
 	}
+	// Settings passed through to claude are checked as the launch checks
+	// them; a settings file is not read here, like an env file.
+	settingsFile := false
+	for i := 0; i < len(claudeArgs); i++ {
+		var value string
+		switch a := claudeArgs[i]; {
+		case a == "--settings" && i+1 < len(claudeArgs):
+			i++
+			value = claudeArgs[i]
+		case strings.HasPrefix(a, "--settings="):
+			value = strings.TrimPrefix(a, "--settings=")
+		default:
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimSpace(value), "{") {
+			settingsFile = true
+			s.Guards = append(s.Guards, askGuard{guardCredential, "reads settings from " + value})
+		}
+	}
 	if sopts.fresh {
 		s.Guards = append(s.Guards, askGuard{guardDestructive, "removes the sandbox and creates it again"})
 	}
@@ -445,9 +464,10 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 	}
 	// The route as the launch resolves it: DEFAULTS and the governing
 	// manifest, then the launch flags in order on top, then the caller's
-	// environment. An env file is not read here: judged as away.
-	away := envFile
-	if !envFile {
+	// environment. An env file or a settings file is not read here: judged
+	// as away.
+	away := envFile || settingsFile
+	if !away {
 		layers, err := launchLayers(tokens)
 		if err != nil {
 			return err
@@ -460,7 +480,7 @@ func checkAskLaunch(s *askStep, args []string, root string) error {
 			name = target
 		}
 		wd, _ := os.Getwd()
-		if _, err := planAccount(configDir, name, layers, wd, nil); err != nil {
+		if _, err := planAccount(configDir, name, layers, wd, claudeArgs); err != nil {
 			return fmt.Errorf("cpb would refuse this launch: %v", err)
 		}
 		route, err := askLaunchRoute(configDir, layers, os.Environ())
