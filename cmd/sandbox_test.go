@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/auth"
 	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
@@ -843,6 +844,10 @@ func TestRunSandboxInjectsSecretsAtTheProxy(t *testing.T) {
 	}
 	if strings.Contains(joined, "--env OTHER") || strings.Contains(joined, "--env ANTHROPIC_API_KEY") {
 		t.Fatalf("revocation touched a mapping that is not ours or was never registered: %q", joined)
+	}
+	// rv sends no key: the fixed value enters as it is, never registered.
+	if calls := sbxCalls(t, log); !strings.Contains(calls[len(calls)-1], "-e ANTHROPIC_AUTH_TOKEN="+auth.NoCredentialPlaceholder+" ") || strings.Contains(joined, "--value "+auth.NoCredentialPlaceholder) {
+		t.Fatalf("a keyless account in the sandbox: %q", calls)
 	}
 	t.Setenv("SBX_STUB_LS", "")
 	t.Setenv("SBX_STUB_LSJSON", "")

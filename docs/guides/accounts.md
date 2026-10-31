@@ -40,7 +40,7 @@ with `AS PLAINTEXT` after the list. The credential is exactly one of:
 | `helper = '<command>'` | an `apiKeyHelper` that prints the key, passed to Claude Code for that launch only |
 | `auth = 'claude_login'` | the playbook's own `/login` (shared or isolated, per its `login`) |
 | `auth = 'cloud'` | the cloud's own credential chain (Bedrock, Vertex, Foundry) |
-| `auth = 'none'` | nothing: a local router that takes no key |
+| `auth = 'none'` | no key: a local router that takes none. Claude Code does not start with an address and no credential, so the launch sends the fixed, non-secret `ANTHROPIC_AUTH_TOKEN=cpb-no-credential` |
 
 ### Headers a gateway asks for
 

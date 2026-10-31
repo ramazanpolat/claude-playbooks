@@ -198,6 +198,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			label: "directory " + absPath, name: name,
 			configPath: absPath, rootPath: absPath, manifest: sbm, backend: backend,
 			noLoginAccount: acct.noLoginAccount(),
+			noCredential:   acct.noCredential(),
 			account:        acct.sel.Name,
 		}, layers, acct.claudeArgs(claudeArgs), sopts)
 		// Cleanup only after a session actually ran: a launch refused
@@ -272,6 +273,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	launchEnv, syncErr := auth.PrepareLaunchEnvFor(absPath, layers, acct.noLoginAccount())
+	if acct.noCredential() {
+		launchEnv = auth.WithNoCredential(launchEnv)
+	}
 	// A token run may have set the playbook's own login aside: it comes
 	// back when the launch returns, whatever the outcome.
 	defer auth.EndLaunch(absPath)
