@@ -267,7 +267,7 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 		// On macOS a launch on an account that uses no login shadows the
 		// playbook's own login instead of setting it aside (ShadowsLogin):
 		// nothing moves, and no run holds it.
-		shadow := noLoginAccount != "" && ShadowsLogin()
+		shadow := noLoginAccount != "" && ShadowsLogin() && ownLoginWhere(configDir) != ""
 		refusal := func() error {
 			if noLoginAccount != "" {
 				return accountOwnLoginRefusal(configDir, "<playbook>", noLoginAccount)

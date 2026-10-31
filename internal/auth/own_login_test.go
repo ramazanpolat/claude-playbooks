@@ -987,16 +987,39 @@ func TestSandboxAccountLoginRefusal(t *testing.T) {
 // no placeholder.
 func TestNoLoginAccountShadowsTheLoginOnMacOS(t *testing.T) {
 	hostOS = "darwin"
-	t.Cleanup(func() { hostOS = "linux" })
+	savedVersion := ClaudeVersion
+	t.Cleanup(func() { hostOS = "linux"; ClaudeVersion = savedVersion })
 	_, configDir := isolatedWithToken(t)
 	writeManifest(t, configDir, "isolated_login = true\n")
+
+	// No login of its own: nothing to shadow, no placeholder.
+	ClaudeVersion = func() string { return "2.1.302" }
+	stubKeychainItems(t, nil)
+	env, err := PrepareLaunchEnvFor(configDir, nil, "router")
+	EndLaunch(configDir)
+	if err != nil {
+		t.Fatalf("no login: %v", err)
+	}
+	if v, ok := envValue(t, env, OAuthTokenEnv); ok {
+		t.Fatalf("no login: %s = %q, want none", OAuthTokenEnv, v)
+	}
+
+	// A claude older than MinShadowClaude, or of an unknown version, does
+	// not keep the placeholder on a 401: refused as before, naming it.
 	own, _ := configKeychainService(configDir)
 	stubKeychainItems(t, map[string]KeychainState{own: KeychainPresent})
+	for _, v := range []string{"2.1.224", ""} {
+		ClaudeVersion = func() string { return v }
+		if err := AccountLoginRefusal(configDir, "pb", "router"); !errors.Is(err, ErrOwnLogin) || !strings.Contains(err.Error(), MinShadowClaude) {
+			t.Fatalf("claude %q: err = %v, want a refusal naming %s", v, err, MinShadowClaude)
+		}
+	}
+	ClaudeVersion = func() string { return "2.1.302" }
 	t.Setenv(OAuthTokenEnv, "sk-ant-oat01-FROM-THE-SHELL")
 	if err := AccountLoginRefusal(configDir, "pb", "router"); err != nil {
 		t.Fatalf("refused on macOS: %v", err)
 	}
-	env, err := PrepareLaunchEnvFor(configDir, nil, "router")
+	env, err = PrepareLaunchEnvFor(configDir, nil, "router")
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}

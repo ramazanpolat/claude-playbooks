@@ -859,9 +859,10 @@ func prepareSandboxEnv(t sandboxTarget, backend sandboxBackend, layers []*manife
 	if envHas(launchEnv, auth.OAuthTokenEnv) && isSandboxLoginLink(t.configPath, backend) {
 		// Token launch after a sandbox login: on the host the link dangles,
 		// so the quarantine above found no grant to detach, but inside the
-		// sandbox it resolves to the earlier login, which Claude Code's
-		// 401 recovery would adopt over the token. Detach it, as the
-		// quarantine does for a shared link with a grant.
+		// sandbox it resolves to the earlier login, which a Claude Code
+		// before 2.1.225 adopted over the token on a 401 (and which must not
+		// stay reachable either way). Detach it, as the quarantine does for
+		// a shared link with a grant.
 		if err := os.Remove(store); err != nil {
 			return nil, "", fmt.Errorf("could not detach the sandbox login for a token launch: %w", err)
 		}

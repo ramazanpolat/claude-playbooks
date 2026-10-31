@@ -17,6 +17,10 @@ import (
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
+// The claude a launch runs, for the macOS shadow's version gate
+// (auth.MinShadowClaude).
+func init() { auth.ClaudeVersion = func() string { return claudeVersion() } }
+
 // anthropicConfigDirName is the empty directory, in each config directory,
 // that ANTHROPIC_CONFIG_DIR names at launch: no Anthropic profile there, so
 // none is ever the credential.
