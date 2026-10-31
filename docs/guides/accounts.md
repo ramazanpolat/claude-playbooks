@@ -99,8 +99,12 @@ cpb EXPLAIN PLAYBOOK sre                     # Account: work (anthropic, claude_
 - **Your login stays home.** An account that uses no Claude login (a router's
   key, a Console key) never reaches yours: a playbook that shares the
   machine's login is refused on it (give it `SET login = 'isolated'`), and an
-  isolated playbook's own login is set aside for the run on Linux, refused on
-  macOS. On Linux, a login that cannot be set aside, a store that cannot be
+  isolated playbook's own login is set aside for the run on Linux and, on
+  macOS, shadowed: the run gets a placeholder Claude token that Claude Code
+  uses before any stored login, so your Keychain login stays in place and
+  never reaches the account's address. So `cpb run --account <router>
+  <playbook>` works for a playbook you are logged into, for one launch. On
+  Linux, a login that cannot be set aside, a store that cannot be
   read, or a login still reachable afterwards refuses the launch: never a
   warning and a run.
 - **Sandboxes too.** A sandboxed launch renders the same account and starts

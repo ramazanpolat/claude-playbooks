@@ -878,8 +878,15 @@ when a cloud switch is on, and only a cloud account turns one on.
   account runs with none reachable: a shared playbook (whose store is the
   machine's) is refused before anything changes, naming the fix, `SET login
   = 'isolated'`; an isolated playbook that holds a login of its own sets it
-  aside for the run on Linux, and is refused on macOS, as a token run is
-  (see *Authentication preparation*). On Linux the launch is refused, never
+  aside for the run on Linux, and on macOS, where the login lives in the
+  Keychain and is never moved, shadows it (since v4.3.1): the run's
+  `CLAUDE_CODE_OAUTH_TOKEN` is set to the placeholder `cpb-no-claude-login`,
+  which Claude Code ranks above any stored login (below the account's own
+  key, its key helper and a cloud's credentials) and never trades for one,
+  so the login reaches neither the account's address as a fallback nor, on
+  an account with `auth = 'none'`, as its only credential. Nothing is set
+  aside on macOS, so the refusals below that protect a set-aside login do
+  not apply there. On Linux the launch is refused, never
   warned about, when the login cannot be set aside, when the store cannot be
   read (it may hold one), or when a login is still reachable after the
   set-aside (a store that is a link to another login, say). The machine's
@@ -889,7 +896,7 @@ when a cloud switch is on, and only a cloud account turns one on.
   uses the playbook's own login is refused while a run that keeps that login
   aside is live, and a launch on an account that uses no Claude login is
   refused while the playbook holds its login and another session of it is
-  live. A Claude credential reaches a non-Anthropic address only through
+  live (Linux only: on macOS the login stays in place). A Claude credential reaches a non-Anthropic address only through
   `claude_login_trusted`.
 - **Sandboxed launches** render the same account inside the sandbox.
   `claude` starts from a plain shell (`bash -c`, with `BASH_ENV` and `ENV`
