@@ -373,11 +373,11 @@ func TestAskRouteAway(t *testing.T) {
 	writeFile(t, filepath.Join(homeDir, "CLAUDE.md"), "x")
 	proj := filepath.Join(homeDir, "proj")
 	writeFile(t, filepath.Join(proj, "CLAUDE.md"), "x")
-	p := &askPlan{Steps: []askStep{away}}
+	p := &askPlan{Steps: []askStep{step(t, root, "run", "work")}}
 	var b strings.Builder
 	printAskPlan(&b, p, proj)
 	out := b.String()
-	for _, want := range []string{"(cd /tmp && cpb start --env-set route-a --delete /tmp/cpb-ask-test-scratch)", "~/proj/CLAUDE.md", "~/CLAUDE.md", "! deletes"} {
+	for _, want := range []string{"(cd /tmp && cpb run work)", "~/proj/CLAUDE.md", "~/CLAUDE.md"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("shown plan lacks %q:\n%s", want, out)
 		}
