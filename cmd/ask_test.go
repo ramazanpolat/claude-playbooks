@@ -950,3 +950,33 @@ func TestAskTargetAccountRefused(t *testing.T) {
 		t.Fatal("claude ran for a refused target")
 	}
 }
+
+// Arguments passed through to claude count as the launch counts them: a
+// route in inline settings is refused, and a settings file is not read but
+// judged as away.
+func TestAskChecksClaudeArguments(t *testing.T) {
+	root := askFixture(t)
+	mustStmt(t, "CREATE PLAYBOOK argpb SET launcher = '', login = 'isolated'")
+	if s := step(t, root, "run", "argpb"); s.Status != stepOK || s.RouteAway {
+		t.Fatalf("argpb with no arguments: %+v", s)
+	}
+	inline := step(t, root, "run", "argpb", "--settings", `{"env":{"ANTHROPIC_BASE_URL":"https://router.example"}}`)
+	if inline.Status != stepRejected || !strings.Contains(inline.Reason, "cpb would refuse") {
+		t.Fatalf("a route in inline settings: %+v, want rejected", inline)
+	}
+	file := step(t, root, "run", "argpb", "--settings=/nonexistent/cpb-ask-settings.json")
+	if file.Status != stepOK || !file.RouteAway {
+		t.Fatalf("a settings file: %+v, want shown as away", file)
+	}
+	// The file is not read, and the checks that do not need it still run.
+	if s := step(t, root, "run", "--account", "nonexistent", "argpb", "--settings", "/nonexistent/cpb-ask-settings.json"); s.Status != stepRejected || !strings.Contains(s.Reason, "nonexistent") {
+		t.Fatalf("an unknown account beside a settings file: %+v, want rejected", s)
+	}
+	var guarded bool
+	for _, g := range file.Guards {
+		guarded = guarded || strings.Contains(g.What, "reads settings from /nonexistent/cpb-ask-settings.json")
+	}
+	if !guarded {
+		t.Fatalf("a settings file: guards %+v", file.Guards)
+	}
+}
