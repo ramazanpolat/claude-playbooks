@@ -9,11 +9,14 @@
 # account, never the token. A variable an account owns set anywhere else
 # refuses the launch. An account that uses no Claude login keeps one out of
 # the run: a shared playbook is refused; an isolated playbook's own /login is
-# set aside for the run (unreadable to claude) and back afterwards on Linux,
-# and refused on macOS before anything changes.
+# set aside for the run (unreadable to claude) and back afterwards on Linux.
+# On macOS a token run leaves it in place with a claude that keeps the token
+# on a 401 (2.1.225, since v4.3.2), and is refused before anything changes
+# with an older or unknown one.
 #
 # Stubs on PATH: `claude` dumps the environment it received and the
-# credential store it can read; `arena-helper` is a secret helper that
+# credential store it can read, and answers `claude --version` with
+# $FAKE_CLAUDE_VERSION when that is set; `arena-helper` is a secret helper that
 # resolves stub:<name> references to secret-<name>, so a value differs
 # from its reference and a leak check means something. Keyless: no real credentials.
 
@@ -26,7 +29,7 @@ agent = "shell"
 steps = [
   '''docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE_DIR":/src -w /src golang:1.26 sh -c 'V=$(cat .gentar-version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo dev); GOCACHE=/tmp/gocache go build -ldflags "-X github.com/ramazanpolat/claude-playbooks/cmd.Version=$V" -o cpb .' ''',
   'mkdir -p "$HOME/.local/bin" && install -m 755 "$WORKSPACE_DIR/cpb" "$HOME/.local/bin/cpb"',
-  '''printf '#!/bin/sh\nenv > "$HOME/claude-env"\ncp "$CLAUDE_CONFIG_DIR/.credentials.json" "$HOME/store-during" 2>/dev/null || : > "$HOME/store-during"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
+  '''printf '#!/bin/sh\nif [ "$1" = --version ] && [ -n "$FAKE_CLAUDE_VERSION" ]; then echo "$FAKE_CLAUDE_VERSION (Claude Code)"; exit 0; fi\nenv > "$HOME/claude-env"\ncp "$CLAUDE_CONFIG_DIR/.credentials.json" "$HOME/store-during" 2>/dev/null || : > "$HOME/store-during"\n' > "$HOME/.local/bin/claude" && chmod 755 "$HOME/.local/bin/claude"''',
   '''printf '#!/bin/sh\nif [ "$1" = --check ]; then exit 0; fi\nprintf "%%s\\n" "${CLAUDE_CODE_OAUTH_TOKEN:-unset}" > "$HOME/helper-inherited"\nwhile [ "$1" != -- ]; do export "${1%%%%=*}=secret-${1#*=stub:}"; shift; done\nshift\nexec "$@"\n' > "$HOME/.local/bin/arena-helper" && chmod 755 "$HOME/.local/bin/arena-helper"''',
   "cpb ALTER DEFAULTS SET secret_helper = 'arena-helper'",
   "cpb CREATE ACCOUNT acct-work SET provider = 'anthropic', claude_token FROM 'stub:work'",
@@ -72,8 +75,11 @@ contains = "one-layer-ok"
 # An isolated playbook with a /login of its own, launched on a token
 # account. Linux: the login is unreadable during the run and back
 # afterwards, other keys kept, nothing left aside. macOS (the login lives
-# in the Keychain): the launch is refused before anything changes.
-command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE ACCOUNT acct-work >/dev/null && P="$HOME/.claude-playbooks/own" && (umask 077 && printf '%s' '{"claudeAiOauth":{"accessToken":"own-login","refreshToken":"r","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"m"}}}' > "$P/.credentials.json") && if [ "$(uname)" = Darwin ]; then rm -f "$HOME/claude-env"; if cpb run own 2> "$HOME/own.err"; then echo own-login-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "holds a login of its own" "$HOME/own.err" && grep -qF "cpb run --account <account> own" "$HOME/own.err" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; else cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && ! grep -q claudeAiOauth "$HOME/store-during" && grep -q mcpOAuth "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; fi'''
+# in the Keychain): with a claude older than 2.1.225 or of an unknown
+# version the launch is refused before anything changes, naming 2.1.225;
+# with a newer one it runs on the account's token and the login stays in
+# place, during the run and after, nothing set aside.
+command = '''cpb CREATE PLAYBOOK own SET launcher = '', login = 'isolated' USE ACCOUNT acct-work >/dev/null && P="$HOME/.claude-playbooks/own" && (umask 077 && printf '%s' '{"claudeAiOauth":{"accessToken":"own-login","refreshToken":"r","expiresAt":1},"mcpOAuth":{"x":{"accessToken":"m"}}}' > "$P/.credentials.json") && if [ "$(uname)" = Darwin ]; then for v in 2.1.224 unknown; do rm -f "$HOME/claude-env"; if FAKE_CLAUDE_VERSION=$v cpb run own 2> "$HOME/own.err"; then echo own-login-let-through; exit 1; fi; test ! -f "$HOME/claude-env" && grep -qF "holds a login of its own" "$HOME/own.err" && grep -qF "2.1.225" "$HOME/own.err" && grep -qF "cpb run --account <account> own" "$HOME/own.err" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" || { echo "refusal-wrong-$v"; exit 1; }; done; FAKE_CLAUDE_VERSION=2.1.302 cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && grep -q '"own-login"' "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; else cpb run own && grep -qx "CLAUDE_CODE_OAUTH_TOKEN=secret-work" "$HOME/claude-env" && ! grep -q claudeAiOauth "$HOME/store-during" && grep -q mcpOAuth "$HOME/store-during" && grep -q '"own-login"' "$P/.credentials.json" && test ! -e "$P/.credentials.json.cpb-aside" && echo aside-ok; fi'''
 contains = "aside-ok"
 
 [[verify.commands]]
