@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [v4.3.2] -- 2026-11-02
+
+v4.3.2 lets a playbook you are logged into on macOS run on a Claude token
+account, so a session can be resumed on another Claude subscription. With
+Claude Code 2.1.225 or newer the playbook's own Keychain login stays in
+place and the account's token outranks it; an older claude is refused as
+before. Nothing else changes.
+
 ### Fixed
 
 - **On macOS a playbook you are logged into runs on a Claude token account.**
