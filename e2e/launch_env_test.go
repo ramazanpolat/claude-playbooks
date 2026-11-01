@@ -30,12 +30,16 @@ import (
 )
 
 const (
-	tokenEnv       = "CLAUDE_CODE_OAUTH_TOKEN"
-	tokenFileEnv   = "CPB_OAUTH_TOKEN_FILE"
-	isolateEnv     = "CPB_ISOLATED_LOGIN"
-	dumpEnv        = "CPB_TEST_ENVDUMP"
-	storeDumpEnv   = "CPB_TEST_STOREDUMP"
-	securityLogEnv = "CPB_TEST_SECURITY_LOG"
+	tokenEnv     = "CLAUDE_CODE_OAUTH_TOKEN"
+	tokenFileEnv = "CPB_OAUTH_TOKEN_FILE"
+	isolateEnv   = "CPB_ISOLATED_LOGIN"
+	dumpEnv      = "CPB_TEST_ENVDUMP"
+	storeDumpEnv = "CPB_TEST_STOREDUMP"
+	// claudeVersionEnv, when set, is the version the stub reports to
+	// `claude --version`, which then dumps nothing: the version probe is no
+	// launch. Unset, --version is an argument like any other.
+	claudeVersionEnv = "CPB_TEST_CLAUDE_VERSION"
+	securityLogEnv   = "CPB_TEST_SECURITY_LOG"
 )
 
 // binPath builds cpb once per test binary run and returns its path.
@@ -78,7 +82,8 @@ func TestMain(m *testing.M) {
 // shimDir writes the stub executables prepended to the binary's PATH.
 //
 //   - `claude`   records its environment to $CPB_TEST_ENVDUMP. This is what every
-//     assertion in this file reads.
+//     assertion in this file reads. With $CPB_TEST_CLAUDE_VERSION set,
+//     `claude --version` prints it and records nothing.
 //   - `security` is stubbed because EnsureGlobalCredentials shells out to
 //     `security find-generic-password -s "Claude Code-credentials"` on darwin,
 //     and does so BEFORE consulting $HOME. Redirecting HOME therefore does not
@@ -93,7 +98,8 @@ func shimDir(t *testing.T) string {
 	stubs := map[string]string{
 		// With storeDumpEnv set, the stub also copies the store as the
 		// session sees it, to prove what was readable during the run.
-		"claude": "#!/bin/sh\nenv > \"$" + dumpEnv + "\"\n" +
+		"claude": "#!/bin/sh\nif [ \"$1\" = --version ] && [ -n \"$" + claudeVersionEnv + "\" ]; then echo \"$" + claudeVersionEnv + " (Claude Code)\"; exit 0; fi\n" +
+			"env > \"$" + dumpEnv + "\"\n" +
 			"if [ -n \"$" + storeDumpEnv + "\" ]; then cp \"$CLAUDE_CONFIG_DIR/.credentials.json\" \"$" + storeDumpEnv + "\" 2>/dev/null || : > \"$" + storeDumpEnv + "\"; fi\nexit 0\n",
 		// Records each interception so a test can prove the stub is the binary
 		// actually reached -- a stub silently bypassed by a PATH change would
