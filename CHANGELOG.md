@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **On macOS a playbook you are logged into runs on a Claude token account.**
+  `cpb run --account <claude-token-account> <playbook>` was refused when the
+  playbook held its own login in the Keychain, which cpb cannot set aside.
+  With Claude Code 2.1.225 or newer the login now stays in place: the
+  account's token outranks any stored login, and that claude keeps the token
+  on a 401 instead of adopting the login. So a session can be resumed on
+  another Claude subscription. An older claude, or one whose version cannot
+  be told, is refused as before, naming the version to update to.
+
 ## [v4.3.1] -- 2026-11-01
 
 v4.3.1 fixes launches on accounts that use no Claude login. On macOS a

@@ -262,7 +262,10 @@ func SandboxAccountLoginRefusal(configDir, target, account string) error {
 }
 
 // ownLoginRefusal is OwnLoginRefusal for a launch already known to carry a
-// token of the playbook's own.
+// token of the playbook's own. On macOS the login stays in place (since
+// v4.3.2): the token outranks it, and a claude since MinShadowClaude keeps
+// the token on a 401 instead of adopting the login. An older or unknown
+// claude is refused, naming the version.
 func ownLoginRefusal(configDir, name string) error {
 	if hostOS != "darwin" {
 		return nil
@@ -271,14 +274,22 @@ func ownLoginRefusal(configDir, name string) error {
 	if where == "" {
 		return nil
 	}
+	ok, v := shadowHolds()
+	if ok {
+		return nil
+	}
+	if v == "" {
+		v = "of an unknown version"
+	}
 	target := "<playbook>"
 	if name != "" {
 		target = name
 	}
-	return &ownLoginError{fmt.Sprintf("%s holds a login of its own (%s), and this launch would carry a token. On macOS cpb cannot keep that login aside for the run, and Claude Code would swap it in over the token on an error. Fix one of:\n"+
+	return &ownLoginError{fmt.Sprintf("%s holds a login of its own (%s), and this launch would carry a token. On macOS cpb leaves that login in place, and only Claude Code %s or newer keeps the token over it on an error; this claude is %s. Fix one of:\n"+
+		"  - update Claude Code (claude update)\n"+
 		"  - this launch on its own login: cpb run --account <account> %s, an account with auth = 'claude_login' (or machine) that it lists\n"+
 		"  - always on the token: /logout in it once, so it holds no login of its own",
-		target, where, target)}
+		target, where, MinShadowClaude, v, target)}
 }
 
 // ownLoginWhere names where an isolated playbook keeps a login of its own:
