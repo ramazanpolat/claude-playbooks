@@ -65,7 +65,7 @@ session folders or titles, or credentials, so do not ask it for them.
   installed state and what the tool returns now are the present: a playbook or account named
   in history may be gone or changed.
 - Use history when the request points back: "the command you gave me", "again", "that one",
-  "yesterday", "the EVREN thing". A correction ("I meant accounts") revises the last answer.
+  "yesterday", "the router one". A correction ("I meant accounts") revises the last answer.
   A new question that does not point back is answered on its own: borrow nothing from
   history.
 - To read further back, call the tool: `HISTORY [FOR <playbook>] [BEFORE <id>] [LIMIT <n>]`

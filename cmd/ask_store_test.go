@@ -141,7 +141,7 @@ func TestAskHistoryQuery(t *testing.T) {
 		return &askPlan{Answer: "ok", Steps: []askStep{{Command: cmd, Status: stepOK, Why: "does it"}}}
 	}
 	var ids []string
-	for i, tag := range []string{"", "kommander", "", "kommander"} {
+	for i, tag := range []string{"", "reviewer", "", "reviewer"} {
 		id, err := appendAskRecord(root, tag, "ask "+string(rune('a'+i)), plan("cpb SHOW ENVS"))
 		if err != nil {
 			t.Fatal(err)
@@ -168,8 +168,8 @@ func TestAskHistoryQuery(t *testing.T) {
 	if got := index(); len(got) != 4 || got[0].ID != ids[3] || got[0].Asked != "ask d" || got[3].Tag != "-" {
 		t.Fatalf("HISTORY: %+v", got)
 	}
-	if got := index("FOR", "kommander"); len(got) != 2 || got[0].ID != ids[3] || got[1].ID != ids[1] {
-		t.Fatalf("HISTORY FOR kommander: %+v", got)
+	if got := index("FOR", "reviewer"); len(got) != 2 || got[0].ID != ids[3] || got[1].ID != ids[1] {
+		t.Fatalf("HISTORY FOR reviewer: %+v", got)
 	}
 	if got := index("BEFORE", ids[2], "LIMIT", "1"); len(got) != 1 || got[0].ID != ids[1] {
 		t.Fatalf("HISTORY BEFORE LIMIT: %+v", got)
