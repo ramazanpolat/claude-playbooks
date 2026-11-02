@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`cpb update` names the migrate step it asks about.** The question before
+  an update whose source declares a migrate step read "Update <name> and run
+  it?", which reads as running the playbook. It is now "Update <name> and run
+  its migrate step (<path>)?", or "... without running its migrate step" when
+  a version is unknown and the step will not run; the refusal off a terminal
+  says the same.
+
 ### Fixed
 
 - **`cpb ask` proposes `CREATE ACCOUNT` and other `SET` statements cpb
