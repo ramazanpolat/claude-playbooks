@@ -66,7 +66,7 @@ func askRun(t *testing.T, flags map[string]string, request ...string) (string, e
 		}
 	}
 	t.Cleanup(func() {
-		for _, k := range []string{"json"} {
+		for _, k := range []string{"json", "no-history"} {
 			askCmd.Flags().Set(k, "false")
 		}
 		askCmd.Flags().Set("model", "")

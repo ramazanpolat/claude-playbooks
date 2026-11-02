@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`cpb ask` remembers.** `~/.claude-playbooks/.ask/history.md` keeps one
+  markdown record per answered ask, appended and never rewritten, each
+  headed by its time, the playbook it was addressed to and an id. Every ask
+  sends the last 20 headings and the last record, and the model reads
+  further back through its tool when the request points there, so a
+  follow-up such as "I was asking for accounts" revises the last answer.
+  `.ask/CLAUDE.md` is your standing context, sent with every ask. Nothing
+  is recorded for a refused ask, a part that looks like a credential is
+  withheld, and `--no-history` keeps one ask out.
+
 ## [v4.3.2] -- 2026-11-02
 
 v4.3.2 lets a playbook you are logged into on macOS run on a Claude token

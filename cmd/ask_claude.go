@@ -322,7 +322,9 @@ var askTimeout = 3 * time.Minute
 const askLoginHint = "cpb ask asks Claude through your Claude Code login: run claude and /login, or set ANTHROPIC_API_KEY"
 
 // askAsk sends the installed state and the request, and returns the plan.
-func askViaClaude(model string, signIn askSignIn, root string, state *askContext, request string) (*askPlan, error) {
+// prelude is what the ask store adds before the request: the user's
+// standing context and the history (askStanding, askHistoryPrelude).
+func askViaClaude(model string, signIn askSignIn, root string, state *askContext, prelude, request string) (*askPlan, error) {
 	if p := askProxy(os.Environ()); p != "" {
 		return nil, fmt.Errorf("cpb ask does not run through a proxy yet, and %s is set here: nothing was sent. If Anthropic's API is reachable without it, run: env -u %s cpb ask ...", p, p)
 	}
@@ -362,7 +364,7 @@ func askViaClaude(model string, signIn askSignIn, root string, state *askContext
 	c := exec.CommandContext(ctx, path, askClaudeArgs(model, self, root)...)
 	c.Dir = dir
 	c.Env = env
-	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\nRequest: " + request + "\n")
+	c.Stdin = strings.NewReader("Installed state: " + string(stateJSON) + "\n\n" + prelude + "Request: " + request + "\n")
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	runErr := c.Run()

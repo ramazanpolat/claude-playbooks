@@ -169,6 +169,39 @@ Name a key instead (`set the router account's key from my keychain`): the
 answer then uses a reference, `ALTER ACCOUNT router SET auth_token FROM
 '<secret-ref>'`.
 
+## Follow-ups and your own context
+
+`cpb ask` remembers what it answered (since v4.4.0), so you can correct it
+or point back:
+
+```
+cpb ask "list my env sets"
+cpb ask "I was asking for accounts"
+cpb ask "the router one from yesterday, again"
+```
+
+Everything it keeps is under `~/.claude-playbooks/.ask/`:
+
+- `history.md`: one record per answered ask, newest at the bottom, each
+  headed by its time, the playbook you asked (`-` for none) and an id:
+
+  ```
+  ## 2026-11-02T11:39:12+03:00 · - · r-20261102-113912-3f2a
+
+  **Asked:** list my env sets
+  ```
+
+  It is appended to and never rewritten. Read it with any tool; delete it
+  to forget, and cpb starts a new one. Each ask sends the last 20 headings
+  and the last record; the model reads further back only when your request
+  points there. A refused ask is never recorded, and a part that looks like
+  a credential is written as withheld.
+- `CLAUDE.md`: write it yourself, in your own words: what you call things,
+  how you like answers. It goes with every ask. cpb never writes it, and one
+  that holds a credential refuses the ask.
+
+`--no-history` keeps one ask out: it reads no history and adds nothing.
+
 ## Choosing the model
 
 `--model <model>`, or `CPB_ASK_MODEL`, else `sonnet`. Any Claude model your

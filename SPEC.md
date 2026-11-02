@@ -3213,7 +3213,7 @@ a screen that shows sessions is up. Everything else is re-read on `r`.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
-### `cpb ask [<playbook>] [--json] [--model <model>] "<request>"`
+### `cpb ask [<playbook>] [--json] [--no-history] [--model <model>] "<request>"`
 
 `cpb ask` answers a request in plain words with the cpb command or commands
 that do it. A model proposes the plan; cpb checks every step and shows it.
@@ -3435,7 +3435,40 @@ known keys and tokens (Anthropic and other `sk-` keys, GitHub, GitLab and
 Slack tokens, AWS access keys, Google API keys, JSON web tokens); and long
 key-shaped runs, except a hash that follows `sha256`, `commit` and the like.
 
-**Exit codes:** 0 shown; 1 refused (a credential in the request, a proxy, `CPB_ASK_LOGIN=token` without a
+**The ask store** (since v4.4.0). `<root>/.ask/` holds what cpb ask carries
+from one ask to the next; nothing else in cpb reads it.
+
+- `CLAUDE.md`: your standing context, in your own words ("my router account
+  is the one I call the box"). cpb only reads it. Its text goes with every ask,
+  after the installed state and labelled as yours, up to 8 KB (past that, cut
+  and marked). It is checked like a request: one that holds a credential
+  refuses the ask before anything is sent, naming the file and the key.
+- `history.md`: one markdown record per answered ask, appended and never
+  rewritten: delete the file to forget, and cpb starts a new one. The
+  directory is made `0700` and the file `0600`; one readable by others gets a
+  warning. A record's heading is its index line, `## <time> · <playbook> ·
+  <id>`: the time in RFC 3339, the playbook the ask was addressed to (`-` for
+  none), and an id `r-<YYYYMMDD-HHMMSS>-<4 hex>`. Below it: `**Asked:**`, the
+  answer, the steps as shown (a rejected one with cpb's reason, a step's `!`
+  lines kept) and the notes. A part that looks like it holds a credential is
+  written as `<withheld: it looked like it held a credential>`. Nothing is
+  written for an ask that is refused or gets no answer.
+
+Every ask hands the model, after the installed state, the index lines of the
+last 20 records (newest first, each with the first line of what was asked)
+and the last record in full, the last addressed to the same playbook when the
+ask names one. The model's tool reads further back, so the model decides how
+far: `HISTORY [FOR <playbook>] [BEFORE <id>] [LIMIT <n>]` (index lines, newest
+first; LIMIT 20 by default, at most 200) and `HISTORY RECORD <id>` (one record
+in full). These are the tool's own statements, not cpb grammar, and read
+`history.md` only. History is the past: the installed state is the present,
+and the reference tells the model so. `--no-history` keeps one ask out: it
+neither reads the history nor adds to it. With `--json` the plan carries
+`record`, the id it was written as. A `CLAUDE.md` or `history.md` that is not
+a regular file (a link) is refused, naming it: what is read is sent. A record
+that cannot be written is a warning; the plan is still shown.
+
+**Exit codes:** 0 shown; 1 refused (a credential in the request or in `.ask/CLAUDE.md`, a link in the ask store, a proxy, `CPB_ASK_LOGIN=token` without a
 machine token, the gate, an addressed playbook it cannot sign in as) or no
 plan from Claude; 2 a usage error (no request, an unknown `CPB_ASK_LOGIN`).
 

@@ -106,3 +106,10 @@ contains = "ask-addressed-ok"
 # named by its key and never echoed.
 command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; rm -f "$HOME/ask-argv"; out=$(cpb ask "create env set x with ANTHROPIC_AUTH_TOKEN=FAKE0arena0token0value" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "ANTHROPIC_AUTH_TOKEN=..." && ! echo "$out" | grep -qF FAKE0arena && test ! -e "$HOME/ask-argv" && echo ask-credential-refused-ok'''
 contains = "ask-credential-refused-ok"
+
+[[verify.commands]]
+# The ask store: an answered ask is recorded, the next ask hands claude the
+# index and that record, the tool reads a record by id, and --no-history
+# neither reads the history nor adds to it.
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; H="$HOME/.claude-playbooks/.ask/history.md"; rm -rf "$HOME/.claude-playbooks/.ask"; cpb ask "list the env profiles" >/dev/null && test -f "$H" && cpb ask "again please" >/dev/null && grep -qF "History of your earlier answers" "$HOME/ask-stdin" && grep -qF "**Asked:** list the env profiles" "$HOME/ask-stdin" && id=$(grep -o 'r-[0-9]\{8\}-[0-9]\{6\}-[0-9a-f]\{4\}' "$H" | head -n 1) && out=$(printf '%s\n' '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"query\",\"arguments\":{\"statement\":\"HISTORY RECORD $id\"}}}" | cpb ask-tool) && echo "$out" | grep -qF "list the env profiles" && B=$(cksum < "$H") && cpb ask --no-history "list once more" >/dev/null && ! grep -qF "History of" "$HOME/ask-stdin" && [ "$(cksum < "$H")" = "$B" ] && echo ask-history-ok'''
+contains = "ask-history-ok"
