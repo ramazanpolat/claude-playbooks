@@ -267,7 +267,9 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 		// On macOS a launch on an account that uses no login shadows the
 		// playbook's own login instead of setting it aside (ShadowsLogin):
 		// nothing moves, and no run holds it.
-		shadow := noLoginAccount != "" && ShadowsLogin() && ownLoginWhere(configDir) != ""
+		// A token run does the same (since v4.3.2): the token outranks the
+		// login, which stays where it is.
+		shadow := keepOut && ShadowsLogin() && ownLoginWhere(configDir) != ""
 		refusal := func() error {
 			if noLoginAccount != "" {
 				return accountOwnLoginRefusal(configDir, "<playbook>", noLoginAccount)
@@ -336,7 +338,7 @@ func PrepareLaunchEnvFor(configDir string, layers []*manifest.Env, noLoginAccoun
 			}
 		}
 		env = applyManifestEnv(env, menv)
-		if shadow {
+		if shadow && noLoginAccount != "" {
 			// After the account's layer, which blocks the variable.
 			env = append(removeEnv(env, OAuthTokenEnv), OAuthTokenEnv+"="+NoLoginPlaceholder)
 		}

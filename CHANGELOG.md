@@ -11,6 +11,34 @@
   a version is unknown and the step will not run; the refusal off a terminal
   says the same.
 
+## [v4.3.2] -- 2026-11-02
+
+v4.3.2 lets a playbook you are logged into on macOS run on a Claude token
+account, so a session can be resumed on another Claude subscription. With
+Claude Code 2.1.225 or newer the playbook's own Keychain login stays in
+place and the account's token outranks it; an older claude is refused as
+before. Nothing else changes.
+
+### Fixed
+
+- **On macOS a playbook you are logged into runs on a Claude token account.**
+  `cpb run --account <claude-token-account> <playbook>` was refused when the
+  playbook held its own login in the Keychain, which cpb cannot set aside.
+  With Claude Code 2.1.225 or newer the login now stays in place: the
+  account's token outranks any stored login, and that claude keeps the token
+  on a 401 instead of adopting the login. So a session can be resumed on
+  another Claude subscription. An older claude, or one whose version cannot
+  be told, is refused as before, naming the version to update to.
+
+## [v4.3.1] -- 2026-11-01
+
+v4.3.1 fixes launches on accounts that use no Claude login. On macOS a
+playbook you are logged into now runs on such an account, its login
+shadowed for the run instead of refused. An account with `auth = 'none'`
+runs at all: the launch gives Claude Code the fixed, non-secret credential
+it needs to start. `cpb ask` proposes only launches cpb accepts. Nothing
+else changes.
+
 ### Fixed
 
 - **On macOS a playbook you are logged into runs on an account that uses no
@@ -35,8 +63,8 @@
 - **`cpb ask` proposes launches cpb accepts.** It now knows your accounts
   (by name and class: provider, where they route, whether they use a Claude
   login) and each playbook's login and account, and plans every `run` or
-  `start` it proposes as the launch would: one cpb would refuse is shown as
-  rejected with cpb's reason. It suggests `--account` to switch where
+  `start` it proposes as the launch would, the arguments it passes to claude
+  included: one cpb would refuse is shown as rejected with cpb's reason. It suggests `--account` to switch where
   requests go for one launch and `--model` or `/model` to pick a model,
   never a routing env set.
 

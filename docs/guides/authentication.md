@@ -88,8 +88,11 @@ account's requests go.
   A `/login` during the token run wins: the earlier login is kept as
   `.credentials.json.cpb-aside-<stamp>`, never overwritten.
 - **On macOS** the login lives in the Keychain, which cpb cannot move
-  without reading it. The launch is refused before anything changes, naming
-  where the login is and the fixes:
+  without reading it, so it stays in place. With Claude Code 2.1.225 or
+  newer that is safe (since v4.3.2): the token outranks any stored login,
+  and Claude Code keeps it on a 401 instead of swapping the login in. With
+  an older claude the launch is refused before anything changes, naming
+  where the login is, the version, and the fixes: `claude update`, or
 
 ```
 cpb run --account <account> <name>   # on an account it lists that uses its login (or machine)

@@ -1049,3 +1049,65 @@ func TestNoLoginAccountShadowsTheLoginOnMacOS(t *testing.T) {
 		t.Fatalf("linux: %s = %q, want none (the login is set aside there)", OAuthTokenEnv, v)
 	}
 }
+
+// On macOS a token launch over a login of the playbook's own leaves the login
+// in place with a claude that keeps the token on a 401 (since v4.3.2): the
+// token reaches the run, nothing is set aside, no placeholder. An older or
+// unknown claude is refused, naming the version.
+func TestTokenOverOwnLoginOnMacOS(t *testing.T) {
+	hostOS = "darwin"
+	savedVersion := ClaudeVersion
+	t.Cleanup(func() { hostOS = "linux"; ClaudeVersion = savedVersion })
+	root, configDir := isolatedWithToken(t)
+	own, _ := configKeychainService(configDir)
+	stubKeychainItems(t, map[string]KeychainState{own: KeychainPresent})
+
+	for _, v := range []string{"2.1.224", ""} {
+		ClaudeVersion = func() string { return v }
+		_, err := PrepareLaunchEnv(configDir)
+		EndLaunch(configDir)
+		if !errors.Is(err, ErrOwnLogin) || !strings.Contains(err.Error(), MinShadowClaude) || !strings.Contains(err.Error(), "in the Keychain") {
+			t.Fatalf("claude %q: err = %v, want a refusal naming %s", v, err, MinShadowClaude)
+		}
+	}
+
+	ClaudeVersion = func() string { return "2.1.302" }
+	if err := OwnLoginRefusal(configDir, mustBlock(t, configDir), "pb"); err != nil {
+		t.Fatalf("refused with a claude that keeps the token: %v", err)
+	}
+	env, err := PrepareLaunchEnv(configDir)
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if v, _ := envValue(t, env, OAuthTokenEnv); v != "sk-ant-oat01-OWN" {
+		t.Fatalf("%s = %q, want the playbook's token", OAuthTokenEnv, v)
+	}
+	if loginAside(configDir) || exists(asidePath(configDir)) {
+		t.Fatal("a token run set the login aside on macOS")
+	}
+	EndLaunch(configDir)
+
+	// The same on a claude_token account: its layer carries the reference,
+	// which the secret helper sets at exec, and the login stays where it is.
+	useTokenAccount(t, root, configDir)
+	layers := []*manifest.Env{{Refs: map[string]string{OAuthTokenEnv: "keychain:own-token"}}}
+	eff, err := EffectiveBlock(configDir, layers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ClaudeVersion = func() string { return "" }
+	if err := OwnLoginRefusal(configDir, eff, "pb"); !errors.Is(err, ErrOwnLogin) {
+		t.Fatalf("a claude_token account, claude of an unknown version: %v, want refused", err)
+	}
+	ClaudeVersion = func() string { return "2.1.302" }
+	if err := OwnLoginRefusal(configDir, eff, "pb"); err != nil {
+		t.Fatalf("a claude_token account refused: %v", err)
+	}
+	if _, err := PrepareLaunchEnvWith(configDir, layers); err != nil {
+		t.Fatalf("a claude_token account's launch: %v", err)
+	}
+	EndLaunch(configDir)
+	if loginAside(configDir) || exists(asidePath(configDir)) {
+		t.Fatal("a claude_token run set the login aside on macOS")
+	}
+}
