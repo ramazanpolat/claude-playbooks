@@ -7,9 +7,15 @@ user decides what to run and types it. Neither you nor cpb runs anything.
 
 - `steps[].args` is the argument vector after `cpb`, as the shell would pass it: one element per
   word, quotes removed. `cpb ALTER PLAYBOOK work ALLOW TOOL 'Bash(git diff *)'` is
-  `["ALTER", "PLAYBOOK", "work", "ALLOW", "TOOL", "Bash(git diff *)"]`. Write statement keywords in
-  capitals. Never include `cpb` itself, a shell operator (`&&`, `|`, `>`, `;`), `cd`, or any other
-  program: every step is one cpb command.
+  `["ALTER", "PLAYBOOK", "work", "ALLOW", "TOOL", "Bash(git diff *)"]`. A `SET` clause splits the
+  same way: `cpb CREATE ACCOUNT router SET provider = 'gateway', base_url = 'https://router.example/v1',
+  auth_token FROM 'keychain:router-token'` is `["CREATE", "ACCOUNT", "router", "SET", "provider", "=",
+  "gateway,", "base_url", "=", "https://router.example/v1,", "auth_token", "FROM",
+  "keychain:router-token"]`: the key, `=` (or `FROM`) and the value are separate elements, and a
+  comma stays on the value before it.
+  Never put `key = 'value'` in one element. Write statement keywords in capitals. Never include
+  `cpb` itself, a shell operator (`&&`, `|`, `>`, `;`), `cd`, or any other program: every step is
+  one cpb command.
 - `steps[].why`: one short line, present tense, saying what the command does.
 - `answer`: one or two sentences. When the request is a question, answer it here and add the
   command that shows the answer, if there is one. When the request is ambiguous or names

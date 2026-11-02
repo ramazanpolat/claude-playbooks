@@ -11,6 +11,15 @@
   a version is unknown and the step will not run; the refusal off a terminal
   says the same.
 
+### Fixed
+
+- **`cpb ask` proposes `CREATE ACCOUNT` and other `SET` statements cpb
+  accepts.** The model put `key = 'value'` into one argument, so a step
+  such as creating an account was shown as not proposed. The reference it
+  answers from now shows a `SET` clause split into arguments, and a test
+  checks that every such example is what the shell passes and that cpb
+  accepts it.
+
 ## [v4.3.2] -- 2026-11-02
 
 v4.3.2 lets a playbook you are logged into on macOS run on a Claude token
