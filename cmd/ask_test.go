@@ -437,6 +437,29 @@ func TestAskReferenceMatchesSpec(t *testing.T) {
 	}
 }
 
+// The reference's own "`cpb ...` is `[...]`" examples are what the shell
+// would pass, and cpb accepts them.
+func TestAskReferenceArgsExamples(t *testing.T) {
+	pair := regexp.MustCompile("`(cpb [^`]+)`\\s+is\\s+`(\\[[^`]+\\])`")
+	found := pair.FindAllStringSubmatch(strings.Join(strings.Fields(askReference), " "), -1)
+	if len(found) < 2 {
+		t.Fatalf("only %d args examples in the reference", len(found))
+	}
+	for _, m := range found {
+		var args []string
+		if err := json.Unmarshal([]byte(m[2]), &args); err != nil {
+			t.Fatalf("%s: %v", m[2], err)
+		}
+		if words := shellWords(t, m[1]); strings.Join(words[1:], "\x00") != strings.Join(args, "\x00") {
+			t.Errorf("%s: the shell passes %q, the reference says %q", m[1], words[1:], args)
+		}
+		s := askStep{Args: args}
+		if err := checkAskStatement(&s, args); err != nil {
+			t.Errorf("%s: %v", m[1], err)
+		}
+	}
+}
+
 // shellWords splits a line as sh would, for the reference's examples: words,
 // single and double quotes.
 func shellWords(t *testing.T, line string) []string {
