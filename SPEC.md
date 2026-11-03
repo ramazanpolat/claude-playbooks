@@ -2191,7 +2191,7 @@ claude starts, cpb checks:
   (with `cd '<folder>' &&` in front from another folder; none is offered
   for a session in another pid domain, whose folder is that machine's); or
   pick another session, `<launcher> --resume`.
-- **The playbook.** When the playbook holds no transcript of `<id>` and
+- **The playbook** (since v4.4.0). When the playbook holds no transcript of `<id>` and
   another config dir cpb knows does, the launch is refused, naming the
   one that holds it and the command that resumes it there, with the `cd`
   in front when the session ran in another folder: `session <id> is not
@@ -3271,7 +3271,7 @@ without preparing a launch (nothing in the playbook changes):
 | has no login of its own, runs on an account that signs in with a key or a token of another kind (`playbook-token`, `api_key`, `auth_token`, a helper), or cannot be launched | refused, nothing sent |
 | routes away from Anthropic | refused, nothing sent: `<name> sends its requests away from Anthropic (route away), and cpb ask asks Anthropic only` |
 
-**Signing in on an account.** `cpb ask --account <account> "<request>"`
+**Signing in on an account** (since v4.4.0). `cpb ask --account <account> "<request>"`
 signs the question in on one of your accounts instead, as a launch on it
 would. With a playbook named (`cpb ask <playbook> --account <account> …`)
 it signs in as `cpb run --account <account> <playbook>` would: the account
