@@ -9,10 +9,9 @@ limit. `cpb ask --account <account>` asks on a Claude token or Claude login
 account, and a failed question names your other accounts. A `--resume` of
 another playbook's session names the playbook that holds it, a live
 session's refusal says where it runs and offers a copy under a new id, and
-the commands cpb suggests keep your `--account` where it can run. `cpb
-update` names the
-migrate step it asks about, and `cpb ask` proposes `SET` statements cpb
-accepts.
+the commands cpb suggests keep your `--account` where it can run.
+`cpb update` names the migrate step it asks about, and `cpb ask` proposes
+`SET` statements cpb accepts.
 
 ### Added
 
