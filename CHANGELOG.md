@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [v4.4.0] -- 2026-11-04
+
+v4.4.0 makes a second account easy to use when the first has hit its
+limit. `cpb ask --account <account>` asks on a Claude token or Claude login
+account, and a failed question names your other accounts. A `--resume` of
+another playbook's session names the playbook that holds it, a live
+session's refusal says where it runs and offers a copy under a new id, and
+every command cpb suggests keeps your `--account`. `cpb update` names the
+migrate step it asks about, and `cpb ask` proposes `SET` statements cpb
+accepts.
+
 ### Added
 
 - **`cpb ask --account <account>`.** A question can sign in on one of your
