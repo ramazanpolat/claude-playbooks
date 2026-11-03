@@ -27,8 +27,9 @@ It shows them; it never runs them.
 
 Naming a playbook (or its launcher) first addresses the question to it: it
 signs in the way a launch of that playbook would, and "you" means it. A
-playbook on an account that is not Anthropic's, or on one that signs in with
-a key or a token of its own, is refused.
+playbook on an Anthropic account that signs in with a Claude token asks with
+that token. A playbook on an account that is not Anthropic's, or on one that
+signs in with a key or a token of another kind, is refused.
 
 It asks Claude through this machine's Claude Code login (claude -p), always on
 Anthropic's API: no env set, DEFAULTS or account of yours applies to the question
@@ -96,16 +97,17 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	}
 	signIn := askSignIn{mode: login}
 	switch {
-	case acctName != "":
+	case cmd.Flags().Changed("account"):
 		// --account decides how the question signs in, with or without a
-		// playbook named.
+		// playbook named. Given empty (an unset variable) it is refused:
+		// a login the person did not name never stands in for one they did.
 		if signIn, err = askAccountSignIn(root, target, acctName); err != nil {
 			return err
 		}
 	case target != nil:
 		// The playbook decides how its question signs in; CPB_ASK_LOGIN is
 		// for questions addressed to no playbook.
-		if signIn, err = askTargetSignIn(root, target); err != nil {
+		if signIn, err = askTargetSignIn(root, target, ""); err != nil {
 			return err
 		}
 	}

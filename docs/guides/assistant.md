@@ -139,8 +139,13 @@ keychain:work-claude-token`) or a Claude login. Its token goes to that one
 `claude` call, in its environment, with a new, empty config directory, as
 `CPB_ASK_LOGIN=token` does. A token stored by reference is resolved by your
 secret helper, which starts `claude` with it, so cpb never sees the value.
-With a playbook named, `cpb ask work --account work-claude "…"`, the account
-must be one that playbook may run on. An account on another provider, or
+The helper runs with the same short environment as that `claude` call, so
+an `env:` reference, or a backend that needs a variable of its own, does not
+resolve here, though it does at launch.
+With a playbook named, `cpb ask work --account work-claude "…"`, the question
+signs in as `cpb run --account work-claude work` would: the account must be
+one that playbook may run on, and a Claude login account uses the
+playbook's own login, or the machine's for a playbook that shares it. An account on another provider, or
 with request headers of its own, is refused before anything is sent.
 
 ## Signing in with cpb's token

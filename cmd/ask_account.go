@@ -22,57 +22,38 @@ import (
 const askLoginAccount = "account"
 
 // askAccountSignIn decides how a question signs in on the account name,
-// addressed to pb (nil for none). With a playbook, the account must be one
-// that playbook may run on, as for `cpb run --account`.
+// addressed to pb (nil for none). With a playbook, it signs in as `cpb run
+// --account <name> <pb>` would: the account must be one pb may run on, and
+// the login is decided on it (askTargetSignIn).
 func askAccountSignIn(root string, pb *playbook.Playbook, name string) (askSignIn, error) {
 	if err := manifest.ValidateAccountName(name); err != nil {
 		return askSignIn{}, askUsage("--account: " + err.Error())
 	}
-	dir := account.Dir(root)
+	if pb != nil {
+		return askTargetSignIn(root, pb, name)
+	}
 	if name == account.Machine {
 		// The implicit account: the way a question signs in without one.
-		if pb == nil {
-			mode, err := askLogin()
-			if err != nil {
-				return askSignIn{}, askUsage(err.Error())
-			}
-			return askSignIn{mode: mode}, nil
-		}
-		if a := askPlaybookAccount(pb.Path, pb.Name); a != nil {
-			return askSignIn{}, fmt.Errorf("%s runs on account %s, not on %s: nothing was sent. Ask without naming it: cpb ask --account %s \"<request>\"", pb.Name, a.Name, account.Machine, account.Machine)
-		}
-		return askTargetSignIn(root, pb)
-	}
-	var a *account.Account
-	if pb != nil {
-		var list []string
-		if m, _ := manifest.Nearest(pb.Path); m != nil && m.Env != nil {
-			list = m.Env.Accounts
-		}
-		sel, err := account.Select(dir, pb.Name, list, name)
+		mode, err := askLogin()
 		if err != nil {
-			return askSignIn{}, fmt.Errorf("%w: nothing was sent", err)
+			return askSignIn{}, askUsage(err.Error())
 		}
-		a = sel.Account
-	} else {
-		var err error
-		if a, err = account.Must(dir, name); err != nil {
-			return askSignIn{}, fmt.Errorf("%w: nothing was sent", err)
-		}
-		if a.Listed() {
-			return askSignIn{}, fmt.Errorf("account %s is access = 'listed': it runs only for a playbook that lists it, so a question on it names one: cpb ask <playbook> --account %s \"<request>\". Nothing was sent", name, name)
-		}
+		return askSignIn{mode: mode}, nil
+	}
+	a, err := account.Must(account.Dir(root), name)
+	if err != nil {
+		return askSignIn{}, fmt.Errorf("%w: nothing was sent", err)
+	}
+	if a.Listed() {
+		return askSignIn{}, fmt.Errorf("account %s is access = 'listed': it runs only for a playbook that lists it, so a question on it names one: cpb ask <playbook> --account %s \"<request>\". Nothing was sent", name, name)
 	}
 	if a.Auth.Kind == account.ClaudeLogin {
-		// The playbook's own Claude login: the playbook's, or, for a
-		// question addressed to none, Claude Code's own on this machine.
+		// A Claude login, and no playbook to hold one: Claude Code's own
+		// login on this machine, and no other credential beside it.
 		if err := askAccountUsable(a); err != nil {
 			return askSignIn{}, err
 		}
-		if pb == nil {
-			return askSignIn{mode: askLoginClaude}, nil
-		}
-		return askLoginSignIn(pb)
+		return askSignIn{mode: askLoginClaude, loginOnly: true}, nil
 	}
 	return askTokenAccountSignIn(a)
 }

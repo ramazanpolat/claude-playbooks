@@ -54,18 +54,23 @@ other stays open, open a copy under a new id: the refusal names the command,
 `--fork-session` starts a new id, so it is never refused.
 
 **Another playbook's session is refused.** Each playbook keeps its own
-sessions. If you give a launcher an id another playbook holds, cpb names
+sessions. If you give one playbook an id another playbook holds, cpb names
 that playbook and the command that resumes it there, instead of letting
-Claude Code say it found no conversation:
+Claude Code say it found no conversation. From `/Users/me/DEV/app`, with
+`work`'s session given to `review`:
 
 ```
-$ cpb run --account work-claude other --resume bfb2d226-403f-46da-8216-e39b2a71dae9
-Error: session bfb2d226-… is not playbook other's: it is playbook kd's, … Resume it there: cpb run --account work-claude kd --resume bfb2d226-…
+$ cpb run --account work-claude review --resume bfb2d226-403f-46da-8216-e39b2a71dae9
+Error: session bfb2d226-403f-46da-8216-e39b2a71dae9 is not playbook review's: it is playbook work's, and Claude Code resumes a session only in the config dir that holds it. Resume it there: kd --account work-claude --resume bfb2d226-403f-46da-8216-e39b2a71dae9
 ```
+
+From another folder, the command starts with the `cd` into the session's
+folder. When `work` cannot run on the account you named (it lists others),
+the command goes without `--account`, and the error says why.
 
 **On another account.** `--account` goes before the session flags:
-`kd --account work-claude --resume <id>`, or `cpb run --account work-claude kd
---resume <id>`. Every command cpb names for the launch, the exit line
+`kd --account work-claude --resume <id>`, or `cpb run --account work-claude
+work --resume <id>`. Every command cpb names for the launch, the exit line
 included, keeps the account you gave it. That is how to carry on a session
 whose Claude subscription has hit its limit: see [Accounts](accounts.md).
 

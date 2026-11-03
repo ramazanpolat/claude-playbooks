@@ -154,3 +154,93 @@ func TestAskFailureNamesOtherAccounts(t *testing.T) {
 		t.Fatalf("on account gm: %v", err)
 	}
 }
+
+// --account <a claude_login account>: the login is decided on that
+// account, as `cpb run --account` decides it, never on the playbook's own
+// choice: no machine token, and no exported key or token beside the login.
+func TestAskAccountClaudeLogin(t *testing.T) {
+	root := askFixture(t)
+	putAccount(t, account.Account{Name: "lg", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeLogin}})
+	putAccount(t, account.Account{Name: "gm", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Value: "CANARY-gm"}})
+	mustStmt(t, "CREATE PLAYBOOK open SET launcher = ''")
+	mustStmt(t, "CREATE PLAYBOOK two SET launcher = '', login = 'isolated' USE ACCOUNT gm, lg")
+	two := filepath.Join(root, "two")
+	writeFile(t, filepath.Join(two, ".credentials.json"), `{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":9999999999999}}`)
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	writeFile(t, tokenFile, "CANARY-machine-token\n")
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", tokenFile)
+	t.Setenv("ANTHROPIC_API_KEY", "CANARY-key")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "CANARY-exported")
+	rec := fakeAskClaude(t, askListPlan)
+
+	// open shares the machine's login; on lg the machine token is blocked.
+	if _, err := askRun(t, map[string]string{"account": "lg"}, "open", "list"); err != nil {
+		t.Fatal(err)
+	}
+	if env := readRec(t, rec, "env"); strings.Contains(env, "CANARY") || strings.Contains(env, "CLAUDE_CONFIG_DIR=") {
+		t.Errorf("open on lg: another credential or a config dir went along:\n%s", env)
+	}
+	// two lists gm first; on lg it signs in with its own login.
+	if _, err := askRun(t, map[string]string{"account": "lg"}, "two", "list"); err != nil {
+		t.Fatal(err)
+	}
+	env := childEnv(t, rec)
+	if env["CLAUDE_CONFIG_DIR"] != two || strings.Contains(readRec(t, rec, "env"), "CANARY") {
+		t.Errorf("two on lg: config dir %q\n%s", env["CLAUDE_CONFIG_DIR"], readRec(t, rec, "env"))
+	}
+	// No playbook: Claude Code's own login, alone.
+	if _, err := askRun(t, map[string]string{"account": "lg"}, "list"); err != nil {
+		t.Fatal(err)
+	}
+	if env := readRec(t, rec, "env"); strings.Contains(env, "CANARY") || strings.Contains(env, "CLAUDE_CONFIG_DIR=") {
+		t.Errorf("lg, no playbook:\n%s", env)
+	}
+}
+
+// --account machine is what `cpb run --account machine` is: allowed for a
+// playbook that lists no account, whatever DEFAULTS names, and signing in
+// as the machine account; refused for one that lists others.
+func TestAskAccountMachine(t *testing.T) {
+	askFixture(t)
+	putAccount(t, account.Account{Name: "gm", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Value: "CANARY-gm"}})
+	mustStmt(t, "ALTER DEFAULTS USE ACCOUNT gm")
+	mustStmt(t, "CREATE PLAYBOOK open SET launcher = ''")
+	mustStmt(t, "CREATE PLAYBOOK listed SET launcher = '' USE ACCOUNT gm")
+	t.Setenv("CPB_OAUTH_TOKEN_FILE", filepath.Join(t.TempDir(), "none"))
+	rec := fakeAskClaude(t, askListPlan)
+	// Without the flag, open runs on DEFAULTS' gm.
+	if _, err := askRun(t, nil, "open", "list"); err != nil {
+		t.Fatal(err)
+	}
+	if childEnv(t, rec)["CLAUDE_CODE_OAUTH_TOKEN"] != "CANARY-gm" {
+		t.Error("open without --account: not on DEFAULTS' account")
+	}
+	if _, err := askRun(t, map[string]string{"account": "machine"}, "open", "list"); err != nil {
+		t.Fatalf("open on machine: %v", err)
+	}
+	if env := readRec(t, rec, "env"); strings.Contains(env, "CANARY") || strings.Contains(env, "CLAUDE_CONFIG_DIR=") {
+		t.Errorf("open on machine: DEFAULTS' account went along:\n%s", env)
+	}
+	if _, err := askRun(t, map[string]string{"account": "machine"}, "listed", "list"); err == nil || !strings.Contains(err.Error(), "runs only on the accounts it lists") {
+		t.Errorf("listed on machine: %v", err)
+	}
+}
+
+// --account given empty (an unset variable) is a usage error, never the
+// default login.
+func TestAskAccountEmpty(t *testing.T) {
+	askFixture(t)
+	rec := fakeAskClaude(t, askListPlan)
+	var err error
+	captureStderr(t, func() { _, err = askRun(t, map[string]string{"account": ""}, "list") })
+	if exitOf(err) != 2 {
+		t.Fatalf("--account '': %v, want exit 2", err)
+	}
+	if _, err := os.Stat(filepath.Join(rec, "argv")); err == nil {
+		t.Fatal("claude ran on --account ''")
+	}
+	// The flag left unset afterwards: the default login again.
+	if _, err := askRun(t, nil, "list"); err != nil {
+		t.Fatalf("after: %v", err)
+	}
+}

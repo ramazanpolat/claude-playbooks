@@ -10,8 +10,9 @@
   login. The token goes into that one `claude` call's environment, with a
   fresh config directory; a reference is resolved by the secret helper, as
   at launch. Another provider, request headers, or another kind of
-  credential is refused before anything is sent. With a playbook named, the
-  account must be one that playbook may run on.
+  credential is refused before anything is sent. With a playbook named, it
+  signs in as `cpb run --account` on that playbook would. An empty
+  `--account` is a usage error.
 - **A failed `cpb ask` names your other accounts.** A hit limit or another
   error from Claude Code now ends with `or ask on another account: cpb ask
   --account <account> "<request>"` and the Claude token accounts open to
@@ -28,7 +29,9 @@
   `cd` in front from another folder) beside the picker.
 - **The commands cpb names for a launch keep its `--account`.** The resume
   refusals and the exit line say `<launcher> --account <account> --resume
-  <id>`, or `cpb run --account <account> <playbook> --resume <id>`.
+  <id>`, or `cpb run --account <account> <playbook> --resume <id>`. A command
+  for another playbook keeps it only when that playbook may run on the
+  account, and says so when it cannot.
 
 - **`cpb update` names the migrate step it asks about.** The question before
   an update whose source declares a migrate step read "Update <name> and run

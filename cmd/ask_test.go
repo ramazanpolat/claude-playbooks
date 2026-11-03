@@ -60,6 +60,9 @@ func readRec(t *testing.T, rec, name string) string {
 // askRun runs cpb ask with flags, as the command line would.
 func askRun(t *testing.T, flags map[string]string, request ...string) (string, error) {
 	t.Helper()
+	// --account counts only when given (Changed): each run starts without.
+	askCmd.Flags().Set("account", "")
+	askCmd.Flags().Lookup("account").Changed = false
 	for k, v := range flags {
 		if err := askCmd.Flags().Set(k, v); err != nil {
 			t.Fatal(err)
@@ -70,7 +73,9 @@ func askRun(t *testing.T, flags map[string]string, request ...string) (string, e
 			askCmd.Flags().Set(k, "false")
 		}
 		askCmd.Flags().Set("model", "")
+		// Set marks a flag changed; --account counts only when given.
 		askCmd.Flags().Set("account", "")
+		askCmd.Flags().Lookup("account").Changed = false
 	})
 	var err error
 	out := captureStdout(t, func() { err = runAsk(askCmd, request) })

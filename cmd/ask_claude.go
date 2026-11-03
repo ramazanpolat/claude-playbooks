@@ -228,6 +228,9 @@ type askSignIn struct {
 	configDir string
 	// account is askLoginAccount's account (ask_account.go).
 	account *account.Account
+	// loginOnly: askLoginClaude keeps no Anthropic key or token from the
+	// environment, as a launch on a claude_login account blocks them.
+	loginOnly bool
 }
 
 // askLogin reads CPB_ASK_LOGIN; anything else is a usage error.
@@ -279,6 +282,15 @@ func askLoginEnvFor(signIn askSignIn, env []string, configDir string) ([]string,
 		return append(out, "CLAUDE_CONFIG_DIR="+configDir), nil
 	}
 	if mode != askLoginToken {
+		if signIn.loginOnly {
+			out := make([]string, 0, len(env))
+			for _, kv := range env {
+				if k, _, _ := strings.Cut(kv, "="); !askEnvLogin[k] {
+					out = append(out, kv)
+				}
+			}
+			return out, nil
+		}
 		return env, nil
 	}
 	f := auth.OAuthTokenFile()

@@ -2188,8 +2188,9 @@ claude starts, cpb checks:
   playbook, the pid, the folder the session runs in and its name, so the
   terminal running it can be found, and the ways on: close that one; open
   a copy of it under a new id, `<launcher> --resume <id> --fork-session`
-  (with `cd '<folder>' &&` in front from another folder); or pick another
-  session, `<launcher> --resume`.
+  (with `cd '<folder>' &&` in front from another folder; none is offered
+  for a session in another pid domain, whose folder is that machine's); or
+  pick another session, `<launcher> --resume`.
 - **The playbook.** When the playbook holds no transcript of `<id>` and
   another config dir cpb knows does, the launch is refused, naming the
   one that holds it and the command that resumes it there, with the `cd`
@@ -2198,7 +2199,12 @@ claude starts, cpb checks:
   Claude Code would only say it found no conversation.
 - **The account.** Every command these refusals and the exit line name
   keeps the launch's `--account`: `cpb run --account <account> <playbook>
-  --resume <id>`, or `<launcher> --account <account> --resume <id>`.
+  --resume <id>`, or `<launcher> --account <account> --resume <id>`. A
+  command for another playbook than the launch's keeps it only when that
+  playbook may run on the account (its `USE ACCOUNT` list, the account's
+  `access`); otherwise the command goes without it, followed by `(without
+  --account <account>, which playbook <name> cannot run on: <reason>)`. A
+  plain directory's command never has one.
 - **The folder.** Claude Code looks a session up by the folder it ran in.
   When `<id>`'s transcript sits under another folder's project directory,
   the launch is refused with the command that resumes it, `cd '<folder>' &&
@@ -3267,10 +3273,13 @@ without preparing a launch (nothing in the playbook changes):
 
 **Signing in on an account.** `cpb ask --account <account> "<request>"`
 signs the question in on one of your accounts instead, as a launch on it
-would; with a playbook named (`cpb ask <playbook> --account <account> …`)
-the account must be one that playbook may run on, as for `cpb run
---account`. It is how to keep asking when your Claude login has hit its
-limit. The account:
+would. With a playbook named (`cpb ask <playbook> --account <account> …`)
+it signs in as `cpb run --account <account> <playbook>` would: the account
+must be one that playbook may run on, and the table above is read for a
+launch on that account, not on the one the playbook picks by itself. It is
+how to keep asking when your Claude login has hit its limit. An empty
+`--account` (an unset variable) is a usage error, exit 2, never the default
+login. The account:
 
 - must be an Anthropic one (`provider = 'anthropic'`) with no request
   headers of its own: another provider is refused (`account <a> sends its
@@ -3286,12 +3295,17 @@ limit. The account:
   token set, as at launch, and runs with the child's allowlisted
   environment; cpb never reads the value, and with no helper configured
   the call is refused before anything is sent. A Claude login is the
-  playbook's, or, for a question addressed to none, Claude Code's own on
-  this machine. Any other kind (`api_key`, `auth_token`, a helper, `cloud`,
+  playbook's own when it is isolated, else Claude Code's own on this
+  machine (also for a question addressed to no playbook), and an Anthropic
+  key or token in the environment is dropped, as a launch on the account
+  blocks it. Any other kind (`api_key`, `auth_token`, a helper, `cloud`,
   `none`) is refused, nothing sent;
 - is `access = 'listed'` only with a playbook that lists it named.
 
-`--account machine` is the way a question signs in without one.
+`--account machine` is the implicit account, as for `cpb run --account
+machine`: with no playbook named, the way a question signs in without
+`--account`; with one, a launch of it on `machine` (allowed only when it
+lists no account, or lists `machine`), whatever `DEFAULTS` names.
 
 Only the playbook's login is used: its `CLAUDE.md`, settings, hooks, plugins
 and MCP servers stay out (`--setting-sources project`, as below), and its

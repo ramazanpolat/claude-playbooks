@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
+	"github.com/ramazanpolat/claude-playbooks/internal/config"
 	"github.com/ramazanpolat/claude-playbooks/internal/grammar"
+	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
 // The resume guard (SPEC.md, "Sessions"): cpb run and
@@ -127,14 +130,35 @@ func elsewhereRefusal(id string, d sessionDir, dirs []sessionDir, cwd string) er
 	for _, o := range holders {
 		names = append(names, o.describe())
 	}
-	h := holders[0]
-	h.account = d.account
+	h, left := carryAccount(holders[0], d.account)
 	cmd := h.resumeCommand(id)
 	if there != "" && !sameDir(there, cwd) {
 		cmd = h.resumeIn(id, there)
 	}
-	return fmt.Errorf("session %s is not %s's: it is %s's, and Claude Code resumes a session only in the config dir that holds it. Resume it there: %s",
-		id, d.describe(), strings.Join(names, "'s and "), cmd)
+	return fmt.Errorf("session %s is not %s's: it is %s's, and Claude Code resumes a session only in the config dir that holds it. Resume it there: %s%s",
+		id, d.describe(), strings.Join(names, "'s and "), cmd, left)
+}
+
+// carryAccount gives h, another config dir than the launch's, the launch's
+// --account name when a launch of h may run on it (account.Select, as
+// planAccount asks), so the command cpb names would run. Otherwise h goes
+// without it, and the note says why ("" when nothing is left out).
+func carryAccount(h sessionDir, name string) (sessionDir, string) {
+	if name == "" {
+		return h, ""
+	}
+	if h.pb == nil {
+		return h, fmt.Sprintf(" (without --account %s: %s is a plain config dir, launched without cpb)", name, h.label)
+	}
+	var list []string
+	if m, _ := manifest.Nearest(h.pb.Path); m != nil && m.Env != nil {
+		list = m.Env.Accounts
+	}
+	if _, err := account.Select(account.Dir(config.ResolvePlaybooksDir()), h.pb.Name, list, name); err != nil {
+		return h, fmt.Sprintf(" (without --account %s, which playbook %s cannot run on: %v)", name, h.pb.Name, err)
+	}
+	h.account = name
+	return h, ""
 }
 
 // describe names d for a message: "playbook <name>", or the plain
@@ -272,19 +296,24 @@ func liveRefusal(id string, s *liveSession, d sessionDir, cwd string) error {
 	}
 	// The copy is made from the dir that holds the transcript: d, or, when
 	// d has none (the id was given to another playbook), the running one.
-	from := d
-	if transcriptPath(d.path, "", id) == "" {
-		from = s.dir
-		from.account = d.account
+	// A session in another pid domain (a sandbox, another host) records a
+	// folder of that machine: no copy is offered from here.
+	elsewhere := s.state == liveUnknown && s.f.PIDDomain != "" && s.f.PIDDomain != pidDomain
+	ways := "close that one first, or pick another with " + d.pickCommand()
+	if !elsewhere {
+		from, left := d, ""
+		if transcriptPath(d.path, "", id) == "" {
+			from, left = carryAccount(s.dir, d.account)
+		}
+		fork := from.resumeCommand(id) + " --fork-session"
+		if s.f.Cwd != "" && !sameDir(s.f.Cwd, cwd) {
+			fork = from.resumeIn(id, s.f.Cwd) + " --fork-session"
+		}
+		ways = "close that one first, open a copy of it under a new id with " + fork + left + ", or pick another with " + d.pickCommand()
 	}
-	fork := from.resumeCommand(id) + " --fork-session"
-	if s.f.Cwd != "" && !sameDir(s.f.Cwd, cwd) {
-		fork = from.resumeIn(id, s.f.Cwd) + " --fork-session"
-	}
-	ways := "close that one first, open a copy of it under a new id with " + fork + ", or pick another with " + d.pickCommand()
 	if s.state == liveUnknown {
 		why := fmt.Sprintf("pid %d in another pid domain, %q", s.f.PID, s.f.PIDDomain)
-		if s.f.PIDDomain == "" || s.f.PIDDomain == pidDomain {
+		if !elsewhere {
 			why = fmt.Sprintf("pid %d is alive, and its session file records no start time to confirm it is the same process", s.f.PID)
 		}
 		return fmt.Errorf("session %s may still be running (playbook %s, %s%s): cpb cannot tell, so it does not resume it. Two processes on one session id corrupt it; %s",

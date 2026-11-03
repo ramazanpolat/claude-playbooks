@@ -116,7 +116,14 @@ func (r Report) MarshalJSON() ([]byte, error) {
 // report beyond its expiry, and no process is spawned. now is injectable for
 // tests.
 func Inspect(name, configDir string, now time.Time) Report {
-	return inspect(name, configDir, now, false)
+	return inspect(name, configDir, "", now, false)
+}
+
+// InspectOn is Inspect for a launch that names the account flag
+// (--account): the mode is decided on that account, as the launch decides
+// it, not on the one the playbook would pick by itself.
+func InspectOn(name, configDir, flag string, now time.Time) Report {
+	return inspect(name, configDir, flag, now, false)
 }
 
 // InspectGlobal is Inspect for ~/.claude, which is not launched by
@@ -124,10 +131,10 @@ func Inspect(name, configDir string, now time.Time) Report {
 // cpb convention), so only an exported CLAUDE_CODE_OAUTH_TOKEN
 // counts as token mode.
 func InspectGlobal(configDir string, now time.Time) Report {
-	return inspect("~/.claude", configDir, now, true)
+	return inspect("~/.claude", configDir, "", now, true)
 }
 
-func inspect(name, configDir string, now time.Time, raw bool) Report {
+func inspect(name, configDir, flag string, now time.Time, raw bool) Report {
 	r := Report{Name: name, Dir: configDir}
 
 	if raw {
@@ -142,7 +149,7 @@ func inspect(name, configDir string, now time.Time, raw bool) Report {
 	} else {
 		r.IsolatedLogin = isAuthIsolated(configDir)
 		var acct *account.Account
-		r.Mode, r.ModeError, r.TokenBlocked, _, acct = launchMode(configDir)
+		r.Mode, r.ModeError, r.TokenBlocked, _, acct = launchModeOn(configDir, flag)
 		switch {
 		case r.Mode == ModePlaybookToken && r.IsolatedLogin:
 			// Honoured, unless the launch is refused over a login of the

@@ -19,6 +19,13 @@ import (
 // governing manifest's own [env] block (nil without one); acct is the
 // launch's account, nil for the machine account or an error.
 func launchMode(configDir string) (mode Mode, modeErr string, blocked bool, block *manifest.Env, acct *account.Account) {
+	return launchModeOn(configDir, "")
+}
+
+// launchModeOn is launchMode for a launch that names the account flag
+// (--account, "" for none): the account is selected as that launch selects
+// it (account.Select), and the mode decided on it.
+func launchModeOn(configDir, flag string) (mode Mode, modeErr string, blocked bool, block *manifest.Env, acct *account.Account) {
 	isolated := isAuthIsolated(configDir)
 	m, _ := manifest.Nearest(configDir)
 	if m != nil {
@@ -42,7 +49,7 @@ func launchMode(configDir string) (mode Mode, modeErr string, blocked bool, bloc
 	if block != nil {
 		list = block.Accounts
 	}
-	sel, err := account.Select(account.Dir(root), "", list, "")
+	sel, err := account.Select(account.Dir(root), "", list, flag)
 	if err != nil {
 		return ModeError, "its account: " + err.Error(), false, block, nil
 	}
