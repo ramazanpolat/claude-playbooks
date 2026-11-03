@@ -94,7 +94,9 @@ func TestFormatAge(t *testing.T) {
 	}{
 		{"zero", time.Time{}, "never"},
 		{"seconds", now.Add(-10 * time.Second), "just now"},
+		{"a minute", now.Add(-90 * time.Second), "1 minute ago"},
 		{"minutes", now.Add(-5 * time.Minute), "5 minutes ago"},
+		{"an hour", now.Add(-90 * time.Minute), "1 hour ago"},
 		{"hours", now.Add(-3 * time.Hour), "3 hours ago"},
 		{"yesterday", now.Add(-30 * time.Hour), "yesterday"},
 		{"days", now.Add(-5 * 24 * time.Hour), "5 days ago"},

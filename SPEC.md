@@ -2180,11 +2180,25 @@ claude under the playbook's config dir, with everything a launch has: env
 sets, variables, secret references, the login and the exit line. Before
 claude starts, cpb checks:
 - **`--resume <id>`** (`-r <id>`, `--resume=<id>`) is refused when `<id>`
-  is live in any config dir cpb knows, naming the playbook and the pid, and
-  nothing is launched. Two processes on one session id corrupt it, which is
-  the `claude --continue` hazard. A session cpb cannot confirm is refused
-  too: one recorded in another pid domain (a sandbox, another host), or a
-  live pid with no recorded start time. There is no `--force`.
+  is live in any config dir cpb knows, and nothing is launched. Two
+  processes on one session id corrupt it, which is the `claude --continue`
+  hazard. A session cpb cannot confirm is refused too: one recorded in
+  another pid domain (a sandbox, another host), or a live pid with no
+  recorded start time. There is no `--force`. The refusal names the
+  playbook, the pid, the folder the session runs in and its name, so the
+  terminal running it can be found, and the ways on: close that one; open
+  a copy of it under a new id, `<launcher> --resume <id> --fork-session`
+  (with `cd '<folder>' &&` in front from another folder); or pick another
+  session, `<launcher> --resume`.
+- **The playbook.** When the playbook holds no transcript of `<id>` and
+  another config dir cpb knows does, the launch is refused, naming the
+  one that holds it and the command that resumes it there, with the `cd`
+  in front when the session ran in another folder: `session <id> is not
+  playbook <a>'s: it is playbook <b>'s, … Resume it there: <command>`.
+  Claude Code would only say it found no conversation.
+- **The account.** Every command these refusals and the exit line name
+  keeps the launch's `--account`: `cpb run --account <account> <playbook>
+  --resume <id>`, or `<launcher> --account <account> --resume <id>`.
 - **The folder.** Claude Code looks a session up by the folder it ran in.
   When `<id>`'s transcript sits under another folder's project directory,
   the launch is refused with the command that resumes it, `cd '<folder>' &&
@@ -2196,7 +2210,8 @@ claude starts, cpb checks:
 - **Not checked.** `--fork-session` beside either flag starts a new id.
   `--resume` with no id, or with a search term (a value that is not a
   UUID), opens Claude Code's picker; of several `--resume`, the last counts.
-  An id cpb finds no transcript of is left to claude, which says so.
+  An id cpb finds no transcript of, in any config dir it knows, is left to
+  claude, which says so.
 - **Sandboxed launches** hand the flags to the claude inside the sandbox.
   Its sessions live there, out of cpb's sight, so the launch prints a note
   instead of checking, and `SHOW SESSIONS` lists only what the host's
@@ -3213,7 +3228,7 @@ a screen that shows sessions is up. Everything else is re-read on `r`.
 through `APPLY --dry-run --json` for its plan, then applied on
 confirmation.
 
-### `cpb ask [<playbook>] [--json] [--model <model>] "<request>"`
+### `cpb ask [<playbook>] [--json] [--model <model>] [--account <account>] "<request>"`
 
 `cpb ask` answers a request in plain words with the cpb command or commands
 that do it. A model proposes the plan; cpb checks every step and shows it.
@@ -3246,8 +3261,37 @@ without preparing a launch (nothing in the playbook changes):
 | uses the machine's token (`auth status`: `token`) | the machine token, as `CPB_ASK_LOGIN=token` does |
 | shares the machine's login (`shared-login`, on `machine` or an `auth = 'claude_login'` account) | Claude Code's own login on this machine |
 | has its own login (`isolated-login`, a grant in its store or Keychain) | that login: its directory is Claude Code's config directory for the call, and no other credential is passed |
-| has no login of its own, runs on an account that signs in with a key or a token of its own (`playbook-token`, `account`), or cannot be launched | refused, nothing sent |
+| runs on an Anthropic account that signs in with a Claude token (`claude_token`) | that token, as `--account` signs in (below) |
+| has no login of its own, runs on an account that signs in with a key or a token of another kind (`playbook-token`, `api_key`, `auth_token`, a helper), or cannot be launched | refused, nothing sent |
 | routes away from Anthropic | refused, nothing sent: `<name> sends its requests away from Anthropic (route away), and cpb ask asks Anthropic only` |
+
+**Signing in on an account.** `cpb ask --account <account> "<request>"`
+signs the question in on one of your accounts instead, as a launch on it
+would; with a playbook named (`cpb ask <playbook> --account <account> …`)
+the account must be one that playbook may run on, as for `cpb run
+--account`. It is how to keep asking when your Claude login has hit its
+limit. The account:
+
+- must be an Anthropic one (`provider = 'anthropic'`) with no request
+  headers of its own: another provider is refused (`account <a> sends its
+  requests away from Anthropic (provider gateway), and cpb ask asks
+  Anthropic only: nothing was sent`), as are headers, which cpb ask does
+  not send. cpb ask sets no base URL, so the question goes to Anthropic's
+  API as every question does;
+- signs in with a Claude token (`claude_token`) or a Claude login
+  (`claude_login`). A Claude token goes into the child's environment as
+  `CLAUDE_CODE_OAUTH_TOKEN`, the one credential, with a new, empty
+  `CLAUDE_CONFIG_DIR` removed afterwards, as `CPB_ASK_LOGIN=token` does. A
+  reference is resolved by your secret helper, which execs claude with the
+  token set, as at launch, and runs with the child's allowlisted
+  environment; cpb never reads the value, and with no helper configured
+  the call is refused before anything is sent. A Claude login is the
+  playbook's, or, for a question addressed to none, Claude Code's own on
+  this machine. Any other kind (`api_key`, `auth_token`, a helper, `cloud`,
+  `none`) is refused, nothing sent;
+- is `access = 'listed'` only with a playbook that lists it named.
+
+`--account machine` is the way a question signs in without one.
 
 Only the playbook's login is used: its `CLAUDE.md`, settings, hooks, plugins
 and MCP servers stay out (`--setting-sources project`, as below), and its
@@ -3319,8 +3363,11 @@ holds no key. The child process is built so that nothing else can join in:
 - **A time limit:** a call that has not answered after 3 minutes is
   stopped: `Claude Code did not answer within 3m0s`, exit 1.
 - **No login, or an error:** one line naming Claude Code's own message and
-  `run claude and /login, or set ANTHROPIC_API_KEY`; exit 1. It never falls
-  back to another route.
+  `run claude and /login, or set ANTHROPIC_API_KEY` (on `--account`, the
+  account it signed in on), then, when you have Claude token accounts open
+  to any playbook, `or ask on another account: cpb ask --account <account>
+  "<request>" (yours: <names>)`, never the one that failed; exit 1. A hit
+  usage limit is such an error. It never falls back to another route.
 
 **Its one tool.** The model's only tool is cpb itself, read-only:
 `cpb --playbooks-dir <root> ask-tool`, an MCP server over stdio that Claude

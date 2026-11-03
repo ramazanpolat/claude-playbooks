@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ramazanpolat/claude-playbooks/internal/account"
 	"github.com/ramazanpolat/claude-playbooks/internal/manifest"
 )
 
@@ -419,6 +420,15 @@ func TestRunPrintsTheResumeLine(t *testing.T) {
 	}
 	if msg := launch(sidLive, "", "-p", "hi"); strings.Contains(msg, "Resume this") {
 		t.Fatalf("print mode:\n%s", msg)
+	}
+	// A launch on --account: the line keeps it.
+	putAccount(t, account.Account{Name: "acc", Provider: account.Anthropic, Auth: account.Auth{Kind: account.ClaudeToken, Value: "t"}})
+	t.Setenv("FAKE_SID", sidDead)
+	t.Setenv("FAKE_OLD", "")
+	var err error
+	msg := captureStderr(t, func() { err = runRun(nil, []string{"--account", "acc", "alpha"}) })
+	if err != nil || !strings.Contains(msg, "Resume this playbook's session with: al --account acc --resume "+sidDead) {
+		t.Fatalf("on --account: %v\n%s", err, msg)
 	}
 	tty = false
 	if msg := launch(sidLive, ""); strings.Contains(msg, "Resume this") {

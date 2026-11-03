@@ -70,6 +70,7 @@ func askRun(t *testing.T, flags map[string]string, request ...string) (string, e
 			askCmd.Flags().Set(k, "false")
 		}
 		askCmd.Flags().Set("model", "")
+		askCmd.Flags().Set("account", "")
 	})
 	var err error
 	out := captureStdout(t, func() { err = runAsk(askCmd, request) })

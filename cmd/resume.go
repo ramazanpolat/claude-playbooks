@@ -59,8 +59,9 @@ scan:
 
 // guardResume refuses a launch in d, from the working directory, whose
 // claudeArgs resume a session still live in another process, or, for
-// --resume <id>, one that ran in another folder. A session cpb finds no
-// transcript of is left to claude, which says so itself.
+// --resume <id>, one that ran in another folder or in another playbook. A
+// session cpb finds no transcript of anywhere is left to claude, which says
+// so itself.
 func guardResume(d sessionDir, claudeArgs []string) error {
 	id, cont := resumeTarget(claudeArgs)
 	if id == "" && !cont {
@@ -70,13 +71,14 @@ func guardResume(d sessionDir, claudeArgs []string) error {
 	if err != nil {
 		return err
 	}
-	lives, err := liveByID()
+	dirs, err := knownSessionDirs()
 	if err != nil {
 		return err
 	}
+	lives := liveByID(dirs)
 	if id != "" {
 		if s := lives[id]; s != nil {
-			return liveRefusal(id, s, d)
+			return liveRefusal(id, s, d, cwd)
 		}
 		if !transcriptHere(d.path, cwd, id) {
 			if p := transcriptPath(d.path, "", id); p != "" {
@@ -84,17 +86,64 @@ func guardResume(d sessionDir, claudeArgs []string) error {
 					return fmt.Errorf("session %s ran in %s, and Claude Code resumes a session only from the folder it ran in: %s",
 						id, there, d.resumeIn(id, there))
 				}
+			} else if err := elsewhereRefusal(id, d, dirs, cwd); err != nil {
+				return err
 			}
 		}
 	}
 	if cont {
 		if last := newestTranscript(d.path, cwd); last != "" {
 			if s := lives[last]; s != nil {
-				return fmt.Errorf("--continue resumes the newest session in this folder, and %w", liveRefusal(last, s, d))
+				return fmt.Errorf("--continue resumes the newest session in this folder, and %w", liveRefusal(last, s, d, cwd))
 			}
 		}
 	}
 	return nil
+}
+
+// elsewhereRefusal is the refusal for a --resume <id> that d holds no
+// transcript of while another config dir cpb knows does: Claude Code would
+// only say it found no conversation. It names the one that holds it and
+// the command that resumes it there, keeping the launch's --account. nil
+// when no other dir holds it.
+func elsewhereRefusal(id string, d sessionDir, dirs []sessionDir, cwd string) error {
+	var holders []sessionDir
+	var there string
+	for _, o := range dirs {
+		if sameDir(o.path, d.path) {
+			continue
+		}
+		if p := transcriptPath(o.path, "", id); p != "" {
+			if len(holders) == 0 {
+				there = transcriptCwd(p)
+			}
+			holders = append(holders, o)
+		}
+	}
+	if len(holders) == 0 {
+		return nil
+	}
+	var names []string
+	for _, o := range holders {
+		names = append(names, o.describe())
+	}
+	h := holders[0]
+	h.account = d.account
+	cmd := h.resumeCommand(id)
+	if there != "" && !sameDir(there, cwd) {
+		cmd = h.resumeIn(id, there)
+	}
+	return fmt.Errorf("session %s is not %s's: it is %s's, and Claude Code resumes a session only in the config dir that holds it. Resume it there: %s",
+		id, d.describe(), strings.Join(names, "'s and "), cmd)
+}
+
+// describe names d for a message: "playbook <name>", or the plain
+// directory's path.
+func (d sessionDir) describe() string {
+	if d.pb != nil {
+		return "playbook " + d.label
+	}
+	return d.label
 }
 
 // resumeNote is what a sandboxed launch says instead of guarding: the
@@ -152,25 +201,30 @@ func sameDir(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
-// liveByID indexes the live sessions of every config dir cpb knows by
-// session id, whichever dir the launch binds: a transcript copied into
-// another dir is still the same live session.
-func liveByID() (map[string]*liveSession, error) {
+// knownSessionDirs is every config dir cpb knows, the playbooks whose
+// manifests cannot be read included: such a playbook still has its session
+// files and transcripts, and the guard must see them.
+func knownSessionDirs() ([]sessionDir, error) {
 	dirs, bad, err := sessionDirs("")
 	if err != nil {
 		return nil, err
 	}
-	// A playbook whose manifest cannot be read still has its session files:
-	// a session live there is live, and the guard must see it.
 	for _, u := range bad {
 		dirs = append(dirs, sessionDir{label: u.Name, path: u.Path})
 	}
+	return dirs, nil
+}
+
+// liveByID indexes the live sessions of dirs by session id, whichever dir
+// the launch binds: a transcript copied into another dir is still the same
+// live session.
+func liveByID(dirs []sessionDir) map[string]*liveSession {
 	m := map[string]*liveSession{}
 	for _, s := range readSessionFiles(dirs) {
 		s := s
 		m[s.f.SessionID] = &s
 	}
-	return m, nil
+	return m
 }
 
 // cwdSpellings are the names of the working directory a session there may
@@ -203,19 +257,41 @@ func cwdSpellings(cwd string) []string {
 }
 
 // liveRefusal is the refusal for a session still live in another process,
-// launched in d.
-func liveRefusal(id string, s *liveSession, d sessionDir) error {
-	pick := "close that one first, or pick another with " + d.pickCommand()
+// launched in d from cwd. It says where that process runs, so it can be
+// found, and the ways on: close it, open a copy under a new id
+// (--fork-session, from the folder the session runs in, where Claude Code
+// finds it), or pick another session. Both commands keep the launch's
+// --account.
+func liveRefusal(id string, s *liveSession, d sessionDir, cwd string) error {
+	where := ""
+	if s.f.Cwd != "" {
+		where = ", in " + tildePath(s.f.Cwd)
+	}
+	if s.f.Name != "" {
+		where += ", named " + s.f.Name
+	}
+	// The copy is made from the dir that holds the transcript: d, or, when
+	// d has none (the id was given to another playbook), the running one.
+	from := d
+	if transcriptPath(d.path, "", id) == "" {
+		from = s.dir
+		from.account = d.account
+	}
+	fork := from.resumeCommand(id) + " --fork-session"
+	if s.f.Cwd != "" && !sameDir(s.f.Cwd, cwd) {
+		fork = from.resumeIn(id, s.f.Cwd) + " --fork-session"
+	}
+	ways := "close that one first, open a copy of it under a new id with " + fork + ", or pick another with " + d.pickCommand()
 	if s.state == liveUnknown {
 		why := fmt.Sprintf("pid %d in another pid domain, %q", s.f.PID, s.f.PIDDomain)
 		if s.f.PIDDomain == "" || s.f.PIDDomain == pidDomain {
 			why = fmt.Sprintf("pid %d is alive, and its session file records no start time to confirm it is the same process", s.f.PID)
 		}
-		return fmt.Errorf("session %s may still be running (playbook %s, %s): cpb cannot tell, so it does not resume it. Two processes on one session id corrupt it; %s",
-			id, s.dir.label, why, pick)
+		return fmt.Errorf("session %s may still be running (playbook %s, %s%s): cpb cannot tell, so it does not resume it. Two processes on one session id corrupt it; %s",
+			id, s.dir.label, why, where, ways)
 	}
-	return fmt.Errorf("session %s is still running (playbook %s, pid %d, since %s). Two processes on one session id corrupt it; %s",
-		id, s.dir.label, s.f.PID, formatAge(time.UnixMilli(s.f.StartedAt)), pick)
+	return fmt.Errorf("session %s is still running (playbook %s, pid %d, since %s%s). Two processes on one session id corrupt it; %s",
+		id, s.dir.label, s.f.PID, formatAge(time.UnixMilli(s.f.StartedAt)), where, ways)
 }
 
 // The exit line: after claude exits under cpb run or a launcher, cpb names
@@ -308,8 +384,12 @@ func formatAge(t time.Time) string {
 	switch {
 	case d < time.Minute:
 		return "just now"
+	case d < 2*time.Minute:
+		return "1 minute ago"
 	case d < time.Hour:
 		return fmt.Sprintf("%d minutes ago", int(d.Minutes()))
+	case d < 2*time.Hour:
+		return "1 hour ago"
 	case d < 24*time.Hour:
 		return fmt.Sprintf("%d hours ago", int(d.Hours()))
 	case d < 48*time.Hour:

@@ -15,7 +15,7 @@ import (
 // cpb checks every step and shows it. cpb ask never runs a step: the user
 // copies what they want to run.
 var askCmd = &cobra.Command{
-	Use:   `ask [<playbook>] [--json] [--model <model>] "<request>"`,
+	Use:   `ask [<playbook>] [--json] [--model <model>] [--account <account>] "<request>"`,
 	Short: "Ask in plain words for the cpb command that does it",
 	Long: `ask answers a request in plain words with the cpb command or commands that do it.
 It shows them; it never runs them.
@@ -23,6 +23,7 @@ It shows them; it never runs them.
   cpb ask "list my env sets"
   cpb ask "run playbook work on my router account"
   cpb ask work "how many of your sessions are live?"
+  cpb ask --account work-claude "list my env sets"
 
 Naming a playbook (or its launcher) first addresses the question to it: it
 signs in the way a launch of that playbook would, and "you" means it. A
@@ -30,7 +31,8 @@ playbook on an account that is not Anthropic's, or on one that signs in with
 a key or a token of its own, is refused.
 
 It asks Claude through this machine's Claude Code login (claude -p), always on
-Anthropic's API: no env set, DEFAULTS or account of yours applies to the question.
+Anthropic's API: no env set, DEFAULTS or account of yours applies to the question
+unless --account names one.
 What it sends, to Anthropic: the request, and the names of your playbooks,
 launchers and env sets, with whether each routes away from Anthropic (a
 playbook by the account it runs on). Never a
@@ -39,6 +41,13 @@ cpb itself, read-only: SHOW and EXPLAIN, cut to names, routes, versions and
 session counts.
 CPB_ASK_LOGIN=token signs in with cpb's machine token (the long-lived token
 every launch uses) instead of Claude Code's own login.
+
+--account <account> signs the question in on one of your accounts instead,
+as a launch on it would: an Anthropic account that signs in with a Claude
+token (auth = claude_token) or a Claude login. Use it when your login has hit
+its limit. With a playbook named, the account must be one it may run on.
+Only the account's credential is used: its token reaches Claude Code's
+environment alone, through your secret helper when it is a reference.
 
 A request that holds a credential (KEY=value with a secret-looking key, a
 token-shaped word, a URL with a password) is refused before anything is
@@ -56,6 +65,7 @@ Exit codes: 0 shown; 1 refused, or no answer from Claude; 2 a usage error.`,
 func init() {
 	askCmd.Flags().Bool("json", false, "print the checked plan as JSON")
 	askCmd.Flags().String("model", "", "the Claude model that answers (default: $CPB_ASK_MODEL, else "+defaultAskModel+")")
+	askCmd.Flags().String("account", "", "sign in on this account: an Anthropic one with a Claude token or login (default: as the playbook would, else Claude Code's own login)")
 	rootCmd.AddCommand(askCmd)
 }
 
@@ -68,6 +78,7 @@ func askUsage(msg string) error {
 func runAsk(cmd *cobra.Command, args []string) error {
 	asJSON, _ := cmd.Flags().GetBool("json")
 	model, _ := cmd.Flags().GetString("model")
+	acctName, _ := cmd.Flags().GetString("account")
 	root := config.ResolvePlaybooksDir()
 	target, request, err := askSplitArgs(root, args)
 	if err != nil {
@@ -84,7 +95,14 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		return askUsage(err.Error())
 	}
 	signIn := askSignIn{mode: login}
-	if target != nil {
+	switch {
+	case acctName != "":
+		// --account decides how the question signs in, with or without a
+		// playbook named.
+		if signIn, err = askAccountSignIn(root, target, acctName); err != nil {
+			return err
+		}
+	case target != nil:
 		// The playbook decides how its question signs in; CPB_ASK_LOGIN is
 		// for questions addressed to no playbook.
 		if signIn, err = askTargetSignIn(root, target); err != nil {

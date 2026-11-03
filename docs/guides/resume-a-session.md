@@ -45,10 +45,29 @@ kd --continue                                      # the newest session here
   folder is refused with that command.
 
 **A live session is refused.** If the session is still open in another
-terminal, cpb says so with its pid and launches nothing. For `--continue`,
-that is the newest session in this folder. Two processes on one session id
-corrupt it. Close the other one first, or pick another session in the
-picker. `--fork-session` starts a new id, so it is never refused.
+terminal, cpb says so with its pid, the folder it runs in and its name, and
+launches nothing. For `--continue`, that is the newest session in this
+folder. Two processes on one session id corrupt it. Close the other one
+first, or pick another session in the picker. To go on with it while the
+other stays open, open a copy under a new id: the refusal names the command,
+`kd --resume <id> --fork-session` from the session's folder.
+`--fork-session` starts a new id, so it is never refused.
+
+**Another playbook's session is refused.** Each playbook keeps its own
+sessions. If you give a launcher an id another playbook holds, cpb names
+that playbook and the command that resumes it there, instead of letting
+Claude Code say it found no conversation:
+
+```
+$ cpb run --account work-claude other --resume 08c4811b-3867-4f18-b08f-de6d1e07395f
+Error: session 08c4811b-… is not playbook other's: it is playbook kd's, … Resume it there: cpb run --account work-claude kd --resume 08c4811b-…
+```
+
+**On another account.** `--account` goes before the session flags:
+`kd --account work-claude --resume <id>`, or `cpb run --account work-claude kd
+--resume <id>`. Every command cpb names for the launch, the exit line
+included, keeps the account you gave it. That is how to carry on a session
+whose Claude subscription has hit its limit: see [Accounts](accounts.md).
 
 ## The line after a session
 

@@ -262,6 +262,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// authenticate the launch, and a login it cannot keep out, refuses here,
 	// before anything is mutated.
 	wd, _ := os.Getwd()
+	// The --account this launch names: the commands cpb suggests keep it.
+	namedAccount := accountFlag(layers)
 	acct, err := planAccount(configDir, pb.Name, layers, wd, claudeArgs)
 	if err != nil {
 		return err
@@ -295,6 +297,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if override {
 		sd = sessionDir{label: configDir, path: configDir}
 	}
+	sd.account = namedAccount
 	if err := guardResume(sd, claudeArgs); err != nil {
 		return err
 	}

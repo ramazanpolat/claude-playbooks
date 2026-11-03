@@ -59,11 +59,23 @@ func askTargetSignIn(root string, pb *playbook.Playbook) (askSignIn, error) {
 	if route := askPlaybookRoute(pb.Path); route != "anthropic" {
 		return askSignIn{}, fmt.Errorf("%s sends its requests away from Anthropic (route %s), and cpb ask asks Anthropic only: nothing was sent. Ask without naming it: cpb ask \"<request>\"", pb.Name, route)
 	}
-	// An Anthropic account that signs in with a key or a token of its own:
-	// cpb ask signs in with a Claude login, the playbook's or the machine's.
+	// An Anthropic account that signs in with a Claude token: the question
+	// signs in with it, as a launch would. One that signs in with a key or
+	// a token of another kind is refused: cpb ask signs in with a Claude
+	// login or a Claude token only.
 	if a := askPlaybookAccount(pb.Path, pb.Name); a != nil && a.Auth.Kind != account.ClaudeLogin {
-		return askSignIn{}, fmt.Errorf("%s runs on account %s, which signs in with its %s, and cpb ask signs in with a Claude login only: nothing was sent. Ask without naming it: cpb ask \"<request>\"", pb.Name, a.Name, a.Auth.Kind)
+		if a.Auth.Kind != account.ClaudeToken {
+			return askSignIn{}, fmt.Errorf("%s runs on account %s, which signs in with its %s, and cpb ask signs in with a Claude login or a Claude token only: nothing was sent. Ask without naming it: cpb ask \"<request>\"", pb.Name, a.Name, a.Auth.Kind)
+		}
+		return askTokenAccountSignIn(a)
 	}
+	return askLoginSignIn(pb)
+}
+
+// askLoginSignIn is how a question addressed to pb signs in on a Claude
+// login, or the machine's token, as a launch of pb with no account of its
+// own would.
+func askLoginSignIn(pb *playbook.Playbook) (askSignIn, error) {
 	rep := auth.Inspect(pb.Name, pb.Path, time.Now())
 	switch rep.Mode {
 	case auth.ModeToken:

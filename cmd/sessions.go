@@ -59,6 +59,9 @@ type sessionDir struct {
 	path     string // the config dir
 	pb       *playbook.Playbook
 	launcher string // the playbook's launcher, "" for none
+	// account is the --account the launch named, "" for none: the
+	// commands cpb suggests for the launch keep it.
+	account string
 }
 
 // sessionJSON is one row of SHOW SESSIONS --json and of the SESSIONS table.
@@ -241,11 +244,16 @@ func playbookSessionDir(pb *playbook.Playbook) sessionDir {
 // the launcher, cpb run, or, for a plain directory, claude under that
 // config dir, with --resume and no id.
 func (d sessionDir) pickCommand() string {
+	// An account name needs no quoting (manifest.ValidateAccountName).
+	acct := ""
+	if d.account != "" {
+		acct = "--account " + d.account + " "
+	}
 	switch {
 	case d.launcher != "":
-		return d.launcher + " --resume"
+		return d.launcher + " " + acct + "--resume"
 	case d.pb != nil:
-		return "cpb run " + d.pb.Name + " --resume"
+		return "cpb run " + acct + d.pb.Name + " --resume"
 	}
 	return "CLAUDE_CONFIG_DIR=" + shell.QuoteArg(d.path) + " claude --resume"
 }
