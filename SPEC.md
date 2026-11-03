@@ -2223,7 +2223,7 @@ claude starts, cpb checks:
 **The exit line.** After `claude` exits under `cpb run` or a launcher, cpb
 prints one line on stderr:
 ```
-Resume this playbook's session with: kd --resume 08c4811b-3867-4f18-b08f-de6d1e07395f
+Resume this playbook's session with: kd --resume bfb2d226-403f-46da-8216-e39b2a71dae9
 ```
 - **When.** Only when stderr is a terminal, the launch was local, and
   claude was interactive (no `-p` / `--print`).

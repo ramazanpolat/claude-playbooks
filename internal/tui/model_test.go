@@ -52,8 +52,8 @@ const fixturePlaybooks = `[
 ]`
 
 const fixtureSessions = `[
- {"playbook":"alpha","config_dir":"/home/me/.claude-playbooks/alpha","pid":47904,"session_id":"08c4811b-3867-4f18-b08f-de6d1e07395f","cwd":"/home/me/DEV/app","kind":"interactive","status":"busy","name":"release","claude_version":"2.1.283","started_at":"2026-09-28T03:00:00.000Z","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","launcher":"al","resume":"cd '/home/me/DEV/app' && al --resume 08c4811b-3867-4f18-b08f-de6d1e07395f","tty":"ttys039"},
- {"playbook":"router","config_dir":"/home/me/.claude-playbooks/router","pid":43627,"session_id":"e7377ba9-434b-4ff2-a592-dd0da81f6e2f","cwd":"/home/me/DEV/app","kind":"bg","status":"idle","name":null,"claude_version":"2.1.283","started_at":"2026-09-26T12:00:00.000Z","last_active":"2026-09-28T11:32:00.000Z","model":"glm-5.3","launcher":"rt","resume":"cd '/home/me/DEV/app' && rt --resume e7377ba9-434b-4ff2-a592-dd0da81f6e2f","tty":null}
+ {"playbook":"alpha","config_dir":"/home/me/.claude-playbooks/alpha","pid":59735,"session_id":"bfb2d226-403f-46da-8216-e39b2a71dae9","cwd":"/home/me/DEV/app","kind":"interactive","status":"busy","name":"release","claude_version":"2.1.283","started_at":"2026-09-28T03:00:00.000Z","last_active":"2026-09-28T11:59:06.000Z","model":"claude-opus-5-5","launcher":"al","resume":"cd '/home/me/DEV/app' && al --resume bfb2d226-403f-46da-8216-e39b2a71dae9","tty":"ttys039"},
+ {"playbook":"router","config_dir":"/home/me/.claude-playbooks/router","pid":21452,"session_id":"01e9cca2-4fe7-4330-ad02-4c417cf4a13e","cwd":"/home/me/DEV/app","kind":"bg","status":"idle","name":null,"claude_version":"2.1.283","started_at":"2026-09-26T12:00:00.000Z","last_active":"2026-09-28T11:32:00.000Z","model":"glm-5.3","launcher":"rt","resume":"cd '/home/me/DEV/app' && rt --resume 01e9cca2-4fe7-4330-ad02-4c417cf4a13e","tty":null}
 ]`
 
 const fixtureEnvs = `[
@@ -336,8 +336,8 @@ func TestCopyStatements(t *testing.T) {
 	hs.keys("2", "y")
 	hs.keys("down", "y")
 	want := []string{"SHOW PLAYBOOK router",
-		"cd '/home/me/DEV/app' && al --resume 08c4811b-3867-4f18-b08f-de6d1e07395f",
-		"cd '/home/me/DEV/app' && rt --resume e7377ba9-434b-4ff2-a592-dd0da81f6e2f"}
+		"cd '/home/me/DEV/app' && al --resume bfb2d226-403f-46da-8216-e39b2a71dae9",
+		"cd '/home/me/DEV/app' && rt --resume 01e9cca2-4fe7-4330-ad02-4c417cf4a13e"}
 	if !reflect.DeepEqual(hs.clip, want) {
 		t.Fatalf("copied %q", hs.clip)
 	}

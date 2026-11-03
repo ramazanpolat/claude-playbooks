@@ -10,8 +10,8 @@ Claude Code under the playbook's own config dir.
 ```
 $ cpb SHOW SESSIONS
 PLAYBOOK       PID    KIND         STATUS  AGE  ACTIVE  MODEL            SESSION                               CWD
-work           47904  interactive  busy    9h   54s     claude-opus-5-5  08c4811b-3867-4f18-b08f-de6d1e07395f  /Users/me/DEV/app
-review         26218  interactive  idle    39m  35m     claude-opus-5-5  8ba14a71-15a8-45b9-bc3e-9db6c209f318  /Users/me/other-app
+work           59735  interactive  busy    9h   54s     claude-opus-5-5  bfb2d226-403f-46da-8216-e39b2a71dae9  /Users/me/DEV/app
+review         30641  interactive  idle    39m  35m     claude-opus-5-5  15247cc4-c3e1-4b98-9c53-54402e029bce  /Users/me/other-app
 ```
 
 - `--json` gives every field, `resume` included: the exact command that
@@ -32,7 +32,7 @@ In the folder the session ran in:
 
 ```
 kd --resume                                        # Claude Code's picker: this playbook's sessions here
-kd --resume 08c4811b-3867-4f18-b08f-de6d1e07395f   # one session
+kd --resume bfb2d226-403f-46da-8216-e39b2a71dae9   # one session
 kd --continue                                      # the newest session here
 ```
 
@@ -59,8 +59,8 @@ that playbook and the command that resumes it there, instead of letting
 Claude Code say it found no conversation:
 
 ```
-$ cpb run --account work-claude other --resume 08c4811b-3867-4f18-b08f-de6d1e07395f
-Error: session 08c4811b-… is not playbook other's: it is playbook kd's, … Resume it there: cpb run --account work-claude kd --resume 08c4811b-…
+$ cpb run --account work-claude other --resume bfb2d226-403f-46da-8216-e39b2a71dae9
+Error: session bfb2d226-… is not playbook other's: it is playbook kd's, … Resume it there: cpb run --account work-claude kd --resume bfb2d226-…
 ```
 
 **On another account.** `--account` goes before the session flags:
@@ -75,7 +75,7 @@ When a session ends under a launcher or `cpb run`, in a terminal, cpb
 prints the command that brings it back:
 
 ```
-Resume this playbook's session with: kd --resume 08c4811b-3867-4f18-b08f-de6d1e07395f
+Resume this playbook's session with: kd --resume bfb2d226-403f-46da-8216-e39b2a71dae9
 ```
 
 Claude Code's own `claude --resume …` line still appears above it. Use

@@ -69,8 +69,8 @@ reads: cpb SHOW PLAYBOOK router --json · cpb EXPLAIN PLAYBOOK router --json
  cpb   1 Playbooks  [2 Sessions]  3 Env sets   4 Defaults   5 Log        ? help
 ────────────────────────────────────────────────────────────────────────────────
   PLAYBOOK  PID    TTY      KIND  AGE  ACTIVE  MODEL            CWD
-▸ alpha     47904  ttys039  int   9h   54s     claude-opus-5-5  ~/DEV/app
-  router    43627  -        bg    2d   28m     glm-5.3          ~/DEV/app
+▸ alpha     59735  ttys039  int   9h   54s     claude-opus-5-5  ~/DEV/app
+  router    21452  -        bg    2d   28m     glm-5.3          ~/DEV/app
 
 ────────────────────────────────────────────────────────────────────────────────
  2 playbooks · 2 live sessions · read 0s ago
