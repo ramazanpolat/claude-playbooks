@@ -106,3 +106,13 @@ contains = "ask-addressed-ok"
 # named by its key and never echoed.
 command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; rm -f "$HOME/ask-argv"; out=$(cpb ask "create env set x with ANTHROPIC_AUTH_TOKEN=FAKE0arena0token0value" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "ANTHROPIC_AUTH_TOKEN=..." && ! echo "$out" | grep -qF FAKE0arena && test ! -e "$HOME/ask-argv" && echo ask-credential-refused-ok'''
 contains = "ask-credential-refused-ok"
+
+[[verify.commands]]
+# cpb ask --account: a Claude token account signs the question in, its
+# token in claude's environment only (never its arguments, its input or
+# cpb's output), with a fresh config directory: a plaintext token as it is,
+# a reference through the secret helper, which execs claude. An account on
+# another provider, and --account given empty, are refused before claude
+# runs.
+command = '''unset HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy; H="$HOME/ask-helper"; printf '#!/bin/sh\n[ "$1" = "--check" ] && exit 0\nwhile [ $# -gt 0 ] && [ "$1" != "--" ]; do export "${1%%%%=*}=arena-ref-canary-8Wd"; shift; done\nshift\nexec "$@"\n' > "$H" && chmod 755 "$H"; export CPB_SECRET_HELPER="$H"; cpb CREATE ACCOUNT askplain SET provider = 'anthropic', claude_token = 'arena-acct-canary-3Hx' AS PLAINTEXT >/dev/null && cpb CREATE ACCOUNT askref SET provider = 'anthropic', claude_token FROM 'arena:askref' >/dev/null && cpb CREATE ACCOUNT askgw SET provider = 'gateway', base_url = 'http://127.0.0.1:9/v1', auth = 'none' >/dev/null || { echo accounts-not-created; exit 1; }; out=$(cpb ask --account askplain "list" 2>&1) || { echo "plain failed: $out"; exit 1; }; grep -qx "CLAUDE_CODE_OAUTH_TOKEN=arena-acct-canary-3Hx" "$HOME/ask-env" && grep -q "^CLAUDE_CONFIG_DIR=.*cpb-ask-" "$HOME/ask-env" || { echo plain-not-in-env; exit 1; }; if grep -q canary "$HOME/ask-argv" "$HOME/ask-stdin" || echo "$out" | grep -q canary; then echo plain-leaked; exit 1; fi; out=$(cpb ask --account askref "list" 2>&1) || { echo "ref failed: $out"; exit 1; }; grep -qx "CLAUDE_CODE_OAUTH_TOKEN=arena-ref-canary-8Wd" "$HOME/ask-env" || { echo ref-not-in-env; exit 1; }; if grep -q canary "$HOME/ask-argv" "$HOME/ask-stdin" || echo "$out" | grep -q canary; then echo ref-leaked; exit 1; fi; rm -f "$HOME/ask-argv"; out=$(cpb ask --account askgw "list" 2>&1); rc=$?; test "$rc" = 1 && echo "$out" | grep -qF "away from Anthropic" && test ! -e "$HOME/ask-argv" || { echo "gateway not refused: $rc $out"; exit 1; }; cpb ask --account "" "list" >/dev/null 2>&1; rc=$?; test "$rc" = 2 && test ! -e "$HOME/ask-argv" || { echo "empty account: $rc"; exit 1; }; echo ask-account-ok'''
+contains = "ask-account-ok"

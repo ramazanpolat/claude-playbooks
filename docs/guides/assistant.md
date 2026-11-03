@@ -37,9 +37,10 @@ work has 2 live sessions: one interactive, one in the background.
 launch of it would: with the machine's token, with the machine's login, or
 with its own login when it has one (`SET login = 'isolated'`). Only its login
 is used; its `CLAUDE.md`, settings, hooks and MCP servers stay out. A
-playbook on an account that is not Anthropic's, or on one that signs in with
-a key or a token of its own, is refused: ask without naming it. Quote the
-request when you name a playbook.
+playbook on an Anthropic account that signs in with a Claude token asks with
+that token. A playbook on an account that is not Anthropic's, or on one that
+signs in with a key or a token of another kind, is refused: ask without
+naming it. Quote the request when you name a playbook.
 
 ## Reading the answer
 
@@ -119,8 +120,33 @@ no tools, from a fresh directory outside your home, so the model sees nothing
 else and can read nothing itself. Claude Code adds its own environment block:
 that directory's path, the platform and the OS version.
 
-If Claude Code is not logged in, `cpb ask` says so and stops: run `claude`
-and `/login`, or set `ANTHROPIC_API_KEY`. It never asks another endpoint.
+If Claude Code is not logged in, or its login has hit a usage limit, `cpb
+ask` says so and stops: run `claude` and `/login`, or set
+`ANTHROPIC_API_KEY`. When you have Claude token accounts, it names them
+too. It never asks another endpoint.
+
+## Asking on another account
+
+When your Claude login has hit its limit, ask on one of your accounts:
+
+```bash
+cpb ask --account work-claude "list my env sets"
+```
+
+The account must be an Anthropic one that signs in with a Claude token
+(`CREATE ACCOUNT work-claude SET provider = anthropic, claude_token FROM
+keychain:work-claude-token`) or a Claude login. Its token goes to that one
+`claude` call, in its environment, with a new, empty config directory, as
+`CPB_ASK_LOGIN=token` does. A token stored by reference is resolved by your
+secret helper, which starts `claude` with it, so cpb never sees the value.
+The helper runs with the same short environment as that `claude` call, so
+an `env:` reference, or a backend that needs a variable of its own, does not
+resolve here, though it does at launch.
+With a playbook named, `cpb ask work --account work-claude "…"`, the question
+signs in as `cpb run --account work-claude work` would: the account must be
+one that playbook may run on, and a Claude login account uses the
+playbook's own login, or the machine's for a playbook that shares it. An account on another provider, or
+with request headers of its own, is refused before anything is sent.
 
 ## Signing in with cpb's token
 
