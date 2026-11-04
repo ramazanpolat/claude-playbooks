@@ -23,6 +23,9 @@ type askPlan struct {
 	Answer string    `json:"answer"`
 	Steps  []askStep `json:"steps"`
 	Notes  []string  `json:"notes"`
+	// Record is the id of the history record this answer was written to
+	// (the ask store); "" when none was.
+	Record string `json:"record,omitempty"`
 }
 
 type askStep struct {

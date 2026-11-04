@@ -321,6 +321,8 @@ func readStatement(st *grammar.Stmt) error {
 		return leftOut(bad)
 	case st.Object == grammar.Sessions:
 		return showSessions(st)
+	case st.Object == grammar.AskHistory, st.Object == grammar.AskRecord:
+		return showAskStore(playbooksDir, st)
 	case st.Object == grammar.Env, st.Object == grammar.Envs:
 		return showEnvs(playbooksDir, dir, st)
 	case st.Object == grammar.Account, st.Object == grammar.Accounts:

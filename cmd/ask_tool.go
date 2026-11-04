@@ -58,9 +58,11 @@ var askToolParent = os.Getppid
 const askToolName = "query"
 
 const askToolDescription = "Read cpb's state. statement is one of: SHOW PLAYBOOKS; SHOW PLAYBOOK <name>; SHOW ENVS; " +
-	"SHOW ENV <name>; SHOW DEFAULTS; SHOW SESSIONS [FOR PLAYBOOK <name>]; EXPLAIN PLAYBOOK <name>. " +
+	"SHOW ENV <name>; SHOW DEFAULTS; SHOW SESSIONS [FOR PLAYBOOK <name>]; EXPLAIN PLAYBOOK <name>; " +
+	"SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>]; SHOW ASK RECORD <id>. " +
 	"Returns JSON with names, launchers, env set names, a route (anthropic or away), versions, and for " +
-	"sessions their kind, status, start, last activity and model. It never returns values, paths or credentials."
+	"sessions their kind, status, start, last activity and model. It never returns values, paths or credentials. " +
+	"SHOW ASK reads your earlier answers: their index lines newest first, or one record in full."
 
 // askToolDropCredentials removes from this process what Claude Code hands
 // every MCP server, its credentials among them: nothing the tool reads
@@ -171,7 +173,7 @@ func askToolHandle(req rpcRequest) (any, *rpcError) {
 
 // askToolViews are the statements the tool runs, and how their output is
 // cut down.
-const askToolRefusal = "the tool reads only: SHOW PLAYBOOKS, SHOW PLAYBOOK <name>, SHOW ENVS, SHOW ENV <name>, SHOW DEFAULTS, SHOW SESSIONS [FOR PLAYBOOK <name>], EXPLAIN PLAYBOOK <name>"
+const askToolRefusal = "the tool reads only: SHOW PLAYBOOKS, SHOW PLAYBOOK <name>, SHOW ENVS, SHOW ENV <name>, SHOW DEFAULTS, SHOW SESSIONS [FOR PLAYBOOK <name>], EXPLAIN PLAYBOOK <name>, SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>], SHOW ASK RECORD <id>"
 
 // askQuery runs one read statement and returns its cut-down JSON.
 func askQuery(statement string) (string, error) {
@@ -204,6 +206,11 @@ func askQuery(statement string) (string, error) {
 			if st.For != "" {
 				args = append(args, "FOR", "PLAYBOOK", st.For)
 			}
+		case grammar.AskHistory, grammar.AskRecord:
+			// The ask store holds no path and no value (a record that
+			// looked like it held a credential was withheld when it was
+			// written): what SHOW ASK prints as JSON is the view.
+			return askToolStore(st)
 		}
 	case st.Verb == grammar.Explain && st.Object == grammar.Playbook:
 		v, err := askToolExplain(st.Name)
@@ -383,4 +390,26 @@ func askNames(v any, key string) []any {
 		}
 	}
 	return askEmpty(out)
+}
+
+// askToolStore answers SHOW ASK HISTORY and SHOW ASK RECORD with what they
+// print as JSON.
+func askToolStore(st *grammar.Stmt) (string, error) {
+	root := config.ResolvePlaybooksDir()
+	var v any
+	if st.Object == grammar.AskRecord {
+		r, err := askRecordByID(root, st.Name)
+		if err != nil {
+			return "", err
+		}
+		v = r
+	} else {
+		page, _, err := askHistoryPage(root, st.For, st.HistoryBefore, st.HistoryLimit)
+		if err != nil {
+			return "", err
+		}
+		v = page
+	}
+	out, err := json.Marshal(v)
+	return string(out), err
 }

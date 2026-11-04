@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ramazanpolat/claude-playbooks/internal/account"
@@ -684,17 +685,21 @@ func (p *parser) show(s *Stmt) *Error {
 	// not an object is still an error, never a silent fallback, and
 	// completion still offers every object here.
 	if p.atEnd() || p.at("--json") {
-		p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS")
+		p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "ASK")
 		s.Object = Playbooks
 		p.jsonFlag(s)
 		return nil
 	}
-	switch w := p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS"); w {
+	switch w := p.kw("PLAYBOOKS", "ENVS", "ACCOUNTS", "DEFAULTS", "PLAYBOOK", "ENV", "ACCOUNT", "SESSIONS", "ASK"); w {
 	case "":
 		return p.fail("SHOW needs an object")
 	case "SESSIONS":
 		s.Object = Sessions
 		if err := p.forPlaybook(s); err != nil {
+			return err
+		}
+	case "ASK":
+		if err := p.askStore(s); err != nil {
 			return err
 		}
 	case "PLAYBOOK", "ENV", "ACCOUNT":
@@ -711,7 +716,93 @@ func (p *parser) show(s *Stmt) *Error {
 	return nil
 }
 
-// forPlaybook reads an optional FOR PLAYBOOK <name> (SHOW SESSIONS).
+// AskHistoryMax is the most records one SHOW ASK HISTORY lists, and
+// AskHistoryDefault how many it lists without LIMIT.
+const (
+	AskHistoryDefault = 20
+	AskHistoryMax     = 200
+)
+
+// askStore reads what follows SHOW ASK:
+//
+//	SHOW ASK HISTORY [FOR PLAYBOOK <name>] [BEFORE <id>] [LIMIT <n>]
+//	SHOW ASK RECORD <id>
+//
+// Like SHOW SESSIONS it reserves no word: ASK, HISTORY, RECORD and LIMIT
+// stay free to name a playbook.
+func (p *parser) askStore(s *Stmt) *Error {
+	switch p.kw("HISTORY", "RECORD") {
+	case "":
+		return p.fail("SHOW ASK takes HISTORY or RECORD <id>")
+	case "RECORD":
+		s.Object = AskRecord
+		id, err := p.askRecordID()
+		if err != nil {
+			return err
+		}
+		s.Name = id
+		return nil
+	}
+	s.Object = AskHistory
+	for {
+		at := p.i
+		if err := p.forPlaybook(s); err != nil {
+			return err
+		}
+		if p.i != at {
+			continue
+		}
+		switch p.kw("BEFORE", "LIMIT") {
+		case "BEFORE":
+			if s.HistoryBefore != "" {
+				return errAt(p.toks[p.i-1].Pos, "BEFORE appears twice")
+			}
+			id, err := p.askRecordID()
+			if err != nil {
+				return err
+			}
+			s.HistoryBefore = id
+		case "LIMIT":
+			if s.HistoryLimit != 0 {
+				return errAt(p.toks[p.i-1].Pos, "LIMIT appears twice")
+			}
+			if p.atEnd() {
+				p.note("<n>")
+				return p.fail("missing <n>: LIMIT <n>")
+			}
+			t := p.toks[p.i]
+			n, err := strconv.Atoi(t.Text)
+			if err != nil || n < 1 || n > AskHistoryMax {
+				return errAt(t.Pos, fmt.Sprintf("LIMIT takes a whole number from 1 to %d", AskHistoryMax))
+			}
+			p.i++
+			s.HistoryLimit = n
+		default:
+			return nil
+		}
+	}
+}
+
+// askRecordID reads the id of an ask record (r-<stamp>-<4 hex>). It is
+// never quoted back when it is not one: a mistyped slot may hold anything.
+func (p *parser) askRecordID() (string, *Error) {
+	if p.atEnd() {
+		p.note("<id>")
+		return "", p.fail("missing <id>, the id of a record (r-20260102-150405-ab12)")
+	}
+	t := p.toks[p.i]
+	if !AskRecordID.MatchString(t.Text) {
+		return "", errAt(t.Pos, "not the id of a record: an id reads r-20260102-150405-ab12")
+	}
+	p.i++
+	return t.Text, nil
+}
+
+// AskRecordID is the shape of an ask record's id: r-<date>-<time>-<4 hex>.
+var AskRecordID = regexp.MustCompile(`^r-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$`)
+
+// forPlaybook reads an optional FOR PLAYBOOK <name> (SHOW SESSIONS, SHOW ASK
+// HISTORY).
 func (p *parser) forPlaybook(s *Stmt) *Error {
 	if p.kw("FOR") == "" {
 		return nil
